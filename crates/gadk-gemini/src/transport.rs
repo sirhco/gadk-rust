@@ -277,11 +277,9 @@ impl Transport {
             http::header::CONTENT_TYPE,
             HeaderValue::from_static("application/json"),
         );
-        for (name, value) in auth_headers(&self.resolved.auth).await? {
-            if let Some(name) = name {
-                headers.insert(name, value);
-            }
-        }
+        // `extend` replaces each auth header name once and keeps all of its values (a
+        // `HeaderMap` yields `None` names for a header's second and later values).
+        headers.extend(auth_headers(&self.resolved.auth).await?);
         let bytes = serde_json::to_vec(&body).map_err(|e| ModelError::Other(Box::new(e)))?;
         let mut req = http::Request::builder()
             .method(http::Method::POST)
