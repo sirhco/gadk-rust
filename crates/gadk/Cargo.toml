@@ -1,0 +1,30 @@
+[package]
+name = "gadk"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["gemini"]
+gemini = ["dep:gadk-gemini"]
+
+[dependencies]
+gadk-genai = { workspace = true }
+gadk-platform = { workspace = true }
+gadk-model = { workspace = true }
+gadk-session = { workspace = true }
+gadk-gemini = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+futures = { workspace = true }
+anyhow = { workspace = true }
+
+[[example]]
+name = "quickstart"
+required-features = ["gemini"]

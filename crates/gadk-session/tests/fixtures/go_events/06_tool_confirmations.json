@@ -1,0 +1,1 @@
+{"id":"evt-6","timestamp":"2024-12-01T08:00:00.123Z","invocationId":"inv-1","author":"model","actions":{"requestedToolConfirmations":{"c1":{"hint":"approve?","confirmed":false,"payload":{"x":1}}},"stateDelta":{},"artifactDelta":{}}}

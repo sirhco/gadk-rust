@@ -1,0 +1,37 @@
+{
+ "candidates": [
+  {
+   "content": {
+    "parts": [
+     {
+      "functionCall": {
+       "name": "search_tool_agent1",
+       "args": {
+        "Query": "AI news"
+       }
+      },
+      "thoughtSignature": "Cs4BAb4+9vs/4CDsMN0qNsrfQFxWS9FvZlzpMygp9/H8v7tHgE7QyJQQND6DgpT7KC5MPOLDWDfE1fBKCe300RWjHUy7Uu7kCaXjLq4vX1ob5IURvlj0wIjyQsNOGOwmLWdjW3Fz/HUQGsi3Y8tVKGkt7e+f80C88cFrC8DKIpOtGw9HhJjGBBoXfGyZ50d+od5M1czN5oNOqSYIQ91F5BbZO7CigLdb+VvgFP/nUMJIpd6SKEO/i6qX8u5zU/hX52GG7S1kx3IwtPS7U9uRNEg="
+     }
+    ],
+    "role": "model"
+   },
+   "finishReason": "STOP",
+   "index": 0,
+   "finishMessage": "Model generated function call(s)."
+  }
+ ],
+ "usageMetadata": {
+  "promptTokenCount": 130,
+  "candidatesTokenCount": 19,
+  "totalTokenCount": 194,
+  "promptTokensDetails": [
+   {
+    "modality": "TEXT",
+    "tokenCount": 130
+   }
+  ],
+  "thoughtsTokenCount": 45
+ },
+ "modelVersion": "gemini-2.5-flash",
+ "responseId": "QCawaf6pHYiEkdUP_4aqmAU"
+}

@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+# Copyright 2026 Chris Olson — Apache-2.0 (see LICENSE)
+"""Checks docs/parity/1a.md against the in-scope ADK-Go test functions."""
+import os, pathlib, re, sys
+
+IN_SCOPE = [
+    "model/llm_test.go", "model/registry_test.go",
+    "model/gemini/continuation_test.go", "model/gemini/gemini_test.go",
+    "internal/llminternal/stream_aggregator_test.go",
+    "internal/llminternal/googlellm/variant_test.go",
+    "session/event_json_test.go", "session/event_test.go", "session/inmemory_test.go",
+    "platform/exec_test.go", "platform/time_test.go", "platform/uuid_test.go",
+    "internal/httprr/rr_test.go",
+]
+GO_TEST = re.compile(r"^func (Test\w+)\(", re.M)
+
+
+def go_test_to_rust(name: str) -> str:
+    """Spec § Parity tooling conversion rule."""
+    if not name.startswith("Test"):
+        raise ValueError(name)
+    s = name[4:]
+    words, cur = [], ""
+    for i, ch in enumerate(s):
+        if ch == "_":
+            if cur:
+                words.append(cur)
+            cur = ""
+            continue
+        prev = s[i - 1] if i > 0 else ""
+        nxt = s[i + 1] if i + 1 < len(s) else ""
+        if ch.isupper() and cur and (prev.islower() or prev.isdigit() or (prev.isupper() and nxt.islower())):
+            words.append(cur)
+            cur = ""
+        cur += ch
+    if cur:
+        words.append(cur)
+    return "test_" + "_".join(w.lower() for w in words)
+
+
+def parse_ledger(path):
+    rows = {}
+    for line in pathlib.Path(path).read_text().splitlines():
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) != 5 or cells[0] in ("Go file", "---") or cells[0].startswith("-"):
+            continue
+        rows[(cells[0], cells[1])] = cells[2:]
+    return rows
+
+
+def check(go_dir, repo_dir, ledger, in_scope=IN_SCOPE):
+    go_dir, repo_dir = pathlib.Path(go_dir), pathlib.Path(repo_dir)
+    rows = parse_ledger(ledger)
+    errs = []
+    for f in in_scope:
+        for name in GO_TEST.findall((go_dir / f).read_text()):
+            row = rows.get((f, name))
+            if row is None:
+                errs.append(f"missing ledger row: {f} {name}")
+                continue
+            status, rust_file, rust_fn = row
+            if status.startswith("ported"):
+                if rust_fn != go_test_to_rust(name):
+                    errs.append(f"{f} {name}: ledger fn {rust_fn} != rule {go_test_to_rust(name)}")
+                p = repo_dir / rust_file
+                if not p.exists() or not re.search(rf"\bfn {re.escape(rust_fn)}\s*\(", p.read_text()):
+                    errs.append(f"{f} {name}: fn {rust_fn} not found in {rust_file}")
+            elif status != "skipped":
+                errs.append(f"{f} {name}: bad status {status!r}")
+    return errs
+
+
+def main():
+    repo = pathlib.Path(__file__).resolve().parent.parent
+    go = pathlib.Path(os.environ.get("ADK_GO_DIR", repo.parent / "adk-go"))
+    if len(sys.argv) == 3 and sys.argv[1] == "--adk-go":
+        go = pathlib.Path(sys.argv[2])
+    errs = check(go, repo, repo / "docs/parity/1a.md")
+    for e in errs:
+        print(e, file=sys.stderr)
+    sys.exit(1 if errs else 0)
+
+
+if __name__ == "__main__":
+    main()

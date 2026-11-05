@@ -1,0 +1,39 @@
+{
+ "candidates": [
+  {
+   "content": {
+    "parts": [
+     {
+      "functionCall": {
+       "name": "calculator",
+       "args": {
+        "skill_id": "add",
+        "request": "2 + 2",
+        "rationale": "The user is asking to add two numbers, and the calculator tool has an 'add' skill that can perform this operation."
+       }
+      },
+      "thoughtSignature": "CtUCAb4+9vstWkvxauzjmusQV16aWpo/PQ7OMXTl2AAfjcNHrf66VJ+K+vjBB7b/Xc+uQ0ka6jVfHXyert4j2BFnwyrpmmW7Kyrle00NJfDippgXt+eXzPmEQHNLdBbgSSHBSVoRVUV8lRChvlTgACd4ihfJkBi4LA5xutfgcrpe6E/juxhdxO0eBRT/JVLsdVxCCKWogFG+4Bhm7HFpqZvEbALMnRbkEb9lNPI5bKkx0UdwzTFuJCzT8SVcs8a8XGBsaxhMj0gypaidLAy2DyDJOCVTfglxQIn6W+6jF+3OGDFr77o281+RbpfN1iP3BD+A7GUfr9Fn8KE3dyMrzKTfvrvfmvZLABLQEyaVUXUpkF7vgpQFaAi3SjSbv/R9VYmFeAFma9lH3jXcyzTbVfl2VfqR29nEwlHsP/44ECn1j0ZE3r+9aarV7d/nteIt60QLP3pPUIM="
+     }
+    ],
+    "role": "model"
+   },
+   "finishReason": "STOP",
+   "index": 0,
+   "finishMessage": "Model generated function call(s)."
+  }
+ ],
+ "usageMetadata": {
+  "promptTokenCount": 165,
+  "candidatesTokenCount": 52,
+  "totalTokenCount": 298,
+  "promptTokensDetails": [
+   {
+    "modality": "TEXT",
+    "tokenCount": 165
+   }
+  ],
+  "thoughtsTokenCount": 81
+ },
+ "modelVersion": "gemini-2.5-flash",
+ "responseId": "LCawaZ-6Bd7ensEP5rH1kAw"
+}

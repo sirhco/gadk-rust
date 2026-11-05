@@ -1,0 +1,40 @@
+{
+ "candidates": [
+  {
+   "content": {
+    "parts": [
+     {
+      "functionCall": {
+       "name": "finish_task",
+       "args": {
+        "quantity": 2,
+        "item": "pizza"
+       },
+       "id": "55relgui"
+      },
+      "thoughtSignature": "Eo8ECowEAQw51sdGmI9ZltyiOAZ6fN2EwJMVyv3q85eukPJWu2ZDQPYLksrMHu+5Zph62XL4bbT1CBjtC5at4jTJUeSDwHQN2JO1MMj53qXaeO2rpBp0dXpgWr8JjMhmlppKNNPjpOpXpBEmeA8dQ5dfBgpyihYOiZ4r/iapJlLd0HvYY/PojuXKXCH2O3bW6BMAGYOG7wI4wZFtbKu/LFbwVZvONq9VAXVGVg2MrdySbAN4+HGk+DDjpMMAhFWlGJm5swvMpWcePHXPAo4mBPqoEJhzGaPYhiyaNEBnJJ85sHPDEaEmaiMH5yBFaK+qq0SY/4q20Lc40eYx/YLw3gdJBr0ivQSoxxdj5B1kVlJgfgXPeu1p8hrruOGFeFmQ+7BOxXTvbbjbLycfqdfUdW6ZSUBy+WLuoBtW7rj3gZ0VKLGcq6YbCQpcXlTldYA0eYol3KwHFocqYHqVVkV3WVTjFy3vxRN/vEZv10AnGYC5MzVpIPFODW9tcCD2ElnT58S2felGInZWMNNEzbZcwfbEzeFXDPVODU3DeQD01G2mDP6rIwORxAU88WTdmMbRoUR8GXTddrQm76RzMRJbRp51q5EpxIAgaZvcucy/qGq1lVbCjUW/vIl9BfHZzjo5Jcp5H9/iezg5SdnQwTI8aYsGmQ0YsAGAeRIerJgz/ryPY9ywMcwjMWPg6IillL3YkQQ="
+     }
+    ],
+    "role": "model"
+   },
+   "finishReason": "STOP",
+   "index": 0,
+   "finishMessage": "Model generated function call(s)."
+  }
+ ],
+ "usageMetadata": {
+  "promptTokenCount": 323,
+  "candidatesTokenCount": 20,
+  "totalTokenCount": 491,
+  "promptTokensDetails": [
+   {
+    "modality": "TEXT",
+    "tokenCount": 323
+   }
+  ],
+  "thoughtsTokenCount": 148,
+  "serviceTier": "standard"
+ },
+ "modelVersion": "gemini-3.5-flash",
+ "responseId": "LXcyauOMBum-nsEPvdmBkAk"
+}

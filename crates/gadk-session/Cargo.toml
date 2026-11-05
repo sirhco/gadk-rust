@@ -1,0 +1,32 @@
+[package]
+name = "gadk-session"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+testsuite = []
+
+[dependencies]
+gadk-genai = { workspace = true }
+gadk-model = { workspace = true }
+gadk-platform = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+parking_lot = { workspace = true }
+futures = { workspace = true }
+
+[dev-dependencies]
+gadk-session = { path = ".", features = ["testsuite"] }
+tokio = { workspace = true }
+pretty_assertions = { workspace = true }
+insta = { workspace = true }
+rstest = { workspace = true }

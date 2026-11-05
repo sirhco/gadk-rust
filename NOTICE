@@ -1,0 +1,11 @@
+gadk — a Rust port of the Agent Development Kit (ADK) for Go.
+Copyright 2026 Chris Olson
+
+This product includes software derived from ADK-Go
+(https://github.com/google/adk-go), Copyright 2026 Google LLC,
+licensed under the Apache License, Version 2.0, and test fixtures
+copied from that project.
+
+This product's behavior is ported from the Google Gen AI Go SDK
+(https://github.com/googleapis/go-genai), Copyright Google LLC,
+licensed under the Apache License, Version 2.0.

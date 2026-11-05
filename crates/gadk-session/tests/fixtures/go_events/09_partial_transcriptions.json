@@ -1,0 +1,1 @@
+{"inputTranscription":{"text":"hi","finished":true},"outputTranscription":{"text":"yo"},"partial":true,"turnComplete":true,"interrupted":true,"id":"evt-9","timestamp":"2024-12-01T08:00:00.123Z","invocationId":"inv-1","author":"model","actions":{"stateDelta":{},"artifactDelta":{}}}
