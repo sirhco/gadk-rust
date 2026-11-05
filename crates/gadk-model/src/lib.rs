@@ -19,12 +19,14 @@ mod convert;
 mod error;
 mod http;
 mod llm;
+mod registry;
 mod variant;
 
 pub use convert::llm_response_from_genai;
 pub use error::{ModelError, api_error_from_body, body_prefix};
 pub use http::{BodyStream, HttpClient, ReqwestClient, collect_body};
 pub use llm::{Backend, ExtrasRequestProvider, HttpOptions, Llm, LlmRequest, LlmResponse};
+pub use registry::*;
 pub use variant::{
     can_use_output_schema_with_tools, google_variant, is_gemini_api_variant, is_gemini_model,
     is_gemini1_model, is_gemini2_or_above, is_gemini25_or_lower, needs_output_schema_processor,
