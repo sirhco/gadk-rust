@@ -1,0 +1,41 @@
+{
+ "candidates": [
+  {
+   "content": {
+    "parts": [
+     {
+      "functionCall": {
+       "name": "get_weather",
+       "args": {
+        "city": "Zurich"
+       },
+       "id": "call_3445095"
+      },
+      "thoughtSignature": "EqEDCp4DARFNMg8fvkN9H7IJF37HbQzdctqOkd5UPMoy8r4zKaLytkFTk0CKplXRX77FIB0nahZGR34JssqpZgDJZXraHyZd2sGL6T8VvZjOR/MpGSNkpj1msp8lFDcA1xw24hPLzx+rWehQBHTTUU3hagq/hZs6nZX4u0a5eNBkh8V4YZWjBXPJn1X+eK/wx7kquRlD7bDkYYSKIbpViGIWYczJhna7y8LOJrPS+tLEnYnJXocS/JJI1rWh7wBrIjNzqUM4Iqt57kY5Ii6sg/mOQXDefsxdm99mr9+1W/Soc8dTjieakqei1iHnIOmtni+a1gcUyNJWtlnZWkw8obP4bg2cm9G3iFaSHPpZpZQmVqG/peDMt/6vhHMaBbPdIRVNcbDLA7xY9M/taeGTmsKNxya5JPil+JaygQYyib3gBxGh9Jyj07iawlo0gUL7tAdtuVogaDCNbk1ZzRviO4qRIsuDUTfogwt1MWlkoCg8qzmvXcNnsm29lpyHE3izk4O2zGPLJDEYlYog0mT6F+sLdMoJaKlseo5SJaq80NhyaDAp"
+     }
+    ],
+    "role": "model"
+   },
+   "finishReason": "STOP",
+   "index": 0,
+   "finishMessage": "Model generated function call(s)."
+  }
+ ],
+ "usageMetadata": {
+  "promptTokenCount": 128,
+  "candidatesTokenCount": 17,
+  "totalTokenCount": 222,
+  "promptTokensDetails": [
+   {
+    "modality": "TEXT",
+    "tokenCount": 128
+   }
+  ],
+  "thoughtsTokenCount": 77,
+  "serviceTier": "standard",
+  "rawPromptTokenCount": 167
+ },
+ "modelVersion": "gemini-3.5-flash",
+ "responseId": "C3eVar2hMaeixN8P5_HquA8",
+ "turnToken": "v1_ChdDM2VWYXIyaE1hZWl4TjhQNV9IcXVBOBIXQzNlVmFyMmhNYWVpeE44UDVfSHF1QTg"
+}

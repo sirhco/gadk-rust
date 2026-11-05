@@ -1,0 +1,29 @@
+{
+ "candidates": [
+  {
+   "content": {
+    "parts": [
+     {
+      "text": "**Calculating Prime Sum**\n\nI've begun working on this problem by identifying the need to sum the first 50 prime numbers. I've started listing them and have got through the first 16. The next step is to compute the rest of the list, verify the number of entries, and then calculate the sum.\n\n\n",
+      "thought": true
+     }
+    ],
+    "role": "model"
+   },
+   "index": 0
+  }
+ ],
+ "usageMetadata": {
+  "promptTokenCount": 51,
+  "totalTokenCount": 165,
+  "promptTokensDetails": [
+   {
+    "modality": "TEXT",
+    "tokenCount": 51
+   }
+  ],
+  "thoughtsTokenCount": 114
+ },
+ "modelVersion": "gemini-2.5-flash",
+ "responseId": "cjGwadCGE7yvnsEP3tfsiQk"
+}

@@ -1,0 +1,39 @@
+{
+ "candidates": [
+  {
+   "content": {
+    "parts": [
+     {
+      "functionCall": {
+       "name": "finish_task",
+       "args": {
+        "edited": "He and I went to the store yesterday."
+       },
+       "id": "505x03aj"
+      },
+      "thoughtSignature": "Ep8ECpwEAQw51scijdMYeKKfge8k2IGJQlgKAsZu23KSGtA96jnCtI6KqhdH3H1jV1KPRUhdECeu4THJstW6Hp3GsgR0tvGQTwI8LdHiMDyUfX6FI9238GhnwdkyfMIhIxe7/GRPu3FP03Kjy/M96y7HZ+Au/uLpXXwyQr7+KB3yZmUpzC+tpBTPlAtd0K4g9zGnkzw7camEmsXXshjAPCVy3BjeEb1LhnSSpJrWII12m6Pv6oE5hNCHvhO9H9jt9g6qiCSwF7jPJDI4oC4SykT/UFdEBjx8ce+xhCrlJAxqNMa/bWFj2jlYWQ7yOjDMDyiYqD0R/j8kEUCh7n9Oe9l/+F+QV4i/dpcu24gGRJ4gNPAudAG2zrupZ09J9fSjneMhMOk77m7PvmtXNuwWnriQ6jNEOV+Lxbt+yw43P9aV62JztBVn5EQraCtYBBJXWqVkV3iGtam4GZSP1ZthqKt349SC6yPzl6sFleOrFptasYmodmBA+Ttk1iD/SddRJRBNH9j96cc7XX647MdZJgEcuon+cZspMBaag8JGDWKKDPZsR98mohKMt95nEkoij14ocVci1JVQzLI7lRKoPQa88nvlzVlXKBhcwo8wzZ+/CJ9IgAxl/EEgHEww1FFv3YUj0mZ//sw0f5Uk42Uj0Tz4lw/J3bwBri8ECQEYUXjp5s0xDQuQ3wCAcvuBeBsD8PzNXjpPw1oea9Fj6aoqKGUx"
+     }
+    ],
+    "role": "model"
+   },
+   "finishReason": "STOP",
+   "index": 0,
+   "finishMessage": "Model generated function call(s)."
+  }
+ ],
+ "usageMetadata": {
+  "promptTokenCount": 328,
+  "candidatesTokenCount": 24,
+  "totalTokenCount": 479,
+  "promptTokensDetails": [
+   {
+    "modality": "TEXT",
+    "tokenCount": 328
+   }
+  ],
+  "thoughtsTokenCount": 127,
+  "serviceTier": "standard"
+ },
+ "modelVersion": "gemini-3.5-flash",
+ "responseId": "8Xoyas6dFu2ZkdUPj6jYmA8"
+}

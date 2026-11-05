@@ -1,0 +1,37 @@
+{
+ "candidates": [
+  {
+   "content": {
+    "parts": [
+     {
+      "functionCall": {
+       "name": "rand_number",
+       "args": {
+        "seed": 5
+       }
+      },
+      "thoughtSignature": "CugCAb4+9vvc6qwu6MEzNuTOUy3EF0pFEtUyVr37qpYQ8/yuGK1RAiRRUl86Myw+fwxbjZ1tY0w2LBDFZxmUZlUStf8C0ccspZu9BQ1qi1C4NQEMQ1JyVTMoeR+T+rCmc9i6/VNR8MC2Yz4cU+o9pKP8wxDJejRGLvrXCjN4JSbhDf97qFRrtAoYtU834NexLmcQJG6RCSPLc0TL8AYVbwrKyiH5qgItuLnpbnbUlrwHzBZeZeyYigBqXbR2nQRCGeflVJ1Hi0n75B1hSbbdDKu6CkzDIWcNBzU9y7xJjv5Kt4J0EhzqZys4e2NZUKFfFhxGssQ5h/1GX+vtAlG0AJ9KzRg6yr5tsMW1RhibbVfMa8J/HkMouTz1pUMbbd9zTIBiEM1GGjIGTPjeMKeVSNyYRgYuHguwMbhy6lnB8xG0XI+MCPKyxAHLMJ47Fx+o3wvT3iRaDbzoAEnBxIEa+los8uM9QSAHAsJ6"
+     }
+    ],
+    "role": "model"
+   },
+   "finishReason": "STOP",
+   "index": 0,
+   "finishMessage": "Model generated function call(s)."
+  }
+ ],
+ "usageMetadata": {
+  "promptTokenCount": 136,
+  "candidatesTokenCount": 15,
+  "totalTokenCount": 227,
+  "promptTokensDetails": [
+   {
+    "modality": "TEXT",
+    "tokenCount": 136
+   }
+  ],
+  "thoughtsTokenCount": 76
+ },
+ "modelVersion": "gemini-2.5-flash",
+ "responseId": "ODCwaZyQMcuXkdUP28zB2As"
+}
