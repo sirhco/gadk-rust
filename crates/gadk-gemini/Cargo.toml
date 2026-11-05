@@ -1,0 +1,36 @@
+[package]
+name = "gadk-gemini"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+build = "build.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+gadk-genai = { workspace = true }
+gadk-model = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+bytes = { workspace = true }
+base64 = { workspace = true }
+http = { workspace = true }
+url = { workspace = true }
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+google-cloud-auth = { workspace = true }
+tracing = { workspace = true }
+parking_lot = { workspace = true }
+
+[dev-dependencies]
+gadk-httprr = { workspace = true }
+tokio = { workspace = true }
+pretty_assertions = { workspace = true }
+rstest = { workspace = true }
+tracing-subscriber = { workspace = true }
