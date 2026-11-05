@@ -1,0 +1,39 @@
+{
+ "candidates": [
+  {
+   "content": {
+    "parts": [
+     {
+      "functionCall": {
+       "name": "transfer_to_agent",
+       "args": {
+        "agent_name": "writer"
+       },
+       "id": "oeiyn4lc"
+      },
+      "thoughtSignature": "ErkDCrYDAQw51sfrQxQjhX1pyAN917aypEp/N9wpW+HWwTwiUT/RalRTiZtLBSJB/OrJZAGTVmHC48WWA3tS1NW2dNGPvEua3PlIYYxUTT8hsNY+dsW2Kq4E5bXlHvlKQ3kHu5TPZMYxOFLUHOYeqtWyhuYCXFNUw+XNdF0pgFvFZLnsIywInTWUBtbqFPv9iOXqu9yV2HHRpFkt9MgAps1OldSvfiDEYXQ/DJOrLtQy9Uto/hyYexSmViEPMUMf6Tso9fP5ardacGbN+q6aKunjD5AibWtVhwCLl4BEo/FLNnPhJAI1eKV+E2oUkVnrPASL5K3qUc4DqdZ3Kw5iJcbi8PFW/rqGjXETi64cxQvyWRXaljUUvZPUiVOgvi0dFZu/s059eapxL4NWEv5U6xLDcCLQ19nSZp2G1YCsPDkU60mJS3in7LR1WUT0TiwlJT6UU7sigWE9qb01rjGXcjsNhMjNXYuUtfSF0krk2SoCs1WaLEdb5KnwzuEZ2OL3eYeIZL1XqJyb4NPtZHF7++2m279XvDN6D/GFfOPBUenMcpMf6W5xan7Zr1C+Ok+MdoOsjO0PRWU2Q4C6"
+     }
+    ],
+    "role": "model"
+   },
+   "finishReason": "STOP",
+   "index": 0,
+   "finishMessage": "Model generated function call(s)."
+  }
+ ],
+ "usageMetadata": {
+  "promptTokenCount": 315,
+  "candidatesTokenCount": 20,
+  "totalTokenCount": 428,
+  "promptTokensDetails": [
+   {
+    "modality": "TEXT",
+    "tokenCount": 315
+   }
+  ],
+  "thoughtsTokenCount": 93,
+  "serviceTier": "standard"
+ },
+ "modelVersion": "gemini-3.5-flash",
+ "responseId": "7XoyasPlI_OikdUP1cTXkAk"
+}

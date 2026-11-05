@@ -213,3 +213,72 @@ pub(crate) fn decode_duration<E: serde::de::Error>(s: Option<String>) -> Result<
         Some(s) => parse_go_duration(s).map_err(E::custom),
     }
 }
+
+/// Go `time.Duration` field behind genai's `InternalDurationJSON` custom marshalers
+/// (e.g. `LiveServerGoAway.TimeLeft`): decoded with [`parse_go_duration`] (`""` and
+/// `null` are zero), encoded as whole seconds with [`format_go_seconds`]. Use with
+/// `#[serde(default, skip_serializing_if = "TimeDelta::is_zero", with = "crate::serde_util::go_duration")]`
+/// so the zero duration is omitted, as genai does.
+pub mod go_duration {
+    use chrono::TimeDelta;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(d: &TimeDelta, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&super::format_go_seconds(*d))
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<TimeDelta, D::Error> {
+        super::decode_duration(Option::<String>::deserialize(d)?)
+    }
+}
+
+/// A JSON string or number holding an `int64` (decode side of Go's `,string` option).
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum I64OrString {
+    Int(i64),
+    Str(String),
+}
+
+impl I64OrString {
+    fn into_i64<E: serde::de::Error>(self) -> Result<i64, E> {
+        match self {
+            Self::Int(v) => Ok(v),
+            Self::Str(s) => s.parse().map_err(E::custom),
+        }
+    }
+}
+
+/// Go `int64` with the `,string` JSON option: encoded as a quoted decimal string.
+/// Decoding also accepts a bare JSON number. Use with
+/// `#[serde(default, skip_serializing_if = "is_zero", with = "crate::serde_util::i64_string")]`.
+pub mod i64_string {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(v: &i64, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&v.to_string())
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<i64, D::Error> {
+        match Option::<super::I64OrString>::deserialize(d)? {
+            Some(v) => v.into_i64(),
+            None => Ok(0),
+        }
+    }
+}
+
+/// Go `*int64` with the `,string` JSON option; `None` is skipped by
+/// `skip_serializing_if = "Option::is_none"`.
+pub mod i64_string_opt {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(v: &Option<i64>, s: S) -> Result<S::Ok, S::Error> {
+        match v {
+            Some(v) => s.serialize_str(&v.to_string()),
+            None => s.serialize_none(),
+        }
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<i64>, D::Error> {
+        Option::<super::I64OrString>::deserialize(d)?
+            .map(super::I64OrString::into_i64)
+            .transpose()
+    }
+}

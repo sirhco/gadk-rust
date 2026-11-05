@@ -14,15 +14,25 @@
 // limitations under the License.
 
 //! gadk-genai: Gemini-compatible content and config types (port of google.golang.org/genai v1.75.0).
+mod config;
 mod content;
 mod enums;
 mod helpers;
+mod live;
+mod media;
+mod response;
 mod schema;
 pub mod serde_util;
+mod tool;
 
+pub use config::*;
 pub use content::*;
 pub use helpers::*;
+pub use live::*;
+pub use media::*;
+pub use response::*;
 pub use schema::*;
+pub use tool::*;
 
 /// Re-export used by [`string_enum!`] so callers need no direct `serde` dependency.
 #[doc(hidden)]

@@ -1,0 +1,39 @@
+{
+ "candidates": [
+  {
+   "content": {
+    "parts": [
+     {
+      "functionCall": {
+       "name": "finish_task",
+       "args": {
+        "wrong_field": 42
+       },
+       "id": "dmyvsg54"
+      },
+      "thoughtSignature": "EuQJCuEJAQw51seAtTlu5ofD76RuGnIRa7ANTS8G9r2nuFCZ+ABrZSsIQktOOD7mQdJNmfdIL8dDAXEdgRPUApzP5X/J7ybspz0Ir3nGXqZ5ozfhpm7Y+NAHKaEGuqPfviEljoBdDX6rsSG3qU2RZPH+OgT35nYWffLoJeWldSxEy+qRDPcQpdeqbLTPCgCAIvFC9wY6Dk2ueGP7zBGSgzXKF+7K5STqhPI1KFbnafaK6e7zBaBn5GPQOdJYTrk0rfrc7JpU0+c5xLAnQqvuTwpTmgL33I3TipXrtmr7Zs174O/C9gZTlSqZ5lQiVOx5eQjq6O+jW2jN2CN3h5ffvg9G1+pK3KmX216+298KXerh7rYMOlr7yJ4uZYvdiyYXyHbDPbLWymiDexvZBmJwk1IJYl2aAkHkZBTsPP7lqcAdBR5H4kZbNzVprIOTXFF0ciY7hktq/sK+G1BiMb31cbtEvVrF+to5ojIbCzKz6wDQ4bh/zVvEIAYCDVFXLw25wVsO4qI30dlVuWx3lrc3BAXoQGk/5ayrJ27DVi/rq4ixPGJUraCDCfOmBe8gdj4tP4yjmWwIlQpgZnRnmV0+3/Umkz8Nb3HH+GBNmRissSh/52ylo1cSp21MvsJXEQLByCf1+KWhJNLTRCZNJwMD+YkTQ3QW85Z79RUlOxqffOSwAV+u/lN6ZrMtJjs6I6KzF2k6I2bn9rw2xHF+PvmNs83HYQnsy8v/a5LtGrPOyK3Iw4MvnYJLGzjUCKD5JkRT4KfJTxYOk8XsK5CjwN2tdux3tVO/StPv9bCcbYcB4L/BFUkOm757e5FIRK8NBI2+2zwjm7/68Q91Gdb1aUPkYyhE1WSvFRiZT+HvkCwZgGYHXRrBNAaYLNydlPpAfNNIUp6IcMubFbAixKk8vgp8HAyd1ilxdqTecgyI7MDLObWrmuD+evwL6p6D9PVZpimbiYNoLi9uPpqm4qIsB/VXEvezJ7YNNVUU2SFBIJ61BEDbBvYya9090oMmsen6TYJJqupgmSAKzF8+XiB3gPR9wkcDonqYyEekApt2mOj3vBH3NJ1KD++Vdi19ekpMJbg7XgUXCRUhFcEGOzZPdLMOpDUTjNAthxgS2qBlHGkajDzYA4nrasoKHSthnq5Iov9Snc7jvtNcirUevv6ppxjyA2YvbFTDeBqwQ3KUujPhIwU6dBCG6JYgUyRSh/Bv3donmWyfngdE7TLyJWgog5mOeFTAAOwkW42qYzeu2oEXOpKHbCulkVGB+vi9dUOVyY5xsdiqybEI3J/JWVK7cCFjZucZhT34uOeu6fbVLQbpJFVgiIc3fEBPmg0BEnykiRPV6DGbQiYrcoeWZeGUUZPJ7Ui0QXQp9uQYDffIKq0Mk6CZnOKPGnH6kxnm5yuxKlF8xnilO/S1lF85dJTrOife0SPrwSVWCIrh222Sc45uu6DdeuLy2HvFYIKs6sizIp1YuhKkzKyem4G57pg28HmGE+75oH/LKY3GSslbeoRpkKFPQ64eA2UTh15xbRXItgmpPuSV+6ROibP61O9QrA+LK5bDB0pYkBUhu56EPwHpTXnD+/ZJwBgh0GeQq+jrZc3azN+Yj3aqeNIReD+0/csjX4NcVVFsBj+p2nD/Fb9cvhhd4jXArP53AQE+iXL25T+HB0Z8ZMZ3wA=="
+     }
+    ],
+    "role": "model"
+   },
+   "finishReason": "STOP",
+   "index": 0,
+   "finishMessage": "Model generated function call(s)."
+  }
+ ],
+ "usageMetadata": {
+  "promptTokenCount": 353,
+  "candidatesTokenCount": 17,
+  "totalTokenCount": 700,
+  "promptTokensDetails": [
+   {
+    "modality": "TEXT",
+    "tokenCount": 353
+   }
+  ],
+  "thoughtsTokenCount": 330,
+  "serviceTier": "standard"
+ },
+ "modelVersion": "gemini-3.5-flash",
+ "responseId": "Y30yaqSYOIXNnsEP9se9wAo"
+}

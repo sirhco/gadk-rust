@@ -1,0 +1,40 @@
+{
+ "candidates": [
+  {
+   "content": {
+    "parts": [
+     {
+      "functionCall": {
+       "name": "finish_task",
+       "args": {
+        "credit_card_number": "4111111111111111",
+        "cvv": "123"
+       },
+       "id": "fm6nag3h"
+      },
+      "thoughtSignature": "EpQECpEEAQw51se7TIxosZDWsDq9nO5Fd7XIl56jfctCVBSLWGDvqTbsYlkqgwa5f4QsYbWuXnrWxksN1r/um7GboCEd9D7CjbXCNAuQccI1MxPnukMoA6hvv60ff3VkWsbzrYthxHDCPDO/gtgRVt+SXtfy7gTQGZ6G2izIB/9jn8wvA1npmywPvFSSA8aiCS+4627EgG5+4Hb3rXagbhRZtxXXTJX8/tgegrk2+jICNrwLOHjsB1EziPIlnT7YCjCpMJLEF09jB2LN54qcXeKDhOKcJCocI3hnT4Bk1ZPR1FAYApgNycnw1lcM1q8LUle/7LfKfo3fhh0KjV8mbyPwN/YI1bn7hUXEzA3AjoiVARxBMZI6KUzjLOUbJz3++omZ355RyQf4GDSe6z+bR0Mzh24G34cF24Jc1ytJ9XImc7x8vbn+SpqWSgJNp7jyoTdO2t+yxCBuQqbLjPsd1oMnS0k/84B2VYLalRW38r8+kG3Sk64pTjckA9WRPQ5ouEO3cRhxYubYamlb04gd915SKnTsDxd4A3Ym9RDshTCQUZlRv5PJSXqCZdtsPeYAhMdslxqUXdkuXOv1NMaKpeLBGVPdFnzK5FN6440S4klja6qzP/aXQHw4yQtZk6sBOizvlFowu4Du0etoG3NnDpGTtbwl4rKSv0iS0SvCM/iIgskwuzmmnsOfoiKxLBC7gLcvF19uLw=="
+     }
+    ],
+    "role": "model"
+   },
+   "finishReason": "STOP",
+   "index": 0,
+   "finishMessage": "Model generated function call(s)."
+  }
+ ],
+ "usageMetadata": {
+  "promptTokenCount": 356,
+  "candidatesTokenCount": 44,
+  "totalTokenCount": 547,
+  "promptTokensDetails": [
+   {
+    "modality": "TEXT",
+    "tokenCount": 356
+   }
+  ],
+  "thoughtsTokenCount": 147,
+  "serviceTier": "standard"
+ },
+ "modelVersion": "gemini-3.5-flash",
+ "responseId": "OXcyarbuHtb7nsEP6tOLgA8"
+}

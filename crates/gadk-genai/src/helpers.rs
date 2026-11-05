@@ -19,6 +19,7 @@ use crate::content::{
     Blob, CodeExecutionResult, Content, ExecutableCode, FileData, FunctionCall, FunctionResponse,
     Language, Outcome, Part, ROLE_USER,
 };
+use crate::media::File;
 use bytes::Bytes;
 use serde_json::{Map, Value};
 
@@ -62,6 +63,11 @@ impl Part {
             }),
             ..Default::default()
         }
+    }
+
+    /// genai `NewPartFromFile`: a file-data part from the file's `uri` and `mime_type`.
+    pub fn from_file(file: &File) -> Self {
+        Self::from_uri(&file.uri, &file.mime_type)
     }
 
     /// genai `NewPartFromFunctionCall`: sets only `name` and `args`.
