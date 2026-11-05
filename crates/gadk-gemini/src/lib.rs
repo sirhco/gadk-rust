@@ -15,10 +15,22 @@
 
 //! gadk-gemini: Gemini API and Vertex AI model implementation.
 
+mod auth;
 mod config;
 mod env;
 mod error;
+mod model;
+mod request;
+mod sse;
+mod transport;
 
 pub use config::{Auth, CLOUD_PLATFORM_SCOPE, ClientConfig, ResolvedConfig, resolve};
 pub use env::{EnvProvider, MapEnv, ProcessEnv};
 pub use error::GeminiError;
+pub use model::GeminiModel;
+
+/// Internals exposed for the integration tests. Not part of the public API.
+#[doc(hidden)]
+pub mod internal {
+    pub use crate::request::{build_request_body, preserve_empty_text_thought_signature_parts};
+}
