@@ -20,6 +20,7 @@ mod config;
 mod continuation;
 mod env;
 mod error;
+mod live;
 mod model;
 mod request;
 mod sse;
@@ -28,6 +29,7 @@ mod transport;
 pub use config::{Auth, CLOUD_PLATFORM_SCOPE, ClientConfig, ResolvedConfig, resolve};
 pub use env::{EnvProvider, MapEnv, ProcessEnv};
 pub use error::GeminiError;
+pub use live::{LiveConnection, RealtimeInput};
 pub use model::GeminiModel;
 
 /// Internals exposed for the integration tests. Not part of the public API.

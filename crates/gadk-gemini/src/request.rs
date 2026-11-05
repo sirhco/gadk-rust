@@ -24,7 +24,7 @@ use gadk_genai::{Content, GenerateContentConfig};
 use gadk_model::{Backend, ExtrasRequestProvider, ModelError};
 use serde_json::{Map, Value};
 
-type Obj = Map<String, Value>;
+pub(crate) type Obj = Map<String, Value>;
 
 /// Where a request is going: the backend plus the Vertex AI project and location used to
 /// expand resource names (genai `tResourceName`).
@@ -110,7 +110,7 @@ fn part_has_data(part: &Obj) -> bool {
 
 // ---- genai converters ---------------------------------------------------------------
 
-fn to_value<T: serde::Serialize>(v: &T) -> Result<Value, ModelError> {
+pub(crate) fn to_value<T: serde::Serialize>(v: &T) -> Result<Value, ModelError> {
     serde_json::to_value(v).map_err(|e| ModelError::Other(Box::new(e)))
 }
 
@@ -128,7 +128,7 @@ fn unsupported(field: &str, backend: Backend) -> ModelError {
 }
 
 /// Fails if any of `fields` is present in `from`.
-fn reject(from: &Obj, fields: &[&str], backend: Backend) -> Result<(), ModelError> {
+pub(crate) fn reject(from: &Obj, fields: &[&str], backend: Backend) -> Result<(), ModelError> {
     match fields.iter().find(|f| present(from, f)) {
         Some(f) => Err(unsupported(f, backend)),
         None => Ok(()),
@@ -141,7 +141,7 @@ fn present(from: &Obj, field: &str) -> bool {
 }
 
 /// Copies each present `fields` entry from `from` into `to` unchanged.
-fn copy(from: &Obj, to: &mut Obj, fields: &[&str]) {
+pub(crate) fn copy(from: &Obj, to: &mut Obj, fields: &[&str]) {
     for f in fields {
         if let Some(v) = from.get(*f).filter(|v| !v.is_null()) {
             to.insert((*f).to_string(), v.clone());
@@ -159,13 +159,13 @@ fn set_merge(to: &mut Obj, key: &str, value: Value) {
     }
 }
 
-fn as_obj(v: &Value) -> Obj {
+pub(crate) fn as_obj(v: &Value) -> Obj {
     v.as_object().cloned().unwrap_or_default()
 }
 
 /// Applies `f` to every object of the array at `from[field]` and stores the result in
 /// `to[field]`.
-fn convert_list(
+pub(crate) fn convert_list(
     from: &Obj,
     to: &mut Obj,
     field: &str,
@@ -182,7 +182,7 @@ fn convert_list(
 }
 
 /// Applies `f` to the object at `from[field]` and stores the result in `to[field]`.
-fn convert_obj(
+pub(crate) fn convert_obj(
     from: &Obj,
     to: &mut Obj,
     field: &str,
@@ -265,12 +265,7 @@ fn generate_content_config(
         copy(from, parent, &["safetySettings"]);
     } else {
         reject(from, &["routingConfig", "modelSelectionConfig"], backend)?;
-        convert_list(from, parent, "safetySettings", |s| {
-            reject(s, &["method"], backend)?;
-            let mut out = Obj::new();
-            copy(s, &mut out, &["category", "threshold"]);
-            Ok(out)
-        })?;
+        convert_list(from, parent, "safetySettings", safety_setting_mldev)?;
     }
 
     convert_list(from, parent, "tools", |t| tool(t, backend))?;
@@ -306,8 +301,16 @@ fn generate_content_config(
     Ok(to)
 }
 
+/// Port of `safetySettingToMldev`.
+pub(crate) fn safety_setting_mldev(from: &Obj) -> Result<Obj, ModelError> {
+    reject(from, &["method"], Backend::GeminiApi)?;
+    let mut to = Obj::new();
+    copy(from, &mut to, &["category", "threshold"]);
+    Ok(to)
+}
+
 /// Port of `contentTo{Mldev,Vertex}`.
-fn content(from: &Obj, backend: Backend) -> Result<Obj, ModelError> {
+pub(crate) fn content(from: &Obj, backend: Backend) -> Result<Obj, ModelError> {
     let mut to = Obj::new();
     convert_list(from, &mut to, "parts", |p| part(p, backend))?;
     copy(from, &mut to, &["role"]);
@@ -362,7 +365,7 @@ fn part(from: &Obj, backend: Backend) -> Result<Obj, ModelError> {
 
 /// Port of `toolTo{Mldev,Vertex}` (with `googleSearchToMldev`, `googleMapsToMldev`,
 /// `authConfigToMldev`, `mcpServerToVertex`).
-fn tool(from: &Obj, backend: Backend) -> Result<Obj, ModelError> {
+pub(crate) fn tool(from: &Obj, backend: Backend) -> Result<Obj, ModelError> {
     let mut to = Obj::new();
     match backend {
         Backend::GeminiApi => {
@@ -497,7 +500,7 @@ fn image_config(from: &Obj, backend: Backend) -> Result<Obj, ModelError> {
 /// Port of `speechConfigToVertex` (with `voiceConfigToVertex`,
 /// `multiSpeakerVoiceConfigToVertex`, `speakerVoiceConfigToVertex`,
 /// `replicatedVoiceConfigToVertex`).
-fn speech_config_vertex(from: &Obj) -> Result<Obj, ModelError> {
+pub(crate) fn speech_config_vertex(from: &Obj) -> Result<Obj, ModelError> {
     let mut to = Obj::new();
     convert_obj(from, &mut to, "voiceConfig", voice_config_vertex)?;
     copy(from, &mut to, &["languageCode"]);
