@@ -17,14 +17,20 @@
 
 mod error;
 mod event;
+mod inmemory;
 mod legacy;
 mod service;
 mod tool_confirmation;
+
+/// Reusable conformance suite for [`SessionService`] implementations.
+#[cfg(feature = "testsuite")]
+pub mod testsuite;
 
 pub use error::SessionError;
 pub use event::{
     Event, EventActions, EventCompaction, EventRef, NodeInfo, RequestInput, zero_time,
 };
+pub use inmemory::InMemorySessionService;
 pub use service::{
     CreateRequest, DeleteRequest, GetRequest, KEY_PREFIX_APP, KEY_PREFIX_TEMP, KEY_PREFIX_USER,
     ListRequest, ReadonlyState, Session, SessionService, State,
