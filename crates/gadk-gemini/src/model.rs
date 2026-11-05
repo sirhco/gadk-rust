@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use futures::StreamExt;
 use futures::stream::BoxStream;
-use gadk_genai::{Content, GenerateContentResponse};
+use gadk_genai::{Content, GenerateContentConfig, GenerateContentResponse};
 use gadk_model::{
     ExtrasRequestProvider, HttpClient, Llm, LlmRequest, LlmResponse, ModelError, ReqwestClient,
     StreamingResponseAggregator, llm_response_from_genai,
@@ -31,6 +31,9 @@ use http::{HeaderMap, HeaderName, HeaderValue};
 use serde_json::{Map, Value};
 
 use crate::config::{Auth, CLOUD_PLATFORM_SCOPE, ClientConfig, ResolvedConfig, resolve};
+use crate::continuation::{
+    StreamContinuation, merge_responses, prepare_config, should_continue, should_enable,
+};
 use crate::error::GeminiError;
 use crate::request::{Target, build_body};
 use crate::transport::Transport;
@@ -70,12 +73,52 @@ impl fmt::Debug for GeminiModel {
     }
 }
 
-/// A request ready to send.
+/// A request ready to send: everything but the body, which is built for each hop (so the
+/// extras provider runs on every request).
 struct Prepared {
     transport: Transport,
+    resolved: Arc<ResolvedConfig>,
     model: String,
-    body: Map<String, Value>,
+    contents: Vec<Content>,
+    config: GenerateContentConfig,
+    extras: Option<ExtrasRequestProvider>,
     headers: HeaderMap,
+}
+
+impl Prepared {
+    /// The JSON body of one request sent with `config`.
+    fn body(&self, config: &GenerateContentConfig) -> Result<Map<String, Value>, ModelError> {
+        let target = Target {
+            backend: self.resolved.backend,
+            project: self.resolved.project.as_deref(),
+            location: self.resolved.location.as_deref(),
+        };
+        build_body(target, &self.contents, config, self.extras.as_ref())
+    }
+
+    /// One `generateContent` request (one hop) with `config`.
+    async fn generate_hop(
+        &self,
+        config: &GenerateContentConfig,
+    ) -> Result<GenerateContentResponse, ModelError> {
+        let body = self.body(config)?;
+        self.transport
+            .generate(&self.model, body, self.headers.clone())
+            .await
+    }
+
+    /// One `streamGenerateContent` request (one hop) with `config`.
+    fn stream_hop(
+        &self,
+        config: &GenerateContentConfig,
+    ) -> BoxStream<'static, Result<GenerateContentResponse, ModelError>> {
+        match self.body(config) {
+            Ok(body) => self
+                .transport
+                .stream(&self.model, body, self.headers.clone()),
+            Err(e) => futures::stream::once(async move { Err(e) }).boxed(),
+        }
+    }
 }
 
 impl GeminiModel {
@@ -145,16 +188,11 @@ impl Inner {
 
         // gemini.go configPreservingEmptyTextThoughtSignatures: the request provider takes
         // precedence over the client's.
-        let extras: Option<&ExtrasRequestProvider> = http_options
+        let extras: Option<ExtrasRequestProvider> = http_options
             .as_ref()
             .and_then(|o| o.extras_request_provider.as_ref())
-            .or(client_options.extras_request_provider.as_ref());
-        let target = Target {
-            backend: self.resolved.backend,
-            project: self.resolved.project.as_deref(),
-            location: self.resolved.location.as_deref(),
-        };
-        let body = build_body(target, &contents, &config, extras)?;
+            .or(client_options.extras_request_provider.as_ref())
+            .cloned();
 
         let model = if model.is_empty() {
             self.name.clone()
@@ -163,8 +201,11 @@ impl Inner {
         };
         Ok(Prepared {
             transport: self.transport.with_request_options(http_options.as_ref()),
+            resolved: self.resolved.clone(),
             model,
-            body,
+            contents,
+            config,
+            extras,
             headers,
         })
     }
@@ -198,26 +239,99 @@ fn add_tracking_headers(headers: &mut HeaderMap) -> Result<(), ModelError> {
     Ok(())
 }
 
-/// Sends the prepared request and yields the raw responses.
+/// Sends the prepared request and yields the raw responses, with genai's automatic
+/// continuation (`models.go` `GenerateContent` / `GenerateContentStream`).
 ///
-/// This is the seam for automatic continuation: today it performs exactly one hop (one
-/// request; one response, or one per SSE event when streaming).
+/// Unary: while the response carries a continuation token with a resumable finish reason,
+/// the request is sent again with that token, and the responses of every hop are yielded
+/// merged into one. Stream: the chunks of every hop are yielded in order, then the error
+/// that ended the run, if any (see [`StreamContinuation::end_hop`]).
 fn run_hops(
     prepared: Prepared,
     stream: bool,
 ) -> BoxStream<'static, Result<GenerateContentResponse, ModelError>> {
-    let Prepared {
-        transport,
-        model,
-        body,
-        headers,
-    } = prepared;
     if stream {
-        transport.stream(&model, body, headers)
+        stream_hops(prepared)
     } else {
-        futures::stream::once(async move { transport.generate(&model, body, headers).await })
-            .boxed()
+        futures::stream::once(generate_hops(prepared)).boxed()
     }
+}
+
+/// genai `Models.GenerateContent`.
+async fn generate_hops(prepared: Prepared) -> Result<GenerateContentResponse, ModelError> {
+    let enabled = should_enable(&prepared.config);
+    let mut response = prepared.generate_hop(&prepared.config).await?;
+    if !enabled {
+        return Ok(response);
+    }
+    let mut hop_responses = Vec::new();
+    while let Some(token) = should_continue(&response) {
+        let call_config = prepare_config(&prepared.config, token);
+        let next = prepared.generate_hop(&call_config).await?;
+        hop_responses.push(std::mem::replace(&mut response, next));
+    }
+    if hop_responses.is_empty() {
+        return Ok(response);
+    }
+    hop_responses.push(response);
+    merge_responses(hop_responses)
+}
+
+struct HopsState {
+    prepared: Prepared,
+    continuation: StreamContinuation,
+    /// The current hop's chunks; `None` between hops.
+    hop: Option<BoxStream<'static, Result<GenerateContentResponse, ModelError>>>,
+    done: bool,
+}
+
+/// genai `Models.GenerateContentStream`: within a hop the transport ends its stream at
+/// the first error, which ends the hop.
+fn stream_hops(
+    prepared: Prepared,
+) -> BoxStream<'static, Result<GenerateContentResponse, ModelError>> {
+    let enabled = should_enable(&prepared.config);
+    let state = HopsState {
+        continuation: StreamContinuation::new(prepared.config.clone(), enabled),
+        prepared,
+        hop: None,
+        done: false,
+    };
+    futures::stream::unfold(state, |mut s| async move {
+        loop {
+            if s.done {
+                return None;
+            }
+            let hop = match &mut s.hop {
+                Some(hop) => hop,
+                None => {
+                    let call_config = s.continuation.start_hop();
+                    s.hop.insert(s.prepared.stream_hop(&call_config))
+                }
+            };
+            let hop_err = match hop.next().await {
+                Some(Ok(chunk)) => match s.continuation.observe(chunk) {
+                    Ok(chunk) => return Some((Ok(chunk), s)),
+                    Err(e) => {
+                        s.done = true;
+                        return Some((Err(e), s));
+                    }
+                },
+                Some(Err(e)) => Some(e),
+                None => None,
+            };
+            s.hop = None;
+            match s.continuation.end_hop(hop_err) {
+                Ok(true) => {}
+                Ok(false) => s.done = true,
+                Err(e) => {
+                    s.done = true;
+                    return Some((Err(e), s));
+                }
+            }
+        }
+    })
+    .boxed()
 }
 
 /// gemini.go `generate`: the first candidate of the single response.

@@ -17,6 +17,7 @@
 
 mod auth;
 mod config;
+mod continuation;
 mod env;
 mod error;
 mod model;

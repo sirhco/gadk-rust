@@ -18,6 +18,8 @@
 
 //! Shared helpers for the gadk-gemini integration tests.
 
+pub mod fake;
+
 use bytes::Bytes;
 use futures::StreamExt;
 use gadk_gemini::{ClientConfig, MapEnv};
