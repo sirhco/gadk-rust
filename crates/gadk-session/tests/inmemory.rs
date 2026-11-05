@@ -722,3 +722,73 @@ async fn test_in_memory_service_append_event_canonical_record_does_not_alias_liv
         );
     }
 }
+
+// Not a Go test: pins Go `Create`, which stores `MergeStates(app, user, req.State)` with the
+// raw request state, so `temp:` keys given at create stay in session state (only appended
+// event deltas are trimmed).
+#[tokio::test]
+async fn create_keeps_temp_keys_like_go() {
+    let svc = InMemorySessionService::new();
+    let created = svc
+        .create(CreateRequest {
+            app_name: "app".into(),
+            user_id: "user".into(),
+            state: delta(&[
+                ("temp:x", json!("t")),
+                ("sk", json!("s")),
+                ("app:a", json!("av")),
+                ("user:u", json!("uv")),
+            ]),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let fetched = get(&svc, created.as_ref()).await;
+    for (what, sess) in [("Create", &created), ("Get", &fetched)] {
+        let st = sess.state();
+        assert_eq!(st.get("temp:x").ok(), Some(json!("t")), "{what}: temp:x");
+        assert_eq!(st.get("sk").ok(), Some(json!("s")), "{what}: sk");
+        assert_eq!(st.get("app:a").ok(), Some(json!("av")), "{what}: app:a");
+        assert_eq!(st.get("user:u").ok(), Some(json!("uv")), "{what}: user:u");
+    }
+    // App and user keys still route to the shared maps; temp: stays per-session.
+    let other = create(&svc, "app", "user").await;
+    assert_eq!(other.state().get("app:a").ok(), Some(json!("av")));
+    assert_eq!(other.state().get("user:u").ok(), Some(json!("uv")));
+    assert!(
+        other.state().get("temp:x").is_err(),
+        "temp:x is per-session"
+    );
+}
+
+// Not a Go test: pins Go's Get filter order (NumRecentEvents first, then After). With 5
+// events the last 2 are ts[3] and ts[4]; of those only ts[4] is not before `after = ts[4]`.
+#[tokio::test]
+async fn get_applies_num_recent_events_before_after_like_go() {
+    let svc = InMemorySessionService::new();
+    let sess = create(&svc, "app", "user").await;
+    let base = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+    let ts: Vec<_> = (1..=5)
+        .map(|i| base + chrono::Duration::seconds(i))
+        .collect();
+    for (i, t) in ts.iter().enumerate() {
+        let mut ev = Event {
+            id: i.to_string(),
+            timestamp: *t,
+            ..Default::default()
+        };
+        svc.append_event(sess.as_ref(), &mut ev).await.unwrap();
+    }
+    let got = svc
+        .get(GetRequest {
+            app_name: "app".into(),
+            user_id: "user".into(),
+            session_id: sess.id().into(),
+            num_recent_events: 2,
+            after: Some(ts[4]),
+        })
+        .await
+        .unwrap();
+    let ids: Vec<String> = got.events().into_iter().map(|e| e.id).collect();
+    assert_eq!(ids, vec!["4".to_string()]);
+}

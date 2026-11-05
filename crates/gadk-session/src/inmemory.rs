@@ -38,8 +38,10 @@ type SessionKey = (String, String, String);
 /// An in-memory [`SessionService`] (ADK-Go `session.InMemoryService`). Thread-safe.
 ///
 /// State keys are routed by prefix: `app:` keys are shared by every session of the app,
-/// `user:` keys by every session of the user, `temp:` keys are never persisted, and the
-/// rest belong to the session. Sessions handed out are copies of the service's record.
+/// `user:` keys by every session of the user, and the rest belong to the session. `temp:`
+/// keys in appended event deltas are never persisted; as in ADK-Go, `temp:` keys in the
+/// initial state given to `create` are kept in session state. Sessions handed out are
+/// copies of the service's record.
 ///
 /// An event appended with an empty ID is given one:
 ///
@@ -221,9 +223,25 @@ impl SessionService for InMemorySessionService {
             app_state,
             user_state,
         } = &mut *inner;
+        // Go stores `MergeStates(app, user, req.State)` with the raw request state: app: and
+        // user: keys go to the shared maps (and are merged back on read), and every other
+        // key, temp: included, stays in session state. Only appended deltas are trimmed.
         let mut state = StateMap::new();
         if let Some(initial) = &req.state {
-            Inner::apply_delta(app_state, user_state, &mut state, initial, &key.0, &key.1);
+            let (app, user, _) = extract_state_deltas(initial);
+            app_state.entry(key.0.clone()).or_default().extend(app);
+            user_state
+                .entry((key.0.clone(), key.1.clone()))
+                .or_default()
+                .extend(user);
+            state.extend(
+                initial
+                    .iter()
+                    .filter(|(k, _)| {
+                        !k.starts_with(KEY_PREFIX_APP) && !k.starts_with(KEY_PREFIX_USER)
+                    })
+                    .map(|(k, v)| (k.clone(), v.clone())),
+            );
         }
         let updated_at = self.platform.now();
         let merged = merge_states(
