@@ -15,13 +15,16 @@
 
 //! gadk-model: the LLM abstraction and model registry.
 
+mod aggregator;
 mod convert;
 mod error;
 mod http;
+mod jsonpath;
 mod llm;
 mod registry;
 mod variant;
 
+pub use aggregator::StreamingResponseAggregator;
 pub use convert::llm_response_from_genai;
 pub use error::{ModelError, api_error_from_body, body_prefix};
 pub use http::{BodyStream, HttpClient, ReqwestClient, collect_body};
