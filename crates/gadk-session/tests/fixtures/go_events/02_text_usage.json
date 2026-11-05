@@ -1,0 +1,1 @@
+{"content":{"parts":[{"text":"hello"}],"role":"model"},"usageMetadata":{"candidatesTokenCount":5,"promptTokenCount":3,"totalTokenCount":8},"modelVersion":"gemini-2.5-flash","id":"evt-2","timestamp":"2024-12-01T08:00:00.123Z","invocationId":"inv-1","author":"model","actions":{"stateDelta":{},"artifactDelta":{}}}

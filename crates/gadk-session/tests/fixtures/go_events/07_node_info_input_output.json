@@ -1,0 +1,1 @@
+{"id":"evt-7","timestamp":"2024-12-01T08:00:00.123Z","invocationId":"inv-1","author":"model","actions":{"stateDelta":{},"artifactDelta":{}},"routes":["reviewer"],"requestedInput":{"interruptId":"i1","message":"need input","payload":{"k":"v"}},"output":{"summary":"ok"},"nodeInfo":{"path":"root/a","messageAsOutput":true,"outputFor":["b"]}}

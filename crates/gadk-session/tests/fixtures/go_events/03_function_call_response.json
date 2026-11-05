@@ -1,0 +1,1 @@
+{"content":{"parts":[{"functionCall":{"id":"c1","args":{"city":"Lisbon"},"name":"get_weather"}},{"functionResponse":{"id":"c1","name":"get_weather","response":{"temp":21}}}],"role":"model"},"id":"evt-3","timestamp":"2024-12-01T08:00:00.123Z","invocationId":"inv-1","author":"model","actions":{"stateDelta":{},"artifactDelta":{}}}
