@@ -22,6 +22,8 @@
 //! compares field names case-insensitively, so `ContinuationToken` and
 //! `continuationToken` are the same field to it).
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use bytes::Bytes;
 use gadk_genai::{
     FinishReason, GenerateContentConfig, GenerateContentResponse,
@@ -348,22 +350,22 @@ fn clear_stale_continuation_on_candidate(cand: &Value) -> Value {
 }
 
 /// genai `mergeCandidates`: merges candidates element-wise.
-fn merge_candidates(prev: &[Value], curr: &[Value]) -> Vec<Value> {
+fn merge_candidates(prev: &[Value], curr: &[Value]) -> Result<Vec<Value>, ModelError> {
     if curr.is_empty() {
-        return prev
+        return Ok(prev
             .iter()
             .map(clear_stale_continuation_on_candidate)
-            .collect();
+            .collect());
     }
     let max_len = prev.len().max(curr.len());
     (0..max_len)
         .map(|i| match curr.get(i).filter(|c| !c.is_null()) {
-            None => prev
+            None => Ok(prev
                 .get(i)
                 .map(clear_stale_continuation_on_candidate)
-                .unwrap_or(Value::Null),
-            Some(c) => merge_values(prev.get(i), Some(c), "candidate", false)
-                .unwrap_or_else(|| Value::Object(Map::new())),
+                .unwrap_or(Value::Null)),
+            Some(c) => Ok(merge_values(prev.get(i), Some(c), "candidate", false)?
+                .unwrap_or_else(|| Value::Object(Map::new()))),
         })
         .collect()
 }
@@ -387,7 +389,7 @@ pub(crate) fn merge_responses(
     for curr in rest {
         let curr = to_value(&curr)?;
         let prev_candidates = candidates_of(&merged).to_vec();
-        merged = merge_values(Some(&merged), Some(&curr), "", false)
+        merged = merge_values(Some(&merged), Some(&curr), "", false)?
             .unwrap_or_else(|| Value::Object(Map::new()));
         if !prev_candidates.is_empty()
             && candidates_of(&curr).is_empty()
@@ -395,7 +397,7 @@ pub(crate) fn merge_responses(
         {
             m.insert(
                 "candidates".into(),
-                Value::Array(merge_candidates(&prev_candidates, &[])),
+                Value::Array(merge_candidates(&prev_candidates, &[])?),
             );
         }
     }
@@ -420,8 +422,28 @@ fn merge_usage_metadata(
         Some(&to_value(curr)?),
         "usageMetadata",
         true,
-    );
+    )?;
     from_value(merged.unwrap_or_else(|| Value::Object(Map::new())))
+}
+
+/// Fields that are Go `[]byte` in genai at a level the merge recurses into: their JSON is
+/// base64, but genai's default slice rule concatenates the bytes
+/// (`SearchEntryPoint.SDKBlob`; `continuationToken` is a terminal hop field instead).
+fn is_bytes_field(field: &str) -> bool {
+    field.eq_ignore_ascii_case("sdkblob") || field.eq_ignore_ascii_case("sdk_blob")
+}
+
+/// Concatenates two base64-encoded byte strings, as genai concatenates `[]byte` slices.
+fn concat_base64(field: &str, prev: &str, curr: &str) -> Result<Value, ModelError> {
+    let decode = |s: &str| {
+        BASE64.decode(s).map_err(|e| ModelError::Decode {
+            message: format!("merging continuation responses: invalid base64 in {field}: {e}"),
+            body_prefix: String::new(),
+        })
+    };
+    let mut bytes = decode(prev)?;
+    bytes.extend(decode(curr)?);
+    Ok(Value::String(BASE64.encode(bytes)))
 }
 
 /// genai `isTerminalHopField`.
@@ -478,16 +500,17 @@ fn json_is_zero(v: &Value) -> bool {
     }
 }
 
-/// genai `mergeValuesReflect` over JSON values; `None` is an absent field.
+/// genai `mergeValuesReflect` over JSON values; `None` is an absent field. Fails only on
+/// an invalid base64 byte field.
 fn merge_values(
     prev: Option<&Value>,
     curr: Option<&Value>,
     field: &str,
     in_usage: bool,
-) -> Option<Value> {
+) -> Result<Option<Value>, ModelError> {
     // Rule 1: terminal hop fields always take curr (even if zero / absent).
     if is_terminal_hop_field(field) {
-        return curr.cloned();
+        return Ok(curr.cloned());
     }
 
     // Preserved candidates are merged against an empty candidate when curr has none, so
@@ -498,27 +521,27 @@ fn merge_values(
         && !matches!(curr, Some(Value::Array(c)) if !c.is_empty())
     {
         let empty = Value::Object(Map::new());
-        return Some(Value::Array(
-            p.iter()
-                .map(|pc| {
-                    merge_values(Some(pc), Some(&empty), "candidate", in_usage)
-                        .unwrap_or(Value::Null)
-                })
-                .collect(),
-        ));
+        let merged = p
+            .iter()
+            .map(|pc| {
+                Ok(merge_values(Some(pc), Some(&empty), "candidate", in_usage)?
+                    .unwrap_or(Value::Null))
+            })
+            .collect::<Result<Vec<_>, ModelError>>()?;
+        return Ok(Some(Value::Array(merged)));
     }
 
     // Rule 2: null / absent handling: keep the non-zero side.
     let curr = match curr.filter(|c| !json_is_zero(c)) {
-        None => return prev.cloned(),
+        None => return Ok(prev.cloned()),
         Some(c) => c,
     };
     let prev = match prev.filter(|p| !json_is_zero(p)) {
-        None => return Some(curr.clone()),
+        None => return Ok(Some(curr.clone())),
         Some(p) => p,
     };
 
-    match (prev, curr) {
+    Ok(match (prev, curr) {
         // Structs (Go pointers to structs).
         (Value::Object(p), Value::Object(c)) => {
             let shifted;
@@ -532,7 +555,7 @@ fn merge_values(
             let mut out = Map::new();
             let keys = p.keys().chain(c.keys().filter(|k| !p.contains_key(*k)));
             for key in keys {
-                if let Some(v) = merge_values(p.get(key), c.get(key), key, in_usage)
+                if let Some(v) = merge_values(p.get(key), c.get(key), key, in_usage)?
                     && !v.is_null()
                 {
                     out.insert(key.clone(), v);
@@ -543,18 +566,22 @@ fn merge_values(
         (Value::Array(p), Value::Array(c)) => {
             // Keyed-list exception 1: candidates, merged element-wise.
             if is_candidates_field(field) {
-                return Some(Value::Array(merge_candidates(p, c)));
+                return Ok(Some(Value::Array(merge_candidates(p, c)?)));
             }
             // Keyed-list exception 2: modality token counts, grouped by modality.
             if is_tokens_details_field(field) {
-                return Some(merge_modality_token_counts(p, c));
+                return Ok(Some(merge_modality_token_counts(p, c)));
             }
             // Keyed-list exception 3: safety ratings, latest per category.
             if is_safety_ratings_field(field) {
-                return Some(merge_safety_ratings(p, c));
+                return Ok(Some(merge_safety_ratings(p, c)));
             }
             // Default: concatenate prev + curr in order.
             Some(Value::Array(p.iter().chain(c).cloned().collect()))
+        }
+        // Go `[]byte` fields (base64 strings here): the default slice rule concatenates.
+        (Value::String(p), Value::String(c)) if is_bytes_field(field) => {
+            Some(concat_base64(field, p, c)?)
         }
         // Numbers: summed inside usage metadata and in token count / *Count / *Sum fields.
         (Value::Number(p), Value::Number(c)) if in_usage || is_count_or_sum_field(field) => {
@@ -562,7 +589,7 @@ fn merge_values(
         }
         // Other scalars: the latest hop wins.
         (_, c) => Some(c.clone()),
-    }
+    })
 }
 
 fn sum_numbers(p: &Number, c: &Number) -> Option<Value> {
@@ -828,6 +855,54 @@ mod tests {
             gm["groundingChunks"],
             json!([{"web": {"uri": "u1"}}, {"web": {"uri": "u2"}}])
         );
+    }
+
+    #[test]
+    fn merge_concatenates_sdk_blob_bytes() {
+        let hop = |text: &str, blob: &'static [u8]| {
+            resp(json!({"candidates": [{
+                "content": {"role": "model", "parts": [{"text": text}]},
+                "groundingMetadata": {"searchEntryPoint": {
+                    "renderedContent": text, "sdkBlob": BASE64.encode(blob)
+                }}
+            }]}))
+        };
+        let merged = merge_responses(vec![hop("a", b"\x01\x02"), hop("b", b"\x03")]).unwrap();
+        let sep = merged.candidates[0]
+            .grounding_metadata
+            .as_ref()
+            .unwrap()
+            .search_entry_point
+            .as_ref()
+            .unwrap();
+        assert_eq!(sep.sdk_blob, Bytes::from_static(b"\x01\x02\x03"));
+        assert_eq!(sep.rendered_content, "b", "other scalars: latest wins");
+
+        // A hop without a blob keeps the previous one (rule 2).
+        let without = resp(json!({"candidates": [{
+            "content": {"role": "model", "parts": [{"text": "c"}]},
+            "groundingMetadata": {"searchEntryPoint": {"renderedContent": "c"}}
+        }]}));
+        let merged = merge_responses(vec![hop("a", b"\x01"), without]).unwrap();
+        let sep = merged.candidates[0]
+            .grounding_metadata
+            .as_ref()
+            .unwrap()
+            .search_entry_point
+            .as_ref()
+            .unwrap();
+        assert_eq!(sep.sdk_blob, Bytes::from_static(b"\x01"));
+    }
+
+    #[test]
+    fn merge_invalid_base64_bytes_is_an_error() {
+        let got = merge_values(
+            Some(&json!({"sdkBlob": "AQ=="})),
+            Some(&json!({"sdkBlob": "not base64!"})),
+            "searchEntryPoint",
+            false,
+        );
+        assert!(matches!(got, Err(ModelError::Decode { .. })), "{got:?}");
     }
 
     #[test]
