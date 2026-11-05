@@ -1,0 +1,39 @@
+name: ci
+on:
+  push: { branches: [main] }
+  pull_request:
+env:
+  CARGO_TERM_COLOR: always
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: google/adk-go
+          path: adk-go
+          fetch-depth: 0
+      - name: Pin adk-go
+        run: git -C adk-go checkout "$(cat docs/parity/ADK_GO_COMMIT)"
+      - uses: dtolnay/rust-toolchain@master
+        with: { toolchain: "1.99.1", components: "rustfmt, clippy" }
+      - uses: Swatinem/rust-cache@v2
+      - name: fmt
+        run: cargo fmt --all --check
+      - name: clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - name: test
+        run: cargo test --workspace --all-features
+      - name: deny
+        uses: EmbarkStudios/cargo-deny-action@v2
+      - name: parity
+        run: ADK_GO_DIR=adk-go python3 scripts/parity-check && python3 scripts/check-workspace-deps.py
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with: { toolchain: "1.95" }
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo +1.95 build --workspace --all-features
