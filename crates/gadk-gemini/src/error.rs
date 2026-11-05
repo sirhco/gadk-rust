@@ -34,3 +34,17 @@ pub enum GeminiError {
     #[error(transparent)]
     Model(#[from] ModelError),
 }
+
+/// Lets a registry [`Factory`](gadk_model::Factory) build a Gemini model with `?`.
+///
+/// `Config` maps to [`ModelError::Config`], `Model` unwraps to the inner error, and every
+/// other variant is boxed into [`ModelError::Other`], keeping its message text.
+impl From<GeminiError> for ModelError {
+    fn from(e: GeminiError) -> Self {
+        match e {
+            GeminiError::Config(msg) => ModelError::Config(msg),
+            GeminiError::Model(e) => e,
+            other => ModelError::Other(Box::new(other)),
+        }
+    }
+}

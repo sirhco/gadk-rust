@@ -526,6 +526,10 @@ fn llm_response_to_generate_content_response(resp: &LlmResponse) -> GenerateCont
 }
 
 impl Llm for StreamingMockModel {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn name(&self) -> &str {
         "streaming-mock"
     }
@@ -719,6 +723,10 @@ async fn test_progressive_sse_preserves_part_ordering() {
 struct PartialFunctionCallMockModel;
 
 impl Llm for PartialFunctionCallMockModel {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn name(&self) -> &str {
         "partial-fc-mock"
     }

@@ -41,6 +41,7 @@ pub type Factory =
 
 /// Errors returned by [`Registry`].
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum RegistryError {
     /// The pattern is not a valid regular expression: `(pattern, reason)`.
     #[error("model: invalid LLM pattern {0:?}: {1}")]

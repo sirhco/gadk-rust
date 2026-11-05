@@ -144,7 +144,7 @@ fn b64(data: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(data)
 }
 
-async fn recv(conn: &mut LiveConnection) -> LlmResponse {
+async fn recv(conn: &LiveConnection) -> LlmResponse {
     conn.recv().await.unwrap().expect("connection closed")
 }
 
@@ -493,8 +493,8 @@ async fn live_gemini_31_routing(#[case] backend: Backend) {
 #[tokio::test]
 async fn live_first_recv_is_setup_complete(#[case] backend: Backend) {
     let server = WsServer::start(vec![]).await;
-    let mut conn = connect(&server, backend).await;
-    assert_eq!(recv(&mut conn).await, LlmResponse::default());
+    let conn = connect(&server, backend).await;
+    assert_eq!(recv(&conn).await, LlmResponse::default());
 }
 
 #[rstest]
@@ -526,10 +526,10 @@ async fn live_recv_maps_server_content_and_tool_call(#[case] backend: Backend) {
         json!({"error": {"code": 500, "message": "boom"}}),
     ])
     .await;
-    let mut conn = connect(&server, backend).await;
-    assert_eq!(recv(&mut conn).await, LlmResponse::default());
+    let conn = connect(&server, backend).await;
+    assert_eq!(recv(&conn).await, LlmResponse::default());
     assert_eq!(
-        recv(&mut conn).await,
+        recv(&conn).await,
         LlmResponse {
             content: Some(content(json!({"role": "model", "parts": [{"text": "hi"}]}))),
             turn_complete: true,
@@ -537,14 +537,14 @@ async fn live_recv_maps_server_content_and_tool_call(#[case] backend: Backend) {
         }
     );
     assert_eq!(
-        recv(&mut conn).await,
+        recv(&conn).await,
         LlmResponse {
             interrupted: true,
             ..Default::default()
         }
     );
     assert_eq!(
-        recv(&mut conn).await,
+        recv(&conn).await,
         LlmResponse {
             content: Some(content(json!({"role": "model", "parts": [
                 {"functionCall": {"id": "c1", "name": "f", "args": {"x": 1}}},
@@ -554,6 +554,58 @@ async fn live_recv_maps_server_content_and_tool_call(#[case] backend: Backend) {
     );
     let err = conn.recv().await.unwrap_err();
     assert!(err.to_string().contains("boom"), "{err}");
+}
+
+/// ADK-Go's live flow receives in one goroutine while sending in another. A pending
+/// `recv` must not block `send_content` on the same shared connection: the server only
+/// answers once it has the content, so a blocked send would hang (caught by the timeout).
+#[rstest]
+#[case::gemini_api(Backend::GeminiApi)]
+#[case::vertex_ai(Backend::VertexAi)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn live_recv_and_send_run_concurrently(#[case] backend: Backend) {
+    let reply = json!({"serverContent": {"modelTurn": {"role": "model", "parts": [{"text": "pong"}]}, "turnComplete": true}});
+    // Frame 0 (setup) gets setupComplete; frame 1 (the content) gets the reply.
+    let server =
+        WsServer::start_staged(vec![vec![json!({"setupComplete": {}})], vec![reply]]).await;
+    let conn = Arc::new(connect(&server, backend).await);
+    // The buffered setupComplete.
+    assert_eq!(recv(&conn).await, LlmResponse::default());
+
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        let receiver = {
+            let conn = conn.clone();
+            tokio::spawn(async move { conn.recv().await })
+        };
+        // Let the receiver park on the read half before sending.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let sender = {
+            let conn = conn.clone();
+            tokio::spawn(async move {
+                conn.send_content(content(
+                    json!({"role": "user", "parts": [{"text": "ping"}]}),
+                ))
+                .await
+            })
+        };
+        sender.await.unwrap().unwrap();
+        receiver.await.unwrap().unwrap()
+    })
+    .await
+    .expect("recv and send_content deadlocked on a shared LiveConnection");
+
+    assert_eq!(
+        outcome,
+        Some(LlmResponse {
+            content: Some(content(
+                json!({"role": "model", "parts": [{"text": "pong"}]})
+            )),
+            turn_complete: true,
+            ..Default::default()
+        })
+    );
+    let frames = server.frames(2).await;
+    assert!(frames[1].get("clientContent").is_some(), "{:?}", frames[1]);
 }
 
 #[rstest]
@@ -566,11 +618,11 @@ async fn live_recv_go_away_yields_empty_response(#[case] backend: Backend) {
         json!({"serverContent": {"modelTurn": {"role": "model", "parts": [{"text": "after"}]}}}),
     ])
     .await;
-    let mut conn = connect(&server, backend).await;
-    assert_eq!(recv(&mut conn).await, LlmResponse::default());
-    assert_eq!(recv(&mut conn).await, LlmResponse::default());
+    let conn = connect(&server, backend).await;
+    assert_eq!(recv(&conn).await, LlmResponse::default());
+    assert_eq!(recv(&conn).await, LlmResponse::default());
     assert_eq!(
-        recv(&mut conn).await,
+        recv(&conn).await,
         LlmResponse {
             content: Some(content(
                 json!({"role": "model", "parts": [{"text": "after"}]})
@@ -593,13 +645,13 @@ async fn live_recv_buffers_transcriptions_until_turn_complete(#[case] backend: B
         json!({"serverContent": {"turnComplete": true}}),
     ])
     .await;
-    let mut conn = connect(&server, backend).await;
+    let conn = connect(&server, backend).await;
     let t = |text: &str, finished: bool| -> gadk_genai::Transcription {
         serde_json::from_value(json!({"text": text, "finished": finished})).unwrap()
     };
-    assert_eq!(recv(&mut conn).await, LlmResponse::default());
+    assert_eq!(recv(&conn).await, LlmResponse::default());
     assert_eq!(
-        recv(&mut conn).await,
+        recv(&conn).await,
         LlmResponse {
             input_transcription: Some(t("hel", false)),
             partial: true,
@@ -607,7 +659,7 @@ async fn live_recv_buffers_transcriptions_until_turn_complete(#[case] backend: B
         }
     );
     assert_eq!(
-        recv(&mut conn).await,
+        recv(&conn).await,
         LlmResponse {
             input_transcription: Some(t("lo", true)),
             partial: true,
@@ -615,7 +667,7 @@ async fn live_recv_buffers_transcriptions_until_turn_complete(#[case] backend: B
         }
     );
     assert_eq!(
-        recv(&mut conn).await,
+        recv(&conn).await,
         LlmResponse {
             output_transcription: Some(t("hi", true)),
             partial: true,
@@ -624,14 +676,14 @@ async fn live_recv_buffers_transcriptions_until_turn_complete(#[case] backend: B
     );
     // turnComplete: the accumulated transcriptions first, then the turnComplete response.
     assert_eq!(
-        recv(&mut conn).await,
+        recv(&conn).await,
         LlmResponse {
             input_transcription: Some(t("hello", true)),
             ..Default::default()
         }
     );
     assert_eq!(
-        recv(&mut conn).await,
+        recv(&conn).await,
         LlmResponse {
             output_transcription: Some(t("hi", true)),
             ..Default::default()
@@ -641,9 +693,9 @@ async fn live_recv_buffers_transcriptions_until_turn_complete(#[case] backend: B
         turn_complete: true,
         ..Default::default()
     };
-    assert_eq!(recv(&mut conn).await, done);
+    assert_eq!(recv(&conn).await, done);
     // The buffers were reset: the next turnComplete carries no transcriptions.
-    assert_eq!(recv(&mut conn).await, done);
+    assert_eq!(recv(&conn).await, done);
 }
 
 #[rstest]
@@ -657,15 +709,15 @@ async fn live_session_resumption_handle(#[case] backend: Backend) {
     .await;
     let cfg: LiveConnectConfig =
         serde_json::from_value(json!({"sessionResumption": {"handle": "h0"}})).unwrap();
-    let mut conn = connect_with(&server, backend, MODEL, cfg).await;
+    let conn = connect_with(&server, backend, MODEL, cfg).await;
     let frames = server.frames(1).await;
     assert_eq!(
         frames[0],
         json!({"setup": {"model": full_model(backend, MODEL), "sessionResumption": {"handle": "h0"}}})
     );
-    assert_eq!(recv(&mut conn).await, LlmResponse::default());
+    assert_eq!(recv(&conn).await, LlmResponse::default());
     assert_eq!(
-        recv(&mut conn).await,
+        recv(&conn).await,
         LlmResponse {
             session_resumption_handle: "h1".into(),
             ..Default::default()
@@ -693,11 +745,11 @@ async fn live_auth_tokens_rejected(#[case] backend: Backend) {
 #[tokio::test]
 async fn live_close_sends_close_frame(#[case] backend: Backend) {
     let server = WsServer::start(vec![]).await;
-    let mut conn = connect(&server, backend).await;
+    let conn = connect(&server, backend).await;
     conn.close().await.unwrap();
     assert!(server.wait_closed().await);
     // The server answers the close; the buffered setupComplete is still delivered, then
     // the connection reports closed.
-    assert_eq!(recv(&mut conn).await, LlmResponse::default());
+    assert_eq!(recv(&conn).await, LlmResponse::default());
     assert!(conn.recv().await.unwrap().is_none());
 }

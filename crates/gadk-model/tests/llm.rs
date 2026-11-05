@@ -449,3 +449,32 @@ fn llm_request_debug_prints_tool_keys_only() {
     let cloned = req.clone();
     assert_eq!(cloned.tools.len(), 1);
 }
+
+#[test]
+fn http_options_debug_redacts_header_values() {
+    let mut headers = http::HeaderMap::new();
+    headers.insert(
+        http::header::AUTHORIZATION,
+        http::HeaderValue::from_static("Bearer secret-token"),
+    );
+    headers.insert("x-custom", http::HeaderValue::from_static("hunter2"));
+    let opts = HttpOptions {
+        headers,
+        ..Default::default()
+    };
+    let dbg = format!("{opts:?}");
+    assert!(!dbg.contains("secret-token"), "{dbg}");
+    assert!(!dbg.contains("hunter2"), "{dbg}");
+    assert!(dbg.contains("authorization"), "{dbg}");
+    assert!(dbg.contains("x-custom"), "{dbg}");
+    assert!(dbg.contains("<redacted>"), "{dbg}");
+
+    // Reached through LlmRequest's Debug as well.
+    let req = LlmRequest {
+        http_options: Some(opts),
+        ..Default::default()
+    };
+    let dbg = format!("{req:?}");
+    assert!(!dbg.contains("secret-token"), "{dbg}");
+    assert!(dbg.contains("authorization"), "{dbg}");
+}

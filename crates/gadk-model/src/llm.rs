@@ -59,6 +59,11 @@ pub trait Llm: Send + Sync {
     fn google_variant(&self) -> Option<Backend> {
         None
     }
+
+    /// Downcasting support: lets a holder of `Arc<dyn Llm>` reach the concrete model
+    /// (for example to open a Live connection on a Gemini model). Implementations return
+    /// `self`.
+    fn as_any(&self) -> &dyn Any;
 }
 
 /// Hook that may add or rewrite fields of the outgoing JSON request body.
@@ -66,6 +71,8 @@ pub type ExtrasRequestProvider =
     Arc<dyn Fn(serde_json::Map<String, Value>) -> serde_json::Map<String, Value> + Send + Sync>;
 
 /// Per-request HTTP options (port of genai `HTTPOptions`).
+///
+/// The `Debug` output lists header names only; header values are redacted.
 #[derive(Clone, Default)]
 pub struct HttpOptions {
     /// Overrides the backend base URL.
@@ -85,12 +92,24 @@ impl fmt::Debug for HttpOptions {
         f.debug_struct("HttpOptions")
             .field("base_url", &self.base_url)
             .field("api_version", &self.api_version)
-            .field("headers", &self.headers)
+            .field("headers", &RedactedHeaders(&self.headers))
             .field("timeout", &self.timeout)
             .field(
                 "extras_request_provider",
                 &self.extras_request_provider.as_ref().map(|_| "<fn>"),
             )
+            .finish()
+    }
+}
+
+/// Debug view of a header map that prints each header name with its value redacted, so
+/// credentials passed as headers never reach logs.
+struct RedactedHeaders<'a>(&'a http::HeaderMap);
+
+impl fmt::Debug for RedactedHeaders<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_map()
+            .entries(self.0.keys().map(|k| (k.as_str(), "<redacted>")))
             .finish()
     }
 }

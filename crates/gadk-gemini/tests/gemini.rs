@@ -756,3 +756,94 @@ async fn model_reports_google_variant() {
     .unwrap();
     assert_eq!(c.resolved().backend, Backend::GeminiApi);
 }
+
+fn api_key_config(http: Arc<dyn HttpClient>) -> ClientConfig {
+    ClientConfig {
+        api_key: Some("k".into()),
+        env: env(&[]),
+        http_client: Some(http),
+        ..Default::default()
+    }
+}
+
+/// A holder of `Arc<dyn Llm>` (as the registry returns) can reach the concrete
+/// [`GeminiModel`], and through it `live_connect`.
+#[tokio::test]
+async fn model_downcasts_from_dyn_llm_to_reach_live() {
+    let llm: Arc<dyn Llm> =
+        GeminiModel::new("gemini-2.5-flash", api_key_config(FakeHttp::json(OK_JSON)))
+            .await
+            .unwrap();
+    let gm = llm
+        .as_any()
+        .downcast_ref::<GeminiModel>()
+        .expect("Arc<dyn Llm> from GeminiModel::new downcasts to GeminiModel");
+    assert_eq!(gm.resolved().backend, Backend::GeminiApi);
+    // The Live entry point is reachable; the future is dropped without connecting.
+    drop(gm.live_connect(LiveConnectConfig::default()));
+}
+
+/// `GeminiError` converts into `ModelError`, so a registry factory can use `?`.
+#[tokio::test]
+async fn model_registers_in_registry_via_error_conversion() {
+    let registry = Registry::new();
+    let factory: Factory = Arc::new(|name: String| {
+        Box::pin(async move {
+            let llm = GeminiModel::new(&name, api_key_config(FakeHttp::json(OK_JSON))).await?;
+            Ok(llm)
+        })
+    });
+    registry.register("^gemini-.*$", factory).unwrap();
+    let llm = registry.new_llm("gemini-2.5-flash").await.unwrap();
+    assert_eq!(llm.name(), "gemini-2.5-flash");
+    assert_eq!(llm.google_variant(), Some(Backend::GeminiApi));
+
+    // A failing factory surfaces the GeminiError text through ModelError.
+    let failing: Factory = Arc::new(|name: String| {
+        Box::pin(async move {
+            let cfg = ClientConfig {
+                env: env(&[]),
+                ..Default::default()
+            };
+            GeminiModel::new(&name, cfg).await.map_err(Into::into)
+        })
+    });
+    registry.register("^broken-.*$", failing).unwrap();
+    let err = registry.new_llm("broken-model").await.err().unwrap();
+    assert!(
+        matches!(&err, RegistryError::Factory(ModelError::Config(m)) if m.contains("api key is required")),
+        "{err}"
+    );
+}
+
+#[test]
+fn gemini_error_converts_to_model_error() {
+    let cases = [
+        (
+            gadk_gemini::GeminiError::Config("bad cfg".into()),
+            "bad cfg",
+        ),
+        (
+            gadk_gemini::GeminiError::Auth("no creds".into()),
+            "auth error: no creds",
+        ),
+        (
+            gadk_gemini::GeminiError::Live("ws down".into()),
+            "live error: ws down",
+        ),
+        (
+            gadk_gemini::GeminiError::Model(ModelError::EmptyResponse),
+            "empty response",
+        ),
+    ];
+    for (g, want) in cases {
+        let m: ModelError = g.into();
+        assert!(m.to_string().contains(want), "{m} does not contain {want}");
+        match m {
+            ModelError::Config(s) => assert_eq!(s, "bad cfg"),
+            ModelError::Other(e) => assert!(e.to_string().contains(want)),
+            ModelError::EmptyResponse => {}
+            other => panic!("unexpected mapping: {other:?}"),
+        }
+    }
+}

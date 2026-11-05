@@ -14,25 +14,41 @@
 // limitations under the License.
 
 use futures::future::BoxFuture;
+use tokio::task::JoinSet;
 
 /// Port of ADK-Go platform/exec.go `TaskRunner`: runs all tasks, returns after all complete.
+///
+/// Contract for implementations:
+/// - the future returned by [`run`](Self::run) must not complete before every task has
+///   completed;
+/// - dropping that future before it completes cancels the tasks that are still running
+///   (Rust cancellation): no task may outlive the call that started it.
 #[async_trait::async_trait]
 pub trait TaskRunner: Send + Sync {
-    /// Runs every task and returns once all of them have completed.
+    /// Runs every task and returns once all of them have completed. Dropping the returned
+    /// future cancels the tasks still running.
     async fn run(&self, tasks: Vec<BoxFuture<'static, ()>>);
 }
 
-/// Default runner: one tokio task per future; a task panic is re-raised on the caller (Go crash semantics).
+/// Default runner: one tokio task per future, held in a [`JoinSet`] so that dropping the
+/// `run` future aborts them. A task panic aborts the remaining tasks, waits for them to
+/// stop, and is then re-raised on the caller (Go crash semantics).
 pub struct TokioTaskRunner;
 
 #[async_trait::async_trait]
 impl TaskRunner for TokioTaskRunner {
     async fn run(&self, tasks: Vec<BoxFuture<'static, ()>>) {
-        let handles: Vec<_> = tasks.into_iter().map(tokio::spawn).collect();
-        for h in handles {
-            if let Err(e) = h.await
+        let mut set = JoinSet::new();
+        for t in tasks {
+            set.spawn(t);
+        }
+        while let Some(res) = set.join_next().await {
+            if let Err(e) = res
                 && e.is_panic()
             {
+                set.abort_all();
+                // Wait for the aborted siblings to stop before re-raising.
+                while set.join_next().await.is_some() {}
                 std::panic::resume_unwind(e.into_panic());
             }
         }

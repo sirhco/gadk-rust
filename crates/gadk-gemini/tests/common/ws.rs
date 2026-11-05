@@ -70,6 +70,12 @@ impl WsServer {
 
     /// Starts a server that answers the setup with exactly `script`.
     pub async fn start_raw(script: Vec<Value>) -> Self {
+        Self::start_staged(vec![script]).await
+    }
+
+    /// Starts a server that answers the client's k-th frame (the setup is frame 0) with
+    /// `stages[k]`; frames past the last stage get no answer.
+    pub async fn start_staged(stages: Vec<Vec<Value>>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let seen = Arc::new(Mutex::new(Seen::default()));
@@ -80,7 +86,7 @@ impl WsServer {
                 .await
                 .unwrap();
             let (mut sink, mut stream) = ws.split();
-            let mut script = Some(script);
+            let mut stages: std::collections::VecDeque<Vec<Value>> = stages.into();
             while let Some(msg) = stream.next().await {
                 let Ok(msg) = msg else { break };
                 match msg {
@@ -103,7 +109,7 @@ impl WsServer {
                     }
                     _ => continue,
                 }
-                if let Some(script) = script.take() {
+                if let Some(script) = stages.pop_front() {
                     for frame in script {
                         if sink.send(Message::text(frame.to_string())).await.is_err() {
                             break;

@@ -177,7 +177,7 @@ impl Platform { pub fn now(&self) -> DateTime<Utc>; pub fn new_uuid(&self) -> St
   pub fn with_time(self, p: impl TimeProvider + 'static) -> Self; /* with_uuid, with_task_runner */
   pub fn deterministic(seed: u64) -> Self; }
 ```
-`deterministic(seed)`: time starts at `2000-01-01T00:00:00Z + seed s` and advances 1 ms per call; UUIDs are RFC 4122 v4-formatted strings from a seeded counter. Default task runner: `tokio::spawn` each, await all handles; a task panic is re-raised on the caller with `std::panic::resume_unwind` (matches Go crash semantics; not a library-originated panic). Empty list returns immediately. Files: `lib.rs`, `time.rs`, `uuid.rs`, `exec.rs`.
+`deterministic(seed)`: time starts at `2000-01-01T00:00:00Z + seed s` and advances 1 ms per call; UUIDs are RFC 4122 v4-formatted strings from a seeded counter. Default task runner: spawn each into a `tokio::task::JoinSet` (dropping the `run` future aborts the tasks), await all; a task panic aborts the siblings, then is re-raised on the caller with `std::panic::resume_unwind` (matches Go crash semantics; not a library-originated panic). Empty list returns immediately. Files: `lib.rs`, `time.rs`, `uuid.rs`, `exec.rs`.
 
 ### `gadk-model`
 
@@ -186,6 +186,7 @@ pub trait Llm: Send + Sync {
     fn name(&self) -> &str;
     fn generate_content(&self, req: LlmRequest, stream: bool) -> BoxStream<'static, Result<LlmResponse, ModelError>>;
     fn google_variant(&self) -> Option<Backend> { None }
+    fn as_any(&self) -> &dyn Any;                                  // downcast Arc<dyn Llm> to the concrete model (e.g. GeminiModel::live_connect)
 }
 pub struct LlmRequest { pub model: String, pub contents: Vec<Content>, pub config: Option<GenerateContentConfig>,
                         pub http_options: Option<HttpOptions>,                   // per-request override (Go: config.HTTPOptions)
@@ -233,7 +234,7 @@ impl GeminiModel { pub async fn new(model_name: &str, cfg: ClientConfig) -> Resu
 - **Shared pipeline** (`model.rs`, R9): clone request → `maybe_append_user_content` → ensure config → tracking headers (`gadk-rust/<CARGO_PKG_VERSION> rust/<rustc version from build.rs>`, appended to any existing `x-goog-api-client`/`user-agent` values with a space, each header set once) → model name (`req.model` if non-empty) → continuation driver → convert/aggregate.
 - **Continuation driver** (`continuation.rs`, R10): ports genai `continuation.go` (`should_enable`, `is_resumable_finish_reason`, `should_continue`, `prepare_config`, `merge_responses`, `StreamContinuation` with reconnect limit 3). Each hop rebuilds the request body (so the extras provider runs every hop).
 - **Transport**: `POST …:generateContent`; `POST …:streamGenerateContent?alt=sse` parsed by a hand-written SSE line parser (`data:` lines, blank-line terminated events) over `BodyStream`. Mid-stream error: yield one `Err`, then end.
-- **Live** (`live/`, R11): `tokio-tungstenite` connect to `wss://{host}/{path}` per genai `live.go`; Gemini API header `x-goog-api-key`; Vertex header `Authorization: Bearer` from credentials headers. First frame `{"setup": {model: <full name>, generationConfig, systemInstruction, tools, sessionResumption, inputAudioTranscription, outputAudioTranscription, realtimeInputConfig, proactivity, …}}` from `LiveConnectConfig`. `send_history`/`send_content` → `clientContent`; `send_realtime` accepts `Blob`, `ActivityStart`, `ActivityEnd`, audio-stream-end → `realtimeInput`; `send_tool_response` → `toolResponse`; `recv` maps `serverContent`/`toolCall`/`sessionResumptionUpdate`/transcriptions to `LlmResponse` exactly as `live_connection.go` `Recv`, ignoring `goAway`, buffering finished transcriptions until `turnComplete`; `close` sends a close frame. Sink behind `tokio::sync::Mutex` so `send_*` take `&self`; `recv` takes `&mut self`.
+- **Live** (`live/`, R11): `tokio-tungstenite` connect to `wss://{host}/{path}` per genai `live.go`; Gemini API header `x-goog-api-key`; Vertex header `Authorization: Bearer` from credentials headers. First frame `{"setup": {model: <full name>, generationConfig, systemInstruction, tools, sessionResumption, inputAudioTranscription, outputAudioTranscription, realtimeInputConfig, proactivity, …}}` from `LiveConnectConfig`. `send_history`/`send_content` → `clientContent`; `send_realtime` accepts `Blob`, `ActivityStart`, `ActivityEnd`, audio-stream-end → `realtimeInput`; `send_tool_response` → `toolResponse`; `recv` maps `serverContent`/`toolCall`/`sessionResumptionUpdate`/transcriptions to `LlmResponse` exactly as `live_connection.go` `Recv`, ignoring `goAway`, buffering finished transcriptions until `turnComplete`; `close` sends a close frame. Sink and read half each behind their own `tokio::sync::Mutex`, so `send_*` and `recv` all take `&self` and a pending `recv` never blocks a send (the connection is shared via `Arc` for concurrent receive and send, as ADK-Go `base_flow.go` does).
 - **Errors** (`error.rs`): `GeminiError::{Config(String), Auth(String), Live(String), Model(ModelError)}`; `Llm` surfaces `ModelError` (auth failures → `ModelError::Other`).
 
 ### `gadk-session`

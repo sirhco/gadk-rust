@@ -30,7 +30,7 @@ use gadk_genai::{
     Content, FunctionResponse, LiveClientContentInput, LiveConnectConfig, LiveRealtimeInput,
     LiveServerMessage, LiveToolResponseInput, Part, Transcription,
 };
-use gadk_model::{Backend, LlmResponse, ModelError};
+use gadk_model::{Backend, LlmResponse, ModelError, body_prefix};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -251,13 +251,13 @@ pub(crate) fn decode_server_message(
     let value: Value = serde_json::from_slice(data).map_err(|e| {
         GeminiError::Live(format!(
             "invalid message format. Error {e}. message: {}",
-            String::from_utf8_lossy(data)
+            body_prefix(data)
         ))
     })?;
     if value.get("error").is_some_and(|e| !e.is_null()) {
         return Err(GeminiError::Live(format!(
             "received error in response: {}",
-            String::from_utf8_lossy(data)
+            body_prefix(data)
         )));
     }
     let value = match backend {
@@ -511,5 +511,26 @@ mod tests {
     fn decode_rejects_invalid_json_and_errors() {
         assert!(decode_server_message(Backend::GeminiApi, b"nope").is_err());
         assert!(decode_server_message(Backend::GeminiApi, br#"{"error":{"code":1}}"#).is_err());
+    }
+
+    #[test]
+    fn decode_errors_truncate_large_frames() {
+        // An unparsable multi-megabyte frame (e.g. base64 audio) is not embedded whole.
+        let mut bad = b"{\"serverContent\":\"".to_vec();
+        bad.extend(std::iter::repeat_n(b'A', 1 << 20));
+        let msg = decode_server_message(Backend::GeminiApi, &bad)
+            .unwrap_err()
+            .to_string();
+        assert!(msg.len() < 4096, "error message is {} bytes", msg.len());
+        assert!(msg.contains("invalid message format"));
+
+        let mut err_frame = b"{\"error\":{\"message\":\"".to_vec();
+        err_frame.extend(std::iter::repeat_n(b'B', 1 << 20));
+        err_frame.extend(b"\"}}");
+        let msg = decode_server_message(Backend::GeminiApi, &err_frame)
+            .unwrap_err()
+            .to_string();
+        assert!(msg.len() < 4096, "error message is {} bytes", msg.len());
+        assert!(msg.contains("received error in response"));
     }
 }

@@ -421,6 +421,10 @@ impl Llm for GeminiModel {
         }
     }
 
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn google_variant(&self) -> Option<gadk_model::Backend> {
         Some(self.inner.resolved.backend)
     }

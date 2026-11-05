@@ -564,3 +564,21 @@ fn config_map_env_lookup() {
     assert_eq!(env.var("A").as_deref(), Some("1"));
     assert_eq!(env.var("B"), None);
 }
+
+#[test]
+fn config_debug_redacts_header_values() {
+    let mut c = cfg(&[("GOOGLE_API_KEY", "k")]);
+    c.http_options.headers.insert(
+        http::header::AUTHORIZATION,
+        http::HeaderValue::from_static("Bearer secret-token"),
+    );
+    let dbg = format!("{c:?}");
+    assert!(!dbg.contains("secret-token"), "{dbg}");
+    assert!(dbg.contains("authorization"), "{dbg}");
+
+    let r = resolve(&c).unwrap();
+    let dbg = format!("{r:?}");
+    assert!(!dbg.contains("secret-token"), "{dbg}");
+    assert!(dbg.contains("authorization"), "{dbg}");
+    assert!(dbg.contains("<redacted>"), "{dbg}");
+}

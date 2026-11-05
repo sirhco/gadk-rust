@@ -17,7 +17,8 @@
 
 use gadk_platform::{BoxFuture, Platform, TaskRunner};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::time::Duration;
 
 fn counting_tasks(n: usize, counter: &Arc<AtomicUsize>) -> Vec<BoxFuture<'static, ()>> {
     (0..n)
@@ -65,5 +66,71 @@ async fn test_with_task_runner_is_used() {
     assert_eq!(
         (used.load(Ordering::SeqCst), c.load(Ordering::SeqCst)),
         (1, 3)
+    );
+}
+
+/// Sets its flag when dropped (that is, when the task future holding it is dropped).
+struct DropFlag(Arc<AtomicBool>);
+
+impl Drop for DropFlag {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
+/// A task that sets `ran` after `delay`, holding a guard that sets `dropped` when the
+/// task future is dropped.
+fn slow_task(
+    delay: Duration,
+    ran: &Arc<AtomicBool>,
+    dropped: &Arc<AtomicBool>,
+) -> BoxFuture<'static, ()> {
+    let ran = ran.clone();
+    let guard = DropFlag(dropped.clone());
+    Box::pin(async move {
+        let _guard = guard;
+        tokio::time::sleep(delay).await;
+        ran.store(true, Ordering::SeqCst);
+    })
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_run_tasks_drop_cancels_tasks() {
+    let ran = Arc::new(AtomicBool::new(false));
+    let dropped = Arc::new(AtomicBool::new(false));
+    let platform = Platform::default();
+    let tasks = vec![slow_task(Duration::from_millis(200), &ran, &dropped)];
+    // The run future is dropped when the timeout fires, long before the task finishes.
+    let r = tokio::time::timeout(Duration::from_millis(20), platform.run_tasks(tasks)).await;
+    assert!(r.is_err(), "run_tasks completed before the timeout");
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert!(!ran.load(Ordering::SeqCst), "task kept running after drop");
+    assert!(
+        dropped.load(Ordering::SeqCst),
+        "task future was not dropped"
+    );
+}
+
+async fn panicking_task() {
+    panic!("task panic");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_run_tasks_panic_aborts_siblings() {
+    let ran = Arc::new(AtomicBool::new(false));
+    let dropped = Arc::new(AtomicBool::new(false));
+    let tasks = vec![
+        Box::pin(panicking_task()) as BoxFuture<'static, ()>,
+        slow_task(Duration::from_millis(200), &ran, &dropped),
+    ];
+    let joined = tokio::spawn(async move { Platform::default().run_tasks(tasks).await }).await;
+    let err = joined.expect_err("the task panic is re-raised on the caller");
+    assert!(err.is_panic());
+    // The sibling was aborted and had stopped by the time the panic was re-raised.
+    assert!(dropped.load(Ordering::SeqCst), "sibling not aborted");
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert!(
+        !ran.load(Ordering::SeqCst),
+        "sibling kept running after the panic"
     );
 }

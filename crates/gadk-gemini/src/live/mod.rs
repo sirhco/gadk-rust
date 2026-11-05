@@ -64,18 +64,51 @@ pub enum RealtimeInput {
 /// A live connection to a model (port of ADK-Go `googlellm.LiveConnection` over a genai
 /// `Session`).
 ///
-/// The send methods take `&self` and may be called concurrently with one another: the
-/// write half sits behind an async mutex, so frames are never interleaved.
-/// [`recv`](Self::recv) takes `&mut self` and owns the read half.
+/// Every method takes `&self`, so a connection can be shared through an `Arc` and used
+/// from several tasks at once, as ADK-Go's live flow does (one goroutine receiving while
+/// another sends). The write half and the read half sit behind separate async mutexes:
+/// frames from concurrent sends are never interleaved, and a pending
+/// [`recv`](Self::recv) never blocks a send. Concurrent `recv` calls are served one at a
+/// time.
 pub struct LiveConnection {
     sink: tokio::sync::Mutex<SplitSink<Ws, Message>>,
-    stream: SplitStream<Ws>,
+    rx: tokio::sync::Mutex<RecvHalf>,
     backend: Backend,
     model_name: String,
+}
+
+/// The read half of a [`LiveConnection`] and the state the receive path keeps.
+struct RecvHalf {
+    stream: SplitStream<Ws>,
     /// genai `Session.bufferedMessage`: the setupComplete message, returned by the first
     /// receive.
     buffered_message: Option<LiveServerMessage>,
     state: RecvState,
+}
+
+impl RecvHalf {
+    /// genai `Session.Receive`: the buffered message, else the next data frame decoded.
+    /// `None` when the connection is closed.
+    async fn receive(
+        &mut self,
+        backend: Backend,
+    ) -> Result<Option<LiveServerMessage>, GeminiError> {
+        if let Some(msg) = self.buffered_message.take() {
+            return Ok(Some(msg));
+        }
+        loop {
+            let data = match self.stream.next().await {
+                None => return Ok(None),
+                Some(Err(e)) => return Err(live_err("failed to receive message", e)),
+                Some(Ok(Message::Text(t))) => t.as_bytes().to_vec(),
+                Some(Ok(Message::Binary(b))) => b.to_vec(),
+                Some(Ok(Message::Close(_))) => return Ok(None),
+                // Pings are answered by tungstenite; pongs and raw frames carry no message.
+                Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_))) => continue,
+            };
+            return messages::decode_server_message(backend, &data).map(Some);
+        }
+    }
 }
 
 impl fmt::Debug for LiveConnection {
@@ -123,18 +156,21 @@ pub(crate) async fn connect(
     let (sink, stream) = ws.split();
     let mut conn = LiveConnection {
         sink: tokio::sync::Mutex::new(sink),
-        stream,
+        rx: tokio::sync::Mutex::new(RecvHalf {
+            stream,
+            buffered_message: None,
+            state: RecvState::default(),
+        }),
         backend: resolved.backend,
         model_name: model_name.to_string(),
-        buffered_message: None,
-        state: RecvState::default(),
     };
 
     if let Err(e) = conn.write(setup).await {
         let _ = conn.close().await;
         return Err(live_err("failed to write LiveClientSetup", e));
     }
-    let setup_message = match conn.receive().await {
+    let backend = conn.backend;
+    let setup_message = match conn.rx.get_mut().receive(backend).await {
         Ok(Some(msg)) => msg,
         Ok(None) => {
             return Err(GeminiError::Live(
@@ -153,7 +189,7 @@ pub(crate) async fn connect(
             "expected SetupComplete message, got: {got}"
         )));
     }
-    conn.buffered_message = Some(setup_message);
+    conn.rx.get_mut().buffered_message = Some(setup_message);
     Ok(conn)
 }
 
@@ -320,35 +356,20 @@ impl LiveConnection {
         self.write(messages::tool_response_message(&input)?).await
     }
 
-    /// genai `Session.Receive`: the buffered message, else the next data frame decoded.
-    /// `None` when the connection is closed.
-    async fn receive(&mut self) -> Result<Option<LiveServerMessage>, GeminiError> {
-        if let Some(msg) = self.buffered_message.take() {
-            return Ok(Some(msg));
-        }
-        loop {
-            let data = match self.stream.next().await {
-                None => return Ok(None),
-                Some(Err(e)) => return Err(live_err("failed to receive message", e)),
-                Some(Ok(Message::Text(t))) => t.as_bytes().to_vec(),
-                Some(Ok(Message::Binary(b))) => b.to_vec(),
-                Some(Ok(Message::Close(_))) => return Ok(None),
-                // Pings are answered by tungstenite; pongs and raw frames carry no message.
-                Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_))) => continue,
-            };
-            return messages::decode_server_message(self.backend, &data).map(Some);
-        }
-    }
-
     /// Port of Go `Recv`: the next response. `None` when the connection is closed.
-    pub async fn recv(&mut self) -> Result<Option<LlmResponse>, GeminiError> {
-        if let Some(resp) = self.state.pop_buffered() {
+    ///
+    /// Takes `&self` and locks only the read half, so it may be awaited while other tasks
+    /// send on the same connection. Cancel-safe: dropping a pending `recv` loses no
+    /// message.
+    pub async fn recv(&self) -> Result<Option<LlmResponse>, GeminiError> {
+        let mut rx = self.rx.lock().await;
+        if let Some(resp) = rx.state.pop_buffered() {
             return Ok(Some(resp));
         }
-        let Some(msg) = self.receive().await? else {
+        let Some(msg) = rx.receive(self.backend).await? else {
             return Ok(None);
         };
-        Ok(Some(self.state.map(msg)))
+        Ok(Some(rx.state.map(msg)))
     }
 
     /// Closes the connection by sending a close frame.
