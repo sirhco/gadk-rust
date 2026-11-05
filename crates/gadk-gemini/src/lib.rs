@@ -14,3 +14,11 @@
 // limitations under the License.
 
 //! gadk-gemini: Gemini API and Vertex AI model implementation.
+
+mod config;
+mod env;
+mod error;
+
+pub use config::{Auth, CLOUD_PLATFORM_SCOPE, ClientConfig, ResolvedConfig, resolve};
+pub use env::{EnvProvider, MapEnv, ProcessEnv};
+pub use error::GeminiError;
