@@ -14,3 +14,19 @@
 // limitations under the License.
 
 //! gadk-session: sessions, events, and the in-memory session service.
+
+mod error;
+mod event;
+mod legacy;
+mod service;
+mod tool_confirmation;
+
+pub use error::SessionError;
+pub use event::{
+    Event, EventActions, EventCompaction, EventRef, NodeInfo, RequestInput, zero_time,
+};
+pub use service::{
+    CreateRequest, DeleteRequest, GetRequest, KEY_PREFIX_APP, KEY_PREFIX_TEMP, KEY_PREFIX_USER,
+    ListRequest, ReadonlyState, Session, SessionService, State,
+};
+pub use tool_confirmation::ToolConfirmation;
