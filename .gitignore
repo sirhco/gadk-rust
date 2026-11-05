@@ -25,3 +25,4 @@ rustc-ice-*.txt
 .orchestration/
 .agent-memory/
 /scripts/gen-go-events/gen-go-events
+__pycache__/

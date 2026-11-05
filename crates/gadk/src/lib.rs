@@ -14,3 +14,9 @@
 // limitations under the License.
 
 //! gadk: Agent Development Kit for Rust (port of ADK-Go).
+#[cfg(feature = "gemini")]
+pub use gadk_gemini as gemini;
+pub use gadk_genai as genai;
+pub use gadk_model as model;
+pub use gadk_platform as platform;
+pub use gadk_session as session;
