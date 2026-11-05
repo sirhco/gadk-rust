@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use futures::StreamExt;
 use futures::stream::BoxStream;
-use gadk_genai::{Content, GenerateContentConfig, GenerateContentResponse};
+use gadk_genai::{Content, GenerateContentConfig, GenerateContentResponse, LiveConnectConfig};
 use gadk_model::{
     ExtrasRequestProvider, HttpClient, Llm, LlmRequest, LlmResponse, ModelError, ReqwestClient,
     StreamingResponseAggregator, llm_response_from_genai,
@@ -35,6 +35,7 @@ use crate::continuation::{
     StreamContinuation, merge_responses, prepare_config, should_continue, should_enable,
 };
 use crate::error::GeminiError;
+use crate::live::LiveConnection;
 use crate::request::{Target, build_body};
 use crate::transport::Transport;
 
@@ -157,6 +158,15 @@ impl GeminiModel {
     /// The resolved client configuration.
     pub fn resolved(&self) -> &ResolvedConfig {
         &self.inner.resolved
+    }
+
+    /// Opens a Live (bidi streaming) connection to this model (genai `Live.Connect` with
+    /// the model's name and client configuration).
+    pub async fn live_connect(
+        &self,
+        cfg: LiveConnectConfig,
+    ) -> Result<LiveConnection, GeminiError> {
+        crate::live::connect(&self.inner.resolved, &self.inner.name, &cfg).await
     }
 }
 

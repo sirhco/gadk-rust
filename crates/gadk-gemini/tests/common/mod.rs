@@ -19,6 +19,7 @@
 //! Shared helpers for the gadk-gemini integration tests.
 
 pub mod fake;
+pub mod ws;
 
 use bytes::Bytes;
 use futures::StreamExt;
