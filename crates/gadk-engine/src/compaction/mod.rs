@@ -17,6 +17,7 @@
 //! internal/agent/compactionctx). The public API is `gadk_session::compaction`.
 
 pub(crate) mod apply;
+pub(crate) mod compactor;
 pub(crate) mod runtime;
 pub(crate) mod summary_event;
 #[cfg(test)]

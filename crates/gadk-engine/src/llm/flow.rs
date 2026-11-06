@@ -1056,13 +1056,15 @@ pub(crate) mod span_capture {
     };
 
     /// One recorded span: its name, `otel.name`, the fields recorded on it or on events inside it,
-    /// and whether it has closed.
+    /// whether it has closed, and its parent's name.
     #[derive(Clone, Debug, Default)]
     pub(crate) struct CapturedSpan {
         pub(crate) name: String,
         pub(crate) otel_name: String,
         pub(crate) fields: BTreeMap<String, String>,
         pub(crate) closed: bool,
+        /// The static name of the span's parent, `None` for a root span.
+        pub(crate) parent: Option<String>,
     }
 
     impl CapturedSpan {
@@ -1150,11 +1152,16 @@ pub(crate) mod span_capture {
         fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, ctx: LayerContext<'_, S>) {
             let mut fields = BTreeMap::new();
             attrs.record(&mut Fields(&mut fields));
+            let parent = ctx
+                .span(id)
+                .and_then(|s| s.parent())
+                .map(|p| p.name().to_owned());
             let captured = CapturedSpan {
                 name: attrs.metadata().name().to_owned(),
                 otel_name: fields.get("otel.name").cloned().unwrap_or_default(),
                 fields,
                 closed: false,
+                parent,
             };
             let i = {
                 let mut v = self.0.lock();
