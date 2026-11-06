@@ -112,3 +112,5 @@ pub type ToolPredicate = Arc<dyn Fn(&ReadonlyContext, &dyn Tool) -> bool + Send 
 
 /// Decides whether a call to the named tool with the given arguments requires confirmation.
 pub type ConfirmationProvider = Arc<dyn Fn(&str, &Value) -> bool + Send + Sync>;
+
+pub use crate::tool_util::{pack_tool, tool_from_request};

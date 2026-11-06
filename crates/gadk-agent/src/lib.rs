@@ -50,3 +50,7 @@ pub use scheduler::DynamicSubScheduler;
 pub use services::{ArtifactBacking, Artifacts, Memory};
 pub use state::{AgentState, AgentType};
 pub use tool::{ConfirmationProvider, RunnableTool, StreamingTool, Tool, ToolPredicate, Toolset};
+pub use tool_util::{
+    REQUEST_CONFIRMATION_FUNCTION_CALL_NAME, original_call_from, pack_tool, tool_from_request,
+};
+pub use toolset::{allowed_tools_predicate, filter_toolset, string_predicate, with_confirmation};

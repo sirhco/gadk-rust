@@ -13,4 +13,78 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Parity target for Go tool/context_test.go. Implemented by Task 5.
+//! Parity target for Go tool/context_test.go.
+
+use std::sync::Arc;
+
+use gadk_session::EventActions;
+use parking_lot::Mutex;
+use serde_json::json;
+
+use crate::context::{ContextDelta, InvocationContext, ReadonlyContext};
+
+// parity: adapted: Go type-asserts the tool context to ReadonlyContext; in Rust a tool context (Context with a call id) derefs to ReadonlyContext
+#[test]
+fn test_new_tool_context_interfaces() {
+    let base = InvocationContext::builder().build();
+    let tool_ctx = base.with_delta(ContextDelta {
+        function_call_id: Some("fn1".into()),
+        actions: Some(Arc::new(Mutex::new(EventActions::default()))),
+        ..Default::default()
+    });
+    let r: &ReadonlyContext = &tool_ctx;
+    assert_eq!(r.invocation_id(), base.invocation_id());
+}
+
+#[test]
+fn test_new_tool_context_request_confirmation_sets_skip_summarization() {
+    let actions = Arc::new(Mutex::new(EventActions::default()));
+    let tool_ctx = InvocationContext::builder()
+        .build()
+        .with_delta(ContextDelta {
+            function_call_id: Some("fn1".into()),
+            actions: Some(actions.clone()),
+            tool_confirmation: Some(None),
+            ..Default::default()
+        });
+    tool_ctx
+        .request_confirmation("please confirm", Some(json!({"key": "value"})))
+        .unwrap();
+    let a = actions.lock();
+    assert!(
+        a.skip_summarization,
+        "RequestConfirmation did not set SkipSummarization to true"
+    );
+    let tc = a
+        .requested_tool_confirmations
+        .get("fn1")
+        .expect("no confirmation for function call ID 'fn1'");
+    assert_eq!(tc.hint, "please confirm");
+    assert!(!tc.confirmed);
+}
+
+#[test]
+fn test_new_tool_context_request_confirmation_auto_generates_id_when_empty() {
+    let actions = Arc::new(Mutex::new(EventActions::default()));
+    let tool_ctx = InvocationContext::builder()
+        .build()
+        .with_delta(ContextDelta {
+            function_call_id: Some(String::new()),
+            actions: Some(actions.clone()),
+            ..Default::default()
+        });
+    tool_ctx.request_confirmation("hint", None).unwrap();
+    let a = actions.lock();
+    assert!(
+        a.skip_summarization,
+        "RequestConfirmation did not set SkipSummarization to true"
+    );
+    assert_eq!(
+        a.requested_tool_confirmations.len(),
+        1,
+        "expected exactly 1 requested confirmation"
+    );
+    let tc = a.requested_tool_confirmations.values().next().unwrap();
+    assert_eq!(tc.hint, "hint");
+    assert!(!tc.confirmed);
+}
