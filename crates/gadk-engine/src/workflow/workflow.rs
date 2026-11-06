@@ -18,14 +18,16 @@
 
 use std::sync::Arc;
 
+use gadk_agent::{Context, ContextDelta, EventStream, InvocationContext};
 use serde_json::Value;
 
 use crate::error::{WorkflowError, WorkflowErrorKind};
-use crate::workflow::Edge;
 use crate::workflow::base_node::compile_schema;
 use crate::workflow::graph::Graph;
 use crate::workflow::route::go_quote;
+use crate::workflow::scheduler::Scheduler;
 use crate::workflow::validation::{validate_nodes, validate_sub_workflow_names, validate_workflow};
+use crate::workflow::{Edge, START};
 
 /// Port of Go workflow.Option / workflowOptions: construction-time settings for [`Workflow::new`].
 /// Zero values mean "no override / use engine defaults".
@@ -113,5 +115,58 @@ impl Workflow {
     /// Port of Go Workflow.Name: the node-path namespacing name; empty when anonymous.
     pub fn name(&self) -> &str {
         &self.name
+    }
+}
+
+impl Workflow {
+    /// Port of Go (*Workflow).Run: namespaces a named, non-root-wrapper workflow's node paths
+    /// under `<parent>/<name>@1` and seeds START with the user content's text.
+    pub fn run(self: &Arc<Self>, ctx: InvocationContext) -> EventStream {
+        let c = ctx.into_context();
+        let c = if !self.is_root_wrapper && !self.name.is_empty() {
+            let parent = c.path();
+            let wf_path = if parent.is_empty() {
+                format!("{}@1", self.name)
+            } else {
+                format!("{parent}/{}@1", self.name)
+            };
+            let ancestors = c.output_for_ancestors();
+            c.with_delta(ContextDelta {
+                path: Some(wf_path),
+                run_id: Some("1".to_string()),
+                output_for_ancestors: Some(ancestors),
+                sub_scheduler: Some(None),
+                ..ContextDelta::default()
+            })
+        } else {
+            c
+        };
+        let input = user_input(&c);
+        self.run_node(c, input)
+    }
+
+    /// Port of Go (*Workflow).RunNode: runs the graph from START with `input` under `ctx`. One
+    /// scheduler per call, created on the stream's first poll; dropping the stream stops the
+    /// run (every node task is aborted and every node context cancelled).
+    pub fn run_node(self: &Arc<Self>, ctx: Context, input: Value) -> EventStream {
+        let wf = Arc::clone(self);
+        Box::pin(async_stream::stream! {
+            let mut s = Scheduler::new(ctx.clone(), Arc::clone(&wf.graph), wf.max_concurrency);
+            s.workflow_name = wf.name.clone();
+            let input = (!input.is_null()).then_some(input);
+            s.state.ensure_node(START.name()).input = input.clone();
+            s.schedule_node(Arc::clone(&START), input, String::new(), ctx.branch());
+            while let Some(item) = s.next().await {
+                yield item;
+            }
+        })
+    }
+}
+
+/// Port of Go userInput: the concatenated text parts of the user content; null without one.
+fn user_input(ctx: &Context) -> Value {
+    match ctx.user_content() {
+        None => Value::Null,
+        Some(uc) => Value::String(uc.parts.iter().map(|p| p.text.as_str()).collect()),
     }
 }
