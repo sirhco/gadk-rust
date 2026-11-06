@@ -18,6 +18,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, Ordering::SeqCst};
+use std::time::Duration;
 
 use futures::StreamExt;
 use gadk_agent::{
@@ -341,20 +342,27 @@ async fn run_failed_sibling_retry(child: bool) {
     );
     let (mut saw_failure, mut saw_pause) = (false, false);
     let mut s = run(&r, user_text("start"));
-    while let Some(item) = s.next().await {
-        match item {
-            Err(e) => {
-                saw_failure =
-                    chain_has(&e, FAILURE) || (child && is_kind(&e, WorkflowErrorKind::NodeFailed));
-            }
-            Ok(ev) => {
-                if ev.requested_input.is_some() && !saw_pause {
-                    saw_pause = true;
-                    paused.cancel();
+    // The failing node waits on `paused`; bound the drain so a missed pause fails, not hangs.
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while let Some(item) = s.next().await {
+            match item {
+                Err(e) => {
+                    saw_failure = chain_has(&e, FAILURE)
+                        || (child && is_kind(&e, WorkflowErrorKind::NodeFailed));
+                }
+                Ok(ev) => {
+                    if ev.requested_input.is_some() && !saw_pause {
+                        saw_pause = true;
+                        paused.cancel();
+                    }
                 }
             }
         }
-    }
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!("{label}: first turn did not finish within 10s (pause never released the node?)")
+    });
     drop(s);
     if child {
         let (_, errs) = run_all(run(

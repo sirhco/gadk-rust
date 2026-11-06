@@ -35,6 +35,7 @@ use gadk_platform::Platform;
 use gadk_session::{CreateRequest, Event, EventCompaction, GetRequest, Session, SessionService};
 use serde_json::{Map, Value};
 use tokio_util::sync::CancellationToken;
+use tracing::Instrument;
 
 use crate::llm::agent::underlying_session;
 use crate::llm::mode::resolve_mode;
@@ -168,15 +169,22 @@ pub(crate) enum Processed {
 }
 
 /// Go `defer pluginManager.RunAfterRunCallback(ctx)`: [`AfterRunGuard::finish`] runs it inline on
-/// normal completion; if the stream is dropped first, `Drop` spawns it on the current runtime.
+/// normal completion; if the stream is dropped first, `Drop` spawns it on the current runtime,
+/// inside the span that was current when the guard was made (the invocation span, as Go's
+/// deferred call runs with the invocation's ctx).
 pub(crate) struct AfterRunGuard {
     pm: Arc<PluginManager>,
     ctx: Option<InvocationContext>,
+    span: tracing::Span,
 }
 
 impl AfterRunGuard {
     pub(crate) fn new(pm: Arc<PluginManager>, ctx: InvocationContext) -> Self {
-        Self { pm, ctx: Some(ctx) }
+        Self {
+            pm,
+            ctx: Some(ctx),
+            span: tracing::Span::current(),
+        }
     }
 
     pub(crate) async fn finish(mut self) {
@@ -193,7 +201,7 @@ impl Drop for AfterRunGuard {
             && let Ok(handle) = tokio::runtime::Handle::try_current()
         {
             let pm = self.pm.clone();
-            handle.spawn(async move { pm.run_after_run(ctx).await });
+            handle.spawn(async move { pm.run_after_run(ctx).await }.instrument(self.span.clone()));
         }
     }
 }

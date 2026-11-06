@@ -180,6 +180,9 @@ fn go_float(f: f64) -> String {
 ///   %g, e.g. 1e+06, but Rust keeps integer JSON numbers as integers);
 /// - other numbers → `go_format_float_v` (Go %v of float64 = %g with shortest digits);
 /// - array → `[a b c]`; object → `map[k1:v1 k2:v2]` with keys sorted (Go fmt sorts map keys).
+///
+/// Callers formatting a value Go would have JSON-decoded (tool args, model output) must apply
+/// [`as_go_floats`] first, so numbers print as Go `float64` (`1e+06`, not `1000000`).
 pub(crate) fn go_sprint(v: &Value) -> String {
     match v {
         Value::Null => "<nil>".to_owned(),
@@ -201,6 +204,25 @@ pub(crate) fn go_sprint(v: &Value) -> String {
                 .collect::<Vec<_>>()
                 .join(" ")
         ),
+    }
+}
+
+/// `v` with every number as a float: Go decodes tool arguments from JSON, so every number is a
+/// `float64` and `fmt.Sprint` prints it in `%v` float form (`1e+06`, not `1000000`). A number
+/// with no finite float form is kept as is. Apply before [`go_sprint`] on JSON-decoded values.
+pub(crate) fn as_go_floats(v: &Value) -> Value {
+    match v {
+        Value::Number(n) => n
+            .as_f64()
+            .and_then(serde_json::Number::from_f64)
+            .map_or_else(|| v.clone(), Value::Number),
+        Value::Array(a) => Value::Array(a.iter().map(as_go_floats).collect()),
+        Value::Object(m) => Value::Object(
+            m.iter()
+                .map(|(k, v)| (k.clone(), as_go_floats(v)))
+                .collect(),
+        ),
+        other => other.clone(),
     }
 }
 

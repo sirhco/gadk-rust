@@ -27,6 +27,7 @@ use parking_lot::Mutex;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::{AbortHandle, JoinSet};
 use tokio_util::sync::CancellationToken;
+use tracing::Instrument;
 
 /// Port of Go parallelagent.Config: the configuration of a parallel agent.
 #[derive(Clone, Default)]
@@ -146,7 +147,7 @@ fn run(ctx: InvocationContext) -> EventStream {
                     first_err.lock().get_or_insert(wrapped);
                     group.cancel();
                 }
-            });
+            }.in_current_span());
         }
         // The funnel: once every sub-agent has finished, report the first error; the channel
         // closes when the funnel and every sub-agent have dropped their senders (Go
@@ -171,7 +172,7 @@ fn run(ctx: InvocationContext) -> EventStream {
             if let Some(e) = err {
                 let _ = tx.send(SubResult::Err(e)).await;
             }
-        });
+        }.in_current_span());
         // Aborting the funnel drops `set`, which aborts every sub-agent task.
         let _abort_on_drop = AbortOnDrop(funnel.abort_handle());
         while let Some(res) = rx.recv().await {

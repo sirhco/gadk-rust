@@ -235,8 +235,9 @@ impl StreamingTool for ConfirmationTool {
     }
 }
 
-/// Port of Go `confirmCall`. Go wraps the sentinels as `"error tool %q %w"`; that wrapping is
-/// `AgentError::Tool`, added by the flow.
+/// Port of Go `confirmCall`. Go wraps the sentinels as `"error tool %q %w"`; here they are returned
+/// bare and the flow adds that wrapping (gadk-engine `llm/functions.rs` `wrap_confirmation_error`,
+/// a `ToolError::Execution(NamedToolError)`).
 fn confirm_call(
     ctx: &Context,
     tool_name: &str,

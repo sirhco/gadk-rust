@@ -202,3 +202,38 @@ async fn llm_root_runs_without_invoke_node_span() {
         "the runner node sets emits_own_span: {spans:#?}"
     );
 }
+
+/// Go parallelagent runs each sub-agent with a context derived from the parallel agent's, so each
+/// branch's `invoke_agent` span is a child of the parallel agent's `invoke_agent` span.
+#[tokio::test(flavor = "current_thread")]
+async fn parallel_sub_agent_spans_nest_under_parallel_agent_span() {
+    let sub = |name: &str| {
+        gadk_agent::new_agent(AgentConfig {
+            name: name.into(),
+            run: Some(empty_run()),
+            ..Default::default()
+        })
+        .unwrap()
+    };
+    let root = gadk_engine::agents::parallel_agent::new(
+        gadk_engine::agents::parallel_agent::ParallelAgentConfig {
+            agent: AgentConfig {
+                name: "par".into(),
+                sub_agents: vec![sub("a"), sub("b")],
+                ..Default::default()
+            },
+        },
+    )
+    .unwrap();
+    let spans = capture(root).await;
+    assert_eq!(with_otel(&spans, "invoke_agent par").len(), 1, "{spans:#?}");
+    for name in ["invoke_agent a", "invoke_agent b"] {
+        let branch = with_otel(&spans, name);
+        assert_eq!(branch.len(), 1, "{spans:#?}");
+        assert_eq!(
+            branch[0].ancestors.first().map(String::as_str),
+            Some("invoke_agent par"),
+            "{spans:#?}"
+        );
+    }
+}

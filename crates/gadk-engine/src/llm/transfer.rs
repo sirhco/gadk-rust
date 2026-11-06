@@ -32,7 +32,7 @@ use crate::{
     llm::{
         flow::Flow,
         mode::{is_untransferable_mode, mode_for},
-        processors::go_sprint,
+        processors::{as_go_floats, go_sprint},
         state::reveal,
     },
     tool::utils::{append_instructions, go_type_name},
@@ -275,7 +275,10 @@ impl RunnableTool for TransferToAgentTool {
             .and_then(Value::as_str)
             .filter(|s| !s.is_empty())
             .ok_or_else(|| {
-                ToolError::InvalidArgument(format!("empty agent_name: {}", go_sprint(&args)))
+                ToolError::InvalidArgument(format!(
+                    "empty agent_name: {}",
+                    go_sprint(&as_go_floats(&args))
+                ))
             })?;
         ctx.update_actions(|a| a.transfer_to_agent = agent.to_owned());
         Ok(Map::new())
@@ -475,6 +478,23 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.to_string(), "empty agent_name: map[agent_name:]");
+        // Go agent_transfer.go:180 `%v` of the JSON-decoded args: numbers are float64.
+        let err = runnable
+            .run(
+                ctx.clone(),
+                json!({"agent_name": "", "n": 1_000_000, "x": [1, "a"]}),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "empty agent_name: map[agent_name: n:1e+06 x:[1 a]]"
+        );
+        let err = runnable
+            .run(ctx.clone(), json!({"agent_name": 5}))
+            .await
+            .unwrap_err();
+        assert_eq!(err.to_string(), "empty agent_name: map[agent_name:5]");
         let err = runnable.run(ctx, Value::Null).await.unwrap_err();
         assert_eq!(err.to_string(), "missing argument");
     }

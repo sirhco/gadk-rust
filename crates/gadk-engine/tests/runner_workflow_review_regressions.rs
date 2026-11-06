@@ -379,12 +379,17 @@ async fn test_runner_workflow_hitl_delegated_output_after_interrupt() {
     let r = new_join_resume_runner(vec![edge(&start(), &p), edge(&p, &d)], vec![]);
 
     let mut s = run(&r, user_text("start"));
-    while let Some(item) = s.next().await {
-        let ev = item.expect("initial run failed");
-        if ev.requested_input.is_some() {
-            raised.cancel();
+    // The parent waits on `raised`; bound the drain so a missed interrupt fails, not hangs.
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while let Some(item) = s.next().await {
+            let ev = item.expect("initial run failed");
+            if ev.requested_input.is_some() {
+                raised.cancel();
+            }
         }
-    }
+    })
+    .await
+    .expect("first turn did not finish within 10s (interrupt never raised?)");
     drop(s);
     let msg = resume_content(
         "approval",

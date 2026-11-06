@@ -461,22 +461,32 @@ async fn test_scheduler_external_cancellation_fails_run() {
     );
 }
 
+// parity: adapted: Go sleeps 50 ms for the retry timer to arm; Rust waits on the should_retry decision, which the scheduler makes synchronously right before arming the timer.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_scheduler_external_cancellation_during_pending_retry() {
     let token = CancellationToken::new();
+    let retry_decided = Gate::new();
+    let decided = Arc::clone(&retry_decided);
     let (n, calls) = retry_test_node(
         "flaky",
         100,
         NodeConfig {
-            retry_config: Some(always_retry(5, Duration::from_secs(3600))),
+            retry_config: Some(RetryConfig {
+                should_retry: Some(Arc::new(move |_| {
+                    decided.release();
+                    true
+                })),
+                ..always_retry(5, Duration::from_secs(3600))
+            }),
             ..NodeConfig::default()
         },
     );
     let w = must_new(vec![edge(&start(), &n)]);
     let run = spawn_first_err(w.run(seeded_ctx_with_token(&token)));
     wait_for_calls(&calls, 1).await;
-    // Let the failed attempt's completion arm the retry timer (Go: time.Sleep(50ms)).
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    tokio::time::timeout(Duration::from_secs(5), retry_decided.wait())
+        .await
+        .expect("timeout waiting for the failed attempt to arm its retry");
     token.cancel();
     let err = tokio::time::timeout(Duration::from_secs(5), run)
         .await
@@ -754,7 +764,7 @@ async fn test_scheduler_retry_cancelled() {
         "node calls before cancellation"
     );
     token.cancel();
-    let err = tokio::time::timeout(Duration::from_millis(500), run)
+    let err = tokio::time::timeout(Duration::from_secs(5), run)
         .await
         .expect("timeout waiting for workflow to finish")
         .expect("run task");

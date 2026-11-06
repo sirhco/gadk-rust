@@ -28,7 +28,7 @@ use gadk_session::{CreateRequest, InMemorySessionService, SessionService};
 use serde_json::{Map, Value};
 
 use crate::artifacts::new_forwarding_service;
-use crate::llm::processors::{go_json_marshal, go_sprint};
+use crate::llm::processors::{as_go_floats, go_json_marshal, go_sprint};
 use crate::llm::state::reveal;
 use crate::runner::{PluginConfig, RunOptions, Runner, RunnerConfig};
 use crate::tool::single_turn::make_function_declaration;
@@ -149,25 +149,6 @@ fn part_text(p: &gadk_genai::Part) -> String {
         c.code.clone()
     } else {
         String::new()
-    }
-}
-
-/// `v` with every number as a float: Go decodes tool arguments from JSON, so every number is a
-/// `float64` and `fmt.Sprint` prints it in `%v` float form (`1e+06`, not `1000000`). A number
-/// with no finite float form is kept as is.
-fn as_go_floats(v: &Value) -> Value {
-    match v {
-        Value::Number(n) => n
-            .as_f64()
-            .and_then(serde_json::Number::from_f64)
-            .map_or_else(|| v.clone(), Value::Number),
-        Value::Array(a) => Value::Array(a.iter().map(as_go_floats).collect()),
-        Value::Object(m) => Value::Object(
-            m.iter()
-                .map(|(k, v)| (k.clone(), as_go_floats(v)))
-                .collect(),
-        ),
-        other => other.clone(),
     }
 }
 

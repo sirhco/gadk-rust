@@ -113,6 +113,7 @@ mod tests {
     }
 
     fn capture(f: impl FnOnce()) -> Vec<(String, BTreeMap<String, String>)> {
+        crate::llm::flow::span_capture::pin_tracing_interest();
         let captured: Captured = Arc::default();
         let sub = tracing_subscriber::registry().with(Capture(captured.clone()));
         tracing::subscriber::with_default(sub, f);
