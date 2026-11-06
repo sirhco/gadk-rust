@@ -19,20 +19,26 @@
 //! `internal/llminternal/googlellm/live_connection.go` (`LiveConnection`).
 
 mod messages;
+pub(crate) mod proxy;
 mod url;
 
 use std::fmt;
+use std::time::Duration;
 
+use async_trait::async_trait;
 use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use gadk_genai::{
-    ActivityEnd, ActivityStart, Blob, Content, FunctionResponse, LiveClientContentInput,
+    ActivityEnd, ActivityStart, Content, FunctionResponse, LiveClientContentInput,
     LiveConnectConfig, LiveRealtimeInput, LiveServerMessage, LiveToolResponseInput, Part,
 };
-use gadk_model::{Backend, LlmResponse};
+pub use gadk_model::RealtimeInput;
+use gadk_model::{Backend, LiveConnError, LiveConnErrorKind, LlmResponse};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::error::ProtocolError;
+use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 use self::messages::RecvState;
@@ -43,23 +49,12 @@ use crate::error::GeminiError;
 
 type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
+/// Bound on the dial, proxy CONNECT, TLS and WebSocket upgrade together (gorilla
+/// `DefaultDialer.HandshakeTimeout`).
+pub(crate) const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(45);
+
 /// The PNG file signature (Go `SendRealtime` MIME detection).
 const PNG_SIGNATURE: [u8; 8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
-
-/// Realtime input for [`LiveConnection::send_realtime`] (the types Go `SendRealtime`
-/// accepts, plus genai's `audioStreamEnd`).
-#[derive(Debug, Clone, PartialEq)]
-pub enum RealtimeInput {
-    /// Audio or image data. An empty MIME type is detected: `image/png` for PNG data,
-    /// otherwise `audio/pcm`.
-    Blob(Blob),
-    /// Start of user activity (manual activity detection).
-    ActivityStart,
-    /// End of user activity (manual activity detection).
-    ActivityEnd,
-    /// The audio stream has ended (automatic activity detection).
-    AudioStreamEnd,
-}
 
 /// A live connection to a model (port of ADK-Go `googlellm.LiveConnection` over a genai
 /// `Session`).
@@ -88,7 +83,8 @@ struct RecvHalf {
 
 impl RecvHalf {
     /// genai `Session.Receive`: the buffered message, else the next data frame decoded.
-    /// `None` when the connection is closed.
+    /// `None` when the stream ended without a close frame; a received close frame is an error
+    /// with its code.
     async fn receive(
         &mut self,
         backend: Backend,
@@ -99,10 +95,21 @@ impl RecvHalf {
         loop {
             let data = match self.stream.next().await {
                 None => return Ok(None),
-                Some(Err(e)) => return Err(live_err("failed to receive message", e)),
+                Some(Err(e)) => {
+                    return Err(GeminiError::Live(classify_ws_error(
+                        "failed to receive message",
+                        e,
+                    )));
+                }
                 Some(Ok(Message::Text(t))) => t.as_bytes().to_vec(),
                 Some(Ok(Message::Binary(b))) => b.to_vec(),
-                Some(Ok(Message::Close(_))) => return Ok(None),
+                // gorilla surfaces a received close frame as *CloseError carrying its code.
+                Some(Ok(Message::Close(frame))) => {
+                    return Err(GeminiError::Live(close_frame_error(
+                        "failed to receive message",
+                        frame.as_ref(),
+                    )));
+                }
                 // Pings are answered by tungstenite; pongs and raw frames carry no message.
                 Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_))) => continue,
             };
@@ -120,12 +127,88 @@ impl fmt::Debug for LiveConnection {
     }
 }
 
-fn live_err(context: &str, e: impl fmt::Display) -> GeminiError {
-    GeminiError::Live(format!("{context}: {e}"))
+/// gorilla `CloseError.Error()` (websocket v1.5.3 conn.go:113): `websocket: close <code>`, the code's
+/// name in parentheses for the codes gorilla names, then `: <reason>` when the reason is non-empty.
+pub fn gorilla_close_text(code: u16, reason: &str) -> String {
+    let name = match code {
+        1000 => " (normal)",
+        1001 => " (going away)",
+        1002 => " (protocol error)",
+        1003 => " (unsupported data)",
+        1005 => " (no status)",
+        1006 => " (abnormal closure)",
+        1007 => " (invalid payload data)",
+        1008 => " (policy violation)",
+        1009 => " (message too big)",
+        1010 => " (mandatory extension missing)",
+        1011 => " (internal server error)",
+        1015 => " (TLS handshake error)",
+        _ => "",
+    };
+    let mut s = format!("websocket: close {code}{name}");
+    if !reason.is_empty() {
+        s.push_str(": ");
+        s.push_str(reason);
+    }
+    s
 }
 
-/// Port of genai `Live.Connect`: dials the Live endpoint, sends the setup message and
-/// waits for `setupComplete`, which is buffered for the first receive.
+/// `<context>: <e>`, classified: a closed connection, a socket I/O failure (Go `*net.OpError`) or a
+/// reset without a closing handshake (gorilla's close 1006) is `ConnectionLost`; anything else is
+/// `Other`. The tungstenite error is kept as the source.
+pub fn classify_ws_error(context: &str, e: tokio_tungstenite::tungstenite::Error) -> LiveConnError {
+    use tokio_tungstenite::tungstenite::Error as WsError;
+    let kind = match &e {
+        WsError::ConnectionClosed
+        | WsError::AlreadyClosed
+        | WsError::Io(_)
+        | WsError::Protocol(ProtocolError::ResetWithoutClosingHandshake) => {
+            LiveConnErrorKind::ConnectionLost
+        }
+        _ => LiveConnErrorKind::Other,
+    };
+    LiveConnError::new(kind, format!("{context}: {e}")).with_source(e)
+}
+
+/// A received close frame (Go `*websocket.CloseError`): kind `Closed { code }`, code 1005 for a
+/// frame without a payload, message `<context>: <gorilla text>`.
+pub fn close_frame_error(context: &str, frame: Option<&CloseFrame>) -> LiveConnError {
+    let (code, reason) = match frame {
+        Some(f) => (u16::from(f.code), f.reason.as_str()),
+        None => (1005, ""),
+    };
+    LiveConnError::new(
+        LiveConnErrorKind::Closed { code },
+        format!("{context}: {}", gorilla_close_text(code, reason)),
+    )
+}
+
+/// Go `fmt.Errorf("<context>: %w", err)`: prefixes the text, keeps the kind, keeps `e` as source.
+pub fn wrap_conn_error(context: &str, e: LiveConnError) -> LiveConnError {
+    LiveConnError::new(e.kind, format!("{context}: {}", e.message)).with_source(e)
+}
+
+/// [`wrap_conn_error`] on a [`GeminiError`]; a non-live error becomes `Other`.
+fn wrap_live(context: &str, e: GeminiError) -> GeminiError {
+    GeminiError::Live(wrap_conn_error(context, into_conn_error(e)))
+}
+
+/// An unclassified live error (decode failures, invalid input, setup failures).
+pub(crate) fn live_other(message: impl Into<String>) -> GeminiError {
+    GeminiError::Live(LiveConnError::new(LiveConnErrorKind::Other, message))
+}
+
+/// The trait-level error: the classified error itself, or `Other` with the text.
+fn into_conn_error(e: GeminiError) -> LiveConnError {
+    match e {
+        GeminiError::Live(e) => e,
+        other => LiveConnError::new(LiveConnErrorKind::Other, other.to_string()).with_source(other),
+    }
+}
+
+/// Port of genai `Live.Connect`: dials the Live endpoint (through `HTTPS_PROXY`/`HTTP_PROXY`
+/// unless `NO_PROXY` or a loopback host says otherwise), sends the setup message and waits for
+/// `setupComplete`, which is buffered for the first receive.
 ///
 /// gadk deviation: the setup message is built before dialing, so an invalid configuration
 /// fails without opening a connection.
@@ -134,6 +217,27 @@ pub(crate) async fn connect(
     model_name: &str,
     cfg: &LiveConnectConfig,
 ) -> Result<LiveConnection, GeminiError> {
+    connect_with_env(resolved, model_name, cfg, &|k: &str| std::env::var(k).ok()).await
+}
+
+/// [`connect`] with an injectable environment lookup for proxy resolution (test seam).
+pub(crate) async fn connect_with_env(
+    resolved: &ResolvedConfig,
+    model_name: &str,
+    cfg: &LiveConnectConfig,
+    env: proxy::EnvLookup<'_>,
+) -> Result<LiveConnection, GeminiError> {
+    connect_with_timeout(resolved, model_name, cfg, env, HANDSHAKE_TIMEOUT).await
+}
+
+/// [`connect_with_env`] with an injectable dial and handshake timeout (test seam).
+pub(crate) async fn connect_with_timeout(
+    resolved: &ResolvedConfig,
+    model_name: &str,
+    cfg: &LiveConnectConfig,
+    env: proxy::EnvLookup<'_>,
+    handshake_timeout: Duration,
+) -> Result<LiveConnection, GeminiError> {
     let url = live_url(resolved)?;
     let model_full_name = model_full_name(resolved, model_name)?;
     let setup = messages::setup_message(resolved.backend, &model_full_name, cfg)?;
@@ -141,7 +245,7 @@ pub(crate) async fn connect(
     let mut request = url
         .as_str()
         .into_client_request()
-        .map_err(|e| live_err("invalid Live request", e))?;
+        .map_err(|e| live_other(format!("invalid Live request: {e}")))?;
     let headers = request.headers_mut();
     // genai mergeHeaders: the client headers, every value added.
     for (name, value) in &resolved.http_options.headers {
@@ -150,9 +254,46 @@ pub(crate) async fn connect(
     // `extend` replaces each auth header name once and keeps all of its values.
     headers.extend(auth_headers(&resolved.auth).await?);
 
-    let (ws, _) = tokio_tungstenite::connect_async(request)
+    // A dial failure is never a lost established connection: it is `Other`.
+    // gorilla DefaultDialer: Proxy = http.ProxyFromEnvironment, then a TCP (or CONNECT
+    // tunnel) dial; TLS for wss is layered on the same stream.
+    let proxy = proxy::proxy_for_with(&url, env);
+    if let Some(p) = &proxy {
+        // Host only: the proxy URL may carry credentials.
+        tracing::debug!(
+            proxy_host = p.host_str().unwrap_or_default(),
+            "dialing Live through a proxy"
+        );
+    }
+    // gorilla DefaultDialer.HandshakeTimeout bounds the dial, the proxy CONNECT, TLS and the
+    // WebSocket upgrade together, so a black-holed endpoint cannot park a (re)connect forever.
+    let handshake = async {
+        let tcp = proxy::dial(&url, proxy.as_ref()).await.map_err(|e| {
+            GeminiError::Live(LiveConnError::new(
+                LiveConnErrorKind::Other,
+                format!("Connect to {url} failed: {e}"),
+            ))
+        })?;
+        tokio_tungstenite::client_async_tls_with_config(request, tcp, None, None)
+            .await
+            .map_err(|e| {
+                GeminiError::Live(
+                    LiveConnError::new(
+                        LiveConnErrorKind::Other,
+                        format!("Connect to {url} failed: {e}"),
+                    )
+                    .with_source(e),
+                )
+            })
+    };
+    let (ws, _) = tokio::time::timeout(handshake_timeout, handshake)
         .await
-        .map_err(|e| live_err(&format!("Connect to {url} failed"), e))?;
+        .map_err(|_| {
+            GeminiError::Live(LiveConnError::new(
+                LiveConnErrorKind::Other,
+                format!("Connect to {url} failed: i/o timeout"),
+            ))
+        })??;
     let (sink, stream) = ws.split();
     let mut conn = LiveConnection {
         sink: tokio::sync::Mutex::new(sink),
@@ -167,25 +308,31 @@ pub(crate) async fn connect(
 
     if let Err(e) = conn.write(setup).await {
         let _ = conn.close().await;
-        return Err(live_err("failed to write LiveClientSetup", e));
+        return Err(live_other(format!(
+            "failed to write LiveClientSetup: {}",
+            into_conn_error(e)
+        )));
     }
     let backend = conn.backend;
     let setup_message = match conn.rx.get_mut().receive(backend).await {
         Ok(Some(msg)) => msg,
         Ok(None) => {
-            return Err(GeminiError::Live(
-                "failed to receive setup complete: connection closed".into(),
+            return Err(live_other(
+                "failed to receive setup complete: connection closed",
             ));
         }
         Err(e) => {
             let _ = conn.close().await;
-            return Err(live_err("failed to receive setup complete", e));
+            return Err(live_other(format!(
+                "failed to receive setup complete: {}",
+                into_conn_error(e)
+            )));
         }
     };
     if setup_message.setup_complete.is_none() {
         let _ = conn.close().await;
         let got = serde_json::to_string(&setup_message).unwrap_or_default();
-        return Err(GeminiError::Live(format!(
+        return Err(live_other(format!(
             "expected SetupComplete message, got: {got}"
         )));
     }
@@ -204,7 +351,7 @@ impl LiveConnection {
             .await
             .send(Message::text(text))
             .await
-            .map_err(|e| live_err("failed to send message", e))
+            .map_err(|e| GeminiError::Live(classify_ws_error("failed to send message", e)))
     }
 
     async fn send_client_content(&self, input: LiveClientContentInput) -> Result<(), GeminiError> {
@@ -254,7 +401,7 @@ impl LiveConnection {
             turn_complete: Some(turn_complete),
         })
         .await
-        .map_err(|e| live_err("failed to send history", e))
+        .map_err(|e| wrap_live("failed to send history", e))
     }
 
     /// Port of Go `SendContent`: function responses (when the first part is one) go as a
@@ -262,13 +409,13 @@ impl LiveConnection {
     /// realtime text; anything else as a complete client-content turn.
     pub async fn send_content(&self, content: Content) -> Result<(), GeminiError> {
         if content.parts.is_empty() {
-            return Err(GeminiError::Live("empty content".into()));
+            return Err(live_other("empty content"));
         }
         if let Some(responses) = messages::function_responses(&content) {
             return self
                 .send_tool_response(responses)
                 .await
-                .map_err(|e| live_err("failed to send tool response", e));
+                .map_err(|e| wrap_live("failed to send tool response", e));
         }
         if let [only] = content.parts.as_slice()
             && !only.text.is_empty()
@@ -282,14 +429,14 @@ impl LiveConnection {
                     ..Default::default()
                 })
                 .await
-                .map_err(|e| live_err("failed to send realtime text", e));
+                .map_err(|e| wrap_live("failed to send realtime text", e));
         }
         self.send_client_content(LiveClientContentInput {
             turns: vec![content],
             turn_complete: Some(true),
         })
         .await
-        .map_err(|e| live_err("failed to send content", e))
+        .map_err(|e| wrap_live("failed to send content", e))
     }
 
     /// Port of Go `SendRealtime`. Blobs go as `mediaChunks`, or for a gemini-3.1 model on
@@ -356,7 +503,8 @@ impl LiveConnection {
         self.write(messages::tool_response_message(&input)?).await
     }
 
-    /// Port of Go `Recv`: the next response. `None` when the connection is closed.
+    /// Port of Go `Recv`: the next response. `None` when the stream ended without a close
+    /// frame; a received close frame is an error with its code.
     ///
     /// Takes `&self` and locks only the read half, so it may be awaited while other tasks
     /// send on the same connection. Cancel-safe: dropping a pending `recv` loses no
@@ -379,6 +527,202 @@ impl LiveConnection {
             .await
             .send(Message::Close(None))
             .await
-            .map_err(|e| live_err("failed to close connection", e))
+            .map_err(|e| GeminiError::Live(classify_ws_error("failed to close connection", e)))
+    }
+}
+
+/// The model-agnostic trait (gadk-model) over the Gemini Live connection.
+#[async_trait]
+impl gadk_model::LiveConnection for LiveConnection {
+    async fn send_history(&self, history: &[Content]) -> Result<(), LiveConnError> {
+        LiveConnection::send_history(self, history)
+            .await
+            .map_err(into_conn_error)
+    }
+
+    async fn send_content(&self, content: Content) -> Result<(), LiveConnError> {
+        LiveConnection::send_content(self, content)
+            .await
+            .map_err(into_conn_error)
+    }
+
+    async fn send_realtime(&self, input: RealtimeInput) -> Result<(), LiveConnError> {
+        LiveConnection::send_realtime(self, input)
+            .await
+            .map_err(into_conn_error)
+    }
+
+    async fn recv(&self) -> Result<Option<LlmResponse>, LiveConnError> {
+        LiveConnection::recv(self).await.map_err(into_conn_error)
+    }
+
+    async fn close(&self) -> Result<(), LiveConnError> {
+        LiveConnection::close(self).await.map_err(into_conn_error)
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use std::error::Error;
+    use std::io;
+
+    use gadk_model::LiveConnErrorKind;
+    use tokio_tungstenite::tungstenite::Error as WsError;
+    use tokio_tungstenite::tungstenite::error::ProtocolError;
+    use tokio_tungstenite::tungstenite::protocol::CloseFrame;
+    use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
+
+    use super::{classify_ws_error, close_frame_error, gorilla_close_text, wrap_conn_error};
+
+    fn frame(code: u16, reason: &str) -> CloseFrame {
+        CloseFrame {
+            code: CloseCode::from(code),
+            reason: reason.into(),
+        }
+    }
+
+    #[test]
+    fn gorilla_close_text_matches_close_error_error() {
+        let cases = [
+            (1000, "", "websocket: close 1000 (normal)"),
+            (1001, "", "websocket: close 1001 (going away)"),
+            (
+                1002,
+                "fatal",
+                "websocket: close 1002 (protocol error): fatal",
+            ),
+            (1003, "", "websocket: close 1003 (unsupported data)"),
+            (1005, "", "websocket: close 1005 (no status)"),
+            (1006, "", "websocket: close 1006 (abnormal closure)"),
+            (1007, "", "websocket: close 1007 (invalid payload data)"),
+            (
+                1008,
+                "policy violation",
+                "websocket: close 1008 (policy violation): policy violation",
+            ),
+            (1009, "", "websocket: close 1009 (message too big)"),
+            (
+                1010,
+                "",
+                "websocket: close 1010 (mandatory extension missing)",
+            ),
+            (1011, "", "websocket: close 1011 (internal server error)"),
+            (1015, "", "websocket: close 1015 (TLS handshake error)"),
+            (1012, "", "websocket: close 1012"),
+            (4000, "app", "websocket: close 4000: app"),
+        ];
+        for (code, reason, want) in cases {
+            assert_eq!(gorilla_close_text(code, reason), want, "code {code}");
+        }
+    }
+
+    #[test]
+    fn classify_ws_error_kinds_and_resumability() {
+        let cases: Vec<(&str, WsError, LiveConnErrorKind, bool)> = vec![
+            (
+                "connection closed",
+                WsError::ConnectionClosed,
+                LiveConnErrorKind::ConnectionLost,
+                true,
+            ),
+            (
+                "already closed",
+                WsError::AlreadyClosed,
+                LiveConnErrorKind::ConnectionLost,
+                true,
+            ),
+            (
+                "io broken pipe",
+                WsError::Io(io::ErrorKind::BrokenPipe.into()),
+                LiveConnErrorKind::ConnectionLost,
+                true,
+            ),
+            (
+                "io reset",
+                WsError::Io(io::ErrorKind::ConnectionReset.into()),
+                LiveConnErrorKind::ConnectionLost,
+                true,
+            ),
+            (
+                "reset without closing handshake",
+                WsError::Protocol(ProtocolError::ResetWithoutClosingHandshake),
+                LiveConnErrorKind::ConnectionLost,
+                true,
+            ),
+            (
+                "other protocol error",
+                WsError::Protocol(ProtocolError::NonZeroReservedBits),
+                LiveConnErrorKind::Other,
+                false,
+            ),
+            (
+                "attack attempt",
+                WsError::AttackAttempt,
+                LiveConnErrorKind::Other,
+                false,
+            ),
+        ];
+        for (name, e, kind, resumable) in cases {
+            let err = classify_ws_error("failed to receive message", e);
+            assert_eq!(err.kind, kind, "{name}");
+            assert_eq!(err.is_resumable(), resumable, "{name}: {err}");
+            assert!(
+                err.message.starts_with("failed to receive message: "),
+                "{name}: {err}"
+            );
+            let source = err.source().expect("tungstenite error kept as source");
+            assert!(source.downcast_ref::<WsError>().is_some(), "{name}");
+        }
+    }
+
+    #[test]
+    fn close_frames_are_errors_with_their_code() {
+        let e = close_frame_error("failed to receive message", Some(&frame(1002, "fatal")));
+        assert_eq!(e.kind, LiveConnErrorKind::Closed { code: 1002 });
+        assert_eq!(
+            e.to_string(),
+            "failed to receive message: websocket: close 1002 (protocol error): fatal"
+        );
+        assert!(e.to_string().contains("1002"));
+        assert!(!e.is_resumable());
+
+        let e = close_frame_error(
+            "failed to receive message",
+            Some(&frame(1008, "policy violation")),
+        );
+        assert_eq!(e.kind, LiveConnErrorKind::Closed { code: 1008 });
+        assert!(e.is_resumable());
+
+        let e = close_frame_error(
+            "failed to receive message",
+            Some(&frame(1002, "error 1008")),
+        );
+        assert!(!e.is_resumable(), "1008 only in the reason must stay fatal");
+
+        let e = close_frame_error("failed to receive message", None);
+        assert_eq!(e.kind, LiveConnErrorKind::Closed { code: 1005 });
+        assert_eq!(
+            e.to_string(),
+            "failed to receive message: websocket: close 1005 (no status)"
+        );
+        assert!(!e.is_resumable());
+    }
+
+    #[test]
+    fn wrapping_keeps_kind_and_source() {
+        let inner = classify_ws_error(
+            "failed to send message",
+            WsError::Io(io::Error::from_raw_os_error(10053)),
+        );
+        let wrapped = wrap_conn_error("failed to send content", inner);
+        assert_eq!(wrapped.kind, LiveConnErrorKind::ConnectionLost);
+        assert!(
+            wrapped
+                .message
+                .starts_with("failed to send content: failed to send message: IO error: ")
+        );
+        assert!(wrapped.is_resumable());
+        assert!(wrapped.source().is_some());
     }
 }

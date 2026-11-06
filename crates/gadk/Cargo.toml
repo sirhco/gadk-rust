@@ -43,3 +43,15 @@ required-features = ["gemini"]
 
 [[example]]
 name = "workflow"
+
+[[example]]
+name = "bidi"
+required-features = ["gemini"]
+
+[[example]]
+name = "bidi_sequential"
+required-features = ["gemini"]
+
+[[example]]
+name = "bidi_streaming_tool"
+required-features = ["gemini"]

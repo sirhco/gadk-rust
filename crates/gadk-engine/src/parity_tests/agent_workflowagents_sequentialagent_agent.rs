@@ -15,27 +15,35 @@
 
 //! Port of Go agent/workflowagents/sequentialagent/agent_test.go.
 
+use std::any::Any;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::time::Duration;
 
+use async_trait::async_trait;
 use futures::stream::{self, BoxStream, StreamExt};
-use gadk_agent::{Agent, AgentConfig, RunConfig};
+use gadk_agent::{
+    Agent, AgentConfig, AgentError, AgentState, AgentType, EventStream, InvocationContext,
+    LiveAgent, LiveRequest, LiveSession, RunConfig,
+};
 use gadk_genai::{Content, ROLE_MODEL, ROLE_USER};
 use gadk_model::{Llm, LlmRequest, LlmResponse, ModelError};
 use gadk_platform::Platform;
 use gadk_session::{CreateRequest, Event, EventActions, InMemorySessionService, SessionService};
 use pretty_assertions::assert_eq;
 use serde_json::Map;
+use tokio::sync::mpsc;
 
 use crate::agents::sequential_agent::{self, SequentialAgentConfig};
+use crate::llm::state::reveal;
 use crate::llm::{LlmAgentConfig, agent as llm_agent};
 use crate::runner::{PluginConfig, RunOptions, Runner, RunnerConfig};
 
 /// Go FakeLLM: replies "hello <id>".
-struct FakeLlm {
-    id: usize,
-    calls: AtomicUsize,
+pub(super) struct FakeLlm {
+    pub(super) id: usize,
+    pub(super) calls: AtomicUsize,
 }
 
 impl Llm for FakeLlm {
@@ -82,7 +90,7 @@ impl Llm for FailingLlm {
 }
 
 /// Go newCustomAgent.
-fn new_custom_agent(id: usize) -> Arc<dyn Agent> {
+pub(super) fn new_custom_agent(id: usize) -> Arc<dyn Agent> {
     llm_agent::new(LlmAgentConfig {
         name: format!("custom_agent_{id}"),
         model: Some(Arc::new(FakeLlm {
@@ -95,7 +103,7 @@ fn new_custom_agent(id: usize) -> Arc<dyn Agent> {
 }
 
 /// Go newSequentialAgent.
-fn new_sequential_agent(sub_agents: Vec<Arc<dyn Agent>>, name: &str) -> Arc<dyn Agent> {
+pub(super) fn new_sequential_agent(sub_agents: Vec<Arc<dyn Agent>>, name: &str) -> Arc<dyn Agent> {
     sequential_agent::new(SequentialAgentConfig {
         agent: AgentConfig {
             name: name.into(),
@@ -327,11 +335,295 @@ async fn test_new_sequential_agent() {
     }
 }
 
-// parity: skipped TestSequentialAgent_RunLive_Injection: live mode (RunLive) is deferred to 1b-live
-// parity: skipped TestSequentialAgent_RunLive_NestedSequentialInjection: live mode (RunLive) is deferred to 1b-live
-// parity: skipped TestSequentialAgent_RunLive_NonLiveCompositeNotMutated: live mode (RunLive) is deferred to 1b-live
-// parity: skipped TestSequentialAgent_RunLive_SequentialOrchestration: live mode (RunLive) is deferred to 1b-live
-// parity: skipped TestSequentialAgent_RunLive_NestedSequentialOrchestration: live mode (RunLive) is deferred to 1b-live
+type RunLiveFn = Arc<
+    dyn Fn(InvocationContext) -> Result<(Arc<dyn LiveSession>, EventStream), AgentError>
+        + Send
+        + Sync,
+>;
+
+/// The LiveAgent half of Go mockLiveAgent: RunLive delegates to `run_live_fn`.
+struct FnLive(RunLiveFn);
+
+#[async_trait]
+impl LiveAgent for FnLive {
+    async fn run_live(
+        &self,
+        ctx: InvocationContext,
+    ) -> Result<(Arc<dyn LiveSession>, EventStream), AgentError> {
+        (self.0)(ctx)
+    }
+}
+
+/// Go mockLiveAgent{Agent: agent.New(Config{Name}), runLiveFn}: a custom agent whose
+/// `as_live()` is the closure.
+fn mock_live_agent(name: &str, run_live_fn: RunLiveFn) -> Arc<dyn Agent> {
+    gadk_agent::new_with_state(
+        AgentConfig {
+            name: name.into(),
+            ..Default::default()
+        },
+        AgentState {
+            agent_type: AgentType::CustomAgent,
+            config: None,
+            on_before_agent_callback_event: None,
+            live: Some(Arc::new(FnLive(run_live_fn))),
+        },
+    )
+    .unwrap()
+}
+
+/// Go dummyLiveSession: forwards every request to a channel and records Close.
+struct DummyLiveSession {
+    send_tx: mpsc::UnboundedSender<LiveRequest>,
+    closed: AtomicBool,
+}
+
+impl DummyLiveSession {
+    fn new() -> (Arc<DummyLiveSession>, mpsc::UnboundedReceiver<LiveRequest>) {
+        let (send_tx, rx) = mpsc::unbounded_channel();
+        (
+            Arc::new(DummyLiveSession {
+                send_tx,
+                closed: AtomicBool::new(false),
+            }),
+            rx,
+        )
+    }
+    fn closed(&self) -> bool {
+        self.closed.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait]
+impl LiveSession for DummyLiveSession {
+    async fn send(&self, req: LiveRequest) -> Result<(), AgentError> {
+        let _ = self.send_tx.send(req);
+        Ok(())
+    }
+    async fn close(&self) -> Result<(), AgentError> {
+        self.closed.store(true, Ordering::SeqCst);
+        Ok(())
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+/// A live agent whose session is `sess` and whose stream yields one event authored by `name`.
+fn one_event_live_agent(name: &'static str, sess: Arc<DummyLiveSession>) -> Arc<dyn Agent> {
+    mock_live_agent(
+        name,
+        Arc::new(move |ctx: InvocationContext| {
+            let mut ev = Event::new(ctx.platform(), ctx.invocation_id());
+            ev.author = name.to_string();
+            let s: EventStream = stream::iter(vec![Ok(ev)]).boxed();
+            Ok((sess.clone() as Arc<dyn LiveSession>, s))
+        }),
+    )
+}
+
+/// Go mockInvocationContext{agent, invocationID}.
+fn mock_ctx(agent: Arc<dyn Agent>, invocation_id: &str) -> InvocationContext {
+    InvocationContext::builder()
+        .agent(agent)
+        .invocation_id(invocation_id)
+        .build_invocation()
+}
+
+fn has_task_completed(agent: &Arc<dyn Agent>) -> bool {
+    reveal(&**agent)
+        .expect("an LLM agent")
+        .tools
+        .read()
+        .iter()
+        .any(|t| t.name() == "task_completed")
+}
+
+#[tokio::test]
+async fn test_sequential_agent_run_live_injection() {
+    let sub_agent1 = new_custom_agent(1);
+    let sub_agent2 = new_custom_agent(2);
+    let seq = sequential_agent::new(SequentialAgentConfig {
+        agent: AgentConfig {
+            name: "seq_agent".into(),
+            sub_agents: vec![sub_agent1.clone(), sub_agent2],
+            ..Default::default()
+        },
+    })
+    .unwrap();
+
+    // Before RunLive, sub-agents do not have the task_completed tool.
+    assert!(
+        !has_task_completed(&sub_agent1),
+        "sub-agent 1 already has task_completed tool before RunLive"
+    );
+
+    let live = seq
+        .as_live()
+        .expect("sequential agent does not implement RunLive");
+    // The injection happens before any sub-agent runs; the stream is never polled.
+    let _ = live.run_live(mock_ctx(seq.clone(), "test_id")).await;
+
+    assert!(
+        has_task_completed(&sub_agent1),
+        "sub-agent 1 does not have task_completed tool injected after RunLive"
+    );
+}
+
+#[tokio::test]
+async fn test_sequential_agent_run_live_nested_sequential_injection() {
+    let sub_agent_a = new_custom_agent(1);
+    let sub_agent_b = new_custom_agent(2);
+    let inner_seq = new_sequential_agent(vec![sub_agent_b.clone()], "inner_seq");
+    let outer_seq = new_sequential_agent(vec![sub_agent_a, inner_seq], "outer_seq");
+
+    let live = outer_seq
+        .as_live()
+        .expect("sequential agent does not implement RunLive");
+    let _ = live.run_live(mock_ctx(outer_seq.clone(), "test_id")).await;
+
+    assert!(
+        has_task_completed(&sub_agent_b),
+        "nested sub-agent B does not have task_completed tool injected after RunLive"
+    );
+}
+
+#[tokio::test]
+async fn test_sequential_agent_run_live_non_live_composite_not_mutated() {
+    let sub_agent_a = new_custom_agent(1);
+    let sub_agent_b = new_custom_agent(2);
+    // A composite agent that is not live-capable (a plain agent::new agent).
+    let non_live_composite = gadk_agent::agent::new(AgentConfig {
+        name: "non_live_composite".into(),
+        sub_agents: vec![sub_agent_b.clone()],
+        ..Default::default()
+    })
+    .unwrap();
+    assert!(non_live_composite.as_live().is_none());
+    let outer_seq = new_sequential_agent(vec![sub_agent_a, non_live_composite], "outer_seq");
+
+    let live = outer_seq
+        .as_live()
+        .expect("sequential agent does not implement RunLive");
+    let _ = live.run_live(mock_ctx(outer_seq.clone(), "test_id")).await;
+
+    assert!(
+        !has_task_completed(&sub_agent_b),
+        "nested sub-agent B inside non-live composite must not have task_completed tool injected"
+    );
+}
+
+/// Waits (up to 5 s, Go: the test context) for the request routed to a dummy session.
+async fn recv_routed(rx: &mut mpsc::UnboundedReceiver<LiveRequest>) -> LiveRequest {
+    tokio::time::timeout(Duration::from_secs(5), rx.recv())
+        .await
+        .expect("timeout waiting for the routed request")
+        .expect("channel closed")
+}
+
+fn text_request(text: &str) -> LiveRequest {
+    LiveRequest {
+        content: Some(Content::from_text(text, "")),
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn test_sequential_agent_run_live_sequential_orchestration() {
+    let (sub_sess1, mut rx1) = DummyLiveSession::new();
+    let (sub_sess2, mut rx2) = DummyLiveSession::new();
+    let live_agent1 = one_event_live_agent("sub_agent_1", sub_sess1.clone());
+    let live_agent2 = one_event_live_agent("sub_agent_2", sub_sess2.clone());
+    let seq_agent = new_sequential_agent(vec![live_agent1, live_agent2], "seq_agent");
+
+    let live = seq_agent
+        .as_live()
+        .expect("sequential agent does not implement RunLive");
+    let (sess, mut events) = live
+        .run_live(mock_ctx(seq_agent.clone(), "test_inv_id"))
+        .await
+        .unwrap_or_else(|e| panic!("RunLive failed: {e}"));
+
+    // Consume the first sub-agent event.
+    let ev1 = events.next().await.expect("expected first event").unwrap();
+    assert_eq!(ev1.author, "sub_agent_1");
+
+    // Now the sequential session routes to sub-session 1.
+    sess.send(text_request("to agent 1")).await.unwrap();
+    let got1 = recv_routed(&mut rx1).await;
+    assert_eq!(got1.content.unwrap().parts[0].text, "to agent 1");
+
+    // Sub-session 1 completes, transitioning to agent 2.
+    let ev2 = events.next().await.expect("expected second event").unwrap();
+    assert_eq!(ev2.author, "sub_agent_2");
+
+    sess.send(text_request("to agent 2")).await.unwrap();
+    let got2 = recv_routed(&mut rx2).await;
+    assert_eq!(got2.content.unwrap().parts[0].text, "to agent 2");
+
+    assert!(
+        sub_sess1.closed(),
+        "expected sub_agent_1 session to be closed after transition"
+    );
+
+    // Sub-session 2 completes.
+    assert!(
+        events.next().await.is_none(),
+        "expected iterator to be exhausted"
+    );
+    assert!(
+        sub_sess2.closed(),
+        "expected sub_agent_2 session to be closed at the end"
+    );
+}
+
+#[tokio::test]
+async fn test_sequential_agent_run_live_nested_sequential_orchestration() {
+    let (sub_sess1, mut rx1) = DummyLiveSession::new();
+    let (sub_sess2, mut rx2) = DummyLiveSession::new();
+    let live_agent1 = one_event_live_agent("sub_agent_1", sub_sess1.clone());
+    let live_agent2 = one_event_live_agent("sub_agent_2", sub_sess2.clone());
+    let inner_seq = new_sequential_agent(vec![live_agent2], "inner_seq");
+    let outer_seq = new_sequential_agent(vec![live_agent1, inner_seq], "outer_seq");
+
+    let live = outer_seq
+        .as_live()
+        .expect("sequential agent does not implement RunLive");
+    let (sess, mut events) = live
+        .run_live(mock_ctx(outer_seq.clone(), "test_inv_id"))
+        .await
+        .unwrap_or_else(|e| panic!("RunLive failed: {e}"));
+
+    let ev1 = events.next().await.expect("expected first event").unwrap();
+    assert_eq!(ev1.author, "sub_agent_1");
+
+    sess.send(text_request("to agent 1")).await.unwrap();
+    let got1 = recv_routed(&mut rx1).await;
+    assert_eq!(got1.content.unwrap().parts[0].text, "to agent 1");
+
+    // Sub-session 1 completes, transitioning to the nested inner_seq → agent 2.
+    let ev2 = events.next().await.expect("expected second event").unwrap();
+    assert_eq!(ev2.author, "sub_agent_2");
+
+    // Routed outer → inner sequential session → sub-session 2.
+    sess.send(text_request("to agent 2")).await.unwrap();
+    let got2 = recv_routed(&mut rx2).await;
+    assert_eq!(got2.content.unwrap().parts[0].text, "to agent 2");
+
+    assert!(
+        sub_sess1.closed(),
+        "expected sub_agent_1 session to be closed after transition"
+    );
+
+    assert!(
+        events.next().await.is_none(),
+        "expected iterator to be exhausted"
+    );
+    assert!(
+        sub_sess2.closed(),
+        "expected sub_agent_2 session to be closed at the end"
+    );
+}
 
 #[tokio::test]
 async fn test_sequential_agent_stops_on_sub_agent_error() {

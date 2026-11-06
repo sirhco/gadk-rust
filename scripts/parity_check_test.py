@@ -209,6 +209,65 @@ class OneBTest(unittest.TestCase):
             run("--ledger", "all", "--count")
 
 
+LEDGER_1B_LIVE = (
+    "# Parity ledger — sub-project 1b-live\n\n"
+    "<!-- in-scope:\nrunner/live_runner_test.go\n-->\n\n"
+    + pc.TABLE_HEADER + "\n" + pc.TABLE_SEP + "\n"
+)
+
+LIVE_TARGET = "crates/gadk-engine/src/parity_tests/runner_live_runner.rs"
+
+
+class OneBLiveTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        d = pathlib.Path(self._tmp.name)
+        self.go, self.repo = d / "go", d / "repo"
+        (self.go / "runner").mkdir(parents=True)
+        (self.go / "runner/live_runner_test.go").write_text(
+            "package runner\nfunc TestLive(t *testing.T) {}\nfunc TestLiveNil(t *testing.T) {}\n")
+        (self.repo / "crates/gadk-engine/src/parity_tests").mkdir(parents=True)
+        (self.repo / "docs/parity").mkdir(parents=True)
+        (self.repo / LIVE_TARGET).write_text(
+            "#[tokio::test]\nasync fn test_live() {}\n\n// parity: skipped TestLiveNil: no nil events in Rust\n")
+        self.ledger = self.repo / "docs/parity/1b-live.md"
+        self.ledger.write_text(LEDGER_1B_LIVE)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def run_cli(self, *args):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = pc.main(["--adk-go", str(self.go), "--repo", str(self.repo), *args])
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_count_files_generate_and_full_check(self):
+        self.assertEqual(self.run_cli("--ledger", "1b-live", "--count"), (0, "2\n", ""))
+        self.assertEqual(self.run_cli("--ledger", "1b-live", "--files", "runner/live_runner_test.go")[0], 0)
+        rc, _, err = self.run_cli("--ledger", "1b-live")
+        self.assertEqual(rc, 1)
+        self.assertIn("run: python3 scripts/parity-check --ledger 1b-live --generate", err)
+        self.assertEqual(self.run_cli("--ledger", "1b-live", "--generate")[0], 0)
+        self.assertEqual(self.run_cli("--ledger", "1b-live")[0], 0)
+        self.assertIn(
+            "| runner/live_runner_test.go | TestLive | ported | " + LIVE_TARGET + " | test_live |",
+            self.ledger.read_text())
+        self.assertIn(
+            "| runner/live_runner_test.go | TestLiveNil | skipped | " + LIVE_TARGET + " | no nil events in Rust |",
+            self.ledger.read_text())
+
+    def test_files_outside_the_live_in_scope_list_are_rejected(self):
+        errs = pc.check_1b(self.go, self.repo, self.ledger, files=["agent/agent_test.go"], name="1b-live")
+        self.assertEqual(errs, ["not in the 1b-live in-scope list: agent/agent_test.go"])
+
+    def test_files_and_generate_still_refuse_1a_and_all(self):
+        with self.assertRaises(SystemExit):
+            self.run_cli("--ledger", "1a", "--generate")
+        with self.assertRaises(SystemExit):
+            self.run_cli("--ledger", "all", "--files", "runner/live_runner_test.go")
+
+
 ADK_GO = pathlib.Path(os.environ.get("ADK_GO_DIR", HERE.parent.parent / "adk-go"))
 
 
@@ -216,9 +275,24 @@ ADK_GO = pathlib.Path(os.environ.get("ADK_GO_DIR", HERE.parent.parent / "adk-go"
 class RealTreeTest(unittest.TestCase):
     def test_1b_count_is_739(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/1b.md")
-        self.assertEqual((len(in_scope), len(deferred)), (137, 13))
+        self.assertEqual((len(in_scope), len(deferred)), (137, 7))
         self.assertEqual(pc.count(ADK_GO, in_scope), 739)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "1b"), [])
+        self.assertFalse(any("1b-live" in reason for reason in deferred.values()), deferred)
+
+    def test_1b_live_count_is_31(self):
+        in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/1b-live.md")
+        self.assertEqual(in_scope, [
+            "agent/workflowagents/sequentialagent/live_injection_test.go",
+            "internal/llminternal/audio_cache_manager_test.go",
+            "internal/llminternal/base_flow_live_test.go",
+            "internal/llminternal/live_injection_test.go",
+            "internal/llminternal/live_reconnect_test.go",
+            "runner/live_runner_test.go",
+        ])
+        self.assertEqual(deferred, {})
+        self.assertEqual(pc.count(ADK_GO, in_scope), 31)
+        self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "1b-live"), [])
 
     def test_1a_header_has_13_files(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/1a.md")

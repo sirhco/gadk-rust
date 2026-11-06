@@ -15,7 +15,10 @@
 
 //! Run configuration (port of Go `agent/run_config.go` and `internal/agent/runconfig`).
 
-/// Go `agent.StreamingMode` (`"none"` | `"sse"`); `Bidi` is live-only and out of scope.
+use crate::live::LiveRunConfig;
+
+/// Go `agent.StreamingMode` (`"none"` | `"sse"` | `"bidi"`); `Bidi` is set by the runner for live
+/// runs (Go `runconfig.StreamingModeBidi`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum StreamingMode {
     /// No streaming.
@@ -23,6 +26,8 @@ pub enum StreamingMode {
     None,
     /// Server-sent events streaming.
     Sse,
+    /// Bidirectional (live) streaming.
+    Bidi,
 }
 
 /// Configuration of one agent run (Go `agent.RunConfig`).
@@ -35,6 +40,8 @@ pub struct RunConfig {
     /// The maximum number of LLM calls per invocation; zero takes the default (or
     /// `ADK_MAX_LLM_CALLS`), a negative value is unlimited.
     pub max_llm_calls: i32,
+    /// The live run configuration (Go `runconfig.RunConfig.Live`); set only for live runs.
+    pub live: Option<LiveRunConfig>,
 }
 
 /// Port of Go `internal/agent/runconfig` (`limits.go`, `run_config.go`).

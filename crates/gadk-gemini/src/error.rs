@@ -27,9 +27,9 @@ pub enum GeminiError {
     /// Credentials could not be obtained.
     #[error("auth error: {0}")]
     Auth(String),
-    /// Live (bidi streaming) session failure.
+    /// Live (bidi streaming) session failure, classified for reconnects.
     #[error("live error: {0}")]
-    Live(String),
+    Live(gadk_model::LiveConnError),
     /// Error from the model layer.
     #[error(transparent)]
     Model(#[from] ModelError),

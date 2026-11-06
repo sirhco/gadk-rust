@@ -26,7 +26,8 @@ use std::{
 use futures::{StreamExt, future::BoxFuture};
 use gadk_agent::{
     AfterToolCallback, AgentError, BeforeToolCallback, Context, ContextDelta, InvocationContext,
-    OnToolErrorCallback, REQUEST_CONFIRMATION_FUNCTION_CALL_NAME, Tool, ToolError,
+    LiveRequest, LiveSession, OnToolErrorCallback, REQUEST_CONFIRMATION_FUNCTION_CALL_NAME, Tool,
+    ToolError,
 };
 use gadk_genai::{Content, FunctionCall, FunctionResponse, Part};
 use gadk_model::LlmResponse;
@@ -35,7 +36,7 @@ use serde_json::{Map, Value};
 use tracing::Instrument;
 
 use crate::{
-    llm::flow::Flow,
+    llm::{flow::Flow, live::session::LiveSessionImpl},
     telemetry::execute_tool_span,
     tool::utils::{function_calls, generate_function_call_id},
     workflow::route::go_quote,
@@ -85,6 +86,57 @@ pub(crate) async fn handle_function_calls_with(
     filters: Option<&HashSet<String>>,
     confirmations: Option<&HashMap<String, ToolConfirmation>>,
 ) -> Result<Option<Event>, AgentError> {
+    handle_function_calls_inner(
+        ctx,
+        flow,
+        tools,
+        function_call_event,
+        filters,
+        confirmations,
+        None,
+    )
+    .await
+}
+
+/// Port of Go handleFunctionCalls with its `liveSess` argument set (base_flow.go:1330): the live
+/// streaming-tool and `stop_streaming` branches use `live`. No filters, no confirmations (Go's live
+/// flow passes nil).
+pub(crate) async fn handle_function_calls_live(
+    ctx: &InvocationContext,
+    flow: &Flow,
+    tools: &HashMap<String, Arc<dyn Tool>>,
+    function_call_event: &Event,
+    live: Arc<dyn LiveSession>,
+) -> Result<Option<Event>, AgentError> {
+    handle_function_calls_inner(
+        ctx,
+        flow,
+        tools,
+        function_call_event,
+        None,
+        None,
+        Some(live),
+    )
+    .await
+}
+
+/// Port of base_flow.go:1330 `(*Flow).handleFunctionCalls`. Go takes the `*model.LLMResponse`;
+/// Rust takes the event carrying it (C5 D5 signature). `filters` (adk-python's call-ID filter; Go
+/// has a TODO) keeps only calls whose ID is in the set. `live` is Go's `liveSess` argument (`None`
+/// outside live mode).
+///
+/// Every call runs as one task on the platform's task runner (Go `platform.RunTasks`); dropping
+/// the returned future aborts the tool tasks still running (a live streaming tool's spawned task
+/// is not one of them: it ends on its cancellation token).
+async fn handle_function_calls_inner(
+    ctx: &InvocationContext,
+    flow: &Flow,
+    tools: &HashMap<String, Arc<dyn Tool>>,
+    function_call_event: &Event,
+    filters: Option<&HashSet<String>>,
+    confirmations: Option<&HashMap<String, ToolConfirmation>>,
+    live: Option<Arc<dyn LiveSession>>,
+) -> Result<Option<Event>, AgentError> {
     let calls: Vec<FunctionCall> = function_calls(function_call_event.response.content.as_ref())
         .into_iter()
         .filter(|fc| filters.is_none_or(|f| f.contains(&fc.id)))
@@ -106,12 +158,14 @@ pub(crate) async fn handle_function_calls_with(
             None => execute_tool_span(&fc.name),
         };
         let (ctx, cbs, slots, names) = (ctx.clone(), cbs.clone(), slots.clone(), names.clone());
+        let live = live.clone();
         let tool = tools.get(&fc.name).cloned();
         let confirmation = confirmations.and_then(|m| m.get(&fc.id).cloned());
         let call_span = span.clone();
         tasks.push(Box::pin(
             async move {
-                let ev = run_one_call(ctx, cbs, tool, fc, confirmation, names, call_span).await;
+                let ev =
+                    run_one_call(ctx, cbs, tool, fc, confirmation, names, live, call_span).await;
                 slots.lock()[i] = ev;
             }
             .instrument(span),
@@ -127,6 +181,7 @@ pub(crate) async fn handle_function_calls_with(
 }
 
 /// The body of Go's per-call task closure (base_flow.go:1350-1525).
+#[allow(clippy::too_many_arguments)]
 async fn run_one_call(
     ctx: InvocationContext,
     cbs: ToolCallbacks,
@@ -134,6 +189,7 @@ async fn run_one_call(
     fc: FunctionCall,
     confirmation: Option<ToolConfirmation>,
     names: Arc<Vec<String>>,
+    live: Option<Arc<dyn LiveSession>>,
     span: tracing::Span,
 ) -> Option<Event> {
     // Go: agent.NewToolContext(toolCallCtx, fnCall.ID, &session.EventActions{StateDelta: {}}, confirmation).
@@ -148,26 +204,40 @@ async fn run_one_call(
     });
 
     let result: Option<Map<String, Value>> = if fc.name == "stop_streaming" {
-        // Go reaches this branch whenever the name matches; with no live session it always
-        // reports "No active…".
+        // Go reaches this branch whenever the name matches, before the tool lookup. Without a
+        // live session (or with one that is not a LiveSessionImpl) nothing can be stopped.
+        // Go: funcToStop, _ := fnCall.Args["function_name"].(string)
         let func_to_stop = fc
             .args
             .get("function_name")
             .and_then(Value::as_str)
             .unwrap_or("");
+        let stopped = live
+            .as_ref()
+            .and_then(|l| l.as_any().downcast_ref::<LiveSessionImpl>())
+            .is_some_and(|s| s.cancel_all_streaming_tools(func_to_stop));
+        let status = if stopped {
+            format!("Successfully stopped all running instances of {func_to_stop}")
+        } else {
+            format!("No active streaming function named {func_to_stop} found")
+        };
         Some(Map::from_iter([(
             "status".to_owned(),
-            Value::String(format!(
-                "No active streaming function named {func_to_stop} found"
-            )),
+            Value::String(status),
         )]))
     } else {
         match &tool {
             None => Some(not_found(&cbs, &tool_ctx, &fc, &names).await),
             // Go checks StreamingFunctionTool before FunctionTool. Callbacks do not run here.
-            Some(t) if t.as_streaming().is_some() => {
-                Some(run_streaming(t.as_ref(), tool_ctx.clone(), &fc.args).await)
-            }
+            Some(t) if t.as_streaming().is_some() => match &live {
+                Some(live) => Some(start_live_streaming(
+                    t.clone(),
+                    &tool_ctx,
+                    &fc,
+                    live.clone(),
+                )),
+                None => Some(run_streaming(t.as_ref(), tool_ctx.clone(), &fc.args).await),
+            },
             Some(t) if t.as_runnable().is_none() => {
                 Some(not_found(&cbs, &tool_ctx, &fc, &names).await)
             }
@@ -256,6 +326,91 @@ async fn run_streaming(
         }
     }
     Map::from_iter([("result".to_owned(), Value::String(out))])
+}
+
+/// Go streaming branch with a live session (base_flow.go:1383-1426): answers at once with the
+/// pending status and streams in a spawned task that outlives the call. Each chunk goes back to the
+/// model as user content through `live.send`. The task stops on cancellation (`stop_streaming`,
+/// session teardown, or the invocation's token) and unregisters before cancelling its scope.
+fn start_live_streaming(
+    tool: Arc<dyn Tool>,
+    tool_ctx: &Context,
+    fc: &FunctionCall,
+    live: Arc<dyn LiveSession>,
+) -> Map<String, Value> {
+    let Some(st) = tool.as_streaming() else {
+        return Map::new();
+    };
+    // Go: cancelCtx, cancel := toolCtx.WithAgentCancel()
+    let (cancel_ctx, cancel_guard) = tool_ctx.with_agent_cancel();
+    let token = cancel_ctx.cancellation_token().clone();
+    let name = tool.name().to_owned();
+    let call_id = fc.id.clone();
+    let session = live.as_any().downcast_ref::<LiveSessionImpl>();
+    if let Some(s) = session {
+        s.register_streaming_tool(&name, &call_id, token.clone());
+        // R9: a teardown that already drained the registry (dropping the event stream aborts the
+        // session task while this tool task may still be mid-poll on another worker) would never
+        // cancel this entry. Teardown cancels `done` before taking the registry lock to drain, so
+        // seeing `done` cancelled here means the drain may have missed us: cancel ourselves.
+        if s.done().is_cancelled() {
+            token.cancel();
+        }
+    }
+    let task_guard = session.map(|s| s.probe().task_guard());
+    let mut stream = st.run_stream(cancel_ctx, Value::Object(fc.args.clone()));
+    tokio::spawn(async move {
+        let _task_guard = task_guard;
+        loop {
+            let next = tokio::select! {
+                biased;
+                _ = token.cancelled() => break,
+                next = stream.next() => next,
+            };
+            let Some(item) = next else { break };
+            if token.is_cancelled() {
+                break;
+            }
+            let chunk = match item {
+                Ok(chunk) => chunk,
+                Err(e) => {
+                    tracing::warn!(tool = %name, error = %e, "error in streaming tool");
+                    break;
+                }
+            };
+            let content = Content {
+                role: "user".into(),
+                parts: vec![Part::from_text(format!(
+                    "Function {name} returned: {chunk}"
+                ))],
+            };
+            let req = LiveRequest {
+                content: Some(content),
+                realtime_input: None,
+            };
+            let sent = tokio::select! {
+                biased;
+                _ = token.cancelled() => break,
+                sent = live.send(req) => sent,
+            };
+            if let Err(e) = sent {
+                tracing::warn!(tool = %name, error = %e, "failed to send content from streaming tool");
+                break;
+            }
+        }
+        drop(stream);
+        // Go defer order: UnregisterStreamingTool, then cancel().
+        if let Some(s) = live.as_any().downcast_ref::<LiveSessionImpl>() {
+            s.unregister_streaming_tool(&name, &call_id);
+        }
+        drop(cancel_guard);
+    });
+    Map::from_iter([(
+        "status".to_owned(),
+        Value::String(
+            "The function is running asynchronously and the results are pending.".to_owned(),
+        ),
+    )])
 }
 
 /// Go: `newToolNotFoundError` routed through the on-tool-error callbacks with a `fakeTool`.

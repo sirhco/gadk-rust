@@ -21,11 +21,39 @@ use gadk_agent::{Agent, AgentState, AgentType, Tool};
 
 use crate::llm::LlmAgentConfig;
 
+/// Port of Go internal/llminternal/agent.go `LiveModeToolInjection`: allows one successful
+/// live-mode tool injection per agent. Concurrent callers wait for the injection to finish; a
+/// panicking injection unwinds through the guard with the flag still false, so a later caller
+/// retries (`parking_lot` does not poison). `inject` must not re-enter `do_once` on the same
+/// latch.
+#[derive(Debug, Default)]
+pub(crate) struct LiveModeToolInjection {
+    done: parking_lot::Mutex<bool>,
+}
+
+impl LiveModeToolInjection {
+    /// Go `Do`: runs `inject` at most once successfully, holding the lock while it runs.
+    pub(crate) fn do_once(&self, inject: impl FnOnce()) {
+        let mut done = self.done.lock();
+        if *done {
+            return;
+        }
+        inject();
+        *done = true;
+    }
+}
+
 /// Port of Go llminternal.State: the LlmAgent's state, stored as `AgentState.config`.
 pub(crate) struct LlmAgentState {
     pub(crate) cfg: LlmAgentConfig,
     /// `cfg.tools` plus the task tools installed for sub-agents (Go appends to `State.Tools`).
     pub(crate) tools: parking_lot::RwLock<Vec<Arc<dyn Tool>>>,
+    /// Go `State.LiveModeInjection`: guards the single live-mode tool injection; its lifetime
+    /// follows the agent.
+    pub(crate) live_injection: LiveModeToolInjection,
+    /// What Go appends to `State.Instruction` at run time (the live `task_completed` suffix). Kept
+    /// apart from the immutable `cfg.instruction`; [`LlmAgentState::instruction`] joins them.
+    pub(crate) instruction_suffix: parking_lot::RwLock<String>,
 }
 
 impl LlmAgentState {
@@ -35,7 +63,18 @@ impl LlmAgentState {
         Self {
             cfg,
             tools: parking_lot::RwLock::new(tools),
+            live_injection: LiveModeToolInjection::default(),
+            instruction_suffix: parking_lot::RwLock::new(String::new()),
         }
+    }
+
+    /// Go `State.Instruction`: the configured instruction plus whatever was appended to it.
+    pub(crate) fn instruction(&self) -> String {
+        let suffix = self.instruction_suffix.read();
+        if suffix.is_empty() {
+            return self.cfg.instruction.clone();
+        }
+        format!("{}{}", self.cfg.instruction, suffix.as_str())
     }
 
     /// Snapshot of the current tool list (no lock escapes).
@@ -47,6 +86,16 @@ impl LlmAgentState {
 /// Port of Go llminternal.Reveal: the LlmAgent state of `agent`, if it is an LlmAgent.
 pub(crate) fn reveal(agent: &dyn Agent) -> Option<&LlmAgentState> {
     reveal_state(agent.agent_state())
+}
+
+/// Owned form of [`reveal`]: the agent's `LlmAgentState` behind its `Arc`, for streams that
+/// outlive the borrow of the agent.
+pub(crate) fn reveal_arc(agent: &dyn Agent) -> Option<Arc<LlmAgentState>> {
+    let state = agent.agent_state();
+    if state.agent_type != AgentType::LlmAgent {
+        return None;
+    }
+    state.config.clone()?.downcast::<LlmAgentState>().ok()
 }
 
 /// State-level variant of [`reveal`], used where only an `AgentState` is at hand (mode bindings,

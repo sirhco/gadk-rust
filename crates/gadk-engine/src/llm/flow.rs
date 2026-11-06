@@ -36,6 +36,7 @@ use serde_json::{Map, Value};
 use crate::{
     llm::{
         functions::{generate_request_confirmation_event, handle_function_calls},
+        live::reconnect::LiveReconnectPolicy,
         processors::{
             output_schema::{
                 create_final_model_response_event, retrieve_structured_model_response,
@@ -82,6 +83,9 @@ pub(crate) struct Flow {
     pub(crate) before_tool_callbacks: Vec<BeforeToolCallback>,
     pub(crate) after_tool_callbacks: Vec<AfterToolCallback>,
     pub(crate) on_tool_error_callbacks: Vec<OnToolErrorCallback>,
+    /// Go `Flow.reconnect`: bounds `run_live`'s reconnect attempts. `None` means the defaults;
+    /// only tests set it, to shrink the delays.
+    pub(crate) live_reconnect: Option<LiveReconnectPolicy>,
 }
 
 /// Port of base_flow.go maxConsecutiveThoughtOnlyTurns: a safety net against a model that only
@@ -523,7 +527,7 @@ fn finalize_model_response_event(
 
 /// Port of base_flow.go:1204 findLongRunningFunctionCallIDs: IDs of calls (non-empty ID) to
 /// long-running tools, deduplicated. Go collects a map (random order); call order here.
-fn find_long_running_function_call_ids(
+pub(crate) fn find_long_running_function_call_ids(
     c: Option<&Content>,
     tools: &HashMap<String, Arc<dyn Tool>>,
 ) -> Vec<String> {

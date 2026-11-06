@@ -32,6 +32,7 @@ fn state(mode: Mode) -> AgentState {
             ..Default::default()
         }))),
         on_before_agent_callback_event: None,
+        live: None,
     }
 }
 
