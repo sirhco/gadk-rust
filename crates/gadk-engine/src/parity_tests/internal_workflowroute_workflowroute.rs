@@ -18,6 +18,7 @@
 use std::sync::Arc;
 
 use crate::error::{WorkflowError, WorkflowErrorKind};
+use crate::workflow::node::same_node;
 use crate::workflow::node::testing::{TestNode, test_node};
 use crate::workflow::route::{
     OutgoingSummary, RouteKind, RouteValue, register_route_validator, validate_outgoing,
@@ -27,14 +28,16 @@ use crate::workflow::{BaseNode, Node, NodeConfig};
 #[test]
 fn test_register_and_validate() {
     // Go's local `targetNode` type: one node, matched by pointer identity, so this validator cannot
-    // affect any other test sharing the global registry (as Go's private type cannot).
+    // affect any other test sharing the global registry (as Go's private type cannot). The
+    // validator owns a clone of the Arc: the registry is process-global and outlives this test, so
+    // the node's allocation must stay alive too, or a later test's node allocated at the freed
+    // address would be mistaken for `target`.
     let target: Arc<dyn Node> = Arc::new(TestNode {
         base: BaseNode::new("target", "", NodeConfig::default()),
     });
-    let target_ptr = Arc::as_ptr(&target).cast::<()>() as usize;
+    let held = Arc::clone(&target);
     register_route_validator(Arc::new(move |node: &dyn Node, out: &OutgoingSummary| {
-        let is_target = (node as *const dyn Node).cast::<()>() as usize == target_ptr;
-        if is_target && !out.routes.is_empty() {
+        if same_node(node, held.as_ref()) && !out.routes.is_empty() {
             return Err(WorkflowError::new(
                 WorkflowErrorKind::Other,
                 "bad outgoing route",
