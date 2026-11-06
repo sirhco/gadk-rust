@@ -93,10 +93,13 @@ async fn append_agent_instructions(
         append_instructions(req, &[instruction.as_str()]);
         return Ok(());
     }
-    if state.cfg.instruction.is_empty() {
+    // Go State.Instruction: cfg.instruction plus any live suffix; the empty check and state
+    // injection run on the combined string (instruction_processor.go:96-102).
+    let instruction = state.instruction();
+    if instruction.is_empty() {
         return Ok(());
     }
-    let inst = inject_session_state(ctx, &state.cfg.instruction)
+    let inst = inject_session_state(ctx, &instruction)
         .await
         .map_err(|e| wrap_err("failed to inject session state into instruction", e))?;
     append_instructions(req, &[inst.as_str()]);
@@ -282,5 +285,94 @@ mod tests {
         assert!(!is_valid_state_name("bad:name"));
         assert!(!is_valid_state_name("a:b:c"));
         assert!(!is_valid_state_name(""));
+    }
+
+    use std::sync::Arc;
+
+    use gadk_model::LlmRequest;
+
+    use crate::llm::flow::Flow;
+    use crate::llm::state::reveal;
+    use crate::llm::{InstructionProvider, LlmAgentConfig, agent as llm_agent};
+
+    /// The system-instruction text the processor builds for `agent` over a session with `x = "X"`.
+    async fn system_instruction_for(agent: Arc<dyn gadk_agent::Agent>) -> String {
+        let svc = InMemorySessionService::new();
+        let sess = svc
+            .create(CreateRequest {
+                app_name: "a".into(),
+                user_id: "u".into(),
+                session_id: Some("s".into()),
+                state: json!({"x": "X"}).as_object().cloned(),
+            })
+            .await
+            .unwrap();
+        let ctx = InvocationContext::builder()
+            .session(sess)
+            .agent(agent)
+            .build_invocation();
+        let mut req = LlmRequest::default();
+        instructions_request_processor(&ctx, &mut req, &Flow::default())
+            .await
+            .unwrap();
+        req.config
+            .and_then(|c| c.system_instruction)
+            .map(|si| si.parts.iter().map(|p| p.text.as_str()).collect::<String>())
+            .unwrap_or_default()
+    }
+
+    /// Go appends the live suffix to State.Instruction, and appendInstructions runs the empty check
+    /// and InjectSessionState on the combined string.
+    #[tokio::test]
+    async fn live_instruction_suffix_is_part_of_the_templated_instruction() {
+        let a = llm_agent::new(LlmAgentConfig {
+            name: "a".into(),
+            instruction: "Hello".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        reveal(&*a)
+            .unwrap()
+            .instruction_suffix
+            .write()
+            .push_str("\nvalue {x}");
+        assert_eq!(system_instruction_for(a).await, "Hello\nvalue X");
+    }
+
+    /// An empty instruction with a suffix is not empty (Go: "" + suffix).
+    #[tokio::test]
+    async fn live_instruction_suffix_alone_is_appended() {
+        let a = llm_agent::new(LlmAgentConfig {
+            name: "a".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        reveal(&*a)
+            .unwrap()
+            .instruction_suffix
+            .write()
+            .push_str("\nsuffix");
+        assert_eq!(system_instruction_for(a).await, "\nsuffix");
+    }
+
+    /// Go appendInstructions uses the provider's output alone; State.Instruction (and so the suffix)
+    /// is ignored.
+    #[tokio::test]
+    async fn live_instruction_suffix_is_ignored_with_an_instruction_provider() {
+        let provider: InstructionProvider =
+            Arc::new(|_ctx| Box::pin(async { Ok::<_, AgentError>("from provider".to_string()) }));
+        let a = llm_agent::new(LlmAgentConfig {
+            name: "a".into(),
+            instruction: "Hello".into(),
+            instruction_provider: Some(provider),
+            ..Default::default()
+        })
+        .unwrap();
+        reveal(&*a)
+            .unwrap()
+            .instruction_suffix
+            .write()
+            .push_str("\nsuffix");
+        assert_eq!(system_instruction_for(a).await, "from provider");
     }
 }

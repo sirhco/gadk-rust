@@ -54,6 +54,9 @@ pub(crate) struct LlmAgentState {
     /// follows the agent.
     #[allow(dead_code)] // consumed by SequentialLive (Task 10); removed by Task 12
     pub(crate) live_injection: LiveModeToolInjection,
+    /// What Go appends to `State.Instruction` at run time (the live `task_completed` suffix). Kept
+    /// apart from the immutable `cfg.instruction`; [`LlmAgentState::instruction`] joins them.
+    pub(crate) instruction_suffix: parking_lot::RwLock<String>,
 }
 
 impl LlmAgentState {
@@ -64,7 +67,17 @@ impl LlmAgentState {
             cfg,
             tools: parking_lot::RwLock::new(tools),
             live_injection: LiveModeToolInjection::default(),
+            instruction_suffix: parking_lot::RwLock::new(String::new()),
         }
+    }
+
+    /// Go `State.Instruction`: the configured instruction plus whatever was appended to it.
+    pub(crate) fn instruction(&self) -> String {
+        let suffix = self.instruction_suffix.read();
+        if suffix.is_empty() {
+            return self.cfg.instruction.clone();
+        }
+        format!("{}{}", self.cfg.instruction, suffix.as_str())
     }
 
     /// Snapshot of the current tool list (no lock escapes).
@@ -76,6 +89,16 @@ impl LlmAgentState {
 /// Port of Go llminternal.Reveal: the LlmAgent state of `agent`, if it is an LlmAgent.
 pub(crate) fn reveal(agent: &dyn Agent) -> Option<&LlmAgentState> {
     reveal_state(agent.agent_state())
+}
+
+/// Owned form of [`reveal`]: the agent's `LlmAgentState` behind its `Arc`, for streams that
+/// outlive the borrow of the agent.
+pub(crate) fn reveal_arc(agent: &dyn Agent) -> Option<Arc<LlmAgentState>> {
+    let state = agent.agent_state();
+    if state.agent_type != AgentType::LlmAgent {
+        return None;
+    }
+    state.config.clone()?.downcast::<LlmAgentState>().ok()
 }
 
 /// State-level variant of [`reveal`], used where only an `AgentState` is at hand (mode bindings,

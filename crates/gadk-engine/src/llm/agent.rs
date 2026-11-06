@@ -13,20 +13,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go agent/llmagent/llmagent.go (New, installTaskTools, run, maybeSaveOutputToState)
-//! and the wrappedSession type of agent/llmagent/llm_agent_wrapper.go.
+//! Port of ADK-Go agent/llmagent/llmagent.go (New, installTaskTools, run, RunLive,
+//! maybeSaveOutputToState) and the wrappedSession type of agent/llmagent/llm_agent_wrapper.go.
 //!
-//! `RunLive` is out of scope (1b-live). `FindAgent` is covered by the `Agent::find_agent`
-//! provided method; `RunNode` is replaced by explicit `run_llm_agent_as_node` calls.
+//! `RunLive` is [`LlmLive`], installed as `AgentState.live`. `FindAgent` is covered by the
+//! `Agent::find_agent` provided method; `RunNode` is replaced by explicit `run_llm_agent_as_node` calls.
 
 use std::any::Any;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use gadk_agent::{
-    Agent, AgentConfig, AgentError, AgentRunFn, AgentState, AgentType, EventStream,
-    InvocationContext, Mode,
+    Agent, AgentConfig, AgentError, AgentRunFn, AgentState, AgentType, ContextDelta, EventStream,
+    InvocationContext, LiveAgent, LiveSession, Mode,
 };
 use gadk_session::{Event, Session, State};
 use serde_json::{Map, Value};
@@ -35,7 +36,7 @@ use crate::llm::config::LlmAgentConfig;
 use crate::llm::flow::Flow;
 use crate::llm::mode::resolve_mode;
 use crate::llm::processors::{default_request_processors, default_response_processors};
-use crate::llm::state::{LlmAgentState, reveal};
+use crate::llm::state::{LlmAgentState, reveal, reveal_arc};
 use crate::tool::finish_task::FinishTaskTool;
 use crate::tool::single_turn::SingleTurnTool;
 use crate::tool::task_agent_tool::TaskAgentTool;
@@ -60,7 +61,8 @@ pub fn new(cfg: LlmAgentConfig) -> Result<Arc<dyn Agent>, AgentError> {
         on_before_agent_callback_event: Some(Arc::new(move |ev: &mut Event| {
             maybe_save_output_to_state(&hook_state, ev)
         })),
-        live: None,
+        // Go: *llmAgent has a RunLive method (the runner's liveAgent assertion succeeds).
+        live: Some(Arc::new(LlmLive)),
     };
 
     let agent = gadk_agent::agent::new_with_state(
@@ -116,14 +118,11 @@ fn install_task_tools(agent: &Arc<dyn Agent>, state: &LlmAgentState) -> Result<(
     Ok(())
 }
 
-/// Port of Go agent/llmagent/llmagent.go (*llmAgent).run.
-///
-/// Go first rebinds `ctx`'s agent to itself; `CustomAgent::run` (built by `new_with_state`)
-/// already does that before calling this closure, so the rebinding is omitted. `Flow::tools`
-/// stays at its default: Go never sets `Flow.Tools` here (the tools processor fills it).
-fn run_flow(state: Arc<LlmAgentState>, ctx: InvocationContext) -> EventStream {
+/// The flow Go builds in both `run` and `RunLive` (llmagent.go:489-499). `Flow::tools` stays at
+/// its default: the tools processor fills it.
+fn build_flow(state: &LlmAgentState) -> Arc<Flow> {
     let cfg = &state.cfg;
-    let flow = Arc::new(Flow {
+    Arc::new(Flow {
         model: cfg.model.clone(),
         request_processors: default_request_processors(),
         response_processors: default_response_processors(),
@@ -134,13 +133,63 @@ fn run_flow(state: Arc<LlmAgentState>, ctx: InvocationContext) -> EventStream {
         after_tool_callbacks: cfg.after_tool_callbacks.clone(),
         on_tool_error_callbacks: cfg.on_tool_error_callbacks.clone(),
         ..Default::default()
-    });
+    })
+}
+
+/// Port of Go agent/llmagent/llmagent.go (*llmAgent).run.
+///
+/// Go first rebinds `ctx`'s agent to itself; `CustomAgent::run` (built by `new_with_state`)
+/// already does that before calling this closure, so the rebinding is omitted.
+fn run_flow(state: Arc<LlmAgentState>, ctx: InvocationContext) -> EventStream {
+    let flow = build_flow(&state);
     Box::pin(flow.run(ctx).map(move |item| {
         item.map(|mut ev| {
             maybe_save_output_to_state(&state, &mut ev);
             ev
         })
     }))
+}
+
+/// Go's `(*llmAgent).RunLive`, installed as `AgentState.live` by [`new`]. Stateless: it resolves
+/// the agent from `ctx.agent()` (the caller passes a context whose current agent is this agent),
+/// so it holds no reference to the agent and creates no cycle.
+pub(crate) struct LlmLive;
+
+#[async_trait]
+impl LiveAgent for LlmLive {
+    /// Port of Go agent/llmagent/llmagent.go:476 (*llmAgent).RunLive: a fresh invocation context
+    /// (Go icontext.NewInvocationContext), the agent's flow in live mode, and the output_key
+    /// save on every event that is not an error.
+    async fn run_live(
+        &self,
+        ctx: InvocationContext,
+    ) -> Result<(Arc<dyn LiveSession>, EventStream), AgentError> {
+        let agent = ctx.agent();
+        let state = reveal_arc(&*agent).ok_or_else(|| {
+            AgentError::Config(format!(
+                "agent {} is not an LlmAgent",
+                go_quote(agent.name())
+            ))
+        })?;
+        // Go NewInvocationContext{Artifacts, Memory, Session, Branch, IsolationScope, Agent,
+        // UserContent, RunConfig, InvocationID}: `fresh_invocation` resets the isolation scope,
+        // so it is set back to the caller's; the other params carry over unchanged.
+        let ictx = ctx.with_delta(ContextDelta {
+            agent: Some(Arc::clone(&agent)),
+            isolation_scope: Some(ctx.isolation_scope()),
+            fresh_invocation: true,
+            ..Default::default()
+        });
+        let flow = build_flow(&state);
+        let (sess, inner) = crate::llm::live::flow::run_live(flow, ictx)?;
+        let wrapped = inner.map(move |item| {
+            item.map(|mut ev| {
+                maybe_save_output_to_state(&state, &mut ev);
+                ev
+            })
+        });
+        Ok((sess, Box::pin(wrapped)))
+    }
 }
 
 /// Port of Go agent/llmagent/llmagent.go (*llmAgent).maybeSaveOutputToState: saves the model
@@ -375,5 +424,118 @@ mod tests {
             Some(&json!("hello"))
         );
         assert_eq!(model.requests().len(), 1);
+    }
+
+    use futures::StreamExt;
+    use gadk_agent::{LiveRunConfig, RunConfig, StreamingMode};
+
+    use crate::llm::live::test_server::ScriptedLiveLlm;
+
+    fn live_ctx(agent: Arc<dyn Agent>) -> InvocationContext {
+        InvocationContext::builder()
+            .agent(agent)
+            .run_config(RunConfig {
+                streaming_mode: StreamingMode::Bidi,
+                live: Some(LiveRunConfig::default()),
+                ..Default::default()
+            })
+            .build_invocation()
+    }
+
+    #[test]
+    fn llm_agent_is_live_capable() {
+        let a = new(LlmAgentConfig {
+            name: "a".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        assert!(a.as_live().is_some());
+        assert!(a.agent_state().live.is_some());
+    }
+
+    /// Go llmAgent.RunLive wraps the flow's iterator with maybeSaveOutputToState for every event
+    /// that carries no error.
+    #[tokio::test]
+    async fn run_live_saves_output_key() {
+        let model = ScriptedLiveLlm::new(
+            "live-model",
+            vec![LlmResponse {
+                content: Some(Content::from_text("hello live", "model")),
+                turn_complete: true,
+                ..Default::default()
+            }],
+        );
+        let a = new(LlmAgentConfig {
+            name: "a".into(),
+            model: Some(model.clone() as Arc<dyn Llm>),
+            output_key: "out".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        let (sess, mut events) = a
+            .as_live()
+            .unwrap()
+            .run_live(live_ctx(a.clone()))
+            .await
+            .unwrap();
+        let ev = loop {
+            let ev = tokio::time::timeout(std::time::Duration::from_secs(5), events.next())
+                .await
+                .expect("timed out waiting for the model event")
+                .expect("stream ended before the model event")
+                .unwrap();
+            if ev.response.content.is_some() {
+                break ev;
+            }
+        };
+        assert_eq!(ev.author, "a");
+        assert_eq!(
+            ev.actions.state_delta.as_ref().unwrap().get("out"),
+            Some(&json!("hello live"))
+        );
+        sess.close().await.unwrap();
+        assert!(events.next().await.is_none());
+    }
+
+    /// Go RunLive runs the flow on icontext.NewInvocationContext, whose resumption handle starts
+    /// empty and is not the caller's: a handle the model sends is stored in the new context only.
+    #[tokio::test]
+    async fn run_live_uses_a_fresh_resumption_handle_slot() {
+        let model = ScriptedLiveLlm::new(
+            "live-model",
+            vec![
+                LlmResponse {
+                    session_resumption_handle: "inner-handle".into(),
+                    ..Default::default()
+                },
+                LlmResponse {
+                    content: Some(Content::from_text("after handle", "model")),
+                    ..Default::default()
+                },
+            ],
+        );
+        let a = new(LlmAgentConfig {
+            name: "a".into(),
+            model: Some(model.clone() as Arc<dyn Llm>),
+            ..Default::default()
+        })
+        .unwrap();
+        let outer = live_ctx(a.clone());
+        outer.set_live_session_resumption_handle("outer-handle");
+        let (sess, mut events) = a.as_live().unwrap().run_live(outer.clone()).await.unwrap();
+        // The reader stores the handle before it hands the event on, so once the content event
+        // arrives the flow's context already holds "inner-handle".
+        loop {
+            let ev = tokio::time::timeout(std::time::Duration::from_secs(5), events.next())
+                .await
+                .expect("timed out")
+                .expect("stream ended early")
+                .unwrap();
+            if ev.response.content.is_some() {
+                break;
+            }
+        }
+        assert_eq!(outer.live_session_resumption_handle(), "outer-handle");
+        sess.close().await.unwrap();
     }
 }
