@@ -160,6 +160,13 @@ impl InvocationContext {
         self.inner().shared.llm_call_limiter.clone()
     }
 
+    /// The engine's per-invocation compaction runtime, if compaction is configured
+    /// (engine-internal; Go `compactionctx.FromContext`).
+    #[doc(hidden)]
+    pub fn compaction_runtime(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+        self.inner().shared.compaction.clone()
+    }
+
     /// The bound agent modes.
     pub fn bound_modes(&self) -> &BoundModes {
         &self.inner().bound_modes
@@ -235,5 +242,70 @@ impl Artifacts for TrackedArtifacts {
 
     fn backing_service(&self) -> Option<ArtifactBacking> {
         self.inner.backing_service()
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use std::any::Any;
+    use std::sync::Arc;
+
+    use crate::context::delta::ContextDelta;
+
+    use super::*;
+
+    fn slot(ctx: &InvocationContext) -> Option<Arc<dyn Any + Send + Sync>> {
+        ctx.compaction_runtime()
+    }
+
+    #[test]
+    fn compaction_runtime_slot_round_trips_and_is_shared() {
+        let rt: Arc<dyn Any + Send + Sync> = Arc::new(7u32);
+        let ctx = InvocationContext::builder()
+            .compaction_runtime(rt.clone())
+            .build_invocation();
+        let got = slot(&ctx).expect("slot set");
+        assert!(Arc::ptr_eq(&got, &rt));
+        assert_eq!(got.downcast_ref::<u32>(), Some(&7));
+
+        // Every derivation inside the invocation sees the same Arc.
+        let derived = [
+            ctx.with_delta(ContextDelta {
+                branch: Some("a.b".into()),
+                ..Default::default()
+            }),
+            ctx.with_delta(ContextDelta {
+                fresh_invocation: true,
+                ..Default::default()
+            }),
+            ctx.clone()
+                .into_context()
+                .with_delta(ContextDelta {
+                    function_call_id: Some("fc".into()),
+                    ..Default::default()
+                })
+                .as_invocation()
+                .clone(),
+            ctx.clone()
+                .into_context()
+                .with_agent_cancel()
+                .0
+                .as_invocation()
+                .clone(),
+        ];
+        for d in &derived {
+            assert!(Arc::ptr_eq(&slot(d).expect("derived slot"), &rt));
+        }
+    }
+
+    #[test]
+    fn compaction_runtime_slot_defaults_to_none() {
+        assert!(
+            InvocationContext::builder()
+                .build_invocation()
+                .compaction_runtime()
+                .is_none()
+        );
     }
 }

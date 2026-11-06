@@ -29,6 +29,7 @@ mod agent_workflowagent_reentry;
 mod agent_workflowagent_workflow;
 mod agent_workflowagents_sequentialagent_agent;
 mod agent_workflowagents_sequentialagent_live_injection;
+mod internal_agent_compactionctx_compactionctx;
 mod internal_agent_parentmap_map;
 mod internal_artifact_artifacts;
 mod internal_artifact_forwarding;
