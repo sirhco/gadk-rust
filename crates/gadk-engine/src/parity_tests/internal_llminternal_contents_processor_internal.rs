@@ -198,4 +198,72 @@ async fn test_drop_orphaned_function_calls_nothing_to_drop() {
     assert_eq!(log, "", "log = {log:?}, want nothing");
 }
 
-// parity: skipped TestPromptTokenEstimator_SuffixDoesNotLogPairedResponseAsOrphan: promptTokenEstimator belongs to compaction (deferred to 1c)
+#[tokio::test]
+async fn test_prompt_token_estimator_suffix_does_not_log_paired_response_as_orphan() {
+    use gadk_session::{CreateRequest, InMemorySessionService, SessionService};
+    use std::sync::Arc;
+
+    const AGENT_NAME: &str = "worker";
+    let svc = InMemorySessionService::new();
+    let sess = svc
+        .create(CreateRequest {
+            app_name: "app".into(),
+            user_id: "user".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let mut response = serde_json::Map::new();
+    response.insert("result".into(), json!("x".repeat(4000)));
+    let mut events = [
+        Event {
+            author: AGENT_NAME.into(),
+            ..ev(
+                "model",
+                vec![Part {
+                    function_call: Some(FunctionCall {
+                        id: "paired".into(),
+                        name: "ping".into(),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }],
+            )
+        },
+        Event {
+            author: AGENT_NAME.into(),
+            ..ev(
+                "user",
+                vec![Part {
+                    function_response: Some(FunctionResponse {
+                        id: "paired".into(),
+                        name: "ping".into(),
+                        response,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }],
+            )
+        },
+    ];
+    for event in events.iter_mut() {
+        svc.append_event(&*sess, event).await.unwrap();
+    }
+    let agent =
+        super::internal_llminternal_contents_processor::llm_agent(crate::llm::LlmAgentConfig {
+            name: AGENT_NAME.into(),
+            ..Default::default()
+        });
+    let ctx = gadk_agent::InvocationContext::builder()
+        .agent(agent)
+        .session(Arc::clone(&sess))
+        .build_invocation();
+    let (_, output) = capture_logs(async {
+        crate::llm::processors::compaction::prompt_token_estimator(&ctx)(&events[1..]);
+    })
+    .await;
+    assert_eq!(
+        output, "",
+        "paired response in suffix produced a stale-response notice: {output:?}"
+    );
+}
