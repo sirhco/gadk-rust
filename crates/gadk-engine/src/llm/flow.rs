@@ -1069,9 +1069,22 @@ pub(crate) mod span_capture {
         CLOSED.with(|c| c.borrow().get(name).copied().unwrap_or(0))
     }
 
+    /// Installs (once per test binary) a no-op global `Registry` so the global max-level hint and
+    /// callsite interest never collapse to "off" while thread-default capture subscribers come and
+    /// go on parallel test threads. Without it, a concurrent interest rebuild on another thread
+    /// (which does not yet see this thread's new default) can disable every span macro and a
+    /// capture records nothing (flaky `execute_tool_spans_for_parallel_calls`).
+    pub(crate) fn pin_tracing_interest() {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| {
+            let _ = tracing::subscriber::set_global_default(tracing_subscriber::registry());
+        });
+    }
+
     /// Runs `fut` with a recording subscriber as the thread default; use only on a
     /// current-thread runtime.
     pub(crate) async fn capture_spans<F: Future>(fut: F) -> (F::Output, Vec<CapturedSpan>) {
+        pin_tracing_interest();
         CLOSED.with(|c| c.borrow_mut().clear());
         let spans: Arc<parking_lot::Mutex<Vec<CapturedSpan>>> = Arc::default();
         let sub = tracing_subscriber::registry().with(CaptureLayer(spans.clone()));

@@ -1862,6 +1862,7 @@ pub(crate) mod test_support {
         /// Installs a thread-default subscriber; use with a current-thread `#[tokio::test]`.
         pub(crate) fn install() -> (SpanCapture, tracing::subscriber::DefaultGuard) {
             use tracing_subscriber::layer::SubscriberExt;
+            crate::llm::flow::span_capture::pin_tracing_interest();
             let cap = SpanCapture::default();
             let guard =
                 tracing::subscriber::set_default(tracing_subscriber::registry().with(cap.clone()));
