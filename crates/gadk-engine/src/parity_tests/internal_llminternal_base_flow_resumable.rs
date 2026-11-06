@@ -13,4 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Parity target for Go internal/llminternal/base_flow_resumable_test.go. Implemented by Task 11.
+//! Parity port of Go internal/llminternal/base_flow_resumable_test.go.
+
+// parity: skipped TestIsResumable: isResumable classifies live WebSocket errors for RunLive reconnect (deferred to 1b-live)
+// parity: skipped TestIsResumableAgreesAcrossReaderAndSender: live reconnect reader/sender agreement (deferred to 1b-live)

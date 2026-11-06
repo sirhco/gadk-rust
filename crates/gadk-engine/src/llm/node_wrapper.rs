@@ -13,4 +13,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `run_llm_agent_as_node` (provisional body by Task 11, real port by Task 15; port of Go agent/llmagent/llm_agent_wrapper.go). Implemented by Task 11.
+//! Port of Go agent/llmagent/llm_agent_wrapper.go (RunLLMAgentAsNode). PROVISIONAL body by Task 11;
+//! Task 15 replaces it with the real port.
+
+use std::sync::Arc;
+
+use gadk_agent::{Agent, Context, EventStream};
+use serde_json::Value;
+
+/// Port of Go llmagent.RunLLMAgentAsNode (C4 signature, not async).
+/// PROVISIONAL (Task 11): runs the agent directly on the node context's invocation context and
+/// ignores `input`. Task 15 replaces this body with the chat/task/single_turn port.
+pub(crate) fn run_llm_agent_as_node(
+    ctx: Context,
+    agent: Arc<dyn Agent>,
+    input: Value,
+) -> EventStream {
+    let _ = input;
+    agent.run(ctx.as_invocation().clone())
+}

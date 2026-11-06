@@ -14,24 +14,27 @@
 // limitations under the License.
 
 //! Request-confirmation request processor (port of Go
-//! internal/llminternal/request_confirmation_processor.go). Task 11 fills in
-//! `dispatch_resume_batches`.
+//! internal/llminternal/request_confirmation_processor.go).
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use futures::future::BoxFuture;
 // Go toolconfirmation.FunctionCallName / OriginalCallFrom come from Task 5 (C5 D3); no private
 // copies.
 use gadk_agent::{
-    AgentError, InvocationContext, REQUEST_CONFIRMATION_FUNCTION_CALL_NAME, original_call_from,
+    AgentError, InvocationContext, REQUEST_CONFIRMATION_FUNCTION_CALL_NAME, Tool,
+    original_call_from,
 };
 use gadk_genai::{Content, FunctionCall, Part};
-use gadk_model::LlmRequest;
+use gadk_model::{LlmRequest, LlmResponse};
 use gadk_session::{Event, ToolConfirmation};
 use serde_json::Value;
 
 use crate::{
-    llm::{flow::Flow, processors::wrap_err, state::reveal},
+    llm::{flow::Flow, functions::handle_function_calls_with, processors::wrap_err, state::reveal},
     tool::utils::{function_calls, function_responses},
     workflow::route::go_quote,
 };
@@ -63,14 +66,37 @@ pub(crate) fn request_confirmation_processor<'a>(
 }
 
 /// Runs each batch through handle_function_calls with its confirmations, in order, and returns
-/// the non-None response events. Batch 5 stub: Task 11 fills in this body once
-/// `crate::llm::functions::handle_function_calls_with` exists (Batch 6).
+/// the non-None response events (Go request_confirmation_processor.go:245-256).
 async fn dispatch_resume_batches(
-    _ctx: &InvocationContext,
-    _f: &Flow,
-    _batches: Vec<ResumeBatch>,
+    ctx: &InvocationContext,
+    f: &Flow,
+    batches: Vec<ResumeBatch>,
 ) -> Result<Vec<Event>, AgentError> {
-    Ok(Vec::new())
+    // Go: toolsmap built from f.Tools (set by the tools processor earlier in this step).
+    let tools: HashMap<String, Arc<dyn Tool>> = f
+        .tools
+        .read()
+        .iter()
+        .map(|t| (t.name().to_owned(), t.clone()))
+        .collect();
+    let mut out = Vec::new();
+    for b in batches {
+        // Go passes &model.LLMResponse{Content: parts}; wrap the content in a bare event.
+        let call_ev = Event {
+            response: LlmResponse {
+                content: Some(b.content),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        if let Some(ev) =
+            handle_function_calls_with(ctx, f, &tools, &call_ev, None, Some(&b.confirmations))
+                .await?
+        {
+            out.push(ev);
+        }
+    }
+    Ok(out)
 }
 
 /// Port of request_confirmation_processor.go:47-257 without the dispatch. Go dispatches each
@@ -247,12 +273,20 @@ fn confirmation_responses(
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        any::Any,
+        sync::atomic::{AtomicBool, Ordering},
+    };
+
+    use async_trait::async_trait;
+    use gadk_agent::{Context, RunnableTool, ToolError};
     use gadk_genai::FunctionResponse;
-    use gadk_model::LlmResponse;
+    use gadk_session::{CreateRequest, GetRequest, InMemorySessionService, SessionService};
     use pretty_assertions::assert_eq;
     use serde_json::{Map, json};
 
     use super::*;
+    use crate::llm::{config::LlmAgentConfig, processors::test_llm_agent};
 
     const AGENT: &str = "agent";
 
@@ -399,6 +433,103 @@ mod tests {
         assert_eq!(
             err.to_string(),
             "error 'response' key found but value is not a string for confirmation function response for event id \"\""
+        );
+    }
+
+    /// Records whether its call carried a confirmed tool confirmation.
+    struct ConfirmProbe {
+        confirmed: Arc<AtomicBool>,
+    }
+
+    impl Tool for ConfirmProbe {
+        fn name(&self) -> &str {
+            "t"
+        }
+        fn description(&self) -> &str {
+            "probe"
+        }
+        fn as_runnable(&self) -> Option<&dyn RunnableTool> {
+            Some(self)
+        }
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+
+    #[async_trait]
+    impl RunnableTool for ConfirmProbe {
+        async fn run(&self, ctx: Context, _: Value) -> Result<Map<String, Value>, ToolError> {
+            let confirmed = ctx.tool_confirmation().is_some_and(|c| c.confirmed);
+            self.confirmed.store(confirmed, Ordering::SeqCst);
+            Ok(Map::from_iter([("done".to_owned(), json!(true))]))
+        }
+    }
+
+    #[tokio::test]
+    async fn request_confirmation_resume_dispatches() {
+        let fc1 = FunctionCall {
+            id: "fc1".into(),
+            name: "t".into(),
+            args: json!({"x": 1}).as_object().unwrap().clone(),
+            ..Default::default()
+        };
+        let svc = InMemorySessionService::new();
+        let created = svc
+            .create(CreateRequest {
+                app_name: "app".into(),
+                user_id: "user".into(),
+                session_id: Some("s".into()),
+                state: None,
+            })
+            .await
+            .unwrap();
+        for mut e in [
+            event(AGENT, "model", vec![call_part(fc1.clone())]),
+            event(AGENT, "model", vec![request("c1", &fc1)]),
+            event("user", "user", vec![confirm("c1")]),
+        ] {
+            svc.append_event(&*created, &mut e).await.unwrap();
+        }
+        let sess = svc
+            .get(GetRequest {
+                app_name: "app".into(),
+                user_id: "user".into(),
+                session_id: "s".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let confirmed = Arc::new(AtomicBool::new(false));
+        let t: Arc<dyn Tool> = Arc::new(ConfirmProbe {
+            confirmed: confirmed.clone(),
+        });
+        let agent = test_llm_agent(LlmAgentConfig {
+            name: AGENT.into(),
+            ..Default::default()
+        });
+        let ctx = InvocationContext::builder()
+            .agent(agent)
+            .session(sess)
+            .build_invocation();
+        let flow = Flow {
+            tools: parking_lot::RwLock::new(vec![t]),
+            ..Default::default()
+        };
+        let events = request_confirmation_processor(&ctx, &mut LlmRequest::default(), &flow)
+            .await
+            .unwrap();
+        assert_eq!(events.len(), 1);
+        let parts = &events[0].response.content.as_ref().unwrap().parts;
+        assert_eq!(parts.len(), 1);
+        let fr = parts[0].function_response.as_ref().unwrap();
+        assert_eq!(fr.id, "fc1");
+        assert_eq!(
+            fr.response,
+            json!({"done": true}).as_object().unwrap().clone()
+        );
+        assert!(
+            confirmed.load(Ordering::SeqCst),
+            "tool must see the confirmation"
         );
     }
 }
