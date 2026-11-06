@@ -25,6 +25,7 @@ use gadk_model::LlmRequest;
 use gadk_platform::Platform;
 use gadk_session::Event;
 use schemars::generate::SchemaSettings;
+use schemars::transform::RecursiveTransform;
 use serde_json::{Map, Value};
 
 /// Go `afFunctionCallIDPrefix`: the prefix of client-generated function call ids.
@@ -81,10 +82,38 @@ pub(crate) fn validate_with_schema<In: serde::Serialize>(
 // ---------------------------------------------------------------------------------------------
 
 fn settings() -> SchemaSettings {
-    SchemaSettings::draft2020_12().with(|s| {
-        s.meta_schema = None; // no "$schema" key (Go jsonschema.For emits none)
-        s.inline_subschemas = true; // no "$defs"/"$ref" except for recursive types
-    })
+    SchemaSettings::draft2020_12()
+        .with(|s| {
+            s.meta_schema = None; // no "$schema" key (Go jsonschema.For emits none)
+            s.inline_subschemas = true; // no "$defs"/"$ref" except for recursive types
+        })
+        .with_transform(RecursiveTransform(
+            go_schema_shape as fn(&mut schemars::Schema),
+        ))
+}
+
+/// Aligns one schemars subschema with the shape Go jsonschema-go (`jsonschema.For`) infers:
+/// - struct schemas forbid unknown keys: an object schema with `properties` and no `additionalProperties`
+///   gets `"additionalProperties": false` (jsonschema-go infer.go, `reflect.Struct` case);
+/// - integer/number schemas carry no `format` (schemars adds `"int64"`, `"double"`, …; Go emits none).
+///
+/// Applied to every subschema via [`RecursiveTransform`].
+fn go_schema_shape(schema: &mut schemars::Schema) {
+    let Some(obj) = schema.as_object_mut() else {
+        return;
+    };
+    let is_numeric = |t: &Value| t == "integer" || t == "number";
+    let numeric = match obj.get("type") {
+        Some(Value::Array(ts)) => ts.iter().any(is_numeric),
+        Some(t) => is_numeric(t),
+        None => false,
+    };
+    if numeric {
+        obj.remove("format");
+    }
+    if obj.contains_key("properties") && !obj.contains_key("additionalProperties") {
+        obj.insert("additionalProperties".to_string(), Value::Bool(false));
+    }
 }
 
 /// Port of Go jsonschema.For[T] as used by functiontool.resolvedSchema: draft 2020-12, no `$schema`,

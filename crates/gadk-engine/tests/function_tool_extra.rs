@@ -173,6 +173,7 @@ async fn function_tool_wraps_non_object_output() {
     assert_eq!(Value::Object(got), json!({"forecast": "Paris"}));
 }
 
+/// Go jsonschema.For shape: no `$schema`, no root `title`, `additionalProperties: false` on structs.
 #[test]
 fn function_tool_inferred_schema_settings() {
     let tool = FunctionTool::new(
@@ -184,13 +185,13 @@ fn function_tool_inferred_schema_settings() {
     assert_eq!(
         decl.parameters_json_schema,
         Some(
-            json!({"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]})
+            json!({"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"], "additionalProperties": false})
         )
     );
     assert_eq!(
         decl.response_json_schema,
         Some(
-            json!({"type": "object", "properties": {"forecast": {"type": "string"}}, "required": ["forecast"]})
+            json!({"type": "object", "properties": {"forecast": {"type": "string"}}, "required": ["forecast"], "additionalProperties": false})
         )
     );
 }
@@ -248,4 +249,88 @@ async fn function_tool_confirmation_provider_overrides_flag() {
         "Please approve or reject the tool call weather() by responding with a FunctionResponse with an expected ToolConfirmation payload."
     );
     assert!(actions.skip_summarization);
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SeedArgs {
+    seed: i64,
+}
+
+/// The inferred schema equals Go jsonschema-go's wire shape, byte for byte after canonical comparison
+/// (agent/llmagent/testdata/TestToolCallback_after_callback_response_used.httprr).
+#[test]
+fn function_tool_inferred_schema_matches_go_fixture() {
+    let tool = FunctionTool::new(
+        FunctionToolConfig::new("rand", ""),
+        |_ctx: Context, a: SeedArgs| async move { Ok(a.seed) },
+    )
+    .unwrap();
+    let decl = tool.declaration().unwrap();
+    let want: Value = serde_json::from_str(
+        r#"{"additionalProperties":false,"properties":{"seed":{"type":"integer"}},"required":["seed"],"type":"object"}"#,
+    )
+    .unwrap();
+    assert_eq!(decl.parameters_json_schema, Some(want));
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct Inner {
+    ratio: f64,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct NestedArgs {
+    inner: Inner,
+    items: Vec<Inner>,
+}
+
+/// The Go shape is applied recursively: nested structs and array items.
+#[test]
+fn function_tool_inferred_schema_nested_go_shape() {
+    let tool =
+        FunctionTool::new(
+            FunctionToolConfig::new("n", ""),
+            |_ctx: Context, a: NestedArgs| async move {
+                Ok(a.items.len() as i64 + a.inner.ratio as i64)
+            },
+        )
+        .unwrap();
+    let inner = json!({"type": "object", "properties": {"ratio": {"type": "number"}}, "required": ["ratio"], "additionalProperties": false});
+    assert_eq!(
+        tool.declaration().unwrap().parameters_json_schema,
+        Some(json!({
+            "type": "object",
+            "properties": {"inner": inner, "items": {"type": "array", "items": inner}},
+            "required": ["inner", "items"],
+            "additionalProperties": false,
+        }))
+    );
+}
+
+/// Go rejects unknown argument keys (`additionalProperties: false`) with a schema validation error.
+#[tokio::test]
+async fn function_tool_unknown_arg_key_rejected() {
+    let called = Arc::new(AtomicBool::new(false));
+    let flag = called.clone();
+    let tool = FunctionTool::new(
+        FunctionToolConfig::new("weather", ""),
+        move |_ctx: Context, a: CityArgs| {
+            flag.store(true, Ordering::SeqCst);
+            async move { Ok(Weather { forecast: a.city }) }
+        },
+    )
+    .unwrap();
+    let got = tool
+        .as_runnable()
+        .unwrap()
+        .run(
+            Context::builder().build(),
+            json!({"city": "Paris", "country": "FR"}),
+        )
+        .await;
+    assert!(matches!(got, Err(ToolError::InvalidArgument(_))), "{got:?}");
+    assert!(
+        !called.load(Ordering::SeqCst),
+        "handler must not run on a schema error"
+    );
 }
