@@ -14,9 +14,42 @@
 // limitations under the License.
 
 //! gadk: Agent Development Kit for Rust (port of ADK-Go).
+//!
+//! The member crates are re-exported as modules; [`prelude`] gathers the common types for
+//! building and running agents.
+
+pub use gadk_agent as agent;
+pub use gadk_artifact as artifact;
+pub use gadk_engine as engine;
 #[cfg(feature = "gemini")]
 pub use gadk_gemini as gemini;
 pub use gadk_genai as genai;
+pub use gadk_memory as memory;
 pub use gadk_model as model;
 pub use gadk_platform as platform;
 pub use gadk_session as session;
+
+/// Common types for building and running agents: `use gadk::prelude::*;`.
+pub mod prelude {
+    pub use gadk_agent::{
+        Agent, AgentConfig, AgentError, Context, EventStream, InvocationContext, Mode, Plugin,
+        ReadonlyContext, RunConfig, StreamingMode, Tool, ToolError, Toolset,
+    };
+    pub use gadk_artifact::{ArtifactService, InMemoryArtifactService};
+    pub use gadk_engine::llm::{IncludeContents, InstructionProvider, LlmAgentConfig};
+    pub use gadk_engine::runner::{RunOptions, Runner, RunnerConfig};
+    pub use gadk_engine::tool::{
+        AgentTool, AgentToolConfig, FunctionTool, FunctionToolConfig, StreamingFunctionTool,
+        exit_loop,
+    };
+    pub use gadk_engine::workflow::{
+        Edge, EdgeBuilder, Node, NodeConfig, START, Workflow, WorkflowOptions, function_node,
+    };
+    pub use gadk_engine::{
+        llm_agent, loop_agent, parallel_agent, sequential_agent, workflow_agent,
+    };
+    pub use gadk_genai::{Content, Part};
+    pub use gadk_memory::{InMemoryMemoryService, MemoryService};
+    pub use gadk_model::Llm;
+    pub use gadk_session::{Event, InMemorySessionService, SessionService};
+}

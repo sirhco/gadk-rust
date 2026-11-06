@@ -1,0 +1,50 @@
+[package]
+name = "gadk-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+testutil = ["dep:gadk-gemini", "dep:gadk-httprr", "dep:http", "dep:bytes"]
+
+[dependencies]
+gadk-agent = { workspace = true }
+gadk-genai = { workspace = true }
+gadk-platform = { workspace = true }
+gadk-model = { workspace = true }
+gadk-session = { workspace = true }
+gadk-artifact = { workspace = true }
+gadk-memory = { workspace = true }
+gadk-gemini = { workspace = true, optional = true }
+gadk-httprr = { workspace = true, optional = true }
+http = { workspace = true, optional = true }
+bytes = { workspace = true, optional = true }
+async-trait = { workspace = true }
+async-stream = { workspace = true }
+futures = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+schemars = { workspace = true }
+jsonschema = { workspace = true }
+chrono = { workspace = true }
+parking_lot = { workspace = true }
+regex = { workspace = true }
+
+[dev-dependencies]
+gadk-engine = { path = ".", features = ["testutil"] }
+gadk-session = { workspace = true, features = ["testsuite"] }
+gadk-artifact = { workspace = true, features = ["testsuite"] }
+tokio = { workspace = true, features = ["test-util"] }
+rstest = { workspace = true }
+pretty_assertions = { workspace = true }
+tracing-subscriber = { workspace = true }
+insta = { workspace = true }

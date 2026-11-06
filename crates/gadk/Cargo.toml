@@ -19,12 +19,27 @@ gadk-platform = { workspace = true }
 gadk-model = { workspace = true }
 gadk-session = { workspace = true }
 gadk-gemini = { workspace = true, optional = true }
+gadk-artifact = { workspace = true }
+gadk-memory = { workspace = true }
+gadk-agent = { workspace = true }
+gadk-engine = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
 futures = { workspace = true }
 anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+schemars = { workspace = true }
+pretty_assertions = { workspace = true }
 
 [[example]]
 name = "quickstart"
 required-features = ["gemini"]
+
+[[example]]
+name = "agent_tool"
+required-features = ["gemini"]
+
+[[example]]
+name = "workflow"
