@@ -19,13 +19,15 @@
 use std::sync::Arc;
 
 use gadk_agent::{Context, ContextDelta, EventStream, InvocationContext};
-use serde_json::Value;
+use gadk_session::Session;
+use serde_json::{Map, Value};
 
 use crate::error::{WorkflowError, WorkflowErrorKind};
 use crate::workflow::base_node::compile_schema;
 use crate::workflow::graph::Graph;
 use crate::workflow::route::go_quote;
 use crate::workflow::scheduler::Scheduler;
+use crate::workflow::state::RunState;
 use crate::workflow::validation::{validate_nodes, validate_sub_workflow_names, validate_workflow};
 use crate::workflow::{Edge, START};
 
@@ -160,6 +162,30 @@ impl Workflow {
                 yield item;
             }
         })
+    }
+}
+
+impl Workflow {
+    /// Port of Go (*Workflow).ReconstructRunState: rebuilds the paused run from session history.
+    /// `Ok(None)` is Go's nil state (no interrupt or failure history); a non-empty
+    /// `invocation_id` scopes the scan to that invocation.
+    pub fn reconstruct_run_state(
+        &self,
+        session: &dyn Session,
+        invocation_id: &str,
+    ) -> Result<Option<RunState>, WorkflowError> {
+        crate::workflow::persistence::reconstruct_run_state(self, session, invocation_id)
+    }
+
+    /// Port of Go (*Workflow).Resume: continues a paused run from `state` with `responses`
+    /// (interrupt id → payload). Empty `responses` yields an empty stream.
+    pub fn resume(
+        self: &Arc<Self>,
+        ctx: Context,
+        state: RunState,
+        responses: Map<String, Value>,
+    ) -> EventStream {
+        crate::workflow::resume::resume_stream(Arc::clone(self), ctx, state, responses)
     }
 }
 

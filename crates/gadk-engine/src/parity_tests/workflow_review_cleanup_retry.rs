@@ -33,7 +33,144 @@ use crate::workflow::{
     Emit, NodeConfig, RetryConfig, RunNodeOptions, dynamic_node, function_node, run_node,
 };
 
-// parity: skipped TestResume_RejectedResponseCompletionDoesNotDispatch: needs Workflow::resume, which Task 14 implements in Batch 8; Task 14 replaces this line with the port (C5 D5)
+#[rstest::rstest]
+#[case::success_without_event(false)]
+#[case::retryable_error_without_event(true)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+// parity: adapted: Go loops 32 trials hoping map order schedules the valid node before the
+// rejection and waits on a span exporter; Rust's resume iterates node names sorted, so the nodes
+// are named "a_valid"/"b_invalid" (interrupt ids stay "valid"/"invalid") to make that order
+// deterministic, and the test waits on the node's call counter instead of the exporter.
+async fn test_resume_rejected_response_completion_does_not_dispatch(#[case] retry: bool) {
+    use std::time::{Duration, Instant};
+
+    use futures::StreamExt;
+
+    use crate::workflow::RunState;
+
+    let (valid_calls, successor_calls) = (Arc::new(AtomicI32::new(0)), Arc::new(AtomicI32::new(0)));
+    let vc = Arc::clone(&valid_calls);
+    let cfg = if retry {
+        NodeConfig {
+            retry_config: Some(RetryConfig {
+                max_attempts: 2,
+                ..RetryConfig::default()
+            }),
+            ..NodeConfig::default()
+        }
+    } else {
+        NodeConfig::default()
+    };
+    let valid = dynamic_node::<Value, Value, _, _>(
+        "a_valid",
+        move |_c: Context, _i: Value, _e: Emit| {
+            let n = vc.fetch_add(1, Ordering::SeqCst) + 1;
+            async move {
+                if n == 1 && retry {
+                    Err(test_err("scripted parent failure"))
+                } else {
+                    Ok(Value::Null)
+                }
+            }
+        },
+        cfg,
+    );
+    let sc = Arc::clone(&successor_calls);
+    let next = function_node::<Value, Value, _, _>(
+        "next",
+        move |_c: Context, _i: Value| {
+            sc.fetch_add(1, Ordering::SeqCst);
+            async { Ok(Value::Null) }
+        },
+        NodeConfig::default(),
+    );
+    let invalid = dynamic_node::<Value, Value, _, _>(
+        "b_invalid",
+        |_c: Context, _i: Value, _e: Emit| async { Ok(Value::Null) },
+        NodeConfig::default(),
+    );
+    let wf = must_new(vec![
+        edge(&start(), &valid),
+        edge(&valid, &next),
+        edge(&start(), &invalid),
+    ]);
+    let new_state = || {
+        let mut state = RunState::default();
+        let mut valid_inputs = serde_json::Map::new();
+        valid_inputs.insert("valid".into(), json!("ok"));
+        state.nodes.insert(
+            "a_valid".into(),
+            NodeState {
+                status: NodeStatus::Pending,
+                resumed_inputs: Some(valid_inputs),
+                ..NodeState::default()
+            },
+        );
+        let mut invalid_inputs = serde_json::Map::new();
+        invalid_inputs.insert("invalid".into(), json!(1));
+        let mut ns = NodeState {
+            status: NodeStatus::Failed,
+            resumed_inputs: Some(invalid_inputs),
+            ..NodeState::default()
+        };
+        ns.interrupt_schemas
+            .insert("invalid".into(), json!({"type": "integer"}));
+        state.nodes.insert("b_invalid".into(), ns);
+        state
+    };
+    let responses = |invalid: Value| {
+        let mut m = serde_json::Map::new();
+        m.insert("valid".into(), json!("ok"));
+        m.insert("invalid".into(), invalid);
+        m
+    };
+
+    let mut s = wf.resume(top_level_ctx(), new_state(), responses(json!("wrong")));
+    let mut rejected = false;
+    while let Some(item) = s.next().await {
+        if let Err(e) = item
+            && is_kind(&e, WorkflowErrorKind::InvalidResumeResponse)
+        {
+            rejected = true;
+            // The valid node was scheduled before the rejection; let it run once.
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while valid_calls.load(Ordering::SeqCst) == 0 && Instant::now() < deadline {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+            break;
+        }
+    }
+    assert!(rejected, "fixture did not reject the invalid response");
+    drop(s); // consumer exit
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(
+        valid_calls.load(Ordering::SeqCst),
+        1,
+        "cleanup dispatched a retry after consumer exit"
+    );
+    assert_eq!(
+        successor_calls.load(Ordering::SeqCst),
+        0,
+        "cleanup dispatched a successor after consumer exit"
+    );
+
+    // Reload the last persisted state: cleanup events were not consumed.
+    let (_, err) = collect(wf.resume(top_level_ctx(), new_state(), responses(json!(42)))).await;
+    assert!(
+        err.is_none(),
+        "corrected response could not resume: {err:?}"
+    );
+    assert_eq!(
+        valid_calls.load(Ordering::SeqCst),
+        2,
+        "corrected response repeated or skipped the valid node"
+    );
+    assert_eq!(
+        successor_calls.load(Ordering::SeqCst),
+        1,
+        "corrected response repeated or skipped the successor"
+    );
+}
 
 #[rstest::rstest]
 #[case::queued_success(false, false)]
