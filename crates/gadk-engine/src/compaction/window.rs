@@ -68,7 +68,7 @@ fn call_obligation_key(call: &FunctionCall, event_index: usize) -> String {
     format!("\u{0}no-id\u{0}{event_index}\u{0}{}", call.name)
 }
 
-/// Port of Go LatestCompactionEventInScope: [`latest_compaction_event`] over the records of
+/// Port of Go LatestCompactionEventInScope: Go LatestCompactionEvent over the records of
 /// one branch and isolation scope.
 pub(crate) fn latest_compaction_event_in_scope<'a>(
     events: &'a [Event],
@@ -85,6 +85,7 @@ pub(crate) fn latest_compaction_event_in_scope<'a>(
 }
 
 /// Port of Go LatestCompactionEvent: the newest record no other record subsumes.
+#[cfg(test)]
 pub(crate) fn latest_compaction_event(events: &[Event]) -> Option<&Event> {
     let all: Vec<&Event> = events.iter().collect();
     latest_among(&all)

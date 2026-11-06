@@ -29,6 +29,14 @@ pub use gadk_model as model;
 pub use gadk_platform as platform;
 pub use gadk_session as session;
 
+/// Context compaction (re-export of `gadk_session::compaction`).
+///
+/// ```
+/// let cfg = gadk::compaction::Config { compaction_interval: 2, overlap_size: 1, ..Default::default() };
+/// assert!(cfg.validate().is_ok());
+/// ```
+pub use gadk_session::compaction;
+
 /// Common types for building and running agents: `use gadk::prelude::*;`.
 pub mod prelude {
     pub use gadk_agent::{

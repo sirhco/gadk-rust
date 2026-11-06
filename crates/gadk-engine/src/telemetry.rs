@@ -88,15 +88,12 @@ pub(crate) fn execute_tool_span(tool_name: &str) -> tracing::Span {
 const COMPACT_EVENTS: &str = "compact_events";
 
 /// Go telemetry.CompactionTriggerSlidingWindow.
-#[allow(dead_code)] // consumed through engine::compaction (Tasks 9-10); removed by Task 11
 pub(crate) const COMPACTION_TRIGGER_SLIDING_WINDOW: &str = "sliding_window";
 /// Go telemetry.CompactionTriggerTokenThreshold.
-#[allow(dead_code)] // consumed through engine::compaction (Tasks 9-10); removed by Task 11
 pub(crate) const COMPACTION_TRIGGER_TOKEN_THRESHOLD: &str = "token_threshold";
 
 /// Port of Go telemetry.StartCompactEventsSpanParams. Zero thresholds mean "strategy disabled"
 /// and their attributes are omitted.
-#[allow(dead_code)] // consumed through engine::compaction (Tasks 9-10); removed by Task 11
 #[derive(Debug, Clone, Default)]
 pub(crate) struct CompactEventsSpanParams {
     pub(crate) trigger: &'static str,
@@ -113,7 +110,6 @@ pub(crate) struct CompactEventsSpanParams {
 
 /// Port of Go telemetry.GenAISystemAttr: `gcp.vertex_ai` / `gcp.gemini` (semconv v1.36), `None`
 /// for a backend that cannot be named.
-#[allow(dead_code)] // consumed through engine::compaction (Tasks 9-10); removed by Task 11
 pub(crate) fn gen_ai_system(backend: Option<Backend>) -> Option<&'static str> {
     match backend {
         Some(Backend::VertexAi) => Some("gcp.vertex_ai"),
@@ -123,7 +119,6 @@ pub(crate) fn gen_ai_system(backend: Option<Backend>) -> Option<&'static str> {
 }
 
 /// Port of Go epochSeconds: `float64(t.UnixNano()) / float64(time.Second)`.
-#[allow(dead_code)] // consumed through engine::compaction (Tasks 9-10); removed by Task 11
 pub(crate) fn epoch_seconds(t: DateTime<Utc>) -> f64 {
     match t.timestamp_nanos_opt() {
         Some(n) => n as f64 / 1e9,
@@ -135,7 +130,6 @@ pub(crate) fn epoch_seconds(t: DateTime<Utc>) -> f64 {
 
 /// Port of Go StartCompactEventsSpan: a span named `compact_events` (`otel.name`
 /// `compact_events <trigger>`), a child of the caller's current span.
-#[allow(dead_code)] // consumed through engine::compaction (Tasks 9-10); removed by Task 11
 pub(crate) fn compact_events_span(p: &CompactEventsSpanParams) -> tracing::Span {
     use tracing::field::Empty;
     let span = tracing::info_span!(
@@ -188,7 +182,6 @@ pub(crate) fn compact_events_span(p: &CompactEventsSpanParams) -> tracing::Span 
 }
 
 /// Port of Go TraceCompactionResultParams.
-#[allow(dead_code)] // consumed through engine::compaction (Tasks 9-10); removed by Task 11
 pub(crate) struct CompactionResultParams<'a> {
     pub(crate) result_event: Option<&'a Event>,
     pub(crate) error: Option<&'a (dyn std::error::Error + 'static)>,
@@ -199,7 +192,6 @@ pub(crate) struct CompactionResultParams<'a> {
 
 /// Port of Go RecordError (non-legacy schema), in the 1b span form: the declared status fields
 /// plus an error event (the OTel `exception` event's counterpart).
-#[allow(dead_code)] // consumed through engine::compaction (Tasks 9-10); removed by Task 11
 pub(crate) fn record_span_error(span: &tracing::Span, err: &dyn std::fmt::Display) {
     span.record("otel.status_code", "ERROR");
     span.record("error.message", tracing::field::display(err));
@@ -212,7 +204,6 @@ pub(crate) fn record_span_error(span: &tracing::Span, err: &dyn std::fmt::Displa
 }
 
 /// Port of Go TraceCompactionResult.
-#[allow(dead_code)] // consumed through engine::compaction (Tasks 9-10); removed by Task 11
 pub(crate) fn trace_compaction_result(span: &tracing::Span, p: CompactionResultParams<'_>) {
     if let Some(e) = p.error {
         record_span_error(span, e);
@@ -257,14 +248,12 @@ pub(crate) fn trace_compaction_result(span: &tracing::Span, p: CompactionResultP
 }
 
 /// Port of Go TraceCompactionDeclined: a closed span with the same attributes plus the reason.
-#[allow(dead_code)] // consumed through engine::compaction (Tasks 9-10); removed by Task 11
 pub(crate) fn trace_compaction_declined(p: &CompactEventsSpanParams, reason: &str) {
     let span = compact_events_span(p);
     span.record("gen_ai.compaction.declined", reason);
 }
 
 /// Port of Go recordCompactionUsage: output tokens include thoughts, per semconv.
-#[allow(dead_code)] // consumed through engine::compaction (Tasks 9-10); removed by Task 11
 fn record_compaction_usage(span: &tracing::Span, u: &GenerateContentResponseUsageMetadata) {
     if u.prompt_token_count > 0 {
         span.record("gen_ai.usage.input_tokens", i64::from(u.prompt_token_count));

@@ -159,6 +159,7 @@ pub(crate) fn configured(ctx: &InvocationContext) -> bool {
 }
 
 /// Go `compactionctx.FromContext(ctx).Enabled()` (false without a runtime).
+#[cfg(test)]
 pub(crate) fn enabled(ctx: &InvocationContext) -> bool {
     from_ctx(ctx).is_some_and(|rt| rt.enabled())
 }
