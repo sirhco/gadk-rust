@@ -13,8 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! gadk-memory: the memory service API and the in-memory memory service (port of ADK-Go
-//! `memory`). Task 3 owns this file and adds the crate-root re-exports.
+//! gadk-memory: long-term memory service (port of ADK-Go memory/).
 
 pub mod inmemory;
 pub mod service;
+
+pub use inmemory::InMemoryMemoryService;
+pub use service::{MemoryEntry, MemoryError, MemoryService, SearchRequest, SearchResponse};
