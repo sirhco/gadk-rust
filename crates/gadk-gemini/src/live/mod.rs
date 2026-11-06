@@ -19,6 +19,7 @@
 //! `internal/llminternal/googlellm/live_connection.go` (`LiveConnection`).
 
 mod messages;
+pub(crate) mod proxy;
 mod url;
 
 use std::fmt;
@@ -200,8 +201,9 @@ fn into_conn_error(e: GeminiError) -> LiveConnError {
     }
 }
 
-/// Port of genai `Live.Connect`: dials the Live endpoint, sends the setup message and
-/// waits for `setupComplete`, which is buffered for the first receive.
+/// Port of genai `Live.Connect`: dials the Live endpoint (through `HTTPS_PROXY`/`HTTP_PROXY`
+/// unless `NO_PROXY` or a loopback host says otherwise), sends the setup message and waits for
+/// `setupComplete`, which is buffered for the first receive.
 ///
 /// gadk deviation: the setup message is built before dialing, so an invalid configuration
 /// fails without opening a connection.
@@ -209,6 +211,16 @@ pub(crate) async fn connect(
     resolved: &ResolvedConfig,
     model_name: &str,
     cfg: &LiveConnectConfig,
+) -> Result<LiveConnection, GeminiError> {
+    connect_with_env(resolved, model_name, cfg, &|k: &str| std::env::var(k).ok()).await
+}
+
+/// [`connect`] with an injectable environment lookup for proxy resolution (test seam).
+pub(crate) async fn connect_with_env(
+    resolved: &ResolvedConfig,
+    model_name: &str,
+    cfg: &LiveConnectConfig,
+    env: proxy::EnvLookup<'_>,
 ) -> Result<LiveConnection, GeminiError> {
     let url = live_url(resolved)?;
     let model_full_name = model_full_name(resolved, model_name)?;
@@ -227,7 +239,23 @@ pub(crate) async fn connect(
     headers.extend(auth_headers(&resolved.auth).await?);
 
     // A dial failure is never a lost established connection: it is `Other`.
-    let (ws, _) = tokio_tungstenite::connect_async(request)
+    // gorilla DefaultDialer: Proxy = http.ProxyFromEnvironment, then a TCP (or CONNECT
+    // tunnel) dial; TLS for wss is layered on the same stream.
+    let proxy = proxy::proxy_for_with(&url, env);
+    if let Some(p) = &proxy {
+        // Host only: the proxy URL may carry credentials.
+        tracing::debug!(
+            proxy_host = p.host_str().unwrap_or_default(),
+            "dialing Live through a proxy"
+        );
+    }
+    let tcp = proxy::dial(&url, proxy.as_ref()).await.map_err(|e| {
+        GeminiError::Live(LiveConnError::new(
+            LiveConnErrorKind::Other,
+            format!("Connect to {url} failed: {e}"),
+        ))
+    })?;
+    let (ws, _) = tokio_tungstenite::client_async_tls_with_config(request, tcp, None, None)
         .await
         .map_err(|e| {
             GeminiError::Live(
