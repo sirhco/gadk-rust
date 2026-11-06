@@ -828,7 +828,10 @@ fn gemini_error_converts_to_model_error() {
             "auth error: no creds",
         ),
         (
-            gadk_gemini::GeminiError::Live("ws down".into()),
+            gadk_gemini::GeminiError::Live(gadk_model::LiveConnError::new(
+                gadk_model::LiveConnErrorKind::Other,
+                "ws down",
+            )),
             "live error: ws down",
         ),
         (

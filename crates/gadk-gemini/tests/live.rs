@@ -28,7 +28,7 @@ use bytes::Bytes;
 use common::ws::WsServer;
 use gadk_gemini::{ClientConfig, GeminiError, GeminiModel, LiveConnection, MapEnv, RealtimeInput};
 use gadk_genai::{Blob, Content, FunctionResponse, LiveConnectConfig};
-use gadk_model::{Backend, HttpOptions, LlmResponse};
+use gadk_model::{Backend, HttpOptions, LiveConnErrorKind, Llm, LlmResponse};
 use google_cloud_auth::credentials::{
     CacheableResource, Credentials, CredentialsProvider, EntityTag,
 };
@@ -748,8 +748,45 @@ async fn live_close_sends_close_frame(#[case] backend: Backend) {
     let conn = connect(&server, backend).await;
     conn.close().await.unwrap();
     assert!(server.wait_closed().await);
-    // The server answers the close; the buffered setupComplete is still delivered, then
-    // the connection reports closed.
+    // The buffered setupComplete is still delivered. Then the server's reply to our close is a
+    // received close frame, which (as gorilla's CloseError) is an error carrying its code.
     assert_eq!(recv(&conn).await, LlmResponse::default());
-    assert!(conn.recv().await.unwrap().is_none());
+    let err = conn.recv().await.unwrap_err();
+    let GeminiError::Live(e) = err else {
+        panic!("expected a live error, got {err:?}");
+    };
+    assert_eq!(e.kind, LiveConnErrorKind::Closed { code: 1005 });
+    assert_eq!(
+        e.to_string(),
+        "failed to receive message: websocket: close 1005 (no status)"
+    );
+}
+
+#[rstest]
+#[case::gemini_api(Backend::GeminiApi)]
+#[case::vertex_ai(Backend::VertexAi)]
+#[tokio::test]
+async fn live_connect_live_dial_failure_is_not_resumable(#[case] backend: Backend) {
+    // Port 9 (discard) is closed on the test hosts: the dial is refused.
+    let m = GeminiModel::new_concrete(MODEL, config(backend, "ws://127.0.0.1:9/".into()))
+        .await
+        .unwrap();
+    let err = m
+        .live_connect(LiveConnectConfig::default())
+        .await
+        .unwrap_err();
+    let GeminiError::Live(e) = err else {
+        panic!("expected a live error, got {err:?}");
+    };
+    assert_eq!(e.kind, LiveConnErrorKind::Other);
+    assert!(!e.is_resumable(), "{e}");
+    // Through the trait the failure is a ModelError, never a connection.
+    let llm: &dyn Llm = &m;
+    let Err(model_err) = llm.connect_live(LiveConnectConfig::default()).await else {
+        panic!("connect_live must fail");
+    };
+    assert!(
+        model_err.to_string().starts_with("live error: Connect to "),
+        "{model_err}"
+    );
 }
