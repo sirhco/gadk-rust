@@ -26,6 +26,10 @@ use gadk_session::Event;
 use serde_json::{Map, Value};
 
 use crate::{
+    compaction::{
+        apply::{apply, has_usable_summary},
+        runtime,
+    },
     llm::{
         config::IncludeContents,
         flow::Flow,
@@ -69,13 +73,15 @@ pub(crate) fn contents_request_processor<'a>(
             state.cfg.include_contents == IncludeContents::None || placement_hides_history;
         // How to shape the turn honors the declaration too (Go ModeFor).
         let is_single_turn = mode_for(ctx, &*agent) == Mode::SingleTurn;
-        // Compaction is never configured in 1b: drop compaction records at collection (Go:
-        // !compactionEnabled). 1c extension point: honor them when compaction is configured.
+        // A compaction record tells prompt assembly to drop a span of history and substitute
+        // content in its place. Tool code and plugins can write EventActions, so records are only
+        // honored when this run actually has compaction configured (Go compactionEnabled).
+        let compaction_enabled = runtime::configured(ctx);
         let events: Vec<Event> = ctx
             .session()
             .events()
             .into_iter()
-            .filter(|e| e.actions.compaction.is_none())
+            .filter(|e| compaction_enabled || e.actions.compaction.is_none())
             .collect();
         let (branch, scope) = (ctx.branch(), ctx.isolation_scope());
         let contents = if current_turn_only {
@@ -130,7 +136,7 @@ pub(crate) fn build_contents_default(
 }
 
 /// Port of contents_processor.go:121 buildContentsDefaultWithCallSource.
-fn build_contents_default_with_call_source(
+pub(crate) fn build_contents_default_with_call_source(
     agent_name: &str,
     branch: &str,
     isolation_scope: &str,
@@ -143,11 +149,13 @@ fn build_contents_default_with_call_source(
     let mut filtered: Vec<Event> = Vec::new();
     for ev in events {
         // Skip events without content or role, UNLESS they carry transcriptions.
-        // (compactioninternal.HasUsableSummary is always false in 1b.)
+        // Compaction events are exempt: they carry their summary on the compaction record
+        // rather than on their content, and `apply` below expands them into content.
         let no_content = content(ev).is_none_or(|c| c.role.is_empty() || c.parts.is_empty());
         if no_content
             && ev.response.input_transcription.is_none()
             && ev.response.output_transcription.is_none()
+            && !has_usable_summary(ev)
         {
             continue;
         }
@@ -161,7 +169,7 @@ fn build_contents_default_with_call_source(
         if should_exclude_event(ev) {
             continue;
         }
-        if is_other_agent_reply(agent_name, ev) {
+        if is_other_agent_reply(agent_name, ev) && !has_usable_summary(ev) {
             // None signals the foreign event is dropped (e.g. a thought-only turn).
             if let Some(converted) = convert_foreign_event(ev) {
                 filtered.push(converted);
@@ -171,7 +179,10 @@ fn build_contents_default_with_call_source(
         }
     }
 
-    // Go compactioninternal.Apply: a no-op without compaction records (1b).
+    // Replace each compaction summary with the events it covers (Go compactioninternal.Apply).
+    // A no-op when no record reached here: records are dropped at collection unless compaction
+    // is configured for the run.
+    let filtered = apply(&filtered);
 
     // Aggregate transcription events (convert to text parts on the fly).
     let mut processed: Vec<Event> = Vec::with_capacity(filtered.len());
@@ -598,7 +609,7 @@ pub(crate) fn build_contents_current_turn_context_only(
         }
         let foreign = is_other_agent_reply(agent_name, event);
         // An event discarded by foreign conversion cannot start a visible turn.
-        if foreign && convert_foreign_event(event).is_none() {
+        if foreign && !has_usable_summary(event) && convert_foreign_event(event).is_none() {
             continue;
         }
         if event.author == "user" || foreign {
