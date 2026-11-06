@@ -72,6 +72,14 @@ pub struct ContextDelta {
     /// A new end flag initialised from the parent's `ended()` (Go copies `Ended()` into a fresh
     /// invocation context); it also clears the function call id, as a fresh invocation has none.
     pub fresh_end_flag: bool,
+    /// Go `icontext.NewInvocationContext` without `EndInvocation`: a fresh invocation context
+    /// whose end flag starts NOT ended and whose invocation-scoped fields take Go's zero values
+    /// (empty isolation scope, no function call id, tool confirmation or actions, empty
+    /// path/run id, no sub-scheduler, output-for-ancestors or resumed inputs). The reset applies
+    /// first, so the delta's own fields still override it. What Go inherits through the parent
+    /// `context.Context` (cancellation, bound modes, platform, plugin manager, …) and the shared
+    /// invocation values carry over.
+    pub fresh_invocation: bool,
 }
 
 /// Go `prepareEventActions`: allocate missing delta maps.
@@ -92,6 +100,7 @@ impl ContextInner {
     /// Port of Go `commonContext.WithDelta` + `invocationContext.WithICDelta` + `NewToolContext`.
     pub(crate) fn apply(&self, d: ContextDelta) -> ContextInner {
         let forks_invocation = d.fresh_end_flag
+            || d.fresh_invocation
             || d.session.is_some()
             || d.agent.is_some()
             || d.branch.is_some()
@@ -103,6 +112,18 @@ impl ContextInner {
         if forks_invocation {
             // Go WithICDelta copies the invocationContext struct, endInvocation included.
             n.ended = Arc::new(AtomicBool::new(self.ended.load(Ordering::SeqCst)));
+        }
+        if d.fresh_invocation {
+            n.ended = Arc::new(AtomicBool::new(false));
+            n.isolation_scope = String::new();
+            n.function_call_id = String::new();
+            n.tool_confirmation = None;
+            n.actions = None;
+            n.path = String::new();
+            n.run_id = String::new();
+            n.sub_scheduler = None;
+            n.output_for_ancestors = None;
+            n.resumed_inputs = None;
         }
         if let Some(v) = d.session {
             n.session = v;
@@ -168,5 +189,82 @@ impl ContextInner {
             }
         }
         n
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use std::sync::Arc;
+
+    use serde_json::{Map, Value, json};
+
+    use crate::context::builder::test_support::named_agent;
+    use crate::context::{ContextDelta, InvocationContext};
+
+    /// A scoped, ended parent with every invocation-scoped field set.
+    fn busy_parent() -> crate::context::Context {
+        let mut resumed = Map::new();
+        resumed.insert("ask".into(), json!("yes"));
+        let parent = InvocationContext::builder()
+            .agent(named_agent("parent"))
+            .isolation_scope("scope-1")
+            .branch("root")
+            .build()
+            .with_delta(ContextDelta {
+                function_call_id: Some("fc-1".into()),
+                path: Some("wf@1/node@1".into()),
+                run_id: Some("1".into()),
+                output_for_ancestors: Some(vec!["wf".into()]),
+                resumed_inputs: Some(Arc::new(resumed)),
+                ..Default::default()
+            });
+        parent.end_invocation();
+        parent
+    }
+
+    #[test]
+    fn fresh_invocation_resets_invocation_scoped_fields_and_starts_not_ended() {
+        let parent = busy_parent();
+        let token = parent.cancellation_token().clone();
+        let child = parent.with_delta(ContextDelta {
+            fresh_invocation: true,
+            agent: Some(named_agent("child")),
+            ..Default::default()
+        });
+        assert!(!child.ended(), "Go NewInvocationContext starts not ended");
+        assert!(parent.ended(), "the parent's flag is untouched");
+        assert_eq!(child.isolation_scope(), "");
+        assert_eq!(child.function_call_id(), "");
+        assert_eq!(child.path(), "");
+        assert_eq!(child.run_id(), "");
+        assert!(child.output_for_ancestors().is_empty());
+        assert_eq!(child.resumed_input("ask"), None::<Value>);
+        assert!(child.actions().state_delta.is_none_or(|d| d.is_empty()));
+        // Inherited through the parent context.Context / shared invocation values.
+        assert_eq!(child.branch(), "root");
+        assert_eq!(child.invocation_id(), parent.invocation_id());
+        token.cancel();
+        assert!(child.cancellation_token().is_cancelled());
+        // Ending the child does not end a sibling.
+        child.end_invocation();
+        let sibling = parent.with_delta(ContextDelta {
+            fresh_invocation: true,
+            ..Default::default()
+        });
+        assert!(!sibling.ended());
+    }
+
+    #[test]
+    fn fresh_invocation_lets_the_delta_override_the_reset() {
+        let child = busy_parent().with_delta(ContextDelta {
+            fresh_invocation: true,
+            isolation_scope: Some("scope-2".into()),
+            path: Some("p".into()),
+            ..Default::default()
+        });
+        assert_eq!(child.isolation_scope(), "scope-2");
+        assert_eq!(child.path(), "p");
+        assert!(!child.ended());
     }
 }

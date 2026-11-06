@@ -110,14 +110,14 @@ pub(crate) fn run_llm_agent_as_node(
 }
 
 /// Port of the `icontext.NewInvocationContext(bound, params{…})` call in RunLLMAgentAsNode: a
-/// FRESH invocation context (own end-invocation flag initialised from `ctx.ended()`, the
-/// Context-level fields path/run_id/sub_scheduler/output_for_ancestors/resumed_inputs/
-/// tool_confirmation reset, function_call_id cleared via `fresh_end_flag`, fresh actions, as
-/// Task 12's `AgentNode::run`) around the possibly wrapped session. Derived with `with_delta`
-/// rather than rebuilt through the builder, so everything Go inherits through the parent
-/// context.Context (bound modes, cancellation, platform, plugin manager, parent map, session
-/// service, artifacts, memory, run config, invocation ID, branch) AND the per-invocation
-/// LLM-call limiter carry over unchanged.
+/// FRESH invocation context (`fresh_invocation`: own end-invocation flag starting NOT ended, as Go
+/// passes no `EndInvocation`; path/run_id/sub_scheduler/output_for_ancestors/resumed_inputs/
+/// tool_confirmation/function_call_id reset) around the possibly wrapped session, with the
+/// params Go sets (agent, user content, the parent's isolation scope) and fresh actions, as Task
+/// 12's `AgentNode::run`. Derived with `with_delta` rather than rebuilt through the builder, so
+/// everything Go inherits through the parent context.Context (bound modes, cancellation,
+/// platform, plugin manager, parent map, session service, artifacts, memory, run config,
+/// invocation ID, branch) AND the per-invocation LLM-call limiter carry over unchanged.
 fn node_invocation_context(
     ctx: &Context,
     bound: &InvocationContext,
@@ -126,19 +126,12 @@ fn node_invocation_context(
     user_content: Option<Content>,
 ) -> InvocationContext {
     ctx.as_invocation().with_delta(ContextDelta {
+        fresh_invocation: true,
         session: Some(session),
-        fresh_end_flag: true,
         agent: Some(agent),
         user_content: Some(user_content),
         isolation_scope: Some(ctx.isolation_scope()),
         bound_modes: Some(bound.bound_modes().clone()),
-        path: Some(String::new()),
-        run_id: Some(String::new()),
-        sub_scheduler: Some(None),
-        output_for_ancestors: Some(Vec::new()),
-        resumed_inputs: Some(Arc::new(Map::new())),
-        // function_call_id is cleared by fresh_end_flag; Some("") would mint a UUID.
-        tool_confirmation: Some(None),
         actions: Some(Arc::new(parking_lot::Mutex::new(EventActions::default()))),
         ..Default::default()
     })
@@ -640,6 +633,51 @@ mod tests {
         .unwrap()
     }
 
+    #[test]
+    fn node_invocation_context_is_a_fresh_invocation() {
+        // Go RunLLMAgentAsNode: icontext.NewInvocationContext(bound, params{…, IsolationScope:
+        // ctx.IsolationScope(), …}) with no EndInvocation, so the agent's context starts not
+        // ended even under an ended parent, keeps the parent's isolation scope and resets the
+        // node-level fields.
+        let model = MockModel::new(vec![]);
+        let a = agent("doer", &model, Mode::Task);
+        let mut resumed = serde_json::Map::new();
+        resumed.insert("ask".into(), json!("yes"));
+        let parent = Context::builder()
+            .agent(a.clone())
+            .isolation_scope("scope-1")
+            .build()
+            .with_delta(ContextDelta {
+                path: Some("wf@1/doer@1".into()),
+                run_id: Some("1".into()),
+                output_for_ancestors: Some(vec!["wf".into()]),
+                resumed_inputs: Some(Arc::new(resumed)),
+                function_call_id: Some("fc-1".into()),
+                ..Default::default()
+            });
+        parent.end_invocation();
+        let ic = node_invocation_context(
+            &parent,
+            parent.as_invocation(),
+            a.clone(),
+            parent.session(),
+            None,
+        );
+        assert!(
+            !ic.ended(),
+            "Go passes no EndInvocation: the flag starts false"
+        );
+        assert!(parent.ended());
+        assert_eq!(ic.isolation_scope(), "scope-1");
+        assert_eq!(ic.agent_name(), "doer");
+        let c = ic.into_context();
+        assert_eq!(c.path(), "");
+        assert_eq!(c.run_id(), "");
+        assert_eq!(c.function_call_id(), "");
+        assert!(c.output_for_ancestors().is_empty());
+        assert_eq!(c.resumed_input("ask"), None);
+    }
+
     #[tokio::test]
     async fn rejects_non_llm_agent() {
         let a = gadk_agent::agent::new(AgentConfig {
@@ -787,7 +825,7 @@ mod tests {
 
     #[tokio::test]
     async fn task_run_keeps_parent_llm_call_limiter() {
-        // C5 D3: the node context is derived with ContextDelta { session, fresh_end_flag }, so the
+        // C5 D3: the node context is derived with ContextDelta { session, fresh_invocation }, so the
         // invocation's limiter is shared, not reset (Task 21's runner/max_llm_calls_test.go relies on it).
         let model = MockModel::new(vec![
             fc_resp("f1", "noop", json!({})),
