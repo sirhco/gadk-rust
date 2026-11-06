@@ -16,7 +16,13 @@
 //! Context compaction internals (port of Go internal/compactioninternal and
 //! internal/agent/compactionctx). The public API is `gadk_session::compaction`.
 
+pub(crate) mod apply;
 pub(crate) mod runtime;
+pub(crate) mod summary_event;
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+pub(crate) mod test_support;
+pub(crate) mod window;
 
 use gadk_session::compaction::Config;
 
