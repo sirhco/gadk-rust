@@ -34,11 +34,14 @@
 
 mod config;
 mod error;
+mod go_fmt;
+pub(crate) mod llm_summarizer;
 mod summarizer;
 mod util;
 
 pub use config::{CompactionConfigError, Config};
 pub use error::{CompactionError, ERR_COMPACTION};
+pub use llm_summarizer::{CONVERSATION_HISTORY_PLACEHOLDER, LlmSummarizer, LlmSummarizerConfig};
 pub use summarizer::{SummarizeFailure, SummarizeResult, Summarizer};
 #[doc(hidden)]
 pub use summarizer::{bare_type_name, failure_usage};
