@@ -33,8 +33,10 @@ use gadk_session::{Event, Session, zero_time};
 use pretty_assertions::assert_eq;
 
 use crate::compaction::compactor::sliding_window;
+use crate::compaction::tail_retention::{TokenCounter, TurnScope};
 use crate::compaction::test_support::{
-    StaticSession, at, fakeSummarizer, model_text_event, sliding_window_stored, text_event,
+    StaticSession, at, fakeSummarizer, model_text_event, sliding_window_stored,
+    tail_retention_stored, text_event,
 };
 use crate::llm::flow::span_capture::{CapturedSpan, capture_spans};
 use crate::telemetry::gen_ai_system;
@@ -588,5 +590,130 @@ async fn test_declined_summarization_reports_what_it_spent() {
     );
 }
 
-// TestTailRetentionEmitsSpan, TestCompactionSpanRecordsTailRetentionThresholds and
-// TestCompactionSpanRecordsADecline need tail retention; Task 8 appends them here.
+/// Go withUsage: tags an event with an observed prompt token count.
+fn with_usage(mut ev: Event, prompt_tokens: i32) -> Event {
+    ev.response.usage_metadata = Some(Usage {
+        prompt_token_count: prompt_tokens,
+        ..Default::default()
+    });
+    ev
+}
+
+fn tail_cfg(token_threshold: i32, event_retention_size: i32, summary: &str) -> Config {
+    Config {
+        token_threshold,
+        event_retention_size,
+        summarizer: Some(fakeSummarizer::new(summary)),
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn test_tail_retention_emits_span() {
+    let sess = StaticSession::new(vec![
+        text_event("a", "inv1", 1, "q1"),
+        with_usage(model_text_event("b", "inv1", 2, "a1"), 900),
+    ]);
+    let cfg = tail_cfg(100, 0, "sum");
+    let (res, spans) = capture_spans(tail_retention_stored(
+        &cfg,
+        Some(&*sess as &dyn Session),
+        &TurnScope::default(),
+        None,
+        None,
+    ))
+    .await;
+    res.expect("tail_retention_stored");
+    let spans = compaction_spans(spans);
+    assert_eq!(spans.len(), 1, "got {} spans, want 1", spans.len());
+    assert_eq!(spans[0].otel_name, "compact_events token_threshold");
+    assert_eq!(
+        spans[0]
+            .field("gen_ai.compaction.token_threshold")
+            .as_deref(),
+        Some("100")
+    );
+    assert!(
+        spans[0]
+            .field("gen_ai.compaction.compaction_interval")
+            .is_none(),
+        "compaction_interval attribute is present on a tail-retention span, want it omitted"
+    );
+}
+
+#[tokio::test]
+async fn test_compaction_span_records_tail_retention_thresholds() {
+    let sess = StaticSession::new(two_invocations());
+    let cfg = tail_cfg(10, 1, "SUM");
+    let est: &TokenCounter = &|_: &[Event]| 1000;
+    let (res, spans) = capture_spans(tail_retention_stored(
+        &cfg,
+        Some(&*sess as &dyn Session),
+        &TurnScope::default(),
+        Some(est),
+        None,
+    ))
+    .await;
+    res.expect("tail_retention_stored");
+    let spans = compaction_spans(spans);
+    assert_eq!(spans.len(), 1, "got {} spans, want 1", spans.len());
+    assert_eq!(
+        spans[0]
+            .field("gen_ai.compaction.token_threshold")
+            .as_deref(),
+        Some("10")
+    );
+    assert_eq!(
+        spans[0]
+            .field("gen_ai.compaction.event_retention_size")
+            .as_deref(),
+        Some("1")
+    );
+    // The knobs of the strategy that is not configured stay off the span.
+    assert!(
+        spans[0]
+            .field("gen_ai.compaction.compaction_interval")
+            .is_none(),
+        "compaction_interval is present on a tail-retention span, want it omitted"
+    );
+}
+
+#[tokio::test]
+async fn test_compaction_span_records_a_decline() {
+    // Threshold crossed, but the retained tail is the entire history.
+    let sess = StaticSession::new(vec![
+        text_event("a", "inv1", 1, "q1"),
+        model_text_event("b", "inv1", 2, "a1"),
+    ]);
+    let cfg = tail_cfg(10, 50, "SUM");
+    let est: &TokenCounter = &|_: &[Event]| 1000;
+    let (res, spans) = capture_spans(tail_retention_stored(
+        &cfg,
+        Some(&*sess as &dyn Session),
+        &TurnScope::default(),
+        Some(est),
+        None,
+    ))
+    .await;
+    let got = res.expect("tail_retention_stored");
+    assert!(
+        got.is_none(),
+        "tail_retention_stored() = {got:?}, want None"
+    );
+    let spans = compaction_spans(spans);
+    assert_eq!(
+        spans.len(),
+        1,
+        "got {} spans for a declined compaction, want 1",
+        spans.len()
+    );
+    let reason = spans[0]
+        .field("gen_ai.compaction.declined")
+        .expect("the span does not say it declined");
+    assert!(!reason.is_empty(), "the decline reason is empty");
+    assert_eq!(
+        spans[0].field("gen_ai.compaction.event_count").as_deref(),
+        Some("0"),
+        "event_count on a declined compaction, want 0"
+    );
+}

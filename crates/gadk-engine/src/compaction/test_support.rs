@@ -34,8 +34,9 @@ use gadk_session::{
 use parking_lot::Mutex;
 use serde_json::{Map, Value, json};
 
-use super::BoxError;
 use super::compactor::sliding_window;
+use super::tail_retention::{TokenCounter, TurnScope, tail_retention};
+use super::{BoxError, ProgressGate};
 
 /// Go `epoch.Add(n * time.Second)`, epoch 2026-01-01T00:00:00Z.
 pub(crate) fn at(n: i64) -> DateTime<Utc> {
@@ -221,6 +222,22 @@ pub(crate) async fn sliding_window_stored(
     sess: Option<&dyn Session>,
 ) -> Result<Option<Event>, BoxError> {
     let (ev, finish) = sliding_window(&Platform::default(), cfg, sess, "").await?;
+    finish.finish(None, "");
+    Ok(ev)
+}
+
+/// Port of Go helpers_test.go tailRetentionStored: runs TailRetention and reports a produced
+/// summary as stored, closing its span. (Go also calls `finish(err, "")` on the error path;
+/// there Rust returns no `Finish` and the span is already closed.)
+pub(crate) async fn tail_retention_stored(
+    cfg: &Config,
+    sess: Option<&dyn Session>,
+    scope: &TurnScope,
+    estimate: Option<&TokenCounter>,
+    progress: Option<Arc<dyn ProgressGate>>,
+) -> Result<Option<Event>, BoxError> {
+    let (ev, finish) =
+        tail_retention(&Platform::default(), cfg, sess, scope, estimate, progress).await?;
     finish.finish(None, "");
     Ok(ev)
 }
