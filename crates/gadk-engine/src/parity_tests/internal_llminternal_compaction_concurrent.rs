@@ -121,7 +121,12 @@ async fn test_compaction_survives_a_concurrent_writer() {
     let writer = {
         let (base, sess, summarizer) = (base.clone(), sess.clone(), summarizer.clone());
         tokio::spawn(async move {
-            summarizer.entered.notified().await;
+            tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                summarizer.entered.notified(),
+            )
+            .await
+            .expect("the summarizer was never entered within 5 s: compaction did not run");
             base.append_event(&*sess, &mut straggler)
                 .await
                 .expect("the concurrent writer could not append");

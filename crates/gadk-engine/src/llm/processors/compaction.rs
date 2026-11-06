@@ -142,9 +142,9 @@ async fn run(ctx: &InvocationContext) {
     }
     finish.finish(None, "");
 
-    // Go RepairContext: the repair ignores the turn's cancellation and is bounded by
-    // apply::REPAIR_TIMEOUT.
-    let repaired = apply::repair(async {
+    // Go RepairContext: the repair is detached from the turn (spawned, so dropping the turn does
+    // not stop it) and bounded by apply::REPAIR_TIMEOUT.
+    let repaired = apply::repair(async move {
         match apply::reload_session(Some(svc.as_ref()), &*sess).await {
             Err(err) => tracing::warn!(
                 target: "adk",

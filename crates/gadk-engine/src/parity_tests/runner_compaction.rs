@@ -1286,7 +1286,7 @@ async fn test_summary_passes_through_plugins() {
     );
 }
 
-// parity: adapted: tracing spans have no trace IDs; "joins the caller's trace" is checked as the compact_events span's parent chain reaching the caller's span, plus Go's invocation-ID attribute
+// parity: adapted: tracing spans have no trace IDs; a span's trace is the root of its parent chain, so Go's compactionTrace == turnTrace is checked as compact_events and invoke_agent walking up to the same root (the caller's span), plus Go's invocation-ID attribute
 #[tokio::test]
 async fn test_compaction_span_joins_the_callers_trace() {
     let (r, _) = new_compaction_runner(
@@ -1311,35 +1311,36 @@ async fn test_compaction_span_joins_the_callers_trace() {
                 spans.iter().map(|s| &s.name).collect::<Vec<_>>()
             )
         });
-    assert!(
-        spans.iter().any(|s| s.name == "invoke_agent"),
-        "missing the turn's invoke_agent span"
-    );
+    let turn = spans
+        .iter()
+        .find(|s| s.name == "invoke_agent")
+        .unwrap_or_else(|| panic!("missing the turn's invoke_agent span"));
     assert!(
         compact.parent.is_some(),
         "the compaction span has no parent, so it escaped the caller's trace"
     );
-    // Walk the parent chain by span name up to the caller's span.
-    let parent_of = |name: &str| -> Option<String> {
-        spans
-            .iter()
-            .find(|s| s.name == name)
-            .and_then(|s: &CapturedSpan| s.parent.clone())
-    };
-    let mut cur = compact.parent.clone();
-    let mut reached_caller = false;
-    for _ in 0..16 {
-        match cur {
-            Some(ref n) if n == "caller" => {
-                reached_caller = true;
-                break;
+    // A span's trace is the root of its parent chain, walked by span name.
+    let trace_of = |s: &CapturedSpan| -> String {
+        let mut cur = s.name.clone();
+        for _ in 0..32 {
+            match spans
+                .iter()
+                .find(|sp| sp.name == cur)
+                .and_then(|sp| sp.parent.clone())
+            {
+                Some(parent) => cur = parent,
+                None => break,
             }
-            Some(ref n) => cur = parent_of(n),
-            None => break,
         }
-    }
-    assert!(
-        reached_caller,
+        cur
+    };
+    let (compaction_trace, turn_trace) = (trace_of(compact), trace_of(turn));
+    assert_eq!(
+        compaction_trace, turn_trace,
+        "compaction is in trace {compaction_trace} and the turn in {turn_trace}, so they cannot be seen together"
+    );
+    assert_eq!(
+        compaction_trace, "caller",
         "compaction is not inside the caller's trace"
     );
     // The correlation attribute is the only join between the two.

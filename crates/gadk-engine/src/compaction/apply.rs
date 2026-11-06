@@ -29,7 +29,6 @@ use super::{BoxError, err_text, wrap_err};
 use crate::tool::utils::{content, function_calls, function_responses, text_parts};
 
 /// Port of Go UnwrapSession (Go-parity note 6).
-#[allow(unused_imports)]
 pub(crate) use crate::llm::agent::underlying_session as unwrap_session;
 
 /// Port of Go repairTimeout.
@@ -74,10 +73,30 @@ pub(crate) fn records(events: &[Event]) -> (Vec<usize>, Vec<&Event>) {
         .unzip()
 }
 
-/// Port of Go RepairContext: `fut` is never handed the invocation's cancellation and is bounded
-/// by [`REPAIR_TIMEOUT`]; `None` means it timed out (Go-parity note 8).
-pub(crate) async fn repair<F: std::future::Future>(fut: F) -> Option<F::Output> {
-    tokio::time::timeout(REPAIR_TIMEOUT, fut).await.ok()
+/// Port of Go RepairContext: runs the corrective write detached from the caller and bounded by
+/// [`REPAIR_TIMEOUT`]; `None` means it timed out (Go-parity note 8).
+///
+/// Go detaches the repair's context from the caller's cancellation. A Rust future has no
+/// context, and dropping it is its cancellation, so `fut` is spawned onto the runtime (inside
+/// the caller's current span, Go's carried values) and the returned future only awaits it:
+/// dropping the caller mid-repair leaves the repair running to completion or to the timeout.
+/// The summary is already stored and claims a range wider than it summarized until this lands.
+/// A panic inside `fut` resumes on the caller, as Go's inline repair would propagate it.
+pub(crate) async fn repair<F>(fut: F) -> Option<F::Output>
+where
+    F: std::future::Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    let task = tokio::spawn(tracing::Instrument::in_current_span(tokio::time::timeout(
+        REPAIR_TIMEOUT,
+        fut,
+    )));
+    match task.await {
+        Ok(done) => done.ok(),
+        Err(e) if e.is_panic() => std::panic::resume_unwind(e.into_panic()),
+        // Cancelled only by the runtime shutting down: nothing is left to repair on.
+        Err(_) => None,
+    }
 }
 
 /// Port of Go keptRange.

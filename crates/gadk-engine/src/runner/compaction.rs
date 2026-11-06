@@ -24,7 +24,7 @@ use std::time::Duration;
 use futures::FutureExt;
 use gadk_agent::{Agent, AgentError, ContextDelta, InvocationContext, go_quote};
 use gadk_session::compaction::{CompactionError, Config, LlmSummarizer, LlmSummarizerConfig};
-use gadk_session::{Event, Session};
+use gadk_session::{Event, Session, SessionService};
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 
@@ -226,55 +226,22 @@ impl RunnerInner {
         finish.finish(None, "");
 
         // Go RepairContext: what lands during the append is repaired after the fact, detached
-        // from the run's cancellation and bounded by the repair timeout; failures are logged.
-        let repaired =
-            apply::repair(self.repair_after_append(stored, &current, &summary, &known)).await;
+        // from the run's cancellation (spawned, so dropping this future does not stop it) and
+        // bounded by the repair timeout; failures are logged.
+        let repaired = apply::repair(repair_after_append(
+            Arc::clone(&self.session_service),
+            Arc::clone(stored),
+            current,
+            summary,
+            known,
+        ))
+        .await;
         if repaired.is_none() {
             tracing::warn!(
                 "adk: could not check a stored compaction for stragglers: the repair timed out"
             );
         }
         Ok(())
-    }
-
-    /// Go compactAfterInvocation's straggler repair: stores a corrected record naming every
-    /// event that landed inside the stored summary's range unseen.
-    async fn repair_after_append(
-        &self,
-        stored: &Arc<dyn Session>,
-        current: &Arc<dyn Session>,
-        summary: &Event,
-        known: &std::collections::HashSet<String>,
-    ) {
-        let latest = match apply::reload_session(Some(&*self.session_service), &**stored).await {
-            Ok(latest) => latest,
-            Err(e) => {
-                tracing::warn!(
-                    "adk: could not re-read the session to check a stored compaction for stragglers: {e}"
-                );
-                return;
-            }
-        };
-        let Some(mut repair) = apply::repair_after_append(summary, known, &*latest) else {
-            return;
-        };
-        let excluded = |ev: &Event| {
-            ev.actions
-                .compaction
-                .as_ref()
-                .map_or(0, |c| c.excluded_events.len())
-        };
-        let added = excluded(&repair).saturating_sub(excluded(summary));
-        match self
-            .session_service
-            .append_event(&**current, &mut repair)
-            .await
-        {
-            Err(e) => tracing::warn!("adk: could not store a corrected compaction record: {e}"),
-            Ok(()) => tracing::warn!(
-                "adk: corrected a compaction record that would have covered {added} event(s) it did not summarize"
-            ),
-        }
     }
 
     /// Go compactAfterInvocation's `raced`: re-reads the session and reports whether anything
@@ -287,6 +254,43 @@ impl RunnerInner {
     ) -> Result<bool, BoxError> {
         let latest = apply::reload_session(Some(&*self.session_service), &**stored).await?;
         Ok(apply::range_raced(&*latest, current, summary))
+    }
+}
+
+/// Go compactAfterInvocation's straggler repair: stores a corrected record naming every event
+/// that landed inside the stored summary's range unseen. Owns its inputs so [`apply::repair`]
+/// can detach it from the run.
+async fn repair_after_append(
+    svc: Arc<dyn SessionService>,
+    stored: Arc<dyn Session>,
+    current: Arc<dyn Session>,
+    summary: Event,
+    known: std::collections::HashSet<String>,
+) {
+    let latest = match apply::reload_session(Some(&*svc), &*stored).await {
+        Ok(latest) => latest,
+        Err(e) => {
+            tracing::warn!(
+                "adk: could not re-read the session to check a stored compaction for stragglers: {e}"
+            );
+            return;
+        }
+    };
+    let Some(mut repair) = apply::repair_after_append(&summary, &known, &*latest) else {
+        return;
+    };
+    let excluded = |ev: &Event| {
+        ev.actions
+            .compaction
+            .as_ref()
+            .map_or(0, |c| c.excluded_events.len())
+    };
+    let added = excluded(&repair).saturating_sub(excluded(&summary));
+    match svc.append_event(&*current, &mut repair).await {
+        Err(e) => tracing::warn!("adk: could not store a corrected compaction record: {e}"),
+        Ok(()) => tracing::warn!(
+            "adk: corrected a compaction record that would have covered {added} event(s) it did not summarize"
+        ),
     }
 }
 
@@ -306,6 +310,9 @@ impl RunnerInner {
 /// Compaction is skipped once the invocation yielded an error ([`InvocationGuard::mark_failed`]),
 /// and when the stream is dropped while suspended inside an await rather than at a yield
 /// ([`InvocationGuard::at_yield`]).
+///
+/// A drop before the summary append is Go's cancellation decline; once the summary is stored,
+/// the straggler repair is detached ([`apply::repair`] spawns it) and always runs.
 pub(crate) struct InvocationGuard {
     inner: Arc<RunnerInner>,
     stored: Arc<dyn Session>,

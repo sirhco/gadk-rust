@@ -21,7 +21,6 @@ use chrono::{Duration, TimeZone, Utc};
 use gadk_genai::Content;
 use gadk_session::{Event, EventActions, EventCompaction, EventRef};
 use pretty_assertions::assert_eq;
-use tokio_util::sync::CancellationToken;
 
 use crate::compaction::apply::{
     CoverIndex, apply, excludes, has_compaction, has_usable_summary, in_range, known_event_ids,
@@ -601,23 +600,43 @@ fn test_two_corrections_keep_both_stragglers() {
     );
 }
 
-// parity: adapted: Rust futures observe no context; apply::repair is never handed the invocation token and is bounded by REPAIR_TIMEOUT, so the test cancels a token, checks the repair still completes, and checks a wedged repair yields None after 30 s on the paused clock (Go-parity note 8)
+// parity: adapted: Go cancels the caller's context and inspects RepairContext; a Rust future is cancelled by being dropped, so the test drops the caller's future while the repair is suspended in its session call and asserts the repair still lands with its captured value, then that a wedged repair yields None after 30 s on the paused clock (Go-parity note 8)
 #[tokio::test(start_paused = true)]
 async fn test_repair_context_outlives_the_callers_cancellation() {
-    let caller = CancellationToken::new();
+    let (entered_tx, entered_rx) = tokio::sync::oneshot::channel::<()>();
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+    let (landed_tx, landed_rx) = tokio::sync::oneshot::channel::<String>();
     let carried = "carried".to_string();
-    caller.cancel();
-    // The caller is gone; the repair still runs to completion and keeps its captured values.
-    let got = repair(async { carried.clone() }).await;
-    assert_eq!(
-        got.as_deref(),
-        Some("carried"),
-        "the repair stopped with its caller"
+    let mut caller = Box::pin(repair(async move {
+        let _ = entered_tx.send(());
+        // The repair's session call, pending until released.
+        let _ = release_rx.await;
+        let _ = landed_tx.send(carried);
+    }));
+    assert!(
+        futures::poll!(&mut caller).is_pending(),
+        "the repair finished before its session call was released"
     );
+    entered_rx
+        .await
+        .expect("the repair never reached its session call");
+    // The caller is canceled (dropped) mid-repair.
+    drop(caller);
+    let _ = release_tx.send(());
+    let got = tokio::time::timeout(std::time::Duration::from_secs(5), landed_rx).await;
+    assert_eq!(
+        got.ok().and_then(Result::ok).as_deref(),
+        Some("carried"),
+        "repair context is canceled once the caller canceled, want it still live: the summary is already stored and nothing has corrected its range"
+    );
+
     // A wedged backend is bounded by the 30 s repair deadline rather than held open for ever.
     let started = tokio::time::Instant::now();
     let wedged = repair(std::future::pending::<()>()).await;
-    assert!(wedged.is_none(), "repair context carries no deadline");
+    assert!(
+        wedged.is_none(),
+        "repair context carries no deadline, so a wedged backend holds the goroutine open for ever"
+    );
     assert_eq!(started.elapsed(), std::time::Duration::from_secs(30));
 }
 
