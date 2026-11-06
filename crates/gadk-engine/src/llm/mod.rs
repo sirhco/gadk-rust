@@ -22,6 +22,8 @@ pub use config::*;
 
 pub(crate) mod flow;
 pub(crate) mod functions;
+#[allow(dead_code)] // consumed by the live flow (Task 8); removed by Task 12
+pub(crate) mod live;
 pub(crate) mod mode;
 pub(crate) mod node_wrapper;
 pub(crate) mod processors;
