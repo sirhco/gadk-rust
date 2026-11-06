@@ -79,6 +79,7 @@ async fn run_with_before_agent_callback(
         plugin_config: PluginConfig::default(),
         auto_create_session: false,
         platform: Platform::default(),
+        compaction: None,
     })
     .unwrap();
     let cr = svc

@@ -197,6 +197,7 @@ async fn runner_on_event_before_append() {
             },
             auto_create_session: true,
             platform: Platform::default(),
+            compaction: None,
         })
         .unwrap();
         let items: Vec<_> = runner
@@ -337,6 +338,7 @@ async fn runner_rejects_non_chat_root(#[case] mode: Mode, #[case] want: Option<&
         plugin_config: PluginConfig::default(),
         auto_create_session: true,
         platform: Platform::default(),
+        compaction: None,
     })
     .unwrap();
     let items: Vec<_> = runner

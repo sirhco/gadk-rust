@@ -15,6 +15,7 @@
 
 //! gadk-session: sessions, events, and the in-memory session service.
 
+pub mod compaction;
 mod error;
 mod event;
 mod inmemory;
@@ -25,6 +26,10 @@ mod tool_confirmation;
 /// Reusable conformance suite for [`SessionService`] implementations.
 #[cfg(feature = "testsuite")]
 pub mod testsuite;
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod parity_tests;
 
 pub use error::SessionError;
 pub use event::{

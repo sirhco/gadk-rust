@@ -57,6 +57,7 @@ async fn test_run_does_not_mutate_the_root_agents_mode() {
         plugin_config: PluginConfig::default(),
         auto_create_session: true,
         platform: Platform::default(),
+        compaction: None,
     })
     .unwrap();
     let mut s = runner.run(

@@ -105,6 +105,7 @@ fn new_runner(agent: Arc<dyn Agent>) -> Runner {
         plugin_config: PluginConfig::default(),
         auto_create_session: true,
         platform: Platform::default(),
+        compaction: None,
     })
     .expect("runner.New()")
 }

@@ -25,6 +25,7 @@ pub mod tool;
 pub mod workflow;
 
 pub(crate) mod artifacts;
+pub(crate) mod compaction;
 pub(crate) mod memory;
 pub(crate) mod telemetry;
 

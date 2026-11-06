@@ -55,3 +55,7 @@ required-features = ["gemini"]
 [[example]]
 name = "bidi_streaming_tool"
 required-features = ["gemini"]
+
+[[example]]
+name = "compaction"
+required-features = ["gemini"]

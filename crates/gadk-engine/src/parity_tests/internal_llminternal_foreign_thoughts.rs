@@ -15,35 +15,23 @@
 
 //! Port of ADK-Go `internal/llminternal/foreign_thoughts_test.go`.
 
-use chrono::{DateTime, TimeZone, Utc};
+use std::sync::Arc;
+
 use gadk_genai::{Blob, Content, Part, ROLE_MODEL, ROLE_USER};
+use gadk_session::compaction::Config;
 use gadk_session::{Event, EventActions};
 use pretty_assertions::assert_eq;
 use serde_json::json;
 
 use super::internal_llminternal_contents_processor::{
-    ctx_builder, ev, llm_agent, run_contents, text, with_continuation,
+    ctx_builder, ev, llm_agent, run_contents, with_continuation,
 };
+use super::internal_llminternal_contents_processor_compaction::{
+    compaction_at as at, compaction_invocation_ctx, compaction_summary_event,
+    compaction_text_event as text_event,
+};
+use crate::compaction::runtime;
 use crate::llm::{IncludeContents, LlmAgentConfig};
-
-/// Go compactionAt (contents_processor_compaction_test.go:38–42): epoch 2026-01-01 + n seconds.
-/// That Go file is a 1c (compaction) target, so the helper is defined here.
-fn at(n: i64) -> DateTime<Utc> {
-    Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap() + chrono::Duration::seconds(n)
-}
-
-/// Go compactionTextEvent: role "user" for author "user", else "model".
-fn text_event(author: &str, ts: i64, t: &str) -> Event {
-    let role = if author == "user" {
-        ROLE_USER
-    } else {
-        ROLE_MODEL
-    };
-    Event {
-        timestamp: at(ts),
-        ..ev(author, text(t, role))
-    }
-}
 
 fn thought(t: &str) -> Part {
     Part {
@@ -155,10 +143,98 @@ async fn test_contents_request_processor_foreign_thoughts() {
     }
 }
 
-// parity: skipped TestContentsRequestProcessor_ForeignThoughtCompactionSummary: compaction summaries are deferred to sub-project 1c
-// parity: skipped TestContentsRequestProcessor_ForeignThoughtCompactionHole: compaction excluded-event holes are deferred to sub-project 1c
+#[tokio::test]
+async fn test_contents_request_processor_foreign_thought_compaction_summary() {
+    for usable in [true, false] {
+        let name = if usable {
+            "usable summary bypasses foreign thought conversion"
+        } else {
+            "unusable summary does not expose foreign thoughts"
+        };
+        let old = text_event("user", 1, "old request");
+        let recent = text_event("user", 4, "recent request");
+        let mut summary = compaction_summary_event(3, 1, 2, "public summary");
+        summary.author = "otherAgent".into();
+        summary.response.content = Some(Content::from_parts(
+            vec![thought("private summary reasoning")],
+            ROLE_MODEL,
+        ));
+        let mut want = vec![
+            summary
+                .actions
+                .compaction
+                .as_ref()
+                .unwrap()
+                .compacted_content
+                .clone()
+                .unwrap(),
+            recent.response.content.clone().unwrap(),
+        ];
+        if !usable {
+            summary
+                .actions
+                .compaction
+                .as_mut()
+                .unwrap()
+                .compacted_content = None;
+            want = vec![
+                old.response.content.clone().unwrap(),
+                recent.response.content.clone().unwrap(),
+            ];
+        }
+        let events = vec![old, summary, recent];
+        let ctx = compaction_invocation_ctx("testAgent", events.clone(), true);
+        let got = foreign_thought_request_contents(&events, &ctx).await;
+        assert_eq!(
+            want, got,
+            "{name}: foreign thought filtering changed compaction summary handling"
+        );
+    }
+}
 
-// parity: adapted: the Go case "usable foreign summary still starts a turn" needs a compaction summary event (deferred to sub-project 1c) and is omitted
+#[tokio::test]
+async fn test_contents_request_processor_foreign_thought_compaction_hole() {
+    let mut foreign = text_event("otherAgent", 2, "public answer");
+    foreign.invocation_id = "foreign-invocation".into();
+    if let Some(c) = foreign.response.content.as_mut() {
+        c.parts.insert(0, thought("private reasoning"));
+    }
+    let mut summary = compaction_summary_event(3, 1, 2, "public summary");
+    summary.actions.compaction.as_mut().unwrap().excluded_events = vec![gadk_session::EventRef {
+        invocation_id: foreign.invocation_id.clone(),
+        timestamp: foreign.timestamp,
+    }];
+    let recent = text_event("user", 4, "recent request");
+    let events = vec![
+        text_event("user", 1, "old request"),
+        foreign,
+        summary.clone(),
+        recent.clone(),
+    ];
+    let ctx = compaction_invocation_ctx("testAgent", events.clone(), true);
+    let got = foreign_thought_request_contents(&events, &ctx).await;
+    let want = vec![
+        summary
+            .actions
+            .compaction
+            .unwrap()
+            .compacted_content
+            .unwrap(),
+        Content::from_parts(
+            vec![
+                Part::from_text("For context:"),
+                Part::from_text("[otherAgent] said: public answer"),
+            ],
+            ROLE_USER,
+        ),
+        recent.response.content.unwrap(),
+    ];
+    assert_eq!(
+        want, got,
+        "filtering foreign thoughts lost the event protected by the compaction hole"
+    );
+}
+
 #[tokio::test]
 async fn test_contents_request_processor_foreign_thought_current_turn() {
     struct Case {
@@ -166,6 +242,7 @@ async fn test_contents_request_processor_foreign_thought_current_turn() {
         author: &'static str,
         parts: Vec<Part>,
         successive_thought: bool,
+        summary: bool,
         keep_current_user: bool,
         want_tail: Vec<Content>,
     }
@@ -179,6 +256,7 @@ async fn test_contents_request_processor_foreign_thought_current_turn() {
             author: "otherAgent",
             parts: vec![thought("private reasoning")],
             successive_thought: false,
+            summary: false,
             keep_current_user: true,
             want_tail: vec![],
         },
@@ -187,6 +265,7 @@ async fn test_contents_request_processor_foreign_thought_current_turn() {
             author: "otherAgent",
             parts: vec![empty_thought.clone()],
             successive_thought: false,
+            summary: false,
             keep_current_user: true,
             want_tail: vec![],
         },
@@ -195,6 +274,7 @@ async fn test_contents_request_processor_foreign_thought_current_turn() {
             author: "otherAgent",
             parts: vec![thought("private reasoning"), empty_thought.clone()],
             successive_thought: false,
+            summary: false,
             keep_current_user: true,
             want_tail: vec![],
         },
@@ -203,6 +283,7 @@ async fn test_contents_request_processor_foreign_thought_current_turn() {
             author: "otherAgent",
             parts: vec![thought("private reasoning")],
             successive_thought: true,
+            summary: false,
             keep_current_user: true,
             want_tail: vec![],
         },
@@ -214,6 +295,7 @@ async fn test_contents_request_processor_foreign_thought_current_turn() {
                 Part::from_text("public answer"),
             ],
             successive_thought: false,
+            summary: false,
             keep_current_user: false,
             want_tail: vec![Content::from_parts(
                 vec![
@@ -228,6 +310,7 @@ async fn test_contents_request_processor_foreign_thought_current_turn() {
             author: "testAgent",
             parts: vec![thought("own reasoning")],
             successive_thought: false,
+            summary: false,
             keep_current_user: true,
             want_tail: vec![Content::from_parts(
                 vec![thought("own reasoning")],
@@ -239,8 +322,18 @@ async fn test_contents_request_processor_foreign_thought_current_turn() {
             author: "user",
             parts: vec![thought("user input")],
             successive_thought: false,
+            summary: false,
             keep_current_user: false,
             want_tail: vec![Content::from_parts(vec![thought("user input")], ROLE_USER)],
+        },
+        Case {
+            name: "usable foreign summary still starts a turn",
+            author: "otherAgent",
+            parts: vec![thought("private summary reasoning")],
+            successive_thought: false,
+            summary: true,
+            keep_current_user: false,
+            want_tail: vec![Content::from_text("public summary", ROLE_MODEL)],
         },
     ];
     for c in cases {
@@ -250,10 +343,15 @@ async fn test_contents_request_processor_foreign_thought_current_turn() {
         } else {
             ROLE_MODEL
         };
-        let event = Event {
+        let mut event = Event {
             timestamp: at(4),
             ..ev(c.author, Content::from_parts(c.parts, role))
         };
+        if c.summary {
+            // The current user is outside this range, so skipping the summary pivot would
+            // incorrectly include that user alongside the summary.
+            event.actions = compaction_summary_event(4, 1, 2, "public summary").actions;
+        }
         let mut events = vec![
             text_event("user", 1, "older request"),
             text_event("testAgent", 2, "older answer"),
@@ -274,7 +372,20 @@ async fn test_contents_request_processor_foreign_thought_current_turn() {
             include_contents: IncludeContents::None,
             ..Default::default()
         });
-        let ctx = ctx_builder(&agent, events.clone()).build_invocation();
+        let mut b = ctx_builder(&agent, events.clone());
+        if c.summary {
+            b = runtime::attach(
+                b,
+                runtime::CompactionRuntime::new(
+                    Arc::new(Config {
+                        compaction_interval: 1,
+                        ..Default::default()
+                    }),
+                    None,
+                ),
+            );
+        }
+        let ctx = b.build_invocation();
         let got = foreign_thought_request_contents(&events, &ctx).await;
         let mut want = Vec::new();
         if c.keep_current_user {

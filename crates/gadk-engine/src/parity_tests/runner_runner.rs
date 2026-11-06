@@ -62,6 +62,7 @@ fn runner_cfg(agent: Arc<dyn Agent>, svc: Arc<dyn SessionService>) -> RunnerConf
         plugin_config: PluginConfig::default(),
         auto_create_session: false,
         platform: Platform::default(),
+        compaction: None,
     }
 }
 

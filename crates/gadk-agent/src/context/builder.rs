@@ -45,7 +45,7 @@ use crate::state::{AgentState, AgentType};
 /// `Platform::default()`, a custom agent named `"test_agent"`, invocation id
 /// `"e-" + platform.new_uuid()` (Go `NewInvocationContext`), empty branch and isolation scope, a
 /// fresh `CancellationToken`, `RunConfig::default()`, no resume inputs, and no artifacts, memory,
-/// plugins, parent map, session service or call limiter.
+/// plugins, parent map, session service, call limiter or compaction runtime.
 #[derive(Default)]
 pub struct ContextBuilder {
     session: Option<Arc<dyn Session>>,
@@ -64,6 +64,7 @@ pub struct ContextBuilder {
     cancellation_token: Option<CancellationToken>,
     llm_call_limiter: Option<Arc<LlmCallLimiter>>,
     resumed_inputs: Option<Map<String, Value>>,
+    compaction: Option<Arc<dyn Any + Send + Sync>>,
 }
 
 impl ContextBuilder {
@@ -168,6 +169,13 @@ impl ContextBuilder {
         self
     }
 
+    /// The engine's per-invocation compaction runtime (engine-internal).
+    #[doc(hidden)]
+    pub fn compaction_runtime(mut self, rt: Arc<dyn Any + Send + Sync>) -> Self {
+        self.compaction = Some(rt);
+        self
+    }
+
     /// Builds the invocation context: no actions, not ended, every node field empty. An empty
     /// explicit invocation id also takes the `"e-"` default, as Go's `params.InvocationID == ""`
     /// check does.
@@ -205,6 +213,7 @@ impl ContextBuilder {
             parent_map: self.parent_map,
             session_service: self.session_service,
             llm_call_limiter: self.llm_call_limiter,
+            compaction: self.compaction,
         };
         InvocationContext::from_inner(ContextInner {
             shared: Arc::new(shared),

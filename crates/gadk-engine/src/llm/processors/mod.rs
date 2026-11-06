@@ -16,6 +16,7 @@
 //! Port of the Go internal/llminternal request/response processor chain (base_flow.go:87-112).
 
 pub(crate) mod basic;
+pub(crate) mod compaction;
 pub(crate) mod confirmation;
 pub(crate) mod contents;
 pub(crate) mod identity;
@@ -34,7 +35,7 @@ use crate::{
     workflow::route::go_quote,
 };
 
-/// Port of base_flow.go:88 DefaultRequestProcessors, Go order with the compaction slot removed.
+/// Port of base_flow.go:88 DefaultRequestProcessors, in Go order.
 pub(crate) fn default_request_processors() -> Vec<RequestProcessor> {
     vec![
         basic::basic_request_processor as RequestProcessor,
@@ -43,7 +44,7 @@ pub(crate) fn default_request_processors() -> Vec<RequestProcessor> {
         confirmation::request_confirmation_processor,
         instructions::instructions_request_processor,
         identity::identity_request_processor,
-        // 1c extension point: Go CompactionRequestProcessor sits here (before contents).
+        compaction::compaction_request_processor,
         contents::contents_request_processor,
         stubs::nl_planning_request_processor,
         stubs::code_execution_request_processor,
@@ -536,7 +537,7 @@ mod tests {
             si.find("You have a list of other agents").unwrap(),
         );
         assert!(g < i && i < id && id < tr, "SI order: {si:?}");
-        assert_eq!(default_request_processors().len(), 12);
+        assert_eq!(default_request_processors().len(), 13);
         assert_eq!(default_response_processors().len(), 2);
     }
 }

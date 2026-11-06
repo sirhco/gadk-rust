@@ -23,10 +23,11 @@ async-trait = { workspace = true }
 thiserror = { workspace = true }
 parking_lot = { workspace = true }
 futures = { workspace = true }
+tokio = { workspace = true }
 
 [dev-dependencies]
 gadk-session = { path = ".", features = ["testsuite"] }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
 pretty_assertions = { workspace = true }
 insta = { workspace = true }
 rstest = { workspace = true }

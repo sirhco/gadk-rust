@@ -55,6 +55,7 @@ impl TestRunner {
             plugin_config: PluginConfig::default(),
             auto_create_session: false,
             platform: Platform::default(),
+            compaction: None,
         })
         .unwrap();
         Self {

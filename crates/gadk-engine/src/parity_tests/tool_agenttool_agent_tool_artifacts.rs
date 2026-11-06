@@ -150,6 +150,7 @@ async fn test_agent_tool_artifacts(nested: bool) {
         plugin_config: PluginConfig::default(),
         auto_create_session: true,
         platform: Platform::default(),
+        compaction: None,
     })
     .expect("runner construction failed");
 

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Copyright 2026 Chris Olson — Apache-2.0 (see LICENSE)
 # R20: every httprr fixture copied under crates/gadk-engine/tests/testdata/ is byte-identical to
-# its ADK-Go original (same relative path under $ADK_GO_DIR), and there are exactly 25 of them.
+# its ADK-Go original (same relative path under $ADK_GO_DIR), and there are exactly 27 of them.
 set -euo pipefail
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 go="${ADK_GO_DIR:-$repo/../adk-go}"
 base="$repo/crates/gadk-engine/tests/testdata"
-expected=25
+expected=27
 n=0
 fail=0
 while IFS= read -r -d '' f; do

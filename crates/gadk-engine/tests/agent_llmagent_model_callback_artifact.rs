@@ -92,6 +92,7 @@ async fn test_model_callback_artifact_save_recorded_on_event() {
         plugin_config: PluginConfig::default(),
         auto_create_session: false,
         platform: Platform::default(),
+        compaction: None,
     })
     .unwrap_or_else(|e| panic!("runner.New() error = {e}"));
     let created = svc

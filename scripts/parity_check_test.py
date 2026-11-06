@@ -268,6 +268,84 @@ class OneBLiveTest(unittest.TestCase):
             self.run_cli("--ledger", "all", "--files", "runner/live_runner_test.go")
 
 
+LEDGER_1C = (
+    "# Parity ledger — sub-project 1c\n\n"
+    "<!-- in-scope:\nsession/compaction/llm_summarizer_test.go\n-->\n\n"
+    "<!-- deferred:\nsession/database/compaction_test.go: database session service (sub-project 4)\n-->\n\n"
+    + pc.TABLE_HEADER + "\n" + pc.TABLE_SEP + "\n"
+)
+
+COMPACTION_TARGET = "crates/gadk-session/src/parity_tests/session_compaction_llm_summarizer.rs"
+
+
+class OneCTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        d = pathlib.Path(self._tmp.name)
+        self.go, self.repo = d / "go", d / "repo"
+        (self.go / "session/compaction").mkdir(parents=True)
+        (self.go / "session/database").mkdir(parents=True)
+        (self.go / "session/compaction/llm_summarizer_test.go").write_text(
+            "package compaction\nfunc TestNewLLMSummarizer(t *testing.T) {}\n"
+            "func TestFormatEventsToleratesNilParts(t *testing.T) {}\n")
+        (self.go / "session/database/compaction_test.go").write_text(
+            "package database\nfunc TestDB(t *testing.T) {}\n")
+        (self.repo / "crates/gadk-session/src/parity_tests").mkdir(parents=True)
+        (self.repo / "docs/parity").mkdir(parents=True)
+        (self.repo / COMPACTION_TARGET).write_text(
+            "#[test]\nfn test_new_llm_summarizer() {}\n\n"
+            "// parity: skipped TestFormatEventsToleratesNilParts: Content::parts holds no nil part\n")
+        self.ledger = self.repo / "docs/parity/1c.md"
+        self.ledger.write_text(LEDGER_1C)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def run_cli(self, *args):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = pc.main(["--adk-go", str(self.go), "--repo", str(self.repo), *args])
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_count_files_generate_and_full_check(self):
+        self.assertEqual(self.run_cli("--ledger", "1c", "--count"), (0, "2\n", ""))
+        self.assertEqual(
+            self.run_cli("--ledger", "1c", "--files", "session/compaction/llm_summarizer_test.go")[0], 0)
+        rc, _, err = self.run_cli("--ledger", "1c")
+        self.assertEqual(rc, 1)
+        self.assertIn("run: python3 scripts/parity-check --ledger 1c --generate", err)
+        self.assertEqual(self.run_cli("--ledger", "1c", "--generate")[0], 0)
+        self.assertEqual(self.run_cli("--ledger", "1c")[0], 0)
+        text = self.ledger.read_text()
+        self.assertIn(
+            "| session/compaction/llm_summarizer_test.go | TestNewLLMSummarizer | ported | "
+            + COMPACTION_TARGET + " | test_new_llm_summarizer |", text)
+        self.assertIn(
+            "| session/compaction/llm_summarizer_test.go | TestFormatEventsToleratesNilParts | skipped | "
+            + COMPACTION_TARGET + " | Content::parts holds no nil part |", text)
+        # Deferred files get no rows.
+        self.assertNotIn("TestDB", text)
+
+    def test_files_outside_the_1c_in_scope_list_are_rejected(self):
+        errs = pc.check_1b(self.go, self.repo, self.ledger,
+                           files=["session/database/compaction_test.go"], name="1c")
+        self.assertEqual(errs, ["not in the 1c in-scope list: session/database/compaction_test.go"])
+
+    def test_missing_target_is_reported(self):
+        (self.repo / COMPACTION_TARGET).unlink()
+        errs = pc.check_1b(self.go, self.repo, self.ledger,
+                           files=["session/compaction/llm_summarizer_test.go"], name="1c")
+        self.assertEqual(errs, [
+            "session/compaction/llm_summarizer_test.go: no Rust target session_compaction_llm_summarizer.rs"
+            " under crates/*/tests/ or crates/*/src/parity_tests/"])
+
+    def test_files_and_generate_still_refuse_1a_and_all(self):
+        with self.assertRaises(SystemExit):
+            self.run_cli("--ledger", "1a", "--generate")
+        with self.assertRaises(SystemExit):
+            self.run_cli("--ledger", "all", "--files", "session/compaction/llm_summarizer_test.go")
+
+
 ADK_GO = pathlib.Path(os.environ.get("ADK_GO_DIR", HERE.parent.parent / "adk-go"))
 
 
@@ -275,10 +353,10 @@ ADK_GO = pathlib.Path(os.environ.get("ADK_GO_DIR", HERE.parent.parent / "adk-go"
 class RealTreeTest(unittest.TestCase):
     def test_1b_count_is_739(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/1b.md")
-        self.assertEqual((len(in_scope), len(deferred)), (137, 7))
+        self.assertEqual((len(in_scope), len(deferred)), (137, 0))
         self.assertEqual(pc.count(ADK_GO, in_scope), 739)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "1b"), [])
-        self.assertFalse(any("1b-live" in reason for reason in deferred.values()), deferred)
+        self.assertEqual(deferred, {})
 
     def test_1b_live_count_is_31(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/1b-live.md")
@@ -293,6 +371,35 @@ class RealTreeTest(unittest.TestCase):
         self.assertEqual(deferred, {})
         self.assertEqual(pc.count(ADK_GO, in_scope), 31)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "1b-live"), [])
+
+    def test_1c_count_is_190(self):
+        in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/1c.md")
+        self.assertEqual(in_scope, [
+            "agent/llmagent/llmagent_compaction_test.go",
+            "agent/llmagent/llmagent_tail_retention_test.go",
+            "internal/agent/compactionctx/compactionctx_test.go",
+            "internal/compactioninternal/apply_test.go",
+            "internal/compactioninternal/compactor_test.go",
+            "internal/compactioninternal/summary_event_test.go",
+            "internal/compactioninternal/tail_retention_test.go",
+            "internal/compactioninternal/telemetry_test.go",
+            "internal/compactioninternal/window_test.go",
+            "internal/llminternal/compaction_concurrent_test.go",
+            "internal/llminternal/compaction_mode_test.go",
+            "internal/llminternal/compaction_processor_test.go",
+            "internal/llminternal/contents_processor_compaction_test.go",
+            "runner/compaction_test.go",
+            "session/compaction/llm_summarizer_test.go",
+        ])
+        self.assertEqual(deferred, {
+            "internal/compactionvalidate/validate_test.go": "launcher and server validation (sub-projects 5 and 6)",
+            "cmd/launcher/console/compaction_test.go": "launcher (sub-project 6)",
+            "server/adkrest/compaction_integration_test.go": "REST server (sub-project 5)",
+            "session/database/compaction_test.go": "database session service (sub-project 4)",
+            "session/vertexai/compaction_persistence_test.go": "Vertex AI session service (sub-project 4)",
+        })
+        self.assertEqual(pc.count(ADK_GO, in_scope), 190)
+        self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "1c"), [])
 
     def test_1a_header_has_13_files(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/1a.md")
