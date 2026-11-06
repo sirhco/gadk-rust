@@ -34,6 +34,7 @@ use gadk_model::{Backend, LlmResponse, ModelError, body_prefix};
 use serde::Serialize;
 use serde_json::Value;
 
+use super::live_other;
 use crate::error::GeminiError;
 use crate::request::{
     Obj, as_obj, content, convert_list, convert_obj, copy, reject, safety_setting_mldev,
@@ -58,7 +59,7 @@ struct LiveClientMessage {
 impl LiveClientMessage {
     fn to_json(&self) -> Result<String, GeminiError> {
         serde_json::to_string(self)
-            .map_err(|e| GeminiError::Live(format!("marshal client message error: {e}")))
+            .map_err(|e| live_other(format!("marshal client message error: {e}")))
     }
 }
 
@@ -214,7 +215,7 @@ fn typed_blob(blob: &Value, prefix: &str) -> Result<Value, GeminiError> {
     if mime.starts_with(prefix) {
         Ok(blob.clone())
     } else {
-        Err(GeminiError::Live(format!("Unsupported mime type: {mime}")))
+        Err(live_other(format!("Unsupported mime type: {mime}")))
     }
 }
 
@@ -249,13 +250,13 @@ pub(crate) fn decode_server_message(
     data: &[u8],
 ) -> Result<LiveServerMessage, GeminiError> {
     let value: Value = serde_json::from_slice(data).map_err(|e| {
-        GeminiError::Live(format!(
+        live_other(format!(
             "invalid message format. Error {e}. message: {}",
             body_prefix(data)
         ))
     })?;
     if value.get("error").is_some_and(|e| !e.is_null()) {
-        return Err(GeminiError::Live(format!(
+        return Err(live_other(format!(
             "received error in response: {}",
             body_prefix(data)
         )));
@@ -264,8 +265,7 @@ pub(crate) fn decode_server_message(
         Backend::VertexAi => Value::Object(server_message_from_vertex(&as_obj(&value))),
         Backend::GeminiApi => value,
     };
-    serde_json::from_value(value)
-        .map_err(|e| GeminiError::Live(format!("invalid server message: {e}")))
+    serde_json::from_value(value).map_err(|e| live_other(format!("invalid server message: {e}")))
 }
 
 /// Port of genai `liveServerMessageFromVertex` (with `usageMetadataFromVertex` and

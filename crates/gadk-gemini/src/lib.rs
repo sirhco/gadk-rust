@@ -32,8 +32,13 @@ pub use error::GeminiError;
 pub use live::{LiveConnection, RealtimeInput};
 pub use model::GeminiModel;
 
-/// Internals exposed for the integration tests. Not part of the public API.
+/// Internals exposed for the integration tests and the engine's parity tests. Not part of the
+/// public API.
 #[doc(hidden)]
 pub mod internal {
+    pub use crate::live::{
+        classify_ws_error, close_frame_error, gorilla_close_text, wrap_conn_error,
+    };
     pub use crate::request::{build_request_body, preserve_empty_text_thought_signature_parts};
+    pub use tokio_tungstenite::tungstenite;
 }

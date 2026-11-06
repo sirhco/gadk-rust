@@ -21,6 +21,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use futures::StreamExt;
+use futures::future::BoxFuture;
 use futures::stream::BoxStream;
 use gadk_genai::{Content, GenerateContentConfig, GenerateContentResponse, LiveConnectConfig};
 use gadk_model::{
@@ -427,5 +428,17 @@ impl Llm for GeminiModel {
 
     fn google_variant(&self) -> Option<gadk_model::Backend> {
         Some(self.inner.resolved.backend)
+    }
+
+    /// Opens a Live connection (genai `Live.Connect` with this model's name and client
+    /// configuration) as the model-agnostic trait object. Failures convert to `ModelError`.
+    fn connect_live<'a>(
+        &'a self,
+        cfg: LiveConnectConfig,
+    ) -> BoxFuture<'a, Result<Box<dyn gadk_model::LiveConnection>, ModelError>> {
+        Box::pin(async move {
+            let conn = self.live_connect(cfg).await?;
+            Ok(Box::new(conn) as Box<dyn gadk_model::LiveConnection>)
+        })
     }
 }
