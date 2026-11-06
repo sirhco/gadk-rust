@@ -27,6 +27,10 @@ mod tool_confirmation;
 #[cfg(feature = "testsuite")]
 pub mod testsuite;
 
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod parity_tests;
+
 pub use error::SessionError;
 pub use event::{
     Event, EventActions, EventCompaction, EventRef, NodeInfo, RequestInput, zero_time,
