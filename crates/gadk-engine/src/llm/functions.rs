@@ -101,7 +101,6 @@ pub(crate) async fn handle_function_calls_with(
 /// Port of Go handleFunctionCalls with its `liveSess` argument set (base_flow.go:1330): the live
 /// streaming-tool and `stop_streaming` branches use `live`. No filters, no confirmations (Go's live
 /// flow passes nil).
-#[allow(dead_code)] // consumed by the live flow (Task 8); removed by Task 12
 pub(crate) async fn handle_function_calls_live(
     ctx: &InvocationContext,
     flow: &Flow,

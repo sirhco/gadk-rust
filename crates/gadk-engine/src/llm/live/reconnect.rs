@@ -138,6 +138,10 @@ pub(crate) fn live_reconnect_gave_up_error(
 }
 
 /// Go `errors.Is(err, errLiveReconnectExhausted)`.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "Go matches the sentinel only in tests")
+)]
 pub(crate) fn is_live_reconnect_exhausted(err: &AgentError) -> bool {
     matches!(err, AgentError::Other(e) if e.downcast_ref::<LiveReconnectGaveUp>().is_some())
 }
