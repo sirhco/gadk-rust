@@ -20,6 +20,7 @@ pub(crate) mod apply;
 pub(crate) mod compactor;
 pub(crate) mod runtime;
 pub(crate) mod summary_event;
+pub(crate) mod tail_retention;
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 pub(crate) mod test_support;
