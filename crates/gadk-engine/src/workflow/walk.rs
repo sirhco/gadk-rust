@@ -13,4 +13,43 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Graph walk (port of Go workflow/walk.go, internal/workflowwalk). Implemented by Task 8.
+//! Agent walk over a workflow graph (port of Go workflow/walk.go). The Go `init` registration
+//! into internal/workflowwalk is dropped: the out-of-scope exp/appinfo is its only consumer.
+
+use std::collections::HashSet;
+use std::sync::Arc;
+
+use gadk_agent::Agent;
+
+use crate::workflow::graph::NodeId;
+use crate::workflow::{AgentNode, Edge, Node, ParallelWorker, WorkflowNode};
+
+/// Port of Go walkAgents: the agents run by the nodes of `edges`, including nested workflows and
+/// ParallelWorkers. Each node is visited once; the same agent behind two nodes is returned twice.
+pub(crate) fn walk_agents(edges: &[Edge]) -> Vec<Arc<dyn Agent>> {
+    let mut agents = Vec::new();
+    let mut seen = HashSet::new();
+    visit_all(edges, &mut seen, &mut agents);
+    agents
+}
+
+fn visit_all(edges: &[Edge], seen: &mut HashSet<NodeId>, agents: &mut Vec<Arc<dyn Agent>>) {
+    for e in edges {
+        visit(&e.from, seen, agents);
+        visit(&e.to, seen, agents);
+    }
+}
+
+fn visit(n: &Arc<dyn Node>, seen: &mut HashSet<NodeId>, agents: &mut Vec<Arc<dyn Agent>>) {
+    if !seen.insert(NodeId::of(n.as_ref())) {
+        return;
+    }
+    let any = n.as_any();
+    if let Some(a) = any.downcast_ref::<AgentNode>() {
+        agents.push(Arc::clone(&a.agent));
+    } else if let Some(w) = any.downcast_ref::<WorkflowNode>() {
+        visit_all(&w.sub_workflow.graph.all_edges(), seen, agents);
+    } else if let Some(p) = any.downcast_ref::<ParallelWorker>() {
+        visit(&p.wrapped, seen, agents);
+    }
+}
