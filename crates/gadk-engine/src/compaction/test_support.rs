@@ -25,13 +25,17 @@ use chrono::{DateTime, TimeZone, Utc};
 use futures::stream::BoxStream;
 use gadk_genai::{Content, FunctionCall, FunctionResponse, Part};
 use gadk_model::{Llm, LlmRequest, LlmResponse, ModelError};
-use gadk_session::compaction::{SummarizeResult, Summarizer};
+use gadk_platform::Platform;
+use gadk_session::compaction::{Config, SummarizeResult, Summarizer};
 use gadk_session::{
     Event, EventActions, EventCompaction, EventRef, Session, SessionError, State, ToolConfirmation,
     zero_time,
 };
 use parking_lot::Mutex;
 use serde_json::{Map, Value, json};
+
+use super::BoxError;
+use super::compactor::sliding_window;
 
 /// Go `epoch.Add(n * time.Second)`, epoch 2026-01-01T00:00:00Z.
 pub(crate) fn at(n: i64) -> DateTime<Utc> {
@@ -208,6 +212,17 @@ pub(crate) fn excl(invocation_id: &str, ts: i64) -> EventRef {
         invocation_id: invocation_id.into(),
         timestamp: at(ts),
     }
+}
+
+/// Port of Go helpers_test.go slidingWindowStored: runs SlidingWindow and reports the summary as
+/// stored, closing its span.
+pub(crate) async fn sliding_window_stored(
+    cfg: &Config,
+    sess: Option<&dyn Session>,
+) -> Result<Option<Event>, BoxError> {
+    let (ev, finish) = sliding_window(&Platform::default(), cfg, sess, "").await?;
+    finish.finish(None, "");
+    Ok(ev)
 }
 
 /// A state with no keys (Go staticSession.State returns nil).
