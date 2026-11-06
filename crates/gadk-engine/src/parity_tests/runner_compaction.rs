@@ -1983,3 +1983,56 @@ async fn test_before_run_plugin_cannot_plant_a_compaction_record() {
         }
     }
 }
+
+// Rust-only: a stream dropped while suspended inside an await (a pending model call) is Go's
+// cancelled ctx (the model call fails and sets invocationFailed, or runner.go's ctx.Err() check
+// trips), so the abandoned turn is not summarized; the after-run callbacks still run.
+#[tokio::test(start_paused = true)]
+async fn dropped_mid_await_skips_compaction_but_runs_after_run() {
+    let after_run = Arc::new(AtomicBool::new(false));
+    let saw = after_run.clone();
+    let p = Plugin::new(gadk_agent::PluginConfig {
+        name: "after".into(),
+        after_run_callback: Some(Arc::new(move |_ctx: InvocationContext| {
+            saw.store(true, Ordering::SeqCst);
+            Box::pin(async {})
+        })),
+        ..Default::default()
+    });
+    // Answers turn 1, then never answers again.
+    let m = Arc::new(hangingSummarizerModel {
+        calls: AtomicUsize::new(0),
+    });
+    let summarizer = recordingSummarizer::new("SUMMARY");
+    let svc: Arc<dyn SessionService> = Arc::new(InMemorySessionService::new());
+    let r = compaction_runner_with(
+        assistant(m),
+        svc.clone(),
+        vec![p],
+        cfg_sw(2, 0, summarizer.clone()),
+    );
+
+    drain(run(&r, "q1")).await;
+    after_run.store(false, Ordering::SeqCst);
+    {
+        let mut s = run(&r, "q2");
+        let got = tokio::time::timeout(Duration::from_millis(50), s.next()).await;
+        assert!(
+            got.is_err(),
+            "the turn was expected to hang in the model call"
+        );
+    }
+    // Give the dropped stream's guard its chance to (wrongly) compact.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    assert!(
+        after_run.load(Ordering::SeqCst),
+        "the after-run callbacks did not run for a dropped stream"
+    );
+    assert_eq!(summarizer.calls(), 0, "an abandoned turn was summarized");
+    let got = compaction_events_in(&*get_session(&svc, "u", "s").await).len();
+    assert_eq!(
+        got, 0,
+        "an abandoned turn produced {got} compaction event(s)"
+    );
+}

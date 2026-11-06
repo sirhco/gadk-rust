@@ -177,7 +177,9 @@ pub(super) fn run_node(
         let ictx = ctx.as_invocation().clone();
         let mut guard = InvocationGuard::new(inner.clone(), stored.clone(), ictx.clone());
         if opts.yield_user_message && let Some(ev) = user_event {
+            guard.at_yield(true);
             yield Ok(ev);
+            guard.at_yield(false);
         }
 
         // Plugin lifecycle: defer after_run, run before_run, honor an early exit.
@@ -186,7 +188,7 @@ pub(super) fn run_node(
         'run: {
             match inner.run_before_run_callback(&ictx).await {
                 Err(e) => { guard.mark_failed(); yield Err(e); early = true; break 'run; }
-                Ok(Some(ev)) => { yield Ok(ev); early = true; break 'run; }
+                Ok(Some(ev)) => { guard.at_yield(true); yield Ok(ev); guard.at_yield(false); early = true; break 'run; }
                 Ok(None) => {}
             }
 
@@ -220,7 +222,7 @@ pub(super) fn run_node(
                     event.author = agent_to_run.name().to_string();
                 }
                 match inner.process_event(&ictx, &*stored, event).await {
-                    Processed::Event(ev) => { yield Ok(*ev); }
+                    Processed::Event(ev) => { guard.at_yield(true); yield Ok(*ev); guard.at_yield(false); }
                     Processed::PluginError(e) => { guard.mark_failed(); yield Err(e); }
                     Processed::AppendError(e) => { guard.mark_failed(); yield Err(e); early = true; break 'run; }
                 }

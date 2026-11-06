@@ -444,7 +444,7 @@ impl RunnerInner {
             'run: {
                 match this.run_before_run_callback(&ictx).await {
                     Err(e) => { guard.mark_failed(); yield Err(e); early = true; break 'run; }
-                    Ok(Some(ev)) => { yield Ok(ev); early = true; break 'run; }
+                    Ok(Some(ev)) => { guard.at_yield(true); yield Ok(ev); guard.at_yield(false); early = true; break 'run; }
                     Ok(None) => {}
                 }
                 let mut events = this.root_agent.run(ictx.clone());
@@ -465,7 +465,7 @@ impl RunnerInner {
                         }
                     };
                     match this.process_event(&ictx, &*stored, event).await {
-                        Processed::Event(ev) => { yield Ok(*ev); }
+                        Processed::Event(ev) => { guard.at_yield(true); yield Ok(*ev); guard.at_yield(false); }
                         Processed::PluginError(e) => { guard.mark_failed(); yield Err(e); }
                         Processed::AppendError(e) => { guard.mark_failed(); yield Err(e); early = true; break 'run; }
                     }

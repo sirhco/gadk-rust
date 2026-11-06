@@ -299,16 +299,20 @@ impl RunnerInner {
 /// - Early return inside the stream: [`InvocationGuard::finish_early`]: after-run, then
 ///   compaction with its error logged.
 /// - Stream dropped: `Drop` spawns one task on the current runtime that runs the after-run
-///   callbacks and then compaction, on a context re-derived with a fresh cancellation token
-///   (Go's `break` leaves the caller's context uncancelled), inside the span that was current
-///   when the guard was made. Errors are logged.
+///   callbacks and then, if the stream was dropped at a yield, compaction on a context
+///   re-derived with a fresh cancellation token (Go's `break` leaves the caller's context
+///   uncancelled), inside the span that was current when the guard was made. Errors are logged.
 ///
-/// Compaction is skipped once the invocation yielded an error ([`InvocationGuard::mark_failed`]).
+/// Compaction is skipped once the invocation yielded an error ([`InvocationGuard::mark_failed`]),
+/// and when the stream is dropped while suspended inside an await rather than at a yield
+/// ([`InvocationGuard::at_yield`]).
 pub(crate) struct InvocationGuard {
     inner: Arc<RunnerInner>,
     stored: Arc<dyn Session>,
     ctx: InvocationContext,
     failed: bool,
+    /// The stream is suspended at a `yield` of an event (see [`InvocationGuard::at_yield`]).
+    yielding: bool,
     after_run_pending: bool,
     compaction_pending: bool,
     span: tracing::Span,
@@ -326,6 +330,7 @@ impl InvocationGuard {
             stored,
             ctx,
             failed: false,
+            yielding: false,
             after_run_pending: false,
             compaction_pending: true,
             span: tracing::Span::current(),
@@ -340,6 +345,17 @@ impl InvocationGuard {
     /// Go's yield wrapper: call immediately before yielding any error.
     pub(crate) fn mark_failed(&mut self) {
         self.failed = true;
+    }
+
+    /// Brackets every `yield` of an event: `true` immediately before it, `false` immediately
+    /// after the stream resumes. A consumer can only stop early at a yield (Go's `break`, after
+    /// which the deferred compaction runs on the caller's still-live context). A stream dropped
+    /// anywhere else was dropped inside an await (a pending model call or append), which is
+    /// Go's cancelled context: the model call returns `ctx.Err()` and sets `invocationFailed`,
+    /// or `compactAfterInvocation`'s `ctx.Err() != nil` check (runner.go) declines. So `Drop`
+    /// compacts only when this is set.
+    pub(crate) fn at_yield(&mut self, yielding: bool) {
+        self.yielding = yielding;
     }
 
     /// Go's explicit `compactOnce()` after the event loop.
@@ -380,7 +396,12 @@ impl InvocationGuard {
 impl Drop for InvocationGuard {
     fn drop(&mut self) {
         let after_run = std::mem::take(&mut self.after_run_pending);
-        let compact = std::mem::take(&mut self.compaction_pending) && !self.failed;
+        // Dropped mid-await is cancellation, not an early stop (see `at_yield`).
+        let pending = std::mem::take(&mut self.compaction_pending) && !self.failed;
+        if pending && !self.yielding {
+            tracing::debug!("adk: skipping context compaction: the run was dropped mid-await");
+        }
+        let compact = pending && self.yielding;
         if !after_run && !compact {
             return;
         }
