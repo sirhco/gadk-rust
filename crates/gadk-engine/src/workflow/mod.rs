@@ -58,4 +58,6 @@ pub(crate) mod persistence;
 pub(crate) mod resume;
 pub(crate) mod scheduler;
 pub(crate) mod validation;
+// Test-only: Go walkAgents' only consumer is the out-of-scope exp/appinfo.
+#[cfg(test)]
 pub(crate) mod walk;

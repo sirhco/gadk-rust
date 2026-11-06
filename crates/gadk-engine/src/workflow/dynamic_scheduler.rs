@@ -235,6 +235,7 @@ fn invalidate_cache_path(st: &mut DynState, path: &str) {
 
 impl DynSubScheduler {
     /// Test access to the guarded state (Go tests read the fields directly).
+    #[cfg(test)]
     pub(crate) fn state(&self) -> parking_lot::MutexGuard<'_, DynState> {
         self.inner.lock()
     }

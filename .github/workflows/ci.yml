@@ -29,10 +29,12 @@ jobs:
         uses: EmbarkStudios/cargo-deny-action@v2
       - name: parity
         run: |
-          ADK_GO_DIR=adk-go python3 scripts/parity-check --ledger 1a
+          ADK_GO_DIR=adk-go python3 scripts/parity-check --ledger all
           ADK_GO_DIR=adk-go python3 scripts/parity_check_test.py
           python3 scripts/check-workspace-deps.py
           python3 scripts/check_workspace_deps_test.py
+      - name: fixtures
+        run: ADK_GO_DIR=adk-go scripts/check-fixtures.sh
   msrv:
     runs-on: ubuntu-latest
     steps:

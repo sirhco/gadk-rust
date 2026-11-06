@@ -19,7 +19,9 @@
 //! `error.message` as empty fields; the code that ends the span records them on error.
 
 /// Port of Go internal/telemetry startInvokeAgentSpan (name only). Engine-internal: agents' own spans
-/// come from `CustomAgent::run` (gadk-agent), and engine code never wraps `Agent::run` in another one.
+/// come from `CustomAgent::run` (gadk-agent), and engine code never wraps `Agent::run` in another one,
+/// so only the span unit tests use it.
+#[cfg(test)]
 pub(crate) fn agent_span(agent_name: &str) -> tracing::Span {
     tracing::info_span!(
         "invoke_agent",

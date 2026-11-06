@@ -18,7 +18,6 @@
 use std::sync::Arc;
 
 use gadk_agent::AgentError;
-use gadk_genai::Content;
 use gadk_session::Event;
 use serde_json::Value;
 
@@ -170,9 +169,11 @@ pub(crate) fn default_validate_output(
 
 /// Port of the `*genai.Content` arm of Go defaultValidateOutput / modelText (base_node.go:128):
 /// validates the content's JSON form, then falls back to projecting the concatenated non-thought
-/// text parts onto the schema.
+/// text parts onto the schema. Test-only: Rust node outputs are `Value`s (synthesized agent output is
+/// a string), so no production path carries a `Content` output.
+#[cfg(test)]
 pub(crate) fn default_validate_content_output(
-    content: &Content,
+    content: &gadk_genai::Content,
     schema: Option<&CompiledSchema>,
 ) -> Result<Value, String> {
     let v = serde_json::to_value(content).map_err(|e| e.to_string())?;

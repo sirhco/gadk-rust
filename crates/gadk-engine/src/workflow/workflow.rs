@@ -77,6 +77,7 @@ pub struct Workflow {
     /// Concurrency cap for graph-scheduled nodes; 0 = unlimited.
     pub(crate) max_concurrency: usize,
     /// The raw state schema (compiled and checked by [`Workflow::new`]).
+    #[allow(dead_code)] // Go workflow.go Workflow.stateSchema is never read after New either.
     pub(crate) state_schema: Option<Value>,
     /// Marks a synthetic single-node wrapper created by the runner.
     pub(crate) is_root_wrapper: bool,

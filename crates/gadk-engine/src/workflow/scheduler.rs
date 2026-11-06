@@ -100,6 +100,7 @@ pub(crate) fn is_cancelled(err: &AgentError) -> bool {
 }
 
 /// Go `errors.Is(err, context.DeadlineExceeded)`.
+#[cfg(test)]
 pub(crate) fn is_deadline_exceeded(err: &AgentError) -> bool {
     chain_any(err, &|e| matches!(e, AgentError::DeadlineExceeded))
 }
@@ -236,6 +237,7 @@ pub(crate) struct NodeRun {
 
 impl NodeRun {
     /// An accumulator for an activation at `node_path`.
+    #[cfg(test)]
     pub(crate) fn with_path(node_path: &str) -> Self {
         NodeRun {
             node_path: node_path.to_string(),
@@ -623,7 +625,9 @@ impl Scheduler {
         }
     }
 
-    /// Go `run(nil, true)`: the consumer already left; never yields, never finalizes.
+    /// Go `run(nil, true)`: the consumer already left; never yields, never finalizes. Test-only: the
+    /// production drain (Go Resume's deferred cleanup) is dropping the stream (see resume.rs).
+    #[cfg(test)]
     pub(crate) async fn drain(&mut self) {
         self.lp.consumer_gone = true;
         self.lp.draining = true;

@@ -268,7 +268,9 @@ pub(crate) type RouteValidator =
 static VALIDATORS: LazyLock<RwLock<Vec<RouteValidator>>> =
     LazyLock::new(|| RwLock::new(Vec::new()));
 
-/// Port of Go workflowroute.Register: `v` runs during workflow graph validation.
+/// Port of Go workflowroute.Register: `v` runs during workflow graph validation. Test-only: Go's
+/// only production caller is the out-of-scope exp/classifier.
+#[cfg(test)]
 pub(crate) fn register_route_validator(v: RouteValidator) {
     VALIDATORS.write().push(v);
 }

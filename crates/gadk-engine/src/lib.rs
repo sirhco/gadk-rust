@@ -13,9 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Removed by Task 23 once every module has consumers.
-#![allow(dead_code)]
-
 //! gadk-engine: the LLM agent and flow, workflow engine, workflow agents, runner and built-in
 //! tools (port of ADK-Go `agent/llmagent`, `internal/llminternal`, `workflow`, `runner`, …).
 
@@ -38,5 +35,8 @@ pub mod testutil;
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod parity_tests;
 
+pub use agents::{loop_agent, parallel_agent, sequential_agent, workflow_agent};
 #[allow(unused_imports)]
 pub use error::*;
+pub use llm::agent as llm_agent;
+pub use runner::{RunOptions, Runner, RunnerConfig};

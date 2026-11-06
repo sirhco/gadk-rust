@@ -19,8 +19,7 @@ use gadk_agent::go_quote;
 use std::sync::Arc;
 
 use gadk_genai::{
-    Content, FunctionCall, FunctionDeclaration, FunctionResponse, GenerateContentConfig, Part,
-    ROLE_USER, Schema,
+    Content, FunctionCall, FunctionResponse, GenerateContentConfig, Part, ROLE_USER, Schema,
 };
 use gadk_model::LlmRequest;
 use gadk_platform::Platform;
@@ -451,12 +450,16 @@ pub(crate) fn text_parts(c: Option<&Content>) -> Vec<String> {
 }
 
 /// The content's text parts concatenated without a separator (no Go counterpart; plan D5).
+#[allow(dead_code)] // Pinned by plan D5; no Go counterpart and no caller in the 1b port.
 pub(crate) fn content_text(c: &Content) -> String {
     text_parts(Some(c)).concat()
 }
 
 /// Port of Go utils.FunctionDecls.
-pub(crate) fn function_decls(c: Option<&GenerateContentConfig>) -> Vec<&FunctionDeclaration> {
+#[cfg(test)]
+pub(crate) fn function_decls(
+    c: Option<&GenerateContentConfig>,
+) -> Vec<&gadk_genai::FunctionDeclaration> {
     c.map(|c| {
         c.tools
             .iter()
@@ -490,6 +493,7 @@ pub(crate) fn append_instructions(req: &mut LlmRequest, instructions: &[&str]) {
 }
 
 /// Port of Go utils.IsProsePart: plain text meant to be read, and nothing else (thoughts are not prose).
+#[allow(dead_code)] // Go's only callers are in internal/compactioninternal and session/compaction, outside 1b.
 pub(crate) fn is_prose_part(p: &Part) -> bool {
     !p.text.is_empty()
         && !p.thought

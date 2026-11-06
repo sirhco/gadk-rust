@@ -24,7 +24,7 @@ use gadk_genai::Content;
 use gadk_session::{Event, Session};
 use serde_json::Value;
 
-use super::{Runner, RunnerInner};
+use super::RunnerInner;
 use crate::llm::state::reveal;
 use crate::tool::finish_task::{FINISH_TASK_SUCCESS_RESULT, FINISH_TASK_TOOL_NAME};
 use crate::tool::utils::{function_calls, function_responses};
@@ -92,7 +92,9 @@ pub(crate) fn is_transferable(parents: &ParentMap, agent: &Arc<dyn Agent>) -> bo
     true
 }
 
-impl Runner {
+/// Test access (Go tests call these unexported methods directly).
+#[cfg(test)]
+impl super::Runner {
     /// Port of Go `(*Runner).findAgentToRun`.
     pub(crate) fn find_agent_to_run(
         &self,

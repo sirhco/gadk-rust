@@ -44,7 +44,8 @@ pub(crate) const WORKFLOW_DELEGATED_OUTPUT_KEY: &str = "adk.workflow.delegated_o
 pub(crate) const WORKFLOW_NODE_FAILURE_OUTCOME: &str = "failed";
 /// Go workflowNodeCancelledOutcome.
 pub(crate) const WORKFLOW_NODE_CANCELLED_OUTCOME: &str = "cancelled";
-/// Go workflowNodeFailureCode (legacy marker read from older history).
+/// Go workflowNodeFailureCode (legacy marker; Go uses it only in tests too).
+#[cfg(test)]
 pub(crate) const WORKFLOW_NODE_FAILURE_CODE: &str = "WorkflowNodeFailed";
 /// Go workflowNodeCancelledCode (legacy marker read from older history).
 pub(crate) const WORKFLOW_NODE_CANCELLED_CODE: &str = "WorkflowNodeCancelled";

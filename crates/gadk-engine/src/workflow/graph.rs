@@ -120,11 +120,6 @@ impl Graph {
         &self.nodes
     }
 
-    /// The first node named `name`.
-    pub(crate) fn node_by_name(&self, name: &str) -> Option<&Arc<dyn Node>> {
-        self.nodes.iter().find(|n| n.name() == name)
-    }
-
     /// Source nodes with their outgoing edges, in source order.
     pub(crate) fn sources(&self) -> impl Iterator<Item = (&Arc<dyn Node>, &[Edge])> {
         self.source_order
