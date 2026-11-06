@@ -1,4 +1,4 @@
-import importlib.machinery, importlib.util, pathlib, tempfile, unittest, os
+import contextlib, importlib.machinery, importlib.util, io, os, pathlib, tempfile, unittest
 
 HERE = pathlib.Path(__file__).resolve().parent
 loader = importlib.machinery.SourceFileLoader("parity_check", str(HERE / "parity-check"))
@@ -21,6 +21,10 @@ class ConvTest(unittest.TestCase):
         for go, rust in cases.items():
             self.assertEqual(pc.go_test_to_rust(go), rust, go)
 
+    def test_target_name(self):
+        self.assertEqual(pc.target_name("agent/llmagent/llmagent_test.go"), "agent_llmagent_llmagent")
+        self.assertEqual(pc.target_name("internal/utils/utils_test.go"), "internal_utils_utils")
+
 
 class CheckTest(unittest.TestCase):
     def test_missing_row_fails_and_complete_passes(self):
@@ -40,6 +44,185 @@ class CheckTest(unittest.TestCase):
             (d / "rs/a.rs").write_text("")
             errs = pc.check(go_dir=d / "go", repo_dir=d, ledger=ledger, in_scope=["model/llm_test.go"])
             self.assertTrue(any("test_a" in e for e in errs))
+
+    def test_1a_in_scope_from_header(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = pathlib.Path(d)
+            (d / "go/model").mkdir(parents=True)
+            (d / "go/model/llm_test.go").write_text("package model\nfunc TestA(t *testing.T) {}\n")
+            ledger = d / "1a.md"
+            ledger.write_text("<!-- in-scope:\nmodel/llm_test.go\n-->\n\n" + pc.TABLE_HEADER + "\n" + pc.TABLE_SEP + "\n")
+            self.assertEqual(pc.parse_header(ledger), (["model/llm_test.go"], {}))
+            self.assertEqual(pc.check(d / "go", d, ledger), ["missing ledger row: model/llm_test.go TestA"])
+
+
+GO_SRC = """package agent
+
+func TestPorted(t *testing.T) {}
+func TestAdapted(t *testing.T) {}
+func TestSkipped(t *testing.T) {}
+func helper() {}
+"""
+
+RUST_OK = """//! target
+#[test]
+fn test_ported() {}
+
+// parity: adapted: Go mock replaced by ContextBuilder
+#[tokio::test]
+async fn test_adapted() {}
+
+// parity: skipped TestSkipped: YAML loader is out of scope
+"""
+
+LEDGER_1B = (
+    "# Parity ledger — sub-project 1b\n\n"
+    "<!-- in-scope:\nagent/agent_test.go\nagent/helpers_test.go\n-->\n\n"
+    "<!-- deferred:\nrunner/live_runner_test.go: live mode (sub-project 1b-live)\n-->\n\n"
+    + pc.TABLE_HEADER + "\n" + pc.TABLE_SEP + "\n"
+)
+
+TARGET = "crates/gadk-agent/src/parity_tests/agent_agent.rs"
+
+
+class OneBTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        d = pathlib.Path(self._tmp.name)
+        self.go, self.repo = d / "go", d / "repo"
+        (self.go / "agent").mkdir(parents=True)
+        (self.go / "runner").mkdir(parents=True)
+        (self.go / "agent/agent_test.go").write_text(GO_SRC)
+        (self.go / "agent/helpers_test.go").write_text("package agent\nfunc newThing() {}\n")
+        (self.go / "runner/live_runner_test.go").write_text("package runner\nfunc TestLive(t *testing.T) {}\n")
+        (self.repo / "crates/gadk-agent/src/parity_tests").mkdir(parents=True)
+        (self.repo / "docs/parity").mkdir(parents=True)
+        self.target = self.repo / TARGET
+        self.target.write_text(RUST_OK)
+        self.ledger = self.repo / "docs/parity/1b.md"
+        self.ledger.write_text(LEDGER_1B)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def scan(self, text):
+        return pc.scan_target("agent/agent_test.go", ["TestPorted", "TestAdapted", "TestSkipped"], TARGET, text)
+
+    def test_scan_ported_adapted_skipped(self):
+        rows, errs = self.scan(RUST_OK)
+        self.assertEqual(errs, [])
+        self.assertEqual(rows, [
+            ("agent/agent_test.go", "TestPorted", "ported", TARGET, "test_ported"),
+            ("agent/agent_test.go", "TestAdapted", "ported (adapted: Go mock replaced by ContextBuilder)", TARGET, "test_adapted"),
+            ("agent/agent_test.go", "TestSkipped", "skipped", TARGET, "YAML loader is out of scope"),
+        ])
+
+    def test_scan_adapted_window_is_three_lines_and_stops_at_previous_item(self):
+        far = "// parity: adapted: too far\n#[a]\n#[b]\n#[c]\nfn test_adapted() {}\n"
+        rows, _ = self.scan(RUST_OK.replace("// parity: adapted: Go mock replaced by ContextBuilder\n#[tokio::test]\nasync fn test_adapted() {}\n", far))
+        self.assertEqual(rows[1][2], "ported")
+        prev = "// parity: adapted: belongs to test_ported\nfn test_ported() {}\nfn test_adapted() {}\n"
+        rows, _ = self.scan(prev + "// parity: skipped TestSkipped: r\n")
+        self.assertEqual(rows[0][2], "ported (adapted: belongs to test_ported)")
+        self.assertEqual(rows[1][2], "ported")
+
+    def test_scan_missing(self):
+        _, errs = self.scan(RUST_OK.replace("fn test_ported() {}", ""))
+        self.assertEqual(len(errs), 1)
+        self.assertIn("TestPorted: missing", errs[0])
+
+    def test_scan_duplicate_fn_and_duplicate_skip(self):
+        _, errs = self.scan(RUST_OK + "fn test_ported() {}\n")
+        self.assertTrue(any("defined 2 times" in e for e in errs), errs)
+        _, errs = self.scan(RUST_OK + "// parity: skipped TestSkipped: again\n")
+        self.assertTrue(any("2 skip annotations" in e for e in errs), errs)
+
+    def test_scan_both_unknown_empty_and_pipe(self):
+        _, errs = self.scan(RUST_OK + "// parity: skipped TestPorted: dup\n")
+        self.assertTrue(any("both fn test_ported" in e for e in errs), errs)
+        _, errs = self.scan(RUST_OK + "// parity: skipped TestNope: typo\n")
+        self.assertTrue(any("unknown Go test TestNope" in e for e in errs), errs)
+        _, errs = self.scan(RUST_OK.replace("YAML loader is out of scope", ""))
+        self.assertTrue(any("empty parity reason" in e for e in errs), errs)
+        _, errs = self.scan(RUST_OK.replace("YAML loader", "a | b"))
+        self.assertTrue(any("contains '|'" in e for e in errs), errs)
+
+    def test_find_target_none_and_multiple(self):
+        self.target.unlink()
+        _, errs = pc.find_target(self.repo, "agent/agent_test.go")
+        self.assertIn("no Rust target agent_agent.rs", errs[0])
+        (self.repo / "crates/gadk-agent/tests").mkdir(parents=True)
+        (self.repo / "crates/gadk-agent/tests/agent_agent.rs").write_text(RUST_OK)
+        self.assertEqual(pc.find_target(self.repo, "agent/agent_test.go"), ("crates/gadk-agent/tests/agent_agent.rs", []))
+        self.target.write_text(RUST_OK)
+        _, errs = pc.find_target(self.repo, "agent/agent_test.go")
+        self.assertIn("multiple Rust targets", errs[0])
+
+    def test_files_mode_scans_only_named_files(self):
+        self.assertEqual(pc.check_1b(self.go, self.repo, self.ledger, files=["agent/agent_test.go"]), [])
+        self.assertEqual(pc.check_1b(self.go, self.repo, self.ledger, files=["agent/helpers_test.go"]), [])
+        errs = pc.check_1b(self.go, self.repo, self.ledger, files=["runner/live_runner_test.go"])
+        self.assertEqual(errs, ["not in the 1b in-scope list: runner/live_runner_test.go"])
+        self.target.write_text("")
+        errs = pc.check_1b(self.go, self.repo, self.ledger, files=["agent/agent_test.go"])
+        self.assertEqual(len(errs), 3)
+
+    def test_full_check_requires_generated_rows_and_generate_is_idempotent(self):
+        errs = pc.check_1b(self.go, self.repo, self.ledger)
+        self.assertTrue(any("ledger row missing or stale" in e for e in errs), errs)
+        self.assertEqual(pc.generate(self.go, self.repo, self.ledger), [])
+        once = self.ledger.read_text()
+        self.assertTrue(once.startswith(LEDGER_1B))
+        self.assertEqual(once.count("\n| agent/agent_test.go |"), 3)
+        self.assertEqual(pc.check_1b(self.go, self.repo, self.ledger), [])
+        self.assertEqual(pc.generate(self.go, self.repo, self.ledger), [])
+        self.assertEqual(self.ledger.read_text(), once)
+        # A hand edit or a removed row is rejected.
+        self.ledger.write_text(once.replace("| ported |", "| skipped |", 1))
+        self.assertNotEqual(pc.check_1b(self.go, self.repo, self.ledger), [])
+        self.ledger.write_text("\n".join(once.splitlines()[:-1]) + "\n")
+        self.assertNotEqual(pc.check_1b(self.go, self.repo, self.ledger), [])
+
+    def test_generate_refuses_on_scan_errors(self):
+        self.target.write_text("")
+        self.assertNotEqual(pc.generate(self.go, self.repo, self.ledger), [])
+        self.assertEqual(self.ledger.read_text(), LEDGER_1B)
+
+    def test_header_checks(self):
+        (self.go / "runner/live_runner_test.go").unlink()
+        errs = pc.check_1b(self.go, self.repo, self.ledger)
+        self.assertTrue(any("deferred file missing in ADK-Go: runner/live_runner_test.go" in e for e in errs), errs)
+
+    def test_cli_count_and_files(self):
+        def run(*args):
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = pc.main(["--adk-go", str(self.go), "--repo", str(self.repo), *args])
+            return rc, out.getvalue(), err.getvalue()
+        self.assertEqual(run("--ledger", "1b", "--count"), (0, "3\n", ""))
+        self.assertEqual(run("--ledger", "1b", "--count", "--files", "agent/helpers_test.go"), (0, "0\n", ""))
+        self.assertEqual(run("--ledger", "1b", "--files", "agent/agent_test.go")[0], 0)
+        self.assertEqual(run("--ledger", "1b")[0], 1)
+        self.assertEqual(run("--ledger", "1b", "--generate")[0], 0)
+        self.assertEqual(run("--ledger", "1b")[0], 0)
+        with self.assertRaises(SystemExit):
+            run("--ledger", "all", "--count")
+
+
+ADK_GO = pathlib.Path(os.environ.get("ADK_GO_DIR", HERE.parent.parent / "adk-go"))
+
+
+@unittest.skipUnless((ADK_GO / "agent/agent_test.go").is_file(), "ADK-Go checkout not found")
+class RealTreeTest(unittest.TestCase):
+    def test_1b_count_is_739(self):
+        in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/1b.md")
+        self.assertEqual((len(in_scope), len(deferred)), (137, 13))
+        self.assertEqual(pc.count(ADK_GO, in_scope), 739)
+        self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "1b"), [])
+
+    def test_1a_header_has_13_files(self):
+        in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/1a.md")
+        self.assertEqual((len(in_scope), deferred), (13, {}))
 
 
 if __name__ == "__main__":

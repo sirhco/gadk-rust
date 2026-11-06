@@ -1,0 +1,29 @@
+[package]
+name = "gadk-artifact"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+testsuite = []
+
+[dependencies]
+gadk-genai = { workspace = true }
+gadk-platform = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+parking_lot = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+gadk-artifact = { path = ".", features = ["testsuite"] }
+tokio = { workspace = true }
+rstest = { workspace = true }
+pretty_assertions = { workspace = true }

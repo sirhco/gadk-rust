@@ -7,6 +7,10 @@ members = [
   "crates/gadk-gemini",
   "crates/gadk-session",
   "crates/gadk-httprr",
+  "crates/gadk-artifact",
+  "crates/gadk-memory",
+  "crates/gadk-agent",
+  "crates/gadk-engine",
   "crates/gadk",
 ]
 
@@ -24,6 +28,10 @@ gadk-model = { path = "crates/gadk-model", version = "0.1.0" }
 gadk-gemini = { path = "crates/gadk-gemini", version = "0.1.0" }
 gadk-session = { path = "crates/gadk-session", version = "0.1.0" }
 gadk-httprr = { path = "crates/gadk-httprr", version = "0.1.0" }
+gadk-artifact = { path = "crates/gadk-artifact", version = "0.1.0" }
+gadk-memory = { path = "crates/gadk-memory", version = "0.1.0" }
+gadk-agent = { path = "crates/gadk-agent", version = "0.1.0" }
+gadk-engine = { path = "crates/gadk-engine", version = "0.1.0" }
 tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "net"] }
 tokio-util = "0.7.20"
 futures = "0.3.34"
@@ -48,6 +56,10 @@ insta = { version = "1.49.0", features = ["json"] }
 pretty_assertions = "1.4.1"
 anyhow = "1.0.104"
 tracing-subscriber = "0.3.23"
+schemars = "1.2.3"
+jsonschema = { version = "0.60.2", default-features = false }
+async-stream = "0.3.6"
+unicode-properties = "0.1.5"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
