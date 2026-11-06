@@ -628,16 +628,16 @@ fn is_other_agent_reply(current_agent_name: &str, ev: &Event) -> bool {
     ev.author != current_agent_name && ev.author != "user"
 }
 
-/// Go nil-map convention (C5 D5) for function-call args: an empty map stands for Go's nil map,
-/// which `json.Marshal` renders as `null` (a model's no-argument call carries no `args`).
-/// Deviation: a Go non-nil empty map would render `{}`. Function-response maps do NOT use it:
-/// see `convert_foreign_event`.
-fn nil_map_value(m: &Map<String, Value>) -> Value {
-    if m.is_empty() {
-        Value::Null
-    } else {
-        Value::Object(m.clone())
-    }
+/// Go `stringify` (contents_processor.go:855) of a function-call args or function-response map.
+///
+/// Representability trade-off: a Rust `Map` cannot tell Go's nil map (`json.Marshal` → `null`)
+/// from a non-nil empty one (`{}`). Real traffic is non-nil: Gemini sends `"args": {}` for a
+/// no-argument call (e.g. TestDelegation_06's `confirm`, TestDelegation_11's `tool_one`) and Go
+/// tool results are non-nil maps (transfer_to_agent returns `map[string]any{}`), so an empty map
+/// renders `{}`. Deviation: only a synthetic Go nil map (a hand-built FunctionCall/Response with
+/// no Args/Response, as in Go's contents_processor_test) would render `null`.
+fn stringify_map(m: &Map<String, Value>) -> String {
+    go_json_marshal(&Value::Object(m.clone()))
 }
 
 /// Port of contents_processor.go:798 ConvertForeignEvent: presents another agent's event as
@@ -660,18 +660,15 @@ pub(crate) fn convert_foreign_event(ev: &Event) -> Option<Event> {
                 "[{}] called tool `{}` with parameters: {}",
                 ev.author,
                 fc.name,
-                go_json_marshal(&nil_map_value(&fc.args))
+                stringify_map(&fc.args)
             )));
         } else if let Some(fr) = &p.function_response {
-            // An empty response renders `{}`: Go tool results are non-nil maps (transfer_to_agent
-            // returns `map[string]any{}`), so the recorded requests carry `{}`; regression:
-            // TestDelegation_05/_09 (contents_processor.go:826 stringify). Deviation: a Go nil
-            // response (a synthetic FunctionResponse with no Response) would render `null`.
+            // Regression: TestDelegation_05/_09 record `returned result: {}` (see stringify_map).
             parts.push(text_part(format!(
                 "[{}] `{}` tool returned result: {}",
                 ev.author,
                 fr.name,
-                go_json_marshal(&Value::Object(fr.response.clone()))
+                stringify_map(&fr.response)
             )));
         } else {
             // Fall back to the original part for non-text, non-function parts.
@@ -916,7 +913,7 @@ mod tests {
     }
 
     #[test]
-    fn foreign_empty_args_render_null_and_empty_response_renders_object() {
+    fn foreign_empty_args_and_empty_response_render_object() {
         let events = vec![ev(
             "other",
             "model",
@@ -927,8 +924,22 @@ mod tests {
             texts(&got[0]),
             [
                 "For context:",
-                "[other] called tool `t` with parameters: null",
+                "[other] called tool `t` with parameters: {}",
                 "[other] `t` tool returned result: {}"
+            ]
+        );
+    }
+
+    /// A foreign no-argument call as Gemini sends it (`"args": {}`) renders `{}`, as Go does.
+    #[test]
+    fn foreign_no_arg_function_call_renders_empty_object() {
+        let events = vec![ev("other", "model", vec![call("", "confirm", json!({}))])];
+        let got = build(&events);
+        assert_eq!(
+            texts(&got[0]),
+            [
+                "For context:",
+                "[other] called tool `confirm` with parameters: {}"
             ]
         );
     }
