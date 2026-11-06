@@ -13,4 +13,46 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Parity target for Go internal/toolinternal/tool_test.go. Implemented by Task 19.
+//! Port of Go internal/toolinternal/tool_test.go.
+
+use std::sync::Arc;
+
+use gadk_agent::{Context, Mode, Tool, ToolError};
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+
+use crate::llm::LlmAgentConfig;
+use crate::llm::agent as llm_agent;
+use crate::tool::task_agent_tool::TaskAgentTool;
+use crate::tool::{FunctionTool, FunctionToolConfig};
+
+#[derive(Deserialize, Serialize, JsonSchema)]
+struct NoArgs {}
+
+// parity: adapted: Go's toolinternal.ResponseDeferrer interface assertion → Tool::defers_response() (default false); Go's nonDeferringTool stub is a plain FunctionTool
+#[test]
+fn test_response_deferrer_contract() {
+    // TaskAgentTool implements ResponseDeferrer and returns true
+    let a = llm_agent::new(LlmAgentConfig {
+        name: "doer".into(),
+        mode: Mode::Task,
+        ..Default::default()
+    })
+    .unwrap();
+    let tool: Arc<dyn Tool> = TaskAgentTool::new(a);
+    assert!(
+        tool.defers_response(),
+        "TaskAgentTool.defers_response() = false, want true"
+    );
+
+    // plain non-deferring tool does NOT implement ResponseDeferrer
+    let plain = FunctionTool::new(
+        FunctionToolConfig::new("non_deferring", ""),
+        |_ctx: Context, _a: NoArgs| async { Ok::<_, ToolError>(NoArgs {}) },
+    )
+    .unwrap();
+    assert!(
+        !plain.defers_response(),
+        "non_deferring unexpectedly defers its response"
+    );
+}
