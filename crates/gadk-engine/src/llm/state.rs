@@ -21,11 +21,39 @@ use gadk_agent::{Agent, AgentState, AgentType, Tool};
 
 use crate::llm::LlmAgentConfig;
 
+/// Port of Go internal/llminternal/agent.go `LiveModeToolInjection`: allows one successful
+/// live-mode tool injection per agent. Concurrent callers wait for the injection to finish; a
+/// panicking injection unwinds through the guard with the flag still false, so a later caller
+/// retries (`parking_lot` does not poison). `inject` must not re-enter `do_once` on the same
+/// latch.
+#[allow(dead_code)] // consumed by SequentialLive (Task 10); removed by Task 12
+#[derive(Debug, Default)]
+pub(crate) struct LiveModeToolInjection {
+    done: parking_lot::Mutex<bool>,
+}
+
+#[allow(dead_code)] // consumed by SequentialLive (Task 10); removed by Task 12
+impl LiveModeToolInjection {
+    /// Go `Do`: runs `inject` at most once successfully, holding the lock while it runs.
+    pub(crate) fn do_once(&self, inject: impl FnOnce()) {
+        let mut done = self.done.lock();
+        if *done {
+            return;
+        }
+        inject();
+        *done = true;
+    }
+}
+
 /// Port of Go llminternal.State: the LlmAgent's state, stored as `AgentState.config`.
 pub(crate) struct LlmAgentState {
     pub(crate) cfg: LlmAgentConfig,
     /// `cfg.tools` plus the task tools installed for sub-agents (Go appends to `State.Tools`).
     pub(crate) tools: parking_lot::RwLock<Vec<Arc<dyn Tool>>>,
+    /// Go `State.LiveModeInjection`: guards the single live-mode tool injection; its lifetime
+    /// follows the agent.
+    #[allow(dead_code)] // consumed by SequentialLive (Task 10); removed by Task 12
+    pub(crate) live_injection: LiveModeToolInjection,
 }
 
 impl LlmAgentState {
@@ -35,6 +63,7 @@ impl LlmAgentState {
         Self {
             cfg,
             tools: parking_lot::RwLock::new(tools),
+            live_injection: LiveModeToolInjection::default(),
         }
     }
 
