@@ -23,7 +23,10 @@ use gadk_agent::{AgentError, ContextDelta, InvocationContext, Tool, pack_tool};
 use gadk_model::LlmRequest;
 use gadk_session::{Event, EventActions};
 
-use crate::llm::{flow::Flow, processors::wrap_err, state::reveal};
+use crate::{
+    llm::{flow::Flow, processors::wrap_err, state::reveal},
+    workflow::route::go_quote,
+};
 
 /// Port of tools_processor.go:32 toolProcessor: rebuilds Flow.tools on every step (toolsets are
 /// re-evaluated each step).
@@ -45,7 +48,10 @@ pub(crate) fn tools_processor<'a>(
         for ts in &state.cfg.toolsets {
             let ts_tools = ts.tools(&ro).await.map_err(|e| {
                 wrap_err(
-                    format!("failed to extract tools from the tool set {:?}", ts.name()),
+                    format!(
+                        "failed to extract tools from the tool set {}",
+                        go_quote(ts.name())
+                    ),
                     e,
                 )
             })?;
@@ -101,9 +107,12 @@ pub(crate) async fn toolset_preprocess(
             tool_confirmation: Some(None),
             ..Default::default()
         });
-        ts.process_request(&tool_ctx, req)
-            .await
-            .map_err(|e| wrap_err(format!("process request by toolset {:?}", ts.name()), e))?;
+        ts.process_request(&tool_ctx, req).await.map_err(|e| {
+            wrap_err(
+                format!("process request by toolset {}", go_quote(ts.name())),
+                e,
+            )
+        })?;
     }
     Ok(())
 }

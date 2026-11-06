@@ -29,7 +29,10 @@ use std::{error::Error as StdError, fmt};
 use gadk_agent::AgentError;
 use serde_json::Value;
 
-use crate::llm::flow::{RequestProcessor, ResponseProcessor};
+use crate::{
+    llm::flow::{RequestProcessor, ResponseProcessor},
+    workflow::route::go_quote,
+};
 
 /// Port of base_flow.go:88 DefaultRequestProcessors, Go order with the compaction slot removed.
 pub(crate) fn default_request_processors() -> Vec<RequestProcessor> {
@@ -153,14 +156,14 @@ fn go_format_float_v(f: f64) -> String {
     }
 }
 
-/// Go `%q` of a `[]string` (log lines): `["a" "b"]`. Go `%q` of one string is written as Rust
-/// `{:?}`; the two agree on every printable string and differ only on control characters.
+/// Go `%q` of a `[]string` (log lines): `["a" "b"]`, each element quoted by Go
+/// `strconv.Quote` ([`go_quote`]).
 pub(crate) fn go_quote_list(items: &[String]) -> String {
     format!(
         "[{}]",
         items
             .iter()
-            .map(|s| format!("{s:?}"))
+            .map(|s| go_quote(s))
             .collect::<Vec<_>>()
             .join(" ")
     )

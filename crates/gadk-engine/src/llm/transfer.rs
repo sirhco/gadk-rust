@@ -36,6 +36,7 @@ use crate::{
         state::reveal,
     },
     tool::utils::{append_instructions, go_type_name},
+    workflow::route::go_quote,
 };
 
 pub(crate) const TRANSFER_TO_AGENT_TOOL_NAME: &str = "transfer_to_agent";
@@ -137,8 +138,8 @@ pub(crate) fn append_tools(
         }
         if req.tools.contains_key(t.name()) {
             return Err(AgentError::other(format!(
-                "tools[{i}] duplicate tool: {:?}",
-                t.name()
+                "tools[{i}] duplicate tool: {}",
+                go_quote(t.name())
             )));
         }
         req.tools.insert(

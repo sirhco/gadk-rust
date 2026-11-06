@@ -33,6 +33,7 @@ use serde_json::Value;
 use crate::{
     llm::{flow::Flow, processors::wrap_err, state::reveal},
     tool::utils::{function_calls, function_responses},
+    workflow::route::go_quote,
 };
 
 /// One Go handleFunctionCalls dispatch: the resumed original calls (role "user" content, in
@@ -215,15 +216,15 @@ fn confirmation_responses(
             Some(resp) if fr.response.len() == 1 => {
                 let Value::String(json) = resp else {
                     return Err(AgentError::other(format!(
-                        "error 'response' key found but value is not a string for confirmation function response for event id {:?}",
-                        event.id
+                        "error 'response' key found but value is not a string for confirmation function response for event id {}",
+                        go_quote(&event.id)
                     )));
                 };
                 serde_json::from_str(json).map_err(|e| {
                     wrap_err(
                         format!(
-                            "error 'response' key found but failed unmarshalling confirmation function response for event id {:?}",
-                            event.id
+                            "error 'response' key found but failed unmarshalling confirmation function response for event id {}",
+                            go_quote(&event.id)
                         ),
                         e,
                     )
@@ -232,8 +233,8 @@ fn confirmation_responses(
             _ => serde_json::from_value(Value::Object(fr.response.clone())).map_err(|e| {
                 wrap_err(
                     format!(
-                        "error failed unmarshalling confirmation function response for event id {:?}",
-                        event.id
+                        "error failed unmarshalling confirmation function response for event id {}",
+                        go_quote(&event.id)
                     ),
                     e,
                 )
