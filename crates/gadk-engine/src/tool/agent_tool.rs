@@ -152,6 +152,25 @@ fn part_text(p: &gadk_genai::Part) -> String {
     }
 }
 
+/// `v` with every number as a float: Go decodes tool arguments from JSON, so every number is a
+/// `float64` and `fmt.Sprint` prints it in `%v` float form (`1e+06`, not `1000000`). A number
+/// with no finite float form is kept as is.
+fn as_go_floats(v: &Value) -> Value {
+    match v {
+        Value::Number(n) => n
+            .as_f64()
+            .and_then(serde_json::Number::from_f64)
+            .map_or_else(|| v.clone(), Value::Number),
+        Value::Array(a) => Value::Array(a.iter().map(as_go_floats).collect()),
+        Value::Object(m) => Value::Object(
+            m.iter()
+                .map(|(k, v)| (k.clone(), as_go_floats(v)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
 #[async_trait]
 impl RunnableTool for AgentTool {
     /// Port of Go `(*agentTool).Run`.
@@ -193,8 +212,8 @@ impl RunnableTool for AgentTool {
                         "missing required argument 'request' for agent {name}"
                     ))
                 })?;
-                // Go: the string as is, else fmt.Sprint(input).
-                Content::from_text(go_sprint(input), ROLE_USER)
+                // Go: the string as is, else fmt.Sprint(input) of the JSON-decoded value.
+                Content::from_text(go_sprint(&as_go_floats(input)), ROLE_USER)
             }
         };
 
@@ -298,5 +317,57 @@ impl RunnableTool for AgentTool {
         let mut out = Map::new();
         out.insert("result".to_string(), Value::String(output_text));
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+    use crate::llm::{LlmAgentConfig, agent as llm_agent};
+    use crate::testutil::MockModel;
+
+    /// The child's user message for a non-string `request` is Go `fmt.Sprint` of the JSON-decoded
+    /// (float64) value; expected texts checked against Go.
+    #[tokio::test]
+    async fn non_string_request_is_go_sprint_of_float64() {
+        let cases = [
+            (json!(1000000), "1e+06"),
+            (json!({"n": 5}), "map[n:5]"),
+            (json!(2.5), "2.5"),
+            (json!([1, 1e21, true, null]), "[1 1e+21 true <nil>]"),
+        ];
+        for (request, want) in cases {
+            let model = MockModel::from_contents(vec![Content::from_text("ok", "model")]);
+            let agent = llm_agent::new(LlmAgentConfig {
+                name: "child".into(),
+                model: Some(model.clone()),
+                ..Default::default()
+            })
+            .unwrap();
+            let sess = InMemorySessionService::new()
+                .create(CreateRequest {
+                    app_name: "app".into(),
+                    user_id: "user".into(),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+            let ctx = Context::builder().session(sess).build();
+            AgentTool::new(agent, None)
+                .as_runnable()
+                .unwrap()
+                .run(ctx, json!({ "request": request }))
+                .await
+                .unwrap();
+            let reqs = model.requests();
+            let user = reqs[0]
+                .contents
+                .iter()
+                .find(|c| c.role == ROLE_USER)
+                .expect("child user message");
+            assert_eq!(user.parts[0].text, want, "request {request}");
+        }
     }
 }
