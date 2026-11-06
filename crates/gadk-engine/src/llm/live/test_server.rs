@@ -256,7 +256,6 @@ impl ScriptedLiveLlm {
         })
     }
 
-    #[expect(dead_code, reason = "for the later live tasks' tests (contract C4)")]
     pub(crate) fn new(name: &str, responses: Vec<LlmResponse>) -> Arc<ScriptedLiveLlm> {
         Self::build(name, responses, false)
     }

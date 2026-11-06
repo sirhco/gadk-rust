@@ -103,7 +103,6 @@ impl Drop for Teardown {
 
 /// Port of Go (*Flow).RunLive. Returns at once; the work runs on a spawned session task, so this
 /// must be called inside a tokio runtime. Dropping the returned stream cancels the session.
-#[cfg_attr(not(test), expect(dead_code, reason = "consumed by LlmLive (Task 9)"))]
 pub(crate) fn run_live(
     flow: Arc<Flow>,
     ctx: InvocationContext,
