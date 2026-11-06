@@ -34,6 +34,7 @@ mod internal_artifact_forwarding;
 mod internal_llminternal_agent_transfer;
 mod internal_llminternal_audio_cache_manager;
 mod internal_llminternal_base_flow;
+mod internal_llminternal_base_flow_live;
 mod internal_llminternal_base_flow_resumable;
 mod internal_llminternal_base_flow_telemetry;
 mod internal_llminternal_basic_processor;

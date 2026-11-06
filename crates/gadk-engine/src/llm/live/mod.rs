@@ -16,5 +16,9 @@
 //! Live (bidirectional streaming) mode (port of the live half of Go internal/llminternal).
 
 pub(crate) mod audio_cache;
+pub(crate) mod flow;
 pub(crate) mod reconnect;
 pub(crate) mod session;
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+pub(crate) mod test_server;

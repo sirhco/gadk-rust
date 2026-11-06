@@ -230,3 +230,384 @@ async fn test_wait_before_reconnect() {
         );
     }
 }
+
+/// The flow-level tests of Go live_reconnect_test.go (Task 8): RunLive over the fake Live server,
+/// in real time with Go's shrunken policies.
+mod flow {
+    use std::time::Duration;
+
+    use futures::StreamExt;
+    use gadk_agent::AgentError;
+    use tokio::sync::oneshot;
+
+    use crate::llm::live::flow::run_live;
+    use crate::llm::live::reconnect::{
+        DEFAULT_LIVE_RECONNECT_HEALTHY_UPTIME, is_live_reconnect_exhausted,
+    };
+    use crate::llm::live::test_server::{
+        DRAIN_TIMEOUT, FakeConn, FakeLiveServer, SERVER_CONTENT_PONG, assert_no_run_live_leak,
+        await_drain, live_ctx, live_flow, probe_of, serve, start_drain, test_live_reconnect_policy,
+        wait_for_backoff,
+    };
+
+    fn text(e: &Option<AgentError>) -> String {
+        e.as_ref().map(ToString::to_string).unwrap_or_default()
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_run_live_bounds_a_dead_endpoint() {
+        // Hard close straight after setupComplete.
+        let server = FakeLiveServer::start(serve(|_n: usize, _conn: FakeConn| async {})).await;
+        let flow = live_flow(
+            server.model().await,
+            Some(test_live_reconnect_policy(4, 20)),
+        );
+        let (ctx, _cancel) = live_ctx();
+        let (sess, stream) = run_live(flow, ctx).unwrap();
+
+        let d = await_drain(start_drain(stream)).await;
+        let _ = sess.close().await;
+
+        let err = d.last_err.as_ref().expect("caller got no error");
+        assert!(
+            is_live_reconnect_exhausted(err),
+            "caller got err {err}, want one wrapping the reconnect-exhausted error"
+        );
+        assert!(
+            err.to_string().contains("consecutive"),
+            "err {err} does not name the consecutive-attempt bound"
+        );
+        // One initial dial plus maxAttempts retries.
+        assert_eq!(server.conn_count(), 5, "dial count");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_run_live_bounds_a_one_frame_per_connection_backend() {
+        let server = FakeLiveServer::start(serve(|_n: usize, mut conn: FakeConn| async move {
+            let _ = conn.write_text(SERVER_CONTENT_PONG).await;
+            // Give the flow time to consume the frame and reset the consecutive budget.
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }))
+        .await;
+        let flow = live_flow(server.model().await, Some(test_live_reconnect_policy(4, 6)));
+        let (ctx, _cancel) = live_ctx();
+        let (sess, stream) = run_live(flow, ctx).unwrap();
+
+        let d = await_drain(start_drain(stream)).await;
+        let _ = sess.close().await;
+
+        let err = d.last_err.as_ref().expect("caller got no error");
+        assert!(
+            is_live_reconnect_exhausted(err),
+            "caller got err {err}, want one wrapping the reconnect-exhausted error"
+        );
+        assert!(
+            err.to_string().contains("short-lived connections"),
+            "err {err} does not name the invocation-wide bound"
+        );
+        // 1 initial dial + maxTotal retries.
+        assert_eq!(server.conn_count(), 7, "dial count");
+        assert!(
+            d.events > 0,
+            "caller received no events, so the reset path was never taken"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_run_live_reconnect_survives_a_transient_drop() {
+        let server = FakeLiveServer::start(serve(|n: usize, mut conn: FakeConn| async move {
+            if n == 1 {
+                return; // one abrupt drop
+            }
+            if !conn.write_text(SERVER_CONTENT_PONG).await {
+                return;
+            }
+            conn.block_until_client_closes().await;
+        }))
+        .await;
+        let flow = live_flow(
+            server.model().await,
+            Some(test_live_reconnect_policy(4, 20)),
+        );
+        let (ctx, _cancel) = live_ctx();
+        let (sess, mut stream) = run_live(flow, ctx).unwrap();
+
+        // Key on content, not on any event: the dropped connection still yields a content-less
+        // event for the setup exchange.
+        let (saw_tx, saw_rx) = oneshot::channel::<()>();
+        let drain = tokio::spawn(async move {
+            let mut saw = Some(saw_tx);
+            let mut stream_err = None;
+            while let Some(item) = stream.next().await {
+                match item {
+                    Err(e) => stream_err = Some(e),
+                    Ok(ev) => {
+                        if ev.response.content.is_some()
+                            && let Some(tx) = saw.take()
+                        {
+                            let _ = tx.send(());
+                        }
+                    }
+                }
+            }
+            stream_err
+        });
+        tokio::time::timeout(DRAIN_TIMEOUT, saw_rx)
+            .await
+            .expect("never served a turn after the transient drop")
+            .unwrap();
+        sess.close().await.unwrap();
+        let stream_err = drain.await.unwrap();
+
+        assert!(
+            stream_err.is_none(),
+            "caller got an error after a recoverable drop: {}",
+            text(&stream_err)
+        );
+        assert_eq!(server.conn_count(), 2, "dial count");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_run_live_reconnect_stops_on_teardown() {
+        for (name, want_err) in [("close", false), ("cancel", true)] {
+            let server = FakeLiveServer::start(serve(|_n: usize, _conn: FakeConn| async {})).await;
+            // A backoff far longer than the test, so the flow is parked in the wait.
+            let mut p = test_live_reconnect_policy(100, 100);
+            p.initial_backoff = Duration::from_secs(3600);
+            p.max_backoff = Duration::from_secs(3600);
+            let flow = live_flow(server.model().await, Some(p));
+            let (ctx, cancel) = live_ctx();
+            let (sess, stream) = run_live(flow, ctx).unwrap();
+            let probe = probe_of(&sess);
+
+            let drained = start_drain(stream);
+            server.wait_for_conns(1).await;
+            wait_for_backoff(&probe).await;
+            if want_err {
+                cancel.cancel();
+            } else {
+                let _ = sess.close().await;
+            }
+
+            let d = await_drain(drained).await;
+            if want_err {
+                assert!(
+                    matches!(d.last_err, Some(AgentError::Cancelled)),
+                    "{name}: caller got err {:?}, want context canceled",
+                    text(&d.last_err)
+                );
+            } else {
+                assert!(
+                    d.last_err.is_none(),
+                    "{name}: close reported err {}, want none",
+                    text(&d.last_err)
+                );
+            }
+            assert_eq!(
+                server.conn_count(),
+                1,
+                "{name}: a torn-down session must not redial"
+            );
+            // The stream ends on close whether or not the flow task noticed; this pins the
+            // wait as interruptible (an uninterruptible one parks the task for the hour).
+            assert_no_run_live_leak(&probe).await;
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_run_live_charges_a_failed_redial_to_the_budget() {
+        let server = FakeLiveServer::start(serve(|_n: usize, _conn: FakeConn| async {})).await;
+        let flow = live_flow(
+            server.model().await,
+            Some(test_live_reconnect_policy(3, 20)),
+        );
+        let (ctx, _cancel) = live_ctx();
+        let (sess, stream) = run_live(flow, ctx).unwrap();
+        let drained = start_drain(stream);
+
+        server.wait_for_conns(1).await;
+        server.close_listener(); // every later dial is refused
+
+        let d = await_drain(drained).await;
+        let _ = sess.close().await;
+        let err = d.last_err.as_ref().expect("caller got no error");
+        assert!(
+            is_live_reconnect_exhausted(err),
+            "caller got err {err}, want the reconnect-exhausted error: a refused redial must be charged to the budget, not end the session"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_run_live_first_connect_failure_is_fatal() {
+        let server = FakeLiveServer::start(serve(|_n: usize, _conn: FakeConn| async {})).await;
+        let model = server.model().await;
+        server.close_listener();
+        // Let the aborted accept task drop the listener before the first dial.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let flow = live_flow(model, Some(test_live_reconnect_policy(5, 20)));
+        let (ctx, _cancel) = live_ctx();
+        let (sess, stream) = run_live(flow, ctx).unwrap();
+        let d = await_drain(start_drain(stream)).await;
+        let _ = sess.close().await;
+
+        let err = d
+            .last_err
+            .as_ref()
+            .expect("caller got no error for a connection that never succeeded");
+        assert!(
+            !is_live_reconnect_exhausted(err),
+            "err {err} means the first dial was retried; it must fail fast"
+        );
+        assert!(
+            err.to_string()
+                .starts_with("failed to connect live session: "),
+            "err {err} lacks Go's connect-failure prefix"
+        );
+        assert_eq!(server.conn_count(), 0, "accepted connections");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_run_live_ceiling_spares_long_lived_connections() {
+        const CONN_LIFETIME: Duration = Duration::from_millis(120);
+        let server = FakeLiveServer::start(serve(|_n: usize, mut conn: FakeConn| async move {
+            let _ = conn.write_text(SERVER_CONTENT_PONG).await;
+            tokio::time::sleep(CONN_LIFETIME).await;
+        }))
+        .await;
+        let mut p = test_live_reconnect_policy(100, 2);
+        p.healthy_uptime = CONN_LIFETIME / 4;
+        let flow = live_flow(server.model().await, Some(p.clone()));
+        let (ctx, _cancel) = live_ctx();
+        let (sess, stream) = run_live(flow, ctx).unwrap();
+        let drained = start_drain(stream);
+
+        // Long enough for many more cycles than maxTotal.
+        tokio::time::sleep(CONN_LIFETIME * 10).await;
+        let got = server.conn_count();
+        sess.close().await.unwrap();
+        let d = await_drain(drained).await;
+
+        assert!(
+            d.last_err.is_none(),
+            "session ended with {}; connections that served past healthyUptime must not spend the ceiling",
+            text(&d.last_err)
+        );
+        assert!(
+            got > p.max_total + 1,
+            "dialled {got} times, want more than {}: the ceiling stopped a healthy session",
+            p.max_total + 1
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_run_live_ceiling_spares_an_intermediary_cycled_session() {
+        // Go intermediaryWebsocketTimeout (25 s) and healthyUptime, both divided by scale = 100.
+        let conn_lifetime = Duration::from_secs(25) / 100;
+        let server =
+            FakeLiveServer::start(serve(move |_n: usize, mut conn: FakeConn| async move {
+                let _ = conn.write_text(SERVER_CONTENT_PONG).await;
+                tokio::time::sleep(conn_lifetime).await;
+            }))
+            .await;
+        let mut p = test_live_reconnect_policy(100, 2);
+        p.healthy_uptime = DEFAULT_LIVE_RECONNECT_HEALTHY_UPTIME / 100;
+        let flow = live_flow(server.model().await, Some(p.clone()));
+        let (ctx, _cancel) = live_ctx();
+        let (sess, stream) = run_live(flow, ctx).unwrap();
+        let drained = start_drain(stream);
+
+        // Long enough for more cycles than the ceiling would allow.
+        tokio::time::sleep(conn_lifetime * 6).await;
+        let got = server.conn_count();
+        sess.close().await.unwrap();
+        let d = await_drain(drained).await;
+
+        assert!(
+            d.last_err.is_none(),
+            "session ended with {}; a connection an intermediary cut after {conn_lifetime:?} of service must not spend the ceiling",
+            text(&d.last_err)
+        );
+        assert!(
+            got > p.max_total + 1,
+            "dialled {got} times, want more than {}: the ceiling ended a session that was serving content",
+            p.max_total + 1
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_run_live_consecutive_budget_spares_a_silent_session() {
+        const CONN_LIFETIME: Duration = Duration::from_millis(120);
+        // No content on any connection, only the setup exchange and a drop.
+        let server = FakeLiveServer::start(serve(|_n: usize, conn: FakeConn| async move {
+            // Hold the socket for the lifetime (an unused closure argument would be dropped
+            // before the future runs, closing the connection at once).
+            let _conn = conn;
+            tokio::time::sleep(CONN_LIFETIME).await;
+        }))
+        .await;
+        let mut p = test_live_reconnect_policy(2, 1000);
+        p.healthy_uptime = CONN_LIFETIME / 4;
+        let flow = live_flow(server.model().await, Some(p.clone()));
+        let (ctx, _cancel) = live_ctx();
+        let (sess, stream) = run_live(flow, ctx).unwrap();
+        let drained = start_drain(stream);
+
+        tokio::time::sleep(CONN_LIFETIME * 10).await;
+        let got = server.conn_count();
+        sess.close().await.unwrap();
+        let d = await_drain(drained).await;
+
+        assert!(
+            d.last_err.is_none(),
+            "session ended with {}; a connection that served past healthyUptime must not spend the consecutive budget",
+            text(&d.last_err)
+        );
+        assert!(
+            got > p.max_attempts + 1,
+            "dialled {got} times, want more than {}: the consecutive budget killed a silent session",
+            p.max_attempts + 1
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_run_live_ceiling_ignores_consumer_latency() {
+        let server = FakeLiveServer::start(serve(|_n: usize, _conn: FakeConn| async {})).await;
+        // maxAttempts well above maxTotal, so the ceiling is what fires.
+        let mut p = test_live_reconnect_policy(100, 3);
+        p.healthy_uptime = Duration::from_millis(20);
+        let slow = p.healthy_uptime * 10;
+        let flow = live_flow(server.model().await, Some(p));
+        let (ctx, _cancel) = live_ctx();
+        let (sess, mut stream) = run_live(flow, ctx).unwrap();
+
+        let drain = tokio::spawn(async move {
+            let mut stream_err = None;
+            while let Some(item) = stream.next().await {
+                if let Err(e) = item {
+                    stream_err = Some(e);
+                }
+                // Far slower than healthyUptime, which is the whole point.
+                tokio::time::sleep(slow).await;
+            }
+            stream_err
+        });
+        let stream_err = tokio::time::timeout(DRAIN_TIMEOUT, drain)
+            .await
+            .unwrap_or_else(|_| {
+                panic!(
+                    "still reconnecting after {DRAIN_TIMEOUT:?} ({} dials): the caller's latency is being credited as connection uptime",
+                    server.conn_count()
+                )
+            })
+            .unwrap();
+        let _ = sess.close().await;
+        // Name the bound, not just the sentinel: with the clock read at the wrong place the
+        // session ends far later on the consecutive-attempt bound instead.
+        assert!(
+            text(&stream_err).contains("short-lived connections"),
+            "session ended with {}, want the short-lived-connection ceiling to fire",
+            text(&stream_err)
+        );
+    }
+}
