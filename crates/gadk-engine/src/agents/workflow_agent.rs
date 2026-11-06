@@ -69,6 +69,7 @@ pub fn new(cfg: WorkflowAgentConfig) -> Result<Arc<dyn Agent>, AgentError> {
             agent_type: AgentType::WorkflowAgent,
             config: Some(Arc::new(cfg)),
             on_before_agent_callback_event: None,
+            live: None,
         },
     )
 }

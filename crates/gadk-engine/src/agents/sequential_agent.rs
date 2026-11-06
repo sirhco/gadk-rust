@@ -45,6 +45,7 @@ pub fn new(cfg: SequentialAgentConfig) -> Result<Arc<dyn Agent>, AgentError> {
             agent_type: AgentType::SequentialAgent,
             config: Some(Arc::new(cfg)),
             on_before_agent_callback_event: None,
+            live: None,
         },
     )
     .map_err(|e| AgentError::Config(format!("failed to create base agent: {e}")))

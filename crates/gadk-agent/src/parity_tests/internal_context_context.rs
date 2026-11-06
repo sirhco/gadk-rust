@@ -18,7 +18,18 @@ use tokio_util::sync::CancellationToken;
 
 use crate::context::{ContextDelta, InvocationContext, ReadonlyContext};
 
-// parity: skipped TestInvocationContext_LiveSessionResumptionHandle: live sessions are out of scope for 1b (1b-live)
+// parity: adapted: Go first type-asserts NewInvocationContext's result to *InvocationContext; the Rust builder returns InvocationContext directly
+#[test]
+fn test_invocation_context_live_session_resumption_handle() {
+    let inv = InvocationContext::builder().build_invocation();
+    assert_eq!(
+        inv.live_session_resumption_handle(),
+        "",
+        "expected empty handle"
+    );
+    inv.set_live_session_resumption_handle("test-handle");
+    assert_eq!(inv.live_session_resumption_handle(), "test-handle");
+}
 
 // parity: adapted: Go asserts by type assertion that a ReadonlyContext is not an InvocationContext; in Rust they are distinct types, so assert as_readonly() returns a ReadonlyContext with the same ids
 #[test]

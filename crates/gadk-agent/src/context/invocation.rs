@@ -165,6 +165,18 @@ impl InvocationContext {
         &self.inner().bound_modes
     }
 
+    /// Go `InvocationContext.LiveSessionResumptionHandle`: the active live session's resumption
+    /// handle, used to resume a bidirectional streaming session after a reconnect.
+    pub fn live_session_resumption_handle(&self) -> String {
+        self.inner().live_handle.lock().clone()
+    }
+
+    /// Go `InvocationContext.SetLiveSessionResumptionHandle`: stores the latest handle received
+    /// from the model, visible to every context of this invocation.
+    pub fn set_live_session_resumption_handle(&self, handle: &str) {
+        *self.inner().live_handle.lock() = handle.to_owned();
+    }
+
     /// A derived context with `d` applied; the receiver is unchanged.
     pub fn with_delta(&self, d: ContextDelta) -> InvocationContext {
         Self::from_inner(self.inner().apply(d))

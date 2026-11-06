@@ -64,6 +64,10 @@ pub(crate) struct ContextInner {
     pub(crate) ended: Arc<AtomicBool>,
     pub(crate) cancellation_token: CancellationToken,
     pub(crate) bound_modes: BoundModes,
+    /// Go `InvocationContextParams.LiveSessionResumptionHandle`. One slot per invocation, shared by
+    /// every derived context (the live reader and the reconnect loop run on different tasks);
+    /// `ContextDelta::fresh_invocation` installs a new empty slot.
+    pub(crate) live_handle: Arc<parking_lot::Mutex<String>>,
     // Node / tool / callback level (Go commonContext).
     pub(crate) resumed_inputs: Option<Arc<Map<String, Value>>>,
     pub(crate) actions: Option<Arc<parking_lot::Mutex<EventActions>>>,

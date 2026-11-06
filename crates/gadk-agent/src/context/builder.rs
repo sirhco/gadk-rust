@@ -190,6 +190,7 @@ impl ContextBuilder {
                     agent_type: AgentType::CustomAgent,
                     config: None,
                     on_before_agent_callback_event: None,
+                    live: None,
                 },
             );
             a
@@ -215,6 +216,7 @@ impl ContextBuilder {
             ended: Arc::new(AtomicBool::new(false)),
             cancellation_token: self.cancellation_token.unwrap_or_default(),
             bound_modes: BoundModes::default(),
+            live_handle: Arc::new(parking_lot::Mutex::new(String::new())),
             resumed_inputs: self.resumed_inputs.map(Arc::new),
             actions: None,
             function_call_id: String::new(),
