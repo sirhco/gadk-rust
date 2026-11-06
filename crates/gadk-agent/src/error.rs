@@ -19,6 +19,7 @@
 
 use futures::stream::BoxStream;
 use gadk_model::ModelError;
+use gadk_session::compaction::CompactionError;
 use gadk_session::{Event, SessionError};
 
 /// Every agent's event stream; dropping it cancels the work it drives.
@@ -68,6 +69,10 @@ pub enum AgentError {
     /// Invalid configuration; the text is Go's error text.
     #[error("{0}")]
     Config(String),
+    /// Context compaction failed (Go `fmt.Errorf("%w: …", compaction.ErrCompaction, …)`); the
+    /// turn's own events are already persisted.
+    #[error(transparent)]
+    Compaction(CompactionError),
     /// Any other error.
     #[error("{0}")]
     Other(Box<dyn std::error::Error + Send + Sync>),
@@ -77,6 +82,28 @@ impl AgentError {
     /// An [`AgentError::Other`] carrying `msg` (Go `errors.New(msg)`).
     pub fn other(msg: impl Into<String>) -> Self {
         AgentError::Other(msg.into().into())
+    }
+
+    /// Go `errors.Is(err, compaction.ErrCompaction)`: whether this error, or any error it wraps,
+    /// is a [`CompactionError`].
+    pub fn is_compaction(&self) -> bool {
+        let mut cur: Option<&(dyn std::error::Error + 'static)> = Some(self);
+        while let Some(e) = cur {
+            if e.is::<CompactionError>() {
+                return true;
+            }
+            match e.downcast_ref::<AgentError>() {
+                Some(AgentError::Compaction(_)) => return true,
+                // These carry their error as a plain field, not a `#[source]`: step into it.
+                Some(AgentError::Other(inner) | AgentError::Workflow(inner)) => {
+                    cur = Some(&**inner);
+                    continue;
+                }
+                _ => {}
+            }
+            cur = e.source();
+        }
+        false
     }
 }
 
@@ -126,4 +153,37 @@ pub(crate) fn wrap(msg: impl Into<String>, source: AgentError) -> AgentError {
         msg: msg.into(),
         source,
     }))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use gadk_session::compaction::CompactionError;
+
+    use super::*;
+
+    #[test]
+    fn compaction_error_displays_go_text_and_is_compaction() {
+        let e = AgentError::Compaction(CompactionError::new("post-invocation: boom"));
+        assert_eq!(
+            e.to_string(),
+            "context compaction failed: post-invocation: boom"
+        );
+        assert!(e.to_string().starts_with("context compaction failed: "));
+        assert!(e.is_compaction());
+    }
+
+    #[test]
+    fn is_compaction_walks_the_chain() {
+        // Wrapped by Go-style fmt.Errorf("…: %w") (Wrapped's source is the AgentError).
+        let wrapped = wrap("outer", AgentError::Compaction(CompactionError::new("x")));
+        assert!(wrapped.is_compaction());
+        // Boxed inside Other / Workflow.
+        assert!(AgentError::Other(Box::new(CompactionError::new("x"))).is_compaction());
+        assert!(AgentError::Workflow(Box::new(CompactionError::new("x"))).is_compaction());
+        // Not a compaction failure.
+        assert!(!AgentError::other("context compaction failed: lookalike").is_compaction());
+        assert!(!AgentError::Cancelled.is_compaction());
+        assert!(!wrap("outer", AgentError::Cancelled).is_compaction());
+    }
 }

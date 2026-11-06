@@ -25,6 +25,9 @@ pub mod tool;
 pub mod workflow;
 
 pub(crate) mod artifacts;
+// consumed by the request processor (Task 9) and the runner (Task 10); removed by Task 11
+#[allow(dead_code)]
+pub(crate) mod compaction;
 pub(crate) mod memory;
 pub(crate) mod telemetry;
 

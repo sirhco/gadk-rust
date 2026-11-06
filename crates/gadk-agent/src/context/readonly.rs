@@ -16,6 +16,7 @@
 //! The read-only context view and the shared context state (port of Go
 //! `internal/context/readonly_context.go` and the `invocationContext`/`commonContext` fields).
 
+use std::any::Any;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
@@ -49,6 +50,9 @@ pub(crate) struct Shared {
     pub(crate) parent_map: Option<Arc<ParentMap>>,
     pub(crate) session_service: Option<Arc<dyn SessionService>>,
     pub(crate) llm_call_limiter: Option<Arc<LlmCallLimiter>>,
+    /// The engine's per-invocation compaction runtime (Go `compactionctx.ToContext`). Opaque here:
+    /// only the engine downcasts it. Every context derived within one invocation shares it.
+    pub(crate) compaction: Option<Arc<dyn Any + Send + Sync>>,
 }
 
 /// One snapshot of every context field; deltas clone it (cheap: `Arc`s and short strings).

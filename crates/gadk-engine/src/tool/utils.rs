@@ -23,7 +23,6 @@ use gadk_genai::{
 };
 use gadk_model::LlmRequest;
 use gadk_platform::Platform;
-use gadk_session::Event;
 use schemars::generate::SchemaSettings;
 use schemars::transform::RecursiveTransform;
 use serde_json::{Map, Value};
@@ -413,10 +412,8 @@ pub(crate) fn remove_client_function_call_id(c: &mut Content) {
     }
 }
 
-/// Port of Go utils.Content: the content of the event's response.
-pub(crate) fn content(ev: &Event) -> Option<&Content> {
-    ev.response.content.as_ref()
-}
+/// Port of Go utils.Content (shared with `gadk_session::compaction`).
+pub(crate) use gadk_session::compaction::content;
 
 /// Port of Go utils.FunctionCalls.
 pub(crate) fn function_calls(c: Option<&Content>) -> Vec<&FunctionCall> {
@@ -493,21 +490,6 @@ pub(crate) fn append_instructions(req: &mut LlmRequest, instructions: &[&str]) {
         return;
     }
     si.parts.push(Part::from_text(inst));
-}
-
-/// Port of Go utils.IsProsePart: plain text meant to be read, and nothing else (thoughts are not prose).
-#[allow(dead_code)] // Go's only callers are in internal/compactioninternal and session/compaction, outside 1b.
-pub(crate) fn is_prose_part(p: &Part) -> bool {
-    !p.text.is_empty()
-        && !p.thought
-        && p.function_call.is_none()
-        && p.function_response.is_none()
-        && p.executable_code.is_none()
-        && p.code_execution_result.is_none()
-        && p.file_data.is_none()
-        && p.inline_data.is_none()
-        && p.tool_call.is_none()
-        && p.tool_response.is_none()
 }
 
 /// Port of Go utils.EventBelongsToBranch: an event belongs to its own branch and every descendant of it.
