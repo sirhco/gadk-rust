@@ -159,6 +159,15 @@ pub(crate) fn check_confirmation(
     Err(ToolError::ConfirmationRequired)
 }
 
+/// The `json.Unmarshal(raw, &map[string]any)` step of Go typeutil.ConvertToWithJSONSchema in functiontool
+/// Run: a `null` that passed the output schema unmarshals to a nil (empty) map, not an error.
+fn result_map(v: Value) -> Result<Map<String, Value>, String> {
+    match v {
+        Value::Null => Ok(Map::new()),
+        v => serde_json::from_value(v).map_err(|e| e.to_string()),
+    }
+}
+
 /// Port of Go's "unexpected args type, got: %T" check: an object or `null` (Go: a typed nil map) is accepted.
 pub(crate) fn check_args_value(args: &Value) -> Result<(), ToolError> {
     match args {
@@ -247,13 +256,13 @@ impl FunctionTool {
                         .map_or(require_confirmation, |p| p(&input))
                 })?;
                 let output: Out = f(ctx, input).await?;
-                let conv_err = match convert_with_schema::<Out, Map<String, Value>>(
-                    &output,
-                    Some(&output_schema),
-                ) {
-                    Ok(m) => return Ok(m),
-                    Err(e) => e,
-                };
+                let conv_err =
+                    match convert_with_schema::<Out, Value>(&output, Some(&output_schema))
+                        .and_then(result_map)
+                    {
+                        Ok(m) => return Ok(m),
+                        Err(e) => e,
+                    };
                 // Go: a result encoding/json cannot represent must not be wrapped, because it cannot be sent.
                 let value =
                     serde_json::to_value(&output).map_err(|e| ToolError::Execution(e.into()))?;

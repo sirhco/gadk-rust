@@ -94,8 +94,9 @@ fn settings() -> SchemaSettings {
 }
 
 /// Aligns one schemars subschema with the shape Go jsonschema-go (`jsonschema.For`) infers:
-/// - struct schemas forbid unknown keys: an object schema with `properties` and no `additionalProperties`
-///   gets `"additionalProperties": false` (jsonschema-go infer.go, `reflect.Struct` case);
+/// - struct schemas forbid unknown keys: an object schema (with `properties`, or a bare `"type": "object"`
+///   from a field-less struct) and no `additionalProperties` gets `"additionalProperties": false`
+///   (jsonschema-go infer.go, `reflect.Struct` case);
 /// - integer/number schemas carry no `format` (schemars adds `"int64"`, `"double"`, …; Go emits none).
 ///
 /// Applied to every subschema via [`RecursiveTransform`].
@@ -112,7 +113,11 @@ fn go_schema_shape(schema: &mut schemars::Schema) {
     if numeric {
         obj.remove("format");
     }
-    if obj.contains_key("properties") && !obj.contains_key("additionalProperties") {
+    // A field-less struct (Go `struct{}`) is a bare `{"type": "object"}` in schemars; maps always carry
+    // `additionalProperties`, so a bare object schema is a struct too.
+    let is_struct =
+        obj.contains_key("properties") || obj.get("type").is_some_and(|t| t == "object");
+    if is_struct && !obj.contains_key("additionalProperties") {
         obj.insert("additionalProperties".to_string(), Value::Bool(false));
     }
 }

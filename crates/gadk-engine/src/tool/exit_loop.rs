@@ -27,7 +27,8 @@ use serde_json::{Map, Value};
 
 use crate::tool::{FunctionTool, FunctionToolConfig};
 
-/// Go `struct{}` args.
+// Go `struct{}` args. A plain comment: a doc comment would become the schema's `description`,
+// which Go's inferred `struct{}` schema does not have.
 #[derive(Deserialize, JsonSchema)]
 struct ExitLoopArgs {}
 

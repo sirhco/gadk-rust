@@ -334,3 +334,16 @@ async fn function_tool_unknown_arg_key_rejected() {
         "handler must not run on a schema error"
     );
 }
+
+/// Go `exitlooptool.New().Declaration()` marshalled by encoding/json (field-less `struct{}` args get
+/// `additionalProperties: false`, no doc-comment `description`; `map[string]string` result).
+#[test]
+fn exit_loop_declaration_matches_go() {
+    let decl = gadk_engine::tool::exit_loop().declaration().unwrap();
+    let got = serde_json::to_value(&decl).unwrap();
+    let want: Value = serde_json::from_str(
+        r#"{"description":"Exits the loop.\n\nCall this function only when you are instructed to do so.\n","name":"exit_loop","parametersJsonSchema":{"type":"object","additionalProperties":false},"responseJsonSchema":{"type":"object","additionalProperties":{"type":"string"}}}"#,
+    )
+    .unwrap();
+    assert_eq!(got, want);
+}
