@@ -13,4 +13,238 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `task` agent tool (port of Go internal/workflowinternal/task_agent_tool.go). Implemented by Task 13.
+//! Port of ADK-Go internal/workflowinternal/task_agent_tool.go.
+
+use std::any::Any;
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use gadk_agent::{Agent, Context, RunnableTool, Tool, ToolError};
+use gadk_genai::{FunctionDeclaration, Schema, Type};
+use gadk_model::is_gemini_api_variant;
+use serde_json::{Map, Value, json};
+
+use crate::llm::state::reveal;
+use crate::tool::single_turn::{input_schema_of, output_schema_of};
+
+const TASK_DESCRIPTION_SUFFIX: &str = "IMPORTANT: This tool delegates execution to a specialized agent. Do NOT call this tool in parallel with any other tools.";
+
+/// Port of Go workflowinternal.TaskAgentTool: the parent's handle on a task-mode sub-agent. The
+/// delegation itself is dispatched by the chat wrapper; running the tool is a no-op.
+pub(crate) struct TaskAgentTool {
+    agent: Arc<dyn Agent>,
+    decl: FunctionDeclaration,
+}
+
+impl TaskAgentTool {
+    /// Port of Go NewTaskAgentTool (its only error, a nil agent, cannot occur in Rust).
+    pub(crate) fn new(agent: Arc<dyn Agent>) -> Arc<TaskAgentTool> {
+        let decl = create_task_agent_func_declaration(agent.as_ref());
+        Arc::new(TaskAgentTool { agent, decl })
+    }
+}
+
+/// Port of Go createTaskAgentFuncDeclaration.
+fn create_task_agent_func_declaration(agent: &dyn Agent) -> FunctionDeclaration {
+    // Go strings.TrimSpace; Rust `str::trim` trims the same Unicode White_Space set.
+    let description = format!("{}\n{}", agent.description(), TASK_DESCRIPTION_SUFFIX)
+        .trim()
+        .to_string();
+    let parameters = input_schema_of(agent).unwrap_or_else(|| Schema {
+        r#type: Some(Type::Object),
+        properties: BTreeMap::from([(
+            "request".to_string(),
+            Schema {
+                r#type: Some(Type::String),
+                description: "Detailed instructions or context for the task sub-agent.".into(),
+                ..Default::default()
+            },
+        )]),
+        required: vec!["request".to_string()],
+        ..Default::default()
+    });
+    let mut decl = FunctionDeclaration {
+        name: agent.name().into(),
+        description,
+        parameters: Some(parameters),
+        ..Default::default()
+    };
+    // Go quirk preserved: a non-LLM composite agent gets no response schema, even though
+    // output_schema_of would recurse into its sub-agents.
+    if let Some(state) = reveal(agent) {
+        // Go googlellm.IsGeminiAPIVariant(nil) is false, so a model-less agent gets one.
+        let gemini_api = state
+            .cfg
+            .model
+            .as_deref()
+            .is_some_and(is_gemini_api_variant);
+        if !gemini_api {
+            let ty = if output_schema_of(agent).is_some() {
+                "OBJECT"
+            } else {
+                "STRING"
+            };
+            // Go &genai.Schema{Type: ty} serializes to exactly this.
+            decl.response_json_schema = Some(json!({ "type": ty }));
+        }
+    }
+    decl
+}
+
+impl Tool for TaskAgentTool {
+    fn name(&self) -> &str {
+        self.agent.name()
+    }
+
+    fn description(&self) -> &str {
+        self.agent.description()
+    }
+
+    fn declaration(&self) -> Option<FunctionDeclaration> {
+        Some(self.decl.clone())
+    }
+
+    // `process_request` is not overridden: Go's ProcessRequest is toolutils.PackTool, which the
+    // flow runs via `gadk_agent::pack_tool` before calling `Tool::process_request`.
+
+    fn as_runnable(&self) -> Option<&dyn RunnableTool> {
+        Some(self)
+    }
+
+    /// Go DefersResponse: the FunctionResponse is synthesized by the chat wrapper, not by the
+    /// standard tool-execution pipeline.
+    fn defers_response(&self) -> bool {
+        true
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+#[async_trait]
+impl RunnableTool for TaskAgentTool {
+    /// Port of Go Run: a no-op; Go returns (nil, nil), Rust an empty map.
+    async fn run(&self, _ctx: Context, _args: Value) -> Result<Map<String, Value>, ToolError> {
+        Ok(Map::new())
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+    use futures::stream::BoxStream;
+    use gadk_model::{Backend, Llm, LlmRequest, LlmResponse, ModelError};
+
+    use crate::llm::config::LlmAgentConfig;
+
+    const SUFFIX: &str = "IMPORTANT: This tool delegates execution to a specialized agent. Do NOT call this tool in parallel with any other tools.";
+
+    fn llm_agent(
+        name: &str,
+        description: &str,
+        input: Option<Schema>,
+        output: Option<Schema>,
+        model: Option<Arc<dyn Llm>>,
+    ) -> Arc<dyn Agent> {
+        crate::llm::agent::new(LlmAgentConfig {
+            name: name.into(),
+            description: description.into(),
+            input_schema: input,
+            output_schema: output,
+            model,
+            ..Default::default()
+        })
+        .unwrap()
+    }
+
+    struct VariantLlm(Backend);
+
+    impl Llm for VariantLlm {
+        fn name(&self) -> &str {
+            "gemini-2.5-flash"
+        }
+
+        fn generate_content(
+            &self,
+            _req: LlmRequest,
+            _stream: bool,
+        ) -> BoxStream<'static, Result<LlmResponse, ModelError>> {
+            Box::pin(futures::stream::empty())
+        }
+
+        fn google_variant(&self) -> Option<Backend> {
+            Some(self.0)
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+
+    #[tokio::test]
+    async fn metadata_and_noop_run() {
+        let t = TaskAgentTool::new(llm_agent("doer", "Does things.", None, None, None));
+        assert_eq!(
+            (
+                t.name(),
+                t.description(),
+                t.is_long_running(),
+                t.defers_response()
+            ),
+            ("doer", "Does things.", false, true)
+        );
+        assert!(
+            t.as_runnable()
+                .unwrap()
+                .run(Context::builder().build(), Value::Null)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn declaration_variants() {
+        let d = TaskAgentTool::new(llm_agent("doer", "Does things.", None, None, None))
+            .declaration()
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(d).unwrap(),
+            json!({
+                "name": "doer", "description": format!("Does things.\n{SUFFIX}"),
+                "parameters": {"type": "OBJECT", "properties": {"request": {"type": "STRING", "description": "Detailed instructions or context for the task sub-agent."}}, "required": ["request"]},
+                "responseJsonSchema": {"type": "STRING"}
+            })
+        );
+        assert_eq!(
+            TaskAgentTool::new(llm_agent("doer", "", None, None, None))
+                .declaration()
+                .unwrap()
+                .description,
+            SUFFIX
+        );
+        let gemini: Arc<dyn Llm> = Arc::new(VariantLlm(Backend::GeminiApi));
+        assert_eq!(
+            TaskAgentTool::new(llm_agent("doer", "d", None, None, Some(gemini)))
+                .declaration()
+                .unwrap()
+                .response_json_schema,
+            None
+        );
+        let vertex: Arc<dyn Llm> = Arc::new(VariantLlm(Backend::VertexAi));
+        let out = Schema {
+            r#type: Some(Type::Object),
+            ..Default::default()
+        };
+        assert_eq!(
+            TaskAgentTool::new(llm_agent("doer", "d", None, Some(out), Some(vertex)))
+                .declaration()
+                .unwrap()
+                .response_json_schema,
+            Some(json!({"type": "OBJECT"}))
+        );
+    }
+}
