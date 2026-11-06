@@ -18,13 +18,11 @@
 
 use std::any::Any;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 use chrono::{DateTime, TimeZone, Utc};
-use futures::stream::BoxStream;
 use gadk_genai::{Content, FunctionCall, FunctionResponse, Part};
-use gadk_model::{Llm, LlmRequest, LlmResponse, ModelError};
+use gadk_model::LlmResponse;
 use gadk_platform::Platform;
 use gadk_session::compaction::{Config, SummarizeResult, Summarizer};
 use gadk_session::{
@@ -309,7 +307,6 @@ pub(crate) struct fakeSummarizer {
     pub(crate) summary: String,
     pub(crate) err: Option<String>,
     windows: Mutex<Vec<Vec<String>>>,
-    calls: AtomicUsize,
 }
 
 impl fakeSummarizer {
@@ -318,7 +315,6 @@ impl fakeSummarizer {
             summary: summary.into(),
             err: None,
             windows: Mutex::new(Vec::new()),
-            calls: AtomicUsize::new(0),
         })
     }
 
@@ -327,17 +323,12 @@ impl fakeSummarizer {
             summary: String::new(),
             err: Some(err.into()),
             windows: Mutex::new(Vec::new()),
-            calls: AtomicUsize::new(0),
         })
     }
 
     /// The event IDs of every window passed in, in call order.
     pub(crate) fn windows(&self) -> Vec<Vec<String>> {
         self.windows.lock().clone()
-    }
-
-    pub(crate) fn calls(&self) -> usize {
-        self.calls.load(Ordering::SeqCst)
     }
 }
 
@@ -347,7 +338,6 @@ impl Summarizer for fakeSummarizer {
         &self,
         events: &[Event],
     ) -> Result<SummarizeResult, Box<dyn std::error::Error + Send + Sync>> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
         self.windows.lock().push(ids(events));
         if let Some(err) = &self.err {
             return Err(err.clone().into());
@@ -362,59 +352,5 @@ impl Summarizer for fakeSummarizer {
             }),
             usage: None,
         })
-    }
-}
-
-/// Go fakeModel: name "fake-model", records requests, yields `responses` or one `err`.
-#[allow(non_camel_case_types)]
-pub(crate) struct fakeModel {
-    responses: Vec<LlmResponse>,
-    err: Option<String>,
-    requests: Mutex<Vec<LlmRequest>>,
-}
-
-impl fakeModel {
-    pub(crate) fn new(responses: Vec<LlmResponse>) -> Arc<fakeModel> {
-        Arc::new(fakeModel {
-            responses,
-            err: None,
-            requests: Mutex::new(Vec::new()),
-        })
-    }
-
-    pub(crate) fn failing(err: &str) -> Arc<fakeModel> {
-        Arc::new(fakeModel {
-            responses: Vec::new(),
-            err: Some(err.into()),
-            requests: Mutex::new(Vec::new()),
-        })
-    }
-
-    /// The requests received, in call order.
-    pub(crate) fn requests(&self) -> Vec<LlmRequest> {
-        self.requests.lock().clone()
-    }
-}
-
-impl Llm for fakeModel {
-    fn name(&self) -> &str {
-        "fake-model"
-    }
-
-    fn generate_content(
-        &self,
-        req: LlmRequest,
-        _stream: bool,
-    ) -> BoxStream<'static, Result<LlmResponse, ModelError>> {
-        self.requests.lock().push(req);
-        let items: Vec<Result<LlmResponse, ModelError>> = match &self.err {
-            Some(e) => vec![Err(ModelError::Other(e.clone().into()))],
-            None => self.responses.iter().cloned().map(Ok).collect(),
-        };
-        Box::pin(futures::stream::iter(items))
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }

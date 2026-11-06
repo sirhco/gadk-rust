@@ -22,7 +22,9 @@
 mod agent_llmagent_llm_agent_wrapper;
 mod agent_llmagent_llmagent;
 mod agent_llmagent_llmagent_clone;
+mod agent_llmagent_llmagent_compaction;
 mod agent_llmagent_llmagent_saveoutput;
+mod agent_llmagent_llmagent_tail_retention;
 mod agent_llmagent_state_agent;
 mod agent_workflowagent_hitl;
 mod agent_workflowagent_reentry;
