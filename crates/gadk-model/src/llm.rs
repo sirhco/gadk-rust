@@ -21,16 +21,19 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures::future::BoxFuture;
 use futures::stream::BoxStream;
 use gadk_genai::serde_util::is_zero;
 use gadk_genai::{
     CitationMetadata, Content, FinishReason, GenerateContentConfig,
-    GenerateContentResponseUsageMetadata, GroundingMetadata, LogprobsResult, Transcription,
+    GenerateContentResponseUsageMetadata, GroundingMetadata, LiveConnectConfig, LogprobsResult,
+    Transcription,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::error::ModelError;
+use crate::live::LiveConnection;
 
 /// Which Google backend serves a model (port of genai `Backend`, minus `BackendUnspecified`,
 /// which is represented as `None`).
@@ -58,6 +61,20 @@ pub trait Llm: Send + Sync {
     /// The Google backend variant, for Google models (port of ADK-Go `GoogleLLM`).
     fn google_variant(&self) -> Option<Backend> {
         None
+    }
+
+    /// Opens a live (bidi streaming) connection. Models without live support keep this default,
+    /// which fails with Go's text `model does not support live connection`.
+    fn connect_live<'a>(
+        &'a self,
+        cfg: LiveConnectConfig,
+    ) -> BoxFuture<'a, Result<Box<dyn LiveConnection>, ModelError>> {
+        let _ = cfg;
+        Box::pin(async {
+            Err(ModelError::Other(
+                "model does not support live connection".into(),
+            ))
+        })
     }
 
     /// Downcasting support: lets a holder of `Arc<dyn Llm>` reach the concrete model
