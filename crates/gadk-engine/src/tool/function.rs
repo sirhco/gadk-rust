@@ -316,8 +316,8 @@ impl RunnableTool for FunctionTool {
         match AssertUnwindSafe((self.run)(ctx, args)).catch_unwind().await {
             Ok(result) => result,
             Err(payload) => Err(ToolError::Panic(format!(
-                "panic in tool {:?}: {}",
-                self.cfg.name,
+                "panic in tool {}: {}",
+                gadk_agent::go_quote(&self.cfg.name),
                 panic_message(&*payload)
             ))),
         }

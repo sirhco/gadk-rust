@@ -173,7 +173,8 @@ impl StreamingTool for StreamingFunctionTool {
             .map(move |item| match item {
                 Ok(item) => item,
                 Err(payload) => Err(ToolError::Panic(format!(
-                    "panic in tool {name:?}: {}",
+                    "panic in tool {}: {}",
+                    gadk_agent::go_quote(&name),
                     panic_message(&*payload)
                 ))),
             })

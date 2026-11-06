@@ -16,6 +16,7 @@
 //! The agent interface and the one agent implementation every agent type builds on (port of Go
 //! `agent/agent.go`).
 
+use crate::go_fmt::go_quote;
 use std::any::Any;
 use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, Weak};
@@ -132,8 +133,8 @@ pub fn new_with_state(cfg: AgentConfig, state: AgentState) -> Result<Arc<dyn Age
     for sub in &cfg.sub_agents {
         if !seen.insert(Arc::as_ptr(sub).cast::<()>() as usize) {
             return Err(AgentError::Config(format!(
-                "error creating agent: subagent {:?} appears multiple times in subAgents",
-                sub.name()
+                "error creating agent: subagent {} appears multiple times in subAgents",
+                go_quote(sub.name())
             )));
         }
     }
@@ -170,7 +171,8 @@ impl Agent for CustomAgent {
             let name = self.name.clone();
             return futures::stream::once(async move {
                 Err(AgentError::Config(format!(
-                    "agent {name:?} is being dropped"
+                    "agent {} is being dropped",
+                    go_quote(&name)
                 )))
             })
             .boxed();
@@ -302,8 +304,8 @@ async fn step(mut st: RunState) -> Option<(Result<Event, AgentError>, RunState)>
                     // Matches adk-python: an agent without a run function is built fine and fails
                     // when run.
                     None => st.pending.push_back(Err(AgentError::Config(format!(
-                        "agent {:?} has no Run function",
-                        st.agent.name
+                        "agent {} has no Run function",
+                        go_quote(&st.agent.name)
                     )))),
                     Some(run) => st.phase = Phase::Main(run(st.ctx.as_invocation().clone())),
                 }

@@ -15,6 +15,7 @@
 
 //! Port of Go internal/utils and internal/typeutil.
 
+use gadk_agent::go_quote;
 use std::sync::Arc;
 
 use gadk_genai::{
@@ -309,14 +310,21 @@ pub(crate) fn validate_map_on_schema(
         let Some(prop_schema) = schema.properties.get(key) else {
             // Note: OpenAPI schemas can allow additional properties. This implementation assumes strictness.
             return Err(format!(
-                "{arg_type} arg: '{key:?}' does not exist in schema properties"
+                "{arg_type} arg: '{}' does not exist in schema properties",
+                go_quote(key)
             ));
         };
         match match_type(value, Some(prop_schema), is_input) {
-            Err(e) => return Err(format!("{arg_type} arg: '{key:?}' validation failed: {e}")),
+            Err(e) => {
+                return Err(format!(
+                    "{arg_type} arg: '{}' validation failed: {e}",
+                    go_quote(key)
+                ));
+            }
             Ok(false) => {
                 return Err(format!(
-                    "{arg_type} arg: '{key:?}' type mismatch, expected schema type {}, got value {value} of type {}",
+                    "{arg_type} arg: '{}' type mismatch, expected schema type {}, got value {value} of type {}",
+                    go_quote(key),
                     type_str(prop_schema),
                     go_type_name(value)
                 ));
@@ -327,7 +335,9 @@ pub(crate) fn validate_map_on_schema(
     for required_key in &schema.required {
         if !args.contains_key(required_key) {
             return Err(format!(
-                "{arg_type:?} args does not contain required key: '{required_key:?}'"
+                "{} args does not contain required key: '{}'",
+                go_quote(arg_type),
+                go_quote(required_key)
             ));
         }
     }

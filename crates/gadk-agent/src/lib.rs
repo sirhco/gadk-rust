@@ -19,6 +19,7 @@ pub mod agent;
 pub mod callback;
 pub mod context;
 pub mod error;
+mod go_fmt;
 pub mod mode;
 pub mod parent_map;
 pub mod plugin;
@@ -41,6 +42,8 @@ pub use context::{
     CancelGuard, Context, ContextBuilder, ContextDelta, InvocationContext, ReadonlyContext,
 };
 pub use error::{AgentError, EventStream, ToolError};
+#[doc(hidden)]
+pub use go_fmt::go_quote;
 pub use mode::{BoundModes, Mode};
 pub use parent_map::ParentMap;
 pub use plugin::{Plugin, PluginConfig};

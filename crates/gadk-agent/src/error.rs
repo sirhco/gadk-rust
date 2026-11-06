@@ -41,7 +41,7 @@ pub enum AgentError {
     #[error(transparent)]
     Memory(#[from] gadk_memory::MemoryError),
     /// A tool failed (Go functiontool: `fmt.Errorf("error tool %q %w", name, err)`).
-    #[error("error tool {tool:?} {source}")]
+    #[error("error tool {} {source}", crate::go_fmt::go_quote(.tool))]
     Tool {
         /// The tool's name.
         tool: String,

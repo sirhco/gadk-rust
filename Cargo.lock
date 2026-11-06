@@ -718,6 +718,7 @@ dependencies = [
  "gadk-session",
  "parking_lot 0.13.0",
  "pretty_assertions",
+ "regex",
  "rstest",
  "serde",
  "serde_json",

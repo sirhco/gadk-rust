@@ -24,6 +24,7 @@ use gadk_model::LlmRequest;
 use serde_json::{Map, Value};
 
 use crate::error::ToolError;
+use crate::go_fmt::go_quote;
 use crate::tool::Tool;
 
 /// Port of Go `toolutils.PackTool`: register `tool` under its name and append its declaration to
@@ -36,7 +37,8 @@ pub fn pack_tool(req: &mut LlmRequest, tool: &Arc<dyn Tool>) -> Result<(), ToolE
     let name = tool.name().to_string();
     if req.tools.contains_key(&name) {
         return Err(ToolError::InvalidArgument(format!(
-            "duplicate tool: {name:?}"
+            "duplicate tool: {}",
+            go_quote(&name)
         )));
     }
     req.tools
@@ -87,13 +89,15 @@ pub fn original_call_from(fc: &FunctionCall) -> Result<FunctionCall, ToolError> 
     }
     let Some(val) = fc.args.get(KEY) else {
         return Err(ToolError::InvalidArgument(format!(
-            "required argument {KEY:?} is missing from call with ID {}",
+            "required argument {} is missing from call with ID {}",
+            go_quote(KEY),
             fc.id
         )));
     };
     let Value::Object(raw) = val else {
         return Err(ToolError::InvalidArgument(format!(
-            "argument {KEY:?} has invalid type: expected JSON object (map[string]any) or *genai.FunctionCall, got {}",
+            "argument {} has invalid type: expected JSON object (map[string]any) or *genai.FunctionCall, got {}",
+            go_quote(KEY),
             go_type_name(val)
         )));
     };
@@ -111,7 +115,8 @@ pub fn original_call_from(fc: &FunctionCall) -> Result<FunctionCall, ToolError> 
         .collect();
     serde_json::from_value(Value::Object(normalized)).map_err(|e| {
         ToolError::InvalidArgument(format!(
-            "failed to decode {KEY:?} structure for call ID {}: {e}",
+            "failed to decode {} structure for call ID {}: {e}",
+            go_quote(KEY),
             fc.id
         ))
     })

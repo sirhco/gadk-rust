@@ -16,6 +16,7 @@
 //! `filter_toolset`, `allowed_tools_predicate`, `with_confirmation` (port of Go `tool/tool.go`
 //! helpers).
 
+use crate::go_fmt::go_quote;
 use std::any::Any;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -193,8 +194,8 @@ impl RunnableTool for ConfirmationTool {
         match self.inner.as_runnable() {
             Some(r) => r.run(ctx, args).await,
             None => Err(ToolError::InvalidArgument(format!(
-                "tool {:?} is not runnable",
-                self.name()
+                "tool {} is not runnable",
+                go_quote(self.name())
             ))),
         }
     }
@@ -221,7 +222,8 @@ impl StreamingTool for ConfirmationTool {
                     Some(s) => s.run_stream(ctx, args),
                     None => futures::stream::once(async move {
                         Err(ToolError::InvalidArgument(format!(
-                            "tool {name:?} is not streaming"
+                            "tool {} is not streaming",
+                            go_quote(&name)
                         )))
                     })
                     .boxed(),

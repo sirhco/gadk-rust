@@ -15,6 +15,7 @@
 
 //! The agent tree's parent map (port of Go `internal/agent/parentmap/map.go`).
 
+use crate::go_fmt::go_quote;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -92,16 +93,16 @@ fn walk(
     for sub in cur.sub_agents() {
         if let Some(p) = seen.get(&ptr(sub)) {
             return Err(AgentError::Config(format!(
-                "{:?} agent cannot have >1 parents, found: {:?}, {:?}",
-                sub.name(),
-                p,
-                cur.name()
+                "{} agent cannot have >1 parents, found: {}, {}",
+                go_quote(sub.name()),
+                go_quote(p),
+                go_quote(cur.name())
             )));
         }
         if parents.contains_key(sub.name()) || sub.name() == root_name {
             return Err(AgentError::Config(format!(
-                "agent names must be unique in the agent tree, found duplicate: {:?}",
-                sub.name()
+                "agent names must be unique in the agent tree, found duplicate: {}",
+                go_quote(sub.name())
             )));
         }
         parents.insert(sub.name().to_string(), cur.clone());
