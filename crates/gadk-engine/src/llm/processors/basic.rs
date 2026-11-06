@@ -13,4 +13,50 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Basic request processor. Implemented by Task 9.
+//! Basic request processor (port of Go internal/llminternal/basic_processor.go).
+
+use futures::future::BoxFuture;
+use gadk_agent::{AgentError, InvocationContext, Mode};
+use gadk_genai::GenerateContentConfig;
+use gadk_model::LlmRequest;
+use gadk_session::Event;
+
+use crate::llm::{
+    flow::Flow, processors::output_schema::need_output_schema_processor, state::reveal,
+};
+
+/// Port of Go internal/llminternal/basic_processor.go basicRequestProcessor (line 31).
+pub(crate) fn basic_request_processor<'a>(
+    ctx: &'a InvocationContext,
+    req: &'a mut LlmRequest,
+    _f: &'a Flow,
+) -> BoxFuture<'a, Result<Vec<Event>, AgentError>> {
+    Box::pin(async move {
+        let agent = ctx.agent();
+        let Some(state) = reveal(&*agent) else {
+            return Ok(Vec::new());
+        };
+        // Go: req.Config = clone(state.GenerateContentConfig), replacing whatever was there;
+        // nil → empty config.
+        let mut cfg = clone_generate_content_config(state.cfg.generate_content_config.as_ref())
+            .unwrap_or_default();
+        // Task-mode agents never set ResponseSchema (the finish_task declaration carries it).
+        // Reads the DECLARED mode (mode.go doc).
+        if state.cfg.mode != Mode::Task
+            && state.cfg.output_schema.is_some()
+            && !need_output_schema_processor(state)
+        {
+            cfg.response_schema = state.cfg.output_schema.clone();
+            cfg.response_mime_type = "application/json".to_owned();
+        }
+        req.config = Some(cfg);
+        Ok(Vec::new())
+    })
+}
+
+/// Port of basic_processor.go:70 CloneGenerateContentConfig (Go's reflective clone → Clone).
+pub(crate) fn clone_generate_content_config(
+    cfg: Option<&GenerateContentConfig>,
+) -> Option<GenerateContentConfig> {
+    cfg.cloned()
+}

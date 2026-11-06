@@ -13,4 +13,63 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go no-op processors (auth, NL-planning, code-execution, response processors). Implemented by Task 9.
+//! Go no-op processors (port of Go internal/llminternal/other_processors.go): auth,
+//! NL-planning and code-execution request processors, NL-planning and code-execution response
+//! processors.
+
+use futures::future::BoxFuture;
+use gadk_agent::{AgentError, InvocationContext};
+use gadk_model::{LlmRequest, LlmResponse};
+use gadk_session::Event;
+
+use crate::llm::flow::Flow;
+
+/// Port of other_processors.go authPreprocessor (Go TODO no-op; kept so the chain order stays
+/// visible).
+pub(crate) fn auth_preprocessor<'a>(
+    _ctx: &'a InvocationContext,
+    _req: &'a mut LlmRequest,
+    _f: &'a Flow,
+) -> BoxFuture<'a, Result<Vec<Event>, AgentError>> {
+    Box::pin(async { Ok(Vec::new()) })
+}
+
+/// Port of other_processors.go nlPlanningRequestProcessor (Go TODO no-op; kept so the chain
+/// order stays visible).
+pub(crate) fn nl_planning_request_processor<'a>(
+    _ctx: &'a InvocationContext,
+    _req: &'a mut LlmRequest,
+    _f: &'a Flow,
+) -> BoxFuture<'a, Result<Vec<Event>, AgentError>> {
+    Box::pin(async { Ok(Vec::new()) })
+}
+
+/// Port of other_processors.go codeExecutionRequestProcessor (Go TODO no-op; kept so the chain
+/// order stays visible).
+pub(crate) fn code_execution_request_processor<'a>(
+    _ctx: &'a InvocationContext,
+    _req: &'a mut LlmRequest,
+    _f: &'a Flow,
+) -> BoxFuture<'a, Result<Vec<Event>, AgentError>> {
+    Box::pin(async { Ok(Vec::new()) })
+}
+
+/// Port of other_processors.go nlPlanningResponseProcessor (Go TODO no-op; kept so the chain
+/// order stays visible).
+pub(crate) fn nl_planning_response_processor(
+    _ctx: &InvocationContext,
+    _req: &LlmRequest,
+    _resp: &mut LlmResponse,
+) -> Result<(), AgentError> {
+    Ok(())
+}
+
+/// Port of other_processors.go codeExecutionResponseProcessor (Go TODO no-op; kept so the chain
+/// order stays visible).
+pub(crate) fn code_execution_response_processor(
+    _ctx: &InvocationContext,
+    _req: &LlmRequest,
+    _resp: &mut LlmResponse,
+) -> Result<(), AgentError> {
+    Ok(())
+}

@@ -13,4 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Parity target for Go internal/llminternal/identity_test.go. Implemented by Task 9.
+//! Parity port of Go internal/llminternal/identity_test.go.
+
+// parity: skipped TestCancelledToolContextKeepsIdentity: cancelledToolContext exists only for live streaming tools (deferred to 1b-live), and Go's adkcontext identity-marker procedure has no Rust counterpart (Rust contexts carry app/user/session structurally)
