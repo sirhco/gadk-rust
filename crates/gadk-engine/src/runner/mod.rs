@@ -13,11 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The runner (port of ADK-Go `runner/runner.go`; live and compaction parts are excluded):
+//! The runner (port of ADK-Go `runner/runner.go`; compaction parts are excluded; live mode is in [`live`]):
 //! [`Runner`], [`RunnerConfig`], [`PluginConfig`], [`RunOptions`].
 
 pub(crate) mod agent_node;
 pub(crate) mod find_agent;
+pub(crate) mod live;
 pub(crate) mod run_node;
 
 use std::pin::Pin;

@@ -68,6 +68,7 @@ mod internal_workflowroute_workflowroute;
 mod runner_agent_node;
 mod runner_before_run;
 mod runner_find_active_task_isolation_scope;
+mod runner_live_runner;
 mod runner_max_llm_calls;
 mod runner_mode_no_mutation;
 mod runner_runner;
