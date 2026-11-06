@@ -29,7 +29,8 @@ use serde_json::{Map, Value};
 use tokio_util::sync::CancellationToken;
 
 use super::agent_node::new_agent_node;
-use super::{AfterRunGuard, Processed, RunOptions, RunnerInner, wrap};
+use super::compaction::InvocationGuard;
+use super::{Processed, RunOptions, RunnerInner, wrap};
 use crate::artifacts::ScopedArtifacts;
 use crate::llm::mode::with_bound_mode;
 use crate::memory::ScopedMemory;
@@ -62,6 +63,7 @@ impl RunnerInner {
         msg: Option<Content>,
         cfg: &RunConfig,
         token: &CancellationToken,
+        compaction: bool,
     ) -> InvocationContext {
         // Go runconfig.ToContext(ctx, &RunConfig{MaxLLMCalls: ResolveMaxLLMCalls(..)}): one
         // budget for the whole invocation.
@@ -101,11 +103,22 @@ impl RunnerInner {
                 stored.user_id(),
             )));
         }
+        // Go compactionctx.ToContext(ctx, r.compactionRuntime()): one runtime for the whole
+        // invocation, shared by every context derived from it. Go RunLive attaches none.
+        if compaction && let Some(cfg) = &self.compaction {
+            b = crate::compaction::runtime::attach(
+                b,
+                crate::compaction::runtime::CompactionRuntime::new(
+                    cfg.clone(),
+                    Some(self.session_service.clone()),
+                ),
+            );
+        }
         b.build_invocation()
     }
 }
 
-/// Port of Go runner/run_node.go `(*Runner).runNode` (compaction omitted): wraps `agent_to_run`
+/// Port of Go runner/run_node.go `(*Runner).runNode`: wraps `agent_to_run`
 /// in a START -> node workflow and runs or resumes it.
 pub(super) fn run_node(
     inner: Arc<RunnerInner>,
@@ -136,7 +149,7 @@ pub(super) fn run_node(
         let token = CancellationToken::new();
         let _cancel_on_drop = token.clone().drop_guard();
         // The user content is the workflow's seed input.
-        let ictx = inner.new_invocation_context(&stored, agent_to_run.clone(), msg.clone(), &cfg, &token);
+        let ictx = inner.new_invocation_context(&stored, agent_to_run.clone(), msg.clone(), &cfg, &token, true);
         // Go runner.go:610 binds the ROOT agent's placement on the context handed to runNode.
         let ictx = with_bound_mode(
             &ictx,
@@ -159,17 +172,21 @@ pub(super) fn run_node(
             Ok(v) => v,
             Err(e) => { yield Err(e); return; }
         };
+        // Go's deferred compactOnce is registered before the user message is yielded, the
+        // deferred after-run callbacks after it.
+        let ictx = ctx.as_invocation().clone();
+        let mut guard = InvocationGuard::new(inner.clone(), stored.clone(), ictx.clone());
         if opts.yield_user_message && let Some(ev) = user_event {
             yield Ok(ev);
         }
 
         // Plugin lifecycle: defer after_run, run before_run, honor an early exit.
-        let ictx = ctx.as_invocation().clone();
-        let after_run = AfterRunGuard::new(inner.plugin_manager.clone(), ictx.clone());
+        guard.defer_after_run();
+        let mut early = false;
         'run: {
             match inner.run_before_run_callback(&ictx).await {
-                Err(e) => { yield Err(e); break 'run; }
-                Ok(Some(ev)) => { yield Ok(ev); break 'run; }
+                Err(e) => { guard.mark_failed(); yield Err(e); early = true; break 'run; }
+                Ok(Some(ev)) => { yield Ok(ev); early = true; break 'run; }
                 Ok(None) => {}
             }
 
@@ -178,7 +195,9 @@ pub(super) fn run_node(
             let state: Option<RunState> = match wf.reconstruct_run_state(&*stored, ictx.invocation_id()) {
                 Ok(s) => s,
                 Err(e) => {
+                    guard.mark_failed();
                     yield Err(wrap("failed to reconstruct workflow run state", e));
+                    early = true;
                     break 'run;
                 }
             };
@@ -193,7 +212,7 @@ pub(super) fn run_node(
             while let Some(item) = events.next().await {
                 let mut event = match item {
                     Ok(ev) => ev,
-                    Err(e) => { yield Err(e); continue; }
+                    Err(e) => { guard.mark_failed(); yield Err(e); continue; }
                 };
                 // Engine control events have no author; a later find_agent_to_run would warn
                 // about the empty author.
@@ -202,12 +221,21 @@ pub(super) fn run_node(
                 }
                 match inner.process_event(&ictx, &*stored, event).await {
                     Processed::Event(ev) => { yield Ok(*ev); }
-                    Processed::PluginError(e) => { yield Err(e); }
-                    Processed::AppendError(e) => { yield Err(e); break 'run; }
+                    Processed::PluginError(e) => { guard.mark_failed(); yield Err(e); }
+                    Processed::AppendError(e) => { guard.mark_failed(); yield Err(e); early = true; break 'run; }
                 }
             }
         }
-        after_run.finish().await;
+        if early {
+            guard.finish_early().await;
+        } else {
+            // Compact once every event of the invocation is persisted; the consumer drained the
+            // stream, so a failure can still be reported.
+            if let Some(e) = guard.compact_inline().await {
+                yield Err(e);
+            }
+            guard.finish().await;
+        }
     })
 }
 

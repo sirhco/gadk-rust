@@ -182,6 +182,7 @@ fn new_runner(agent: Arc<dyn Agent>, svc: Arc<dyn SessionService>, plugins: Vec<
         },
         auto_create_session: false,
         platform: Platform::default(),
+        compaction: None,
     })
     .unwrap()
 }

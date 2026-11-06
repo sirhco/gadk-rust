@@ -63,6 +63,7 @@ fn runner_config(
         plugin_config: PluginConfig::default(),
         auto_create_session,
         platform: Platform::default(),
+        compaction: None,
     }
 }
 

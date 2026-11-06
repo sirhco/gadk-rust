@@ -124,6 +124,7 @@ async fn logging_plugin_logs_the_invocation() {
         },
         auto_create_session: true,
         platform: Platform::default(),
+        compaction: None,
     })
     .unwrap();
     let items: Vec<_> = runner

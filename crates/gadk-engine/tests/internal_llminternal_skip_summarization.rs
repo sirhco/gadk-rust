@@ -78,6 +78,7 @@ async fn run_skip_summarization_scenario(root: Arc<dyn Agent>) -> Vec<Event> {
         plugin_config: PluginConfig::default(),
         auto_create_session: false,
         platform: Platform::default(),
+        compaction: None,
     })
     .unwrap();
     let mut stream = runner.run(

@@ -80,6 +80,7 @@ fn runner_over(agent: Arc<dyn gadk_agent::Agent>, svc: Arc<dyn SessionService>) 
         plugin_config: PluginConfig::default(),
         auto_create_session: false,
         platform: Platform::default(),
+        compaction: None,
     })
     .unwrap()
 }

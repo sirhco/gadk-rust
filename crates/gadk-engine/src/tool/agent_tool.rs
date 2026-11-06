@@ -208,6 +208,7 @@ impl RunnableTool for AgentTool {
             plugin_config: PluginConfig::default(),
             auto_create_session: false,
             platform: ctx.platform().clone(),
+            compaction: None,
         })
         .map_err(|e| exec_src(format!("failed to create runner for agent {name}"), e))?;
 

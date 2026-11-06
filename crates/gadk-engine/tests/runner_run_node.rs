@@ -166,6 +166,7 @@ fn new_node_test_runner(agent: Arc<dyn Agent>, svc: Arc<dyn SessionService>) -> 
         plugin_config: PluginConfig::default(),
         auto_create_session: false,
         platform: Platform::default(),
+        compaction: None,
     })
     .expect("runner.New()")
 }
