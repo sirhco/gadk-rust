@@ -256,6 +256,14 @@ impl LiveSessionImpl {
     }
 }
 
+#[cfg(test)]
+impl LiveSessionImpl {
+    /// How many instances of `tool_name` are registered (Go tests read `activeTools` directly).
+    pub(crate) fn active_streaming_tool_count(&self, tool_name: &str) -> usize {
+        self.active_tools.lock().get(tool_name).map_or(0, Vec::len)
+    }
+}
+
 #[async_trait]
 impl LiveSession for LiveSessionImpl {
     /// Go Send: returns once the flow's sender task has taken `req`; `EOF` after `close`. As in
