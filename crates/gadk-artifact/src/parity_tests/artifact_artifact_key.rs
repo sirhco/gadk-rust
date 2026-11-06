@@ -13,4 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Parity target for Go artifact/artifact_key_test.go. Implemented by Task 2.
+//! Parity target for Go artifact/artifact_key_test.go.
+
+use crate::inmemory::ArtifactKey;
+
+#[test]
+fn test_artifact_key() {
+    let key = ArtifactKey::new("testapp", "testuser", "testsession", "testfile", 123);
+    let key2 = ArtifactKey::decode(&key.encode()).expect("error decoding key");
+    assert_eq!(key, key2);
+}

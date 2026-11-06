@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! gadk-artifact: the artifact service API and the in-memory artifact service (port of ADK-Go
-//! `artifact`). Tasks 2 owns this file and adds the crate-root re-exports.
+//! gadk-artifact: artifact storage service (port of ADK-Go artifact/).
 
 pub mod inmemory;
 pub mod service;
@@ -24,3 +23,10 @@ pub mod testsuite;
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod parity_tests;
+
+pub use inmemory::InMemoryArtifactService;
+pub use service::{
+    ArtifactError, ArtifactService, ArtifactVersion, DeleteRequest, GetArtifactVersionRequest,
+    GetArtifactVersionResponse, ListRequest, ListResponse, LoadRequest, LoadResponse, SaveRequest,
+    SaveResponse, VersionsRequest, VersionsResponse,
+};
