@@ -26,9 +26,10 @@ use std::fmt;
 use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use gadk_genai::{
-    ActivityEnd, ActivityStart, Blob, Content, FunctionResponse, LiveClientContentInput,
+    ActivityEnd, ActivityStart, Content, FunctionResponse, LiveClientContentInput,
     LiveConnectConfig, LiveRealtimeInput, LiveServerMessage, LiveToolResponseInput, Part,
 };
+pub use gadk_model::RealtimeInput;
 use gadk_model::{Backend, LlmResponse};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
@@ -45,21 +46,6 @@ type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 /// The PNG file signature (Go `SendRealtime` MIME detection).
 const PNG_SIGNATURE: [u8; 8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
-
-/// Realtime input for [`LiveConnection::send_realtime`] (the types Go `SendRealtime`
-/// accepts, plus genai's `audioStreamEnd`).
-#[derive(Debug, Clone, PartialEq)]
-pub enum RealtimeInput {
-    /// Audio or image data. An empty MIME type is detected: `image/png` for PNG data,
-    /// otherwise `audio/pcm`.
-    Blob(Blob),
-    /// Start of user activity (manual activity detection).
-    ActivityStart,
-    /// End of user activity (manual activity detection).
-    ActivityEnd,
-    /// The audio stream has ended (automatic activity detection).
-    AudioStreamEnd,
-}
 
 /// A live connection to a model (port of ADK-Go `googlellm.LiveConnection` over a genai
 /// `Session`).
