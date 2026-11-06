@@ -293,6 +293,7 @@ mod test_support {
                 agent_type: AgentType::LlmAgent,
                 config: Some(state),
                 on_before_agent_callback_event: None,
+                live: None,
             },
         )
         .expect("test agent")

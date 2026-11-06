@@ -159,6 +159,7 @@ async fn runner_skips_invocation_span_for_workflow_agent_root() {
             agent_type: AgentType::WorkflowAgent,
             config: None,
             on_before_agent_callback_event: None,
+            live: None,
         },
     )
     .unwrap();

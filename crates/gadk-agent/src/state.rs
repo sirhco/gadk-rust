@@ -20,6 +20,8 @@ use std::sync::Arc;
 
 use gadk_session::Event;
 
+use crate::agent::LiveAgent;
+
 /// Go `agentinternal.Type`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentType {
@@ -66,6 +68,9 @@ pub struct AgentState {
     /// is yielded.
     #[allow(clippy::type_complexity)] // the exact Appendix C3 type
     pub on_before_agent_callback_event: Option<Arc<dyn Fn(&mut Event) + Send + Sync>>,
+    /// The live entry point (Go's optional `RunLive`); engine agents built with `new_with_state`
+    /// set it, every other agent leaves it `None`.
+    pub live: Option<Arc<dyn LiveAgent>>,
 }
 
 impl AgentState {
@@ -82,6 +87,7 @@ impl std::fmt::Debug for AgentState {
         f.debug_struct("AgentState")
             .field("agent_type", &self.agent_type)
             .field("key", &self.key())
+            .field("live", &self.live.is_some())
             .finish_non_exhaustive()
     }
 }

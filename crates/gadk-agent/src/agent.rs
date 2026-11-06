@@ -21,6 +21,7 @@ use std::any::Any;
 use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, Weak};
 
+use async_trait::async_trait;
 use futures::StreamExt;
 use gadk_genai::Content;
 use gadk_session::{Event, EventActions};
@@ -30,7 +31,21 @@ use crate::callback::{AfterAgentCallback, BeforeAgentCallback};
 use crate::context::delta::new_actions;
 use crate::context::{Context, ContextDelta, InvocationContext};
 use crate::error::{AgentError, EventStream, wrap};
+use crate::live::LiveSession;
 use crate::state::{AgentState, AgentType};
+
+/// Go's optional `RunLive` method (the runner's `liveAgent` and the sequential agent's
+/// `liveRunner` type assertions). Agents expose it through [`Agent::as_live`]; `None` there means
+/// the agent is not live-capable, and callers check that before doing anything else.
+#[async_trait]
+pub trait LiveAgent: Send + Sync {
+    /// Starts a live run in `ctx`, whose current agent is the agent being run. Returns the
+    /// session to send on and the event stream; dropping the stream ends the run.
+    async fn run_live(
+        &self,
+        ctx: InvocationContext,
+    ) -> Result<(Arc<dyn LiveSession>, EventStream), AgentError>;
+}
 
 /// Go `agent.Agent`: the interface every agent implements.
 ///
@@ -60,6 +75,11 @@ pub trait Agent: Send + Sync + 'static {
     /// Engine-owned state (Go `agent.internal().State`).
     #[doc(hidden)]
     fn agent_state(&self) -> &AgentState;
+
+    /// The live entry point (Go `RunLive`), or `None` when the agent is not live-capable.
+    fn as_live(&self) -> Option<&dyn LiveAgent> {
+        None
+    }
     /// Downcasting support.
     fn as_any(&self) -> &dyn Any;
 }
@@ -122,6 +142,7 @@ pub fn new(cfg: AgentConfig) -> Result<Arc<dyn Agent>, AgentError> {
             agent_type: AgentType::CustomAgent,
             config: None,
             on_before_agent_callback_event: None,
+            live: None,
         },
     )
 }
@@ -197,6 +218,10 @@ impl Agent for CustomAgent {
 
     fn agent_state(&self) -> &AgentState {
         &self.state
+    }
+
+    fn as_live(&self) -> Option<&dyn LiveAgent> {
+        self.state.live.as_deref()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -460,4 +485,72 @@ async fn run_after_agent_callbacks(
         return Ok(Some(callback_event(agent, ctx, &actions, None)));
     }
     Ok(None)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod live_tests {
+    use std::sync::Arc;
+
+    use async_trait::async_trait;
+
+    use super::{AgentConfig, LiveAgent, new, new_with_state};
+    use crate::context::InvocationContext;
+    use crate::error::{AgentError, EventStream};
+    use crate::live::LiveSession;
+    use crate::state::{AgentState, AgentType};
+
+    struct NoopLive;
+
+    #[async_trait]
+    impl LiveAgent for NoopLive {
+        async fn run_live(
+            &self,
+            _ctx: InvocationContext,
+        ) -> Result<(Arc<dyn LiveSession>, EventStream), AgentError> {
+            Err(AgentError::other("noop live"))
+        }
+    }
+
+    #[test]
+    fn as_live_is_none_for_agent_new() {
+        let a = new(AgentConfig {
+            name: "plain".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        assert!(
+            a.as_live().is_none(),
+            "gadk_agent::new agents are not live-capable"
+        );
+    }
+
+    #[tokio::test]
+    async fn as_live_returns_the_agent_state_hook() {
+        let a = new_with_state(
+            AgentConfig {
+                name: "live".into(),
+                ..Default::default()
+            },
+            AgentState {
+                agent_type: AgentType::CustomAgent,
+                config: None,
+                on_before_agent_callback_event: None,
+                live: Some(Arc::new(NoopLive)),
+            },
+        )
+        .unwrap();
+        let live = a
+            .as_live()
+            .expect("AgentState.live makes the agent live-capable");
+        match live
+            .run_live(InvocationContext::builder().build_invocation())
+            .await
+        {
+            Err(e) => assert_eq!(e.to_string(), "noop live"),
+            Ok(_) => panic!("NoopLive must fail"),
+        }
+        // The trait is object-safe and shareable.
+        let _shared: Arc<dyn LiveAgent> = Arc::new(NoopLive);
+    }
 }

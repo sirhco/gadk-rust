@@ -60,6 +60,7 @@ pub fn new(cfg: LlmAgentConfig) -> Result<Arc<dyn Agent>, AgentError> {
         on_before_agent_callback_event: Some(Arc::new(move |ev: &mut Event| {
             maybe_save_output_to_state(&hook_state, ev)
         })),
+        live: None,
     };
 
     let agent = gadk_agent::agent::new_with_state(

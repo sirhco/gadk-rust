@@ -124,6 +124,8 @@ impl ContextInner {
             n.sub_scheduler = None;
             n.output_for_ancestors = None;
             n.resumed_inputs = None;
+            // Go NewInvocationContext: a fresh InvocationContextParams has no resumption handle.
+            n.live_handle = Arc::new(parking_lot::Mutex::new(String::new()));
         }
         if let Some(v) = d.session {
             n.session = v;
@@ -266,5 +268,53 @@ mod tests {
         assert_eq!(child.isolation_scope(), "scope-2");
         assert_eq!(child.path(), "p");
         assert!(!child.ended());
+    }
+
+    #[test]
+    fn live_resumption_handle_is_shared_by_every_derived_context() {
+        let inv = InvocationContext::builder().build_invocation();
+        let child = inv.with_delta(ContextDelta {
+            agent: Some(named_agent("child")),
+            branch: Some("b".into()),
+            ..Default::default()
+        });
+        let tool = child.clone().into_context().with_delta(ContextDelta {
+            function_call_id: Some("fc-1".into()),
+            ..Default::default()
+        });
+        let (cancellable, _guard) = tool.with_agent_cancel();
+        cancellable
+            .as_invocation()
+            .set_live_session_resumption_handle("h1");
+        assert_eq!(inv.live_session_resumption_handle(), "h1");
+        assert_eq!(child.live_session_resumption_handle(), "h1");
+        assert_eq!(tool.as_invocation().live_session_resumption_handle(), "h1");
+    }
+
+    #[test]
+    fn fresh_invocation_installs_an_empty_resumption_handle_slot() {
+        let parent = InvocationContext::builder().build_invocation();
+        parent.set_live_session_resumption_handle("old");
+        let fresh = parent.with_delta(ContextDelta {
+            fresh_invocation: true,
+            ..Default::default()
+        });
+        assert_eq!(
+            fresh.live_session_resumption_handle(),
+            "",
+            "Go NewInvocationContext starts with no handle"
+        );
+        fresh.set_live_session_resumption_handle("new");
+        assert_eq!(
+            parent.live_session_resumption_handle(),
+            "old",
+            "the parent's slot is untouched"
+        );
+        // A derivation of the fresh context shares the fresh slot.
+        let derived = fresh.with_delta(ContextDelta {
+            branch: Some("x".into()),
+            ..Default::default()
+        });
+        assert_eq!(derived.live_session_resumption_handle(), "new");
     }
 }
