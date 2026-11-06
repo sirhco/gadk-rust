@@ -13,4 +13,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Parity target for Go workflow/synthesize_agent_output_test.go. Implemented by Task 12.
+//! Port of Go workflow/synthesize_agent_output_test.go.
+
+use gadk_genai::Content;
+use gadk_session::Event;
+use serde_json::json;
+
+use crate::workflow::nodes::agent::synthesize_agent_output;
+
+#[test]
+fn test_synthesize_agent_output_skips_long_running_tool_event() {
+    let mut ev = Event {
+        long_running_tool_ids: vec!["fc-pending".into()],
+        ..Event::default()
+    };
+    ev.response.content = Some(Content::from_text("Awaiting your approval…", "model"));
+    synthesize_agent_output(&mut ev);
+    assert_eq!(ev.output, None, "LRT-bearing events must not be promoted");
+    assert!(
+        !ev.node_info.as_ref().is_some_and(|i| i.message_as_output),
+        "MessageAsOutput must stay unset for LRT pauses"
+    );
+}
+
+#[test]
+fn test_synthesize_agent_output_promotes_plain_model_text() {
+    let mut ev = Event::default();
+    ev.response.content = Some(Content::from_text("hello", "model"));
+    synthesize_agent_output(&mut ev);
+    assert_eq!(ev.output, Some(json!("hello")));
+    assert!(
+        ev.node_info.as_ref().is_some_and(|i| i.message_as_output),
+        "MessageAsOutput = true"
+    );
+}
