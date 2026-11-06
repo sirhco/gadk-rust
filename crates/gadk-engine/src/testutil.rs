@@ -321,6 +321,111 @@ pub async fn gemini_test_model(model: &str, path: impl AsRef<std::path::Path>) -
         .unwrap_or_else(|e| panic!("GeminiModel::new({model}) failed: {e}"))
 }
 
+/// Port of Go internal/testutil `TestAgentRunner`: a runner over an in-memory session service with
+/// one session (`"test_app"`/`"test_user"`/`"test_session"`), created up front.
+pub struct TestAgentRunner {
+    runner: crate::runner::Runner,
+    session_service: Arc<dyn gadk_session::SessionService>,
+    session_id: String,
+}
+
+impl TestAgentRunner {
+    /// Port of Go `NewTestAgentRunner`.
+    pub async fn new(agent: Arc<dyn gadk_agent::Agent>) -> Self {
+        Self::build(agent, crate::runner::PluginConfig::default(), None).await
+    }
+
+    /// Port of Go `NewTestAgentRunnerWithPluginManager`.
+    pub async fn with_plugins(
+        agent: Arc<dyn gadk_agent::Agent>,
+        cfg: crate::runner::PluginConfig,
+    ) -> Self {
+        Self::build(agent, cfg, None).await
+    }
+
+    /// Port of Go `NewTestAgentRunner` + `SetInitSessionState`: the session starts with `state`.
+    pub async fn with_state(
+        agent: Arc<dyn gadk_agent::Agent>,
+        state: serde_json::Map<String, serde_json::Value>,
+    ) -> Self {
+        Self::build(agent, crate::runner::PluginConfig::default(), Some(state)).await
+    }
+
+    async fn build(
+        agent: Arc<dyn gadk_agent::Agent>,
+        cfg: crate::runner::PluginConfig,
+        state: Option<serde_json::Map<String, serde_json::Value>>,
+    ) -> Self {
+        let session_service: Arc<dyn gadk_session::SessionService> =
+            Arc::new(gadk_session::InMemorySessionService::new());
+        let runner = crate::runner::Runner::new(crate::runner::RunnerConfig {
+            app_name: "test_app".into(),
+            agent,
+            session_service: session_service.clone(),
+            artifact_service: None,
+            memory_service: None,
+            plugin_config: cfg,
+            auto_create_session: false,
+            platform: gadk_platform::Platform::default(),
+        })
+        .expect("runner::Runner::new");
+        // Go creates the session on the first Run with the initial state; Rust's `run` takes no
+        // session ID, so it is created here.
+        let session = session_service
+            .create(gadk_session::CreateRequest {
+                app_name: "test_app".into(),
+                user_id: "test_user".into(),
+                session_id: Some("test_session".into()),
+                state,
+            })
+            .await
+            .expect("create test session");
+        Self {
+            runner,
+            session_service,
+            session_id: session.id().to_string(),
+        }
+    }
+
+    /// Port of Go `Run`: an empty message is Go's nil content.
+    pub fn run(&self, msg: &str) -> EventStream {
+        let msg = (!msg.is_empty()).then(|| Content::from_text(msg, gadk_genai::ROLE_USER));
+        self.runner.run(
+            "test_user",
+            &self.session_id,
+            msg,
+            gadk_agent::RunConfig::default(),
+            crate::runner::RunOptions::default(),
+        )
+    }
+
+    /// Port of Go `RunContent`.
+    pub fn run_content(&self, msg: Content) -> EventStream {
+        self.run_with_config(msg, gadk_agent::RunConfig::default())
+    }
+
+    /// Port of Go `RunContentWithConfig`.
+    pub fn run_with_config(&self, msg: Content, cfg: gadk_agent::RunConfig) -> EventStream {
+        self.runner.run(
+            "test_user",
+            &self.session_id,
+            Some(msg),
+            cfg,
+            crate::runner::RunOptions::default(),
+        )
+    }
+
+    /// The test session's ID.
+    pub fn session_id(&self) -> &str {
+        &self.session_id
+    }
+
+    /// Port of Go `SessionService`: the runner's session service, for inspecting stored events.
+    pub fn session_service(&self) -> Arc<dyn gadk_session::SessionService> {
+        self.session_service.clone()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
