@@ -26,13 +26,11 @@ use crate::llm::LlmAgentConfig;
 /// panicking injection unwinds through the guard with the flag still false, so a later caller
 /// retries (`parking_lot` does not poison). `inject` must not re-enter `do_once` on the same
 /// latch.
-#[allow(dead_code)] // consumed by SequentialLive (Task 10); removed by Task 12
 #[derive(Debug, Default)]
 pub(crate) struct LiveModeToolInjection {
     done: parking_lot::Mutex<bool>,
 }
 
-#[allow(dead_code)] // consumed by SequentialLive (Task 10); removed by Task 12
 impl LiveModeToolInjection {
     /// Go `Do`: runs `inject` at most once successfully, holding the lock while it runs.
     pub(crate) fn do_once(&self, inject: impl FnOnce()) {
@@ -52,7 +50,6 @@ pub(crate) struct LlmAgentState {
     pub(crate) tools: parking_lot::RwLock<Vec<Arc<dyn Tool>>>,
     /// Go `State.LiveModeInjection`: guards the single live-mode tool injection; its lifetime
     /// follows the agent.
-    #[allow(dead_code)] // consumed by SequentialLive (Task 10); removed by Task 12
     pub(crate) live_injection: LiveModeToolInjection,
     /// What Go appends to `State.Instruction` at run time (the live `task_completed` suffix). Kept
     /// apart from the immutable `cfg.instruction`; [`LlmAgentState::instruction`] joins them.
