@@ -25,7 +25,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use futures::{StreamExt, future::BoxFuture, stream::BoxStream};
+use futures::{StreamExt, TryStreamExt, future::BoxFuture, stream::BoxStream};
 use gadk_agent::{
     AfterToolCallback, AgentConfig, AgentError, BeforeToolCallback, Context, InvocationContext,
     OnToolErrorCallback, ReadonlyContext, RunConfig, RunnableTool, StreamingMode, Tool, ToolError,
@@ -790,9 +790,9 @@ async fn test_preprocess_toolset() {
     for (name, agent, want_error, want_model) in cases {
         let ctx = InvocationContext::builder().agent(agent).build_invocation();
         let mut req = LlmRequest::default();
-        let res = Flow::default()
-            .preprocess(&ctx, &mut req, &mut Vec::new())
-            .await;
+        let flow = Flow::default();
+        let res: Result<Vec<Event>, AgentError> =
+            flow.preprocess(&ctx, &mut req).try_collect().await;
         assert_eq!(res.is_err(), want_error, "{name}: {res:?}");
         assert_eq!(req.model, want_model, "{name}");
     }

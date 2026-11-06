@@ -169,12 +169,16 @@ impl Flow {
                     model: model.name().to_owned(),
                     ..Default::default()
                 };
-                let mut pre = Vec::new();
-                let res = self.preprocess(&ctx, &mut req, &mut pre).await;
-                for ev in pre {
-                    yield ev;
+                {
+                    // Go yields each processor's events as they are produced, so they are in the
+                    // session before a later processor (contents) reads it; regression:
+                    // TestDelegation_06_ChatToTaskHITLResume (the resumed tool's response comes
+                    // from the confirmation processor and must reach the same step's request).
+                    let mut pre = self.preprocess(&ctx, &mut req);
+                    while let Some(ev) = pre.next().await {
+                        yield ev?;
+                    }
                 }
-                res?;
                 if ctx.ended() {
                     break 'step;
                 }
@@ -293,22 +297,26 @@ impl Flow {
     }
 
     /// Port of base_flow.go:922 `(*Flow).preprocess`: the request processors, then
-    /// `toolPreprocess` over `Flow.tools` and `toolsetPreprocess`. Go yields a failing
-    /// processor's events before its error; Rust drops the events of the failing processor (those
-    /// of earlier processors are already in `out`).
-    pub(crate) async fn preprocess(
-        &self,
-        ctx: &InvocationContext,
-        req: &mut LlmRequest,
-        out: &mut Vec<Event>,
-    ) -> Result<(), AgentError> {
-        for p in &self.request_processors {
-            out.extend(p(ctx, req, self).await?);
-        }
-        // Never hold the guard across an .await.
-        let tools = self.tools.read().clone();
-        tool_preprocess(ctx, req, &tools)?;
-        toolset_preprocess(ctx, req).await
+    /// `toolPreprocess` over `Flow.tools` and `toolsetPreprocess`. Each processor's events are
+    /// yielded before the next processor runs (Go base_flow.go:925-934), so the caller can append
+    /// them to the session first. Go yields a failing processor's events before its error; Rust
+    /// drops the events of the failing processor (those of earlier processors were yielded).
+    pub(crate) fn preprocess<'a>(
+        &'a self,
+        ctx: &'a InvocationContext,
+        req: &'a mut LlmRequest,
+    ) -> BoxStream<'a, Result<Event, AgentError>> {
+        Box::pin(async_stream::try_stream! {
+            for p in &self.request_processors {
+                for ev in p(ctx, &mut *req, self).await? {
+                    yield ev;
+                }
+            }
+            // Never hold the guard across an .await.
+            let tools = self.tools.read().clone();
+            tool_preprocess(ctx, &mut *req, &tools)?;
+            toolset_preprocess(ctx, &mut *req).await?;
+        })
     }
 
     /// Port of the model half of base_flow.go:986 `(*Flow).callLLM` (lines 1011-1081): the

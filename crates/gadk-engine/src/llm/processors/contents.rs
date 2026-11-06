@@ -628,8 +628,10 @@ fn is_other_agent_reply(current_agent_name: &str, ev: &Event) -> bool {
     ev.author != current_agent_name && ev.author != "user"
 }
 
-/// Go nil-map convention (C5 D5): an empty map stands for Go's nil map, which `json.Marshal`
-/// renders as `null`. Deviation: a Go non-nil empty map would render `{}`.
+/// Go nil-map convention (C5 D5) for function-call args: an empty map stands for Go's nil map,
+/// which `json.Marshal` renders as `null` (a model's no-argument call carries no `args`).
+/// Deviation: a Go non-nil empty map would render `{}`. Function-response maps do NOT use it:
+/// see `convert_foreign_event`.
 fn nil_map_value(m: &Map<String, Value>) -> Value {
     if m.is_empty() {
         Value::Null
@@ -661,11 +663,15 @@ pub(crate) fn convert_foreign_event(ev: &Event) -> Option<Event> {
                 go_json_marshal(&nil_map_value(&fc.args))
             )));
         } else if let Some(fr) = &p.function_response {
+            // An empty response renders `{}`: Go tool results are non-nil maps (transfer_to_agent
+            // returns `map[string]any{}`), so the recorded requests carry `{}`; regression:
+            // TestDelegation_05/_09 (contents_processor.go:826 stringify). Deviation: a Go nil
+            // response (a synthetic FunctionResponse with no Response) would render `null`.
             parts.push(text_part(format!(
                 "[{}] `{}` tool returned result: {}",
                 ev.author,
                 fr.name,
-                go_json_marshal(&nil_map_value(&fr.response))
+                go_json_marshal(&Value::Object(fr.response.clone()))
             )));
         } else {
             // Fall back to the original part for non-text, non-function parts.
@@ -910,7 +916,7 @@ mod tests {
     }
 
     #[test]
-    fn foreign_empty_args_render_null() {
+    fn foreign_empty_args_render_null_and_empty_response_renders_object() {
         let events = vec![ev(
             "other",
             "model",
@@ -922,7 +928,7 @@ mod tests {
             [
                 "For context:",
                 "[other] called tool `t` with parameters: null",
-                "[other] `t` tool returned result: null"
+                "[other] `t` tool returned result: {}"
             ]
         );
     }
