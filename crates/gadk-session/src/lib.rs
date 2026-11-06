@@ -15,6 +15,7 @@
 
 //! gadk-session: sessions, events, and the in-memory session service.
 
+pub mod compaction;
 mod error;
 mod event;
 mod inmemory;
