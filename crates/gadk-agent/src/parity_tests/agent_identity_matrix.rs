@@ -13,4 +13,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Parity target for Go agent/identity_matrix_test.go. Implemented by Task 4.
+// parity: skipped TestIdentityDecisionMatrix: tabulates Go context.Value identity answers across out-of-module decorators and promotions; Rust contexts are a closed concrete type with no Value bag
+// parity: skipped TestEveryContextProducingMethodIsTabulated: reflects over Go context-producing methods for the decorator matrix; no decorators in Rust
+// parity: skipped TestPromotedColumnsActuallyDropADecorator: Go method promotion of embedded interfaces; no Rust counterpart
+// parity: skipped TestPromotedColumnsCallTheMethodTheyName: Go method promotion of embedded interfaces; no Rust counterpart
+// parity: skipped TestDecoratorAnswersForItselfWhileReadingTheEnclosingUsersData: out-of-module decorators cannot exist in Rust
+// parity: skipped TestRebindIsTotalWithNoCachedHandle: Go WithAgentContext rebinding to another InvocationContext; Rust has no rebind derivation
+// parity: skipped TestRebindDoesNotCarryTheArtifactsHandle: Go WithAgentContext rebinding; Rust has no rebind derivation
+// parity: skipped TestAnUnmarkedContextCanAnswerTheKeyItself: Go context.Value identity key; no Rust counterpart
+// parity: skipped TestTheKeyValueEscapesToAnyContext: Go context.Value identity key; no Rust counterpart
+// parity: skipped TestIdentityFromAHostileSource: Go adkcontext.Source marker answering the key; no Rust counterpart
+// parity: skipped TestPromotedSubSchedulerDropsTheDecorator: out-of-module decorators cannot exist in Rust
+// parity: skipped TestDeltaDerivationsReachWithICDeltaOnly: Go WithDelta/WithICDelta dispatch on user implementations; Rust applies ContextDelta in one place
+// parity: skipped TestNilInvocationDeltaIsSafeOnlyOnceHeld: Go nil InvocationContextDelta on out-of-module invocations; no Rust counterpart

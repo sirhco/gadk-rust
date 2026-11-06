@@ -13,4 +13,38 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Parity target for Go internal/context/identity_mappings_test.go. Implemented by Task 4.
+use crate::context::builder::test_support::session;
+use crate::context::{ContextDelta, InvocationContext};
+
+// parity: adapted: Go compares its two session→Identity literals; Rust has one read path, so compare a context built on the session with one that swapped to it from a different enclosing session (ContextDelta.session), and require every field non-empty
+#[test]
+fn test_identity_mappings_agree() {
+    let s = session("mapping-app", "mapping-user", "mapping-sid");
+    let from_builder = InvocationContext::builder()
+        .session(s.clone())
+        .build_invocation();
+    let base = InvocationContext::builder()
+        .session(session("enclosing-app", "enclosing-user", "enclosing-sid"))
+        .build_invocation();
+    let from_delta = base.into_context().with_delta(ContextDelta {
+        session: Some(s),
+        ..Default::default()
+    });
+    let a = (
+        from_builder.user_id(),
+        from_builder.app_name(),
+        from_builder.session_id(),
+    );
+    let b = (
+        from_delta.user_id(),
+        from_delta.app_name(),
+        from_delta.session_id(),
+    );
+    assert_eq!(a, b, "the two derivations disagree");
+    for (name, v) in [("UserID", a.0), ("AppName", a.1), ("SessionID", a.2)] {
+        assert!(
+            !v.is_empty(),
+            "Identity.{name} is empty for a session that sets every accessor"
+        );
+    }
+}

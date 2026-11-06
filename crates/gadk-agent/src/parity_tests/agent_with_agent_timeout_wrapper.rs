@@ -13,4 +13,83 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Parity target for Go agent/with_agent_timeout_wrapper_test.go. Implemented by Task 4.
+use std::time::Duration;
+
+use crate::context::builder::test_support::named_agent;
+use crate::context::{Context, ContextDelta};
+
+fn callback_ctx() -> Context {
+    Context::builder()
+        .agent(named_agent("test-agent"))
+        .invocation_id("inv-1")
+        .build()
+        .with_delta(ContextDelta {
+            actions: Some(Default::default()),
+            ..Default::default()
+        })
+}
+
+/// Awaits `ctx`'s token on a paused clock and checks it fired after 5 s and not before.
+async fn assert_fires_after_five_seconds(parent: &Context, ctx: &Context) {
+    let start = tokio::time::Instant::now();
+    ctx.cancellation_token().cancelled().await;
+    let waited = start.elapsed();
+    assert!(
+        waited >= Duration::from_secs(5) && waited < Duration::from_secs(6),
+        "waited {waited:?}"
+    );
+    assert!(
+        !parent.cancellation_token().is_cancelled(),
+        "the timeout canceled the parent context"
+    );
+}
+
+// parity: adapted: Go CancelFunc/ctx.Err() become CancelGuard::cancel()/CancellationToken::is_cancelled()
+#[tokio::test]
+async fn test_with_agent_cancel_on_callback_context() {
+    let parent = callback_ctx();
+    let (ctx, guard) = parent.with_agent_cancel();
+    assert!(
+        !ctx.cancellation_token().is_cancelled(),
+        "derived context was canceled before cancel was called"
+    );
+    assert_eq!(
+        (ctx.agent_name(), ctx.invocation_id()),
+        (parent.agent_name(), parent.invocation_id())
+    );
+    guard.cancel();
+    assert!(
+        ctx.cancellation_token().is_cancelled(),
+        "cancel did not close the derived context"
+    );
+    assert!(
+        !parent.cancellation_token().is_cancelled(),
+        "canceling the derived context canceled its parent"
+    );
+}
+
+// parity: adapted: no Deadline() accessor; with a paused clock the derived token must fire after 5 s and not before
+#[tokio::test(start_paused = true)]
+async fn test_with_agent_timeout_on_tool_context() {
+    let tool_ctx = Context::builder()
+        .agent(named_agent("test-agent"))
+        .build()
+        .with_delta(ContextDelta {
+            function_call_id: Some("call-1".into()),
+            ..Default::default()
+        });
+    let (ctx, _guard) = tool_ctx.with_agent_timeout(Duration::from_secs(5));
+    assert_fires_after_five_seconds(&tool_ctx, &ctx).await;
+}
+
+// parity: adapted: no Deadline() accessor; with a paused clock the derived token must fire after 5 s and not before
+#[tokio::test(start_paused = true)]
+async fn test_with_agent_timeout_on_callback_context() {
+    let parent = callback_ctx();
+    let (ctx, _guard) = parent.with_agent_timeout(Duration::from_secs(5));
+    assert_eq!(
+        (ctx.agent_name(), ctx.invocation_id()),
+        (parent.agent_name(), parent.invocation_id())
+    );
+    assert_fires_after_five_seconds(&parent, &ctx).await;
+}

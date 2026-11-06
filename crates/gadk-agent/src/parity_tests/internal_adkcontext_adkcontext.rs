@@ -13,4 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Parity target for Go internal/adkcontext/adkcontext_test.go. Implemented by Task 4.
+// parity: skipped TestSourceMethodIsUnexported: Go unexported-method marker interface (adkcontext.Source); Rust contexts need no identity marker
+// parity: skipped TestIdentityKeyTypeIsUnnameable: Go unnameable context.Value key type; Rust has no context.Value identity key
+// parity: skipped TestALookalikeFromAnotherPackageIsNotASource: Go package-scoped unexported method sets; no Rust counterpart
+// parity: skipped TestEmbeddingMarkerStillSatisfiesSource: Go struct embedding of the Marker type; no Rust counterpart

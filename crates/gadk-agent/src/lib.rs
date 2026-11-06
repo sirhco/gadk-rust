@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! gadk-agent: the agent API — agents, contexts, tools, callbacks and plugins (port of ADK-Go
-//! `agent`, `tool`, `plugin`). Task 4 owns this file and adds the crate-root re-exports.
+//! gadk-agent: the agent API — Agent, contexts, tools, callbacks, plugins (port of ADK-Go agent/, tool/, plugin/).
 
 pub mod agent;
 pub mod callback;
@@ -35,3 +34,19 @@ pub mod toolset;
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod parity_tests;
+
+pub use agent::{Agent, AgentConfig, AgentRunFn, new as new_agent, new_with_state, self_arc};
+pub use callback::*;
+pub use context::{
+    CancelGuard, Context, ContextBuilder, ContextDelta, InvocationContext, ReadonlyContext,
+};
+pub use error::{AgentError, EventStream, ToolError};
+pub use mode::{BoundModes, Mode};
+pub use parent_map::ParentMap;
+pub use plugin::{Plugin, PluginConfig};
+pub use plugin_manager::PluginManager;
+pub use run_config::{RunConfig, StreamingMode, run_limits};
+pub use scheduler::DynamicSubScheduler;
+pub use services::{ArtifactBacking, Artifacts, Memory};
+pub use state::{AgentState, AgentType};
+pub use tool::{ConfirmationProvider, RunnableTool, StreamingTool, Tool, ToolPredicate, Toolset};

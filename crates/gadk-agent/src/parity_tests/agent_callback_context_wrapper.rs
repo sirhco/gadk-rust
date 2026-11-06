@@ -13,4 +13,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Parity target for Go agent/callback_context_wrapper_test.go. Implemented by Task 4.
+use gadk_genai::{Content, ROLE_USER};
+
+use crate::context::builder::test_support::{named_agent, session};
+use crate::context::{Context, ContextDelta};
+
+// parity: skipped TestCallbackContextWrapper_LogsForToolContextMethods: Go's callback-context wrapper logs on tool-only methods; Rust has one Context type whose accessors are all supported (Appendix C3)
+
+// parity: adapted: no log capture; asserts the callback context (a Context with actions) reports the invocation's values
+#[test]
+fn test_callback_context_wrapper_no_log_for_supported_methods() {
+    let cc = Context::builder()
+        .agent(named_agent("test-agent"))
+        .session(session("app", "user", "sess-1"))
+        .invocation_id("inv-1")
+        .branch("branch-1")
+        .user_content(Content::from_text("hi", ROLE_USER))
+        .build()
+        .with_delta(ContextDelta {
+            actions: Some(Default::default()),
+            ..Default::default()
+        });
+    assert_eq!(cc.agent_name(), "test-agent");
+    assert_eq!(cc.app_name(), "app");
+    assert_eq!(cc.branch(), "branch-1");
+    assert_eq!(cc.invocation_id(), "inv-1");
+    assert_eq!(cc.session_id(), "sess-1");
+    assert_eq!(cc.user_id(), "user");
+    assert!(cc.user_content().is_some());
+    let _ = cc.readonly_state();
+    let _ = cc.state();
+}

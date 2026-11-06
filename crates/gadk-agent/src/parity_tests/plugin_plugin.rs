@@ -13,4 +13,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Parity target for Go plugin/plugin_test.go. Implemented by Task 4.
+use std::sync::Arc;
+
+use futures::FutureExt;
+
+use crate::error::AgentError;
+use crate::plugin::{Plugin, PluginConfig};
+
+// parity: adapted: Go's Plugin.Close() method becomes the close() accessor (always Some; Plugin::new installs a no-op) whose future is awaited
+#[tokio::test]
+async fn test_new() {
+    // Successfully maps all fields; default close is Ok
+    let p = Plugin::new(PluginConfig {
+        on_user_message_callback: Some(Arc::new(|_ctx, _msg| async { Ok(None) }.boxed())),
+        ..Default::default()
+    });
+    assert!(p.on_user_message_callback().is_some());
+    assert!((p.close().unwrap())().await.is_ok());
+    // Handles a missing close function gracefully
+    let p = Plugin::new(PluginConfig::default());
+    assert!((p.close().unwrap())().await.is_ok());
+    // Executes the provided close function
+    let p = Plugin::new(PluginConfig {
+        close: Some(Arc::new(|| {
+            async { Err(AgentError::other("close error")) }.boxed()
+        })),
+        ..Default::default()
+    });
+    assert_eq!(
+        (p.close().unwrap())().await.unwrap_err().to_string(),
+        "close error"
+    );
+}

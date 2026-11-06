@@ -13,4 +13,75 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `AgentType`, `AgentState` (port of Go internal/agent/state.go). Implemented by Task 4.
+//! Agent type and internal state (port of Go `internal/agent/state.go`).
+
+use std::any::Any;
+use std::sync::Arc;
+
+use gadk_session::Event;
+
+/// Go `agentinternal.Type`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentType {
+    /// `"LLMAgent"`.
+    LlmAgent,
+    /// `"LoopAgent"`.
+    LoopAgent,
+    /// `"SequentialAgent"`.
+    SequentialAgent,
+    /// `"ParallelAgent"`.
+    ParallelAgent,
+    /// `"WorkflowAgent"`.
+    WorkflowAgent,
+    /// `"CustomAgent"`.
+    CustomAgent,
+    /// `"RemoteAgent"`.
+    RemoteAgent,
+}
+
+impl AgentType {
+    /// Go's string value of the type.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AgentType::LlmAgent => "LLMAgent",
+            AgentType::LoopAgent => "LoopAgent",
+            AgentType::SequentialAgent => "SequentialAgent",
+            AgentType::ParallelAgent => "ParallelAgent",
+            AgentType::WorkflowAgent => "WorkflowAgent",
+            AgentType::CustomAgent => "CustomAgent",
+            AgentType::RemoteAgent => "RemoteAgent",
+        }
+    }
+}
+
+/// Go `agentinternal.State`: engine-owned per-agent state.
+#[doc(hidden)]
+#[derive(Clone)]
+pub struct AgentState {
+    /// The agent's type.
+    pub agent_type: AgentType,
+    /// The engine's per-type configuration.
+    pub config: Option<Arc<dyn Any + Send + Sync>>,
+    /// Go `State.OnBeforeAgentCallbackEvent`: called with the before-agent callback event before it
+    /// is yielded.
+    #[allow(clippy::type_complexity)] // the exact Appendix C3 type
+    pub on_before_agent_callback_event: Option<Arc<dyn Fn(&mut Event) + Send + Sync>>,
+}
+
+impl AgentState {
+    /// Stable identity of the config allocation (Go uses the `*State` pointer); 0 when there is none.
+    pub fn key(&self) -> usize {
+        self.config
+            .as_ref()
+            .map_or(0, |c| Arc::as_ptr(c).cast::<()>() as usize)
+    }
+}
+
+impl std::fmt::Debug for AgentState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AgentState")
+            .field("agent_type", &self.agent_type)
+            .field("key", &self.key())
+            .finish_non_exhaustive()
+    }
+}

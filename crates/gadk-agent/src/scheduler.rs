@@ -13,4 +13,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `DynamicSubScheduler` (port of Go agent/dynamic_scheduler.go). Implemented by Task 4.
+//! Dynamic sub-scheduling (port of Go `agent/dynamic_scheduler.go`).
+
+use std::any::Any;
+use std::sync::Arc;
+
+use serde_json::Value;
+
+use crate::error::AgentError;
+
+/// Go `agent.DynamicSubScheduler`: schedules and runs child nodes dynamically, resolving their
+/// outputs for ancestor agents.
+#[async_trait::async_trait]
+pub trait DynamicSubScheduler: Send + Sync {
+    /// Go `RunNode`: runs `node` with `input` and the engine-defined `opts`.
+    async fn run_node(
+        &self,
+        node: Arc<dyn Any + Send + Sync>,
+        input: Value,
+        opts: Option<Arc<dyn Any + Send + Sync>>,
+    ) -> Result<Value, AgentError>;
+    /// Go `ParentPath`.
+    fn parent_path(&self) -> String;
+    /// Go `OutputForAncestors`.
+    fn output_for_ancestors(&self) -> Vec<String>;
+    /// Go `DelegatedOutput`: `None` for Go's `(nil, false)`.
+    fn delegated_output(&self) -> Option<Value>;
+    /// Go `ResolveByRunID`.
+    fn resolve_by_run_id(&self, child_name: &str, custom: &str) -> Result<String, AgentError>;
+}

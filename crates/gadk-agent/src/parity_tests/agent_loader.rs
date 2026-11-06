@@ -13,4 +13,4 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Parity target for Go agent/loader_test.go. Implemented by Task 4.
+// parity: skipped TestDuplicateName: agent/loader.go (YAML agent loader) is out of scope for 1b
