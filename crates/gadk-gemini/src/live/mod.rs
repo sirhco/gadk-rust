@@ -23,6 +23,7 @@ pub(crate) mod proxy;
 mod url;
 
 use std::fmt;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::stream::{SplitSink, SplitStream};
@@ -47,6 +48,10 @@ use crate::config::ResolvedConfig;
 use crate::error::GeminiError;
 
 type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
+
+/// Bound on the dial, proxy CONNECT, TLS and WebSocket upgrade together (gorilla
+/// `DefaultDialer.HandshakeTimeout`).
+pub(crate) const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(45);
 
 /// The PNG file signature (Go `SendRealtime` MIME detection).
 const PNG_SIGNATURE: [u8; 8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
@@ -222,6 +227,17 @@ pub(crate) async fn connect_with_env(
     cfg: &LiveConnectConfig,
     env: proxy::EnvLookup<'_>,
 ) -> Result<LiveConnection, GeminiError> {
+    connect_with_timeout(resolved, model_name, cfg, env, HANDSHAKE_TIMEOUT).await
+}
+
+/// [`connect_with_env`] with an injectable dial and handshake timeout (test seam).
+pub(crate) async fn connect_with_timeout(
+    resolved: &ResolvedConfig,
+    model_name: &str,
+    cfg: &LiveConnectConfig,
+    env: proxy::EnvLookup<'_>,
+    handshake_timeout: Duration,
+) -> Result<LiveConnection, GeminiError> {
     let url = live_url(resolved)?;
     let model_full_name = model_full_name(resolved, model_name)?;
     let setup = messages::setup_message(resolved.backend, &model_full_name, cfg)?;
@@ -249,23 +265,35 @@ pub(crate) async fn connect_with_env(
             "dialing Live through a proxy"
         );
     }
-    let tcp = proxy::dial(&url, proxy.as_ref()).await.map_err(|e| {
-        GeminiError::Live(LiveConnError::new(
-            LiveConnErrorKind::Other,
-            format!("Connect to {url} failed: {e}"),
-        ))
-    })?;
-    let (ws, _) = tokio_tungstenite::client_async_tls_with_config(request, tcp, None, None)
-        .await
-        .map_err(|e| {
-            GeminiError::Live(
-                LiveConnError::new(
-                    LiveConnErrorKind::Other,
-                    format!("Connect to {url} failed: {e}"),
-                )
-                .with_source(e),
-            )
+    // gorilla DefaultDialer.HandshakeTimeout bounds the dial, the proxy CONNECT, TLS and the
+    // WebSocket upgrade together, so a black-holed endpoint cannot park a (re)connect forever.
+    let handshake = async {
+        let tcp = proxy::dial(&url, proxy.as_ref()).await.map_err(|e| {
+            GeminiError::Live(LiveConnError::new(
+                LiveConnErrorKind::Other,
+                format!("Connect to {url} failed: {e}"),
+            ))
         })?;
+        tokio_tungstenite::client_async_tls_with_config(request, tcp, None, None)
+            .await
+            .map_err(|e| {
+                GeminiError::Live(
+                    LiveConnError::new(
+                        LiveConnErrorKind::Other,
+                        format!("Connect to {url} failed: {e}"),
+                    )
+                    .with_source(e),
+                )
+            })
+    };
+    let (ws, _) = tokio::time::timeout(handshake_timeout, handshake)
+        .await
+        .map_err(|_| {
+            GeminiError::Live(LiveConnError::new(
+                LiveConnErrorKind::Other,
+                format!("Connect to {url} failed: i/o timeout"),
+            ))
+        })??;
     let (sink, stream) = ws.split();
     let mut conn = LiveConnection {
         sink: tokio::sync::Mutex::new(sink),

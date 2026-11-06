@@ -121,7 +121,8 @@ impl FakeConn {
 pub(crate) struct FakeLiveServer {
     port: u16,
     conn_count: Arc<AtomicUsize>,
-    accept: AbortHandle,
+    /// The accept task; taken (and awaited) by `close_listener`.
+    accept: Mutex<Option<JoinHandle<()>>>,
     conns: Arc<Mutex<Vec<AbortHandle>>>,
 }
 
@@ -154,12 +155,11 @@ impl FakeLiveServer {
                 });
                 handles.lock().push(task.abort_handle());
             }
-        })
-        .abort_handle();
+        });
         FakeLiveServer {
             port,
             conn_count,
-            accept,
+            accept: Mutex::new(Some(accept)),
             conns,
         }
     }
@@ -189,9 +189,14 @@ impl FakeLiveServer {
     }
 
     /// Go `closeServer()` (closes the listener, not the server): every later dial is refused;
-    /// connections already accepted keep running. Aborting the accept task drops the listener.
-    pub(crate) fn close_listener(&self) {
-        self.accept.abort();
+    /// connections already accepted keep running. Aborting the accept task drops the listener,
+    /// and awaiting it means the listener is gone (the port refuses dials) once this returns.
+    pub(crate) async fn close_listener(&self) {
+        let accept = self.accept.lock().take();
+        if let Some(accept) = accept {
+            accept.abort();
+            let _ = accept.await;
+        }
     }
 
     /// Go `genai.NewClient(…Backend: BackendGeminiAPI, APIKey: "test-api-key", BaseURL: ws://…)`
@@ -217,7 +222,9 @@ impl FakeLiveServer {
 
 impl Drop for FakeLiveServer {
     fn drop(&mut self) {
-        self.accept.abort();
+        if let Some(accept) = self.accept.lock().take() {
+            accept.abort();
+        }
         for h in self.conns.lock().drain(..) {
             h.abort();
         }

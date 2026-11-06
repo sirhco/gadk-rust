@@ -160,6 +160,10 @@ impl LiveAgent for LlmLive {
     /// Port of Go agent/llmagent/llmagent.go:476 (*llmAgent).RunLive: a fresh invocation context
     /// (Go icontext.NewInvocationContext), the agent's flow in live mode, and the output_key
     /// save on every event that is not an error.
+    ///
+    /// `ctx.agent()` must be this agent: the agent (its model, tools and output key) is resolved
+    /// from the context, so a context whose current agent is another agent runs that agent
+    /// instead. `Agent::as_live` callers derive the context for the agent they call it on.
     async fn run_live(
         &self,
         ctx: InvocationContext,
@@ -494,7 +498,12 @@ mod tests {
             Some(&json!("hello live"))
         );
         sess.close().await.unwrap();
-        assert!(events.next().await.is_none());
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_secs(5), events.next())
+                .await
+                .expect("the live stream did not end")
+                .is_none()
+        );
     }
 
     /// Go RunLive runs the flow on icontext.NewInvocationContext, whose resumption handle starts

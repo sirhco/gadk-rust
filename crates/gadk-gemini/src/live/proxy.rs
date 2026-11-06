@@ -394,12 +394,13 @@ fn parse_status_line(line: &str) -> Result<(String, String), String> {
 mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
+    use std::time::Duration;
 
     use ::url::Url;
     use base64::Engine;
     use futures::{SinkExt, StreamExt};
     use gadk_genai::LiveConnectConfig;
-    use gadk_model::{Backend, HttpOptions, LlmResponse};
+    use gadk_model::{Backend, HttpOptions, LiveConnErrorKind, LlmResponse};
     use parking_lot::Mutex;
     use pretty_assertions::assert_eq;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -753,7 +754,10 @@ mod tests {
                 head.push(byte[0]);
             }
             *task_seen.lock() = Some(String::from_utf8(head).unwrap());
-            client.write_all(reply.as_bytes()).await.unwrap();
+            // The client may hang up mid-reply (an oversized head); that is not a proxy failure.
+            if client.write_all(reply.as_bytes()).await.is_err() {
+                return;
+            }
             if let Some(up) = upstream {
                 let mut server = tokio::net::TcpStream::connect(("127.0.0.1", up))
                     .await
@@ -893,6 +897,96 @@ mod tests {
                 .ends_with("failed: proxy: unsupported proxy scheme socks5"),
             "{err}"
         );
+    }
+
+    /// A proxy that accepts the TCP connection but never answers CONNECT: the handshake timeout
+    /// (gorilla `HandshakeTimeout`) fails the dial instead of parking it forever.
+    #[tokio::test]
+    async fn black_holed_connect_times_out() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let proxy_task = tokio::spawn(async move {
+            let (mut client, _) = listener.accept().await.unwrap();
+            // Swallow the CONNECT request and never reply, holding the connection open.
+            let mut buf = [0u8; 1024];
+            while client.read(&mut buf).await.is_ok_and(|n| n > 0) {}
+            std::future::pending::<()>().await;
+        });
+        let env = env_of(&[("HTTPS_PROXY", &format!("http://127.0.0.1:{port}"))]);
+        let err = crate::live::connect_with_timeout(
+            &resolved("wss://gemini.test/"),
+            "m",
+            &LiveConnectConfig::default(),
+            &env,
+            Duration::from_millis(200),
+        )
+        .await
+        .unwrap_err();
+        proxy_task.abort();
+        let GeminiError::Live(e) = err else {
+            panic!("{err:?}")
+        };
+        assert_eq!(e.kind, LiveConnErrorKind::Other);
+        assert!(
+            e.message.starts_with("Connect to wss://gemini.test/"),
+            "{}",
+            e.message
+        );
+        assert!(e.message.ends_with(" failed: i/o timeout"), "{}", e.message);
+        assert_eq!(
+            crate::live::HANDSHAKE_TIMEOUT,
+            Duration::from_secs(45),
+            "gorilla DefaultDialer.HandshakeTimeout"
+        );
+    }
+
+    /// A CONNECT response head is capped at 8192 bytes.
+    #[tokio::test]
+    async fn oversized_connect_response_head_is_a_dial_error() {
+        let reply = format!(
+            "HTTP/1.1 200 OK\r\nX-Filler: {}\r\n\r\n",
+            "a".repeat(super::MAX_CONNECT_RESPONSE_HEAD)
+        );
+        let proxy = fake_proxy(None, Box::leak(reply.into_boxed_str())).await;
+        let p = url(&format!("http://127.0.0.1:{}", proxy.port));
+        let err = dial(&url("wss://gemini.test/"), Some(&p))
+            .await
+            .unwrap_err();
+        assert_eq!(err, "proxy: CONNECT response head too large");
+    }
+
+    /// A malformed CONNECT status line is a dial error (Go `http.ReadResponse`).
+    #[tokio::test]
+    async fn malformed_connect_status_line_is_a_dial_error() {
+        for (reply, want) in [
+            ("garbage\r\n\r\n", r#"malformed HTTP response "garbage""#),
+            (
+                "SPDY/1 200 OK\r\n\r\n",
+                r#"malformed HTTP response "SPDY/1 200 OK""#,
+            ),
+            (
+                "HTTP/1.1 2x0 OK\r\n\r\n",
+                r#"malformed HTTP status code "2x0""#,
+            ),
+        ] {
+            let proxy = fake_proxy(None, reply).await;
+            let p = url(&format!("http://127.0.0.1:{}", proxy.port));
+            let err = dial(&url("wss://gemini.test/"), Some(&p))
+                .await
+                .unwrap_err();
+            assert_eq!(err, want, "{reply:?}");
+        }
+    }
+
+    /// The proxy hanging up before the blank line ending the head is a dial error.
+    #[tokio::test]
+    async fn eof_before_end_of_connect_head_is_a_dial_error() {
+        let proxy = fake_proxy(None, "HTTP/1.1 200 OK\r\nX-Partial: 1\r\n").await;
+        let p = url(&format!("http://127.0.0.1:{}", proxy.port));
+        let err = dial(&url("wss://gemini.test/"), Some(&p))
+            .await
+            .unwrap_err();
+        assert_eq!(err, "unexpected EOF");
     }
 
     /// A loopback Live endpoint is dialled directly even when a (dead) proxy is configured.

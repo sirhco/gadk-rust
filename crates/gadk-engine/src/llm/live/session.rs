@@ -41,6 +41,8 @@ pub(crate) struct LiveProbe {
     pub(crate) live_tasks: AtomicUsize,
     /// Reconnect waits in progress.
     pub(crate) in_backoff: AtomicUsize,
+    /// Completed session teardowns (the flow's drop guard has drained the tool registry).
+    pub(crate) teardowns: AtomicUsize,
 }
 
 impl LiveProbe {

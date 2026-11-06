@@ -426,7 +426,7 @@ mod flow {
         let drained = start_drain(stream);
 
         server.wait_for_conns(1).await;
-        server.close_listener(); // every later dial is refused
+        server.close_listener().await; // every later dial is refused
 
         let d = await_drain(drained).await;
         let _ = sess.close().await;
@@ -441,9 +441,8 @@ mod flow {
     async fn test_run_live_first_connect_failure_is_fatal() {
         let server = FakeLiveServer::start(serve(|_n: usize, _conn: FakeConn| async {})).await;
         let model = server.model().await;
-        server.close_listener();
-        // Let the aborted accept task drop the listener before the first dial.
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        // Returns once the aborted accept task has dropped the listener, before the first dial.
+        server.close_listener().await;
 
         let flow = live_flow(model, Some(test_live_reconnect_policy(5, 20)));
         let (ctx, _cancel) = live_ctx();

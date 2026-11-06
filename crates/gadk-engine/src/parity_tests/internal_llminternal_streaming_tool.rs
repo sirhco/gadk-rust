@@ -271,7 +271,13 @@ async fn test_handle_function_calls_live_control_plane() {
         ))
     );
 
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    // Wait (up to 5 s) for both streams to see the cancellation, as assert_no_run_live_leak waits.
+    for _ in 0..250 {
+        if cancel_count.load(Ordering::SeqCst) >= 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
     assert_eq!(
         cancel_count.load(Ordering::SeqCst),
         2,

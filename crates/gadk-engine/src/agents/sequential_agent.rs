@@ -150,6 +150,11 @@ fn inject_sub_agents(
 }
 
 /// Go `sequentialLiveSession`: forwards `send` to the active sub-agent's session.
+///
+/// `close()` closes only the active sub-session; it does not stop the sequence. Once that
+/// sub-agent's stream ends, the next sub-agent starts, but `send` keeps refusing with
+/// "session is closed" because the closed flag stays set. This is Go's behaviour
+/// (sequentialagent/agent.go:186-218); to end the whole run, drop the event stream.
 #[derive(Default)]
 pub(crate) struct SequentialLiveSession {
     /// (active sub-session, closed).

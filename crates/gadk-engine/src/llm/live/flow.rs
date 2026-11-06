@@ -21,6 +21,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use futures::StreamExt;
@@ -89,8 +90,9 @@ fn conn_err(err: LiveConnError) -> AgentError {
 
 /// Go's `defer sess.Close()`, plus R9: once the session task ends, no streaming tool outlives
 /// the flow. A drop guard rather than trailing code, so it also runs when dropping the event
-/// stream aborts the task. By then `session_task` has returned (or its future has been dropped),
-/// so `handle_function_calls_live` can no longer register a streaming tool through this flow.
+/// stream aborts the task. Aborting does not stop a tool task already mid-poll on another worker,
+/// which can register a streaming tool after the drain; `done` is cancelled before the drain so
+/// that `start_live_streaming`, which checks it after registering, cancels such a late tool.
 /// Equivalent to `LiveSession::close`, which is async only for the trait.
 struct Teardown(Arc<LiveSessionImpl>);
 
@@ -98,6 +100,7 @@ impl Drop for Teardown {
     fn drop(&mut self) {
         self.0.done().cancel();
         self.0.cancel_every_streaming_tool();
+        self.0.probe().teardowns.fetch_add(1, Ordering::SeqCst);
     }
 }
 
@@ -542,5 +545,128 @@ async fn sender(
                 return;
             }
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use std::any::Any;
+    use std::sync::{Mutex, OnceLock};
+
+    use futures::stream::BoxStream;
+    use gadk_agent::{Context, StreamingTool, ToolError};
+    use serde_json::Value;
+    use tokio::sync::oneshot;
+
+    use super::*;
+    use crate::llm::flow::RequestProcessor;
+    use crate::llm::live::session::LiveProbe;
+    use crate::llm::live::test_server::{
+        FakeConn, FakeLiveServer, assert_no_run_live_leak, live_config_processor, live_ctx,
+        probe_of, serve,
+    };
+
+    const NEVER_CALL: &str =
+        r#"{"toolCall":{"functionCalls":[{"id":"never_1","name":"never_yields","args":{}}]}}"#;
+
+    /// A streaming tool that never yields. Its first `as_streaming` (made by the tool-call task,
+    /// right before `start_live_streaming` registers it, with no await in between) reports that
+    /// the tool is starting, then blocks its worker until the session's teardown has drained the
+    /// registry: the interleaving in which dropping the event stream used to leak the tool.
+    struct NeverYields {
+        probe: OnceLock<Arc<LiveProbe>>,
+        entered: Mutex<Option<oneshot::Sender<()>>>,
+    }
+
+    impl Tool for NeverYields {
+        fn name(&self) -> &str {
+            "never_yields"
+        }
+        fn description(&self) -> &str {
+            "never yields"
+        }
+        fn as_streaming(&self) -> Option<&dyn StreamingTool> {
+            if let Some(tx) = self.entered.lock().unwrap().take() {
+                let _ = tx.send(());
+                let deadline = Instant::now() + Duration::from_secs(10);
+                while Instant::now() < deadline {
+                    if self
+                        .probe
+                        .get()
+                        .is_some_and(|p| p.teardowns.load(Ordering::SeqCst) > 0)
+                    {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+            }
+            Some(self)
+        }
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+
+    impl StreamingTool for NeverYields {
+        fn run_stream(
+            &self,
+            _ctx: Context,
+            _args: Value,
+        ) -> BoxStream<'static, Result<String, ToolError>> {
+            Box::pin(futures::stream::pending())
+        }
+    }
+
+    /// R9 on the abort path: dropping the event stream while a streaming tool is starting must
+    /// not leave the tool's task running, even for a direct `run_live` caller whose invocation is
+    /// never cancelled.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn dropping_the_stream_while_a_streaming_tool_starts_does_not_leak_it() {
+        let server = FakeLiveServer::start(serve(|_n: usize, mut conn: FakeConn| async move {
+            assert!(conn.write_text(NEVER_CALL).await, "writing toolCall failed");
+            conn.block_until_client_closes().await;
+        }))
+        .await;
+        let (entered_tx, mut entered_rx) = oneshot::channel();
+        let tool = Arc::new(NeverYields {
+            probe: OnceLock::new(),
+            entered: Mutex::new(Some(entered_tx)),
+        });
+        let flow = Arc::new(Flow {
+            model: Some(server.model().await),
+            request_processors: vec![live_config_processor as RequestProcessor],
+            tools: parking_lot::RwLock::new(vec![tool.clone() as Arc<dyn Tool>]),
+            ..Default::default()
+        });
+        // The invocation is deliberately never cancelled (no `cancel_on_drop` safety net).
+        let (ctx, _cancel) = live_ctx();
+        let (sess, mut stream) = run_live(flow, ctx).unwrap();
+        let probe = probe_of(&sess);
+        tool.probe.set(probe.clone()).unwrap();
+
+        // Consume events (pushes are rendezvous) until the tool is starting.
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                tokio::select! {
+                    _ = &mut entered_rx => return,
+                    item = stream.next() => assert!(item.is_some(), "stream ended before the tool call"),
+                }
+            }
+        })
+        .await
+        .expect("the streaming tool never started");
+        drop(stream);
+
+        assert_no_run_live_leak(&probe).await;
+        assert_eq!(probe.teardowns.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            sess.as_any()
+                .downcast_ref::<LiveSessionImpl>()
+                .unwrap()
+                .active_streaming_tool_count("never_yields"),
+            0,
+            "the late registration is cancelled, then unregistered by its task"
+        );
     }
 }

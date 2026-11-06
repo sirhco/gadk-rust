@@ -77,6 +77,10 @@ pub trait Agent: Send + Sync + 'static {
     fn agent_state(&self) -> &AgentState;
 
     /// The live entry point (Go `RunLive`), or `None` when the agent is not live-capable.
+    ///
+    /// The context passed to the returned [`LiveAgent::run_live`] must have this agent as
+    /// `ctx.agent()`: live agents are stateless and resolve the agent to run from the context,
+    /// not from the agent `as_live` was called on.
     fn as_live(&self) -> Option<&dyn LiveAgent> {
         None
     }
