@@ -32,8 +32,9 @@ pub use gadk_session as session;
 /// Common types for building and running agents: `use gadk::prelude::*;`.
 pub mod prelude {
     pub use gadk_agent::{
-        Agent, AgentConfig, AgentError, Context, EventStream, InvocationContext, Mode, Plugin,
-        ReadonlyContext, RunConfig, StreamingMode, Tool, ToolError, Toolset,
+        Agent, AgentConfig, AgentError, Context, EventStream, InvocationContext, LiveAgent,
+        LiveRequest, LiveRunConfig, LiveSession, Mode, Plugin, ReadonlyContext, RunConfig,
+        StreamingMode, Tool, ToolError, Toolset,
     };
     pub use gadk_artifact::{ArtifactService, InMemoryArtifactService};
     pub use gadk_engine::llm::{IncludeContents, InstructionProvider, LlmAgentConfig};
@@ -50,6 +51,6 @@ pub mod prelude {
     };
     pub use gadk_genai::{Content, Part};
     pub use gadk_memory::{InMemoryMemoryService, MemoryService};
-    pub use gadk_model::Llm;
+    pub use gadk_model::{Llm, RealtimeInput};
     pub use gadk_session::{Event, InMemorySessionService, SessionService};
 }
