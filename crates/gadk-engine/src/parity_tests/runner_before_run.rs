@@ -290,6 +290,7 @@ async fn run_case(kind: &str, tc: Case) {
         },
         auto_create_session: true,
         platform: Platform::default(),
+        compaction: None,
     })
     .unwrap();
 

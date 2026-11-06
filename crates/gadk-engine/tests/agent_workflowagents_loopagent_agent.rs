@@ -147,6 +147,7 @@ fn runner_config(agent: Arc<dyn Agent>, auto_create_session: bool) -> RunnerConf
         plugin_config: PluginConfig::default(),
         auto_create_session,
         platform: Platform::default(),
+        compaction: None,
     }
 }
 

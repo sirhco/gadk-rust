@@ -278,6 +278,7 @@ async fn test_new_sequential_agent() {
             plugin_config: PluginConfig::default(),
             auto_create_session: false,
             platform: Platform::default(),
+            compaction: None,
         }) {
             Ok(r) => r,
             Err(e) => {
@@ -655,6 +656,7 @@ async fn test_sequential_agent_stops_on_sub_agent_error() {
         plugin_config: PluginConfig::default(),
         auto_create_session: true,
         platform: Platform::default(),
+        compaction: None,
     })
     .unwrap();
 

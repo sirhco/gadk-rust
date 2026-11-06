@@ -75,6 +75,7 @@ impl DelegationRunner {
             plugin_config: PluginConfig::default(),
             auto_create_session: false,
             platform: Platform::default(),
+            compaction: None,
         })
         .unwrap_or_else(|e| panic!("runner.New: {e}"));
         svc.create(CreateRequest {

@@ -64,8 +64,15 @@ impl Runner {
             ..Default::default()
         };
         let token = CancellationToken::new();
-        let ictx =
-            this.new_invocation_context(&stored, agent_to_run.clone(), None, &run_cfg, &token);
+        // Go RunLive attaches no compaction runtime (runner.go:928).
+        let ictx = this.new_invocation_context(
+            &stored,
+            agent_to_run.clone(),
+            None,
+            &run_cfg,
+            &token,
+            false,
+        );
 
         // Go's live early exit: no on_event and no before-run-reply stamp (unlike Runner::run).
         if let Some(content) = this.plugin_manager.run_before_run(ictx.clone()).await? {
@@ -325,6 +332,7 @@ mod tests {
             },
             auto_create_session: true,
             platform: Platform::default(),
+            compaction: None,
         })
         .unwrap();
         let err = runner
@@ -392,6 +400,7 @@ mod tests {
             plugin_config: PluginConfig::default(),
             auto_create_session: true,
             platform: Platform::default(),
+            compaction: None,
         })
         .unwrap();
         let (_sess, stream) = runner

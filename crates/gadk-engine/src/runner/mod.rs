@@ -13,10 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The runner (port of ADK-Go `runner/runner.go`; compaction parts are excluded; live mode is in [`live`]):
+//! The runner (port of ADK-Go `runner/runner.go`; context compaction is in [`compaction`], live mode is in [`live`]):
 //! [`Runner`], [`RunnerConfig`], [`PluginConfig`], [`RunOptions`].
 
 pub(crate) mod agent_node;
+pub(crate) mod compaction;
 pub(crate) mod find_agent;
 pub(crate) mod live;
 pub(crate) mod run_node;
@@ -47,7 +48,7 @@ use run_node::is_llm_agent;
 /// Go `plugininternal.BeforeRunReplyKey`: marks a before-run reply in `custom_metadata`.
 pub(crate) const BEFORE_RUN_REPLY_KEY: &str = "adk:before_run_reply";
 
-/// Port of Go `runner.Config` (`Compaction` arrives in 1c).
+/// Port of Go `runner.Config`.
 #[derive(Clone)]
 pub struct RunnerConfig {
     /// The application name sessions are scoped to.
@@ -66,6 +67,12 @@ pub struct RunnerConfig {
     pub auto_create_session: bool,
     /// Clock and ID source.
     pub platform: Platform,
+    /// Context compaction for the sessions this runner drives (Go `Config.Compaction`); `None`
+    /// disables it. A config without a summarizer gets an [`LlmSummarizer`] over the root
+    /// agent's model, which then has to be an LLM agent.
+    ///
+    /// [`LlmSummarizer`]: gadk_session::compaction::LlmSummarizer
+    pub compaction: Option<gadk_session::compaction::Config>,
 }
 
 /// Port of Go `runner.PluginConfig`: the plugins a [`Runner`] applies and how long it waits for
@@ -104,6 +111,9 @@ pub(crate) struct RunnerInner {
     plugin_manager: Arc<PluginManager>,
     auto_create_session: bool,
     platform: Platform,
+    /// A validated copy of [`RunnerConfig::compaction`] with the summarizer resolved; `None`
+    /// when compaction is disabled.
+    compaction: Option<Arc<gadk_session::compaction::Config>>,
 }
 
 /// Go `fmt.Errorf("<context>: %w", err)`.
@@ -224,14 +234,26 @@ impl Stream for Instrumented {
 }
 
 impl Runner {
-    /// Port of Go `runner.New` (compaction resolution omitted until 1c). Go's nil-agent and
-    /// nil-service checks have no Rust counterpart.
+    /// Port of Go `runner.New`. Go's nil-agent and nil-service checks have no Rust counterpart.
     pub fn new(cfg: RunnerConfig) -> Result<Runner, AgentError> {
+        Self::new_with_summarizer_timeout(cfg, compaction::DEFAULT_SUMMARIZER_TIMEOUT)
+    }
+
+    /// [`Runner::new`] with the default summarizer's timeout overridden (a test seam).
+    pub(crate) fn new_with_summarizer_timeout(
+        cfg: RunnerConfig,
+        summarizer_timeout: Duration,
+    ) -> Result<Runner, AgentError> {
         let parents =
             ParentMap::new(&cfg.agent).map_err(|e| wrap("failed to create agent tree", e))?;
         let plugin_manager =
             PluginManager::new(cfg.plugin_config.plugins, cfg.plugin_config.close_timeout)
                 .map_err(|e| wrap("failed to create plugin manager", e))?;
+        let compaction = compaction::resolve_compaction_config(
+            cfg.compaction.as_ref(),
+            &cfg.agent,
+            summarizer_timeout,
+        )?;
         Ok(Runner {
             inner: Arc::new(RunnerInner {
                 app_name: cfg.app_name,
@@ -243,6 +265,7 @@ impl Runner {
                 plugin_manager: Arc::new(plugin_manager),
                 auto_create_session: cfg.auto_create_session,
                 platform: cfg.platform,
+                compaction,
             }),
         })
     }
@@ -259,11 +282,17 @@ impl Runner {
             plugin_config: PluginConfig::default(),
             auto_create_session: true,
             platform: Platform::default(),
+            compaction: None,
         })
     }
 
     /// Port of Go `(*Runner).Run`: runs the agent for `msg` (`None` is Go's nil message) in the
     /// session, yielding its events. Dropping the returned stream cancels the invocation.
+    ///
+    /// With compaction configured, a sliding-window compaction runs after the invocation's
+    /// events are persisted: inline when the stream ends (its error, if any, is the last item),
+    /// or on a spawned task after the after-run callbacks when the stream is dropped early, in
+    /// which case its error is logged. Dropping the stream does not cancel that task.
     pub fn run(
         &self,
         user_id: &str,
@@ -387,8 +416,14 @@ impl RunnerInner {
             // Agent path (runner.go:644-794): the root agent runs directly.
             let token = CancellationToken::new();
             let _cancel_on_drop = token.clone().drop_guard();
-            let ictx =
-                this.new_invocation_context(&stored, this.root_agent.clone(), msg.clone(), &cfg, &token);
+            let ictx = this.new_invocation_context(
+                &stored,
+                this.root_agent.clone(),
+                msg.clone(),
+                &cfg,
+                &token,
+                true,
+            );
             let appended = this
                 .append_message_to_session(
                     ictx.into_context(),
@@ -403,11 +438,13 @@ impl RunnerInner {
                 Err(e) => { yield Err(e); return; }
             };
             let ictx = ctx.as_invocation().clone();
-            let after_run = AfterRunGuard::new(this.plugin_manager.clone(), ictx.clone());
+            let mut guard = compaction::InvocationGuard::new(this.clone(), stored.clone(), ictx.clone());
+            guard.defer_after_run();
+            let mut early = false;
             'run: {
                 match this.run_before_run_callback(&ictx).await {
-                    Err(e) => { yield Err(e); break 'run; }
-                    Ok(Some(ev)) => { yield Ok(ev); break 'run; }
+                    Err(e) => { guard.mark_failed(); yield Err(e); early = true; break 'run; }
+                    Ok(Some(ev)) => { guard.at_yield(true); yield Ok(ev); guard.at_yield(false); early = true; break 'run; }
                     Ok(None) => {}
                 }
                 let mut events = this.root_agent.run(ictx.clone());
@@ -418,21 +455,32 @@ impl RunnerInner {
                             // The model-call budget is spent for the whole invocation, so
                             // nothing after this can reach a model (adk-python parity).
                             let stop = is_llm_calls_limit(&e);
+                            guard.mark_failed();
                             yield Err(e);
                             if stop {
+                                early = true;
                                 break 'run;
                             }
                             continue;
                         }
                     };
                     match this.process_event(&ictx, &*stored, event).await {
-                        Processed::Event(ev) => { yield Ok(*ev); }
-                        Processed::PluginError(e) => { yield Err(e); }
-                        Processed::AppendError(e) => { yield Err(e); break 'run; }
+                        Processed::Event(ev) => { guard.at_yield(true); yield Ok(*ev); guard.at_yield(false); }
+                        Processed::PluginError(e) => { guard.mark_failed(); yield Err(e); }
+                        Processed::AppendError(e) => { guard.mark_failed(); yield Err(e); early = true; break 'run; }
                     }
                 }
             }
-            after_run.finish().await;
+            if early {
+                guard.finish_early().await;
+            } else {
+                // Compact once every event of the invocation is persisted; the consumer
+                // drained the stream, so a failure can still be reported.
+                if let Some(e) = guard.compact_inline().await {
+                    yield Err(e);
+                }
+                guard.finish().await;
+            }
         })
     }
 

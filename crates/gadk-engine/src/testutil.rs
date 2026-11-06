@@ -332,7 +332,7 @@ pub struct TestAgentRunner {
 impl TestAgentRunner {
     /// Port of Go `NewTestAgentRunner`.
     pub async fn new(agent: Arc<dyn gadk_agent::Agent>) -> Self {
-        Self::build(agent, crate::runner::PluginConfig::default(), None).await
+        Self::build(agent, crate::runner::PluginConfig::default(), None, None).await
     }
 
     /// Port of Go `NewTestAgentRunnerWithPluginManager`.
@@ -340,7 +340,7 @@ impl TestAgentRunner {
         agent: Arc<dyn gadk_agent::Agent>,
         cfg: crate::runner::PluginConfig,
     ) -> Self {
-        Self::build(agent, cfg, None).await
+        Self::build(agent, cfg, None, None).await
     }
 
     /// Port of Go `NewTestAgentRunner` + `SetInitSessionState`: the session starts with `state`.
@@ -348,13 +348,34 @@ impl TestAgentRunner {
         agent: Arc<dyn gadk_agent::Agent>,
         state: serde_json::Map<String, serde_json::Value>,
     ) -> Self {
-        Self::build(agent, crate::runner::PluginConfig::default(), Some(state)).await
+        Self::build(
+            agent,
+            crate::runner::PluginConfig::default(),
+            Some(state),
+            None,
+        )
+        .await
+    }
+
+    /// Port of Go `NewTestAgentRunnerWithCompaction`: a runner with context compaction enabled.
+    pub async fn with_compaction(
+        agent: Arc<dyn gadk_agent::Agent>,
+        cfg: gadk_session::compaction::Config,
+    ) -> Self {
+        Self::build(
+            agent,
+            crate::runner::PluginConfig::default(),
+            None,
+            Some(cfg),
+        )
+        .await
     }
 
     async fn build(
         agent: Arc<dyn gadk_agent::Agent>,
         cfg: crate::runner::PluginConfig,
         state: Option<serde_json::Map<String, serde_json::Value>>,
+        compaction: Option<gadk_session::compaction::Config>,
     ) -> Self {
         let session_service: Arc<dyn gadk_session::SessionService> =
             Arc::new(gadk_session::InMemorySessionService::new());
@@ -367,6 +388,7 @@ impl TestAgentRunner {
             plugin_config: cfg,
             auto_create_session: false,
             platform: gadk_platform::Platform::default(),
+            compaction,
         })
         .expect("runner::Runner::new");
         // Go creates the session on the first Run with the initial state; Rust's `run` takes no

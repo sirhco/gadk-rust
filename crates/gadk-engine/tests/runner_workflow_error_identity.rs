@@ -92,6 +92,7 @@ fn new_join_resume_runner(edges: Vec<Edge>) -> Runner {
         plugin_config: PluginConfig::default(),
         auto_create_session: true,
         platform: Platform::default(),
+        compaction: None,
     })
     .expect("runner.New()")
 }
