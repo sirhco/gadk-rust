@@ -880,3 +880,88 @@ fn test_reconstruct_run_state_completed_join_predecessors(#[case] message_output
         );
     }
 }
+
+/// A pause event for interrupt `id` that carries `responseSchema` only in the
+/// `adk_request_input` FunctionCall args. It has no RequestedInput, as in JSON-persisted history.
+fn args_only_schema_pause(author: &str, id: &str) -> Event {
+    let mut ev = raised(author, id);
+    ev.response.content = Some(Content {
+        role: "model".into(),
+        parts: vec![Part {
+            function_call: Some(gadk_genai::FunctionCall {
+                id: id.into(),
+                name: WORKFLOW_INPUT_FUNCTION_CALL_NAME.into(),
+                args: obj(json!({"interruptId": id, "responseSchema": {"type": "integer"}})),
+                ..gadk_genai::FunctionCall::default()
+            }),
+            ..Part::default()
+        }],
+    });
+    ev
+}
+
+#[tokio::test]
+// parity: Go-only behavior check (no Go test). Go's schemaFromEvent (persistence.go:687-691)
+// accepts a FunctionCall-args schema only as an in-memory *jsonschema.Schema. After a JSON round
+// trip it finds none, so the response passes through unvalidated, and Rust matches that.
+async fn test_reconstruct_run_state_function_call_args_schema_ignored() {
+    use crate::workflow::persistence::schema_from_event;
+
+    let pause = args_only_schema_pause("ask", "approval");
+    assert_eq!(
+        schema_from_event(&pause, "approval"),
+        None,
+        "schema read from FunctionCall args"
+    );
+    let ask = dummy_node("ask");
+    let wf = must_new(vec![edge(&start(), &ask)]);
+
+    // Reconstruct (validate_resolved): a response violating the args schema is accepted unchanged.
+    let events = round_trip(&[
+        pause.clone(),
+        user_response("approval", json!({"response": "not-an-int"})),
+    ]);
+    let state = reconstruct(&wf, events, "");
+    let ns = node_state(&state, "ask");
+    assert!(
+        ns.status == NodeStatus::Completed
+            && ns.output == Some(json!("not-an-int"))
+            && ns.interrupt_schemas.is_empty(),
+        "args-only schema validated the reconstructed response: {ns:?}"
+    );
+
+    // Resume (interrupt_schemas): a direct response violating it is forwarded too.
+    let state = reconstruct(&wf, round_trip(&[pause]), "").expect("non-nil state");
+    assert_eq!(state.nodes["ask"].status, NodeStatus::Waiting);
+    let (_, err) = collect(wf.resume(
+        top_level_ctx(),
+        state,
+        obj(json!({"approval": "still-not-an-int"})),
+    ))
+    .await;
+    assert!(
+        err.is_none(),
+        "args-only schema rejected the resume response: {err:?}"
+    );
+
+    // Contrast: a RequestedInput schema is still enforced on reconstruction.
+    let mut declared = raised("ask", "approval");
+    declared.requested_input = Some(RequestInput {
+        interrupt_id: "approval".into(),
+        response_schema: Some(json!({"type": "integer"})),
+        ..RequestInput::default()
+    });
+    let err = wf
+        .reconstruct_run_state(
+            &EventsSession::new(round_trip(&[
+                declared,
+                user_response("approval", json!({"response": "not-an-int"})),
+            ])),
+            "",
+        )
+        .expect_err("RequestedInput schema not enforced");
+    assert!(
+        err.is(WorkflowErrorKind::InvalidResumeResponse),
+        "err = {err}"
+    );
+}

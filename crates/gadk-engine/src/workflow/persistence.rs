@@ -28,7 +28,7 @@ use crate::workflow::resume::{resume_output, validate_resume_response};
 use crate::workflow::route::go_quote;
 use crate::workflow::scheduler::{build_nodes_by_name, child_event_output};
 use crate::workflow::state::{NodeState, NodeStatus, RunState};
-use crate::workflow::{Node, START, WORKFLOW_INPUT_FUNCTION_CALL_NAME, Workflow};
+use crate::workflow::{Node, START, Workflow};
 
 /// Go workflowNodeCompletedKey: a successful activation without output records its own event.
 pub(crate) const WORKFLOW_NODE_COMPLETED_KEY: &str = "adk.workflow.node_completed";
@@ -610,30 +610,18 @@ fn fr_part(p: &Part) -> Option<&FunctionResponse> {
     p.function_response.as_ref().filter(|fr| !fr.id.is_empty())
 }
 
-/// Port of Go schemaFromEvent: the response schema for interrupt `id` from the pause event
-/// (its RequestedInput, else the `adk_request_input` FunctionCall's `responseSchema` arg). Go
-/// accepts only an in-memory `*jsonschema.Schema` arg; Rust events carry JSON, so a JSON object
-/// is accepted.
+/// Port of Go schemaFromEvent: the response schema for interrupt `id` from the pause event's
+/// RequestedInput. Go (persistence.go:687-691) also takes the `adk_request_input` FunctionCall's
+/// `responseSchema` arg, but only when it is an in-memory `*jsonschema.Schema`. Once history has
+/// been through JSON (a persisted session) that arg is a map, so Go finds no schema there and the
+/// response passes through unvalidated. Rust events hold only JSON, so Go's accepting case can't
+/// be represented, and the persisted behavior is what Rust matches: FunctionCall args are never
+/// read for a schema.
 pub(crate) fn schema_from_event(ev: &Event, id: &str) -> Option<Value> {
-    if let Some(ri) = ev
-        .requested_input
+    ev.requested_input
         .as_ref()
         .filter(|ri| ri.interrupt_id == id)
-    {
-        return ri.response_schema.clone();
-    }
-    let content = ev.response.content.as_ref()?;
-    content
-        .parts
-        .iter()
-        .filter_map(|p| p.function_call.as_ref())
-        .filter(|fc| fc.name == WORKFLOW_INPUT_FUNCTION_CALL_NAME && fc.id == id)
-        .find_map(|fc| {
-            fc.args
-                .get("responseSchema")
-                .filter(|v| v.is_object())
-                .cloned()
-        })
+        .and_then(|ri| ri.response_schema.clone())
 }
 
 /// Port of Go unwrapResponse: a sole single-key `result`/`response`/`payload` wrapper is
