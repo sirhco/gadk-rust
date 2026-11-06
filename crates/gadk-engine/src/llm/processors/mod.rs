@@ -92,18 +92,86 @@ pub(crate) fn wrap_err(
     }))
 }
 
-/// Go `json.Marshal` of a decoded JSON value: object keys sorted (serde_json's default BTreeMap
-/// Map), no whitespace, and HTML-escaping of `<` `>` `&` U+2028 U+2029 as `\u003c` `\u003e`
-/// `\u0026` `\u2028` `\u2029`. These characters can only occur inside JSON strings, so a
-/// post-pass replace is exact. Used where Go json.Marshal output reaches the model or an event
-/// (contents.go stringify, outputschema retrieveStructuredModelResponse).
+/// Go `json.Marshal` of a decoded JSON value: object keys sorted, no whitespace, strings
+/// HTML-escaped (`<` `>` `&` U+2028 U+2029 as `\u003c` `\u003e` `\u0026` `\u2028` `\u2029`;
+/// serde_json's other escapes already match Go's), and floats in Go's floatEncoder format
+/// ([`go_float`]). Used where Go json.Marshal output reaches the model or an event (contents.go
+/// stringify, outputschema retrieveStructuredModelResponse, nodeInputToContent).
 pub(crate) fn go_json_marshal(v: &Value) -> String {
-    let s = serde_json::to_string(v).unwrap_or_else(|_| "null".to_owned());
-    s.replace('<', "\\u003c")
-        .replace('>', "\\u003e")
-        .replace('&', "\\u0026")
-        .replace('\u{2028}', "\\u2028")
-        .replace('\u{2029}', "\\u2029")
+    let mut out = String::new();
+    write_go_json(v, &mut out);
+    out
+}
+
+fn write_go_json(v: &Value, out: &mut String) {
+    match v {
+        Value::Null => out.push_str("null"),
+        Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+        Value::Number(n) => match (n.as_i64(), n.as_u64(), n.as_f64()) {
+            (Some(i), _, _) => out.push_str(&i.to_string()),
+            (_, Some(u), _) => out.push_str(&u.to_string()),
+            (_, _, Some(f)) => out.push_str(&go_float(f)),
+            _ => out.push_str(&n.to_string()),
+        },
+        Value::String(s) => write_go_string(s, out),
+        Value::Array(a) => {
+            out.push('[');
+            for (i, x) in a.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                write_go_json(x, out);
+            }
+            out.push(']');
+        }
+        Value::Object(m) => {
+            let mut keys: Vec<&String> = m.keys().collect();
+            keys.sort();
+            out.push('{');
+            for (i, k) in keys.into_iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                write_go_string(k, out);
+                out.push(':');
+                if let Some(x) = m.get(k) {
+                    write_go_json(x, out);
+                }
+            }
+            out.push('}');
+        }
+    }
+}
+
+/// Go encodeState.string with HTML escaping.
+fn write_go_string(s: &str, out: &mut String) {
+    let encoded = serde_json::to_string(s).unwrap_or_default();
+    for ch in encoded.chars() {
+        match ch {
+            '<' => out.push_str("\\u003c"),
+            '>' => out.push_str("\\u003e"),
+            '&' => out.push_str("\\u0026"),
+            '\u{2028}' => out.push_str("\\u2028"),
+            '\u{2029}' => out.push_str("\\u2029"),
+            c => out.push(c),
+        }
+    }
+}
+
+/// Go encoding/json floatEncoder (encode.go): `'f'` format with shortest digits in
+/// `[1e-6, 1e21)` (and for zero, keeping `-0`), else `'e'` format with a two-digit minimum positive
+/// exponent (`1e+21`) and Go's cleanup of `e-07` to `e-7`.
+fn go_float(f: f64) -> String {
+    let abs = f.abs();
+    if abs != 0.0 && !(1e-6..1e21).contains(&abs) {
+        let s = format!("{f:e}"); // Rust: shortest mantissa, bare exponent ("1e-7", "1.5e21")
+        match s.split_once('e') {
+            Some((m, e)) if !e.starts_with('-') => format!("{m}e+{e:0>2}"),
+            _ => s,
+        }
+    } else {
+        format!("{f}") // shortest round-trip, no ".0" for integral values, never exponent form
+    }
 }
 
 /// Go `fmt.Sprintf("%v", v)` for a JSON-decoded value:
@@ -288,6 +356,7 @@ mod test_support {
     /// Go captureLog: records the `message` of every tracing event with target "adk", one line
     /// each.
     pub(crate) async fn capture_logs<F: Future>(fut: F) -> (F::Output, String) {
+        crate::llm::flow::span_capture::pin_tracing_interest();
         let buf = Arc::new(parking_lot::Mutex::new(String::new()));
         let sub = tracing_subscriber::registry().with(MessageCapture(buf.clone()));
         let _g = tracing::subscriber::set_default(sub);
@@ -360,6 +429,40 @@ mod tests {
         assert_eq!(
             go_json_marshal(&json!({"b": "<x>&", "a": 1})),
             r#"{"a":1,"b":"\u003cx\u003e\u0026"}"#
+        );
+    }
+
+    /// Expected strings are the output of Go 1.x `json.Marshal` on the same float64 values
+    /// (byte-exact, not round-tripped through a parser).
+    #[test]
+    fn go_json_marshal_formats_floats_like_go() {
+        for (v, want) in [
+            (1.0, "1"),
+            (100.0, "100"),
+            (1e21, "1e+21"),
+            (1.5e21, "1.5e+21"),
+            (1e20, "100000000000000000000"),
+            (1e-7, "1e-7"),
+            (0.000001, "0.000001"),
+            (-1.5e-10, "-1.5e-10"),
+            (123.456, "123.456"),
+            (0.1, "0.1"),
+            (-0.0, "-0"),
+            (5e-324, "5e-324"),
+            (1.7976931348623157e308, "1.7976931348623157e+308"),
+        ] {
+            assert_eq!(go_json_marshal(&json!(v)), want, "float {v:e}");
+        }
+        // Go: json.Unmarshal(`{"b":[1.0,2.5,"<x>&\u2028"],"a":3}`) then json.Marshal.
+        let v: Value = serde_json::from_str(r#"{"b":[1.0,2.5,"<x>&\u2028"],"a":3}"#).unwrap();
+        assert_eq!(
+            go_json_marshal(&v),
+            r#"{"a":3,"b":[1,2.5,"\u003cx\u003e\u0026\u2028"]}"#
+        );
+        // Go: json.Marshal("a\bb\fc\nd\re\tf\x01g\x7fh") — serde's control escapes match Go's.
+        assert_eq!(
+            go_json_marshal(&json!("a\u{8}b\u{c}c\nd\re\tf\u{1}g\u{7f}h")),
+            "\"a\\bb\\fc\\nd\\re\\tf\\u0001g\u{7f}h\""
         );
     }
 

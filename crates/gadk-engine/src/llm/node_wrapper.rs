@@ -30,6 +30,7 @@ use serde_json::{Map, Value};
 
 use crate::llm::agent::WrappedSession;
 use crate::llm::mode::{mode_for, resolve_mode, with_bound_mode};
+use crate::llm::processors::go_json_marshal;
 use crate::llm::state::reveal;
 use crate::tool::finish_task::{FINISH_TASK_SUCCESS_RESULT, FINISH_TASK_TOOL_NAME, FinishTaskTool};
 use crate::tool::task_agent_tool::TaskAgentTool;
@@ -428,82 +429,6 @@ pub(crate) fn node_input_to_content(input: &Value) -> Option<Content> {
             }
         }
         other => Some(user(vec![Part::from_text(go_json_marshal(other))])),
-    }
-}
-
-/// Go `json.Marshal` of a decoded JSON value: keys sorted, HTML-escaped strings, Go float format.
-fn go_json_marshal(v: &Value) -> String {
-    let mut out = String::new();
-    write_go_json(v, &mut out);
-    out
-}
-
-fn write_go_json(v: &Value, out: &mut String) {
-    match v {
-        Value::Null => out.push_str("null"),
-        Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
-        Value::Number(n) => match (n.as_i64(), n.as_u64(), n.as_f64()) {
-            (Some(i), _, _) => out.push_str(&i.to_string()),
-            (_, Some(u), _) => out.push_str(&u.to_string()),
-            (_, _, Some(f)) => out.push_str(&go_float(f)),
-            _ => out.push_str(&n.to_string()),
-        },
-        Value::String(s) => write_go_string(s, out),
-        Value::Array(a) => {
-            out.push('[');
-            for (i, x) in a.iter().enumerate() {
-                if i > 0 {
-                    out.push(',');
-                }
-                write_go_json(x, out);
-            }
-            out.push(']');
-        }
-        Value::Object(m) => {
-            let mut keys: Vec<&String> = m.keys().collect();
-            keys.sort();
-            out.push('{');
-            for (i, k) in keys.into_iter().enumerate() {
-                if i > 0 {
-                    out.push(',');
-                }
-                write_go_string(k, out);
-                out.push(':');
-                if let Some(x) = m.get(k) {
-                    write_go_json(x, out);
-                }
-            }
-            out.push('}');
-        }
-    }
-}
-
-/// Go encodeState.string with HTML escaping: `<` `>` `&` U+2028 U+2029 as `\uXXXX`.
-fn write_go_string(s: &str, out: &mut String) {
-    let encoded = serde_json::to_string(s).unwrap_or_default();
-    for ch in encoded.chars() {
-        match ch {
-            '<' => out.push_str("\\u003c"),
-            '>' => out.push_str("\\u003e"),
-            '&' => out.push_str("\\u0026"),
-            '\u{2028}' => out.push_str("\\u2028"),
-            '\u{2029}' => out.push_str("\\u2029"),
-            c => out.push(c),
-        }
-    }
-}
-
-/// Go encoding/json floatEncoder: 'f' format in [1e-6, 1e21), else 'e' with "e+NN" / "e-N".
-fn go_float(f: f64) -> String {
-    let abs = f.abs();
-    if abs != 0.0 && !(1e-6..1e21).contains(&abs) {
-        let s = format!("{f:e}"); // Rust: "1e-7", "1.5e21"
-        match s.split_once('e') {
-            Some((m, e)) if !e.starts_with('-') => format!("{m}e+{e:0>2}"),
-            _ => s,
-        }
-    } else {
-        format!("{f}") // shortest round-trip, no ".0" for integral values
     }
 }
 

@@ -175,7 +175,12 @@ fn test_get_structured_model_response() {
     let event = response_event("set_model_response", json!({"result": 123.0}));
     let got = retrieve_structured_model_response(Some(&event)).unwrap();
     let got_map: Value = serde_json::from_str(&got).expect("result is not valid JSON");
-    assert_eq!(got_map, json!({"result": 123.0}));
+    // Go unmarshals every number to float64, so compare the decoded value as f64.
+    assert_eq!(got_map.as_object().map(|m| m.len()), Some(1));
+    assert_eq!(got_map["result"].as_f64(), Some(123.0));
+    // Rust addition (Go's test only round-trips, which hid serde's "123.0"): byte-exact Go
+    // json.Marshal of map[string]any{"result": 123.0}.
+    assert_eq!(got, r#"{"result":123}"#);
 
     // NoResponseWhenNameMismatch
     let event = response_event("other_tool", json!({"x": 1}));
