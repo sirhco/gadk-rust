@@ -936,6 +936,76 @@ mod tests {
         assert_eq!(model.requests().len(), 1);
     }
 
+    #[derive(serde::Deserialize, schemars::JsonSchema)]
+    struct NoArgs {}
+
+    #[tokio::test]
+    async fn confirmation_required_error_carries_go_tool_prefix() {
+        use gadk_agent::AfterToolCallback;
+
+        use crate::tool::{FunctionTool, FunctionToolConfig};
+
+        let secure = FunctionTool::new(
+            FunctionToolConfig {
+                require_confirmation: true,
+                ..FunctionToolConfig::new("secure_action", "needs approval")
+            },
+            |_ctx: Context, _: NoArgs| async move { Ok::<_, ToolError>(json!({"done": true})) },
+        )
+        .unwrap();
+        let seen: Arc<parking_lot::Mutex<Option<(String, bool)>>> = Arc::default();
+        let seen_cb = seen.clone();
+        let after: AfterToolCallback = Arc::new(move |_, _, _, _, err| {
+            let err = err.expect("after callback sees the tool error");
+            // The sentinel stays reachable through source() (Go errors.Is).
+            let mut src: Option<&(dyn std::error::Error + 'static)> = Some(&*err);
+            let mut is_required = false;
+            while let Some(e) = src {
+                is_required |= matches!(
+                    e.downcast_ref::<ToolError>(),
+                    Some(ToolError::ConfirmationRequired)
+                );
+                src = e.source();
+            }
+            *seen_cb.lock() = Some((err.to_string(), is_required));
+            Box::pin(async { Ok(None) })
+        });
+        let flow = Flow {
+            model: Some(MockModel::new(vec![Ok(call_resp(
+                "fc1",
+                "secure_action",
+                json!({}),
+            ))])),
+            tools: parking_lot::RwLock::new(vec![secure]),
+            after_tool_callbacks: vec![after],
+            ..Default::default()
+        };
+        let events: Vec<Event> = run_all(flow, ctx_for("a"))
+            .await
+            .into_iter()
+            .map(Result::unwrap)
+            .collect();
+        let want = "error tool \"secure_action\" requires confirmation, please approve or reject";
+        let fr = events[1].response.content.as_ref().unwrap().parts[0]
+            .function_response
+            .clone()
+            .unwrap();
+        assert_eq!(
+            fr.response,
+            json!({"error": want}).as_object().unwrap().clone()
+        );
+        assert_eq!(*seen.lock(), Some((want.to_owned(), true)));
+        // The confirmation request follows the response event.
+        let req = events[2].response.content.as_ref().unwrap().parts[0]
+            .function_call
+            .clone()
+            .unwrap();
+        assert_eq!(
+            req.name,
+            gadk_agent::REQUEST_CONFIRMATION_FUNCTION_CALL_NAME
+        );
+    }
+
     #[tokio::test]
     async fn cancelled_token_stops_model_call() {
         let model = MockModel::new(vec![Ok(text_resp("never"))]);

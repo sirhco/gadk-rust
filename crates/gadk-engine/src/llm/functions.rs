@@ -38,6 +38,7 @@ use crate::{
     llm::flow::Flow,
     telemetry::execute_tool_span,
     tool::utils::{function_calls, generate_function_call_id},
+    workflow::route::go_quote,
 };
 
 /// Tool callbacks cloned out of the Flow so each spawned tool task is `'static`.
@@ -251,7 +252,7 @@ async fn run_streaming(
     while let Some(chunk) = stream.next().await {
         match chunk {
             Ok(c) => out.push_str(&c),
-            Err(e) => return error_map(&e.to_string()),
+            Err(e) => return error_map(&wrap_confirmation_error(tool.name(), e).to_string()),
         }
     }
     Map::from_iter([("result".to_owned(), Value::String(out))])
@@ -370,7 +371,8 @@ pub(crate) async fn call_tool(
     {
         match r.run(tool_ctx.clone(), Value::Object(args.clone())).await {
             Ok(m) => response = Some(m),
-            Err(e) => err = Some(Arc::new(e)),
+            // Go wraps the sentinel inside the tool, so every callback sees the wrapped error.
+            Err(e) => err = Some(Arc::new(wrap_confirmation_error(tool.name(), e))),
         }
     }
 
@@ -429,6 +431,43 @@ pub(crate) async fn call_tool(
     match err {
         Some(e) => Some(error_map(&e.to_string())),
         None => response,
+    }
+}
+
+/// Go `fmt.Errorf("error tool %q %w", name, tool.ErrConfirmation{Required,Rejected})`
+/// (functiontool function.go:205/224, streaming_function.go:161/180, tool.go confirmCall): Go
+/// tools wrap the confirmation sentinels with the tool name, and that text reaches the model and
+/// the session as `{"error": ...}`. Rust tools return the bare sentinels, so the flow applies the
+/// wrap where it receives the tool's error. Other errors pass through unchanged.
+fn wrap_confirmation_error(tool_name: &str, e: ToolError) -> ToolError {
+    match e {
+        ToolError::ConfirmationRequired | ToolError::ConfirmationRejected => {
+            ToolError::Execution(Box::new(NamedToolError {
+                name: tool_name.to_owned(),
+                source: e,
+            }))
+        }
+        other => other,
+    }
+}
+
+/// Display `error tool "<name>" <sentinel>`; `source()` is the sentinel (Go `%w`), so a
+/// source-chain walk still finds `ToolError::ConfirmationRequired`/`ConfirmationRejected`.
+#[derive(Debug)]
+struct NamedToolError {
+    name: String,
+    source: ToolError,
+}
+
+impl std::fmt::Display for NamedToolError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "error tool {} {}", go_quote(&self.name), self.source)
+    }
+}
+
+impl std::error::Error for NamedToolError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
     }
 }
 
@@ -921,6 +960,69 @@ mod tests {
         assert_eq!(
             span.field("otel.status_description").as_deref(),
             Some("boom")
+        );
+    }
+
+    #[derive(serde::Deserialize, schemars::JsonSchema)]
+    struct NoArgs {}
+
+    #[tokio::test]
+    async fn streaming_confirmation_errors_carry_go_tool_prefix() {
+        use crate::tool::{FunctionToolConfig, StreamingFunctionTool};
+
+        let stream_tool = StreamingFunctionTool::new(
+            FunctionToolConfig {
+                require_confirmation: true,
+                ..FunctionToolConfig::new("secure_stream", "needs approval")
+            },
+            |_ctx: Context, _: NoArgs| futures::stream::iter([Ok("chunk".to_owned())]),
+        )
+        .unwrap();
+        let tools = tool_map(vec![stream_tool]);
+        let error_of = |ev: Event| {
+            ev.response.content.unwrap().parts[0]
+                .function_response
+                .clone()
+                .unwrap()
+                .response
+        };
+        // No confirmation yet: required.
+        let ev = handle_function_calls(
+            &ctx(),
+            &Flow::default(),
+            &tools,
+            &calls_event(&["secure_stream"]),
+            None,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            error_of(ev),
+            json!({"error": "error tool \"secure_stream\" requires confirmation, please approve or reject"})
+                .as_object()
+                .unwrap()
+                .clone()
+        );
+        // Rejected confirmation.
+        let confs = HashMap::from([("fc1".to_owned(), ToolConfirmation::default())]);
+        let ev = handle_function_calls_with(
+            &ctx(),
+            &Flow::default(),
+            &tools,
+            &calls_event(&["secure_stream"]),
+            None,
+            Some(&confs),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            error_of(ev),
+            json!({"error": "error tool \"secure_stream\" call is rejected"})
+                .as_object()
+                .unwrap()
+                .clone()
         );
     }
 
