@@ -11,6 +11,7 @@ members = [
   "crates/gadk-memory",
   "crates/gadk-agent",
   "crates/gadk-engine",
+  "crates/gadk-tools",
   "crates/gadk",
 ]
 
@@ -32,6 +33,7 @@ gadk-artifact = { path = "crates/gadk-artifact", version = "0.1.0" }
 gadk-memory = { path = "crates/gadk-memory", version = "0.1.0" }
 gadk-agent = { path = "crates/gadk-agent", version = "0.1.0" }
 gadk-engine = { path = "crates/gadk-engine", version = "0.1.0" }
+gadk-tools = { path = "crates/gadk-tools", version = "0.1.0" }
 tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
 tokio-util = "0.7.20"
 futures = "0.3.34"
@@ -40,6 +42,7 @@ reqwest = { version = "0.13.5", default-features = false, features = ["json", "s
 tokio-tungstenite = { version = "0.30.0", features = ["connect", "rustls-tls-webpki-roots"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
+serde-saphyr = { version = "2.1.1", default-features = false, features = ["serialize", "deserialize"] }
 thiserror = "2.0.21"
 tracing = "0.1.44"
 uuid = { version = "1.29.0", features = ["v4"] }
@@ -49,6 +52,7 @@ base64 = "0.23.1"
 http = "1.5.0"
 url = "2.5.8"
 regex = "1.13.1"
+regex-syntax = "0.8.11"
 parking_lot = "0.13.0"
 google-cloud-auth = "1.18.0"
 rstest = "0.28.0"
