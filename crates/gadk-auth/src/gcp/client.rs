@@ -247,7 +247,6 @@ impl Client {
 
     /// client.go:619 `doPost`: JSON POST, 1 MiB cap, status before size, redacted ApiError,
     /// `MalformedResponse` decode error.
-    #[allow(dead_code)] // first called from agent_identity.rs and connector.rs (Cycle 2)
     pub(crate) async fn do_post<B, T>(
         &self,
         url: &str,
@@ -551,7 +550,6 @@ pub(crate) fn valid_header_field_name(s: &str) -> bool {
 
 /// client.go:518 `parseExpireTime` (RFC 3339; empty or unparseable → None), with Go's
 /// `time.Parse(time.RFC3339, v)` rules (see `go_parse_rfc3339`).
-#[allow(dead_code)] // first called from agent_identity.rs and connector.rs (Cycle 2)
 pub(crate) fn parse_expire_time(v: &str) -> Option<DateTime<Utc>> {
     if v.is_empty() {
         return None;
@@ -677,7 +675,6 @@ fn go_marshal<B: serde::Serialize + ?Sized>(body: &B) -> Result<Vec<u8>, serde_j
 }
 
 /// client.go:454-470 `outcome`, a closed enum (Go's `%T` default arm cannot occur).
-#[allow(dead_code)] // first constructed by agent_identity.rs and connector.rs (Cycle 2)
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) enum Outcome {
     /// A retrieved {header, token} credential and its expiry (`None` when not reported).
@@ -717,6 +714,75 @@ impl fmt::Debug for Outcome {
             Outcome::Rejected => f.write_str("Rejected"),
         }
     }
+}
+
+/// Go `credentialPayload` (client.go:533): the success shape both services share, under
+/// "success" for Agent Identity and "response" for the connector operation. An empty
+/// `expire_time` means the service cannot say when the token expires (possibly never).
+#[derive(Default, serde::Deserialize)]
+pub(crate) struct CredentialPayload {
+    #[serde(default, deserialize_with = "go_zero")]
+    pub(crate) token: String,
+    #[serde(default, deserialize_with = "go_zero")]
+    pub(crate) header: String,
+    /// Go `lenientTime`: only the cache reads it and the connector's shape for it is an
+    /// assumption, so a value of an unexpected type costs a cache entry, never the retrieval.
+    #[serde(default, rename = "expireTime", deserialize_with = "lenient_time")]
+    pub(crate) expire_time: String,
+}
+
+/// Go `*struct{}`: present (any JSON object) or absent.
+#[derive(Debug, Default, serde::Deserialize)]
+pub(crate) struct Empty {}
+
+/// Go `json.Unmarshal(data, &out)` into a struct: `null` leaves it zero, anything but an object
+/// fails, and a repeated key keeps its last value.
+pub(crate) struct GoObject<T>(pub(crate) T);
+
+impl<'de, T> serde::Deserialize<'de> for GoObject<T>
+where
+    T: serde::de::DeserializeOwned + Default,
+{
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(GoObject(go_object(d)?.unwrap_or_default()))
+    }
+}
+
+/// A Go pointer-to-struct field (`*T`): `null` is `None`, and only a JSON object decodes. It goes
+/// through `serde_json::Map` because serde's derive would also accept an array as a struct,
+/// where `encoding/json` fails, and the map insert gives Go's last-key-wins.
+pub(crate) fn go_object<'de, D, T>(d: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
+{
+    match <Option<serde_json::Map<String, serde_json::Value>> as serde::Deserialize>::deserialize(
+        d,
+    )? {
+        None => Ok(None),
+        Some(map) => serde_json::from_value(serde_json::Value::Object(map))
+            .map(Some)
+            .map_err(<D::Error as serde::de::Error>::custom),
+    }
+}
+
+/// A Go value field (`string`, `bool`, `int`): `null` leaves the zero value.
+pub(crate) fn go_zero<'de, D, T>(d: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de> + Default,
+{
+    Ok(<Option<T> as serde::Deserialize>::deserialize(d)?.unwrap_or_default())
+}
+
+/// Go `lenientTime.UnmarshalJSON`: a JSON string is kept, any other value is "".
+fn lenient_time<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    Ok(
+        match <serde_json::Value as serde::Deserialize>::deserialize(d)? {
+            serde_json::Value::String(s) => s,
+            _ => String::new(),
+        },
+    )
 }
 
 #[cfg(test)]
@@ -932,5 +998,234 @@ mod tests {
             ),
             "{source:?}"
         );
+    }
+
+    mod wire {
+        use parking_lot::Mutex;
+
+        use super::super::*;
+        use crate::error::find_consent;
+        use crate::gcp::is_kind;
+
+        const AP: &str = "projects/p/locations/l/authProviders/ap";
+        const CO: &str = "projects/p/locations/l/connectors/co";
+
+        struct Call {
+            at: Instant,
+            method: String,
+            url: String,
+            content_type: Option<String>,
+            accept: Option<String>,
+            body: String,
+        }
+
+        struct Stub {
+            bodies: Vec<String>,
+            calls: Arc<Mutex<Vec<Call>>>,
+        }
+
+        #[async_trait::async_trait]
+        impl reqwest_middleware::Middleware for Stub {
+            async fn handle(
+                &self,
+                req: reqwest::Request,
+                _extensions: &mut http::Extensions,
+                _next: reqwest_middleware::Next<'_>,
+            ) -> reqwest_middleware::Result<reqwest::Response> {
+                let header = |name: http::header::HeaderName| {
+                    req.headers()
+                        .get(name)
+                        .and_then(|v| v.to_str().ok())
+                        .map(str::to_string)
+                };
+                let call = Call {
+                    at: Instant::now(),
+                    method: req.method().to_string(),
+                    url: req.url().to_string(),
+                    content_type: header(http::header::CONTENT_TYPE),
+                    accept: header(http::header::ACCEPT),
+                    body: String::from_utf8_lossy(
+                        req.body()
+                            .and_then(reqwest::Body::as_bytes)
+                            .unwrap_or_default(),
+                    )
+                    .into_owned(),
+                };
+                let reply = {
+                    let mut calls = self.calls.lock();
+                    calls.push(call);
+                    self.bodies[(calls.len() - 1).min(self.bodies.len() - 1)].clone()
+                };
+                Ok(reqwest::Response::from(http::Response::new(
+                    reqwest::Body::from(reply),
+                )))
+            }
+        }
+
+        /// A client whose every call is answered by `bodies` in order (the last repeats).
+        fn stub_client(bodies: &[&str], poll_timeout: Duration) -> (Client, Arc<Mutex<Vec<Call>>>) {
+            let calls = Arc::new(Mutex::new(Vec::new()));
+            let stub = Stub {
+                bodies: bodies.iter().map(|b| (*b).to_string()).collect(),
+                calls: calls.clone(),
+            };
+            let http = reqwest_middleware::ClientBuilder::new(reqwest::Client::new())
+                .with(stub)
+                .build();
+            let c = Client::new(Config {
+                http_client: Some(http),
+                agent_identity_endpoint: "https://ai.stub.test".into(),
+                connector_endpoint: "https://conn.stub.test".into(),
+                poll_timeout,
+            })
+            .unwrap();
+            (c, calls)
+        }
+
+        fn request(resource: &str, user_id: &str) -> Request {
+            Request {
+                resource: resource.into(),
+                user_id: user_id.into(),
+                ..Default::default()
+            }
+        }
+
+        /// The body is `encoding/json`'s output for the same `agentIdentityRequest`, captured
+        /// from Go: HTML-safe escapes, the `\b`/`\f` short forms, lowercase `\u00XX`.
+        #[tokio::test]
+        async fn agent_identity_request_is_gos_json_bytes() {
+            let ok = r#"{"success":{"token":"t","header":"Authorization: Bearer"}}"#;
+            let (c, calls) = stub_client(&[ok], Duration::ZERO);
+            c.retrieve_credential(Request {
+                resource: AP.into(),
+                user_id: "a<b>&c\u{2028}\u{2029}\u{8}\u{c}\u{1}\u{1f}\"\\/é".into(),
+                scopes: vec!["s1".into(), "s2".into()],
+                continue_uri: "https://x.test/cb?a=1&b=2".into(),
+                prior_token: "tok".into(),
+            })
+            .await
+            .unwrap();
+            let calls = calls.lock();
+            assert_eq!(calls.len(), 1);
+            let call = &calls[0];
+            assert_eq!(call.method, "POST");
+            assert_eq!(
+                call.url,
+                "https://ai.stub.test/v1/projects/p/locations/l/authProviders/ap/credentials:retrieve"
+            );
+            assert_eq!(call.content_type.as_deref(), Some("application/json"));
+            assert_eq!(call.accept.as_deref(), Some("application/json"));
+            assert_eq!(
+                call.body,
+                r#"{"userId":"a\u003cb\u003e\u0026c\u2028\u2029\b\f\u0001\u001f\"\\/é","scopes":["s1","s2"],"continueUri":"https://x.test/cb?a=1\u0026b=2","forceRefreshToken":"tok"}"#
+            );
+        }
+
+        /// The connector is sent a boolean where Agent Identity is sent the token, and both
+        /// omit empty fields (Go `omitempty`); the bodies are Go's.
+        #[tokio::test]
+        async fn connector_request_sends_force_refresh_as_a_boolean() {
+            let done = r#"{"done":true,"response":{"token":"t","header":"Authorization: Bearer"}}"#;
+            let (c, calls) = stub_client(&[done], Duration::ZERO);
+            c.retrieve_credential(Request {
+                resource: CO.into(),
+                user_id: "u".into(),
+                scopes: vec!["s".into()],
+                continue_uri: "c".into(),
+                prior_token: "tok".into(),
+            })
+            .await
+            .unwrap();
+            c.retrieve_credential(request(CO, "u")).await.unwrap();
+            {
+                // Scoped: the guard must be gone before the next await.
+                let calls = calls.lock();
+                assert_eq!(
+                    calls[0].url,
+                    "https://conn.stub.test/v1alpha/projects/p/locations/l/connectors/co/credentials:retrieve"
+                );
+                assert_eq!(
+                    calls[0].body,
+                    r#"{"userId":"u","scopes":["s"],"continueUri":"c","forceRefresh":true}"#
+                );
+                assert_eq!(calls[1].body, r#"{"userId":"u"}"#);
+            }
+
+            let ok = r#"{"success":{"token":"t","header":"Authorization: Bearer"}}"#;
+            let (c, calls) = stub_client(&[ok], Duration::ZERO);
+            c.retrieve_credential(request(AP, "u")).await.unwrap();
+            assert_eq!(calls.lock()[0].body, r#"{"userId":"u"}"#);
+        }
+
+        /// R8: 500 ms initial backoff doubling to 8 s, capped by the poll timeout (default
+        /// 10 s). The last sleep is cut to what remains, and one more call is made at the
+        /// deadline before PollTimeout.
+        #[tokio::test(start_paused = true)]
+        async fn pending_backs_off_from_500ms_doubling_to_8s_within_the_poll_timeout() {
+            let cases: [(Duration, &[u64]); 2] = [
+                // Zero is the 10 s default.
+                (Duration::ZERO, &[0, 500, 1500, 3500, 7500, 10_000]),
+                (
+                    Duration::from_secs(40),
+                    &[
+                        0, 500, 1500, 3500, 7500, 15_500, 23_500, 31_500, 39_500, 40_000,
+                    ],
+                ),
+            ];
+            for (poll_timeout, want_ms) in cases {
+                let (c, calls) = stub_client(&[r#"{"pending":{}}"#], poll_timeout);
+                let start = Instant::now();
+                let err = c.retrieve_credential(request(AP, "u")).await.unwrap_err();
+                assert!(is_kind(&err, ErrorKind::PollTimeout), "{err}");
+                assert_eq!(
+                    err.to_string(),
+                    r#"gcp: timed out waiting for credentials (resource "projects/p/locations/l/authProviders/ap")"#
+                );
+                let got: Vec<u64> = calls
+                    .lock()
+                    .iter()
+                    .map(|call| u64::try_from((call.at - start).as_millis()).unwrap())
+                    .collect();
+                assert_eq!(got, want_ms, "call times for poll_timeout {poll_timeout:?}");
+            }
+
+            // Pending, then a credential on the next poll, 500 ms later.
+            let ok = r#"{"success":{"token":"t","header":"Authorization: Bearer"}}"#;
+            let (c, calls) = stub_client(&[r#"{"pending":{}}"#, ok], Duration::ZERO);
+            let start = Instant::now();
+            c.retrieve_credential(request(AP, "u")).await.unwrap();
+            let got: Vec<Duration> = calls.lock().iter().map(|call| call.at - start).collect();
+            assert_eq!(got, [Duration::ZERO, Duration::from_millis(500)]);
+        }
+
+        /// Consent and rejection carry Go's texts, decorated with the resource, and stay
+        /// matchable through the decoration.
+        #[tokio::test]
+        async fn consent_and_rejection_name_the_resource() {
+            let consent = r#"{"uriConsentRequired":{"authorizationUri":"https://consent.test/a?b=c","consentNonce":"n-1"}}"#;
+            let (c, _) = stub_client(&[consent], Duration::ZERO);
+            let err = c.retrieve_credential(request(AP, "u")).await.unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                r#"auth: interactive consent required (resource "projects/p/locations/l/authProviders/ap")"#
+            );
+            assert_eq!(err.kind(), None);
+            assert_eq!(
+                find_consent(&err),
+                Some(&ConsentRequiredError {
+                    auth_uri: "https://consent.test/a?b=c".into(),
+                    nonce: "n-1".into(),
+                    key: String::new(),
+                })
+            );
+
+            let (c, _) = stub_client(&[r#"{"metadata":{"consentRejected":{}}}"#], Duration::ZERO);
+            let err = c.retrieve_credential(request(CO, "u")).await.unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                r#"gcp: user consent rejected (resource "projects/p/locations/l/connectors/co")"#
+            );
+            assert_eq!(err.kind(), Some(ErrorKind::ConsentRejected));
+        }
     }
 }
