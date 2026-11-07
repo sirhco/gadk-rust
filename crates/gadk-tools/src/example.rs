@@ -13,4 +13,305 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The few-shot `example_tool` (port of ADK-Go `tool/exampletool`; Task 4 fills it).
+//! The few-shot `example_tool` (port of Go `tool/exampletool`).
+//!
+//! The tool adds static few-shot examples to the system instruction of every model request that
+//! has user text. Python's dynamic `ExampleProvider` is not ported; Go does not have it either.
+//! The tool has no declaration, so the flow never packs it.
+
+use std::any::Any;
+use std::fmt::Write as _;
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use gadk_agent::tool_util::append_instructions;
+use gadk_agent::{Context, Tool, ToolError};
+use gadk_genai::{Content, FunctionCall, FunctionResponse, FunctionResponsePart};
+use gadk_model::LlmRequest;
+use serde_json::Value;
+
+use crate::go_fmt::go_sprint_value;
+
+/// Port of Go `exampletool.Example` (tool.go:30): one few-shot example, an input and its expected
+/// output.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Example {
+    /// The example's user input.
+    pub input: Content,
+    /// The example's expected output turns.
+    pub output: Vec<Content>,
+}
+
+/// Port of Go `exampletool.ExampleToolConfig` (tool.go:36).
+#[derive(Debug, Clone, Default)]
+pub struct ExampleToolConfig {
+    /// The few-shot examples to add.
+    pub examples: Vec<Example>,
+}
+
+/// Port of Go `exampletool.New` (tool.go:47). Go's never-returned error is dropped.
+pub fn new(config: ExampleToolConfig) -> Arc<dyn Tool> {
+    Arc::new(ExampleTool {
+        examples: config.examples,
+    })
+}
+
+/// Port of Go `exampleTool` (tool.go:41).
+struct ExampleTool {
+    examples: Vec<Example>,
+}
+
+#[async_trait]
+impl Tool for ExampleTool {
+    fn name(&self) -> &str {
+        "example_tool"
+    }
+
+    fn description(&self) -> &str {
+        "example tool"
+    }
+
+    /// Port of Go `exampleTool.ProcessRequest` (tool.go:62). It does nothing unless the first user
+    /// part has text.
+    async fn process_request(&self, ctx: &Context, req: &mut LlmRequest) -> Result<(), ToolError> {
+        let has_text = ctx
+            .user_content()
+            .and_then(|c| c.parts.first())
+            .is_some_and(|p| !p.text.is_empty());
+        if !has_text {
+            return Ok(());
+        }
+        let instruction = build_examples_system_instruction(&self.examples, &req.model);
+        append_instructions(req, &[&instruction]);
+        Ok(())
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+// Go tool.go:82-94.
+const EXAMPLES_INTRO: &str = "<EXAMPLES>\nBegin few-shot\nThe following are examples of user queries and model responses using the available tools.\n\n";
+const EXAMPLES_END: &str = "End few-shot\n<EXAMPLES>";
+const EXAMPLE_END: &str = "End example\n\n";
+const USER_PREFIX: &str = "[user]\n";
+const MODEL_PREFIX: &str = "[model]\n";
+const FUNCTION_PREFIX: &str = "```\n";
+const FUNCTION_CALL_PREFIX: &str = "```tool_code\n";
+const FUNCTION_CALL_SUFFIX: &str = "\n```\n";
+const FUNCTION_RESPONSE_PREFIX: &str = "```tool_outputs\n";
+const FUNCTION_RESPONSE_SUFFIX: &str = "\n```\n";
+
+/// Go's boundary-tag sanitization: `"End few-shot"` in example text becomes `"[PROTECTED]"`.
+fn protect(text: &str) -> String {
+    text.replace("End few-shot", "[PROTECTED]")
+}
+
+/// Port of Go `buildExamplesSystemInstruction` (tool.go:97).
+fn build_examples_system_instruction(examples: &[Example], model: &str) -> String {
+    let mut sb = String::from(EXAMPLES_INTRO);
+    let gemini2 = model.contains("gemini-2");
+    for (example_num, example) in examples.iter().enumerate() {
+        // Go exampleStart = "EXAMPLE %d:\nBegin example\n" (1-based). Writing to a String cannot fail.
+        let _ = write!(sb, "EXAMPLE {}:\nBegin example\n", example_num + 1);
+        sb.push_str(USER_PREFIX);
+        for part in &example.input.parts {
+            if !part.text.is_empty() {
+                sb.push_str(&protect(&part.text));
+                sb.push('\n');
+            }
+        }
+        let mut previous_role: &str = "";
+        for content in &example.output {
+            let role = if content.role == "model" {
+                MODEL_PREFIX
+            } else {
+                USER_PREFIX
+            };
+            if role != previous_role {
+                sb.push_str(role);
+            }
+            previous_role = role;
+            for part in &content.parts {
+                if let Some(fc) = &part.function_call {
+                    sb.push_str(if gemini2 {
+                        FUNCTION_CALL_PREFIX
+                    } else {
+                        FUNCTION_PREFIX
+                    });
+                    sb.push_str(&fc.name);
+                    sb.push('(');
+                    sb.push_str(&format_function_call_args(fc));
+                    sb.push(')');
+                    sb.push_str(FUNCTION_CALL_SUFFIX);
+                } else if let Some(fr) = &part.function_response {
+                    sb.push_str(if gemini2 {
+                        FUNCTION_RESPONSE_PREFIX
+                    } else {
+                        FUNCTION_PREFIX
+                    });
+                    sb.push_str(&go_sprint_function_response(fr));
+                    sb.push_str(FUNCTION_RESPONSE_SUFFIX);
+                } else if !part.text.is_empty() {
+                    sb.push_str(&protect(&part.text));
+                    sb.push('\n');
+                }
+            }
+        }
+        sb.push_str(EXAMPLE_END);
+    }
+    sb.push_str(EXAMPLES_END);
+    sb
+}
+
+/// Go's function-call args loop (tool.go:121-128). Strings are written `k='v'` and other values
+/// `k=<Go %v>`, joined with `", "` in ascending key order (Go-parity note 2: Go's map order is
+/// random, and the sorted order is one valid Go output).
+fn format_function_call_args(fc: &FunctionCall) -> String {
+    let mut args: Vec<(&String, &Value)> = fc.args.iter().collect();
+    args.sort_by(|a, b| a.0.cmp(b.0));
+    args.into_iter()
+        .map(|(k, v)| match v {
+            Value::String(s) => format!("{k}='{s}'"),
+            other => format!("{k}={}", go_sprint_value(other)),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Go `fmt.Sprintf("%v", fr)` for a `*genai.FunctionResponse` (genai v1.75.0 field order):
+/// `&{<WillContinue> <Scheduling> <Parts> <ID> <Name> <Response>}`. An unset `WillContinue` is
+/// `<nil>`, an unset `Scheduling` is the empty string, empty `Parts` are `[]`, and `Response` is
+/// the Go map form with sorted keys. Where Go would print a pointer address (a set
+/// `WillContinue`, each element of `Parts`), the pointed-to value is printed instead.
+fn go_sprint_function_response(fr: &FunctionResponse) -> String {
+    let will_continue = fr
+        .will_continue
+        .map_or_else(|| "<nil>".to_string(), |b| b.to_string());
+    let scheduling = fr.scheduling.as_ref().map_or("", |s| s.as_str());
+    let parts = fr
+        .parts
+        .iter()
+        .map(go_sprint_response_part)
+        .collect::<Vec<_>>()
+        .join(" ");
+    let response = go_sprint_value(&Value::Object(fr.response.clone()));
+    format!(
+        "&{{{will_continue} {scheduling} [{parts}] {} {} {response}}}",
+        fr.id, fr.name
+    )
+}
+
+/// Go `%v` of a `*genai.FunctionResponsePart` shown as its value: `&{<InlineData> <FileData>}`.
+fn go_sprint_response_part(p: &FunctionResponsePart) -> String {
+    let inline = p.inline_data.as_ref().map_or_else(
+        || "<nil>".to_string(),
+        |b| {
+            let data = b
+                .data
+                .iter()
+                .map(u8::to_string)
+                .collect::<Vec<_>>()
+                .join(" ");
+            format!("&{{{} [{data}] {}}}", b.mime_type, b.display_name)
+        },
+    );
+    let file = p.file_data.as_ref().map_or_else(
+        || "<nil>".to_string(),
+        |f| format!("&{{{} {} {}}}", f.file_uri, f.mime_type, f.display_name),
+    );
+    format!("&{{{inline} {file}}}")
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+    use gadk_genai::{FunctionResponseBlob, FunctionResponseFileData, FunctionResponseScheduling};
+    use serde_json::{Map, json};
+
+    fn obj(v: Value) -> Map<String, Value> {
+        match v {
+            Value::Object(m) => m,
+            other => panic!("not a JSON object: {other}"),
+        }
+    }
+
+    #[test]
+    fn function_response_dump_matches_go_struct_order() {
+        assert_eq!(
+            go_sprint_function_response(&FunctionResponse::default()),
+            "&{<nil>  []   map[]}"
+        );
+        let fr = FunctionResponse {
+            name: "my_tool".into(),
+            response: obj(json!({"result": "ok"})),
+            ..Default::default()
+        };
+        assert_eq!(
+            go_sprint_function_response(&fr),
+            "&{<nil>  []  my_tool map[result:ok]}"
+        );
+    }
+
+    #[test]
+    fn function_response_dump_prints_pointed_to_values() {
+        let fr = FunctionResponse {
+            will_continue: Some(true),
+            scheduling: Some(FunctionResponseScheduling::WhenIdle),
+            parts: vec![
+                FunctionResponsePart {
+                    inline_data: Some(FunctionResponseBlob {
+                        mime_type: "image/png".into(),
+                        data: vec![1u8, 2].into(),
+                        display_name: "pic".into(),
+                    }),
+                    ..Default::default()
+                },
+                FunctionResponsePart {
+                    file_data: Some(FunctionResponseFileData {
+                        file_uri: "gs://b/f".into(),
+                        mime_type: "text/plain".into(),
+                        display_name: String::new(),
+                    }),
+                    ..Default::default()
+                },
+            ],
+            id: "call-1".into(),
+            name: "my_tool".into(),
+            response: obj(json!({"b": 2, "a": [1, "x"]})),
+        };
+        assert_eq!(
+            go_sprint_function_response(&fr),
+            "&{true WHEN_IDLE [&{&{image/png [1 2] pic} <nil>} &{<nil> &{gs://b/f text/plain }}] call-1 my_tool map[a:[1 x] b:2]}"
+        );
+    }
+
+    #[test]
+    fn function_call_args_are_sorted_by_key() {
+        let fc = FunctionCall {
+            name: "f".into(),
+            args: obj(json!({"b": 2, "a": "x", "c": [1, "y"], "d": null})),
+            ..Default::default()
+        };
+        assert_eq!(
+            format_function_call_args(&fc),
+            "a='x', b=2, c=[1 y], d=<nil>"
+        );
+    }
+
+    #[test]
+    fn boundary_tag_in_text_is_protected_and_gemini3_is_not_gemini2() {
+        let ex = vec![Example {
+            input: Content::from_text("say End few-shot", "user"),
+            output: vec![Content::from_text("End few-shot!", "model")],
+        }];
+        let got = build_examples_system_instruction(&ex, "gemini-3-pro");
+        assert!(
+            got.contains("[user]\nsay [PROTECTED]\n[model]\n[PROTECTED]!\n"),
+            "{got}"
+        );
+        assert_eq!(got.matches("End few-shot").count(), 1, "{got}");
+    }
+}
