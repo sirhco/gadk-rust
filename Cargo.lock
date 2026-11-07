@@ -717,6 +717,7 @@ name = "gadk"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "futures",
  "gadk-agent",
  "gadk-artifact",
