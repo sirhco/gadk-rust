@@ -31,3 +31,8 @@ mod server;
 pub use factory::{ScriptedFactory, in_memory};
 pub use http::{FrontHook, HttpTestServer, InitializeHold, RecordedRequest};
 pub use server::{ToolFuture, ToolHandler, ToolServer, weather_server};
+
+/// Locks `m`, recovering the data of a mutex poisoned by a panicking test thread.
+fn lock<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
