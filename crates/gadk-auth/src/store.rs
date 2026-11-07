@@ -208,23 +208,172 @@ pub(crate) fn expired(now: DateTime<Utc>, expires_at: DateTime<Utc>) -> bool {
 }
 
 #[cfg(test)]
-#[allow(dead_code, unused_variables, clippy::todo)]
 impl InMemoryCredentialStore {
-    /// store_internal_test.go:182 `arm`.
+    /// store_internal_test.go:181 `arm`: makes the next call sweep. Clearing `last_sweep` makes
+    /// the sweep due whatever the clock's resolution; the one-nanosecond interval keeps every
+    /// later call due as well.
     pub(crate) fn arm(&self) {
-        todo!("Task 3")
+        let mut state = self.state.lock();
+        state.sweep_every = Some(Duration::from_nanos(1));
+        state.last_sweep = None;
     }
 
+    /// store_internal_test.go:188 `size`: the resident entry count, expired entries included.
     pub(crate) fn size(&self) -> usize {
-        todo!("Task 3")
+        self.state.lock().entries.len()
     }
 
-    /// Go `lastSweep` (`None` = zero).
+    /// store_internal_test.go:194 `swept`: Go `lastSweep` (`None` = zero).
     pub(crate) fn swept(&self) -> Option<DateTime<Utc>> {
-        todo!("Task 3")
+        self.state.lock().last_sweep
     }
 
+    /// Go's `s.sweepEvery = …` under `s.mu` (store_internal_test.go:112-114). `Duration::ZERO`
+    /// means the default interval, as Go's zero does.
     pub(crate) fn set_sweep_every(&self, every: Duration) {
-        todo!("Task 3")
+        self.state.lock().sweep_every = Some(every);
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use chrono::TimeZone;
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+    use crate::credential::Bearer;
+
+    /// A clock the test moves by hand.
+    fn manual_clock(
+        start: DateTime<Utc>,
+    ) -> (
+        Arc<parking_lot::Mutex<DateTime<Utc>>>,
+        Arc<dyn gadk_platform::TimeProvider>,
+    ) {
+        let now = Arc::new(parking_lot::Mutex::new(start));
+        let read = Arc::clone(&now);
+        (now, Arc::new(move || *read.lock()))
+    }
+
+    fn t0() -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2030, 1, 1, 0, 0, 0).unwrap()
+    }
+
+    fn key(user: &str) -> CredentialKey {
+        CredentialKey {
+            app_name: "app".into(),
+            user_id: user.into(),
+            key: "res".into(),
+        }
+    }
+
+    fn bearer() -> Arc<dyn Credential> {
+        Arc::new(Bearer {
+            token: "tok-secret".into(),
+        })
+    }
+
+    /// D5: expiry is judged on the injected clock, not the wall clock.
+    #[tokio::test]
+    async fn injected_clock_judges_expiry() {
+        let (now, clock) = manual_clock(t0());
+        let s = InMemoryCredentialStore::with_time_provider(clock);
+        s.set(&key("u"), bearer(), t0() + TimeDelta::seconds(11))
+            .await
+            .unwrap();
+        assert!(
+            s.get(&key("u")).await.unwrap().is_some(),
+            "11s left at t0 = miss, want hit"
+        );
+
+        *now.lock() = t0() + TimeDelta::seconds(1);
+        assert!(
+            s.get(&key("u")).await.unwrap().is_none(),
+            "exactly EXPIRY_SKEW left = hit, want miss"
+        );
+        assert_eq!(s.size(), 0, "the expired entry was not evicted");
+    }
+
+    /// D5: the sweep is paced by the store's clock: nothing at 59s, a sweep at 60s.
+    #[tokio::test]
+    async fn sweep_is_paced_on_the_store_clock() {
+        let (now, clock) = manual_clock(t0());
+        let s = InMemoryCredentialStore::with_time_provider(clock);
+        // The first call sweeps an empty map, so the next sweep is due at t0 + 60s.
+        s.set(&key("gone"), bearer(), t0()).await.unwrap();
+        assert_eq!(s.swept(), Some(t0()));
+
+        *now.lock() = t0() + TimeDelta::seconds(59);
+        s.get(&key("other")).await.unwrap();
+        assert_eq!(s.size(), 1, "a sweep ran inside SWEEP_INTERVAL");
+        assert_eq!(s.swept(), Some(t0()));
+
+        *now.lock() = t0() + TimeDelta::seconds(60);
+        s.get(&key("other")).await.unwrap();
+        assert_eq!(s.size(), 0, "no sweep at SWEEP_INTERVAL");
+        assert_eq!(s.swept(), Some(t0() + TimeDelta::seconds(60)));
+    }
+
+    /// Go's zero `sweepEvery` is the sentinel for the default, not "always".
+    #[tokio::test]
+    async fn a_zero_sweep_interval_means_the_default() {
+        let (now, clock) = manual_clock(t0());
+        let s = InMemoryCredentialStore::with_time_provider(clock);
+        s.set_sweep_every(Duration::ZERO);
+        s.set(&key("gone"), bearer(), t0()).await.unwrap();
+
+        *now.lock() = t0() + TimeDelta::seconds(1);
+        s.delete(&key("other")).await.unwrap();
+        assert_eq!(s.size(), 1, "a zero interval swept on the next call");
+        assert_eq!(s.swept(), Some(t0()));
+    }
+
+    /// A clock stepping backwards gives a negative gap, which never reaches the interval.
+    #[tokio::test]
+    async fn a_clock_stepping_back_does_not_sweep() {
+        let (now, clock) = manual_clock(t0());
+        let s = InMemoryCredentialStore::with_time_provider(clock);
+        s.set(&key("gone"), bearer(), t0()).await.unwrap();
+
+        *now.lock() = t0() - TimeDelta::hours(1);
+        s.get(&key("other")).await.unwrap();
+        assert_eq!(s.size(), 1);
+        assert_eq!(s.swept(), Some(t0()));
+    }
+
+    /// `expired` at the very end of `DateTime`'s range does not panic.
+    #[test]
+    fn expired_does_not_overflow() {
+        assert!(expired(DateTime::<Utc>::MAX_UTC, DateTime::<Utc>::MAX_UTC));
+        assert!(!expired(DateTime::<Utc>::MIN_UTC, DateTime::<Utc>::MAX_UTC));
+    }
+
+    /// Debug shows the entry count and nothing about keys or credentials.
+    #[tokio::test]
+    async fn debug_shows_only_the_entry_count() {
+        let s = InMemoryCredentialStore::new();
+        assert_eq!(
+            format!("{s:?}"),
+            "InMemoryCredentialStore { entries: 0, .. }"
+        );
+        let k = CredentialKey {
+            app_name: "app-name-marker".into(),
+            user_id: "user-id-marker".into(),
+            key: "slot-marker".into(),
+        };
+        s.set(&k, bearer(), Utc::now() + TimeDelta::hours(1))
+            .await
+            .unwrap();
+        let got = format!("{s:?} {s:#?}");
+        assert!(got.contains("entries: 1"), "{got}");
+        for secret in [
+            "app-name-marker",
+            "user-id-marker",
+            "slot-marker",
+            "tok-secret",
+        ] {
+            assert!(!got.contains(secret), "Debug {got:?} contains {secret:?}");
+        }
     }
 }
