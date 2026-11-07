@@ -139,6 +139,9 @@ pub(crate) fn go_json_entry(e: &MemoryEntry) -> Value {
     m.insert(
         "Content".into(),
         e.content.as_ref().map_or(Value::Null, |c| {
+            // Infallible: every `Content` field serializes to JSON without error (string-keyed
+            // maps, `serde_json::Value`s, bytes as base64 strings), so the fallback is never
+            // taken.
             serde_json::to_value(c).unwrap_or(Value::Null)
         }),
     );
@@ -164,8 +167,9 @@ pub(crate) fn go_json_entry(e: &MemoryEntry) -> Value {
 
 /// Go `time.Time.MarshalJSON` for a UTC time: `time.RFC3339Nano`
 /// (`2006-01-02T15:04:05.999999999Z07:00`). The fraction drops its trailing zeros and is omitted
-/// when the nanoseconds are zero. A chrono leap-second nanosecond value (>= 1e9) is folded back,
-/// because Go has no leap seconds.
+/// when the nanoseconds are zero. For a chrono leap second (nanoseconds >= 1e9) the fraction is
+/// taken modulo 1e9 so it stays nine digits, but chrono's `%S` prints that second as `60`, which
+/// Go (with no leap seconds) never writes.
 fn go_rfc3339_nano(t: &DateTime<Utc>) -> String {
     let nanos = t.timestamp_subsec_nanos() % 1_000_000_000;
     let mut s = t.format("%Y-%m-%dT%H:%M:%S").to_string();

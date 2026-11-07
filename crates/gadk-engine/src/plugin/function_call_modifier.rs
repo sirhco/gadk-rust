@@ -109,7 +109,11 @@ fn strip_args(
     err: Option<Arc<ModelError>>,
 ) -> (LlmResponse, Result<Option<LlmResponse>, AgentError>) {
     if let Some(err) = err {
-        // Go: return nil, llmResponseError (pass through).
+        // Go: return nil, llmResponseError (pass through). The flow never reaches this: it
+        // passes `None` here and routes model errors to the on-model-error callbacks. A caller
+        // going through the PluginManager keeps its own clone of the `Arc`, so the error is
+        // shared and surfaces as `AgentError::Other` (same text); only the `Arc`'s sole owner
+        // gets `AgentError::Model` back.
         return (resp, Err(model_error_into_agent(err)));
     }
     if resp.content.as_ref().is_none_or(|c| c.parts.is_empty()) {
@@ -173,6 +177,7 @@ mod tests {
         assert!(p.after_model_callback().is_some());
     }
 
+    // Called directly with the sole `Arc`, so the error comes back as `AgentError::Model`.
     #[tokio::test]
     async fn after_model_passes_a_model_error_through() {
         let cb = new_function_call_modifier_plugin(cfg())
