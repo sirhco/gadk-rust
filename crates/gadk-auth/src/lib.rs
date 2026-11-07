@@ -31,7 +31,7 @@
 //! Providers backed by a token source refresh themselves and need none.
 //!
 //! Token exchange and refresh are delegated to `google-cloud-auth` rather than reimplemented
-//! here. The GCP agent-identity integration lives in the [`gcp`] module (feature `gcp`, on by
+//! here. The GCP agent-identity integration lives in the `gcp` module (feature `gcp`, on by
 //! default).
 
 pub mod credential;
