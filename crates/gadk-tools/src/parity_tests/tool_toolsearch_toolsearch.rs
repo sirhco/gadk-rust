@@ -51,7 +51,7 @@ use crate::toolsearch::{
 /// Go `testAgent`: the agent name the stub contexts report.
 const TEST_AGENT: &str = "test_agent";
 
-// parity: skipped TestGatingToolset_SkipsDiscoveredToolsTheFlowCannotPack: every Rust Tool has a (defaulted) process_request, so the non-packable stub this test reveals cannot exist and the filter it pins has nothing to skip (spec R8)
+// parity: skipped TestGatingToolset_SkipsDiscoveredToolsTheFlowCannotPack: every Rust Tool has a (defaulted) process_request, so Rust returns the non-packable stub this test reveals, and the flow packs nothing for it because it has no declaration (spec R8)
 
 // ---------------------------------------------------------------------------------------------
 // Errors (Go `errors.New` sentinels and `errors.Is`).

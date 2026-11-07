@@ -483,7 +483,9 @@ pub(crate) struct GatingToolset {
 /// Go `availableTools`: the base tools exposed next to the search tool, the core tools in
 /// catalog order, then the discovered ones in discovery order. A discovered name that is core,
 /// that the base no longer returns, or that is [`TOOL_NAME`] (it would duplicate the search
-/// tool) is skipped. Go also skips tools the flow cannot pack; every Rust tool can be packed.
+/// tool) is skipped. Go also skips tools the flow cannot pack; Rust keeps them (every Rust tool
+/// has a defaulted `process_request`), and the flow packs nothing for a tool without a
+/// declaration.
 fn available_tools(
     base_tools: &[Arc<dyn Tool>],
     core_names: &HashSet<String>,
