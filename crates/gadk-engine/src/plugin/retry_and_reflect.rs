@@ -177,10 +177,7 @@ impl RetryAndReflect {
         err: &Arc<ToolError>,
     ) -> Result<Option<Map<String, Value>>, AgentError> {
         // Go: errors.Is(err, tool.ErrConfirmationRequired) || errors.Is(err, tool.ErrConfirmationRejected).
-        if matches!(
-            **err,
-            ToolError::ConfirmationRequired | ToolError::ConfirmationRejected
-        ) {
+        if is_confirmation_error(err) {
             return Ok(None);
         }
 
@@ -281,6 +278,32 @@ impl RetryAndReflect {
         );
         response_map(err, self.max_retries, &rendered)
     }
+}
+
+/// Go `errors.Is(err, tool.ErrConfirmationRequired) || errors.Is(err, tool.ErrConfirmationRejected)`.
+/// The flow hands confirmation sentinels over wrapped (`ToolError::Execution` around a named
+/// wrapper whose `source()` is the sentinel, Go's `%w`), so this walks the chain. Transparent
+/// layers (`ToolError::Execution`, `SharedToolError`, `AgentError::Other`) forward `source()` to
+/// their inner error's source, skipping the inner error itself, so the walk descends into them
+/// directly; any other error is followed through `source()`.
+fn is_confirmation_error(err: &ToolError) -> bool {
+    let mut cur: Option<&(dyn std::error::Error + 'static)> = Some(err);
+    while let Some(e) = cur {
+        cur = if let Some(te) = e.downcast_ref::<ToolError>() {
+            match te {
+                ToolError::ConfirmationRequired | ToolError::ConfirmationRejected => return true,
+                ToolError::Execution(inner) => Some(&**inner),
+                _ => std::error::Error::source(te),
+            }
+        } else if let Some(shared) = e.downcast_ref::<SharedToolError>() {
+            Some(&*shared.0)
+        } else if let Some(AgentError::Other(inner)) = e.downcast_ref::<AgentError>() {
+            Some(&**inner)
+        } else {
+            e.source()
+        };
+    }
+    false
 }
 
 /// The original tool error, keeping the caller's `Arc` (Go returns the same `err` value).
@@ -624,6 +647,129 @@ null
             assert!(matches!(res, Ok(None)), "{res:?}");
         }
         assert!(r.scoped_failure_counters.lock().is_empty());
+    }
+
+    /// Stands in for the flow's private `llm::functions::NamedToolError` (Go `fmt.Errorf("error
+    /// tool %q %w", name, sentinel)`): its `source()` is the sentinel.
+    #[derive(Debug)]
+    struct Wrapped(ToolError);
+
+    impl std::fmt::Display for Wrapped {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "error tool \"t\" {}", self.0)
+        }
+    }
+
+    impl std::error::Error for Wrapped {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            Some(&self.0)
+        }
+    }
+
+    /// The confirmation sentinels as the flow hands them over (`wrap_confirmation_error`), plus
+    /// further layers (`SharedToolError`, `AgentError::Other`) a wrapping tool might add.
+    fn wrapped_sentinels() -> Vec<ToolError> {
+        let mut v = Vec::new();
+        for s in [
+            || ToolError::ConfirmationRequired,
+            || ToolError::ConfirmationRejected,
+        ] {
+            v.push(ToolError::Execution(Box::new(Wrapped(s()))));
+            v.push(ToolError::Execution(Box::new(SharedToolError(Arc::new(
+                ToolError::Execution(Box::new(Wrapped(s()))),
+            )))));
+            v.push(ToolError::Execution(Box::new(AgentError::Other(Box::new(
+                SharedToolError(Arc::new(s())),
+            )))));
+        }
+        v
+    }
+
+    // Go errors.Is unwraps %w, so the flow-wrapped sentinels pass through uncounted too.
+    #[test]
+    fn wrapped_confirmation_errors_pass_through_uncounted() {
+        let r = RetryAndReflect::new(&RetryAndReflectConfig {
+            max_retries: 0,
+            error_if_retry_exceeded: true,
+            ..Default::default()
+        });
+        let ctx = Context::builder().build();
+        for e in wrapped_sentinels() {
+            let shown = e.to_string();
+            let res = r.on_tool_error(&ctx, &NamedTool("t"), &Map::new(), &Arc::new(e));
+            assert!(matches!(res, Ok(None)), "{shown}: {res:?}");
+        }
+        let r = RetryAndReflect::new(&RetryAndReflectConfig::default());
+        for e in wrapped_sentinels() {
+            let res = r.on_tool_error(&ctx, &NamedTool("t"), &Map::new(), &Arc::new(e));
+            assert!(matches!(res, Ok(None)), "{res:?}");
+        }
+        assert!(r.scoped_failure_counters.lock().is_empty());
+    }
+
+    #[test]
+    fn non_confirmation_wrapped_error_is_counted() {
+        let r = RetryAndReflect::new(&RetryAndReflectConfig::default());
+        let err = Arc::new(ToolError::Execution(Box::new(Wrapped(
+            ToolError::InvalidArgument("bad".into()),
+        ))));
+        let res = r
+            .on_tool_error(
+                &Context::builder().build(),
+                &NamedTool("t"),
+                &Map::new(),
+                &err,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(res["retry_count"], json!(1));
+    }
+
+    // Covers the plugin's closures: they share one state and pass the original error through.
+    #[tokio::test]
+    async fn plugin_callbacks_share_state_and_skip_confirmation() {
+        let p = new_retry_and_reflect_plugin(RetryAndReflectConfig {
+            max_retries: 1,
+            error_if_retry_exceeded: true,
+            ..Default::default()
+        })
+        .unwrap();
+        let on_err = p.on_tool_error_callback().unwrap();
+        let after = p.after_tool_callback().unwrap();
+        let ctx = Context::builder().invocation_id("inv").build();
+        let tool: Arc<dyn Tool> = Arc::new(NamedTool("t"));
+
+        let confirm = Arc::new(ToolError::Execution(Box::new(Wrapped(
+            ToolError::ConfirmationRequired,
+        ))));
+        let res = on_err(ctx.clone(), tool.clone(), Map::new(), confirm).await;
+        assert!(matches!(res, Ok(None)), "{res:?}");
+
+        let err = fail();
+        let res = on_err(ctx.clone(), tool.clone(), Map::new(), err.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(res["retry_count"], json!(1));
+        // The reflection result does not reset; a real success does.
+        let res = after(ctx.clone(), tool.clone(), Map::new(), res, None).await;
+        assert!(matches!(res, Ok(None)), "{res:?}");
+        let res = after(ctx.clone(), tool.clone(), Map::new(), Map::new(), None).await;
+        assert!(matches!(res, Ok(None)), "{res:?}");
+        let res = on_err(ctx.clone(), tool.clone(), Map::new(), err.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(res["retry_count"], json!(1), "success reset the count");
+
+        let got = on_err(ctx, tool, Map::new(), err.clone())
+            .await
+            .unwrap_err();
+        let AgentError::Other(inner) = &got else {
+            panic!("want AgentError::Other, got {got:?}");
+        };
+        let shared = inner.downcast_ref::<SharedToolError>().unwrap();
+        assert!(Arc::ptr_eq(&shared.0, &err));
     }
 
     #[test]
