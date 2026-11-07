@@ -66,7 +66,7 @@ fn split_frac(v: u128, prec: u32) -> (u128, String) {
 }
 
 /// Lowercase hex of `bytes` (Go `hex.EncodeToString`), replacing the `hex` crate.
-#[allow(dead_code)] // first used by Tasks 8 and 9 (gcp cache slot and nonce)
+#[cfg_attr(not(feature = "gcp"), allow(dead_code))] // only the gcp module calls it
 pub(crate) fn hex_encode(bytes: &[u8]) -> String {
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
     let mut out = String::with_capacity(bytes.len() * 2);

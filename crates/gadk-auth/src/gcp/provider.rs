@@ -180,7 +180,7 @@ impl ClientInit {
     }
 
     /// An attempt that already landed (TestResolveClientPrefersALandedResultOverAnExpiredBound).
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub(crate) fn landed(result: Result<Arc<Client>, Error>, deadline: Instant) -> Arc<Self> {
         Arc::new(Self {
             deadline,
