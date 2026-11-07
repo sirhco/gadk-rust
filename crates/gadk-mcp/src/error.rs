@@ -17,6 +17,9 @@
 //! (`tool/mcptoolset/{set,client,tool}.go` and go-sdk's `mcp.ErrConnectionClosed`).
 
 use std::error::Error as StdError;
+use std::sync::Arc;
+
+use rmcp::ServiceError;
 
 /// A boxed error from outside this crate (a transport factory, a metadata provider, rmcp's
 /// `ClientInitializeError`).
@@ -136,8 +139,15 @@ pub enum Error {
 impl Error {
     /// Go `errors.Is(err, mcp.ErrConnectionClosed)`: whether [`Error::ConnectionClosed`] is this
     /// error or anywhere in its chain (a joined [`Error::Close`] matches when any part does).
+    /// rmcp's `ServiceError::TransportClosed` counts too: go-sdk wraps `ErrConnectionClosed`
+    /// around a call in flight when its connection closes.
     pub fn is_connection_closed(&self) -> bool {
-        self.any_in_chain(&|e| matches!(e, Error::ConnectionClosed))
+        self.any_in_chain(&|e| {
+            matches!(
+                e,
+                Error::ConnectionClosed | Error::Service(ServiceError::TransportClosed)
+            )
+        })
     }
 
     /// Go `errors.Is(err, context.Canceled)`: whether [`Error::Cancelled`] is this error or
@@ -167,12 +177,22 @@ impl Error {
     }
 }
 
-/// The first `Error` along `e`'s `source()` chain (starting at `e`), searched with `pred`.
+/// The first `Error` (or shared `Arc<Error>`) along `e`'s `source()` chain (starting at `e`),
+/// searched with `pred`; a bare rmcp `ServiceError::TransportClosed` on the way is searched as
+/// [`Error::Service`].
 fn boxed_any_in_chain(e: &(dyn StdError + 'static), pred: &dyn Fn(&Error) -> bool) -> bool {
     let mut cur = Some(e);
     while let Some(c) = cur {
         if let Some(found) = c.downcast_ref::<Error>() {
             return found.any_in_chain(pred);
+        }
+        if let Some(shared) = c.downcast_ref::<Arc<Error>>() {
+            return shared.any_in_chain(pred);
+        }
+        if let Some(ServiceError::TransportClosed) = c.downcast_ref::<ServiceError>()
+            && pred(&Error::Service(ServiceError::TransportClosed))
+        {
+            return true;
         }
         cur = c.source();
     }
@@ -311,7 +331,40 @@ mod tests {
         assert!(
             Error::Close(vec![Error::Cancelled, Error::ConnectionClosed]).is_connection_closed()
         );
-        assert!(!Error::Service(rmcp::ServiceError::TransportClosed).is_connection_closed());
         assert!(!Error::NoTransport.is_cancelled());
+    }
+
+    #[test]
+    fn transport_closed_is_connection_closed() {
+        // go-sdk wraps ErrConnectionClosed around a call in flight when the connection closes
+        // (transport.go); rmcp reports that as `ServiceError::TransportClosed`.
+        assert!(Error::Service(rmcp::ServiceError::TransportClosed).is_connection_closed());
+        // A close during an in-flight call whose reconnect then finds the refresher closed.
+        let in_flight = Error::CallTool {
+            name: "t".into(),
+            source: Box::new(Error::ReconnectFailed {
+                err: Box::new(Error::Service(rmcp::ServiceError::TransportClosed)),
+                refresh: Box::new(Error::ConnectionClosed),
+            }),
+        };
+        assert!(in_flight.is_connection_closed());
+        assert!(!in_flight.is_cancelled());
+        // A bare rmcp error inside a BoxError counts too; other service errors do not.
+        assert!(
+            Error::InitSession(Box::new(rmcp::ServiceError::TransportClosed))
+                .is_connection_closed()
+        );
+        assert!(!Error::Service(rmcp::ServiceError::UnexpectedResponse).is_connection_closed());
+    }
+
+    #[test]
+    fn shared_errors_in_a_box_are_searched() {
+        // sessions.rs `unshare`: a close error still shared elsewhere is boxed as `Arc<Error>`.
+        let shared = Arc::new(Error::Close(vec![Error::ConnectionClosed]));
+        let _other = shared.clone();
+        let boxed = Error::Transport(Box::new(shared));
+        assert!(boxed.is_connection_closed());
+        assert!(!boxed.is_cancelled());
+        assert!(Error::Transport(Box::new(Arc::new(Error::Cancelled))).is_cancelled());
     }
 }
