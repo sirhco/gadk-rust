@@ -105,7 +105,7 @@ impl Client {
     /// Go `NewClient` (client.go:305) with `AdcSource::Discover`. Unless `cfg.http_client` is
     /// set, it discovers Application Default Credentials (cloud-platform scope) to authenticate
     /// calls to the services, on an HTTP client that refuses redirects. ADC failure:
-    /// "gcp: find default credentials: <builder error>" (source kept).
+    /// `"gcp: find default credentials: <builder error>"` (source kept).
     pub fn new(cfg: Config) -> Result<Client, Error> {
         Self::with_adc(cfg, &AdcSource::Discover)
     }
@@ -417,7 +417,6 @@ pub(crate) static CONNECTOR_RESOURCE_RE: LazyLock<regex::Regex> = LazyLock::new(
 });
 /// client.go:59 `authProviderResourceRE`: with `CONNECTOR_RESOURCE_RE`, the full set
 /// `new_provider` accepts. The client itself routes any non-connector name to Agent Identity.
-#[allow(dead_code)] // first used by Task 9 (new_provider)
 #[allow(clippy::expect_used)] // constant pattern, cannot fail
 pub(crate) static AUTH_PROVIDER_RESOURCE_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r"^projects/[^/]+/locations/[^/]+/authProviders/[^/]+$")

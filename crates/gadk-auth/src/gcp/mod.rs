@@ -119,7 +119,6 @@ impl Error {
     }
 
     /// `errors.New(message)`.
-    #[allow(dead_code)] // first used by Tasks 8 and 9
     pub(crate) fn new(message: impl Into<String>) -> Self {
         Self {
             kind: None,
@@ -129,7 +128,6 @@ impl Error {
     }
 
     /// `return ErrX`: message = `kind.as_str()`.
-    #[allow(dead_code)] // first used by Tasks 8 and 9
     pub(crate) fn from_kind(kind: ErrorKind) -> Self {
         Self {
             kind: Some(kind),
@@ -139,7 +137,6 @@ impl Error {
     }
 
     /// `fmt.Errorf("%w: …", ErrX)`: kind plus a full message the caller formats.
-    #[allow(dead_code)] // first used by Tasks 8 and 9
     pub(crate) fn with_kind(kind: ErrorKind, message: impl Into<String>) -> Self {
         Self {
             kind: Some(kind),
@@ -150,7 +147,6 @@ impl Error {
 
     /// Attach the wrapped error (Go `%w` of an `APIError`, a `ConsentRequiredError`, an inner
     /// `gcp::Error`, a `reqwest::Error` …). Message and kind are unchanged.
-    #[allow(dead_code)] // first used by Tasks 8 and 9
     pub(crate) fn caused_by<E: std::error::Error + Send + Sync + 'static>(
         mut self,
         source: E,
@@ -160,14 +156,12 @@ impl Error {
     }
 
     /// `fmt.Errorf("<prefix>: %w", err)`: message = "{prefix}: {message}"; kind and source kept.
-    #[allow(dead_code)] // first used by Tasks 8 and 9
     pub(crate) fn prefixed(mut self, prefix: &str) -> Self {
         self.message = format!("{prefix}: {}", self.message);
         self
     }
 
     /// client.go:390 `fmt.Errorf("%w (resource %q)", err, req.Resource)`.
-    #[allow(dead_code)] // first used by Task 8
     pub(crate) fn with_resource(mut self, resource: &str) -> Self {
         self.message = format!(
             "{} (resource {})",

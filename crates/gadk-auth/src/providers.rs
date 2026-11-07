@@ -16,7 +16,7 @@
 //! The built-in providers and the lazy token source (port of ADK-Go `auth/providers.go:124-291`).
 //!
 //! [`static_token`], [`api_key`] and [`token_source`] resolve at once. [`adc`] and
-//! [`service_account`] build their token source lazily, on the first `credential` call: one
+//! [`service_account()`] build their token source lazily, on the first `credential` call: one
 //! detached init attempt at a time, each bounded at 30 s, a failed attempt retried by the next
 //! call, and a success reused from then on. Tokens are minted when a credential is applied, not
 //! when it is resolved.
@@ -33,7 +33,9 @@ use futures::future::{BoxFuture, Shared};
 use gadk_agent::go_quote;
 use google_cloud_auth::credentials::idtoken::{self, IDTokenCredentials};
 use google_cloud_auth::credentials::service_account::{self, AccessSpecifier};
-use google_cloud_auth::credentials::{AccessTokenCredentials, Builder as AdcBuilder, user_account};
+#[cfg(test)]
+use google_cloud_auth::credentials::user_account;
+use google_cloud_auth::credentials::{AccessTokenCredentials, Builder as AdcBuilder};
 use parking_lot::Mutex;
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
@@ -136,12 +138,10 @@ pub(crate) const SCOPE_CLOUD_PLATFORM: &str = "https://www.googleapis.com/auth/c
 /// Where ADC is read from. `Discover` is google-cloud-auth's real lookup. `Json` stands in for a
 /// `GOOGLE_APPLICATION_CREDENTIALS` file, because tests cannot set the variable
 /// (`env::set_var` is `unsafe`). Supported `"type"`s: `authorized_user`, `service_account`.
-// `Json` is built only by tests and the gcp client's ADC seam, so a non-test build without
-// those sees it as never constructed.
-#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub(crate) enum AdcSource {
     Discover,
+    #[cfg(test)]
     Json(Value),
 }
 
@@ -162,6 +162,7 @@ pub(crate) fn adc_token_source(
             .with_scopes(scopes)
             .build_access_token_credentials()
             .map_err(SharedError::new),
+        #[cfg(test)]
         AdcSource::Json(json) => match credential_type(json) {
             "authorized_user" => user_account::Builder::new(json.clone())
                 .with_scopes(scopes)
@@ -249,6 +250,7 @@ fn id_token_source(
     } else {
         match source {
             AdcSource::Discover => idtoken::Builder::new(audience).build(),
+            #[cfg(test)]
             AdcSource::Json(json) => match credential_type(json) {
                 "service_account" => {
                     idtoken::service_account::Builder::new(audience, json.clone()).build()

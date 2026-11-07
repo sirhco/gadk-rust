@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `auth/providers_internal_test.go` (Task 2).
+//! Port of Go `auth/providers_internal_test.go`.
 //!
 //! Every `TestLazyTokenSource*` case runs on paused Tokio time. Go's `initTimeout` override is
 //! the `bound` argument of `lazy_token_source`.

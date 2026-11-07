@@ -30,10 +30,6 @@
 //!
 //! Every lowering goes through [`go_to_lower`], Go's `strings.ToLower`.
 
-// Nothing outside this module and its tests calls it until Task 8 (`client.rs` `do_post`,
-// `map_credential` and the connector operation result). Task 10 removes this allow.
-#![allow(dead_code)]
-
 /// maxErrorBody caps service-controlled text carried into an error.
 pub(crate) const MAX_ERROR_BODY: usize = 1024; // redact.go:29
 /// Replaces service text that could not be shown free of the caller's own identifiers. It
