@@ -86,7 +86,11 @@ fn blocking_init() -> NewClientFn {
 }
 
 /// A builder that counts its attempts and holds each one open until `release` is notified.
-fn held_builder(built: Arc<Client>, release: Arc<Notify>, attempts: Arc<AtomicUsize>) -> NewClientFn {
+fn held_builder(
+    built: Arc<Client>,
+    release: Arc<Notify>,
+    attempts: Arc<AtomicUsize>,
+) -> NewClientFn {
     builder(move || {
         let built = Arc::clone(&built);
         let release = Arc::clone(&release);
@@ -181,7 +185,11 @@ async fn test_resolve_client_single_flight() {
     let built = plain_client();
     let release = Arc::new(Notify::new());
     let mut p = new_test_provider();
-    p.new_client = held_builder(Arc::clone(&built), Arc::clone(&release), Arc::clone(&attempts));
+    p.new_client = held_builder(
+        Arc::clone(&built),
+        Arc::clone(&release),
+        Arc::clone(&attempts),
+    );
     let p = Arc::new(p);
 
     let handles: Vec<_> = (0..CALLERS)
@@ -276,7 +284,11 @@ async fn test_resolve_client_publishes_late_client() {
     let attempts = Arc::new(AtomicUsize::new(0));
     let mut p = new_test_provider();
     p.init_timeout = Duration::from_millis(20);
-    p.new_client = held_builder(Arc::clone(&built), Arc::clone(&release), Arc::clone(&attempts));
+    p.new_client = held_builder(
+        Arc::clone(&built),
+        Arc::clone(&release),
+        Arc::clone(&attempts),
+    );
 
     let err = p
         .resolve_client()
@@ -324,8 +336,7 @@ async fn test_run_init_survives_abrupt_builder() {
         p.init_timeout = Duration::from_secs(5); // long enough that a wedge shows up as one
         p.new_client = build;
 
-        let Ok(res) = tokio::time::timeout(Duration::from_secs(2), p.resolve_client()).await
-        else {
+        let Ok(res) = tokio::time::timeout(Duration::from_secs(2), p.resolve_client()).await else {
             panic!("{name}: resolve_client() blocked; an abrupt builder wedged the provider");
         };
         let err = res.expect_err("resolve_client() = a client, want the builder's failure");
@@ -358,7 +369,10 @@ async fn test_resolve_client_fails_fast_once_the_attempt_bound_passes() {
     p.init_timeout = Duration::from_millis(200);
 
     let start = Instant::now();
-    let err = p.resolve_client().await.expect_err("first resolve_client()");
+    let err = p
+        .resolve_client()
+        .await
+        .expect_err("first resolve_client()");
     assert!(
         is_kind(&err, ErrorKind::ClientUnavailable),
         "first resolve_client() error = {err}, want ErrClientUnavailable"
@@ -366,7 +380,10 @@ async fn test_resolve_client_fails_fast_once_the_attempt_bound_passes() {
     let first = start.elapsed();
 
     let start = Instant::now();
-    let err = p.resolve_client().await.expect_err("second resolve_client()");
+    let err = p
+        .resolve_client()
+        .await
+        .expect_err("second resolve_client()");
     let second = start.elapsed();
     assert!(
         is_kind(&err, ErrorKind::ClientUnavailable),
@@ -625,7 +642,10 @@ fn test_new_client_slots_are_unique_under_concurrency() {
     let mut seen = HashSet::with_capacity(N);
     for s in &slots {
         assert!(!s.is_empty(), "a Client was built with an empty cache slot");
-        assert!(seen.insert(s.clone()), "cache slot {s:?} was handed to two Clients");
+        assert!(
+            seen.insert(s.clone()),
+            "cache slot {s:?} was handed to two Clients"
+        );
     }
 }
 
@@ -648,7 +668,11 @@ fn test_cache_until_boundary() {
     let rows: [(&str, Option<DateTime<Utc>>, Option<DateTime<Utc>>); 8] = [
         ("no expiry", None, None),
         ("already past", Some(now - ns), None),
-        ("a nanosecond inside the margin", Some(now + skew - ns), None),
+        (
+            "a nanosecond inside the margin",
+            Some(now + skew - ns),
+            None,
+        ),
         ("exactly the margin", Some(now + skew), None),
         (
             "a nanosecond beyond the margin",
@@ -656,7 +680,11 @@ fn test_cache_until_boundary() {
             Some(now + skew + ns),
         ),
         ("exactly the cap", Some(now + cap), Some(now + cap)),
-        ("a nanosecond beyond the cap", Some(now + cap + ns), Some(now + cap)),
+        (
+            "a nanosecond beyond the cap",
+            Some(now + cap + ns),
+            Some(now + cap),
+        ),
         ("far future", Some(far), Some(now + cap)),
     ];
     for (name, expires_at, want) in rows {

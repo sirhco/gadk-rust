@@ -40,15 +40,17 @@ use sha2::{Digest, Sha256};
 use tokio::sync::watch;
 use tokio::time::Instant;
 
-use crate::credential::Credential;
+use gadk_agent::go_quote;
+
+use crate::credential::{ApiKey, Bearer, Credential};
 use crate::go_fmt::{go_duration, hex_encode};
 use crate::provider::{AuthContext, CredentialProvider, RefreshingProvider};
 use crate::providers::AdcSource;
 use crate::store::{CredentialKey, CredentialStore, InMemoryCredentialStore};
 
 use super::client::{
-    AUTH_PROVIDER_RESOURCE_RE, CONNECTOR_RESOURCE_RE, Client, Config, join_fields,
-    validate_resource,
+    AUTH_PROVIDER_RESOURCE_RE, CONNECTOR_RESOURCE_RE, Client, Config, Request, Retrieval,
+    join_fields, validate_resource,
 };
 use super::{Error, ErrorKind};
 
@@ -215,7 +217,7 @@ pub(crate) fn build_provider(cfg: ProviderConfig) -> Result<Provider, Error> {
     if !CONNECTOR_RESOURCE_RE.is_match(name) && !AUTH_PROVIDER_RESOURCE_RE.is_match(name) {
         return Err(Error::new(format!(
             "gcp: NewProvider: scheme Name {} is neither projects/*/locations/*/connectors/* nor projects/*/locations/*/authProviders/*",
-            gadk_agent::go_quote(name)
+            go_quote(name)
         )));
     }
     let store = cfg
@@ -348,13 +350,16 @@ impl Provider {
             let unavailable = ErrorKind::ClientUnavailable;
             let result = match built {
                 Ok(Ok(client)) => Ok(client),
-                Ok(Err(err)) => {
-                    Err(Error::with_kind(unavailable, format!("{unavailable}: {err}")).caused_by(err))
-                }
+                Ok(Err(err)) => Err(
+                    Error::with_kind(unavailable, format!("{unavailable}: {err}")).caused_by(err),
+                ),
                 Err(join) => match join.try_into_panic() {
                     Ok(payload) => Err(Error::with_kind(
                         unavailable,
-                        format!("{unavailable}: building it panicked: {}", panic_text(&*payload)),
+                        format!(
+                            "{unavailable}: building it panicked: {}",
+                            panic_text(&*payload)
+                        ),
                     )),
                     Err(_) => Err(Error::with_kind(
                         unavailable,
@@ -429,13 +434,122 @@ fn panic_text(payload: &(dyn Any + Send)) -> String {
     }
 }
 
-// ---- Credential and Refresh (Cycle 2 replaces this section) ----
+// ---- Credential and Refresh ----
+
+impl Provider {
+    /// Go `resolve` (provider.go:546): names the acting user's cache entry and the client that
+    /// will fill it. The client is resolved before the cache is read, because the `Client` is
+    /// part of the cache key. A client-init failure is not qualified by resource: it is about
+    /// this process's own credentials, and every provider fails it identically.
+    async fn resolve(&self, cx: &AuthContext) -> Result<(Arc<Client>, CredentialKey), Error> {
+        let Some(id) = &cx.identity else {
+            return Err(Error::with_kind(
+                ErrorKind::NoActingUser,
+                format!(
+                    "{}: no ADK invocation identity on the context",
+                    ErrorKind::NoActingUser
+                ),
+            ));
+        };
+        if id.user_id.is_empty() {
+            // No ids in the message: it reaches the model and is persisted in the session.
+            return Err(Error::with_kind(
+                ErrorKind::NoActingUser,
+                format!(
+                    "{}: the invocation identity carries no user",
+                    ErrorKind::NoActingUser
+                ),
+            ));
+        }
+        let client = self.resolve_client().await?;
+        let key = client.cache_key(&self.scheme, id);
+        Ok((client, key))
+    }
+
+    /// Go `fetch` (provider.go:577): retrieves a credential and caches it, reporting whether
+    /// an entry was written. A non-empty `prior_token` asks for a forced refresh.
+    async fn fetch(
+        &self,
+        client: &Client,
+        key: &CredentialKey,
+        prior_token: &str,
+    ) -> Result<(Arc<dyn Credential>, bool), Error> {
+        let retrieval = client
+            .retrieve_credential(Request {
+                resource: self.scheme.name.clone(),
+                user_id: key.user_id.clone(),
+                scopes: self.scheme.scopes.clone(),
+                continue_uri: self.scheme.continue_uri.clone(),
+                prior_token: prior_token.to_string(),
+            })
+            .await?;
+        let cached = self.cache(key, &retrieval).await;
+        Ok((retrieval.credential, cached))
+    }
+
+    /// Go `cache` (provider.go:625): best-effort, inline on the caller's task (a store write
+    /// failure must not fail auth, and a request that ends first costs the entry rather than
+    /// hanging on the store). Reports whether an entry was written.
+    async fn cache(&self, key: &CredentialKey, retrieval: &Retrieval) -> bool {
+        let Some(expires_at) = cache_until(self.clock.now(), retrieval.expires_at) else {
+            return false;
+        };
+        self.store
+            .set(key, Arc::clone(&retrieval.credential), expires_at)
+            .await
+            .is_ok()
+    }
+
+    /// Go `evictRejected` (provider.go:437): drops `key`'s entry while it still holds the
+    /// refused credential. An entry another request has replaced is left alone.
+    async fn evict_rejected(&self, key: &CredentialKey, rejected_token: &str) {
+        if self.cached_replacement(key, rejected_token).await.is_some() {
+            return;
+        }
+        self.drop_entry(key).await;
+    }
+
+    /// Go `cachedReplacement` (provider.go:448): `key`'s cached credential when it can be shown
+    /// to differ from the rejected one. An entry whose token cannot be read never counts.
+    async fn cached_replacement(
+        &self,
+        key: &CredentialKey,
+        rejected_token: &str,
+    ) -> Option<Arc<dyn Credential>> {
+        let cred = self.store.get(key).await.ok()??;
+        let token = credential_token(cred.as_ref());
+        if token.is_empty() || token == rejected_token {
+            return None;
+        }
+        Some(cred)
+    }
+}
+
+/// Go `credentialToken` (provider.go:597): the token inside a credential this package minted,
+/// unwrapping one `with_headers` layer first (every non-bearer credential is wrapped for the
+/// extra `X-Goog-Api-Key` header). "" for any other type.
+fn credential_token(cred: &dyn Credential) -> String {
+    let cred = cred.inner().unwrap_or(cred);
+    if let Some(bearer) = cred.downcast_ref::<Bearer>() {
+        return bearer.token.clone();
+    }
+    if let Some(key) = cred.downcast_ref::<ApiKey>() {
+        return key.value.clone();
+    }
+    String::new()
+}
 
 #[async_trait::async_trait]
 impl CredentialProvider for Provider {
-    #[allow(unused_variables, clippy::todo)]
+    /// Go `provider.Credential` (provider.go:329). A store read error is a miss: fall through
+    /// and fetch a fresh credential.
     async fn credential(&self, cx: &AuthContext) -> Result<Arc<dyn Credential>, crate::Error> {
-        todo!("Task 9, cycle 2")
+        let (client, key) = self.resolve(cx).await?;
+        if let Ok(Some(cred)) = self.store.get(&key).await {
+            return Ok(cred);
+        }
+        let (cred, _) = self.fetch(&client, &key, "").await?;
+        Ok(cred)
     }
 
     fn as_refreshing(&self) -> Option<&dyn RefreshingProvider> {
@@ -445,13 +559,68 @@ impl CredentialProvider for Provider {
 
 #[async_trait::async_trait]
 impl RefreshingProvider for Provider {
-    #[allow(unused_variables, clippy::todo)]
+    /// Go `provider.Refresh` (provider.go:373). The rejected token is the ask: each service is
+    /// told in its own way (`Request::prior_token`). A cache entry shown to differ from the
+    /// rejected credential means another request refreshed, so it is served instead; and one
+    /// forced refresh per `refresh_slot` per `REFRESH_COOLDOWN` is all a downstream gets. On
+    /// every path that does not produce a replacement the rejected entry is dropped.
+    ///
+    /// Go's `ctx.Err()` check before the cooldown has no counterpart: a caller that gives up
+    /// drops this future.
     async fn refresh(
         &self,
         cx: &AuthContext,
         rejected: &Arc<dyn Credential>,
     ) -> Result<Arc<dyn Credential>, crate::Error> {
-        todo!("Task 9, cycle 2")
+        let (client, key) = self.resolve(cx).await?;
+        let rejected_token = credential_token(rejected.as_ref());
+        if rejected_token.is_empty() {
+            // A credential type this package did not mint, handed back by a third-party store:
+            // no hint to send and no telling the cached entry from the rejected one. Drop the
+            // entry unread, the fail-safe direction.
+            self.drop_entry(&key).await;
+            return Err(Error::new(format!(
+                "gcp: resource {}: cannot read the rejected credential's token, so it cannot be force-refreshed",
+                go_quote(&self.scheme.name)
+            ))
+            .into());
+        }
+        if let Some(cred) = self.cached_replacement(&key, &rejected_token).await {
+            return Ok(cred);
+        }
+        if !self.allow_refresh(&refresh_slot(&key.user_id, &self.scheme)) {
+            // Nothing will replace it, so drop it: a credential the downstream refused must not
+            // be served again.
+            self.evict_rejected(&key, &rejected_token).await;
+            return Err(Error::new(format!(
+                "gcp: refusing to force-refresh {} twice inside {}",
+                self.scheme.name,
+                go_duration(REFRESH_COOLDOWN)
+            ))
+            .into());
+        }
+        let (cred, cached) = match self.fetch(&client, &key, &rejected_token).await {
+            Ok(fetched) => fetched,
+            Err(err) => {
+                self.evict_rejected(&key, &rejected_token).await;
+                return Err(err.into());
+            }
+        };
+        if credential_token(cred.as_ref()) == rejected_token {
+            // The service handed back what it already had; retrying with it is a second
+            // guaranteed failure, so report and let the downstream's own answer stand.
+            self.evict_rejected(&key, &rejected_token).await;
+            return Err(Error::new(format!(
+                "gcp: resource {}: the credential service returned the credential that was rejected",
+                go_quote(&self.scheme.name)
+            ))
+            .into());
+        }
+        if !cached {
+            // Nothing replaced the entry, so the rejected credential is still in it.
+            self.evict_rejected(&key, &rejected_token).await;
+        }
+        Ok(cred)
     }
 }
 
@@ -461,7 +630,9 @@ impl RefreshingProvider for Provider {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use crate::gcp::client::{DEFAULT_AGENT_IDENTITY_URL, DEFAULT_CONNECTOR_URL, DEFAULT_POLL_TIMEOUT};
+    use crate::gcp::client::{
+        DEFAULT_AGENT_IDENTITY_URL, DEFAULT_CONNECTOR_URL, DEFAULT_POLL_TIMEOUT,
+    };
 
     const RESOURCE: &str = "projects/p/locations/l/authProviders/ap";
 
@@ -508,7 +679,11 @@ mod tests {
             Sha256::digest(join_fields(&["u", "n", "2", "a", "b", "c"]).as_bytes()).as_slice(),
         );
         assert_eq!(refresh_slot("u", &a), want);
-        assert_eq!(refresh_slot("u", &reordered), want, "scope order is not a dimension");
+        assert_eq!(
+            refresh_slot("u", &reordered),
+            want,
+            "scope order is not a dimension"
+        );
         assert_ne!(refresh_slot("v", &a), want, "the user is a dimension");
         assert_eq!(want.len(), 64);
     }
@@ -518,6 +693,40 @@ mod tests {
         assert_eq!(
             format!("{:?}", cfg_for(RESOURCE)),
             r#"ProviderConfig { scheme: ProviderScheme { name: "projects/p/locations/l/authProviders/ap", scopes: [], continue_uri: "" }, client: None, store: None }"#
+        );
+    }
+
+    // The offline twin of Go's TestCredentialSurfacesAnUnavailableClient: the default-client
+    // builder fails, and Credential surfaces ClientUnavailable without naming the resource.
+    #[tokio::test(start_paused = true)]
+    async fn credential_surfaces_a_failing_default_builder() {
+        let mut p = build_provider(cfg_for(RESOURCE)).expect("NewProvider()");
+        p.new_client = Arc::new(|| {
+            async {
+                Err::<Arc<Client>, _>(Error::new(
+                    "gcp: find default credentials: no credentials on this host",
+                ))
+            }
+            .boxed()
+        });
+        let p: Arc<dyn CredentialProvider> = Arc::new(p);
+        let cx = AuthContext::for_identity(gadk_agent::Identity {
+            user_id: "alice@example.test".to_string(),
+            app_name: "app".to_string(),
+            session_id: "s".to_string(),
+        });
+        let err = p
+            .credential(&cx)
+            .await
+            .expect_err("Credential() = a credential, want ErrClientUnavailable");
+        assert!(
+            super::super::is_kind(&err, ErrorKind::ClientUnavailable),
+            "{err}"
+        );
+        assert!(!err.to_string().contains(RESOURCE), "{err}");
+        assert_eq!(
+            err.to_string(),
+            "gcp: default credentials client unavailable: gcp: find default credentials: no credentials on this host"
         );
     }
 }
