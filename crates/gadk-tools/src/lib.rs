@@ -15,7 +15,8 @@
 
 //! gadk-tools: ADK-Go's built-in tools that need no authentication (port of ADK-Go
 //! `tool/geminitool`, `tool/loadartifactstool`, `tool/loadmemorytool`, `tool/preloadmemorytool`,
-//! `tool/exampletool`, `tool/toolsearch` with `internal/ranksearch`, and `tool/skilltoolset`).
+//! `tool/exampletool`, `tool/toolsearch` with `internal/ranksearch`, and `tool/skilltoolset`), plus
+//! adk-python's auth wire model (`tool/toolauth`).
 
 pub mod example;
 pub mod gemini;
@@ -25,6 +26,7 @@ pub mod load_memory;
 pub mod preload_memory;
 pub(crate) mod ranksearch;
 pub mod skills;
+pub mod toolauth;
 pub mod toolsearch;
 
 #[cfg(test)]

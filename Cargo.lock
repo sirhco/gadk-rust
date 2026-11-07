@@ -721,6 +721,7 @@ dependencies = [
  "futures",
  "gadk-agent",
  "gadk-artifact",
+ "gadk-auth",
  "gadk-engine",
  "gadk-gemini",
  "gadk-genai",
@@ -993,6 +994,7 @@ dependencies = [
  "serde",
  "serde-saphyr",
  "serde_json",
+ "sha2",
  "tokio",
 ]
 

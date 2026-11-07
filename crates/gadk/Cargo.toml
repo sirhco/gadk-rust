@@ -13,8 +13,9 @@ autoexamples = false
 workspace = true
 
 [features]
-default = ["gemini"]
+default = ["gemini", "gcp"]
 gemini = ["dep:gadk-gemini"]
+gcp = ["gadk-auth/gcp"]
 
 [dependencies]
 gadk-genai = { workspace = true }
@@ -27,6 +28,8 @@ gadk-memory = { workspace = true }
 gadk-agent = { workspace = true }
 gadk-engine = { workspace = true }
 gadk-tools = { workspace = true }
+# The root pin has default-features = false, so `gcp` is the façade's choice.
+gadk-auth = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
