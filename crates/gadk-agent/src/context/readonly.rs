@@ -142,6 +142,13 @@ impl ReadonlyContext {
     pub fn branch(&self) -> String {
         self.inner.branch.clone()
     }
+
+    /// The invocation's cancellation token (Go's embedded `context.Context` cancellation): the
+    /// same token [`InvocationContext::cancellation_token`](crate::InvocationContext::cancellation_token)
+    /// returns, so a toolset's `tools` can stop when the invocation is cancelled.
+    pub fn cancellation_token(&self) -> &CancellationToken {
+        &self.inner.cancellation_token
+    }
 }
 
 /// The session's state seen read-only (Go `ReadonlyContext.ReadonlyState`).
@@ -154,5 +161,39 @@ impl ReadonlyState for SessionReadonlyState {
 
     fn all(&self) -> Vec<(String, Value)> {
         self.0.state().all()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio_util::sync::CancellationToken;
+
+    use crate::context::{ContextDelta, InvocationContext};
+
+    /// R18: the read-only view hands out the invocation's own token, on every context shape.
+    #[test]
+    fn readonly_cancellation_token_is_the_invocations() {
+        let token = CancellationToken::new();
+        let ic = InvocationContext::builder()
+            .cancellation_token(token.clone())
+            .build_invocation();
+        let ctx = ic.clone().into_context();
+        let tool_ctx = ctx.with_delta(ContextDelta {
+            function_call_id: Some("fc".into()),
+            ..Default::default()
+        });
+        let views = [
+            ("invocation", (*ic).clone()),
+            ("context", (**ctx.as_invocation()).clone()),
+            ("tool context", (**tool_ctx.as_invocation()).clone()),
+        ];
+        for (name, ro) in &views {
+            assert!(!ro.cancellation_token().is_cancelled(), "{name}");
+        }
+        token.cancel();
+        for (name, ro) in &views {
+            assert!(ro.cancellation_token().is_cancelled(), "{name}");
+        }
+        assert!(ic.cancellation_token().is_cancelled());
     }
 }
