@@ -24,7 +24,6 @@ use std::sync::Arc;
 
 use gadk_auth::{
     AuthContext, CredentialProvider, apply_credential, find_consent, is_auth_rejected,
-    refresh_credential,
 };
 use http::header::{HeaderMap, USER_AGENT};
 use http::{HeaderName, HeaderValue};
@@ -55,44 +54,50 @@ pub(crate) struct AdkHttpClient {
 }
 
 impl AdkHttpClient {
+    /// The request's headers before the credential and the tracking step: `custom_headers`
+    /// (rmcp's own), then the configured headers, which replace a name rmcp also set and keep
+    /// every value they repeat.
+    fn request_headers(&self, custom_headers: HashMap<HeaderName, HeaderValue>) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        for (name, value) in custom_headers {
+            headers.insert(name, value);
+        }
+        for name in self.headers.keys() {
+            headers.remove(name);
+            for value in self.headers.get_all(name) {
+                headers.append(name.clone(), value.clone());
+            }
+        }
+        headers
+    }
+
     /// Go `trackingTransport.RoundTrip`'s header step: `custom_headers` (rmcp's own) extended
     /// with the configured headers, then `user-agent` and `x-goog-api-client` set to the ADK
     /// tracking tokens followed by the configured values' tokens, without duplicates. A name the
     /// configured headers repeat is sent once, its values joined with `", "`.
+    // `send` applies the credential between the two steps, so only tests and later tasks call
+    // this seam.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn tracked_headers(
         &self,
-        mut custom_headers: HashMap<HeaderName, HeaderValue>,
+        custom_headers: HashMap<HeaderName, HeaderValue>,
     ) -> HashMap<HeaderName, HeaderValue> {
-        for name in self.headers.keys() {
-            if *name == USER_AGENT || *name == X_GOOG_API_CLIENT {
-                continue;
-            }
-            if let Some(value) = joined(self.headers.get_all(name).iter()) {
-                custom_headers.insert(name.clone(), value);
-            }
-        }
-        for name in [USER_AGENT, X_GOOG_API_CLIENT] {
-            let existing: Vec<&str> = self
-                .headers
-                .get_all(&name)
-                .iter()
-                .filter_map(|v| std::str::from_utf8(v.as_bytes()).ok())
-                .collect();
-            if let Ok(value) = HeaderValue::from_str(&merge_tracking_tokens(&existing)) {
-                custom_headers.insert(name, value);
-            }
-        }
-        custom_headers
+        tracked(&self.request_headers(custom_headers))
     }
 
-    /// Sends one request through `call` with the tracking headers and, with auth, the
-    /// credential's headers (Go `auth.Transport` over `trackingTransport`).
+    /// Sends one request through `call` with, in Go's order (set.go `httpClient` wraps
+    /// `auth.Transport` around `trackingTransport`), the credential's headers applied to the
+    /// request's headers and then the tracking step, so a `user-agent` or `x-goog-api-client`
+    /// the credential writes is merged after the ADK tokens, on the first send and the replay.
     ///
     /// On an auth rejection ([`is_rejection`]) by a refreshing provider, the credential is
-    /// refreshed once and the request replayed with the fresh one; a second rejection is
-    /// returned as is. As in `gadk_auth::Transport`, a refresh error degrades to the original
-    /// rejection unless it carries interactive consent, and an error applying the fresh
-    /// credential is returned. Credential errors are [`credential_error`]s.
+    /// refreshed once and the request replayed with the fresh one applied to the request's
+    /// headers as they were before the stale credential (Go `applyAndSend`); a second rejection
+    /// is returned as is. As in Go `auth.Transport.RoundTrip`, any refresh error degrades to the
+    /// original rejection unless it carries interactive consent (then it is returned), and only
+    /// an error applying the fresh credential is returned as an apply error. Refresh and apply
+    /// run as separate steps, so a provider's refresh error that is itself an
+    /// `Error::ApplyCredential` still degrades. Credential errors are [`credential_error`]s.
     async fn send<T, F, Fut>(
         &self,
         custom_headers: HashMap<HeaderName, HeaderValue>,
@@ -103,29 +108,35 @@ impl AdkHttpClient {
         Fut: Future<Output = Result<T, HttpError>> + Send,
         T: Send,
     {
-        let base = self.tracked_headers(custom_headers);
+        let request = self.request_headers(custom_headers);
         let Some((provider, cx)) = &self.auth else {
-            return call(base).await;
+            return call(tracked(&request)).await;
         };
-        let mut applied = HeaderMap::new();
-        let cred = apply_credential(provider.as_ref(), cx, &mut applied)
+        let mut first = request.clone();
+        let cred = apply_credential(provider.as_ref(), cx, &mut first)
             .await
             .map_err(credential_error)?;
-        let rejection = match call(with_credential(base.clone(), &applied)).await {
+        let rejection = match call(tracked(&first)).await {
             Err(err) if is_rejection(&err) => err,
             other => return other,
         };
-        let mut fresh = HeaderMap::new();
-        match refresh_credential(provider.as_ref(), cx, &cred, &mut fresh).await {
-            None => Err(rejection),
-            Some(Ok(_)) => call(with_credential(base, &fresh)).await,
-            // Go `applyAndSend` on the fresh credential: its apply error is returned.
-            Some(Err(err @ gadk_auth::Error::ApplyCredential(_))) => Err(credential_error(err)),
+        let Some(refresher) = provider.as_refreshing() else {
+            return Err(rejection);
+        };
+        let fresh = match refresher.refresh(cx, &cred).await {
+            Ok(fresh) => fresh,
             // Interactive consent is something the caller can act on; every other refresh
             // failure degrades to the rejection the server actually sent.
-            Some(Err(err)) if find_consent(&err).is_some() => Err(credential_error(err)),
-            Some(Err(_)) => Err(rejection),
-        }
+            Err(err) if find_consent(&err).is_some() => return Err(credential_error(err)),
+            Err(_) => return Err(rejection),
+        };
+        // Go `applyAndSend` on the fresh credential: its apply error is returned.
+        let mut replay = request;
+        fresh
+            .apply(&mut replay)
+            .await
+            .map_err(|e| credential_error(gadk_auth::Error::ApplyCredential(Box::new(e))))?;
+        call(tracked(&replay)).await
     }
 }
 
@@ -241,7 +252,7 @@ impl StreamableHttpClient for AdkHttpClient {
 }
 
 /// Go `trackingTransport` for one header name: the ADK tracking tokens, then the whitespace-split
-/// tokens of `existing` (the configured values, in order) not already present, joined by one
+/// tokens of `existing` (the request's values, in order) not already present, joined by one
 /// space.
 pub(crate) fn merge_tracking_tokens(existing: &[&str]) -> String {
     let tracking = gadk_platform::tracking_header();
@@ -276,18 +287,31 @@ fn credential_error(err: gadk_auth::Error) -> HttpError {
     StreamableHttpError::Io(std::io::Error::other(err))
 }
 
-/// `base` with the headers a credential applied; a name it set twice is sent once, its values
-/// joined with `", "`.
-fn with_credential(
-    mut base: HashMap<HeaderName, HeaderValue>,
-    applied: &HeaderMap,
-) -> HashMap<HeaderName, HeaderValue> {
-    for name in applied.keys() {
-        if let Some(value) = joined(applied.get_all(name).iter()) {
-            base.insert(name.clone(), value);
+/// Go `trackingTransport.RoundTrip` over a request's final headers: each name sent once, its
+/// values joined with `", "`, and `user-agent`/`x-goog-api-client` set to the ADK tracking tokens
+/// followed by the tokens of the request's values (configured or credential-written), without
+/// duplicates.
+fn tracked(headers: &HeaderMap) -> HashMap<HeaderName, HeaderValue> {
+    let mut out = HashMap::new();
+    for name in headers.keys() {
+        if *name == USER_AGENT || *name == X_GOOG_API_CLIENT {
+            continue;
+        }
+        if let Some(value) = joined(headers.get_all(name).iter()) {
+            out.insert(name.clone(), value);
         }
     }
-    base
+    for name in [USER_AGENT, X_GOOG_API_CLIENT] {
+        let existing: Vec<&str> = headers
+            .get_all(&name)
+            .iter()
+            .filter_map(|v| std::str::from_utf8(v.as_bytes()).ok())
+            .collect();
+        if let Ok(value) = HeaderValue::from_str(&merge_tracking_tokens(&existing)) {
+            out.insert(name, value);
+        }
+    }
+    out
 }
 
 /// One header value from `values`: the value itself when there is one, else all of them joined

@@ -460,3 +460,117 @@ fn configured_headers_are_sent_and_joined() {
     assert_eq!(get("user-agent"), gadk_platform::tracking_header());
     assert_eq!(sent.len(), 5);
 }
+
+/// Go `auth.Transport.RoundTrip` degrades every non-consent `Refresh` error to the rejection,
+/// even one that is itself an `Error::ApplyCredential`: only `applyAndSend`'s apply error of the
+/// fresh credential is returned.
+#[tokio::test]
+async fn a_refresh_error_that_is_an_apply_error_still_degrades() {
+    let server = HttpTestServer::start(weather_server).await;
+    server.set_front(Some(reject_unless("fresh", StatusCode::UNAUTHORIZED, None)));
+    let uri: Arc<str> = server.url().into();
+
+    let provider = Rotating::new(
+        "stale",
+        Err(AuthError::ApplyCredential(Box::new(AuthError::msg("boom")))),
+    );
+    let err = auth_client(provider.clone())
+        .delete_session(uri, "s-1".into(), None, HashMap::new())
+        .await
+        .err()
+        .unwrap();
+    assert!(
+        matches!(&err, StreamableHttpError::Client(e) if e.status() == Some(StatusCode::UNAUTHORIZED)),
+        "{err:?}"
+    );
+    assert_eq!(provider.refreshes(), 1);
+    assert_eq!(authorizations(&server.requests()), ["Bearer stale"]);
+}
+
+/// A bearer token that also writes its own `user-agent`.
+#[derive(Debug)]
+struct AgentBearer(&'static str);
+
+#[async_trait::async_trait]
+impl Credential for AgentBearer {
+    async fn apply(&self, headers: &mut http::HeaderMap) -> Result<(), AuthError> {
+        headers.insert(
+            http::header::AUTHORIZATION,
+            HeaderValue::try_from(format!("Bearer {}", self.0)).unwrap(),
+        );
+        headers.insert(USER_AGENT, HeaderValue::from_static("cred-agent/1"));
+        Ok(())
+    }
+}
+
+/// Yields `AgentBearer("stale")` and refreshes to `AgentBearer("fresh")`.
+struct AgentProvider;
+
+#[async_trait::async_trait]
+impl CredentialProvider for AgentProvider {
+    async fn credential(&self, _cx: &AuthContext) -> Result<Arc<dyn Credential>, AuthError> {
+        Ok(Arc::new(AgentBearer("stale")))
+    }
+
+    fn as_refreshing(&self) -> Option<&dyn RefreshingProvider> {
+        Some(self)
+    }
+}
+
+#[async_trait::async_trait]
+impl RefreshingProvider for AgentProvider {
+    async fn refresh(
+        &self,
+        _cx: &AuthContext,
+        _rejected: &Arc<dyn Credential>,
+    ) -> Result<Arc<dyn Credential>, AuthError> {
+        Ok(Arc::new(AgentBearer("fresh")))
+    }
+}
+
+/// Go wraps `auth.Transport` around `trackingTransport` (set.go `httpClient`), so the tracking
+/// step merges a `user-agent` the credential wrote after the ADK tokens, on the first send and on
+/// the replay.
+#[tokio::test]
+async fn a_credential_user_agent_is_merged_after_the_tracking_tokens() {
+    let server = HttpTestServer::start(weather_server).await;
+    server.set_front(Some(Arc::new(|parts, _| {
+        let fresh = parts
+            .headers
+            .get("authorization")
+            .is_some_and(|v| v == "Bearer fresh");
+        let status = if fresh {
+            StatusCode::OK
+        } else {
+            StatusCode::UNAUTHORIZED
+        };
+        Some(
+            http::Response::builder()
+                .status(status)
+                .body(String::new())
+                .unwrap(),
+        )
+    })));
+    let mut headers = http::HeaderMap::new();
+    headers.insert(USER_AGENT, HeaderValue::from_static("caller-app/1.0"));
+    let client = AdkHttpClient {
+        inner: reqwest::Client::new(),
+        headers,
+        auth: Some((Arc::new(AgentProvider), AuthContext::anonymous())),
+    };
+    client
+        .delete_session(server.url().into(), "s-1".into(), None, HashMap::new())
+        .await
+        .unwrap();
+
+    let adk = gadk_platform::tracking_header();
+    let got = server.requests();
+    assert_eq!(authorizations(&got), ["Bearer stale", "Bearer fresh"]);
+    for r in &got {
+        // The credential's `insert` replaces the configured value, as Go's `Header.Set` does.
+        let ua: Vec<_> = r.headers.get_all("user-agent").iter().collect();
+        assert_eq!(ua, [format!("{adk} cred-agent/1").as_str()]);
+        let xgac: Vec<_> = r.headers.get_all("x-goog-api-client").iter().collect();
+        assert_eq!(xgac, [adk.as_str()]);
+    }
+}
