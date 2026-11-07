@@ -62,4 +62,6 @@ pub use providers::{
     ServiceAccountConfig, adc, api_key, service_account, static_token, token_source,
 };
 pub use store::{CredentialKey, CredentialStore, EXPIRY_SKEW, InMemoryCredentialStore};
-pub use transport::{Transport, client, find_consent_in};
+pub use transport::{
+    Transport, apply_credential, client, find_consent_in, is_auth_rejected, refresh_credential,
+};

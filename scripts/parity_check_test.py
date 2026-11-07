@@ -18,6 +18,10 @@ class ConvTest(unittest.TestCase):
             "Test_inMemoryService": "test_in_memory_service",
             "TestMetadataVertexAISSEStream": "test_metadata_vertex_aisse_stream",
             "TestOAuth2TokenSourceError": "test_o_auth2_token_source_error",
+            "TestMCPTool_EmptyTextResponse": "test_mcp_tool_empty_text_response",
+            "TestNewToolSet_RequireConfirmationProvider_Validation":
+                "test_new_tool_set_require_confirmation_provider_validation",
+            "TestMCPToolSetConfirmation": "test_mcp_tool_set_confirmation",
             "FuzzRedact": "fuzz_redact",
             "FuzzRedact_Seeds": "fuzz_redact_seeds",
         }
@@ -538,6 +542,77 @@ class TwoBTest(unittest.TestCase):
             self.run_cli("--ledger", "all", "--files", "auth/credential_test.go")
 
 
+LEDGER_2C = (
+    "# Parity ledger — sub-project 2c\n\n"
+    "<!-- in-scope:\ntool/mcptoolset/tool_test.go\ntool/mcptoolset/set_test.go\n-->\n\n"
+    + pc.TABLE_HEADER + "\n" + pc.TABLE_SEP + "\n"
+)
+
+MCP_TOOL_TARGET = "crates/gadk-mcp/src/parity_tests/tool_mcptoolset_tool.rs"
+MCP_SET_TARGET = "crates/gadk/tests/tool_mcptoolset_set.rs"
+
+
+class TwoCTest(unittest.TestCase):
+    """2c: a gadk-mcp white-box target and a façade tests target; the ledger starts with a
+    header and no rows, and the scaffold's placeholder target reports its tests missing."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        d = pathlib.Path(self._tmp.name)
+        self.go, self.repo = d / "go", d / "repo"
+        (self.go / "tool/mcptoolset").mkdir(parents=True)
+        (self.go / "tool/mcptoolset/tool_test.go").write_text(
+            "package mcptoolset\nfunc TestMCPToolRunContent(t *testing.T) {}\n"
+            "func TestHasMIMECharsetParameter(t *testing.T) {}\n")
+        (self.go / "tool/mcptoolset/set_test.go").write_text(
+            "package mcptoolset_test\nfunc TestMCPToolSet(t *testing.T) {}\n")
+        (self.repo / "crates/gadk-mcp/src/parity_tests").mkdir(parents=True)
+        (self.repo / "crates/gadk/tests").mkdir(parents=True)
+        (self.repo / "docs/parity").mkdir(parents=True)
+        # The placeholder the 2c scaffold leaves for Task 3.
+        (self.repo / MCP_TOOL_TARGET).write_text(
+            "//! Port of Go `tool/mcptoolset/tool_test.go` (package `mcptoolset`; Task 3).\n")
+        (self.repo / MCP_SET_TARGET).write_text("#[tokio::test]\nasync fn test_mcp_tool_set() {}\n")
+        self.ledger = self.repo / "docs/parity/2c.md"
+        self.ledger.write_text(LEDGER_2C)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def run_cli(self, *args):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = pc.main(["--adk-go", str(self.go), "--repo", str(self.repo), *args])
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_placeholder_reports_missing_and_generate_refuses(self):
+        self.assertEqual(self.run_cli("--ledger", "2c", "--count"), (0, "3\n", ""))
+        self.assertEqual(
+            self.run_cli("--ledger", "2c", "--files", "tool/mcptoolset/set_test.go")[0], 0)
+        rc, _, err = self.run_cli("--ledger", "2c")
+        self.assertEqual(rc, 1)
+        self.assertIn(
+            "tool/mcptoolset/tool_test.go TestHasMIMECharsetParameter: missing (no fn"
+            " test_has_mime_charset_parameter and no `// parity: skipped"
+            " TestHasMIMECharsetParameter:` in " + MCP_TOOL_TARGET + ")", err)
+        self.assertEqual(self.run_cli("--ledger", "2c", "--generate")[0], 1)
+        self.assertEqual(self.ledger.read_text(), LEDGER_2C)
+
+    def test_ports_generate_rows(self):
+        (self.repo / MCP_TOOL_TARGET).write_text(
+            "// parity: adapted: nil content cases are skipped\n#[test]\nfn test_mcp_tool_run_content() {}\n"
+            "\n#[test]\nfn test_has_mime_charset_parameter() {}\n")
+        self.assertEqual(self.run_cli("--ledger", "2c", "--generate")[0], 0)
+        self.assertEqual(self.run_cli("--ledger", "2c")[0], 0)
+        text = self.ledger.read_text()
+        self.assertIn(
+            "| tool/mcptoolset/tool_test.go | TestMCPToolRunContent | ported (adapted: nil content"
+            " cases are skipped) | " + MCP_TOOL_TARGET + " | test_mcp_tool_run_content |", text)
+        self.assertIn(
+            "| tool/mcptoolset/set_test.go | TestMCPToolSet | ported | " + MCP_SET_TARGET
+            + " | test_mcp_tool_set |", text)
+
+
 ADK_GO = pathlib.Path(os.environ.get("ADK_GO_DIR", HERE.parent.parent / "adk-go"))
 
 
@@ -650,6 +725,23 @@ class RealTreeTest(unittest.TestCase):
         self.assertEqual(pc.count(ADK_GO, in_scope), 203)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "2b"), [])
         self.assertIn("FuzzRedact", pc.go_tests(ADK_GO, "auth/gcp/redact_fuzz_test.go"))
+
+    def test_2c_count_is_47(self):
+        in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/2c.md")
+        self.assertEqual(in_scope, [
+            "tool/mcptoolset/auth_session_test.go",
+            "tool/mcptoolset/client_cancellation_test.go",
+            "tool/mcptoolset/client_test.go",
+            "tool/mcptoolset/set_test.go",
+            "tool/mcptoolset/tool_test.go",
+            "tool/mcptoolset/tracking_test.go",
+            "tool/mcptoolset/transport_config_test.go",
+        ])
+        self.assertEqual(deferred, {})
+        self.assertEqual(pc.count(ADK_GO, in_scope), 47)
+        self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "2c"), [])
+        for f in in_scope:
+            self.assertEqual([t for t in pc.go_tests(ADK_GO, f) if t.startswith("Fuzz")], [], f)
 
     def test_earlier_ledgers_have_no_fuzz_tests(self):
         # Widening GO_TEST to `Fuzz*` must not change any 1a-2a ledger.

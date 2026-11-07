@@ -59,7 +59,8 @@ class EdgeTest(unittest.TestCase):
     def test_auth_edges_are_exactly_agent_and_platform(self):
         self.assertEqual(cwd.ALLOWED["gadk-auth"], {"gadk-agent", "gadk-platform"})
         self.assertIn("gadk-auth", cwd.ALLOWED["gadk"])
-        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-auth" in deps], ["gadk"])
+        # 2c: gadk-mcp applies credentials to MCP requests, so it is the one other dependent.
+        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-auth" in deps], ["gadk-mcp", "gadk"])
 
     def test_auth_normal_dependency_on_engine_is_rejected(self):
         self.edit("gadk-auth", "[dependencies]\n", "[dependencies]\ngadk-engine = { workspace = true }\n")
@@ -80,6 +81,26 @@ class EdgeTest(unittest.TestCase):
         self.edit("gadk", "gadk-auth = { workspace = true }\n", "")
         errs = cwd.check(self.repo)
         self.assertTrue(any("gadk -> gadk-auth is missing" in e for e in errs), errs)
+
+    def test_mcp_edges_are_exactly_agent_auth_genai_platform(self):
+        self.assertEqual(cwd.ALLOWED["gadk-mcp"], {"gadk-agent", "gadk-auth", "gadk-genai", "gadk-platform"})
+        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-mcp" in deps], ["gadk"])
+        self.assertIn("gadk-platform", cwd.ALLOWED["gadk-gemini"])
+
+    def test_mcp_normal_dependency_on_engine_is_rejected(self):
+        self.edit("gadk-mcp", "[dependencies]\n", "[dependencies]\ngadk-engine = { workspace = true }\n")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-mcp -> gadk-engine is not allowed" in e for e in errs), errs)
+
+    def test_mcp_dev_dependency_on_tools_is_rejected(self):
+        self.edit("gadk-mcp", "[dev-dependencies]\n", "[dev-dependencies]\ngadk-tools = { workspace = true }\n")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("only gadk may depend on gadk-tools" in e for e in errs), errs)
+
+    def test_facade_missing_mcp_edge_is_rejected(self):
+        self.edit("gadk", "gadk-mcp = { workspace = true, optional = true }\n", "")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk -> gadk-mcp is missing" in e for e in errs), errs)
 
     def test_disallowed_normal_edge_is_rejected(self):
         self.edit("gadk-artifact", "[dependencies]\n", "[dependencies]\ngadk-session = { workspace = true }\n")

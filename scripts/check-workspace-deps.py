@@ -13,8 +13,11 @@
   `gadk-tools`, normal or dev (2a: gadk-tools builds on the engine's public API; its tests use
   the engine's `testutil` feature).
 - 2b: `gadk-auth` depends on exactly `gadk-agent` and `gadk-platform` (never `gadk-engine` or
-  `gadk-tools`), and only the façade depends on it; `gadk-tools` stays free of `gadk-auth`
-  because `toolauth` is a pure data model.
+  `gadk-tools`), and only the façade (and, from 2c, `gadk-mcp`) depends on it; `gadk-tools` stays
+  free of `gadk-auth` because `toolauth` is a pure data model.
+- 2c: `gadk-mcp` depends on exactly `gadk-agent`, `gadk-auth`, `gadk-genai` and `gadk-platform`
+  (never `gadk-engine` or `gadk-tools`), and only the façade depends on it; `gadk-gemini`
+  depends on `gadk-platform` for the shared tracking header.
 """
 import pathlib, sys, tomllib
 
@@ -22,7 +25,7 @@ ALLOWED = {
     "gadk-genai": set(),
     "gadk-platform": set(),
     "gadk-model": {"gadk-genai"},
-    "gadk-gemini": {"gadk-genai", "gadk-model"},
+    "gadk-gemini": {"gadk-genai", "gadk-model", "gadk-platform"},
     "gadk-session": {"gadk-genai", "gadk-model", "gadk-platform"},
     "gadk-httprr": {"gadk-model"},
     "gadk-artifact": {"gadk-genai", "gadk-platform"},
@@ -33,8 +36,10 @@ ALLOWED = {
     "gadk-tools": {"gadk-agent", "gadk-engine", "gadk-genai", "gadk-model", "gadk-platform",
                    "gadk-session", "gadk-memory", "gadk-artifact"},
     "gadk-auth": {"gadk-agent", "gadk-platform"},
+    "gadk-mcp": {"gadk-agent", "gadk-auth", "gadk-genai", "gadk-platform"},
     "gadk": {"gadk-genai", "gadk-platform", "gadk-model", "gadk-session", "gadk-gemini",
-             "gadk-agent", "gadk-engine", "gadk-tools", "gadk-auth", "gadk-artifact", "gadk-memory"},
+             "gadk-agent", "gadk-engine", "gadk-tools", "gadk-auth", "gadk-mcp", "gadk-artifact",
+             "gadk-memory"},
 }
 # (crate, dependency) normal edges that must be `optional = true`.
 OPTIONAL = {("gadk-engine", "gadk-gemini"), ("gadk-engine", "gadk-httprr")}
