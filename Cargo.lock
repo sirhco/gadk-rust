@@ -959,19 +959,14 @@ dependencies = [
  "gadk-model",
  "gadk-platform",
  "gadk-session",
- "parking_lot 0.13.0",
  "pretty_assertions",
  "regex",
  "regex-syntax",
- "rstest",
  "schemars 1.2.3",
  "serde",
  "serde-saphyr",
  "serde_json",
- "thiserror",
  "tokio",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
