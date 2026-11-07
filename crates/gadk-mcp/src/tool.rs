@@ -46,7 +46,6 @@ pub struct McpTool {
 
 impl McpTool {
     /// Go `convertTool`.
-    #[allow(dead_code)] // called by Task 9's `McpToolset::tools`
     pub(crate) fn new(
         tool: rmcp::model::Tool,
         client: Arc<dyn McpClient>,
