@@ -144,10 +144,45 @@ impl Config {
         key
     }
 
-    /// Go `Config.WithoutSecrets`: a deep copy with secrets dropped and `credential_key` set.
-    #[allow(unused_variables, clippy::todo)]
+    /// A deep copy of the config without the secrets the agent was configured with, for
+    /// sending to the client and keeping in the session (Go `Config.WithoutSecrets`).
+    ///
+    /// In both `raw_auth_credential` and `exchanged_auth_credential` it drops the API key, the
+    /// OAuth2 client secret, the HTTP password, token and additional headers, and a service
+    /// account's private key and key ID. That is adk-python's `_without_configured_secrets`,
+    /// which leaves the service account key in. Everything else, the PKCE code verifier
+    /// included, is kept. The copy carries this config's [`Config::key`] in `credential_key`,
+    /// since its stripped content would derive a different one.
+    ///
+    /// The copy shares nothing with `self`: `Clone` copies every map, list and extra value.
+    /// Infallible, unlike Go's, because [`Config::key`] is (spec R12).
     pub fn without_secrets(&self) -> Config {
-        todo!("Task 7")
+        let mut out = self.clone();
+        out.credential_key = self.key();
+        for cred in [
+            out.raw_auth_credential.as_mut(),
+            out.exchanged_auth_credential.as_mut(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            cred.api_key = String::new();
+            if let Some(o) = cred.oauth2.as_mut() {
+                o.client_secret = String::new();
+            }
+            if let Some(h) = cred.http.as_mut() {
+                h.credentials.password = String::new();
+                h.credentials.token = String::new();
+                h.additional_headers = None;
+            }
+            if let Some(sa) = cred.service_account.as_mut()
+                && let Some(key) = sa.service_account_credential.as_mut()
+            {
+                key.private_key = String::new();
+                key.private_key_id = String::new();
+            }
+        }
+        out
     }
 
     /// Go `Config.UnmarshalJSON`: `decodeModel(data, …, "Config", "authScheme")`.

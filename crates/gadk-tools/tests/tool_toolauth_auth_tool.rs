@@ -16,9 +16,12 @@
 
 //! Port of Go tool/toolauth/auth_tool_test.go.
 
+use std::collections::BTreeMap;
+
 use gadk_tools::toolauth::{
-    Config, Credential, CredentialType, Extra, OAuth2Auth, OAuthFlow, OAuthFlows,
-    REQUEST_CREDENTIAL_FUNCTION_CALL_NAME, Scheme, SchemeType, ToolArguments,
+    Config, Credential, CredentialType, Extra, HttpAuth, HttpCredentials, OAuth2Auth, OAuthFlow,
+    OAuthFlows, REQUEST_CREDENTIAL_FUNCTION_CALL_NAME, Scheme, SchemeType, ServiceAccount,
+    ServiceAccountCredential, ToolArguments,
 };
 use serde_json::value::RawValue;
 
@@ -546,4 +549,297 @@ fn test_config_marshal_writes_key() {
             tc.name
         );
     }
+}
+
+/// Go `saKey` (auth_credential_test.go:28).
+fn sa_key(key_type: &str) -> ServiceAccountCredential {
+    ServiceAccountCredential {
+        r#type: key_type.into(),
+        project_id: "proj".into(),
+        private_key_id: "kid".into(),
+        private_key: "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n".into(),
+        client_email: "sa@proj.iam.gserviceaccount.com".into(),
+        client_id: "123".into(),
+        auth_uri: "https://accounts.google.com/o/oauth2/auth".into(),
+        token_uri: "https://oauth2.googleapis.com/token".into(),
+        auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs".into(),
+        client_x509_cert_url: "https://www.googleapis.com/robot/v1/metadata/x509/sa".into(),
+        universe_domain: "googleapis.com".into(),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn test_config_without_secrets_matches_python() {
+    // Each want is what adk-python 2.12.0's _without_configured_secrets returns for the same
+    // config. Its credentialKey is the key the original derived, with the secrets still in.
+    struct Case {
+        name: &'static str,
+        data: &'static str,
+        want: &'static str,
+    }
+    let tests = [
+        Case {
+            // The PKCE verifier stays: Python needs it back on resume.
+            name: "OAuth2 waiting for consent",
+            data: concat!(
+                r#"{"authScheme":{"type":"oauth2","flows":{"authorizationCode":{"authorizationUrl":"https://example.com/authorize","tokenUrl":"https://example.com/token"}}},"#,
+                r#""rawAuthCredential":{"authType":"oauth2","oauth2":{"clientId":"cid","clientSecret":"sec"}},"#,
+                r#""exchangedAuthCredential":{"authType":"oauth2","oauth2":{"clientId":"cid","clientSecret":"sec","authUri":"https://example.com/authorize?state=s1","state":"s1","codeVerifier":"v1","codeChallengeMethod":"S256"}}}"#,
+            ),
+            want: concat!(
+                r#"{"authScheme":{"type":"oauth2","flows":{"authorizationCode":{"scopes":{},"authorizationUrl":"https://example.com/authorize","tokenUrl":"https://example.com/token"}}},"#,
+                r#""rawAuthCredential":{"authType":"oauth2","oauth2":{"clientId":"cid","tokenEndpointAuthMethod":"client_secret_basic"}},"#,
+                r#""exchangedAuthCredential":{"authType":"oauth2","oauth2":{"clientId":"cid","authUri":"https://example.com/authorize?state=s1","state":"s1","codeVerifier":"v1","codeChallengeMethod":"S256","tokenEndpointAuthMethod":"client_secret_basic"}},"#,
+                r#""credentialKey":"adk_oauth2_5a0ef268bdc8890b_oauth2_0833ddacfe0bd302"}"#,
+            ),
+        },
+        Case {
+            name: "HTTP basic",
+            data: concat!(
+                r#"{"authScheme":{"type":"http","scheme":"basic"},"#,
+                r#""rawAuthCredential":{"authType":"http","http":{"scheme":"basic","credentials":{"username":"u","password":"p","token":"t"},"additionalHeaders":{"X-Secret":"h"}}}}"#,
+            ),
+            want: concat!(
+                r#"{"authScheme":{"type":"http","scheme":"basic"},"rawAuthCredential":{"authType":"http","http":{"scheme":"basic","credentials":{"username":"u"}}},"#,
+                r#""credentialKey":"adk_http_fc8df715f5002444_http_ac2b0193e6f6c376"}"#,
+            ),
+        },
+        Case {
+            name: "API key",
+            data: r#"{"authScheme":{"type":"apiKey","in":"header","name":"X-Api-Key"},"rawAuthCredential":{"authType":"apiKey","apiKey":"k"}}"#,
+            want: concat!(
+                r#"{"authScheme":{"type":"apiKey","in":"header","name":"X-Api-Key"},"rawAuthCredential":{"authType":"apiKey"},"#,
+                r#""credentialKey":"adk_apiKey_12037b6b68d3604d_apiKey_39fdaa2147b3f2d1"}"#,
+            ),
+        },
+    ];
+    for tc in tests {
+        let config: Config = serde_json::from_str(tc.data)
+            .unwrap_or_else(|e| panic!("{}: serde_json::from_str() error = {e}", tc.name));
+        let stripped = config.without_secrets();
+        let got = serde_json::to_string(&stripped)
+            .unwrap_or_else(|e| panic!("{}: serde_json::to_string() error = {e}", tc.name));
+        assert_eq!(
+            decode_json(tc.want),
+            decode_json(&got),
+            "{}: without_secrets() differs from adk-python (left: want, right: got)",
+            tc.name
+        );
+    }
+}
+
+#[test]
+fn test_config_without_secrets_drops_service_account_key() {
+    // adk-python leaves the service account key in. ADK Go strips it with the other secrets
+    // the agent was configured with.
+    let config = Config {
+        auth_scheme: Scheme {
+            r#type: SchemeType::HTTP,
+            scheme: "bearer".into(),
+            ..Default::default()
+        },
+        raw_auth_credential: Some(Credential {
+            auth_type: CredentialType::SERVICE_ACCOUNT,
+            service_account: Some(ServiceAccount {
+                service_account_credential: Some(sa_key("service_account")),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let stripped = config.without_secrets();
+    let mut want = sa_key("service_account");
+    want.private_key = String::new();
+    want.private_key_id = String::new();
+    let got = stripped
+        .raw_auth_credential
+        .as_ref()
+        .and_then(|c| c.service_account.as_ref())
+        .and_then(|sa| sa.service_account_credential.as_ref());
+    assert_eq!(
+        Some(&want),
+        got,
+        "without_secrets() key mismatch (left: want, right: got)"
+    );
+}
+
+#[test]
+fn test_config_without_secrets_copies_configs_built_in_go() {
+    // Neither the scheme, which has no type, nor the credential, which has no auth_type, would
+    // decode from JSON. adk-python's model_copy copies whatever the model holds, and so does
+    // without_secrets, leaving every value as it was.
+    let config = Config {
+        auth_scheme: Scheme {
+            description: "d".into(),
+            ..Default::default()
+        },
+        raw_auth_credential: Some(Credential {
+            api_key: "k".into(),
+            oauth2: Some(OAuth2Auth {
+                client_id: "cid".into(),
+                client_secret: "sec".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+        credential_key: "my_key".into(),
+        extra: extra(&[("n", "5")]),
+        ..Default::default()
+    };
+    let got = config.without_secrets();
+    let want = Config {
+        auth_scheme: Scheme {
+            description: "d".into(),
+            ..Default::default()
+        },
+        raw_auth_credential: Some(Credential {
+            oauth2: Some(OAuth2Auth {
+                client_id: "cid".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+        credential_key: "my_key".into(),
+        extra: extra(&[("n", "5")]),
+        ..Default::default()
+    };
+    assert_eq!(
+        want, got,
+        "without_secrets() mismatch (left: want, right: got)"
+    );
+}
+
+/// Go `configWithEverySharedValue`: a config that sets every map, list and optional value a
+/// copy could share with the original. Its credential holds an HTTP, an OAuth2 and a service
+/// account credential at once, which only code can build.
+fn config_with_every_shared_value() -> Config {
+    Config {
+        auth_scheme: Scheme {
+            r#type: SchemeType::OPEN_ID_CONNECT,
+            flows: Some(OAuthFlows {
+                implicit: Some(OAuthFlow {
+                    authorization_url: TEST_AUTH_URL.into(),
+                    ..Default::default()
+                }),
+                password: Some(OAuthFlow {
+                    token_url: TEST_TOKEN_URL.into(),
+                    ..Default::default()
+                }),
+                client_credentials: Some(OAuthFlow {
+                    token_url: TEST_TOKEN_URL.into(),
+                    ..Default::default()
+                }),
+                authorization_code: Some(OAuthFlow {
+                    authorization_url: TEST_AUTH_URL.into(),
+                    token_url: TEST_TOKEN_URL.into(),
+                    scopes: BTreeMap::from([("read".to_owned(), "Read".to_owned())]),
+                    extra: extra(&[("x-flow", r#""f""#)]),
+                    ..Default::default()
+                }),
+                extra: extra(&[("x-flows", r#""f""#)]),
+            }),
+            token_endpoint_auth_methods_supported: Some(vec!["client_secret_basic".into()]),
+            grant_types_supported: Some(vec!["authorization_code".into()]),
+            scopes: Some(vec!["openid".into()]),
+            extra: extra(&[("x-nested", r#"{"list":[{"k":"v"}]}"#)]),
+            ..Default::default()
+        },
+        raw_auth_credential: Some(Credential {
+            auth_type: CredentialType::HTTP,
+            http: Some(HttpAuth {
+                scheme: "basic".into(),
+                credentials: HttpCredentials {
+                    username: "u".into(),
+                    password: "p".into(),
+                    extra: extra(&[("x-cred", r#""c""#)]),
+                    ..Default::default()
+                },
+                additional_headers: Some(BTreeMap::from([("X-Secret".to_owned(), "h".to_owned())])),
+                extra: extra(&[("x-http", r#""h""#)]),
+            }),
+            oauth2: Some(OAuth2Auth {
+                client_id: "cid".into(),
+                client_secret: "sec".into(),
+                extra: extra(&[("x-oauth2", r#""o""#)]),
+                ..Default::default()
+            }),
+            service_account: Some(ServiceAccount {
+                service_account_credential: Some(ServiceAccountCredential {
+                    private_key: "pk".into(),
+                    extra: extra(&[("x-key", r#""k""#)]),
+                    ..Default::default()
+                }),
+                scopes: Some(vec!["s".into()]),
+                extra: extra(&[("x-sa", r#""s""#)]),
+                ..Default::default()
+            }),
+            extra: extra(&[("x-raw", r#""r""#)]),
+            ..Default::default()
+        }),
+        exchanged_auth_credential: Some(Credential {
+            auth_type: CredentialType::API_KEY,
+            api_key: "k".into(),
+            extra: extra(&[("x-exchanged", r#""e""#)]),
+            ..Default::default()
+        }),
+        extra: extra(&[("x-config", r#""c""#)]),
+        ..Default::default()
+    }
+}
+
+// parity: adapted: extras are immutable raw JSON text, so Go's in-place writes into Extra maps (including the nested x-nested list) become replacing the stripped copy's entry; the original is compared unchanged
+#[test]
+fn test_config_without_secrets_leaves_original_alone() {
+    let config = config_with_every_shared_value();
+    let mut stripped = config.without_secrets();
+    let changed = || raw(r#""changed""#);
+
+    let scheme = &mut stripped.auth_scheme;
+    let flows = scheme.flows.as_mut().unwrap();
+    flows.implicit.as_mut().unwrap().refresh_url = "changed".into();
+    flows.password.as_mut().unwrap().refresh_url = "changed".into();
+    flows.client_credentials.as_mut().unwrap().refresh_url = "changed".into();
+    let code = flows.authorization_code.as_mut().unwrap();
+    code.scopes.insert("read".into(), "changed".into());
+    code.extra.insert("x-flow".into(), changed());
+    flows.extra.insert("x-flows".into(), changed());
+    scheme
+        .token_endpoint_auth_methods_supported
+        .as_mut()
+        .unwrap()[0] = "changed".into();
+    scheme.grant_types_supported.as_mut().unwrap()[0] = "changed".into();
+    scheme.scopes.as_mut().unwrap()[0] = "changed".into();
+    scheme
+        .extra
+        .insert("x-nested".into(), raw(r#"{"list":[{"k":"changed"}]}"#));
+    let raw_cred = stripped.raw_auth_credential.as_mut().unwrap();
+    let http = raw_cred.http.as_mut().unwrap();
+    http.credentials.username = "changed".into();
+    http.credentials.extra.insert("x-cred".into(), changed());
+    http.extra.insert("x-http".into(), changed());
+    let oauth2 = raw_cred.oauth2.as_mut().unwrap();
+    oauth2.client_id = "changed".into();
+    oauth2.extra.insert("x-oauth2".into(), changed());
+    let sa = raw_cred.service_account.as_mut().unwrap();
+    let key = sa.service_account_credential.as_mut().unwrap();
+    key.client_email = "changed".into();
+    key.extra.insert("x-key".into(), changed());
+    sa.scopes.as_mut().unwrap()[0] = "changed".into();
+    sa.extra.insert("x-sa".into(), changed());
+    raw_cred.extra.insert("x-raw".into(), changed());
+    stripped
+        .exchanged_auth_credential
+        .as_mut()
+        .unwrap()
+        .extra
+        .insert("x-exchanged".into(), changed());
+    stripped.extra.insert("x-config".into(), changed());
+
+    assert_eq!(
+        config_with_every_shared_value(),
+        config,
+        "original changed (left: want, right: got)"
+    );
 }
