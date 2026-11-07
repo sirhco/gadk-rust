@@ -197,8 +197,9 @@ impl StoreState {
 pub(crate) const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 
 /// store.go:249 `expired`: `!(expires_at > now + EXPIRY_SKEW)`. The gcp provider's caching floor
-/// (`cache_until`) is its complement. Exactly [`EXPIRY_SKEW`] left counts as spent. A `now` so close to the end of
-/// `DateTime`'s range that adding the skew overflows leaves nothing later, so it is expired.
+/// (`cache_until`) is its complement. Exactly [`EXPIRY_SKEW`] left counts as spent. A `now` so
+/// close to the end of `DateTime`'s range that adding the skew overflows leaves nothing later, so
+/// it is expired.
 pub(crate) fn expired(now: DateTime<Utc>, expires_at: DateTime<Utc>) -> bool {
     let skew = TimeDelta::from_std(EXPIRY_SKEW).unwrap_or(TimeDelta::MAX);
     match now.checked_add_signed(skew) {
