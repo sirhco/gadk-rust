@@ -135,12 +135,26 @@ pub(crate) fn go_sprint_value(v: &Value) -> String {
 /// in `%e` form (`d.ddde±XX`, at least two exponent digits) when the decimal exponent is below -4
 /// or at least 6 (strconv ftoa.go: `if shortest { eprec = 6 }`), otherwise plain decimal. So
 /// 1e6 → `1e+06`, 123456 → `123456`, 0.00001 → `1e-05`, -0.0 → `-0`.
+///
+/// Rust's shortest formatters round an exact decimal tie up, while Go rounds it half to even
+/// (141016749166520.625 → Go `1.4101674916652062e+14`). So only the shortest digit count is taken
+/// from `{f:e}`; the digits themselves come from Rust's exact-precision formatting at that count,
+/// which rounds ties to even as Go does.
 fn go_format_float_v(f: f64) -> String {
-    let sci = format!("{f:e}"); // Rust: shortest round-trip mantissa, e.g. "1.234567e6", "-0e0"
+    let shortest = format!("{f:e}"); // e.g. "1.234567e6", "-0e0"
+    let shortest_mant = shortest
+        .split_once('e')
+        .map_or(shortest.as_str(), |(m, _)| m);
+    let digits = shortest_mant.bytes().filter(u8::is_ascii_digit).count();
+    let prec = digits.saturating_sub(1);
+    let sci = format!("{f:.prec$e}");
     let (mant, exp) = sci.split_once('e').unwrap_or((sci.as_str(), "0"));
     let exp: i32 = exp.parse().unwrap_or(0);
     if (-4..6).contains(&exp) {
-        format!("{f}") // Rust Display: shortest round-trip, never exponent form
+        // Plain decimal with the same significant digits: `prec - exp` fraction digits.
+        let frac =
+            usize::try_from(i64::try_from(prec).unwrap_or(i64::MAX) - i64::from(exp)).unwrap_or(0);
+        format!("{f:.frac$}")
     } else {
         format!(
             "{mant}e{}{:02}",
@@ -304,6 +318,9 @@ mod tests {
             ("1.7976931348623157e308", "1.7976931348623157e+308"),
             ("0.1", "0.1"),
             ("-1.5e7", "-1.5e+07"),
+            // Exact decimal ties: Go rounds the shortest digits half to even.
+            ("141016749166520.625", "1.4101674916652062e+14"),
+            ("-783388490710125.25", "-7.833884907101252e+14"),
             ("[]", "[]"),
             (r#"[1,"a",null,true]"#, "[1 a <nil> true]"),
             (r#"[[1,2],{"k":"v"}]"#, "[[1 2] map[k:v]]"),
