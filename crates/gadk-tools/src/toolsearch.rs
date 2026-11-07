@@ -32,7 +32,7 @@ use gadk_model::LlmRequest;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Value, json};
 
-use crate::go_fmt::url_query_escape;
+use crate::go_fmt::{url_query_escape, wrap_err};
 use crate::ranksearch;
 
 /// The name of the search tool exposed to the model (Go `ToolName`).
@@ -101,29 +101,6 @@ pub struct Config {
     pub description: String,
     /// Caps BM25 and regex matches, not exact selections. Zero or negative means 8.
     pub max_results: i32,
-}
-
-/// Go `fmt.Errorf("<msg>: %w", source)`: Display `"<msg>: <source>"`, `source()` = the cause.
-#[derive(Debug)]
-struct Wrapped {
-    msg: &'static str,
-    source: ToolError,
-}
-
-impl std::fmt::Display for Wrapped {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}: {}", self.msg, self.source)
-    }
-}
-
-impl std::error::Error for Wrapped {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&self.source)
-    }
-}
-
-fn wrap(msg: &'static str, source: ToolError) -> ToolError {
-    ToolError::Execution(Box::new(Wrapped { msg, source }))
 }
 
 /// Exposes `cfg.core_tool_names` up front and gates the other base tools behind `search_tools`
@@ -201,7 +178,7 @@ pub(crate) fn new_gating(
                 }
             },
         )
-        .map_err(|e| wrap("toolsearch: build search tool", e))?
+        .map_err(|e| wrap_err("toolsearch: build search tool", e))?
     };
 
     Ok(Arc::new(GatingToolset {
@@ -372,7 +349,7 @@ pub(crate) async fn execute_search(
     let base_tools = base
         .tools(ctx.as_readonly())
         .await
-        .map_err(|e| wrap("toolsearch: list base tools", e))?;
+        .map_err(|e| wrap_err("toolsearch: list base tools", e))?;
 
     // Tools the model already has are excluded from results, which would waste result slots, and
     // select: reports them as already available. They are taken from what `tools` returns, so a
@@ -416,7 +393,7 @@ pub(crate) async fn execute_search(
         .collect();
     let matched_names: Vec<&str> = search_matches.iter().map(|m| m.name.as_str()).collect();
     reveal_tools(ctx, &matched_names)
-        .map_err(|e| wrap("toolsearch: persist discovered tools", e))?;
+        .map_err(|e| wrap_err("toolsearch: persist discovered tools", e))?;
 
     let next_step = if has_connected_skill {
         NEXT_STEP_WITH_SKILL
@@ -570,7 +547,7 @@ impl Toolset for GatingToolset {
         self.base
             .process_request(ctx, req)
             .await
-            .map_err(|e| wrap("toolsearch: base toolset ProcessRequest", e))
+            .map_err(|e| wrap_err("toolsearch: base toolset ProcessRequest", e))
     }
 
     fn as_any(&self) -> &dyn Any {

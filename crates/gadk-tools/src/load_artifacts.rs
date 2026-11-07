@@ -31,7 +31,8 @@ use gadk_genai::{Content, FunctionDeclaration, Part, ROLE_USER, Schema, Type};
 use gadk_model::LlmRequest;
 use serde_json::{Map, Value};
 
-use crate::load_memory::{go_error, go_type_name, wrap_err};
+use crate::go_fmt::wrap_err;
+use crate::load_memory::{go_error, go_type_name};
 
 const NAME: &str = "load_artifacts";
 const DESCRIPTION: &str = "Loads the artifacts and adds them to the session.";

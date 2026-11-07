@@ -29,6 +29,8 @@ use gadk_memory::MemoryEntry;
 use gadk_model::LlmRequest;
 use serde_json::{Map, Value};
 
+use crate::go_fmt::wrap_err;
+
 const NAME: &str = "load_memory";
 const DESCRIPTION: &str = "Loads the memory for the current user.";
 
@@ -188,37 +190,6 @@ pub(crate) fn go_type_name(v: &Value) -> &'static str {
     }
 }
 
-/// Go `fmt.Errorf("<msg>: %w", source)`: Display `"<msg>: <source>"`, `source()` = the wrapped
-/// error.
-#[derive(Debug)]
-struct GoWrapped {
-    msg: String,
-    source: Box<dyn std::error::Error + Send + Sync>,
-}
-
-impl std::fmt::Display for GoWrapped {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}: {}", self.msg, self.source)
-    }
-}
-
-impl std::error::Error for GoWrapped {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&*self.source)
-    }
-}
-
-/// A [`ToolError::Execution`] wrapping `source` as Go's `fmt.Errorf("<msg>: %w", source)` does.
-pub(crate) fn wrap_err(
-    msg: impl Into<String>,
-    source: impl Into<Box<dyn std::error::Error + Send + Sync>>,
-) -> ToolError {
-    ToolError::Execution(Box::new(GoWrapped {
-        msg: msg.into(),
-        source: source.into(),
-    }))
-}
-
 /// A [`ToolError::Execution`] carrying Go's `errors.New(msg)` text.
 pub(crate) fn go_error(msg: impl Into<String>) -> ToolError {
     let msg: String = msg.into();
@@ -293,13 +264,5 @@ mod tests {
         assert_eq!(go_type_name(&json!("s")), "string");
         assert_eq!(go_type_name(&json!([])), "[]interface {}");
         assert_eq!(go_type_name(&json!({})), "map[string]interface {}");
-    }
-
-    #[test]
-    fn wrap_err_keeps_go_text_and_source() {
-        let err = wrap_err("failed to search memory", std::io::Error::other("boom"));
-        assert_eq!(err.to_string(), "failed to search memory: boom");
-        let src = std::error::Error::source(&err).expect("wrapped source");
-        assert_eq!(src.to_string(), "boom");
     }
 }

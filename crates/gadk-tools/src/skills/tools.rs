@@ -31,7 +31,7 @@ use serde_json::{Value, json};
 use tokio::io::AsyncReadExt;
 
 use super::skill::{Frontmatter, MAX_RESOURCE_BYTES, Source};
-use crate::go_fmt::{go_lossy_utf8, html_escape_string};
+use crate::go_fmt::{go_lossy_utf8, html_escape_string, wrap_err};
 
 pub(crate) const LIST_SKILLS_NAME: &str = "list_skills";
 pub(crate) const LIST_SKILLS_DESCRIPTION: &str =
@@ -41,32 +41,6 @@ pub(crate) const LOAD_SKILL_DESCRIPTION: &str =
     "Loads the SKILL.md instructions for a given skill.";
 pub(crate) const LOAD_SKILL_RESOURCE_NAME: &str = "load_skill_resource";
 pub(crate) const LOAD_SKILL_RESOURCE_DESCRIPTION: &str = "Loads a resource file (e.g., from references/ or assets/) associated with the specified skill.";
-
-/// Go `fmt.Errorf("<msg>: %w", err)`: Display `"<msg>: <source>"`, `source()` = the wrapped error.
-#[derive(Debug)]
-struct Wrapped {
-    msg: String,
-    source: Box<dyn std::error::Error + Send + Sync>,
-}
-
-impl std::fmt::Display for Wrapped {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}: {}", self.msg, self.source)
-    }
-}
-
-impl std::error::Error for Wrapped {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&*self.source)
-    }
-}
-
-fn wrap(msg: String, source: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> ToolError {
-    ToolError::Execution(Box::new(Wrapped {
-        msg,
-        source: source.into(),
-    }))
-}
 
 // ---------------------------------------------------------------------------------------------
 // list_skills (Go list_skills.go)
@@ -250,13 +224,13 @@ async fn run_load_skill(
         ));
     }
     let frontmatter = source.load_frontmatter(&args.name).await.map_err(|e| {
-        wrap(
+        wrap_err(
             format!("load frontmatter for skill {}", go_quote(&args.name)),
             e,
         )
     })?;
     let instructions = source.load_instructions(&args.name).await.map_err(|e| {
-        wrap(
+        wrap_err(
             format!("load instructions for skill {}", go_quote(&args.name)),
             e,
         )
@@ -356,13 +330,13 @@ async fn run_load_skill_resource(
     let reader = source
         .load_resource(name, path)
         .await
-        .map_err(|e| wrap(format!("load resource '{path}' from skill '{name}'"), e))?;
+        .map_err(|e| wrap_err(format!("load resource '{path}' from skill '{name}'"), e))?;
     let mut content = Vec::new();
     reader
         .take(MAX_RESOURCE_BYTES as u64 + 1)
         .read_to_end(&mut content)
         .await
-        .map_err(|e| wrap(format!("read resource '{path}' from skill '{name}'"), e))?;
+        .map_err(|e| wrap_err(format!("read resource '{path}' from skill '{name}'"), e))?;
     if content.len() > MAX_RESOURCE_BYTES {
         return Err(ToolError::Execution(
             format!(

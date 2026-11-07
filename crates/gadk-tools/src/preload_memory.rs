@@ -29,7 +29,7 @@ use gadk_agent::{Context, Tool, ToolError};
 use gadk_memory::MemoryEntry;
 use gadk_model::LlmRequest;
 
-use crate::load_memory::wrap_err;
+use crate::go_fmt::wrap_err;
 
 /// Go's zero `time.Time` as Unix seconds (`0001-01-01T00:00:00Z`).
 const GO_ZERO_UNIX_SECONDS: i64 = -62_135_596_800;

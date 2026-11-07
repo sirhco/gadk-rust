@@ -15,9 +15,11 @@
 
 //! Go standard-library formatting and path helpers the tools reproduce byte-for-byte: `net/url`
 //! `QueryEscape`, `html` `EscapeString`, `path` `Clean`, `io/fs` `ValidPath`, `encoding/json` of a
-//! Go `string(bytes)`, and `fmt` `%v` of a JSON-decoded value. Private to the crate (the
-//! engine's and gadk-session's copies are private to those crates).
+//! Go `string(bytes)`, and `fmt` `%v` of a JSON-decoded value; plus the crate's one
+//! `fmt.Errorf("<msg>: %w", err)` wrapper, [`wrap_err`]. Private to the crate (the engine's and
+//! gadk-session's copies are private to those crates).
 
+use gadk_agent::ToolError;
 use serde_json::Value;
 
 /// Go `url.QueryEscape` (net/url/url.go `escape(s, encodeQueryComponent)`): every byte except
@@ -94,6 +96,37 @@ pub(crate) fn path_clean(p: &str) -> String {
 /// a Rust `&str` cannot hold.
 pub(crate) fn valid_path(p: &str) -> bool {
     p == "." || p.split('/').all(|e| !matches!(e, "" | "." | ".."))
+}
+
+/// Go `fmt.Errorf("<msg>: %w", source)`: Display `"<msg>: <source>"`, `source()` = the wrapped
+/// error.
+#[derive(Debug)]
+struct GoWrapped {
+    msg: String,
+    source: Box<dyn std::error::Error + Send + Sync>,
+}
+
+impl std::fmt::Display for GoWrapped {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.msg, self.source)
+    }
+}
+
+impl std::error::Error for GoWrapped {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&*self.source)
+    }
+}
+
+/// A [`ToolError::Execution`] wrapping `source` as Go's `fmt.Errorf("<msg>: %w", source)` does.
+pub(crate) fn wrap_err(
+    msg: impl Into<String>,
+    source: impl Into<Box<dyn std::error::Error + Send + Sync>>,
+) -> ToolError {
+    ToolError::Execution(Box::new(GoWrapped {
+        msg: msg.into(),
+        source: source.into(),
+    }))
 }
 
 /// Go `string(bytes)` as `encoding/json` encodes it: valid UTF-8 is copied, and each byte that
@@ -213,6 +246,29 @@ mod tests {
         ] {
             assert_eq!(url_query_escape(input), want, "QueryEscape({input:?})");
         }
+    }
+
+    #[test]
+    fn wrap_err_keeps_go_text_and_source() {
+        let err = wrap_err("failed to search memory", std::io::Error::other("boom"));
+        assert_eq!(err.to_string(), "failed to search memory: boom");
+        let src = std::error::Error::source(&err).expect("wrapped source");
+        assert_eq!(src.to_string(), "boom");
+    }
+
+    /// A wrapped `ToolError` stays reachable as itself through `source()` (Go `%w`).
+    #[test]
+    fn wrap_err_of_tool_error_sources_the_tool_error() {
+        let err = wrap_err(
+            "toolsearch: list base tools",
+            ToolError::Panic("boom".into()),
+        );
+        assert_eq!(err.to_string(), "toolsearch: list base tools: boom");
+        let src = std::error::Error::source(&err).expect("wrapped source");
+        assert!(matches!(
+            src.downcast_ref::<ToolError>(),
+            Some(ToolError::Panic(m)) if m == "boom"
+        ));
     }
 
     /// Go `string(bytes)` through `encoding/json`: one U+FFFD per byte `utf8.DecodeRune`
