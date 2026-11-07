@@ -46,7 +46,6 @@ const MAX_BALANCING_STEPS: usize = 256;
 
 /// A searchable named entity: a tool or a skill. `tokens` is the pre-built BM25 token bag (use
 /// [`build_tokens`]). Go `Item`.
-#[allow(dead_code)] // consumed by toolsearch (Task 9); Task 11 removes this allow
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct Item {
     pub name: String,
@@ -55,7 +54,6 @@ pub(crate) struct Item {
 }
 
 /// A ranked result: name and (possibly truncated) description. Go `Match`.
-#[allow(dead_code)] // consumed by toolsearch (Task 9); Task 11 removes this allow
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub(crate) struct Match {
     pub name: String,
@@ -63,7 +61,6 @@ pub(crate) struct Match {
 }
 
 /// Tunes a [`rank`] call. Go `Config`.
-#[allow(dead_code)] // consumed by toolsearch (Task 9); Task 11 removes this allow
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Config {
     /// The singular word used in notes ("tool", "skill"); plurals append "s".
@@ -88,7 +85,6 @@ impl Config {
 /// Dispatches on the query form and returns ranked matches plus a UX note (empty for none).
 /// Items whose name is in `already_available` are excluded. Port of Go `Rank`; see its doc
 /// comment for the query forms.
-#[allow(dead_code)] // consumed by toolsearch (Task 9); Task 11 removes this allow
 pub(crate) fn rank(
     items: &[Item],
     query: &str,
@@ -601,7 +597,6 @@ fn to_match(it: &Item, cfg: &Config) -> Match {
 
 /// Builds an item's BM25 token bag: its name (repeated to weight name matches highest), its
 /// description, and any extra strings (e.g. argument names and descriptions). Go `BuildTokens`.
-#[allow(dead_code)] // consumed by toolsearch (Task 9); Task 11 removes this allow
 pub(crate) fn build_tokens(name: &str, description: &str, extra: &[&str]) -> Vec<String> {
     let name_toks = tokenize(name);
     let mut toks = Vec::with_capacity(name_toks.len() * NAME_REPEAT + 8);
@@ -617,7 +612,6 @@ pub(crate) fn build_tokens(name: &str, description: &str, extra: &[&str]) -> Vec
 
 /// Appends the sorted, deduplicated item names to a search tool's base description. Returns
 /// `base` unchanged when there are no names. Go `DescribeSearch`.
-#[allow(dead_code)] // consumed by toolsearch (Task 9); Task 11 removes this allow
 pub(crate) fn describe_search(base: &str, item_names: &[String]) -> String {
     if item_names.is_empty() {
         return base.to_string();

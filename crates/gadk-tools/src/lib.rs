@@ -19,9 +19,6 @@
 
 pub mod example;
 pub mod gemini;
-// Callers land in later tasks (example: Task 4, skills::skill: Task 6, toolsearch: Task 9,
-// skills: Task 10); Task 11 removes this allow once every function has a caller.
-#[allow(dead_code)]
 pub(crate) mod go_fmt;
 pub mod load_artifacts;
 pub mod load_memory;

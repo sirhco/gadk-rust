@@ -5,6 +5,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+# Examples are declared explicitly below: examples/toolsearch_catalog.rs is a module shared
+# with tests/examples_toolsearch_main.rs through #[path], not an example.
+autoexamples = false
 
 [lints]
 workspace = true
@@ -29,6 +32,7 @@ gadk-tools = { workspace = true }
 tokio = { workspace = true }
 futures = { workspace = true }
 anyhow = { workspace = true }
+async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 schemars = { workspace = true }
@@ -59,4 +63,24 @@ required-features = ["gemini"]
 
 [[example]]
 name = "compaction"
+required-features = ["gemini"]
+
+[[example]]
+name = "load_memory"
+required-features = ["gemini"]
+
+[[example]]
+name = "load_artifacts"
+required-features = ["gemini"]
+
+[[example]]
+name = "multiple_tools"
+required-features = ["gemini"]
+
+[[example]]
+name = "toolsearch"
+required-features = ["gemini"]
+
+[[example]]
+name = "skills"
 required-features = ["gemini"]
