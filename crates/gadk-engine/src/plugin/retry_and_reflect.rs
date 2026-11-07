@@ -88,7 +88,11 @@ pub fn new_retry_and_reflect_plugin(cfg: RetryAndReflectConfig) -> Result<Plugin
             "maxRetries must be a non-negative integer".into(),
         ));
     }
-    let r = Arc::new(RetryAndReflect::new(&cfg));
+    Ok(plugin_for(Arc::new(RetryAndReflect::new(&cfg))))
+}
+
+/// The plugin whose two callbacks share `r`.
+fn plugin_for(r: Arc<RetryAndReflect>) -> Plugin {
     let after_tool: AfterToolCallback = {
         let r = r.clone();
         Arc::new(
@@ -120,12 +124,12 @@ pub fn new_retry_and_reflect_plugin(cfg: RetryAndReflectConfig) -> Result<Plugin
             },
         )
     };
-    Ok(Plugin::new(PluginConfig {
+    Plugin::new(PluginConfig {
         name: NAME.into(),
         after_tool_callback: Some(after_tool),
         on_tool_error_callback: Some(on_tool_error),
         ..Default::default()
-    }))
+    })
 }
 
 /// Go `retryAndReflect`: the plugin's settings and its failure counters, shared by both
@@ -811,6 +815,100 @@ null
         assert_eq!(
             render("{{.ToolName}}/{{.ArgsSummary}}", &d),
             "{{.ArgsSummary}}/ARGS"
+        );
+    }
+
+    #[derive(serde::Deserialize, schemars::JsonSchema)]
+    struct NoArgs {}
+
+    /// Runner-level: a confirmation-requiring FunctionTool's error, as the flow really wraps it
+    /// (`error tool "<name>" requires confirmation, ...`), passes the guard. The model's
+    /// function response is Go's confirmation error, not reflection guidance, and no failure
+    /// is counted.
+    #[tokio::test]
+    async fn runner_confirmation_error_passes_through_uncounted() {
+        use gadk_genai::{Content, FunctionCall};
+        use gadk_model::LlmResponse;
+
+        use crate::llm::{LlmAgentConfig, agent as llm_agent};
+        use crate::testutil::{MockModel, TestAgentRunner, collect_events};
+        use crate::tool::{FunctionTool, FunctionToolConfig};
+
+        let secure = FunctionTool::new(
+            FunctionToolConfig {
+                require_confirmation: true,
+                ..FunctionToolConfig::new("secure_action", "needs approval")
+            },
+            |_ctx: Context, _: NoArgs| async move { Ok::<_, ToolError>(json!({"done": true})) },
+        )
+        .unwrap();
+        let call = Content::from_function_call(
+            FunctionCall {
+                id: "fc1".into(),
+                name: "secure_action".into(),
+                ..Default::default()
+            },
+            "model",
+        );
+        let model = MockModel::new(vec![
+            Ok(LlmResponse {
+                content: Some(call),
+                ..Default::default()
+            }),
+            Ok(LlmResponse {
+                content: Some(Content::from_text("done", "model")),
+                ..Default::default()
+            }),
+        ]);
+        let agent = llm_agent::new(LlmAgentConfig {
+            name: "a".into(),
+            model: Some(model.clone()),
+            tools: vec![secure],
+            ..Default::default()
+        })
+        .unwrap();
+        let state = Arc::new(RetryAndReflect::new(&RetryAndReflectConfig::default()));
+        let runner = TestAgentRunner::with_plugins(
+            agent,
+            crate::runner::PluginConfig {
+                plugins: vec![plugin_for(state.clone())],
+                close_timeout: std::time::Duration::from_secs(1),
+            },
+        )
+        .await;
+        let events = collect_events(runner.run("go")).await.unwrap();
+
+        let want = json!({
+            "error": "error tool \"secure_action\" requires confirmation, please approve or reject"
+        });
+        let responses: Vec<Value> = events
+            .iter()
+            .filter_map(|e| e.response.content.as_ref())
+            .flat_map(|c| c.parts.iter())
+            .filter_map(|p| p.function_response.as_ref())
+            .filter(|fr| fr.name == "secure_action")
+            .map(|fr| Value::Object(fr.response.clone()))
+            .collect();
+        assert_eq!(responses, vec![want.clone()]);
+        // The run pauses for the confirmation (as in Go); the model sees the response on the
+        // next turn.
+        assert_eq!(model.requests().len(), 1);
+        collect_events(runner.run("next")).await.unwrap();
+        let requests = model.requests();
+        assert_eq!(requests.len(), 2);
+        let sent: Vec<Value> = requests[1]
+            .contents
+            .iter()
+            .flat_map(|c| c.parts.iter())
+            .filter_map(|p| p.function_response.as_ref())
+            .filter(|fr| fr.name == "secure_action")
+            .map(|fr| Value::Object(fr.response.clone()))
+            .collect();
+        assert_eq!(sent, vec![want]);
+        let counters = state.scoped_failure_counters.lock();
+        assert!(
+            counters.values().all(|m| m.values().all(|&n| n == 0)),
+            "{counters:?}"
         );
     }
 }
