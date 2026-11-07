@@ -261,14 +261,19 @@ fn before_err(prefix: &'static str, sentinel: &'static str) -> BeforeModelCallba
     })
 }
 fn after_none() -> AfterModelCallback {
-    Arc::new(|_ctx, _resp, _err| Box::pin(async { Ok(None) }))
+    Arc::new(|_ctx, resp, _err| Box::pin(async move { (resp, Ok(None)) }))
 }
 fn after_text(text: &'static str) -> AfterModelCallback {
-    Arc::new(move |_ctx, _resp, _err| Box::pin(async move { Ok(Some(text_resp(text))) }))
+    Arc::new(move |_ctx, resp, _err| Box::pin(async move { (resp, Ok(Some(text_resp(text)))) }))
 }
 fn after_err(prefix: &'static str, sentinel: &'static str) -> AfterModelCallback {
-    Arc::new(move |_ctx, _resp, _err| {
-        Box::pin(async move { Err(AgentError::other(format!("{prefix}: {sentinel}"))) })
+    Arc::new(move |_ctx, resp, _err| {
+        Box::pin(async move {
+            (
+                resp,
+                Err(AgentError::other(format!("{prefix}: {sentinel}"))),
+            )
+        })
     })
 }
 fn on_error_text(text: &'static str) -> OnModelErrorCallback {

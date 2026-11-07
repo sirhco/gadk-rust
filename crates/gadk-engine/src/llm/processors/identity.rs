@@ -16,13 +16,13 @@
 //! Identity request processor (port of Go internal/llminternal/identity_request_processor.go).
 
 use futures::future::BoxFuture;
+use gadk_agent::tool_util::append_instructions;
 use gadk_agent::{AgentError, InvocationContext, Mode};
 use gadk_model::LlmRequest;
 use gadk_session::Event;
 
 use crate::{
     llm::{flow::Flow, mode::mode_for, state::reveal},
-    tool::utils::append_instructions,
     workflow::route::go_quote,
 };
 

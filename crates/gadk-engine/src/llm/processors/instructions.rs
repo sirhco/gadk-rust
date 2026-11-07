@@ -19,19 +19,17 @@
 use std::sync::{Arc, LazyLock};
 
 use futures::future::BoxFuture;
+use gadk_agent::tool_util::append_instructions;
 use gadk_agent::{Agent, AgentError, InvocationContext};
 use gadk_artifact::ArtifactError;
 use gadk_model::LlmRequest;
 use gadk_session::{Event, SessionError};
 use serde_json::Value;
 
-use crate::{
-    llm::{
-        flow::Flow,
-        processors::{go_sprint, wrap_err},
-        state::{LlmAgentState, reveal},
-    },
-    tool::utils::append_instructions,
+use crate::llm::{
+    flow::Flow,
+    processors::{go_sprint, wrap_err},
+    state::{LlmAgentState, reveal},
 };
 
 const APP_PREFIX: &str = "app:";

@@ -22,6 +22,7 @@ use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures::stream::BoxStream;
+use gadk_agent::tool_util::append_instructions;
 use gadk_agent::{
     AgentConfig, ConfirmationProvider, Context, ContextDelta, ReadonlyContext, RunnableTool,
     StreamingTool, Tool, ToolError, Toolset, new_agent, pack_tool, tool_from_request,
@@ -34,7 +35,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
-use crate::tool::utils::append_instructions;
 use crate::tool::{AgentTool, FunctionTool, FunctionToolConfig, StreamingFunctionTool};
 
 const FC_ID: &str = "test-function-call-id";
@@ -260,6 +260,7 @@ struct CustomRequestTool {
     called: Arc<AtomicBool>,
 }
 
+#[async_trait]
 impl Tool for CustomRequestTool {
     fn name(&self) -> &str {
         self.base.name()
@@ -273,7 +274,7 @@ impl Tool for CustomRequestTool {
             ..Default::default()
         })
     }
-    fn process_request(&self, _ctx: &Context, req: &mut LlmRequest) -> Result<(), ToolError> {
+    async fn process_request(&self, _ctx: &Context, req: &mut LlmRequest) -> Result<(), ToolError> {
         self.called.store(true, SeqCst);
         if self.append_instruction {
             append_instructions(req, &["custom tool system instruction"]);
@@ -338,6 +339,7 @@ async fn test_with_confirmation_process_request() {
     pack_tool(&mut req, &tools[0]).unwrap_or_else(|e| panic!("pack_tool() failed: {e}"));
     tools[0]
         .process_request(&test_context(None), &mut req)
+        .await
         .unwrap_or_else(|e| panic!("ProcessRequest() failed: {e}"));
 
     assert!(
@@ -366,6 +368,7 @@ async fn test_with_confirmation_process_request_packing() {
     pack_tool(&mut req, &tools[0]).unwrap_or_else(|e| panic!("pack_tool() failed: {e}"));
     tools[0]
         .process_request(&test_context(None), &mut req)
+        .await
         .unwrap_or_else(|e| panic!("ProcessRequest() failed: {e}"));
 
     assert!(
@@ -644,6 +647,7 @@ struct PackingStreamingTool {
     called: Option<Arc<AtomicBool>>,
 }
 
+#[async_trait]
 impl Tool for PackingStreamingTool {
     fn name(&self) -> &str {
         STREAM_PACKING_TOOL
@@ -657,7 +661,11 @@ impl Tool for PackingStreamingTool {
             ..Default::default()
         })
     }
-    fn process_request(&self, _ctx: &Context, _req: &mut LlmRequest) -> Result<(), ToolError> {
+    async fn process_request(
+        &self,
+        _ctx: &Context,
+        _req: &mut LlmRequest,
+    ) -> Result<(), ToolError> {
         if let Some(called) = &self.called {
             called.store(true, SeqCst);
         }
@@ -706,6 +714,7 @@ async fn test_with_confirmation_streaming_process_request_packing() {
             .unwrap_or_else(|e| panic!("{name}: pack_tool() failed: {e}"));
         tools[0]
             .process_request(&test_context(None), &mut req)
+            .await
             .unwrap_or_else(|e| panic!("{name}: ProcessRequest() failed: {e}"));
         assert_eq!(
             called.load(SeqCst),

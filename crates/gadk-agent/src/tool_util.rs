@@ -13,13 +13,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `pack_tool`, `tool_from_request` (port of Go `tool/toolutils/toolutils.go`) and the tool
+//! `pack_tool`, `tool_from_request` (port of Go `tool/toolutils/toolutils.go`),
+//! `append_instructions` (port of Go `internal/utils/utils.go` `AppendInstructions`) and the tool
 //! confirmation helpers (port of Go `tool/toolconfirmation/tool_confirmation.go`).
 
 use std::any::Any;
 use std::sync::Arc;
 
-use gadk_genai::{FunctionCall, GenerateContentConfig, Tool as GenaiTool};
+use gadk_genai::{
+    Content, FunctionCall, GenerateContentConfig, Part, ROLE_USER, Tool as GenaiTool,
+};
 use gadk_model::LlmRequest;
 use serde_json::{Map, Value};
 
@@ -29,7 +32,8 @@ use crate::tool::Tool;
 
 /// Port of Go `toolutils.PackTool`: register `tool` under its name and append its declaration to
 /// the first genai Tool that already has function declarations, else to a new one. Called by the
-/// flow's toolPreprocess (`base_flow.go`) for every tool, after all request processors.
+/// flow's toolPreprocess (`base_flow.go`) for every tool that has a declaration, after all
+/// request processors.
 ///
 /// The tool is stored as an `Arc<dyn Tool>` boxed in an `Arc<dyn Any>`; read it back with
 /// [`tool_from_request`].
@@ -70,6 +74,33 @@ pub fn tool_from_request(req: &LlmRequest, name: &str) -> Option<Arc<dyn Tool>> 
         .get(name)?
         .downcast_ref::<Arc<dyn Tool>>()
         .cloned()
+}
+
+/// Port of Go `utils.AppendInstructions` (`internal/utils/utils.go:138`): appends `instructions`,
+/// joined with `"\n\n"`, to the request's system instruction. The text goes onto the last
+/// system-instruction part when that part's text is non-empty (separated by `"\n\n"`), otherwise
+/// into a new part; a missing system instruction becomes a new user-role content. An empty
+/// `instructions` slice changes nothing (not even `config`).
+pub fn append_instructions(req: &mut LlmRequest, instructions: &[&str]) {
+    if instructions.is_empty() {
+        return;
+    }
+    let inst = instructions.join("\n\n");
+    let cfg = req
+        .config
+        .get_or_insert_with(GenerateContentConfig::default);
+    let Some(si) = cfg.system_instruction.as_mut() else {
+        cfg.system_instruction = Some(Content::from_text(inst, ROLE_USER));
+        return;
+    };
+    if let Some(last) = si.parts.last_mut()
+        && !last.text.is_empty()
+    {
+        last.text.push_str("\n\n");
+        last.text.push_str(&inst);
+        return;
+    }
+    si.parts.push(Part::from_text(inst));
 }
 
 /// Go `toolconfirmation.FunctionCallName`.

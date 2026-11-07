@@ -44,7 +44,7 @@ pub use callback::*;
 pub use context::{
     CancelGuard, Context, ContextBuilder, ContextDelta, InvocationContext, ReadonlyContext,
 };
-pub use error::{AgentError, EventStream, ToolError};
+pub use error::{AgentError, EventStream, SharedToolError, ToolError};
 #[doc(hidden)]
 pub use go_fmt::go_quote;
 pub use live::{LiveRequest, LiveRunConfig, LiveSession};
@@ -58,6 +58,7 @@ pub use services::{ArtifactBacking, Artifacts, Memory};
 pub use state::{AgentState, AgentType};
 pub use tool::{ConfirmationProvider, RunnableTool, StreamingTool, Tool, ToolPredicate, Toolset};
 pub use tool_util::{
-    REQUEST_CONFIRMATION_FUNCTION_CALL_NAME, original_call_from, pack_tool, tool_from_request,
+    REQUEST_CONFIRMATION_FUNCTION_CALL_NAME, append_instructions, original_call_from, pack_tool,
+    tool_from_request,
 };
 pub use toolset::{allowed_tools_predicate, filter_toolset, string_predicate, with_confirmation};
