@@ -42,7 +42,8 @@ pub use agent::{
 };
 pub use callback::*;
 pub use context::{
-    CancelGuard, Context, ContextBuilder, ContextDelta, InvocationContext, ReadonlyContext,
+    CancelGuard, Context, ContextBuilder, ContextDelta, Identity, InvocationContext,
+    ReadonlyContext,
 };
 pub use error::{AgentError, EventStream, SharedToolError, ToolError};
 #[doc(hidden)]

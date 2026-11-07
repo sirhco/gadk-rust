@@ -56,6 +56,31 @@ class EdgeTest(unittest.TestCase):
         errs = cwd.check(self.repo)
         self.assertTrue(any("gadk-tools -> gadk-platform is missing" in e for e in errs), errs)
 
+    def test_auth_edges_are_exactly_agent_and_platform(self):
+        self.assertEqual(cwd.ALLOWED["gadk-auth"], {"gadk-agent", "gadk-platform"})
+        self.assertIn("gadk-auth", cwd.ALLOWED["gadk"])
+        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-auth" in deps], ["gadk"])
+
+    def test_auth_normal_dependency_on_engine_is_rejected(self):
+        self.edit("gadk-auth", "[dependencies]\n", "[dependencies]\ngadk-engine = { workspace = true }\n")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-auth -> gadk-engine is not allowed" in e for e in errs), errs)
+
+    def test_tools_normal_dependency_on_auth_is_rejected(self):
+        self.edit("gadk-tools", "[dependencies]\n", "[dependencies]\ngadk-auth = { workspace = true }\n")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-tools -> gadk-auth is not allowed" in e for e in errs), errs)
+
+    def test_auth_missing_required_edge_is_rejected(self):
+        self.edit("gadk-auth", "gadk-platform = { workspace = true }\n", "")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-auth -> gadk-platform is missing" in e for e in errs), errs)
+
+    def test_facade_missing_auth_edge_is_rejected(self):
+        self.edit("gadk", "gadk-auth = { workspace = true }\n", "")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk -> gadk-auth is missing" in e for e in errs), errs)
+
     def test_disallowed_normal_edge_is_rejected(self):
         self.edit("gadk-artifact", "[dependencies]\n", "[dependencies]\ngadk-session = { workspace = true }\n")
         errs = cwd.check(self.repo)

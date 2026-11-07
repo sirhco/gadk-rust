@@ -20,6 +20,7 @@ pub mod builder;
 #[allow(clippy::module_inception)]
 pub mod context;
 pub mod delta;
+pub mod identity;
 pub mod invocation;
 pub mod readonly;
 
@@ -31,6 +32,8 @@ pub use builder::*;
 pub use context::*;
 #[allow(unused_imports)]
 pub use delta::*;
+#[allow(unused_imports)]
+pub use identity::*;
 #[allow(unused_imports)]
 pub use invocation::*;
 #[allow(unused_imports)]

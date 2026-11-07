@@ -12,6 +12,9 @@
 - Only `gadk` and `gadk-tools` may depend on `gadk-engine`, and only `gadk` may depend on
   `gadk-tools`, normal or dev (2a: gadk-tools builds on the engine's public API; its tests use
   the engine's `testutil` feature).
+- 2b: `gadk-auth` depends on exactly `gadk-agent` and `gadk-platform` (never `gadk-engine` or
+  `gadk-tools`), and only the façade depends on it; `gadk-tools` stays free of `gadk-auth`
+  because `toolauth` is a pure data model.
 """
 import pathlib, sys, tomllib
 
@@ -29,8 +32,9 @@ ALLOWED = {
                     "gadk-artifact", "gadk-memory", "gadk-gemini", "gadk-httprr"},
     "gadk-tools": {"gadk-agent", "gadk-engine", "gadk-genai", "gadk-model", "gadk-platform",
                    "gadk-session", "gadk-memory", "gadk-artifact"},
+    "gadk-auth": {"gadk-agent", "gadk-platform"},
     "gadk": {"gadk-genai", "gadk-platform", "gadk-model", "gadk-session", "gadk-gemini",
-             "gadk-agent", "gadk-engine", "gadk-tools", "gadk-artifact", "gadk-memory"},
+             "gadk-agent", "gadk-engine", "gadk-tools", "gadk-auth", "gadk-artifact", "gadk-memory"},
 }
 # (crate, dependency) normal edges that must be `optional = true`.
 OPTIONAL = {("gadk-engine", "gadk-gemini"), ("gadk-engine", "gadk-httprr")}
