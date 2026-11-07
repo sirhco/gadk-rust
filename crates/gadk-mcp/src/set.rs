@@ -65,7 +65,6 @@ impl McpToolset {
     /// The credential session pool; panics for a toolset built without `auth` (as Go's type
     /// assertion in export_test.go does).
     #[cfg(test)]
-    #[allow(dead_code)] // Task 10's auth_session parity tests call the hooks.
     fn credential_sessions(&self) -> &crate::sessions::CredentialSessions {
         match self.client.as_credential_sessions() {
             Some(pool) => pool,
@@ -75,14 +74,12 @@ impl McpToolset {
 
     /// Go `SetSessionBoundsForTest` (export_test.go) for a toolset built with `auth`.
     #[cfg(test)]
-    #[allow(dead_code)] // Task 10's auth_session parity tests call the hooks.
     pub(crate) fn set_session_bounds_for_test(&self, idle: Duration, max: usize) {
         self.credential_sessions().set_bounds(idle, max);
     }
 
     /// Go `SessionCountForTest` (export_test.go) for a toolset built with `auth`.
     #[cfg(test)]
-    #[allow(dead_code)] // Task 10's auth_session parity tests call the hooks.
     pub(crate) fn session_count_for_test(&self) -> usize {
         self.credential_sessions().len()
     }
