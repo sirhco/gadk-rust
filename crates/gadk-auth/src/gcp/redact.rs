@@ -58,30 +58,250 @@ pub(crate) const MAX_DECODE_PASSES: usize = 64; // redact.go:317
 /// Go `utf8.UTFMax`.
 const UTF_MAX: usize = 4;
 
-/// redact.go:107. Cycle 2 of Task 5 replaces this.
-#[allow(unused_variables, clippy::todo)]
+/// redact.go:107 `redactedForError`. Prepares service-controlled text so that an error may
+/// carry it: the caller's own identifiers removed and the source capped, or, where neither can
+/// be shown to have worked, [`WITHHELD_TEXT`] instead of any of the response.
+///
+/// Contract: no secret is recoverable from the returned string by this module's decoder, or
+/// nothing is returned. The choice between the two candidates is made on the OUTPUT, never on
+/// a property of `s` and its decoded copy, because the service writes both.
 pub(crate) fn redacted_for_error(s: &str, secrets: &[&str]) -> String {
-    todo!("Task 5")
+    if secrets.iter().any(|v| v.len() > MAX_SCRUBBABLE_SECRET) {
+        return WITHHELD_TEXT.to_owned();
+    }
+    if let Some(out) = showable(s, secrets) {
+        return out;
+    }
+    let u = unescape_json(s);
+    if u != s
+        && let Some(out) = showable(&u, secrets)
+    {
+        return out;
+    }
+    // Neither candidate can be shown clean. The status code, the resource and the sentinel
+    // all survive in the error around this.
+    WITHHELD_TEXT.to_owned()
 }
-/// redact.go:161. Cycle 2 of Task 5 replaces this.
-#[allow(unused_variables, clippy::todo)]
+
+/// redact.go:156 `fitsStraddleWindow`: whether the whole-text check can examine `s` whole.
+fn fits_straddle_window(s: &str) -> bool {
+    s.len() <= MAX_STRADDLE_WINDOW
+}
+
+/// redact.go:161 `showable`: scrubs `s` for an error; `None` when the result cannot be shown.
 pub(crate) fn showable(s: &str, secrets: &[&str]) -> Option<String> {
-    todo!("Task 5")
+    let (out, truncated) = redact_within_limit(s, secrets);
+    // Asked of the WHOLE text as well, and only when the cap actually cut: an escaped spelling
+    // straddling the cut is sliced in half and matches nothing in the visible part. Past the
+    // window there is no answer, so the response is withheld unexamined.
+    if truncated && (!fits_straddle_window(s) || recoverable(&redact(s, secrets), secrets)) {
+        return None;
+    }
+    // Checked AFTER the cap, so what is examined is exactly what is returned: the ellipsis is
+    // appended text, and it can finish a secret the untruncated string only started.
+    if recoverable(&out, secrets) {
+        return None;
+    }
+    Some(out)
 }
-/// redact.go:200. Cycle 2 of Task 5 replaces this.
-#[allow(unused_variables, clippy::todo)]
+
+/// redact.go:200 `recoverable`: whether any secret can be read out of `x`, literally or once
+/// this module's decoder has been run over it to a fixpoint. The marker this scrub writes is
+/// excluded by POSITION: an occurrence belongs to us only when every byte of it came from a
+/// marker. Fails closed when either decode cannot finish.
 pub(crate) fn recoverable(x: &str, secrets: &[&str]) -> bool {
-    todo!("Task 5")
+    let mut forms: Vec<String> = Vec::new();
+    for v in secrets {
+        if v.is_empty() {
+            continue;
+        }
+        let (decoded, done) = decode_fully(v);
+        if !done {
+            // Not finishing the decode means not knowing what this text says, and "unknown"
+            // has to answer the same way as "yes".
+            return true;
+        }
+        for form in [go_to_lower(v), go_to_lower(&decoded)] {
+            if !form.is_empty() {
+                forms.push(form);
+            }
+        }
+    }
+    if forms.is_empty() {
+        return false;
+    }
+    // Decoded once for the whole text rather than once per marker-separated part.
+    let (decoded, done) = decode_fully(x);
+    if !done {
+        return true;
+    }
+    for text in [go_to_lower(x), go_to_lower(&decoded)] {
+        // Lowered first, then scanned: the marker is already lower case, so it survives the
+        // fold unchanged and its offsets are the folded copy's own.
+        let ours = marker_bytes(&text);
+        for form in &forms {
+            if readable_outside_markers(&text, ours.as_deref(), form) {
+                return true;
+            }
+        }
+    }
+    false
 }
-/// redact.go:342. Cycle 2 of Task 5 replaces this.
-#[allow(unused_variables, clippy::todo)]
+
+/// redact.go:250 `markerBytes`: marks every byte of `text` belonging to an occurrence of the
+/// marker, and returns `None` when there is none.
+fn marker_bytes(text: &str) -> Option<Vec<bool>> {
+    let mut i = text.find(REDACTED_MARKER)?;
+    let mut ours = vec![false; text.len()];
+    loop {
+        ours[i..i + REDACTED_MARKER.len()].fill(true);
+        match text[i + REDACTED_MARKER.len()..].find(REDACTED_MARKER) {
+            None => break,
+            Some(next) => i += REDACTED_MARKER.len() + next,
+        }
+    }
+    Some(ours)
+}
+
+/// redact.go:278 `readableOutsideMarkers`: whether `form` occurs anywhere in `text` other than
+/// wholly inside bytes this scrub wrote. Overlapping occurrences are walked one start at a
+/// time rather than skipped past.
+///
+/// Go steps `i = at + 1`, a byte. Here `i` moves to the next char boundary after `at`, which
+/// skips only positions inside the char at `at`; `form` is non-empty valid UTF-8, so no
+/// occurrence can start there, and the matches found are Go's.
+fn readable_outside_markers(text: &str, ours: Option<&[bool]>, form: &str) -> bool {
+    let mut i = 0;
+    while i + form.len() <= text.len() {
+        let Some(j) = text[i..].find(form) else {
+            return false;
+        };
+        let at = i + j;
+        if !all_ours(ours, at, at + form.len()) {
+            return true;
+        }
+        i = at + 1;
+        while !text.is_char_boundary(i) {
+            i += 1;
+        }
+    }
+    false
+}
+
+/// redact.go:295 `allOurs`: whether every byte of `[lo, hi)` came from a marker. A text with
+/// no marker in it owns nothing, so nothing is excused.
+fn all_ours(ours: Option<&[bool]>, lo: usize, hi: usize) -> bool {
+    match ours {
+        None => false,
+        Some(ours) => ours[lo..hi].iter().all(|&b| b),
+    }
+}
+
+/// redact.go:342 `decodeFully`: applies [`unescape_json`] until the text stops changing, and
+/// reports whether it got there within [`MAX_DECODE_PASSES`] reads. `false` means the caller
+/// must treat the text as though a secret were in it.
 pub(crate) fn decode_fully(s: &str) -> (String, bool) {
-    todo!("Task 5")
+    let mut s = s.to_owned();
+    for _ in 0..MAX_DECODE_PASSES {
+        let u = unescape_json(&s);
+        if u == s {
+            return (s, true);
+        }
+        s = u;
+    }
+    (s, false)
 }
-/// redact.go:379. Cycle 2 of Task 5 replaces this.
-#[allow(unused_variables, clippy::todo)]
+
+/// redact.go:379 `unescapeJSON`: decodes the JSON escapes that can hide a caller-supplied value
+/// from a substring scrub (`\uXXXX`, a surrogate pair as one rune, `\/` and `\\`) and leaves
+/// every other one alone, a malformed escape included, which stays verbatim. An unpaired
+/// surrogate becomes U+FFFD, as Go's `strings.Builder.WriteRune` writes it.
 pub(crate) fn unescape_json(s: &str) -> String {
-    todo!("Task 5")
+    if !s.contains('\\') {
+        return s.to_owned();
+    }
+    let bytes = s.as_bytes();
+    let mut b = String::with_capacity(s.len());
+    // `i` is always a char boundary: it starts at 0, every escape is ASCII, and the copy-through
+    // branch below ends at a backslash or at the end.
+    let mut i = 0;
+    while i < s.len() {
+        if has_escape(bytes, i, b'\\') {
+            b.push('\\');
+            i += SHORT_ESCAPE_LEN;
+            continue;
+        }
+        if has_escape(bytes, i, b'/') {
+            b.push('/');
+            i += SHORT_ESCAPE_LEN;
+            continue;
+        }
+        let Some(r) = decode_unicode_escape(bytes, i) else {
+            // Not an escape this function decodes, or a malformed one. Either way the bytes
+            // are copied through rather than dropped. Go copies one byte per iteration; every
+            // escape starts with a backslash, so copying up to the next one is the same.
+            if bytes[i] == b'\\' {
+                b.push('\\');
+                i += 1;
+            } else {
+                let end = s[i..].find('\\').map_or(s.len(), |j| i + j);
+                b.push_str(&s[i..end]);
+                i = end;
+            }
+            continue;
+        };
+        // A non-BMP rune arrives as a surrogate PAIR, and the two halves have to be decoded
+        // together: apart, each becomes U+FFFD and the rune survives the scrub whole.
+        if is_surrogate(r)
+            && let Some(lo) = decode_unicode_escape(bytes, i + UNICODE_ESCAPE_LEN)
+            && let Some(paired) = decode_surrogate_pair(r, lo)
+        {
+            b.push(paired);
+            i += SURROGATE_PAIR_LEN;
+            continue;
+        }
+        b.push(char::from_u32(r).unwrap_or(char::REPLACEMENT_CHARACTER));
+        i += UNICODE_ESCAPE_LEN;
+    }
+    b
+}
+
+/// Widths in bytes of the escapes [`unescape_json`] decodes (redact.go:424-428).
+const SHORT_ESCAPE_LEN: usize = 2; // \\ and \/
+const UNICODE_ESCAPE_LEN: usize = 6; // \uXXXX
+const SURROGATE_PAIR_LEN: usize = 2 * UNICODE_ESCAPE_LEN; // \uD83D\uDE00
+
+/// Go `utf16.IsSurrogate`.
+fn is_surrogate(r: u32) -> bool {
+    (0xD800..0xE000).contains(&r)
+}
+
+/// Go `utf16.DecodeRune`, with `None` for its `utf8.RuneError` result.
+fn decode_surrogate_pair(r1: u32, r2: u32) -> Option<char> {
+    if (0xD800..0xDC00).contains(&r1) && (0xDC00..0xE000).contains(&r2) {
+        char::from_u32((((r1 - 0xD800) << 10) | (r2 - 0xDC00)) + 0x10000)
+    } else {
+        None
+    }
+}
+
+/// redact.go:431 `hasEscape`: whether `s[i..]` begins with a backslash followed by `c`.
+fn has_escape(s: &[u8], i: usize, c: u8) -> bool {
+    i + SHORT_ESCAPE_LEN <= s.len() && s[i] == b'\\' && s[i + 1] == c
+}
+
+/// redact.go:440 `decodeUnicodeEscape`: decodes the `\uXXXX` at `s[i..]`, if that is what is
+/// there. Exactly four hex digits parse, as `strconv.ParseUint(_, 16, 32)` admits: no sign,
+/// no `0x`, no underscores.
+fn decode_unicode_escape(s: &[u8], i: usize) -> Option<u32> {
+    if !has_escape(s, i, b'u') || i + UNICODE_ESCAPE_LEN > s.len() {
+        return None;
+    }
+    let mut n = 0u32;
+    for &d in &s[i + SHORT_ESCAPE_LEN..i + UNICODE_ESCAPE_LEN] {
+        n = n * 16 + char::from(d).to_digit(16)?;
+    }
+    Some(n)
 }
 
 /// Go `utf8.RuneStart`.
@@ -314,5 +534,15 @@ mod tests {
         assert!(cut);
         assert_eq!(t, format!("{}...", "x".repeat(MAX_ERROR_BODY - 1)));
         assert_eq!(visible_limit("short"), (5, false));
+    }
+
+    #[test]
+    fn readable_outside_markers_steps_over_multibyte_chars() {
+        // A form that only matches after a multi-byte char: the char-boundary step must not
+        // panic and must still find the second occurrence outside the marker.
+        let text = "é[redacted]éa";
+        let ours = marker_bytes(text);
+        assert!(readable_outside_markers(text, ours.as_deref(), "éa"));
+        assert!(!readable_outside_markers(text, ours.as_deref(), "ed"));
     }
 }
