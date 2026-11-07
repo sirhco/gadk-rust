@@ -72,8 +72,11 @@ async fn test_model_callback_artifact_save_recorded_on_event() {
             (req, res)
         })
     });
-    let after: AfterModelCallback = Arc::new(|ctx: Context, _resp, _err| {
-        Box::pin(async move { save_artifact(&ctx, "after.txt").await.map(|()| None) })
+    let after: AfterModelCallback = Arc::new(|ctx: Context, resp, _err| {
+        Box::pin(async move {
+            let res = save_artifact(&ctx, "after.txt").await.map(|()| None);
+            (resp, res)
+        })
     });
     let a = llm_agent::new(LlmAgentConfig {
         name: "root_agent".into(),

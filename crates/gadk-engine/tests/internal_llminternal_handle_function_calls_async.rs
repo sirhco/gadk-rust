@@ -190,7 +190,7 @@ impl Tool for DeferringTool {
             ..Default::default()
         })
     }
-    // Go ProcessRequest = toolutils.PackTool: the Rust flow packs every tool itself (pack_tool), so the default is kept.
+    // Go ProcessRequest = toolutils.PackTool: the Rust flow packs every declared tool itself (pack_tool), so the default is kept.
     fn as_runnable(&self) -> Option<&dyn RunnableTool> {
         Some(self)
     }

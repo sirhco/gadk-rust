@@ -78,6 +78,7 @@ mod internal_workflowinternal_finish_task_tool;
 mod internal_workflowinternal_single_turn_tool;
 mod internal_workflowinternal_task_agent_tool;
 mod internal_workflowroute_workflowroute;
+mod plugin_retryandreflect_plugin;
 mod runner_agent_node;
 mod runner_before_run;
 mod runner_compaction;

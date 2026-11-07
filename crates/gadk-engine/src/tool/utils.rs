@@ -18,10 +18,7 @@
 use gadk_agent::go_quote;
 use std::sync::Arc;
 
-use gadk_genai::{
-    Content, FunctionCall, FunctionResponse, GenerateContentConfig, Part, ROLE_USER, Schema,
-};
-use gadk_model::LlmRequest;
+use gadk_genai::{Content, FunctionCall, FunctionResponse, Schema};
 use gadk_platform::Platform;
 use schemars::generate::SchemaSettings;
 use schemars::transform::RecursiveTransform;
@@ -458,7 +455,7 @@ pub(crate) fn content_text(c: &Content) -> String {
 /// Port of Go utils.FunctionDecls.
 #[cfg(test)]
 pub(crate) fn function_decls(
-    c: Option<&GenerateContentConfig>,
+    c: Option<&gadk_genai::GenerateContentConfig>,
 ) -> Vec<&gadk_genai::FunctionDeclaration> {
     c.map(|c| {
         c.tools
@@ -467,29 +464,6 @@ pub(crate) fn function_decls(
             .collect()
     })
     .unwrap_or_default()
-}
-
-/// Port of Go utils.AppendInstructions.
-pub(crate) fn append_instructions(req: &mut LlmRequest, instructions: &[&str]) {
-    if instructions.is_empty() {
-        return;
-    }
-    let inst = instructions.join("\n\n");
-    let cfg = req
-        .config
-        .get_or_insert_with(GenerateContentConfig::default);
-    let Some(si) = cfg.system_instruction.as_mut() else {
-        cfg.system_instruction = Some(Content::from_text(inst, ROLE_USER));
-        return;
-    };
-    if let Some(last) = si.parts.last_mut()
-        && !last.text.is_empty()
-    {
-        last.text.push_str("\n\n");
-        last.text.push_str(&inst);
-        return;
-    }
-    si.parts.push(Part::from_text(inst));
 }
 
 /// Port of Go utils.EventBelongsToBranch: an event belongs to its own branch and every descendant of it.

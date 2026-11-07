@@ -21,6 +21,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures::stream::BoxStream;
+use gadk_agent::tool_util::append_instructions;
 use gadk_agent::{
     AfterAgentCallback, AfterModelCallback, AfterToolCallback, BeforeAgentCallback,
     BeforeModelCallback, BeforeToolCallback, Context, ReadonlyContext, RunConfig, Tool, ToolError,
@@ -37,7 +38,7 @@ use serde_json::{Map, Value, json};
 use crate::llm::LlmAgentConfig;
 use crate::llm::agent as llm_agent;
 use crate::runner::{PluginConfig, RunOptions, Runner, RunnerConfig};
-use crate::tool::utils::{append_instructions, text_parts};
+use crate::tool::utils::text_parts;
 use crate::tool::{FunctionTool, FunctionToolConfig};
 
 type GenFn = Arc<dyn Fn(&LlmRequest, bool) -> Result<LlmResponse, ModelError> + Send + Sync>;
@@ -192,13 +193,15 @@ async fn test_agent_session_lifecycle() {
     let after_model: AfterModelCallback = {
         let (svc, failures) = (svc.clone(), failures.clone());
         Arc::new(
-            move |ctx: Context, _resp: LlmResponse, _err: Option<Arc<ModelError>>| {
+            move |ctx: Context, resp: LlmResponse, _err: Option<Arc<ModelError>>| {
                 let (svc, failures) = (svc.clone(), failures.clone());
                 Box::pin(async move {
-                    ctx.state().set(
+                    if let Err(e) = ctx.state().set(
                         "after_model_callback_state_key",
                         json!("after_model_callback_state_value"),
-                    )?;
+                    ) {
+                        return (resp, Err(e.into()));
+                    }
                     check_session(
                         &svc,
                         &ctx,
@@ -216,7 +219,7 @@ async fn test_agent_session_lifecycle() {
                         &failures,
                     )
                     .await;
-                    Ok(None)
+                    (resp, Ok(None))
                 })
             },
         )

@@ -28,6 +28,7 @@ use crate::context::{Context, ReadonlyContext};
 use crate::error::ToolError;
 
 /// Go `tool.Tool`, plus the optional `toolinternal` capabilities as defaulted methods.
+#[async_trait::async_trait]
 pub trait Tool: Send + Sync + 'static {
     /// The name of the tool.
     fn name(&self) -> &str;
@@ -42,9 +43,15 @@ pub trait Tool: Send + Sync + 'static {
     fn declaration(&self) -> Option<FunctionDeclaration> {
         None
     }
-    /// Extra request edits only (`toolinternal.RequestProcessor`); packing is done by the flow via
-    /// `pack_tool` before this runs.
-    fn process_request(&self, _ctx: &Context, _req: &mut LlmRequest) -> Result<(), ToolError> {
+    /// Extra request edits only (`toolinternal.RequestProcessor`). The flow packs a tool that has
+    /// a [`declaration`](Tool::declaration) with `pack_tool` before this runs; a tool without one
+    /// is never packed (Go's flow packs nothing, and Go tools without a declaration never pack
+    /// themselves). Async because implementations may do I/O (artifact listing, memory search).
+    async fn process_request(
+        &self,
+        _ctx: &Context,
+        _req: &mut LlmRequest,
+    ) -> Result<(), ToolError> {
         Ok(())
     }
     /// The runnable capability (`toolinternal.FunctionTool.Run`).

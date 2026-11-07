@@ -158,21 +158,26 @@ impl PluginManager {
         (req, Ok(None))
     }
 
-    /// Go `RunAfterModelCallback`.
+    /// Go `RunAfterModelCallback`: the response is threaded through every callback (Go passes
+    /// one `*model.LLMResponse` that callbacks may edit in place) and always handed back.
     pub async fn run_after_model(
         &self,
         ctx: Context,
-        resp: LlmResponse,
+        mut resp: LlmResponse,
         err: Option<Arc<ModelError>>,
-    ) -> Result<Option<LlmResponse>, AgentError> {
+    ) -> (LlmResponse, Result<Option<LlmResponse>, AgentError>) {
         for p in &self.plugins {
-            if let Some(cb) = p.after_model_callback()
-                && let Some(r) = cb(ctx.clone(), resp.clone(), err.clone()).await?
-            {
-                return Ok(Some(r));
+            if let Some(cb) = p.after_model_callback() {
+                let (r, res) = cb(ctx.clone(), resp, err.clone()).await;
+                resp = r;
+                match res {
+                    Err(e) => return (resp, Err(e)),
+                    Ok(Some(new_resp)) => return (resp, Ok(Some(new_resp))),
+                    Ok(None) => {}
+                }
             }
         }
-        Ok(None)
+        (resp, Ok(None))
     }
 
     /// Go `RunOnModelErrorCallback`.

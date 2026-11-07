@@ -563,6 +563,7 @@ async fn test_agent_transfer_process_request() {
     let transfer: Arc<dyn Tool> = Arc::new(zero_transfer_tool());
     transfer
         .process_request(&Context::builder().build(), &mut req)
+        .await
         .unwrap_or_else(|e| panic!("transferToAgentTool.ProcessRequest failed: {e}"));
 
     let tools = &req.config.as_ref().unwrap().tools;

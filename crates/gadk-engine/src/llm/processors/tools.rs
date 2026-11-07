@@ -62,15 +62,19 @@ pub(crate) fn tools_processor<'a>(
     })
 }
 
-/// Port of base_flow.go:951 toolPreprocess. Runs AFTER all request processors (called by Task
-/// 11's Flow::preprocess). For each tool, in order: pack_tool (Go toolutils.PackTool, which Go
-/// tools call inside ProcessRequest), then the tool's own process_request for extra edits (e.g.
-/// finish_task's appended instructions). This keeps Go's declaration order: processor-added
-/// tools (transfer_to_agent, set_model_response) come first, then the agent's tools.
+/// Port of base_flow.go:951 toolPreprocess. Runs AFTER all request processors (called by
+/// `Flow::preprocess`). For each tool, in order: `pack_tool` (Go toolutils.PackTool, which Go
+/// tools with a declaration call inside ProcessRequest) when the tool has a declaration, then
+/// the tool's own awaited `process_request` for extra edits (e.g. finish_task's appended
+/// instructions). This keeps Go's declaration order: processor-added tools (transfer_to_agent,
+/// set_model_response) come first, then the agent's tools.
+///
+/// Go's flow packs nothing itself, and no Go tool without a declaration packs itself (the Gemini
+/// built-ins, preload_memory, example_tool), so a declaration-less tool is never in `req.tools`.
 ///
 /// Go fails with "does not implement RequestProcessor()" for a tool without `ProcessRequest`;
 /// every Rust `Tool` has a defaulted `process_request`, so that error cannot occur.
-pub(crate) fn tool_preprocess(
+pub(crate) async fn tool_preprocess(
     ctx: &InvocationContext,
     req: &mut LlmRequest,
     tools: &[Arc<dyn Tool>],
@@ -84,8 +88,11 @@ pub(crate) fn tool_preprocess(
             ..Default::default()
         });
         // Text `duplicate tool: "x"` unchanged.
-        pack_tool(req, t).map_err(|e| AgentError::Other(Box::new(e)))?;
+        if t.declaration().is_some() {
+            pack_tool(req, t).map_err(|e| AgentError::Other(Box::new(e)))?;
+        }
         t.process_request(&tool_ctx, req)
+            .await
             .map_err(|e| AgentError::Other(Box::new(e)))?;
     }
     Ok(())

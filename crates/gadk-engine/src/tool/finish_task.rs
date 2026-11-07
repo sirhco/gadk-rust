@@ -21,6 +21,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use gadk_agent::tool_util::append_instructions;
 use gadk_agent::{Agent, Context, RunnableTool, Tool, ToolError};
 use gadk_genai::{FunctionDeclaration, Schema, Type};
 use gadk_model::LlmRequest;
@@ -29,7 +30,7 @@ use serde_json::{Map, Value};
 use crate::llm::state::reveal;
 /// Go `%T` of a JSON-decoded `any` (shared with the schema utilities).
 pub(crate) use crate::tool::utils::go_type_name;
-use crate::tool::utils::{append_instructions, validate_map_on_schema};
+use crate::tool::utils::validate_map_on_schema;
 use crate::workflow::route::go_quote;
 
 /// Go FinishTaskToolName.
@@ -125,6 +126,7 @@ fn is_object_schema(s: &Schema) -> bool {
     }
 }
 
+#[async_trait]
 impl Tool for FinishTaskTool {
     fn name(&self) -> &str {
         FINISH_TASK_TOOL_NAME
@@ -144,9 +146,10 @@ impl Tool for FinishTaskTool {
     }
 
     /// Port of Go ProcessRequest minus `toolutils.PackTool`: the flow's tools processor calls
-    /// `pack_tool` for every tool before `process_request`, so packing here would fail with a
-    /// duplicate-tool error. Only the instruction append remains.
-    fn process_request(&self, _ctx: &Context, req: &mut LlmRequest) -> Result<(), ToolError> {
+    /// `pack_tool` for every tool with a declaration (this one has one) before
+    /// `process_request`, so packing here would fail with a duplicate-tool error. Only the
+    /// instruction append remains.
+    async fn process_request(&self, _ctx: &Context, req: &mut LlmRequest) -> Result<(), ToolError> {
         append_instructions(req, &[FINISH_TASK_INSTRUCTIONS]);
         Ok(())
     }
@@ -331,12 +334,13 @@ mod tests {
         );
     }
 
-    #[test]
-    fn process_request_appends_go_instructions() {
+    #[tokio::test]
+    async fn process_request_appends_go_instructions() {
         let ft =
             FinishTaskTool::new(llm_agent("test_agent", "", None, None, None).as_ref()).unwrap();
         let mut req = LlmRequest::default();
         ft.process_request(&Context::builder().build(), &mut req)
+            .await
             .unwrap();
         let si = req.config.unwrap().system_instruction.unwrap();
         assert_eq!(si.role, "user");

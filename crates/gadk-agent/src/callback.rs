@@ -58,12 +58,17 @@ pub type BeforeModelCallback = Arc<
 
 /// Called after receiving a response from the model. If it returns `Some` response or an error, the
 /// actual model response/error is replaced with the returned response/error.
+///
+/// The response (possibly edited) is always handed back, mirroring [`BeforeModelCallback`]: Go
+/// passes `*model.LLMResponse`, so an in-place edit made by a callback that returns `(nil, nil)`
+/// reaches the later callbacks and the rest of the flow. Return the received response unchanged
+/// when there is nothing to edit.
 pub type AfterModelCallback = Arc<
     dyn Fn(
             Context,
             LlmResponse,
             Option<Arc<ModelError>>,
-        ) -> BoxFuture<'static, Result<Option<LlmResponse>, AgentError>>
+        ) -> BoxFuture<'static, (LlmResponse, Result<Option<LlmResponse>, AgentError>)>
         + Send
         + Sync,
 >;

@@ -346,6 +346,98 @@ class OneCTest(unittest.TestCase):
             self.run_cli("--ledger", "all", "--files", "session/compaction/llm_summarizer_test.go")
 
 
+LEDGER_2A = (
+    "# Parity ledger — sub-project 2a\n\n"
+    "<!-- in-scope:\nplugin/functioncallmodifier/plugin_test.go\ntool/exampletool/tool_test.go\n-->\n\n"
+    + pc.TABLE_HEADER + "\n" + pc.TABLE_SEP + "\n"
+)
+
+EXAMPLE_TARGET = "crates/gadk-tools/src/parity_tests/tool_exampletool_tool.rs"
+FCM_TARGET = "crates/gadk-engine/tests/plugin_functioncallmodifier_plugin.rs"
+
+
+class TwoATest(unittest.TestCase):
+    """2a: a gadk-tools white-box target and a gadk-engine tests target; the ledger starts with
+    a header and no rows, and the full check fails until every target is annotated."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        d = pathlib.Path(self._tmp.name)
+        self.go, self.repo = d / "go", d / "repo"
+        (self.go / "tool/exampletool").mkdir(parents=True)
+        (self.go / "plugin/functioncallmodifier").mkdir(parents=True)
+        (self.go / "tool/exampletool/tool_test.go").write_text(
+            "package exampletool\nfunc TestExampleTool_ProcessRequest(t *testing.T) {}\n"
+            "func TestExampleTool_Interface(t *testing.T) {}\n")
+        (self.go / "plugin/functioncallmodifier/plugin_test.go").write_text(
+            "package functioncallmodifier_test\nfunc TestPluginCallbacks(t *testing.T) {}\n")
+        (self.repo / "crates/gadk-tools/src/parity_tests").mkdir(parents=True)
+        (self.repo / "crates/gadk-engine/tests").mkdir(parents=True)
+        (self.repo / "docs/parity").mkdir(parents=True)
+        # Placeholders, as the 2a scaffold leaves them.
+        (self.repo / EXAMPLE_TARGET).write_text("//! Port of Go tool/exampletool/tool_test.go.\n")
+        (self.repo / FCM_TARGET).write_text("// license header only\n")
+        self.ledger = self.repo / "docs/parity/2a.md"
+        self.ledger.write_text(LEDGER_2A)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def run_cli(self, *args):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = pc.main(["--adk-go", str(self.go), "--repo", str(self.repo), *args])
+        return rc, out.getvalue(), err.getvalue()
+
+    def fill_targets(self):
+        (self.repo / EXAMPLE_TARGET).write_text(
+            "// parity: adapted: nil-request cases dropped\n"
+            "#[tokio::test]\nasync fn test_example_tool_process_request() {}\n\n"
+            "#[test]\nfn test_example_tool_interface() {}\n")
+        (self.repo / FCM_TARGET).write_text("#[tokio::test]\nasync fn test_plugin_callbacks() {}\n")
+
+    def test_header_only_ledger_counts_and_reports_placeholders(self):
+        self.assertEqual(self.run_cli("--ledger", "2a", "--count"), (0, "3\n", ""))
+        rc, _, err = self.run_cli("--ledger", "2a")
+        self.assertEqual(rc, 1)
+        self.assertIn(
+            "tool/exampletool/tool_test.go TestExampleTool_Interface: missing (no fn"
+            " test_example_tool_interface", err)
+        self.assertIn(
+            "plugin/functioncallmodifier/plugin_test.go TestPluginCallbacks: missing", err)
+        rc, _, _ = self.run_cli("--ledger", "2a", "--generate")
+        self.assertEqual(rc, 1, "generate refuses while targets are placeholders")
+        self.assertEqual(self.ledger.read_text(), LEDGER_2A)
+
+    def test_files_generate_and_full_check(self):
+        self.fill_targets()
+        self.assertEqual(
+            self.run_cli("--ledger", "2a", "--files", "tool/exampletool/tool_test.go")[0], 0)
+        rc, _, err = self.run_cli("--ledger", "2a")
+        self.assertEqual(rc, 1)
+        self.assertIn("run: python3 scripts/parity-check --ledger 2a --generate", err)
+        self.assertEqual(self.run_cli("--ledger", "2a", "--generate")[0], 0)
+        self.assertEqual(self.run_cli("--ledger", "2a")[0], 0)
+        text = self.ledger.read_text()
+        self.assertIn(
+            "| tool/exampletool/tool_test.go | TestExampleTool_ProcessRequest | ported (adapted: nil-request"
+            " cases dropped) | " + EXAMPLE_TARGET + " | test_example_tool_process_request |", text)
+        self.assertIn(
+            "| plugin/functioncallmodifier/plugin_test.go | TestPluginCallbacks | ported | "
+            + FCM_TARGET + " | test_plugin_callbacks |", text)
+
+    def test_files_outside_the_2a_in_scope_list_are_rejected(self):
+        errs = pc.check_1b(self.go, self.repo, self.ledger,
+                           files=["tool/toolutils/toolutils_test.go"], name="2a")
+        self.assertEqual(errs, ["not in the 2a in-scope list: tool/toolutils/toolutils_test.go"])
+
+    def test_files_and_generate_still_refuse_1a_and_all(self):
+        with self.assertRaises(SystemExit):
+            self.run_cli("--ledger", "1a", "--generate")
+        with self.assertRaises(SystemExit):
+            self.run_cli("--ledger", "all", "--files", "tool/exampletool/tool_test.go")
+
+
 ADK_GO = pathlib.Path(os.environ.get("ADK_GO_DIR", HERE.parent.parent / "adk-go"))
 
 
@@ -400,6 +492,39 @@ class RealTreeTest(unittest.TestCase):
         })
         self.assertEqual(pc.count(ADK_GO, in_scope), 190)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "1c"), [])
+
+    def test_2a_count_is_148(self):
+        in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/2a.md")
+        self.assertEqual(in_scope, [
+            "examples/toolsearch/main_test.go",
+            "internal/ranksearch/bm25_test.go",
+            "internal/ranksearch/ranksearch_test.go",
+            "plugin/functioncallmodifier/integration_test.go",
+            "plugin/functioncallmodifier/plugin_test.go",
+            "plugin/retryandreflect/plugin_test.go",
+            "tool/exampletool/tool_test.go",
+            "tool/geminitool/enterprise_web_search_test.go",
+            "tool/geminitool/tool_test.go",
+            "tool/loadartifactstool/load_artifacts_tool_test.go",
+            "tool/loadmemorytool/tool_test.go",
+            "tool/preloadmemorytool/tool_test.go",
+            "tool/skilltoolset/instruction_test.go",
+            "tool/skilltoolset/internal/skilltool/tools_test.go",
+            "tool/skilltoolset/skill/complete_preload_test.go",
+            "tool/skilltoolset/skill/filesystem_source_test.go",
+            "tool/skilltoolset/skill/frontmatter_preload_test.go",
+            "tool/skilltoolset/skill/frontmatter_test.go",
+            "tool/skilltoolset/skill/merged_source_test.go",
+            "tool/skilltoolset/toolset_test.go",
+            "tool/toolsearch/toolsearch_test.go",
+        ])
+        self.assertEqual(deferred, {})
+        self.assertEqual(pc.count(ADK_GO, in_scope), 148)
+        self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "2a"), [])
+        # tool/toolutils stays a 1b file.
+        in_1b, _ = pc.parse_header(HERE.parent / "docs/parity/1b.md")
+        self.assertIn("tool/toolutils/toolutils_test.go", in_1b)
+        self.assertNotIn("tool/toolutils/toolutils_test.go", in_scope)
 
     def test_1a_header_has_13_files(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/1a.md")

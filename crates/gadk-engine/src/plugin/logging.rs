@@ -107,9 +107,9 @@ pub fn logging_plugin() -> Plugin {
             move |ctx: Context,
                   resp: LlmResponse,
                   err: Option<Arc<ModelError>>|
-                  -> ResponseResult {
+                  -> BoxFuture<'static, (LlmResponse, Result<Option<LlmResponse>, AgentError>)> {
                 p.after_model(&ctx, &resp, err.as_deref());
-                Box::pin(ready(Ok(None)))
+                Box::pin(ready((resp, Ok(None))))
             },
         )
     };

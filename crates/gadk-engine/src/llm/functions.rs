@@ -26,8 +26,8 @@ use std::{
 use futures::{StreamExt, future::BoxFuture};
 use gadk_agent::{
     AfterToolCallback, AgentError, BeforeToolCallback, Context, ContextDelta, InvocationContext,
-    LiveRequest, LiveSession, OnToolErrorCallback, REQUEST_CONFIRMATION_FUNCTION_CALL_NAME, Tool,
-    ToolError,
+    LiveRequest, LiveSession, OnToolErrorCallback, REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+    SharedToolError, Tool, ToolError,
 };
 use gadk_genai::{Content, FunctionCall, FunctionResponse, Part};
 use gadk_model::LlmResponse;
@@ -489,7 +489,7 @@ async fn run_on_tool_error_callbacks(
             .await
         {
             Ok(Some(r)) => return (Some(r), None),
-            Err(e) => return (None, Some(Arc::new(to_tool_error(e)))),
+            Err(e) => return (None, Some(to_tool_error(e))),
             Ok(None) => {}
         }
     }
@@ -514,7 +514,7 @@ pub(crate) async fn call_tool(
             .await
         {
             Ok(r) => response = r,
-            Err(e) => err = Some(Arc::new(to_tool_error(e))),
+            Err(e) => err = Some(to_tool_error(e)),
         }
     }
     if response.is_none() && err.is_none() {
@@ -539,7 +539,7 @@ pub(crate) async fn call_tool(
                 .await
             {
                 Ok(r) => er = r,
-                Err(x) => ce = Some(Arc::new(to_tool_error(x))),
+                Err(x) => ce = Some(to_tool_error(x)),
             }
         }
         if er.is_none() && ce.is_none() {
@@ -564,7 +564,7 @@ pub(crate) async fn call_tool(
             .await
         {
             Ok(r) => ar = r,
-            Err(x) => ae = Some(Arc::new(to_tool_error(x))),
+            Err(x) => ae = Some(to_tool_error(x)),
         }
     }
     if ar.is_none() && ae.is_none() {
@@ -626,12 +626,17 @@ impl std::error::Error for NamedToolError {
     }
 }
 
-/// `AgentError` → `ToolError`: unwrap `AgentError::Tool`, else box the error (Display is
-/// transparent).
-fn to_tool_error(e: AgentError) -> ToolError {
+/// `AgentError` → the flow's current `Arc<ToolError>`: an `AgentError::Other` holding a
+/// [`SharedToolError`] gives back its `Arc` unchanged (Go passes the same `err` value onward);
+/// `AgentError::Tool` is unwrapped; anything else is boxed (Display is transparent).
+fn to_tool_error(e: AgentError) -> Arc<ToolError> {
     match e {
-        AgentError::Tool { source, .. } => source,
-        other => ToolError::Execution(Box::new(other)),
+        AgentError::Tool { source, .. } => Arc::new(source),
+        AgentError::Other(b) => match b.downcast::<SharedToolError>() {
+            Ok(shared) => shared.0,
+            Err(b) => Arc::new(ToolError::Execution(Box::new(AgentError::Other(b)))),
+        },
+        other => Arc::new(ToolError::Execution(Box::new(other))),
     }
 }
 
@@ -644,7 +649,7 @@ async fn invoke_before_tool_callbacks(
 ) -> (Option<Map<String, Value>>, Option<Arc<ToolError>>) {
     for cb in &cbs.before {
         match cb(tool_ctx.clone(), tool.clone(), args.clone()).await {
-            Err(e) => return (None, Some(Arc::new(to_tool_error(e)))),
+            Err(e) => return (None, Some(to_tool_error(e))),
             Ok(Some(r)) => return (Some(r), None),
             Ok(None) => {}
         }
@@ -672,7 +677,7 @@ async fn invoke_after_tool_callbacks(
         )
         .await
         {
-            Err(e) => return (None, Some(Arc::new(to_tool_error(e)))),
+            Err(e) => return (None, Some(to_tool_error(e))),
             Ok(Some(r)) => return (Some(r), None),
             Ok(None) => {}
         }
@@ -691,7 +696,7 @@ async fn invoke_on_tool_error_callbacks(
 ) -> (Option<Map<String, Value>>, Option<Arc<ToolError>>) {
     for cb in &cbs.on_error {
         match cb(tool_ctx.clone(), tool.clone(), args.clone(), err.clone()).await {
-            Err(e) => return (None, Some(Arc::new(to_tool_error(e)))),
+            Err(e) => return (None, Some(to_tool_error(e))),
             Ok(Some(r)) => return (Some(r), None),
             Ok(None) => {}
         }
@@ -1224,5 +1229,42 @@ mod tests {
         drop(fut);
         // The aborted task's future (and its guard) is dropped by the runtime.
         dropped_rx.await.unwrap();
+    }
+
+    /// Go passes a callback's `err` value onward unchanged: a callback error carrying a
+    /// [`SharedToolError`] reaches the later after-tool callbacks as the same `Arc`.
+    #[tokio::test]
+    async fn shared_tool_error_from_callback_keeps_arc_identity() {
+        use std::sync::Mutex;
+
+        let original = Arc::new(ToolError::InvalidArgument("original".into()));
+        let seen: Arc<Mutex<Option<Arc<ToolError>>>> = Arc::new(Mutex::new(None));
+        let before: BeforeToolCallback = {
+            let original = original.clone();
+            Arc::new(move |_, _, _| {
+                let original = original.clone();
+                Box::pin(async move { Err(AgentError::Other(Box::new(SharedToolError(original)))) })
+            })
+        };
+        let after: AfterToolCallback = {
+            let seen = seen.clone();
+            Arc::new(move |_, _, _, _, err| {
+                *seen.lock().unwrap() = err;
+                Box::pin(async { Ok(None) })
+            })
+        };
+        let cbs = ToolCallbacks {
+            before: vec![before],
+            after: vec![after],
+            on_error: vec![],
+        };
+        let tool = state_tool("t", "a", 1);
+        let resp = call_tool(&cbs, ctx().into_context(), tool, Map::new()).await;
+        assert_eq!(resp, Some(error_map("original")));
+        let seen = seen.lock().unwrap().clone().unwrap();
+        assert!(
+            Arc::ptr_eq(&seen, &original),
+            "after-tool got a new Arc: {seen:?}"
+        );
     }
 }

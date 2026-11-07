@@ -28,6 +28,9 @@ pub use gadk_memory as memory;
 pub use gadk_model as model;
 pub use gadk_platform as platform;
 pub use gadk_session as session;
+/// Built-in tools that need no authentication: the Gemini built-ins, artifact and memory tools,
+/// the example tool, tool search and the skills toolset (re-export of `gadk-tools`).
+pub use gadk_tools as tools;
 
 /// Context compaction (re-export of `gadk_session::compaction`).
 ///

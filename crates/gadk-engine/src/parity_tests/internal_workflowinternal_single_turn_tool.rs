@@ -294,13 +294,14 @@ async fn test_single_turn_tool_run_failures() {
 }
 
 // parity: adapted: Go ProcessRequest packs the tool itself; the Rust flow calls pack_tool before process_request (spec § Tools), so the port does both in the flow's order
-#[test]
-fn test_single_turn_tool_process_request_registers_tool() {
+#[tokio::test]
+async fn test_single_turn_tool_process_request_registers_tool() {
     let st = SingleTurnTool::new(new_llm_agent(AGENT_NAME, AGENT_DESC, None));
     let mut req = LlmRequest::default();
     let t: Arc<dyn Tool> = st.clone();
     pack_tool(&mut req, &t).expect("pack_tool");
     st.process_request(&Context::builder().build(), &mut req)
+        .await
         .unwrap_or_else(|e| panic!("ProcessRequest() err = {e}"));
 
     assert!(

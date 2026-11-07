@@ -1,0 +1,37 @@
+[package]
+name = "gadk-tools"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+gadk-agent = { workspace = true }
+gadk-engine = { workspace = true }
+gadk-genai = { workspace = true }
+gadk-model = { workspace = true }
+gadk-platform = { workspace = true }
+gadk-session = { workspace = true }
+gadk-memory = { workspace = true }
+gadk-artifact = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde-saphyr = { workspace = true }
+schemars = { workspace = true }
+regex = { workspace = true }
+regex-syntax = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+gadk-engine = { workspace = true, features = ["testutil"] }
+gadk-session = { workspace = true, features = ["testsuite"] }
+gadk-artifact = { workspace = true, features = ["testsuite"] }
+tokio = { workspace = true, features = ["test-util"] }
+pretty_assertions = { workspace = true }

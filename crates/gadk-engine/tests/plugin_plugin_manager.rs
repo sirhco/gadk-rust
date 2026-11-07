@@ -489,9 +489,14 @@ fn before_model(out: ModelOut) -> BeforeModelCallback {
 }
 
 fn after_model(out: ModelOut) -> AfterModelCallback {
-    Arc::new(move |_ctx, _resp, _err| {
+    Arc::new(move |_ctx, resp, _err| {
         let out = out.clone();
-        Box::pin(async move { out.map(|t| t.map(model_text)).map_err(AgentError::other) })
+        Box::pin(async move {
+            (
+                resp,
+                out.map(|t| t.map(model_text)).map_err(AgentError::other),
+            )
+        })
     })
 }
 
@@ -743,9 +748,9 @@ async fn test_model_callbacks() {
                 bc.store(true, SeqCst);
                 Box::pin(async move { (req, Ok(None)) })
             })],
-            after_model_callbacks: vec![Arc::new(move |_c, _r, _e| {
+            after_model_callbacks: vec![Arc::new(move |_c, r, _e| {
                 ac.store(true, SeqCst);
-                Box::pin(async { Ok(None) })
+                Box::pin(async move { (r, Ok(None)) })
             })],
             ..Default::default()
         })
@@ -796,4 +801,75 @@ async fn test_model_callbacks() {
             case.name
         );
     }
+}
+
+/// R1: a response edited in place by the first after-model plugin callback (Go mutates
+/// `*model.LLMResponse` and returns `(nil, nil)`) reaches the second plugin, the agent's
+/// after-model callback, and the event the flow yields.
+#[tokio::test]
+async fn after_model_edit_reaches_later_callbacks_and_the_flow() {
+    let seen = Arc::new(parking_lot::Mutex::new(Vec::<String>::new()));
+    let first_text = |r: &LlmResponse| {
+        r.content
+            .as_ref()
+            .map(|c| c.parts[0].text.clone())
+            .unwrap_or_default()
+    };
+    let editor: AfterModelCallback = Arc::new(|_ctx, mut resp: LlmResponse, _err| {
+        Box::pin(async move {
+            resp.content = Some(Content::from_text("edited by plugin-0", "model"));
+            (resp, Ok(None))
+        })
+    });
+    let observer = |who: &'static str| -> AfterModelCallback {
+        let seen = seen.clone();
+        Arc::new(move |_ctx, resp: LlmResponse, _err| {
+            seen.lock().push(format!("{who}: {}", first_text(&resp)));
+            Box::pin(async move { (resp, Ok(None)) })
+        })
+    };
+    let plugins = vec![
+        Plugin::new(gadk_agent::PluginConfig {
+            name: "plugin-0".into(),
+            after_model_callback: Some(editor),
+            ..Default::default()
+        }),
+        Plugin::new(gadk_agent::PluginConfig {
+            name: "plugin-1".into(),
+            after_model_callback: Some(observer("plugin-1")),
+            ..Default::default()
+        }),
+    ];
+    let agent = llm_agent::new(LlmAgentConfig {
+        name: "hello_world_agent".into(),
+        model: Some(MockModel::from_contents(vec![Content::from_text(
+            "from the model",
+            "model",
+        )])),
+        after_model_callbacks: vec![observer("agent")],
+        ..Default::default()
+    })
+    .unwrap();
+    let runner = TestAgentRunner::with_plugins(
+        agent,
+        RunnerPluginConfig {
+            plugins,
+            close_timeout: Duration::from_secs(1),
+        },
+    )
+    .await;
+    let (events, err) = drain(runner.run("")).await;
+    assert!(err.is_none(), "{err:?}");
+    let texts: Vec<String> = events
+        .iter()
+        .filter_map(|e| e.response.content.as_ref())
+        .flat_map(|c| c.parts.iter())
+        .filter(|p| !p.text.is_empty())
+        .map(|p| p.text.clone())
+        .collect();
+    assert_eq!(texts, ["edited by plugin-0"]);
+    assert_eq!(
+        *seen.lock(),
+        ["plugin-1: edited by plugin-0", "agent: edited by plugin-0"]
+    );
 }
