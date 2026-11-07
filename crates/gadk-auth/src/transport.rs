@@ -22,11 +22,14 @@
 //! token-source-backed one refreshes itself, and a network-backed one can cache in a
 //! [`CredentialStore`](crate::CredentialStore).
 //!
-//! When the provider is a [`RefreshingProvider`](crate::RefreshingProvider) and the response is
-//! a 401 or 403, `Transport` refreshes the credential and retries once, provided the request can
-//! be replayed (`reqwest::Request::try_clone` succeeds; a streamed body cannot). The retry is not
-//! restricted by method, so a server that acts on a request and only then answers 401 or 403 sees
-//! the same body twice.
+//! When the provider is a [`RefreshingProvider`] and the response is a 401 or 403, `Transport`
+//! refreshes the credential and retries once, provided the request can be replayed
+//! (`reqwest::Request::try_clone` succeeds; a streamed body cannot). The retry is not restricted
+//! by method, so a server that acts on a request and only then answers 401 or 403 sees the same
+//! body twice.
+//!
+//! [`apply_credential`], [`refresh_credential`] and [`is_auth_rejected`] are the same steps for
+//! callers that build their requests themselves (the MCP HTTP client).
 
 use std::sync::Arc;
 
@@ -36,7 +39,7 @@ use reqwest_middleware::{ClientBuilder, ClientWithMiddleware, Middleware, Next};
 
 use crate::credential::Credential;
 use crate::error::{ConsentRequiredError, Error, find_consent};
-use crate::provider::{AuthContext, CredentialProvider};
+use crate::provider::{AuthContext, CredentialProvider, RefreshingProvider};
 
 /// Go `Transport` (transport.go:39) as a `reqwest_middleware::Middleware`. Go's per-request
 /// context is the `AuthContext` fixed at construction, so a transport for a per-user provider
@@ -75,17 +78,10 @@ impl Middleware for Transport {
     /// Go `RoundTrip` (transport.go:47).
     async fn handle(
         &self,
-        req: reqwest::Request,
+        mut req: reqwest::Request,
         extensions: &mut Extensions,
         next: Next<'_>,
     ) -> reqwest_middleware::Result<reqwest::Response> {
-        // On an error return `req` is dropped, which closes its body (Go's deferred Close).
-        let cred = self
-            .provider
-            .credential(&self.cx)
-            .await
-            .map_err(|e| middleware_error(Error::ResolveCredential(Box::new(e))))?;
-
         // The replay snapshot: the caller's request as it arrived, taken before anything is
         // applied or sent, so a retry cannot inherit a header the first credential set. Only a
         // refreshing provider can retry, so only then is it taken (Go calls GetBody only then).
@@ -96,24 +92,36 @@ impl Middleware for Transport {
             None => None,
         };
 
-        let resp = apply_and_send(req, cred.as_ref(), &mut *extensions, next.clone()).await?;
+        // On an error return `req` and `replay` are dropped, which closes their bodies (Go's
+        // deferred Close), and nothing is sent.
+        let cred = apply_credential(self.provider.as_ref(), &self.cx, req.headers_mut())
+            .await
+            .map_err(middleware_error)?;
+        let resp = next.clone().run(req, &mut *extensions).await?;
 
         // One refresh-and-retry on a downstream auth rejection, when the provider supports
         // refresh and the request can be replayed.
         if !is_auth_rejected(resp.status()) {
             return Ok(resp);
         }
-        let (Some(refresher), Some(replay)) = (refresher, replay) else {
+        let (Some(refresher), Some(mut replay)) = (refresher, replay) else {
             return Ok(resp);
         };
 
         // Refresh first: the rejected response stays unread until we know what to do with it.
-        match refresher.refresh(&self.cx, &cred).await {
-            Ok(fresh) => {
+        match refresh_and_apply(refresher, &self.cx, &cred, replay.headers_mut()).await {
+            Ok(_fresh) => {
                 drain(resp).await;
-                apply_and_send(replay, fresh.as_ref(), extensions, next).await
+                next.run(replay, extensions).await
             }
-            Err(err) => {
+            Err(RefreshFailure::Apply(err)) => {
+                // Go `applyAndSend` on the fresh credential: the replay (with its body) is
+                // dropped, nothing is sent, and the apply error is returned.
+                drop(replay);
+                drain(resp).await;
+                Err(middleware_error(err))
+            }
+            Err(RefreshFailure::Refresh(err)) => {
                 drop(replay);
                 // One refusal is worth surfacing: interactive consent is something the caller
                 // can act on, and `credential` reports it the same way, so the two paths
@@ -131,20 +139,6 @@ impl Middleware for Transport {
     }
 }
 
-/// Go `applyAndSend` (transport.go:131): applies `cred` to `req`'s headers and sends it on. On an
-/// apply error nothing is sent, and `req` (with its body) is dropped.
-async fn apply_and_send<'a>(
-    mut req: reqwest::Request,
-    cred: &dyn Credential,
-    extensions: &'a mut Extensions,
-    next: Next<'a>,
-) -> reqwest_middleware::Result<reqwest::Response> {
-    if let Err(err) = cred.apply(req.headers_mut()).await {
-        return Err(middleware_error(Error::ApplyCredential(Box::new(err))));
-    }
-    next.run(req, extensions).await
-}
-
 /// Go `isAuthRejected` (transport.go:143): whether a response status means the credential was
 /// rejected (401 or 403), the condition for one refresh-and-retry.
 pub fn is_auth_rejected(status: StatusCode) -> bool {
@@ -158,13 +152,17 @@ pub fn is_auth_rejected(status: StatusCode) -> bool {
 /// Errors carry [`Transport`]'s texts: [`Error::ResolveCredential`] (`auth: resolve credential:
 /// …`) when the provider fails, [`Error::ApplyCredential`] (`auth: apply credential: …`) when the
 /// credential cannot be applied.
-#[allow(unused_variables, clippy::todo)]
 pub async fn apply_credential(
     provider: &dyn CredentialProvider,
     cx: &AuthContext,
     headers: &mut http::HeaderMap,
 ) -> Result<Arc<dyn Credential>, Error> {
-    todo!("Task 2")
+    let cred = provider
+        .credential(cx)
+        .await
+        .map_err(|e| Error::ResolveCredential(Box::new(e)))?;
+    apply(cred.as_ref(), headers).await?;
+    Ok(cred)
 }
 
 /// After an auth rejection ([`is_auth_rejected`]) of a request that carried `rejected`: `None`
@@ -172,14 +170,55 @@ pub async fn apply_credential(
 /// `headers` (the request's headers as they were before `rejected` was applied), as
 /// `Some(Ok(fresh))`, or `Some(Err(_))` when the refresh or the apply failed (an apply error is
 /// [`Error::ApplyCredential`]; a refresh error is returned as the provider gave it).
-#[allow(unused_variables, clippy::todo)]
 pub async fn refresh_credential(
     provider: &dyn CredentialProvider,
     cx: &AuthContext,
     rejected: &Arc<dyn Credential>,
     headers: &mut http::HeaderMap,
 ) -> Option<Result<Arc<dyn Credential>, Error>> {
-    todo!("Task 2")
+    let refresher = provider.as_refreshing()?;
+    Some(
+        refresh_and_apply(refresher, cx, rejected, headers)
+            .await
+            .map_err(|failure| match failure {
+                RefreshFailure::Refresh(err) | RefreshFailure::Apply(err) => err,
+            }),
+    )
+}
+
+/// Why [`refresh_and_apply`] failed. [`Transport`] treats the two differently (an apply error is
+/// returned, a refresh error other than consent degrades to the rejected response), so it keeps
+/// them apart even when the provider's refresh error is itself an [`Error::ApplyCredential`].
+enum RefreshFailure {
+    /// The provider's refresh error, as it gave it.
+    Refresh(Error),
+    /// [`Error::ApplyCredential`] from applying the fresh credential.
+    Apply(Error),
+}
+
+/// `refresher`'s refresh of `rejected` for `cx`, applied to `headers`.
+async fn refresh_and_apply(
+    refresher: &dyn RefreshingProvider,
+    cx: &AuthContext,
+    rejected: &Arc<dyn Credential>,
+    headers: &mut http::HeaderMap,
+) -> Result<Arc<dyn Credential>, RefreshFailure> {
+    let fresh = refresher
+        .refresh(cx, rejected)
+        .await
+        .map_err(RefreshFailure::Refresh)?;
+    apply(fresh.as_ref(), headers)
+        .await
+        .map_err(RefreshFailure::Apply)?;
+    Ok(fresh)
+}
+
+/// Go `applyAndSend`'s apply step (transport.go:135): `cred` applied to `headers`, an error
+/// wrapped as [`Error::ApplyCredential`] (`auth: apply credential: …`).
+async fn apply(cred: &dyn Credential, headers: &mut http::HeaderMap) -> Result<(), Error> {
+    cred.apply(headers)
+        .await
+        .map_err(|e| Error::ApplyCredential(Box::new(e)))
 }
 
 /// transport.go:164 `maxDrainBytes`.
@@ -536,5 +575,276 @@ mod tests {
              app_name: \"a\", session_id: \"s\" }) }, refreshing: true, .. }"
         );
         assert!(!got.contains("secret-token"));
+    }
+
+    /// A provider that never refreshes, yielding `cred` (or `err`).
+    fn plain(cred: Result<Arc<dyn Credential>, Error>) -> Arc<dyn CredentialProvider> {
+        ProviderFn::new(move |_cx: &AuthContext| -> CredentialFuture {
+            let cred = cred.clone();
+            Box::pin(async move { cred })
+        })
+        .into_provider()
+    }
+
+    /// Yields `stale`; `refresh` records the credential it was handed and answers `fresh`.
+    struct Recorder {
+        stale: Arc<dyn Credential>,
+        fresh: Arc<dyn Credential>,
+        rejected: std::sync::Mutex<Vec<Arc<dyn Credential>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl CredentialProvider for Recorder {
+        async fn credential(&self, _cx: &AuthContext) -> Result<Arc<dyn Credential>, Error> {
+            Ok(self.stale.clone())
+        }
+
+        fn as_refreshing(&self) -> Option<&dyn RefreshingProvider> {
+            Some(self)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl RefreshingProvider for Recorder {
+        async fn refresh(
+            &self,
+            _cx: &AuthContext,
+            rejected: &Arc<dyn Credential>,
+        ) -> Result<Arc<dyn Credential>, Error> {
+            self.rejected.lock().unwrap().push(rejected.clone());
+            Ok(self.fresh.clone())
+        }
+    }
+
+    fn authorization(headers: &http::HeaderMap) -> Option<&str> {
+        headers
+            .get(http::header::AUTHORIZATION)
+            .map(|v| v.to_str().unwrap())
+    }
+
+    #[tokio::test]
+    async fn apply_credential_resolves_and_applies() {
+        let cred = bearer("tok");
+        let provider = plain(Ok(cred.clone()));
+        let mut headers = http::HeaderMap::new();
+
+        let got = apply_credential(provider.as_ref(), &AuthContext::anonymous(), &mut headers)
+            .await
+            .unwrap();
+
+        assert!(Arc::ptr_eq(&got, &cred), "returns the applied credential");
+        assert_eq!(authorization(&headers), Some("Bearer tok"));
+    }
+
+    #[tokio::test]
+    async fn apply_credential_resolve_error_text() {
+        let provider = plain(Err(Error::msg("boom")));
+        let mut headers = http::HeaderMap::new();
+
+        let err = apply_credential(provider.as_ref(), &AuthContext::anonymous(), &mut headers)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, Error::ResolveCredential(_)), "got {err:?}");
+        assert_eq!(err.to_string(), "auth: resolve credential: boom");
+        assert!(headers.is_empty(), "nothing is applied");
+    }
+
+    #[tokio::test]
+    async fn apply_credential_keeps_consent_findable() {
+        let provider = plain(Err(Error::from(consent())));
+        let mut headers = http::HeaderMap::new();
+
+        let err = apply_credential(provider.as_ref(), &AuthContext::anonymous(), &mut headers)
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            err.to_string(),
+            "auth: resolve credential: auth: interactive consent required"
+        );
+        assert_eq!(find_consent(&err), Some(&consent()));
+    }
+
+    #[tokio::test]
+    async fn apply_credential_apply_error_text() {
+        let provider = plain(Ok(bearer("")));
+        let mut headers = http::HeaderMap::new();
+
+        let err = apply_credential(provider.as_ref(), &AuthContext::anonymous(), &mut headers)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, Error::ApplyCredential(_)), "got {err:?}");
+        assert_eq!(
+            err.to_string(),
+            "auth: apply credential: auth: bearer credential missing token"
+        );
+        assert!(headers.is_empty(), "nothing is applied");
+    }
+
+    #[tokio::test]
+    async fn refresh_credential_is_none_without_a_refreshing_provider() {
+        let provider = plain(Ok(bearer("stale")));
+        let rejected = bearer("stale");
+        let mut headers = http::HeaderMap::new();
+
+        let got = refresh_credential(
+            provider.as_ref(),
+            &AuthContext::anonymous(),
+            &rejected,
+            &mut headers,
+        )
+        .await;
+
+        assert!(got.is_none(), "a plain provider does not refresh");
+        assert!(headers.is_empty(), "nothing is applied");
+    }
+
+    #[tokio::test]
+    async fn refresh_credential_applies_the_fresh_credential() {
+        let fresh = bearer("fresh");
+        let provider = Recorder {
+            stale: bearer("stale"),
+            fresh: fresh.clone(),
+            rejected: std::sync::Mutex::new(Vec::new()),
+        };
+        let cx = AuthContext::anonymous();
+        let mut first = http::HeaderMap::new();
+        let rejected = apply_credential(&provider, &cx, &mut first).await.unwrap();
+        assert_eq!(authorization(&first), Some("Bearer stale"));
+
+        let mut headers = http::HeaderMap::new();
+        let got = refresh_credential(&provider, &cx, &rejected, &mut headers)
+            .await
+            .expect("a refreshing provider refreshes")
+            .unwrap();
+
+        assert!(Arc::ptr_eq(&got, &fresh), "returns the fresh credential");
+        assert_eq!(authorization(&headers), Some("Bearer fresh"));
+        let seen = provider.rejected.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert!(
+            Arc::ptr_eq(&seen[0], &rejected),
+            "refresh is handed the rejected credential"
+        );
+    }
+
+    #[tokio::test]
+    async fn refresh_credential_returns_the_refresh_error_as_given() {
+        let provider = Flip {
+            stale: bearer("stale"),
+            fresh: Err(Error::other(Wrapped(consent()))),
+            refreshes: AtomicUsize::new(0),
+        };
+        let rejected = bearer("stale");
+        let mut headers = http::HeaderMap::new();
+
+        let err = refresh_credential(
+            &provider,
+            &AuthContext::anonymous(),
+            &rejected,
+            &mut headers,
+        )
+        .await
+        .expect("a refreshing provider refreshes")
+        .unwrap_err();
+
+        assert!(matches!(err, Error::Other(_)), "not wrapped: {err:?}");
+        assert_eq!(err.to_string(), "gcp: auth: interactive consent required");
+        assert_eq!(find_consent(&err), Some(&consent()));
+        assert_eq!(provider.refreshes.load(Ordering::SeqCst), 1);
+        assert!(headers.is_empty(), "nothing is applied");
+    }
+
+    #[tokio::test]
+    async fn refresh_credential_apply_error_text() {
+        let provider = Flip {
+            stale: bearer("stale"),
+            fresh: Ok(bearer("")),
+            refreshes: AtomicUsize::new(0),
+        };
+        let rejected = bearer("stale");
+        let mut headers = http::HeaderMap::new();
+
+        let err = refresh_credential(
+            &provider,
+            &AuthContext::anonymous(),
+            &rejected,
+            &mut headers,
+        )
+        .await
+        .expect("a refreshing provider refreshes")
+        .unwrap_err();
+
+        assert!(matches!(err, Error::ApplyCredential(_)), "got {err:?}");
+        assert_eq!(
+            err.to_string(),
+            "auth: apply credential: auth: bearer credential missing token"
+        );
+        assert_eq!(provider.refreshes.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn client_returns_the_apply_error_of_a_refreshed_credential() {
+        let server = TestServer::start(|_req| async { Reply::status(401, "rejected") }).await;
+        let provider = Arc::new(Flip {
+            stale: bearer("stale"),
+            fresh: Ok(bearer("")),
+            refreshes: AtomicUsize::new(0),
+        });
+        let http = client(server.client(), provider.clone(), AuthContext::anonymous());
+
+        let err = http
+            .get(format!("{}/v1/thing", server.url()))
+            .send()
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            err.to_string(),
+            "auth: apply credential: auth: bearer credential missing token"
+        );
+        assert_eq!(server.calls(), 1, "nothing is sent after the apply error");
+        assert_eq!(provider.refreshes.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn client_degrades_a_refresh_error_shaped_like_an_apply_error() {
+        let server = TestServer::start(|_req| async { Reply::status(401, "rejected") }).await;
+        let provider = Arc::new(Flip {
+            stale: bearer("stale"),
+            fresh: Err(Error::ApplyCredential(Box::new(Error::msg("boom")))),
+            refreshes: AtomicUsize::new(0),
+        });
+        let http = client(server.client(), provider.clone(), AuthContext::anonymous());
+
+        let resp = http
+            .get(format!("{}/v1/thing", server.url()))
+            .send()
+            .await
+            .unwrap();
+
+        // A refresh error is the provider's, whatever its variant: it degrades to the
+        // rejection the downstream sent.
+        assert_eq!(resp.status(), 401);
+        assert_eq!(resp.text().await.unwrap(), "rejected");
+        assert_eq!(server.calls(), 1);
+        assert_eq!(provider.refreshes.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn is_auth_rejected_is_401_or_403() {
+        assert!(is_auth_rejected(StatusCode::UNAUTHORIZED));
+        assert!(is_auth_rejected(StatusCode::FORBIDDEN));
+        for other in [
+            StatusCode::OK,
+            StatusCode::BAD_REQUEST,
+            StatusCode::NOT_FOUND,
+            StatusCode::PROXY_AUTHENTICATION_REQUIRED,
+            StatusCode::INTERNAL_SERVER_ERROR,
+        ] {
+            assert!(!is_auth_rejected(other), "{other} is not an auth rejection");
+        }
     }
 }
