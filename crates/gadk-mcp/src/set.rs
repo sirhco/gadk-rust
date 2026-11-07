@@ -20,65 +20,118 @@ use std::sync::Arc;
 #[cfg(test)]
 use std::time::Duration;
 
-use gadk_agent::tool::{Tool, Toolset};
+use gadk_agent::tool::{ConfirmationProvider, Tool, ToolPredicate, Toolset};
 use gadk_agent::{ReadonlyContext, ToolError};
 
-use crate::client::SessionClient;
-use crate::config::Config;
+use crate::client::{CallContext, McpClient, SessionClient};
+use crate::config::{Config, MetadataProvider};
 use crate::error::Error;
+use crate::tool::McpTool;
 
 /// Go `set`: the tools of one MCP server as a [`Toolset`] named `mcp_tool_set`. Build it with
 /// [`new`](crate::new); close it with [`close`](McpToolset::close).
-pub struct McpToolset {}
+pub struct McpToolset {
+    client: Arc<dyn SessionClient>,
+    tool_filter: Option<ToolPredicate>,
+    require_confirmation: bool,
+    require_confirmation_provider: Option<ConfirmationProvider>,
+    metadata_provider: Option<MetadataProvider>,
+}
 
-#[allow(unused_variables, dead_code, clippy::todo)]
 impl McpToolset {
     /// The toolset over `client`, with `cfg`'s filter, confirmation and metadata settings.
     pub(crate) fn from_parts(client: Arc<dyn SessionClient>, cfg: &Config) -> Self {
-        todo!("Task 9")
+        Self {
+            client,
+            tool_filter: cfg.tool_filter.clone(),
+            require_confirmation: cfg.require_confirmation,
+            require_confirmation_provider: cfg.require_confirmation_provider.clone(),
+            metadata_provider: cfg.metadata_provider.clone(),
+        }
     }
 
     /// Go `Description()`: `Connects to a MCP Server, retrieves MCP Tools into ADK Tools.`
     pub fn description(&self) -> &str {
-        todo!("Task 9")
+        "Connects to a MCP Server, retrieves MCP Tools into ADK Tools."
     }
 
     /// Go `Close`: waits for connection setup in progress, closes every MCP session, and makes
     /// later operations fail with [`Error::ConnectionClosed`]. Idempotent and safe to call
     /// concurrently; every call returns the first call's result.
     pub async fn close(&self) -> Result<(), Arc<Error>> {
-        todo!("Task 9")
+        self.client.close().await
+    }
+
+    /// The credential session pool; panics for a toolset built without `auth` (as Go's type
+    /// assertion in export_test.go does).
+    #[cfg(test)]
+    #[allow(dead_code)] // Task 10's auth_session parity tests call the hooks.
+    fn credential_sessions(&self) -> &crate::sessions::CredentialSessions {
+        match self.client.as_credential_sessions() {
+            Some(pool) => pool,
+            None => panic!("the toolset was not built with Config.auth"),
+        }
     }
 
     /// Go `SetSessionBoundsForTest` (export_test.go) for a toolset built with `auth`.
     #[cfg(test)]
+    #[allow(dead_code)] // Task 10's auth_session parity tests call the hooks.
     pub(crate) fn set_session_bounds_for_test(&self, idle: Duration, max: usize) {
-        todo!("Task 9")
+        self.credential_sessions().set_bounds(idle, max);
     }
 
     /// Go `SessionCountForTest` (export_test.go) for a toolset built with `auth`.
     #[cfg(test)]
+    #[allow(dead_code)] // Task 10's auth_session parity tests call the hooks.
     pub(crate) fn session_count_for_test(&self) -> usize {
-        todo!("Task 9")
+        self.credential_sessions().len()
     }
 }
 
 #[async_trait::async_trait]
-#[allow(unused_variables, clippy::todo)]
 impl Toolset for McpToolset {
     /// `mcp_tool_set`.
     fn name(&self) -> &str {
-        todo!("Task 9")
+        "mcp_tool_set"
     }
 
     /// Go `Tools`: every server tool (all pages, server order) as an [`McpTool`](crate::McpTool),
-    /// filtered by `tool_filter`.
+    /// filtered by `tool_filter`. Listing stops with [`Error::Cancelled`] when `ctx`'s
+    /// invocation is cancelled; a listing error reaches the caller as
+    /// [`ToolError::Execution`] with the crate [`Error`] as its source.
+    ///
+    /// Go's `convertTool` can fail (`failed to convert MCP tool %q to adk tool: …`, which
+    /// [`Error::ConvertTool`] spells), but only for a nil tool; rmcp's listing never yields one,
+    /// so conversion here is infallible and `ConvertTool` is never produced.
     async fn tools(&self, ctx: &ReadonlyContext) -> Result<Vec<Arc<dyn Tool>>, ToolError> {
-        todo!("Task 9")
+        let mcp_tools = self
+            .client
+            .list_tools(&CallContext::from(ctx))
+            .await
+            .map_err(|err| ToolError::Execution(Box::new(err)))?;
+        let client: Arc<dyn McpClient> = self.client.clone();
+        let mut adk_tools: Vec<Arc<dyn Tool>> = Vec::with_capacity(mcp_tools.len());
+        for mcp_tool in mcp_tools {
+            let tool: Arc<dyn Tool> = Arc::new(McpTool::new(
+                mcp_tool,
+                client.clone(),
+                self.require_confirmation,
+                self.require_confirmation_provider.clone(),
+                self.metadata_provider.clone(),
+            ));
+            // Go filters the converted tool, so the predicate sees the ADK tool.
+            if let Some(filter) = &self.tool_filter
+                && !filter(ctx, tool.as_ref())
+            {
+                continue;
+            }
+            adk_tools.push(tool);
+        }
+        Ok(adk_tools)
     }
 
     fn as_any(&self) -> &dyn Any {
-        todo!("Task 9")
+        self
     }
 }
 
