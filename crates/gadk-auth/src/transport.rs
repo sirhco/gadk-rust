@@ -170,6 +170,13 @@ pub async fn apply_credential(
 /// `headers` (the request's headers as they were before `rejected` was applied), as
 /// `Some(Ok(fresh))`, or `Some(Err(_))` when the refresh or the apply failed (an apply error is
 /// [`Error::ApplyCredential`]; a refresh error is returned as the provider gave it).
+///
+/// The two failures are folded into one `Err`, so a caller cannot tell them apart when the
+/// provider's refresh error is itself an [`Error::ApplyCredential`]. Callers that need
+/// [`Transport`]'s (Go `auth.Transport`'s) semantics, where a refresh error other than consent
+/// degrades to the rejected response but an apply error is returned, must call
+/// [`RefreshingProvider::refresh`] (via [`CredentialProvider::as_refreshing`]) and apply the
+/// fresh credential separately, as gadk-mcp's HTTP client does.
 pub async fn refresh_credential(
     provider: &dyn CredentialProvider,
     cx: &AuthContext,

@@ -1053,7 +1053,7 @@ async fn test_metadata_provider_keeps_client_meta() {
 async fn test_metadata_provider_map_is_copied() {
     let reused = Arc::new(Mutex::new(obj(json!({"trace_id": "abc-123"}))));
     let shared = reused.clone();
-    let (ts, _) =
+    let (ts, got) =
         start_meta_echo_server(provider(move |_| Ok(Some(shared.lock().unwrap().clone()))));
     if let Err(e) = run_single_tool(&ts, &inv_ctx()).await {
         panic!("Run() err = {e}");
@@ -1062,6 +1062,13 @@ async fn test_metadata_provider_map_is_copied() {
         *reused.lock().unwrap(),
         obj(json!({"trace_id": "abc-123"})),
         "the provider's own map was modified"
+    );
+    // The provider hands over an owned map, so the check above holds by construction in Rust;
+    // also check the map reached the server unchanged.
+    assert_eq!(
+        provider_meta(&got.lock().unwrap().meta),
+        obj(json!({"trace_id": "abc-123"})),
+        "provider _meta mismatch"
     );
 }
 

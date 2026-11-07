@@ -73,10 +73,10 @@ impl AdkHttpClient {
 
     /// Go `trackingTransport.RoundTrip`'s header step: `custom_headers` (rmcp's own) extended
     /// with the configured headers, then `user-agent` and `x-goog-api-client` set to the ADK
-    /// tracking tokens followed by the configured values' tokens, without duplicates. A name the
-    /// configured headers repeat is sent once, its values joined with `", "`.
-    // `send` applies the credential between the two steps, so only tests and later tasks call
-    // this seam.
+    /// tracking tokens followed by the tokens of the request's values (rmcp's and the configured
+    /// ones; see [`tracked`]), without duplicates. A name the configured headers repeat is sent
+    /// once, its values joined with `", "`. No credential is applied.
+    // `send` applies the credential between the two steps, so only tests call this seam.
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn tracked_headers(
         &self,
