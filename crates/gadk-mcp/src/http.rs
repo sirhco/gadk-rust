@@ -19,9 +19,14 @@
 //! auth rejection.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
 
-use gadk_auth::{AuthContext, CredentialProvider};
+use gadk_auth::{
+    AuthContext, CredentialProvider, apply_credential, find_consent, is_auth_rejected,
+    refresh_credential,
+};
+use http::header::{HeaderMap, USER_AGENT};
 use http::{HeaderName, HeaderValue};
 use rmcp::model::ClientJsonRpcMessage;
 use rmcp::transport::common::client_side_sse::BoxedSseResponse;
@@ -29,11 +34,16 @@ use rmcp::transport::streamable_http_client::{
     StreamableHttpClient, StreamableHttpError, StreamableHttpPostResponse,
 };
 
+/// The header that carries the ADK tracking tokens next to `user-agent` (Go `trackingTransport`).
+const X_GOOG_API_CLIENT: HeaderName = HeaderName::from_static("x-goog-api-client");
+
+/// What every delegated `reqwest::Client` call returns on error.
+type HttpError = StreamableHttpError<reqwest::Error>;
+
 /// A `reqwest::Client` that adds the tracking headers, the configured headers and (with `auth`)
 /// the credential's headers to every MCP request, delegating to rmcp's `reqwest::Client`
 /// implementation.
 #[derive(Clone)]
-#[allow(dead_code)]
 pub(crate) struct AdkHttpClient {
     /// The client requests go through.
     pub(crate) inner: reqwest::Client,
@@ -44,7 +54,81 @@ pub(crate) struct AdkHttpClient {
     pub(crate) auth: Option<(Arc<dyn CredentialProvider>, AuthContext)>,
 }
 
-#[allow(unused_variables, clippy::todo)]
+impl AdkHttpClient {
+    /// Go `trackingTransport.RoundTrip`'s header step: `custom_headers` (rmcp's own) extended
+    /// with the configured headers, then `user-agent` and `x-goog-api-client` set to the ADK
+    /// tracking tokens followed by the configured values' tokens, without duplicates. A name the
+    /// configured headers repeat is sent once, its values joined with `", "`.
+    pub(crate) fn tracked_headers(
+        &self,
+        mut custom_headers: HashMap<HeaderName, HeaderValue>,
+    ) -> HashMap<HeaderName, HeaderValue> {
+        for name in self.headers.keys() {
+            if *name == USER_AGENT || *name == X_GOOG_API_CLIENT {
+                continue;
+            }
+            if let Some(value) = joined(self.headers.get_all(name).iter()) {
+                custom_headers.insert(name.clone(), value);
+            }
+        }
+        for name in [USER_AGENT, X_GOOG_API_CLIENT] {
+            let existing: Vec<&str> = self
+                .headers
+                .get_all(&name)
+                .iter()
+                .filter_map(|v| std::str::from_utf8(v.as_bytes()).ok())
+                .collect();
+            if let Ok(value) = HeaderValue::from_str(&merge_tracking_tokens(&existing)) {
+                custom_headers.insert(name, value);
+            }
+        }
+        custom_headers
+    }
+
+    /// Sends one request through `call` with the tracking headers and, with auth, the
+    /// credential's headers (Go `auth.Transport` over `trackingTransport`).
+    ///
+    /// On an auth rejection ([`is_rejection`]) by a refreshing provider, the credential is
+    /// refreshed once and the request replayed with the fresh one; a second rejection is
+    /// returned as is. As in `gadk_auth::Transport`, a refresh error degrades to the original
+    /// rejection unless it carries interactive consent, and an error applying the fresh
+    /// credential is returned. Credential errors are [`credential_error`]s.
+    async fn send<T, F, Fut>(
+        &self,
+        custom_headers: HashMap<HeaderName, HeaderValue>,
+        call: F,
+    ) -> Result<T, HttpError>
+    where
+        F: Fn(HashMap<HeaderName, HeaderValue>) -> Fut + Send + Sync,
+        Fut: Future<Output = Result<T, HttpError>> + Send,
+        T: Send,
+    {
+        let base = self.tracked_headers(custom_headers);
+        let Some((provider, cx)) = &self.auth else {
+            return call(base).await;
+        };
+        let mut applied = HeaderMap::new();
+        let cred = apply_credential(provider.as_ref(), cx, &mut applied)
+            .await
+            .map_err(credential_error)?;
+        let rejection = match call(with_credential(base.clone(), &applied)).await {
+            Err(err) if is_rejection(&err) => err,
+            other => return other,
+        };
+        let mut fresh = HeaderMap::new();
+        match refresh_credential(provider.as_ref(), cx, &cred, &mut fresh).await {
+            None => Err(rejection),
+            Some(Ok(_)) => call(with_credential(base, &fresh)).await,
+            // Go `applyAndSend` on the fresh credential: its apply error is returned.
+            Some(Err(err @ gadk_auth::Error::ApplyCredential(_))) => Err(credential_error(err)),
+            // Interactive consent is something the caller can act on; every other refresh
+            // failure degrades to the rejection the server actually sent.
+            Some(Err(err)) if find_consent(&err).is_some() => Err(credential_error(err)),
+            Some(Err(_)) => Err(rejection),
+        }
+    }
+}
+
 impl StreamableHttpClient for AdkHttpClient {
     type Error = reqwest::Error;
 
@@ -56,7 +140,17 @@ impl StreamableHttpClient for AdkHttpClient {
         auth_header: Option<String>,
         custom_headers: HashMap<HeaderName, HeaderValue>,
     ) -> Result<StreamableHttpPostResponse, StreamableHttpError<Self::Error>> {
-        todo!("Task 7")
+        let inner = &self.inner;
+        self.send(custom_headers, move |headers| {
+            inner.post_message(
+                uri.clone(),
+                message.clone(),
+                session_id.clone(),
+                auth_header.clone(),
+                headers,
+            )
+        })
+        .await
     }
 
     async fn post_message_with_max_sse_event_size(
@@ -68,7 +162,18 @@ impl StreamableHttpClient for AdkHttpClient {
         custom_headers: HashMap<HeaderName, HeaderValue>,
         max_sse_event_size: usize,
     ) -> Result<StreamableHttpPostResponse, StreamableHttpError<Self::Error>> {
-        todo!("Task 7")
+        let inner = &self.inner;
+        self.send(custom_headers, move |headers| {
+            inner.post_message_with_max_sse_event_size(
+                uri.clone(),
+                message.clone(),
+                session_id.clone(),
+                auth_header.clone(),
+                headers,
+                max_sse_event_size,
+            )
+        })
+        .await
     }
 
     async fn delete_session(
@@ -78,7 +183,16 @@ impl StreamableHttpClient for AdkHttpClient {
         auth_header: Option<String>,
         custom_headers: HashMap<HeaderName, HeaderValue>,
     ) -> Result<(), StreamableHttpError<Self::Error>> {
-        todo!("Task 7")
+        let inner = &self.inner;
+        self.send(custom_headers, move |headers| {
+            inner.delete_session(
+                uri.clone(),
+                session_id.clone(),
+                auth_header.clone(),
+                headers,
+            )
+        })
+        .await
     }
 
     async fn get_stream(
@@ -89,7 +203,17 @@ impl StreamableHttpClient for AdkHttpClient {
         auth_header: Option<String>,
         custom_headers: HashMap<HeaderName, HeaderValue>,
     ) -> Result<BoxedSseResponse, StreamableHttpError<Self::Error>> {
-        todo!("Task 7")
+        let inner = &self.inner;
+        self.send(custom_headers, move |headers| {
+            inner.get_stream(
+                uri.clone(),
+                session_id.clone(),
+                last_event_id.clone(),
+                auth_header.clone(),
+                headers,
+            )
+        })
+        .await
     }
 
     async fn get_stream_with_max_sse_event_size(
@@ -101,16 +225,89 @@ impl StreamableHttpClient for AdkHttpClient {
         custom_headers: HashMap<HeaderName, HeaderValue>,
         max_sse_event_size: usize,
     ) -> Result<BoxedSseResponse, StreamableHttpError<Self::Error>> {
-        todo!("Task 7")
+        let inner = &self.inner;
+        self.send(custom_headers, move |headers| {
+            inner.get_stream_with_max_sse_event_size(
+                uri.clone(),
+                session_id.clone(),
+                last_event_id.clone(),
+                auth_header.clone(),
+                headers,
+                max_sse_event_size,
+            )
+        })
+        .await
     }
 }
 
 /// Go `trackingTransport` for one header name: the ADK tracking tokens, then the whitespace-split
 /// tokens of `existing` (the configured values, in order) not already present, joined by one
 /// space.
-#[allow(unused_variables, dead_code, clippy::todo)]
 pub(crate) fn merge_tracking_tokens(existing: &[&str]) -> String {
-    todo!("Task 7")
+    let tracking = gadk_platform::tracking_header();
+    let mut tokens: Vec<&str> = tracking.split_whitespace().collect();
+    for token in existing.iter().flat_map(|v| v.split_whitespace()) {
+        if !tokens.contains(&token) {
+            tokens.push(token);
+        }
+    }
+    tokens.join(" ")
+}
+
+/// Whether a delegated call's error is an auth rejection (401 or 403) in any of the shapes rmcp's
+/// `reqwest::Client` gives it: `AuthRequired`/`InsufficientScope` (with `WWW-Authenticate`),
+/// `Client` from `error_for_status` (`get_stream`, `delete_session`), or a POST's
+/// `UnexpectedServerResponse("HTTP 401 …")` without a challenge.
+pub(crate) fn is_rejection(err: &HttpError) -> bool {
+    match err {
+        StreamableHttpError::AuthRequired(_) | StreamableHttpError::InsufficientScope(_) => true,
+        StreamableHttpError::Client(e) => e.status().is_some_and(is_auth_rejected),
+        StreamableHttpError::UnexpectedServerResponse(msg) => {
+            msg.starts_with("HTTP 401") || msg.starts_with("HTTP 403")
+        }
+        _ => false,
+    }
+}
+
+/// A credential error as the transport reports it: `StreamableHttpError::Io` whose message is
+/// gadk-auth's text (`auth: resolve credential: …`, `auth: apply credential: …`). Consent stays
+/// findable along the `source()` chain.
+fn credential_error(err: gadk_auth::Error) -> HttpError {
+    StreamableHttpError::Io(std::io::Error::other(err))
+}
+
+/// `base` with the headers a credential applied; a name it set twice is sent once, its values
+/// joined with `", "`.
+fn with_credential(
+    mut base: HashMap<HeaderName, HeaderValue>,
+    applied: &HeaderMap,
+) -> HashMap<HeaderName, HeaderValue> {
+    for name in applied.keys() {
+        if let Some(value) = joined(applied.get_all(name).iter()) {
+            base.insert(name.clone(), value);
+        }
+    }
+    base
+}
+
+/// One header value from `values`: the value itself when there is one, else all of them joined
+/// with `", "` (RFC 9110 field-line combination). `None` for no values.
+fn joined<'a>(values: impl Iterator<Item = &'a HeaderValue>) -> Option<HeaderValue> {
+    let values: Vec<&HeaderValue> = values.collect();
+    match values.as_slice() {
+        [] => None,
+        [one] => Some((*one).clone()),
+        many => {
+            let bytes = many
+                .iter()
+                .map(|v| v.as_bytes())
+                .collect::<Vec<_>>()
+                .join(&b", "[..]);
+            HeaderValue::from_bytes(&bytes)
+                .ok()
+                .or_else(|| many.first().map(|v| (*v).clone()))
+        }
+    }
 }
 
 #[cfg(test)]
