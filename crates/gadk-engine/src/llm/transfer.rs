@@ -20,6 +20,7 @@ use std::{any::Any, collections::BTreeMap, sync::Arc};
 
 use async_trait::async_trait;
 use futures::future::BoxFuture;
+use gadk_agent::tool_util::append_instructions;
 use gadk_agent::{
     Agent, AgentError, Context, InvocationContext, Mode, RunnableTool, Tool, ToolError,
 };
@@ -35,7 +36,7 @@ use crate::{
         processors::{as_go_floats, go_sprint},
         state::reveal,
     },
-    tool::utils::{append_instructions, go_type_name},
+    tool::utils::go_type_name,
     workflow::route::go_quote,
 };
 
@@ -203,6 +204,7 @@ impl TransferToAgentTool {
     }
 }
 
+#[async_trait]
 impl Tool for TransferToAgentTool {
     fn name(&self) -> &str {
         TRANSFER_TO_AGENT_TOOL_NAME
@@ -242,7 +244,7 @@ impl Tool for TransferToAgentTool {
     /// (the processor appends the tool itself, and toolPreprocess walks only the agent's tools);
     /// it is ported so TestAgentTransfer_ProcessRequest is a straight port. The error text is
     /// append_tools' text unchanged.
-    fn process_request(&self, _ctx: &Context, req: &mut LlmRequest) -> Result<(), ToolError> {
+    async fn process_request(&self, _ctx: &Context, req: &mut LlmRequest) -> Result<(), ToolError> {
         append_tools(req, &[Arc::new(self.clone()) as Arc<dyn Tool>])
             .map_err(|e| ToolError::Execution(e.to_string().into()))
     }
@@ -398,12 +400,12 @@ mod tests {
         );
     }
 
-    #[test]
-    fn process_request_appends_declaration() {
+    #[tokio::test]
+    async fn process_request_appends_declaration() {
         let t = tool(vec![llm("x", "", Mode::Unset, vec![])]);
         let ctx = Context::builder().build();
         let mut req = LlmRequest::default();
-        t.process_request(&ctx, &mut req).unwrap();
+        t.process_request(&ctx, &mut req).await.unwrap();
         assert!(req.tools.contains_key(TRANSFER_TO_AGENT_TOOL_NAME));
         assert!(gadk_agent::tool_from_request(&req, TRANSFER_TO_AGENT_TOOL_NAME).is_some());
         let decls: Vec<_> = req
@@ -416,7 +418,7 @@ mod tests {
             .collect();
         assert_eq!(decls.len(), 1);
         assert_eq!(decls[0].name, TRANSFER_TO_AGENT_TOOL_NAME);
-        let err = t.process_request(&ctx, &mut req).unwrap_err();
+        let err = t.process_request(&ctx, &mut req).await.unwrap_err();
         assert_eq!(
             err.to_string(),
             "tools[0] duplicate tool: \"transfer_to_agent\""

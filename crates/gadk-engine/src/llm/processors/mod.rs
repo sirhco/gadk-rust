@@ -520,7 +520,9 @@ mod tests {
             p(&ctx, &mut req, &flow).await.unwrap();
         }
         let tools = flow.tools.read().clone();
-        tools::tool_preprocess(&ctx, &mut req, &tools).unwrap();
+        tools::tool_preprocess(&ctx, &mut req, &tools)
+            .await
+            .unwrap();
         tools::toolset_preprocess(&ctx, &mut req).await.unwrap();
         let cfg = req.config.unwrap();
         let names: Vec<_> = cfg
@@ -539,5 +541,74 @@ mod tests {
         assert!(g < i && i < id && id < tr, "SI order: {si:?}");
         assert_eq!(default_request_processors().len(), 13);
         assert_eq!(default_response_processors().len(), 2);
+    }
+
+    /// Go base_flow.go:951 toolPreprocess packs nothing itself, and a Go tool without a
+    /// declaration never packs itself, so `tool_preprocess` packs only declared tools. The
+    /// declaration-less tool's `process_request` still runs, in order.
+    #[tokio::test]
+    async fn tool_preprocess_packs_only_declared_tools() {
+        use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
+
+        use gadk_agent::{Context, Tool, ToolError, tool_util::append_instructions};
+
+        struct Undeclared(Arc<AtomicBool>);
+
+        #[async_trait::async_trait]
+        impl Tool for Undeclared {
+            fn name(&self) -> &str {
+                "undeclared"
+            }
+            fn description(&self) -> &str {
+                "a tool without a declaration"
+            }
+            async fn process_request(
+                &self,
+                _ctx: &Context,
+                req: &mut LlmRequest,
+            ) -> Result<(), ToolError> {
+                self.0.store(true, SeqCst);
+                append_instructions(req, &["from undeclared"]);
+                Ok(())
+            }
+            fn as_any(&self) -> &dyn std::any::Any {
+                self
+            }
+        }
+
+        let ran = Arc::new(AtomicBool::new(false));
+        let root = test_llm_agent(LlmAgentConfig {
+            name: "root".into(),
+            ..Default::default()
+        });
+        let ctx = InvocationContext::builder().agent(root).build_invocation();
+        let tools: Vec<Arc<dyn Tool>> = vec![
+            Arc::new(Undeclared(ran.clone())),
+            TestTool::named("declared"),
+        ];
+        let mut req = LlmRequest::default();
+        tools::tool_preprocess(&ctx, &mut req, &tools)
+            .await
+            .unwrap();
+
+        assert!(ran.load(SeqCst), "undeclared tool's process_request ran");
+        assert!(
+            !req.tools.contains_key("undeclared"),
+            "a declaration-less tool must not be packed; req.tools keys: {:?}",
+            req.tools.keys().collect::<Vec<_>>()
+        );
+        assert!(gadk_agent::tool_from_request(&req, "declared").is_some());
+        assert_eq!(req.tools.len(), 1);
+        let cfg = req.config.unwrap();
+        let names: Vec<_> = cfg
+            .tools
+            .iter()
+            .flat_map(|t| t.function_declarations.iter().map(|d| d.name.clone()))
+            .collect();
+        assert_eq!(names, ["declared"]);
+        assert_eq!(
+            cfg.system_instruction.unwrap().parts[0].text,
+            "from undeclared"
+        );
     }
 }

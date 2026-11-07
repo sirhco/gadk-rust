@@ -144,6 +144,7 @@ struct ConfirmationTool {
     streaming: bool,
 }
 
+#[async_trait]
 impl Tool for ConfirmationTool {
     fn name(&self) -> &str {
         self.inner.name()
@@ -161,10 +162,10 @@ impl Tool for ConfirmationTool {
         self.inner.declaration()
     }
 
-    /// Go forwards `ProcessRequest`. The flow packs this wrapper with `pack_tool` first, so
-    /// `req.tools` maps the name to the wrapper.
-    fn process_request(&self, ctx: &Context, req: &mut LlmRequest) -> Result<(), ToolError> {
-        self.inner.process_request(ctx, req)
+    /// Go forwards `ProcessRequest`. The flow packs this wrapper with `pack_tool` first (when it
+    /// has a declaration), so `req.tools` maps the name to the wrapper.
+    async fn process_request(&self, ctx: &Context, req: &mut LlmRequest) -> Result<(), ToolError> {
+        self.inner.process_request(ctx, req).await
     }
 
     fn as_runnable(&self) -> Option<&dyn RunnableTool> {

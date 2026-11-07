@@ -318,7 +318,7 @@ impl Flow {
             }
             // Never hold the guard across an .await.
             let tools = self.tools.read().clone();
-            tool_preprocess(ctx, &mut *req, &tools)?;
+            tool_preprocess(ctx, &mut *req, &tools).await?;
             toolset_preprocess(ctx, &mut *req).await?;
         })
     }
@@ -375,8 +375,11 @@ impl Flow {
                 };
                 // Function call IDs are optional in genai; set them for the after-model callbacks.
                 populate_client_function_call_id(ctx.platform(), resp.content.as_mut());
-                // Go passes the (now nil) model error, so the error argument is always None.
-                match self.run_after_model_callbacks(&ctx, resp.clone(), &actions).await? {
+                // Go passes the (now nil) model error, so the error argument is always None. The
+                // callbacks hand the (possibly edited) response back; Go yields its edited
+                // `*LLMResponse` when no callback replaces it.
+                let (resp, res) = self.run_after_model_callbacks(&ctx, resp, &actions).await;
+                match res? {
                     Some(r) => yield (r, event_id),
                     None => yield (resp, event_id),
                 }
@@ -385,26 +388,33 @@ impl Flow {
     }
 
     /// Port of base_flow.go:1110 runAfterModelCallbacks: plugins first; the first `Some`/`Err`
-    /// wins.
+    /// wins. The response is threaded through every callback (plugins, then the agent's) and
+    /// handed back, so an edit made by one callback reaches the next and the flow.
     async fn run_after_model_callbacks(
         &self,
         ctx: &InvocationContext,
-        resp: LlmResponse,
+        mut resp: LlmResponse,
         actions: &SharedActions,
-    ) -> Result<Option<LlmResponse>, AgentError> {
-        if let Some(pm) = ctx.plugin_manager()
-            && let Some(r) = pm
-                .run_after_model(callback_ctx(ctx, actions), resp.clone(), None)
-                .await?
-        {
-            return Ok(Some(r));
-        }
-        for cb in &self.after_model_callbacks {
-            if let Some(r) = cb(callback_ctx(ctx, actions), resp.clone(), None).await? {
-                return Ok(Some(r));
+    ) -> (LlmResponse, Result<Option<LlmResponse>, AgentError>) {
+        if let Some(pm) = ctx.plugin_manager() {
+            let (r, res) = pm
+                .run_after_model(callback_ctx(ctx, actions), resp, None)
+                .await;
+            resp = r;
+            match res {
+                Ok(None) => {}
+                other => return (resp, other),
             }
         }
-        Ok(None)
+        for cb in &self.after_model_callbacks {
+            let (r, res) = cb(callback_ctx(ctx, actions), resp, None).await;
+            resp = r;
+            match res {
+                Ok(None) => {}
+                other => return (resp, other),
+            }
+        }
+        (resp, Ok(None))
     }
 
     /// Port of base_flow.go:1132 runOnModelErrorCallbacks: plugins first; the first `Some`/`Err`
@@ -637,7 +647,7 @@ mod tests {
         OnModelErrorCallback, ParentMap, RunnableTool, Tool, ToolError, agent,
         run_limits::LlmCallLimiter,
     };
-    use gadk_genai::{Content, FunctionCall, Part};
+    use gadk_genai::{Content, FunctionCall, FunctionDeclaration, Part};
     use gadk_model::{LlmResponse, ModelError};
     use gadk_session::Event;
     use pretty_assertions::assert_eq;
@@ -714,7 +724,9 @@ mod tests {
         Arc::new(flow).run(ctx).collect().await
     }
 
-    /// A no-op tool, optionally long-running.
+    /// A no-op tool, optionally long-running. It has a declaration, as every callable Go tool
+    /// does: Go tools pack themselves in ProcessRequest, and the Rust flow packs only declared
+    /// tools, so a declaration-less tool would never reach `req.tools`.
     struct Noop {
         name: &'static str,
         long_running: bool,
@@ -729,6 +741,12 @@ mod tests {
         }
         fn is_long_running(&self) -> bool {
             self.long_running
+        }
+        fn declaration(&self) -> Option<FunctionDeclaration> {
+            Some(FunctionDeclaration {
+                name: self.name.into(),
+                ..Default::default()
+            })
         }
         fn as_runnable(&self) -> Option<&dyn RunnableTool> {
             Some(self)

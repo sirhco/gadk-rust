@@ -128,6 +128,26 @@ pub enum ToolError {
     Execution(Box<dyn std::error::Error + Send + Sync>),
 }
 
+/// A shared [`ToolError`] carried as an error value, for callbacks that hand the original tool
+/// error back unchanged (e.g. as `AgentError::Other(Box::new(SharedToolError(err)))`), where Go
+/// returns the same `error` value. Display-transparent: it writes the tool error's text, and
+/// `source()` is the tool error's own source. The `Arc` is kept, so callers can check identity
+/// with `Arc::ptr_eq` after a downcast.
+#[derive(Debug, Clone)]
+pub struct SharedToolError(pub std::sync::Arc<ToolError>);
+
+impl std::fmt::Display for SharedToolError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&*self.0, f)
+    }
+}
+
+impl std::error::Error for SharedToolError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        std::error::Error::source(&*self.0)
+    }
+}
+
 /// Go `fmt.Errorf("<msg>: %w", err)`: Display `"<msg>: <source>"`, `source()` = the wrapped error.
 #[derive(Debug)]
 pub(crate) struct Wrapped {
@@ -171,6 +191,42 @@ mod tests {
         );
         assert!(e.to_string().starts_with("context compaction failed: "));
         assert!(e.is_compaction());
+    }
+
+    #[test]
+    fn shared_tool_error_is_display_transparent_and_keeps_the_arc() {
+        use std::error::Error as _;
+        use std::sync::Arc;
+
+        let plain = Arc::new(ToolError::InvalidArgument("bad args".into()));
+        let shared = SharedToolError(plain.clone());
+        assert_eq!(shared.to_string(), "bad args");
+        assert!(shared.source().is_none(), "InvalidArgument has no source");
+
+        // Execution is transparent, so the source is the boxed error's own source.
+        let inner = Wrapped {
+            msg: "outer".into(),
+            source: AgentError::other("root cause"),
+        };
+        let exec = Arc::new(ToolError::Execution(Box::new(inner)));
+        let shared_exec = SharedToolError(exec.clone());
+        assert_eq!(shared_exec.to_string(), "outer: root cause");
+        assert_eq!(
+            shared_exec.source().map(|s| s.to_string()).as_deref(),
+            Some("root cause")
+        );
+
+        // Boxed as an AgentError, the original Arc is recoverable for an identity check.
+        let agent_err = AgentError::Other(Box::new(SharedToolError(plain.clone())));
+        assert_eq!(agent_err.to_string(), "bad args");
+        let AgentError::Other(boxed) = &agent_err else {
+            panic!("not Other: {agent_err:?}")
+        };
+        let got = boxed.downcast_ref::<SharedToolError>().unwrap();
+        assert!(Arc::ptr_eq(&got.0, &plain));
+        assert!(!Arc::ptr_eq(&got.0, &exec));
+        let cloned = shared.clone();
+        assert!(Arc::ptr_eq(&cloned.0, &shared.0));
     }
 
     #[test]

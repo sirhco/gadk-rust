@@ -101,3 +101,66 @@ fn test_pack_tool_nil_declaration() {
         cfg.tools.len()
     );
 }
+
+// Go utils.AppendInstructions (internal/utils/utils.go:138) has no Go test; these pin its
+// branches now that it is public as gadk_agent::append_instructions.
+
+#[test]
+fn append_instructions_empty_input_changes_nothing() {
+    let mut req = LlmRequest::default();
+    gadk_agent::append_instructions(&mut req, &[]);
+    assert!(req.config.is_none(), "Go returns before creating Config");
+}
+
+#[test]
+fn append_instructions_creates_a_user_system_instruction() {
+    let mut req = LlmRequest::default();
+    gadk_agent::append_instructions(&mut req, &["first", "second"]);
+    let si = req.config.unwrap().system_instruction.unwrap();
+    assert_eq!(si.role, "user");
+    assert_eq!(si.parts.len(), 1);
+    assert_eq!(si.parts[0].text, "first\n\nsecond");
+}
+
+#[test]
+fn append_instructions_extends_a_non_empty_last_part() {
+    let mut req = LlmRequest {
+        config: Some(gadk_genai::GenerateContentConfig {
+            system_instruction: Some(gadk_genai::Content {
+                role: "system".into(),
+                parts: vec![
+                    gadk_genai::Part::from_text("one"),
+                    gadk_genai::Part::from_text("two"),
+                ],
+            }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    gadk_agent::append_instructions(&mut req, &["three"]);
+    let si = req.config.unwrap().system_instruction.unwrap();
+    assert_eq!(si.role, "system", "the existing role is kept");
+    let texts: Vec<_> = si.parts.iter().map(|p| p.text.as_str()).collect();
+    assert_eq!(texts, ["one", "two\n\nthree"]);
+}
+
+#[test]
+fn append_instructions_adds_a_part_after_an_empty_or_missing_last_text() {
+    for parts in [vec![], vec![gadk_genai::Part::default()]] {
+        let n = parts.len();
+        let mut req = LlmRequest {
+            config: Some(gadk_genai::GenerateContentConfig {
+                system_instruction: Some(gadk_genai::Content {
+                    role: "user".into(),
+                    parts,
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        gadk_agent::append_instructions(&mut req, &["x", "y"]);
+        let si = req.config.unwrap().system_instruction.unwrap();
+        assert_eq!(si.parts.len(), n + 1, "a new part is appended");
+        assert_eq!(si.parts[n].text, "x\n\ny");
+    }
+}

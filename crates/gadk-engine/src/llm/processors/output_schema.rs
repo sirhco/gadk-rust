@@ -20,6 +20,7 @@ use std::{any::Any, sync::Arc};
 
 use async_trait::async_trait;
 use futures::future::BoxFuture;
+use gadk_agent::tool_util::append_instructions;
 use gadk_agent::{
     AgentError, Context, InvocationContext, Mode, RunnableTool, Tool, ToolError, pack_tool,
 };
@@ -34,7 +35,7 @@ use crate::{
         processors::{go_json_marshal, wrap_err},
         state::{LlmAgentState, reveal},
     },
-    tool::utils::{append_instructions, go_type_name, validate_map_on_schema},
+    tool::utils::{go_type_name, validate_map_on_schema},
 };
 
 pub(crate) const SET_MODEL_RESPONSE_TOOL_NAME: &str = "set_model_response";

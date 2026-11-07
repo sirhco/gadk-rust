@@ -317,13 +317,14 @@ async fn test_finish_task_tool_run() {
 }
 
 // parity: adapted: Go ProcessRequest packs the tool itself; the Rust flow calls pack_tool before process_request (spec § Tools), so the port does both in the flow's order
-#[test]
-fn test_finish_task_tool_process_request() {
+#[tokio::test]
+async fn test_finish_task_tool_process_request() {
     let ft = new_finish_task_tool(None);
     let mut req = LlmRequest::default();
     let t: Arc<dyn Tool> = ft.clone();
     pack_tool(&mut req, &t).expect("pack_tool");
     ft.process_request(&Context::builder().build(), &mut req)
+        .await
         .unwrap_or_else(|e| panic!("ProcessRequest() failed: {e}"));
 
     // The tool should be registered on the request.
