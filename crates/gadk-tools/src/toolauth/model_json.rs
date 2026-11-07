@@ -26,9 +26,6 @@
 //! the text it arrived with, as Go's `UseNumber` decode does. [`GoJson`] is Go's `any` after such
 //! a decode, and its [`GoJson::encode`] is Go's encoder.
 
-// Cycle 1 only: the models that call these helpers arrive in Cycle 2, which deletes this line.
-#![allow(dead_code)]
-
 use std::collections::BTreeMap;
 
 use serde::de::DeserializeOwned;
