@@ -16,17 +16,24 @@
 //! The MCP client seam and the connection refresher (port of ADK-Go
 //! `tool/mcptoolset/client.go`: `MCPClient`, `connectionRefresher`, `withRetry`).
 
+use std::error::Error as StdError;
 use std::future::Future;
+use std::io;
 use std::sync::Arc;
 
 use gadk_auth::AuthContext;
-use rmcp::RoleClient;
-use rmcp::model::{CallToolRequestParams, CallToolResult, ClientConfig, Tool};
-use rmcp::service::Peer;
+use rmcp::model::{
+    CallToolRequestParams, CallToolResult, ClientConfig, ClientRequest, PaginatedRequestParams,
+    Tool,
+};
+use rmcp::service::{Peer, RunningService};
+use rmcp::transport::streamable_http_client::StreamableHttpError;
+use rmcp::{ClientCacheConfig, RoleClient, ServiceError};
+use tokio::sync::{Mutex, MutexGuard, OnceCell};
 use tokio_util::sync::CancellationToken;
 
 use crate::config::TransportFactory;
-use crate::error::Error;
+use crate::error::{BoxError, Error};
 
 /// What one MCP operation runs with: the identity credentials are resolved for (`auth`) and the
 /// caller's cancellation (`cancel`, Go's `ctx.Done()`).
@@ -45,26 +52,23 @@ impl CallContext {
     }
 
     /// No identity and a token nothing cancels (Go `context.Background()`).
-    #[allow(clippy::todo)]
     pub fn background() -> Self {
-        todo!("Task 6")
+        Self::new(AuthContext::anonymous(), CancellationToken::new())
     }
 }
 
 impl From<&gadk_agent::Context> for CallContext {
     /// The context's identity and its invocation's cancellation token.
-    #[allow(unused_variables, clippy::todo)]
     fn from(ctx: &gadk_agent::Context) -> Self {
-        todo!("Task 6")
+        Self::new(AuthContext::from(ctx), ctx.cancellation_token().clone())
     }
 }
 
 impl From<&gadk_agent::ReadonlyContext> for CallContext {
     /// The context's identity and its invocation's cancellation token
     /// ([`ReadonlyContext::cancellation_token`](gadk_agent::ReadonlyContext::cancellation_token)).
-    #[allow(unused_variables, clippy::todo)]
     fn from(ctx: &gadk_agent::ReadonlyContext) -> Self {
-        todo!("Task 6")
+        Self::new(AuthContext::from(ctx), ctx.cancellation_token().clone())
     }
 }
 
@@ -96,22 +100,133 @@ pub(crate) trait SessionClient: McpClient {
     }
 }
 
+/// A connected client session.
+type Session = RunningService<RoleClient, ClientConfig>;
+
+/// What the session lock guards (Go `connectionRefresher.session` and `.closed`).
+#[derive(Default)]
+pub(crate) struct State {
+    session: Option<Session>,
+    /// Set by `close`: closing is final, so failed in-flight calls cannot reconnect.
+    closed: bool,
+}
+
 /// Go `connectionRefresher`: one lazily connected session, reconnected once when an operation
 /// fails because the connection was lost.
-#[allow(dead_code)]
-pub(crate) struct ConnectionRefresher {}
+///
+/// The session lock is held only to connect or refresh. Operations run on a cloned [`Peer`]
+/// outside it, so calls on the session run concurrently (R11).
+pub(crate) struct ConnectionRefresher {
+    client_info: ClientConfig,
+    factory: Arc<dyn TransportFactory>,
+    /// Go's one-slot `mu` channel plus the state it guards. Waiters leave when their own token
+    /// fires without disturbing the owner (see [`lock`](ConnectionRefresher::lock)).
+    state: Mutex<State>,
+    /// Go `closeOnce` + `closeErr`: the first `close`'s result, shared by every call.
+    close_result: OnceCell<Result<(), Arc<Error>>>,
+}
 
-#[allow(unused_variables, dead_code, clippy::todo)]
 impl ConnectionRefresher {
     /// A refresher that connects through `factory` on first use.
     pub(crate) fn new(client_info: ClientConfig, factory: Arc<dyn TransportFactory>) -> Self {
-        todo!("Task 6")
+        Self {
+            client_info,
+            factory,
+            state: Mutex::new(State::default()),
+            close_result: OnceCell::new(),
+        }
     }
 
     /// No session and no connect in progress (a `try_lock` that finds the lock busy answers
     /// `false`).
+    #[allow(dead_code)] // Task 8's pool calls it on release.
     pub(crate) fn disconnected(&self) -> bool {
-        todo!("Task 6")
+        match self.state.try_lock() {
+            Ok(state) => state.session.is_none(),
+            Err(_) => false,
+        }
+    }
+
+    /// Go `lock`: takes the session lock, or fails with [`Error::Cancelled`] once `cx.cancel`
+    /// fires. A token that is cancelled by the time the lock is taken fails too, even when the
+    /// lock was free (Go's post-acquire `ctx.Err()` check). Leaving the wait does not disturb
+    /// the lock's owner.
+    pub(crate) async fn lock(&self, cx: &CallContext) -> Result<MutexGuard<'_, State>, Error> {
+        let state = tokio::select! {
+            biased;
+            () = cx.cancel.cancelled() => return Err(Error::Cancelled),
+            state = self.state.lock() => state,
+        };
+        // The token may have fired while this call waited for the lock to be handed over.
+        if cx.cancel.is_cancelled() {
+            return Err(Error::Cancelled);
+        }
+        Ok(state)
+    }
+
+    /// Go `connect`: opens a fresh session with the response cache off (R8), giving up with
+    /// [`Error::Cancelled`] when `cx.cancel` fires. The caller holds the lock.
+    async fn connect(&self, cx: &CallContext) -> Result<Session, BoxError> {
+        let connected = tokio::select! {
+            biased;
+            () = cx.cancel.cancelled() => return Err(Box::new(Error::Cancelled)),
+            connected = self.factory.connect(self.client_info.clone()) => connected?,
+        };
+        // A listing must never be served from a cache: tools change between sessions.
+        connected
+            .peer()
+            .set_response_cache_config(ClientCacheConfig::disabled())
+            .await;
+        Ok(connected)
+    }
+
+    /// Go `getSession`: the current session's peer, connecting first when there is none.
+    pub(crate) async fn get_session(&self, cx: &CallContext) -> Result<Peer<RoleClient>, Error> {
+        let mut state = self.lock(cx).await?;
+        if state.closed {
+            return Err(Error::ConnectionClosed);
+        }
+        if let Some(session) = &state.session {
+            return Ok(session.peer().clone());
+        }
+        let session = self.connect(cx).await.map_err(Error::InitSession)?;
+        let peer = session.peer().clone();
+        state.session = Some(session);
+        Ok(peer)
+    }
+
+    /// Go `refreshConnection`: pings the current session and keeps it if it answers (another
+    /// caller already reconnected); otherwise closes it and connects a new one.
+    pub(crate) async fn refresh_connection(
+        &self,
+        cx: &CallContext,
+    ) -> Result<Peer<RoleClient>, Error> {
+        let mut state = self.lock(cx).await?;
+        if state.closed {
+            return Err(Error::ConnectionClosed);
+        }
+        if let Some(session) = &state.session {
+            let peer = session.peer().clone();
+            // Go pings on the caller's ctx: a cancelled ping counts as failed, so the session is
+            // closed and the reconnect below fails with `context canceled`.
+            let answered = tokio::select! {
+                biased;
+                () = cx.cancel.cancelled() => false,
+                ping = peer.send_request(ClientRequest::PingRequest(Default::default())) => ping.is_ok(),
+            };
+            if answered {
+                return Ok(peer);
+            }
+            if let Some(stale) = state.session.take()
+                && let Err(err) = stale.cancel().await
+            {
+                tracing::warn!("failed to close MCP session: {err}");
+            }
+        }
+        let session = self.connect(cx).await.map_err(Error::RefreshSession)?;
+        let peer = session.peer().clone();
+        state.session = Some(session);
+        Ok(peer)
     }
 
     /// Go `withRetry`: runs `op` on the current session's peer; on a refreshable error, refreshes
@@ -120,38 +235,185 @@ impl ConnectionRefresher {
     pub(crate) async fn with_retry<T, F, Fut>(
         &self,
         cx: &CallContext,
-        op: F,
+        mut op: F,
     ) -> Result<(T, bool), Error>
     where
         F: FnMut(Peer<RoleClient>) -> Fut + Send,
         Fut: Future<Output = Result<T, Error>> + Send,
         T: Send,
     {
-        todo!("Task 6")
+        let peer = self.get_session(cx).await?;
+        let err = match op(peer).await {
+            Ok(value) => return Ok((value, false)),
+            Err(err) => err,
+        };
+        if !is_refreshable(&err) {
+            return Err(err);
+        }
+        let peer = match self.refresh_connection(cx).await {
+            Ok(peer) => peer,
+            Err(refresh) => {
+                return Err(Error::ReconnectFailed {
+                    err: Box::new(err),
+                    refresh: Box::new(refresh),
+                });
+            }
+        };
+        let value = op(peer).await?;
+        Ok((value, true))
     }
 }
 
+/// Go `shouldRefreshConnection`: whether `err` means the connection was lost (go-sdk
+/// `ErrConnectionClosed` / `ErrSessionMissing`, `io.ErrClosedPipe`, `io.EOF`). rmcp spells these
+/// `ServiceError::TransportClosed`, a send failure wrapping streamable HTTP's
+/// `SessionExpired` / `TransportChannelClosed` / `UnexpectedEndOfStream`, and an `io::Error` of
+/// kind `BrokenPipe` or `UnexpectedEof`; the crate's own [`Error::ConnectionClosed`] counts too.
+fn is_refreshable(err: &Error) -> bool {
+    match err {
+        Error::ConnectionClosed => true,
+        Error::Service(service) => service_is_refreshable(service),
+        Error::ReconnectFailed { err, .. } => is_refreshable(err),
+        Error::ListTools(err) | Error::CallTool { source: err, .. } => is_refreshable(err),
+        Error::InitSession(err)
+        | Error::RefreshSession(err)
+        | Error::Transport(err)
+        | Error::ConvertTool { source: err, .. }
+        | Error::MetadataProvider { source: err, .. } => chain_is_refreshable(err.as_ref()),
+        Error::Close(errs) => errs.iter().any(is_refreshable),
+        _ => false,
+    }
+}
+
+fn service_is_refreshable(err: &ServiceError) -> bool {
+    match err {
+        ServiceError::TransportClosed => true,
+        ServiceError::TransportSend(send) => chain_is_refreshable(send.error.as_ref()),
+        _ => false,
+    }
+}
+
+/// Walks `err`'s `source()` chain (starting at `err`) for a refreshable error.
+fn chain_is_refreshable(err: &(dyn StdError + 'static)) -> bool {
+    let mut cur = Some(err);
+    while let Some(e) = cur {
+        if let Some(own) = e.downcast_ref::<Error>() {
+            return is_refreshable(own);
+        }
+        if let Some(service) = e.downcast_ref::<ServiceError>()
+            && service_is_refreshable(service)
+        {
+            return true;
+        }
+        if let Some(http) = e.downcast_ref::<StreamableHttpError<reqwest::Error>>()
+            && matches!(
+                http,
+                StreamableHttpError::SessionExpired
+                    | StreamableHttpError::TransportChannelClosed
+                    | StreamableHttpError::UnexpectedEndOfStream
+            )
+        {
+            return true;
+        }
+        if let Some(io) = e.downcast_ref::<io::Error>()
+            && matches!(
+                io.kind(),
+                io::ErrorKind::BrokenPipe | io::ErrorKind::UnexpectedEof
+            )
+        {
+            return true;
+        }
+        cur = e.source();
+    }
+    false
+}
+
 #[async_trait::async_trait]
-#[allow(unused_variables, clippy::todo)]
 impl McpClient for ConnectionRefresher {
+    /// Go `CallTool`: `tools/call` on the session, reconnecting once if needed.
     async fn call_tool(
         &self,
         cx: &CallContext,
         params: CallToolRequestParams,
     ) -> Result<CallToolResult, Error> {
-        todo!("Task 6")
+        let (result, _) = self
+            .with_retry(cx, |peer| {
+                let params = params.clone();
+                async move { peer.call_tool(params).await.map_err(Error::from) }
+            })
+            .await?;
+        Ok(result)
     }
 
+    /// Go `ListTools`: every page, following `nextCursor`. Cursors do not survive a session
+    /// (MCP spec), so after a reconnect the listing restarts from the first page; a second
+    /// reconnect in the same listing fails.
     async fn list_tools(&self, cx: &CallContext) -> Result<Vec<Tool>, Error> {
-        todo!("Task 6")
+        let mut tools = Vec::new();
+        let mut cursor: Option<String> = None;
+        let mut has_reconnected = false;
+        loop {
+            let page_cursor = cursor.clone();
+            let (page, reconnected) = self
+                .with_retry(cx, |peer| {
+                    let params = PaginatedRequestParams::default().with_cursor(page_cursor.clone());
+                    async move { peer.list_tools(Some(params)).await.map_err(Error::from) }
+                })
+                .await
+                .map_err(|err| Error::ListTools(Box::new(err)))?;
+            if reconnected {
+                if has_reconnected {
+                    return Err(Error::ListToolsReconnectedTwice);
+                }
+                // On reconnection, restart pagination from scratch per MCP spec.
+                has_reconnected = true;
+                cursor = None;
+                tools.clear();
+                continue;
+            }
+            tools.extend(page.tools);
+            match page.next_cursor {
+                Some(next) if !next.is_empty() => cursor = Some(next),
+                _ => break,
+            }
+        }
+        Ok(tools)
     }
 }
 
 #[async_trait::async_trait]
-#[allow(clippy::todo)]
 impl SessionClient for ConnectionRefresher {
+    /// Go `Close`: waits for a connect or refresh in progress (no caller token), marks the
+    /// refresher closed, and closes the session after releasing the lock.
     async fn close(&self) -> Result<(), Arc<Error>> {
-        todo!("Task 6")
+        self.close_result
+            .get_or_init(|| async {
+                let session = {
+                    let mut state = self.state.lock().await;
+                    state.closed = true;
+                    state.session.take()
+                };
+                match session {
+                    Some(session) => session
+                        .cancel()
+                        .await
+                        .map(|_| ())
+                        .map_err(|err| Arc::new(Error::Transport(Box::new(err)))),
+                    None => Ok(()),
+                }
+            })
+            .await
+            .clone()
+    }
+}
+
+#[cfg(test)]
+impl ConnectionRefresher {
+    /// The current session's peer without connecting (Go tests' `c.session`); `None` while the
+    /// lock is held.
+    pub(crate) fn session_peer(&self) -> Option<Peer<RoleClient>> {
+        let state = self.state.try_lock().ok()?;
+        state.session.as_ref().map(|s| s.peer().clone())
     }
 }
 
