@@ -179,11 +179,35 @@ async fn tools_are_the_same_instances_on_every_call() {
 async fn name_and_system_instruction_defaults() {
     assert_eq!(toolset(MockSource::default()).name(), "SkillToolset");
     let empty = SkillToolset::new(SkillToolsetConfig {
-        source: Arc::new(MockSource::default()),
+        source: Arc::new(MockSource {
+            frontmatters: vec![Frontmatter {
+                name: "a".into(),
+                description: "b".into(),
+                ..Default::default()
+            }],
+        }),
         name: Some(String::new()),
         system_instruction: Some(String::new()),
     });
     assert_eq!(empty.name(), "SkillToolset");
+    // An empty system instruction falls back to the default one (which is private to the crate;
+    // its exact text is pinned by the lib test `default_instruction_is_go_text`).
+    let mut req = LlmRequest::default();
+    empty
+        .process_request(&Context::builder().build(), &mut req)
+        .await
+        .unwrap();
+    let text = &req.config.unwrap().system_instruction.unwrap().parts[0].text;
+    assert!(
+        text.starts_with("You can use specialized 'skills' to help you with complex tasks."),
+        "empty system_instruction did not default: {text:?}"
+    );
+    assert!(
+        text.ends_with(
+            "Do NOT use other tools to access these files.\n\n\n<available_skills>\n<skill>\n<name>\na\n</name>\n<description>\nb\n</description>\n</skill>\n</available_skills>"
+        ),
+        "default instruction and skill list not joined as Go does: {text:?}"
+    );
 
     let custom = SkillToolset::new(SkillToolsetConfig {
         source: Arc::new(MockSource {

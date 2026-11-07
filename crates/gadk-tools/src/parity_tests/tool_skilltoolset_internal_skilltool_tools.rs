@@ -320,3 +320,49 @@ async fn load_skill_resource_size_limit() {
         "resource 'assets/over' from skill 's' is too large (limit: 10485760 bytes)"
     );
 }
+
+/// Go returns `string(content)`, and `encoding/json` writes one U+FFFD for each byte that
+/// `utf8.DecodeRune` rejects with size 1. The expectations below were checked with Go
+/// (`json.Marshal(string(b))`).
+#[tokio::test]
+async fn load_skill_resource_invalid_utf8_matches_go() {
+    const R: &str = "\u{FFFD}";
+    let cases: [(&[u8], String); 6] = [
+        // Truncated 4-byte prefix before an ASCII byte.
+        (b"\xF0\x90\x80A", format!("{R}{R}{R}A")),
+        // Surrogate code point.
+        (b"\xED\xA0\x80", R.repeat(3)),
+        // Overlong NUL.
+        (b"\xC0\x80", R.repeat(2)),
+        // Truncated sequence at the end.
+        (b"ok\xE2\x82", format!("ok{R}{R}")),
+        // Valid multi-byte text passes through unchanged.
+        (
+            "h\u{e9}llo \u{20ac}".as_bytes(),
+            "h\u{e9}llo \u{20ac}".to_string(),
+        ),
+        // A lone continuation byte and an invalid lead byte.
+        (b"a\x80b\xFFc", format!("a{R}b{R}c")),
+    ];
+    for (bytes, want) in cases {
+        let source = MockSource {
+            resources: HashMap::from([(
+                "s".to_string(),
+                HashMap::from([("assets/bin".to_string(), bytes.to_vec())]),
+            )]),
+            ..Default::default()
+        };
+        let tool = load_skill_resource(Arc::new(source)).unwrap();
+        let got = run(
+            &tool,
+            json!({"skill_name": "s", "resource_path": "assets/bin"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            got["content"].as_str(),
+            Some(want.as_str()),
+            "content for {bytes:x?}"
+        );
+    }
+}

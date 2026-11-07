@@ -335,8 +335,8 @@ pub(crate) fn load_skill_resource(source: Arc<dyn Source>) -> Result<Arc<dyn Too
 }
 
 /// Port of Go `loadSkillResource` (load_skill_resource.go): reads at most 10 MiB + 1 bytes and
-/// rejects anything over 10 MiB. The bytes are decoded as lossy UTF-8; Go passes them through
-/// as a Go string, which `encoding/json` encodes the same way.
+/// rejects anything over 10 MiB. Go passes the bytes through as a Go string, and
+/// `encoding/json` replaces each invalid byte with U+FFFD; [`go_lossy_utf8`] does the same.
 async fn run_load_skill_resource(
     source: &dyn Source,
     args: LoadSkillResourceArgs,
@@ -374,6 +374,30 @@ async fn run_load_skill_resource(
     Ok(LoadSkillResourceResult {
         skill_name: args.skill_name.clone(),
         path: args.resource_path.clone(),
-        content: String::from_utf8_lossy(&content).into_owned(),
+        content: go_lossy_utf8(&content),
     })
+}
+
+/// Go `string(bytes)` as `encoding/json` encodes it: valid UTF-8 is copied, and each byte that
+/// `utf8.DecodeRune` rejects (size 1) becomes one U+FFFD. Unlike [`String::from_utf8_lossy`],
+/// which emits one U+FFFD per maximal invalid subpart, this emits one per invalid byte.
+fn go_lossy_utf8(mut bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len());
+    loop {
+        match std::str::from_utf8(bytes) {
+            Ok(valid) => {
+                out.push_str(valid);
+                return out;
+            }
+            Err(e) => {
+                let (valid, rest) = bytes.split_at(e.valid_up_to());
+                // `valid` is valid UTF-8 by `valid_up_to`'s contract.
+                out.push_str(std::str::from_utf8(valid).unwrap_or_default());
+                // `None`: a truncated sequence at the end; every remaining byte is invalid.
+                let invalid = e.error_len().unwrap_or(rest.len());
+                out.extend(std::iter::repeat_n('\u{FFFD}', invalid));
+                bytes = &rest[invalid..];
+            }
+        }
+    }
 }
