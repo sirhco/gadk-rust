@@ -87,7 +87,6 @@ pub trait McpClient: Send + Sync {
 
 /// Go `sessionClient`: an [`McpClient`] the toolset can close.
 #[async_trait::async_trait]
-#[allow(dead_code)]
 pub(crate) trait SessionClient: McpClient {
     /// Closes every session. Idempotent and concurrency-safe: every call returns the first
     /// call's result. Later operations fail with [`Error::ConnectionClosed`].
@@ -95,6 +94,8 @@ pub(crate) trait SessionClient: McpClient {
 
     /// The credential session pool behind a toolset built with `auth` (for the D4 test hooks);
     /// `None` for a [`ConnectionRefresher`].
+    // Only the `#[cfg(test)]` hooks on `McpToolset` call it.
+    #[cfg_attr(not(test), allow(dead_code))]
     fn as_credential_sessions(&self) -> Option<&crate::sessions::CredentialSessions> {
         None
     }
@@ -139,7 +140,6 @@ impl ConnectionRefresher {
 
     /// No session and no connect in progress (a `try_lock` that finds the lock busy answers
     /// `false`).
-    #[allow(dead_code)] // Task 8's pool calls it on release.
     pub(crate) fn disconnected(&self) -> bool {
         match self.state.try_lock() {
             Ok(state) => state.session.is_none(),

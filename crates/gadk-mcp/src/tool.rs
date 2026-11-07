@@ -22,7 +22,6 @@ use std::sync::Arc;
 use gadk_agent::Context;
 use gadk_agent::ToolError;
 use gadk_agent::tool::{ConfirmationProvider, RunnableTool, Tool};
-use gadk_auth::AuthContext;
 use gadk_genai::FunctionDeclaration;
 use rmcp::model::{CallToolRequestParams, MetaObject, RequestMetaObject};
 use serde_json::{Map, Value};
@@ -182,8 +181,7 @@ impl RunnableTool for McpTool {
         }
         params.meta = self.request_meta(&ctx).map_err(Self::execution)?;
 
-        // Same as `CallContext::from(&ctx)`: the invocation's identity and cancellation token.
-        let cx = CallContext::new(AuthContext::from(&ctx), ctx.cancellation_token().clone());
+        let cx = CallContext::from(&ctx);
         let res = self.client.call_tool(&cx, params).await.map_err(|err| {
             Self::execution(Error::CallTool {
                 name: self.name.clone(),

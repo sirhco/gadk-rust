@@ -62,8 +62,6 @@ pub(crate) fn build_transport(cfg: &Config) -> Result<Arc<dyn TransportFactory>,
 
 /// The HTTP factory of one pooled session: every request carries `auth`'s credential resolved
 /// for `cx`, the identity that created the session (Go `identityOnlyContext`).
-// Its caller is Task 8's `CredentialSessions::new` (a `todo!` until then).
-#[allow(dead_code)]
 pub(crate) fn http_factory_for(
     target: &HttpTarget,
     auth: Arc<dyn CredentialProvider>,
