@@ -17,8 +17,8 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::io::BufRead;
 
+use futures::FutureExt;
 use serde::de::{self, Deserializer, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt};
@@ -276,33 +276,6 @@ pub async fn parse<R: AsyncBufRead + Unpin + Send>(r: &mut R) -> Result<Frontmat
     decode(&yaml)
 }
 
-/// The synchronous twin of [`parse`] over an in-memory reader.
-fn parse_sync<R: BufRead>(r: &mut R) -> Result<Frontmatter, SkillError> {
-    let mut line = Vec::new();
-    r.read_until(b'\n', &mut line)
-        .map_err(|e| SkillError::io("reading first line", e))?;
-    if line.last() != Some(&b'\n') {
-        return Err(first_line_eof());
-    }
-    if !is_separator(&line) {
-        return Err(bad_opening_separator());
-    }
-    let mut yaml = Vec::new();
-    loop {
-        line.clear();
-        r.read_until(b'\n', &mut line)
-            .map_err(|e| SkillError::io("read a line of frontmatter", e))?;
-        if line.last() != Some(&b'\n') {
-            return Err(missing_closing_separator());
-        }
-        if is_separator(&line) {
-            break;
-        }
-        yaml.extend_from_slice(&line);
-    }
-    decode(&yaml)
-}
-
 /// Go's `decoder.Decode(&fmYAML)` + `Validate` tail of `Parse`.
 fn decode(yaml: &[u8]) -> Result<Frontmatter, SkillError> {
     let mut options = serde_saphyr::Options::default();
@@ -342,13 +315,18 @@ fn has_document_content(yaml: &[u8]) -> bool {
 /// in-memory SKILL.md and returns it with the Markdown body. Errors carry Go's extra
 /// `parse frontmatter: ` prefix. A body that is not UTF-8 is decoded lossily.
 pub fn parse_bytes(content: &[u8]) -> Result<(Frontmatter, String), SkillError> {
-    let mut reader = std::io::Cursor::new(content);
-    let fm = parse_sync(&mut reader).map_err(|e| SkillError::wrap("parse frontmatter", e))?;
-    let rest = reader.position();
-    let body = usize::try_from(rest)
-        .ok()
-        .and_then(|at| content.get(at..))
-        .unwrap_or_default();
+    // A slice read never returns `Pending`, so the async parser completes on its first poll.
+    let mut rest: &[u8] = content;
+    let fm = parse(&mut rest)
+        .now_or_never()
+        .unwrap_or_else(|| {
+            Err(SkillError::new(
+                SkillErrorKind::Other,
+                "in-memory frontmatter read did not complete",
+            ))
+        })
+        .map_err(|e| SkillError::wrap("parse frontmatter", e))?;
+    let body = &content[content.len() - rest.len()..];
     Ok((fm, String::from_utf8_lossy(body).into_owned()))
 }
 
