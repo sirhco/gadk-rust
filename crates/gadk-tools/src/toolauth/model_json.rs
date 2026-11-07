@@ -49,8 +49,6 @@ impl GoJson {
     /// Parses `text`, which must be one JSON value. Syntax is checked by serde_json; the tree is
     /// then built by a Go-faithful scanner (a lone UTF-16 surrogate escape decodes to U+FFFD, as
     /// `encoding/json` decodes it; serde_json would reject it).
-    // Task 7's `digest` is the first caller outside the tests.
-    #[allow(dead_code)]
     pub(crate) fn parse(text: &str) -> Result<GoJson, serde_json::Error> {
         serde_json::from_str::<serde::de::IgnoredAny>(text)?;
         Ok(Scanner::new(text).value())
