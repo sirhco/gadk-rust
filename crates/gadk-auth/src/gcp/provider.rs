@@ -30,6 +30,7 @@
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use chrono::{DateTime, TimeDelta, Utc};
@@ -169,6 +170,33 @@ pub(crate) struct ClientInit {
     pub(crate) deadline: Instant,
     /// `None` until the attempt lands; then its result, sent exactly once.
     outcome: watch::Sender<Option<Result<Arc<Client>, Error>>>,
+    /// Set when the attempt's task was dropped before it published (the runtime shut down with
+    /// it pending): the next call starts a fresh attempt instead of waiting on this one.
+    abandoned: AtomicBool,
+}
+
+/// Owned by an init task. Dropped before it is disarmed, it marks the attempt abandoned and
+/// releases its waiters with an error, so the attempt is retried, not wedged forever. It takes
+/// no lock: tokio may drop a task's future inside `spawn`, while the caller holds the state lock.
+struct AbandonOnDrop(Option<Arc<ClientInit>>);
+
+impl AbandonOnDrop {
+    fn disarm(mut self) {
+        self.0 = None;
+    }
+}
+
+impl Drop for AbandonOnDrop {
+    fn drop(&mut self) {
+        if let Some(init) = self.0.take() {
+            init.abandoned.store(true, Ordering::Release);
+            let unavailable = ErrorKind::ClientUnavailable;
+            init.publish(Err(Error::with_kind(
+                unavailable,
+                format!("{unavailable}: building it did not complete"),
+            )));
+        }
+    }
 }
 
 impl ClientInit {
@@ -176,6 +204,7 @@ impl ClientInit {
         Arc::new(Self {
             deadline,
             outcome: watch::channel(None).0,
+            abandoned: AtomicBool::new(false),
         })
     }
 
@@ -185,6 +214,7 @@ impl ClientInit {
         Arc::new(Self {
             deadline,
             outcome: watch::channel(Some(result)).0,
+            abandoned: AtomicBool::new(false),
         })
     }
 
@@ -302,8 +332,8 @@ impl Provider {
             }
             let existing = state.pending.clone();
             match existing {
-                Some(init) => init,
-                None => {
+                Some(init) if !init.abandoned.load(Ordering::Acquire) => init,
+                _ => {
                     let init = ClientInit::new(Instant::now() + self.init_timeout);
                     state.pending = Some(Arc::clone(&init));
                     self.spawn_init(Arc::clone(&init));
@@ -349,6 +379,7 @@ impl Provider {
     fn spawn_init(&self, init: Arc<ClientInit>) {
         let new_client = Arc::clone(&self.new_client);
         let state = Arc::clone(&self.state);
+        let on_drop = AbandonOnDrop(Some(Arc::clone(&init)));
         tokio::spawn(async move {
             let built = tokio::spawn(async move { (*new_client)().await }).await;
             let unavailable = ErrorKind::ClientUnavailable;
@@ -372,6 +403,7 @@ impl Provider {
                 },
             };
             publish(&state, &init, result);
+            on_drop.disarm();
         });
     }
 
@@ -732,5 +764,52 @@ mod tests {
             err.to_string(),
             "gcp: default credentials client unavailable: gcp: find default credentials: no credentials on this host"
         );
+    }
+
+    #[test]
+    fn an_init_dropped_with_its_runtime_is_retried_not_wedged() {
+        use std::sync::atomic::AtomicUsize;
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut p = build_provider(cfg_for(RESOURCE)).unwrap();
+        p.new_client = {
+            let calls = Arc::clone(&calls);
+            Arc::new(move || {
+                if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                    std::future::pending().boxed()
+                } else {
+                    std::future::ready(Err(Error::new("second attempt"))).boxed()
+                }
+            })
+        };
+        let runtime = |paused| {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_time()
+                .start_paused(paused)
+                .build()
+                .unwrap()
+        };
+        let first = runtime(false);
+        first.block_on(async {
+            let mut call = Box::pin(p.resolve_client());
+            assert!(call.as_mut().now_or_never().is_none());
+            // Let the init task start the builder before the runtime goes away.
+            for _ in 0..100 {
+                if calls.load(Ordering::SeqCst) == 1 {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+        });
+        // The runtime shuts down with the init still pending.
+        drop(first);
+        let second = runtime(true);
+        let err = second.block_on(p.resolve_client()).err().unwrap();
+        assert_eq!(
+            err.to_string(),
+            format!("{}: second attempt", ErrorKind::ClientUnavailable),
+            "a fresh attempt should run"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 }
