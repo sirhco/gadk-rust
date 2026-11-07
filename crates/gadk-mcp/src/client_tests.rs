@@ -600,3 +600,138 @@ fn call_contexts_carry_identity_and_token() {
     assert!(from_ctx.cancel.is_cancelled());
     assert!(from_readonly.cancel.is_cancelled());
 }
+
+/// A server whose `hang` tool and whose `tools/list` signal `entered` and never answer; its
+/// `weather` tools answer normally.
+#[derive(Clone)]
+struct HangingServer {
+    inner: ToolServer,
+    hang_list: Arc<std::sync::atomic::AtomicBool>,
+    entered: Arc<Notify>,
+}
+
+impl ServerHandler for HangingServer {
+    fn get_info(&self) -> ServerConfig {
+        self.inner.get_info()
+    }
+
+    fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
+        self.inner.supported_protocol_versions()
+    }
+
+    async fn list_tools(
+        &self,
+        request: Option<PaginatedRequestParams>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, ErrorData> {
+        if self.hang_list.load(std::sync::atomic::Ordering::SeqCst) {
+            self.entered.notify_one();
+            std::future::pending::<()>().await;
+        }
+        self.inner.list_tools(request, context).await
+    }
+
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<rmcp::model::CallToolResponse, ErrorData> {
+        self.inner.call_tool(request, context).await
+    }
+}
+
+/// A refresher over a `HangingServer` whose `hang` tool never answers; returns the factory, the
+/// refresher, the "request reached the server" signal and the switch that hangs `tools/list`.
+fn hanging() -> (
+    Arc<ScriptedFactory>,
+    Arc<ConnectionRefresher>,
+    Arc<Notify>,
+    Arc<std::sync::atomic::AtomicBool>,
+) {
+    let entered = Arc::new(Notify::new());
+    let hang_list = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let factory = ScriptedFactory::new({
+        let (entered, hang_list) = (entered.clone(), hang_list.clone());
+        move || {
+            let gate = entered.clone();
+            HangingServer {
+                inner: weather_server().tool(
+                    tool("hang"),
+                    move |_params: CallToolRequestParams, _context| {
+                        let gate = gate.clone();
+                        async move {
+                            gate.notify_one();
+                            std::future::pending().await
+                        }
+                    },
+                ),
+                hang_list: hang_list.clone(),
+                entered: entered.clone(),
+            }
+        }
+    });
+    let c = Arc::new(ConnectionRefresher::new(
+        default_client_info(),
+        factory.clone(),
+    ));
+    (factory, c, entered, hang_list)
+}
+
+#[tokio::test]
+async fn cancelling_an_in_flight_call_returns_at_once_and_keeps_the_session() {
+    let (factory, c, entered, _) = hanging();
+    let cx = CallContext::background();
+    let call = tokio::spawn({
+        let (c, cx) = (c.clone(), cx.clone());
+        async move { c.call_tool(&cx, CallToolRequestParams::new("hang")).await }
+    });
+    entered.notified().await;
+    let peer = c.session_peer().expect("a session");
+    cx.cancel.cancel();
+
+    // Go passes ctx into session.CallTool: cancellation ends the call with `context canceled`.
+    let err = tokio::time::timeout(Duration::from_secs(5), call)
+        .await
+        .expect("cancelled call returned")
+        .unwrap()
+        .unwrap_err();
+    assert!(err.is_cancelled(), "{err:?}");
+    assert_eq!(err.to_string(), "context canceled");
+
+    // The session survives: the next call reuses it without a reconnect.
+    assert!(!c.disconnected());
+    c.call_tool(&CallContext::background(), weather_params())
+        .await
+        .unwrap();
+    assert!(same_session(&peer, &c.session_peer().expect("a session")));
+    assert_eq!(factory.connects(), 1);
+    c.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn cancelling_an_in_flight_listing_returns_at_once_and_keeps_the_session() {
+    let (factory, c, entered, hang_list) = hanging();
+    c.list_tools(&CallContext::background()).await.unwrap();
+    let peer = c.session_peer().expect("a session");
+    hang_list.store(true, std::sync::atomic::Ordering::SeqCst);
+    let cx = CallContext::background();
+    let list = tokio::spawn({
+        let (c, cx) = (c.clone(), cx.clone());
+        async move { c.list_tools(&cx).await }
+    });
+    entered.notified().await;
+    cx.cancel.cancel();
+
+    let err = tokio::time::timeout(Duration::from_secs(5), list)
+        .await
+        .expect("cancelled listing returned")
+        .unwrap()
+        .unwrap_err();
+    assert!(err.is_cancelled(), "{err:?}");
+
+    hang_list.store(false, std::sync::atomic::Ordering::SeqCst);
+    c.list_tools(&CallContext::background()).await.unwrap();
+    assert!(same_session(&peer, &c.session_peer().expect("a session")));
+    assert_eq!(factory.connects(), 1);
+    c.close().await.unwrap();
+}

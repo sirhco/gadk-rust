@@ -152,11 +152,7 @@ impl ConnectionRefresher {
     /// lock was free (Go's post-acquire `ctx.Err()` check). Leaving the wait does not disturb
     /// the lock's owner.
     pub(crate) async fn lock(&self, cx: &CallContext) -> Result<MutexGuard<'_, State>, Error> {
-        let state = tokio::select! {
-            biased;
-            () = cx.cancel.cancelled() => return Err(Error::Cancelled),
-            state = self.state.lock() => state,
-        };
+        let state = unless_cancelled(cx, self.state.lock()).await?;
         // The token may have fired while this call waited for the lock to be handed over.
         if cx.cancel.is_cancelled() {
             return Err(Error::Cancelled);
@@ -167,11 +163,9 @@ impl ConnectionRefresher {
     /// Go `connect`: opens a fresh session with the response cache off (R8), giving up with
     /// [`Error::Cancelled`] when `cx.cancel` fires. The caller holds the lock.
     async fn connect(&self, cx: &CallContext) -> Result<Session, BoxError> {
-        let connected = tokio::select! {
-            biased;
-            () = cx.cancel.cancelled() => return Err(Box::new(Error::Cancelled)),
-            connected = self.factory.connect(self.client_info.clone()) => connected?,
-        };
+        let connected = unless_cancelled(cx, self.factory.connect(self.client_info.clone()))
+            .await
+            .map_err(|cancelled| -> BoxError { Box::new(cancelled) })??;
         // A listing must never be served from a cache: tools change between sessions.
         connected
             .peer()
@@ -209,11 +203,8 @@ impl ConnectionRefresher {
             let peer = session.peer().clone();
             // Go pings on the caller's ctx: a cancelled ping counts as failed, so the session is
             // closed and the reconnect below fails with `context canceled`.
-            let answered = tokio::select! {
-                biased;
-                () = cx.cancel.cancelled() => false,
-                ping = peer.send_request(ClientRequest::PingRequest(Default::default())) => ping.is_ok(),
-            };
+            let ping = peer.send_request(ClientRequest::PingRequest(Default::default()));
+            let answered = matches!(unless_cancelled(cx, ping).await, Ok(Ok(_)));
             if answered {
                 return Ok(peer);
             }
@@ -232,6 +223,10 @@ impl ConnectionRefresher {
     /// Go `withRetry`: runs `op` on the current session's peer; on a refreshable error, refreshes
     /// the connection and runs `op` once more. Returns `op`'s value and whether a reconnect
     /// happened. A failed refresh returns [`Error::ReconnectFailed`].
+    ///
+    /// Each `op` run gives up with [`Error::Cancelled`] once `cx.cancel` fires (Go passes ctx into
+    /// `session.CallTool` / `ListTools`); dropping rmcp's request sends `notifications/cancelled`
+    /// as go-sdk does. Cancellation is not refreshable, so the session stays.
     pub(crate) async fn with_retry<T, F, Fut>(
         &self,
         cx: &CallContext,
@@ -243,7 +238,7 @@ impl ConnectionRefresher {
         T: Send,
     {
         let peer = self.get_session(cx).await?;
-        let err = match op(peer).await {
+        let err = match unless_cancelled(cx, op(peer)).await.and_then(|r| r) {
             Ok(value) => return Ok((value, false)),
             Err(err) => err,
         };
@@ -259,8 +254,18 @@ impl ConnectionRefresher {
                 });
             }
         };
-        let value = op(peer).await?;
+        let value = unless_cancelled(cx, op(peer)).await??;
         Ok((value, true))
+    }
+}
+
+/// Runs `fut` unless `cx.cancel` fires first, which fails with [`Error::Cancelled`] (Go's
+/// ctx-aware blocking calls). A token already cancelled wins over a ready `fut`.
+async fn unless_cancelled<T>(cx: &CallContext, fut: impl Future<Output = T>) -> Result<T, Error> {
+    tokio::select! {
+        biased;
+        () = cx.cancel.cancelled() => Err(Error::Cancelled),
+        value = fut => Ok(value),
     }
 }
 
