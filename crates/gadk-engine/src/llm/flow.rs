@@ -488,8 +488,8 @@ impl std::error::Error for SharedModelError {
 }
 
 /// The model error as an `AgentError::Model`, or `AgentError::Other` (same text) when a callback
-/// still holds the `Arc`.
-fn model_error_into_agent(err: Arc<ModelError>) -> AgentError {
+/// still holds the `Arc`. Shared with the `function_call_modifier` plugin's after-model callback.
+pub(crate) fn model_error_into_agent(err: Arc<ModelError>) -> AgentError {
     match Arc::try_unwrap(err) {
         Ok(e) => AgentError::Model(e),
         Err(shared) => AgentError::Other(Box::new(SharedModelError(shared))),

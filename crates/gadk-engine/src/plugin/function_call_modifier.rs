@@ -19,7 +19,6 @@
 //! never see them.
 
 use std::collections::BTreeMap;
-use std::fmt;
 use std::sync::Arc;
 
 use futures::future::{BoxFuture, ready};
@@ -29,6 +28,7 @@ use gadk_agent::{
 use gadk_genai::{Schema, Type};
 use gadk_model::{LlmRequest, LlmResponse, ModelError};
 
+use crate::llm::flow::model_error_into_agent;
 use crate::llm::processors::wrap_err;
 
 const NAME: &str = "FunctionCallModifierPlugin";
@@ -146,31 +146,6 @@ fn strip_args(
         Some(e) => (resp, Err(e)),
         // Go: return nil, nil after editing *llmResponse in place.
         None => (resp, Ok(None)),
-    }
-}
-
-/// The model error as an `AgentError::Model`. When another holder still shares the `Arc`, it
-/// becomes an `AgentError::Other` with the same text.
-fn model_error_into_agent(err: Arc<ModelError>) -> AgentError {
-    match Arc::try_unwrap(err) {
-        Ok(e) => AgentError::Model(e),
-        Err(shared) => AgentError::Other(Box::new(SharedModelError(shared))),
-    }
-}
-
-/// A model error still shared with another holder of its `Arc`.
-#[derive(Debug)]
-struct SharedModelError(Arc<ModelError>);
-
-impl fmt::Display for SharedModelError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(&*self.0, f)
-    }
-}
-
-impl std::error::Error for SharedModelError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&*self.0)
     }
 }
 
