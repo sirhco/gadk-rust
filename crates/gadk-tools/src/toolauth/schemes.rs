@@ -74,9 +74,7 @@ impl GoUnmarshal for OAuthFlow {
             authorization_url: d.take("authorizationUrl", T, "string")?.unwrap_or_default(),
             token_url: d.take("tokenUrl", T, "string")?.unwrap_or_default(),
             refresh_url: d.take("refreshUrl", T, "string")?.unwrap_or_default(),
-            scopes: d
-                .take("scopes", T, "map[string]string")?
-                .unwrap_or_default(),
+            scopes: d.take_string_map("scopes", T)?.unwrap_or_default(),
             extra: d.extra,
         })
     }
@@ -353,13 +351,10 @@ impl GoUnmarshal for Scheme {
             revocation_endpoint: d
                 .take("revocation_endpoint", T, "string")?
                 .unwrap_or_default(),
-            token_endpoint_auth_methods_supported: d.take(
-                "token_endpoint_auth_methods_supported",
-                T,
-                "[]string",
-            )?,
-            grant_types_supported: d.take("grant_types_supported", T, "[]string")?,
-            scopes: d.take("scopes", T, "[]string")?,
+            token_endpoint_auth_methods_supported: d
+                .take_string_list("token_endpoint_auth_methods_supported", T)?,
+            grant_types_supported: d.take_string_list("grant_types_supported", T)?,
+            scopes: d.take_string_list("scopes", T)?,
             extra: d.extra,
         };
         if s.r#type.as_str().is_empty() {

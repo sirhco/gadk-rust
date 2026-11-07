@@ -512,6 +512,51 @@ impl Decoded {
             }
         })
     }
+
+    /// [`Decoded::take`] for an `int64` field, read from the number's text as Go's
+    /// `strconv.ParseInt` reads it: `-0` is 0 (serde_json reads it as a float). A fraction, an
+    /// exponent, an overflow or another JSON kind is Go's type-mismatch error.
+    pub(crate) fn take_i64(&mut self, alias: &str, type_name: &str) -> Result<Option<i64>, String> {
+        let Some(raw) = self.known.get(alias) else {
+            return Ok(None);
+        };
+        let text = raw.get().trim();
+        if json_kind(text) == "number"
+            && let Ok(n) = text.parse::<i64>()
+        {
+            self.known.remove(alias);
+            return Ok(Some(n));
+        }
+        self.take::<i64>(alias, type_name, "int64")
+    }
+
+    /// [`Decoded::take`] for a `[]string` field: a `null` element is `""`, as Go's
+    /// `json.Unmarshal` leaves the element at its zero value.
+    pub(crate) fn take_string_list(
+        &mut self,
+        alias: &str,
+        type_name: &str,
+    ) -> Result<Option<Vec<String>>, String> {
+        Ok(self
+            .take::<Vec<Option<String>>>(alias, type_name, "[]string")?
+            .map(|items| items.into_iter().map(Option::unwrap_or_default).collect()))
+    }
+
+    /// [`Decoded::take`] for a `map[string]string` field: a `null` value is `""`, as Go's
+    /// `json.Unmarshal` stores the element's zero value.
+    pub(crate) fn take_string_map(
+        &mut self,
+        alias: &str,
+        type_name: &str,
+    ) -> Result<Option<BTreeMap<String, String>>, String> {
+        Ok(self
+            .take::<BTreeMap<String, Option<String>>>(alias, type_name, "map[string]string")?
+            .map(|map| {
+                map.into_iter()
+                    .map(|(k, v)| (k, v.unwrap_or_default()))
+                    .collect()
+            }))
+    }
 }
 
 /// Go `encode` (model_json.go): known fields in Go struct order, then extras sorted, skipping an
@@ -726,6 +771,98 @@ mod tests {
         assert_eq!(
             d.take::<String>("s", "T", "string").unwrap().unwrap(),
             "a\u{FFFD}b"
+        );
+    }
+
+    fn unmarshal<T: GoUnmarshal>(text: &str) -> Result<T, String> {
+        T::go_unmarshal(&raw(text))
+    }
+
+    #[test]
+    fn int64_fields_read_negative_zero_as_go_does() {
+        use super::super::OAuth2Auth;
+        let a: OAuth2Auth = unmarshal(r#"{"expiresAt":-0,"expires_in":-0}"#).unwrap();
+        assert_eq!((a.expires_at, a.expires_in), (0, 0));
+        let a: OAuth2Auth =
+            unmarshal(r#"{"expiresAt":-9223372036854775808,"expiresIn":9223372036854775807}"#)
+                .unwrap();
+        assert_eq!((a.expires_at, a.expires_in), (i64::MIN, i64::MAX));
+        for (text, kind) in [
+            ("-0.0", "number"),
+            ("1.0", "number"),
+            ("1e3", "number"),
+            ("-0e0", "number"),
+            ("9223372036854775808", "number"),
+            ("-9223372036854775809", "number"),
+            ("\"5\"", "string"),
+            ("[1]", "array"),
+            ("true", "bool"),
+            ("{}", "object"),
+        ] {
+            assert_eq!(
+                unmarshal::<OAuth2Auth>(&format!(r#"{{"expiresAt":{text}}}"#))
+                    .err()
+                    .unwrap(),
+                format!("toolauth: OAuth2Auth: field expiresAt: cannot use a JSON {kind} as int64"),
+                "{text}"
+            );
+        }
+        let a: OAuth2Auth = unmarshal(r#"{"expiresAt":null}"#).unwrap();
+        assert_eq!(a.expires_at, 0);
+    }
+
+    #[test]
+    fn string_list_and_map_fields_read_null_elements_as_empty() {
+        use super::super::{HttpAuth, OAuthFlow, Scheme, ServiceAccount};
+        let sa: ServiceAccount =
+            unmarshal(r#"{"useDefaultCredential":true,"scopes":["a",null]}"#).unwrap();
+        assert_eq!(sa.scopes, Some(vec!["a".to_owned(), String::new()]));
+        let h: HttpAuth =
+            unmarshal(r#"{"scheme":"b","credentials":{},"additionalHeaders":{"a":null,"b":"c"}}"#)
+                .unwrap();
+        assert_eq!(
+            h.additional_headers,
+            Some(BTreeMap::from([
+                ("a".to_owned(), String::new()),
+                ("b".to_owned(), "c".to_owned()),
+            ]))
+        );
+        let f: OAuthFlow = unmarshal(r#"{"scopes":{"r":null}}"#).unwrap();
+        assert_eq!(f.scopes, BTreeMap::from([("r".to_owned(), String::new())]));
+        let s: Scheme = unmarshal(
+            r#"{"type":"openIdConnect","grant_types_supported":[null],"token_endpoint_auth_methods_supported":[null,"x"],"scopes":[null]}"#,
+        )
+        .unwrap();
+        assert_eq!(s.grant_types_supported, Some(vec![String::new()]));
+        assert_eq!(
+            s.token_endpoint_auth_methods_supported,
+            Some(vec![String::new(), "x".to_owned()])
+        );
+        assert_eq!(s.scopes, Some(vec![String::new()]));
+        // Real type mismatches keep their text.
+        assert_eq!(
+            unmarshal::<ServiceAccount>(r#"{"scopes":["a",1]}"#)
+                .err()
+                .unwrap(),
+            "toolauth: ServiceAccount: field scopes: cannot use a JSON array as []string"
+        );
+        assert_eq!(
+            unmarshal::<ServiceAccount>(r#"{"scopes":{"a":"b"}}"#)
+                .err()
+                .unwrap(),
+            "toolauth: ServiceAccount: field scopes: cannot use a JSON object as []string"
+        );
+        assert_eq!(
+            unmarshal::<OAuthFlow>(r#"{"scopes":{"r":1}}"#)
+                .err()
+                .unwrap(),
+            "toolauth: OAuthFlow: field scopes: cannot use a JSON object as map[string]string"
+        );
+        assert_eq!(
+            unmarshal::<HttpAuth>(r#"{"scheme":"b","credentials":{},"additionalHeaders":["a"]}"#)
+                .err()
+                .unwrap(),
+            "toolauth: HTTPAuth: field additionalHeaders: cannot use a JSON array as map[string]string"
         );
     }
 

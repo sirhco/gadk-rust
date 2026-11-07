@@ -191,7 +191,7 @@ impl GoUnmarshal for HttpAuth {
             credentials: d
                 .take("credentials", T, "toolauth.HTTPCredentials")?
                 .unwrap_or_default(),
-            additional_headers: d.take("additionalHeaders", T, "map[string]string")?,
+            additional_headers: d.take_string_map("additionalHeaders", T)?,
             extra: d.extra,
         })
     }
@@ -284,8 +284,8 @@ impl GoUnmarshal for OAuth2Auth {
         let access_token = s("accessToken")?;
         let refresh_token = s("refreshToken")?;
         let id_token = s("idToken")?;
-        let expires_at = d.take("expiresAt", T, "int64")?.unwrap_or_default();
-        let expires_in = d.take("expiresIn", T, "int64")?.unwrap_or_default();
+        let expires_at = d.take_i64("expiresAt", T)?.unwrap_or_default();
+        let expires_in = d.take_i64("expiresIn", T)?.unwrap_or_default();
         let mut s = |alias: &str| -> Result<String, String> {
             Ok(d.take(alias, T, "string")?.unwrap_or_default())
         };
@@ -532,7 +532,7 @@ impl GoUnmarshal for ServiceAccount {
                 T,
                 "*toolauth.ServiceAccountCredential",
             )?,
-            scopes: d.take("scopes", T, "[]string")?,
+            scopes: d.take_string_list("scopes", T)?,
             use_default_credential: d
                 .take("useDefaultCredential", T, "bool")?
                 .unwrap_or_default(),
