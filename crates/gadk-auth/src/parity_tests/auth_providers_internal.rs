@@ -23,6 +23,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use futures::FutureExt as _;
+use http::HeaderMap;
+use http::header::AUTHORIZATION;
 use parking_lot::Mutex;
 use tokio::sync::watch;
 use tokio::time::Instant;
@@ -30,8 +32,12 @@ use tokio_util::sync::CancellationToken;
 
 use crate::credential::{OAuth2, StaticTokenSource, Token, TokenSource};
 use crate::error::{Error, SharedError};
-use crate::provider::AuthContext;
-use crate::providers::{INIT_TIMEOUT, InitFuture, lazy_token_source};
+use crate::provider::{AuthContext, CredentialProvider};
+use crate::providers::{
+    AdcSource, INIT_TIMEOUT, InitFuture, ServiceAccountConfig, adc_with, lazy_token_source,
+    service_account_with,
+};
+use crate::testserver::{RecordedRequest, Reply, TestServer};
 
 /// Go `t.Context()`: no invocation identity.
 fn cx() -> AuthContext {
@@ -388,4 +394,65 @@ async fn test_lazy_token_source_keeps_init_error_text_past_timeout() {
         err.to_string(),
         "auth: credential initialization exceeded 100ms: context deadline exceeded: auth: find default credentials: context canceled"
     );
+}
+
+/// ADC and ServiceAccount mint through an `authorized_user` source.
+// parity: adapted: the fake `authorized_user` ADC file is fed through the `AdcSource::Json` seam (setting `GOOGLE_APPLICATION_CREDENTIALS` needs `unsafe` `env::set_var`, and `unsafe_code` is forbidden), and the token-endpoint hit count is asserted as google-cloud-auth's token cache allows (at least one mint, every `apply` a `Bearer tok…`), not exactly one per `apply` as oauth2's cache gives.
+#[tokio::test]
+async fn test_providers_mint_tokens_after_init() {
+    let hits = Arc::new(AtomicUsize::new(0));
+    let srv = TestServer::start({
+        let hits = Arc::clone(&hits);
+        move |_: RecordedRequest| {
+            let n = hits.fetch_add(1, Ordering::SeqCst) + 1;
+            async move {
+                // Go: inside oauth2's expiry margin, so every Apply refreshes.
+                Reply::json(format!(
+                    r#"{{"access_token":"tok{n}","token_type":"Bearer","expires_in":1}}"#
+                ))
+            }
+        }
+    })
+    .await;
+    let creds = serde_json::json!({
+        "type": "authorized_user",
+        "client_id": "id",
+        "client_secret": "secret",
+        "refresh_token": "refresh",
+        "token_uri": srv.url(),
+    });
+
+    let tests: [(&str, Arc<dyn CredentialProvider>); 2] = [
+        ("ADC", adc_with(AdcSource::Json(creds.clone()), Vec::new())),
+        (
+            "ServiceAccountADCFallback",
+            service_account_with(ServiceAccountConfig::default(), AdcSource::Json(creds)),
+        ),
+    ];
+    for (name, provider) in tests {
+        let before = hits.load(Ordering::SeqCst);
+        let cred = provider
+            .credential(&cx())
+            .await
+            .unwrap_or_else(|e| panic!("{name}: Credential() error = {e}"));
+        for i in 1..=2 {
+            let mut h = HeaderMap::new();
+            if let Err(err) = cred.apply(&mut h).await {
+                panic!("{name}: Apply() #{i} error = {err}");
+            }
+            let auth = h
+                .get(AUTHORIZATION)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or_default();
+            assert!(
+                auth.starts_with("Bearer tok"),
+                "{name}: Apply() #{i} Authorization = {auth:?}, want a minted bearer token"
+            );
+        }
+        let got = hits.load(Ordering::SeqCst) - before;
+        assert!(
+            got >= 1,
+            "{name}: token endpoint hit {got} times, want at least one mint"
+        );
+    }
 }

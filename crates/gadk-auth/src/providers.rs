@@ -30,42 +30,77 @@ use std::time::Duration;
 
 use futures::FutureExt as _;
 use futures::future::{BoxFuture, Shared};
+use gadk_agent::go_quote;
+use google_cloud_auth::credentials::idtoken::{self, IDTokenCredentials};
+use google_cloud_auth::credentials::service_account::{self, AccessSpecifier};
+use google_cloud_auth::credentials::{AccessTokenCredentials, Builder as AdcBuilder, user_account};
 use parking_lot::Mutex;
+use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
-use crate::credential::{Credential, OAuth2, TokenSource};
-use crate::error::Error;
-use crate::provider::{AuthContext, CredentialProvider};
+use crate::credential::{ApiKey, Bearer, Credential, OAuth2, Token, TokenSource};
+use crate::error::{Error, SharedError};
+use crate::provider::{AuthContext, CredentialFuture, CredentialProvider, ProviderFn};
 
 /// Go `StaticToken` (providers.go:125): a fresh `Bearer { token }` per call.
-#[allow(unused_variables, clippy::todo)]
 pub fn static_token(token: impl Into<String>) -> Arc<dyn CredentialProvider> {
-    todo!("Task 2")
+    let token = token.into();
+    ProviderFn::new(move |_: &AuthContext| -> CredentialFuture {
+        resolved(Arc::new(Bearer {
+            token: token.clone(),
+        }))
+    })
+    .into_provider()
 }
 
-/// Go `APIKey` (providers.go:133).
-#[allow(unused_variables, clippy::todo)]
+/// Go `APIKey` (providers.go:133): a header API key credential, where `name` is the header (for
+/// example `X-Api-Key`).
 pub fn api_key(name: impl Into<String>, value: impl Into<String>) -> Arc<dyn CredentialProvider> {
-    todo!("Task 2")
+    let (name, value) = (name.into(), value.into());
+    ProviderFn::new(move |_: &AuthContext| -> CredentialFuture {
+        resolved(Arc::new(ApiKey {
+            name: name.clone(),
+            value: value.clone(),
+        }))
+    })
+    .into_provider()
 }
 
-/// Go `TokenSourceProvider` (providers.go:142): `OAuth2 { token_source }` per call.
-#[allow(unused_variables, clippy::todo)]
+/// Go `TokenSourceProvider` (providers.go:142): `OAuth2 { token_source }` per call, so a fresh
+/// (self-refreshing) token is minted at apply time. This covers client-credentials (2-legged)
+/// OAuth. Go's `auth: nil token source` cannot occur: `ts` is a non-optional `Arc`.
 pub fn token_source(ts: Arc<dyn TokenSource>) -> Arc<dyn CredentialProvider> {
-    todo!("Task 2")
+    ProviderFn::new(move |_: &AuthContext| -> CredentialFuture {
+        resolved(Arc::new(OAuth2 {
+            token_source: Arc::clone(&ts),
+        }))
+    })
+    .into_provider()
 }
 
-/// Go `ADC(scopes...)` (providers.go:168): lazy, scopes default to cloud-platform when empty.
-#[allow(unused_variables, clippy::todo)]
+/// An already-resolved credential as a [`CredentialFuture`].
+fn resolved(cred: Arc<dyn Credential>) -> CredentialFuture {
+    std::future::ready(Ok(cred)).boxed()
+}
+
+/// Go `ADC(scopes...)` (providers.go:168): Google Application Default Credentials, discovered
+/// lazily on the first `credential` call and reused thereafter. With no scopes the
+/// cloud-platform scope is used.
 pub fn adc(scopes: &[&str]) -> Arc<dyn CredentialProvider> {
-    todo!("Task 2")
+    adc_with(
+        AdcSource::Discover,
+        scopes.iter().map(|s| (*s).to_owned()).collect(),
+    )
 }
 
-/// Go `ServiceAccount` (providers.go:193): lazy; audience → ID token; key → access token
-/// (scopes required); neither → ADC with `scopes`.
-#[allow(unused_variables, clippy::todo)]
+/// Go `ServiceAccount` (providers.go:193): mints tokens for a service account, from an explicit
+/// key or from ADC. The token source is built lazily on the first `credential` call and reused
+/// thereafter:
+/// - `audience` set: a Google-signed ID token for it (from `json_key` when given, else ADC);
+/// - `json_key` set: an access token for `scopes`, which are required;
+/// - neither: an ADC access token for `scopes` (cloud-platform when empty).
 pub fn service_account(cfg: ServiceAccountConfig) -> Arc<dyn CredentialProvider> {
-    todo!("Task 2")
+    service_account_with(cfg, AdcSource::Discover)
 }
 
 /// Go `ServiceAccountConfig` (providers.go:177). An empty `json_key` is Go's `len(JSONKey) == 0`.
@@ -80,60 +115,214 @@ pub struct ServiceAccountConfig {
 }
 
 impl std::fmt::Debug for ServiceAccountConfig {
-    #[allow(unused_variables, clippy::todo)]
+    // The key is a secret: it prints as "<redacted>" when set.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!("Task 2")
+        let json_key = if self.json_key.is_empty() {
+            ""
+        } else {
+            "<redacted>"
+        };
+        f.debug_struct("ServiceAccountConfig")
+            .field("json_key", &json_key)
+            .field("scopes", &self.scopes)
+            .field("audience", &self.audience)
+            .finish()
     }
 }
 
-/// providers.go:152 `scopeCloudPlatform`.
-#[allow(dead_code)]
+/// providers.go:152 `scopeCloudPlatform`: the default ADC scope, as in adk-python and gcloud.
 pub(crate) const SCOPE_CLOUD_PLATFORM: &str = "https://www.googleapis.com/auth/cloud-platform";
 
 /// Where ADC is read from. `Discover` is google-cloud-auth's real lookup. `Json` stands in for a
 /// `GOOGLE_APPLICATION_CREDENTIALS` file, because tests cannot set the variable
 /// (`env::set_var` is `unsafe`). Supported `"type"`s: `authorized_user`, `service_account`.
+// `Json` is built only by tests and the gcp client's ADC seam, so a non-test build without
+// those sees it as never constructed.
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub(crate) enum AdcSource {
     Discover,
-    Json(serde_json::Value),
+    Json(Value),
 }
 
 /// Go `adcTokenSource` (providers.go:154): an access-token source for `scopes` (cloud-platform
-/// when empty). Builder errors are exactly `Error::FindDefaultCredentials(_)`. Synchronous.
-#[allow(dead_code, unused_variables, clippy::todo)]
+/// when empty). Builder errors are exactly `Error::FindDefaultCredentials(_)`. Synchronous, but
+/// must run inside a Tokio runtime: the built credentials spawn their token-refresh task.
 pub(crate) fn adc_token_source(
     source: &AdcSource,
     scopes: &[String],
 ) -> Result<Arc<dyn TokenSource>, Error> {
-    todo!("Task 2")
+    let scopes = if scopes.is_empty() {
+        vec![SCOPE_CLOUD_PLATFORM.to_owned()]
+    } else {
+        scopes.to_vec()
+    };
+    let built = match source {
+        AdcSource::Discover => AdcBuilder::default()
+            .with_scopes(scopes)
+            .build_access_token_credentials()
+            .map_err(SharedError::new),
+        AdcSource::Json(json) => match credential_type(json) {
+            "authorized_user" => user_account::Builder::new(json.clone())
+                .with_scopes(scopes)
+                .build_access_token_credentials()
+                .map_err(SharedError::new),
+            "service_account" => service_account::Builder::new(json.clone())
+                .with_access_specifier(AccessSpecifier::from_scopes(scopes))
+                .build_access_token_credentials()
+                .map_err(SharedError::new),
+            // golang.org/x/oauth2/google/google.go:244.
+            other => Err(SharedError::from(format!(
+                "unknown credential type: {}",
+                go_quote(other)
+            ))),
+        },
+    };
+    let creds = built.map_err(Error::FindDefaultCredentials)?;
+    Ok(Arc::new(AccessTokenSource(creds)))
 }
 
 /// `adc` with an injected source.
-#[allow(dead_code, unused_variables, clippy::todo)]
 pub(crate) fn adc_with(source: AdcSource, scopes: Vec<String>) -> Arc<dyn CredentialProvider> {
-    todo!("Task 2")
+    // google-cloud-auth's builders take no context and their token caches refresh on their own
+    // tasks, so the init token has nothing to reach.
+    lazy_token_source(
+        move |_cancel: CancellationToken| -> InitFuture {
+            std::future::ready(adc_token_source(&source, &scopes)).boxed()
+        },
+        INIT_TIMEOUT,
+    )
 }
 
 /// `service_account` with an injected ADC source for its fallback branch.
-#[allow(dead_code, unused_variables, clippy::todo)]
 pub(crate) fn service_account_with(
     cfg: ServiceAccountConfig,
     source: AdcSource,
 ) -> Arc<dyn CredentialProvider> {
-    todo!("Task 2")
+    lazy_token_source(
+        move |_cancel: CancellationToken| -> InitFuture {
+            std::future::ready(service_account_token_source(&cfg, &source)).boxed()
+        },
+        INIT_TIMEOUT,
+    )
+}
+
+/// The init of Go `ServiceAccount` (providers.go:194-222).
+fn service_account_token_source(
+    cfg: &ServiceAccountConfig,
+    source: &AdcSource,
+) -> Result<Arc<dyn TokenSource>, Error> {
+    if !cfg.audience.is_empty() {
+        return id_token_source(cfg, source).map_err(Error::IdTokenSource);
+    }
+    if !cfg.json_key.is_empty() {
+        // An explicit-key access token is scope-bound, so no scopes means unusable. This runs on
+        // the first `credential` call, not in `service_account`, which cannot fail. adk-python
+        // rejects the same case at the same point (service_account_exchanger.py).
+        if cfg.scopes.is_empty() {
+            return Err(Error::ServiceAccountScopesRequired);
+        }
+        let creds = service_account_key(&cfg.json_key)
+            .and_then(|key| {
+                service_account::Builder::new(key)
+                    .with_access_specifier(AccessSpecifier::from_scopes(cfg.scopes.clone()))
+                    .build_access_token_credentials()
+                    .map_err(SharedError::new)
+            })
+            .map_err(Error::CredentialsFromJson)?;
+        return Ok(Arc::new(AccessTokenSource(creds)));
+    }
+    adc_token_source(source, &cfg.scopes)
+}
+
+/// Go `idtoken.NewTokenSource(ctx, cfg.Audience, opts...)` (providers.go:196-204): from the key
+/// when one is given (Go `option.WithAuthCredentialsJSON(option.ServiceAccount, key)`), else
+/// from ADC.
+fn id_token_source(
+    cfg: &ServiceAccountConfig,
+    source: &AdcSource,
+) -> Result<Arc<dyn TokenSource>, SharedError> {
+    let audience = cfg.audience.clone();
+    let built = if !cfg.json_key.is_empty() {
+        let key = service_account_key(&cfg.json_key)?;
+        idtoken::service_account::Builder::new(audience, key).build()
+    } else {
+        match source {
+            AdcSource::Discover => idtoken::Builder::new(audience).build(),
+            AdcSource::Json(json) => match credential_type(json) {
+                "service_account" => {
+                    idtoken::service_account::Builder::new(audience, json.clone()).build()
+                }
+                // google.golang.org/api/idtoken/idtoken.go `unsupported credentials type`.
+                other => {
+                    return Err(SharedError::from(format!(
+                        "idtoken: unsupported credentials type: {}",
+                        go_quote(other)
+                    )));
+                }
+            },
+        }
+    };
+    let creds = built.map_err(SharedError::new)?;
+    Ok(Arc::new(IdTokenSource(creds)))
+}
+
+/// Go `google.CredentialsFromJSONWithType(…, google.ServiceAccount, …)`'s parse and type check
+/// (golang.org/x/oauth2/google/default.go:310-316).
+fn service_account_key(json_key: &[u8]) -> Result<Value, SharedError> {
+    let key: Value = serde_json::from_slice(json_key).map_err(SharedError::new)?;
+    let found = credential_type(&key);
+    if found != "service_account" {
+        return Err(SharedError::from(format!(
+            "google: expected credential type {}, found {}",
+            go_quote("service_account"),
+            go_quote(found)
+        )));
+    }
+    Ok(key)
+}
+
+/// The `"type"` of a credentials JSON file; `""` when absent (Go's zero `credentialsFile.Type`).
+fn credential_type(json: &Value) -> &str {
+    json.get("type").and_then(Value::as_str).unwrap_or_default()
+}
+
+/// Go `creds.TokenSource`: an access-token source over google-cloud-auth credentials, which
+/// cache and refresh the token themselves.
+struct AccessTokenSource(AccessTokenCredentials);
+
+#[async_trait::async_trait]
+impl TokenSource for AccessTokenSource {
+    async fn token(&self) -> Result<Token, Error> {
+        let token = self.0.access_token().await.map_err(Error::other)?;
+        Ok(Token {
+            access_token: token.token,
+            token_type: "Bearer".to_owned(),
+        })
+    }
+}
+
+/// Go `idtoken.NewTokenSource`'s source: the ID token travels as a bearer token.
+struct IdTokenSource(IDTokenCredentials);
+
+#[async_trait::async_trait]
+impl TokenSource for IdTokenSource {
+    async fn token(&self) -> Result<Token, Error> {
+        let id_token = self.0.id_token().await.map_err(Error::other)?;
+        Ok(Token {
+            access_token: id_token,
+            token_type: "Bearer".to_owned(),
+        })
+    }
 }
 
 // ---- Lazy token source (providers.go:226-291) ----
 
 /// providers.go:227 `initTimeout`: bounds a hung init so it fails and is retried, not wedged
 /// forever. A parameter of [`lazy_token_source`] in Rust, so tests pass a short bound.
-#[allow(dead_code)] // Task 2 Cycle 2 removes this allow
 pub(crate) const INIT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// What a lazy init resolves to.
-#[allow(dead_code)] // Task 2 Cycle 2 removes this allow
 pub(crate) type InitFuture = BoxFuture<'static, Result<Arc<dyn TokenSource>, Error>>;
 
 /// One init attempt (Go `*attempt`). Every waiter awaits its own clone and gets a clone of the
@@ -166,7 +355,6 @@ struct LazyTokenSource<F> {
 /// Waiters are cancelled only by dropping their own future; that never stops the attempt, whose
 /// result is still memoized for the next call. The token handed to `init` is cancelled only when
 /// the bound fires, never because init returned, since a token source may keep using it.
-#[allow(dead_code)] // Task 2 Cycle 2 removes this allow
 pub(crate) fn lazy_token_source<F>(init: F, bound: Duration) -> Arc<dyn CredentialProvider>
 where
     F: Fn(CancellationToken) -> InitFuture + Send + Sync + 'static,
@@ -360,5 +548,109 @@ mod lazy_tests {
             .map(|_| ())
             .unwrap();
         assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod builtin_tests {
+    use serde_json::json;
+
+    use super::*;
+
+    /// The error a provider's first `credential` call returns.
+    async fn credential_err(p: Arc<dyn CredentialProvider>) -> Error {
+        match p.credential(&AuthContext::anonymous()).await {
+            Ok(cred) => panic!("credential() = {cred:?}, want an error"),
+            Err(e) => e,
+        }
+    }
+
+    #[test]
+    fn service_account_config_debug_redacts_the_key() {
+        let cfg = ServiceAccountConfig {
+            json_key: br#"{"private_key":"s3cr3t"}"#.to_vec(),
+            scopes: vec!["s".into()],
+            audience: "aud".into(),
+        };
+        assert_eq!(
+            format!("{cfg:?}"),
+            r#"ServiceAccountConfig { json_key: "<redacted>", scopes: ["s"], audience: "aud" }"#
+        );
+        assert_eq!(
+            format!("{:?}", ServiceAccountConfig::default()),
+            r#"ServiceAccountConfig { json_key: "", scopes: [], audience: "" }"#
+        );
+    }
+
+    #[tokio::test]
+    async fn static_token_resolves_a_fresh_credential_per_call() {
+        let p = static_token("abc");
+        let a = p.credential(&AuthContext::anonymous()).await.unwrap();
+        let b = p.credential(&AuthContext::anonymous()).await.unwrap();
+        assert!(!Arc::ptr_eq(&a, &b));
+        assert_eq!(
+            a.downcast_ref::<Bearer>(),
+            Some(&Bearer {
+                token: "abc".into()
+            })
+        );
+    }
+
+    #[test]
+    fn adc_json_rejects_an_unknown_credential_type() {
+        let Err(err) = adc_token_source(&AdcSource::Json(json!({"type": "external_x"})), &[])
+        else {
+            panic!("adc_token_source() succeeded for an unknown type");
+        };
+        assert!(matches!(err, Error::FindDefaultCredentials(_)), "{err:?}");
+        assert_eq!(
+            err.to_string(),
+            r#"auth: find default credentials: unknown credential type: "external_x""#
+        );
+    }
+
+    #[tokio::test]
+    async fn service_account_key_must_be_a_service_account() {
+        let err = credential_err(service_account(ServiceAccountConfig {
+            json_key: br#"{"type":"authorized_user"}"#.to_vec(),
+            scopes: vec![SCOPE_CLOUD_PLATFORM.into()],
+            ..Default::default()
+        }))
+        .await;
+        assert_eq!(
+            err.to_string(),
+            r#"auth: credentials from json: google: expected credential type "service_account", found "authorized_user""#
+        );
+    }
+
+    #[tokio::test]
+    async fn id_token_needs_a_service_account() {
+        // From ADC.
+        let err = credential_err(service_account_with(
+            ServiceAccountConfig {
+                audience: "https://run.example".into(),
+                ..Default::default()
+            },
+            AdcSource::Json(json!({"type": "authorized_user"})),
+        ))
+        .await;
+        assert!(matches!(err, Error::IdTokenSource(_)), "{err:?}");
+        assert_eq!(
+            err.to_string(),
+            r#"auth: id token source: idtoken: unsupported credentials type: "authorized_user""#
+        );
+        // From an explicit key that is not JSON.
+        let err = credential_err(service_account(ServiceAccountConfig {
+            json_key: b"not-json".to_vec(),
+            audience: "https://run.example".into(),
+            ..Default::default()
+        }))
+        .await;
+        assert!(matches!(err, Error::IdTokenSource(_)), "{err:?}");
+        assert!(
+            err.to_string().starts_with("auth: id token source: "),
+            "{err}"
+        );
     }
 }
