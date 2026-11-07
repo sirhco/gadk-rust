@@ -39,7 +39,8 @@ use crate::error::{ConsentRequiredError, Error, find_consent};
 use crate::provider::{AuthContext, CredentialProvider};
 
 /// Go `Transport` (transport.go:39) as a `reqwest_middleware::Middleware`. Go's per-request
-/// context is the `AuthContext` fixed at construction.
+/// context is the `AuthContext` fixed at construction, so a transport for a per-user provider
+/// (such as the gcp one) must be built per invocation identity and not shared across users.
 ///
 /// Errors reach the caller as `reqwest_middleware::Error::Middleware` wrapping a
 /// [`crate::Error`]: `auth: resolve credential: …` when the provider fails, `auth: apply

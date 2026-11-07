@@ -246,6 +246,10 @@ pub(crate) fn build_provider(cfg: ProviderConfig) -> Result<Provider, Error> {
 /// projects/*/locations/*/authProviders/*". The provider's `as_refreshing()` is `Some`.
 ///
 /// Building the default client (when `cfg.client` is `None`) happens on first use, not here.
+///
+/// The provider resolves per user and session, but a [`crate::Transport`] (or
+/// [`crate::client`]) fixes its `AuthContext` when it is built: build the transport per
+/// invocation identity and do not share one across users.
 pub fn new_provider(cfg: ProviderConfig) -> Result<Arc<dyn CredentialProvider>, Error> {
     build_provider(cfg).map(|p| Arc::new(p) as Arc<dyn CredentialProvider>)
 }
