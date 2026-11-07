@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt};
 
 use super::{SkillError, SkillErrorKind};
+use crate::go_fmt::go_lossy_utf8;
 
 const FRONTMATTER_SEPARATOR: &[u8] = b"---\n";
 const FRONTMATTER_SEPARATOR_WIN: &[u8] = b"---\r\n";
@@ -327,7 +328,7 @@ pub fn parse_bytes(content: &[u8]) -> Result<(Frontmatter, String), SkillError> 
         })
         .map_err(|e| SkillError::wrap("parse frontmatter", e))?;
     let body = &content[content.len() - rest.len()..];
-    Ok((fm, String::from_utf8_lossy(body).into_owned()))
+    Ok((fm, go_lossy_utf8(body)))
 }
 
 /// Port of Go `Validate` (`frontmatter.go:203`): the specification's field rules, checked in
@@ -474,5 +475,12 @@ mod tests {
         let (parsed, body) = parse_bytes(&out).unwrap();
         assert_eq!(parsed, fm);
         assert_eq!(body, "body\n");
+    }
+
+    /// Go's `string(body)` under `encoding/json`: one U+FFFD per invalid byte.
+    #[test]
+    fn body_replaces_each_invalid_byte_like_go() {
+        let (_, body) = parse_bytes(b"---\nname: s\ndescription: d\n---\n\xE2\x82A").unwrap();
+        assert_eq!(body, "\u{FFFD}\u{FFFD}A");
     }
 }

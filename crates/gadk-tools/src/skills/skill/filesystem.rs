@@ -25,7 +25,7 @@ use tokio::io::{AsyncReadExt, BufReader};
 use super::{
     Frontmatter, ResourceReader, SkillError, SkillErrorKind, SkillFs, Source, parse, quote,
 };
-use crate::go_fmt::{path_clean, valid_path};
+use crate::go_fmt::{go_lossy_utf8, path_clean, valid_path};
 
 /// The directories a skill resource may live in, in Go's listing order.
 const RESOURCE_DIRS: [&str; 3] = ["references", "assets", "scripts"];
@@ -226,7 +226,7 @@ impl Source for FileSystemSource {
             .read_to_end(&mut instructions)
             .await
             .map_err(|e| SkillError::io("read instructions", e))?;
-        Ok(String::from_utf8_lossy(&instructions).into_owned())
+        Ok(go_lossy_utf8(&instructions))
     }
 
     /// Port of Go `LoadResource` (`filesystem_source.go:115`): the path is cleaned with Go's
@@ -273,5 +273,22 @@ fn path_join(a: &str, b: &str) -> String {
         (true, false) => path_clean(b),
         (false, true) => path_clean(a),
         (false, false) => path_clean(&format!("{a}/{b}")),
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+    use crate::skills::skill::MemFs;
+
+    /// Go returns `string(bytes)`, which `encoding/json` encodes with one U+FFFD per invalid
+    /// byte: `\xE2\x82` (a truncated three-byte sequence) becomes two U+FFFD, not one.
+    #[tokio::test]
+    async fn instructions_replace_each_invalid_byte_like_go() {
+        let skill_md: &[u8] = b"---\nname: s\ndescription: d\n---\n\xE2\x82A";
+        let source = FileSystemSource::new(Arc::new(MemFs::new([("s/SKILL.md", skill_md)])));
+        let got = source.load_instructions("s").await.unwrap();
+        assert_eq!(got, "\u{FFFD}\u{FFFD}A");
     }
 }

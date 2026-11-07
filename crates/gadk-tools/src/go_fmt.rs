@@ -14,9 +14,9 @@
 // limitations under the License.
 
 //! Go standard-library formatting and path helpers the tools reproduce byte-for-byte: `net/url`
-//! `QueryEscape`, `html` `EscapeString`, `path` `Clean`, `io/fs` `ValidPath`, and `fmt` `%v` of a
-//! JSON-decoded value. Private to the crate (the engine's and gadk-session's copies are private
-//! to those crates).
+//! `QueryEscape`, `html` `EscapeString`, `path` `Clean`, `io/fs` `ValidPath`, `encoding/json` of a
+//! Go `string(bytes)`, and `fmt` `%v` of a JSON-decoded value. Private to the crate (the
+//! engine's and gadk-session's copies are private to those crates).
 
 use serde_json::Value;
 
@@ -94,6 +94,30 @@ pub(crate) fn path_clean(p: &str) -> String {
 /// a Rust `&str` cannot hold.
 pub(crate) fn valid_path(p: &str) -> bool {
     p == "." || p.split('/').all(|e| !matches!(e, "" | "." | ".."))
+}
+
+/// Go `string(bytes)` as `encoding/json` encodes it: valid UTF-8 is copied, and each byte that
+/// `utf8.DecodeRune` rejects (size 1) becomes one U+FFFD. Unlike [`String::from_utf8_lossy`],
+/// which emits one U+FFFD per maximal invalid subpart, this emits one per invalid byte.
+pub(crate) fn go_lossy_utf8(mut bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len());
+    loop {
+        match std::str::from_utf8(bytes) {
+            Ok(valid) => {
+                out.push_str(valid);
+                return out;
+            }
+            Err(e) => {
+                let (valid, rest) = bytes.split_at(e.valid_up_to());
+                // `valid` is valid UTF-8 by `valid_up_to`'s contract.
+                out.push_str(std::str::from_utf8(valid).unwrap_or_default());
+                // `None`: a truncated sequence at the end; every remaining byte is invalid.
+                let invalid = e.error_len().unwrap_or(rest.len());
+                out.extend(std::iter::repeat_n('\u{FFFD}', invalid));
+                bytes = &rest[invalid..];
+            }
+        }
+    }
 }
 
 /// Go `fmt.Sprintf("%v", v)` of a value Go decoded from JSON (`any`):
@@ -188,6 +212,21 @@ mod tests {
             ("Ünï", "%C3%9Cn%C3%AF"),
         ] {
             assert_eq!(url_query_escape(input), want, "QueryEscape({input:?})");
+        }
+    }
+
+    /// Go `string(bytes)` through `encoding/json`: one U+FFFD per byte `utf8.DecodeRune`
+    /// rejects.
+    #[test]
+    fn go_lossy_utf8_replaces_each_invalid_byte() {
+        for (input, want) in [
+            (&b""[..], ""),
+            (b"plain \xE2\x82\xAC", "plain \u{20AC}"),
+            (b"\xE2\x82A", "\u{FFFD}\u{FFFD}A"),
+            (b"\xF0\x9F\x98", "\u{FFFD}\u{FFFD}\u{FFFD}"),
+            (b"a\xFFb\xC0\xAF", "a\u{FFFD}b\u{FFFD}\u{FFFD}"),
+        ] {
+            assert_eq!(go_lossy_utf8(input), want, "{input:?}");
         }
     }
 

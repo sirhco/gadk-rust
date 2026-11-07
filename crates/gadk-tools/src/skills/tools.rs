@@ -31,7 +31,7 @@ use serde_json::{Value, json};
 use tokio::io::AsyncReadExt;
 
 use super::skill::{Frontmatter, MAX_RESOURCE_BYTES, Source};
-use crate::go_fmt::html_escape_string;
+use crate::go_fmt::{go_lossy_utf8, html_escape_string};
 
 pub(crate) const LIST_SKILLS_NAME: &str = "list_skills";
 pub(crate) const LIST_SKILLS_DESCRIPTION: &str =
@@ -376,28 +376,4 @@ async fn run_load_skill_resource(
         path: args.resource_path.clone(),
         content: go_lossy_utf8(&content),
     })
-}
-
-/// Go `string(bytes)` as `encoding/json` encodes it: valid UTF-8 is copied, and each byte that
-/// `utf8.DecodeRune` rejects (size 1) becomes one U+FFFD. Unlike [`String::from_utf8_lossy`],
-/// which emits one U+FFFD per maximal invalid subpart, this emits one per invalid byte.
-fn go_lossy_utf8(mut bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len());
-    loop {
-        match std::str::from_utf8(bytes) {
-            Ok(valid) => {
-                out.push_str(valid);
-                return out;
-            }
-            Err(e) => {
-                let (valid, rest) = bytes.split_at(e.valid_up_to());
-                // `valid` is valid UTF-8 by `valid_up_to`'s contract.
-                out.push_str(std::str::from_utf8(valid).unwrap_or_default());
-                // `None`: a truncated sequence at the end; every remaining byte is invalid.
-                let invalid = e.error_len().unwrap_or(rest.len());
-                out.extend(std::iter::repeat_n('\u{FFFD}', invalid));
-                bytes = &rest[invalid..];
-            }
-        }
-    }
 }
