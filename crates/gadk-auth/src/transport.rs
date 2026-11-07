@@ -145,9 +145,41 @@ async fn apply_and_send<'a>(
     next.run(req, extensions).await
 }
 
-/// Go `isAuthRejected` (transport.go:143).
-fn is_auth_rejected(status: StatusCode) -> bool {
+/// Go `isAuthRejected` (transport.go:143): whether a response status means the credential was
+/// rejected (401 or 403), the condition for one refresh-and-retry.
+pub fn is_auth_rejected(status: StatusCode) -> bool {
     status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN
+}
+
+/// Resolves `provider`'s credential for `cx` and applies it to `headers`, for callers that build
+/// requests themselves (the MCP HTTP client) rather than through [`Transport`]. Returns the
+/// applied credential, the `rejected` argument of a later [`refresh_credential`].
+///
+/// Errors carry [`Transport`]'s texts: [`Error::ResolveCredential`] (`auth: resolve credential:
+/// …`) when the provider fails, [`Error::ApplyCredential`] (`auth: apply credential: …`) when the
+/// credential cannot be applied.
+#[allow(unused_variables, clippy::todo)]
+pub async fn apply_credential(
+    provider: &dyn CredentialProvider,
+    cx: &AuthContext,
+    headers: &mut http::HeaderMap,
+) -> Result<Arc<dyn Credential>, Error> {
+    todo!("Task 2")
+}
+
+/// After an auth rejection ([`is_auth_rejected`]) of a request that carried `rejected`: `None`
+/// when `provider` does not refresh; otherwise the provider's refresh for `cx`, applied to
+/// `headers` (the request's headers as they were before `rejected` was applied), as
+/// `Some(Ok(fresh))`, or `Some(Err(_))` when the refresh or the apply failed (an apply error is
+/// [`Error::ApplyCredential`]; a refresh error is returned as the provider gave it).
+#[allow(unused_variables, clippy::todo)]
+pub async fn refresh_credential(
+    provider: &dyn CredentialProvider,
+    cx: &AuthContext,
+    rejected: &Arc<dyn Credential>,
+    headers: &mut http::HeaderMap,
+) -> Option<Result<Arc<dyn Credential>, Error>> {
+    todo!("Task 2")
 }
 
 /// transport.go:164 `maxDrainBytes`.
