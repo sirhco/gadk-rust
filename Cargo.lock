@@ -857,6 +857,7 @@ dependencies = [
  "gadk-genai",
  "gadk-httprr",
  "gadk-model",
+ "gadk-platform",
  "google-cloud-auth",
  "http",
  "parking_lot 0.13.0",

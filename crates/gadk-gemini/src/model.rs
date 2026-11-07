@@ -28,6 +28,7 @@ use gadk_model::{
     ExtrasRequestProvider, HttpClient, Llm, LlmRequest, LlmResponse, ModelError, ReqwestClient,
     StreamingResponseAggregator, llm_response_from_genai,
 };
+use gadk_platform::tracking_header;
 use http::{HeaderMap, HeaderName, HeaderValue};
 use serde_json::{Map, Value};
 
@@ -43,16 +44,6 @@ use crate::transport::Transport;
 /// The text of the user turn appended when the history ends on a non-user turn
 /// (gemini.go `maybeAppendUserContent`).
 const CONTINUE_TEXT: &str = "Continue processing previous requests as instructed. Exit or provide a summary if no more outputs are needed.";
-
-/// The `user-agent` / `x-goog-api-client` tracking value (port of ADK-Go
-/// `version.TrackingHeader`).
-pub(crate) fn tracking_header() -> String {
-    format!(
-        "gadk-rust/{} rust/{}",
-        env!("CARGO_PKG_VERSION"),
-        env!("GADK_RUSTC_VERSION")
-    )
-}
 
 /// A Gemini model served by the Gemini API or Vertex AI over REST.
 #[derive(Clone)]
