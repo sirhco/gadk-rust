@@ -217,7 +217,8 @@ impl Credential for WithHeaders {
     async fn apply(&self, headers: &mut http::HeaderMap) -> Result<(), Error> {
         self.inner.apply(headers).await?;
         for (k, v) in &self.headers {
-            set_header(headers, k, v, false)?;
+            // Every header a credential adds is credential material (gcp mirrors the token).
+            set_header(headers, k, v, true)?;
         }
         Ok(())
     }
@@ -387,6 +388,16 @@ mod tests {
         let mut h = HeaderMap::new();
         Bearer { token: "t".into() }.apply(&mut h).await.unwrap();
         assert!(h[AUTHORIZATION].is_sensitive());
+        let mut h = HeaderMap::new();
+        with_headers(
+            Arc::new(Bearer { token: "t".into() }),
+            BTreeMap::from([("X-Goog-Api-Key".into(), "t".into())]),
+        )
+        .apply(&mut h)
+        .await
+        .unwrap();
+        assert!(h[AUTHORIZATION].is_sensitive());
+        assert!(h["x-goog-api-key"].is_sensitive());
     }
 
     #[tokio::test]
