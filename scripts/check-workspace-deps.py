@@ -8,7 +8,10 @@
 - Normal gadk-* dependencies of each crate equal ALLOWED[crate] exactly; OPTIONAL edges are
   `optional = true`.
 - A gadk-* dev-dependency is the crate itself or a crate that does not (transitively, via
-  ALLOWED) depend on it; only `gadk` may depend on `gadk-engine`, normal or dev.
+  ALLOWED) depend on it, and never `gadk`.
+- Only `gadk` and `gadk-tools` may depend on `gadk-engine`, and only `gadk` may depend on
+  `gadk-tools`, normal or dev (2a: gadk-tools builds on the engine's public API; its tests use
+  the engine's `testutil` feature).
 """
 import pathlib, sys, tomllib
 
@@ -24,12 +27,16 @@ ALLOWED = {
     "gadk-agent": {"gadk-genai", "gadk-platform", "gadk-model", "gadk-session", "gadk-artifact", "gadk-memory"},
     "gadk-engine": {"gadk-agent", "gadk-genai", "gadk-platform", "gadk-model", "gadk-session",
                     "gadk-artifact", "gadk-memory", "gadk-gemini", "gadk-httprr"},
+    "gadk-tools": {"gadk-agent", "gadk-engine", "gadk-genai", "gadk-model", "gadk-platform",
+                   "gadk-session", "gadk-memory", "gadk-artifact"},
     "gadk": {"gadk-genai", "gadk-platform", "gadk-model", "gadk-session", "gadk-gemini",
-             "gadk-agent", "gadk-engine", "gadk-artifact", "gadk-memory"},
+             "gadk-agent", "gadk-engine", "gadk-tools", "gadk-artifact", "gadk-memory"},
 }
 # (crate, dependency) normal edges that must be `optional = true`.
 OPTIONAL = {("gadk-engine", "gadk-gemini"), ("gadk-engine", "gadk-httprr")}
-ENGINE_ONLY_DEPENDENT = "gadk"
+FACADE = "gadk"  # no crate may dev-depend on the façade
+ENGINE_DEPENDENTS = ("gadk", "gadk-tools")  # the only crates that may depend on gadk-engine
+TOOLS_DEPENDENT = "gadk"  # the only crate that may depend on gadk-tools
 
 
 def reaches(src, dst, seen=None):
@@ -78,9 +85,11 @@ def check(repo):
         for d in sorted(x for x in data.get("dev-dependencies", {}) if x.startswith("gadk")):
             if d == name:
                 continue
-            if d == "gadk-engine" and name != ENGINE_ONLY_DEPENDENT:
-                errs.append(f"{rel}: only {ENGINE_ONLY_DEPENDENT} may depend on gadk-engine (dev-dependency)")
-            elif reaches(d, name) or d == ENGINE_ONLY_DEPENDENT:
+            if d == "gadk-engine" and name not in ENGINE_DEPENDENTS:
+                errs.append(f"{rel}: only gadk and gadk-tools may depend on gadk-engine (dev-dependency)")
+            elif d == "gadk-tools" and name != TOOLS_DEPENDENT:
+                errs.append(f"{rel}: only {TOOLS_DEPENDENT} may depend on gadk-tools (dev-dependency)")
+            elif reaches(d, name) or d == FACADE:
                 errs.append(f"{rel}: dev-dependency {name} -> {d} creates a cycle")
     for missing in sorted(set(ALLOWED) - names):
         errs.append(f"ALLOWED names crate {missing}, which is not a workspace member under crates/")

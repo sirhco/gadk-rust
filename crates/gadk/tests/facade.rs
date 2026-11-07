@@ -41,6 +41,17 @@ fn facade_modules_are_reexported() {
     let _: fn() -> Arc<dyn Tool> = gadk::engine::tool::exit_loop;
 }
 
+#[test]
+fn facade_tools_modules_resolve() {
+    // Each gadk-tools module path must resolve through the façade (the modules are filled by
+    // later tasks).
+    #[allow(unused_imports)]
+    use gadk::tools::{
+        example, gemini, load_artifacts, load_memory, preload_memory, skills, skills::skill,
+        toolsearch,
+    };
+}
+
 #[tokio::test]
 async fn facade_three_node_workflow_runs() {
     let upper = function_node(

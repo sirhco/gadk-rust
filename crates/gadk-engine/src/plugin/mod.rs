@@ -15,6 +15,12 @@
 
 //! Built-in plugins.
 
+pub mod function_call_modifier;
 pub mod logging;
+pub mod retry_and_reflect;
+#[allow(unused_imports)]
+pub use function_call_modifier::*;
 #[allow(unused_imports)]
 pub use logging::*;
+#[allow(unused_imports)]
+pub use retry_and_reflect::*;

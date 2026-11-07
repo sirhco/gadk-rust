@@ -33,7 +33,28 @@ class EdgeTest(unittest.TestCase):
     def test_agent_dev_dependency_on_engine_is_rejected(self):
         self.edit("gadk-agent", "[dev-dependencies]\n", "[dev-dependencies]\ngadk-engine = { workspace = true }\n")
         errs = cwd.check(self.repo)
-        self.assertTrue(any("only gadk may depend on gadk-engine" in e for e in errs), errs)
+        self.assertTrue(any("only gadk and gadk-tools may depend on gadk-engine" in e for e in errs), errs)
+
+    def test_tools_dev_dependency_on_engine_is_allowed(self):
+        text = (self.repo / "crates/gadk-tools/Cargo.toml").read_text()
+        dev = text.split("[dev-dependencies]\n", 1)[1]
+        self.assertIn('gadk-engine = { workspace = true, features = ["testutil"] }', dev)
+        self.assertEqual(cwd.check(self.repo), [])
+
+    def test_engine_dev_dependency_on_tools_is_rejected(self):
+        self.edit("gadk-engine", "[dev-dependencies]\n", "[dev-dependencies]\ngadk-tools = { workspace = true }\n")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("only gadk may depend on gadk-tools" in e for e in errs), errs)
+
+    def test_agent_normal_dependency_on_tools_is_rejected(self):
+        self.edit("gadk-agent", "[dependencies]\n", "[dependencies]\ngadk-tools = { workspace = true }\n")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-agent -> gadk-tools is not allowed" in e for e in errs), errs)
+
+    def test_tools_missing_required_edge_is_rejected(self):
+        self.edit("gadk-tools", "gadk-platform = { workspace = true }\n", "")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-tools -> gadk-platform is missing" in e for e in errs), errs)
 
     def test_disallowed_normal_edge_is_rejected(self):
         self.edit("gadk-artifact", "[dependencies]\n", "[dependencies]\ngadk-session = { workspace = true }\n")

@@ -23,6 +23,7 @@ gadk-artifact = { workspace = true }
 gadk-memory = { workspace = true }
 gadk-agent = { workspace = true }
 gadk-engine = { workspace = true }
+gadk-tools = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
