@@ -337,8 +337,39 @@ type Attempt = Shared<BoxFuture<'static, Result<Arc<dyn TokenSource>, Error>>>;
 struct LazyState {
     /// Go `ts`: the source of the first attempt that succeeded within its bound.
     ts: Option<Arc<dyn TokenSource>>,
-    /// Go `cur`: the in-flight attempt, for single flight. The attempt clears it when it ends.
-    cur: Option<Attempt>,
+    /// Go `cur`: the in-flight attempt, for single flight. The attempt clears it when it ends;
+    /// one whose task was dropped unfinished is marked abandoned and replaced by the next call.
+    cur: Option<(Attempt, AbandonGuard)>,
+}
+
+/// Owned by an attempt's task. Dropped before it is disarmed (the runtime shut down with the
+/// attempt pending), it marks the attempt abandoned, so the next call starts a fresh one: Go's
+/// "retried, not wedged forever". A flag rather than a lock, because tokio may drop a task's
+/// future inside `spawn`, while the caller holds the state lock.
+#[derive(Clone, Default)]
+struct AbandonGuard(Arc<std::sync::atomic::AtomicBool>);
+
+impl AbandonGuard {
+    fn abandoned(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Acquire)
+    }
+}
+
+/// [`AbandonGuard`]'s task-side half: sets the flag on drop unless [`Self::disarm`]ed.
+struct AbandonOnDrop(Option<AbandonGuard>);
+
+impl AbandonOnDrop {
+    fn disarm(mut self) {
+        self.0 = None;
+    }
+}
+
+impl Drop for AbandonOnDrop {
+    fn drop(&mut self) {
+        if let Some(guard) = self.0.take() {
+            guard.0.store(true, std::sync::atomic::Ordering::Release);
+        }
+    }
 }
 
 /// Go `lazyTokenSource`'s provider.
@@ -374,13 +405,17 @@ where
 {
     /// Go's `go func() { … }()` (providers.go:254-277): starts the attempt on its own task, so
     /// no waiter giving up can stop it.
-    fn spawn_attempt(&self) -> Attempt {
-        let task = tokio::spawn(run_attempt(
-            Arc::clone(&self.init),
-            Arc::clone(&self.state),
-            self.bound,
-        ));
-        async move {
+    fn spawn_attempt(&self) -> (Attempt, AbandonGuard) {
+        let guard = AbandonGuard::default();
+        let on_drop = AbandonOnDrop(Some(guard.clone()));
+        let attempt = run_attempt(Arc::clone(&self.init), Arc::clone(&self.state), self.bound);
+        let task = tokio::spawn(async move {
+            let result = attempt.await;
+            // run_attempt has cleared `cur` itself.
+            on_drop.disarm();
+            result
+        });
+        let attempt = async move {
             task.await.unwrap_or_else(|join| {
                 // run_attempt catches init's panics, so only a runtime shutting down gets here.
                 Err(Error::msg(format!(
@@ -389,7 +424,8 @@ where
             })
         }
         .boxed()
-        .shared()
+        .shared();
+        (attempt, guard)
     }
 }
 
@@ -404,7 +440,10 @@ where
             if let Some(ts) = &st.ts {
                 return Ok(oauth2(Arc::clone(ts)));
             }
-            st.cur.get_or_insert_with(|| self.spawn_attempt()).clone()
+            if st.cur.as_ref().is_some_and(|(_, guard)| guard.abandoned()) {
+                st.cur = None;
+            }
+            st.cur.get_or_insert_with(|| self.spawn_attempt()).0.clone()
         };
         // Go's `select` on `a.done` and `ctx.Done()`: a caller that gives up drops this future.
         attempt.await.map(oauth2)
@@ -549,6 +588,54 @@ mod lazy_tests {
             .await
             .map(|_| ())
             .unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    /// A current-thread runtime; `paused` starts its clock paused, so a timer fires at once.
+    fn runtime(paused: bool) -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .start_paused(paused)
+            .build()
+            .unwrap()
+    }
+
+    #[test]
+    fn an_attempt_dropped_with_its_runtime_is_retried_not_wedged() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let p = lazy_token_source(
+            {
+                let calls = Arc::clone(&calls);
+                move |_cancel: CancellationToken| -> InitFuture {
+                    if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                        std::future::pending().boxed()
+                    } else {
+                        ready(Ok(tok()))
+                    }
+                }
+            },
+            INIT_TIMEOUT,
+        );
+        let first = runtime(false);
+        let cx = AuthContext::anonymous();
+        first.block_on(async {
+            let mut call = p.credential(&cx);
+            assert!(call.as_mut().now_or_never().is_none());
+            // Let the attempt's task start init before the runtime goes away.
+            for _ in 0..100 {
+                if calls.load(Ordering::SeqCst) == 1 {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+        });
+        // The runtime shuts down with the attempt still pending (a short-lived runtime, as in a
+        // process-global provider used from several of them).
+        drop(first);
+        let second = runtime(true);
+        let r = second.block_on(p.credential(&cx));
+        assert!(r.is_ok(), "a fresh attempt should run, got {r:?}");
         assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 }
