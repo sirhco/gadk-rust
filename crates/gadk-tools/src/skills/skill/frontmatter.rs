@@ -71,7 +71,8 @@ struct FrontmatterYaml {
     description: Option<String>,
     license: Option<String>,
     compatibility: Option<String>,
-    metadata: Option<BTreeMap<String, String>>,
+    /// A `null` value decodes to `""`, as yaml.v3 does for a Go `string`.
+    metadata: Option<BTreeMap<String, Option<String>>>,
     #[serde(rename = "allowed-tools")]
     allowed_tools: AllowedToolsYaml,
 }
@@ -83,7 +84,12 @@ impl FrontmatterYaml {
             description: self.description.unwrap_or_default(),
             license: self.license.unwrap_or_default(),
             compatibility: self.compatibility.unwrap_or_default(),
-            metadata: self.metadata.unwrap_or_default(),
+            metadata: self
+                .metadata
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(k, v)| (k, v.unwrap_or_default()))
+                .collect(),
             allowed_tools: self.allowed_tools.0,
         }
     }
@@ -475,6 +481,26 @@ mod tests {
         let (parsed, body) = parse_bytes(&out).unwrap();
         assert_eq!(parsed, fm);
         assert_eq!(body, "body\n");
+    }
+
+    /// yaml.v3 decodes a `null` metadata value into a Go `string` as `""`, and a non-string
+    /// scalar as its source text.
+    #[test]
+    fn metadata_null_values_decode_to_empty_strings() {
+        let input = "---\nname: s\ndescription: d\nmetadata:\n  author:\n  tilde: ~\n  null-word: null\n  version: 1.0\n  count: 5\n  flag: true\n---\nbody";
+        let (fm, _) = parse_bytes(input.as_bytes()).unwrap();
+        let want: BTreeMap<String, String> = [
+            ("author", ""),
+            ("tilde", ""),
+            ("null-word", ""),
+            ("version", "1.0"),
+            ("count", "5"),
+            ("flag", "true"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+        assert_eq!(fm.metadata, want);
     }
 
     /// Go's `string(body)` under `encoding/json`: one U+FFFD per invalid byte.
