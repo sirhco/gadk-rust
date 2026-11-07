@@ -17,9 +17,25 @@ class ConvTest(unittest.TestCase):
             "TestContinuation_GenerateResumedBySDK": "test_continuation_generate_resumed_by_sdk",
             "Test_inMemoryService": "test_in_memory_service",
             "TestMetadataVertexAISSEStream": "test_metadata_vertex_aisse_stream",
+            "TestOAuth2TokenSourceError": "test_o_auth2_token_source_error",
+            "FuzzRedact": "fuzz_redact",
+            "FuzzRedact_Seeds": "fuzz_redact_seeds",
         }
         for go, rust in cases.items():
             self.assertEqual(pc.go_test_to_rust(go), rust, go)
+
+    def test_other_prefixes_raise(self):
+        for name in ("BenchmarkFoo", "ExampleFoo", "testFoo", "fuzzFoo"):
+            with self.assertRaises(ValueError, msg=name):
+                pc.go_test_to_rust(name)
+
+    def test_go_test_regex_finds_test_and_fuzz_only(self):
+        src = (
+            "func TestA(t *testing.T) {}\nfunc FuzzB(f *testing.F) {}\n"
+            "func BenchmarkC(b *testing.B) {}\nfunc ExampleD() {}\nfunc helperFuzz() {}\n"
+        )
+        self.assertEqual(pc.GO_TEST.findall(src), ["TestA", "FuzzB"])
+
 
     def test_target_name(self):
         self.assertEqual(pc.target_name("agent/llmagent/llmagent_test.go"), "agent_llmagent_llmagent")
@@ -438,6 +454,90 @@ class TwoATest(unittest.TestCase):
             self.run_cli("--ledger", "all", "--files", "tool/exampletool/tool_test.go")
 
 
+LEDGER_2B = (
+    "# Parity ledger — sub-project 2b\n\n"
+    "<!-- in-scope:\nauth/credential_test.go\nauth/gcp/redact_fuzz_test.go\n-->\n\n"
+    + pc.TABLE_HEADER + "\n" + pc.TABLE_SEP + "\n"
+)
+
+CRED_TARGET = "crates/gadk-auth/tests/auth_credential.rs"
+FUZZ_TARGET = "crates/gadk-auth/src/parity_tests/auth_gcp_redact_fuzz.rs"
+
+
+class TwoBTest(unittest.TestCase):
+    """2b: a `Fuzz*` Go test gets a row like a `Test*` one (`FuzzRedact` -> `fn fuzz_redact`);
+    the ledger starts with a header and no rows, as the 2b scaffold leaves it."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        d = pathlib.Path(self._tmp.name)
+        self.go, self.repo = d / "go", d / "repo"
+        (self.go / "auth/gcp").mkdir(parents=True)
+        (self.go / "auth/credential_test.go").write_text(
+            "package auth_test\nfunc TestCredentialApply(t *testing.T) {}\n"
+            "func TestOAuth2TokenSourceError(t *testing.T) {}\n")
+        (self.go / "auth/gcp/redact_fuzz_test.go").write_text(
+            "package gcp\nfunc FuzzRedact(f *testing.F) {}\nfunc BenchmarkRedact(b *testing.B) {}\n")
+        (self.repo / "crates/gadk-auth/tests").mkdir(parents=True)
+        (self.repo / "crates/gadk-auth/src/parity_tests").mkdir(parents=True)
+        (self.repo / "docs/parity").mkdir(parents=True)
+        (self.repo / CRED_TARGET).write_text(
+            "// parity: adapted: two cases cannot be built\n"
+            "#[tokio::test]\nasync fn test_credential_apply() {}\n\n"
+            "#[tokio::test]\nasync fn test_o_auth2_token_source_error() {}\n")
+        # The placeholder the 2b scaffold leaves for Task 5.
+        (self.repo / FUZZ_TARGET).write_text("//! Port of Go `auth/gcp/redact_fuzz_test.go` (Task 5).\n")
+        self.ledger = self.repo / "docs/parity/2b.md"
+        self.ledger.write_text(LEDGER_2B)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def run_cli(self, *args):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = pc.main(["--adk-go", str(self.go), "--repo", str(self.repo), *args])
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_fuzz_counts_and_a_placeholder_reports_it_missing(self):
+        self.assertEqual(self.run_cli("--ledger", "2b", "--count"), (0, "3\n", ""))
+        self.assertEqual(self.run_cli("--ledger", "2b", "--files", "auth/credential_test.go")[0], 0)
+        rc, _, err = self.run_cli("--ledger", "2b")
+        self.assertEqual(rc, 1)
+        self.assertIn(
+            "auth/gcp/redact_fuzz_test.go FuzzRedact: missing (no fn fuzz_redact and no"
+            " `// parity: skipped FuzzRedact:` in " + FUZZ_TARGET + ")", err)
+        self.assertEqual(self.run_cli("--ledger", "2b", "--generate")[0], 1)
+        self.assertEqual(self.ledger.read_text(), LEDGER_2B)
+
+    def test_fuzz_port_generates_a_row(self):
+        (self.repo / FUZZ_TARGET).write_text(
+            "// parity: adapted: deterministic corpus\n#[test]\nfn fuzz_redact() {}\n")
+        self.assertEqual(self.run_cli("--ledger", "2b", "--generate")[0], 0)
+        self.assertEqual(self.run_cli("--ledger", "2b")[0], 0)
+        text = self.ledger.read_text()
+        self.assertIn(
+            "| auth/gcp/redact_fuzz_test.go | FuzzRedact | ported (adapted: deterministic corpus) | "
+            + FUZZ_TARGET + " | fuzz_redact |", text)
+        self.assertIn(
+            "| auth/credential_test.go | TestOAuth2TokenSourceError | ported | " + CRED_TARGET
+            + " | test_o_auth2_token_source_error |", text)
+        self.assertNotIn("BenchmarkRedact", text)
+
+    def test_fuzz_skip_annotation_is_accepted(self):
+        (self.repo / FUZZ_TARGET).write_text("// parity: skipped FuzzRedact: no fuzzer\n")
+        self.assertEqual(self.run_cli("--ledger", "2b", "--generate")[0], 0)
+        self.assertIn(
+            "| auth/gcp/redact_fuzz_test.go | FuzzRedact | skipped | " + FUZZ_TARGET
+            + " | no fuzzer |", self.ledger.read_text())
+
+    def test_files_and_generate_still_refuse_1a_and_all(self):
+        with self.assertRaises(SystemExit):
+            self.run_cli("--ledger", "1a", "--generate")
+        with self.assertRaises(SystemExit):
+            self.run_cli("--ledger", "all", "--files", "auth/credential_test.go")
+
+
 ADK_GO = pathlib.Path(os.environ.get("ADK_GO_DIR", HERE.parent.parent / "adk-go"))
 
 
@@ -525,6 +625,39 @@ class RealTreeTest(unittest.TestCase):
         in_1b, _ = pc.parse_header(HERE.parent / "docs/parity/1b.md")
         self.assertIn("tool/toolutils/toolutils_test.go", in_1b)
         self.assertNotIn("tool/toolutils/toolutils_test.go", in_scope)
+
+    def test_2b_count_is_203(self):
+        in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/2b.md")
+        self.assertEqual(in_scope, [
+            "auth/credential_test.go",
+            "auth/gcp/client_test.go",
+            "auth/gcp/provider_internal_test.go",
+            "auth/gcp/provider_test.go",
+            "auth/gcp/redact_fuzz_test.go",
+            "auth/gcp/redact_reference_test.go",
+            "auth/gcp/unescape_test.go",
+            "auth/providers_internal_test.go",
+            "auth/providers_test.go",
+            "auth/store_internal_test.go",
+            "auth/store_test.go",
+            "auth/transport_test.go",
+            "tool/toolauth/auth_credential_test.go",
+            "tool/toolauth/auth_schemes_test.go",
+            "tool/toolauth/auth_tool_test.go",
+            "tool/toolauth/redact_test.go",
+        ])
+        self.assertEqual(deferred, {})
+        self.assertEqual(pc.count(ADK_GO, in_scope), 203)
+        self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "2b"), [])
+        self.assertIn("FuzzRedact", pc.go_tests(ADK_GO, "auth/gcp/redact_fuzz_test.go"))
+
+    def test_earlier_ledgers_have_no_fuzz_tests(self):
+        # Widening GO_TEST to `Fuzz*` must not change any 1a-2a ledger.
+        for name in ("1a", "1b", "1b-live", "1c", "2a"):
+            in_scope, _ = pc.parse_header(HERE.parent / f"docs/parity/{name}.md")
+            for f in in_scope:
+                fuzz = [t for t in pc.go_tests(ADK_GO, f) if t.startswith("Fuzz")]
+                self.assertEqual(fuzz, [], f"{name}: {f}")
 
     def test_1a_header_has_13_files(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/1a.md")

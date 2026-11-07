@@ -28,6 +28,7 @@ schemars = { workspace = true }
 regex = { workspace = true }
 regex-syntax = { workspace = true }
 chrono = { workspace = true }
+sha2 = { workspace = true }
 
 [dev-dependencies]
 gadk-engine = { workspace = true, features = ["testutil"] }

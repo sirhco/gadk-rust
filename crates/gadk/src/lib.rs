@@ -20,6 +20,10 @@
 
 pub use gadk_agent as agent;
 pub use gadk_artifact as artifact;
+/// Authentication for outbound HTTP calls: credentials, credential providers, the credential
+/// store, the refresh-and-retry transport and (feature `gcp`) per-user Google Cloud credentials
+/// (re-export of `gadk-auth`).
+pub use gadk_auth as auth;
 pub use gadk_engine as engine;
 #[cfg(feature = "gemini")]
 pub use gadk_gemini as gemini;
@@ -29,7 +33,8 @@ pub use gadk_model as model;
 pub use gadk_platform as platform;
 pub use gadk_session as session;
 /// Built-in tools that need no authentication: the Gemini built-ins, artifact and memory tools,
-/// the example tool, tool search and the skills toolset (re-export of `gadk-tools`).
+/// the example tool, tool search, the skills toolset and the `toolauth` wire model (re-export of
+/// `gadk-tools`).
 pub use gadk_tools as tools;
 
 /// Context compaction (re-export of `gadk_session::compaction`).
