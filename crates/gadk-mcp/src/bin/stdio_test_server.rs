@@ -15,8 +15,43 @@
 
 //! `gadk-mcp-stdio-test-server`: the `testutil` weather server over stdio, spawned by the
 //! `child_process` test through `McpTransport::Command` (Task 4).
+//!
+//! It serves [`gadk_mcp::testutil::weather_server`] on stdin/stdout until the client closes
+//! stdin, then exits 0; a failed handshake exits 1.
 
-#[allow(clippy::todo)]
-fn main() {
-    todo!("Task 4")
+use std::process::ExitCode;
+
+use gadk_mcp::rmcp::ServiceExt;
+use gadk_mcp::testutil::weather_server;
+
+fn main() -> ExitCode {
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(e) => {
+            eprintln!("gadk-mcp-stdio-test-server: runtime: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    runtime.block_on(async {
+        let running = match weather_server()
+            .serve(gadk_mcp::rmcp::transport::stdio())
+            .await
+        {
+            Ok(running) => running,
+            Err(e) => {
+                eprintln!("gadk-mcp-stdio-test-server: initialize: {e}");
+                return ExitCode::FAILURE;
+            }
+        };
+        match running.waiting().await {
+            Ok(_) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("gadk-mcp-stdio-test-server: {e}");
+                ExitCode::FAILURE
+            }
+        }
+    })
 }
