@@ -29,6 +29,7 @@ use serde_json::{Map, Value};
 use tokio_util::sync::CancellationToken;
 
 use crate::agent::Agent;
+use crate::context::identity::Identity;
 use crate::mode::BoundModes;
 use crate::parent_map::ParentMap;
 use crate::plugin_manager::PluginManager;
@@ -124,6 +125,17 @@ impl ReadonlyContext {
     /// The session id, read from the session on every call.
     pub fn session_id(&self) -> &str {
         self.inner.session.id()
+    }
+
+    /// Go `identityOf` (agent/common_context.go:83): the invocation's identity from one
+    /// `session` read, then one accessor call per field, so the identity cannot be torn.
+    pub fn identity(&self) -> Identity {
+        let s = self.inner.session.clone();
+        Identity {
+            user_id: s.user_id().to_string(),
+            app_name: s.app_name().to_string(),
+            session_id: s.id().to_string(),
+        }
     }
 
     /// The branch, like `agent_1.agent_2.agent_3`.
