@@ -16,6 +16,7 @@
 //! Thinking, effort and structured output (port of ADK-Go `thinking.go`).
 
 use gadk_genai::{GenerateContentConfig, ThinkingConfig};
+use gadk_platform::go_to_lower;
 use serde_json::{Map, Value};
 
 use crate::config::Effort;
@@ -99,7 +100,7 @@ pub(crate) fn validate_output_format_config(
             "ResponseSchema and ResponseJsonSchema cannot both be set",
         ));
     }
-    let mime = cfg.response_mime_type.trim().to_lowercase();
+    let mime = go_to_lower(cfg.response_mime_type.trim());
     if !mime.is_empty() && mime != "text/plain" && mime != "application/json" {
         return Err(invalid_config(format!(
             "ResponseMIMEType {} is not supported",
@@ -508,6 +509,14 @@ mod tests {
                     " APPLICATION/JSON ",
                     json!({"type": "string"}),
                 )),
+            ),
+            (
+                // Go strings.ToLower maps U+0130 to a single `i` (Rust's to_lowercase does not).
+                "text_plain_dotted_capital_i",
+                Some(GenerateContentConfig {
+                    response_mime_type: "TEXT/PLA\u{130}N".into(),
+                    ..Default::default()
+                }),
             ),
             (
                 "schema_without_mime",

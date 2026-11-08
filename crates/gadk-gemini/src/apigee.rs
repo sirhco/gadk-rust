@@ -25,6 +25,7 @@ use std::sync::Arc;
 use futures::stream::BoxStream;
 use gadk_model::{Backend, HttpClient, HttpOptions, Llm, LlmRequest, LlmResponse, ModelError};
 use gadk_platform::env::{EnvProvider, ProcessEnv};
+use gadk_platform::go_to_lower;
 
 use crate::config::ClientConfig;
 use crate::error::GeminiError;
@@ -176,7 +177,7 @@ fn backend_type(is_vertex_ai: bool) -> Backend {
 /// Go `isEnabled`: the variable is `true` (any case) or `1`.
 fn is_enabled(env: &dyn EnvProvider, env_var_name: &str) -> bool {
     let val = env.var(env_var_name).unwrap_or_default();
-    val.to_lowercase() == "true" || val == "1"
+    go_to_lower(&val) == "true" || val == "1"
 }
 
 /// Go `generateClientConfig`: Vertex AI requires `GOOGLE_CLOUD_PROJECT` and

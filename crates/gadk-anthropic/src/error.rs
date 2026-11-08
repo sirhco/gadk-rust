@@ -482,7 +482,7 @@ pub(crate) fn sanitize_error_message(msg: &str) -> String {
     if msg.is_empty() {
         return String::new();
     }
-    let lower = msg.to_lowercase();
+    let lower = gadk_platform::go_to_lower(msg);
     if ["http://", "https://", "gs://", "sk-ant-", "bearer "]
         .iter()
         .any(|needle| lower.contains(needle))

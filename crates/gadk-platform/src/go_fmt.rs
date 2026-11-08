@@ -13,7 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `fmt` verb ports shared by the gadk crates: `strconv.Quote` (`%q`).
+//! Go `fmt` verb and `strings` ports shared by the gadk crates: `strconv.Quote` (`%q`),
+//! `strings.ToLower` and `strings.ToUpper`.
 
 use std::sync::LazyLock;
 
@@ -67,9 +68,81 @@ pub fn go_quote(s: &str) -> String {
     out
 }
 
+/// Go `unicode.ToLower`: the simple (one-rune) lowercase mapping. Rust's `char::to_lowercase`
+/// is the full mapping, which differs only for U+0130 (Go `i`, Rust `i` + U+0307).
+fn go_lower_rune(c: char) -> char {
+    if c == '\u{130}' {
+        return 'i';
+    }
+    let mut lower = c.to_lowercase();
+    match (lower.next(), lower.next()) {
+        (Some(l), None) => l,
+        _ => c,
+    }
+}
+
+/// Go `unicode.ToUpper`: the simple (one-rune) uppercase mapping. Where Rust's full mapping
+/// expands to several runes (`ß` → `SS`, ligatures, Greek with ypogegrammeni) Go keeps the rune,
+/// except the lowercase Greek letters with ypogegrammeni, whose simple uppercase is the
+/// matching prosgegrammeni capital.
+fn go_upper_rune(c: char) -> char {
+    let mut upper = c.to_uppercase();
+    match (upper.next(), upper.next()) {
+        (Some(u), None) => u,
+        _ => {
+            let shifted = match c as u32 {
+                cp @ (0x1F80..=0x1F87 | 0x1F90..=0x1F97 | 0x1FA0..=0x1FA7) => cp + 8,
+                cp @ (0x1FB3 | 0x1FC3 | 0x1FF3) => cp + 9,
+                _ => return c,
+            };
+            char::from_u32(shifted).unwrap_or(c)
+        }
+    }
+}
+
+/// Port of Go `strings.ToLower` on valid UTF-8: [`unicode.ToLower`](go_lower_rune) rune by rune,
+/// with no final-sigma context. Rust's `str::to_lowercase` differs for U+0130 and a final `Σ`
+/// (Go `σ`, Rust `ς`).
+pub fn go_to_lower(s: &str) -> String {
+    if s.is_ascii() {
+        return s.to_ascii_lowercase();
+    }
+    s.chars().map(go_lower_rune).collect()
+}
+
+/// Port of Go `strings.ToUpper` on valid UTF-8: [`unicode.ToUpper`](go_upper_rune) rune by rune.
+/// Rust's `str::to_uppercase` differs wherever the full mapping has several runes (`ß` → `SS`).
+pub fn go_to_upper(s: &str) -> String {
+    if s.is_ascii() {
+        return s.to_ascii_uppercase();
+    }
+    s.chars().map(go_upper_rune).collect()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::go_quote;
+    use super::{go_quote, go_to_lower, go_to_upper};
+
+    /// Expected values are Go `strings.ToLower` / `strings.ToUpper` output. (The rune mappings
+    /// were checked against Go 1.27's `unicode.ToLower`/`ToUpper` for every code point.)
+    #[test]
+    fn go_case_mapping_matches_go_strings() {
+        assert_eq!(go_to_lower("Alice@Example.TEST"), "alice@example.test");
+        // U+0130: Go maps to one `i`; Rust's full mapping gives "i\u{307}".
+        assert_eq!(go_to_lower("ASS\u{130}STANT"), "assistant");
+        // Final sigma: Go has no context, so both become σ (Rust: "σς").
+        assert_eq!(go_to_lower("\u{3a3}\u{3a3}"), "\u{3c3}\u{3c3}");
+        assert_eq!(go_to_lower("\u{3a3}"), "\u{3c3}");
+        assert_eq!(go_to_lower("\u{212a}"), "k");
+        assert_eq!(go_to_upper("auto"), "AUTO");
+        // ß has no simple uppercase (Rust: "SS"); ﬁ stays (Rust: "FI").
+        assert_eq!(go_to_upper("stra\u{df}e"), "STRA\u{df}E");
+        assert_eq!(go_to_upper("\u{fb01}"), "\u{fb01}");
+        // Ypogegrammeni: Go maps to the prosgegrammeni capital (Rust: two runes).
+        assert_eq!(go_to_upper("\u{1f80}\u{1fb3}"), "\u{1f88}\u{1fbc}");
+        assert_eq!(go_to_upper("\u{1c5}"), "\u{1c4}");
+        assert_eq!(go_to_upper("\u{131}"), "I");
+    }
 
     /// Expected values are Go `strconv.Quote` output.
     #[test]

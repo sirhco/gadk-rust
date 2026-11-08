@@ -19,6 +19,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
+use gadk_platform::go_to_lower;
+
 use super::go_syntax;
 
 /// Term-frequency saturation (Go `bm25K1`).
@@ -147,23 +149,6 @@ fn stem(tok: &str) -> String {
 /// Reports whether `s` ends with any of the given suffixes (Go `endsWithAny`).
 fn ends_with_any(s: &str, suffixes: &[&str]) -> bool {
     suffixes.iter().any(|suf| s.ends_with(suf))
-}
-
-/// Go `strings.ToLower`: the simple per-rune lowercase mapping, with no final-sigma context. Rust's
-/// `str::to_lowercase` differs (context-sensitive Σ, and U+0130 lowercases to two runes).
-fn go_to_lower(s: &str) -> String {
-    s.chars()
-        .map(|c| {
-            let mut lower = c.to_lowercase();
-            match (lower.next(), lower.next()) {
-                (Some(l), None) => l,
-                // U+0130 is the only rune whose full lowercase mapping has two runes; Go's
-                // unicode.ToLower maps it to 'i'.
-                _ if c == '\u{130}' => 'i',
-                _ => c,
-            }
-        })
-        .collect()
 }
 
 /// Go `unicode.L`, `unicode.Nd`, `unicode.Lu` and `unicode.Ll`, as Go-layout range pairs.

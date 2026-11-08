@@ -21,6 +21,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use gadk_genai::{FunctionDeclaration, GenerateContentConfig, ThinkingConfig, Tool, ToolConfig};
+use gadk_platform::{go_to_lower, go_to_upper};
 use serde_json::{Map, Value};
 
 use crate::error::{AnthropicError, ErrorKind, go_quote};
@@ -47,7 +48,7 @@ fn invalid_config(detail: impl std::fmt::Display) -> AnthropicError {
 /// The mode of a function-calling config as Go switches on it:
 /// `strings.ToUpper(strings.TrimSpace(string(fcc.Mode)))` (unset is `""`).
 fn normalized_mode(raw: &str) -> String {
-    raw.trim().to_uppercase()
+    go_to_upper(raw.trim())
 }
 
 /// Go `validateTools`: `Ok(true)` when some tool has function declarations; Go's errors for
@@ -343,11 +344,11 @@ pub(crate) fn lowercase_schema_types(node: &mut Value) {
 /// [`lowercase_schema_types`] on an object node.
 fn lowercase_schema_map(map: &mut Map<String, Value>) {
     match map.get_mut("type") {
-        Some(Value::String(t)) => *t = t.to_lowercase(),
+        Some(Value::String(t)) => *t = go_to_lower(t),
         Some(Value::Array(elems)) => {
             for elem in elems.iter_mut() {
                 if let Value::String(s) = elem {
-                    *s = s.to_lowercase();
+                    *s = go_to_lower(s);
                 }
             }
         }
@@ -1036,5 +1037,9 @@ mod tests {
                 "enum": ["KEEP"]
             })
         );
+        // Go strings.ToLower, rune by rune: U+0130 → `i`, and Σ is σ even when final.
+        let mut v = json!({"type": ["\u{130}NTEGER", "\u{3a3}"]});
+        lowercase_schema_types(&mut v);
+        assert_eq!(v, json!({"type": ["integer", "\u{3c3}"]}));
     }
 }

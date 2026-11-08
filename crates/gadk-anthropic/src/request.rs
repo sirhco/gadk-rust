@@ -34,6 +34,7 @@ use gadk_genai::{
     Blob, Content, FileData, FunctionResponse, FunctionResponsePart, GenerateContentConfig,
     Language, Part, ROLE_MODEL,
 };
+use gadk_platform::go_to_lower;
 use regex::Regex;
 use serde_json::{Map, Value};
 
@@ -848,16 +849,6 @@ fn go_is_ipv6_literal(s: &[u8]) -> bool {
         return false;
     }
     std::str::from_utf8(addr).is_ok_and(|a| a.parse::<Ipv6Addr>().is_ok())
-}
-
-/// Go `strings.ToLower`: Unicode simple lowercase mapping, rune by rune.
-fn go_to_lower(s: &str) -> String {
-    s.chars()
-        .map(|c| match c {
-            '\u{130}' => 'i',
-            c => c.to_lowercase().next().unwrap_or(c),
-        })
-        .collect()
 }
 
 /// Go `string(b)` as Go's JSON encoder writes it: each byte that does not start a valid
@@ -2109,12 +2100,5 @@ mod tests {
         assert_eq!(go_string(b"ok"), "ok");
         assert_eq!(go_string(b"\xe2\x82a\xff"), "\u{FFFD}\u{FFFD}a\u{FFFD}");
         assert_eq!(go_string("\u{e4}".as_bytes()), "\u{e4}");
-    }
-
-    #[test]
-    fn go_to_lower_maps_rune_by_rune() {
-        assert_eq!(go_to_lower("ASS\u{130}STANT"), "assistant");
-        assert_eq!(go_to_lower("\u{212a}"), "k");
-        assert_eq!(go_to_lower("\u{3a3}\u{3a3}"), "\u{3c3}\u{3c3}");
     }
 }

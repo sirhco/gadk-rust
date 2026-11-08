@@ -295,16 +295,8 @@ fn is_token_char(c: u8) -> bool {
         )
 }
 
-/// Go `strings.ToLower`: per-rune simple lowercase. Rust's `str::to_lowercase` differs for
-/// U+0130 (Go maps it to `i`, Rust to `i` plus U+0307) and for a final `Σ` (Go `σ`, Rust `ς`).
-pub(crate) fn go_to_lower(s: &str) -> String {
-    s.chars()
-        .map(|c| match c {
-            '\u{130}' => 'i',
-            c => c.to_lowercase().next().unwrap_or(c),
-        })
-        .collect()
-}
+/// Go `strings.ToLower` (shared port in gadk-platform).
+pub(crate) use gadk_platform::go_to_lower;
 
 /// Go `hasMIMECharsetParameter`: whether `value` declares a charset parameter, or is ambiguous
 /// enough that it might (a quote that does not open a parameter value, a quoted parameter Go's

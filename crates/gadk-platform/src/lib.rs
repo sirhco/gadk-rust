@@ -14,8 +14,9 @@
 // limitations under the License.
 
 //! gadk-platform: overridable time, UUID and task-execution seams (port of ADK-Go platform/),
-//! the ADK tracking header value, the injectable environment ([`env`](mod@env)), and Go's
-//! `strconv.Quote` ([`go_quote`]).
+//! the ADK tracking header value, the injectable environment ([`env`](mod@env)), Go's
+//! `strconv.Quote` ([`go_quote`]) and `strings.ToLower`/`ToUpper` ([`go_to_lower`],
+//! [`go_to_upper`]).
 
 pub mod env;
 mod exec;
@@ -26,7 +27,7 @@ mod uuid;
 
 pub use exec::{TaskRunner, TokioTaskRunner};
 pub use futures::future::BoxFuture;
-pub use go_fmt::go_quote;
+pub use go_fmt::{go_quote, go_to_lower, go_to_upper};
 pub use time::TimeProvider;
 pub use tracking::tracking_header;
 pub use uuid::UuidProvider;

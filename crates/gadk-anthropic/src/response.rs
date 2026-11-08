@@ -23,6 +23,7 @@ use gadk_genai::{
     Content, FinishReason, FunctionCall, GenerateContentResponseUsageMetadata, Part, ROLE_MODEL,
 };
 use gadk_model::LlmResponse;
+use gadk_platform::go_to_lower;
 use serde_json::value::RawValue;
 use serde_json::{Map, Value};
 
@@ -77,7 +78,7 @@ fn media_type(content_type: &str) -> String {
         Some(i) => content_type.split_at(i),
         None => (content_type, ""),
     };
-    let media = base.to_lowercase().trim().to_string();
+    let media = go_to_lower(base).trim().to_string();
     let valid = match media.split_once('/') {
         Some((kind, sub)) => is_mime_token(kind) && is_mime_token(sub),
         None => is_mime_token(&media),

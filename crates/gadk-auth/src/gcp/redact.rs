@@ -486,23 +486,8 @@ fn advance_matches(ls: &str, pos: usize, lowered: &[String], next: &mut [Option<
     }
 }
 
-/// Go `strings.ToLower` on valid UTF-8: per char `unicode.ToLower`, i.e. Rust's
-/// `char::to_lowercase` except U+0130 → 'i' (Rust gives "i\u{307}"); no final-sigma context.
-/// Every lowering above goes through this.
-pub(crate) fn go_to_lower(s: &str) -> String {
-    if s.is_ascii() {
-        return s.to_ascii_lowercase();
-    }
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        if c == '\u{130}' {
-            out.push('i');
-        } else {
-            out.extend(c.to_lowercase());
-        }
-    }
-    out
-}
+/// Go `strings.ToLower` (shared port in gadk-platform). Every lowering above goes through this.
+pub(crate) use gadk_platform::go_to_lower;
 
 #[cfg(test)]
 mod tests {
