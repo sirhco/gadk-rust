@@ -21,7 +21,7 @@ use std::collections::{BTreeMap, VecDeque};
 use futures::StreamExt;
 use futures::stream::BoxStream;
 use gadk_genai::{Content, Part, ROLE_MODEL};
-use gadk_model::sse::{SseEvent, sse_events};
+use gadk_model::sse::{ANTHROPIC_SDK_MAX_LINE, SseEvent, sse_events_with_max_line};
 use gadk_model::{BodyStream, LlmResponse};
 
 use crate::error::{AnthropicError, api_error_from_response};
@@ -323,8 +323,9 @@ fn refresh_content_block(cb: &mut ContentBlock) {
     }
 }
 
-/// Drives [`gadk_model::sse::sse_events`] over `body` through a [`StreamAccumulator`]: the
-/// partial responses, then the final one; the first error (a body error through
+/// Drives [`gadk_model::sse::sse_events_with_max_line`] (the SDK's 32 MiB line limit) over
+/// `body` through a [`StreamAccumulator`]: the partial responses, then the final one; the first
+/// error (a body or SSE error through
 /// [`AnthropicError::from_body_error`](crate::error::AnthropicError), or the accumulator's)
 /// ends the stream.
 pub(crate) fn stream_responses(
@@ -348,7 +349,7 @@ pub(crate) fn stream_responses(
         }
     }
     let state = State {
-        events: sse_events(body),
+        events: sse_events_with_max_line(body, ANTHROPIC_SDK_MAX_LINE),
         acc: Some(StreamAccumulator::new(unwrap_output, status, &request_id)),
         pending: VecDeque::new(),
     };
