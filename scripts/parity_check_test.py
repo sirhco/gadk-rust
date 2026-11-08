@@ -24,6 +24,9 @@ class ConvTest(unittest.TestCase):
             "TestMCPToolSetConfirmation": "test_mcp_tool_set_confirmation",
             "FuzzRedact": "fuzz_redact",
             "FuzzRedact_Seeds": "fuzz_redact_seeds",
+            "TestSamplePNG1x1_DecodesAsValidPNG": "test_sample_png1x1_decodes_as_valid_png",
+            "TestNewModel_VertexAndModelNames": "test_new_model_vertex_and_model_names",
+            "TestExecutableCodeAndURISchemePrivacy": "test_executable_code_and_uri_scheme_privacy",
         }
         for go, rust in cases.items():
             self.assertEqual(pc.go_test_to_rust(go), rust, go)
@@ -613,6 +616,118 @@ class TwoCTest(unittest.TestCase):
             + " | test_mcp_tool_set |", text)
 
 
+LEDGER_3A = (
+    "# Parity ledger — sub-project 3a\n\n"
+    "<!-- in-scope:\nmodel/anthropicmodel/anthropicmodel_test.go\nmodel/apigee/apigee_test.go\n-->\n\n"
+    + pc.TABLE_HEADER + "\n" + pc.TABLE_SEP + "\n"
+)
+
+ANTHROPIC_DIR = "crates/gadk-anthropic/tests/model_anthropicmodel_anthropicmodel/"
+APIGEE_TARGET = "crates/gadk-gemini/tests/model_apigee_apigee.rs"
+RUNNER_SKIP = (
+    "// parity: skipped TestAgentRunner_MultiTurnImageAndTool: ported in"
+    " crates/gadk/tests/model_anthropicmodel_agent_runner.rs (needs the runner)\n"
+)
+
+
+class ThreeATest(unittest.TestCase):
+    """3a: a directory target (`tests/<target>/main.rs` plus module files) and a file target."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        d = pathlib.Path(self._tmp.name)
+        self.go, self.repo = d / "go", d / "repo"
+        (self.go / "model/anthropicmodel").mkdir(parents=True)
+        (self.go / "model/apigee").mkdir(parents=True)
+        (self.go / "model/anthropicmodel/anthropicmodel_test.go").write_text(
+            "package anthropicmodel_test\nfunc TestGenerate_Anthropic(t *testing.T) {}\n"
+            "func TestAgentRunner_MultiTurnImageAndTool(t *testing.T) {}\n"
+            "func TestPromptCaching(t *testing.T) {}\n")
+        (self.go / "model/apigee/apigee_test.go").write_text(
+            "package apigee\nfunc TestParseModelName(t *testing.T) {}\n")
+        self.dir = self.repo / ANTHROPIC_DIR
+        self.dir.mkdir(parents=True)
+        (self.repo / "crates/gadk-gemini/tests").mkdir(parents=True)
+        (self.repo / "docs/parity").mkdir(parents=True)
+        # The scaffold: main.rs with the runner skip line, empty module files.
+        (self.dir / "main.rs").write_text("//! Parity target.\n\n" + RUNNER_SKIP + "\nmod generate;\nmod tools_thinking;\n")
+        (self.dir / "generate.rs").write_text("//! Task 8.\n")
+        (self.dir / "tools_thinking.rs").write_text("//! Task 10.\n")
+        (self.repo / APIGEE_TARGET).write_text("#[tokio::test]\nasync fn test_parse_model_name() {}\n")
+        self.ledger = self.repo / "docs/parity/3a.md"
+        self.ledger.write_text(LEDGER_3A)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def run_cli(self, *args):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = pc.main(["--adk-go", str(self.go), "--repo", str(self.repo), *args])
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_find_target_accepts_a_test_directory(self):
+        self.assertEqual(
+            pc.find_target(self.repo, "model/anthropicmodel/anthropicmodel_test.go"),
+            (ANTHROPIC_DIR + "main.rs", []))
+
+    def test_scaffold_reports_missing_with_the_directory_and_accepts_the_skip(self):
+        self.assertEqual(self.run_cli("--ledger", "3a", "--count"), (0, "4\n", ""))
+        rc, _, err = self.run_cli("--ledger", "3a")
+        self.assertEqual(rc, 1)
+        self.assertEqual(err.splitlines(), [
+            "model/anthropicmodel/anthropicmodel_test.go TestGenerate_Anthropic: missing (no fn"
+            " test_generate_anthropic and no `// parity: skipped TestGenerate_Anthropic:` in "
+            + ANTHROPIC_DIR + ")",
+            "model/anthropicmodel/anthropicmodel_test.go TestPromptCaching: missing (no fn"
+            " test_prompt_caching and no `// parity: skipped TestPromptCaching:` in "
+            + ANTHROPIC_DIR + ")",
+        ])
+        self.assertEqual(self.run_cli("--ledger", "3a", "--files", "model/apigee/apigee_test.go")[0], 0)
+
+    def test_rows_name_the_file_that_holds_the_fn_or_the_skip(self):
+        (self.dir / "generate.rs").write_text("#[tokio::test]\nasync fn test_generate_anthropic() {}\n")
+        (self.dir / "tools_thinking.rs").write_text(
+            "// parity: adapted: tracing replaces slog\n#[tokio::test]\nasync fn test_prompt_caching() {}\n")
+        self.assertEqual(self.run_cli("--ledger", "3a", "--files",
+                                      "model/anthropicmodel/anthropicmodel_test.go")[0], 0)
+        self.assertEqual(self.run_cli("--ledger", "3a", "--generate")[0], 0)
+        self.assertEqual(self.run_cli("--ledger", "3a"), (0, "", ""))
+        rows = self.ledger.read_text().splitlines()[-4:]
+        self.assertEqual(rows, [
+            "| model/anthropicmodel/anthropicmodel_test.go | TestGenerate_Anthropic | ported | "
+            + ANTHROPIC_DIR + "generate.rs | test_generate_anthropic |",
+            "| model/anthropicmodel/anthropicmodel_test.go | TestAgentRunner_MultiTurnImageAndTool |"
+            " skipped | " + ANTHROPIC_DIR + "main.rs | ported in"
+            " crates/gadk/tests/model_anthropicmodel_agent_runner.rs (needs the runner) |",
+            "| model/anthropicmodel/anthropicmodel_test.go | TestPromptCaching | ported (adapted:"
+            " tracing replaces slog) | " + ANTHROPIC_DIR + "tools_thinking.rs | test_prompt_caching |",
+            "| model/apigee/apigee_test.go | TestParseModelName | ported | " + APIGEE_TARGET
+            + " | test_parse_model_name |",
+        ])
+
+    def test_duplicates_across_files_and_unknown_skips_are_errors(self):
+        (self.dir / "generate.rs").write_text(
+            "fn test_generate_anthropic() {}\n// parity: skipped TestNope: x\n")
+        (self.dir / "tools_thinking.rs").write_text("fn test_generate_anthropic() {}\nfn test_prompt_caching() {}\n")
+        rc, _, err = self.run_cli("--ledger", "3a")
+        self.assertEqual(rc, 1)
+        self.assertEqual(err.splitlines(), [
+            ANTHROPIC_DIR + "generate.rs: skip annotation for unknown Go test TestNope (not in"
+            " model/anthropicmodel/anthropicmodel_test.go)",
+            "model/anthropicmodel/anthropicmodel_test.go TestGenerate_Anthropic: fn"
+            " test_generate_anthropic defined 2 times in " + ANTHROPIC_DIR,
+        ])
+
+    def test_nested_module_files_are_scanned(self):
+        (self.dir / "nested").mkdir()
+        (self.dir / "nested/deep.rs").write_text("fn test_generate_anthropic() {}\nfn test_prompt_caching() {}\n")
+        rows, errs = pc.generate_rows(self.go, self.repo, ["model/anthropicmodel/anthropicmodel_test.go"])
+        self.assertEqual(errs, [])
+        self.assertEqual([r[3] for r in rows], [
+            ANTHROPIC_DIR + "nested/deep.rs", ANTHROPIC_DIR + "main.rs", ANTHROPIC_DIR + "nested/deep.rs"])
+
+
 ADK_GO = pathlib.Path(os.environ.get("ADK_GO_DIR", HERE.parent.parent / "adk-go"))
 
 
@@ -742,6 +857,17 @@ class RealTreeTest(unittest.TestCase):
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "2c"), [])
         for f in in_scope:
             self.assertEqual([t for t in pc.go_tests(ADK_GO, f) if t.startswith("Fuzz")], [], f)
+
+    def test_3a_count_is_28(self):
+        in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/3a.md")
+        self.assertEqual(in_scope, [
+            "model/anthropicmodel/anthropicmodel_test.go",
+            "model/apigee/apigee_test.go",
+        ])
+        self.assertEqual(deferred, {})
+        self.assertEqual(pc.count(ADK_GO, in_scope), 28)
+        self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "3a"), [])
+        self.assertEqual(len(pc.go_tests(ADK_GO, "model/anthropicmodel/anthropicmodel_test.go")), 21)
 
     def test_earlier_ledgers_have_no_fuzz_tests(self):
         # Widening GO_TEST to `Fuzz*` must not change any 1a-2a ledger.

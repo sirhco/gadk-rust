@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
 # Copyright 2026 Chris Olson — Apache-2.0 (see LICENSE)
-"""Checks the parity ledgers (docs/parity/1a.md, 1b.md, 1b-live.md, 1c.md, 2a.md, 2b.md, 2c.md) against ADK-Go.
+"""Checks the parity ledgers (docs/parity/1a.md, 1b.md, 1b-live.md, 1c.md, 2a.md, 2b.md, 2c.md, 3a.md)
+against ADK-Go.
 
 Usage:
-  parity-check [--adk-go DIR] [--ledger 1a|1b|1b-live|1c|2a|2b|2c|all] [--files GO_TEST_FILE ...] [--count] [--generate]
+  parity-check [--adk-go DIR] [--ledger 1a|1b|1b-live|1c|2a|2b|2c|3a|all] [--files GO_TEST_FILE ...] [--count] [--generate]
 
 Each ledger lists its in-scope Go test files in a `<!-- in-scope: ... -->` header block and
 (optionally) its deferred files in a `<!-- deferred: ... -->` block (`path: reason` per line).
-1a rows are hand-written and checked as before. 1b, 1b-live, 1c, 2a, 2b and 2c rows are generated
-from annotations in the Rust target files (see `scan_target`); `--generate` rewrites them, and a
-full `--ledger 1b` / `--ledger 1b-live` / `--ledger 1c` / `--ledger 2a` / `--ledger 2b` /
-`--ledger 2c` check requires the ledger rows to equal the generated rows.
+1a rows are hand-written and checked as before. 1b, 1b-live, 1c, 2a, 2b, 2c and 3a rows are
+generated from annotations in the Rust target files (see `scan_target`); `--generate` rewrites
+them, and a full `--ledger 1b` / `--ledger 1b-live` / `--ledger 1c` / `--ledger 2a` /
+`--ledger 2b` / `--ledger 2c` / `--ledger 3a` check requires the ledger rows to equal the
+generated rows.
+
+A target is a file `crates/*/tests/<target>.rs` or `crates/*/src/parity_tests/<target>.rs`, or
+(from 3a) a test directory `crates/*/tests/<target>/main.rs`: a directory target's annotations
+may sit in any `.rs` file under the directory, and a row names the file that holds them.
 
 A Go test is a `func TestXxx(` or (from 2b) a `func FuzzXxx(`; `FuzzXxx` ports as `fn fuzz_xxx`.
 """
@@ -22,7 +28,7 @@ TABLE_SEP = "|---|---|---|---|---|"
 SKIP_RE = re.compile(r"^\s*//\s*parity:\s*skipped\s+((?:Test|Fuzz)\w*)\s*:(.*)$")
 ADAPTED_RE = re.compile(r"^\s*//\s*parity:\s*adapted\s*:(.*)$")
 ADAPTED_WINDOW = 3  # lines above the `fn` line searched for `// parity: adapted:`
-GENERATED_LEDGERS = ("1b", "1b-live", "1c", "2a", "2b", "2c")  # ledgers whose rows come from annotations
+GENERATED_LEDGERS = ("1b", "1b-live", "1c", "2a", "2b", "2c", "3a")  # ledgers whose rows come from annotations
 
 
 def go_test_to_rust(name: str) -> str:
@@ -149,7 +155,11 @@ def find_target(repo_dir, go_file):
     t = target_name(go_file)
     hits = sorted(
         str(p.relative_to(repo_dir))
-        for pattern in (f"crates/*/tests/{t}.rs", f"crates/*/src/parity_tests/{t}.rs")
+        for pattern in (
+            f"crates/*/tests/{t}.rs",
+            f"crates/*/src/parity_tests/{t}.rs",
+            f"crates/*/tests/{t}/main.rs",
+        )
         for p in repo_dir.glob(pattern)
     )
     if not hits:
@@ -171,38 +181,47 @@ def scan_target(go_file, names, rust_path, text):
       - error:   neither, both, more than one of either, an empty reason, a reason containing
                  `|`, or a skip annotation naming a test that is not in the Go file.
     """
-    lines = text.splitlines()
+    return scan_files(go_file, names, rust_path, [(rust_path, text)])
+
+
+def scan_files(go_file, names, label, files):
+    """`scan_target` over several files (a directory target, 3a): `files` is a list of
+    (repo-relative path, text). The rule counts lines across all files; a row names the file that
+    holds the `fn` or the skip line; errors name the target as `label`."""
     errs, rows = [], []
     skips = {}
-    for i, ln in enumerate(lines):
-        m = SKIP_RE.match(ln)
-        if m:
-            skips.setdefault(m.group(1), []).append((i, m.group(2).strip()))
+    split = [(path, text.splitlines()) for path, text in files]
+    for path, lines in split:
+        for i, ln in enumerate(lines):
+            m = SKIP_RE.match(ln)
+            if m:
+                skips.setdefault(m.group(1), []).append((path, m.group(2).strip()))
     for unknown in sorted(set(skips) - set(names)):
-        errs.append(f"{rust_path}: skip annotation for unknown Go test {unknown} (not in {go_file})")
+        where = sorted({p for p, _ in skips[unknown]})
+        errs.append(f"{', '.join(where)}: skip annotation for unknown Go test {unknown} (not in {go_file})")
     for name in names:
         rust_fn = go_test_to_rust(name)
         fn_re = re.compile(rf"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+{re.escape(rust_fn)}\s*[(<]")
-        fn_lines = [i for i, ln in enumerate(lines) if fn_re.match(ln)]
+        fn_hits = [(path, lines, i) for path, lines in split for i, ln in enumerate(lines) if fn_re.match(ln)]
         skip = skips.get(name, [])
         where = f"{go_file} {name}"
-        if len(fn_lines) > 1:
-            errs.append(f"{where}: fn {rust_fn} defined {len(fn_lines)} times in {rust_path}")
+        if len(fn_hits) > 1:
+            errs.append(f"{where}: fn {rust_fn} defined {len(fn_hits)} times in {label}")
             continue
         if len(skip) > 1:
-            errs.append(f"{where}: {len(skip)} skip annotations in {rust_path}")
+            errs.append(f"{where}: {len(skip)} skip annotations in {label}")
             continue
-        if fn_lines and skip:
-            errs.append(f"{where}: both fn {rust_fn} and a skip annotation in {rust_path}")
+        if fn_hits and skip:
+            errs.append(f"{where}: both fn {rust_fn} and a skip annotation in {label}")
             continue
-        if not fn_lines and not skip:
-            errs.append(f"{where}: missing (no fn {rust_fn} and no `// parity: skipped {name}:` in {rust_path})")
+        if not fn_hits and not skip:
+            errs.append(f"{where}: missing (no fn {rust_fn} and no `// parity: skipped {name}:` in {label})")
             continue
         if skip:
-            reason = skip[0][1]
+            path, reason = skip[0]
             status, last = "skipped", reason
         else:
-            i = fn_lines[0]
+            path, lines, i = fn_hits[0]
             reason = None
             for j in range(i - 1, max(-1, i - 1 - ADAPTED_WINDOW), -1):
                 m = ADAPTED_RE.match(lines[j])
@@ -214,13 +233,24 @@ def scan_target(go_file, names, rust_path, text):
             status = "ported" if reason is None else f"ported (adapted: {reason})"
             last = rust_fn
         if reason is not None and not reason:
-            errs.append(f"{where}: empty parity reason in {rust_path}")
+            errs.append(f"{where}: empty parity reason in {path}")
             continue
         if reason is not None and "|" in reason:
-            errs.append(f"{where}: parity reason contains '|' in {rust_path}")
+            errs.append(f"{where}: parity reason contains '|' in {path}")
             continue
-        rows.append((go_file, name, status, rust_path, last))
+        rows.append((go_file, name, status, path, last))
     return rows, errs
+
+
+def target_files(repo_dir, target):
+    """(label, [(path, text)]) of a target: the file itself, or for a directory target
+    (`…/<target>/main.rs`) every `.rs` file under the directory, sorted by path."""
+    repo_dir = pathlib.Path(repo_dir)
+    if not target.endswith("/main.rs"):
+        return target, [(target, (repo_dir / target).read_text())]
+    d = (repo_dir / target).parent
+    paths = sorted(str(p.relative_to(repo_dir)) for p in d.rglob("*.rs"))
+    return str(d.relative_to(repo_dir)) + "/", [(p, (repo_dir / p).read_text()) for p in paths]
 
 
 def generate_rows(go_dir, repo_dir, files):
@@ -234,7 +264,8 @@ def generate_rows(go_dir, repo_dir, files):
         errs += terrs
         if target is None:
             continue
-        r, e = scan_target(f, names, target, (pathlib.Path(repo_dir) / target).read_text())
+        label, files_ = target_files(repo_dir, target)
+        r, e = scan_files(f, names, label, files_)
         rows += r
         errs += e
     return rows, errs
@@ -259,7 +290,8 @@ def check_header(go_dir, in_scope, deferred, label):
 def check_1b(go_dir, repo_dir, ledger, files=None, name="1b"):
     """Full check when `files` is None (rows must equal generated rows); else scan only `files`.
 
-    `name` is the ledger's CLI name (`1b`, `1b-live`, `1c`, `2a`, `2b` or `2c`), used in messages."""
+    `name` is the ledger's CLI name (`1b`, `1b-live`, `1c`, `2a`, `2b`, `2c` or `3a`), used in
+    messages."""
     in_scope, deferred = parse_header(ledger)
     errs = check_header(go_dir, in_scope, deferred, str(ledger))
     if errs:
@@ -321,7 +353,7 @@ def main(argv=None):
     repo = pathlib.Path(__file__).resolve().parent.parent
     ap = argparse.ArgumentParser(prog="parity-check")
     ap.add_argument("--adk-go", default=os.environ.get("ADK_GO_DIR", str(repo.parent / "adk-go")))
-    ap.add_argument("--ledger", choices=("1a", "1b", "1b-live", "1c", "2a", "2b", "2c", "all"), default="all")
+    ap.add_argument("--ledger", choices=("1a", "1b", "1b-live", "1c", "2a", "2b", "2c", "3a", "all"), default="all")
     ap.add_argument("--files", nargs="+", metavar="GO_TEST_FILE")
     ap.add_argument("--count", action="store_true")
     ap.add_argument("--generate", action="store_true")
@@ -336,12 +368,13 @@ def main(argv=None):
         "2a": repo / "docs/parity/2a.md",
         "2b": repo / "docs/parity/2b.md",
         "2c": repo / "docs/parity/2c.md",
+        "3a": repo / "docs/parity/3a.md",
     }
 
     if (a.files or a.generate) and a.ledger not in GENERATED_LEDGERS:
-        ap.error("--files and --generate require --ledger 1b, 1b-live, 1c, 2a, 2b or 2c")
+        ap.error("--files and --generate require --ledger 1b, 1b-live, 1c, 2a, 2b, 2c or 3a")
     if a.count and a.ledger == "all":
-        ap.error("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b or 2c")
+        ap.error("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c or 3a")
     if a.generate and (a.files or a.count):
         ap.error("--generate cannot be combined with --files or --count")
 

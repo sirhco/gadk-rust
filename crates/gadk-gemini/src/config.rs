@@ -23,9 +23,9 @@ use std::fmt;
 use std::sync::Arc;
 
 use gadk_model::{Backend, HttpClient, HttpOptions};
+use gadk_platform::env::{EnvProvider, ProcessEnv};
 use google_cloud_auth::credentials::Credentials;
 
-use crate::env::{EnvProvider, ProcessEnv};
 use crate::error::GeminiError;
 
 /// OAuth scope requested for Application Default Credentials on Vertex AI.
