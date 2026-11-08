@@ -18,6 +18,9 @@
 - 2c: `gadk-mcp` depends on exactly `gadk-agent`, `gadk-auth`, `gadk-genai` and `gadk-platform`
   (never `gadk-engine` or `gadk-tools`), and only the façade depends on it; `gadk-gemini`
   depends on `gadk-platform` for the shared tracking header.
+- 3a: `gadk-anthropic` depends on exactly `gadk-genai`, `gadk-model` and `gadk-platform` (the
+  shared SSE parser lives in `gadk-model`, the injectable environment in `gadk-platform`), and
+  only the façade depends on it (feature `anthropic`).
 """
 import pathlib, sys, tomllib
 
@@ -37,9 +40,10 @@ ALLOWED = {
                    "gadk-session", "gadk-memory", "gadk-artifact"},
     "gadk-auth": {"gadk-agent", "gadk-platform"},
     "gadk-mcp": {"gadk-agent", "gadk-auth", "gadk-genai", "gadk-platform"},
+    "gadk-anthropic": {"gadk-genai", "gadk-model", "gadk-platform"},
     "gadk": {"gadk-genai", "gadk-platform", "gadk-model", "gadk-session", "gadk-gemini",
              "gadk-agent", "gadk-engine", "gadk-tools", "gadk-auth", "gadk-mcp", "gadk-artifact",
-             "gadk-memory"},
+             "gadk-memory", "gadk-anthropic"},
 }
 # (crate, dependency) normal edges that must be `optional = true`.
 OPTIONAL = {("gadk-engine", "gadk-gemini"), ("gadk-engine", "gadk-httprr")}

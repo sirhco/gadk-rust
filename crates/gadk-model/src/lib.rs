@@ -13,7 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! gadk-model: the LLM abstraction and model registry.
+//! gadk-model: the LLM abstraction, the model registry, the HTTP seam and the shared SSE parser
+//! ([`sse`]).
 
 mod aggregator;
 mod convert;
@@ -23,12 +24,13 @@ mod jsonpath;
 mod live;
 mod llm;
 mod registry;
+pub mod sse;
 mod variant;
 
 pub use aggregator::StreamingResponseAggregator;
 pub use convert::llm_response_from_genai;
 pub use error::{ModelError, api_error_from_body, body_prefix};
-pub use http::{BodyStream, HttpClient, ReqwestClient, collect_body};
+pub use http::{BodyStream, HttpClient, ReqwestClient, collect_body, redact_url};
 pub use live::{LiveConnError, LiveConnErrorKind, LiveConnection, RealtimeInput};
 pub use llm::{Backend, ExtrasRequestProvider, HttpOptions, Llm, LlmRequest, LlmResponse};
 pub use registry::*;

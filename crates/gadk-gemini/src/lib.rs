@@ -15,20 +15,19 @@
 
 //! gadk-gemini: Gemini API and Vertex AI model implementation.
 
+pub mod apigee;
 mod auth;
 mod config;
 mod continuation;
-mod env;
 mod error;
 mod live;
 mod model;
 mod request;
-mod sse;
 mod transport;
 
 pub use config::{Auth, CLOUD_PLATFORM_SCOPE, ClientConfig, ResolvedConfig, resolve};
-pub use env::{EnvProvider, MapEnv, ProcessEnv};
 pub use error::GeminiError;
+pub use gadk_platform::env::{EnvProvider, MapEnv, ProcessEnv};
 pub use live::{LiveConnection, RealtimeInput};
 pub use model::GeminiModel;
 
@@ -41,4 +40,19 @@ pub mod internal {
     };
     pub use crate::request::{build_request_body, preserve_empty_text_thought_signature_parts};
     pub use tokio_tungstenite::tungstenite;
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    /// R2: the environment types moved to `gadk_platform::env`; the old paths name the same types.
+    #[test]
+    fn env_reexports_are_the_platform_types() {
+        let env: gadk_platform::env::MapEnv =
+            crate::MapEnv(HashMap::from([("K".to_string(), "v".to_string())]));
+        let provider: &dyn crate::EnvProvider = &env;
+        assert_eq!(provider.var("K").as_deref(), Some("v"));
+        let _: gadk_platform::env::ProcessEnv = crate::ProcessEnv;
+    }
 }

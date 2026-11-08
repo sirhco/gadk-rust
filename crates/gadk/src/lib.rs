@@ -19,6 +19,10 @@
 //! building and running agents.
 
 pub use gadk_agent as agent;
+/// Claude models on the Anthropic Messages API and on Vertex AI (feature `anthropic`, not on
+/// by default; re-export of `gadk-anthropic`).
+#[cfg(feature = "anthropic")]
+pub use gadk_anthropic as anthropic;
 pub use gadk_artifact as artifact;
 /// Authentication for outbound HTTP calls: credentials, credential providers, the credential
 /// store, the refresh-and-retry transport and (feature `gcp`) per-user Google Cloud credentials
