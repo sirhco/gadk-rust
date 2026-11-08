@@ -20,7 +20,6 @@
 //! Go's `%w` order, and renders Go's `Error()` text as its `Display`.
 
 use std::fmt;
-use std::sync::LazyLock;
 
 use gadk_model::ModelError;
 use serde_json::{Map, Value};
@@ -497,47 +496,8 @@ pub(crate) fn sanitize_error_message(msg: &str) -> String {
 
 // ---------------------------------------------------------------- Go %q
 
-/// Go `unicode.IsPrint`: letters, marks, numbers, punctuation, symbols and the ASCII space.
-#[allow(clippy::expect_used)] // constant pattern, cannot fail
-static GO_PRINTABLE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"^[\p{L}\p{M}\p{N}\p{P}\p{S}]$").expect("valid printable-class regex")
-});
-
-fn go_is_print(c: char) -> bool {
-    if c.is_ascii() {
-        return (' '..='~').contains(&c);
-    }
-    let mut buf = [0u8; 4];
-    GO_PRINTABLE.is_match(c.encode_utf8(&mut buf))
-}
-
-/// Port of Go `strconv.Quote` (Go `%q` on a string). Copied from `gadk_agent::go_quote`
-/// (`crates/gadk-agent/src/go_fmt.rs`), which gadk-anthropic may not depend on.
-pub(crate) fn go_quote(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            c if go_is_print(c) => out.push(c),
-            '\u{7}' => out.push_str("\\a"),
-            '\u{8}' => out.push_str("\\b"),
-            '\u{c}' => out.push_str("\\f"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            '\u{b}' => out.push_str("\\v"),
-            c if (c as u32) < 0x20 || c == '\u{7f}' => {
-                out.push_str(&format!("\\x{:02x}", c as u32));
-            }
-            c if (c as u32) < 0x10000 => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push_str(&format!("\\U{:08x}", c as u32)),
-        }
-    }
-    out.push('"');
-    out
-}
+/// Port of Go `strconv.Quote` (Go `%q` on a string), shared with the other gadk crates.
+pub(crate) use gadk_platform::go_quote;
 
 #[cfg(test)]
 mod tests {
@@ -878,21 +838,5 @@ mod tests {
 
         let e = AnthropicError::from_model_error(ModelError::Other("boom".into()));
         assert_eq!(e.to_string(), "anthropicmodel: request failed: boom");
-    }
-
-    #[test]
-    fn go_quote_matches_strconv_quote() {
-        let cases = [
-            ("plain", "\"plain\""),
-            ("q\"b\\", "\"q\\\"b\\\\\""),
-            ("\u{7}\u{8}\u{c}\n\r\t\u{b}", "\"\\a\\b\\f\\n\\r\\t\\v\""),
-            ("\u{0}\u{1b}\u{7f}", "\"\\x00\\x1b\\x7f\""),
-            ("soft\u{ad}hyphen", "\"soft\\u00adhyphen\""),
-            ("tag\u{e0001}", "\"tag\\U000e0001\""),
-            ("caf\u{e9}", "\"caf\u{e9}\""),
-        ];
-        for (input, want) in cases {
-            assert_eq!(go_quote(input), want, "go_quote({input:?})");
-        }
     }
 }
