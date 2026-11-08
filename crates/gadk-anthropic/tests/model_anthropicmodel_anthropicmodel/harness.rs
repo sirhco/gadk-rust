@@ -442,6 +442,11 @@ impl Drop for DropGuard {
 }
 
 /// A response body that plays [`BodyStep`]s; counts a drop if dropped before it finished.
+///
+/// The body counts as finished as soon as its last chunk is handed out (or at once when it
+/// has no steps) with [`BodyEnd::Finish`]: hyper drops a fixed-length body after writing the
+/// declared bytes without polling it to `None`, so waiting for `None` would count every fully
+/// sent `Content-Length` response as a drop.
 struct ScriptedBody {
     steps: VecDeque<BodyStep>,
     end: BodyEnd,
@@ -460,7 +465,7 @@ impl ScriptedBody {
             end: resp.end,
             sleep: None,
             shared,
-            finished: false,
+            finished: resp.end == BodyEnd::Finish && resp.steps.is_empty(),
             exact_len: only_chunks.then(|| resp.body_bytes().len() as u64),
         }
     }
@@ -474,7 +479,12 @@ impl ScriptedBody {
                 self.sleep = None;
             }
             match self.steps.pop_front() {
-                Some(BodyStep::Chunk(b)) => return Poll::Ready(Some(b)),
+                Some(BodyStep::Chunk(b)) => {
+                    if self.steps.is_empty() && self.end == BodyEnd::Finish {
+                        self.finished = true;
+                    }
+                    return Poll::Ready(Some(b));
+                }
                 Some(BodyStep::Delay(d)) => self.sleep = Some(Box::pin(tokio::time::sleep(d))),
                 None => {
                     return match self.end {
@@ -581,6 +591,7 @@ impl FakeServer {
         let accept = tokio::spawn(async move {
             loop {
                 let Ok((stream, _)) = listener.accept().await else {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
                     continue;
                 };
                 let (shared, base) = (acc_shared.clone(), base.clone());
@@ -632,7 +643,9 @@ impl FakeServer {
     }
 
     /// Number of responses the client abandoned: a [`FakeResponse::never`] request whose
-    /// connection closed, or a body dropped before its end (drop-cancellation evidence).
+    /// connection closed, or a body dropped before its last chunk was handed out
+    /// (drop-cancellation evidence). A fully sent response, including a fixed-length or empty
+    /// one, is never a drop.
     pub fn drops(&self) -> usize {
         self.shared.drops.load(Ordering::SeqCst)
     }
@@ -1402,7 +1415,10 @@ pub fn scrub_anthropic_response(buf: &mut Vec<u8>) -> Result<(), HttprrError> {
     let mut in_headers = true;
     for line in buf.split(|&b| b == b'\n') {
         if in_headers {
-            let trimmed = line.strip_suffix(b"\r").unwrap_or(line);
+            let mut trimmed = line;
+            while let Some(rest) = trimmed.strip_suffix(b"\r") {
+                trimmed = rest;
+            }
             if trimmed.is_empty() {
                 in_headers = false;
                 out.push(line);
@@ -1477,6 +1493,30 @@ async fn harness_server_streams_chunks_with_delays() {
         format!("{}{}event: ping\ndata: {{}}\n\n", events[0], events[1])
     );
     assert_eq!(srv.drops(), 0);
+}
+
+#[tokio::test]
+async fn harness_server_fully_read_fixed_length_bodies_are_not_drops() {
+    let srv = FakeServer::json(text_message_json("msg_1", "ok", 5, 1));
+    let client = reqwest::Client::new();
+    for _ in 0..2 {
+        let resp = client.post(srv.url()).body("{}").send().await.unwrap();
+        assert!(resp.headers().contains_key("content-length"));
+        assert!(resp.text().await.unwrap().contains("msg_1"));
+    }
+    // hyper releases the body after the response is written; give it time to do so.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!((srv.hits(), srv.drops()), (2, 0));
+}
+
+#[tokio::test]
+async fn harness_server_fully_read_empty_body_is_not_a_drop() {
+    let srv = FakeServer::always(FakeResponse::new(204));
+    let resp = reqwest::get(srv.url()).await.unwrap();
+    assert_eq!(resp.status(), 204);
+    assert!(resp.bytes().await.unwrap().is_empty());
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!((srv.hits(), srv.drops()), (1, 0));
 }
 
 #[tokio::test]
@@ -1795,5 +1835,13 @@ fn harness_scrub_response_matches_go() {
     assert_eq!(
         String::from_utf8(buf).unwrap(),
         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\nrequest-id: body line kept\n"
+    );
+
+    // Go `strings.TrimRight(line, "\r")` strips every trailing CR: `\r\r` still ends the headers.
+    let mut buf = b"HTTP/1.1 200 OK\r\n\r\r\nrequest-id: body\n".to_vec();
+    scrub_anthropic_response(&mut buf).unwrap();
+    assert_eq!(
+        String::from_utf8(buf).unwrap(),
+        "HTTP/1.1 200 OK\r\n\r\r\nrequest-id: body\n"
     );
 }
