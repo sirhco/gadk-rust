@@ -27,7 +27,7 @@ use crate::thinking::{
 use crate::tools::{ReqTools, validate_tool_config, validate_tools};
 
 /// Go `fmt.Errorf("%w: <detail>", ErrInvalidConfig)`.
-fn invalid_config(detail: impl std::fmt::Display) -> AnthropicError {
+pub(crate) fn invalid_config(detail: impl std::fmt::Display) -> AnthropicError {
     AnthropicError::new(ErrorKind::InvalidConfig, detail)
 }
 
