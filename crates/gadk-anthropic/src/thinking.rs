@@ -20,8 +20,9 @@ use gadk_platform::go_to_lower;
 use serde_json::{Map, Value};
 
 use crate::config::Effort;
-use crate::error::{AnthropicError, ErrorKind, go_quote};
-use crate::tools::lowercase_schema_types;
+use crate::error::{AnthropicError, go_quote};
+use crate::tools::lowercase_schema_map;
+use crate::validate::invalid_config;
 use crate::wire::{JsonOutputFormat, JsonSchemaTag, OutputConfig, ThinkingConfigParam};
 
 /// The property a non-object output schema is wrapped in (Go `wrappedOutputSchemaKey`).
@@ -35,11 +36,6 @@ pub(crate) struct OutputSchema {
     /// Whether the schema was wrapped in `{"result": …}` (a non-object root), so text
     /// responses must be unwrapped.
     pub(crate) unwrap: bool,
-}
-
-/// Go `fmt.Errorf("%w: <detail>", ErrInvalidConfig)`.
-fn invalid_config(detail: impl std::fmt::Display) -> AnthropicError {
-    AnthropicError::new(ErrorKind::InvalidConfig, detail)
 }
 
 /// Go `validateThinkingConfig`: rejects `thinking_level` and a missing `thinking_budget`.
@@ -234,15 +230,6 @@ fn normalize_output_schema_map(map: &mut Map<String, Value>) {
             .or_insert(Value::Bool(false));
     }
     map.values_mut().for_each(normalize_output_schema_objects);
-}
-
-/// [`lowercase_schema_types`] on an object node (the root of an output schema).
-fn lowercase_schema_map(map: &mut Map<String, Value>) {
-    let mut node = Value::Object(std::mem::take(map));
-    lowercase_schema_types(&mut node);
-    if let Value::Object(lowered) = node {
-        *map = lowered;
-    }
 }
 
 /// Go `buildOutputConfigParam`: `output_config` (`None` when neither effort nor a schema is

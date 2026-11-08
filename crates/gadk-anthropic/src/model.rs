@@ -34,7 +34,7 @@ use serde_json::Value;
 use crate::cache::apply_cache_breakpoints;
 use crate::client::{
     ANTHROPIC_DEFAULT_BASE_URL, Auth, DEFAULT_RESPONSE_HEADER_TIMEOUT, Endpoint, Transport,
-    request_id, vertex_base_url,
+    vertex_base_url,
 };
 use crate::config::{
     Backend, ClientConfig, DEFAULT_MAX_TOKENS, Effort, PromptCacheConfig, parse_model_name,
@@ -43,7 +43,7 @@ use crate::config::{
 use crate::error::{AnthropicError, ErrorKind, go_quote};
 use crate::request::{ConvertCtx, build_messages, build_system_blocks};
 use crate::response::{convert_message_to_llm_response, decode_message};
-use crate::retry::DEFAULT_MAX_RETRIES;
+use crate::retry::{DEFAULT_MAX_RETRIES, header_str};
 use crate::stream::stream_responses;
 use crate::thinking::{build_output_config_param, build_thinking_param, is_thinking_enabled};
 use crate::tools::build_tools_and_choice;
@@ -508,7 +508,7 @@ async fn generate_once(
     transport: Arc<Transport>,
     built: BuiltParams,
 ) -> Result<LlmResponse, AnthropicError> {
-    let body = transport.encode_body(&built.params, false)?;
+    let body = transport.encode_body(built.params, false)?;
     let resp = transport
         .send(&built.model_id, body, false, built.timeout)
         .await?;
@@ -531,12 +531,12 @@ async fn open_stream(
     transport: Arc<Transport>,
     built: BuiltParams,
 ) -> Result<BoxStream<'static, Result<LlmResponse, AnthropicError>>, AnthropicError> {
-    let body = transport.encode_body(&built.params, true)?;
+    let body = transport.encode_body(built.params, true)?;
     let resp = transport
         .send(&built.model_id, body, true, built.timeout)
         .await?;
     let status = resp.status().as_u16();
-    let request_id = request_id(resp.headers()).to_string();
+    let request_id = header_str(resp.headers(), "request-id").to_string();
     Ok(stream_responses(
         resp.into_body(),
         built.unwrap_output,
@@ -1168,7 +1168,7 @@ mod tests {
         assert_eq!(
             String::from_utf8(
                 m.transport
-                    .encode_body(&built.params, false)
+                    .encode_body(built.params.clone(), false)
                     .unwrap()
                     .to_vec()
             )
@@ -1294,7 +1294,7 @@ mod tests {
         let built = m.build_message_params(&req).unwrap();
         let body = String::from_utf8(
             m.transport
-                .encode_body(&built.params, false)
+                .encode_body(built.params.clone(), false)
                 .unwrap()
                 .to_vec(),
         )

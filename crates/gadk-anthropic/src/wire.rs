@@ -105,26 +105,31 @@ pub(crate) fn to_go_json<T: ?Sized + Serialize>(value: &T) -> Result<Vec<u8>, se
     Ok(out)
 }
 
+/// How the SDK's Vertex middleware treats a request body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum VertexBody {
+    /// The path is rewritten to `…:rawPredict`: `model` is removed (`sjson.DeleteBytes`).
+    DropModel,
+    /// The path is not rewritten (a base URL with a path prefix): `model` stays.
+    KeepModel,
+}
+
 /// The request body the SDK sends for `params`:
 /// - the params as [`to_go_json`] writes them;
 /// - streaming: `,"stream":true` appended (the SDK's `option.WithJSONSet("stream", true)`);
-/// - Vertex: without `"model"` and with `,"anthropic_version":"vertex-2023-10-16"` appended
-///   after every other key (the SDK's Vertex middleware: `sjson.SetBytes` appends,
-///   `sjson.DeleteBytes` removes; omitting `model` gives the same bytes).
+/// - Vertex: `,"anthropic_version":"vertex-2023-10-16"` appended after every other key (the
+///   SDK's Vertex middleware: `sjson.SetBytes` appends), and with [`VertexBody::DropModel`]
+///   without `"model"` (`sjson.DeleteBytes` removes it; omitting it gives the same bytes).
 pub(crate) fn encode_request(
-    params: &MessageNewParams,
+    mut params: MessageNewParams,
     stream: bool,
-    vertex: bool,
+    vertex: Option<VertexBody>,
 ) -> Result<Vec<u8>, serde_json::Error> {
-    let mut body = if vertex {
-        let without_model = MessageNewParams {
-            model: String::new(),
-            ..params.clone()
-        };
-        to_go_json(&without_model)?
-    } else {
-        to_go_json(params)?
-    };
+    if vertex == Some(VertexBody::DropModel) {
+        // `model` is skipped when empty.
+        params.model.clear();
+    }
+    let mut body = to_go_json(&params)?;
     let mut append = |key_value: &str| {
         // The params always serialize as a non-empty object (`max_tokens` is never omitted).
         body.pop();
@@ -135,7 +140,7 @@ pub(crate) fn encode_request(
     if stream {
         append(r#""stream":true"#);
     }
-    if vertex {
+    if vertex.is_some() {
         append(&format!(
             r#""anthropic_version":"{VERTEX_ANTHROPIC_VERSION}""#
         ));
@@ -994,9 +999,9 @@ mod tests {
         assert_eq!(bodies.len(), 2);
         let params = anthropic_params();
         let non_streaming =
-            String::from_utf8(encode_request(&params, false, false).unwrap()).unwrap();
+            String::from_utf8(encode_request(params.clone(), false, None).unwrap()).unwrap();
         assert_eq!(non_streaming, bodies[0]);
-        let streaming = String::from_utf8(encode_request(&params, true, false).unwrap()).unwrap();
+        let streaming = String::from_utf8(encode_request(params, true, None).unwrap()).unwrap();
         assert_eq!(streaming, bodies[1]);
     }
 
@@ -1013,7 +1018,9 @@ mod tests {
             temperature: Some(0.0),
             ..MessageNewParams::default()
         };
-        let body = String::from_utf8(encode_request(&params, false, true).unwrap()).unwrap();
+        let body =
+            String::from_utf8(encode_request(params, false, Some(VertexBody::DropModel)).unwrap())
+                .unwrap();
         assert_eq!(body, bodies[0]);
     }
 
@@ -1021,8 +1028,10 @@ mod tests {
     /// `stream`).
     #[test]
     fn vertex_streaming_body_appends_stream_then_version() {
-        let body =
-            String::from_utf8(encode_request(&anthropic_params(), true, true).unwrap()).unwrap();
+        let body = String::from_utf8(
+            encode_request(anthropic_params(), true, Some(VertexBody::DropModel)).unwrap(),
+        )
+        .unwrap();
         assert_eq!(
             body,
             r#"{"max_tokens":8192,"messages":[{"content":[{"text":"What is the capital of France? Reply with one word.","type":"text"}],"role":"user"}],"temperature":0,"system":[{"text":"Reply with the city name only.","type":"text"}],"stream":true,"anthropic_version":"vertex-2023-10-16"}"#
@@ -1072,7 +1081,7 @@ mod tests {
         );
         let bodies = recorded_request_bodies(trace);
         assert_eq!(
-            String::from_utf8(encode_request(&params, false, false).unwrap()).unwrap(),
+            String::from_utf8(encode_request(params.clone(), false, None).unwrap()).unwrap(),
             bodies[0]
         );
 
@@ -1098,7 +1107,7 @@ mod tests {
             role: Role::User,
         });
         assert_eq!(
-            String::from_utf8(encode_request(&params, false, false).unwrap()).unwrap(),
+            String::from_utf8(encode_request(params.clone(), false, None).unwrap()).unwrap(),
             bodies[1]
         );
     }

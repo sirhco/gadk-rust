@@ -32,8 +32,8 @@ const MAX_BACKOFF: Duration = Duration::from_secs(8);
 const INITIAL_BACKOFF: Duration = Duration::from_millis(500);
 
 /// Go `Header.Get`: the first value of `name`, `""` when absent (or not visible ASCII, which
-/// none of the values compared here can match anyway).
-fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> &'a str {
+/// none of the values compared or reported here can match anyway).
+pub(crate) fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> &'a str {
     headers
         .get(name)
         .and_then(|v| v.to_str().ok())

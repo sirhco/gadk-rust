@@ -26,6 +26,7 @@ use serde_json::{Map, Value};
 
 use crate::error::{AnthropicError, ErrorKind, go_quote};
 use crate::thinking::is_thinking_enabled;
+use crate::validate::invalid_config;
 use crate::wire::{ObjectTag, ToolChoiceParam, ToolInputSchema, ToolParam};
 
 /// `LlmRequest.tools` (Go `req.Tools`, `map[string]any`); only whether it is empty matters.
@@ -38,11 +39,6 @@ fn unsupported_tool(detail: &str) -> AnthropicError {
         ErrorKind::UnsupportedToolType,
         detail,
     )
-}
-
-/// Go `fmt.Errorf("%w: <detail>", ErrInvalidConfig)`.
-fn invalid_config(detail: impl std::fmt::Display) -> AnthropicError {
-    AnthropicError::new(ErrorKind::InvalidConfig, detail)
 }
 
 /// The mode of a function-calling config as Go switches on it:
@@ -341,8 +337,8 @@ pub(crate) fn lowercase_schema_types(node: &mut Value) {
     }
 }
 
-/// [`lowercase_schema_types`] on an object node.
-fn lowercase_schema_map(map: &mut Map<String, Value>) {
+/// [`lowercase_schema_types`] on an object node (a tool or output schema root).
+pub(crate) fn lowercase_schema_map(map: &mut Map<String, Value>) {
     match map.get_mut("type") {
         Some(Value::String(t)) => *t = go_to_lower(t),
         Some(Value::Array(elems)) => {

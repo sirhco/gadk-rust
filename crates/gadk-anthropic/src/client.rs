@@ -29,8 +29,8 @@ use http::{HeaderMap, HeaderValue, Method, Uri};
 use tokio::time::Instant;
 
 use crate::error::{AnthropicError, api_error_from_response, error_chain, go_quote};
-use crate::retry::{retry_delay, should_retry, should_retry_dropped_body};
-use crate::wire::{MessageNewParams, VERTEX_ANTHROPIC_VERSION, encode_request};
+use crate::retry::{header_str, retry_delay, should_retry, should_retry_dropped_body};
+use crate::wire::{MessageNewParams, VertexBody, encode_request};
 
 /// The Anthropic backend's default base URL (SDK `WithEnvironmentProduction`).
 pub(crate) const ANTHROPIC_DEFAULT_BASE_URL: &str = "https://api.anthropic.com/";
@@ -184,14 +184,6 @@ fn body_read_error(err: ModelError) -> AnthropicError {
     AnthropicError::from_body_error(err, "error reading response body: ")
 }
 
-/// The `request-id` header, `""` when absent (Go `Header.Get`).
-pub(crate) fn request_id(headers: &HeaderMap) -> &str {
-    headers
-        .get("request-id")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-}
-
 /// A streaming body still under the attempt's deadline (SDK `bodyWithTimeout`): once the
 /// deadline passes, the next poll yields
 /// `ModelError::Other(AnthropicError::deadline_exceeded())` and the body ends (it is dropped,
@@ -293,34 +285,25 @@ impl Transport {
         Ok(h)
     }
 
-    /// The request body the SDK sends for `params` (whose `model` is set):
-    /// [`encode_request`]`(params, stream, vertex)`, except that on Vertex with a base URL whose
-    /// path the middleware does not rewrite (see [`request_url`]) `model` stays and only
+    /// The request body the SDK sends for `params` (whose `model` is set): [`encode_request`],
+    /// on Vertex dropping `model` only when the middleware rewrites the path (see
+    /// [`request_url`]); with a base URL whose path it does not rewrite `model` stays and only
     /// `,"anthropic_version":"vertex-2023-10-16"` is appended, as the SDK's middleware does.
     pub(crate) fn encode_body(
         &self,
-        params: &MessageNewParams,
+        params: MessageNewParams,
         stream: bool,
     ) -> Result<Bytes, AnthropicError> {
-        let encode =
-            |vertex| encode_request(params, stream, vertex).map_err(AnthropicError::request_failed);
-        match &self.endpoint {
-            Endpoint::Anthropic => encode(false).map(Bytes::from),
-            Endpoint::Vertex { .. } => {
-                if vertex_rewrites(&messages_url(&self.base_url)?) {
-                    return encode(true).map(Bytes::from);
-                }
-                // `encode_request` always yields a non-empty JSON object (`max_tokens` is always
-                // serialised), so the last byte is its closing `}` and the splice stays valid.
-                let mut body = encode(false)?;
-                debug_assert_eq!(body.last(), Some(&b'}'));
-                body.pop();
-                body.extend_from_slice(
-                    format!(r#","anthropic_version":"{VERTEX_ANTHROPIC_VERSION}"}}"#).as_bytes(),
-                );
-                Ok(Bytes::from(body))
+        let vertex = match &self.endpoint {
+            Endpoint::Anthropic => None,
+            Endpoint::Vertex { .. } if vertex_rewrites(&messages_url(&self.base_url)?) => {
+                Some(VertexBody::DropModel)
             }
-        }
+            Endpoint::Vertex { .. } => Some(VertexBody::KeepModel),
+        };
+        encode_request(params, stream, vertex)
+            .map(Bytes::from)
+            .map_err(AnthropicError::request_failed)
     }
 
     /// One attempt, up to the point Go's loop decides on it: send (under
@@ -425,7 +408,7 @@ impl Transport {
                     if parts.status.as_u16() >= 400 {
                         return Err(AnthropicError::api(api_error_from_response(
                             parts.status.as_u16(),
-                            request_id(&parts.headers),
+                            header_str(&parts.headers, "request-id"),
                             &bytes,
                         )));
                     }
@@ -941,7 +924,7 @@ mod tests {
             ),
         ];
         for (name, t, stream, want) in cases {
-            let got = t.encode_body(&params, stream).unwrap();
+            let got = t.encode_body(params.clone(), stream).unwrap();
             assert_eq!(std::str::from_utf8(&got).unwrap(), want, "{name}");
         }
     }
