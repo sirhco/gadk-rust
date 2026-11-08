@@ -100,7 +100,7 @@ fn go_upper_rune(c: char) -> char {
     }
 }
 
-/// Port of Go `strings.ToLower` on valid UTF-8: [`unicode.ToLower`](go_lower_rune) rune by rune,
+/// Port of Go `strings.ToLower` on valid UTF-8: `unicode.ToLower` rune by rune,
 /// with no final-sigma context. Rust's `str::to_lowercase` differs for U+0130 and a final `Σ`
 /// (Go `σ`, Rust `ς`).
 pub fn go_to_lower(s: &str) -> String {
@@ -110,7 +110,7 @@ pub fn go_to_lower(s: &str) -> String {
     s.chars().map(go_lower_rune).collect()
 }
 
-/// Port of Go `strings.ToUpper` on valid UTF-8: [`unicode.ToUpper`](go_upper_rune) rune by rune.
+/// Port of Go `strings.ToUpper` on valid UTF-8: `unicode.ToUpper` rune by rune.
 /// Rust's `str::to_uppercase` differs wherever the full mapping has several runes (`ß` → `SS`).
 pub fn go_to_upper(s: &str) -> String {
     if s.is_ascii() {
