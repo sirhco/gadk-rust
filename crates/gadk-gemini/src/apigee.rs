@@ -62,10 +62,14 @@ impl Default for ApigeeConfig {
     }
 }
 
+/// Header values and credentials in `proxy_url` are redacted.
 impl fmt::Debug for ApigeeConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ApigeeConfig")
-            .field("proxy_url", &self.proxy_url)
+            .field(
+                "proxy_url",
+                &self.proxy_url.as_deref().map(gadk_model::redact_url),
+            )
             .field(
                 "custom_headers",
                 &self.custom_headers.keys().collect::<Vec<_>>(),
@@ -307,6 +311,18 @@ mod tests {
                 .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
                 .collect::<HashMap<_, _>>(),
         ))
+    }
+
+    #[test]
+    fn apigee_config_debug_redacts_proxy_url_credentials() {
+        let cfg = ApigeeConfig {
+            proxy_url: Some("https://user:url-secret@proxy.example/apigee".into()),
+            ..ApigeeConfig::default()
+        };
+        let dbg = format!("{cfg:?}");
+        assert!(!dbg.contains("url-secret"), "{dbg}");
+        assert!(!dbg.contains("user"), "{dbg}");
+        assert!(dbg.contains("proxy.example/apigee"), "{dbg}");
     }
 
     #[test]

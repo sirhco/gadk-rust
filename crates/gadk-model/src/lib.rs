@@ -30,7 +30,7 @@ mod variant;
 pub use aggregator::StreamingResponseAggregator;
 pub use convert::llm_response_from_genai;
 pub use error::{ModelError, api_error_from_body, body_prefix};
-pub use http::{BodyStream, HttpClient, ReqwestClient, collect_body};
+pub use http::{BodyStream, HttpClient, ReqwestClient, collect_body, redact_url};
 pub use live::{LiveConnError, LiveConnErrorKind, LiveConnection, RealtimeInput};
 pub use llm::{Backend, ExtrasRequestProvider, HttpOptions, Llm, LlmRequest, LlmResponse};
 pub use registry::*;

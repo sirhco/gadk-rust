@@ -271,7 +271,7 @@ impl Default for ClientConfig {
     }
 }
 
-/// Secrets (`api_key`, `auth_token`, header values) are redacted.
+/// Secrets (`api_key`, `auth_token`, header values, credentials in `base_url`) are redacted.
 impl fmt::Debug for ClientConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ClientConfig")
@@ -281,7 +281,10 @@ impl fmt::Debug for ClientConfig {
                 "auth_token",
                 &self.auth_token.as_ref().map(|_| "<redacted>"),
             )
-            .field("base_url", &self.base_url)
+            .field(
+                "base_url",
+                &self.base_url.as_deref().map(gadk_model::redact_url),
+            )
             .field("project", &self.project)
             .field("location", &self.location)
             .field("credentials", &self.credentials.is_some())
@@ -516,10 +519,14 @@ mod tests {
         let cfg = ClientConfig {
             api_key: Some("sk-ant-secret".into()),
             auth_token: Some("tok-secret".into()),
+            base_url: Some("https://user:url-secret@proxy.example/v1".into()),
             headers,
             ..ClientConfig::default()
         };
         let dbg = format!("{cfg:?}");
+        assert!(!dbg.contains("url-secret"), "{dbg}");
+        assert!(!dbg.contains("user"), "{dbg}");
+        assert!(dbg.contains("proxy.example/v1"), "{dbg}");
         assert!(!dbg.contains("sk-ant-secret"), "{dbg}");
         assert!(!dbg.contains("tok-secret"), "{dbg}");
         assert!(!dbg.contains("hdr-secret"), "{dbg}");

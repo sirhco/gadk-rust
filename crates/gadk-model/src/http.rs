@@ -82,3 +82,43 @@ pub async fn collect_body(mut body: BodyStream) -> Result<Bytes, ModelError> {
     }
     Ok(buf.freeze())
 }
+
+/// `url` for `Debug` output: credentials embedded in it (`https://user:secret@host`) are
+/// removed; a URL without user info is returned as it is, and one that does not parse (or whose
+/// user info cannot be removed) becomes `<redacted>`.
+pub fn redact_url(url: &str) -> String {
+    let Ok(mut parsed) = reqwest::Url::parse(url) else {
+        return "<redacted>".to_string();
+    };
+    if parsed.username().is_empty() && parsed.password().is_none() {
+        return url.to_string();
+    }
+    if parsed.set_username("").is_err() || parsed.set_password(None).is_err() {
+        return "<redacted>".to_string();
+    }
+    parsed.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::redact_url;
+
+    #[test]
+    fn redact_url_removes_user_info() {
+        assert_eq!(
+            redact_url("https://user:secret@proxy.example/v1"),
+            "https://proxy.example/v1"
+        );
+        assert_eq!(
+            redact_url("https://token@proxy.example"),
+            "https://proxy.example/"
+        );
+        assert_eq!(
+            redact_url("https://:secret@proxy.example/"),
+            "https://proxy.example/"
+        );
+        // No user info: unchanged (not normalized).
+        assert_eq!(redact_url("https://proxy.example"), "https://proxy.example");
+        assert_eq!(redact_url("not a url user:secret@"), "<redacted>");
+    }
+}
