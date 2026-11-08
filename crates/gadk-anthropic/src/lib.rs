@@ -19,35 +19,19 @@
 //! [`AnthropicModel::new`] builds an [`Llm`](gadk_model::Llm) from a model name
 //! (`claude-…`, `anthropic/claude-…`, or a Vertex resource name) and a [`ClientConfig`].
 
-// D1: until Task 8 joins the modules, most crate-internal items have no caller outside their
-// own tests. Task 13 removes these `dead_code` allows.
-#[allow(dead_code)]
 mod cache;
-#[allow(dead_code)]
 mod client;
-#[allow(dead_code)]
 mod config;
-#[allow(dead_code)]
 mod error;
-#[allow(dead_code)]
 mod model;
-#[allow(dead_code)]
 mod request;
-#[allow(dead_code)]
 mod response;
-#[allow(dead_code)]
 mod retry;
-#[allow(dead_code)]
 mod stream;
-#[allow(dead_code)]
 mod thinking;
-#[allow(dead_code)]
 mod tool_id;
-#[allow(dead_code)]
 mod tools;
-#[allow(dead_code)]
 mod validate;
-#[allow(dead_code)]
 mod wire;
 
 pub use config::{
