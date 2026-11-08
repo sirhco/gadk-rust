@@ -120,8 +120,9 @@ async fn missing_credentials_fails() {
 /// Go `t.Run("canceled_context_fails")`.
 ///
 /// parity: adapted: `AnthropicModel::new` takes no context; cancellation is by drop (plan
-/// D11). A `new` future dropped before its first poll builds nothing and sends nothing, and a
-/// `generate_content` stream dropped before its first poll sends no request.
+/// D11). A `new` future and a `generate_content` stream, each dropped before its first poll,
+/// send no request even after spawned work has had a chance to run (`settle`), so an eager
+/// `tokio::spawn` of the send would be caught.
 async fn canceled_context_fails() {
     let client = ScriptedClient::json(ok_reply());
     let cfg = ClientConfig {
@@ -131,11 +132,23 @@ async fn canceled_context_fails() {
         ..Default::default()
     };
     drop(AnthropicModel::new(MODEL, cfg.clone()));
+    settle().await;
     assert_eq!(client.hits(), 0, "canceled_context_fails: dropped NewModel");
 
     let m = new_model(MODEL, cfg).await;
     drop(m.generate_content(text_request("hi"), false));
+    settle().await;
     assert_eq!(client.hits(), 0, "canceled_context_fails: dropped stream");
+}
+
+/// Lets any work spawned by the code under test run before a "nothing was sent" check: on the
+/// test's current-thread runtime, yielding hands the scheduler to every queued task, and the
+/// short real-time sleep covers spawned work that itself awaits before sending.
+async fn settle() {
+    for _ in 0..16 {
+        tokio::task::yield_now().await;
+    }
+    tokio::time::sleep(Duration::from_millis(20)).await;
 }
 
 /// Go `t.Run("env_api_key_and_precedence")`.
