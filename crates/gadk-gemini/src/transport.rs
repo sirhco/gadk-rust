@@ -23,6 +23,7 @@ use bytes::Bytes;
 use futures::stream::BoxStream;
 use futures::{StreamExt, TryStreamExt};
 use gadk_genai::GenerateContentResponse;
+use gadk_model::sse::sse_events;
 use gadk_model::{
     Backend, BodyStream, HttpClient, HttpOptions, ModelError, api_error_from_body, body_prefix,
     collect_body,
@@ -32,7 +33,6 @@ use serde_json::{Map, Value};
 
 use crate::auth::auth_headers;
 use crate::config::ResolvedConfig;
-use crate::sse::sse_events;
 
 /// Port of genai `tModel` plus the Vertex AI `projects/{p}/locations/{l}/` prefix that
 /// genai `createAPIURL` adds: the request path below the API version.
@@ -333,7 +333,7 @@ impl Transport {
         .try_flatten();
         let mut failed = false;
         events
-            .map(move |event| event.and_then(|data| decode_response(backend, data.as_bytes())))
+            .map(move |event| event.and_then(|ev| decode_response(backend, ev.data.as_bytes())))
             .take_while(move |item| {
                 let keep = !failed;
                 failed |= item.is_err();

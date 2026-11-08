@@ -14,8 +14,9 @@
 // limitations under the License.
 
 //! gadk-platform: overridable time, UUID and task-execution seams (port of ADK-Go platform/),
-//! and the ADK tracking header value.
+//! the ADK tracking header value, and the injectable environment ([`env`](mod@env)).
 
+pub mod env;
 mod exec;
 mod time;
 mod tracking;

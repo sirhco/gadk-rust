@@ -13,7 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! gadk-model: the LLM abstraction and model registry.
+//! gadk-model: the LLM abstraction, the model registry, the HTTP seam and the shared SSE parser
+//! ([`sse`]).
 
 mod aggregator;
 mod convert;
@@ -23,6 +24,7 @@ mod jsonpath;
 mod live;
 mod llm;
 mod registry;
+pub mod sse;
 mod variant;
 
 pub use aggregator::StreamingResponseAggregator;
