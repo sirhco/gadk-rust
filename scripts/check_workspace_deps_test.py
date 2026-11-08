@@ -102,6 +102,20 @@ class EdgeTest(unittest.TestCase):
         errs = cwd.check(self.repo)
         self.assertTrue(any("gadk -> gadk-mcp is missing" in e for e in errs), errs)
 
+    def test_anthropic_edges_are_exactly_genai_model_platform(self):
+        self.assertEqual(cwd.ALLOWED["gadk-anthropic"], {"gadk-genai", "gadk-model", "gadk-platform"})
+        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-anthropic" in deps], ["gadk"])
+
+    def test_anthropic_normal_dependency_on_gemini_is_rejected(self):
+        self.edit("gadk-anthropic", "[dependencies]\n", "[dependencies]\ngadk-gemini = { workspace = true }\n")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-anthropic -> gadk-gemini is not allowed" in e for e in errs), errs)
+
+    def test_facade_missing_anthropic_edge_is_rejected(self):
+        self.edit("gadk", "gadk-anthropic = { workspace = true, optional = true }\n", "")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk -> gadk-anthropic is missing" in e for e in errs), errs)
+
     def test_disallowed_normal_edge_is_rejected(self):
         self.edit("gadk-artifact", "[dependencies]\n", "[dependencies]\ngadk-session = { workspace = true }\n")
         errs = cwd.check(self.repo)
