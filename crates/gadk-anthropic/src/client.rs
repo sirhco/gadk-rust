@@ -191,7 +191,7 @@ fn body_read_error(err: ModelError) -> AnthropicError {
 }
 
 /// The `request-id` header, `""` when absent (Go `Header.Get`).
-fn request_id(headers: &HeaderMap) -> &str {
+pub(crate) fn request_id(headers: &HeaderMap) -> &str {
     headers
         .get("request-id")
         .and_then(|v| v.to_str().ok())
