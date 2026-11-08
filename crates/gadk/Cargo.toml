@@ -13,9 +13,10 @@ autoexamples = false
 workspace = true
 
 [features]
-default = ["gemini", "gcp"]
+default = ["gemini", "gcp", "mcp"]
 gemini = ["dep:gadk-gemini"]
 gcp = ["gadk-auth/gcp"]
+mcp = ["dep:gadk-mcp"]
 
 [dependencies]
 gadk-genai = { workspace = true }
@@ -30,6 +31,7 @@ gadk-engine = { workspace = true }
 gadk-tools = { workspace = true }
 # The root pin has default-features = false, so `gcp` is the façade's choice.
 gadk-auth = { workspace = true }
+gadk-mcp = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
@@ -40,6 +42,11 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 schemars = { workspace = true }
 pretty_assertions = { workspace = true }
+# The MCP tests replay Gemini recordings (gemini_test_model) against in-process MCP servers
+# (gadk_mcp::testutil); the mcp example builds its weather server with rmcp's macros.
+gadk-engine = { workspace = true, features = ["testutil"] }
+gadk-mcp = { workspace = true, features = ["testutil"] }
+rmcp = { workspace = true, features = ["server", "macros"] }
 
 [[example]]
 name = "quickstart"
@@ -87,3 +94,7 @@ required-features = ["gemini"]
 [[example]]
 name = "skills"
 required-features = ["gemini"]
+
+[[example]]
+name = "mcp"
+required-features = ["gemini", "mcp"]

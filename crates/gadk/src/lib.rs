@@ -28,6 +28,10 @@ pub use gadk_engine as engine;
 #[cfg(feature = "gemini")]
 pub use gadk_gemini as gemini;
 pub use gadk_genai as genai;
+/// Model Context Protocol tools: the tools of an MCP server as a toolset (feature `mcp`, on by
+/// default; re-export of `gadk-mcp`).
+#[cfg(feature = "mcp")]
+pub use gadk_mcp as mcp;
 pub use gadk_memory as memory;
 pub use gadk_model as model;
 pub use gadk_platform as platform;

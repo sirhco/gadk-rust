@@ -13,15 +13,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! gadk-platform: overridable time, UUID and task-execution seams (port of ADK-Go platform/).
+//! gadk-platform: overridable time, UUID and task-execution seams (port of ADK-Go platform/),
+//! and the ADK tracking header value.
 
 mod exec;
 mod time;
+mod tracking;
 mod uuid;
 
 pub use exec::{TaskRunner, TokioTaskRunner};
 pub use futures::future::BoxFuture;
 pub use time::TimeProvider;
+pub use tracking::tracking_header;
 pub use uuid::UuidProvider;
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
