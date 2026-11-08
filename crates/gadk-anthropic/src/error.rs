@@ -406,25 +406,6 @@ pub(crate) fn api_error_from_response(
     build_api_error(status, &error_type, &request_id, &message)
 }
 
-/// Go `classifyError`'s fallback for a mid-stream error that reached it as text: the JSON from
-/// the first `{` on, when it decodes as an error envelope with an error type or with
-/// `"type":"error"`, gives an [`ApiError`] with status 0 (mapped by [`build_api_error`]).
-pub(crate) fn sniff_error_envelope(msg: &str) -> Option<ApiError> {
-    let idx = msg.find('{')?;
-    let raw = msg[idx..].trim();
-    let v: Value = serde_json::from_str(raw).ok()?;
-    let env = parse_envelope(&v)?;
-    if env.error_type.is_empty() && env.envelope_type != "error" {
-        return None;
-    }
-    Some(build_api_error(
-        0,
-        &env.error_type,
-        &env.request_id,
-        &env.error_message,
-    ))
-}
-
 /// Go `buildAPIError`: the sentinel from the status or the error type, and a status filled in
 /// when the response had none (0) or was 200 (a mid-stream event).
 pub(crate) fn build_api_error(
@@ -766,28 +747,6 @@ mod tests {
                 ErrorKind::Authentication
             )
         );
-    }
-
-    #[test]
-    fn sniff_error_envelope_ports_classify_errors_fallback() {
-        let e = sniff_error_envelope(
-            r#"received error while streaming: {"type":"error","request_id":"r","error":{"type":"overloaded_error","message":"m"}}"#,
-        );
-        assert_eq!(
-            e,
-            Some(api(
-                529,
-                "overloaded_error",
-                "r",
-                "m",
-                ErrorKind::Overloaded
-            ))
-        );
-        let e = sniff_error_envelope(r#"x {"type":"error"}"#);
-        assert_eq!(e, Some(api(500, "", "", "", ErrorKind::ApiStatus)));
-        assert_eq!(sniff_error_envelope(r#"x {"type":"message"}"#), None);
-        assert_eq!(sniff_error_envelope("no json here"), None);
-        assert_eq!(sniff_error_envelope("bad {json"), None);
     }
 
     #[test]
