@@ -338,6 +338,15 @@ pub(crate) fn stream_responses(
         acc: Option<StreamAccumulator>,
         pending: VecDeque<LlmResponse>,
     }
+    impl State {
+        /// Ends the stream after an error and drops the body now, as Go's deferred
+        /// `stream.Close()` does when `generateStreaming` returns, not when the caller drops
+        /// the stream.
+        fn release(&mut self) {
+            self.acc = None;
+            self.events = futures::stream::empty().boxed();
+        }
+    }
     let state = State {
         events: sse_events(body),
         acc: Some(StreamAccumulator::new(unwrap_output, status, &request_id)),
@@ -353,12 +362,12 @@ pub(crate) fn stream_responses(
                 Some(Ok(event)) => match acc.push(event) {
                     Ok(partials) => st.pending.extend(partials),
                     Err(err) => {
-                        st.acc = None;
+                        st.release();
                         return Some((Err(err), st));
                     }
                 },
                 Some(Err(err)) => {
-                    st.acc = None;
+                    st.release();
                     return Some((Err(AnthropicError::from_model_error(err)), st));
                 }
                 None => {
@@ -383,6 +392,8 @@ mod tests {
     use gadk_model::ModelError;
     use pretty_assertions::assert_eq;
     use serde_json::{Value, json};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     /// An SSE body of `chunks` (each one body chunk).
     fn body(chunks: &[&str]) -> BodyStream {
@@ -1066,6 +1077,53 @@ mod tests {
             err.to_string(),
             "anthropicmodel: transport error: connection reset"
         );
+    }
+
+    /// Go closes the body as soon as `generateStreaming` returns: the stream drops the body on
+    /// its first error, while the caller still holds the stream.
+    #[tokio::test]
+    async fn error_releases_the_body_immediately() {
+        struct DropFlag(Arc<AtomicBool>);
+        impl Drop for DropFlag {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+        let cases: [(&str, Result<Bytes, ModelError>); 3] = [
+            (
+                "error_event",
+                Ok(Bytes::from_static(
+                    b"event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"x\"}}\n\n",
+                )),
+            ),
+            (
+                "undecodable_event",
+                Ok(Bytes::from_static(b"event: message_start\ndata: {\n\n")),
+            ),
+            (
+                "body_error",
+                Err(ModelError::Transport(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::ConnectionReset,
+                    "connection reset",
+                )))),
+            ),
+        ];
+        for (name, chunk) in cases {
+            let dropped = Arc::new(AtomicBool::new(false));
+            let guard = DropFlag(Arc::clone(&dropped));
+            // The body never ends after the first chunk, like a live connection.
+            let body = futures::stream::iter([chunk])
+                .chain(futures::stream::pending())
+                .map(move |item| {
+                    let _ = &guard;
+                    item
+                })
+                .boxed();
+            let mut stream = stream_responses(body, false, 200, String::new());
+            assert!(stream.next().await.unwrap().is_err(), "{name}");
+            assert!(dropped.load(Ordering::SeqCst), "{name}: body still held");
+            assert!(stream.next().await.is_none(), "{name}");
+        }
     }
 
     #[tokio::test]

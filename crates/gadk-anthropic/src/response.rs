@@ -67,27 +67,108 @@ pub(crate) fn decode_message(content_type: &str, body: &[u8]) -> Result<Message,
     }
 }
 
-/// The media type of Go `mime.ParseMediaType` (lowercased, parameters dropped), or `""` when
-/// it is not `type[/subtype]` of MIME token characters. Parameters are not validated.
+/// The media type of Go `mime.ParseMediaType` as the SDK reads it (the error is ignored):
+/// lowercased, parameters dropped, or `""` when it is not `type[/subtype]` of MIME token
+/// characters or when a parameter name repeats with a different value (Go
+/// `errDuplicateParamName`). A malformed parameter ends parsing and keeps the media type (Go
+/// `ErrInvalidMediaParameter`); parameter values are otherwise unused.
 fn media_type(content_type: &str) -> String {
-    let media = content_type
-        .split(';')
-        .next()
-        .unwrap_or_default()
-        .trim()
-        .to_ascii_lowercase();
+    let (base, mut rest) = match content_type.find(';') {
+        Some(i) => content_type.split_at(i),
+        None => (content_type, ""),
+    };
+    let media = base.to_lowercase().trim().to_string();
     let valid = match media.split_once('/') {
         Some((kind, sub)) => is_mime_token(kind) && is_mime_token(sub),
         None => is_mime_token(&media),
     };
-    if valid { media } else { String::new() }
+    if !valid {
+        return String::new();
+    }
+    let mut params: HashMap<String, Vec<u8>> = HashMap::new();
+    loop {
+        rest = rest.trim_start();
+        if rest.is_empty() {
+            break;
+        }
+        let Some((key, value, after)) = consume_media_param(rest) else {
+            // A trailing `;` is not an error; anything else is ErrInvalidMediaParameter, which
+            // keeps the media type.
+            break;
+        };
+        match params.get(&key) {
+            Some(prev) if *prev != value => return String::new(),
+            _ => {}
+        }
+        params.insert(key, value);
+        rest = after;
+    }
+    media
 }
 
-/// Go `mime` `isToken`: non-empty, every byte printable ASCII and not a tspecial.
+/// Go `mime` `consumeToken`: the leading run of token bytes and the rest.
+fn consume_token(v: &str) -> (&str, &str) {
+    let end = v
+        .bytes()
+        .position(|b| !is_mime_token_byte(b))
+        .unwrap_or(v.len());
+    v.split_at(end)
+}
+
+/// Go `mime` `consumeValue`: a token or a quoted string (with Go's MSIE-tolerant escapes);
+/// `None` when no value can be read (Go's `value == "" && rest2 == rest`).
+fn consume_value(v: &str) -> Option<(Vec<u8>, &str)> {
+    if !v.starts_with('"') {
+        let (token, rest) = consume_token(v);
+        return (!token.is_empty()).then(|| (token.as_bytes().to_vec(), rest));
+    }
+    let bytes = v.as_bytes();
+    let mut value = Vec::new();
+    let mut i = 1;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'"' {
+            return Some((value, &v[i + 1..]));
+        }
+        if b == b'\\' && i + 1 < bytes.len() && is_tspecial(bytes[i + 1]) {
+            value.push(bytes[i + 1]);
+            i += 2;
+            continue;
+        }
+        if b == b'\r' || b == b'\n' {
+            return None;
+        }
+        value.push(b);
+        i += 1;
+    }
+    None
+}
+
+/// Go `mime` `consumeMediaParam`: `; name=value` with the name lowercased, or `None`.
+fn consume_media_param(v: &str) -> Option<(String, Vec<u8>, &str)> {
+    let rest = v.trim_start().strip_prefix(';')?.trim_start();
+    let (name, rest) = consume_token(rest);
+    if name.is_empty() {
+        return None;
+    }
+    let rest = rest.trim_start().strip_prefix('=')?.trim_start();
+    let (value, rest) = consume_value(rest)?;
+    Some((name.to_ascii_lowercase(), value, rest))
+}
+
+/// Go `mime` `isTSpecial`.
+fn is_tspecial(b: u8) -> bool {
+    b"()<>@,;:\\\"/[]?=".contains(&b)
+}
+
+/// Go `mime` `isTokenChar`.
+fn is_mime_token_byte(b: u8) -> bool {
+    b > 0x20 && b < 0x7f && !is_tspecial(b)
+}
+
+/// Go `mime` `isToken`: non-empty, every byte a token character.
 fn is_mime_token(s: &str) -> bool {
-    !s.is_empty()
-        && s.bytes()
-            .all(|b| b > 0x20 && b < 0x7f && !b"()<>@,;:\\\"/[]?=".contains(&b))
+    !s.is_empty() && s.bytes().all(is_mime_token_byte)
 }
 
 /// Go `convertMessageToLLMResponse`: role `model`, the converted blocks (tool use dropped when
@@ -229,7 +310,7 @@ pub(crate) fn map_stop_reason(stop_reason: &str) -> (FinishReason, String) {
 
 /// Go `extractUsageMetadata`: the usage metadata and the cache creation token count.
 ///
-/// Counts are clamped at 0; thinking tokens (when the response reports them) are capped at the
+/// Counts are clamped at 0 and summed with wrapping, as Go's `int64` sums; thinking tokens (when the response reports them) are capped at the
 /// output tokens and excluded from the candidates count. The `int32` conversions wrap as Go's
 /// do.
 pub(crate) fn extract_usage_metadata(usage: &Usage) -> (GenerateContentResponseUsageMetadata, i64) {
@@ -238,7 +319,10 @@ pub(crate) fn extract_usage_metadata(usage: &Usage) -> (GenerateContentResponseU
     let cache_create = usage.cache_creation_input_tokens.max(0);
     let output_tokens = usage.output_tokens.max(0);
 
-    let prompt_total = input_tokens + cache_read + cache_create;
+    // Go's int64 sums wrap; so do these (no panic on absurd server counts).
+    let prompt_total = input_tokens
+        .wrapping_add(cache_read)
+        .wrapping_add(cache_create);
 
     let thinking_tokens = usage
         .output_tokens_details
@@ -252,7 +336,7 @@ pub(crate) fn extract_usage_metadata(usage: &Usage) -> (GenerateContentResponseU
         GenerateContentResponseUsageMetadata {
             prompt_token_count: prompt_total as i32,
             candidates_token_count: candidates_tokens as i32,
-            total_token_count: (prompt_total + output_tokens) as i32,
+            total_token_count: prompt_total.wrapping_add(output_tokens) as i32,
             cached_content_token_count: cache_read as i32,
             thoughts_token_count: thinking_tokens as i32,
             ..GenerateContentResponseUsageMetadata::default()
@@ -602,6 +686,35 @@ mod tests {
         );
     }
 
+    /// Go's `int64` sums wrap (no panic on absurd server counts), then `int32()` truncates.
+    #[test]
+    fn usage_sums_wrap_like_go() {
+        let usage = Usage {
+            input_tokens: i64::MAX,
+            cache_read_input_tokens: 2,
+            cache_creation_input_tokens: 3,
+            output_tokens: 10,
+            output_tokens_details: None,
+        };
+        let (meta, cache_create) = extract_usage_metadata(&usage);
+        assert_eq!(cache_create, 3);
+        // i64::MAX + 5 wraps to i64::MIN + 4, whose low 32 bits are 4.
+        assert_eq!(meta.prompt_token_count, 4);
+        assert_eq!(meta.total_token_count, 14);
+        assert_eq!(meta.cached_content_token_count, 2);
+        assert_eq!(meta.candidates_token_count, 10);
+
+        let output_overflow = Usage {
+            input_tokens: 1,
+            output_tokens: i64::MAX,
+            ..Usage::default()
+        };
+        let meta = extract_usage_metadata(&output_overflow).0;
+        assert_eq!(meta.prompt_token_count, 1);
+        assert_eq!(meta.total_token_count, 0);
+        assert_eq!(meta.candidates_token_count, -1);
+    }
+
     #[test]
     fn cache_creation_tokens_metadata() {
         let m = msg(
@@ -643,6 +756,38 @@ mod tests {
             "",
             "text/plain; charset=utf-8",
             "application/json/x",
+        ] {
+            let err = decode_message(ct, body).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                format!(
+                    "anthropicmodel: request failed: expected destination type of 'string' or '[]byte' for responses with content-type '{ct}' that is not 'application/json'"
+                ),
+                "{ct}"
+            );
+        }
+    }
+
+    /// Go `mime.ParseMediaType` returns `""` for a repeated parameter name with a different
+    /// value (names compare case-insensitively); equal repeats, a parse error before the repeat
+    /// and a trailing `;` keep the media type.
+    #[test]
+    fn decode_message_duplicate_params_follow_go() {
+        let body = br#"{"model":"m","content":[]}"#;
+        for ct in [
+            "application/json; charset=a; charset=a",
+            "application/json; charset=\"a\"; charset=a",
+            "application/json; charset=a; garbage; charset=b",
+            "application/json; charset=a; charset*=b",
+            "application/json;",
+            "application/json; charset=utf-8;",
+        ] {
+            assert_eq!(decode_message(ct, body).unwrap().model, "m", "{ct}");
+        }
+        for ct in [
+            "application/json; charset=a; charset=b",
+            "application/json; Charset=a; CHARSET=b",
+            "application/json;charset=a;x=1;charset=\"b\"",
         ] {
             let err = decode_message(ct, body).unwrap_err();
             assert_eq!(
