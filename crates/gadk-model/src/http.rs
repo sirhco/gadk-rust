@@ -84,12 +84,17 @@ pub async fn collect_body(mut body: BodyStream) -> Result<Bytes, ModelError> {
 }
 
 /// `url` for `Debug` output: credentials embedded in it (`https://user:secret@host`) are
-/// removed; a URL without user info is returned as it is, and one that does not parse (or whose
-/// user info cannot be removed) becomes `<redacted>`.
+/// removed; a URL without user info is returned as it is, and one that does not parse, has no
+/// host but contains `@`, or whose user info cannot be removed becomes `<redacted>`.
 pub fn redact_url(url: &str) -> String {
     let Ok(mut parsed) = reqwest::Url::parse(url) else {
         return "<redacted>".to_string();
     };
+    // Without an authority, an `@` may be user info the parser did not recognise (e.g.
+    // `user:secret@host` parses as scheme `user`), so the whole value is withheld.
+    if !parsed.has_host() && url.contains('@') {
+        return "<redacted>".to_string();
+    }
     if parsed.username().is_empty() && parsed.password().is_none() {
         return url.to_string();
     }
@@ -120,5 +125,8 @@ mod tests {
         // No user info: unchanged (not normalized).
         assert_eq!(redact_url("https://proxy.example"), "https://proxy.example");
         assert_eq!(redact_url("not a url user:secret@"), "<redacted>");
+        // Scheme-less user info parses as scheme `user` with no authority.
+        assert_eq!(redact_url("user:secret@proxy.example:8080"), "<redacted>");
+        assert_eq!(redact_url("user:secret@proxy.example/v1"), "<redacted>");
     }
 }
