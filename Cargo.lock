@@ -720,11 +720,13 @@ dependencies = [
  "async-trait",
  "futures",
  "gadk-agent",
+ "gadk-anthropic",
  "gadk-artifact",
  "gadk-auth",
  "gadk-engine",
  "gadk-gemini",
  "gadk-genai",
+ "gadk-httprr",
  "gadk-mcp",
  "gadk-memory",
  "gadk-model",
@@ -764,6 +766,35 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "gadk-anthropic"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "bytes",
+ "chrono",
+ "futures",
+ "gadk-genai",
+ "gadk-httprr",
+ "gadk-model",
+ "gadk-platform",
+ "google-cloud-auth",
+ "http",
+ "hyper",
+ "hyper-util",
+ "pretty_assertions",
+ "rand",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "url",
 ]
 
 [[package]]

@@ -17,6 +17,8 @@ default = ["gemini", "gcp", "mcp"]
 gemini = ["dep:gadk-gemini"]
 gcp = ["gadk-auth/gcp"]
 mcp = ["dep:gadk-mcp"]
+# Claude models (gadk-anthropic); not in `default`.
+anthropic = ["dep:gadk-anthropic"]
 
 [dependencies]
 gadk-genai = { workspace = true }
@@ -32,6 +34,7 @@ gadk-tools = { workspace = true }
 # The root pin has default-features = false, so `gcp` is the façade's choice.
 gadk-auth = { workspace = true }
 gadk-mcp = { workspace = true, optional = true }
+gadk-anthropic = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
@@ -47,6 +50,8 @@ pretty_assertions = { workspace = true }
 gadk-engine = { workspace = true, features = ["testutil"] }
 gadk-mcp = { workspace = true, features = ["testutil"] }
 rmcp = { workspace = true, features = ["server", "macros"] }
+# The anthropic runner test replays a Go httprr recording.
+gadk-httprr = { workspace = true }
 
 [[example]]
 name = "quickstart"
@@ -98,3 +103,11 @@ required-features = ["gemini"]
 [[example]]
 name = "mcp"
 required-features = ["gemini", "mcp"]
+
+[[example]]
+name = "anthropic"
+required-features = ["anthropic"]
+
+[[test]]
+name = "model_anthropicmodel_agent_runner"
+required-features = ["anthropic"]
