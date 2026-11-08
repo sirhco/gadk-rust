@@ -49,7 +49,7 @@ use serde_json::json;
 
 use crate::harness::{
     FakeResponse, FakeServer, MODEL, SAMPLE_PNG_1X1, anthropic_config, anthropic_error, generate,
-    new_model, sse_event, sse_lines, text_request,
+    generate_err_in, generate_last_in, new_model, sse_event, sse_lines, text_request,
 };
 
 /// Go `ErrInvalidConfig.Error()`.
@@ -136,11 +136,7 @@ async fn stop_reason_mapping_without_error_code() {
         ));
         let m = new_model(MODEL, anthropic_config(&srv.url())).await;
 
-        let mut items = generate(m.as_ref(), text_request("hi"), false).await;
-        let got = match items.pop() {
-            Some(Ok(resp)) => resp,
-            other => panic!("{case}: GenerateContent() = {other:?}"),
-        };
+        let got = generate_last_in(&case, m.as_ref(), text_request("hi"), false).await;
         assert_eq!(
             got.finish_reason,
             Some(tc.want_finish),
@@ -307,12 +303,13 @@ async fn http_status_and_midstream_sse_errors() {
         )
         .await;
 
-        let got_err = generate(m.as_ref(), text_request("SECRET_PROMPT_TEXT"), tc.sse)
-            .await
-            .into_iter()
-            .filter_map(Result::err)
-            .next_back()
-            .unwrap_or_else(|| panic!("{case}: GenerateContent() yielded no error"));
+        let got_err = generate_err_in(
+            &case,
+            m.as_ref(),
+            text_request("SECRET_PROMPT_TEXT"),
+            tc.sse,
+        )
+        .await;
         let err = anthropic_error(&got_err);
         assert!(
             err.is(tc.want_sentinel),
@@ -996,12 +993,7 @@ async fn non_streaming_max_tokens_omits_incomplete_tool_use_and_keeps_text() {
     );
     let m = new_model(MODEL, anthropic_config(&srv.url())).await;
 
-    let got = generate(m.as_ref(), text_request("hi"), false)
-        .await
-        .into_iter()
-        .map(|item| item.unwrap_or_else(|e| panic!("{case}: GenerateContent() error = {e}")))
-        .next_back();
-    let got = got.unwrap_or_else(|| panic!("{case}: got = None, want FinishReasonMaxTokens"));
+    let got = generate_last_in(case, m.as_ref(), text_request("hi"), false).await;
     assert_eq!(
         got.finish_reason,
         Some(FinishReason::MaxTokens),

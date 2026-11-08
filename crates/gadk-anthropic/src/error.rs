@@ -264,6 +264,10 @@ impl AnthropicError {
     /// - [`ModelError::Transport`] (no response) becomes a transport error, with the URL removed
     ///   from a `reqwest::Error` and the source chain joined with `": "`;
     /// - anything else becomes `anthropicmodel: request failed: <err>`.
+    ///
+    /// Not ported (ruling R-g): Go's fallback that decodes an error envelope from the text of
+    /// an arbitrary error (`strings.Index(msg, "{")`); gadk classifies a mid-stream `error`
+    /// event directly from its JSON instead.
     pub(crate) fn from_model_error(err: ModelError) -> Self {
         match err {
             ModelError::Other(boxed) => match boxed.downcast::<AnthropicError>() {

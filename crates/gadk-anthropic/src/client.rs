@@ -166,7 +166,8 @@ fn sensitive_value(name: &str, value: &str) -> Result<HeaderValue, AnthropicErro
     Ok(v)
 }
 
-/// The credentials' headers (Go's `oauth2.Transport`); a failure is a transport error.
+/// The credentials' headers (Go's `oauth2.Transport`); a failure is a transport error whose
+/// detail is google-cloud-auth's error text (Go's is `oauth2`'s), a ledgered divergence.
 async fn credential_headers(credentials: &Credentials) -> Result<HeaderMap, AnthropicError> {
     match credentials.headers(http::Extensions::new()).await {
         Ok(CacheableResource::New { data, .. }) => Ok(data),
@@ -236,6 +237,8 @@ pub(crate) struct Transport {
     pub(crate) max_retries: u32,
     /// A timeout on each `HttpClient::send` (until the response headers):
     /// [`DEFAULT_RESPONSE_HEADER_TIMEOUT`] when gadk built the client, `None` for a custom one.
+    /// It also covers connecting and writing the request (Go's `ResponseHeaderTimeout` starts
+    /// once the request is written); the credential fetch before `send` is outside it, as in Go.
     pub(crate) response_header_timeout: Option<Duration>,
 }
 
@@ -243,9 +246,10 @@ impl Transport {
     /// The headers of one attempt, in Go's precedence (a later step replaces an earlier one's
     /// values for the same name):
     /// 1. `Accept: application/json`, `Anthropic-Version`, `Content-Type: application/json`;
-    /// 2. Anthropic: `x-api-key` and/or `Authorization: Bearer` (SDK `WithAPIKey` /
-    ///    `WithAuthToken`); Vertex: `x-goog-api-client` and `user-agent` set to
-    ///    `gadk_platform::tracking_header()`;
+    /// 2. `user-agent` set to `gadk_platform::tracking_header()` (Go's `net/http` sends
+    ///    `Go-http-client/1.1`); Anthropic: `x-api-key` and/or `Authorization: Bearer` (SDK
+    ///    `WithAPIKey` / `WithAuthToken`); Vertex: `x-goog-api-client` set to the tracking value
+    ///    too;
     /// 3. [`headers`](Self::headers) (Go's `option.WithHeader`, applied after the above);
     /// 4. Vertex: the credentials' headers, fetched now (Go's `oauth2.Transport` sets
     ///    `Authorization` on the outgoing request last).
@@ -257,6 +261,9 @@ impl Transport {
             HeaderValue::from_static(ANTHROPIC_VERSION),
         );
         h.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        let tracking = HeaderValue::from_str(&gadk_platform::tracking_header())
+            .map_err(|e| AnthropicError::transport(e.to_string()))?;
+        h.insert(USER_AGENT, tracking.clone());
         match &self.auth {
             Auth::Anthropic {
                 api_key,
@@ -274,10 +281,7 @@ impl Transport {
                 h.extend(self.headers.clone());
             }
             Auth::Vertex(credentials) => {
-                let tracking = HeaderValue::from_str(&gadk_platform::tracking_header())
-                    .map_err(|e| AnthropicError::transport(e.to_string()))?;
-                h.insert("x-goog-api-client", tracking.clone());
-                h.insert(USER_AGENT, tracking);
+                h.insert("x-goog-api-client", tracking);
                 h.extend(self.headers.clone());
                 h.extend(credential_headers(credentials).await?);
             }
@@ -857,6 +861,8 @@ mod tests {
 
     #[test]
     fn request_url_rejects_an_unparsable_base_url() {
+        // The text is gadk's (shaped like the SDK's `WithBaseURL` error): Go's url.Parse accepts
+        // "not a url" as a relative URL, so Go has no counterpart for this input.
         let err = request_url("not a url", &Endpoint::Anthropic, "m", false).unwrap_err();
         assert_eq!(
             err.to_string(),
@@ -965,8 +971,11 @@ mod tests {
                 auth_token: auth_token.map(str::to_string),
             };
             let got = t.request_headers().await.unwrap();
+            let tracking = gadk_platform::tracking_header();
             let mut want = BASE_HEADERS.to_vec();
             want.extend_from_slice(auth);
+            // gadk's User-Agent (Go's net/http sends `Go-http-client/1.1`).
+            want.push(("user-agent", tracking.as_str()));
             assert_eq!(sorted(&got), pairs(&want), "{name}");
             for name in ["x-api-key", "authorization"] {
                 if let Some(v) = got.get(name) {
@@ -985,6 +994,8 @@ mod tests {
         t.headers.append("x-extra", HeaderValue::from_static("b"));
         t.headers
             .append("x-api-key", HeaderValue::from_static("override"));
+        t.headers
+            .insert(USER_AGENT, HeaderValue::from_static("mine"));
         let got = t.request_headers().await.unwrap();
         assert_eq!(
             sorted(&got),
@@ -992,6 +1003,7 @@ mod tests {
                 ("accept", "application/json"),
                 ("anthropic-version", "2099-01-01"),
                 ("content-type", "application/json"),
+                ("user-agent", "mine"),
                 ("x-api-key", "override"),
                 ("x-extra", "a"),
                 ("x-extra", "b"),

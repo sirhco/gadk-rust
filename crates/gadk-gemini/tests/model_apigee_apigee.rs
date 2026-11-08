@@ -43,6 +43,7 @@ struct RoundTripFunc {
     content_type: &'static str,
     body: &'static str,
     urls: Mutex<Vec<String>>,
+    headers: Mutex<Vec<http::HeaderMap>>,
 }
 
 impl RoundTripFunc {
@@ -52,6 +53,7 @@ impl RoundTripFunc {
             content_type,
             body,
             urls: Mutex::new(Vec::new()),
+            headers: Mutex::new(Vec::new()),
         }
     }
 }
@@ -64,6 +66,7 @@ impl HttpClient for RoundTripFunc {
     ) -> Result<http::Response<BodyStream>, ModelError> {
         let url = req.uri().to_string();
         self.urls.lock().push(url.clone());
+        self.headers.lock().push(req.headers().clone());
         if !self.allowed.contains(&url.as_str()) {
             return Err(ModelError::Transport(
                 format!("unexpected URL: {url}").into(),
@@ -349,4 +352,41 @@ async fn test_generate_content() {
         vec!["https://test.apigee.net/v1/models/gemini-1.5-flash:generateContent".to_string()]
     );
     assert_eq!(model.name(), "apigee/gemini/v1/gemini-1.5-flash");
+}
+
+/// Not a Go test: `ApigeeConfig::custom_headers` (Go `WithCustomHeaders`) reach the request on
+/// the wire.
+#[tokio::test]
+async fn generate_content_sends_custom_headers() {
+    let env = env(&[("GOOGLE_API_KEY", "test-key")]);
+    let client = Arc::new(RoundTripFunc::new(
+        vec!["https://test.apigee.net/v1beta/models/gemini-1.5-flash:generateContent"],
+        "application/json",
+        "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Paris\"}]}}]}",
+    ));
+    let mut custom_headers = http::HeaderMap::new();
+    custom_headers.insert("x-apigee-tenant", http::HeaderValue::from_static("team-a"));
+    let cfg = ApigeeConfig {
+        http_client: Some(client.clone()),
+        custom_headers,
+        ..config_with_proxy(env)
+    };
+    let model = ApigeeModel::new("apigee/gemini-1.5-flash", cfg)
+        .await
+        .unwrap();
+    let req = LlmRequest {
+        contents: vec![Content::from_text("Hi", "user")],
+        ..Default::default()
+    };
+    let responses: Vec<_> = model.generate_content(req, false).collect().await;
+    assert_eq!(responses.len(), 1);
+    responses[0].as_ref().unwrap();
+    let headers = client.headers.lock();
+    assert_eq!(headers.len(), 1, "{:?}", client.urls.lock());
+    assert_eq!(
+        headers[0]
+            .get("x-apigee-tenant")
+            .map(|v| v.to_str().unwrap()),
+        Some("team-a")
+    );
 }

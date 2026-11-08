@@ -97,9 +97,13 @@ fn duration_from_nanos(nanos: f64) -> Duration {
     Duration::from_nanos(nanos as u64)
 }
 
-/// Go `time.Parse(time.RFC1123, v)` (`Mon, 02 Jan 2006 15:04:05 MST`): the weekday is checked
-/// for syntax only, and a zone abbreviation (3 to 5 letters) is read as UTC, as Go does for
-/// `GMT`/`UTC` and for any abbreviation the local zone does not define.
+/// Close to, not identical to, Go `time.Parse(time.RFC1123, v)` (`Mon, 02 Jan 2006 15:04:05
+/// MST`): the weekday is checked for syntax only, and a zone abbreviation (3 to 5 letters) is
+/// read as UTC, as Go does for `GMT`/`UTC` and for any abbreviation the local zone does not
+/// define. Known differences: case rules (Go matches the weekday case-insensitively and wants
+/// an upper-case zone), the zone shapes Go accepts (`GMT+3`, `ChST`), digit-count rules for the
+/// numeric fields (one-digit forms), and abbreviations of the local zone (Go applies that
+/// zone's offset; gadk reads UTC).
 fn parse_rfc1123(v: &str) -> Option<DateTime<Utc>> {
     const WEEKDAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
     let (weekday, rest) = v.split_at_checked(3)?;

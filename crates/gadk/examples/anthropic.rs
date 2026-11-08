@@ -186,6 +186,7 @@ async fn run_turn(runner: &Runner, msg: Content) -> anyhow::Result<()> {
             continue;
         };
         for part in content.parts {
+            // Tool args and results print as JSON, not Go's `%v` map formatting.
             if let Some(fc) = part.function_call {
                 println!(
                     "Tool Call -> {}({})",

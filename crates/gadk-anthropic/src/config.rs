@@ -246,7 +246,10 @@ pub struct ClientConfig {
     pub effort: Option<Effort>,
     /// Enables ephemeral prompt caching.
     pub prompt_cache: Option<PromptCacheConfig>,
-    /// Environment variable source.
+    /// Environment variable source (`ANTHROPIC_*`, `GOOGLE_*`, and
+    /// `GOOGLE_APPLICATION_CREDENTIALS` for ADC). Without `GOOGLE_APPLICATION_CREDENTIALS` in it,
+    /// ADC uses google-cloud-auth's default builder, which reads the process environment, the
+    /// gcloud configuration files and the metadata server regardless of this source.
     pub env: Arc<dyn EnvProvider>,
 }
 
@@ -394,7 +397,8 @@ pub(crate) fn parse_model_name(raw: &str) -> Result<ParsedModelName, AnthropicEr
 }
 
 /// Go `validateBaseURL`: `source` names the setting in the error (`BaseURL`,
-/// `ANTHROPIC_BASE_URL`). The URL must parse with an `http`/`https` scheme and a host.
+/// `ANTHROPIC_BASE_URL`). The URL must parse with an `http`/`https` scheme and a host; an ASCII
+/// control character fails, as Go `url.Parse` does (`invalid control character in URL`).
 pub(crate) fn validate_base_url(source: &str, raw: &str) -> Result<(), AnthropicError> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -403,9 +407,11 @@ pub(crate) fn validate_base_url(source: &str, raw: &str) -> Result<(), Anthropic
             format!("{source} must not be whitespace-only"),
         ));
     }
-    let ok = url::Url::parse(trimmed).is_ok_and(|u| {
-        matches!(u.scheme(), "http" | "https") && u.host_str().is_some_and(|h| !h.is_empty())
-    });
+    let has_ctl = trimmed.bytes().any(|b| b < 0x20 || b == 0x7f);
+    let ok = !has_ctl
+        && url::Url::parse(trimmed).is_ok_and(|u| {
+            matches!(u.scheme(), "http" | "https") && u.host_str().is_some_and(|h| !h.is_empty())
+        });
     if ok && go_authority_has_host(trimmed) {
         return Ok(());
     }
@@ -638,6 +644,12 @@ mod tests {
             "localhost:8080",
             "http://",
             "https:///path",
+            // Go url.Parse: `invalid control character in URL` (the WHATWG parser strips tabs
+            // and newlines and would accept these).
+            "https://exa\tmple.com",
+            "https://example.com/a\nb",
+            "https://example.com/\u{7f}",
+            "https://example.com/\u{1}",
         ] {
             assert_eq!(
                 validate_base_url("ANTHROPIC_BASE_URL", bad).err().map(|e| e.to_string()),

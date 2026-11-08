@@ -1290,31 +1290,66 @@ pub async fn generate(
     collect(m.generate_content(req, stream)).await
 }
 
+/// `"<case>: "`, or `""` for an unlabelled call: the prefix of a helper's panic message.
+fn case_prefix(case: &str) -> String {
+    if case.is_empty() {
+        String::new()
+    } else {
+        format!("{case}: ")
+    }
+}
+
 /// Every response; panics on the first error (Go `t.Fatalf("GenerateContent() error = %v")`).
 pub async fn generate_ok(m: &dyn Llm, req: LlmRequest, stream: bool) -> Vec<LlmResponse> {
+    generate_ok_in("", m, req, stream).await
+}
+
+/// [`generate_ok`] whose panic message starts with `case`.
+pub async fn generate_ok_in(
+    case: &str,
+    m: &dyn Llm,
+    req: LlmRequest,
+    stream: bool,
+) -> Vec<LlmResponse> {
+    let prefix = case_prefix(case);
     generate(m, req, stream)
         .await
         .into_iter()
-        .map(|r| r.unwrap_or_else(|e| panic!("GenerateContent() error = {e}")))
+        .map(|r| r.unwrap_or_else(|e| panic!("{prefix}GenerateContent() error = {e}")))
         .collect()
 }
 
 /// The last response (Go `got = resp`); panics on any error or an empty stream.
 pub async fn generate_last(m: &dyn Llm, req: LlmRequest, stream: bool) -> LlmResponse {
-    generate_ok(m, req, stream)
+    generate_last_in("", m, req, stream).await
+}
+
+/// [`generate_last`] whose panic message starts with `case`.
+pub async fn generate_last_in(
+    case: &str,
+    m: &dyn Llm,
+    req: LlmRequest,
+    stream: bool,
+) -> LlmResponse {
+    generate_ok_in(case, m, req, stream)
         .await
         .pop()
-        .expect("GenerateContent() yielded no response")
+        .unwrap_or_else(|| panic!("{}GenerateContent() yielded no response", case_prefix(case)))
 }
 
 /// The last error (Go `gotErr = err`); panics when the stream yielded none.
 pub async fn generate_err(m: &dyn Llm, req: LlmRequest, stream: bool) -> ModelError {
+    generate_err_in("", m, req, stream).await
+}
+
+/// [`generate_err`] whose panic message starts with `case`.
+pub async fn generate_err_in(case: &str, m: &dyn Llm, req: LlmRequest, stream: bool) -> ModelError {
     generate(m, req, stream)
         .await
         .into_iter()
         .filter_map(Result::err)
         .next_back()
-        .expect("GenerateContent() yielded no error")
+        .unwrap_or_else(|| panic!("{}GenerateContent() yielded no error", case_prefix(case)))
 }
 
 /// The [`AnthropicError`] inside a `ModelError::Other` (how the model reports every error),

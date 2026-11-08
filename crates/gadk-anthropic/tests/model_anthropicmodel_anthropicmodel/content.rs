@@ -167,15 +167,42 @@ fn string_array_schema() -> Schema {
 
 /// The text of every part of every non-partial response (Go `testutil.CollectTextParts` over
 /// the runner's events; the runner yields the model's final responses in non-streaming mode).
-fn collect_text_parts(resps: &[LlmResponse]) -> Vec<String> {
-    resps
-        .iter()
-        .filter(|r| !r.partial)
-        .filter_map(|r| r.content.as_ref())
-        .flat_map(|c| c.parts.iter())
-        .filter(|p| !p.text.is_empty())
-        .map(|p| p.text.clone())
-        .collect()
+/// A non-partial response without content fails, as Go's `unexpected empty event: %v` does.
+fn collect_text_parts(resps: &[LlmResponse]) -> Result<Vec<String>, String> {
+    let mut texts = Vec::new();
+    for r in resps.iter().filter(|r| !r.partial) {
+        let Some(content) = r.content.as_ref() else {
+            return Err(format!("unexpected empty event: {r:?}"));
+        };
+        texts.extend(
+            content
+                .parts
+                .iter()
+                .filter(|p| !p.text.is_empty())
+                .map(|p| p.text.clone()),
+        );
+    }
+    Ok(texts)
+}
+
+/// Not a Go test: [`collect_text_parts`] keeps Go `CollectTextParts`' failure on an event
+/// without content.
+#[test]
+fn collect_text_parts_fails_on_empty_content() {
+    let with_text = LlmResponse {
+        content: Some(Content::from_text("a", "model")),
+        ..Default::default()
+    };
+    let partial_empty = LlmResponse {
+        partial: true,
+        ..Default::default()
+    };
+    assert_eq!(
+        collect_text_parts(&[with_text.clone(), partial_empty]),
+        Ok(vec!["a".to_string()])
+    );
+    let err = collect_text_parts(&[with_text, LlmResponse::default()]).unwrap_err();
+    assert!(err.starts_with("unexpected empty event: "), "{err}");
 }
 
 // ------------------------------------------------------------- TestSamplePNG1x1_DecodesAsValidPNG
@@ -1185,7 +1212,10 @@ async fn run_output_schema_agent(m: &dyn Llm, schema: Schema, msg: &str) -> Vec<
             ..Default::default()
         },
     );
-    collect_text_parts(&generate_ok(m, req, false).await)
+    match collect_text_parts(&generate_ok(m, req, false).await) {
+        Ok(texts) => texts,
+        Err(e) => panic!("CollectTextParts: {e}"),
+    }
 }
 
 async fn output_schema_llmagent_with_output_schema_end_to_end(m: &dyn Llm) {

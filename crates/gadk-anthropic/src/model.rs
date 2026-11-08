@@ -72,6 +72,27 @@ pub struct AnthropicModel {
     transport: Arc<Transport>,
 }
 
+/// Credentials (API key, auth token, Vertex credentials, header values) are left out, and
+/// user info in the base URL is redacted.
+impl std::fmt::Debug for AnthropicModel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AnthropicModel")
+            .field("name", &self.name)
+            .field("model_id", &self.model_id)
+            .field("backend", &self.backend)
+            .field("project", &self.project)
+            .field("location", &self.location)
+            .field(
+                "base_url",
+                &gadk_model::redact_url(&self.transport.base_url),
+            )
+            .field("max_tokens", &self.max_tokens)
+            .field("effort", &self.effort)
+            .field("prompt_cache", &self.prompt_cache)
+            .finish_non_exhaustive()
+    }
+}
+
 /// What [`AnthropicModel::build_message_params`] returns (Go's `params, reqOpts,
 /// unwrapOutput`).
 #[derive(Debug, Clone, PartialEq)]
@@ -463,9 +484,11 @@ pub(crate) fn resolve_vertex_credentials(
 /// dispatched on its `"type"` to google-cloud-auth's per-type builders (as gadk-auth's
 /// `adc_token_source` does), else google-cloud-auth's default builder. Any failure is Go's
 /// `ErrInvalidConfig` + `ErrAuthentication` text `failed to find Google Application Default
-/// Credentials for Vertex AI`.
+/// Credentials for Vertex AI`; the underlying detail is logged at `debug` only (Go's error
+/// carries none).
 pub(crate) fn adc_credentials(env: &dyn EnvProvider) -> Result<Credentials, AnthropicError> {
-    let fail = |_| {
+    let fail = |detail: String| {
+        tracing::debug!(%detail, "anthropicmodel: Application Default Credentials lookup failed");
         AnthropicError::wrap2(
             ErrorKind::InvalidConfig,
             ErrorKind::Authentication,
@@ -661,6 +684,23 @@ mod tests {
             Ok(_) => panic!("new_concrete({name:?}) succeeded"),
             Err(e) => e,
         }
+    }
+
+    #[tokio::test]
+    async fn debug_redacts_secrets() {
+        let cfg = ClientConfig {
+            auth_token: Some("tok-secret".into()),
+            base_url: Some("https://user:url-secret@proxy.example/v1".into()),
+            ..anthropic(Some("sk-ant-secret"), &[])
+        };
+        let m = AnthropicModel::new_concrete("claude-x", cfg).await.unwrap();
+        let dbg = format!("{m:?}");
+        for secret in ["sk-ant-secret", "tok-secret", "url-secret"] {
+            assert!(!dbg.contains(secret), "{dbg}");
+        }
+        assert!(dbg.contains("AnthropicModel"), "{dbg}");
+        assert!(dbg.contains("claude-x"), "{dbg}");
+        assert!(dbg.contains("proxy.example/v1"), "{dbg}");
     }
 
     fn anthropic_auth(m: &AnthropicModel) -> (Option<String>, Option<String>) {

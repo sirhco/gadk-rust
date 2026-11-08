@@ -226,12 +226,26 @@ mod tests {
 
     #[test]
     fn empty_inputs_are_fine() {
+        let mut system: Vec<TextBlockParam> = Vec::new();
+        let mut messages: Vec<MessageParam> = Vec::new();
+        let mut tools: Vec<ToolParam> = Vec::new();
         apply_cache_breakpoints(
             Some(&PromptCacheConfig::default()),
-            &mut [],
-            &mut [],
-            &mut [],
+            &mut system,
+            &mut messages,
+            &mut tools,
         );
+        assert!(system.is_empty() && messages.is_empty() && tools.is_empty());
+        // A system prompt alone still gets its breakpoint when the other inputs are empty.
+        let mut system = vec![TextBlockParam::new("System prompt")];
+        apply_cache_breakpoints(
+            Some(&PromptCacheConfig::default()),
+            &mut system,
+            &mut messages,
+            &mut tools,
+        );
+        assert!(system[0].cache_control.is_some(), "{system:?}");
+        assert!(messages.is_empty() && tools.is_empty());
     }
 
     #[test]
