@@ -28,9 +28,7 @@ use http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, USER_AGENT};
 use http::{HeaderMap, HeaderValue, Method, Uri};
 use tokio::time::Instant;
 
-use crate::error::{
-    AnthropicError, api_error_from_response, error_chain, go_quote, transport_detail,
-};
+use crate::error::{AnthropicError, api_error_from_response, error_chain, go_quote};
 use crate::retry::{retry_delay, should_retry, should_retry_dropped_body};
 use crate::wire::{MessageNewParams, VERTEX_ANTHROPIC_VERSION, encode_request};
 
@@ -180,14 +178,10 @@ async fn credential_headers(credentials: &Credentials) -> Result<HeaderMap, Anth
     }
 }
 
-/// Go `readBody`'s `error reading response body: %w`, classified by `classifyError` (not a
-/// `*url.Error`, so `request failed`); a `reqwest::Error` loses its URL.
+/// Go `requestconfig`'s `error reading response body: %w`, classified by `classifyError` (not a
+/// `*url.Error`, so `request failed`).
 fn body_read_error(err: ModelError) -> AnthropicError {
-    let detail = match err {
-        ModelError::Transport(boxed) => transport_detail(boxed),
-        other => other.to_string(),
-    };
-    AnthropicError::request_failed(format!("error reading response body: {detail}"))
+    AnthropicError::from_body_error(err, "error reading response body: ")
 }
 
 /// The `request-id` header, `""` when absent (Go `Header.Get`).

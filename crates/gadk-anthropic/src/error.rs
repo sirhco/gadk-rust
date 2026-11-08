@@ -274,6 +274,24 @@ impl AnthropicError {
             other => Self::request_failed(other),
         }
     }
+
+    /// Port of Go `classifyError` for an error reading a response body after the response
+    /// arrived (the SDK's SSE scanner error, or `requestconfig`'s `error reading response
+    /// body: %w`, which `prefix` carries): neither is a `*url.Error`, so the result is
+    /// `anthropicmodel: request failed: <prefix><err>` even when the body stream reports a
+    /// [`ModelError::Transport`] (a `reqwest::Error` loses its URL). An `AnthropicError` boxed in
+    /// [`ModelError::Other`] (a body deadline) is returned as it is.
+    pub(crate) fn from_body_error(err: ModelError, prefix: &str) -> Self {
+        let detail = match err {
+            ModelError::Other(boxed) => match boxed.downcast::<AnthropicError>() {
+                Ok(e) => return *e,
+                Err(other) => ModelError::Other(other).to_string(),
+            },
+            ModelError::Transport(boxed) => transport_detail(boxed),
+            other => other.to_string(),
+        };
+        Self::request_failed(format!("{prefix}{detail}"))
+    }
 }
 
 /// The text of a [`ModelError::Transport`] cause: a `reqwest::Error` loses its URL (Go's
@@ -803,5 +821,28 @@ mod tests {
 
         let e = AnthropicError::from_model_error(ModelError::Other("boom".into()));
         assert_eq!(e.to_string(), "anthropicmodel: request failed: boom");
+    }
+
+    #[test]
+    fn body_errors_are_request_failed_with_prefix() {
+        let deadline: ModelError = AnthropicError::deadline_exceeded().into();
+        assert!(AnthropicError::from_body_error(deadline, "p: ").is_deadline_exceeded());
+
+        let io = std::io::Error::new(std::io::ErrorKind::ConnectionReset, "connection reset");
+        let e = AnthropicError::from_body_error(ModelError::Transport(Box::new(io)), "");
+        assert!(!e.is_transport());
+        assert_eq!(
+            e.to_string(),
+            "anthropicmodel: request failed: connection reset"
+        );
+
+        let e = AnthropicError::from_body_error(
+            ModelError::Other("boom".into()),
+            "error reading response body: ",
+        );
+        assert_eq!(
+            e.to_string(),
+            "anthropicmodel: request failed: error reading response body: boom"
+        );
     }
 }

@@ -325,7 +325,7 @@ fn refresh_content_block(cb: &mut ContentBlock) {
 
 /// Drives [`gadk_model::sse::sse_events`] over `body` through a [`StreamAccumulator`]: the
 /// partial responses, then the final one; the first error (a body error through
-/// [`AnthropicError::from_model_error`](crate::error::AnthropicError), or the accumulator's)
+/// [`AnthropicError::from_body_error`](crate::error::AnthropicError), or the accumulator's)
 /// ends the stream.
 pub(crate) fn stream_responses(
     body: BodyStream,
@@ -368,7 +368,7 @@ pub(crate) fn stream_responses(
                 },
                 Some(Err(err)) => {
                     st.release();
-                    return Some((Err(AnthropicError::from_model_error(err)), st));
+                    return Some((Err(AnthropicError::from_body_error(err, "")), st));
                 }
                 None => {
                     let acc = st.acc.take()?;
@@ -1051,7 +1051,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn body_error_is_transport_error_after_partials() {
+    async fn body_error_is_request_failed_after_partials() {
         let chunks: Vec<Result<Bytes, ModelError>> = vec![
             Ok(Bytes::from_static(
                 b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"Hi\"}}\n\n",
@@ -1071,11 +1071,13 @@ mod tests {
         .await;
         assert_eq!(got.len(), 2);
         assert_eq!(part_texts(got[0].as_ref().unwrap()), vec!["Hi".to_string()]);
+        // Go: the SDK's SSE decoder returns the scanner's read error (not a *url.Error), so
+        // classifyError gives `request failed`, with no `error reading response body:` prefix.
         let err = got[1].as_ref().unwrap_err();
-        assert!(err.is_transport());
+        assert!(!err.is_transport());
         assert_eq!(
             err.to_string(),
-            "anthropicmodel: transport error: connection reset"
+            "anthropicmodel: request failed: connection reset"
         );
     }
 
