@@ -270,17 +270,23 @@ impl AnthropicError {
                 Ok(e) => *e,
                 Err(other) => Self::request_failed(ModelError::Other(other)),
             },
-            ModelError::Transport(boxed) => match boxed.downcast::<reqwest::Error>() {
-                Ok(e) => Self::transport(error_chain(&e.without_url())),
-                Err(other) => Self::transport(error_chain(other.as_ref())),
-            },
+            ModelError::Transport(boxed) => Self::transport(transport_detail(boxed)),
             other => Self::request_failed(other),
         }
     }
 }
 
+/// The text of a [`ModelError::Transport`] cause: a `reqwest::Error` loses its URL (Go's
+/// `classifyError` output carries none), then the source chain is joined with `": "`.
+pub(crate) fn transport_detail(err: Box<dyn std::error::Error + Send + Sync>) -> String {
+    match err.downcast::<reqwest::Error>() {
+        Ok(e) => error_chain(&e.without_url()),
+        Err(other) => error_chain(other.as_ref()),
+    }
+}
+
 /// `err` and its sources, joined with `": "`.
-fn error_chain(err: &(dyn std::error::Error + 'static)) -> String {
+pub(crate) fn error_chain(err: &(dyn std::error::Error + 'static)) -> String {
     let mut out = err.to_string();
     let mut cur = err.source();
     while let Some(e) = cur {

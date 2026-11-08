@@ -28,7 +28,9 @@ use http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, USER_AGENT};
 use http::{HeaderMap, HeaderValue, Method, Uri};
 use tokio::time::Instant;
 
-use crate::error::{AnthropicError, api_error_from_response, go_quote};
+use crate::error::{
+    AnthropicError, api_error_from_response, error_chain, go_quote, transport_detail,
+};
 use crate::retry::{retry_delay, should_retry, should_retry_dropped_body};
 use crate::wire::{MessageNewParams, VERTEX_ANTHROPIC_VERSION, encode_request};
 
@@ -153,18 +155,6 @@ pub(crate) fn request_url(
     Ok(url.into())
 }
 
-/// `err` and its sources, joined with `": "`.
-fn error_chain(err: &(dyn std::error::Error + 'static)) -> String {
-    let mut out = err.to_string();
-    let mut cur = err.source();
-    while let Some(e) = cur {
-        out.push_str(": ");
-        out.push_str(&e.to_string());
-        cur = e.source();
-    }
-    out
-}
-
 /// A header value marked sensitive; an invalid one fails the attempt as Go's `net/http` does
 /// (a transport error).
 fn sensitive_value(name: &str, value: &str) -> Result<HeaderValue, AnthropicError> {
@@ -194,10 +184,7 @@ async fn credential_headers(credentials: &Credentials) -> Result<HeaderMap, Anth
 /// `*url.Error`, so `request failed`); a `reqwest::Error` loses its URL.
 fn body_read_error(err: ModelError) -> AnthropicError {
     let detail = match err {
-        ModelError::Transport(boxed) => match boxed.downcast::<reqwest::Error>() {
-            Ok(e) => error_chain(&e.without_url()),
-            Err(other) => error_chain(other.as_ref()),
-        },
+        ModelError::Transport(boxed) => transport_detail(boxed),
         other => other.to_string(),
     };
     AnthropicError::request_failed(format!("error reading response body: {detail}"))
@@ -329,7 +316,10 @@ impl Transport {
                 if vertex_rewrites(&messages_url(&self.base_url)?) {
                     return encode(true).map(Bytes::from);
                 }
+                // `encode_request` always yields a non-empty JSON object (`max_tokens` is always
+                // serialised), so the last byte is its closing `}` and the splice stays valid.
                 let mut body = encode(false)?;
+                debug_assert_eq!(body.last(), Some(&b'}'));
                 body.pop();
                 body.extend_from_slice(
                     format!(r#","anthropic_version":"{VERTEX_ANTHROPIC_VERSION}"}}"#).as_bytes(),
