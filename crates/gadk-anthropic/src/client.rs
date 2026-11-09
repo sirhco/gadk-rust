@@ -240,6 +240,10 @@ impl Transport {
         let tracking = HeaderValue::from_str(&gadk_platform::tracking_header())
             .map_err(|e| AnthropicError::transport(e.to_string()))?;
         h.insert(USER_AGENT, tracking.clone());
+        let mut user = self.headers.clone();
+        for v in user.values_mut() {
+            v.set_sensitive(true);
+        }
         match &self.auth {
             Auth::Anthropic {
                 api_key,
@@ -254,11 +258,11 @@ impl Transport {
                         sensitive_value("Authorization", &format!("Bearer {token}"))?,
                     );
                 }
-                h.extend(self.headers.clone());
+                h.extend(user);
             }
             Auth::Vertex(credentials) => {
                 h.insert("x-goog-api-client", tracking);
-                h.extend(self.headers.clone());
+                h.extend(user);
                 h.extend(credential_headers(credentials).await?);
             }
         }
@@ -742,6 +746,10 @@ mod tests {
                 ("x-extra", "a"),
                 ("x-extra", "b"),
             ])
+        );
+        assert!(
+            got.get_all("x-extra").iter().all(HeaderValue::is_sensitive),
+            "config header values are sensitive"
         );
     }
 
