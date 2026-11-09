@@ -1,0 +1,8 @@
+index	sqlite_autoindex_app_states_1	app_states	
+index	sqlite_autoindex_events_1	events	
+index	sqlite_autoindex_sessions_1	sessions	
+index	sqlite_autoindex_user_states_1	user_states	
+table	app_states	app_states	CREATE TABLE `app_states` (`app_name` text,`state` text,`update_time` datetime,PRIMARY KEY (`app_name`))
+table	events	events	CREATE TABLE `events` (`id` text,`app_name` text,`user_id` text,`session_id` text,`invocation_id` text,`author` text,`actions` blob,`long_running_tool_ids_json` text,`routes_json` text,`output_json` text,`node_info_json` text,`requested_input_json` text,`branch` text,`isolation_scope` text,`timestamp` datetime,`content` text,`grounding_metadata` text,`custom_metadata` text,`usage_metadata` text,`citation_metadata` text,`input_transcription` text,`output_transcription` text,`partial` numeric,`turn_complete` numeric,`error_code` text,`error_message` text,`interrupted` numeric,PRIMARY KEY (`id`,`app_name`,`user_id`,`session_id`),CONSTRAINT `fk_sessions_events` FOREIGN KEY (`app_name`,`user_id`,`session_id`) REFERENCES `sessions`(`app_name`,`user_id`,`id`) ON DELETE CASCADE)
+table	sessions	sessions	CREATE TABLE `sessions` (`app_name` text,`user_id` text,`id` text,`state` text,`create_time` datetime,`update_time` datetime,PRIMARY KEY (`app_name`,`user_id`,`id`))
+table	user_states	user_states	CREATE TABLE `user_states` (`app_name` text,`user_id` text,`state` text,`update_time` datetime,PRIMARY KEY (`app_name`,`user_id`))
