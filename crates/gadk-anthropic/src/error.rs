@@ -299,26 +299,7 @@ impl AnthropicError {
     }
 }
 
-/// The text of a [`ModelError::Transport`] cause: a `reqwest::Error` loses its URL (Go's
-/// `classifyError` output carries none), then the source chain is joined with `": "`.
-pub(crate) fn transport_detail(err: Box<dyn std::error::Error + Send + Sync>) -> String {
-    match err.downcast::<reqwest::Error>() {
-        Ok(e) => error_chain(&e.without_url()),
-        Err(other) => error_chain(other.as_ref()),
-    }
-}
-
-/// `err` and its sources, joined with `": "`.
-pub(crate) fn error_chain(err: &(dyn std::error::Error + 'static)) -> String {
-    let mut out = err.to_string();
-    let mut cur = err.source();
-    while let Some(e) = cur {
-        out.push_str(": ");
-        out.push_str(&e.to_string());
-        cur = e.source();
-    }
-    out
-}
+pub(crate) use gadk_model::{error_chain, transport_error_detail as transport_detail};
 
 /// Every [`AnthropicError`] becomes [`ModelError::Other`], so `Display` is unchanged and the
 /// typed error is recovered by downcasting.

@@ -1,22 +1,26 @@
 #!/usr/bin/env python3
 # Copyright 2026 Chris Olson — Apache-2.0 (see LICENSE)
-"""Checks the parity ledgers (docs/parity/1a.md, 1b.md, 1b-live.md, 1c.md, 2a.md, 2b.md, 2c.md, 3a.md)
+"""Checks the parity ledgers (docs/parity/1a.md, 1b.md, 1b-live.md, 1c.md, 2a.md, 2b.md, 2c.md, 3a.md,
+3b.md)
 against ADK-Go.
 
 Usage:
-  parity-check [--adk-go DIR] [--ledger 1a|1b|1b-live|1c|2a|2b|2c|3a|all] [--files GO_TEST_FILE ...] [--count] [--generate]
+  parity-check [--adk-go DIR] [--ledger 1a|1b|1b-live|1c|2a|2b|2c|3a|3b|all] [--files GO_TEST_FILE ...] [--count] [--generate]
 
 Each ledger lists its in-scope Go test files in a `<!-- in-scope: ... -->` header block and
 (optionally) its deferred files in a `<!-- deferred: ... -->` block (`path: reason` per line).
-1a rows are hand-written and checked as before. 1b, 1b-live, 1c, 2a, 2b, 2c and 3a rows are
+1a rows are hand-written and checked as before. 1b, 1b-live, 1c, 2a, 2b, 2c, 3a and 3b rows are
 generated from annotations in the Rust target files (see `scan_target`); `--generate` rewrites
 them, and a full `--ledger 1b` / `--ledger 1b-live` / `--ledger 1c` / `--ledger 2a` /
-`--ledger 2b` / `--ledger 2c` / `--ledger 3a` check requires the ledger rows to equal the
+`--ledger 2b` / `--ledger 2c` / `--ledger 3a` / `--ledger 3b` check requires the ledger rows to
+equal the
 generated rows.
 
 A target is a file `crates/*/tests/<target>.rs` or `crates/*/src/parity_tests/<target>.rs`, or
-(from 3a) a test directory `crates/*/tests/<target>/main.rs`: a directory target's annotations
-may sit in any `.rs` file under the directory, and a row names the file that holds them.
+a directory: (from 3a) a test directory `crates/*/tests/<target>/main.rs`, or (from 3b) an
+in-crate module directory `crates/*/src/parity_tests/<target>/mod.rs`. A directory target's
+annotations may sit in any `.rs` file under the directory, and a row names the file that holds
+them.
 
 A Go test is a `func TestXxx(` or (from 2b) a `func FuzzXxx(`; `FuzzXxx` ports as `fn fuzz_xxx`.
 """
@@ -28,7 +32,7 @@ TABLE_SEP = "|---|---|---|---|---|"
 SKIP_RE = re.compile(r"^\s*//\s*parity:\s*skipped\s+((?:Test|Fuzz)\w*)\s*:(.*)$")
 ADAPTED_RE = re.compile(r"^\s*//\s*parity:\s*adapted\s*:(.*)$")
 ADAPTED_WINDOW = 3  # lines above the `fn` line searched for `// parity: adapted:`
-GENERATED_LEDGERS = ("1b", "1b-live", "1c", "2a", "2b", "2c", "3a")  # ledgers whose rows come from annotations
+GENERATED_LEDGERS = ("1b", "1b-live", "1c", "2a", "2b", "2c", "3a", "3b")  # ledgers whose rows come from annotations
 
 
 def go_test_to_rust(name: str) -> str:
@@ -159,6 +163,7 @@ def find_target(repo_dir, go_file):
             f"crates/*/tests/{t}.rs",
             f"crates/*/src/parity_tests/{t}.rs",
             f"crates/*/tests/{t}/main.rs",
+            f"crates/*/src/parity_tests/{t}/mod.rs",
         )
         for p in repo_dir.glob(pattern)
     )
@@ -185,7 +190,7 @@ def scan_target(go_file, names, rust_path, text):
 
 
 def scan_files(go_file, names, label, files):
-    """`scan_target` over several files (a directory target, 3a): `files` is a list of
+    """`scan_target` over several files (a directory target, 3a/3b): `files` is a list of
     (repo-relative path, text). The rule counts lines across all files; a row names the file that
     holds the `fn` or the skip line; errors name the target as `label`."""
     errs, rows = [], []
@@ -244,9 +249,10 @@ def scan_files(go_file, names, label, files):
 
 def target_files(repo_dir, target):
     """(label, [(path, text)]) of a target: the file itself, or for a directory target
-    (`…/<target>/main.rs`) every `.rs` file under the directory, sorted by path."""
+    (`…/<target>/main.rs`, or from 3b `…/parity_tests/<target>/mod.rs`) every `.rs` file under
+    the directory, sorted by path."""
     repo_dir = pathlib.Path(repo_dir)
-    if not target.endswith("/main.rs"):
+    if not target.endswith(("/main.rs", "/mod.rs")):
         return target, [(target, (repo_dir / target).read_text())]
     d = (repo_dir / target).parent
     paths = sorted(str(p.relative_to(repo_dir)) for p in d.rglob("*.rs"))
@@ -290,7 +296,7 @@ def check_header(go_dir, in_scope, deferred, label):
 def check_1b(go_dir, repo_dir, ledger, files=None, name="1b"):
     """Full check when `files` is None (rows must equal generated rows); else scan only `files`.
 
-    `name` is the ledger's CLI name (`1b`, `1b-live`, `1c`, `2a`, `2b`, `2c` or `3a`), used in
+    `name` is the ledger's CLI name (`1b`, `1b-live`, `1c`, `2a`, `2b`, `2c`, `3a` or `3b`), used in
     messages."""
     in_scope, deferred = parse_header(ledger)
     errs = check_header(go_dir, in_scope, deferred, str(ledger))
@@ -353,7 +359,7 @@ def main(argv=None):
     repo = pathlib.Path(__file__).resolve().parent.parent
     ap = argparse.ArgumentParser(prog="parity-check")
     ap.add_argument("--adk-go", default=os.environ.get("ADK_GO_DIR", str(repo.parent / "adk-go")))
-    ap.add_argument("--ledger", choices=("1a", "1b", "1b-live", "1c", "2a", "2b", "2c", "3a", "all"), default="all")
+    ap.add_argument("--ledger", choices=("1a", "1b", "1b-live", "1c", "2a", "2b", "2c", "3a", "3b", "all"), default="all")
     ap.add_argument("--files", nargs="+", metavar="GO_TEST_FILE")
     ap.add_argument("--count", action="store_true")
     ap.add_argument("--generate", action="store_true")
@@ -369,12 +375,13 @@ def main(argv=None):
         "2b": repo / "docs/parity/2b.md",
         "2c": repo / "docs/parity/2c.md",
         "3a": repo / "docs/parity/3a.md",
+        "3b": repo / "docs/parity/3b.md",
     }
 
     if (a.files or a.generate) and a.ledger not in GENERATED_LEDGERS:
-        ap.error("--files and --generate require --ledger 1b, 1b-live, 1c, 2a, 2b, 2c or 3a")
+        ap.error("--files and --generate require --ledger 1b, 1b-live, 1c, 2a, 2b, 2c, 3a or 3b")
     if a.count and a.ledger == "all":
-        ap.error("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c or 3a")
+        ap.error("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c, 3a or 3b")
     if a.generate and (a.files or a.count):
         ap.error("--generate cannot be combined with --files or --count")
 

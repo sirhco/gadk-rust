@@ -19,6 +19,8 @@ gcp = ["gadk-auth/gcp"]
 mcp = ["dep:gadk-mcp"]
 # Claude models (gadk-anthropic); not in `default`.
 anthropic = ["dep:gadk-anthropic"]
+# OpenAI models (gadk-openai); not in `default`.
+openai = ["dep:gadk-openai"]
 
 [dependencies]
 gadk-genai = { workspace = true }
@@ -35,6 +37,7 @@ gadk-tools = { workspace = true }
 gadk-auth = { workspace = true }
 gadk-mcp = { workspace = true, optional = true }
 gadk-anthropic = { workspace = true, optional = true }
+gadk-openai = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
@@ -108,6 +111,14 @@ required-features = ["gemini", "mcp"]
 name = "anthropic"
 required-features = ["anthropic"]
 
+[[example]]
+name = "openai"
+required-features = ["openai"]
+
 [[test]]
 name = "model_anthropicmodel_agent_runner"
 required-features = ["anthropic"]
+
+[[test]]
+name = "facade_openai"
+required-features = ["openai"]

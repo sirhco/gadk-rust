@@ -15,6 +15,7 @@ members = [
   "crates/gadk-auth",
   "crates/gadk-mcp",
   "crates/gadk-anthropic",
+  "crates/gadk-openai",
   "crates/gadk",
 ]
 
@@ -40,6 +41,7 @@ gadk-tools = { path = "crates/gadk-tools", version = "0.1.0" }
 gadk-auth = { path = "crates/gadk-auth", version = "0.1.0", default-features = false }
 gadk-mcp = { path = "crates/gadk-mcp", version = "0.1.0" }
 gadk-anthropic = { path = "crates/gadk-anthropic", version = "0.1.0" }
+gadk-openai = { path = "crates/gadk-openai", version = "0.1.0" }
 tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
 tokio-util = "0.7.20"
 futures = "0.3.34"

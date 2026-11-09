@@ -728,6 +728,121 @@ class ThreeATest(unittest.TestCase):
             ANTHROPIC_DIR + "nested/deep.rs", ANTHROPIC_DIR + "main.rs", ANTHROPIC_DIR + "nested/deep.rs"])
 
 
+LEDGER_3B = (
+    "# Parity ledger — sub-project 3b\n\n"
+    "<!-- in-scope:\nmodel/openaimodel/internal/responses/request_test.go\n"
+    "model/openaimodel/internal/shared/tools_test.go\n-->\n\n"
+    + pc.TABLE_HEADER + "\n" + pc.TABLE_SEP + "\n"
+)
+
+REQUEST_DIR = "crates/gadk-openai/src/parity_tests/model_openaimodel_internal_responses_request/"
+TOOLS_TARGET = "crates/gadk-openai/src/parity_tests/model_openaimodel_internal_shared_tools.rs"
+
+
+class ThreeBTest(unittest.TestCase):
+    """3b: an in-crate module directory target (`src/parity_tests/<target>/mod.rs` plus module
+    files) beside a file target under `src/parity_tests/`."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        d = pathlib.Path(self._tmp.name)
+        self.go, self.repo = d / "go", d / "repo"
+        (self.go / "model/openaimodel/internal/responses").mkdir(parents=True)
+        (self.go / "model/openaimodel/internal/shared").mkdir(parents=True)
+        (self.go / "model/openaimodel/internal/responses/request_test.go").write_text(
+            "package responses\nfunc TestBuildParams_Text(t *testing.T) {}\n"
+            "func TestApplyGenerationConfig(t *testing.T) {}\n"
+            "func FuzzFailedResponseError(f *testing.F) {}\n")
+        (self.go / "model/openaimodel/internal/shared/tools_test.go").write_text(
+            "package shared\nfunc TestEnsureFunctionToolOnly(t *testing.T) {}\n")
+        self.dir = self.repo / REQUEST_DIR
+        self.dir.mkdir(parents=True)
+        (self.repo / "docs/parity").mkdir(parents=True)
+        # The scaffold: mod.rs declaring the sub-modules, empty module files.
+        (self.dir / "mod.rs").write_text("//! Parity target.\n\nmod build_params;\nmod generation_config;\n")
+        (self.dir / "build_params.rs").write_text("//! Task 5.\n")
+        (self.dir / "generation_config.rs").write_text("//! Task 5.\n")
+        (self.repo / TOOLS_TARGET).write_text("#[test]\nfn test_ensure_function_tool_only() {}\n")
+        self.ledger = self.repo / "docs/parity/3b.md"
+        self.ledger.write_text(LEDGER_3B)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def run_cli(self, *args):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = pc.main(["--adk-go", str(self.go), "--repo", str(self.repo), *args])
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_find_target_accepts_a_parity_tests_module_directory(self):
+        self.assertEqual(
+            pc.find_target(self.repo, "model/openaimodel/internal/responses/request_test.go"),
+            (REQUEST_DIR + "mod.rs", []))
+        self.assertEqual(
+            pc.find_target(self.repo, "model/openaimodel/internal/shared/tools_test.go"),
+            (TOOLS_TARGET, []))
+
+    def test_target_files_scans_every_module_file(self):
+        label, files = pc.target_files(self.repo, REQUEST_DIR + "mod.rs")
+        self.assertEqual(label, REQUEST_DIR)
+        self.assertEqual([p for p, _ in files], [
+            REQUEST_DIR + "build_params.rs", REQUEST_DIR + "generation_config.rs", REQUEST_DIR + "mod.rs"])
+        label, files = pc.target_files(self.repo, TOOLS_TARGET)
+        self.assertEqual((label, [p for p, _ in files]), (TOOLS_TARGET, [TOOLS_TARGET]))
+
+    def test_scaffold_reports_only_missing_tests(self):
+        self.assertEqual(self.run_cli("--ledger", "3b", "--count"), (0, "4\n", ""))
+        rc, _, err = self.run_cli("--ledger", "3b")
+        self.assertEqual(rc, 1)
+        self.assertEqual(err.splitlines(), [
+            "model/openaimodel/internal/responses/request_test.go " + name + ": missing (no fn "
+            + rust + " and no `// parity: skipped " + name + ":` in " + REQUEST_DIR + ")"
+            for name, rust in [
+                ("TestBuildParams_Text", "test_build_params_text"),
+                ("TestApplyGenerationConfig", "test_apply_generation_config"),
+                ("FuzzFailedResponseError", "fuzz_failed_response_error"),
+            ]
+        ])
+        self.assertEqual(self.run_cli("--ledger", "3b", "--files",
+                                      "model/openaimodel/internal/shared/tools_test.go")[0], 0)
+
+    def test_rows_name_the_module_file_that_holds_the_fn_or_the_skip(self):
+        (self.dir / "build_params.rs").write_text(
+            "#[test]\nfn test_build_params_text() {}\n"
+            "// parity: skipped FuzzFailedResponseError: covered by its seed table\n")
+        (self.dir / "generation_config.rs").write_text(
+            "// parity: adapted: HttpOptions travels beside the config\n#[test]\nfn test_apply_generation_config() {}\n")
+        self.assertEqual(self.run_cli("--ledger", "3b", "--generate")[0], 0)
+        self.assertEqual(self.run_cli("--ledger", "3b"), (0, "", ""))
+        rows = self.ledger.read_text().splitlines()[-4:]
+        self.assertEqual(rows, [
+            "| model/openaimodel/internal/responses/request_test.go | TestBuildParams_Text | ported | "
+            + REQUEST_DIR + "build_params.rs | test_build_params_text |",
+            "| model/openaimodel/internal/responses/request_test.go | TestApplyGenerationConfig | ported"
+            " (adapted: HttpOptions travels beside the config) | " + REQUEST_DIR
+            + "generation_config.rs | test_apply_generation_config |",
+            "| model/openaimodel/internal/responses/request_test.go | FuzzFailedResponseError | skipped | "
+            + REQUEST_DIR + "build_params.rs | covered by its seed table |",
+            "| model/openaimodel/internal/shared/tools_test.go | TestEnsureFunctionToolOnly | ported | "
+            + TOOLS_TARGET + " | test_ensure_function_tool_only |",
+        ])
+
+    def test_a_file_and_a_directory_target_for_one_go_file_is_an_error(self):
+        (self.dir.parent / "model_openaimodel_internal_responses_request.rs").write_text("")
+        target, errs = pc.find_target(self.repo, "model/openaimodel/internal/responses/request_test.go")
+        self.assertIsNone(target)
+        self.assertEqual(len(errs), 1)
+        self.assertIn("multiple Rust targets", errs[0])
+
+    def test_ledger_3b_is_registered(self):
+        self.assertIn("3b", pc.GENERATED_LEDGERS)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
+            pc.main(["--adk-go", str(self.go), "--repo", str(self.repo), "--ledger", "all", "--count"])
+        self.assertIn("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c, 3a or 3b", err.getvalue())
+
+
 ADK_GO = pathlib.Path(os.environ.get("ADK_GO_DIR", HERE.parent.parent / "adk-go"))
 
 
@@ -868,6 +983,15 @@ class RealTreeTest(unittest.TestCase):
         self.assertEqual(pc.count(ADK_GO, in_scope), 28)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "3a"), [])
         self.assertEqual(len(pc.go_tests(ADK_GO, "model/anthropicmodel/anthropicmodel_test.go")), 21)
+
+    def test_3b_count_is_217(self):
+        in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/3b.md")
+        self.assertEqual(len(in_scope), 19)
+        self.assertEqual(deferred, {})
+        self.assertEqual(pc.count(ADK_GO, in_scope), 217)
+        self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "3b"), [])
+        fuzz = [t for f in in_scope for t in pc.go_tests(ADK_GO, f) if t.startswith("Fuzz")]
+        self.assertEqual(fuzz, ["FuzzFailedResponseError", "FuzzClipServerText"])
 
     def test_earlier_ledgers_have_no_fuzz_tests(self):
         # Widening GO_TEST to `Fuzz*` must not change any 1a-2a ledger.

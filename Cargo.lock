@@ -730,6 +730,7 @@ dependencies = [
  "gadk-mcp",
  "gadk-memory",
  "gadk-model",
+ "gadk-openai",
  "gadk-platform",
  "gadk-session",
  "gadk-tools",
@@ -1000,6 +1001,26 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "gadk-openai"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.23.1",
+ "bytes",
+ "futures",
+ "gadk-genai",
+ "gadk-model",
+ "gadk-platform",
+ "http",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "url",
 ]
 
 [[package]]
