@@ -34,19 +34,29 @@ use crate::errors::{self, wrap};
 use crate::rows::{self, AppStateRow, SessionRow, StateMap, UserStateRow};
 use crate::session::DatabaseSession;
 
+/// A fetched state row's decoded state, empty when there is no row; errors carry `prefix`.
+fn fetched_state(
+    found: sqlx::Result<Option<String>>,
+    prefix: &str,
+) -> Result<StateMap, SessionError> {
+    match found {
+        Ok(Some(state)) => rows::decode_state(&state).map_err(|e| wrap(prefix, e)),
+        Ok(None) => Ok(StateMap::new()),
+        Err(e) => Err(wrap(prefix, e)),
+    }
+}
+
 /// Go `fetchStorageAppState`: the app's state, empty when it has no row.
 async fn fetch_app_state(
     tx: &mut Tx,
     app_name: &str,
     for_update: bool,
 ) -> Result<StateMap, SessionError> {
-    match tx.select_app_state(app_name, for_update).await {
-        Ok(Some(row)) => {
-            rows::decode_state(&row.state).map_err(|e| wrap("failed to fetch app state", e))
-        }
-        Ok(None) => Ok(StateMap::new()),
-        Err(e) => Err(wrap("failed to fetch app state", e)),
-    }
+    let found = tx.select_app_state(app_name, for_update).await;
+    fetched_state(
+        found.map(|row| row.map(|r| r.state)),
+        "failed to fetch app state",
+    )
 }
 
 /// Go `fetchStorageUserState`.
@@ -56,13 +66,11 @@ async fn fetch_user_state(
     user_id: &str,
     for_update: bool,
 ) -> Result<StateMap, SessionError> {
-    match tx.select_user_state(app_name, user_id, for_update).await {
-        Ok(Some(row)) => {
-            rows::decode_state(&row.state).map_err(|e| wrap("failed to fetch user state", e))
-        }
-        Ok(None) => Ok(StateMap::new()),
-        Err(e) => Err(wrap("failed to fetch user state", e)),
-    }
+    let found = tx.select_user_state(app_name, user_id, for_update).await;
+    fetched_state(
+        found.map(|row| row.map(|r| r.state)),
+        "failed to fetch user state",
+    )
 }
 
 /// Go `fetchAllAppStorageUserState`: every user's state for the app, by user ID.
@@ -87,12 +95,58 @@ fn encode(state: &StateMap, prefix: &str) -> Result<String, SessionError> {
     rows::encode_state(state).map_err(|e| wrap(prefix, e))
 }
 
+/// The owner of a shared state row.
+#[derive(Clone, Copy)]
+enum Scope<'a> {
+    App { app_name: &'a str },
+    User { app_name: &'a str, user_id: &'a str },
+}
+
+/// Merges a non-empty `delta` into `state` and saves the app or user row stamped `now`.
+async fn save_delta(
+    tx: &mut Tx,
+    scope: Scope<'_>,
+    state: &mut StateMap,
+    delta: StateMap,
+    now: DateTime<Utc>,
+) -> Result<(), SessionError> {
+    if delta.is_empty() {
+        return Ok(());
+    }
+    state.extend(delta);
+    let prefix = match scope {
+        Scope::App { .. } => "failed to save app state",
+        Scope::User { .. } => "failed to save user state",
+    };
+    let state = encode(state, prefix)?;
+    let saved = match scope {
+        Scope::App { app_name } => {
+            let row = AppStateRow {
+                app_name: app_name.to_string(),
+                state,
+                update_time: now,
+            };
+            tx.save_app_state(&row).await
+        }
+        Scope::User { app_name, user_id } => {
+            let row = UserStateRow {
+                app_name: app_name.to_string(),
+                user_id: user_id.to_string(),
+                state,
+                update_time: now,
+            };
+            tx.save_user_state(&row).await
+        }
+    };
+    saved.map_err(|e| wrap(prefix, e))
+}
+
 /// Go `t.Truncate(time.Microsecond)`.
 fn truncate_to_micros(t: DateTime<Utc>) -> DateTime<Utc> {
     DateTime::from_timestamp_micros(t.timestamp_micros()).unwrap_or(t)
 }
 
-/// Go `time.UnixMicro(us).Format(time.RFC3339Nano)`, in UTC (spec R10).
+/// Go `time.UnixMicro(us).Format(time.RFC3339Nano)`, in UTC.
 fn micros_rfc3339(us: i64) -> String {
     DateTime::from_timestamp_micros(us)
         .map(|t| go_rfc3339_nano(&t))
@@ -126,29 +180,15 @@ impl SessionService for DatabaseSessionService {
         let mut user_state = fetch_user_state(&mut tx, &req.app_name, &req.user_id, false)
             .await
             .map_err(|e| wrap("error on create session", e))?;
-        if !app_delta.is_empty() {
-            app_state.extend(app_delta);
-            let row = AppStateRow {
-                app_name: req.app_name.clone(),
-                state: encode(&app_state, "failed to save app state")?,
-                update_time: now,
-            };
-            tx.save_app_state(&row)
-                .await
-                .map_err(|e| wrap("failed to save app state", e))?;
-        }
-        if !user_delta.is_empty() {
-            user_state.extend(user_delta);
-            let row = UserStateRow {
-                app_name: req.app_name.clone(),
-                user_id: req.user_id.clone(),
-                state: encode(&user_state, "failed to save user state")?,
-                update_time: now,
-            };
-            tx.save_user_state(&row)
-                .await
-                .map_err(|e| wrap("failed to save user state", e))?;
-        }
+        let app = Scope::App {
+            app_name: &req.app_name,
+        };
+        save_delta(&mut tx, app, &mut app_state, app_delta, now).await?;
+        let user = Scope::User {
+            app_name: &req.app_name,
+            user_id: &req.user_id,
+        };
+        save_delta(&mut tx, user, &mut user_state, user_delta, now).await?;
         let row = SessionRow {
             app_name: req.app_name.clone(),
             user_id: req.user_id.clone(),
@@ -378,29 +418,11 @@ impl DatabaseSessionService {
         let mut user_state =
             fetch_user_state(&mut tx, app_name, user_id, !user_delta.is_empty()).await?;
 
-        if !app_delta.is_empty() {
-            app_state.extend(app_delta);
-            let row = AppStateRow {
-                app_name: app_name.to_string(),
-                state: encode(&app_state, "failed to save app state")?,
-                update_time: event.timestamp,
-            };
-            tx.save_app_state(&row)
-                .await
-                .map_err(|e| wrap("failed to save app state", e))?;
-        }
-        if !user_delta.is_empty() {
-            user_state.extend(user_delta);
-            let row = UserStateRow {
-                app_name: app_name.to_string(),
-                user_id: user_id.to_string(),
-                state: encode(&user_state, "failed to save user state")?,
-                update_time: event.timestamp,
-            };
-            tx.save_user_state(&row)
-                .await
-                .map_err(|e| wrap("failed to save user state", e))?;
-        }
+        let now = event.timestamp;
+        let app = Scope::App { app_name };
+        save_delta(&mut tx, app, &mut app_state, app_delta, now).await?;
+        let user = Scope::User { app_name, user_id };
+        save_delta(&mut tx, user, &mut user_state, user_delta, now).await?;
 
         let mut session_state =
             rows::decode_state(&stored.state).map_err(|e| wrap("failed to get session", e))?;
