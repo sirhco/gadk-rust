@@ -629,3 +629,57 @@ async fn test_model_honours_timeout() {
         "err = {err}, want a deadline error"
     );
 }
+
+// Not ports of Go tests: they pin the streaming error texts, which Go reports unwrapped (no
+// `openai: call failed: ` prefix; ADK-Go yields the stream's error as it is).
+
+/// A streaming request answered with HTTP 500 (after openai-go's two retries) yields
+/// openai-go's API error text, unwrapped.
+#[tokio::test(start_paused = true)]
+async fn stream_server_error_text_is_unwrapped() {
+    let fake = ScriptedClient::always(FakeResponse::json_status(
+        500,
+        r#"{"error":{"message":"boom"}}"#,
+    ));
+    let llm = test_model(
+        Api::ChatCompletions,
+        super::support::TEST_MODEL,
+        &TestClientConfig::for_scripted(&fake),
+    );
+    let (got, err) = collect(llm.as_ref(), user_request("hi"), true).await;
+    assert!(got.is_empty(), "{got:?}");
+    let Some(err) = err else {
+        panic!("want the 500 as an error");
+    };
+    assert_eq!(
+        err.to_string(),
+        "OpenAI API error: 500 Internal Server Error"
+    );
+    assert_eq!(err.status(), Some(500));
+    assert_eq!(fake.hits(), 3, "attempts (openai-go retries twice)");
+}
+
+/// `http_options.timeout` expiring while the body streams yields exactly Go's
+/// `context deadline exceeded`.
+#[tokio::test(start_paused = true)]
+async fn stream_timeout_mid_stream_text_is_context_deadline_exceeded() {
+    let fake = ScriptedClient::always(
+        FakeResponse::sse(
+            "data: {\"id\":\"c\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"hail \"}}]}\n\n",
+        )
+        .hang(),
+    );
+    let llm = test_model(
+        Api::ChatCompletions,
+        super::support::TEST_MODEL,
+        &TestClientConfig::for_scripted(&fake),
+    );
+    let (got, err) = collect(llm.as_ref(), hi_with_timeout(Duration::from_secs(5)), true).await;
+    assert_eq!(got.len(), 1, "the partial before the deadline: {got:?}");
+    assert!(got[0].partial);
+    let Some(err) = err else {
+        panic!("want the deadline as an error");
+    };
+    assert_eq!(err.to_string(), "context deadline exceeded");
+    assert!(err.is_deadline_exceeded());
+}

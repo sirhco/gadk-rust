@@ -32,9 +32,9 @@ use super::{
 };
 use crate::error::ErrorKind;
 use crate::parity_tests::support::{
-    FakeResponse, TEST_MODEL, TestClientConfig, all_text, assert_finish_signal, assert_turn_shape,
-    function_calls, new_loopback_server, new_test_model, run_blocking, run_stream, sse_data,
-    user_request,
+    FakeResponse, ScriptedClient, TEST_MODEL, TestClientConfig, all_text, assert_finish_signal,
+    assert_turn_shape, collect, function_calls, new_loopback_server, new_test_model, run_blocking,
+    run_stream, sse_data, user_request,
 };
 use crate::shared::response::carries_content;
 
@@ -832,4 +832,56 @@ async fn test_model_generate_stream_adopts_terminal_tool_calls() {
             .is_some_and(|e| e.is(ErrorKind::FunctionCallArgs)),
         "unusable arguments: blocking err = {err:?}, want ErrFunctionCallArgs"
     );
+}
+
+// Not ports of Go tests: they pin the streaming error texts, which Go reports unwrapped (no
+// `openai: call failed: ` prefix; ADK-Go yields the stream's error as it is).
+
+/// A streaming request answered with HTTP 500 (after openai-go's two retries) yields
+/// openai-go's API error text, unwrapped.
+#[tokio::test(start_paused = true)]
+async fn stream_server_error_text_is_unwrapped() {
+    let fake = ScriptedClient::always(FakeResponse::json_status(
+        500,
+        r#"{"error":{"message":"boom"}}"#,
+    ));
+    let llm = new_test_model(TEST_MODEL, &TestClientConfig::for_scripted(&fake));
+    let (got, err) = collect(llm.as_ref(), user_request("hi"), true).await;
+    assert!(got.is_empty(), "{got:?}");
+    let Some(err) = err else {
+        panic!("want the 500 as an error");
+    };
+    assert_eq!(
+        err.to_string(),
+        "OpenAI API error: 500 Internal Server Error"
+    );
+    assert_eq!(err.status(), Some(500));
+    assert_eq!(fake.hits(), 3, "attempts (openai-go retries twice)");
+}
+
+/// `http_options.timeout` expiring while the body streams yields exactly Go's
+/// `context deadline exceeded`.
+#[tokio::test(start_paused = true)]
+async fn stream_timeout_mid_stream_text_is_context_deadline_exceeded() {
+    let fake = ScriptedClient::always(
+        FakeResponse::sse(&format!("data: {}\n\ndata: {}\n\n", EV_CREATED, EV_DELTA1)).hang(),
+    );
+    let llm = new_test_model(TEST_MODEL, &TestClientConfig::for_scripted(&fake));
+    let req = gadk_model::LlmRequest {
+        http_options: Some(gadk_model::HttpOptions {
+            timeout: Some(std::time::Duration::from_secs(5)),
+            ..gadk_model::HttpOptions::default()
+        }),
+        ..user_request("hi")
+    };
+    let (got, err) = collect(llm.as_ref(), req, true).await;
+    assert!(
+        got.iter().any(|r| r.partial),
+        "a partial before the deadline: {got:?}"
+    );
+    let Some(err) = err else {
+        panic!("want the deadline as an error");
+    };
+    assert_eq!(err.to_string(), "context deadline exceeded");
+    assert!(err.is_deadline_exceeded());
 }
