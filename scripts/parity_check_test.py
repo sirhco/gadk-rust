@@ -840,7 +840,63 @@ class ThreeBTest(unittest.TestCase):
         err = io.StringIO()
         with contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
             pc.main(["--adk-go", str(self.go), "--repo", str(self.repo), "--ledger", "all", "--count"])
-        self.assertIn("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c, 3a or 3b", err.getvalue())
+        self.assertIn("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b or 4a", err.getvalue())
+
+
+LEDGER_4A = (
+    "# Parity ledger — sub-project 4a\n\n"
+    "<!-- in-scope:\nsession/database/compaction_test.go\nsession/database/session_test.go\n-->\n\n"
+    + pc.TABLE_HEADER + "\n" + pc.TABLE_SEP + "\n"
+)
+
+ENGINE_TARGET = "crates/gadk-engine/src/parity_tests/session_database_compaction.rs"
+SESSION_TARGET = "crates/gadk-session-database/src/parity_tests/session_database_session.rs"
+
+
+class FourATest(unittest.TestCase):
+    """4a: a Go package whose test files land in two crates' `src/parity_tests/`."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        d = pathlib.Path(self._tmp.name)
+        self.go, self.repo = d / "go", d / "repo"
+        (self.go / "session/database").mkdir(parents=True)
+        (self.go / "session/database/compaction_test.go").write_text(
+            "package database\nfunc TestACompactionCorrectionSortsAfterTheRecordItCorrects(t *testing.T) {}\n")
+        (self.go / "session/database/session_test.go").write_text(
+            "package database\nfunc TestLocalSessionEventsSnapshot(t *testing.T) {}\n")
+        for target in (ENGINE_TARGET, SESSION_TARGET):
+            (self.repo / target).parent.mkdir(parents=True, exist_ok=True)
+        (self.repo / ENGINE_TARGET).write_text(
+            "#[tokio::test]\nasync fn test_a_compaction_correction_sorts_after_the_record_it_corrects() {}\n")
+        (self.repo / SESSION_TARGET).write_text("#[test]\nfn test_local_session_events_snapshot() {}\n")
+        (self.repo / "docs/parity").mkdir(parents=True)
+        self.ledger = self.repo / "docs/parity/4a.md"
+        self.ledger.write_text(LEDGER_4A)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def run_cli(self, *args):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = pc.main(["--adk-go", str(self.go), "--repo", str(self.repo), *args])
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_ledger_4a_is_registered(self):
+        self.assertIn("4a", pc.GENERATED_LEDGERS)
+
+    def test_targets_in_two_crates_generate_and_check(self):
+        self.assertEqual(self.run_cli("--ledger", "4a", "--count"), (0, "2\n", ""))
+        self.assertEqual(self.run_cli("--ledger", "4a", "--generate")[0], 0)
+        self.assertEqual(self.run_cli("--ledger", "4a"), (0, "", ""))
+        rows = self.ledger.read_text().splitlines()[-2:]
+        self.assertEqual(rows, [
+            "| session/database/compaction_test.go | TestACompactionCorrectionSortsAfterTheRecordItCorrects"
+            " | ported | " + ENGINE_TARGET + " | test_a_compaction_correction_sorts_after_the_record_it_corrects |",
+            "| session/database/session_test.go | TestLocalSessionEventsSnapshot | ported | "
+            + SESSION_TARGET + " | test_local_session_events_snapshot |",
+        ])
 
 
 ADK_GO = pathlib.Path(os.environ.get("ADK_GO_DIR", HERE.parent.parent / "adk-go"))
@@ -892,7 +948,6 @@ class RealTreeTest(unittest.TestCase):
             "internal/compactionvalidate/validate_test.go": "launcher and server validation (sub-projects 5 and 6)",
             "cmd/launcher/console/compaction_test.go": "launcher (sub-project 6)",
             "server/adkrest/compaction_integration_test.go": "REST server (sub-project 5)",
-            "session/database/compaction_test.go": "database session service (sub-project 4)",
             "session/vertexai/compaction_persistence_test.go": "Vertex AI session service (sub-project 4)",
         })
         self.assertEqual(pc.count(ADK_GO, in_scope), 190)
@@ -1004,6 +1059,17 @@ class RealTreeTest(unittest.TestCase):
     def test_1a_header_has_13_files(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/1a.md")
         self.assertEqual((len(in_scope), deferred), (13, {}))
+
+    def test_4a_count_is_15(self):
+        in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/4a.md")
+        self.assertEqual(in_scope, [
+            "session/database/compaction_test.go",
+            "session/database/service_test.go",
+            "session/database/session_test.go",
+        ])
+        self.assertEqual(deferred, {})
+        self.assertEqual(pc.count(ADK_GO, in_scope), 15)
+        self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "4a"), [])
 
 
 if __name__ == "__main__":

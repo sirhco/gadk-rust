@@ -135,6 +135,13 @@ class EdgeTest(unittest.TestCase):
         errs = cwd.check(self.repo)
         self.assertTrue(any("only gadk may depend on gadk-openai (dev-dependency)" in e for e in errs), errs)
 
+    def test_session_database_edges_are_exactly_session_model_platform(self):
+        self.assertEqual(cwd.ALLOWED["gadk-session-database"], {"gadk-session", "gadk-model", "gadk-platform"})
+        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-session-database" in deps], ["gadk"])
+
+    def test_engine_dev_dependency_on_session_database_is_allowed(self):
+        self.assertFalse(cwd.reaches("gadk-session-database", "gadk-engine"))
+
     def test_disallowed_normal_edge_is_rejected(self):
         self.edit("gadk-artifact", "[dependencies]\n", "[dependencies]\ngadk-session = { workspace = true }\n")
         errs = cwd.check(self.repo)

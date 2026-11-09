@@ -44,6 +44,10 @@ pub use gadk_model as model;
 pub use gadk_openai as openai;
 pub use gadk_platform as platform;
 pub use gadk_session as session;
+/// Sessions in a relational database: sqlite, or PostgreSQL with the crate's `postgres`
+/// feature (feature `database`, not on by default; re-export of `gadk-session-database`).
+#[cfg(feature = "database")]
+pub use gadk_session_database as session_database;
 /// Built-in tools that need no authentication: the Gemini built-ins, artifact and memory tools,
 /// the example tool, tool search, the skills toolset and the `toolauth` wire model (re-export of
 /// `gadk-tools`).

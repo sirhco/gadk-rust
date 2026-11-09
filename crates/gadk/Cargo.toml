@@ -21,6 +21,9 @@ mcp = ["dep:gadk-mcp"]
 anthropic = ["dep:gadk-anthropic"]
 # OpenAI models (gadk-openai); not in `default`.
 openai = ["dep:gadk-openai"]
+# Relational-database sessions (gadk-session-database; sqlite by default — enable the crate's
+# `postgres` feature in your own manifest for PostgreSQL); not in `default`.
+database = ["dep:gadk-session-database"]
 
 [dependencies]
 gadk-genai = { workspace = true }
@@ -38,6 +41,7 @@ gadk-auth = { workspace = true }
 gadk-mcp = { workspace = true, optional = true }
 gadk-anthropic = { workspace = true, optional = true }
 gadk-openai = { workspace = true, optional = true }
+gadk-session-database = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
@@ -116,6 +120,10 @@ required-features = ["anthropic"]
 [[example]]
 name = "openai"
 required-features = ["openai"]
+
+[[example]]
+name = "database_session"
+required-features = ["database", "gemini"]
 
 [[test]]
 name = "model_anthropicmodel_agent_runner"

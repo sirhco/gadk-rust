@@ -21,6 +21,7 @@ mod event;
 mod inmemory;
 mod legacy;
 mod service;
+pub mod state_util;
 mod tool_confirmation;
 
 /// Reusable conformance suite for [`SessionService`] implementations.

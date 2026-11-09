@@ -1,0 +1,187 @@
+{
+  "get": [
+    {
+      "app_name": "app",
+      "user_id": "u1",
+      "id": "s1",
+      "state": {
+        "app:theme": "light",
+        "big": 1e+21,
+        "count": 2,
+        "html": "\u003ca\u0026b\u003e",
+        "n": 1.5,
+        "ratio": 1e-7,
+        "sk": "v",
+        "user:lang": "fr"
+      },
+      "last_update_time": "2026-03-04T05:06:12.123456Z",
+      "events": [
+        {
+          "content": {
+            "parts": [
+              {
+                "text": "hello \u003cworld\u003e \u0026 \u2028"
+              }
+            ],
+            "role": "model"
+          },
+          "citationMetadata": {
+            "citations": [
+              {
+                "endIndex": 4,
+                "startIndex": 1,
+                "uri": "https://example.com"
+              }
+            ]
+          },
+          "groundingMetadata": {
+            "webSearchQueries": [
+              "weather"
+            ]
+          },
+          "usageMetadata": {
+            "candidatesTokenCount": 5,
+            "promptTokenCount": 3,
+            "totalTokenCount": 8
+          },
+          "customMetadata": {
+            "n": 1,
+            "trace": "abc"
+          },
+          "inputTranscription": {
+            "text": "what time is it",
+            "finished": true
+          },
+          "outputTranscription": {
+            "text": "it is noon"
+          },
+          "turnComplete": true,
+          "interrupted": true,
+          "errorCode": "E42",
+          "errorMessage": "partial failure",
+          "id": "e-full",
+          "timestamp": "2026-03-04T05:06:09.123456Z",
+          "invocationId": "inv-1",
+          "branch": "root.child",
+          "isolationScope": "task-1",
+          "author": "agent",
+          "actions": {
+            "skipSummarization": true,
+            "transferToAgent": "helper",
+            "escalate": true,
+            "stateDelta": {
+              "app:theme": "light",
+              "count": 2,
+              "ratio": 1e-7,
+              "user:lang": "fr"
+            },
+            "artifactDelta": {
+              "report.txt": 3
+            }
+          },
+          "longRunningToolIds": [
+            "call-1"
+          ],
+          "routes": [
+            "route_a",
+            "route_b"
+          ],
+          "requestedInput": {
+            "interruptId": "ask",
+            "message": "Name?",
+            "responseSchema": {
+              "type": "string"
+            }
+          },
+          "output": {
+            "answer": 42.5,
+            "html": "\u003cb\u003e\u0026\u003c/b\u003e"
+          },
+          "nodeInfo": {
+            "path": "wf/ask",
+            "messageAsOutput": true,
+            "outputFor": [
+              "wf"
+            ]
+          }
+        },
+        {
+          "content": {
+            "parts": [
+              {
+                "text": "hi"
+              }
+            ],
+            "role": "user"
+          },
+          "id": "e-plain",
+          "timestamp": "2026-03-04T05:06:11.123456Z",
+          "invocationId": "inv-1",
+          "author": "user",
+          "actions": {
+            "stateDelta": {},
+            "artifactDelta": {}
+          }
+        },
+        {
+          "id": "e-compaction",
+          "timestamp": "2026-03-04T05:06:12.123456Z",
+          "invocationId": "inv-1",
+          "author": "user",
+          "actions": {
+            "compaction": {
+              "startTimestamp": "2026-03-04T05:06:07.123456789Z",
+              "endTimestamp": "2026-03-04T05:06:11.123456789Z",
+              "compactedContent": {
+                "parts": [
+                  {
+                    "text": "summary"
+                  }
+                ],
+                "role": "model"
+              }
+            },
+            "stateDelta": {},
+            "artifactDelta": {}
+          }
+        }
+      ]
+    },
+    {
+      "app_name": "app",
+      "user_id": "u2",
+      "id": "s2",
+      "state": {
+        "app:theme": "light"
+      },
+      "last_update_time": "2026-03-04T05:06:08.123456789Z"
+    }
+  ],
+  "list": [
+    {
+      "app_name": "app",
+      "user_id": "u1",
+      "id": "s1",
+      "state": {
+        "app:theme": "light",
+        "big": 1e+21,
+        "count": 2,
+        "html": "\u003ca\u0026b\u003e",
+        "n": 1.5,
+        "ratio": 1e-7,
+        "sk": "v",
+        "user:lang": "fr"
+      },
+      "last_update_time": "2026-03-04T05:06:12.123456Z"
+    },
+    {
+      "app_name": "app",
+      "user_id": "u2",
+      "id": "s2",
+      "state": {
+        "app:theme": "light"
+      },
+      "last_update_time": "2026-03-04T05:06:08.123456789Z"
+    }
+  ]
+}

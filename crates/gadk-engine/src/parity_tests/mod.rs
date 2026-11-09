@@ -87,6 +87,7 @@ mod runner_live_runner;
 mod runner_max_llm_calls;
 mod runner_mode_no_mutation;
 mod runner_runner;
+mod session_database_compaction;
 mod tool_agenttool_agent_tool;
 mod tool_agenttool_agent_tool_artifacts;
 mod tool_agenttool_agent_tool_limits;
