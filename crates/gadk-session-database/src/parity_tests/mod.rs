@@ -13,6 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! In-crate parity targets (plan 4a D3).
+//! In-crate ports of ADK-Go tests that reach crate-private types.
 
 mod session_database_session;

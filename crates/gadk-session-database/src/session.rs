@@ -14,9 +14,9 @@
 // limitations under the License.
 
 //! The session handed out by the service (Go `localSession`).
-#![allow(dead_code, unused_variables, unused_imports, clippy::todo)]
 
 use chrono::{DateTime, Utc};
+use gadk_session::state_util::trim_temp_delta_state;
 use gadk_session::{Event, Session, SessionError, State};
 use parking_lot::RwLock;
 use serde_json::Value;
@@ -51,63 +51,95 @@ impl DatabaseSession {
         events: Vec<Event>,
         updated_at: DateTime<Utc>,
     ) -> Self {
-        todo!("Task 5")
+        Self {
+            app_name,
+            user_id,
+            id,
+            data: SessionData(RwLock::new(Inner {
+                state,
+                events,
+                updated_at,
+            })),
+        }
     }
 
     /// Go `localSession.appendEvent`: a partial event is ignored; otherwise the whole state
     /// delta (temp: keys included) is copied into the session state and the event, with temp:
     /// keys trimmed from its delta, is appended.
     pub(crate) fn append_event(&self, event: &Event) {
-        todo!("Task 5")
+        if event.response.partial {
+            return;
+        }
+        let mut inner = self.data.0.write();
+        if let Some(delta) = &event.actions.state_delta {
+            inner
+                .state
+                .extend(delta.iter().map(|(k, v)| (k.clone(), v.clone())));
+        }
+        inner.events.push(trim_temp_delta_state(event));
     }
 
     pub(crate) fn updated_at(&self) -> DateTime<Utc> {
-        todo!("Task 5")
+        self.data.0.read().updated_at
     }
 
     pub(crate) fn set_updated_at(&self, t: DateTime<Utc>) {
-        todo!("Task 5")
+        self.data.0.write().updated_at = t;
     }
 
     /// Test hook for the snapshot port: replaces the event at `index`.
     #[cfg(test)]
     pub(crate) fn replace_event(&self, index: usize, event: Event) {
-        todo!("Task 5")
+        if let Some(slot) = self.data.0.write().events.get_mut(index) {
+            *slot = event;
+        }
     }
 }
 
 impl Session for DatabaseSession {
     fn id(&self) -> &str {
-        todo!("Task 5")
+        &self.id
     }
     fn app_name(&self) -> &str {
-        todo!("Task 5")
+        &self.app_name
     }
     fn user_id(&self) -> &str {
-        todo!("Task 5")
+        &self.user_id
     }
     fn state(&self) -> &dyn State {
-        todo!("Task 5")
+        &self.data
     }
+    /// A snapshot: later appends and replacements do not change it (Go `slices.Clone`).
     fn events(&self) -> Vec<Event> {
-        todo!("Task 5")
+        self.data.0.read().events.clone()
     }
     fn last_update_time(&self) -> DateTime<Utc> {
-        todo!("Task 5")
+        self.updated_at()
     }
     fn as_any(&self) -> &dyn std::any::Any {
-        todo!("Task 5")
+        self
     }
 }
 
 impl State for SessionData {
     fn get(&self, key: &str) -> Result<Value, SessionError> {
-        todo!("Task 5")
+        self.0
+            .read()
+            .state
+            .get(key)
+            .cloned()
+            .ok_or(SessionError::StateKeyNotExist)
     }
     fn set(&self, key: &str, value: Value) -> Result<(), SessionError> {
-        todo!("Task 5")
+        self.0.write().state.insert(key.to_string(), value);
+        Ok(())
     }
     fn all(&self) -> Vec<(String, Value)> {
-        todo!("Task 5")
+        self.0
+            .read()
+            .state
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
     }
 }
