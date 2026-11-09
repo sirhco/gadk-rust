@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `session/inmemory.go` and `internal/sessionutils`.
+//! Port of ADK-Go `session/inmemory.go`.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;

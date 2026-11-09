@@ -55,7 +55,7 @@ mod sqlite;
 mod parity_tests;
 
 /// The sqlx version this crate is built on, for building pools to pass to
-/// [`DatabaseSessionService::from_sqlite_pool`] / [`DatabaseSessionService::from_pg_pool`].
+/// `DatabaseSessionService::from_sqlite_pool` / `DatabaseSessionService::from_pg_pool`.
 pub use sqlx;
 
 use gadk_platform::{Platform, go_quote};
