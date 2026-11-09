@@ -121,6 +121,10 @@ required-features = ["anthropic"]
 name = "openai"
 required-features = ["openai"]
 
+[[example]]
+name = "database_session"
+required-features = ["database", "gemini"]
+
 [[test]]
 name = "model_anthropicmodel_agent_runner"
 required-features = ["anthropic"]

@@ -42,6 +42,7 @@ regex = { workspace = true }
 [dev-dependencies]
 gadk-engine = { path = ".", features = ["testutil"] }
 gadk-session = { workspace = true, features = ["testsuite"] }
+gadk-session-database = { workspace = true }
 gadk-artifact = { workspace = true, features = ["testsuite"] }
 tokio = { workspace = true, features = ["test-util"] }
 rstest = { workspace = true }
