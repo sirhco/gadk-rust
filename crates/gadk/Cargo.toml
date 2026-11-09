@@ -55,6 +55,8 @@ gadk-mcp = { workspace = true, features = ["testutil"] }
 rmcp = { workspace = true, features = ["server", "macros"] }
 # The anthropic runner test replays a Go httprr recording.
 gadk-httprr = { workspace = true }
+# The openai façade test answers through the scripted fake client (no network).
+gadk-model = { workspace = true, features = ["test-util"] }
 
 [[example]]
 name = "quickstart"
