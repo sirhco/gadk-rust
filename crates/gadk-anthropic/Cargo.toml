@@ -11,7 +11,7 @@ workspace = true
 
 [dependencies]
 gadk-genai = { workspace = true }
-gadk-model = { workspace = true }
+gadk-model = { workspace = true, features = ["gcp-auth"] }
 gadk-platform = { workspace = true }
 google-cloud-auth = { workspace = true }
 reqwest = { workspace = true }

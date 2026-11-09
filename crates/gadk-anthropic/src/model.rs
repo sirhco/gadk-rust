@@ -26,11 +26,8 @@ use gadk_model::{
     HttpClient, Llm, LlmRequest, LlmResponse, ModelError, ReqwestClient, collect_body,
 };
 use gadk_platform::env::EnvProvider;
-use google_cloud_auth::credentials::{
-    Credentials, external_account, impersonated, service_account, user_account,
-};
+use google_cloud_auth::credentials::Credentials;
 use http::header::CONTENT_TYPE;
-use serde_json::Value;
 
 use crate::cache::apply_cache_breakpoints;
 use crate::client::{
@@ -485,50 +482,21 @@ pub(crate) fn resolve_vertex_credentials(
     }
 }
 
-/// Application Default Credentials read through `env`: `GOOGLE_APPLICATION_CREDENTIALS`'s file
-/// dispatched on its `"type"` to google-cloud-auth's per-type builders (as gadk-auth's
-/// `adc_token_source` does), else google-cloud-auth's default builder. Any failure is Go's
-/// `ErrInvalidConfig` + `ErrAuthentication` text `failed to find Google Application Default
+/// Application Default Credentials read through `env` ([`gadk_model::gcp_auth::adc_credentials`]
+/// with `env`'s `GOOGLE_APPLICATION_CREDENTIALS` and [`CLOUD_PLATFORM_SCOPE`]). Any failure is
+/// Go's `ErrInvalidConfig` + `ErrAuthentication` text `failed to find Google Application Default
 /// Credentials for Vertex AI`; the underlying detail is logged at `debug` only (Go's error
 /// carries none).
 pub(crate) fn adc_credentials(env: &dyn EnvProvider) -> Result<Credentials, AnthropicError> {
-    let fail = |detail: String| {
-        tracing::debug!(%detail, "anthropicmodel: Application Default Credentials lookup failed");
+    let file = env.var("GOOGLE_APPLICATION_CREDENTIALS");
+    gadk_model::gcp_auth::adc_credentials(file.as_deref(), &[CLOUD_PLATFORM_SCOPE]).map_err(|e| {
+        tracing::debug!(detail = %e, "anthropicmodel: Application Default Credentials lookup failed");
         AnthropicError::wrap2(
             ErrorKind::InvalidConfig,
             ErrorKind::Authentication,
             ADC_FAILURE,
         )
-    };
-    let scopes = [CLOUD_PLATFORM_SCOPE];
-    match env
-        .var("GOOGLE_APPLICATION_CREDENTIALS")
-        .filter(|p| !p.is_empty())
-    {
-        Some(path) => {
-            let contents = std::fs::read(&path).map_err(|e| fail(e.to_string()))?;
-            let json: Value = serde_json::from_slice(&contents).map_err(|e| fail(e.to_string()))?;
-            let kind = json.get("type").and_then(Value::as_str).unwrap_or_default();
-            let built = match kind {
-                "authorized_user" => user_account::Builder::new(json).with_scopes(scopes).build(),
-                "service_account" => service_account::Builder::new(json)
-                    .with_access_specifier(service_account::AccessSpecifier::from_scopes(scopes))
-                    .build(),
-                "impersonated_service_account" => {
-                    impersonated::Builder::new(json).with_scopes(scopes).build()
-                }
-                "external_account" => external_account::Builder::new(json)
-                    .with_scopes(scopes)
-                    .build(),
-                other => return Err(fail(format!("unknown credential type: {other}"))),
-            };
-            built.map_err(|e| fail(e.to_string()))
-        }
-        None => google_cloud_auth::credentials::Builder::default()
-            .with_scopes(scopes)
-            .build()
-            .map_err(|e| fail(e.to_string())),
-    }
+    })
 }
 
 /// One non-streaming call (Go `Messages.New` + `convertMessageToLLMResponse`).

@@ -22,15 +22,16 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use futures::StreamExt;
+use gadk_model::gcp_auth::credential_headers;
 use gadk_model::rest::{
     CallTimeout, RequestHeaders, RestError, RestReply, RestTransport, header_str,
 };
 use gadk_model::{BodyStream, ModelError};
-use google_cloud_auth::credentials::{CacheableResource, Credentials};
+use google_cloud_auth::credentials::Credentials;
 use http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, USER_AGENT};
 use http::{HeaderMap, HeaderValue, Uri};
 
-use crate::error::{AnthropicError, api_error_from_response, error_chain, go_quote};
+use crate::error::{AnthropicError, api_error_from_response, go_quote};
 use crate::wire::{MessageNewParams, VertexBody, encode_request};
 
 /// The Anthropic backend's default base URL (SDK `WithEnvironmentProduction`).
@@ -164,19 +165,6 @@ fn sensitive_value(name: &str, value: &str) -> Result<HeaderValue, AnthropicErro
     Ok(v)
 }
 
-/// The credentials' headers (Go's `oauth2.Transport`); a failure is a transport error whose
-/// detail is google-cloud-auth's error text (Go's is `oauth2`'s), a ledgered divergence.
-async fn credential_headers(credentials: &Credentials) -> Result<HeaderMap, AnthropicError> {
-    match credentials.headers(http::Extensions::new()).await {
-        Ok(CacheableResource::New { data, .. }) => Ok(data),
-        // Only returned when the caller passes an entity tag, which gadk never does.
-        Ok(CacheableResource::NotModified) => {
-            Err(AnthropicError::transport("credentials returned no headers"))
-        }
-        Err(e) => Err(AnthropicError::transport(error_chain(&e))),
-    }
-}
-
 /// A streaming body's [`RestError`] (the attempt's deadline passing) becomes the
 /// [`AnthropicError`] the rest of the crate expects: `ModelError::Other(AnthropicError)`.
 fn anthropic_body_error(err: ModelError) -> ModelError {
@@ -263,7 +251,13 @@ impl Transport {
             Auth::Vertex(credentials) => {
                 h.insert("x-goog-api-client", tracking);
                 h.extend(user);
-                h.extend(credential_headers(credentials).await?);
+                // A failure is a transport error whose detail is google-cloud-auth's error
+                // text (Go's is `oauth2`'s), a ledgered divergence.
+                h.extend(
+                    credential_headers(credentials)
+                        .await
+                        .map_err(AnthropicError::transport)?,
+                );
             }
         }
         Ok(h)
@@ -340,7 +334,7 @@ mod tests {
 
     use gadk_model::rest::RetryPolicy;
     use gadk_model::rest::test_util::{FakeResponse, ScriptedClient as Fake};
-    use google_cloud_auth::credentials::{CredentialsProvider, EntityTag};
+    use google_cloud_auth::credentials::{CacheableResource, CredentialsProvider, EntityTag};
     use google_cloud_auth::errors::CredentialsError;
     use http::StatusCode;
     use pretty_assertions::assert_eq;
