@@ -17,8 +17,6 @@
 //! `internal/responses/request.go`: `supportedConfigFields`, `applyGenerationConfig`,
 //! `serviceTiers`, `applyThinkingConfig`).
 
-#![allow(dead_code)] // D1: first used by Task 9 (`responses::model`).
-
 use gadk_genai::{GenerateContentConfig, ServiceTier, ThinkingConfig};
 use gadk_model::HttpOptions;
 use gadk_platform::go_quote;

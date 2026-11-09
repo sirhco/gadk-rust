@@ -16,8 +16,6 @@
 //! The Responses API stream event types ADK-Go's translator and stream loop switch on (port
 //! of ADK-Go `internal/responses/consts.go`).
 
-#![allow(dead_code)] // D1: consumed by Tasks 7 and 9; Task 10 sweeps what stays unused.
-
 /// `response.output_text.delta`.
 pub(crate) const RESPONSE_OUTPUT_TEXT_DELTA: &str = "response.output_text.delta";
 /// `response.refusal.delta`.

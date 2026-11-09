@@ -15,8 +15,6 @@
 
 //! Chat Completions tools (port of ADK-Go `internal/completions/tools.go`).
 
-#![allow(dead_code)] // D1: first used by Task 8 (`completions::model`).
-
 use gadk_genai::{
     FunctionCallingConfigMode, FunctionDeclaration, GenerateContentConfig, ToolConfig,
 };

@@ -16,8 +16,6 @@
 //! The Responses JSON-schema text format (port of ADK-Go `internal/responses/request.go`'s
 //! `newJSONSchemaFormat`).
 
-#![allow(dead_code)] // D1: first used by Task 9 (`responses::model`).
-
 use gadk_genai::GenerateContentConfig;
 
 use crate::error::OpenAiError;

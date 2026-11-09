@@ -15,8 +15,6 @@
 
 //! Content helpers both APIs share (port of ADK-Go `internal/shared/contents.go`).
 
-#![allow(dead_code)] // D1: first used by Tasks 4 and 5.
-
 use gadk_genai::{Content, Part};
 
 use crate::error::OpenAiError;

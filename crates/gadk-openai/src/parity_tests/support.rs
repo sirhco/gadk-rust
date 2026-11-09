@@ -28,7 +28,7 @@
 //! - Tests that need paused time use [`ScriptedClient`] with [`test_model`] instead of a
 //!   server.
 
-#![allow(dead_code, clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::sync::Arc;
 
@@ -37,10 +37,8 @@ use gadk_genai::{Content, FunctionCall};
 use gadk_model::{HttpClient, Llm, LlmRequest, LlmResponse, ModelError, ReqwestClient};
 use gadk_platform::env::MapEnv;
 
-#[allow(unused_imports)] // re-exported for the ports (Tasks 3–9)
 pub(crate) use gadk_model::rest::test_util::{
-    BodyEnd, BodyStep, FakeResponse, FakeServer, Outcome, RecordedRequest, ScriptedClient,
-    WAIT_TIMEOUT, sse_event, sse_lines,
+    FakeResponse, FakeServer, RecordedRequest, ScriptedClient, WAIT_TIMEOUT,
 };
 
 use crate::client::OpenAiClient;

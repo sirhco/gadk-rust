@@ -24,8 +24,6 @@
 //! block and `incompleteEvent`) are here; the shared helpers (`runStream`, `runBlocking`,
 //! `assertTurnShape`, …) are in [`super::support`].
 
-#![allow(dead_code)]
-
 mod blocking;
 mod stream_content;
 mod stream_terminal;
@@ -190,6 +188,7 @@ pub(super) const EV_CREATED_FAILED: &str = evcreatedfailed!();
 /// Go `bodyCompleted`.
 pub(super) const BODY_COMPLETED: &str = bodycompleted!();
 /// Go `bodyCompletedReasoning`.
+#[allow(dead_code)] // Go's const block; like Go, only `EV_COMPLETED_REASONING` uses the body (via its macro).
 pub(super) const BODY_COMPLETED_REASONING: &str = bodycompletedreasoning!();
 /// Go `bodyFiltered`.
 pub(super) const BODY_FILTERED: &str = bodyfiltered!();

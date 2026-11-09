@@ -17,8 +17,6 @@
 //! `completion.go`) that ADK-Go's `internal/completions` touches, following the conventions of
 //! [`crate::oaishared`] (declaration order, `omitzero`, `apijson` leniency).
 
-#![allow(dead_code)] // D1: consumed by Tasks 4, 6 and 8; Task 10 sweeps what stays unused.
-
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -135,6 +133,7 @@ pub(crate) struct ChatCompletionNewParams {
 /// openai-go `ChatCompletionNewParamsServiceTier`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
+#[allow(dead_code)] // D5: openai-go's whole value set; ADK-Go never sends `auto`, `scale` or `fast`.
 pub(crate) enum ChatCompletionServiceTier {
     /// `"auto"`.
     Auto,
@@ -153,6 +152,7 @@ pub(crate) enum ChatCompletionServiceTier {
 /// openai-go `ChatCompletionNewParamsStopUnion` (ADK-Go sends `OfStringArray`).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
+#[allow(dead_code)] // D5: openai-go's whole value set; ADK-Go sends only `OfStringArray`.
 pub(crate) enum ChatCompletionStop {
     /// `OfString`.
     String(String),
@@ -246,6 +246,7 @@ impl ChatCompletionMessageParam {
 /// `ChatCompletion{System,Developer,Tool}MessageParamContentUnion`).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
+#[allow(dead_code)] // D5: openai-go's whole value set; ADK-Go sends only `OfString`.
 pub(crate) enum ChatCompletionTextContent {
     /// `OfString`.
     String(String),
@@ -539,6 +540,7 @@ pub(crate) struct ChatCompletionNamedToolChoiceFunctionParam {
 /// openai-go `ChatCompletionNewParamsResponseFormatUnion`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
+#[allow(dead_code)] // D5: openai-go's whole value set; ADK-Go never sends `OfText`.
 pub(crate) enum ChatCompletionResponseFormat {
     /// `OfText`.
     Text(ResponseFormatTextParam),

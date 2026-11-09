@@ -18,9 +18,7 @@
 //! `normalizeRole`, `joinText`, `newToolCall`, `newToolMessage`, `serviceTiers`,
 //! `supportedConfigFields`, `applyGenerationConfig`, `newResponseFormat`). Only
 //! [`build_params`] is shared; [`build_params_with`] and [`supported_config_fields`] are
-//! Task 4's seam for the test that swaps Go's `supportedConfigFields`.
-
-#![allow(dead_code)] // D1: first used by Task 8 (`completions::model`).
+//! the seam for the test that swaps Go's `supportedConfigFields`.
 
 use gadk_genai::{Content, FunctionCall, FunctionResponse, GenerateContentConfig, ServiceTier};
 use gadk_model::{HttpOptions, LlmRequest};

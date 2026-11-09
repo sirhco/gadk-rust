@@ -17,8 +17,6 @@
 //! argument decoding ADK-Go repeats in `completions/response.go`, `responses/response.go` and
 //! `responses/stream.go`, shared here).
 
-#![allow(dead_code)] // D1: first used by Tasks 4–7.
-
 use gadk_genai::{FunctionCall, FunctionResponse};
 use gadk_platform::go_quote;
 use serde_json::{Map, Value};

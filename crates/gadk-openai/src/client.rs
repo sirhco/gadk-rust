@@ -17,8 +17,6 @@
 //! [`gadk_model::rest`] with openai-go v3.82.0's retry policy and ADK-Go's call deadline
 //! (port of openai-go `RequestConfig.Execute`'s OpenAI specifics and `packages/ssestream`).
 
-#![allow(dead_code)] // D1: the models (Tasks 8, 9) call `post`, `decode_body`, `event_stream`; Task 10 removes this.
-
 use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;

@@ -17,8 +17,6 @@
 //! ADK-Go's `internal/responses` touches, following the conventions of [`crate::oaishared`]
 //! (declaration order, `omitzero`, `apijson` leniency).
 
-#![allow(dead_code)] // D1: consumed by Tasks 5, 7 and 9; Task 10 sweeps what stays unused.
-
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use serde_json::{Map, Value};
@@ -120,6 +118,7 @@ pub(crate) struct ResponseNewParams {
 
 /// openai-go `responses.ResponseIncludable`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[allow(dead_code)] // D5: openai-go's whole value set; ADK-Go sends only `message.output_text.logprobs`.
 pub(crate) enum ResponseIncludable {
     /// `"file_search_call.results"`.
     #[serde(rename = "file_search_call.results")]
@@ -150,6 +149,7 @@ pub(crate) enum ResponseIncludable {
 /// openai-go `responses.ResponseNewParamsServiceTier`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
+#[allow(dead_code)] // D5: openai-go's whole value set; ADK-Go never sends `auto`, `scale`, `fast` or `ultrafast`.
 pub(crate) enum ResponseServiceTier {
     /// `"auto"`.
     Auto,
@@ -170,6 +170,7 @@ pub(crate) enum ResponseServiceTier {
 /// openai-go `responses.ResponseNewParamsInputUnion`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
+#[allow(dead_code)] // D5: openai-go's whole value set; ADK-Go sends only `OfInputItemList`.
 pub(crate) enum ResponseInput {
     /// `OfString`.
     String(String),
@@ -241,6 +242,7 @@ pub(crate) struct EasyInputMessageParam {
 /// openai-go `responses.EasyInputMessageContentUnionParam`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
+#[allow(dead_code)] // D5: openai-go's whole value set; ADK-Go sends only `OfInputItemContentList`.
 pub(crate) enum EasyInputMessageContent {
     /// `OfString`.
     String(String),
@@ -273,6 +275,7 @@ pub(crate) struct ResponseInputTextParam {
 /// openai-go `responses.ResponseInputImageDetail`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
+#[allow(dead_code)] // D5: openai-go's whole value set; ADK-Go sends only `auto`.
 pub(crate) enum ResponseInputImageDetail {
     /// `"low"`.
     Low,
@@ -326,6 +329,7 @@ pub(crate) struct ResponseInputFileParam {
 /// openai-go `responses.ResponseOutputMessageStatus`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
+#[allow(dead_code)] // D5: openai-go's whole value set; ADK-Go sends only `completed`.
 pub(crate) enum ResponseOutputMessageStatus {
     /// `"in_progress"`.
     InProgress,
@@ -433,6 +437,7 @@ impl ResponseTextConfigParam {
 /// openai-go `responses.ResponseFormatTextConfigUnionParam`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
+#[allow(dead_code)] // D5: openai-go's whole value set; ADK-Go never sends `OfText`.
 pub(crate) enum ResponseFormatTextConfig {
     /// `OfText`.
     Text(ResponseFormatTextParam),
@@ -465,6 +470,7 @@ pub(crate) struct ResponseFormatTextJsonSchemaConfigParam {
 /// openai-go `responses.ToolChoiceOptions`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
+#[allow(dead_code)] // D5: openai-go's whole value set; ADK-Go never sends `auto`.
 pub(crate) enum ToolChoiceOptions {
     /// `"none"`.
     None,
@@ -543,10 +549,13 @@ pub(crate) mod status {
     /// `"failed"`.
     pub(crate) const FAILED: &str = "failed";
     /// `"in_progress"`.
+    #[cfg_attr(not(test), allow(dead_code))] // only the response tests name it (Go's use the SDK constant)
     pub(crate) const IN_PROGRESS: &str = "in_progress";
     /// `"cancelled"`.
+    #[cfg_attr(not(test), allow(dead_code))] // only the response tests name it (Go's use the SDK constant)
     pub(crate) const CANCELLED: &str = "cancelled";
     /// `"queued"`.
+    #[cfg_attr(not(test), allow(dead_code))] // only the response tests name it (Go's use the SDK constant)
     pub(crate) const QUEUED: &str = "queued";
     /// `"incomplete"`.
     pub(crate) const INCOMPLETE: &str = "incomplete";

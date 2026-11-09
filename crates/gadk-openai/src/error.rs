@@ -258,7 +258,6 @@ fn status_text(code: u16) -> Option<&'static str> {
 }
 
 /// Where an [`OpenAiError`] comes from; decides the accessors that are true.
-#[allow(dead_code)] // D1: `Api` is built once Tasks 8 and 9 call `OpenAiClient::post`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Origin {
     /// A sentinel, bare or wrapped (`fmt.Errorf("%w…", sentinel…)`).
@@ -377,7 +376,6 @@ impl OpenAiError {
     }
 
     /// openai-go's `*openai.Error` for a final response with status ≥ 400.
-    #[allow(dead_code)] // D1: reached through `OpenAiClient::post` (Tasks 8, 9).
     pub(crate) fn api(status: u16, body: Bytes) -> Self {
         let api = ApiError { status, body };
         Self {
@@ -445,7 +443,6 @@ impl OpenAiError {
 
     /// Go `fmt.Errorf("openai: call failed: %w", err)` (the blocking paths' wrap of a client
     /// error).
-    #[allow(dead_code)] // D1: Tasks 8 and 9 wrap the blocking paths' errors.
     pub(crate) fn call_failed(self) -> Self {
         self.prefixed("openai: call failed: ")
     }
@@ -518,7 +515,6 @@ impl From<RestError> for OpenAiError {
 /// Go `encoding/json`'s text for a serde_json error, where a Go test asserts it (P3): a
 /// truncated document is `unexpected end of JSON input`; every other error keeps serde_json's
 /// wording (an accepted divergence, `docs/parity/3b.md`).
-#[allow(dead_code)] // D1: reached through `client::event_stream` (Tasks 8, 9) and Task 3's argument decoding.
 pub(crate) fn go_json_error(err: &serde_json::Error) -> String {
     if err.is_eof() {
         "unexpected end of JSON input".to_string()

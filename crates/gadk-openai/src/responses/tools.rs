@@ -15,8 +15,6 @@
 
 //! Responses tools (port of ADK-Go `internal/responses/tools.go`).
 
-#![allow(dead_code)] // D1: first used by Task 9 (`responses::model`).
-
 use gadk_genai::{
     FunctionCallingConfigMode, FunctionDeclaration, GenerateContentConfig, ToolConfig,
 };

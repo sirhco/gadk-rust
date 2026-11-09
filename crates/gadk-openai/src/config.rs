@@ -227,7 +227,6 @@ pub(crate) fn resolve(cfg: &ClientConfig) -> Resolved {
 }
 
 /// How a request URL could not be built from the base URL.
-#[allow(dead_code)] // D1: reached through `OpenAiClient::post` once Tasks 8 and 9 call it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum UrlError {
     /// The base has no scheme (`""` or a relative reference): Go's `http.Client` fails the
@@ -240,7 +239,6 @@ pub(crate) enum UrlError {
 /// `path` resolved against `base_url` as openai-go does: `WithBaseURL` gives a non-empty path
 /// a trailing `/`, then `url.Parse` + `ResolveReference` keep the base's path as a prefix and
 /// drop its query and fragment.
-#[allow(dead_code)] // D1: reached through `OpenAiClient::post` once Tasks 8 and 9 call it.
 pub(crate) fn request_url(base_url: &str, path: &str) -> Result<url::Url, UrlError> {
     let mut base = match url::Url::parse(base_url) {
         Ok(u) => u,
