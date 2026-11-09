@@ -193,10 +193,20 @@ pub(crate) struct ResponseFormatJsonSchemaJsonSchemaParam {
 ///   (`None` for an `Option`); a slice with one element of the wrong shape is empty, as Go's.
 /// - [`go_string`]: a string; a number, boolean, object or array is its raw JSON text (Go's
 ///   `apijson` copies the raw value into a string field); `null` is `""`.
-/// - [`go_i64`]: an integer; a float truncates toward zero, saturating at the `i64` bounds; a
-///   numeric string is parsed; anything else is `0`.
-/// - [`go_f64`]: a number or numeric string; anything else is `0`.
+/// - [`go_i64`]: gjson `Result.Int()`, which `apijson` stores whatever its error: `true` is 1;
+///   a string goes through gjson's `parseInt` (optional `-`, ASCII digits only, nothing
+///   trimmed, wrapping on overflow as Go's `int64` does), anything else in it is 0; a number
+///   within ±(2^53 − 1) truncates toward zero, a larger one is its raw text through `parseInt`
+///   when that is all digits, else the float converted with Rust's saturating `as` (Go's
+///   `int64(f)` is implementation-defined there: arm64 saturates likewise, amd64 gives
+///   `i64::MIN`); `false`, `null`, objects and arrays are 0.
+/// - [`go_f64`]: gjson `Result.Float()`: `true` is 1; a string or number is Go
+///   `strconv.ParseFloat` ([`go_parse_float`](gadk_model::rest::go_parse_float): nothing trimmed, hexadecimal and underscores
+///   accepted, the value kept on a range error); anything else is 0. One divergence: a
+///   non-finite result (`1e400`, `"inf"`, `"nan"`) is 0 where Go keeps ±Inf/NaN, because it
+///   could not be persisted (serde writes `null`; Go's `json.Marshal` fails).
 pub(crate) mod de {
+    use gadk_model::rest::{GoParseFloatError, go_parse_float};
     use serde::Deserialize;
     use serde::de::{DeserializeOwned, Deserializer};
     use serde_json::value::RawValue;
@@ -228,39 +238,90 @@ pub(crate) mod de {
         Ok(text.to_string())
     }
 
-    /// The value of a JSON number or numeric string as text, or `None`.
-    fn number_text(text: &str) -> Option<String> {
-        if text.starts_with('"') {
-            let s: String = serde_json::from_str(text).ok()?;
-            return Some(s.trim().to_string());
-        }
-        let first = text.chars().next()?;
-        (first == '-' || first.is_ascii_digit()).then(|| text.to_string())
+    /// A raw JSON value as the gjson `Result` types `Int()`/`Float()` tell apart.
+    enum Gjson<'a> {
+        /// `String`, unescaped (`Result.Str`).
+        Str(String),
+        /// `Number`, its raw text (`Result.Raw`).
+        Num(&'a str),
+        /// `True`.
+        True,
+        /// `False`, `Null` and `JSON` (an object or array): `Int()`/`Float()` are 0.
+        Other,
     }
 
-    /// An integer field.
+    fn gjson(text: &str) -> Gjson<'_> {
+        match text.as_bytes().first() {
+            Some(b'"') => Gjson::Str(serde_json::from_str(text).unwrap_or_default()),
+            Some(b't') => Gjson::True,
+            Some(b'-' | b'0'..=b'9') => Gjson::Num(text),
+            _ => Gjson::Other,
+        }
+    }
+
+    /// Go `strconv.ParseFloat(s, 64)`'s value whatever its error, as gjson keeps it (`Num`,
+    /// and `Float()` of a string): ±Inf on a range error, 0 on a syntax error.
+    fn parse_float_value(s: &str) -> f64 {
+        match go_parse_float(s) {
+            Ok(v) | Err(GoParseFloatError::Range { value: v }) => v,
+            Err(GoParseFloatError::Syntax) => 0.0,
+        }
+    }
+
+    /// gjson `parseInt`: an optional `-` and at least one ASCII digit, nothing else; the
+    /// arithmetic wraps as Go's `int64` does.
+    fn gjson_parse_int(s: &str) -> Option<i64> {
+        let (neg, digits) = match s.strip_prefix('-') {
+            Some(rest) => (true, rest),
+            None => (false, s),
+        };
+        if digits.is_empty() {
+            return None;
+        }
+        let mut n: i64 = 0;
+        for c in digits.bytes() {
+            if !c.is_ascii_digit() {
+                return None;
+            }
+            n = n.wrapping_mul(10).wrapping_add(i64::from(c - b'0'));
+        }
+        Some(if neg { n.wrapping_neg() } else { n })
+    }
+
+    /// gjson `safeInt`'s bound: JavaScript's `Number.MAX_SAFE_INTEGER`.
+    const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
+
+    /// An integer field (gjson `Result.Int()`).
     pub(crate) fn go_i64<'de, D: Deserializer<'de>>(d: D) -> Result<i64, D::Error> {
         let raw = raw(d)?;
-        let Some(text) = number_text(raw.get()) else {
-            return Ok(0);
-        };
-        if let Ok(i) = text.parse::<i64>() {
-            return Ok(i);
-        }
-        Ok(match text.parse::<f64>() {
-            // `as` saturates at the i64 bounds and maps NaN to 0.
-            Ok(f) => f.trunc() as i64,
-            Err(_) => 0,
+        Ok(match gjson(raw.get()) {
+            Gjson::True => 1,
+            Gjson::Str(s) => gjson_parse_int(&s).unwrap_or(0),
+            Gjson::Num(text) => {
+                let f = parse_float_value(text);
+                if (-MAX_SAFE_INTEGER..=MAX_SAFE_INTEGER).contains(&f) {
+                    f as i64
+                } else if let Some(i) = gjson_parse_int(text) {
+                    i
+                } else {
+                    // `as` saturates (Go arm64's `int64(f)`; see the module docs).
+                    f as i64
+                }
+            }
+            Gjson::Other => 0,
         })
     }
 
-    /// A float field.
+    /// A float field (gjson `Result.Float()`); a non-finite value is 0 (see the module docs).
     pub(crate) fn go_f64<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
         let raw = raw(d)?;
-        Ok(number_text(raw.get())
-            .and_then(|t| t.parse::<f64>().ok())
-            .filter(|f| f.is_finite())
-            .unwrap_or_default())
+        let f = match gjson(raw.get()) {
+            Gjson::True => 1.0,
+            Gjson::Str(s) => parse_float_value(&s),
+            Gjson::Num(text) => parse_float_value(text),
+            Gjson::Other => 0.0,
+        };
+        Ok(if f.is_finite() { f } else { 0.0 })
     }
 }
 
@@ -368,8 +429,10 @@ mod tests {
         serde_json::from_str(s).unwrap()
     }
 
-    /// The coercions openai-go's `apijson` applies (checked against openai-go v3.82.0 decoding
-    /// `openai.ChatCompletion`).
+    /// The coercions openai-go v3.82.0's `apijson` applies (gjson v1.19.0 `Int()`/`Float()`),
+    /// recorded from Go decoding `openai.CompletionUsage.PromptTokens` (int64) and
+    /// `openai.ChatCompletionTokenLogprob.Logprob` (float64) on arm64. The one divergence
+    /// pinned here: Go keeps a non-finite float (`1e400` → +Inf, `"inf"` → +Inf); gadk has 0.
     #[test]
     fn decoding_follows_apijson_leniency() {
         assert_eq!(probe("{}"), Probe::default());
@@ -386,12 +449,55 @@ mod tests {
         assert_eq!(probe(r#"{"s":{"a":1}}"#).s, r#"{"a":1}"#);
         assert_eq!(probe(r#"{"s":true}"#).s, "true");
         assert_eq!(probe(r#"{"s":null}"#).s, "");
-        assert_eq!(probe(r#"{"i":1.5}"#).i, 1);
-        assert_eq!(probe(r#"{"i":2.0}"#).i, 2);
-        assert_eq!(probe(r#"{"i":1e400}"#).i, i64::MAX);
-        assert_eq!(probe(r#"{"i":-1e400}"#).i, i64::MIN);
-        assert_eq!(probe(r#"{"i":true}"#).i, 0);
-        assert_eq!(probe(r#"{"f":1e400}"#).f, 0.0);
+        let int = |v: &str| probe(&format!(r#"{{"i":{v}}}"#)).i;
+        for (v, want) in [
+            ("true", 1),
+            ("false", 0),
+            ("null", 0),
+            ("{}", 0),
+            ("[1]", 0),
+            (r#""7""#, 7),
+            (r#"" 7""#, 0),
+            (r#""+7""#, 0),
+            (r#""1.5""#, 0),
+            (r#""-""#, 0),
+            (r#""""#, 0),
+            (r#""-12""#, -12),
+            (r#""99999999999999999999""#, 7_766_279_631_452_241_919),
+            ("1.5", 1),
+            ("2.0", 2),
+            ("-1.9", -1),
+            ("9007199254740993", 9_007_199_254_740_993),
+            ("99999999999999999999", 7_766_279_631_452_241_919),
+            ("1e19", i64::MAX),
+            ("1e400", i64::MAX),
+            ("-1e400", i64::MIN),
+            ("1.5e20", i64::MAX),
+            ("-0", 0),
+        ] {
+            assert_eq!(int(v), want, "int {v}");
+        }
+        let float = |v: &str| probe(&format!(r#"{{"f":{v}}}"#)).f;
+        for (v, want) in [
+            ("true", 1.0),
+            ("false", 0.0),
+            (r#""2.5""#, 2.5),
+            (r#"" 2.5""#, 0.0),
+            (r#""+2.5""#, 2.5),
+            (r#"".5""#, 0.5),
+            (r#""1.""#, 1.0),
+            (r#""0x1p-2""#, 0.25),
+            (r#""1_0""#, 10.0),
+            (r#""abc""#, 0.0),
+            ("{}", 0.0),
+            // Divergences: Go keeps +Inf, +Inf, +Inf and -Inf.
+            (r#""inf""#, 0.0),
+            (r#""1e400""#, 0.0),
+            ("1e400", 0.0),
+            ("-1e400", 0.0),
+        ] {
+            assert_eq!(float(v), want, "float {v}");
+        }
         assert_eq!(probe(r#"{"o":null}"#).o, None);
         assert_eq!(probe(r#"{"o":"x"}"#).o, None);
         assert_eq!(probe(r#"{"v":[1,{"n":0}]}"#).v, vec![]);
