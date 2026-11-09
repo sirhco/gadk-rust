@@ -16,12 +16,16 @@
 //! The Responses JSON-schema text format (port of ADK-Go `internal/responses/request.go`'s
 //! `newJSONSchemaFormat`).
 
-#![allow(dead_code, unused_variables, clippy::todo)] // D1: Task 5 fills the bodies.
+#![allow(dead_code)] // D1: first used by Task 9 (`responses::model`).
 
 use gadk_genai::GenerateContentConfig;
 
 use crate::error::OpenAiError;
+use crate::oaishared::JsonSchemaTag;
 use crate::responses::wire::ResponseFormatTextJsonSchemaConfigParam;
+use crate::shared::schema::{
+    enforce_strict_openai_schema, normalize_schema, response_format_name, schema_to_map,
+};
 
 /// Go `newJSONSchemaFormat`: `text.format` for the config's `response_json_schema` (first) or
 /// `response_schema`, made strict
@@ -32,5 +36,25 @@ use crate::responses::wire::ResponseFormatTextJsonSchemaConfigParam;
 pub(crate) fn new_json_schema_format(
     cfg: &GenerateContentConfig,
 ) -> Result<ResponseFormatTextJsonSchemaConfigParam, OpenAiError> {
-    todo!("Task 5")
+    // Both conversions build a new map, so the strict rewrite below never reaches the
+    // caller's schema.
+    let mut schema = if let Some(json_schema) = &cfg.response_json_schema {
+        normalize_schema(Some(json_schema))?
+    } else if let Some(schema) = &cfg.response_schema {
+        schema_to_map(Some(schema))?
+    } else {
+        return Err(OpenAiError::plain(
+            "openai: json schema requested without schema",
+        ));
+    };
+    if let Some(schema) = schema.as_mut() {
+        enforce_strict_openai_schema(schema);
+    }
+    Ok(ResponseFormatTextJsonSchemaConfigParam {
+        name: response_format_name(cfg.response_schema.as_ref()),
+        schema,
+        strict: Some(true),
+        description: None,
+        kind: JsonSchemaTag,
+    })
 }
