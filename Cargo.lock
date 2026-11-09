@@ -1002,6 +1002,7 @@ dependencies = [
  "gadk-model",
  "gadk-platform",
  "gadk-session",
+ "gadk-session-database",
  "http",
  "insta",
  "jsonschema",
