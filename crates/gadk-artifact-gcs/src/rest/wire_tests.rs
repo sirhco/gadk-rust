@@ -363,6 +363,47 @@ async fn object_paths_escape_all_but_unreserved_bytes() {
     );
 }
 
+// Go's Load: a reader that cannot be created and a body that fails while being read are
+// reported differently.
+#[tokio::test(start_paused = true)]
+async fn load_read_failures_are_gos_text() {
+    use gadk_artifact::{ArtifactService, LoadRequest};
+
+    let load = |media: FakeResponse| async move {
+        let client = ScriptedClient::new(move |req| {
+            if req.url.ends_with("?alt=media") {
+                media.clone()
+            } else {
+                FakeResponse::json(r#"{"name":"a/u/s/f/1","contentType":"text/plain"}"#)
+            }
+        });
+        let svc =
+            GcsArtifactService::from_bucket("bkt".into(), Arc::new(bucket_with(client, config())));
+        svc.load(LoadRequest {
+            app_name: "a".into(),
+            user_id: "u".into(),
+            session_id: "s".into(),
+            file_name: "f".into(),
+            version: 1,
+        })
+        .await
+        .unwrap_err()
+        .to_string()
+    };
+    assert_eq!(
+        load(FakeResponse::new(200).chunk("da").fail("unexpected EOF")).await,
+        "could not read data from blob 'a/u/s/f/1': transport error: unexpected EOF"
+    );
+    assert_eq!(
+        load(FakeResponse::json_status(
+            403,
+            r#"{"error":{"code":403,"message":"denied"}}"#
+        ))
+        .await,
+        "could not create reader for blob 'a/u/s/f/1': googleapi: Error 403: denied"
+    );
+}
+
 #[tokio::test]
 async fn upload_is_one_conditional_multipart_request() {
     let server = FakeServer::json(r#"{"name":"a/b/1","generation":"1"}"#);

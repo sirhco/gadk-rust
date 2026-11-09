@@ -335,10 +335,14 @@ impl ArtifactService for GcsArtifactService {
         );
         // Check that the object exists before reading it.
         let attrs = self.bucket.attrs(&blob_name).await.map_err(attrs_error)?;
-        let data =
-            self.bucket.read(&blob_name).await.map_err(|e| {
-                backend(format!("could not create reader for blob '{blob_name}'"), e)
-            })?;
+        let data = self.bucket.read(&blob_name).await.map_err(|e| {
+            let context = if e.is_body_read_failure() {
+                "could not read data from blob"
+            } else {
+                "could not create reader for blob"
+            };
+            backend(format!("{context} '{blob_name}'"), e)
+        })?;
         Ok(LoadResponse {
             part: Some(Part::from_bytes(data, &attrs.content_type)),
         })

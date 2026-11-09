@@ -80,6 +80,15 @@ impl GcsError {
     pub fn is_object_not_exist(&self) -> bool {
         chain_any(self, is_object_not_exist_error)
     }
+
+    /// Whether a successful response's body failed while being read: Go's reader was created
+    /// and its `io.ReadAll` failed.
+    pub(crate) fn is_body_read_failure(&self) -> bool {
+        matches!(
+            self,
+            GcsError::Transport(RestError::DroppedBody { parts, .. }) if parts.status.is_success()
+        )
+    }
 }
 
 fn is_object_not_exist_error(e: &(dyn StdError + 'static)) -> bool {
