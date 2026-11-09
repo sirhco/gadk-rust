@@ -15,7 +15,6 @@
 
 //! [`GcsError`] (the storage client's errors) and the Go `%w` wrapping the service builds on top
 //! of it.
-#![allow(dead_code)]
 
 use std::error::Error as StdError;
 
