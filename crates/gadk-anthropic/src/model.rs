@@ -21,6 +21,7 @@ use std::time::Duration;
 
 use futures::stream::BoxStream;
 use futures::{StreamExt, TryStreamExt};
+use gadk_model::rest::{DEFAULT_MAX_RETRIES, RestTransport, RetryPolicy, header_str};
 use gadk_model::{
     HttpClient, Llm, LlmRequest, LlmResponse, ModelError, ReqwestClient, collect_body,
 };
@@ -43,7 +44,6 @@ use crate::config::{
 use crate::error::{AnthropicError, ErrorKind, go_quote};
 use crate::request::{ConvertCtx, build_messages, build_system_blocks};
 use crate::response::{convert_message_to_llm_response, decode_message};
-use crate::retry::{DEFAULT_MAX_RETRIES, header_str};
 use crate::stream::stream_responses;
 use crate::thinking::{build_output_config_param, build_thinking_param, is_thinking_enabled};
 use crate::tools::build_tools_and_choice;
@@ -199,13 +199,18 @@ impl AnthropicModel {
             effort: cfg.effort,
             prompt_cache: cfg.prompt_cache,
             transport: Arc::new(Transport {
-                http,
+                rest: RestTransport {
+                    http,
+                    policy: RetryPolicy {
+                        max_retries: cfg.max_retries.unwrap_or(DEFAULT_MAX_RETRIES),
+                        ..RetryPolicy::ANTHROPIC
+                    },
+                    response_header_timeout,
+                },
                 base_url: resolved.base_url,
                 endpoint: resolved.endpoint,
                 auth: resolved.auth,
                 headers: cfg.headers,
-                max_retries: cfg.max_retries.unwrap_or(DEFAULT_MAX_RETRIES),
-                response_header_timeout,
             }),
         })
     }
@@ -762,9 +767,9 @@ mod tests {
         // ANTHROPIC_BASE_URL applies without a custom base URL.
         assert_eq!(m.transport.base_url, "https://ignored.example");
         assert_eq!(m.transport.endpoint, Endpoint::Anthropic);
-        assert_eq!(m.transport.max_retries, DEFAULT_MAX_RETRIES);
+        assert_eq!(m.transport.rest.policy.max_retries, DEFAULT_MAX_RETRIES);
         assert_eq!(
-            m.transport.response_header_timeout,
+            m.transport.rest.response_header_timeout,
             Some(DEFAULT_RESPONSE_HEADER_TIMEOUT)
         );
 
@@ -912,7 +917,7 @@ mod tests {
         };
         let m = AnthropicModel::new_concrete(MODEL, cfg).await.unwrap();
         assert_eq!(m.max_tokens, DEFAULT_MAX_TOKENS);
-        assert_eq!(m.transport.max_retries, 0);
+        assert_eq!(m.transport.rest.policy.max_retries, 0);
         assert_eq!(m.effort, Some(Effort::High));
         assert_eq!(
             m.prompt_cache,
@@ -922,7 +927,7 @@ mod tests {
         );
         assert_eq!(m.transport.headers, headers);
         // A custom client gets no response-header timeout (Go sets it on its default only).
-        assert_eq!(m.transport.response_header_timeout, None);
+        assert_eq!(m.transport.rest.response_header_timeout, None);
 
         let mut cfg = anthropic(Some("key"), &[]);
         cfg.max_tokens = Some(100);
@@ -952,7 +957,7 @@ mod tests {
             m.transport.base_url,
             "https://us-east5-aiplatform.googleapis.com/"
         );
-        assert_eq!(m.transport.response_header_timeout, None);
+        assert_eq!(m.transport.rest.response_header_timeout, None);
         assert!(matches!(m.transport.auth, Auth::Vertex(_)));
 
         // Config, then env in Go's order.
