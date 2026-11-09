@@ -26,6 +26,10 @@ use serde_json::Value;
 
 use crate::http::error_chain;
 
+/// The [`AdcError`] detail when [`adc_credentials`] is called outside a Tokio runtime.
+pub const NO_RUNTIME: &str =
+    "no Tokio runtime: Application Default Credentials must be built from within one";
+
 /// Why [`adc_credentials`] found no credentials: the underlying detail (the file read, the
 /// JSON parse, an unknown credential `"type"`, or google-cloud-auth's own error text). Callers
 /// wrap it in their own error text.
@@ -50,12 +54,19 @@ impl AdcError {
 /// (`authorized_user`, `service_account`, `impersonated_service_account`, `external_account`);
 /// `None` or an empty path falls back to google-cloud-auth's default builder, which reads the
 /// real process environment, gcloud's well-known file and the metadata server.
+///
+/// # Errors
+///
+/// [`AdcError`] when the credentials file cannot be read or parsed, names an unknown type, or
+/// the credentials cannot be built — including, with [`NO_RUNTIME`], when no Tokio runtime is
+/// running on the calling thread (the built credentials start their token refresh on it).
 pub fn adc_credentials(
     credentials_file: Option<&str>,
     scopes: &[&str],
 ) -> Result<Credentials, AdcError> {
     let scopes = scopes.iter().copied();
     let Some(path) = credentials_file.filter(|p| !p.is_empty()) else {
+        require_runtime()?;
         return Builder::default()
             .with_scopes(scopes)
             .build()
@@ -64,6 +75,12 @@ pub fn adc_credentials(
     let contents = std::fs::read(path).map_err(AdcError::new)?;
     let json: Value = serde_json::from_slice(&contents).map_err(AdcError::new)?;
     let kind = json.get("type").and_then(Value::as_str).unwrap_or_default();
+    if matches!(
+        kind,
+        "authorized_user" | "service_account" | "impersonated_service_account" | "external_account"
+    ) {
+        require_runtime()?;
+    }
     let built = match kind {
         "authorized_user" => user_account::Builder::new(json).with_scopes(scopes).build(),
         "service_account" => service_account::Builder::new(json)
@@ -78,6 +95,14 @@ pub fn adc_credentials(
         other => return Err(AdcError::new(format!("unknown credential type: {other}"))),
     };
     built.map_err(AdcError::new)
+}
+
+/// google-cloud-auth's credential builders start a token cache with an unguarded
+/// `tokio::spawn`, which panics outside a runtime: refuse with [`NO_RUNTIME`] instead.
+fn require_runtime() -> Result<(), AdcError> {
+    tokio::runtime::Handle::try_current()
+        .map(drop)
+        .map_err(|_| AdcError::new(NO_RUNTIME))
 }
 
 /// Why [`credential_headers`] produced no headers: google-cloud-auth's error and its sources
@@ -128,6 +153,16 @@ mod tests {
 
     fn path(f: &tempfile::NamedTempFile) -> String {
         f.path().to_string_lossy().into_owned()
+    }
+
+    // Building credentials outside a runtime would panic in google-cloud-auth's token cache.
+    #[test]
+    fn outside_a_runtime_is_an_error() {
+        let f = file(
+            r#"{"type":"authorized_user","client_id":"c","client_secret":"s","refresh_token":"r"}"#,
+        );
+        let err = adc_credentials(Some(&path(&f)), SCOPES).unwrap_err();
+        assert_eq!(err.detail, NO_RUNTIME);
     }
 
     // The built credentials start their token cache on the tokio runtime.

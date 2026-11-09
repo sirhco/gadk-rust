@@ -411,7 +411,9 @@ impl GcsArtifactService {
     ///
     /// [`ArtifactError::InvalidRequest`] for an endpoint with a path other than `/storage/v1`;
     /// [`ArtifactError::Backend`] (`failed to create gcs service: …`) when Application Default
-    /// Credentials cannot be resolved.
+    /// Credentials cannot be resolved, including when they are needed (no
+    /// [`GcsConfig::credentials`] and no `STORAGE_EMULATOR_HOST`) and no Tokio runtime is
+    /// running on the calling thread: call `new` from within a runtime in that case.
     pub fn new(bucket: impl Into<String>, config: GcsConfig) -> Result<Self, ArtifactError> {
         let bucket = bucket.into();
         let rest = RestBucket::from_config(&bucket, config)?;

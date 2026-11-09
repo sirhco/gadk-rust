@@ -225,6 +225,41 @@ fn adc_failure_is_failed_to_create_gcs_service() {
             .starts_with("failed to create gcs service: "),
         "{err}"
     );
+    assert!(
+        !err.to_string().contains(gadk_model::gcp_auth::NO_RUNTIME),
+        "{err}"
+    );
+}
+
+// A plain test: no Tokio runtime is running, which must be an error rather than a panic.
+#[test]
+fn adc_outside_a_runtime_is_an_error() {
+    let path = std::env::temp_dir().join(format!(
+        "gadk-artifact-gcs-adc-{}-{:x}.json",
+        std::process::id(),
+        rand::random::<u64>()
+    ));
+    std::fs::write(
+        &path,
+        r#"{"type":"authorized_user","client_id":"c","client_secret":"s","refresh_token":"r"}"#,
+    )
+    .unwrap();
+    let cfg = GcsConfig {
+        credentials: None,
+        env: env(&[("GOOGLE_APPLICATION_CREDENTIALS", &path.to_string_lossy())]),
+        ..config()
+    };
+    let result = GcsArtifactService::new("bkt", cfg);
+    let _ = std::fs::remove_file(&path);
+    let err = result.unwrap_err();
+    assert!(matches!(err, ArtifactError::Backend(_)), "{err:?}");
+    assert_eq!(
+        err.to_string(),
+        format!(
+            "failed to create gcs service: {}",
+            gadk_model::gcp_auth::NO_RUNTIME
+        )
+    );
 }
 
 #[tokio::test]
