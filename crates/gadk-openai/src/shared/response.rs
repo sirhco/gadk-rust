@@ -19,6 +19,7 @@ use futures::StreamExt as _;
 use futures::stream::{self, BoxStream};
 use gadk_genai::{Candidate, Content, FunctionCall, GenerateContentResponse, Part, ROLE_MODEL};
 use gadk_model::{LlmResponse, ModelError};
+use serde_json::{Map, Value};
 
 use crate::error::{ErrorKind, OpenAiError};
 
@@ -100,12 +101,47 @@ pub(crate) fn completed_content_supersedes(
     let mut matched = vec![false; completed_calls.len()];
     aggregate_calls.iter().all(|aggregate_call| {
         let found = (0..completed_calls.len())
-            .find(|&i| !matched[i] && completed_calls[i] == *aggregate_call);
+            .find(|&i| !matched[i] && go_call_eq(completed_calls[i], aggregate_call));
         if let Some(i) = found {
             matched[i] = true;
         }
         found.is_some()
     })
+}
+
+/// Go `reflect.DeepEqual` on two calls whose `Args` ADK-Go decoded with `encoding/json` into
+/// `map[string]any`, where every JSON number is a `float64`: numbers compare by their `f64`
+/// value (`1` equals `1.0`; integers past 2^53 equal when they round to the same `f64`).
+fn go_call_eq(a: &FunctionCall, b: &FunctionCall) -> bool {
+    let FunctionCall {
+        id,
+        args,
+        name,
+        partial_args,
+        will_continue,
+    } = a;
+    *id == b.id
+        && *name == b.name
+        && *partial_args == b.partial_args
+        && *will_continue == b.will_continue
+        && go_map_eq(args, &b.args)
+}
+
+fn go_map_eq(a: &Map<String, Value>, b: &Map<String, Value>) -> bool {
+    a.len() == b.len()
+        && a.iter()
+            .all(|(k, v)| b.get(k).is_some_and(|w| go_value_eq(v, w)))
+}
+
+fn go_value_eq(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => x.as_f64() == y.as_f64(),
+        (Value::Array(x), Value::Array(y)) => {
+            x.len() == y.len() && x.iter().zip(y).all(|(x, y)| go_value_eq(x, y))
+        }
+        (Value::Object(x), Value::Object(y)) => go_map_eq(x, y),
+        _ => a == b,
+    }
 }
 
 /// The non-thought text of `parts`, concatenated, and their function calls in order.
@@ -179,6 +215,48 @@ mod tests {
             role: ROLE_MODEL.to_string(),
             parts,
         }
+    }
+
+    fn call_with(name: &str, args: Value) -> Part {
+        let Value::Object(args) = args else {
+            panic!("args must be an object");
+        };
+        Part {
+            function_call: Some(FunctionCall {
+                name: name.to_string(),
+                args,
+                ..FunctionCall::default()
+            }),
+            ..Part::default()
+        }
+    }
+
+    /// ADK-Go decodes arguments into `map[string]any` (numbers are `float64`) and compares
+    /// calls with `reflect.DeepEqual`: `1` and `1.0` are the same argument.
+    #[test]
+    fn supersedes_compares_argument_numbers_as_go_float64() {
+        use serde_json::json;
+        let agg = content(vec![call_with("f", json!({"n": 1, "a": [2, {"x": 3}]}))]);
+        let same = content(vec![call_with(
+            "f",
+            json!({"a": [2.0, {"x": 3.0}], "n": 1.0}),
+        )]);
+        assert!(completed_content_supersedes(Some(&agg), Some(&same)));
+        let big = content(vec![call_with(
+            "f",
+            json!({"n": 9_007_199_254_740_993_u64}),
+        )]);
+        let rounded = content(vec![call_with(
+            "f",
+            json!({"n": 9_007_199_254_740_992_u64}),
+        )]);
+        assert!(completed_content_supersedes(Some(&big), Some(&rounded)));
+        let other = content(vec![call_with("f", json!({"n": 2}))]);
+        assert!(!completed_content_supersedes(Some(&agg), Some(&other)));
+        let missing = content(vec![call_with("f", json!({"n": 1}))]);
+        assert!(!completed_content_supersedes(Some(&agg), Some(&missing)));
+        let string = content(vec![call_with("f", json!({"n": "1", "a": [2, {"x": 3}]}))]);
+        assert!(!completed_content_supersedes(Some(&agg), Some(&string)));
     }
 
     #[test]
