@@ -261,7 +261,10 @@ impl RestTransport {
                 return Err(RestError::DeadlineExceeded);
             }
             let last_attempt = retry_count >= self.policy.max_retries;
-            let deadline = per_attempt.map(|t| Instant::now() + t).or(call_deadline);
+            // A per-attempt deadline past `Instant`'s range is none (Go saturates).
+            let deadline = per_attempt
+                .and_then(|t| Instant::now().checked_add(t))
+                .or(call_deadline);
             let attempt = self.attempt(uri, &body, stream, headers, retry_count);
             let outcome = match deadline {
                 Some(deadline) => tokio::time::timeout_at(deadline, attempt)
@@ -907,6 +910,41 @@ mod tests {
         assert!(
             body.next().await.is_none(),
             "the body ends after the deadline"
+        );
+    }
+
+    /// A per-attempt timeout past `Instant`'s range is no deadline (Go saturates), never a
+    /// panic.
+    #[tokio::test(start_paused = true)]
+    async fn duration_max_per_attempt_timeout_is_no_deadline() {
+        let fake = ScriptedClient::always(reply(200, OK));
+        let got = send_timeout(
+            &anthropic(fake.clone(), 2),
+            false,
+            CallTimeout::PerAttempt(Duration::MAX),
+        )
+        .await
+        .unwrap();
+        assert_eq!(got.1, OK.as_bytes());
+        assert_eq!(fake.hits(), 1);
+
+        let fake = ScriptedClient::always(FakeResponse::sse("data: a\n\n").hang());
+        let res = streaming(
+            send_with(
+                &anthropic(fake, 0),
+                true,
+                CallTimeout::PerAttempt(Duration::MAX),
+            )
+            .await
+            .unwrap(),
+        );
+        let mut body = res.into_body();
+        assert_eq!(body.next().await.unwrap().unwrap(), "data: a\n\n");
+        assert!(
+            tokio::time::timeout(Duration::from_secs(3600), body.next())
+                .await
+                .is_err(),
+            "no deadline ends the body"
         );
     }
 
