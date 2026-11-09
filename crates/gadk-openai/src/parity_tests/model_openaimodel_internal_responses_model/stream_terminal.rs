@@ -864,7 +864,7 @@ async fn stream_server_error_text_is_unwrapped() {
 #[tokio::test(start_paused = true)]
 async fn stream_timeout_mid_stream_text_is_context_deadline_exceeded() {
     let fake = ScriptedClient::always(
-        FakeResponse::sse(&format!("data: {}\n\ndata: {}\n\n", EV_CREATED, EV_DELTA1)).hang(),
+        FakeResponse::sse(format!("data: {EV_CREATED}\n\ndata: {EV_DELTA1}\n\n")).hang(),
     );
     let llm = new_test_model(TEST_MODEL, &TestClientConfig::for_scripted(&fake));
     let req = gadk_model::LlmRequest {
