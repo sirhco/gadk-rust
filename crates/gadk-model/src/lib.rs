@@ -19,6 +19,8 @@
 mod aggregator;
 mod convert;
 mod error;
+#[cfg(feature = "gcp-auth")]
+pub mod gcp_auth;
 mod go_json;
 mod http;
 mod jsonpath;
