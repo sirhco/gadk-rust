@@ -15,12 +15,21 @@
 
 //! Media classification both APIs share (port of ADK-Go `internal/shared/media.go`).
 
-#![allow(dead_code, unused_variables, clippy::todo)] // D1: Task 3 fills the bodies.
+#![allow(dead_code)] // D1: first used by Tasks 4 and 5.
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
 use bytes::Bytes;
-use gadk_genai::Part;
+use gadk_genai::{Blob, FileData, Part};
+use gadk_platform::go_to_lower;
 
-use crate::error::OpenAiError;
+use crate::error::{ErrorKind, OpenAiError};
+
+/// Go `fileIDPrefix`: a file URI naming an upload to the provider.
+const FILE_ID_PREFIX: &str = "file-";
+
+/// Go `defaultInlineFilename`: the filename of inline data without a display name.
+const DEFAULT_INLINE_FILENAME: &str = "inline_data";
 
 /// Go `MediaKind`: what a part's media is, as its MIME type reports it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -92,7 +101,14 @@ impl Media {
     /// Go `Media.DataURL`: `data:<trimmed mime type>;base64,<standard base64>` for inline
     /// media, `""` otherwise.
     pub(crate) fn data_url(&self) -> String {
-        todo!("Task 3")
+        if self.source != MediaSource::Data {
+            return String::new();
+        }
+        format!(
+            "data:{};base64,{}",
+            self.mime_type.trim(),
+            STANDARD.encode(&self.data)
+        )
     }
 }
 
@@ -101,5 +117,83 @@ impl Media {
 /// without bytes `ErrMediaDataRequired: inline data of type <mime>`; file data without a URI
 /// `ErrMediaURIRequired: file data`, without a MIME type `ErrMediaMIMETypeRequired: file data`.
 pub(crate) fn classify_media(part: &Part) -> Result<Vec<Media>, OpenAiError> {
-    todo!("Task 3")
+    let mut out = Vec::new();
+    if let Some(blob) = &part.inline_data {
+        out.push(classify_inline_data(blob)?);
+    }
+    if let Some(fd) = &part.file_data {
+        out.push(classify_file_data(fd)?);
+    }
+    Ok(out)
+}
+
+/// Go `classifyInlineData`.
+fn classify_inline_data(blob: &Blob) -> Result<Media, OpenAiError> {
+    if blob.mime_type.is_empty() {
+        return Err(OpenAiError::new(
+            ErrorKind::MediaMimeTypeRequired,
+            "inline data",
+        ));
+    }
+    if blob.data.is_empty() {
+        return Err(OpenAiError::new(
+            ErrorKind::MediaDataRequired,
+            format!("inline data of type {}", blob.mime_type),
+        ));
+    }
+    Ok(Media {
+        kind: media_kind_of(&blob.mime_type),
+        source: MediaSource::Data,
+        mime_type: blob.mime_type.clone(),
+        filename: if blob.display_name.is_empty() {
+            DEFAULT_INLINE_FILENAME.to_string()
+        } else {
+            blob.display_name.clone()
+        },
+        data: blob.data.clone(),
+        file_id: String::new(),
+        url: String::new(),
+    })
+}
+
+/// Go `classifyFileData`. The URI is never echoed in an error: it may carry a signature.
+fn classify_file_data(fd: &FileData) -> Result<Media, OpenAiError> {
+    if fd.file_uri.is_empty() {
+        return Err(OpenAiError::new(ErrorKind::MediaUriRequired, "file data"));
+    }
+    if fd.mime_type.is_empty() {
+        return Err(OpenAiError::new(
+            ErrorKind::MediaMimeTypeRequired,
+            "file data",
+        ));
+    }
+    let (source, file_id, url) = if fd.file_uri.starts_with(FILE_ID_PREFIX) {
+        (MediaSource::FileId, fd.file_uri.clone(), String::new())
+    } else {
+        (MediaSource::Url, String::new(), fd.file_uri.clone())
+    };
+    Ok(Media {
+        kind: media_kind_of(&fd.mime_type),
+        source,
+        mime_type: fd.mime_type.clone(),
+        filename: fd.display_name.clone(),
+        data: Bytes::new(),
+        file_id,
+        url,
+    })
+}
+
+/// Go `mediaKindOf`: the kind by the type's top-level tree, ignoring case, surrounding
+/// whitespace and parameters.
+fn media_kind_of(mime_type: &str) -> MediaKind {
+    let essence = go_to_lower(mime_type.trim());
+    if essence.starts_with("image/") {
+        MediaKind::Image
+    } else if essence.starts_with("audio/") {
+        MediaKind::Audio
+    } else if essence.starts_with("video/") {
+        MediaKind::Video
+    } else {
+        MediaKind::File
+    }
 }

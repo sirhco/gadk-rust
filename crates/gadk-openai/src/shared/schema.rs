@@ -15,12 +15,14 @@
 
 //! JSON-schema helpers both APIs share (port of ADK-Go `internal/shared/schema.go`).
 
-#![allow(dead_code, unused_variables, clippy::todo)] // D1: Task 3 fills the bodies.
+#![allow(dead_code)] // D1: first used by Tasks 4 and 5.
 
 use gadk_genai::Schema;
+use gadk_platform::go_to_lower;
 use serde_json::{Map, Value};
 
-use crate::error::OpenAiError;
+use crate::error::{ErrorKind, OpenAiError};
+use crate::shared::calls::go_map;
 
 /// Go `DefaultResponseFormatName`: the structured-output format name when the schema's title
 /// is not one OpenAI accepts.
@@ -29,7 +31,20 @@ pub(crate) const DEFAULT_RESPONSE_FORMAT_NAME: &str = "adk_response";
 /// Go `ResponseFormatName`: the schema's title when it matches `^[a-zA-Z0-9_-]{1,64}$`, else
 /// [`DEFAULT_RESPONSE_FORMAT_NAME`].
 pub(crate) fn response_format_name(schema: Option<&Schema>) -> String {
-    todo!("Task 3")
+    match schema {
+        Some(schema) if is_response_format_name(&schema.title) => schema.title.clone(),
+        _ => DEFAULT_RESPONSE_FORMAT_NAME.to_string(),
+    }
+}
+
+/// Go `responseFormatNamePattern` (`^[a-zA-Z0-9_-]{1,64}$`; RE2's `$` is the end of the
+/// text, so a trailing newline does not match). Every allowed character is ASCII, so the
+/// byte length is the character count.
+fn is_response_format_name(title: &str) -> bool {
+    (1..=64).contains(&title.len())
+        && title
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
 /// Go `NormalizeSchema`: a JSON schema of any shape as a map, numbers kept as decoded. `None`
@@ -39,7 +54,13 @@ pub(crate) fn response_format_name(schema: Option<&Schema>) -> String {
 pub(crate) fn normalize_schema(
     schema: Option<&Value>,
 ) -> Result<Option<Map<String, Value>>, OpenAiError> {
-    todo!("Task 3")
+    let Some(schema) = schema else {
+        return Err(OpenAiError::sentinel(ErrorKind::EmptyJsonSchema));
+    };
+    // Go marshals the value and decodes it back with `UseNumber`, keeping every number as
+    // written; a `serde_json::Value` already holds the numbers it was built with.
+    go_map(schema.clone())
+        .map_err(|err| OpenAiError::plain(format!("openai: unmarshal json schema: {err}")))
 }
 
 /// Go `EnforceStrictOpenAISchema`: every object type gets `properties` (added empty when
@@ -47,7 +68,46 @@ pub(crate) fn normalize_schema(
 /// `$ref` keeps no siblings; recurses through `$defs`, `properties`, `anyOf`/`oneOf`/`allOf`
 /// and an object `items`. Mutates in place.
 pub(crate) fn enforce_strict_openai_schema(schema: &mut Map<String, Value>) {
-    todo!("Task 3")
+    if schema.contains_key("$ref") {
+        schema.retain(|key, _| key == "$ref");
+        return;
+    }
+
+    if schema.get("type").and_then(Value::as_str) == Some("object") {
+        if !matches!(schema.get("properties"), Some(Value::Object(_))) {
+            schema.insert("properties".to_string(), Value::Object(Map::new()));
+        }
+        let required: Vec<Value> = match schema.get("properties") {
+            // `Map` iterates in key order: Go's `sort.Strings`.
+            Some(Value::Object(props)) => props.keys().cloned().map(Value::String).collect(),
+            _ => Vec::new(),
+        };
+        schema.insert("additionalProperties".to_string(), Value::Bool(false));
+        schema.insert("required".to_string(), Value::Array(required));
+    }
+
+    if let Some(Value::Object(defs)) = schema.get_mut("$defs") {
+        defs.values_mut().for_each(enforce_strict_value);
+    }
+    if let Some(Value::Object(props)) = schema.get_mut("properties") {
+        props.values_mut().for_each(enforce_strict_value);
+    }
+    for key in ["anyOf", "oneOf", "allOf"] {
+        if let Some(Value::Array(items)) = schema.get_mut(key) {
+            items.iter_mut().for_each(enforce_strict_value);
+        }
+    }
+    if let Some(items @ Value::Object(_)) = schema.get_mut("items") {
+        enforce_strict_value(items);
+    }
+}
+
+/// [`enforce_strict_openai_schema`] on any JSON value (Go's `val any`): only an object is
+/// touched.
+fn enforce_strict_value(value: &mut Value) {
+    if let Value::Object(schema) = value {
+        enforce_strict_openai_schema(schema);
+    }
 }
 
 /// Go `SchemaToMap`: a genai schema as the JSON-schema map both APIs take, type names
@@ -56,5 +116,138 @@ pub(crate) fn enforce_strict_openai_schema(schema: &mut Map<String, Value>) {
 pub(crate) fn schema_to_map(
     schema: Option<&Schema>,
 ) -> Result<Option<Map<String, Value>>, OpenAiError> {
-    todo!("Task 3")
+    let Some(schema) = schema else {
+        return Ok(None);
+    };
+    let mut value = serde_json::to_value(schema)
+        .map_err(|err| OpenAiError::plain(format!("openai: marshal schema: {err}")))?;
+    lowercase_schema_types(&mut value);
+    go_map(value).map_err(|err| OpenAiError::plain(format!("openai: unmarshal schema: {err}")))
+}
+
+/// Go `lowercaseSchemaTypes`: every `type` string (or string in a `type` array) lowercased,
+/// at every depth.
+fn lowercase_schema_types(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            lowercase_type_field(map);
+            map.values_mut().for_each(lowercase_schema_types);
+        }
+        Value::Array(items) => items.iter_mut().for_each(lowercase_schema_types),
+        _ => {}
+    }
+}
+
+/// The `type` member of one map, lowercased (Go `strings.ToLower`).
+fn lowercase_type_field(map: &mut Map<String, Value>) {
+    match map.get_mut("type") {
+        Some(Value::String(t)) => *t = go_to_lower(t),
+        Some(Value::Array(types)) => {
+            for t in types {
+                if let Value::String(s) = t {
+                    *s = go_to_lower(s);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+    use gadk_genai::Type;
+    use pretty_assertions::assert_eq;
+    use serde_json::json;
+
+    fn object(value: Value) -> Map<String, Value> {
+        match value {
+            Value::Object(map) => map,
+            other => panic!("not an object: {other}"),
+        }
+    }
+
+    #[test]
+    fn normalize_schema_keeps_numbers_and_reads_null_as_none() {
+        assert_eq!(normalize_schema(Some(&Value::Null)).unwrap(), None);
+        let schema = json!({"type": "integer", "minimum": 9_007_199_254_740_993_i64});
+        let got = normalize_schema(Some(&schema)).unwrap().unwrap();
+        assert_eq!(
+            String::from_utf8(gadk_model::to_go_json(&got).unwrap()).unwrap(),
+            r#"{"minimum":9007199254740993,"type":"integer"}"#
+        );
+        let err = normalize_schema(Some(&json!("object"))).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "openai: unmarshal json schema: json: cannot unmarshal string into Go value of type map[string]interface {}"
+        );
+    }
+
+    #[test]
+    fn strict_schema_closes_every_object() {
+        let mut schema = object(json!({
+            "type": "object",
+            "properties": {
+                "b": {"type": "string"},
+                "a": {"type": "object"},
+                "list": {"type": "array", "items": {"type": "object", "properties": {"x": {}}}},
+                "pick": {"anyOf": [{"type": "object"}, {"$ref": "#/$defs/D", "description": "gone"}]}
+            },
+            "$defs": {"D": {"type": "object", "properties": {"z": {"type": "integer"}}}}
+        }));
+        enforce_strict_openai_schema(&mut schema);
+        assert_eq!(
+            Value::Object(schema),
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["a", "b", "list", "pick"],
+                "properties": {
+                    "b": {"type": "string"},
+                    "a": {"type": "object", "properties": {}, "additionalProperties": false, "required": []},
+                    "list": {"type": "array", "items": {
+                        "type": "object", "properties": {"x": {}}, "additionalProperties": false, "required": ["x"]
+                    }},
+                    "pick": {"anyOf": [
+                        {"type": "object", "properties": {}, "additionalProperties": false, "required": []},
+                        {"$ref": "#/$defs/D"}
+                    ]}
+                },
+                "$defs": {"D": {
+                    "type": "object", "properties": {"z": {"type": "integer"}},
+                    "additionalProperties": false, "required": ["z"]
+                }}
+            })
+        );
+    }
+
+    #[test]
+    fn schema_to_map_lowercases_types_at_every_depth() {
+        let schema = Schema {
+            r#type: Some(Type::Object),
+            title: "Report".to_string(),
+            properties: BTreeMap::from([(
+                "tags".to_string(),
+                Schema {
+                    r#type: Some(Type::Array),
+                    items: Some(Box::new(Schema {
+                        r#type: Some(Type::String),
+                        ..Schema::default()
+                    })),
+                    max_items: Some(3),
+                    ..Schema::default()
+                },
+            )]),
+            minimum: Some(1.0),
+            ..Schema::default()
+        };
+        let got = schema_to_map(Some(&schema)).unwrap().unwrap();
+        assert_eq!(
+            String::from_utf8(gadk_model::to_go_json(&got).unwrap()).unwrap(),
+            r#"{"minimum":1,"properties":{"tags":{"items":{"type":"string"},"maxItems":3,"type":"array"}},"title":"Report","type":"object"}"#
+        );
+        assert_eq!(schema_to_map(None).unwrap(), None);
+    }
 }
