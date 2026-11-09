@@ -13,23 +13,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The HTTP transport: endpoints, request headers, and the SDK's send loop with retries and
-//! per-attempt timeouts (port of anthropic-sdk-go v1.81.0 `RequestConfig.Execute` and
-//! `vertex.WithCredentials`'s URL rules).
+//! The Messages transport: endpoints, request headers, and the request body, sent through
+//! [`gadk_model::rest`] with anthropic-sdk-go v1.81.0's retry policy and per-attempt timeouts
+//! (port of `RequestConfig.Execute`'s Anthropic specifics and `vertex.WithCredentials`'s URL
+//! rules).
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
 use futures::StreamExt;
-use gadk_model::{BodyStream, HttpClient, ModelError, collect_body};
+use gadk_model::rest::{
+    CallTimeout, RequestHeaders, RestError, RestReply, RestTransport, header_str,
+};
+use gadk_model::{BodyStream, ModelError};
 use google_cloud_auth::credentials::{CacheableResource, Credentials};
 use http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, USER_AGENT};
-use http::{HeaderMap, HeaderValue, Method, Uri};
-use tokio::time::Instant;
+use http::{HeaderMap, HeaderValue, Uri};
 
 use crate::error::{AnthropicError, api_error_from_response, error_chain, go_quote};
-use crate::retry::{header_str, retry_delay, should_retry, should_retry_dropped_body};
 use crate::wire::{MessageNewParams, VertexBody, encode_request};
 
 /// The Anthropic backend's default base URL (SDK `WithEnvironmentProduction`).
@@ -39,13 +40,10 @@ pub(crate) const ANTHROPIC_DEFAULT_BASE_URL: &str = "https://api.anthropic.com/"
 pub(crate) const ANTHROPIC_VERSION: &str = "2023-06-01";
 
 /// Go's default client `ResponseHeaderTimeout` (`defaultResponseHeaderTimeout`).
-pub(crate) const DEFAULT_RESPONSE_HEADER_TIMEOUT: Duration = Duration::from_secs(600);
+pub(crate) use gadk_model::rest::DEFAULT_RESPONSE_HEADER_TIMEOUT;
 
 /// The Messages API path, relative to the base URL (SDK `"v1/messages"`).
 const MESSAGES_PATH: &str = "v1/messages";
-
-/// Go's `http.Transport` error when `ResponseHeaderTimeout` expires.
-const RESPONSE_HEADER_TIMEOUT_TEXT: &str = "net/http: timeout awaiting response headers";
 
 /// Where a model's requests go.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -179,51 +177,26 @@ async fn credential_headers(credentials: &Credentials) -> Result<HeaderMap, Anth
     }
 }
 
-/// Go `requestconfig`'s `error reading response body: %w`, classified by `classifyError` (not a
-/// `*url.Error`, so `request failed`).
-fn body_read_error(err: ModelError) -> AnthropicError {
-    AnthropicError::from_body_error(err, "error reading response body: ")
-}
-
-/// A streaming body still under the attempt's deadline (SDK `bodyWithTimeout`): once the
-/// deadline passes, the next poll yields
-/// `ModelError::Other(AnthropicError::deadline_exceeded())` and the body ends (it is dropped,
-/// which closes the connection).
-fn body_with_deadline(body: BodyStream, deadline: Instant) -> BodyStream {
-    let sleep = Box::pin(tokio::time::sleep_until(deadline));
-    futures::stream::unfold(Some((body, sleep)), |state| async move {
-        let (mut body, mut sleep) = state?;
-        tokio::select! {
-            biased;
-            chunk = body.next() => chunk.map(|c| (c, Some((body, sleep)))),
-            () = &mut sleep => Some((
-                Err(ModelError::from(AnthropicError::deadline_exceeded())),
-                None,
-            )),
-        }
-    })
-    .boxed()
-}
-
-/// What one attempt produced.
-enum Attempt {
-    /// No response: a connection error, a credential failure, or the response-header timeout.
-    NoResponse(AnthropicError),
-    /// The attempt's `timeout` expired.
-    TimedOut,
-    /// A response that ends the call, its body read.
-    Read(http::response::Parts, Bytes),
-    /// A response that ends the call whose body could not be read.
-    DroppedBody(http::response::Parts, AnthropicError),
-    /// A response left unread: one that is retried, or a streaming 2xx that ends the call.
-    Unread(http::Response<BodyStream>),
+/// A streaming body's [`RestError`] (the attempt's deadline passing) becomes the
+/// [`AnthropicError`] the rest of the crate expects: `ModelError::Other(AnthropicError)`.
+fn anthropic_body_error(err: ModelError) -> ModelError {
+    match err {
+        ModelError::Other(boxed) => match boxed.downcast::<RestError>() {
+            Ok(rest) => AnthropicError::from(*rest).into(),
+            Err(other) => ModelError::Other(other),
+        },
+        other => other,
+    }
 }
 
 /// A model's transport: everything needed to send one Messages request.
 #[derive(Clone)]
 pub(crate) struct Transport {
-    /// The HTTP client (`ClientConfig.http_client`, or a `ReqwestClient`).
-    pub(crate) http: Arc<dyn HttpClient>,
+    /// The HTTP client, the retry policy ([`gadk_model::rest::RetryPolicy::ANTHROPIC`] with
+    /// `ClientConfig.max_retries`), and the response-header timeout
+    /// ([`DEFAULT_RESPONSE_HEADER_TIMEOUT`] when gadk built the client, `None` for a custom
+    /// one; the credential fetch before each send is outside it, as in Go).
+    pub(crate) rest: RestTransport,
     /// The effective base URL (custom, `ANTHROPIC_BASE_URL`, or the backend default).
     pub(crate) base_url: String,
     /// The endpoint shape.
@@ -232,14 +205,17 @@ pub(crate) struct Transport {
     pub(crate) auth: Auth,
     /// `ClientConfig.headers`, added after the headers gadk sets.
     pub(crate) headers: HeaderMap,
-    /// Retries after the first attempt (`ClientConfig.max_retries`, default
-    /// [`crate::retry::DEFAULT_MAX_RETRIES`]).
-    pub(crate) max_retries: u32,
-    /// A timeout on each `HttpClient::send` (until the response headers):
-    /// [`DEFAULT_RESPONSE_HEADER_TIMEOUT`] when gadk built the client, `None` for a custom one.
-    /// It also covers connecting and writing the request (Go's `ResponseHeaderTimeout` starts
-    /// once the request is written); the credential fetch before `send` is outside it, as in Go.
-    pub(crate) response_header_timeout: Option<Duration>,
+}
+
+/// Every attempt's headers are [`Transport::request_headers`]; its error travels boxed in
+/// [`RestError::Headers`] and comes back unchanged.
+#[async_trait::async_trait]
+impl RequestHeaders for Transport {
+    async fn headers(&self) -> Result<HeaderMap, RestError> {
+        self.request_headers()
+            .await
+            .map_err(|e| RestError::Headers(Box::new(e)))
+    }
 }
 
 impl Transport {
@@ -264,6 +240,10 @@ impl Transport {
         let tracking = HeaderValue::from_str(&gadk_platform::tracking_header())
             .map_err(|e| AnthropicError::transport(e.to_string()))?;
         h.insert(USER_AGENT, tracking.clone());
+        let mut user = self.headers.clone();
+        for v in user.values_mut() {
+            v.set_sensitive(true);
+        }
         match &self.auth {
             Auth::Anthropic {
                 api_key,
@@ -278,11 +258,11 @@ impl Transport {
                         sensitive_value("Authorization", &format!("Bearer {token}"))?,
                     );
                 }
-                h.extend(self.headers.clone());
+                h.extend(user);
             }
             Auth::Vertex(credentials) => {
                 h.insert("x-goog-api-client", tracking);
-                h.extend(self.headers.clone());
+                h.extend(user);
                 h.extend(credential_headers(credentials).await?);
             }
         }
@@ -310,58 +290,14 @@ impl Transport {
             .map_err(AnthropicError::request_failed)
     }
 
-    /// One attempt, up to the point Go's loop decides on it: send (under
-    /// `response_header_timeout`), then read the body of a response that ends the call unless
-    /// it is a streaming 2xx (SDK `readsBody`).
-    async fn attempt(&self, uri: &Uri, body: &Bytes, stream: bool, last_attempt: bool) -> Attempt {
-        let headers = match self.request_headers().await {
-            Ok(h) => h,
-            Err(e) => return Attempt::NoResponse(e),
-        };
-        let mut req = http::Request::new(body.clone());
-        *req.method_mut() = Method::POST;
-        *req.uri_mut() = uri.clone();
-        *req.headers_mut() = headers;
-        let sent = match self.response_header_timeout {
-            Some(limit) => match tokio::time::timeout(limit, self.http.send(req)).await {
-                Ok(sent) => sent,
-                Err(_) => {
-                    return Attempt::NoResponse(AnthropicError::transport(
-                        RESPONSE_HEADER_TIMEOUT_TEXT,
-                    ));
-                }
-            },
-            None => self.http.send(req).await,
-        };
-        let res = match sent {
-            Ok(res) => res,
-            Err(e) => return Attempt::NoResponse(AnthropicError::from_model_error(e)),
-        };
-        let ends_call = last_attempt || !should_retry(res.status(), res.headers());
-        let reads_body = res.status().as_u16() >= 400 || !stream;
-        if !(ends_call && reads_body) {
-            return Attempt::Unread(res);
-        }
-        let (parts, body) = res.into_parts();
-        match collect_body(body).await {
-            Ok(bytes) => Attempt::Read(parts, bytes),
-            Err(e) => Attempt::DroppedBody(parts, body_read_error(e)),
-        }
-    }
-
-    /// Sends `body` with the SDK's retry policy and returns the response that ends the call.
+    /// Sends `body` with anthropic-sdk-go's retry policy ([`RestTransport::send`] with
+    /// [`CallTimeout::PerAttempt`] for `timeout`) and returns the response that ends the call.
     ///
-    /// - Attempts: `max_retries + 1`. A connection error (including a credential failure and
-    ///   the response-header timeout), or `timeout` (> 0, per attempt) expiring, is retried like
-    ///   a connection error; [`AnthropicError::deadline_exceeded`] surfaces only when the last
-    ///   attempt timed out.
-    /// - A response is retried per [`crate::retry::should_retry`] (a 2xx with
-    ///   `x-should-retry: true` included), unread; waits use [`crate::retry::retry_delay`] (the
-    ///   response's headers, or none after a connection error or timeout).
-    /// - The body of a response that ends the call is read inside the attempt (under its
-    ///   `timeout`) unless it is a streaming 2xx; a body that fails to read is retried per
-    ///   [`crate::retry::should_retry_dropped_body`] (its `Retry-After` still counts), else
-    ///   returned as `anthropicmodel: request failed: error reading response body: …`.
+    /// - A connection error (including a credential failure and the response-header timeout),
+    ///   or `timeout` (> 0, per attempt) expiring, is retried like a connection error;
+    ///   [`AnthropicError::deadline_exceeded`] surfaces only when the last attempt timed out.
+    /// - A body that fails to read is retried per `shouldRetryDroppedBody`, else returned as
+    ///   `anthropicmodel: request failed: error reading response body: …`.
     /// - A status ≥ 400 that ends the call is returned as `Err` with
     ///   [`crate::error::api_error_from_response`] (header `request-id`).
     /// - A non-streaming 2xx is returned with its whole body as one chunk; a streaming 2xx with
@@ -377,73 +313,33 @@ impl Transport {
     ) -> Result<http::Response<BodyStream>, AnthropicError> {
         let url = request_url(&self.base_url, &self.endpoint, model_id, stream)?;
         let uri: Uri = url.parse().map_err(AnthropicError::request_failed)?;
-        let timeout = timeout.filter(|t| !t.is_zero());
-        let mut retry_count: u32 = 0;
-        loop {
-            let last_attempt = retry_count >= self.max_retries;
-            let deadline = timeout.map(|t| Instant::now() + t);
-            let attempt = self.attempt(&uri, &body, stream, last_attempt);
-            let outcome = match deadline {
-                Some(deadline) => tokio::time::timeout_at(deadline, attempt)
-                    .await
-                    .unwrap_or(Attempt::TimedOut),
-                None => attempt.await,
-            };
-            let retry_headers = match outcome {
-                Attempt::NoResponse(err) => {
-                    if last_attempt {
-                        return Err(err);
-                    }
-                    None
+        let timeout = timeout.map_or(CallTimeout::None, CallTimeout::PerAttempt);
+        match self.rest.send(&uri, body, stream, self, timeout).await? {
+            RestReply::Read(parts, bytes) => {
+                if parts.status.as_u16() >= 400 {
+                    return Err(AnthropicError::api(api_error_from_response(
+                        parts.status.as_u16(),
+                        header_str(&parts.headers, "request-id"),
+                        &bytes,
+                    )));
                 }
-                Attempt::TimedOut => {
-                    if last_attempt {
-                        return Err(AnthropicError::deadline_exceeded());
-                    }
-                    None
-                }
-                Attempt::DroppedBody(parts, err) => {
-                    if last_attempt || !should_retry_dropped_body(&parts.headers) {
-                        return Err(err);
-                    }
-                    Some(parts.headers)
-                }
-                Attempt::Read(parts, bytes) => {
-                    if parts.status.as_u16() >= 400 {
-                        return Err(AnthropicError::api(api_error_from_response(
-                            parts.status.as_u16(),
-                            header_str(&parts.headers, "request-id"),
-                            &bytes,
-                        )));
-                    }
-                    let body: BodyStream = futures::stream::iter([Ok(bytes)]).boxed();
-                    return Ok(http::Response::from_parts(parts, body));
-                }
-                Attempt::Unread(res) => {
-                    if last_attempt || !should_retry(res.status(), res.headers()) {
-                        return Ok(match deadline {
-                            Some(deadline) => res.map(|b| body_with_deadline(b, deadline)),
-                            None => res,
-                        });
-                    }
-                    // The response is dropped unread, which closes its connection.
-                    Some(res.headers().clone())
-                }
-            };
-            tokio::time::sleep(retry_delay(retry_headers.as_ref(), retry_count)).await;
-            retry_count += 1;
+                let body: BodyStream = futures::stream::iter([Ok(bytes)]).boxed();
+                Ok(http::Response::from_parts(parts, body))
+            }
+            RestReply::Streaming(res) => {
+                Ok(res.map(|b| b.map(|chunk| chunk.map_err(anthropic_body_error)).boxed()))
+            }
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
-    use std::future::Future;
-    use std::pin::Pin;
-    use std::sync::Mutex;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
+    use gadk_model::rest::RetryPolicy;
+    use gadk_model::rest::test_util::{FakeResponse, ScriptedClient as Fake};
     use google_cloud_auth::credentials::{CredentialsProvider, EntityTag};
     use google_cloud_auth::errors::CredentialsError;
     use http::StatusCode;
@@ -454,167 +350,9 @@ mod tests {
 
     // ------------------------------------------------------------ scripted fake HttpClient
 
-    /// One scripted answer of [`Fake`].
-    #[derive(Clone)]
-    enum Reply {
-        /// A response; `body` chunks are sent in order (`Err` is a body error that ends it),
-        /// then the body ends, or stays open forever when `stall`.
-        Respond {
-            status: u16,
-            headers: Vec<(&'static str, &'static str)>,
-            body: Vec<Result<&'static str, &'static str>>,
-            stall: bool,
-        },
-        /// A connection error (no response).
-        ConnErr(&'static str),
-        /// Never answers.
-        Hang,
-    }
-
-    fn reply(status: u16, body: &'static str) -> Reply {
-        Reply::Respond {
-            status,
-            headers: vec![("content-type", "application/json")],
-            body: vec![Ok(body)],
-            stall: false,
-        }
-    }
-
-    impl Reply {
-        fn header(mut self, name: &'static str, value: &'static str) -> Self {
-            if let Reply::Respond { headers, .. } = &mut self {
-                headers.push((name, value));
-            }
-            self
-        }
-        /// The body yields its first chunk, then fails as a dropped connection does.
-        fn dropped(mut self) -> Self {
-            if let Reply::Respond { body, .. } = &mut self {
-                body.push(Err("unexpected EOF"));
-            }
-            self
-        }
-        /// The body yields its chunks, then stays open.
-        fn stalled(mut self) -> Self {
-            if let Reply::Respond { stall, .. } = &mut self {
-                *stall = true;
-            }
-            self
-        }
-    }
-
-    /// What [`Fake`] saw of one request.
-    struct Seen {
-        method: Method,
-        uri: String,
-        headers: HeaderMap,
-        body: Bytes,
-        at: Instant,
-    }
-
-    /// An [`HttpClient`] answering from a script (the last reply repeats).
-    struct Fake {
-        script: Mutex<VecDeque<Reply>>,
-        seen: Mutex<Vec<Seen>>,
-        /// Set when a hanging send is dropped.
-        hang_dropped: Arc<AtomicBool>,
-    }
-
-    impl Fake {
-        fn new(script: Vec<Reply>) -> Arc<Self> {
-            Arc::new(Self {
-                script: Mutex::new(script.into()),
-                seen: Mutex::new(Vec::new()),
-                hang_dropped: Arc::new(AtomicBool::new(false)),
-            })
-        }
-        fn calls(&self) -> usize {
-            self.seen.lock().unwrap().len()
-        }
-        /// The time between request `i` and request `i + 1`.
-        fn gap(&self, i: usize) -> Duration {
-            let seen = self.seen.lock().unwrap();
-            seen[i + 1].at - seen[i].at
-        }
-        fn next_reply(&self) -> Reply {
-            let mut script = self.script.lock().unwrap();
-            if script.len() > 1 {
-                script.pop_front().unwrap()
-            } else {
-                script.front().cloned().unwrap()
-            }
-        }
-    }
-
-    /// Sets its flag when dropped.
-    struct DropFlag(Arc<AtomicBool>);
-    impl Drop for DropFlag {
-        fn drop(&mut self) {
-            self.0.store(true, Ordering::SeqCst);
-        }
-    }
-
-    fn io_err(msg: &str) -> ModelError {
-        ModelError::Transport(Box::new(std::io::Error::other(msg.to_string())))
-    }
-
-    // `HttpClient` is an `async_trait`; gadk-anthropic does not depend on `async-trait`, so the
-    // fake spells out the method the macro generates.
-    impl HttpClient for Fake {
-        fn send<'life0, 'async_trait>(
-            &'life0 self,
-            req: http::Request<Bytes>,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<http::Response<BodyStream>, ModelError>>
-                    + Send
-                    + 'async_trait,
-            >,
-        >
-        where
-            'life0: 'async_trait,
-            Self: 'async_trait,
-        {
-            Box::pin(async move {
-                let (parts, body) = req.into_parts();
-                self.seen.lock().unwrap().push(Seen {
-                    method: parts.method,
-                    uri: parts.uri.to_string(),
-                    headers: parts.headers,
-                    body,
-                    at: Instant::now(),
-                });
-                match self.next_reply() {
-                    Reply::ConnErr(msg) => Err(io_err(msg)),
-                    Reply::Hang => {
-                        let _flag = DropFlag(self.hang_dropped.clone());
-                        futures::future::pending::<()>().await;
-                        unreachable!()
-                    }
-                    Reply::Respond {
-                        status,
-                        headers,
-                        body,
-                        stall,
-                    } => {
-                        let chunks: Vec<Result<Bytes, ModelError>> = body
-                            .into_iter()
-                            .map(|c| c.map(|s| Bytes::from_static(s.as_bytes())).map_err(io_err))
-                            .collect();
-                        let mut stream: BodyStream = futures::stream::iter(chunks).boxed();
-                        if stall {
-                            stream = stream.chain(futures::stream::pending()).boxed();
-                        }
-                        let mut res = http::Response::new(stream);
-                        *res.status_mut() = StatusCode::from_u16(status).unwrap();
-                        for (k, v) in headers {
-                            res.headers_mut().append(k, HeaderValue::from_static(v));
-                        }
-                        Ok(res)
-                    }
-                }
-            })
-        }
+    /// A JSON reply (`gadk_model::rest::test_util`'s scripted fake).
+    fn reply(status: u16, body: &'static str) -> FakeResponse {
+        FakeResponse::json_status(status, body)
     }
 
     /// A credentials provider returning fixed headers, or failing; counts its calls.
@@ -657,9 +395,20 @@ mod tests {
         HeaderMap::from_iter([(AUTHORIZATION, HeaderValue::from_static(token))])
     }
 
+    fn rest(http: Arc<Fake>, max_retries: u32) -> RestTransport {
+        RestTransport {
+            http,
+            policy: RetryPolicy {
+                max_retries,
+                ..RetryPolicy::ANTHROPIC
+            },
+            response_header_timeout: None,
+        }
+    }
+
     fn anthropic(http: Arc<Fake>, max_retries: u32) -> Transport {
         Transport {
-            http,
+            rest: rest(http, max_retries),
             base_url: ANTHROPIC_DEFAULT_BASE_URL.to_string(),
             endpoint: Endpoint::Anthropic,
             auth: Auth::Anthropic {
@@ -667,14 +416,12 @@ mod tests {
                 auth_token: None,
             },
             headers: HeaderMap::new(),
-            max_retries,
-            response_header_timeout: None,
         }
     }
 
     fn vertex(http: Arc<Fake>, credentials: Credentials, max_retries: u32) -> Transport {
         Transport {
-            http,
+            rest: rest(http, max_retries),
             base_url: vertex_base_url("us-east5"),
             endpoint: Endpoint::Vertex {
                 project: "p".to_string(),
@@ -682,8 +429,6 @@ mod tests {
             },
             auth: Auth::Vertex(credentials),
             headers: HeaderMap::new(),
-            max_retries,
-            response_header_timeout: None,
         }
     }
 
@@ -701,14 +446,7 @@ mod tests {
         let res = t
             .send("claude-x", Bytes::from_static(BODY), stream, timeout)
             .await?;
-        Ok(collect_body(res.into_body()).await.unwrap())
-    }
-
-    /// Asserts `d` is a jittered backoff for retry `n` plus `extra`.
-    fn assert_backoff(d: Duration, n: u32, extra: Duration) {
-        let base = Duration::from_millis(500) * 2u32.pow(n);
-        let (lo, hi) = (extra + base - base / 4, extra + base);
-        assert!(d > lo && d <= hi, "gap {d:?} not in ({lo:?}, {hi:?}]");
+        Ok(gadk_model::collect_body(res.into_body()).await.unwrap())
     }
 
     fn sorted(h: &HeaderMap) -> Vec<(String, String)> {
@@ -877,7 +615,7 @@ mod tests {
             model: "claude-x".to_string(),
             ..Default::default()
         };
-        let fake = Fake::new(vec![reply(200, OK)]);
+        let fake = Fake::sequence(vec![reply(200, OK)]);
         let (creds, _) = vertex_creds(Some(HeaderMap::new()));
         let anthropic_t = anthropic(fake.clone(), 0);
         let vertex_t = vertex(fake.clone(), creds.clone(), 0);
@@ -965,7 +703,7 @@ mod tests {
             ("neither", None, None, &[]),
         ];
         for (name, api_key, auth_token, auth) in cases {
-            let mut t = anthropic(Fake::new(vec![reply(200, OK)]), 0);
+            let mut t = anthropic(Fake::sequence(vec![reply(200, OK)]), 0);
             t.auth = Auth::Anthropic {
                 api_key: api_key.map(str::to_string),
                 auth_token: auth_token.map(str::to_string),
@@ -987,7 +725,7 @@ mod tests {
 
     #[tokio::test]
     async fn request_headers_user_headers_replace_and_add() {
-        let mut t = anthropic(Fake::new(vec![reply(200, OK)]), 0);
+        let mut t = anthropic(Fake::sequence(vec![reply(200, OK)]), 0);
         t.headers
             .append("anthropic-version", HeaderValue::from_static("2099-01-01"));
         t.headers.append("x-extra", HeaderValue::from_static("a"));
@@ -1009,11 +747,15 @@ mod tests {
                 ("x-extra", "b"),
             ])
         );
+        assert!(
+            got.get_all("x-extra").iter().all(HeaderValue::is_sensitive),
+            "config header values are sensitive"
+        );
     }
 
     #[tokio::test]
     async fn request_headers_invalid_api_key_is_a_transport_error() {
-        let mut t = anthropic(Fake::new(vec![reply(200, OK)]), 0);
+        let mut t = anthropic(Fake::sequence(vec![reply(200, OK)]), 0);
         t.auth = Auth::Anthropic {
             api_key: Some("a\nb".to_string()),
             auth_token: None,
@@ -1031,7 +773,7 @@ mod tests {
         let mut creds_headers = bearer("Bearer vertex-token");
         creds_headers.insert("x-goog-user-project", HeaderValue::from_static("quota"));
         let (creds, calls) = vertex_creds(Some(creds_headers));
-        let mut t = vertex(Fake::new(vec![reply(200, OK)]), creds, 0);
+        let mut t = vertex(Fake::sequence(vec![reply(200, OK)]), creds, 0);
         t.headers.insert("x-extra", HeaderValue::from_static("1"));
         let got = t.request_headers().await.unwrap();
         let tracking = gadk_platform::tracking_header();
@@ -1053,7 +795,7 @@ mod tests {
         // User headers replace the tracking headers (Go's WithHeader order), and the
         // credentials' Authorization replaces a user one (Go's oauth2.Transport runs last).
         let (creds, _) = vertex_creds(Some(bearer("Bearer vertex-token")));
-        let mut t = vertex(Fake::new(vec![reply(200, OK)]), creds, 0);
+        let mut t = vertex(Fake::sequence(vec![reply(200, OK)]), creds, 0);
         t.headers
             .insert(USER_AGENT, HeaderValue::from_static("mine"));
         t.headers
@@ -1070,7 +812,7 @@ mod tests {
     #[tokio::test]
     async fn request_headers_vertex_credential_failure() {
         let (creds, _) = vertex_creds(None);
-        let t = vertex(Fake::new(vec![reply(200, OK)]), creds, 0);
+        let t = vertex(Fake::sequence(vec![reply(200, OK)]), creds, 0);
         let err = t.request_headers().await.unwrap_err();
         assert!(err.is_transport());
         assert_eq!(
@@ -1079,11 +821,14 @@ mod tests {
         );
     }
 
-    // ------------------------------------------------------------ send: success and wire
+    // ------------------------------------------------------------ send: Go texts over gadk_model::rest
+    //
+    // The retry loop, backoff, retry-after, timeouts, dropped bodies and cancellation are
+    // tested in `gadk_model::rest`; these pin the Anthropic wiring and error texts.
 
     #[tokio::test(start_paused = true)]
     async fn send_first_attempt_success_wire() {
-        let fake = Fake::new(vec![reply(200, OK)]);
+        let fake = Fake::sequence(vec![reply(200, OK)]);
         let t = anthropic(fake.clone(), 2);
         let res = t
             .send("claude-x", Bytes::from_static(BODY), false, None)
@@ -1091,11 +836,14 @@ mod tests {
             .unwrap();
         assert_eq!(res.status(), StatusCode::OK);
         assert_eq!(res.headers().get(CONTENT_TYPE).unwrap(), "application/json");
-        assert_eq!(collect_body(res.into_body()).await.unwrap(), OK.as_bytes());
-        let seen = fake.seen.lock().unwrap();
+        assert_eq!(
+            gadk_model::collect_body(res.into_body()).await.unwrap(),
+            OK.as_bytes()
+        );
+        let seen = fake.requests();
         assert_eq!(seen.len(), 1);
-        assert_eq!(seen[0].method, Method::POST);
-        assert_eq!(seen[0].uri, "https://api.anthropic.com/v1/messages");
+        assert_eq!(seen[0].method, "POST");
+        assert_eq!(seen[0].url, "https://api.anthropic.com/v1/messages");
         assert_eq!(seen[0].body, BODY);
         assert_eq!(seen[0].headers.get("x-api-key").unwrap(), "sk-test");
         assert_eq!(
@@ -1113,18 +861,18 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn send_vertex_wire() {
         let (creds, calls) = vertex_creds(Some(bearer("Bearer vertex-token")));
-        let fake = Fake::new(vec![reply(500, BOOM), reply(200, OK)]);
+        let fake = Fake::sequence(vec![reply(500, BOOM), reply(200, OK)]);
         let t = vertex(fake.clone(), creds, 2);
         send(&t, true, None).await.unwrap();
-        assert_eq!(fake.calls(), 2);
+        assert_eq!(fake.hits(), 2);
         assert_eq!(
             calls.load(Ordering::SeqCst),
             2,
             "credentials fetched per attempt"
         );
-        let seen = fake.seen.lock().unwrap();
+        let seen = fake.requests();
         assert_eq!(
-            seen[1].uri,
+            seen[1].url,
             "https://us-east5-aiplatform.googleapis.com/v1/projects/p/locations/us-east5/publishers/anthropic/models/claude-x:streamRawPredict"
         );
         assert_eq!(
@@ -1135,33 +883,6 @@ mod tests {
             seen[1].headers.get(USER_AGENT).unwrap(),
             gadk_platform::tracking_header().as_str()
         );
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn send_resends_the_same_body_and_headers() {
-        let fake = Fake::new(vec![reply(503, BOOM), reply(503, BOOM), reply(200, OK)]);
-        let t = anthropic(fake.clone(), 2);
-        send(&t, false, None).await.unwrap();
-        let seen = fake.seen.lock().unwrap();
-        assert_eq!(seen.len(), 3);
-        for s in seen.iter() {
-            assert_eq!(s.body, BODY);
-            assert_eq!(sorted(&s.headers), sorted(&seen[0].headers));
-        }
-    }
-
-    // ------------------------------------------------------------ send: status rules
-
-    #[tokio::test(start_paused = true)]
-    async fn send_retries_retryable_statuses() {
-        for status in [408u16, 409, 429, 500, 502, 503, 529] {
-            let fake = Fake::new(vec![reply(status, BOOM), reply(200, OK)]);
-            let got = send(&anthropic(fake.clone(), 2), false, None)
-                .await
-                .unwrap();
-            assert_eq!(got, OK.as_bytes(), "{status}");
-            assert_eq!(fake.calls(), 2, "{status}");
-        }
     }
 
     #[tokio::test(start_paused = true)]
@@ -1176,11 +897,11 @@ mod tests {
         // The error type is neutral, so the kind comes from the status alone.
         let body = r#"{"type":"error","error":{"type":"some_error","message":"bad thing"}}"#;
         for (status, kind) in cases {
-            let fake = Fake::new(vec![reply(status, body), reply(200, OK)]);
+            let fake = Fake::sequence(vec![reply(status, body), reply(200, OK)]);
             let err = send(&anthropic(fake.clone(), 2), false, None)
                 .await
                 .unwrap_err();
-            assert_eq!(fake.calls(), 1, "{status}");
+            assert_eq!(fake.hits(), 1, "{status}");
             assert!(err.is(kind), "{status}: {err}");
             let api = err.api_error().unwrap();
             assert_eq!(api.status_code, status);
@@ -1191,12 +912,12 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn send_max_retries_0_1_2() {
         for max_retries in [0u32, 1, 2] {
-            let fake = Fake::new(vec![reply(500, BOOM)]);
+            let fake = Fake::sequence(vec![reply(500, BOOM)]);
             let err = send(&anthropic(fake.clone(), max_retries), false, None)
                 .await
                 .unwrap_err();
             assert_eq!(
-                fake.calls(),
+                fake.hits(),
                 max_retries as usize + 1,
                 "max_retries {max_retries}"
             );
@@ -1209,55 +930,8 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn send_x_should_retry_overrides_status() {
-        // true on a 2xx: retried.
-        let fake = Fake::new(vec![
-            reply(200, "first").header("x-should-retry", "true"),
-            reply(200, OK),
-        ]);
-        assert_eq!(
-            send(&anthropic(fake.clone(), 2), false, None)
-                .await
-                .unwrap(),
-            OK.as_bytes()
-        );
-        assert_eq!(fake.calls(), 2);
-
-        // true on a 400: retried.
-        let fake = Fake::new(vec![
-            reply(400, BAD).header("x-should-retry", "true"),
-            reply(200, OK),
-        ]);
-        send(&anthropic(fake.clone(), 2), false, None)
-            .await
-            .unwrap();
-        assert_eq!(fake.calls(), 2);
-
-        // false on a 503: not retried.
-        let fake = Fake::new(vec![
-            reply(503, BOOM).header("x-should-retry", "false"),
-            reply(200, OK),
-        ]);
-        let err = send(&anthropic(fake.clone(), 2), false, None)
-            .await
-            .unwrap_err();
-        assert_eq!(fake.calls(), 1);
-        assert_eq!(err.api_error().unwrap().status_code, 503);
-
-        // true on the last attempt: the response is returned.
-        let fake = Fake::new(vec![reply(200, "last").header("x-should-retry", "true")]);
-        assert_eq!(
-            send(&anthropic(fake.clone(), 0), false, None)
-                .await
-                .unwrap(),
-            "last".as_bytes()
-        );
-        assert_eq!(fake.calls(), 1);
-    }
-
-    #[tokio::test(start_paused = true)]
     async fn send_request_id_header_wins() {
-        let fake = Fake::new(vec![reply(
+        let fake = Fake::sequence(vec![reply(
             400,
             r#"{"type":"error","error":{"type":"invalid_request_error","message":"bad"},"request_id":"req_body"}"#,
         )
@@ -1266,85 +940,13 @@ mod tests {
         assert_eq!(err.api_error().unwrap().request_id, "req_header");
     }
 
-    // ------------------------------------------------------------ send: delays
-
     #[tokio::test(start_paused = true)]
-    async fn send_backoff_bounds_with_jitter() {
-        let fake = Fake::new(vec![
-            reply(500, BOOM),
-            reply(500, BOOM),
-            reply(500, BOOM),
-            reply(200, OK),
-        ]);
-        send(&anthropic(fake.clone(), 3), false, None)
-            .await
-            .unwrap();
-        assert_eq!(fake.calls(), 4);
-        for n in 0..3 {
-            assert_backoff(fake.gap(n as usize), n, Duration::ZERO);
-        }
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn send_honours_retry_after_ms() {
-        let fake = Fake::new(vec![
-            reply(429, BOOM).header("retry-after-ms", "1234"),
-            reply(200, OK),
-        ]);
-        send(&anthropic(fake.clone(), 2), false, None)
-            .await
-            .unwrap();
-        assert_eq!(fake.gap(0), Duration::from_millis(1234));
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn send_honours_retry_after_seconds() {
-        let fake = Fake::new(vec![
-            reply(503, BOOM).header("retry-after", "7"),
-            reply(200, OK),
-        ]);
-        send(&anthropic(fake.clone(), 2), false, None)
-            .await
-            .unwrap();
-        assert_eq!(fake.gap(0), Duration::from_secs(7));
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn send_honours_retry_after_date() {
-        let at = (chrono::Utc::now() + chrono::Duration::seconds(30))
-            .format("%a, %d %b %Y %H:%M:%S GMT")
-            .to_string();
-        let at: &'static str = Box::leak(at.into_boxed_str());
-        let fake = Fake::new(vec![
-            reply(503, BOOM).header("retry-after", at),
-            reply(200, OK),
-        ]);
-        send(&anthropic(fake.clone(), 2), false, None)
-            .await
-            .unwrap();
-        let gap = fake.gap(0);
-        assert!(
-            gap > Duration::from_secs(28) && gap <= Duration::from_secs(30),
-            "{gap:?}"
-        );
-    }
-
-    // ------------------------------------------------------------ send: connection errors
-
-    #[tokio::test(start_paused = true)]
-    async fn send_retries_connection_errors() {
-        let fake = Fake::new(vec![Reply::ConnErr("connection refused"), reply(200, OK)]);
-        send(&anthropic(fake.clone(), 2), false, None)
-            .await
-            .unwrap();
-        assert_eq!(fake.calls(), 2);
-        assert_backoff(fake.gap(0), 0, Duration::ZERO);
-
-        let fake = Fake::new(vec![Reply::ConnErr("connection refused")]);
+    async fn send_connection_error_text() {
+        let fake = Fake::sequence(vec![FakeResponse::reset("connection refused")]);
         let err = send(&anthropic(fake.clone(), 2), false, None)
             .await
             .unwrap_err();
-        assert_eq!(fake.calls(), 3);
+        assert_eq!(fake.hits(), 3);
         assert!(err.is_transport());
         assert_eq!(
             err.to_string(),
@@ -1355,26 +957,24 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn send_retries_credential_failures() {
         let (creds, calls) = vertex_creds(None);
-        let fake = Fake::new(vec![reply(200, OK)]);
+        let fake = Fake::sequence(vec![reply(200, OK)]);
         let err = send(&vertex(fake.clone(), creds, 2), false, None)
             .await
             .unwrap_err();
         assert_eq!(calls.load(Ordering::SeqCst), 3);
-        assert_eq!(fake.calls(), 0);
+        assert_eq!(fake.hits(), 0);
         assert!(err.is_transport());
+        assert_eq!(
+            err.to_string(),
+            "anthropicmodel: transport error: boom and future attempts will not succeed"
+        );
     }
 
     #[tokio::test(start_paused = true)]
-    async fn send_response_header_timeout() {
-        let fake = Fake::new(vec![Reply::Hang, reply(200, OK)]);
-        let mut t = anthropic(fake.clone(), 2);
-        t.response_header_timeout = Some(DEFAULT_RESPONSE_HEADER_TIMEOUT);
-        send(&t, false, None).await.unwrap();
-        assert_backoff(fake.gap(0), 0, DEFAULT_RESPONSE_HEADER_TIMEOUT);
-
-        let fake = Fake::new(vec![Reply::Hang]);
+    async fn send_response_header_timeout_text() {
+        let fake = Fake::sequence(vec![FakeResponse::never()]);
         let mut t = anthropic(fake.clone(), 0);
-        t.response_header_timeout = Some(DEFAULT_RESPONSE_HEADER_TIMEOUT);
+        t.rest.response_header_timeout = Some(DEFAULT_RESPONSE_HEADER_TIMEOUT);
         let err = send(&t, false, None).await.unwrap_err();
         assert!(err.is_transport());
         assert_eq!(
@@ -1384,55 +984,9 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn response_header_timeout_does_not_limit_a_streaming_body() {
-        let fake = Fake::new(vec![Reply::Respond {
-            status: 200,
-            headers: vec![],
-            body: vec![Ok("data: a\n\n")],
-            stall: true,
-        }]);
-        let mut t = anthropic(fake, 0);
-        t.response_header_timeout = Some(Duration::from_secs(1));
-        let res = t
-            .send("claude-x", Bytes::from_static(BODY), true, None)
-            .await
-            .unwrap();
-        let mut body = res.into_body();
-        assert_eq!(body.next().await.unwrap().unwrap(), "data: a\n\n");
-        assert!(
-            tokio::time::timeout(Duration::from_secs(3600), body.next())
-                .await
-                .is_err(),
-            "the body stays open"
-        );
-    }
-
-    // ------------------------------------------------------------ send: per-attempt timeout
-
-    #[tokio::test(start_paused = true)]
-    async fn send_attempt_timeout_is_retried() {
-        let fake = Fake::new(vec![Reply::Hang, Reply::Hang, reply(200, OK)]);
-        let got = send(
-            &anthropic(fake.clone(), 2),
-            false,
-            Some(Duration::from_secs(1)),
-        )
-        .await
-        .unwrap();
-        assert_eq!(got, OK.as_bytes());
-        assert_eq!(fake.calls(), 3);
-        assert_backoff(fake.gap(0), 0, Duration::from_secs(1));
-        assert_backoff(fake.gap(1), 1, Duration::from_secs(1));
-        assert!(
-            fake.hang_dropped.load(Ordering::SeqCst),
-            "timed-out send dropped"
-        );
-    }
-
-    #[tokio::test(start_paused = true)]
     async fn send_attempt_timeout_on_last_attempt_is_deadline_exceeded() {
         for max_retries in [0u32, 2] {
-            let fake = Fake::new(vec![Reply::Hang]);
+            let fake = Fake::sequence(vec![FakeResponse::never()]);
             let err = send(
                 &anthropic(fake.clone(), max_retries),
                 false,
@@ -1440,43 +994,17 @@ mod tests {
             )
             .await
             .unwrap_err();
-            assert_eq!(fake.calls(), max_retries as usize + 1);
+            assert_eq!(fake.hits(), max_retries as usize + 1);
             assert!(err.is_deadline_exceeded());
             assert_eq!(err.to_string(), "context deadline exceeded");
         }
     }
 
     #[tokio::test(start_paused = true)]
-    async fn send_attempt_timeout_covers_a_non_streaming_body() {
-        let stalled = reply(200, "{").stalled();
-        let fake = Fake::new(vec![stalled.clone(), reply(200, OK)]);
-        let got = send(
-            &anthropic(fake.clone(), 1),
-            false,
-            Some(Duration::from_secs(2)),
-        )
-        .await
-        .unwrap();
-        assert_eq!(got, OK.as_bytes());
-        assert_eq!(fake.calls(), 2);
-
-        let fake = Fake::new(vec![stalled]);
-        let err = send(&anthropic(fake, 1), false, Some(Duration::from_secs(2)))
-            .await
-            .unwrap_err();
-        assert!(err.is_deadline_exceeded());
-    }
-
-    #[tokio::test(start_paused = true)]
     async fn send_attempt_timeout_keeps_running_on_a_streaming_body() {
-        let fake = Fake::new(vec![Reply::Respond {
-            status: 200,
-            headers: vec![("content-type", "text/event-stream")],
-            body: vec![Ok("data: a\n\n")],
-            stall: true,
-        }]);
+        let fake = Fake::sequence(vec![FakeResponse::sse("data: a\n\n").hang()]);
         let t = anthropic(fake, 2);
-        let start = Instant::now();
+        let start = tokio::time::Instant::now();
         let res = t
             .send(
                 "claude-x",
@@ -1502,102 +1030,38 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn zero_timeout_is_no_timeout() {
-        let fake = Fake::new(vec![reply(200, "data: a\n\n").stalled()]);
-        let res = anthropic(fake, 0)
-            .send(
-                "claude-x",
-                Bytes::from_static(BODY),
-                true,
-                Some(Duration::ZERO),
-            )
-            .await
-            .unwrap();
-        let mut body = res.into_body();
-        assert!(body.next().await.unwrap().is_ok());
-        assert!(
-            tokio::time::timeout(Duration::from_secs(3600), body.next())
-                .await
-                .is_err()
-        );
-    }
-
-    // ------------------------------------------------------------ send: dropped bodies
-
-    #[tokio::test(start_paused = true)]
-    async fn send_retries_a_dropped_body() {
-        let fake = Fake::new(vec![reply(200, "{").dropped(), reply(200, OK)]);
-        assert_eq!(
-            send(&anthropic(fake.clone(), 2), false, None)
-                .await
-                .unwrap(),
-            OK.as_bytes()
-        );
-        assert_eq!(fake.calls(), 2);
-        assert_backoff(fake.gap(0), 0, Duration::ZERO);
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn send_dropped_body_honours_retry_after() {
-        let fake = Fake::new(vec![
-            reply(200, "{").dropped().header("retry-after-ms", "2000"),
-            reply(200, OK),
-        ]);
-        send(&anthropic(fake.clone(), 2), false, None)
-            .await
-            .unwrap();
-        assert_eq!(fake.gap(0), Duration::from_secs(2));
-    }
-
-    #[tokio::test(start_paused = true)]
     async fn send_dropped_body_not_retried() {
         let want = "anthropicmodel: request failed: error reading response body: unexpected EOF";
         // x-should-retry: false.
-        let fake = Fake::new(vec![
-            reply(200, "{").dropped().header("x-should-retry", "false"),
+        let fake = Fake::sequence(vec![
+            reply(200, "{")
+                .fail("unexpected EOF")
+                .header("x-should-retry", "false"),
             reply(200, OK),
         ]);
         let err = send(&anthropic(fake.clone(), 2), false, None)
             .await
             .unwrap_err();
-        assert_eq!(fake.calls(), 1);
+        assert_eq!(fake.hits(), 1);
         assert_eq!(err.to_string(), want);
         // The last attempt.
-        let fake = Fake::new(vec![reply(200, "{").dropped()]);
+        let fake = Fake::sequence(vec![reply(200, "{").fail("unexpected EOF")]);
         let err = send(&anthropic(fake.clone(), 1), false, None)
             .await
             .unwrap_err();
-        assert_eq!(fake.calls(), 2);
+        assert_eq!(fake.hits(), 2);
         assert_eq!(err.to_string(), want);
         // An error status whose body drops on the last attempt.
-        let fake = Fake::new(vec![reply(500, "{").dropped()]);
+        let fake = Fake::sequence(vec![reply(500, "{").fail("unexpected EOF")]);
         let err = send(&anthropic(fake.clone(), 0), false, None)
             .await
             .unwrap_err();
         assert_eq!(err.to_string(), want);
     }
 
-    // ------------------------------------------------------------ send: streaming
-
-    #[tokio::test(start_paused = true)]
-    async fn send_streaming_returns_the_live_body() {
-        let fake = Fake::new(vec![
-            reply(503, BOOM).dropped(),
-            reply(200, "data: a\n\n").stalled(),
-        ]);
-        let res = anthropic(fake.clone(), 2)
-            .send("claude-x", Bytes::from_static(BODY), true, None)
-            .await
-            .unwrap();
-        // The retried 503's broken body was never read; the 2xx body is left to the caller.
-        assert_eq!(fake.calls(), 2);
-        let mut body = res.into_body();
-        assert_eq!(body.next().await.unwrap().unwrap(), "data: a\n\n");
-    }
-
     #[tokio::test(start_paused = true)]
     async fn send_streaming_error_status_reads_the_body() {
-        let fake = Fake::new(vec![reply(400, BAD)]);
+        let fake = Fake::sequence(vec![reply(400, BAD)]);
         let Err(err) = anthropic(fake, 2)
             .send("claude-x", Bytes::from_static(BODY), true, None)
             .await
@@ -1608,29 +1072,42 @@ mod tests {
         assert_eq!(err.api_error().unwrap().message, "bad thing");
     }
 
-    // ------------------------------------------------------------ send: cancellation by drop
-
-    #[tokio::test(start_paused = true)]
-    async fn dropping_send_during_backoff_sends_nothing_more() {
-        let fake = Fake::new(vec![
-            reply(503, BOOM).header("retry-after", "60"),
-            reply(200, OK),
-        ]);
-        let t = anthropic(fake.clone(), 2);
-        let res = tokio::time::timeout(Duration::from_secs(10), send(&t, false, None)).await;
-        assert!(res.is_err(), "still backing off");
-        assert_eq!(fake.calls(), 1);
-        tokio::time::sleep(Duration::from_secs(120)).await;
-        assert_eq!(fake.calls(), 1);
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn dropping_send_drops_the_in_flight_request() {
-        let fake = Fake::new(vec![Reply::Hang]);
-        let t = anthropic(fake.clone(), 2);
-        let res = tokio::time::timeout(Duration::from_secs(1), send(&t, false, None)).await;
-        assert!(res.is_err());
-        assert!(fake.hang_dropped.load(Ordering::SeqCst));
-        assert_eq!(fake.calls(), 1);
+    #[test]
+    fn rest_errors_map_to_gos_texts() {
+        let io = std::io::Error::other("connection refused");
+        let cases: [(&str, RestError, &str); 4] = [
+            (
+                "transport",
+                RestError::Transport(ModelError::Transport(Box::new(io))),
+                "anthropicmodel: transport error: connection refused",
+            ),
+            (
+                "headers_keep_the_anthropic_error",
+                RestError::Headers(Box::new(AnthropicError::transport("boom"))),
+                "anthropicmodel: transport error: boom",
+            ),
+            (
+                "response_header_timeout",
+                RestError::ResponseHeaderTimeout,
+                "anthropicmodel: transport error: net/http: timeout awaiting response headers",
+            ),
+            (
+                "deadline_exceeded",
+                RestError::DeadlineExceeded,
+                "context deadline exceeded",
+            ),
+        ];
+        for (name, rest, want) in cases {
+            assert_eq!(AnthropicError::from(rest).to_string(), want, "{name}");
+        }
+        let (parts, ()) = http::Response::new(()).into_parts();
+        let dropped = RestError::DroppedBody {
+            parts: Box::new(parts),
+            source: ModelError::Other("unexpected EOF".into()),
+        };
+        assert_eq!(
+            AnthropicError::from(dropped).to_string(),
+            "anthropicmodel: request failed: error reading response body: unexpected EOF"
+        );
     }
 }

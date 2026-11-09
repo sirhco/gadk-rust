@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Ports of TestGenerate_Anthropic, TestGenerate_Vertex (Task 8): the two Go recordings
+//! Ports of TestGenerate_Anthropic, TestGenerate_Vertex: the two Go recordings
 //! replayed through `gadk_httprr` with Go's scrubbers. Each test also records the raw request
 //! bodies the model sends and checks them byte for byte against the recorded ones (the httprr
 //! lookup alone compares scrubbed, compacted bodies).

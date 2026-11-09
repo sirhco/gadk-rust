@@ -14,7 +14,7 @@
 // limitations under the License.
 
 //! `gadk-mcp-stdio-test-server`: the `testutil` weather server over stdio, spawned by the
-//! `child_process` test through `McpTransport::Command` (Task 4).
+//! `child_process` test through `McpTransport::Command`.
 //!
 //! It serves [`gadk_mcp::testutil::weather_server`] on stdin/stdout until the client closes
 //! stdin, then exits 0; a failed handshake exits 1.

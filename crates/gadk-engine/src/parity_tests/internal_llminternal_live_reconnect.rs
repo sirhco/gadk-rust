@@ -231,7 +231,7 @@ async fn test_wait_before_reconnect() {
     }
 }
 
-/// The flow-level tests of Go live_reconnect_test.go (Task 8): RunLive over the fake Live server,
+/// The flow-level tests of Go live_reconnect_test.go: RunLive over the fake Live server,
 /// in real time with Go's shrunken policies.
 mod flow {
     use std::time::Duration;

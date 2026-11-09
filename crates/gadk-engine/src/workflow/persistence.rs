@@ -14,7 +14,7 @@
 // limitations under the License.
 
 //! Port of Go workflow/persistence.go: the metadata constants and the history attribution used
-//! by the live schedulers (Task 10), and ReconstructRunState with its scan helpers (Task 14).
+//! by the live schedulers, and ReconstructRunState with its scan helpers.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;

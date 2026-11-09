@@ -15,8 +15,8 @@
 
 //! Parity target for ADK-Go `model/anthropicmodel/anthropicmodel_test.go` (a directory target:
 //! `scripts/parity-check` scans every `.rs` file here). One module per porting task:
-//! `generate` (Task 8), `new_model` (Task 9), `tools_thinking` (Task 10), `content` (Task 11),
-//! `behavior` (Task 12); `harness` (Task 6) holds the shared test helpers.
+//! `generate`, `new_model`, `tools_thinking`, `content`,
+//! `behavior`; `harness` holds the shared test helpers.
 
 // parity: skipped TestAgentRunner_MultiTurnImageAndTool: ported in crates/gadk/tests/model_anthropicmodel_agent_runner.rs (needs the runner)
 

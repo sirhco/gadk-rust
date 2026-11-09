@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `tool/mcptoolset/auth_session_test.go` (package `mcptoolset_test`; Task 10).
+//! Port of Go `tool/mcptoolset/auth_session_test.go` (package `mcptoolset_test`).
 //!
 //! Go's `userBoundServer` is [`HttpTestServer::user_bound`]: `Bearer token-of-<user>` is required,
 //! each MCP session is bound to the user that created it (403 `session user mismatch` for anyone

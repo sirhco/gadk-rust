@@ -83,6 +83,29 @@ pub async fn collect_body(mut body: BodyStream) -> Result<Bytes, ModelError> {
     Ok(buf.freeze())
 }
 
+/// `err` and its sources, joined with `": "` (moved from gadk-anthropic in 3b so every REST
+/// provider renders a cause chain the same way).
+pub fn error_chain(err: &(dyn std::error::Error + 'static)) -> String {
+    let mut out = err.to_string();
+    let mut cur = err.source();
+    while let Some(e) = cur {
+        out.push_str(": ");
+        out.push_str(&e.to_string());
+        cur = e.source();
+    }
+    out
+}
+
+/// The text of a [`ModelError::Transport`] cause: a `reqwest::Error` loses its URL (Go's
+/// provider error texts carry none), then the source chain is joined with `": "`
+/// ([`error_chain`]).
+pub fn transport_error_detail(err: Box<dyn std::error::Error + Send + Sync>) -> String {
+    match err.downcast::<reqwest::Error>() {
+        Ok(e) => error_chain(&e.without_url()),
+        Err(other) => error_chain(other.as_ref()),
+    }
+}
+
 /// `url` for `Debug` output: credentials embedded in it (`https://user:secret@host`) are
 /// removed; a URL without user info is returned as it is, and one that does not parse, has no
 /// host but contains `@`, or whose user info cannot be removed becomes `<redacted>`.

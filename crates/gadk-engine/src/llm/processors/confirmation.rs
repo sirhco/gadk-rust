@@ -22,8 +22,8 @@ use std::{
 };
 
 use futures::future::BoxFuture;
-// Go toolconfirmation.FunctionCallName / OriginalCallFrom come from Task 5 (C5 D3); no private
-// copies.
+// Go toolconfirmation.FunctionCallName / OriginalCallFrom come from gadk-agent (C5 D3); no
+// private copies.
 use gadk_agent::{
     AgentError, InvocationContext, REQUEST_CONFIRMATION_FUNCTION_CALL_NAME, Tool,
     original_call_from,

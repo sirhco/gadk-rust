@@ -730,6 +730,7 @@ dependencies = [
  "gadk-mcp",
  "gadk-memory",
  "gadk-model",
+ "gadk-openai",
  "gadk-platform",
  "gadk-session",
  "gadk-tools",
@@ -771,9 +772,9 @@ dependencies = [
 name = "gadk-anthropic"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "base64 0.23.1",
  "bytes",
- "chrono",
  "futures",
  "gadk-genai",
  "gadk-httprr",
@@ -781,10 +782,7 @@ dependencies = [
  "gadk-platform",
  "google-cloud-auth",
  "http",
- "hyper",
- "hyper-util",
  "pretty_assertions",
- "rand",
  "regex",
  "reqwest",
  "serde",
@@ -985,11 +983,16 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
+ "chrono",
  "futures",
  "gadk-genai",
+ "gadk-model",
  "http",
+ "hyper",
+ "hyper-util",
  "parking_lot 0.13.0",
  "pretty_assertions",
+ "rand",
  "regex",
  "reqwest",
  "rstest",
@@ -998,6 +1001,25 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "gadk-openai"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.23.1",
+ "bytes",
+ "futures",
+ "gadk-genai",
+ "gadk-model",
+ "gadk-platform",
+ "http",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "tokio",
+ "url",
 ]
 
 [[package]]

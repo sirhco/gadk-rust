@@ -16,7 +16,7 @@
 //! Ports of TestFinishReasonAndErrorClassification, TestGenerateContentConfigValidation,
 //! TestConcurrencyAndNonMutation, TestContextCancellation, TestTruncatedStreamedToolCall,
 //! TestMaxRetriesAndInFlightNonStreamingCancellation and TestGenaiConfigReflectionCompleteness
-//! (Task 12).
+//!.
 //!
 //! Every Go subtest and table case is a named case here; a failing case names itself in the
 //! panic message. Error `Display` texts are asserted whole, byte for byte with Go's `Error()`

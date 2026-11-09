@@ -15,7 +15,7 @@
 
 //! Ports of TestSamplePNG1x1_DecodesAsValidPNG, TestMultimodalSupport,
 //! TestFunctionResponseStructSerializationAndEmptyResult, TestExecutableCodeAndURISchemePrivacy,
-//! TestOutputSchemaAndStructuredOutput (Task 11).
+//! TestOutputSchemaAndStructuredOutput.
 //!
 //! Each Go test is one `fn test_*`; each Go `t.Run` subtest is an `async fn` named after it and
 //! called in Go's order against the test's shared fake server (Go shares one `httptest` server
@@ -1247,7 +1247,7 @@ async fn output_schema_llmagent_with_output_schema_end_to_end(m: &dyn Llm) {
     );
 }
 
-// parity: adapted: llmagent_with_output_schema_end_to_end drives the model with the request llmagent's basic processor builds for a tool-less OutputSchema agent (gadk-agent is not a dependency of gadk-anthropic; the runner path is Task 13's TestAgentRunner port)
+// parity: adapted: llmagent_with_output_schema_end_to_end drives the model with the request llmagent's basic processor builds for a tool-less OutputSchema agent (gadk-agent is not a dependency of gadk-anthropic; the runner path is the TestAgentRunner port's)
 #[tokio::test]
 async fn test_output_schema_and_structured_output() {
     let srv = weather_server();

@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `Workflow` and `WorkflowOptions` (port of Go workflow/workflow.go; Tasks 10 and 14 add impl
-//! blocks). `Workflow` is not a [`Node`](crate::workflow::Node); `WorkflowNode` wraps it.
+//! `Workflow` and `WorkflowOptions` (port of Go workflow/workflow.go; the scheduler and
+//! persistence modules add impl blocks). `Workflow` is not a [`Node`](crate::workflow::Node); `WorkflowNode` wraps it.
 
 use std::sync::Arc;
 

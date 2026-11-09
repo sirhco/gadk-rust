@@ -116,6 +116,25 @@ class EdgeTest(unittest.TestCase):
         errs = cwd.check(self.repo)
         self.assertTrue(any("gadk -> gadk-anthropic is missing" in e for e in errs), errs)
 
+    def test_openai_edges_are_exactly_genai_model_platform(self):
+        self.assertEqual(cwd.ALLOWED["gadk-openai"], {"gadk-genai", "gadk-model", "gadk-platform"})
+        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-openai" in deps], ["gadk"])
+
+    def test_openai_normal_dependency_on_anthropic_is_rejected(self):
+        self.edit("gadk-openai", "[dependencies]\n", "[dependencies]\ngadk-anthropic = { workspace = true }\n")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-openai -> gadk-anthropic is not allowed" in e for e in errs), errs)
+
+    def test_facade_missing_openai_edge_is_rejected(self):
+        self.edit("gadk", "gadk-openai = { workspace = true, optional = true }\n", "")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk -> gadk-openai is missing" in e for e in errs), errs)
+
+    def test_dev_dependency_on_openai_outside_the_facade_is_rejected(self):
+        self.edit("gadk-anthropic", "[dev-dependencies]\n", "[dev-dependencies]\ngadk-openai = { workspace = true }\n")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("only gadk may depend on gadk-openai (dev-dependency)" in e for e in errs), errs)
+
     def test_disallowed_normal_edge_is_rejected(self):
         self.edit("gadk-artifact", "[dependencies]\n", "[dependencies]\ngadk-session = { workspace = true }\n")
         errs = cwd.check(self.repo)

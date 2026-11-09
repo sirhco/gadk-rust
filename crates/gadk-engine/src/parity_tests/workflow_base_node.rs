@@ -30,8 +30,8 @@ use crate::workflow::{
     AgentNode, BaseNode, JoinNode, Node, NodeConfig, ParallelWorker, RetryConfig, WorkflowNode,
 };
 
-// Compile-time assertions: every built-in node kind Task 8 defines satisfies Node
-// (Go's `var _ Node = (*X)(nil)` block). FunctionNode/ToolNode are asserted by Tasks 10/12.
+// Compile-time assertions: the built-in node kinds satisfy Node (Go's `var _ Node = (*X)(nil)`
+// block). FunctionNode/ToolNode are asserted with their own tests.
 const _: fn() = || {
     fn is_node<T: Node>() {}
     is_node::<AgentNode>();

@@ -9,6 +9,11 @@ repository.workspace = true
 [lints]
 workspace = true
 
+[features]
+# `rest::test_util`: the scripted fake `HttpClient` and the 127.0.0.1 fake server shared by the
+# provider crates' tests.
+test-util = ["dep:hyper", "dep:hyper-util"]
+
 [dependencies]
 gadk-genai = { workspace = true }
 serde = { workspace = true }
@@ -22,8 +27,14 @@ reqwest = { workspace = true }
 regex = { workspace = true }
 parking_lot = { workspace = true }
 tracing = { workspace = true }
+tokio = { workspace = true }
+chrono = { workspace = true }
+rand = { workspace = true }
+hyper = { workspace = true, optional = true, features = ["server", "http1"] }
+hyper-util = { workspace = true, optional = true, features = ["tokio", "service"] }
 
 [dev-dependencies]
-tokio = { workspace = true }
+gadk-model = { path = ".", features = ["test-util"] }
+tokio = { workspace = true, features = ["test-util"] }
 pretty_assertions = { workspace = true }
 rstest = { workspace = true }

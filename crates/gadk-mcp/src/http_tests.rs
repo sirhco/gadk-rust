@@ -16,7 +16,7 @@
 //! Rust-only tests of the MCP HTTP client: an HTTP 404 reaches the refresher with
 //! `reinit_on_expired_session(false)`, a 401 with and without `WWW-Authenticate` refreshes once
 //! and replays, a second 401 is returned, and credential errors carry the `auth: …` text
-//! (Task 7).
+//!.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

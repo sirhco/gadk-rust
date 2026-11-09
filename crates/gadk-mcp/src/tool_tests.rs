@@ -13,10 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Rust-only unit tests of `McpTool` against a fake `McpClient` (Task 5).
+//! Rust-only unit tests of `McpTool` against a fake `McpClient`.
 //!
 //! MCP content is mostly single plain text blocks; `format_mcp_content`'s labels and joining rules
-//! are Task 3's tests, and one `isError` case checks that its text becomes the details.
+//! are tested in `parity_tests/tool_mcptoolset_tool.rs`, and one `isError` case checks that its text becomes the details.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -309,7 +309,7 @@ async fn run_is_error_texts() {
     let err = tool.run(tool_ctx(None), args()).await.unwrap_err();
     assert_eq!(err.to_string(), "Tool execution failed.");
 
-    // The details are `format_mcp_content`'s text (Task 3): a label on its own line.
+    // The details are `format_mcp_content`'s text: a label on its own line.
     let err = tool.run(tool_ctx(None), args()).await.unwrap_err();
     assert_eq!(
         err.to_string(),

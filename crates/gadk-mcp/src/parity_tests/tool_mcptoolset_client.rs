@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `tool/mcptoolset/client_test.go` (package `mcptoolset`; Task 8).
+//! Port of Go `tool/mcptoolset/client_test.go` (package `mcptoolset`).
 //!
 //! Go's `connectFunc` over an in-memory server is [`ScriptedFactory::new`]; the pool's
 //! never-connecting transport is [`ScriptedFactory::failing`]. Go's `SetSessionBoundsForTest` is

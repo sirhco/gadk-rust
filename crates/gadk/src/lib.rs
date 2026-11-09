@@ -38,6 +38,10 @@ pub use gadk_genai as genai;
 pub use gadk_mcp as mcp;
 pub use gadk_memory as memory;
 pub use gadk_model as model;
+/// OpenAI models on the Responses and Chat Completions APIs (feature `openai`, not on by
+/// default; re-export of `gadk-openai`).
+#[cfg(feature = "openai")]
+pub use gadk_openai as openai;
 pub use gadk_platform as platform;
 pub use gadk_session as session;
 /// Built-in tools that need no authentication: the Gemini built-ins, artifact and memory tools,

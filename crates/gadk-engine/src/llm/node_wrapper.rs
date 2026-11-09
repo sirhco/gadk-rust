@@ -733,7 +733,7 @@ mod tests {
         );
     }
 
-    // Rust counterpart of Go TestRunLLMAgentAsNode_DeclaredSingleTurn_BindsForTheRequestProcessors (Task 19 ports the Go test itself).
+    // Rust counterpart of Go TestRunLLMAgentAsNode_DeclaredSingleTurn_BindsForTheRequestProcessors (the Go test itself is ported in the parity tests).
     #[tokio::test]
     async fn declared_single_turn_hides_history() {
         let model = MockModel::new(vec![text_resp("answer")]);
@@ -826,7 +826,7 @@ mod tests {
     #[tokio::test]
     async fn task_run_keeps_parent_llm_call_limiter() {
         // C5 D3: the node context is derived with ContextDelta { session, fresh_invocation }, so the
-        // invocation's limiter is shared, not reset (Task 21's runner/max_llm_calls_test.go relies on it).
+        // invocation's limiter is shared, not reset (the runner/max_llm_calls_test.go port relies on it).
         let model = MockModel::new(vec![
             fc_resp("f1", "noop", json!({})),
             fc_resp("f2", "noop", json!({})),
@@ -1073,7 +1073,7 @@ mod tests {
         assert_eq!(doer_model.requests().len(), 1);
     }
 
-    // Task 12/13 review follow-ups: the AgentNode → LlmAgent branch now that the real wrapper exists.
+    // Review follow-ups: the AgentNode → LlmAgent branch now that the real wrapper exists.
 
     #[tokio::test]
     async fn agent_node_binds_single_turn_for_an_undeclared_llm_agent() {

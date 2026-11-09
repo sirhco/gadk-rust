@@ -21,6 +21,8 @@
 - 3a: `gadk-anthropic` depends on exactly `gadk-genai`, `gadk-model` and `gadk-platform` (the
   shared SSE parser lives in `gadk-model`, the injectable environment in `gadk-platform`), and
   only the façade depends on it (feature `anthropic`).
+- 3b: `gadk-openai` depends on exactly `gadk-genai`, `gadk-model` and `gadk-platform`, and only
+  the façade depends on it (feature `openai`), normal or dev.
 """
 import pathlib, sys, tomllib
 
@@ -41,15 +43,17 @@ ALLOWED = {
     "gadk-auth": {"gadk-agent", "gadk-platform"},
     "gadk-mcp": {"gadk-agent", "gadk-auth", "gadk-genai", "gadk-platform"},
     "gadk-anthropic": {"gadk-genai", "gadk-model", "gadk-platform"},
+    "gadk-openai": {"gadk-genai", "gadk-model", "gadk-platform"},
     "gadk": {"gadk-genai", "gadk-platform", "gadk-model", "gadk-session", "gadk-gemini",
              "gadk-agent", "gadk-engine", "gadk-tools", "gadk-auth", "gadk-mcp", "gadk-artifact",
-             "gadk-memory", "gadk-anthropic"},
+             "gadk-memory", "gadk-anthropic", "gadk-openai"},
 }
 # (crate, dependency) normal edges that must be `optional = true`.
 OPTIONAL = {("gadk-engine", "gadk-gemini"), ("gadk-engine", "gadk-httprr")}
 FACADE = "gadk"  # no crate may dev-depend on the façade
 ENGINE_DEPENDENTS = ("gadk", "gadk-tools")  # the only crates that may depend on gadk-engine
 TOOLS_DEPENDENT = "gadk"  # the only crate that may depend on gadk-tools
+OPENAI_DEPENDENT = "gadk"  # the only crate that may depend on gadk-openai (3b)
 
 
 def reaches(src, dst, seen=None):
@@ -102,6 +106,8 @@ def check(repo):
                 errs.append(f"{rel}: only gadk and gadk-tools may depend on gadk-engine (dev-dependency)")
             elif d == "gadk-tools" and name != TOOLS_DEPENDENT:
                 errs.append(f"{rel}: only {TOOLS_DEPENDENT} may depend on gadk-tools (dev-dependency)")
+            elif d == "gadk-openai" and name != OPENAI_DEPENDENT:
+                errs.append(f"{rel}: only {OPENAI_DEPENDENT} may depend on gadk-openai (dev-dependency)")
             elif reaches(d, name) or d == FACADE:
                 errs.append(f"{rel}: dev-dependency {name} -> {d} creates a cycle")
     for missing in sorted(set(ALLOWED) - names):
