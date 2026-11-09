@@ -840,7 +840,7 @@ class ThreeBTest(unittest.TestCase):
         err = io.StringIO()
         with contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
             pc.main(["--adk-go", str(self.go), "--repo", str(self.repo), "--ledger", "all", "--count"])
-        self.assertIn("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b or 4a", err.getvalue())
+        self.assertIn("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a or 4b", err.getvalue())
 
 
 LEDGER_4A = (
@@ -851,6 +851,62 @@ LEDGER_4A = (
 
 ENGINE_TARGET = "crates/gadk-engine/src/parity_tests/session_database_compaction.rs"
 SESSION_TARGET = "crates/gadk-session-database/src/parity_tests/session_database_session.rs"
+
+
+LEDGER_4B = (
+    "# Parity ledger — sub-project 4b\n\n"
+    "<!-- in-scope:\nartifact/gcsartifact/gcs_client_test.go\nartifact/gcsartifact/gcs_test.go\n-->\n\n"
+    + pc.TABLE_HEADER + "\n" + pc.TABLE_SEP + "\n"
+)
+
+GCS_TARGET = "crates/gadk-artifact-gcs/src/parity_tests/artifact_gcsartifact_gcs.rs"
+GCS_CLIENT_TARGET = "crates/gadk-artifact-gcs/src/parity_tests/artifact_gcsartifact_gcs_client.rs"
+
+
+class FourBTest(unittest.TestCase):
+    """4b: one Go package whose two test files land in one crate's `src/parity_tests/`."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        d = pathlib.Path(self._tmp.name)
+        self.go, self.repo = d / "go", d / "repo"
+        (self.go / "artifact/gcsartifact").mkdir(parents=True)
+        (self.go / "artifact/gcsartifact/gcs_test.go").write_text(
+            "package gcsartifact\nfunc TestSleepContext(t *testing.T) {}\n")
+        (self.go / "artifact/gcsartifact/gcs_client_test.go").write_text(
+            "package gcsartifact\nfunc TestObjectWrapperIfNotExist(t *testing.T) {}\n")
+        (self.repo / GCS_TARGET).parent.mkdir(parents=True)
+        (self.repo / GCS_TARGET).write_text("#[tokio::test]\nasync fn test_sleep_context() {}\n")
+        (self.repo / GCS_CLIENT_TARGET).write_text(
+            "// parity: adapted: no unconditional upload\n#[tokio::test]\nasync fn test_object_wrapper_if_not_exist() {}\n")
+        (self.repo / "docs/parity").mkdir(parents=True)
+        self.ledger = self.repo / "docs/parity/4b.md"
+        self.ledger.write_text(LEDGER_4B)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def run_cli(self, *args):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = pc.main(["--adk-go", str(self.go), "--repo", str(self.repo), *args])
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_ledger_4b_is_registered(self):
+        self.assertIn("4b", pc.GENERATED_LEDGERS)
+
+    def test_targets_generate_and_check(self):
+        self.assertEqual(self.run_cli("--ledger", "4b", "--count"), (0, "2\n", ""))
+        self.assertEqual(self.run_cli("--ledger", "4b", "--generate")[0], 0)
+        self.assertEqual(self.run_cli("--ledger", "4b"), (0, "", ""))
+        rows = self.ledger.read_text().splitlines()[-2:]
+        self.assertEqual(rows, [
+            "| artifact/gcsartifact/gcs_client_test.go | TestObjectWrapperIfNotExist"
+            " | ported (adapted: no unconditional upload) | " + GCS_CLIENT_TARGET
+            + " | test_object_wrapper_if_not_exist |",
+            "| artifact/gcsartifact/gcs_test.go | TestSleepContext | ported | " + GCS_TARGET
+            + " | test_sleep_context |",
+        ])
 
 
 class FourATest(unittest.TestCase):
@@ -1070,6 +1126,16 @@ class RealTreeTest(unittest.TestCase):
         self.assertEqual(deferred, {})
         self.assertEqual(pc.count(ADK_GO, in_scope), 15)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "4a"), [])
+
+    def test_4b_count_is_16(self):
+        in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/4b.md")
+        self.assertEqual(in_scope, [
+            "artifact/gcsartifact/gcs_client_test.go",
+            "artifact/gcsartifact/gcs_test.go",
+        ])
+        self.assertEqual(deferred, {})
+        self.assertEqual(pc.count(ADK_GO, in_scope), 16)
+        self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "4b"), [])
 
 
 if __name__ == "__main__":

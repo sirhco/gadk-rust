@@ -8,6 +8,7 @@ members = [
   "crates/gadk-session",
   "crates/gadk-httprr",
   "crates/gadk-artifact",
+  "crates/gadk-artifact-gcs",
   "crates/gadk-memory",
   "crates/gadk-agent",
   "crates/gadk-engine",
@@ -35,6 +36,7 @@ gadk-gemini = { path = "crates/gadk-gemini", version = "0.1.0" }
 gadk-session = { path = "crates/gadk-session", version = "0.1.0" }
 gadk-httprr = { path = "crates/gadk-httprr", version = "0.1.0" }
 gadk-artifact = { path = "crates/gadk-artifact", version = "0.1.0" }
+gadk-artifact-gcs = { path = "crates/gadk-artifact-gcs", version = "0.1.0" }
 gadk-memory = { path = "crates/gadk-memory", version = "0.1.0" }
 gadk-agent = { path = "crates/gadk-agent", version = "0.1.0" }
 gadk-engine = { path = "crates/gadk-engine", version = "0.1.0" }
