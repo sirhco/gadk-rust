@@ -28,6 +28,8 @@
 
 mod error;
 mod policy;
+#[cfg(feature = "test-util")]
+pub mod test_util;
 
 pub use error::RestError;
 pub use policy::{
