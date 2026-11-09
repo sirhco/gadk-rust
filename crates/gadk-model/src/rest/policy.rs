@@ -163,19 +163,255 @@ pub enum GoParseFloatError {
     },
 }
 
-/// Go `strconv.ParseFloat(s, 64)` for the decimal forms a header carries: an out-of-range
-/// value (`1e400`) is [`GoParseFloatError::Range`] with `±Inf`, as Go reports `ErrRange`;
-/// `inf`/`infinity`/`nan` (any case, optional sign) are accepted as Go accepts them. (Go's
-/// hexadecimal floats and underscores are not.)
+/// Go `strconv.ParseFloat(s, 64)`: decimal and hexadecimal (`0x1.8p1`) forms with Go's
+/// underscore digit separators (`1_000`), and `inf`/`infinity` (any case, optional sign) and
+/// `nan` (any case, no sign). An out-of-range value (`1e400`) is [`GoParseFloatError::Range`]
+/// with `±Inf`, as Go reports `ErrRange`; an underflow is `±0` without an error, as Go's.
+/// Nothing is trimmed.
 pub fn go_parse_float(s: &str) -> Result<f64, GoParseFloatError> {
-    let v: f64 = s.parse().map_err(|_| GoParseFloatError::Syntax)?;
+    if let Some(v) = go_special_float(s) {
+        return Ok(v);
+    }
+    let r = go_read_float(s.as_bytes()).ok_or(GoParseFloatError::Syntax)?;
+    let v = if r.hex {
+        go_atof_hex(r.mantissa, r.exp, r.neg, r.trunc)
+    } else {
+        // The grammar Go's `readFloat` accepted (sign, digits with at most one dot, at least
+        // one digit, optional exponent) is the grammar of Rust's `f64::from_str` once the
+        // validated underscores are gone, and both round correctly.
+        let digits: String = s.chars().filter(|&c| c != '_').collect();
+        digits.parse().map_err(|_| GoParseFloatError::Syntax)?
+    };
     if v.is_infinite() {
-        let word = s.trim_start_matches(['+', '-']).to_ascii_lowercase();
-        if word != "inf" && word != "infinity" {
-            return Err(GoParseFloatError::Range { value: v });
-        }
+        return Err(GoParseFloatError::Range { value: v });
     }
     Ok(v)
+}
+
+/// Go `strconv.special`, matched against the whole input as `ParseFloat` requires.
+fn go_special_float(s: &str) -> Option<f64> {
+    let lower = s.to_ascii_lowercase();
+    let (sign, word) = match lower.as_bytes().first() {
+        Some(b'+') => (1.0, &lower[1..]),
+        Some(b'-') => (-1.0, &lower[1..]),
+        _ => {
+            if lower == "nan" {
+                return Some(f64::NAN);
+            }
+            (1.0, lower.as_str())
+        }
+    };
+    (word == "inf" || word == "infinity").then_some(sign * f64::INFINITY)
+}
+
+/// What Go `strconv.readFloat` read from a whole, valid input.
+struct GoReadFloat {
+    mantissa: u64,
+    exp: i64,
+    neg: bool,
+    trunc: bool,
+    hex: bool,
+}
+
+/// Go `strconv.readFloat`, requiring the whole input to be consumed (`ParseFloat`'s syntax
+/// check); `None` is `ErrSyntax`.
+fn go_read_float(s: &[u8]) -> Option<GoReadFloat> {
+    let mut i = 0;
+    let mut neg = false;
+    let mut underscores = false;
+    match s.first()? {
+        b'+' => i += 1,
+        b'-' => {
+            i += 1;
+            neg = true;
+        }
+        _ => {}
+    }
+    let mut base: u64 = 10;
+    let mut max_mant_digits = 19;
+    let mut exp_char = b'e';
+    let mut hex = false;
+    if i + 2 < s.len() && s[i] == b'0' && s[i + 1].eq_ignore_ascii_case(&b'x') {
+        base = 16;
+        max_mant_digits = 16;
+        i += 2;
+        exp_char = b'p';
+        hex = true;
+    }
+    let (mut sawdot, mut sawdigits) = (false, false);
+    let (mut nd, mut nd_mant, mut dp): (i64, i64, i64) = (0, 0, 0);
+    let mut mantissa: u64 = 0;
+    let mut trunc = false;
+    while i < s.len() {
+        let c = s[i];
+        let lc = c.to_ascii_lowercase();
+        if c == b'_' {
+            underscores = true;
+        } else if c == b'.' {
+            if sawdot {
+                break;
+            }
+            sawdot = true;
+            dp = nd;
+        } else if c.is_ascii_digit() {
+            sawdigits = true;
+            if c == b'0' && nd == 0 {
+                dp -= 1;
+            } else {
+                nd += 1;
+                if nd_mant < max_mant_digits {
+                    mantissa = mantissa * base + u64::from(c - b'0');
+                    nd_mant += 1;
+                } else if c != b'0' {
+                    trunc = true;
+                }
+            }
+        } else if base == 16 && (b'a'..=b'f').contains(&lc) {
+            sawdigits = true;
+            nd += 1;
+            if nd_mant < max_mant_digits {
+                mantissa = mantissa * 16 + u64::from(lc - b'a' + 10);
+                nd_mant += 1;
+            } else {
+                trunc = true;
+            }
+        } else {
+            break;
+        }
+        i += 1;
+    }
+    if !sawdigits {
+        return None;
+    }
+    if !sawdot {
+        dp = nd;
+    }
+    if base == 16 {
+        dp *= 4;
+        nd_mant *= 4;
+    }
+    if i < s.len() && s[i].to_ascii_lowercase() == exp_char {
+        i += 1;
+        let mut esign = 1;
+        match s.get(i)? {
+            b'+' => i += 1,
+            b'-' => {
+                i += 1;
+                esign = -1;
+            }
+            _ => {}
+        }
+        if !s.get(i)?.is_ascii_digit() {
+            return None;
+        }
+        let mut e: i64 = 0;
+        while i < s.len() && (s[i].is_ascii_digit() || s[i] == b'_') {
+            if s[i] == b'_' {
+                underscores = true;
+            } else if e < 10000 {
+                e = e * 10 + i64::from(s[i] - b'0');
+            }
+            i += 1;
+        }
+        dp += e * esign;
+    } else if base == 16 {
+        // A hexadecimal mantissa must have an exponent.
+        return None;
+    }
+    let exp = if mantissa != 0 { dp - nd_mant } else { 0 };
+    if underscores && !go_underscore_ok(&s[..i]) {
+        return None;
+    }
+    (i == s.len()).then_some(GoReadFloat {
+        mantissa,
+        exp,
+        neg,
+        trunc,
+        hex,
+    })
+}
+
+/// Go `strconv.underscoreOK`: underscores only between digits (or after a base prefix).
+fn go_underscore_ok(s: &[u8]) -> bool {
+    let mut s = s;
+    if let Some(b'-' | b'+') = s.first() {
+        s = &s[1..];
+    }
+    let mut saw = b'^';
+    let mut i = 0;
+    let mut hex = false;
+    if s.len() >= 2 && s[0] == b'0' && matches!(s[1].to_ascii_lowercase(), b'b' | b'o' | b'x') {
+        i = 2;
+        saw = b'0';
+        hex = s[1].eq_ignore_ascii_case(&b'x');
+    }
+    for &c in &s[i..] {
+        if c.is_ascii_digit() || hex && (b'a'..=b'f').contains(&c.to_ascii_lowercase()) {
+            saw = b'0';
+            continue;
+        }
+        if c == b'_' {
+            if saw != b'0' {
+                return false;
+            }
+            saw = b'_';
+            continue;
+        }
+        if saw == b'_' {
+            return false;
+        }
+        saw = b'!';
+    }
+    saw != b'_'
+}
+
+/// Go `strconv.atofHex` for `float64` (52 mantissa bits, 11 exponent bits, bias -1023):
+/// `mantissa * 2^exp`, rounded half to even; an overflow is `±Inf`.
+fn go_atof_hex(mut mantissa: u64, exp: i64, neg: bool, trunc: bool) -> f64 {
+    const MANTBITS: u32 = 52;
+    const BIAS: i64 = -1023;
+    const MAX_EXP: i64 = (1 << 11) + BIAS - 2;
+    const MIN_EXP: i64 = BIAS + 1;
+    let mut exp = exp + i64::from(MANTBITS);
+    while mantissa != 0 && mantissa >> (MANTBITS + 2) == 0 {
+        mantissa <<= 1;
+        exp -= 1;
+    }
+    if trunc {
+        mantissa |= 1;
+    }
+    while mantissa >> (1 + MANTBITS + 2) != 0 {
+        mantissa = (mantissa >> 1) | (mantissa & 1);
+        exp += 1;
+    }
+    while mantissa > 1 && exp < MIN_EXP - 2 {
+        mantissa = (mantissa >> 1) | (mantissa & 1);
+        exp += 1;
+    }
+    let mut round = mantissa & 3;
+    mantissa >>= 2;
+    round |= mantissa & 1;
+    exp += 2;
+    if round == 3 {
+        mantissa += 1;
+        if mantissa == 1 << (1 + MANTBITS) {
+            mantissa >>= 1;
+            exp += 1;
+        }
+    }
+    if mantissa >> MANTBITS == 0 {
+        exp = BIAS;
+    }
+    if exp > MAX_EXP {
+        mantissa = 1 << MANTBITS;
+        exp = MAX_EXP + 1;
+    }
+    let mut bits = mantissa & ((1 << MANTBITS) - 1);
+    bits |= (((exp - BIAS) & ((1 << 11) - 1)) as u64) << MANTBITS;
+    if neg {
+        bits |= 1 << 63;
+    }
+    f64::from_bits(bits)
 }
 
 /// Go `time.Duration(nanos)` followed by anthropic-sdk-go `retryDelay`'s `max(0, d)`: NaN and
@@ -432,7 +668,100 @@ mod tests {
             assert_eq!(go_parse_float(input), want, "{input}");
         }
         assert!(go_parse_float("NaN").unwrap().is_nan());
-        assert!(go_parse_float("-nan").unwrap().is_nan());
+        assert_eq!(go_parse_float("-nan"), Err(GoParseFloatError::Syntax));
+    }
+
+    /// Go `strconv.ParseFloat(s, 64)` on each input, as recorded from Go: the error kind and
+    /// the returned value's bits (`ErrSyntax` returns 0, `ErrRange` ±Inf).
+    #[test]
+    fn go_parse_float_matches_go_strconv() {
+        let cases: &[(&str, &str, u64)] = &[
+            ("2", "ok", 0x4000000000000000),
+            ("1.5", "ok", 0x3ff8000000000000),
+            ("1e1", "ok", 0x4024000000000000),
+            ("-3", "ok", 0xc008000000000000),
+            (".5", "ok", 0x3fe0000000000000),
+            ("1.", "ok", 0x3ff0000000000000),
+            ("+2.5", "ok", 0x4004000000000000),
+            (" 2.5", "syntax", 0x0000000000000000),
+            ("inf", "ok", 0x7ff0000000000000),
+            ("+Inf", "ok", 0x7ff0000000000000),
+            ("-Infinity", "ok", 0xfff0000000000000),
+            ("infin", "syntax", 0x0000000000000000),
+            ("NaN", "ok", 0x7ff8000000000001),
+            ("-nan", "syntax", 0x0000000000000000),
+            ("+nan", "syntax", 0x0000000000000000),
+            ("nan", "ok", 0x7ff8000000000001),
+            ("1e400", "range", 0x7ff0000000000000),
+            ("-1e400", "range", 0xfff0000000000000),
+            ("1e-400", "ok", 0x0000000000000000),
+            ("soon", "syntax", 0x0000000000000000),
+            ("", "syntax", 0x0000000000000000),
+            ("1_0", "ok", 0x4024000000000000),
+            ("1__0", "syntax", 0x0000000000000000),
+            ("_1", "syntax", 0x0000000000000000),
+            ("1_", "syntax", 0x0000000000000000),
+            ("1_.5", "syntax", 0x0000000000000000),
+            ("1._5", "syntax", 0x0000000000000000),
+            ("1e1_0", "ok", 0x4202a05f20000000),
+            ("0x1p-2", "ok", 0x3fd0000000000000),
+            ("0X1P+2", "ok", 0x4010000000000000),
+            ("0x1.8p1", "ok", 0x4008000000000000),
+            ("0x_1p0", "ok", 0x3ff0000000000000),
+            ("0x1", "syntax", 0x0000000000000000),
+            ("0x", "syntax", 0x0000000000000000),
+            ("0xp1", "syntax", 0x0000000000000000),
+            ("0x.8p1", "ok", 0x3ff0000000000000),
+            ("-0x1p-1074", "ok", 0x8000000000000001),
+            ("0x1p-1075", "ok", 0x0000000000000000),
+            ("0x1.8p-1075", "ok", 0x0000000000000001),
+            ("0x1.0000000000001p0", "ok", 0x3ff0000000000001),
+            ("0x1.00000000000008p0", "ok", 0x3ff0000000000000),
+            ("0x1.00000000000018p0", "ok", 0x3ff0000000000002),
+            ("0x1.000000000000081p0", "ok", 0x3ff0000000000001),
+            ("0x1fffffffffffffp971", "ok", 0x7fefffffffffffff),
+            ("0x1fffffffffffffp972", "range", 0x7ff0000000000000),
+            ("0x1.fffffffffffff8p1023", "range", 0x7ff0000000000000),
+            ("0x123456789abcdef0123p-10", "ok", 0x43d23456789abcdf),
+            ("0x0p0", "ok", 0x0000000000000000),
+            ("-0x0p0", "ok", 0x8000000000000000),
+            ("0x1p-1022", "ok", 0x0010000000000000),
+            ("0x1.fffffffffffffp-1023", "ok", 0x0010000000000000),
+            ("0x0.0000000000001p-1022", "ok", 0x0000000000000001),
+            ("0x3p-1076", "ok", 0x0000000000000001),
+            ("00012", "ok", 0x4028000000000000),
+            ("1e", "syntax", 0x0000000000000000),
+            ("1e+", "syntax", 0x0000000000000000),
+            ("e5", "syntax", 0x0000000000000000),
+            (".", "syntax", 0x0000000000000000),
+            ("-", "syntax", 0x0000000000000000),
+            ("+", "syntax", 0x0000000000000000),
+            ("1.2.3", "syntax", 0x0000000000000000),
+            ("0x1p1e", "syntax", 0x0000000000000000),
+            ("0x1.p1", "ok", 0x4000000000000000),
+            ("0x.p1", "syntax", 0x0000000000000000),
+            ("1e100000", "range", 0x7ff0000000000000),
+            ("0x1p100000", "range", 0x7ff0000000000000),
+            ("0x1p-100000", "ok", 0x0000000000000000),
+            ("0b101", "syntax", 0x0000000000000000),
+            ("0o17", "syntax", 0x0000000000000000),
+            ("1e-5_0", "ok", 0x358dee7a4ad4b81f),
+            ("1_000.000_1", "ok", 0x408f4000346dc5d6),
+            ("0x_1_p_1", "syntax", 0x0000000000000000),
+        ];
+        for &(input, kind, bits) in cases {
+            let (got_kind, got) = match go_parse_float(input) {
+                Ok(v) => ("ok", v),
+                Err(GoParseFloatError::Syntax) => ("syntax", 0.0),
+                Err(GoParseFloatError::Range { value }) => ("range", value),
+            };
+            assert_eq!(got_kind, kind, "{input:?}");
+            if got.is_nan() {
+                assert!(f64::from_bits(bits).is_nan(), "{input:?}");
+            } else {
+                assert_eq!(got.to_bits(), bits, "{input:?}: {got}");
+            }
+        }
     }
 
     #[test]
