@@ -144,18 +144,24 @@ pub(crate) struct VersionConflict;
 /// Go `errors.Is(err, ErrVersionConflict)`: `save` gave up because concurrent writers kept
 /// taking the version it picked; the save can be retried.
 pub fn is_version_conflict(err: &ArtifactError) -> bool {
-    match err {
-        ArtifactError::Backend(b) => chain_any(b.as_ref(), |e| e.is::<VersionConflict>()),
-        _ => false,
-    }
+    backend_chain_any(err, |e| e.is::<VersionConflict>())
 }
 
 /// Go `errors.Is(err, storage.ErrObjectNotExist)` for a service error: the storage client said
 /// the object does not exist (deleting a missing version, for example). Distinct from
 /// [`ArtifactError::NotFound`], which `load`, `versions` and `get_artifact_version` return.
 pub fn is_object_not_exist(err: &ArtifactError) -> bool {
+    backend_chain_any(err, is_object_not_exist_error)
+}
+
+/// Go `errors.Is` / `errors.As` for a service error: `err` is an [`ArtifactError::Backend`]
+/// some error in whose `source()` chain satisfies `pred`.
+pub(crate) fn backend_chain_any(
+    err: &ArtifactError,
+    pred: impl Fn(&(dyn StdError + 'static)) -> bool,
+) -> bool {
     match err {
-        ArtifactError::Backend(b) => chain_any(b.as_ref(), is_object_not_exist_error),
+        ArtifactError::Backend(b) => chain_any(b.as_ref(), pred),
         _ => false,
     }
 }

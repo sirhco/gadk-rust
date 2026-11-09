@@ -30,7 +30,7 @@ use pretty_assertions::assert_eq;
 use serde_json::{Map, Value, json};
 
 use crate::bucket::GcsBucket;
-use crate::error::{GcsError, GoWrapped, chain_any};
+use crate::error::{GcsError, GoWrapped, backend_chain_any};
 use crate::service::{
     MAX_SAVE_ATTEMPTS, SAVE_RETRY_MAX_DELAY, backoff_delay, build_blob_name,
     is_precondition_failed, sleep_context,
@@ -96,17 +96,6 @@ async fn get_version(svc: &GcsArtifactService, req: GetArtifactVersionRequest) -
         .unwrap()
 }
 
-/// Go `errors.Is(err, target)` for a service error: some error in the chain matches.
-fn chain_has(
-    err: &ArtifactError,
-    pred: impl Fn(&(dyn std::error::Error + 'static)) -> bool,
-) -> bool {
-    match err {
-        ArtifactError::Backend(b) => chain_any(b.as_ref(), pred),
-        _ => false,
-    }
-}
-
 #[tokio::test]
 async fn test_gcs_artifact_service() {
     gadk_artifact::testsuite::run(|| async {
@@ -151,7 +140,7 @@ async fn test_delete_version_errors() {
                 )))
             }),
             |err| {
-                chain_has(err, |e| {
+                backend_chain_any(err, |e| {
                     e.downcast_ref::<std::io::Error>()
                         .is_some_and(|io| io.kind() == std::io::ErrorKind::PermissionDenied)
                 })
@@ -326,7 +315,7 @@ async fn test_save_returns_write_error_without_retry() {
         err.to_string(),
         "failed to save artifact: failed to close blob writer: googleapi: Error 500: boom"
     );
-    assert!(chain_has(&err, |e| matches!(
+    assert!(backend_chain_any(&err, |e| matches!(
         e.downcast_ref::<GcsError>(),
         Some(GcsError::Http { status: 500, .. })
     )));
