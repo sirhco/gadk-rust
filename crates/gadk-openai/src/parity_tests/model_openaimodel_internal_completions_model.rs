@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `model/openaimodel/internal/completions/model_test.go` (Task 8).
+//! Port of ADK-Go `model/openaimodel/internal/completions/model_test.go`.
 //!
 //! Go's `testRig`, `serveJSON`, `serveSSE`, `ask`, `responseText`, `onlyCall`,
 //! `newLoopbackServer` and `newTestModel` are [`super::support`]'s `TestRig`, `serve_json`,

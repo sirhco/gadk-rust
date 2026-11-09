@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `responses/request_test.go`: the schema tests (Task 5; see `mod.rs`).
+//! `responses/request_test.go`: the schema tests (see `mod.rs`).
 
 use std::collections::BTreeMap;
 

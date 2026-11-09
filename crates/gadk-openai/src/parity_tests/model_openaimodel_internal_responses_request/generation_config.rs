@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `responses/request_test.go`: the generation_config tests (Task 5; see `mod.rs`).
+//! `responses/request_test.go`: the generation_config tests (see `mod.rs`).
 //!
 //! Go compares `ResponseNewParams` structs; these compare the encoded params (Go's probe of the
 //! same calls gave the bytes), so an omitted or misplaced field fails as it would on the wire.

@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `model/openaimodel/internal/shared/config_test.go` (Task 3).
+//! Port of ADK-Go `model/openaimodel/internal/shared/config_test.go`.
 
 use std::time::Duration;
 

@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `model/openaimodel/internal/shared/schema_test.go` (Task 3).
+//! Port of ADK-Go `model/openaimodel/internal/shared/schema_test.go`.
 
 use gadk_genai::{Schema, Type};
 use pretty_assertions::assert_eq;

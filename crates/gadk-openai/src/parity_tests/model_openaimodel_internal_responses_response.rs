@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `model/openaimodel/internal/responses/response_test.go` (Task 7).
+//! Port of ADK-Go `model/openaimodel/internal/responses/response_test.go`.
 //!
 //! Go builds `oairesponses.Response` struct literals; these tests build the wire structs the
 //! same way. A Go literal carries no JSON presence metadata, so an `Option` field Go reads

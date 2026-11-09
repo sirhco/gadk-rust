@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `responses/model_test.go`: the stream_content tests (Task 9; see `mod.rs`).
+//! `responses/model_test.go`: the stream_content tests (see `mod.rs`).
 
 use gadk_genai::{Content, FunctionCall, Part, ROLE_MODEL};
 use gadk_model::LlmResponse;

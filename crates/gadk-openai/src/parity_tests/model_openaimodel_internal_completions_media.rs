@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `model/openaimodel/internal/completions/media_test.go` (Task 4).
+//! Port of ADK-Go `model/openaimodel/internal/completions/media_test.go`.
 //!
 //! `wire_content` re-marshals the decoded content as Go does (`json.Marshal` of a
 //! `map[string]any`: sorted keys, HTML-escaped), so the expected strings are Go's bytes.

@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `model/openaimodel/internal/responses/tools_test.go` (Task 5).
+//! Port of ADK-Go `model/openaimodel/internal/responses/tools_test.go`.
 //!
 //! Go compares openai-go param structs; these compare the encoded params (Go's probe of the
 //! same calls gave the bytes).

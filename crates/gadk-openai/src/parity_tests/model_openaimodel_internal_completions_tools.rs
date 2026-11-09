@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `model/openaimodel/internal/completions/tools_test.go` (Task 4).
+//! Port of ADK-Go `model/openaimodel/internal/completions/tools_test.go`.
 
 use gadk_genai::{
     FunctionCallingConfig, FunctionCallingConfigMode, FunctionDeclaration, GenerateContentConfig,

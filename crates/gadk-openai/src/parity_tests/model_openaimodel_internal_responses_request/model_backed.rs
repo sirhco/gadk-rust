@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `responses/request_test.go`: the model-backed tests (Task 9, D8; see `mod.rs`).
+//! `responses/request_test.go`: the model-backed tests (D8; see `mod.rs`).
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};

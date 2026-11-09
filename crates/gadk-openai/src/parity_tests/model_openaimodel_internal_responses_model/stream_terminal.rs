@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `responses/model_test.go`: the stream_terminal tests (Task 9; see `mod.rs`).
+//! `responses/model_test.go`: the stream_terminal tests (see `mod.rs`).
 
 use futures::StreamExt as _;
 use gadk_genai::{

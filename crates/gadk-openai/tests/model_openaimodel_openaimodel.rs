@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `model/openaimodel/openaimodel_test.go` (Task 10), through the public API
+//! Port of ADK-Go `model/openaimodel/openaimodel_test.go`, through the public API
 //! only.
 //!
 //! - Go's `httptest` loopback server is [`FakeServer`] (127.0.0.1, real time); Go's in-memory

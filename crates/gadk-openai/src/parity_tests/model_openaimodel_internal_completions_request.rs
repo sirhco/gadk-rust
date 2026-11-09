@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `model/openaimodel/internal/completions/request_test.go` (Task 4).
+//! Port of ADK-Go `model/openaimodel/internal/completions/request_test.go`.
 //!
 //! Go marshals the params and decodes them back into a `map[string]any` (`requestWire`), so
 //! assertions read the bytes openai-go sends; [`request_wire`] does the same with
@@ -845,7 +845,7 @@ fn test_apply_generation_config_rejected_fields() {
     }
 }
 
-// parity: adapted: Go swaps three package variables; gadk passes the top-level list to build_params_with (Temperature runs through build_params), while the HTTP and thinking lists are Task 3 consts, so those two cases run the narrowed walk through reject_unsupported_fields over the field lists build_params checks
+// parity: adapted: Go swaps three package variables; gadk passes the top-level list to build_params_with (Temperature runs through build_params), while the HTTP and thinking lists are `shared::config` consts, so those two cases run the narrowed walk through reject_unsupported_fields over the field lists build_params checks
 #[test]
 fn test_apply_generation_config_refuses_fields_outside_the_supported_lists() {
     let want = |field: &str| format!("{}: {field}", ErrorKind::UnsupportedConfigField);

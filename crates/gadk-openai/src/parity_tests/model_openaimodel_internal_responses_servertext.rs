@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `model/openaimodel/internal/responses/servertext_test.go` (Task 7).
+//! Port of ADK-Go `model/openaimodel/internal/responses/servertext_test.go`.
 
 use pretty_assertions::assert_eq;
 

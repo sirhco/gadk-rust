@@ -15,14 +15,14 @@
 
 //! Port of ADK-Go `model/openaimodel/internal/responses/request_test.go`, a directory target:
 //! - `build_params`: `TestBuildParams_*`, `TestReplayedReasoning*`, `TestUnsupportedPayload_*`,
-//!   `TestCallTrackerNewFunctionResponse_UnknownCallID`, `TestNormalizeRole` (Task 5);
+//!   `TestCallTrackerNewFunctionResponse_UnknownCallID`, `TestNormalizeRole`;
 //! - `generation_config`: `TestApplyGenerationConfig*`, `TestReasoningEffortsCoverEveryThinkingLevel`,
 //!   `TestServiceTiersCoverEveryGenaiTier`, `TestRequestTimeoutHonorsAPositiveTimeout`,
-//!   `TestHeadersAffectNeitherValidationNorTimeout`, `TestTranslatedFieldsAreNotRejected` (Task 5);
-//! - `schema`: `TestNewJSONSchemaFormat*`, `TestBuildParamsPreservesLargeJSONSchemaIntegers` (Task 5);
+//!   `TestHeadersAffectNeitherValidationNorTimeout`, `TestTranslatedFieldsAreNotRejected`;
+//! - `schema`: `TestNewJSONSchemaFormat*`, `TestBuildParamsPreservesLargeJSONSchemaIntegers`;
 //! - `model_backed`: `TestCallerAuthorizationHeaderDisplacesTheAPIKey`,
 //!   `TestHTTPOptionsTimeoutReachesTheRequest`, `TestGenerateContentIsReRangeableWithATimeout`
-//!   (Task 9, D8).
+//!   (D8).
 
 mod build_params;
 mod generation_config;

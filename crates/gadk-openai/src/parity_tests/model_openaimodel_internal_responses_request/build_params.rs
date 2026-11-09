@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `responses/request_test.go`: the build_params tests (Task 5; see `mod.rs`).
+//! `responses/request_test.go`: the build_params tests (see `mod.rs`).
 //!
 //! Go asserts on openai-go param structs; these assert on the encoded request (what
 //! [`crate::client::encode_body`] sends), byte for byte where Go's probe of the same request

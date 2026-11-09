@@ -14,7 +14,7 @@
 // limitations under the License.
 
 //! Port of ADK-Go `model/openaimodel/internal/responses/model_test.go`, a directory target
-//! (Task 9), split by Go source order:
+//!, split by Go source order:
 //! - `blocking`: Go lines 39–176 and 2302–end (`TestModel_Generate`, `TestModel_FailedStatus*`,
 //!   `TestModel_GenerateContent_*`);
 //! - `stream_terminal`: Go lines 178–1121;
