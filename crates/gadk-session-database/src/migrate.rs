@@ -14,7 +14,6 @@
 // limitations under the License.
 
 //! `auto_migrate`: create missing tables, add missing columns (spec R4).
-#![allow(dead_code, unused_variables, unused_imports, clippy::todo)]
 
 use gadk_session::SessionError;
 
@@ -31,5 +30,25 @@ pub(crate) struct TableDef {
 /// For each table of `backend.tables()` in order: create it when it has no columns, else add
 /// each missing column. One write transaction for the whole migration.
 pub(crate) async fn auto_migrate(backend: &Backend) -> Result<(), SessionError> {
-    todo!("Task 4")
+    run(backend)
+        .await
+        .map_err(|e| crate::errors::wrap("auto migrate failed", e))
+}
+
+async fn run(backend: &Backend) -> sqlx::Result<()> {
+    let mut tx = backend.begin_write(None).await?;
+    for table in backend.tables() {
+        let have = tx.existing_columns(table.name).await?;
+        if have.is_empty() {
+            tx.execute(table.create).await?;
+            continue;
+        }
+        for (column, ty) in table.columns {
+            if !have.iter().any(|h| h == column) {
+                tx.execute(&backend.add_column_sql(table.name, column, ty))
+                    .await?;
+            }
+        }
+    }
+    tx.commit().await
 }
