@@ -22,6 +22,7 @@
 use std::fmt;
 
 use gadk_model::ModelError;
+use gadk_model::rest::RestError;
 use serde_json::{Map, Value};
 
 /// The HTTP status code Anthropic uses when it is overloaded (Go `StatusOverloaded`).
@@ -324,6 +325,33 @@ pub(crate) fn error_chain(err: &(dyn std::error::Error + 'static)) -> String {
 impl From<AnthropicError> for ModelError {
     fn from(err: AnthropicError) -> Self {
         ModelError::Other(Box::new(err))
+    }
+}
+
+/// The shared transport's failures in Go's texts (anthropic-sdk-go `RequestConfig.Execute` +
+/// ADK-Go `classifyError`):
+/// - no response ([`RestError::Transport`]): classified as `from_model_error` does (a
+///   connection error is `anthropicmodel: transport error: …`);
+/// - a header failure ([`RestError::Headers`]): the boxed [`AnthropicError`] as it is;
+/// - [`RestError::ResponseHeaderTimeout`]: `anthropicmodel: transport error: net/http: timeout
+///   awaiting response headers`;
+/// - [`RestError::DeadlineExceeded`]: `context deadline exceeded`;
+/// - [`RestError::DroppedBody`]: `anthropicmodel: request failed: error reading response
+///   body: <cause>`.
+impl From<RestError> for AnthropicError {
+    fn from(err: RestError) -> Self {
+        match err {
+            RestError::Transport(e) => Self::from_model_error(e),
+            RestError::Headers(e) => match e.downcast::<AnthropicError>() {
+                Ok(e) => *e,
+                Err(other) => Self::transport(error_chain(other.as_ref())),
+            },
+            RestError::ResponseHeaderTimeout => Self::transport(RestError::ResponseHeaderTimeout),
+            RestError::DeadlineExceeded => Self::deadline_exceeded(),
+            RestError::DroppedBody { source, .. } => {
+                Self::from_body_error(source, "error reading response body: ")
+            }
+        }
     }
 }
 

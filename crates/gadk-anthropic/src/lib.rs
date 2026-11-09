@@ -26,7 +26,6 @@ mod error;
 mod model;
 mod request;
 mod response;
-mod retry;
 mod stream;
 mod thinking;
 mod tool_id;
