@@ -168,7 +168,11 @@ impl OpenAiClient {
             v.set_sensitive(true);
             h.insert(header, v);
         }
-        h.extend(self.resolved.headers.clone());
+        let mut user = self.resolved.headers.clone();
+        for v in user.values_mut() {
+            v.set_sensitive(true);
+        }
+        h.extend(user);
         let key = &self.resolved.api_key;
         if !self.resolved.authorization_overridden && !key.is_empty() {
             let mut v = header_value("Authorization", &format!("Bearer {key}"))?;
@@ -217,10 +221,10 @@ impl OpenAiClient {
         stream: bool,
         timeout: Option<Duration>,
     ) -> Result<Reply, OpenAiError> {
-        let timeout = match timeout {
-            Some(d) => CallTimeout::Call(tokio::time::Instant::now() + d),
-            None => CallTimeout::None,
-        };
+        // Go's `context.WithTimeout` saturates: a deadline past `Instant`'s range is none.
+        let timeout = timeout
+            .and_then(|d| tokio::time::Instant::now().checked_add(d))
+            .map_or(CallTimeout::None, CallTimeout::Call);
         let uri = self.request_uri(path)?;
         match self.rest.send(&uri, body, stream, self, timeout).await? {
             RestReply::Read(parts, bytes) => {
@@ -455,6 +459,14 @@ mod tests {
                 ("x-env".into(), "e".into()),
             ]
         );
+        let mut cfg = base_cfg(&[]);
+        cfg.headers
+            .insert("x-cfg", HeaderValue::from_static("secret"));
+        let h = client(cfg, &fake).request_headers().unwrap();
+        assert!(
+            h["x-cfg"].is_sensitive(),
+            "config header values are sensitive"
+        );
     }
 
     /// Spec R7: env `OPENAI_CUSTOM_HEADERS: Authorization: X` + config `api_key` → the config
@@ -669,6 +681,34 @@ mod tests {
             "openai: call failed: context deadline exceeded"
         );
         assert_eq!(fake.hits(), 1, "a passed call deadline is never retried");
+    }
+
+    /// Go's `context.WithTimeout` saturates: a timeout past `Instant`'s range is no deadline,
+    /// never a panic.
+    #[tokio::test(start_paused = true)]
+    async fn post_duration_max_timeout_is_no_deadline() {
+        let fake = ScriptedClient::json("{}");
+        let reply = client(base_cfg(&[]), &fake)
+            .post(RESPONSES_PATH, Bytes::new(), false, Some(Duration::MAX))
+            .await
+            .unwrap();
+        assert!(matches!(reply, Reply::Body { ref body, .. } if body.as_ref() == b"{}"));
+
+        let fake = ScriptedClient::always(FakeResponse::sse("data: a\n\n").hang());
+        let reply = client(base_cfg(&[]), &fake)
+            .post(RESPONSES_PATH, Bytes::new(), true, Some(Duration::MAX))
+            .await
+            .unwrap();
+        let Reply::Stream(mut body) = reply else {
+            panic!("a streaming reply");
+        };
+        assert_eq!(body.next().await.unwrap().unwrap(), "data: a\n\n");
+        assert!(
+            tokio::time::timeout(Duration::from_secs(3600), body.next())
+                .await
+                .is_err(),
+            "no deadline ends the body"
+        );
     }
 
     #[tokio::test(start_paused = true)]
