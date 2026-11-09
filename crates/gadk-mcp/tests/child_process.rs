@@ -18,9 +18,9 @@
 //!
 //! The first test drives the session by hand, as the toolset's private `Command` factory does on
 //! every connect: run the transport's `CommandBuilder` and serve the client over a fresh
-//! `TokioChildProcess` (Task 7). The second goes through the public API end to end:
+//! `TokioChildProcess`. The second goes through the public API end to end:
 //! `gadk_mcp::new` over `McpTransport::Command`, `Toolset::tools` and `RunnableTool::run`, with
-//! the connection refresher reconnecting to a new child after the first one is killed (Task 12).
+//! the connection refresher reconnecting to a new child after the first one is killed.
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 

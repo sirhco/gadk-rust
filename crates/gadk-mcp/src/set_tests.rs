@@ -14,7 +14,7 @@
 // limitations under the License.
 
 //! Rust-only tests of the toolset over the in-memory server: listing, calling, closing and
-//! `tools()` cancellation (Task 9).
+//! `tools()` cancellation.
 
 use std::sync::Arc;
 

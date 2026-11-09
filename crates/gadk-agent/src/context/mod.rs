@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The three context types (port of ADK-Go `agent/context.go` and `internal/context`). Task 4 owns
-//! this file.
+//! The three context types (port of ADK-Go `agent/context.go` and `internal/context`).
 
 pub mod builder;
 #[allow(clippy::module_inception)]
@@ -24,8 +23,8 @@ pub mod identity;
 pub mod invocation;
 pub mod readonly;
 
-// Glob re-exports of every child (Task 4 imports through `crate::context::*`). The allows keep the
-// empty Task 1 stubs warning-free.
+// Glob re-exports of every child (the crate imports through `crate::context::*`). The allows
+// keep children that export nothing warning-free.
 #[allow(unused_imports)]
 pub use builder::*;
 #[allow(unused_imports)]

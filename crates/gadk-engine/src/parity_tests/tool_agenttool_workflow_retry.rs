@@ -56,7 +56,7 @@ async fn create_tool_context() -> Context {
         })
         .await
         .unwrap();
-    // Go NewToolContext: own actions via the function_call_id delta (Task 4 apply()).
+    // Go NewToolContext: own actions via the function_call_id delta (ContextInner::apply).
     Context::builder()
         .session(session)
         .session_service(svc)

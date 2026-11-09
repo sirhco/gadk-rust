@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Shared helpers for the anthropicmodel parity tests (Task 6): tracing capture, Anthropic
+//! Shared helpers for the anthropicmodel parity tests: tracing capture, Anthropic
 //! JSON builders, sample PNG, model builders; the fake HTTP server, request recorder and SSE
 //! builders are `gadk_model::rest::test_util`'s, re-exported here.
 //!

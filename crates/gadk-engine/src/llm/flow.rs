@@ -70,7 +70,7 @@ pub(crate) type ResponseProcessor = for<'a> fn(
 pub(crate) struct Flow {
     pub(crate) model: Option<Arc<dyn Llm>>,
     /// Go `Flow.Tools`. The tools processor (slot 2) rewrites it on every step
-    /// (`tools_processor.go:49`), and the request-confirmation processor and Task 11's
+    /// (`tools_processor.go:49`), and the request-confirmation processor and
     /// `tool_preprocess` read it. Interior mutability is needed because processors get
     /// `&Flow` (C5 D5). Never hold the guard across an `.await`. There is no `toolsets`
     /// field: the processors read toolsets through `reveal(ctx.agent())` exactly as Go does.

@@ -147,7 +147,7 @@ mod tests {
         let client = srv.client();
         let url = srv.url().to_string();
         let pending = tokio::spawn(async move { client.get(url).send().await });
-        // Real-clock wait, well under the plan's 100 ms ceiling per step.
+        // Real-clock wait, well under a 100 ms ceiling per step.
         for _ in 0..50 {
             if srv.calls() == 1 {
                 break;

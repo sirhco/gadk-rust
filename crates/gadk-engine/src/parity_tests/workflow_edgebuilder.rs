@@ -172,7 +172,7 @@ fn test_edge_builder_add_routes_sorts_bytewise() {
     assert_eq!(got, ["10", "2", "Beta", "alpha"]);
 }
 
-// parity: adapted: the scheduler (Task 10) is not available in Task 8; asserts that Workflow::new accepts the router→targets→JoinNode graph and that the router's successors_of order (the dispatch order the scheduler follows) is 10, 2, Beta, alpha
+// parity: adapted: a structural check without running the scheduler; asserts that Workflow::new accepts the router→targets→JoinNode graph and that the router's successors_of order (the dispatch order the scheduler follows) is 10, 2, Beta, alpha
 #[test]
 fn test_edge_builder_add_routes_dispatch_order() {
     // Reverse-sorted, so a builder that kept declaration order would fail.

@@ -559,7 +559,7 @@ async fn test_agent_transfer_process_request() {
     // Go identityTool.ProcessRequest packs the declaration; the Rust FunctionTool's packing is pack_tool.
     pack_tool(&mut req, &identity)
         .unwrap_or_else(|e| panic!("identityTool.ProcessRequest failed: {e}"));
-    // Second tool: Task 9's TransferToAgentTool::process_request is Go's ProcessRequest (appendTools).
+    // Second tool: TransferToAgentTool::process_request is Go's ProcessRequest (appendTools).
     let transfer: Arc<dyn Tool> = Arc::new(zero_transfer_tool());
     transfer
         .process_request(&Context::builder().build(), &mut req)

@@ -14,7 +14,7 @@
 // limitations under the License.
 
 //! Ports of TestToolsAndToolConfig, TestExtendedThinkingAndEffort,
-//! TestThinkingAndEffortOmitSamplingParamsAndDefaultMaxTokens, TestPromptCaching (Task 10).
+//! TestThinkingAndEffortOmitSamplingParamsAndDefaultMaxTokens, TestPromptCaching.
 //!
 //! Go's handlers decode each request body into `lastBody map[string]any`; here the fake server
 //! records every request and `last_body` decodes the newest one. Go's nil-safe map lookups

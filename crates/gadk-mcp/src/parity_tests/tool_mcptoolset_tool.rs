@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `tool/mcptoolset/tool_test.go` (package `mcptoolset`; Task 3).
+//! Port of Go `tool/mcptoolset/tool_test.go` (package `mcptoolset`).
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
@@ -66,7 +66,7 @@ fn run_shape(result: &CallToolResult) -> Result<Value, String> {
     Ok(json!({ "output": format_mcp_content(&result.content) }))
 }
 
-// parity: adapted: McpTool::run is Task 5's, so each row runs format_mcp_content through Go Run's result shaping (run_shape); 7 rows rmcp's ContentBlock cannot represent are noted in the table
+// parity: adapted: McpTool::run is unit-tested in tool_tests.rs, so each row runs format_mcp_content through Go Run's result shaping (run_shape); 7 rows rmcp's ContentBlock cannot represent are noted in the table
 #[test]
 fn test_mcp_tool_run_content() {
     let resource_size: u64 = 1 << 20;

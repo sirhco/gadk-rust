@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `tool/mcptoolset/client_cancellation_test.go` (package `mcptoolset`; Task 6).
+//! Port of Go `tool/mcptoolset/client_cancellation_test.go` (package `mcptoolset`).
 //!
 //! Go's `gatedSessionTransport` is [`ScriptedFactory`] with its gate closed: every connect
 //! counts itself, announces itself to `entered()`, and waits for `open_gate()` (a dropped

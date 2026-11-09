@@ -665,7 +665,7 @@ mod tests {
     #[test]
     fn ignored_fields_do_not_error() {
         // Go TestGenerateContentConfigValidation/ignored_fields_do_not_error_or_leak_headers
-        // (the validation half; Task 12 checks that the header is not sent).
+        // (the validation half; the behavior parity tests check that the header is not sent).
         let cfg = GenerateContentConfig {
             response_modalities: vec![" text ".into(), "TEXT".into()],
             automatic_continuation: Some(true),

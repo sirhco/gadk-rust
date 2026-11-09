@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Ports of TestNewModel_AnthropicCredentialsAndConfig, TestNewModel_VertexAndModelNames (Task 9).
+//! Ports of TestNewModel_AnthropicCredentialsAndConfig, TestNewModel_VertexAndModelNames.
 //!
 //! Each Go `t.Run` subtest is a private `async fn` named after it, called in Go's order from
 //! the test function; each table row or loop item is a named case inside it. Go's

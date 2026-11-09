@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `tool/mcptoolset/tracking_test.go` (package `mcptoolset`; Task 7).
+//! Port of Go `tool/mcptoolset/tracking_test.go` (package `mcptoolset`).
 //!
 //! Go's `trackingTransport` is an `http.RoundTripper` under the caller's `http.Client`; the Rust
 //! counterpart is [`AdkHttpClient`], which adds the same headers before delegating to the

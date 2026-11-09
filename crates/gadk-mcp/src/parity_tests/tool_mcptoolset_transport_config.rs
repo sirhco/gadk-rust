@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `tool/mcptoolset/transport_config_test.go` (package `mcptoolset`; Task 7).
+//! Port of Go `tool/mcptoolset/transport_config_test.go` (package `mcptoolset`).
 //!
 //! Go's `buildTransport` returns a copied `mcp.Transport` whose `http.Client` carries the
 //! tracking and auth `RoundTripper`s; the Rust counterpart returns a [`TransportFactory`], and

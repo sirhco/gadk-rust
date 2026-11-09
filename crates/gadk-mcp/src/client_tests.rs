@@ -14,7 +14,7 @@
 // limitations under the License.
 
 //! Rust-only tests of the connection refresher: pagination, restart after a reconnect, the
-//! double-reconnect text, ping reuse and the failed-refresh text (Task 6).
+//! double-reconnect text, ping reuse and the failed-refresh text.
 
 use std::any::TypeId;
 use std::borrow::Cow;

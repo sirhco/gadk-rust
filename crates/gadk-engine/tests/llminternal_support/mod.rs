@@ -14,7 +14,7 @@
 // limitations under the License.
 #![allow(dead_code, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-//! Runner harness for the Task 20 external targets: the Go tests' own
+//! Runner harness for the external llminternal targets: the Go tests' own
 //! `session.InMemoryService()` + `Create` + `runner.New` + `r.Run` sequence.
 
 use std::sync::Arc;

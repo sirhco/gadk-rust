@@ -661,7 +661,7 @@ struct InvalidParams {
     foo: String,
 }
 
-/// Not a Go test of this file: exercises Task 8's state-schema consistency check now that
+/// Not a Go test of this file: exercises the workflow's state-schema consistency check now that
 /// `function_node_from_state` exists (the Go cases of TestWorkflow_StateSchemaConsistency).
 #[tokio::test]
 async fn state_schema_consistency_with_from_state_nodes() {

@@ -36,7 +36,7 @@ fn forwarding_parent() -> (Arc<dyn Artifacts>, Context) {
         "parent_session",
     ));
     // Go NewToolContext(ctx, "call", actions, nil): a function_call_id delta gives the context its own
-    // actions (Task 4 ContextInner::apply), so artifact saves are tracked into artifact_delta.
+    // actions (ContextInner::apply), so artifact saves are tracked into artifact_delta.
     let ctx = Context::builder()
         .artifacts(scoped)
         .build()

@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `AgentNode` (struct by Task 8, `Node::run` by Task 12; port of Go workflow/agent_node.go).
+//! `AgentNode` (port of Go workflow/agent_node.go).
 
 use std::any::Any;
 use std::sync::Arc;

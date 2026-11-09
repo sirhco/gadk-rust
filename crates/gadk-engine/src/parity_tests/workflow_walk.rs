@@ -56,7 +56,7 @@ fn walked_names(edges: &[Edge]) -> Vec<String> {
     names
 }
 
-// parity: adapted: the "nodes that run no agent" case uses a no-op test node instead of NewFunctionNode (Task 10, a later batch)
+// parity: adapted: the "nodes that run no agent" case uses a no-op test node instead of NewFunctionNode
 #[test]
 fn test_walk_agents() {
     let s = Arc::clone(&START);
