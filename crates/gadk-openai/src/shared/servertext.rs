@@ -15,8 +15,6 @@
 
 //! Server-chosen text in error messages (port of ADK-Go `internal/shared/servertext.go`).
 
-#![allow(dead_code)] // D1: first used by Task 7.
-
 /// The mark a clipped string ends with (Go's `"\u2026"`, HORIZONTAL ELLIPSIS).
 const TRUNCATION_MARK: char = '\u{2026}';
 

@@ -18,8 +18,6 @@
 //! `normalizeRole`, `newFunctionCall`, `newFunctionResponse`; the config half is
 //! [`crate::responses::generation_config`], the schema half [`crate::responses::schema`]).
 
-#![allow(dead_code)] // D1: first used by Task 9 (`responses::model`).
-
 use gadk_genai::{Content, FunctionCall, FunctionResponse};
 use gadk_model::LlmRequest;
 use gadk_platform::go_quote;

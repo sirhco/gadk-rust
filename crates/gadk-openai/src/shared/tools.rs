@@ -15,8 +15,6 @@
 
 //! Tool validation both APIs share (port of ADK-Go `internal/shared/tools.go`).
 
-#![allow(dead_code)] // D1: first used by Tasks 4 and 5.
-
 use gadk_genai::Tool;
 
 use crate::error::OpenAiError;

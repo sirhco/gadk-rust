@@ -22,8 +22,6 @@
 //! [`http_option_fields`]) listing `(Go field name, is set)` in genai's declaration order, so a
 //! field genai adds fails to compile here.
 
-#![allow(dead_code)] // D1: first used by Tasks 4 and 5.
-
 use std::time::Duration;
 
 use gadk_genai::{GenerateContentConfig, ThinkingConfig, ThinkingLevel};

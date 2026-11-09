@@ -18,6 +18,6 @@
 //! re-exports them under the Go package's name so the API modules read as Go's do
 //! (`shared::errors::ErrorKind::NoContents` ≙ `shared.ErrNoContents`).
 
+// The API modules import the sentinels from `crate::error` directly; this is Go's package path.
 #[allow(unused_imports)]
-// D1: the API modules import the sentinels from here or from `crate::error`.
 pub(crate) use crate::error::{ErrorKind, OpenAiError};

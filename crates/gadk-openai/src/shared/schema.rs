@@ -15,8 +15,6 @@
 
 //! JSON-schema helpers both APIs share (port of ADK-Go `internal/shared/schema.go`).
 
-#![allow(dead_code)] // D1: first used by Tasks 4 and 5.
-
 use gadk_genai::Schema;
 use gadk_platform::go_to_lower;
 use serde_json::{Map, Value};

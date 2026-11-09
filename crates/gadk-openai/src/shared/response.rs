@@ -15,8 +15,6 @@
 
 //! Response helpers both APIs share (port of ADK-Go `internal/shared/response.go`).
 
-#![allow(dead_code)] // D1: first used by Tasks 6–9.
-
 use futures::StreamExt as _;
 use futures::stream::{self, BoxStream};
 use gadk_genai::{Candidate, Content, FunctionCall, GenerateContentResponse, Part, ROLE_MODEL};

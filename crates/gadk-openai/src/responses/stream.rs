@@ -15,8 +15,6 @@
 
 //! Responses stream translation (port of ADK-Go `internal/responses/stream.go`).
 
-#![allow(dead_code)] // D1: first used by Task 9 (`responses::model`).
-
 use std::collections::HashMap;
 
 use gadk_genai::{FunctionCall, GenerateContentResponse, Part};
@@ -24,9 +22,12 @@ use gadk_platform::go_quote;
 
 use crate::error::OpenAiError;
 use crate::responses::consts::{
-    ERROR_EVENT, RESPONSE_FAILED, RESPONSE_FUNCTION_CALL_ARGUMENTS_DELTA,
-    RESPONSE_FUNCTION_CALL_ARGUMENTS_DONE, RESPONSE_OUTPUT_ITEM_ADDED, RESPONSE_OUTPUT_TEXT_DELTA,
-    RESPONSE_REASONING_SUMMARY_TEXT_DELTA, RESPONSE_REASONING_TEXT_DELTA, RESPONSE_REFUSAL_DELTA,
+    ERROR_EVENT, RESPONSE_COMPLETED, RESPONSE_FAILED, RESPONSE_FUNCTION_CALL_ARGUMENTS_DELTA,
+    RESPONSE_FUNCTION_CALL_ARGUMENTS_DONE, RESPONSE_IN_PROGRESS, RESPONSE_INCOMPLETE,
+    RESPONSE_OUTPUT_ITEM_ADDED, RESPONSE_OUTPUT_ITEM_DONE, RESPONSE_OUTPUT_TEXT_DELTA,
+    RESPONSE_OUTPUT_TEXT_DONE, RESPONSE_REASONING_SUMMARY_TEXT_DELTA,
+    RESPONSE_REASONING_SUMMARY_TEXT_DONE, RESPONSE_REASONING_TEXT_DELTA,
+    RESPONSE_REASONING_TEXT_DONE, RESPONSE_REFUSAL_DELTA, RESPONSE_REFUSAL_DONE,
 };
 use crate::responses::response::failed_response_error;
 use crate::responses::wire::ResponseStreamEvent;
@@ -35,8 +36,7 @@ use crate::shared::response::single_part_response;
 use crate::shared::servertext::clip_server_text;
 
 /// Go `streamTranslator`: turns stream events into partial genai responses, buffering a
-/// function call's argument deltas until its `response.function_call_arguments.done`. Task 7
-/// may add private fields.
+/// function call's argument deltas until its `response.function_call_arguments.done`.
 #[derive(Debug, Default)]
 pub(crate) struct StreamTranslator {
     /// Go `functionArgs`: argument deltas by item id (`""` → `"default"`).
@@ -110,10 +110,17 @@ impl StreamTranslator {
                 }
                 Ok(None)
             }
-            // The `*.done`, `response.completed`, `response.incomplete`,
-            // `response.in_progress` and `response.output_item.done` events are informational,
-            // with no part of their own (the stream loop reads the finish reason off the
-            // terminal ones directly); any other event type is ignored.
+            // Informational events with no part of their own; the stream loop reads the finish
+            // reason off the terminal ones directly.
+            RESPONSE_OUTPUT_TEXT_DONE
+            | RESPONSE_REFUSAL_DONE
+            | RESPONSE_REASONING_TEXT_DONE
+            | RESPONSE_REASONING_SUMMARY_TEXT_DONE
+            | RESPONSE_COMPLETED
+            | RESPONSE_INCOMPLETE
+            | RESPONSE_IN_PROGRESS
+            | RESPONSE_OUTPUT_ITEM_DONE => Ok(None),
+            // Any other event type is ignored.
             _ => Ok(None),
         }
     }

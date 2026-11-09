@@ -15,8 +15,6 @@
 
 //! Responses response conversion (port of ADK-Go `internal/responses/response.go`).
 
-#![allow(dead_code)] // D1: first used by Task 9 (`responses::model`).
-
 use gadk_genai::{
     Candidate, Content, FinishReason, FunctionCall, GenerateContentResponse,
     GenerateContentResponseUsageMetadata, LogprobsResult, LogprobsResultCandidate,

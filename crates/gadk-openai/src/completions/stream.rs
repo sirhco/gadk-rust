@@ -16,8 +16,6 @@
 //! Chat Completions stream translation (port of ADK-Go `internal/completions/stream.go`, with
 //! the parts of openai-go v3.82.0's `ChatCompletionAccumulator` it relies on).
 
-#![allow(dead_code)] // D1: first used by Task 8 (`completions::model`).
-
 use gadk_genai::{GenerateContentResponse, Part};
 
 use crate::completions::wire::{
@@ -38,7 +36,7 @@ const MAX_CHOICE_INDEX: i64 = 127;
 const MAX_TOOL_CALL_GROWTH: usize = 128;
 
 /// Go `streamTranslator`: turns chunks into partial genai responses while accumulating the
-/// whole turn (openai-go `ChatCompletionAccumulator.AddChunk`). Task 6 may add private fields.
+/// whole turn (openai-go `ChatCompletionAccumulator.AddChunk`).
 ///
 /// Tool calls are not emitted as they stream: nothing marks one complete (arguments arrive as
 /// fragments until the stream ends), so they reach the caller on the final response, built from

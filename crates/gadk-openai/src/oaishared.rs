@@ -31,8 +31,6 @@
 //! non-null and of the right shape. Decode them only from text (`serde_json::from_str` /
 //! `from_slice`): the helpers read each field as a [`RawValue`](serde_json::value::RawValue).
 
-#![allow(dead_code)] // D1: consumed by Tasks 3–9; Task 10 sweeps what stays unused.
-
 use serde::Serialize;
 use serde_json::{Map, Value};
 
@@ -46,7 +44,7 @@ macro_rules! tag {
 
         impl $name {
             /// The constant's value.
-            #[allow(dead_code)]
+            #[allow(dead_code)] // Not every tag's value is read outside its `Serialize`.
             pub(crate) const VALUE: &'static str = $value;
         }
 
@@ -62,6 +60,7 @@ pub(crate) use tag;
 /// openai-go `shared.ReasoningEffort`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
+#[allow(dead_code)] // D5: openai-go's whole value set; ADK-Go never sends `xhigh` or `max`.
 pub(crate) enum ReasoningEffort {
     /// `"none"`.
     None,
@@ -79,24 +78,10 @@ pub(crate) enum ReasoningEffort {
     Max,
 }
 
-impl ReasoningEffort {
-    /// The wire value.
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::Minimal => "minimal",
-            Self::Low => "low",
-            Self::Medium => "medium",
-            Self::High => "high",
-            Self::Xhigh => "xhigh",
-            Self::Max => "max",
-        }
-    }
-}
-
 /// openai-go `shared.ReasoningSummary`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
+#[allow(dead_code)] // D5: openai-go's whole value set; ADK-Go sends only `auto`.
 pub(crate) enum ReasoningSummary {
     /// `"auto"`.
     Auto,
@@ -211,7 +196,6 @@ pub(crate) struct ResponseFormatJsonSchemaJsonSchemaParam {
 /// - [`go_i64`]: an integer; a float truncates toward zero, saturating at the `i64` bounds; a
 ///   numeric string is parsed; anything else is `0`.
 /// - [`go_f64`]: a number or numeric string; anything else is `0`.
-/// - [`go_bool`]: a boolean; anything else is `false`.
 pub(crate) mod de {
     use serde::Deserialize;
     use serde::de::{DeserializeOwned, Deserializer};
@@ -278,12 +262,6 @@ pub(crate) mod de {
             .filter(|f| f.is_finite())
             .unwrap_or_default())
     }
-
-    /// A boolean field.
-    pub(crate) fn go_bool<'de, D: Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
-        let raw = raw(d)?;
-        Ok(raw.get() == "true")
-    }
 }
 
 #[cfg(test)]
@@ -320,7 +298,6 @@ mod tests {
             (ReasoningEffort::Xhigh, "xhigh"),
             (ReasoningEffort::Max, "max"),
         ] {
-            assert_eq!(e.as_str(), want);
             assert_eq!(go(&e), format!("\"{want}\""));
         }
         let params = json!({"type": "object", "properties": {}, "b": 1, "a": 2});
@@ -375,8 +352,6 @@ mod tests {
         i: i64,
         #[serde(default, deserialize_with = "de::go_f64")]
         f: f64,
-        #[serde(default, deserialize_with = "de::go_bool")]
-        b: bool,
         #[serde(default, deserialize_with = "de::lenient")]
         o: Option<Inner>,
         #[serde(default, deserialize_with = "de::lenient")]
@@ -399,12 +374,11 @@ mod tests {
     fn decoding_follows_apijson_leniency() {
         assert_eq!(probe("{}"), Probe::default());
         assert_eq!(
-            probe(r#"{"s":5,"i":"7","f":"2.5","b":true,"o":{},"v":[{"n":1}]}"#),
+            probe(r#"{"s":5,"i":"7","f":"2.5","o":{},"v":[{"n":1}]}"#),
             Probe {
                 s: "5".into(),
                 i: 7,
                 f: 2.5,
-                b: true,
                 o: Some(Inner { n: 0 }),
                 v: vec![Inner { n: 1 }],
             }
@@ -418,7 +392,6 @@ mod tests {
         assert_eq!(probe(r#"{"i":-1e400}"#).i, i64::MIN);
         assert_eq!(probe(r#"{"i":true}"#).i, 0);
         assert_eq!(probe(r#"{"f":1e400}"#).f, 0.0);
-        assert_eq!(probe(r#"{"b":"true"}"#).b, false);
         assert_eq!(probe(r#"{"o":null}"#).o, None);
         assert_eq!(probe(r#"{"o":"x"}"#).o, None);
         assert_eq!(probe(r#"{"v":[1,{"n":0}]}"#).v, vec![]);

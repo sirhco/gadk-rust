@@ -15,8 +15,6 @@
 
 //! Chat Completions response conversion (port of ADK-Go `internal/completions/response.go`).
 
-#![allow(dead_code)] // D1: first used by Task 8 (`completions::model`).
-
 use gadk_genai::{
     Candidate, Content, FinishReason, FunctionCall, GenerateContentResponse,
     GenerateContentResponseUsageMetadata, LogprobsResult, LogprobsResultCandidate,

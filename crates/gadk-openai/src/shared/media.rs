@@ -15,8 +15,6 @@
 
 //! Media classification both APIs share (port of ADK-Go `internal/shared/media.go`).
 
-#![allow(dead_code)] // D1: first used by Tasks 4 and 5.
-
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use bytes::Bytes;
@@ -42,18 +40,6 @@ pub(crate) enum MediaKind {
     Video,
     /// `"file"`: any other type.
     File,
-}
-
-impl MediaKind {
-    /// Go's string value.
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Image => "image",
-            Self::Audio => "audio",
-            Self::Video => "video",
-            Self::File => "file",
-        }
-    }
 }
 
 /// Go `MediaSource`: where the bytes are.
