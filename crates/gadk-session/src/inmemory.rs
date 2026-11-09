@@ -20,16 +20,17 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use gadk_platform::Platform;
+use gadk_platform::{Platform, go_quote};
 use parking_lot::RwLock;
 use serde_json::{Map, Value};
 
 use crate::error::SessionError;
 use crate::event::{Event, zero_time};
 use crate::service::{
-    CreateRequest, DeleteRequest, GetRequest, KEY_PREFIX_APP, KEY_PREFIX_TEMP, KEY_PREFIX_USER,
-    ListRequest, Session, SessionService, State,
+    CreateRequest, DeleteRequest, GetRequest, KEY_PREFIX_APP, KEY_PREFIX_USER, ListRequest,
+    Session, SessionService, State,
 };
+use crate::state_util::{extract_state_deltas, merge_states, require, trim_temp_delta_state};
 
 type StateMap = Map<String, Value>;
 /// `(app_name, user_id, session_id)`, ordered like Go's `ordered.Encode` key.
@@ -138,70 +139,14 @@ impl Inner {
     }
 }
 
-/// Go `sessionutils.ExtractStateDeltas`: splits a delta into app, user (both with their
-/// prefix removed) and session parts; `temp:` keys are dropped. Prefixes do not compose:
-/// `app:temp:x` is app-scoped.
-fn extract_state_deltas(delta: &StateMap) -> (StateMap, StateMap, StateMap) {
-    let (mut app, mut user, mut session) = (StateMap::new(), StateMap::new(), StateMap::new());
-    for (key, value) in delta {
-        if let Some(k) = key.strip_prefix(KEY_PREFIX_APP) {
-            app.insert(k.to_string(), value.clone());
-        } else if let Some(k) = key.strip_prefix(KEY_PREFIX_USER) {
-            user.insert(k.to_string(), value.clone());
-        } else if !key.starts_with(KEY_PREFIX_TEMP) {
-            session.insert(key.clone(), value.clone());
-        }
-    }
-    (app, user, session)
-}
-
-/// Go `sessionutils.MergeStates`.
-fn merge_states(
-    app_state: Option<&StateMap>,
-    user_state: Option<&StateMap>,
-    session_state: &StateMap,
-) -> StateMap {
-    let mut merged = session_state.clone();
-    for (k, v) in app_state.into_iter().flatten() {
-        merged.insert(format!("{KEY_PREFIX_APP}{k}"), v.clone());
-    }
-    for (k, v) in user_state.into_iter().flatten() {
-        merged.insert(format!("{KEY_PREFIX_USER}{k}"), v.clone());
-    }
-    merged
-}
-
-/// Go `trimTempDeltaState`: a copy of `event` without `temp:` keys in its state delta. A
-/// delta whose every key is `temp:` becomes an empty map, not `None`.
-fn trim_temp_delta_state(event: &Event) -> Event {
-    let mut copy = event.clone();
-    if let Some(delta) = copy.actions.state_delta.as_mut() {
-        delta.retain(|k, _| !k.starts_with(KEY_PREFIX_TEMP));
-    }
-    copy
-}
-
-fn require(fields: &[(&str, &str)]) -> Result<(), SessionError> {
-    if fields.iter().all(|(_, v)| !v.is_empty()) {
-        return Ok(());
-    }
-    let names: Vec<&str> = fields.iter().map(|(n, _)| *n).collect();
-    let got: Vec<String> = fields.iter().map(|(n, v)| format!("{n}: {v:?}")).collect();
-    Err(SessionError::InvalidRequest(format!(
-        "{} {} required, got {}",
-        names.join(", "),
-        if names.len() == 1 { "is" } else { "are" },
-        got.join(", ")
-    )))
-}
-
 #[async_trait]
 impl SessionService for InMemorySessionService {
     async fn create(&self, req: CreateRequest) -> Result<Arc<dyn Session>, SessionError> {
         if req.app_name.is_empty() || req.user_id.is_empty() {
             return Err(SessionError::InvalidRequest(format!(
-                "app_name and user_id are required, got app_name: {:?}, user_id: {:?}",
-                req.app_name, req.user_id
+                "app_name and user_id are required, got app_name: {}, user_id: {}",
+                go_quote(&req.app_name),
+                go_quote(&req.user_id)
             )));
         }
         let session_id = match req.session_id {
