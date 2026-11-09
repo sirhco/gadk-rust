@@ -15,8 +15,7 @@
 
 //! The dialect-neutral layer the service talks to: one transaction type whose operations
 //! dispatch to `sqlite.rs` or `postgres.rs` (identical function names and signatures) and
-//! record the state-table statements of plan D5.
-#![allow(dead_code)]
+//! record the state-table statements ADK-Go's locking test observes.
 
 use std::sync::Arc;
 
@@ -261,5 +260,23 @@ fn select_stmt(table: &str, for_update: bool) -> String {
         format!("select {table} for update")
     } else {
         format!("select {table}")
+    }
+}
+
+#[cfg(all(test, feature = "sqlite", feature = "postgres"))]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn dialects_define_the_same_columns_in_the_same_order() {
+        for (pg, lite) in crate::postgres::TABLES
+            .iter()
+            .zip(crate::sqlite::TABLES.iter())
+        {
+            assert_eq!(pg.name, lite.name);
+            let a: Vec<&str> = pg.columns.iter().map(|c| c.0).collect();
+            let b: Vec<&str> = lite.columns.iter().map(|c| c.0).collect();
+            assert_eq!(a, b, "{}", pg.name);
+        }
     }
 }

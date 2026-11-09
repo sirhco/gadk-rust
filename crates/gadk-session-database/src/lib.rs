@@ -35,7 +35,6 @@
 //! svc.auto_migrate().await?;
 //! # Ok(()) }
 //! ```
-#![allow(dead_code)]
 
 #[cfg(not(any(feature = "sqlite", feature = "postgres")))]
 compile_error!("gadk-session-database needs feature `sqlite` or `postgres`");
@@ -139,8 +138,9 @@ impl DatabaseSessionService {
         }
     }
 
-    /// Test hook: records the app/user state statements the service issues (see D5 of the 4a
-    /// plan) into the returned log.
+    /// Test hook: records into the returned log the app/user state statements the service
+    /// issues: `select <table>`, `select <table> for update` and
+    /// `insert <table> on conflict do nothing`, the statements ADK-Go's test observes.
     #[cfg(feature = "testutil")]
     #[doc(hidden)]
     pub fn with_statement_log(mut self) -> (Self, std::sync::Arc<parking_lot::Mutex<Vec<String>>>) {
