@@ -23,7 +23,10 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow};
 use sqlx::{Row, SqliteConnection as Conn, SqlitePool};
 
 use crate::migrate::TableDef;
-use crate::rows::{AppStateRow, EventRow, SessionRow, UserStateRow};
+use crate::rows::{
+    AppStateRow, ColumnReader, EventRow, SessionRow, UserStateRow, app_state_row, event_row,
+    session_row, user_state_row,
+};
 
 /// ADK-Go's gorm DDL on glebarez/sqlite, byte for byte, in `AutoMigrate` order.
 pub(crate) static TABLES: [TableDef; 4] = [
@@ -186,85 +189,33 @@ fn decode_err(col: &str, msg: String) -> sqlx::Error {
     }
 }
 
-fn text(row: &SqliteRow, col: &str) -> sqlx::Result<Option<String>> {
-    row.try_get_unchecked::<Option<String>, _>(col)
-}
-
-/// A `datetime` column; NULL is Go's zero time.
-fn time(row: &SqliteRow, col: &str) -> sqlx::Result<DateTime<Utc>> {
-    match text(row, col)? {
-        None => Ok(gadk_session::zero_time()),
-        Some(s) => decode_time(&s).map_err(|e| decode_err(col, e)),
+impl ColumnReader for SqliteRow {
+    fn text(&self, col: &str) -> sqlx::Result<String> {
+        self.try_get_unchecked(col)
     }
-}
 
-/// A `numeric` boolean column (Go binds bools as 0/1).
-fn flag(row: &SqliteRow, col: &str) -> sqlx::Result<Option<bool>> {
-    Ok(row
-        .try_get_unchecked::<Option<i64>, _>(col)?
-        .map(|n| n != 0))
-}
+    fn opt_text(&self, col: &str) -> sqlx::Result<Option<String>> {
+        self.try_get_unchecked(col)
+    }
 
-fn session_row(r: &SqliteRow) -> sqlx::Result<SessionRow> {
-    Ok(SessionRow {
-        app_name: r.try_get_unchecked("app_name")?,
-        user_id: r.try_get_unchecked("user_id")?,
-        id: r.try_get_unchecked("id")?,
-        state: text(r, "state")?.unwrap_or_default(),
-        create_time: time(r, "create_time")?,
-        update_time: time(r, "update_time")?,
-    })
-}
+    fn opt_bytes(&self, col: &str) -> sqlx::Result<Option<Vec<u8>>> {
+        self.try_get_unchecked(col)
+    }
 
-fn app_state_row(r: &SqliteRow) -> sqlx::Result<AppStateRow> {
-    Ok(AppStateRow {
-        app_name: r.try_get_unchecked("app_name")?,
-        state: text(r, "state")?.unwrap_or_default(),
-        update_time: time(r, "update_time")?,
-    })
-}
+    /// A `datetime` column in go-sqlite's text layout; NULL is Go's zero time.
+    fn time(&self, col: &str) -> sqlx::Result<DateTime<Utc>> {
+        match self.opt_text(col)? {
+            None => Ok(gadk_session::zero_time()),
+            Some(s) => decode_time(&s).map_err(|e| decode_err(col, e)),
+        }
+    }
 
-fn user_state_row(r: &SqliteRow) -> sqlx::Result<UserStateRow> {
-    Ok(UserStateRow {
-        app_name: r.try_get_unchecked("app_name")?,
-        user_id: r.try_get_unchecked("user_id")?,
-        state: text(r, "state")?.unwrap_or_default(),
-        update_time: time(r, "update_time")?,
-    })
-}
-
-fn event_row(r: &SqliteRow) -> sqlx::Result<EventRow> {
-    Ok(EventRow {
-        id: r.try_get_unchecked("id")?,
-        app_name: r.try_get_unchecked("app_name")?,
-        user_id: r.try_get_unchecked("user_id")?,
-        session_id: r.try_get_unchecked("session_id")?,
-        invocation_id: text(r, "invocation_id")?.unwrap_or_default(),
-        author: text(r, "author")?.unwrap_or_default(),
-        actions: r
-            .try_get_unchecked::<Option<Vec<u8>>, _>("actions")?
-            .unwrap_or_default(),
-        long_running_tool_ids_json: text(r, "long_running_tool_ids_json")?,
-        routes_json: text(r, "routes_json")?,
-        output_json: text(r, "output_json")?,
-        node_info_json: text(r, "node_info_json")?,
-        requested_input_json: text(r, "requested_input_json")?,
-        branch: text(r, "branch")?,
-        isolation_scope: text(r, "isolation_scope")?,
-        timestamp: time(r, "timestamp")?,
-        content: text(r, "content")?,
-        grounding_metadata: text(r, "grounding_metadata")?,
-        custom_metadata: text(r, "custom_metadata")?,
-        usage_metadata: text(r, "usage_metadata")?,
-        citation_metadata: text(r, "citation_metadata")?,
-        input_transcription: text(r, "input_transcription")?,
-        output_transcription: text(r, "output_transcription")?,
-        partial: flag(r, "partial")?,
-        turn_complete: flag(r, "turn_complete")?,
-        error_code: text(r, "error_code")?,
-        error_message: text(r, "error_message")?,
-        interrupted: flag(r, "interrupted")?,
-    })
+    /// A `numeric` boolean column (Go binds bools as 0/1).
+    fn flag(&self, col: &str) -> sqlx::Result<Option<bool>> {
+        Ok(self
+            .try_get_unchecked::<Option<i64>, _>(col)?
+            .map(|n| n != 0))
+    }
 }
 
 pub(crate) async fn select_session(

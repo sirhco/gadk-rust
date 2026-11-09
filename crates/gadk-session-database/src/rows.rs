@@ -87,6 +87,81 @@ pub(crate) struct EventRow {
     pub(crate) interrupted: Option<bool>,
 }
 
+/// Reads one column of a result row in a dialect's storage form. A NULL `time` is Go's zero
+/// time.
+pub(crate) trait ColumnReader {
+    /// A non-NULL text column.
+    fn text(&self, col: &str) -> sqlx::Result<String>;
+    /// A nullable text column (JSON columns read back as text).
+    fn opt_text(&self, col: &str) -> sqlx::Result<Option<String>>;
+    /// A nullable binary column.
+    fn opt_bytes(&self, col: &str) -> sqlx::Result<Option<Vec<u8>>>;
+    /// A timestamp column.
+    fn time(&self, col: &str) -> sqlx::Result<DateTime<Utc>>;
+    /// A nullable boolean column.
+    fn flag(&self, col: &str) -> sqlx::Result<Option<bool>>;
+}
+
+pub(crate) fn session_row(r: &impl ColumnReader) -> sqlx::Result<SessionRow> {
+    Ok(SessionRow {
+        app_name: r.text("app_name")?,
+        user_id: r.text("user_id")?,
+        id: r.text("id")?,
+        state: r.opt_text("state")?.unwrap_or_default(),
+        create_time: r.time("create_time")?,
+        update_time: r.time("update_time")?,
+    })
+}
+
+pub(crate) fn app_state_row(r: &impl ColumnReader) -> sqlx::Result<AppStateRow> {
+    Ok(AppStateRow {
+        app_name: r.text("app_name")?,
+        state: r.opt_text("state")?.unwrap_or_default(),
+        update_time: r.time("update_time")?,
+    })
+}
+
+pub(crate) fn user_state_row(r: &impl ColumnReader) -> sqlx::Result<UserStateRow> {
+    Ok(UserStateRow {
+        app_name: r.text("app_name")?,
+        user_id: r.text("user_id")?,
+        state: r.opt_text("state")?.unwrap_or_default(),
+        update_time: r.time("update_time")?,
+    })
+}
+
+pub(crate) fn event_row(r: &impl ColumnReader) -> sqlx::Result<EventRow> {
+    Ok(EventRow {
+        id: r.text("id")?,
+        app_name: r.text("app_name")?,
+        user_id: r.text("user_id")?,
+        session_id: r.text("session_id")?,
+        invocation_id: r.opt_text("invocation_id")?.unwrap_or_default(),
+        author: r.opt_text("author")?.unwrap_or_default(),
+        actions: r.opt_bytes("actions")?.unwrap_or_default(),
+        long_running_tool_ids_json: r.opt_text("long_running_tool_ids_json")?,
+        routes_json: r.opt_text("routes_json")?,
+        output_json: r.opt_text("output_json")?,
+        node_info_json: r.opt_text("node_info_json")?,
+        requested_input_json: r.opt_text("requested_input_json")?,
+        branch: r.opt_text("branch")?,
+        isolation_scope: r.opt_text("isolation_scope")?,
+        timestamp: r.time("timestamp")?,
+        content: r.opt_text("content")?,
+        grounding_metadata: r.opt_text("grounding_metadata")?,
+        custom_metadata: r.opt_text("custom_metadata")?,
+        usage_metadata: r.opt_text("usage_metadata")?,
+        citation_metadata: r.opt_text("citation_metadata")?,
+        input_transcription: r.opt_text("input_transcription")?,
+        output_transcription: r.opt_text("output_transcription")?,
+        partial: r.flag("partial")?,
+        turn_complete: r.flag("turn_complete")?,
+        error_code: r.opt_text("error_code")?,
+        error_message: r.opt_text("error_message")?,
+        interrupted: r.flag("interrupted")?,
+    })
+}
+
 fn go_json<T: Serialize + ?Sized>(v: &T) -> Result<String, serde_json::Error> {
     to_go_json(v).map(|b| String::from_utf8_lossy(&b).into_owned())
 }

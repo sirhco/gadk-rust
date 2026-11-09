@@ -21,7 +21,10 @@ use sqlx::postgres::{PgPoolOptions, PgRow};
 use sqlx::{PgConnection as Conn, PgPool, Row};
 
 use crate::migrate::TableDef;
-use crate::rows::{AppStateRow, EventRow, SessionRow, UserStateRow};
+use crate::rows::{
+    AppStateRow, ColumnReader, EventRow, SessionRow, UserStateRow, app_state_row, event_row,
+    session_row, user_state_row,
+};
 
 /// gorm postgres DDL for ADK-Go's models: `text` strings, `JSONB` for `stateMap`/`dynamicJSON`,
 /// `bytea` for `[]byte`, `timestamptz(6)` for `precision:6` times, `boolean` for `*bool`.
@@ -105,72 +108,29 @@ pub(crate) fn add_column_sql(table: &str, column: &str, ty: &str) -> String {
     format!("ALTER TABLE \"{table}\" ADD \"{column}\" {ty}")
 }
 
-fn time(r: &PgRow, col: &str) -> sqlx::Result<DateTime<Utc>> {
-    Ok(r.try_get::<Option<DateTime<Utc>>, _>(col)?
-        .unwrap_or_else(gadk_session::zero_time))
-}
+impl ColumnReader for PgRow {
+    fn text(&self, col: &str) -> sqlx::Result<String> {
+        self.try_get(col)
+    }
 
-fn session_row(r: &PgRow) -> sqlx::Result<SessionRow> {
-    Ok(SessionRow {
-        app_name: r.try_get("app_name")?,
-        user_id: r.try_get("user_id")?,
-        id: r.try_get("id")?,
-        state: r.try_get::<Option<String>, _>("state")?.unwrap_or_default(),
-        create_time: time(r, "create_time")?,
-        update_time: time(r, "update_time")?,
-    })
-}
+    fn opt_text(&self, col: &str) -> sqlx::Result<Option<String>> {
+        self.try_get(col)
+    }
 
-fn app_state_row(r: &PgRow) -> sqlx::Result<AppStateRow> {
-    Ok(AppStateRow {
-        app_name: r.try_get("app_name")?,
-        state: r.try_get::<Option<String>, _>("state")?.unwrap_or_default(),
-        update_time: time(r, "update_time")?,
-    })
-}
+    fn opt_bytes(&self, col: &str) -> sqlx::Result<Option<Vec<u8>>> {
+        self.try_get(col)
+    }
 
-fn user_state_row(r: &PgRow) -> sqlx::Result<UserStateRow> {
-    Ok(UserStateRow {
-        app_name: r.try_get("app_name")?,
-        user_id: r.try_get("user_id")?,
-        state: r.try_get::<Option<String>, _>("state")?.unwrap_or_default(),
-        update_time: time(r, "update_time")?,
-    })
-}
+    /// A `timestamptz` column; NULL is Go's zero time.
+    fn time(&self, col: &str) -> sqlx::Result<DateTime<Utc>> {
+        Ok(self
+            .try_get::<Option<DateTime<Utc>>, _>(col)?
+            .unwrap_or_else(gadk_session::zero_time))
+    }
 
-fn event_row(r: &PgRow) -> sqlx::Result<EventRow> {
-    let text = |c: &str| r.try_get::<Option<String>, _>(c);
-    Ok(EventRow {
-        id: r.try_get("id")?,
-        app_name: r.try_get("app_name")?,
-        user_id: r.try_get("user_id")?,
-        session_id: r.try_get("session_id")?,
-        invocation_id: text("invocation_id")?.unwrap_or_default(),
-        author: text("author")?.unwrap_or_default(),
-        actions: r
-            .try_get::<Option<Vec<u8>>, _>("actions")?
-            .unwrap_or_default(),
-        long_running_tool_ids_json: text("long_running_tool_ids_json")?,
-        routes_json: text("routes_json")?,
-        output_json: text("output_json")?,
-        node_info_json: text("node_info_json")?,
-        requested_input_json: text("requested_input_json")?,
-        branch: text("branch")?,
-        isolation_scope: text("isolation_scope")?,
-        timestamp: time(r, "timestamp")?,
-        content: text("content")?,
-        grounding_metadata: text("grounding_metadata")?,
-        custom_metadata: text("custom_metadata")?,
-        usage_metadata: text("usage_metadata")?,
-        citation_metadata: text("citation_metadata")?,
-        input_transcription: text("input_transcription")?,
-        output_transcription: text("output_transcription")?,
-        partial: r.try_get("partial")?,
-        turn_complete: r.try_get("turn_complete")?,
-        error_code: text("error_code")?,
-        error_message: text("error_message")?,
-        interrupted: r.try_get("interrupted")?,
-    })
+    fn flag(&self, col: &str) -> sqlx::Result<Option<bool>> {
+        self.try_get(col)
+    }
 }
 
 fn locking(for_update: bool) -> &'static str {
