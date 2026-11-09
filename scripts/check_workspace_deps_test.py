@@ -142,6 +142,14 @@ class EdgeTest(unittest.TestCase):
     def test_engine_dev_dependency_on_session_database_is_allowed(self):
         self.assertFalse(cwd.reaches("gadk-session-database", "gadk-engine"))
 
+    def test_artifact_gcs_edges_are_exactly_artifact_genai_model_platform(self):
+        self.assertEqual(cwd.ALLOWED["gadk-artifact-gcs"],
+                         {"gadk-artifact", "gadk-genai", "gadk-model", "gadk-platform"})
+        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-artifact-gcs" in deps], ["gadk"])
+
+    def test_model_edges_are_unchanged_by_gcp_auth(self):
+        self.assertEqual(cwd.ALLOWED["gadk-model"], {"gadk-genai"})
+
     def test_disallowed_normal_edge_is_rejected(self):
         self.edit("gadk-artifact", "[dependencies]\n", "[dependencies]\ngadk-session = { workspace = true }\n")
         errs = cwd.check(self.repo)

@@ -24,6 +24,8 @@ openai = ["dep:gadk-openai"]
 # Relational-database sessions (gadk-session-database; sqlite by default — enable the crate's
 # `postgres` feature in your own manifest for PostgreSQL); not in `default`.
 database = ["dep:gadk-session-database"]
+# Artifacts in Google Cloud Storage (gadk-artifact-gcs); not in `default`.
+gcs = ["dep:gadk-artifact-gcs"]
 
 [dependencies]
 gadk-genai = { workspace = true }
@@ -32,6 +34,7 @@ gadk-model = { workspace = true }
 gadk-session = { workspace = true }
 gadk-gemini = { workspace = true, optional = true }
 gadk-artifact = { workspace = true }
+gadk-artifact-gcs = { workspace = true, optional = true }
 gadk-memory = { workspace = true }
 gadk-agent = { workspace = true }
 gadk-engine = { workspace = true }
