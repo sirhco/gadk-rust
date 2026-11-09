@@ -15,7 +15,6 @@
 
 //! The storage seam (Go's `gcsClient`, `gcsBucket`, `gcsObject` and `gcsWriter` interfaces folded
 //! into one trait): the REST client implements it for GCS, the fake for tests.
-#![allow(dead_code)]
 
 use std::collections::BTreeMap;
 
