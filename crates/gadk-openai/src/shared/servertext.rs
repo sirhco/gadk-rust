@@ -15,7 +15,10 @@
 
 //! Server-chosen text in error messages (port of ADK-Go `internal/shared/servertext.go`).
 
-#![allow(dead_code, unused_variables, clippy::todo)] // D1: Task 3 fills the bodies.
+#![allow(dead_code)] // D1: first used by Task 7.
+
+/// The mark a clipped string ends with (Go's `"\u2026"`, HORIZONTAL ELLIPSIS).
+const TRUNCATION_MARK: char = '\u{2026}';
 
 /// Bounds any server-chosen string an error quotes (Go `MaxServerTextRunes`).
 pub(crate) const MAX_SERVER_TEXT_RUNES: usize = 256;
@@ -24,5 +27,11 @@ pub(crate) const MAX_SERVER_TEXT_RUNES: usize = 256;
 /// marking a cut with `…` (after trimming the kept prefix again). Callers render the result
 /// with [`gadk_platform::go_quote`].
 pub(crate) fn clip_server_text(s: &str) -> String {
-    todo!("Task 3")
+    let s = s.trim();
+    // `nth` walks the characters rather than collecting them, so a megabyte of message costs
+    // nothing beyond the kept prefix, and the byte offset it yields is a character boundary.
+    match s.char_indices().nth(MAX_SERVER_TEXT_RUNES) {
+        Some((cut, _)) => format!("{}{TRUNCATION_MARK}", s[..cut].trim_end()),
+        None => s.to_string(),
+    }
 }
