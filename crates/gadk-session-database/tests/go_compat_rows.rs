@@ -15,7 +15,7 @@
 
 #![cfg(feature = "sqlite")]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-//! gadk writes the rows ADK-Go writes, byte for byte, and reads ADK-Go's rows (spec R6, R7).
+//! gadk writes the rows ADK-Go writes, byte for byte, and reads ADK-Go's rows.
 
 mod common;
 

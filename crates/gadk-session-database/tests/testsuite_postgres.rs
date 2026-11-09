@@ -15,7 +15,7 @@
 
 #![cfg(feature = "postgres")]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-//! The shared suite and delete/migrate behaviour on PostgreSQL (R3, R4, R11). Runs only when
+//! The shared suite and delete/migrate behaviour on PostgreSQL. Runs only when
 //! `GADK_TEST_POSTGRES_URL` is set; otherwise each test reports itself skipped.
 
 mod common;

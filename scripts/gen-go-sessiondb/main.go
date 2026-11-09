@@ -16,7 +16,7 @@
 // Command gen-go-sessiondb runs ADK-Go's database session service on sqlite
 // (glebarez/sqlite, the driver ADK-Go's own tests use) through a fixed
 // script, and writes the schema, the stored rows, the script and ADK-Go's
-// read-back results as gadk-session-database parity fixtures (4a R5-R7).
+// read-back results as gadk-session-database parity fixtures.
 //
 // Run from this directory: TZ=UTC go run .
 package main
@@ -229,7 +229,7 @@ func expected(svc session.Service) map[string]any {
 	return map[string]any{"get": gets, "list": lists}
 }
 
-// dumpSchema: one `type\tname\ttbl_name\tsql` line per sqlite_master row (plan D6).
+// dumpSchema: one `type\tname\ttbl_name\tsql` line per sqlite_master row.
 func dumpSchema(db *gorm.DB) []byte {
 	rows, err := db.Raw("SELECT type, name, tbl_name, coalesce(sql, '') FROM sqlite_master ORDER BY type, name").Rows()
 	check(err)
@@ -245,7 +245,7 @@ func dumpSchema(db *gorm.DB) []byte {
 }
 
 // dumpRows: per table, one INSERT line per row with sqlite quote() values in column order,
-// rows ordered by the primary key (plan D6).
+// rows ordered by the primary key.
 func dumpRows(db *gorm.DB) []byte {
 	var b bytes.Buffer
 	for _, t := range tables {

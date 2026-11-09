@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `auto_migrate`: create missing tables, add missing columns (spec R4).
+//! `auto_migrate`: create missing tables, add missing columns.
 
 use gadk_session::SessionError;
 

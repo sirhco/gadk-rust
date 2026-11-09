@@ -15,8 +15,8 @@
 
 #![cfg(feature = "sqlite")]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-//! Behaviour beyond the Go tests: delete semantics (R3), validation texts (R10), concurrent
-//! appends to shared state (R9), temp: keys, partial events and timestamp precision.
+//! Behaviour beyond the Go tests: delete semantics, validation texts, concurrent appends to
+//! shared state, temp: keys, partial events and timestamp precision.
 
 mod common;
 
