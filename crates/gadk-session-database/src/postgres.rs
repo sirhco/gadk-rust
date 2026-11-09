@@ -13,100 +13,337 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The PostgreSQL dialect (gorm postgres): DDL, SQL text, `FOR UPDATE` locking. Filled in by
-//! Task 6.
-#![allow(dead_code, unused_variables, unused_imports, clippy::todo)]
+//! The PostgreSQL dialect (gorm postgres): DDL with `JSONB` and `timestamptz(6)` columns, SQL
+//! text, and `SELECT … FOR UPDATE` row locking.
 
 use chrono::{DateTime, Utc};
-use sqlx::PgConnection as Conn;
+use sqlx::postgres::{PgPoolOptions, PgRow};
+use sqlx::{PgConnection as Conn, PgPool, Row};
 
 use crate::migrate::TableDef;
 use crate::rows::{AppStateRow, EventRow, SessionRow, UserStateRow};
 
-const PLACEHOLDER: TableDef = TableDef {
-    name: "",
-    create: "",
-    columns: &[],
-};
-pub(crate) static TABLES: [TableDef; 4] = [PLACEHOLDER; 4];
+/// gorm postgres DDL for ADK-Go's models: `text` strings, `JSONB` for `stateMap`/`dynamicJSON`,
+/// `bytea` for `[]byte`, `timestamptz(6)` for `precision:6` times, `boolean` for `*bool`.
+pub(crate) static TABLES: [TableDef; 4] = [
+    TableDef {
+        name: "sessions",
+        create: "CREATE TABLE \"sessions\" (\"app_name\" text,\"user_id\" text,\"id\" text,\"state\" JSONB,\"create_time\" timestamptz(6),\"update_time\" timestamptz(6),PRIMARY KEY (\"app_name\",\"user_id\",\"id\"))",
+        columns: &[
+            ("app_name", "text"),
+            ("user_id", "text"),
+            ("id", "text"),
+            ("state", "JSONB"),
+            ("create_time", "timestamptz(6)"),
+            ("update_time", "timestamptz(6)"),
+        ],
+    },
+    TableDef {
+        name: "events",
+        create: "CREATE TABLE \"events\" (\"id\" text,\"app_name\" text,\"user_id\" text,\"session_id\" text,\"invocation_id\" text,\"author\" text,\"actions\" bytea,\"long_running_tool_ids_json\" JSONB,\"routes_json\" JSONB,\"output_json\" JSONB,\"node_info_json\" JSONB,\"requested_input_json\" JSONB,\"branch\" text,\"isolation_scope\" text,\"timestamp\" timestamptz(6),\"content\" JSONB,\"grounding_metadata\" JSONB,\"custom_metadata\" JSONB,\"usage_metadata\" JSONB,\"citation_metadata\" JSONB,\"input_transcription\" JSONB,\"output_transcription\" JSONB,\"partial\" boolean,\"turn_complete\" boolean,\"error_code\" text,\"error_message\" text,\"interrupted\" boolean,PRIMARY KEY (\"id\",\"app_name\",\"user_id\",\"session_id\"),CONSTRAINT \"fk_sessions_events\" FOREIGN KEY (\"app_name\",\"user_id\",\"session_id\") REFERENCES \"sessions\"(\"app_name\",\"user_id\",\"id\") ON DELETE CASCADE)",
+        columns: &[
+            ("id", "text"),
+            ("app_name", "text"),
+            ("user_id", "text"),
+            ("session_id", "text"),
+            ("invocation_id", "text"),
+            ("author", "text"),
+            ("actions", "bytea"),
+            ("long_running_tool_ids_json", "JSONB"),
+            ("routes_json", "JSONB"),
+            ("output_json", "JSONB"),
+            ("node_info_json", "JSONB"),
+            ("requested_input_json", "JSONB"),
+            ("branch", "text"),
+            ("isolation_scope", "text"),
+            ("timestamp", "timestamptz(6)"),
+            ("content", "JSONB"),
+            ("grounding_metadata", "JSONB"),
+            ("custom_metadata", "JSONB"),
+            ("usage_metadata", "JSONB"),
+            ("citation_metadata", "JSONB"),
+            ("input_transcription", "JSONB"),
+            ("output_transcription", "JSONB"),
+            ("partial", "boolean"),
+            ("turn_complete", "boolean"),
+            ("error_code", "text"),
+            ("error_message", "text"),
+            ("interrupted", "boolean"),
+        ],
+    },
+    TableDef {
+        name: "app_states",
+        create: "CREATE TABLE \"app_states\" (\"app_name\" text,\"state\" JSONB,\"update_time\" timestamptz(6),PRIMARY KEY (\"app_name\"))",
+        columns: &[
+            ("app_name", "text"),
+            ("state", "JSONB"),
+            ("update_time", "timestamptz(6)"),
+        ],
+    },
+    TableDef {
+        name: "user_states",
+        create: "CREATE TABLE \"user_states\" (\"app_name\" text,\"user_id\" text,\"state\" JSONB,\"update_time\" timestamptz(6),PRIMARY KEY (\"app_name\",\"user_id\"))",
+        columns: &[
+            ("app_name", "text"),
+            ("user_id", "text"),
+            ("state", "JSONB"),
+            ("update_time", "timestamptz(6)"),
+        ],
+    },
+];
 
-pub(crate) async fn connect(url: &str) -> sqlx::Result<sqlx::PgPool> {
-    todo!("Task 6")
+/// Reads JSONB columns back as text.
+const EVENT_SELECT: &str = "SELECT \"id\", \"app_name\", \"user_id\", \"session_id\", \"invocation_id\", \"author\", \"actions\", \"long_running_tool_ids_json\"::text AS long_running_tool_ids_json, \"routes_json\"::text AS routes_json, \"output_json\"::text AS output_json, \"node_info_json\"::text AS node_info_json, \"requested_input_json\"::text AS requested_input_json, \"branch\", \"isolation_scope\", \"timestamp\", \"content\"::text AS content, \"grounding_metadata\"::text AS grounding_metadata, \"custom_metadata\"::text AS custom_metadata, \"usage_metadata\"::text AS usage_metadata, \"citation_metadata\"::text AS citation_metadata, \"input_transcription\"::text AS input_transcription, \"output_transcription\"::text AS output_transcription, \"partial\", \"turn_complete\", \"error_code\", \"error_message\", \"interrupted\" FROM \"events\"";
+const SESSION_SELECT: &str = "SELECT \"app_name\", \"user_id\", \"id\", \"state\"::text AS state, \"create_time\", \"update_time\" FROM \"sessions\"";
+
+pub(crate) async fn connect(url: &str) -> sqlx::Result<PgPool> {
+    PgPoolOptions::new().connect(url).await
 }
+
+/// gorm's postgres `AddColumn`.
 pub(crate) fn add_column_sql(table: &str, column: &str, ty: &str) -> String {
-    todo!("Task 6")
+    format!("ALTER TABLE \"{table}\" ADD \"{column}\" {ty}")
 }
+
+fn time(r: &PgRow, col: &str) -> sqlx::Result<DateTime<Utc>> {
+    Ok(r.try_get::<Option<DateTime<Utc>>, _>(col)?
+        .unwrap_or_else(gadk_session::zero_time))
+}
+
+fn session_row(r: &PgRow) -> sqlx::Result<SessionRow> {
+    Ok(SessionRow {
+        app_name: r.try_get("app_name")?,
+        user_id: r.try_get("user_id")?,
+        id: r.try_get("id")?,
+        state: r.try_get::<Option<String>, _>("state")?.unwrap_or_default(),
+        create_time: time(r, "create_time")?,
+        update_time: time(r, "update_time")?,
+    })
+}
+
+fn app_state_row(r: &PgRow) -> sqlx::Result<AppStateRow> {
+    Ok(AppStateRow {
+        app_name: r.try_get("app_name")?,
+        state: r.try_get::<Option<String>, _>("state")?.unwrap_or_default(),
+        update_time: time(r, "update_time")?,
+    })
+}
+
+fn user_state_row(r: &PgRow) -> sqlx::Result<UserStateRow> {
+    Ok(UserStateRow {
+        app_name: r.try_get("app_name")?,
+        user_id: r.try_get("user_id")?,
+        state: r.try_get::<Option<String>, _>("state")?.unwrap_or_default(),
+        update_time: time(r, "update_time")?,
+    })
+}
+
+fn event_row(r: &PgRow) -> sqlx::Result<EventRow> {
+    let text = |c: &str| r.try_get::<Option<String>, _>(c);
+    Ok(EventRow {
+        id: r.try_get("id")?,
+        app_name: r.try_get("app_name")?,
+        user_id: r.try_get("user_id")?,
+        session_id: r.try_get("session_id")?,
+        invocation_id: text("invocation_id")?.unwrap_or_default(),
+        author: text("author")?.unwrap_or_default(),
+        actions: r
+            .try_get::<Option<Vec<u8>>, _>("actions")?
+            .unwrap_or_default(),
+        long_running_tool_ids_json: text("long_running_tool_ids_json")?,
+        routes_json: text("routes_json")?,
+        output_json: text("output_json")?,
+        node_info_json: text("node_info_json")?,
+        requested_input_json: text("requested_input_json")?,
+        branch: text("branch")?,
+        isolation_scope: text("isolation_scope")?,
+        timestamp: time(r, "timestamp")?,
+        content: text("content")?,
+        grounding_metadata: text("grounding_metadata")?,
+        custom_metadata: text("custom_metadata")?,
+        usage_metadata: text("usage_metadata")?,
+        citation_metadata: text("citation_metadata")?,
+        input_transcription: text("input_transcription")?,
+        output_transcription: text("output_transcription")?,
+        partial: r.try_get("partial")?,
+        turn_complete: r.try_get("turn_complete")?,
+        error_code: text("error_code")?,
+        error_message: text("error_message")?,
+        interrupted: r.try_get("interrupted")?,
+    })
+}
+
+fn locking(for_update: bool) -> &'static str {
+    if for_update { " FOR UPDATE" } else { "" }
+}
+
 pub(crate) async fn select_session(
     c: &mut Conn,
     app_name: &str,
     user_id: &str,
     id: &str,
 ) -> sqlx::Result<Option<SessionRow>> {
-    todo!("Task 6")
+    let sql = format!(
+        "{SESSION_SELECT} WHERE \"app_name\" = $1 AND \"user_id\" = $2 AND \"id\" = $3 LIMIT 1"
+    );
+    sqlx::query(sqlx::AssertSqlSafe(sql))
+        .bind(app_name)
+        .bind(user_id)
+        .bind(id)
+        .fetch_optional(&mut *c)
+        .await?
+        .as_ref()
+        .map(session_row)
+        .transpose()
 }
+
 pub(crate) async fn list_sessions(
     c: &mut Conn,
     app_name: &str,
     user_id: Option<&str>,
 ) -> sqlx::Result<Vec<SessionRow>> {
-    todo!("Task 6")
+    let rows = match user_id {
+        Some(user_id) => {
+            let sql = format!("{SESSION_SELECT} WHERE \"app_name\" = $1 AND \"user_id\" = $2");
+            sqlx::query(sqlx::AssertSqlSafe(sql))
+                .bind(app_name)
+                .bind(user_id)
+                .fetch_all(&mut *c)
+                .await?
+        }
+        None => {
+            let sql = format!("{SESSION_SELECT} WHERE \"app_name\" = $1");
+            sqlx::query(sqlx::AssertSqlSafe(sql))
+                .bind(app_name)
+                .fetch_all(&mut *c)
+                .await?
+        }
+    };
+    rows.iter().map(session_row).collect()
 }
+
 pub(crate) async fn insert_session(c: &mut Conn, row: &SessionRow) -> sqlx::Result<()> {
-    todo!("Task 6")
+    sqlx::query("INSERT INTO \"sessions\" (\"app_name\", \"user_id\", \"id\", \"state\", \"create_time\", \"update_time\") VALUES ($1, $2, $3, $4::jsonb, $5, $6)")
+        .bind(&row.app_name).bind(&row.user_id).bind(&row.id).bind(&row.state)
+        .bind(row.create_time).bind(row.update_time)
+        .execute(&mut *c).await.map(|_| ())
 }
+
 pub(crate) async fn update_session(c: &mut Conn, row: &SessionRow) -> sqlx::Result<()> {
-    todo!("Task 6")
+    sqlx::query("UPDATE \"sessions\" SET \"state\" = $1::jsonb, \"create_time\" = $2, \"update_time\" = $3 WHERE \"app_name\" = $4 AND \"user_id\" = $5 AND \"id\" = $6")
+        .bind(&row.state).bind(row.create_time).bind(row.update_time)
+        .bind(&row.app_name).bind(&row.user_id).bind(&row.id)
+        .execute(&mut *c).await.map(|_| ())
 }
+
 pub(crate) async fn delete_session(
     c: &mut Conn,
     app_name: &str,
     user_id: &str,
     id: &str,
 ) -> sqlx::Result<()> {
-    todo!("Task 6")
+    sqlx::query(
+        "DELETE FROM \"sessions\" WHERE \"app_name\" = $1 AND \"user_id\" = $2 AND \"id\" = $3",
+    )
+    .bind(app_name)
+    .bind(user_id)
+    .bind(id)
+    .execute(&mut *c)
+    .await
+    .map(|_| ())
 }
+
 pub(crate) async fn select_app_state(
     c: &mut Conn,
     app_name: &str,
     for_update: bool,
 ) -> sqlx::Result<Option<AppStateRow>> {
-    todo!("Task 6")
+    let sql = format!(
+        "SELECT \"app_name\", \"state\"::text AS state, \"update_time\" FROM \"app_states\" WHERE \"app_name\" = $1 ORDER BY \"app_name\" LIMIT 1{}",
+        locking(for_update)
+    );
+    sqlx::query(sqlx::AssertSqlSafe(sql))
+        .bind(app_name)
+        .fetch_optional(&mut *c)
+        .await?
+        .as_ref()
+        .map(app_state_row)
+        .transpose()
 }
+
 pub(crate) async fn select_user_state(
     c: &mut Conn,
     app_name: &str,
     user_id: &str,
     for_update: bool,
 ) -> sqlx::Result<Option<UserStateRow>> {
-    todo!("Task 6")
+    let sql = format!(
+        "SELECT \"app_name\", \"user_id\", \"state\"::text AS state, \"update_time\" FROM \"user_states\" WHERE \"app_name\" = $1 AND \"user_id\" = $2 ORDER BY \"app_name\" LIMIT 1{}",
+        locking(for_update)
+    );
+    sqlx::query(sqlx::AssertSqlSafe(sql))
+        .bind(app_name)
+        .bind(user_id)
+        .fetch_optional(&mut *c)
+        .await?
+        .as_ref()
+        .map(user_state_row)
+        .transpose()
 }
+
 pub(crate) async fn select_user_states(
     c: &mut Conn,
     app_name: &str,
 ) -> sqlx::Result<Vec<UserStateRow>> {
-    todo!("Task 6")
+    sqlx::query("SELECT \"app_name\", \"user_id\", \"state\"::text AS state, \"update_time\" FROM \"user_states\" WHERE \"app_name\" = $1")
+        .bind(app_name).fetch_all(&mut *c).await?.iter().map(user_state_row).collect()
 }
+
 pub(crate) async fn insert_app_state_if_absent(
     c: &mut Conn,
     row: &AppStateRow,
 ) -> sqlx::Result<()> {
-    todo!("Task 6")
+    sqlx::query("INSERT INTO \"app_states\" (\"app_name\", \"state\", \"update_time\") VALUES ($1, $2::jsonb, $3) ON CONFLICT DO NOTHING")
+        .bind(&row.app_name).bind(&row.state).bind(row.update_time)
+        .execute(&mut *c).await.map(|_| ())
 }
+
 pub(crate) async fn insert_user_state_if_absent(
     c: &mut Conn,
     row: &UserStateRow,
 ) -> sqlx::Result<()> {
-    todo!("Task 6")
+    sqlx::query("INSERT INTO \"user_states\" (\"app_name\", \"user_id\", \"state\", \"update_time\") VALUES ($1, $2, $3::jsonb, $4) ON CONFLICT DO NOTHING")
+        .bind(&row.app_name).bind(&row.user_id).bind(&row.state).bind(row.update_time)
+        .execute(&mut *c).await.map(|_| ())
 }
+
 pub(crate) async fn save_app_state(c: &mut Conn, row: &AppStateRow) -> sqlx::Result<()> {
-    todo!("Task 6")
+    sqlx::query("INSERT INTO \"app_states\" (\"app_name\", \"state\", \"update_time\") VALUES ($1, $2::jsonb, $3) ON CONFLICT (\"app_name\") DO UPDATE SET \"state\" = excluded.\"state\", \"update_time\" = excluded.\"update_time\"")
+        .bind(&row.app_name).bind(&row.state).bind(row.update_time)
+        .execute(&mut *c).await.map(|_| ())
 }
+
 pub(crate) async fn save_user_state(c: &mut Conn, row: &UserStateRow) -> sqlx::Result<()> {
-    todo!("Task 6")
+    sqlx::query("INSERT INTO \"user_states\" (\"app_name\", \"user_id\", \"state\", \"update_time\") VALUES ($1, $2, $3::jsonb, $4) ON CONFLICT (\"app_name\", \"user_id\") DO UPDATE SET \"state\" = excluded.\"state\", \"update_time\" = excluded.\"update_time\"")
+        .bind(&row.app_name).bind(&row.user_id).bind(&row.state).bind(row.update_time)
+        .execute(&mut *c).await.map(|_| ())
 }
+
 pub(crate) async fn insert_event(c: &mut Conn, row: &EventRow) -> sqlx::Result<()> {
-    todo!("Task 6")
+    sqlx::query("INSERT INTO \"events\" (\"id\", \"app_name\", \"user_id\", \"session_id\", \"invocation_id\", \"author\", \"actions\", \"long_running_tool_ids_json\", \"routes_json\", \"output_json\", \"node_info_json\", \"requested_input_json\", \"branch\", \"isolation_scope\", \"timestamp\", \"content\", \"grounding_metadata\", \"custom_metadata\", \"usage_metadata\", \"citation_metadata\", \"input_transcription\", \"output_transcription\", \"partial\", \"turn_complete\", \"error_code\", \"error_message\", \"interrupted\") VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb, $13, $14, $15, $16::jsonb, $17::jsonb, $18::jsonb, $19::jsonb, $20::jsonb, $21::jsonb, $22::jsonb, $23, $24, $25, $26, $27)")
+        .bind(&row.id).bind(&row.app_name).bind(&row.user_id).bind(&row.session_id)
+        .bind(&row.invocation_id).bind(&row.author).bind(&row.actions)
+        .bind(&row.long_running_tool_ids_json).bind(&row.routes_json).bind(&row.output_json)
+        .bind(&row.node_info_json).bind(&row.requested_input_json)
+        .bind(&row.branch).bind(&row.isolation_scope).bind(row.timestamp)
+        .bind(&row.content).bind(&row.grounding_metadata).bind(&row.custom_metadata)
+        .bind(&row.usage_metadata).bind(&row.citation_metadata)
+        .bind(&row.input_transcription).bind(&row.output_transcription)
+        .bind(row.partial).bind(row.turn_complete)
+        .bind(&row.error_code).bind(&row.error_message).bind(row.interrupted)
+        .execute(&mut *c).await.map(|_| ())
 }
+
 pub(crate) async fn select_events(
     c: &mut Conn,
     app_name: &str,
@@ -115,11 +352,78 @@ pub(crate) async fn select_events(
     after: Option<DateTime<Utc>>,
     limit: Option<i64>,
 ) -> sqlx::Result<Vec<EventRow>> {
-    todo!("Task 6")
+    let mut sql = format!(
+        "{EVENT_SELECT} WHERE \"app_name\" = $1 AND \"user_id\" = $2 AND \"session_id\" = $3"
+    );
+    let mut n = 3;
+    if after.is_some() {
+        n += 1;
+        sql.push_str(&format!(" AND \"timestamp\" >= ${n}"));
+    }
+    sql.push_str(" ORDER BY \"timestamp\" DESC, \"id\" DESC");
+    if limit.is_some() {
+        n += 1;
+        sql.push_str(&format!(" LIMIT ${n}"));
+    }
+    let mut q = sqlx::query(sqlx::AssertSqlSafe(sql))
+        .bind(app_name)
+        .bind(user_id)
+        .bind(session_id);
+    if let Some(after) = after {
+        q = q.bind(after);
+    }
+    if let Some(limit) = limit {
+        q = q.bind(limit);
+    }
+    q.fetch_all(&mut *c).await?.iter().map(event_row).collect()
 }
+
 pub(crate) async fn existing_columns(c: &mut Conn, table: &str) -> sqlx::Result<Vec<String>> {
-    todo!("Task 6")
+    sqlx::query_scalar::<_, String>("SELECT column_name::text FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1 ORDER BY ordinal_position")
+        .bind(table).fetch_all(&mut *c).await
 }
+
 pub(crate) async fn execute(c: &mut Conn, sql: &str) -> sqlx::Result<()> {
-    todo!("Task 6")
+    sqlx::query(sqlx::AssertSqlSafe(sql.to_string()))
+        .execute(&mut *c)
+        .await
+        .map(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::panic)]
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn table_columns_match_their_create_statements() {
+        for t in &TABLES {
+            let mut at = 0;
+            for (name, ty) in t.columns {
+                let needle = format!("\"{name}\" {ty}");
+                let pos = t.create[at..]
+                    .find(&needle)
+                    .unwrap_or_else(|| panic!("{}: {needle}", t.name));
+                at += pos + needle.len();
+            }
+        }
+        let names: Vec<&str> = TABLES.iter().map(|t| t.name).collect();
+        assert_eq!(names, ["sessions", "events", "app_states", "user_states"]);
+    }
+
+    #[test]
+    fn events_cascade_on_session_delete() {
+        assert!(TABLES[1].create.ends_with(
+            "REFERENCES \"sessions\"(\"app_name\",\"user_id\",\"id\") ON DELETE CASCADE)"
+        ));
+    }
+
+    #[test]
+    fn add_column_sql_is_gorms() {
+        assert_eq!(
+            add_column_sql("events", "interrupted", "boolean"),
+            "ALTER TABLE \"events\" ADD \"interrupted\" boolean"
+        );
+    }
 }
