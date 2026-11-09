@@ -23,6 +23,9 @@
   only the façade depends on it (feature `anthropic`).
 - 3b: `gadk-openai` depends on exactly `gadk-genai`, `gadk-model` and `gadk-platform`, and only
   the façade depends on it (feature `openai`), normal or dev.
+- 4a: `gadk-session-database` depends on exactly `gadk-session`, `gadk-model` and `gadk-platform`;
+  only the façade depends on it (feature `database`), and `gadk-engine` may dev-depend on it (its
+  compaction parity test).
 """
 import pathlib, sys, tomllib
 
@@ -44,9 +47,10 @@ ALLOWED = {
     "gadk-mcp": {"gadk-agent", "gadk-auth", "gadk-genai", "gadk-platform"},
     "gadk-anthropic": {"gadk-genai", "gadk-model", "gadk-platform"},
     "gadk-openai": {"gadk-genai", "gadk-model", "gadk-platform"},
+    "gadk-session-database": {"gadk-session", "gadk-model", "gadk-platform"},
     "gadk": {"gadk-genai", "gadk-platform", "gadk-model", "gadk-session", "gadk-gemini",
              "gadk-agent", "gadk-engine", "gadk-tools", "gadk-auth", "gadk-mcp", "gadk-artifact",
-             "gadk-memory", "gadk-anthropic", "gadk-openai"},
+             "gadk-memory", "gadk-anthropic", "gadk-openai", "gadk-session-database"},
 }
 # (crate, dependency) normal edges that must be `optional = true`.
 OPTIONAL = {("gadk-engine", "gadk-gemini"), ("gadk-engine", "gadk-httprr")}

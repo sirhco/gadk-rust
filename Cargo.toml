@@ -16,6 +16,7 @@ members = [
   "crates/gadk-mcp",
   "crates/gadk-anthropic",
   "crates/gadk-openai",
+  "crates/gadk-session-database",
   "crates/gadk",
 ]
 
@@ -42,6 +43,7 @@ gadk-auth = { path = "crates/gadk-auth", version = "0.1.0", default-features = f
 gadk-mcp = { path = "crates/gadk-mcp", version = "0.1.0" }
 gadk-anthropic = { path = "crates/gadk-anthropic", version = "0.1.0" }
 gadk-openai = { path = "crates/gadk-openai", version = "0.1.0" }
+gadk-session-database = { path = "crates/gadk-session-database", version = "0.1.0" }
 tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
 tokio-util = "0.7.20"
 futures = "0.3.34"
@@ -79,6 +81,8 @@ hyper = { version = "1.12.0", default-features = false }
 hyper-util = { version = "0.1.21", default-features = false }
 tower = { version = "0.5.3", default-features = false }
 rand = "0.10.3"
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "chrono"] }
+tempfile = "3.27.0"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
