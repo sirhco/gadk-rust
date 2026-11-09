@@ -357,6 +357,7 @@ async fn test_database_service_append_event_preserves_input_event_temp_state() {
     assert_eq!(stored_delta["sk"], json!("v2"));
 }
 
+// parity: adapted: the events carry fixed IDs and the order is asserted exactly (Go's random IDs leave "not reversed" failing whenever ascending ID order is reverse insertion order)
 #[tokio::test]
 async fn test_events_sharing_a_timestamp_come_back_in_a_stable_order() {
     let svc = memory_service().await;
@@ -368,6 +369,8 @@ async fn test_events_sharing_a_timestamp_come_back_in_a_stable_order() {
     let mut want = Vec::new();
     for i in 0..6 {
         let mut ev = Event::new(&platform, "inv1");
+        // Ties are broken by ID; IDs ascending with insertion make the expected order exact.
+        ev.id = format!("e{i}");
         ev.author = "author".into();
         ev.timestamp = ts;
         ev.response.content = Some(Content::from_text(format!("event {i}"), ROLE_USER));
@@ -391,11 +394,9 @@ async fn test_events_sharing_a_timestamp_come_back_in_a_stable_order() {
             "the order of tied events changed between reads"
         );
     }
-    let mut reversed = want.clone();
-    reversed.reverse();
-    assert_ne!(
-        first, reversed,
-        "tied events came back in reverse insertion order: {first:?}"
+    assert_eq!(
+        first, want,
+        "tied events did not come back in insertion order"
     );
 }
 
