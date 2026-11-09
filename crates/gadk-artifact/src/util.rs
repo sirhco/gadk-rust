@@ -15,7 +15,8 @@
 
 //! Helpers shared by the artifact services (gadk-artifact's in-memory service and
 //! gadk-artifact-gcs): the `request validation failed: ` wrapping, Go's `fmt.Sprint` of a
-//! custom-metadata value, the `user:` file-name namespace check, and Go's `url.PathEscape`.
+//! custom-metadata value, the `user:` file-name namespace check, Go's `url.PathEscape` and the
+//! JSON API's URL path-segment escape.
 
 use std::fmt::Write as _;
 
@@ -55,14 +56,23 @@ pub fn go_sprint(v: &Value) -> String {
 /// Port of Go net/url PathEscape: keeps ALPHA / DIGIT / "-_.~" / "$&+:=@", percent-encodes
 /// every other byte (upper-case hex), so `/` becomes `%2F` and a space `%20`.
 pub fn go_path_escape(s: &str) -> String {
+    percent_escape(s, |b| matches!(b, b'$' | b'&' | b'+' | b':' | b'=' | b'@'))
+}
+
+/// Port of the simple-expansion escape of Go's `googleapi.Expand` (google.golang.org/api
+/// `internal/third_party/uritemplates`, `escape(s, false)`), which builds the JSON API URL
+/// path segments: keeps only the unreserved ALPHA / DIGIT / "-._~" and percent-encodes every
+/// other byte (upper-case hex), so `:` becomes `%3A`, `+` `%2B` and `/` `%2F`.
+pub fn go_uri_template_escape(s: &str) -> String {
+    percent_escape(s, |_| false)
+}
+
+/// Percent-encodes (upper-case hex) every byte of `s` but ALPHA / DIGIT / "-._~" and the bytes
+/// `also_keep` accepts.
+fn percent_escape(s: &str, also_keep: impl Fn(u8) -> bool) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
-        let keep = b.is_ascii_alphanumeric()
-            || matches!(
-                b,
-                b'-' | b'_' | b'.' | b'~' | b'$' | b'&' | b'+' | b':' | b'=' | b'@'
-            );
-        if keep {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') || also_keep(b) {
             out.push(char::from(b));
         } else {
             let _ = write!(out, "%{b:02X}");
@@ -133,6 +143,22 @@ mod tests {
             ("user:file.txt/1", "user:file.txt%2F1"),
         ] {
             assert_eq!(go_path_escape(input), want, "PathEscape({input:?})");
+        }
+    }
+
+    #[test]
+    fn go_uri_template_escape_keeps_only_unreserved() {
+        for (input, want) in [
+            ("", ""),
+            ("abcXYZ019-_.~", "abcXYZ019-_.~"),
+            ("$&+:=@", "%24%26%2B%3A%3D%40"),
+            ("user:a+b=c@d.txt", "user%3Aa%2Bb%3Dc%40d.txt"),
+            ("a b/c", "a%20b%2Fc"),
+            ("100%", "100%25"),
+            ("!*'();,?#[]", "%21%2A%27%28%29%3B%2C%3F%23%5B%5D"),
+            ("résumé", "r%C3%A9sum%C3%A9"),
+        ] {
+            assert_eq!(go_uri_template_escape(input), want, "{input:?}");
         }
     }
 }

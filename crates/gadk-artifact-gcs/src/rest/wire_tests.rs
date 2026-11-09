@@ -329,7 +329,37 @@ async fn read_downloads_with_alt_media() {
     assert_eq!(data, "bytes");
     assert_eq!(
         server.last_request().path_and_query(),
-        "/storage/v1/b/bkt/o/a%2Fuser:%C3%A9%2F1?alt=media"
+        "/storage/v1/b/bkt/o/a%2Fuser%3A%C3%A9%2F1?alt=media"
+    );
+}
+
+// Go's googleapi.Expand escapes path segments to the unreserved set, where url.PathEscape
+// would keep `$&+:=@`.
+#[tokio::test]
+async fn object_paths_escape_all_but_unreserved_bytes() {
+    let server = FakeServer::start(|req| match req.method.as_str() {
+        "DELETE" => FakeResponse::new(204),
+        _ if req.query.as_deref() == Some("alt=media") => FakeResponse::new(200).chunk("x"),
+        _ => FakeResponse::json(r#"{"name":"n"}"#),
+    });
+    let bucket = bucket_on(&server);
+    let name = "app/u/s/user:a+b=c@d$&.txt/0";
+    bucket.attrs(name).await.unwrap();
+    bucket.read(name).await.unwrap();
+    bucket.delete(name).await.unwrap();
+    let want = "/storage/v1/b/bkt/o/app%2Fu%2Fs%2Fuser%3Aa%2Bb%3Dc%40d%24%26.txt%2F0";
+    let reqs = server.requests();
+    let got: Vec<(String, String)> = reqs
+        .iter()
+        .map(|r| (r.method.clone(), r.path_and_query()))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            ("GET".to_owned(), want.to_owned()),
+            ("GET".to_owned(), format!("{want}?alt=media")),
+            ("DELETE".to_owned(), want.to_owned()),
+        ]
     );
 }
 

@@ -24,7 +24,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use gadk_artifact::ArtifactError;
-use gadk_artifact::util::go_path_escape;
+use gadk_artifact::util::go_uri_template_escape;
 use gadk_model::gcp_auth::credential_headers;
 use gadk_model::rest::{
     CallTimeout, RequestHeaders, RestError, RestReply, RestTransport, RetryAfterRule, RetryPolicy,
@@ -123,7 +123,7 @@ impl RestBucket {
         let http: Arc<dyn HttpClient> = config
             .http_client
             .unwrap_or_else(|| Arc::new(ReqwestClient::default()));
-        let bucket = go_path_escape(bucket);
+        let bucket = go_uri_template_escape(bucket);
         Ok(Self {
             objects_url: format!("{}/storage/v1/b/{bucket}/o", resolved.base_url),
             upload_url: format!("{}/upload/storage/v1/b/{bucket}/o", resolved.base_url),
@@ -144,9 +144,10 @@ impl RestBucket {
         })
     }
 
-    /// `{objects_url}/{escaped object name}`.
+    /// `{objects_url}/{escaped object name}`, escaped as Go's `googleapi.Expand` expands
+    /// `b/{bucket}/o/{object}`.
     fn object_url(&self, name: &str) -> String {
-        format!("{}/{}", self.objects_url, go_path_escape(name))
+        format!("{}/{}", self.objects_url, go_uri_template_escape(name))
     }
 
     /// Sends one call and returns a 2xx response's body, else the status mapped to a
