@@ -24,6 +24,7 @@ mod jsonpath;
 mod live;
 mod llm;
 mod registry;
+pub mod rest;
 pub mod sse;
 mod variant;
 
