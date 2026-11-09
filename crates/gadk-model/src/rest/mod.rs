@@ -25,15 +25,18 @@
 //! - Feature `test-util` adds [`test_util`]: a scripted in-process `HttpClient` and a
 //!   127.0.0.1 fake server.
 
-
 mod error;
 mod policy;
 #[cfg(feature = "test-util")]
 pub mod test_util;
+mod transport;
 
 pub use error::RestError;
 pub use policy::{
     DEFAULT_MAX_BACKOFF, DEFAULT_MAX_RETRIES, DEFAULT_MAX_RETRY_AFTER, GoParseFloatError,
     RetryAfter, RetryAfterRule, RetryPolicy, go_parse_float, header_str, parse_retry_after,
     retry_header, should_retry, should_retry_dropped_body,
+};
+pub use transport::{
+    CallTimeout, DEFAULT_RESPONSE_HEADER_TIMEOUT, RequestHeaders, RestReply, RestTransport,
 };
