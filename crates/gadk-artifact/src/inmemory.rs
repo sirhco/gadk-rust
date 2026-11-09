@@ -18,7 +18,6 @@
 
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::Write as _;
 
 use chrono::{DateTime, Utc};
 use gadk_genai::Part;
@@ -31,6 +30,7 @@ use crate::service::{
     GetArtifactVersionResponse, ListRequest, ListResponse, LoadRequest, LoadResponse, SaveRequest,
     SaveResponse, VersionsRequest, VersionsResponse,
 };
+use crate::util::{file_has_user_namespace, go_path_escape, go_sprint, validation_failed};
 
 /// Port of Go artifactKey. Derived `Ord` (with the version reversed) reproduces the
 /// `ordered.Encode(app, user, session, file, ordered.Rev(version))` byte order, so a
@@ -102,52 +102,6 @@ pub struct InMemoryArtifactService {
 
 /// Port of Go userScopedArtifactKey: the session slot user-scoped artifacts are stored under.
 const USER_SCOPED_ARTIFACT_KEY: &str = "user";
-
-/// Port of Go fileHasUserNamespace.
-fn file_has_user_namespace(file_name: &str) -> bool {
-    file_name.starts_with("user:")
-}
-
-/// Wraps a validation error as Go does: `fmt.Errorf("request validation failed: %w", err)`.
-fn validation_failed(err: ArtifactError) -> ArtifactError {
-    match err {
-        ArtifactError::InvalidRequest(m) => {
-            ArtifactError::InvalidRequest(format!("request validation failed: {m}"))
-        }
-        other => other,
-    }
-}
-
-/// Port of Go `fmt.Sprint(value)` for a custom-metadata value. Arrays and objects use their
-/// JSON text where Go would print `[...]` / `map[...]`.
-fn sprint(v: &Value) -> String {
-    match v {
-        Value::String(s) => s.clone(),
-        Value::Number(n) => n.to_string(),
-        Value::Bool(b) => b.to_string(),
-        Value::Null => "<nil>".to_owned(),
-        Value::Array(_) | Value::Object(_) => serde_json::to_string(v).unwrap_or_default(),
-    }
-}
-
-/// Port of Go net/url PathEscape: keeps ALPHA / DIGIT / "-_.~" / "$&+:=@", percent-encodes
-/// every other byte (upper-case hex).
-fn path_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        let keep = b.is_ascii_alphanumeric()
-            || matches!(
-                b,
-                b'-' | b'_' | b'.' | b'~' | b'$' | b'&' | b'+' | b':' | b'=' | b'@'
-            );
-        if keep {
-            out.push(char::from(b));
-        } else {
-            let _ = write!(out, "%{b:02X}");
-        }
-    }
-    out
-}
 
 /// Session slot an artifact is stored under: `"user"` for user-scoped file names.
 fn storage_session<'a>(session_id: &'a str, file_name: &str) -> &'a str {
@@ -247,7 +201,7 @@ impl ArtifactService for InMemoryArtifactService {
         let custom_metadata: Map<String, Value> = req
             .custom_metadata
             .iter()
-            .map(|(k, v)| (k.clone(), Value::String(sprint(v))))
+            .map(|(k, v)| (k.clone(), Value::String(go_sprint(v))))
             .collect();
         // Read the caller-provided clock outside the service lock. A provider may call back
         // into the service, so invoking it while locked could deadlock.
@@ -422,13 +376,13 @@ impl ArtifactService for InMemoryArtifactService {
         };
         let (version, entry) = found.ok_or(ArtifactError::NotFound)?;
 
-        let app = path_escape(&req.app_name);
-        let user = path_escape(&req.user_id);
-        let file = path_escape(&req.file_name);
+        let app = go_path_escape(&req.app_name);
+        let user = go_path_escape(&req.user_id);
+        let file = go_path_escape(&req.file_name);
         let canonical_uri = if user_scoped {
             format!("memory://apps/{app}/users/{user}/artifacts/{file}/versions/{version}")
         } else {
-            let session = path_escape(session_id);
+            let session = go_path_escape(session_id);
             format!(
                 "memory://apps/{app}/users/{user}/sessions/{session}/artifacts/{file}/versions/{version}"
             )
