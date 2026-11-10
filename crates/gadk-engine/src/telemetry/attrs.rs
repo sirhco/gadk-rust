@@ -20,7 +20,7 @@
 
 use std::sync::Arc;
 
-use gadk_model::{Backend, LlmRequest, LlmResponse, ModelError};
+use gadk_model::{Backend, LlmRequest, LlmResponse};
 use gadk_session::Event;
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -80,9 +80,9 @@ pub(crate) const SCHEMA_URL_1_36: &str = "https://opentelemetry.io/schemas/1.36.
 /// The default (1.44) schema URL.
 pub(crate) const SCHEMA_URL_1_44: &str = "https://opentelemetry.io/schemas/1.44.0";
 
-/// Go `errorType`'s value for an error that is not a `genai.APIError`: the type of a Go
-/// `errors.New` error, which is what an ADK-Go error reaching a span usually is.
-pub(crate) const GO_ERROR_STRING_TYPE: &str = "*errors.errorString";
+/// Go `errorType` and its value for an error that is not a `genai.APIError` (shared with
+/// gadk-agent's agent spans).
+pub(crate) use gadk_agent::agent::telemetry::{GO_ERROR_STRING_TYPE, error_type};
 
 /// Go `schemaURL`: the schema of the tracer and the logger, following the env. `tracing` has no
 /// instrumentation scope, so nothing records it; the debug view does not show it.
@@ -121,27 +121,6 @@ impl SpanError {
             error_type: GO_ERROR_STRING_TYPE.to_owned(),
         }
     }
-}
-
-/// Go `errorType`: an API error's HTTP code (Go `errors.As(err, &genai.APIError{})`, through
-/// wrapping), else [`GO_ERROR_STRING_TYPE`] (Go names the error's dynamic type, which a Rust
-/// error does not have).
-pub(crate) fn error_type(err: &(dyn std::error::Error + 'static)) -> String {
-    let mut cur: Option<&(dyn std::error::Error + 'static)> = Some(err);
-    while let Some(e) = cur {
-        let model = e.downcast_ref::<ModelError>().or_else(|| {
-            e.downcast_ref::<gadk_agent::AgentError>()
-                .and_then(|a| match a {
-                    gadk_agent::AgentError::Model(m) => Some(m),
-                    _ => None,
-                })
-        });
-        if let Some(ModelError::Api { code, .. }) = model {
-            return code.to_string();
-        }
-        cur = e.source();
-    }
-    GO_ERROR_STRING_TYPE.to_owned()
 }
 
 /// Go `RecordError`: marks `span` failed with `err` (status `ERROR`, the description in

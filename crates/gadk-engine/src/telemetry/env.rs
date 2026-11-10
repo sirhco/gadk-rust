@@ -14,29 +14,29 @@
 // limitations under the License.
 
 //! The telemetry environment (port of the environment rules of Go `internal/telemetry/logger.go`):
-//! the process-wide [`EnvProvider`] installed with [`set_env_provider`] (default [`ProcessEnv`]),
+//! the process-wide [`EnvProvider`] installed with [`set_env_provider`] (default
+//! [`ProcessEnv`](gadk_platform::env::ProcessEnv)),
 //! the content-capture mode (`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`, read once and
 //! cached until the next [`set_env_provider`] or [`apply_env`], as Go's `sync.Once` plus
 //! `ApplyEnv`), and the 1.36 schema opt-in (`ADK_TELEMETRY_SCHEMA_VERSION_OPT_IN`, read on every
-//! call, as Go's `useLegacySchema`).
+//! call, as Go's `useLegacySchema`). The provider and the schema switch live in gadk-agent
+//! (`gadk_agent::agent::telemetry`), whose agent spans read them too.
 
 // `apply_env` and the cache are read by the log records (Task 11).
 #![allow(dead_code)]
 
 use std::sync::Arc;
 
-use gadk_platform::env::{EnvProvider, ProcessEnv};
+#[cfg(test)]
+pub(crate) use gadk_agent::agent::telemetry::{OTEL_SEMCONV_1_36, SCHEMA_VERSION_OPT_IN_ENV_VAR};
+pub(crate) use gadk_agent::agent::telemetry::{env_provider as provider, use_legacy_schema};
+use gadk_platform::env::EnvProvider;
 use gadk_platform::{go_to_lower, go_to_upper};
-use parking_lot::{Mutex, RwLock};
+use parking_lot::Mutex;
 
 /// Go `captureMessageContentEnvVar`.
 pub(crate) const CAPTURE_MESSAGE_CONTENT_ENV_VAR: &str =
     "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT";
-/// Go `adkTelemetrySchemaVersionOptIn`: `otel_semconv_1_36` or `1` selects the legacy (1.36)
-/// schema; anything else the default (1.44).
-pub(crate) const SCHEMA_VERSION_OPT_IN_ENV_VAR: &str = "ADK_TELEMETRY_SCHEMA_VERSION_OPT_IN";
-/// Go `otelSemconv136`.
-pub(crate) const OTEL_SEMCONV_1_36: &str = "otel_semconv_1_36";
 
 /// Go `contentCaptureMode`: which signals may carry message content.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,7 +51,6 @@ pub(crate) enum ContentCaptureMode {
     SpanAndEvent,
 }
 
-static PROVIDER: RwLock<Option<Arc<dyn EnvProvider>>> = RwLock::new(None);
 static CAPTURE_MODE: Mutex<Option<ContentCaptureMode>> = Mutex::new(None);
 
 /// Installs the process-wide environment the engine's telemetry reads
@@ -59,16 +58,8 @@ static CAPTURE_MODE: Mutex<Option<ContentCaptureMode>> = Mutex::new(None);
 /// the default is the process environment. The cached content-capture mode is dropped, so the
 /// next read uses `env`.
 pub fn set_env_provider(env: Arc<dyn EnvProvider>) {
-    *PROVIDER.write() = Some(env);
+    gadk_agent::agent::telemetry::set_env_provider(env);
     *CAPTURE_MODE.lock() = None;
-}
-
-/// The installed provider ([`ProcessEnv`] when none was installed).
-pub(crate) fn provider() -> Arc<dyn EnvProvider> {
-    PROVIDER
-        .read()
-        .clone()
-        .unwrap_or_else(|| Arc::new(ProcessEnv))
 }
 
 /// `key` from the installed provider; unset reads as empty (Go `os.Getenv`).
@@ -124,15 +115,6 @@ pub(crate) fn capture_content_on_spans() -> bool {
     matches!(
         capture_mode(),
         ContentCaptureMode::SpanOnly | ContentCaptureMode::SpanAndEvent
-    )
-}
-
-/// Go `useLegacySchema`: whether `ADK_TELEMETRY_SCHEMA_VERSION_OPT_IN` selects the 1.36 schema;
-/// read on every call.
-pub(crate) fn use_legacy_schema() -> bool {
-    matches!(
-        go_to_lower(getenv(SCHEMA_VERSION_OPT_IN_ENV_VAR).trim()).as_str(),
-        OTEL_SEMCONV_1_36 | "1"
     )
 }
 
@@ -211,7 +193,7 @@ mod tests {
         assert!(capture_message_content());
         assert!(capture_content_on_spans());
         // A provider change is what drops the cache; the old mode is kept until then.
-        *PROVIDER.write() = Some(env(&[]));
+        gadk_agent::agent::telemetry::set_env_provider(env(&[]));
         assert_eq!(capture_mode(), ContentCaptureMode::SpanAndEvent);
         apply_env();
         assert_eq!(capture_mode(), ContentCaptureMode::None);
@@ -230,9 +212,15 @@ mod tests {
             " OTEL_SEMCONV_1_36 ",
         )]));
         assert!(use_legacy_schema());
-        *PROVIDER.write() = Some(env(&[(SCHEMA_VERSION_OPT_IN_ENV_VAR, "1")]));
+        gadk_agent::agent::telemetry::set_env_provider(env(&[(
+            SCHEMA_VERSION_OPT_IN_ENV_VAR,
+            "1",
+        )]));
         assert!(use_legacy_schema());
-        *PROVIDER.write() = Some(env(&[(SCHEMA_VERSION_OPT_IN_ENV_VAR, "2")]));
+        gadk_agent::agent::telemetry::set_env_provider(env(&[(
+            SCHEMA_VERSION_OPT_IN_ENV_VAR,
+            "2",
+        )]));
         assert!(!use_legacy_schema());
         set_env_provider(Arc::new(MapEnv::default()));
         assert!(!use_legacy_schema());

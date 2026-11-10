@@ -33,6 +33,7 @@ use super::attrs::{
 };
 use super::env::use_legacy_schema;
 use super::genai_messages::reported_finish_reason;
+use super::logger::{log_request, log_response};
 use super::semconv::OperationDetails;
 use super::{in_workflow_scope, workflow_span};
 
@@ -112,7 +113,9 @@ pub(crate) type ModelItem = (Result<LlmResponse, ModelError>, String);
 /// at the first error, the first response that reports a finish reason, the first response
 /// when the call does not stream, or the end of the stream (the legacy schema: the first error
 /// or non-partial response), whichever is first, or when the stream is dropped; at its end it
-/// gets the result attributes and, in the default schema, the inference-details log record.
+/// gets the result attributes and, in the default schema, the inference-details log record. In
+/// the legacy schema the request's log records follow the span's start and the `gen_ai.choice`
+/// record precedes the end at the first non-partial response (Go `logRequest`/`logResponse`).
 /// `call` receives `req` once the span has read it.
 pub(crate) fn instrument_generate_content(
     params: GenerateContentParams,
@@ -120,7 +123,7 @@ pub(crate) fn instrument_generate_content(
     call: impl FnOnce(LlmRequest) -> BoxStream<'static, ModelItem>,
 ) -> BoxStream<'static, ModelItem> {
     let span = start_generate_content_span(&params, &req);
-    // Go logRequest (the legacy schema's request log records) is emitted here (Task 11).
+    log_request(&span, &req, params.backend);
     let mut details = OperationDetails::new(span.clone());
     details.note_llm_request(&req);
     let inner = span.in_scope(|| call(req));
@@ -188,8 +191,7 @@ impl GenerateContentStream {
                         ..Default::default()
                     };
                     if !resp.partial {
-                        // Go logResponse (the legacy schema's gen_ai.choice record) is emitted
-                        // here (Task 11).
+                        log_response(&st.span, Some(resp), st.params.backend);
                         self.end();
                     }
                 }
