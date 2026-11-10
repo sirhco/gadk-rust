@@ -17,6 +17,28 @@
 //! `telemetry.go`). No OpenTelemetry: the static span name is Go's operation and `otel.name` is Go's
 //! full span name. All spans are `INFO`. The node, model and tool spans declare `otel.status_code` and
 //! `error.message` as empty fields; the code that ends the span records them on error.
+//!
+//! The module is public only for [`set_env_provider`]; everything else stays crate-private.
+//! Submodules (plan 5a): `env` (the process-wide environment provider, Go `logger.go`'s
+//! environment rules), the span attributes of Go `telemetry.go` and friends (`attrs`,
+//! `converters`, `inference`, `instrumentation`, `semconv`), the OTel log records of Go
+//! `logger.go` and `genaimessages.go` (`logger`, `genai_messages`), and the test digests of Go
+//! `telemetrytest` (`span_digest`, `log_digest`).
+
+pub(crate) mod attrs;
+pub(crate) mod converters;
+pub(crate) mod env;
+pub(crate) mod genai_messages;
+pub(crate) mod inference;
+pub(crate) mod instrumentation;
+#[cfg(any(test, feature = "testutil"))]
+pub(crate) mod log_digest;
+pub(crate) mod logger;
+pub(crate) mod semconv;
+#[cfg(any(test, feature = "testutil"))]
+pub(crate) mod span_digest;
+
+pub use env::set_env_provider;
 
 use chrono::{DateTime, Utc};
 use gadk_genai::GenerateContentResponseUsageMetadata;

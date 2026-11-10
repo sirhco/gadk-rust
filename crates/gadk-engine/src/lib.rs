@@ -17,17 +17,18 @@
 //! tools (port of ADK-Go `agent/llmagent`, `internal/llminternal`, `workflow`, `runner`, …).
 
 pub mod agents;
+pub mod compactionvalidate;
 pub mod error;
 pub mod llm;
 pub mod plugin;
 pub mod runner;
+pub mod telemetry;
 pub mod tool;
 pub mod workflow;
 
 pub(crate) mod artifacts;
 pub(crate) mod compaction;
 pub(crate) mod memory;
-pub(crate) mod telemetry;
 
 #[cfg(any(test, feature = "testutil"))]
 pub mod testutil;
