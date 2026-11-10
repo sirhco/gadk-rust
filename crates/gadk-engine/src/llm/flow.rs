@@ -45,7 +45,7 @@ use crate::{
         },
         transfer::transfer_target_agents,
     },
-    telemetry::generate_content_span,
+    telemetry::{attrs::GenerateContentParams, instrumentation::instrument_generate_content},
     tool::utils::{function_calls, populate_client_function_call_id},
     workflow::route::go_quote,
 };
@@ -565,75 +565,29 @@ pub(crate) fn is_thought_only_turn(ev: Option<&Event>) -> bool {
     c.parts.iter().all(|p| p.thought)
 }
 
-/// Port of base_flow.go:1090 generateContent + telemetry.InstrumentGenerateContent (non-legacy
-/// schema). The `generate_content` span covers only the model call (callbacks and plugins stay
-/// outside it). It ends on the first error, the first response that reports a finish reason, the
-/// first response when `!stream`, or the end of the stream, recording the last response's usage.
-/// Each item reserves one event ID (Go newResponseWithEventID).
+/// Port of base_flow.go:1090 generateContent: the model call inside
+/// `telemetry.InstrumentGenerateContent`'s `generate_content` span, which covers only the model
+/// call (callbacks and plugins stay outside it). Each item reserves one event ID (Go
+/// newResponseWithEventID).
 pub(crate) fn generate_content(
     ctx: &InvocationContext,
     model: Arc<dyn Llm>,
     req: LlmRequest,
     stream: bool,
 ) -> BoxStream<'static, (Result<LlmResponse, ModelError>, String)> {
-    let span = generate_content_span(model.name());
+    let params = GenerateContentParams {
+        model_name: model.name().to_owned(),
+        invocation_id: ctx.invocation_id().to_owned(),
+        backend: gadk_model::google_variant(model.as_ref()),
+        stream,
+    };
     let platform = ctx.platform().clone();
-    let mut inner = span.in_scope(|| model.generate_content(req, stream));
-    Box::pin(async_stream::stream! {
-        let mut span = Some(span);
-        let mut last: Option<LlmResponse> = None;
-        while let Some(item) = inner.next().await {
-            let event_id = platform.new_uuid();
-            if let Some(s) = span.as_ref() {
-                match &item {
-                    Err(e) => {
-                        record_generate_end(s, last.as_ref(), Some(e));
-                        // Dropping the last handle closes the span.
-                        span = None;
-                    }
-                    Ok(r) => {
-                        last = Some(r.clone());
-                        if r.finish_reason.is_some() || !stream {
-                            record_generate_end(s, last.as_ref(), None);
-                            span = None;
-                        }
-                    }
-                }
-            }
-            yield (item, event_id);
-        }
-        if let Some(s) = span.take() {
-            record_generate_end(&s, last.as_ref(), None);
-        }
+    instrument_generate_content(params, req, move |req| {
+        model
+            .generate_content(req, stream)
+            .map(move |item| (item, platform.new_uuid()))
+            .boxed()
     })
-}
-
-/// Go traceGenerateContentResult: usage and status of the ended `generate_content` span.
-fn record_generate_end(span: &tracing::Span, resp: Option<&LlmResponse>, err: Option<&ModelError>) {
-    let usage = resp.and_then(|r| r.usage_metadata.as_ref());
-    let input = usage.map(|u| u.prompt_token_count);
-    let output = usage.map(|u| u.candidates_token_count);
-    match err {
-        Some(e) => {
-            // Also set the span's declared Empty status fields, not just the event's.
-            span.record("otel.status_code", "ERROR");
-            span.record("error.message", tracing::field::display(e));
-            tracing::error!(
-                parent: span,
-                otel.status_code = "ERROR",
-                otel.status_description = %e,
-                gen_ai.usage.input_tokens = input,
-                gen_ai.usage.output_tokens = output,
-                "generate_content failed"
-            );
-        }
-        None => tracing::info!(
-            parent: span,
-            gen_ai.usage.input_tokens = input,
-            gen_ai.usage.output_tokens = output,
-            "generate_content finished"
-        ),
-    }
 }
 
 #[cfg(test)]
@@ -1101,21 +1055,17 @@ pub(crate) mod span_capture {
         CLOSED.with(|c| c.borrow().get(name).copied().unwrap_or(0))
     }
 
-    /// Installs (once per test binary) a no-op global `Registry` so the global max-level hint and
-    /// callsite interest never collapse to "off" while thread-default capture subscribers come and
-    /// go on parallel test threads. Without it, a concurrent interest rebuild on another thread
-    /// (which does not yet see this thread's new default) can disable every span macro and a
-    /// capture records nothing (flaky `execute_tool_spans_for_parallel_calls`).
-    pub(crate) fn pin_tracing_interest() {
-        static ONCE: std::sync::Once = std::sync::Once::new();
-        ONCE.call_once(|| {
-            let _ = tracing::subscriber::set_global_default(tracing_subscriber::registry());
-        });
+    pub(crate) use crate::telemetry::span_digest::pin_tracing_interest;
+
+    /// Runs `fut` with a recording subscriber as the thread default and the default (empty)
+    /// telemetry environment; use only on a current-thread runtime.
+    pub(crate) async fn capture_spans<F: Future>(fut: F) -> (F::Output, Vec<CapturedSpan>) {
+        let _env = crate::telemetry::env::test_env(&[]);
+        capture_spans_in_env(fut).await
     }
 
-    /// Runs `fut` with a recording subscriber as the thread default; use only on a
-    /// current-thread runtime.
-    pub(crate) async fn capture_spans<F: Future>(fut: F) -> (F::Output, Vec<CapturedSpan>) {
+    /// [`capture_spans`] for a test that installed its own telemetry environment.
+    pub(crate) async fn capture_spans_in_env<F: Future>(fut: F) -> (F::Output, Vec<CapturedSpan>) {
         pin_tracing_interest();
         CLOSED.with(|c| c.borrow_mut().clear());
         let spans: Arc<parking_lot::Mutex<Vec<CapturedSpan>>> = Arc::default();
@@ -1141,6 +1091,11 @@ pub(crate) mod span_capture {
         }
         fn record_debug(&mut self, f: &Field, v: &dyn std::fmt::Debug) {
             self.0.insert(f.name().to_owned(), format!("{v:?}"));
+        }
+        /// A structured attribute's JSON text (Go's `Value.Emit` of a string slice).
+        fn record_bytes(&mut self, f: &Field, v: &[u8]) {
+            self.0
+                .insert(f.name().to_owned(), String::from_utf8_lossy(v).into_owned());
         }
     }
 

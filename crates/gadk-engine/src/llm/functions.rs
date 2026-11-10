@@ -37,7 +37,12 @@ use tracing::Instrument;
 
 use crate::{
     llm::{flow::Flow, live::session::LiveSessionImpl},
-    telemetry::execute_tool_span,
+    telemetry::{
+        attrs::{
+            SpanError, start_execute_tool_span, trace_merged_tool_calls_result, trace_tool_result,
+        },
+        merged_tool_calls_span,
+    },
     tool::utils::{function_calls, generate_function_call_id},
     workflow::route::go_quote,
 };
@@ -147,15 +152,15 @@ async fn handle_function_calls_inner(
     names.sort();
     let names = Arc::new(names);
     // Go: a merged span only for more than one call (otel.name "execute_tool (merged)").
-    let merged_span = (calls.len() > 1).then(|| execute_tool_span("(merged)"));
+    let merged_span = (calls.len() > 1).then(merged_tool_calls_span);
     let slots: Arc<parking_lot::Mutex<Vec<Option<Event>>>> =
         Arc::new(parking_lot::Mutex::new(vec![None; calls.len()]));
     let cbs = flow.tool_callbacks();
     let mut tasks: Vec<BoxFuture<'static, ()>> = Vec::with_capacity(calls.len());
     for (i, fc) in calls.into_iter().enumerate() {
         let span = match &merged_span {
-            Some(m) => m.in_scope(|| execute_tool_span(&fc.name)),
-            None => execute_tool_span(&fc.name),
+            Some(m) => m.in_scope(|| start_execute_tool_span(&fc.name, &fc.args)),
+            None => start_execute_tool_span(&fc.name, &fc.args),
         };
         let (ctx, cbs, slots, names) = (ctx.clone(), cbs.clone(), slots.clone(), names.clone());
         let live = live.clone();
@@ -177,7 +182,15 @@ async fn handle_function_calls_inner(
         None => run.await,
     }
     let events = std::mem::take(&mut *slots.lock());
-    merge_parallel_function_response_events(events)
+    let merged = merge_parallel_function_response_events(events);
+    if let Some(s) = &merged_span {
+        // Go's deferred TraceMergedToolCallsResult(mergedToolCallSpan, mergedEvent, err).
+        match &merged {
+            Ok(ev) => trace_merged_tool_calls_result(s, ev.as_ref(), None),
+            Err(e) => trace_merged_tool_calls_result(s, None, Some(&SpanError::new(e))),
+        }
+    }
+    merged
 }
 
 /// The body of Go's per-call task closure (base_flow.go:1350-1525).
@@ -295,16 +308,17 @@ async fn run_one_call(
     // Compaction is the framework's to write (Go session.EventActions.Compaction).
     ev.actions.compaction = None;
 
-    // Go telemetry.TraceToolResult: only a string (or error) "error" value marks the span failed.
-    if let Some(Value::String(err)) = result.get("error") {
-        span.record("otel.status_code", "ERROR");
-        span.record("error.message", err.as_str());
-        tracing::error!(
-            otel.status_code = "ERROR",
-            otel.status_description = %err,
-            "execute_tool failed"
-        );
-    }
+    // Go telemetry.TraceToolResult: only a string (or error) "error" value marks the span failed;
+    // a call without a tool (stop_streaming or an unknown name) is Go's fakeTool.
+    let description = match &tool {
+        Some(t) if fc.name != "stop_streaming" => t.description(),
+        _ => "Tool not found",
+    };
+    let tool_err = match result.get("error") {
+        Some(Value::String(err)) => Some(SpanError::text(err.as_str())),
+        _ => None,
+    };
+    trace_tool_result(&span, description, Some(&ev), tool_err.as_ref());
     Some(ev)
 }
 
@@ -1097,6 +1111,31 @@ mod tests {
             ]
         );
         assert!(spans.iter().all(|s| s.closed), "{spans:#?}");
+        // Go TraceMergedToolCallsResult on the merged span; TraceToolResult on each call's.
+        let merged = spans
+            .iter()
+            .find(|s| s.otel_name == "execute_tool (merged)")
+            .unwrap();
+        assert_eq!(
+            merged.field("gen_ai.tool.name").as_deref(),
+            Some("(merged tools)")
+        );
+        assert_eq!(
+            merged.field("gen_ai.tool.description").as_deref(),
+            Some("(merged tools)")
+        );
+        assert!(merged.field("gcp.vertex.agent.event_id").is_some());
+        assert!(merged.field("gcp.vertex.agent.tool_response").is_none());
+        let t1 = spans
+            .iter()
+            .find(|s| s.otel_name == "execute_tool t1")
+            .unwrap();
+        assert_eq!(
+            t1.field("gen_ai.operation.name").as_deref(),
+            Some("execute_tool")
+        );
+        assert!(t1.field("gcp.vertex.agent.event_id").is_some());
+        assert!(t1.field("gen_ai.tool.description").is_some());
     }
 
     #[tokio::test]
@@ -1120,6 +1159,11 @@ mod tests {
         assert_eq!(
             span.field("otel.status_description").as_deref(),
             Some("boom")
+        );
+        assert_eq!(span.field("error.message").as_deref(), Some("boom"));
+        assert_eq!(
+            span.field("error.type").as_deref(),
+            Some("*errors.errorString")
         );
     }
 

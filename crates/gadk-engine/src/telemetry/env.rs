@@ -20,7 +20,7 @@
 //! `ApplyEnv`), and the 1.36 schema opt-in (`ADK_TELEMETRY_SCHEMA_VERSION_OPT_IN`, read on every
 //! call, as Go's `useLegacySchema`).
 
-// Read by the span attributes (Task 3) and log records (Task 11).
+// `apply_env` and the cache are read by the log records (Task 11).
 #![allow(dead_code)]
 
 use std::sync::Arc;
@@ -134,6 +134,36 @@ pub(crate) fn use_legacy_schema() -> bool {
         go_to_lower(getenv(SCHEMA_VERSION_OPT_IN_ENV_VAR).trim()).as_str(),
         OTEL_SEMCONV_1_36 | "1"
     )
+}
+
+/// A test's telemetry environment (plan decision D7): holds
+/// [`ENV_LOCK`](crate::testutil::telemetry::ENV_LOCK) and the installed [`MapEnv`]
+/// (`gadk_platform::env::MapEnv`) until dropped, then installs an empty one.
+#[cfg(test)]
+pub(crate) struct TestEnv {
+    _lock: parking_lot::MutexGuard<'static, ()>,
+}
+
+/// Installs `pairs` as the telemetry environment for the rest of the test (Go
+/// `setEnvForTesting`); every test that reads the telemetry environment holds one, so tests that
+/// change it cannot race tests that read it.
+#[cfg(test)]
+pub(crate) fn test_env(pairs: &[(&str, &str)]) -> TestEnv {
+    let lock = crate::testutil::telemetry::ENV_LOCK.lock();
+    set_env_provider(Arc::new(gadk_platform::env::MapEnv(
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect(),
+    )));
+    TestEnv { _lock: lock }
+}
+
+#[cfg(test)]
+impl Drop for TestEnv {
+    fn drop(&mut self) {
+        set_env_provider(Arc::new(gadk_platform::env::MapEnv::default()));
+    }
 }
 
 #[cfg(test)]
