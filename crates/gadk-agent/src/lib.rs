@@ -21,6 +21,7 @@ pub mod context;
 pub mod error;
 mod go_fmt;
 pub mod live;
+pub mod loader;
 pub mod mode;
 pub mod parent_map;
 pub mod plugin;
@@ -49,6 +50,7 @@ pub use error::{AgentError, EventStream, SharedToolError, ToolError};
 #[doc(hidden)]
 pub use go_fmt::go_quote;
 pub use live::{LiveRequest, LiveRunConfig, LiveSession};
+pub use loader::{Loader, LoaderError, MultiLoader, SingleLoader};
 pub use mode::{BoundModes, Mode};
 pub use parent_map::ParentMap;
 pub use plugin::{Plugin, PluginConfig};

@@ -1,0 +1,264 @@
+// Copyright 2026 Chris Olson
+// Portions derived from ADK-Go (https://github.com/google/adk-go), Copyright 2026 Google LLC.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! Port of Go `controllers/devfeatures.go` and the builder, tests and eval routers of
+//! `internal/routers/{agentgraph,eval}.go`: the developer endpoints the web UI calls but ADK
+//! does not implement answer 501 with a body naming the missing feature (plan 5a Task 6 fills the
+//! two handlers).
+
+#![allow(dead_code, unused_variables, unused_imports, clippy::todo)]
+
+use http::{Method, StatusCode};
+use serde::{Deserialize, Serialize};
+
+use crate::rest::http_error::encode_json_response;
+use crate::rest::routing::{DEV_PREFIX, Handler, Request, Response, Route, handler, route};
+
+/// Go `controllers.NotInstalledDetail`: the marker the web UI looks for in an eval error.
+pub const NOT_INSTALLED_DETAIL: &str = "not installed";
+
+/// Go `builderDetail`.
+const BUILDER_DETAIL: &str =
+    "ADK Go agents are defined in Go code, so there is no server-side agent configuration to edit.";
+/// Go `testsDetail`.
+const TESTS_DETAIL: &str =
+    "ADK Go does not implement the web UI tests tab. Write Go tests against runner.Run instead.";
+
+/// Go `evalDetail`.
+fn eval_detail() -> String {
+    format!(
+        "agent evaluation is {NOT_INSTALLED_DETAIL} in ADK Go. Use adk-python for eval workflows."
+    )
+}
+
+/// Port of Go `controllers.ErrorResponse`: a machine-readable error body.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ErrorResponse {
+    /// What failed.
+    pub error: String,
+    /// What a caller can do about it; `omitempty`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub detail: String,
+}
+
+/// Port of Go `controllers.NewNotImplementedHandler`: 501 with
+/// `{"error":"<feature> is not implemented in ADK Go","detail":"<detail>"}`.
+pub fn new_not_implemented_handler(feature: &str, detail: &str) -> Handler {
+    let body = ErrorResponse {
+        error: format!("{feature} is not implemented in ADK Go"),
+        detail: detail.to_owned(),
+    };
+    handler(move |_req| {
+        let resp = encode_json_response(&body, StatusCode::NOT_IMPLEMENTED);
+        async move { resp }
+    })
+}
+
+/// Port of Go `controllers.MetricsInfoResponse`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct MetricsInfoResponse {
+    /// Go `MetricsInfo []any` (`metricsInfo`).
+    #[serde(rename = "metricsInfo")]
+    pub metrics_info: Vec<serde_json::Value>,
+}
+
+/// Go `controllers.MetricsInfoHandler`: `{"metricsInfo":[]}`.
+pub async fn metrics_info_handler(req: Request) -> Response {
+    todo!("plan 5a Task 6")
+}
+
+/// Go `controllers.AgentBuilderConfigHandler`: an empty `text/plain; charset=UTF-8` 200.
+pub async fn agent_builder_config_handler(req: Request) -> Response {
+    todo!("plan 5a Task 6")
+}
+
+/// Go `AgentBuilderAPIRouter.Routes`.
+pub(crate) fn agent_builder_routes() -> Vec<Route> {
+    let not_implemented = new_not_implemented_handler("the agent builder", BUILDER_DETAIL);
+    vec![
+        route(
+            "GetAgentBuilderConfig",
+            &[Method::GET],
+            format!("{DEV_PREFIX}/builder"),
+            handler(agent_builder_config_handler),
+        ),
+        route(
+            "SaveAgentBuilderConfig",
+            &[Method::POST],
+            format!("{DEV_PREFIX}/builder/save"),
+            not_implemented.clone(),
+        ),
+        route(
+            "CancelAgentBuilderChanges",
+            &[Method::POST],
+            format!("{DEV_PREFIX}/builder/cancel"),
+            not_implemented,
+        ),
+    ]
+}
+
+/// Go `TestsAPIRouter.Routes`.
+pub(crate) fn tests_routes() -> Vec<Route> {
+    let not_implemented = new_not_implemented_handler("the tests tab", TESTS_DETAIL);
+    [
+        ("ListTests", Method::GET, "/tests"),
+        ("RebuildTests", Method::POST, "/tests/rebuild"),
+        ("RunTests", Method::POST, "/tests/run"),
+        ("GetTest", Method::GET, "/tests/{test_name}"),
+        ("CreateTest", Method::PUT, "/tests/{test_name}"),
+        ("DeleteTest", Method::DELETE, "/tests/{test_name}"),
+    ]
+    .into_iter()
+    .map(|(name, method, pattern)| {
+        route(
+            name,
+            &[method],
+            format!("{DEV_PREFIX}{pattern}"),
+            not_implemented.clone(),
+        )
+    })
+    .collect()
+}
+
+/// Go `EvalAPIRouter.Routes`.
+pub(crate) fn eval_routes() -> Vec<Route> {
+    let unavailable = new_not_implemented_handler("eval", &eval_detail());
+    let mut routes = vec![route(
+        "GetEvalMetricsInfo",
+        &[Method::GET],
+        format!("{DEV_PREFIX}/metrics-info"),
+        handler(metrics_info_handler),
+    )];
+    let eval = [
+        ("ListEvalSets", Method::GET, "/eval_sets"),
+        ("CreateEvalSet", Method::POST, "/eval-sets"),
+        ("CreateEvalSetUnderscore", Method::POST, "/eval_sets"),
+        ("GetEvalSet", Method::GET, "/eval_sets/{eval_set_id}"),
+        ("DeleteEvalSet", Method::DELETE, "/eval_sets/{eval_set_id}"),
+        (
+            "ListEvalCases",
+            Method::GET,
+            "/eval_sets/{eval_set_id}/evals",
+        ),
+        (
+            "GetEvalCase",
+            Method::GET,
+            "/eval_sets/{eval_set_id}/evals/{eval_case_id}",
+        ),
+        (
+            "UpdateEvalCase",
+            Method::PUT,
+            "/eval_sets/{eval_set_id}/evals/{eval_case_id}",
+        ),
+        (
+            "DeleteEvalCase",
+            Method::DELETE,
+            "/eval_sets/{eval_set_id}/evals/{eval_case_id}",
+        ),
+        (
+            "AddSessionToEvalSet",
+            Method::POST,
+            "/eval_sets/{eval_set_id}/add_session",
+        ),
+        ("RunEval", Method::POST, "/eval_sets/{eval_set_id}/run_eval"),
+        ("ListEvalResults", Method::GET, "/eval_results"),
+        (
+            "GetEvalResult",
+            Method::GET,
+            "/eval_results/{eval_result_id}",
+        ),
+    ];
+    routes.extend(eval.into_iter().map(|(name, method, pattern)| {
+        route(
+            name,
+            &[method],
+            format!("{DEV_PREFIX}{pattern}"),
+            unavailable.clone(),
+        )
+    }));
+    let legacy = [
+        (
+            "ListEvalSetsLegacyPath",
+            Method::GET,
+            "/apps/{app_name}/eval_sets",
+        ),
+        (
+            "ListEvalResultsLegacyPath",
+            Method::GET,
+            "/apps/{app_name}/eval_results",
+        ),
+        (
+            "CreateEvalSetLegacyPath",
+            Method::POST,
+            "/apps/{app_name}/eval_sets/{eval_set_name}",
+        ),
+    ];
+    routes.extend(
+        legacy
+            .into_iter()
+            .map(|(name, method, pattern)| route(name, &[method], pattern, unavailable.clone())),
+    );
+    routes
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+
+    /// Go `NewNotImplementedHandler("eval", evalDetail)` on an `httptest.ResponseRecorder`.
+    #[tokio::test]
+    async fn not_implemented_handler_matches_go() {
+        let h = new_not_implemented_handler("eval", &eval_detail());
+        let resp = h(Request::new(axum::body::Body::empty())).await;
+        assert_eq!(resp.status(), StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(
+            resp.headers()["content-type"],
+            "application/json; charset=UTF-8"
+        );
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(
+            body.as_ref(),
+            &b"{\"error\":\"eval is not implemented in ADK Go\",\"detail\":\"agent evaluation is not installed in ADK Go. Use adk-python for eval workflows.\"}\n"[..]
+        );
+    }
+
+    #[test]
+    fn route_tables_follow_go() {
+        let names: Vec<_> = eval_routes()
+            .iter()
+            .map(|r| (r.name, r.pattern.clone()))
+            .collect();
+        assert_eq!(names.len(), 17);
+        assert_eq!(
+            names[0],
+            (
+                "GetEvalMetricsInfo",
+                "/dev/apps/{app_name}/metrics-info".into()
+            )
+        );
+        assert_eq!(
+            names[16],
+            (
+                "CreateEvalSetLegacyPath",
+                "/apps/{app_name}/eval_sets/{eval_set_name}".into()
+            )
+        );
+        assert_eq!(tests_routes().len(), 6);
+        assert!(agent_builder_routes().iter().all(|r| !r.public));
+    }
+}

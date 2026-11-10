@@ -28,6 +28,8 @@ database = ["dep:gadk-session-database"]
 gcs = ["dep:gadk-artifact-gcs"]
 # Sessions and memory in a Vertex AI Agent Engine (gadk-vertexai); not in `default`.
 vertexai = ["dep:gadk-vertexai"]
+# The ADK REST API server with inbound authn/authz (gadk-server); not in `default`.
+server = ["dep:gadk-server"]
 
 [dependencies]
 gadk-genai = { workspace = true }
@@ -48,6 +50,7 @@ gadk-anthropic = { workspace = true, optional = true }
 gadk-openai = { workspace = true, optional = true }
 gadk-session-database = { workspace = true, optional = true }
 gadk-vertexai = { workspace = true, optional = true }
+gadk-server = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

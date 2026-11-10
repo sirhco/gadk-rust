@@ -47,6 +47,11 @@ pub use gadk_model as model;
 #[cfg(feature = "openai")]
 pub use gadk_openai as openai;
 pub use gadk_platform as platform;
+/// The ADK REST API server (`server::rest`) with inbound authentication (`server::authn`) and
+/// authorization (`server::authz`), wire-compatible with an ADK-Go server (feature `server`, not
+/// on by default; re-export of `gadk-server`).
+#[cfg(feature = "server")]
+pub use gadk_server as server;
 pub use gadk_session as session;
 /// Sessions in a relational database: sqlite, or PostgreSQL with the crate's `postgres`
 /// feature (feature `database`, not on by default; re-export of `gadk-session-database`).

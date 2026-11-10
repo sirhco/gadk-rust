@@ -448,6 +448,21 @@ impl TestAgentRunner {
     }
 }
 
+/// Telemetry test helpers (port of Go `internal/telemetry/telemetrytest`): the span and log
+/// digests, the `tracing` capture behind them, and the lock that serialises tests changing the
+/// telemetry environment (plan decision D7).
+pub mod telemetry {
+    pub use crate::telemetry::log_digest::{LogDigest, LogRecord, build_log_digest, capture_logs};
+    pub use crate::telemetry::span_digest::{
+        Digest, PRESENT, SpanDigest, SpanStub, build_digest, capture_spans,
+    };
+
+    /// Serialises tests that change the process-wide telemetry environment
+    /// ([`set_env_provider`](crate::telemetry::set_env_provider)); hold it for the whole test and
+    /// restore `MapEnv::default()` before releasing it.
+    pub static ENV_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

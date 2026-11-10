@@ -33,7 +33,7 @@ class EdgeTest(unittest.TestCase):
     def test_agent_dev_dependency_on_engine_is_rejected(self):
         self.edit("gadk-agent", "[dev-dependencies]\n", "[dev-dependencies]\ngadk-engine = { workspace = true }\n")
         errs = cwd.check(self.repo)
-        self.assertTrue(any("only gadk and gadk-tools may depend on gadk-engine" in e for e in errs), errs)
+        self.assertTrue(any("only gadk, gadk-tools and gadk-server may depend on gadk-engine" in e for e in errs), errs)
 
     def test_tools_dev_dependency_on_engine_is_allowed(self):
         text = (self.repo / "crates/gadk-tools/Cargo.toml").read_text()
@@ -151,6 +151,29 @@ class EdgeTest(unittest.TestCase):
         self.assertEqual(cwd.ALLOWED["gadk-vertexai"],
                          {"gadk-session", "gadk-memory", "gadk-genai", "gadk-model", "gadk-platform"})
         self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-vertexai" in deps], ["gadk"])
+
+    def test_server_edges_are_exactly_the_engine_stack(self):
+        self.assertEqual(cwd.ALLOWED["gadk-server"],
+                         {"gadk-agent", "gadk-engine", "gadk-session", "gadk-memory", "gadk-artifact",
+                          "gadk-genai", "gadk-model", "gadk-platform"})
+        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-server" in deps], ["gadk"])
+        self.assertIn("gadk-server", cwd.ENGINE_DEPENDENTS)
+
+    def test_server_dev_dependency_on_engine_is_allowed(self):
+        text = (self.repo / "crates/gadk-server/Cargo.toml").read_text()
+        dev = text.split("[dev-dependencies]\n", 1)[1]
+        self.assertIn('gadk-engine = { workspace = true, features = ["testutil"] }', dev)
+        self.assertEqual(cwd.check(self.repo), [])
+
+    def test_server_normal_dependency_on_tools_is_rejected(self):
+        self.edit("gadk-server", "[dependencies]\n", "[dependencies]\ngadk-tools = { workspace = true }\n")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-server -> gadk-tools is not allowed" in e for e in errs), errs)
+
+    def test_facade_missing_server_edge_is_rejected(self):
+        self.edit("gadk", "gadk-server = { workspace = true, optional = true }\n", "")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk -> gadk-server is missing" in e for e in errs), errs)
 
     def test_model_edges_are_unchanged_by_gcp_auth(self):
         self.assertEqual(cwd.ALLOWED["gadk-model"], {"gadk-genai"})
