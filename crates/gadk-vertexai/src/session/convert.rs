@@ -90,6 +90,9 @@ pub(crate) fn event_to_session_event(event: &Event) -> Result<Value, BoxError> {
 /// A `SessionEvent` JSON as the event Go's `listSessionEvents` builds, including the event ID
 /// from the last segment of `name`; `rawEvent` wins when present.
 pub(crate) fn session_event_to_event(v: &Value) -> Result<Event, BoxError> {
+    // Go decodes the whole response before reading any event, so malformed scalars anywhere in
+    // it fail the call; the lenient readers below are only used on validated input.
+    validate_scalars(v).map_err(|e| wrap(LIST_EVENTS, e))?;
     let id = event_id_from_name(str_field(v, "name")).map_err(|e| wrap(LIST_EVENTS, e))?;
     let timestamp = timestamp_field(v).map_err(|e| wrap(LIST_EVENTS, e))?;
     let invocation_id = str_field(v, "invocationId").to_owned();
@@ -740,7 +743,9 @@ fn strings_field(v: &Value, key: &str) -> Vec<String> {
         .collect()
 }
 
-/// A `bytes` field; text that is not base64 reads as empty.
+/// A `bytes` field; text that is not base64 reads as empty. The lenience is safe because
+/// [`session_event_to_event`] has already rejected such text through [`validate_scalars`]; the
+/// infallible readers are otherwise reached only by the Go-test ports with well-formed input.
 fn bytes_field(v: &Value, key: &str) -> Vec<u8> {
     decode_bytes(str_field(v, key)).unwrap_or_default()
 }
@@ -781,6 +786,175 @@ fn timestamp_field(v: &Value) -> Result<DateTime<Utc>, String> {
         Some(Value::String(s)) => parse_timestamp(s),
         Some(other) => Err(format!("invalid google.protobuf.Timestamp value {other}")),
     }
+}
+
+// ---- Strict scalar validation (Go protojson's `unmarshalScalar`) ----
+
+/// protojson's `invalid value for {kind} field {name}: {raw token}`, without its
+/// `proto: (line:col): ` prefix (as `parse_timestamp`'s texts).
+fn invalid_scalar(kind: &str, name: &str, v: &Value) -> String {
+    let raw = serde_json::to_string(v).unwrap_or_default();
+    format!("invalid value for {kind} field {name}: {raw}")
+}
+
+/// Whether `s` is exactly one JSON number (Go reads it with `json.NewDecoder`).
+fn is_json_number(s: &str) -> bool {
+    let b = s.as_bytes();
+    let digits = |start: usize| {
+        let mut i = start;
+        while b.get(i).is_some_and(u8::is_ascii_digit) {
+            i += 1;
+        }
+        i
+    };
+    let mut i = usize::from(b.first() == Some(&b'-'));
+    match b.get(i) {
+        Some(b'0') => i += 1,
+        Some(b'1'..=b'9') => i = digits(i),
+        _ => return false,
+    }
+    if b.get(i) == Some(&b'.') {
+        let end = digits(i + 1);
+        if end == i + 1 {
+            return false;
+        }
+        i = end;
+    }
+    if matches!(b.get(i), Some(b'e' | b'E')) {
+        i += 1;
+        if matches!(b.get(i), Some(b'+' | b'-')) {
+            i += 1;
+        }
+        let end = digits(i);
+        if end == i {
+            return false;
+        }
+        i = end;
+    }
+    i == b.len()
+}
+
+/// protojson's `unmarshalFloat(tok, 32)`: a number or numeric string that fits a `float`, or
+/// `NaN` / `Infinity` / `-Infinity`.
+fn float32_is_valid(v: &Value) -> bool {
+    match v {
+        Value::Number(n) => n.as_f64().is_some_and(|f| (f as f32).is_finite()),
+        Value::String(s) => {
+            matches!(s.as_str(), "NaN" | "Infinity" | "-Infinity")
+                || (is_json_number(s) && s.parse::<f32>().is_ok_and(f32::is_finite))
+        }
+        _ => false,
+    }
+}
+
+fn check_bytes(v: &Value, key: &str) -> Result<(), String> {
+    match field(v, key) {
+        Some(f) if f.as_str().is_none_or(|s| decode_bytes(s).is_err()) => {
+            Err(invalid_scalar("bytes", key, f))
+        }
+        _ => Ok(()),
+    }
+}
+
+/// `name` is the descriptor's JSON name (`value` for a map value).
+fn check_int32(f: &Value, name: &str) -> Result<(), String> {
+    if f.is_null() || int64_value(f).is_some_and(|n| i32::try_from(n).is_ok()) {
+        Ok(())
+    } else {
+        Err(invalid_scalar("int32", name, f))
+    }
+}
+
+fn check_int32_field(v: &Value, key: &str) -> Result<(), String> {
+    v.get(key).map_or(Ok(()), |f| check_int32(f, key))
+}
+
+fn check_int32_list(v: &Value, key: &str) -> Result<(), String> {
+    array_field(v, key)
+        .iter()
+        .try_for_each(|f| check_int32(f, key))
+}
+
+fn check_float_list(v: &Value, key: &str) -> Result<(), String> {
+    for f in array_field(v, key) {
+        if !float32_is_valid(f) {
+            return Err(invalid_scalar("float", key, f));
+        }
+    }
+    Ok(())
+}
+
+fn check_string_list(v: &Value, key: &str) -> Result<(), String> {
+    for f in array_field(v, key) {
+        if !f.is_string() {
+            return Err(invalid_scalar("string", key, f));
+        }
+    }
+    Ok(())
+}
+
+/// Rejects what protojson would reject in the fields [`session_event_to_event`] reads: `bytes`
+/// that are not base64, `int32`s that are not whole numbers in range, `float`s that do not
+/// parse, and non-string elements of repeated `string` fields.
+fn validate_scalars(v: &Value) -> Result<(), String> {
+    if let Some(content) = field(v, "content") {
+        for part in array_field(content, "parts") {
+            check_bytes(part, "thoughtSignature")?;
+            if let Some(blob) = field(part, "inlineData") {
+                check_bytes(blob, "data")?;
+            }
+        }
+    }
+    if let Some(deltas) = field(v, "actions").and_then(|a| object_field(a, "artifactDelta")) {
+        for version in deltas.values() {
+            check_int32(version, "value")?;
+        }
+    }
+    if let Some(md) = field(v, "eventMetadata") {
+        check_string_list(md, "longRunningToolIds")?;
+        if let Some(g) = field(md, "groundingMetadata") {
+            validate_grounding(g)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_grounding(g: &Value) -> Result<(), String> {
+    check_string_list(g, "webSearchQueries")?;
+    check_string_list(g, "retrievalQueries")?;
+    if let Some(sep) = field(g, "searchEntryPoint") {
+        check_bytes(sep, "sdkBlob")?;
+    }
+    let score =
+        field(g, "retrievalMetadata").and_then(|r| field(r, "googleSearchDynamicRetrievalScore"));
+    if let Some(f) = score
+        && !float32_is_valid(f)
+    {
+        return Err(invalid_scalar(
+            "float",
+            "googleSearchDynamicRetrievalScore",
+            f,
+        ));
+    }
+    for chunk in array_field(g, "groundingChunks") {
+        let span = field(chunk, "retrievedContext")
+            .and_then(|rc| field(rc, "ragChunk"))
+            .and_then(|rag| field(rag, "pageSpan"));
+        if let Some(span) = span {
+            check_int32_field(span, "firstPage")?;
+            check_int32_field(span, "lastPage")?;
+        }
+    }
+    for support in array_field(g, "groundingSupports") {
+        check_int32_list(support, "groundingChunkIndices")?;
+        check_float_list(support, "confidenceScores")?;
+        if let Some(seg) = field(support, "segment") {
+            for key in ["partIndex", "startIndex", "endIndex"] {
+                check_int32_field(seg, key)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 // ---- Writing protojson fields (unpopulated scalars omitted) ----

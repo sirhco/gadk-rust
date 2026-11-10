@@ -1254,3 +1254,101 @@ fn recorded_compaction_record_reads_back_from_raw_event() {
     // rawEvent wins: the recorded `content: {}` envelope field is not read.
     assert_eq!(got.response.content, None);
 }
+
+// ---- Malformed protojson scalars fail the whole decode (Go protojson `unmarshalScalar`) ----
+
+fn decode_err(wire: Value) -> String {
+    session_event_to_event(&wire).unwrap_err().to_string()
+}
+
+#[test]
+fn session_event_to_event_rejects_invalid_base64_bytes() {
+    let wire = json!({"name": "a/b", "content": {"parts": [{"inlineData": {"data": "***"}}]}});
+    assert_eq!(
+        decode_err(wire),
+        r#"error fetching session events: invalid value for bytes field data: "***""#
+    );
+    let wire = json!({"name": "a/b", "content": {"parts": [{"thoughtSignature": 7}]}});
+    assert_eq!(
+        decode_err(wire),
+        "error fetching session events: invalid value for bytes field thoughtSignature: 7"
+    );
+}
+
+#[test]
+fn session_event_to_event_rejects_out_of_range_int32() {
+    let wire = json!({"name": "a/b", "actions": {"artifactDelta": {"f": 2_147_483_648_i64}}});
+    assert_eq!(
+        decode_err(wire),
+        "error fetching session events: invalid value for int32 field value: 2147483648"
+    );
+}
+
+#[test]
+fn session_event_to_event_rejects_non_integral_int32_string() {
+    let wire = json!({"name": "a/b", "eventMetadata": {"groundingMetadata": {
+        "groundingSupports": [{"segment": {"partIndex": "3.5"}}]
+    }}});
+    assert_eq!(
+        decode_err(wire),
+        r#"error fetching session events: invalid value for int32 field partIndex: "3.5""#
+    );
+}
+
+#[test]
+fn session_event_to_event_rejects_unparsable_float_string() {
+    let wire = json!({"name": "a/b", "eventMetadata": {"groundingMetadata": {
+        "groundingSupports": [{"confidenceScores": [0.5, "abc"]}]
+    }}});
+    assert_eq!(
+        decode_err(wire),
+        r#"error fetching session events: invalid value for float field confidenceScores: "abc""#
+    );
+}
+
+#[test]
+fn session_event_to_event_rejects_non_string_repeated_string_elements() {
+    let wire = json!({"name": "a/b", "eventMetadata": {"longRunningToolIds": ["ok", 1]}});
+    assert_eq!(
+        decode_err(wire),
+        "error fetching session events: invalid value for string field longRunningToolIds: 1"
+    );
+}
+
+#[test]
+fn session_event_to_event_accepts_well_formed_edge_scalars() {
+    let wire = json!({
+        "name": "a/b",
+        // URL-alphabet, unpadded: 0xfb 0xff.
+        "content": {"parts": [{"inlineData": {"data": "-_8"}}]},
+        "actions": {"artifactDelta": {"f": "1e2"}},
+        "eventMetadata": {"groundingMetadata": {
+            "groundingChunks": [
+                {"retrievedContext": {"ragChunk": {"pageSpan": {"firstPage": "1e2"}}}}
+            ],
+            "groundingSupports": [{"confidenceScores": ["NaN", "-Infinity", "1e2", 0.5]}],
+            "retrievalMetadata": {"googleSearchDynamicRetrievalScore": "0.25"}
+        }}
+    });
+    let got = session_event_to_event(&wire).unwrap();
+    let content = got.response.content.unwrap();
+    let blob = content.parts[0].inline_data.clone().unwrap();
+    assert_eq!(blob.data.as_ref(), [0xfb, 0xff]);
+    assert_eq!(
+        got.actions.artifact_delta,
+        Some(BTreeMap::from([("f".into(), 100)]))
+    );
+    let g = got.response.grounding_metadata.unwrap();
+    let rc = g.grounding_chunks[0].retrieved_context.as_ref().unwrap();
+    assert_eq!(
+        rc.rag_chunk
+            .as_ref()
+            .unwrap()
+            .page_span
+            .as_ref()
+            .unwrap()
+            .first_page,
+        100
+    );
+    assert!(g.grounding_supports[0].confidence_scores[0].is_nan());
+}
