@@ -1,0 +1,278 @@
+{
+  "calls": [
+    {
+      "method": "/google.cloud.aiplatform.v1beta1.SessionService/CreateSession",
+      "request": {
+        "parent": "projects/adk-go-e2e/locations/us-central1/reasoningEngines/1491331942182813696",
+        "session": {
+          "sessionState": {
+            "user:k1": "v1"
+          },
+          "userId": "u1"
+        }
+      },
+      "response": {
+        "done": true,
+        "metadata": {
+          "@type": "type.googleapis.com/google.cloud.aiplatform.v1beta1.CreateSessionOperationMetadata",
+          "genericMetadata": {
+            "createTime": "2026-06-09T14:08:14.409798Z",
+            "updateTime": "2026-06-09T14:08:14.409798Z"
+          }
+        },
+        "name": "projects/69593958020/locations/us-central1/reasoningEngines/1491331942182813696/sessions/5516638582632087552/operations/247325202113888256",
+        "response": {
+          "@type": "type.googleapis.com/google.cloud.aiplatform.v1beta1.Session",
+          "createTime": "2026-06-09T14:08:14.402948Z",
+          "name": "projects/69593958020/locations/us-central1/reasoningEngines/1491331942182813696/sessions/5516638582632087552",
+          "sessionState": {
+            "user:k1": "v1"
+          },
+          "updateTime": "2026-06-09T14:08:14.402948Z",
+          "userId": "u1"
+        }
+      }
+    },
+    {
+      "method": "/google.cloud.aiplatform.v1beta1.SessionService/GetSession",
+      "request": {
+        "name": "projects/adk-go-e2e/locations/us-central1/reasoningEngines/1491331942182813696/sessions/5516638582632087552"
+      },
+      "response": {
+        "createTime": "2026-06-09T14:08:14.393201Z",
+        "expireTime": "2027-06-09T14:08:14.387739Z",
+        "name": "projects/69593958020/locations/us-central1/reasoningEngines/1491331942182813696/sessions/5516638582632087552",
+        "sessionState": {
+          "app:k1": "v1",
+          "app:k2": "v2",
+          "user:k1": "v1",
+          "user:k2": "v2"
+        },
+        "updateTime": "2026-06-09T14:08:14.393201Z",
+        "userId": "u1"
+      }
+    },
+    {
+      "method": "/google.cloud.aiplatform.v1beta1.SessionService/AppendEvent",
+      "request": {
+        "event": {
+          "actions": {
+            "stateDelta": {
+              "user:k2": "v2"
+            }
+          },
+          "author": "user",
+          "eventMetadata": {},
+          "invocationId": "inv1",
+          "timestamp": "0001-01-01T00:00:00Z"
+        },
+        "name": "projects/adk-go-e2e/locations/us-central1/reasoningEngines/1491331942182813696/sessions/5516638582632087552"
+      },
+      "response": {}
+    },
+    {
+      "method": "/google.cloud.aiplatform.v1beta1.SessionService/CreateSession",
+      "request": {
+        "parent": "projects/adk-go-e2e/locations/us-central1/reasoningEngines/1491331942182813696",
+        "session": {
+          "userId": "u1"
+        }
+      },
+      "response": {
+        "done": true,
+        "metadata": {
+          "@type": "type.googleapis.com/google.cloud.aiplatform.v1beta1.CreateSessionOperationMetadata",
+          "genericMetadata": {
+            "createTime": "2026-06-09T14:08:15.577738Z",
+            "updateTime": "2026-06-09T14:08:15.577738Z"
+          }
+        },
+        "name": "projects/69593958020/locations/us-central1/reasoningEngines/1491331942182813696/sessions/8635381324586156032/operations/9070721297062821888",
+        "response": {
+          "@type": "type.googleapis.com/google.cloud.aiplatform.v1beta1.Session",
+          "createTime": "2026-06-09T14:08:15.571047Z",
+          "name": "projects/69593958020/locations/us-central1/reasoningEngines/1491331942182813696/sessions/8635381324586156032",
+          "updateTime": "2026-06-09T14:08:15.571047Z",
+          "userId": "u1"
+        }
+      }
+    },
+    {
+      "method": "/google.cloud.aiplatform.v1beta1.SessionService/GetSession",
+      "request": {
+        "name": "projects/adk-go-e2e/locations/us-central1/reasoningEngines/1491331942182813696/sessions/8635381324586156032"
+      },
+      "response": {
+        "createTime": "2026-06-09T14:08:15.562041Z",
+        "expireTime": "2027-06-09T14:08:15.557574Z",
+        "name": "projects/69593958020/locations/us-central1/reasoningEngines/1491331942182813696/sessions/8635381324586156032",
+        "sessionState": {
+          "app:k1": "v1",
+          "app:k2": "v2",
+          "user:k1": "v1",
+          "user:k2": "v2"
+        },
+        "updateTime": "2026-06-09T14:08:15.562041Z",
+        "userId": "u1"
+      }
+    },
+    {
+      "method": "/google.cloud.aiplatform.v1beta1.SessionService/CreateSession",
+      "request": {
+        "parent": "projects/adk-go-e2e/locations/us-central1/reasoningEngines/1491331942182813696",
+        "session": {
+          "userId": "u2"
+        }
+      },
+      "response": {
+        "done": true,
+        "metadata": {
+          "@type": "type.googleapis.com/google.cloud.aiplatform.v1beta1.CreateSessionOperationMetadata",
+          "genericMetadata": {
+            "createTime": "2026-06-09T14:08:16.193338Z",
+            "updateTime": "2026-06-09T14:08:16.193338Z"
+          }
+        },
+        "name": "projects/69593958020/locations/us-central1/reasoningEngines/1491331942182813696/sessions/8272841554582831104/operations/5805611567219212288",
+        "response": {
+          "@type": "type.googleapis.com/google.cloud.aiplatform.v1beta1.Session",
+          "createTime": "2026-06-09T14:08:16.186929Z",
+          "name": "projects/69593958020/locations/us-central1/reasoningEngines/1491331942182813696/sessions/8272841554582831104",
+          "updateTime": "2026-06-09T14:08:16.186929Z",
+          "userId": "u2"
+        }
+      }
+    },
+    {
+      "method": "/google.cloud.aiplatform.v1beta1.SessionService/GetSession",
+      "request": {
+        "name": "projects/adk-go-e2e/locations/us-central1/reasoningEngines/1491331942182813696/sessions/8272841554582831104"
+      },
+      "response": {
+        "createTime": "2026-06-09T14:08:16.177426Z",
+        "expireTime": "2027-06-09T14:08:16.172666Z",
+        "name": "projects/69593958020/locations/us-central1/reasoningEngines/1491331942182813696/sessions/8272841554582831104",
+        "sessionState": {
+          "app:k1": "v1",
+          "app:k2": "v2"
+        },
+        "updateTime": "2026-06-09T14:08:16.177426Z",
+        "userId": "u2"
+      }
+    },
+    {
+      "method": "/google.cloud.aiplatform.v1beta1.SessionService/ListSessions",
+      "request": {
+        "parent": "projects/adk-go-e2e/locations/us-central1/reasoningEngines/1491331942182813696"
+      },
+      "response": {
+        "sessions": [
+          {
+            "createTime": "2026-06-09T14:08:16.177426Z",
+            "expireTime": "2027-06-09T14:08:16.172666Z",
+            "name": "projects/69593958020/locations/us-central1/reasoningEngines/1491331942182813696/sessions/8272841554582831104",
+            "sessionState": {
+              "app:k1": "v1",
+              "app:k2": "v2"
+            },
+            "updateTime": "2026-06-09T14:08:16.177426Z",
+            "userId": "u2"
+          },
+          {
+            "createTime": "2026-06-09T14:08:15.562041Z",
+            "expireTime": "2027-06-09T14:08:15.557574Z",
+            "name": "projects/69593958020/locations/us-central1/reasoningEngines/1491331942182813696/sessions/8635381324586156032",
+            "sessionState": {
+              "app:k1": "v1",
+              "app:k2": "v2",
+              "user:k1": "v1",
+              "user:k2": "v2"
+            },
+            "updateTime": "2026-06-09T14:08:15.562041Z",
+            "userId": "u1"
+          },
+          {
+            "createTime": "2026-06-09T14:08:14.393201Z",
+            "expireTime": "2027-06-09T14:08:14.387739Z",
+            "name": "projects/69593958020/locations/us-central1/reasoningEngines/1491331942182813696/sessions/5516638582632087552",
+            "sessionState": {
+              "app:k1": "v1",
+              "app:k2": "v2",
+              "user:k1": "v1",
+              "user:k2": "v2"
+            },
+            "updateTime": "2026-06-09T14:08:15.330815Z",
+            "userId": "u1"
+          }
+        ]
+      }
+    },
+    {
+      "method": "/google.cloud.aiplatform.v1beta1.SessionService/DeleteSession",
+      "request": {
+        "name": "projects/adk-go-e2e/locations/us-central1/reasoningEngines/1491331942182813696/sessions/8272841554582831104"
+      },
+      "response": {
+        "done": true,
+        "metadata": {
+          "@type": "type.googleapis.com/google.cloud.aiplatform.v1beta1.DeleteOperationMetadata",
+          "genericMetadata": {
+            "createTime": "2026-06-09T14:08:17.228800Z",
+            "updateTime": "2026-06-09T14:08:17.228800Z"
+          }
+        },
+        "name": "projects/69593958020/locations/us-central1/operations/5800263542661709824",
+        "response": {
+          "@type": "type.googleapis.com/google.protobuf.Empty"
+        }
+      }
+    },
+    {
+      "method": "/google.cloud.aiplatform.v1beta1.SessionService/DeleteSession",
+      "request": {
+        "name": "projects/adk-go-e2e/locations/us-central1/reasoningEngines/1491331942182813696/sessions/8635381324586156032"
+      },
+      "response": {
+        "done": true,
+        "metadata": {
+          "@type": "type.googleapis.com/google.cloud.aiplatform.v1beta1.DeleteOperationMetadata",
+          "genericMetadata": {
+            "createTime": "2026-06-09T14:08:17.429737Z",
+            "updateTime": "2026-06-09T14:08:17.429737Z"
+          }
+        },
+        "name": "projects/69593958020/locations/us-central1/operations/3666401744218226688",
+        "response": {
+          "@type": "type.googleapis.com/google.protobuf.Empty"
+        }
+      }
+    },
+    {
+      "method": "/google.cloud.aiplatform.v1beta1.SessionService/DeleteSession",
+      "request": {
+        "name": "projects/adk-go-e2e/locations/us-central1/reasoningEngines/1491331942182813696/sessions/5516638582632087552"
+      },
+      "response": {
+        "done": true,
+        "metadata": {
+          "@type": "type.googleapis.com/google.cloud.aiplatform.v1beta1.DeleteOperationMetadata",
+          "genericMetadata": {
+            "createTime": "2026-06-09T14:08:17.859760Z",
+            "updateTime": "2026-06-09T14:08:17.859760Z"
+          }
+        },
+        "name": "projects/69593958020/locations/us-central1/operations/4332934489069060096",
+        "response": {
+          "@type": "type.googleapis.com/google.protobuf.Empty"
+        }
+      }
+    },
+    {
+      "method": "/google.cloud.aiplatform.v1beta1.SessionService/ListSessions",
+      "request": {
+        "parent": "projects/adk-go-e2e/locations/us-central1/reasoningEngines/6857370898194759680"
+      },
+      "response": {}
+    }
+  ]
+}

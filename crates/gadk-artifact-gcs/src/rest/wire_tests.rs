@@ -19,37 +19,12 @@
 
 use std::collections::HashMap;
 
-use gadk_model::rest::test_util::{FakeResponse, FakeServer, ScriptedClient};
+use gadk_model::rest::test_util::{FakeResponse, FakeServer, ScriptedClient, bearer_credentials};
 use gadk_platform::env::MapEnv;
-use google_cloud_auth::credentials::{CacheableResource, CredentialsProvider, EntityTag};
-use google_cloud_auth::errors::CredentialsError;
 use pretty_assertions::assert_eq;
 
 use super::*;
 use crate::testutil::multipart_parts;
-
-/// Credentials whose headers are `Authorization: Bearer test-token`.
-#[derive(Debug)]
-struct TestCreds;
-
-impl CredentialsProvider for TestCreds {
-    async fn headers(
-        &self,
-        _extensions: http::Extensions,
-    ) -> Result<CacheableResource<HeaderMap>, CredentialsError> {
-        Ok(CacheableResource::New {
-            entity_tag: EntityTag::new(),
-            data: HeaderMap::from_iter([(
-                http::header::AUTHORIZATION,
-                HeaderValue::from_static("Bearer test-token"),
-            )]),
-        })
-    }
-
-    async fn universe_domain(&self) -> Option<String> {
-        None
-    }
-}
 
 /// An environment holding exactly `vars`.
 pub(crate) fn env(vars: &[(&str, &str)]) -> Arc<MapEnv> {
@@ -63,7 +38,7 @@ pub(crate) fn env(vars: &[(&str, &str)]) -> Arc<MapEnv> {
 /// Test credentials and an empty environment.
 fn config() -> GcsConfig {
     GcsConfig {
-        credentials: Some(Credentials::from(TestCreds)),
+        credentials: Some(bearer_credentials("test-token")),
         env: env(&[]),
         ..Default::default()
     }

@@ -20,6 +20,7 @@ use std::error::Error as StdError;
 
 use gadk_artifact::ArtifactError;
 use gadk_model::rest::RestError;
+use gadk_platform::GoWrapped;
 
 /// A boxed error cause.
 pub(crate) type BoxError = Box<dyn StdError + Send + Sync>;
@@ -109,35 +110,6 @@ pub(crate) fn chain_any(
         cur = e.source();
     }
     false
-}
-
-/// Go `fmt.Errorf("{prefix}: %w", source)`: displays `{prefix}: {source}` and keeps `source`
-/// as its `source()`.
-#[derive(Debug)]
-pub(crate) struct GoWrapped {
-    prefix: String,
-    source: BoxError,
-}
-
-impl GoWrapped {
-    pub(crate) fn new(prefix: impl Into<String>, source: impl Into<BoxError>) -> Self {
-        Self {
-            prefix: prefix.into(),
-            source: source.into(),
-        }
-    }
-}
-
-impl std::fmt::Display for GoWrapped {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}: {}", self.prefix, self.source)
-    }
-}
-
-impl StdError for GoWrapped {
-    fn source(&self) -> Option<&(dyn StdError + 'static)> {
-        Some(self.source.as_ref())
-    }
 }
 
 /// `ArtifactError::Backend` holding Go's `fmt.Errorf("{prefix}: %w", source)`.

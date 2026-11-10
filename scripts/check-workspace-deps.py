@@ -29,6 +29,8 @@
 - 4b: `gadk-artifact-gcs` depends on exactly `gadk-artifact`, `gadk-genai`, `gadk-model` and
   `gadk-platform`, and only the façade depends on it (feature `gcs`); `gadk-model`'s `gcp-auth`
   feature adds no gadk-* edge.
+- 4c: `gadk-vertexai` depends on exactly `gadk-session`, `gadk-memory`, `gadk-genai`, `gadk-model`
+  and `gadk-platform`, and only the façade depends on it (feature `vertexai`).
 """
 import pathlib, sys, tomllib
 
@@ -52,10 +54,11 @@ ALLOWED = {
     "gadk-openai": {"gadk-genai", "gadk-model", "gadk-platform"},
     "gadk-session-database": {"gadk-session", "gadk-model", "gadk-platform"},
     "gadk-artifact-gcs": {"gadk-artifact", "gadk-genai", "gadk-model", "gadk-platform"},
+    "gadk-vertexai": {"gadk-session", "gadk-memory", "gadk-genai", "gadk-model", "gadk-platform"},
     "gadk": {"gadk-genai", "gadk-platform", "gadk-model", "gadk-session", "gadk-gemini",
              "gadk-agent", "gadk-engine", "gadk-tools", "gadk-auth", "gadk-mcp", "gadk-artifact",
              "gadk-memory", "gadk-anthropic", "gadk-openai", "gadk-session-database",
-             "gadk-artifact-gcs"},
+             "gadk-artifact-gcs", "gadk-vertexai"},
 }
 # (crate, dependency) normal edges that must be `optional = true`.
 OPTIONAL = {("gadk-engine", "gadk-gemini"), ("gadk-engine", "gadk-httprr")}

@@ -29,11 +29,11 @@ use gadk_artifact::{
     SaveResponse, VersionsRequest, VersionsResponse,
 };
 use gadk_genai::Part;
-use gadk_platform::go_quote;
+use gadk_platform::{GoWrapped, go_quote};
 use serde_json::{Map, Value};
 
 use crate::bucket::GcsBucket;
-use crate::error::{BoxError, GcsError, GoWrapped, VersionConflict, backend, chain_any};
+use crate::error::{BoxError, GcsError, VersionConflict, backend, chain_any};
 
 /// Go `maxSaveAttempts`: how many colliding writers `save` tolerates before it returns the
 /// version-conflict error.

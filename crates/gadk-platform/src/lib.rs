@@ -15,19 +15,27 @@
 
 //! gadk-platform: overridable time, UUID and task-execution seams (port of ADK-Go platform/),
 //! the ADK tracking header value, the injectable environment ([`env`](mod@env)), Go's
-//! `strconv.Quote` ([`go_quote`]) and `strings.ToLower`/`ToUpper` ([`go_to_lower`],
-//! [`go_to_upper`]).
+//! `strconv.Quote` ([`go_quote`]), `strings.ToLower`/`ToUpper` ([`go_to_lower`],
+//! [`go_to_upper`]), `url.QueryEscape` ([`go_query_escape`]), `fmt` `%v` of a JSON-decoded value
+//! ([`go_sprint_value`]), `time.Parse(time.RFC3339, …)` ([`go_parse_rfc3339`]) and Go's
+//! `fmt.Errorf("…: %w", err)` wrapping ([`GoWrapped`]).
 
 pub mod env;
 mod exec;
+mod go_err;
 mod go_fmt;
+mod go_time;
 mod time;
 mod tracking;
 mod uuid;
 
 pub use exec::{TaskRunner, TokioTaskRunner};
 pub use futures::future::BoxFuture;
-pub use go_fmt::{go_quote, go_to_lower, go_to_upper};
+pub use go_err::GoWrapped;
+pub use go_fmt::{
+    go_query_escape, go_quote, go_sprint_value, go_to_lower, go_to_upper, go_type_name,
+};
+pub use go_time::go_parse_rfc3339;
 pub use time::TimeProvider;
 pub use tracking::tracking_header;
 pub use uuid::UuidProvider;

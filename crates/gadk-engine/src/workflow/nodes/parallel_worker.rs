@@ -20,6 +20,7 @@ use std::sync::Arc;
 
 use futures::StreamExt;
 use gadk_agent::{AgentError, Context, ContextDelta, EventStream};
+use gadk_platform::go_type_name;
 use gadk_session::Event;
 use parking_lot::Mutex;
 use serde_json::Value;
@@ -192,18 +193,6 @@ impl Node for ParallelWorker {
     }
     fn as_any(&self) -> &dyn Any {
         self
-    }
-}
-
-/// Go `%T` of a JSON-decoded value.
-fn go_type_name(v: &Value) -> &'static str {
-    match v {
-        Value::Null => "<nil>",
-        Value::Bool(_) => "bool",
-        Value::Number(_) => "float64",
-        Value::String(_) => "string",
-        Value::Array(_) => "[]interface {}",
-        Value::Object(_) => "map[string]interface {}",
     }
 }
 

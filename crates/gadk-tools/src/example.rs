@@ -28,9 +28,8 @@ use gadk_agent::tool_util::append_instructions;
 use gadk_agent::{Context, Tool, ToolError};
 use gadk_genai::{Content, FunctionCall, FunctionResponse, FunctionResponsePart};
 use gadk_model::LlmRequest;
+use gadk_platform::go_sprint_value;
 use serde_json::Value;
-
-use crate::go_fmt::go_sprint_value;
 
 /// Port of Go `exampletool.Example` (tool.go:30): one few-shot example, an input and its expected
 /// output.

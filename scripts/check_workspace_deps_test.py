@@ -147,6 +147,11 @@ class EdgeTest(unittest.TestCase):
                          {"gadk-artifact", "gadk-genai", "gadk-model", "gadk-platform"})
         self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-artifact-gcs" in deps], ["gadk"])
 
+    def test_vertexai_edges_are_exactly_session_memory_genai_model_platform(self):
+        self.assertEqual(cwd.ALLOWED["gadk-vertexai"],
+                         {"gadk-session", "gadk-memory", "gadk-genai", "gadk-model", "gadk-platform"})
+        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-vertexai" in deps], ["gadk"])
+
     def test_model_edges_are_unchanged_by_gcp_auth(self):
         self.assertEqual(cwd.ALLOWED["gadk-model"], {"gadk-genai"})
 
