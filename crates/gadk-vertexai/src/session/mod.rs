@@ -19,7 +19,7 @@
 #![allow(dead_code, unused_variables, unused_imports, clippy::todo)]
 
 mod client;
-mod convert;
+pub(crate) mod convert;
 mod local;
 
 use std::sync::Arc;
