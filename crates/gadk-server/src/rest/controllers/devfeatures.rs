@@ -18,9 +18,9 @@
 //! does not implement answer 501 with a body naming the missing feature (plan 5a Task 6 fills the
 //! two handlers).
 
-#![allow(dead_code, unused_variables, unused_imports, clippy::todo)]
-
-use http::{Method, StatusCode};
+use axum::body::Body;
+use http::header::CONTENT_TYPE;
+use http::{HeaderValue, Method, StatusCode};
 use serde::{Deserialize, Serialize};
 
 use crate::rest::http_error::encode_json_response;
@@ -75,16 +75,28 @@ pub struct MetricsInfoResponse {
 }
 
 /// Go `controllers.MetricsInfoHandler`: `{"metricsInfo":[]}`.
-pub async fn metrics_info_handler(req: Request) -> Response {
-    todo!("plan 5a Task 6")
+pub async fn metrics_info_handler(_req: Request) -> Response {
+    encode_json_response(
+        &MetricsInfoResponse {
+            metrics_info: Vec::new(),
+        },
+        StatusCode::OK,
+    )
 }
 
 /// Go `controllers.AgentBuilderConfigHandler`: an empty `text/plain; charset=UTF-8` 200.
-pub async fn agent_builder_config_handler(req: Request) -> Response {
-    todo!("plan 5a Task 6")
+pub async fn agent_builder_config_handler(_req: Request) -> Response {
+    let mut resp = Response::new(Body::empty());
+    resp.headers_mut().insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("text/plain; charset=UTF-8"),
+    );
+    resp
 }
 
 /// Go `AgentBuilderAPIRouter.Routes`.
+// Mounted by `Server::new` (plan 5a Task 13).
+#[allow(dead_code)]
 pub(crate) fn agent_builder_routes() -> Vec<Route> {
     let not_implemented = new_not_implemented_handler("the agent builder", BUILDER_DETAIL);
     vec![
@@ -110,6 +122,8 @@ pub(crate) fn agent_builder_routes() -> Vec<Route> {
 }
 
 /// Go `TestsAPIRouter.Routes`.
+// Mounted by `Server::new` (plan 5a Task 13).
+#[allow(dead_code)]
 pub(crate) fn tests_routes() -> Vec<Route> {
     let not_implemented = new_not_implemented_handler("the tests tab", TESTS_DETAIL);
     [
@@ -133,6 +147,8 @@ pub(crate) fn tests_routes() -> Vec<Route> {
 }
 
 /// Go `EvalAPIRouter.Routes`.
+// Mounted by `Server::new` (plan 5a Task 13).
+#[allow(dead_code)]
 pub(crate) fn eval_routes() -> Vec<Route> {
     let unavailable = new_not_implemented_handler("eval", &eval_detail());
     let mut routes = vec![route(
@@ -235,6 +251,59 @@ mod tests {
             body.as_ref(),
             &b"{\"error\":\"eval is not implemented in ADK Go\",\"detail\":\"agent evaluation is not installed in ADK Go. Use adk-python for eval workflows.\"}\n"[..]
         );
+    }
+
+    /// Every builder, tests and eval 501 route the probe hit (`main_47` … `main_51`) answers
+    /// ADK-Go's bytes; `RunEval` shares the eval handler, so its detail carries
+    /// [`NOT_INSTALLED_DETAIL`] (Go `TestEvalDetailReportsNotInstalled` reads that route).
+    #[tokio::test]
+    async fn not_implemented_routes_match_go_wire_fixtures() {
+        let mut routes = agent_builder_routes();
+        routes.extend(tests_routes());
+        routes.extend(eval_routes());
+        let by_name = |name: &str| {
+            routes
+                .iter()
+                .find(|r| r.name == name)
+                .map(|r| r.handler.clone())
+                .unwrap()
+        };
+        for (fixture, route_name) in [
+            ("main_47_builder_save", "SaveAgentBuilderConfig"),
+            ("main_48_tests_list", "ListTests"),
+            ("main_49_eval_sets_list", "ListEvalSets"),
+            ("main_49_eval_sets_list", "RunEval"),
+            ("main_50_eval_sets_create_dash", "CreateEvalSet"),
+            ("main_51_eval_legacy_results", "ListEvalResultsLegacyPath"),
+        ] {
+            let path = format!(
+                "{}/testdata/wire/{fixture}.json",
+                env!("CARGO_MANIFEST_DIR")
+            );
+            let f: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+            let resp = by_name(route_name)(Request::new(axum::body::Body::empty())).await;
+            assert_eq!(resp.status().as_u16(), 501, "{route_name}");
+            assert_eq!(
+                resp.headers()["content-type"],
+                f["response"]["headers"][0][1].as_str().unwrap(),
+                "{route_name}"
+            );
+            let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            assert_eq!(
+                std::str::from_utf8(&body).unwrap(),
+                f["response"]["body"].as_str().unwrap(),
+                "{route_name}"
+            );
+        }
+        let run_eval = by_name("RunEval")(Request::new(axum::body::Body::empty())).await;
+        let body = axum::body::to_bytes(run_eval.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let got: ErrorResponse = serde_json::from_slice(&body).unwrap();
+        assert!(got.detail.contains(NOT_INSTALLED_DETAIL));
     }
 
     #[test]

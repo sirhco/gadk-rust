@@ -15,13 +15,12 @@
 
 //! Port of Go `controllers/version.go` and `internal/routers/version.go` (plan 5a Task 6).
 
-#![allow(dead_code, unused_variables, unused_imports, clippy::todo)]
-
 use std::sync::Arc;
 
-use http::Method;
+use http::{Method, StatusCode};
 use serde::{Deserialize, Serialize};
 
+use crate::rest::http_error::encode_json_response;
 use crate::rest::routing::{Request, Response, Route, controller_handler, route};
 
 /// Port of Go `controllers.VersionAPIController`: the version handshake the web UI performs.
@@ -34,9 +33,10 @@ impl VersionApiController {
         Self
     }
 
-    /// Go `VersionHandler`.
-    pub async fn version_handler(&self, req: Request) -> Response {
-        todo!("plan 5a Task 6")
+    /// Go `VersionHandler`: Go's body shape with gadk's values (`language` is `rust`,
+    /// `language_version` the rustc release gadk was built with).
+    pub async fn version_handler(&self, _req: Request) -> Response {
+        encode_json_response(&VersionResponse::gadk(), StatusCode::OK)
     }
 }
 
@@ -52,7 +52,27 @@ pub struct VersionResponse {
     pub language_version: String,
 }
 
+impl VersionResponse {
+    /// This build's values: the gadk release, `rust`, and the rustc release recorded by
+    /// gadk-platform's build script (the tail of [`gadk_platform::tracking_header`],
+    /// `gadk-rust/<version> rust/<rustc>`).
+    fn gadk() -> Self {
+        let header = gadk_platform::tracking_header();
+        let language_version = header
+            .rsplit_once(" rust/")
+            .map(|(_, v)| v.to_owned())
+            .unwrap_or_default();
+        Self {
+            version: env!("CARGO_PKG_VERSION").to_owned(),
+            language: "rust".to_owned(),
+            language_version,
+        }
+    }
+}
+
 /// Go `VersionAPIRouter.Routes` (public: no authentication).
+// Mounted by `Server::new` (plan 5a Task 13).
+#[allow(dead_code)]
 pub(crate) fn version_routes(c: Arc<VersionApiController>) -> Vec<Route> {
     let mut r = route(
         "GetVersion",
