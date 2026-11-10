@@ -14,3 +14,28 @@
 // limitations under the License.
 
 //! Ports of ADK-Go `session/vertexai/filter_test.go`.
+
+use crate::session::client::quote_filter_literal;
+
+#[test]
+fn test_quote_filter_literal() {
+    let tests = [
+        ("plain value", "alice", r#""alice""#),
+        // A double quote in the value must not break out of the literal and append an OR
+        // predicate that would return every user's sessions.
+        (
+            "quote injection is neutralized",
+            r#"attacker" OR userId!=""#,
+            r#""attacker\" OR userId!=\"""#,
+        ),
+        ("backslash only", r"\", r#""\\""#),
+        ("empty string", "", r#""""#),
+    ];
+    for (name, input, want) in tests {
+        assert_eq!(
+            quote_filter_literal(input),
+            want,
+            "{name}: quote_filter_literal({input:?})"
+        );
+    }
+}
