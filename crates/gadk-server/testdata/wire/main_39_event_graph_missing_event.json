@@ -1,0 +1,25 @@
+{
+  "name": "39_event_graph_missing_event",
+  "config": "main",
+  "request": {
+    "method": "GET",
+    "target": "/apps/assistant/users/alice/sessions/s1/events/nope/graph",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 404,
+    "headers": [
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ],
+      [
+        "X-Content-Type-Options",
+        "nosniff"
+      ]
+    ],
+    "body": "event not found\n"
+  },
+  "compare": "exact"
+}

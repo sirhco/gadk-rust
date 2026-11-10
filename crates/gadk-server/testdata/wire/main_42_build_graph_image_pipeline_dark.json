@@ -1,0 +1,21 @@
+{
+  "name": "42_build_graph_image_pipeline_dark",
+  "config": "main",
+  "request": {
+    "method": "GET",
+    "target": "/dev/apps/pipeline/build_graph_image?dark_mode=true",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "headers": [
+      [
+        "Content-Type",
+        "application/json; charset=UTF-8"
+      ]
+    ],
+    "body": "{\"pipeline\":{\"dotSrc\":\"digraph AgentGraph {\\n\\tbgcolor=\\\"#333537\\\";\\n\\trankdir=LR;\\n\\tdrafter-\\u003ereviewer[ arrowhead=none, color=\\\"#cccccc\\\" ];\\n\\tsubgraph cluster_pipeline {\\n\\tcolor=\\\"#ffffff\\\";\\n\\tfontcolor=\\\"#cccccc\\\";\\n\\tlabel=\\\"pipeline (SequentialAgent)\\\";\\n\\tstyle=rounded;\\n\\tdrafter [ color=\\\"#cccccc\\\", fontcolor=\\\"#cccccc\\\", label=\\\"🤖 drafter\\\", shape=ellipse, style=rounded ];\\n\\treviewer [ color=\\\"#cccccc\\\", fontcolor=\\\"#cccccc\\\", label=\\\"🤖 reviewer\\\", shape=ellipse, style=rounded ];\\n\\n}\\n;\\n\\n}\\n\"}}\n"
+  },
+  "compare": "exact"
+}

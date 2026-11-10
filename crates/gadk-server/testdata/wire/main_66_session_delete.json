@@ -1,0 +1,21 @@
+{
+  "name": "66_session_delete",
+  "config": "main",
+  "request": {
+    "method": "DELETE",
+    "target": "/apps/assistant/users/alice/sessions/s2",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "headers": [
+      [
+        "Content-Type",
+        "application/json; charset=UTF-8"
+      ]
+    ],
+    "body": ""
+  },
+  "compare": "exact"
+}

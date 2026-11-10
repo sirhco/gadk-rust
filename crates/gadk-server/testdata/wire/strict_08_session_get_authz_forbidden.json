@@ -1,0 +1,30 @@
+{
+  "name": "08_session_get_authz_forbidden",
+  "config": "strict",
+  "request": {
+    "method": "GET",
+    "target": "/apps/assistant/users/alice/sessions/s1",
+    "headers": [
+      [
+        "X-Test-User",
+        "bob"
+      ]
+    ],
+    "body": ""
+  },
+  "response": {
+    "status": 403,
+    "headers": [
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ],
+      [
+        "X-Content-Type-Options",
+        "nosniff"
+      ]
+    ],
+    "body": "forbidden: authz: unauthorized: caller doesn't match the provided userID\n"
+  },
+  "compare": "exact"
+}

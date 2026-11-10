@@ -1,0 +1,21 @@
+{
+  "name": "58_head_list_apps",
+  "config": "main",
+  "request": {
+    "method": "HEAD",
+    "target": "/list-apps",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "headers": [
+      [
+        "Content-Type",
+        "application/json; charset=UTF-8"
+      ]
+    ],
+    "body": ""
+  },
+  "compare": "exact"
+}

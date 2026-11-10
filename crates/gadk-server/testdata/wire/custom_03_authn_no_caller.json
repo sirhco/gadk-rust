@@ -1,0 +1,25 @@
+{
+  "name": "03_authn_no_caller",
+  "config": "custom",
+  "request": {
+    "method": "GET",
+    "target": "/list-apps",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 401,
+    "headers": [
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ],
+      [
+        "X-Content-Type-Options",
+        "nosniff"
+      ]
+    ],
+    "body": "unauthorized\n"
+  },
+  "compare": "exact"
+}

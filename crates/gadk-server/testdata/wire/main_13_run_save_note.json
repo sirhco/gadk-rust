@@ -1,0 +1,26 @@
+{
+  "name": "13_run_save_note",
+  "config": "main",
+  "request": {
+    "method": "POST",
+    "target": "/run",
+    "headers": [
+      [
+        "Content-Type",
+        "application/json"
+      ]
+    ],
+    "body": "{\"appName\":\"assistant\",\"userId\":\"alice\",\"sessionId\":\"s1\",\"newMessage\":{\"role\":\"user\",\"parts\":[{\"text\":\"save: buy milk\"}]}}"
+  },
+  "response": {
+    "status": 200,
+    "headers": [
+      [
+        "Content-Type",
+        "application/json; charset=UTF-8"
+      ]
+    ],
+    "body": "[{\"id\":\"00000000-0000-4000-8000-000000000012\",\"invocationId\":\"e-00000000-0000-4000-8000-000000000009\",\"author\":\"assistant\",\"groundingMetadata\":null,\"usageMetadata\":{\"candidatesTokenCount\":5,\"promptTokenCount\":10,\"totalTokenCount\":15},\"finishReason\":\"STOP\",\"actions\":{\"stateDelta\":{},\"artifactDelta\":{}},\"nodeInfo\":{\"path\":\"assistant\"},\"content\":{\"role\":\"model\",\"parts\":[{\"functionCall\":{\"id\":\"adk-00000000-0000-4000-8000-000000000013\",\"name\":\"save_note\",\"args\":{\"text\":\"buy milk\"}}}]}},{\"id\":\"00000000-0000-4000-8000-000000000015\",\"invocationId\":\"e-00000000-0000-4000-8000-000000000009\",\"author\":\"assistant\",\"groundingMetadata\":null,\"usageMetadata\":null,\"actions\":{\"stateDelta\":{},\"artifactDelta\":{\"note.txt\":1}},\"nodeInfo\":{\"path\":\"assistant\"},\"content\":{\"role\":\"user\",\"parts\":[{\"functionResponse\":{\"id\":\"adk-00000000-0000-4000-8000-000000000013\",\"name\":\"save_note\",\"response\":{\"status\":\"saved\",\"version\":1}}}]}},{\"id\":\"00000000-0000-4000-8000-000000000017\",\"invocationId\":\"e-00000000-0000-4000-8000-000000000009\",\"author\":\"assistant\",\"groundingMetadata\":null,\"usageMetadata\":{\"candidatesTokenCount\":5,\"promptTokenCount\":10,\"totalTokenCount\":15},\"finishReason\":\"STOP\",\"actions\":{\"stateDelta\":{},\"artifactDelta\":{}},\"nodeInfo\":{\"path\":\"assistant\"},\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"Saved your note.\"}]}}]\n"
+  },
+  "compare": "exact"
+}

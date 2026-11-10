@@ -1,0 +1,30 @@
+{
+  "name": "10_session_patch_scoped",
+  "config": "main",
+  "request": {
+    "method": "PATCH",
+    "target": "/apps/assistant/users/alice/sessions/s1",
+    "headers": [
+      [
+        "Content-Type",
+        "application/json"
+      ]
+    ],
+    "body": "{\"stateDelta\":{\"app:theme\":\"dark\",\"user:lang\":\"en\"}}"
+  },
+  "response": {
+    "status": 400,
+    "headers": [
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ],
+      [
+        "X-Content-Type-Options",
+        "nosniff"
+      ]
+    ],
+    "body": "stateDelta may only contain session-scoped keys; remove [app:theme user:lang] (the \"app:\", \"user:\" and \"temp:\" prefixes write outside this session)\n"
+  },
+  "compare": "exact"
+}

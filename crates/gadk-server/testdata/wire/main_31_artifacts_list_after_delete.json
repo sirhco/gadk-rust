@@ -1,0 +1,21 @@
+{
+  "name": "31_artifacts_list_after_delete",
+  "config": "main",
+  "request": {
+    "method": "GET",
+    "target": "/apps/assistant/users/alice/sessions/s1/artifacts",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "headers": [
+      [
+        "Content-Type",
+        "application/json; charset=UTF-8"
+      ]
+    ],
+    "body": "[]\n"
+  },
+  "compare": "exact"
+}

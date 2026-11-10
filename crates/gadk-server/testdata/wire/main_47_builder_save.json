@@ -1,0 +1,21 @@
+{
+  "name": "47_builder_save",
+  "config": "main",
+  "request": {
+    "method": "POST",
+    "target": "/dev/apps/assistant/builder/save",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 501,
+    "headers": [
+      [
+        "Content-Type",
+        "application/json; charset=UTF-8"
+      ]
+    ],
+    "body": "{\"error\":\"the agent builder is not implemented in ADK Go\",\"detail\":\"ADK Go agents are defined in Go code, so there is no server-side agent configuration to edit.\"}\n"
+  },
+  "compare": "exact"
+}

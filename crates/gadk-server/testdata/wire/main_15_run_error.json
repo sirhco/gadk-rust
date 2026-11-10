@@ -1,0 +1,30 @@
+{
+  "name": "15_run_error",
+  "config": "main",
+  "request": {
+    "method": "POST",
+    "target": "/run",
+    "headers": [
+      [
+        "Content-Type",
+        "application/json"
+      ]
+    ],
+    "body": "{\"appName\":\"assistant\",\"userId\":\"alice\",\"sessionId\":\"s1\",\"newMessage\":{\"role\":\"user\",\"parts\":[{\"text\":\"fail\"}]}}"
+  },
+  "response": {
+    "status": 500,
+    "headers": [
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ],
+      [
+        "X-Content-Type-Options",
+        "nosniff"
+      ]
+    ],
+    "body": "failed to run agent: scripted model failure\n"
+  },
+  "compare": "exact"
+}

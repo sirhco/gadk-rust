@@ -1,0 +1,26 @@
+{
+  "name": "07_session_create",
+  "config": "strict",
+  "request": {
+    "method": "POST",
+    "target": "/apps/assistant/users/alice/sessions/s1",
+    "headers": [
+      [
+        "X-Test-User",
+        "alice"
+      ]
+    ],
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "headers": [
+      [
+        "Content-Type",
+        "application/json; charset=UTF-8"
+      ]
+    ],
+    "body": "{\"id\":\"s1\",\"appName\":\"assistant\",\"userId\":\"alice\",\"lastUpdateTime\":1767323045,\"events\":[],\"state\":{}}\n"
+  },
+  "compare": "exact"
+}

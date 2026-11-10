@@ -1,0 +1,21 @@
+{
+  "name": "46_builder_get",
+  "config": "main",
+  "request": {
+    "method": "GET",
+    "target": "/dev/apps/assistant/builder",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "headers": [
+      [
+        "Content-Type",
+        "text/plain; charset=UTF-8"
+      ]
+    ],
+    "body": ""
+  },
+  "compare": "exact"
+}

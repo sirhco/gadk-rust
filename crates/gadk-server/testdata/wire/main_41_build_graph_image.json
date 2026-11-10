@@ -1,0 +1,21 @@
+{
+  "name": "41_build_graph_image",
+  "config": "main",
+  "request": {
+    "method": "GET",
+    "target": "/dev/apps/assistant/build_graph_image",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "headers": [
+      [
+        "Content-Type",
+        "application/json; charset=UTF-8"
+      ]
+    ],
+    "body": "{\"assistant\":{\"dotSrc\":\"digraph AgentGraph {\\n\\tbgcolor=\\\"#ffffff\\\";\\n\\trankdir=LR;\\n\\tassistant-\\u003esave_note[ arrowhead=none, color=\\\"#3c4043\\\" ];\\n\\tassistant [ color=\\\"#3c4043\\\", fontcolor=\\\"#3c4043\\\", label=\\\"🤖 assistant\\\", shape=ellipse, style=rounded ];\\n\\tsave_note [ color=\\\"#3c4043\\\", fontcolor=\\\"#3c4043\\\", label=\\\"🔧 save_note\\\", shape=box, style=rounded ];\\n\\n}\\n\"}}\n"
+  },
+  "compare": "exact"
+}

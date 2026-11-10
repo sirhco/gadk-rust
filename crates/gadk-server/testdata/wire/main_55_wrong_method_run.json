@@ -1,0 +1,21 @@
+{
+  "name": "55_wrong_method_run",
+  "config": "main",
+  "request": {
+    "method": "GET",
+    "target": "/run",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 405,
+    "headers": [
+      [
+        "Allow",
+        "POST"
+      ]
+    ],
+    "body": ""
+  },
+  "compare": "exact"
+}

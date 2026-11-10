@@ -1,0 +1,26 @@
+{
+  "name": "64_origin_allowed",
+  "config": "main",
+  "request": {
+    "method": "GET",
+    "target": "/health",
+    "headers": [
+      [
+        "Origin",
+        "http://localhost:4200"
+      ]
+    ],
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "headers": [
+      [
+        "Content-Type",
+        "application/json"
+      ]
+    ],
+    "body": "{\"status\":\"ok\"}\n"
+  },
+  "compare": "exact"
+}

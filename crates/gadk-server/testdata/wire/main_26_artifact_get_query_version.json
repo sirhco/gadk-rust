@@ -1,0 +1,21 @@
+{
+  "name": "26_artifact_get_query_version",
+  "config": "main",
+  "request": {
+    "method": "GET",
+    "target": "/apps/assistant/users/alice/sessions/s1/artifacts/note.txt?version=1",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "headers": [
+      [
+        "Content-Type",
+        "application/json; charset=UTF-8"
+      ]
+    ],
+    "body": "{\"text\":\"buy milk\"}\n"
+  },
+  "compare": "exact"
+}

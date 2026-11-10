@@ -1,0 +1,26 @@
+{
+  "name": "09_session_patch",
+  "config": "main",
+  "request": {
+    "method": "PATCH",
+    "target": "/apps/assistant/users/alice/sessions/s1",
+    "headers": [
+      [
+        "Content-Type",
+        "application/json"
+      ]
+    ],
+    "body": "{\"stateDelta\":{\"mood\":\"happy\"}}"
+  },
+  "response": {
+    "status": 200,
+    "headers": [
+      [
+        "Content-Type",
+        "application/json; charset=UTF-8"
+      ]
+    ],
+    "body": "{\"id\":\"s1\",\"appName\":\"assistant\",\"userId\":\"alice\",\"lastUpdateTime\":1767323047,\"events\":[{\"id\":\"00000000-0000-4000-8000-000000000003\",\"invocationId\":\"00000000-0000-4000-8000-000000000002\",\"author\":\"user\",\"groundingMetadata\":null,\"usageMetadata\":null,\"actions\":{\"stateDelta\":{\"mood\":\"happy\"},\"artifactDelta\":{}},\"content\":null}],\"state\":{\"color\":\"blue\",\"mood\":\"happy\"}}\n"
+  },
+  "compare": "exact"
+}

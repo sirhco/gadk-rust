@@ -1,0 +1,30 @@
+{
+  "name": "02_authn_error",
+  "config": "custom",
+  "request": {
+    "method": "GET",
+    "target": "/list-apps",
+    "headers": [
+      [
+        "X-Test-User",
+        "boom"
+      ]
+    ],
+    "body": ""
+  },
+  "response": {
+    "status": 500,
+    "headers": [
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ],
+      [
+        "X-Content-Type-Options",
+        "nosniff"
+      ]
+    ],
+    "body": "authentication failed\n"
+  },
+  "compare": "exact"
+}

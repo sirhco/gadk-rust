@@ -1,0 +1,30 @@
+{
+  "name": "65_host_forbidden",
+  "config": "main",
+  "request": {
+    "method": "GET",
+    "target": "/health",
+    "headers": [
+      [
+        "Host",
+        "evil.example"
+      ]
+    ],
+    "body": ""
+  },
+  "response": {
+    "status": 403,
+    "headers": [
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ],
+      [
+        "X-Content-Type-Options",
+        "nosniff"
+      ]
+    ],
+    "body": "Forbidden: host not allowed\n"
+  },
+  "compare": "exact"
+}

@@ -1,0 +1,34 @@
+{
+  "name": "09_run_authz_forbidden",
+  "config": "strict",
+  "request": {
+    "method": "POST",
+    "target": "/run",
+    "headers": [
+      [
+        "Content-Type",
+        "application/json"
+      ],
+      [
+        "X-Test-User",
+        "bob"
+      ]
+    ],
+    "body": "{\"appName\":\"assistant\",\"userId\":\"alice\",\"sessionId\":\"s1\",\"newMessage\":{\"role\":\"user\",\"parts\":[{\"text\":\"hello\"}]}}"
+  },
+  "response": {
+    "status": 403,
+    "headers": [
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ],
+      [
+        "X-Content-Type-Options",
+        "nosniff"
+      ]
+    ],
+    "body": "forbidden: authz: unauthorized: caller doesn't match the provided userID\n"
+  },
+  "compare": "exact"
+}

@@ -1,0 +1,21 @@
+{
+  "name": "08_session_list",
+  "config": "main",
+  "request": {
+    "method": "GET",
+    "target": "/apps/assistant/users/alice/sessions",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "headers": [
+      [
+        "Content-Type",
+        "application/json; charset=UTF-8"
+      ]
+    ],
+    "body": "[{\"id\":\"00000000-0000-4000-8000-000000000001\",\"appName\":\"assistant\",\"userId\":\"alice\",\"lastUpdateTime\":1767323046,\"events\":[],\"state\":{}},{\"id\":\"s1\",\"appName\":\"assistant\",\"userId\":\"alice\",\"lastUpdateTime\":1767323045,\"events\":[],\"state\":{\"color\":\"blue\"}}]\n"
+  },
+  "compare": "exact"
+}

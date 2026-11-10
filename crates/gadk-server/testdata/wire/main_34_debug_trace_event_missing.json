@@ -1,0 +1,25 @@
+{
+  "name": "34_debug_trace_event_missing",
+  "config": "main",
+  "request": {
+    "method": "GET",
+    "target": "/debug/trace/nope",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 404,
+    "headers": [
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ],
+      [
+        "X-Content-Type-Options",
+        "nosniff"
+      ]
+    ],
+    "body": "event not found: nope\n"
+  },
+  "compare": "exact"
+}

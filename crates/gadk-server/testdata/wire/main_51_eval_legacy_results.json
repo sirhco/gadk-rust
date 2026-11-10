@@ -1,0 +1,21 @@
+{
+  "name": "51_eval_legacy_results",
+  "config": "main",
+  "request": {
+    "method": "GET",
+    "target": "/apps/assistant/eval_results",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 501,
+    "headers": [
+      [
+        "Content-Type",
+        "application/json; charset=UTF-8"
+      ]
+    ],
+    "body": "{\"error\":\"eval is not implemented in ADK Go\",\"detail\":\"agent evaluation is not installed in ADK Go. Use adk-python for eval workflows.\"}\n"
+  },
+  "compare": "exact"
+}
