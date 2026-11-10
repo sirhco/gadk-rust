@@ -17,8 +17,6 @@
 //! query, `x-goog-request-params` routing header, credentials, protojson bodies), list paging,
 //! and long-running-operation polling.
 
-#![allow(dead_code)]
-
 use std::time::Duration;
 
 use bytes::Bytes;

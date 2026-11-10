@@ -17,8 +17,6 @@
 //! bytes encoding, int64 values, the two aiplatform enums the session events carry, and Go's
 //! `url.QueryEscape`, `url.Values.Encode` and `URL.EscapedPath`.
 
-#![allow(dead_code)]
-
 use base64::Engine as _;
 use base64::engine::general_purpose::{GeneralPurpose, GeneralPurposeConfig};
 use base64::engine::{DecodePaddingMode, general_purpose};

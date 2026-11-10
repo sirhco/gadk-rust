@@ -26,6 +26,7 @@ use serde_json::{Map, Value, json};
 
 use super::{error_response, grpc_request};
 use crate::protojson::{format_timestamp, int64_value, parse_timestamp};
+use crate::session::convert::str_field;
 
 /// The text the real Agent Engine answers a malformed request with.
 const INVALID_ARGUMENT: &str = "Request contains an invalid argument.";
@@ -161,10 +162,6 @@ fn split_session(name: &str) -> Option<(&str, &str)> {
 
 fn now() -> String {
     format_timestamp(&Utc::now())
-}
-
-fn str_field<'a>(v: &'a Value, key: &str) -> &'a str {
-    v.get(key).and_then(Value::as_str).unwrap_or_default()
 }
 
 fn not_found(name: &str) -> Failure {

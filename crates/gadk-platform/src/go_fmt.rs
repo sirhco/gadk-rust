@@ -179,6 +179,18 @@ pub fn go_sprint_value(v: &Value) -> String {
     }
 }
 
+/// Go `fmt.Sprintf("%T", v)` of a value Go decoded from JSON (`any` from `encoding/json`).
+pub fn go_type_name(v: &Value) -> &'static str {
+    match v {
+        Value::Null => "<nil>",
+        Value::Bool(_) => "bool",
+        Value::Number(_) => "float64",
+        Value::String(_) => "string",
+        Value::Array(_) => "[]interface {}",
+        Value::Object(_) => "map[string]interface {}",
+    }
+}
+
 /// Go `%v` of a float64 = `strconv.FormatFloat(f, 'g', -1, 64)`: the shortest round-trip digits,
 /// in `%e` form (`d.ddde±XX`, at least two exponent digits) when the decimal exponent is below -4
 /// or at least 6 (strconv ftoa.go: `if shortest { eprec = 6 }`), otherwise plain decimal. So
@@ -216,7 +228,9 @@ fn go_format_float_v(f: f64) -> String {
 mod tests {
     use serde_json::Value;
 
-    use super::{go_query_escape, go_quote, go_sprint_value, go_to_lower, go_to_upper};
+    use super::{
+        go_query_escape, go_quote, go_sprint_value, go_to_lower, go_to_upper, go_type_name,
+    };
 
     /// Go net/url/url_test.go `queryEscapeTests`, plus non-ASCII and the unreserved marks.
     #[test]
@@ -329,6 +343,21 @@ mod tests {
         ] {
             let v: Value = serde_json::from_str(input).unwrap();
             assert_eq!(go_sprint_value(&v), want, "%v of {input}");
+        }
+    }
+
+    #[test]
+    fn go_type_name_matches_go_percent_t() {
+        for (input, want) in [
+            ("null", "<nil>"),
+            ("true", "bool"),
+            ("1", "float64"),
+            (r#""s""#, "string"),
+            ("[]", "[]interface {}"),
+            ("{}", "map[string]interface {}"),
+        ] {
+            let v: Value = serde_json::from_str(input).unwrap();
+            assert_eq!(go_type_name(&v), want, "%T of {input}");
         }
     }
 }

@@ -94,7 +94,7 @@ pub(crate) fn session_event_to_event(v: &Value) -> Result<Event, BoxError> {
     // it fail the call; the lenient readers below are only used on validated input.
     validate_scalars(v).map_err(|e| wrap(LIST_EVENTS, e))?;
     let id = event_id_from_name(str_field(v, "name")).map_err(|e| wrap(LIST_EVENTS, e))?;
-    let timestamp = timestamp_field(v).map_err(|e| wrap(LIST_EVENTS, e))?;
+    let timestamp = timestamp_field(v, "timestamp").map_err(|e| wrap(LIST_EVENTS, e))?;
     let invocation_id = str_field(v, "invocationId").to_owned();
     let author = str_field(v, "author").to_owned();
 
@@ -717,7 +717,8 @@ fn field<'a>(v: &'a Value, key: &str) -> Option<&'a Value> {
     v.get(key).filter(|f| !f.is_null())
 }
 
-fn str_field<'a>(v: &'a Value, key: &str) -> &'a str {
+/// A protojson string field; an absent (or non-string) one is Go's zero `""`.
+pub(crate) fn str_field<'a>(v: &'a Value, key: &str) -> &'a str {
     v.get(key).and_then(Value::as_str).unwrap_or_default()
 }
 
@@ -779,9 +780,11 @@ fn float32_field(v: &Value, key: &str) -> f32 {
     v.get(key).map(float32_value).unwrap_or_default()
 }
 
-/// The envelope timestamp; an absent one is the Unix epoch (Go `(*Timestamp)(nil).AsTime()`).
-fn timestamp_field(v: &Value) -> Result<DateTime<Utc>, String> {
-    match field(v, "timestamp") {
+/// The `google.protobuf.Timestamp` field `key` of a protojson object (an event's `timestamp`,
+/// a session's `updateTime`); an absent or null one is the Unix epoch (Go
+/// `(*Timestamp)(nil).AsTime()`).
+pub(crate) fn timestamp_field(v: &Value, key: &str) -> Result<DateTime<Utc>, String> {
+    match field(v, key) {
         None => Ok(DateTime::UNIX_EPOCH),
         Some(Value::String(s)) => parse_timestamp(s),
         Some(other) => Err(format!("invalid google.protobuf.Timestamp value {other}")),

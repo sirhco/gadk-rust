@@ -241,17 +241,7 @@ fn encode_number(n: &serde_json::Number) -> String {
 // internal/utils/schema_utils.go
 // ---------------------------------------------------------------------------------------------
 
-/// Go `%T` of a JSON-decoded value.
-pub(crate) fn go_type_name(v: &Value) -> &'static str {
-    match v {
-        Value::Null => "<nil>",
-        Value::Bool(_) => "bool",
-        Value::Number(_) => "float64",
-        Value::String(_) => "string",
-        Value::Array(_) => "[]interface {}",
-        Value::Object(_) => "map[string]interface {}",
-    }
-}
+pub(crate) use gadk_platform::go_type_name;
 
 fn type_str(schema: &Schema) -> &str {
     schema.r#type.as_ref().map(|t| t.as_str()).unwrap_or("")

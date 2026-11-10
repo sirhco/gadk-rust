@@ -30,13 +30,12 @@ use serde_json::{Map, Value};
 
 use super::convert::{
     event_id_from_name, event_to_session_event, filter_nil_values, session_event_to_event,
-    struct_as_map, to_struct,
+    str_field, struct_as_map, timestamp_field, to_struct,
 };
 use super::local::VertexSession;
 use crate::client::VertexClient;
 use crate::config::AgentEngineData;
 use crate::error::{BoxError, VertexError, find_vertex_error, session_error, wrap};
-use crate::protojson::parse_timestamp;
 
 /// Go `waitForOperation`'s attempts (`maxRetries`)…
 const WAIT_ATTEMPTS: u32 = 10;
@@ -219,8 +218,8 @@ impl SessionClient {
         if str_field(&resp, "userId") != req.user_id {
             return Err(SessionError::NotFound);
         }
-        let updated_at =
-            update_time(&resp).map_err(|e| session_error(wrap("error fetching session", e)))?;
+        let updated_at = timestamp_field(&resp, "updateTime")
+            .map_err(|e| session_error(wrap("error fetching session", e)))?;
         Ok(VertexSession::new(
             req.app_name.clone(),
             req.user_id.clone(),
@@ -301,7 +300,7 @@ impl SessionClient {
             .iter()
             .map(|s| {
                 let id = session_id_by_session_name(str_field(s, "name"))?;
-                let updated_at = update_time(s)?;
+                let updated_at = timestamp_field(s, "updateTime")?;
                 Ok(VertexSession::new(
                     req.app_name.clone(),
                     str_field(s, "userId").to_owned(),
@@ -400,20 +399,6 @@ fn not_found_or(prefix: &str, err: BoxError) -> SessionError {
         SessionError::NotFound
     } else {
         session_error(wrap(prefix, err))
-    }
-}
-
-fn str_field<'a>(v: &'a Value, key: &str) -> &'a str {
-    v.get(key).and_then(Value::as_str).unwrap_or_default()
-}
-
-/// A session's `updateTime`; an absent one is the Unix epoch (Go
-/// `(*Timestamp)(nil).AsTime()`).
-fn update_time(v: &Value) -> Result<DateTime<Utc>, String> {
-    match v.get("updateTime").filter(|t| !t.is_null()) {
-        None => Ok(DateTime::UNIX_EPOCH),
-        Some(Value::String(s)) => parse_timestamp(s),
-        Some(other) => Err(format!("invalid google.protobuf.Timestamp value {other}")),
     }
 }
 

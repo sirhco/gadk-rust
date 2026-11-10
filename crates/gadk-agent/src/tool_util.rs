@@ -24,6 +24,7 @@ use gadk_genai::{
     Content, FunctionCall, GenerateContentConfig, Part, ROLE_USER, Tool as GenaiTool,
 };
 use gadk_model::LlmRequest;
+use gadk_platform::go_type_name;
 use serde_json::{Map, Value};
 
 use crate::error::ToolError;
@@ -151,16 +152,4 @@ pub fn original_call_from(fc: &FunctionCall) -> Result<FunctionCall, ToolError> 
             fc.id
         ))
     })
-}
-
-/// Go `%T` of a JSON-decoded value.
-fn go_type_name(v: &Value) -> &'static str {
-    match v {
-        Value::Null => "<nil>",
-        Value::Bool(_) => "bool",
-        Value::Number(_) => "float64",
-        Value::String(_) => "string",
-        Value::Array(_) => "[]interface {}",
-        Value::Object(_) => "map[string]interface {}",
-    }
 }

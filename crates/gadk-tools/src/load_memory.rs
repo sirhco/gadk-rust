@@ -27,6 +27,7 @@ use gadk_agent::{Context, RunnableTool, Tool, ToolError};
 use gadk_genai::{FunctionDeclaration, Schema, Type};
 use gadk_memory::MemoryEntry;
 use gadk_model::LlmRequest;
+use gadk_platform::go_type_name;
 use serde_json::{Map, Value};
 
 use crate::go_fmt::wrap_err;
@@ -182,18 +183,6 @@ fn go_rfc3339_nano(t: &DateTime<Utc>) -> String {
     s
 }
 
-/// Go `%T` of a JSON-decoded value (`any` from `encoding/json`).
-pub(crate) fn go_type_name(v: &Value) -> &'static str {
-    match v {
-        Value::Null => "<nil>",
-        Value::Bool(_) => "bool",
-        Value::Number(_) => "float64",
-        Value::String(_) => "string",
-        Value::Array(_) => "[]interface {}",
-        Value::Object(_) => "map[string]interface {}",
-    }
-}
-
 /// A [`ToolError::Execution`] carrying Go's `errors.New(msg)` text.
 pub(crate) fn go_error(msg: impl Into<String>) -> ToolError {
     let msg: String = msg.into();
@@ -258,15 +247,5 @@ mod tests {
             go_rfc3339_nano(&base.with_nanosecond(1_000).unwrap()),
             "2025-01-02T03:04:05.000001Z"
         );
-    }
-
-    #[test]
-    fn go_type_name_matches_go_percent_t() {
-        assert_eq!(go_type_name(&json!(null)), "<nil>");
-        assert_eq!(go_type_name(&json!(true)), "bool");
-        assert_eq!(go_type_name(&json!(1)), "float64");
-        assert_eq!(go_type_name(&json!("s")), "string");
-        assert_eq!(go_type_name(&json!([])), "[]interface {}");
-        assert_eq!(go_type_name(&json!({})), "map[string]interface {}");
     }
 }
