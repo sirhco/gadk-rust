@@ -68,8 +68,15 @@ const CLOSE_NO_STATUS_RECEIVED: u16 = 1005;
 const CLOSE_MESSAGE_TOO_BIG: u16 = 1009;
 /// gorilla `CloseInternalServerErr`.
 const CLOSE_INTERNAL_SERVER_ERR: u16 = 1011;
+// The tungstenite error texts below were checked against tungstenite 0.29.0 (axum 0.8.9's
+// WebSocket backend); gadk-server has no tungstenite dependency to downcast to.
 /// tungstenite's `Error::Capacity` display prefix: the message or frame exceeded the read limit.
 const READ_LIMIT_ERROR_PREFIX: &str = "Space limit exceeded";
+/// tungstenite's `ProtocolError::SendAfterClosing` text: a write after a close frame went out or
+/// after the peer's close frame was read (tungstenite flips its state inside `poll_next`).
+const SEND_AFTER_CLOSING_ERROR: &str = "Sending after closing is not allowed";
+/// tungstenite's `Error::AlreadyClosed` text: a write after the close handshake completed.
+const ALREADY_CLOSED_ERROR: &str = "Trying to work with closed connection";
 
 impl RuntimeApiController {
     /// Go `RunLiveHandler` (through `NewErrorHandler`): upgrades to a WebSocket and streams a
@@ -399,6 +406,18 @@ impl fmt::Display for WriteError {
     }
 }
 
+/// A transport write error as a [`WriteError`]. tungstenite refuses writes once a close frame
+/// went either way (it marks the peer's close while reading it, before the reader can set
+/// `close_sent`); that is gorilla's `ErrCloseSent`, which Go's event loop does not log.
+fn write_error(e: axum::Error) -> WriteError {
+    let text = e.to_string();
+    if text.contains(SEND_AFTER_CLOSING_ERROR) || text.contains(ALREADY_CLOSED_ERROR) {
+        WriteError::CloseSent
+    } else {
+        WriteError::Other(text)
+    }
+}
+
 /// The write half of a live WebSocket, shared by the event loop, the pinger and the reader
 /// (gorilla allows one writer at a time; a write waits for the previous one within its own
 /// deadline, as `WriteControl` does).
@@ -431,21 +450,28 @@ impl Conn {
         let is_close = matches!(msg, Message::Close(_));
         let send = async {
             let mut sink = self.sink.lock().await;
-            sink.send(msg).await
+            // gorilla re-checks `writeErr` once it holds the write mutex: a close frame may have
+            // gone out while this write waited for the writer.
+            if self.close_sent.load(Ordering::SeqCst) {
+                return Err(WriteError::CloseSent);
+            }
+            let res = sink.send(msg).await.map_err(write_error);
+            if is_close && res.is_ok() {
+                self.close_sent.store(true, Ordering::SeqCst);
+            }
+            res
         };
         let res = tokio::select! {
             biased;
             () = self.closed.cancelled() => Err(WriteError::Closed),
-            r = with_deadline(deadline, send) => match r {
-                None => Err(WriteError::Timeout),
-                Some(Err(e)) => Err(WriteError::Other(e.to_string())),
-                Some(Ok(())) => Ok(()),
-            },
+            r = with_deadline(deadline, send) => r.unwrap_or(Err(WriteError::Timeout)),
         };
-        if is_close && res.is_ok() {
-            self.close_sent.store(true, Ordering::SeqCst);
+        // gorilla reports `ErrCloseSent` ahead of any other failure once a close frame went out
+        // (e.g. a write still waiting for the writer when the reader replied and closed).
+        match res {
+            Err(_) if self.close_sent.load(Ordering::SeqCst) => Err(WriteError::CloseSent),
+            res => res,
         }
-        res
     }
 
     /// gorilla's default close handler: the reply tungstenite queued for the client's close
@@ -453,6 +479,7 @@ impl Conn {
     async fn send_close_reply(&self) {
         let flush = async {
             let mut sink = self.sink.lock().await;
+            self.close_sent.store(true, Ordering::SeqCst);
             sink.flush().await
         };
         tokio::select! {
@@ -840,6 +867,25 @@ mod tests {
         assert!(is_valid_challenge_key("dGhlIHNhbXBsZSBub25jZQ=="));
         assert!(!is_valid_challenge_key("abc"));
         assert!(!is_valid_challenge_key(""));
+    }
+
+    #[test]
+    fn post_close_write_errors_are_close_sent() {
+        let e = |t: &str| axum::Error::new(std::io::Error::other(t.to_owned()));
+        assert!(matches!(
+            write_error(e(
+                "WebSocket protocol error: Sending after closing is not allowed"
+            )),
+            WriteError::CloseSent
+        ));
+        assert!(matches!(
+            write_error(e("Trying to work with closed connection")),
+            WriteError::CloseSent
+        ));
+        assert!(matches!(
+            write_error(e("Connection reset by peer")),
+            WriteError::Other(_)
+        ));
     }
 
     #[test]

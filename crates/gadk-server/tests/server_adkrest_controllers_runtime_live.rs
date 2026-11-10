@@ -970,6 +970,73 @@ async fn test_run_live_handler_graceful_client_close_does_not_log_write_error() 
     );
 }
 
+// parity: gadk-only regression: on a multi-threaded runtime an event write races the reader's handling of the client's close frame (tungstenite refuses writes once it has read the frame); like gorilla's ErrCloseSent, none of them is logged
+#[test]
+fn test_run_live_handler_graceful_client_close_races_event_writes_multi_thread() {
+    const ITERATIONS: usize = 200;
+    let logs = LogBuffer::default();
+    let dispatch = tracing::Dispatch::new(
+        tracing_subscriber::fmt()
+            .with_writer(logs.clone())
+            .with_ansi(false)
+            .finish(),
+    );
+    // The `tokio::test` multi-thread flavor cannot install a subscriber on its worker threads,
+    // where the server's tasks log; each worker installs the capture as it starts.
+    let worker_dispatch = dispatch.clone();
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .enable_all()
+        .on_thread_start(move || {
+            std::mem::forget(tracing::dispatcher::set_default(&worker_dispatch));
+        })
+        .build()
+        .unwrap();
+    let _guard = tracing::dispatcher::set_default(&dispatch);
+
+    rt.block_on(async {
+        let mut server = start_run_live_server(
+            |_| {},
+            run_live_fn(|| async {
+                let session = RecordingLiveSession::new();
+                let closed = session.closed.clone();
+                let sess: Arc<dyn LiveSession> = session;
+                Ok((
+                    sess,
+                    // Events back to back, so a write is in flight whenever the close arrives.
+                    event_stream(move |y| async move {
+                        let event = make_event("invocation-1", TEST_LIVE_APP_NAME, "tick");
+                        while !closed.is_cancelled() && y.yield_(Ok(event.clone())).await {}
+                    }),
+                ))
+            }),
+        )
+        .await;
+        for _ in 0..ITERATIONS {
+            let mut conn = dial_live(&server.ws_url).await;
+            read_event(&mut conn).await;
+            conn.send(close_frame(1000, "client finished"))
+                .await
+                .unwrap();
+            // Keep reading so the server's writes never stall on a full socket buffer.
+            timeout(Duration::from_secs(1), async {
+                while let Some(Ok(_)) = conn.next().await {}
+            })
+            .await
+            .expect("connection did not close after the client close frame");
+            wait_for_handler_exit(&mut server.exits).await;
+        }
+    });
+    drop(rt);
+    let got = logs.text();
+    assert!(
+        !got.contains(&format!(
+            "WebSocket write error for app {TEST_LIVE_APP_NAME}"
+        )),
+        "graceful close produced a write-error log line: {got:?}"
+    );
+}
+
 // parity: adapted: a gadk models::Event always encodes, so the write fails on a connection the client dropped (Go logs that write error the same way)
 #[tokio::test]
 async fn test_run_live_handler_logs_write_json_failure() {
