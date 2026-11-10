@@ -76,35 +76,12 @@ pub(crate) fn valid_path(p: &str) -> bool {
     p == "." || p.split('/').all(|e| !matches!(e, "" | "." | ".."))
 }
 
-/// Go `fmt.Errorf("<msg>: %w", source)`: Display `"<msg>: <source>"`, `source()` = the wrapped
-/// error.
-#[derive(Debug)]
-struct GoWrapped {
-    msg: String,
-    source: Box<dyn std::error::Error + Send + Sync>,
-}
-
-impl std::fmt::Display for GoWrapped {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}: {}", self.msg, self.source)
-    }
-}
-
-impl std::error::Error for GoWrapped {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&*self.source)
-    }
-}
-
 /// A [`ToolError::Execution`] wrapping `source` as Go's `fmt.Errorf("<msg>: %w", source)` does.
 pub(crate) fn wrap_err(
     msg: impl Into<String>,
     source: impl Into<Box<dyn std::error::Error + Send + Sync>>,
 ) -> ToolError {
-    ToolError::Execution(Box::new(GoWrapped {
-        msg: msg.into(),
-        source: source.into(),
-    }))
+    ToolError::Execution(Box::new(gadk_platform::GoWrapped::new(msg, source)))
 }
 
 /// Go `string(bytes)` as `encoding/json` encodes it: valid UTF-8 is copied, and each byte that
