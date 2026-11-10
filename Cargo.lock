@@ -1204,6 +1204,7 @@ dependencies = [
  "chrono",
  "futures",
  "regex",
+ "serde_json",
  "tokio",
  "uuid",
 ]

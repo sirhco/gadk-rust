@@ -14,9 +14,12 @@
 // limitations under the License.
 
 //! Go `fmt` verb, `strings` and `net/url` ports shared by the gadk crates: `strconv.Quote`
-//! (`%q`), `strings.ToLower`, `strings.ToUpper` and `url.QueryEscape`.
+//! (`%q`), `strings.ToLower`, `strings.ToUpper`, `url.QueryEscape` and `fmt` `%v` of a
+//! JSON-decoded value.
 
 use std::sync::LazyLock;
+
+use serde_json::Value;
 
 /// Go `unicode.IsPrint` (= `strconv.IsPrint`): letters, marks, numbers, punctuation, symbols
 /// (categories L, M, N, P, S) and the ASCII space U+0020. Other spaces, Cc, Cf, Cs, Co and Cn
@@ -141,9 +144,79 @@ pub fn go_query_escape(s: &str) -> String {
     out
 }
 
+/// Go `fmt.Sprintf("%v", v)` of a value Go decoded from JSON (`any`):
+/// - `null` → `<nil>`; a bool → `true`/`false`; a string → itself;
+/// - every number is a Go `float64`, printed as `%v` does (see `go_format_float_v`), so
+///   `1000000` → `1e+06`;
+/// - an array → `[a b c]`; an object → `map[k1:v1 k2:v2]` with the keys sorted (Go `fmt` sorts
+///   map keys).
+pub fn go_sprint_value(v: &Value) -> String {
+    match v {
+        Value::Null => "<nil>".to_owned(),
+        Value::Bool(b) => b.to_string(),
+        Value::Number(n) => go_format_float_v(n.as_f64().unwrap_or_default()),
+        Value::String(s) => s.clone(),
+        Value::Array(items) => format!(
+            "[{}]",
+            items
+                .iter()
+                .map(go_sprint_value)
+                .collect::<Vec<_>>()
+                .join(" ")
+        ),
+        Value::Object(m) => {
+            let mut entries: Vec<(&String, &Value)> = m.iter().collect();
+            entries.sort_by(|a, b| a.0.cmp(b.0));
+            format!(
+                "map[{}]",
+                entries
+                    .iter()
+                    .map(|(k, v)| format!("{k}:{}", go_sprint_value(v)))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            )
+        }
+    }
+}
+
+/// Go `%v` of a float64 = `strconv.FormatFloat(f, 'g', -1, 64)`: the shortest round-trip digits,
+/// in `%e` form (`d.ddde±XX`, at least two exponent digits) when the decimal exponent is below -4
+/// or at least 6 (strconv ftoa.go: `if shortest { eprec = 6 }`), otherwise plain decimal. So
+/// 1e6 → `1e+06`, 123456 → `123456`, 0.00001 → `1e-05`, -0.0 → `-0`.
+///
+/// Rust's shortest formatters round an exact decimal tie up, while Go rounds it half to even
+/// (141016749166520.625 → Go `1.4101674916652062e+14`). So only the shortest digit count is taken
+/// from `{f:e}`; the digits themselves come from Rust's exact-precision formatting at that count,
+/// which rounds ties to even as Go does.
+fn go_format_float_v(f: f64) -> String {
+    let shortest = format!("{f:e}"); // e.g. "1.234567e6", "-0e0"
+    let shortest_mant = shortest
+        .split_once('e')
+        .map_or(shortest.as_str(), |(m, _)| m);
+    let digits = shortest_mant.bytes().filter(u8::is_ascii_digit).count();
+    let prec = digits.saturating_sub(1);
+    let sci = format!("{f:.prec$e}");
+    let (mant, exp) = sci.split_once('e').unwrap_or((sci.as_str(), "0"));
+    let exp: i32 = exp.parse().unwrap_or(0);
+    if (-4..6).contains(&exp) {
+        // Plain decimal with the same significant digits: `prec - exp` fraction digits.
+        let frac =
+            usize::try_from(i64::try_from(prec).unwrap_or(i64::MAX) - i64::from(exp)).unwrap_or(0);
+        format!("{f:.frac$}")
+    } else {
+        format!(
+            "{mant}e{}{:02}",
+            if exp < 0 { '-' } else { '+' },
+            exp.unsigned_abs()
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{go_query_escape, go_quote, go_to_lower, go_to_upper};
+    use serde_json::Value;
+
+    use super::{go_query_escape, go_quote, go_sprint_value, go_to_lower, go_to_upper};
 
     /// Go net/url/url_test.go `queryEscapeTests`, plus non-ASCII and the unreserved marks.
     #[test]
@@ -208,6 +281,54 @@ mod tests {
         ];
         for (input, want) in cases {
             assert_eq!(go_quote(input), want, "go_quote({input:?})");
+        }
+    }
+
+    /// `fmt.Sprintf("%v", v)` after Go `json.Unmarshal(input, &v)` (go1.27 run of the same
+    /// inputs). The inputs are parsed by serde_json, as a JSON-decoded value is in Rust.
+    #[test]
+    fn go_sprint_value_matches_go_for_json_decoded_values() {
+        for (input, want) in [
+            ("null", "<nil>"),
+            ("true", "true"),
+            ("false", "false"),
+            (r#""ok""#, "ok"),
+            (r#""""#, ""),
+            ("0", "0"),
+            ("-0.0", "-0"),
+            ("3", "3"),
+            ("1.5", "1.5"),
+            ("-2.25", "-2.25"),
+            ("100000", "100000"),
+            ("123456", "123456"),
+            ("1000000", "1e+06"),
+            ("1234567", "1.234567e+06"),
+            ("0.0001", "0.0001"),
+            ("0.00001", "1e-05"),
+            ("0.000123", "0.000123"),
+            ("1e21", "1e+21"),
+            ("1e20", "1e+20"),
+            ("123456789012345678", "1.2345678901234568e+17"),
+            ("5e-324", "5e-324"),
+            ("1.7976931348623157e308", "1.7976931348623157e+308"),
+            ("0.1", "0.1"),
+            ("-1.5e7", "-1.5e+07"),
+            // Exact decimal ties: Go rounds the shortest digits half to even.
+            ("141016749166520.625", "1.4101674916652062e+14"),
+            ("-783388490710125.25", "-7.833884907101252e+14"),
+            ("[]", "[]"),
+            (r#"[1,"a",null,true]"#, "[1 a <nil> true]"),
+            (r#"[[1,2],{"k":"v"}]"#, "[[1 2] map[k:v]]"),
+            ("{}", "map[]"),
+            (r#"{"b":2,"a":true,"c":"x y"}"#, "map[a:true b:2 c:x y]"),
+            (
+                r#"{"z":{"y":[1.5,"s"]},"a":null}"#,
+                "map[a:<nil> z:map[y:[1.5 s]]]",
+            ),
+            (r#"{"result":"ok"}"#, "map[result:ok]"),
+        ] {
+            let v: Value = serde_json::from_str(input).unwrap();
+            assert_eq!(go_sprint_value(&v), want, "%v of {input}");
         }
     }
 }
