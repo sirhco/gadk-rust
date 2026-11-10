@@ -135,6 +135,10 @@ required-features = ["database", "gemini"]
 name = "gcs_artifacts"
 required-features = ["gcs"]
 
+[[example]]
+name = "vertexai_session"
+required-features = ["vertexai", "gemini"]
+
 [[test]]
 name = "model_anthropicmodel_agent_runner"
 required-features = ["anthropic"]
