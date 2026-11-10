@@ -1,0 +1,21 @@
+{
+  "name": "32_debug_trace_event",
+  "config": "main",
+  "request": {
+    "method": "GET",
+    "target": "/debug/trace/00000000-0000-4000-8000-000000000012",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "headers": [
+      [
+        "Content-Type",
+        "application/json; charset=UTF-8"
+      ]
+    ],
+    "body": "{\"end_time\":1794340393283556584,\"gcp.vertex.agent.event_id\":\"00000000-0000-4000-8000-000000000012\",\"gcp.vertex.agent.invocation_id\":\"e-00000000-0000-4000-8000-000000000009\",\"gen_ai.operation.name\":\"generate_content\",\"gen_ai.request.model\":\"scripted-assistant\",\"gen_ai.response.finish_reasons\":\"[\\\"tool_call\\\"]\",\"gen_ai.usage.cache_read.input_tokens\":\"0\",\"gen_ai.usage.input_tokens\":\"10\",\"gen_ai.usage.output_tokens\":\"5\",\"gen_ai.usage.reasoning.output_tokens\":\"0\",\"logs\":[{\"body\":null,\"attributes\":{\"gcp.vertex.agent.event_id\":\"00000000-0000-4000-8000-000000000012\",\"gcp.vertex.agent.invocation_id\":\"e-00000000-0000-4000-8000-000000000009\",\"gen_ai.operation.name\":\"generate_content\",\"gen_ai.request.model\":\"scripted-assistant\",\"gen_ai.response.finish_reasons\":[\"tool_call\"],\"gen_ai.usage.cache_read.input_tokens\":0,\"gen_ai.usage.input_tokens\":10,\"gen_ai.usage.output_tokens\":5,\"gen_ai.usage.reasoning.output_tokens\":0},\"observed_timestamp\":\"2026-11-10T13:53:13.283545-06:00\",\"trace_id\":\"75135f4b3dc6a14e644f493bd00d7eef\",\"span_id\":\"695cf8d3e00fd7e6\",\"event_name\":\"gen_ai.client.inference.operation.details\"}],\"name\":\"generate_content scripted-assistant\",\"parent_span_id\":\"97a36a32fcd68634\",\"span_id\":\"695cf8d3e00fd7e6\",\"start_time\":1794340393283536000,\"trace_id\":\"75135f4b3dc6a14e644f493bd00d7eef\"}\n"
+  },
+  "compare": "debug_trace"
+}

@@ -1,0 +1,25 @@
+{
+  "name": "44_build_graph_image_node_missing",
+  "config": "main",
+  "request": {
+    "method": "GET",
+    "target": "/dev/apps/pipeline/build_graph_image?node=pipeline/nobody",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 404,
+    "headers": [
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ],
+      [
+        "X-Content-Type-Options",
+        "nosniff"
+      ]
+    ],
+    "body": "agent \"nobody\" not found under \"pipeline\" in path \"pipeline/nobody\"\n"
+  },
+  "compare": "exact"
+}

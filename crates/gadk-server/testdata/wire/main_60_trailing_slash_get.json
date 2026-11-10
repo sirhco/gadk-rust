@@ -1,0 +1,21 @@
+{
+  "name": "60_trailing_slash_get",
+  "config": "main",
+  "request": {
+    "method": "GET",
+    "target": "/apps/assistant/users/alice/sessions/s2/",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "headers": [
+      [
+        "Content-Type",
+        "application/json; charset=UTF-8"
+      ]
+    ],
+    "body": "{\"id\":\"s2\",\"appName\":\"assistant\",\"userId\":\"alice\",\"lastUpdateTime\":1767323068,\"events\":[],\"state\":{\"via\":\"slash\"}}\n"
+  },
+  "compare": "exact"
+}

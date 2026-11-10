@@ -1,0 +1,21 @@
+{
+  "name": "02_health_head",
+  "config": "main",
+  "request": {
+    "method": "HEAD",
+    "target": "/health",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "headers": [
+      [
+        "Content-Type",
+        "application/json"
+      ]
+    ],
+    "body": ""
+  },
+  "compare": "exact"
+}

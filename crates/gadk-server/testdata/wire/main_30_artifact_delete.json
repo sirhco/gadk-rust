@@ -1,0 +1,21 @@
+{
+  "name": "30_artifact_delete",
+  "config": "main",
+  "request": {
+    "method": "DELETE",
+    "target": "/apps/assistant/users/alice/sessions/s1/artifacts/note.txt",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "headers": [
+      [
+        "Content-Type",
+        "application/json; charset=UTF-8"
+      ]
+    ],
+    "body": ""
+  },
+  "compare": "exact"
+}

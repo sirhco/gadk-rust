@@ -1,0 +1,25 @@
+{
+  "name": "21_run_live_missing_params",
+  "config": "main",
+  "request": {
+    "method": "GET",
+    "target": "/run_live",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 500,
+    "headers": [
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ],
+      [
+        "X-Content-Type-Options",
+        "nosniff"
+      ]
+    ],
+    "body": "appName, userId, and sessionId are required\n"
+  },
+  "compare": "exact"
+}

@@ -1,0 +1,21 @@
+{
+  "name": "43_build_graph_image_node",
+  "config": "main",
+  "request": {
+    "method": "GET",
+    "target": "/dev/apps/pipeline/build_graph_image?node=pipeline/reviewer",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "headers": [
+      [
+        "Content-Type",
+        "application/json; charset=UTF-8"
+      ]
+    ],
+    "body": "{\"dotSrc\":\"digraph AgentGraph {\\n\\tbgcolor=\\\"#ffffff\\\";\\n\\trankdir=LR;\\n\\treviewer [ color=\\\"#3c4043\\\", fontcolor=\\\"#3c4043\\\", label=\\\"🤖 reviewer\\\", shape=ellipse, style=rounded ];\\n\\n}\\n\"}\n"
+  },
+  "compare": "exact"
+}

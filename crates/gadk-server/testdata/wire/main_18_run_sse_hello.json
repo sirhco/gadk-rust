@@ -1,0 +1,34 @@
+{
+  "name": "18_run_sse_hello",
+  "config": "main",
+  "request": {
+    "method": "POST",
+    "target": "/run_sse",
+    "headers": [
+      [
+        "Content-Type",
+        "application/json"
+      ]
+    ],
+    "body": "{\"appName\":\"assistant\",\"userId\":\"alice\",\"sessionId\":\"s1\",\"newMessage\":{\"role\":\"user\",\"parts\":[{\"text\":\"hello\"}]},\"streaming\":true}"
+  },
+  "response": {
+    "status": 200,
+    "headers": [
+      [
+        "Cache-Control",
+        "no-cache"
+      ],
+      [
+        "Connection",
+        "keep-alive"
+      ],
+      [
+        "Content-Type",
+        "text/event-stream; charset=UTF-8"
+      ]
+    ],
+    "body": "data: {\"id\":\"00000000-0000-4000-8000-000000000036\",\"invocationId\":\"e-00000000-0000-4000-8000-000000000033\",\"author\":\"assistant\",\"groundingMetadata\":null,\"usageMetadata\":{\"candidatesTokenCount\":5,\"promptTokenCount\":10,\"totalTokenCount\":15},\"finishReason\":\"STOP\",\"actions\":{\"stateDelta\":{},\"artifactDelta\":{}},\"nodeInfo\":{\"path\":\"assistant\"},\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"Hello! How can I help?\"}]}}\n\n"
+  },
+  "compare": "sse"
+}

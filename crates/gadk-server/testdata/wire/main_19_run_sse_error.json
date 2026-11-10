@@ -1,0 +1,34 @@
+{
+  "name": "19_run_sse_error",
+  "config": "main",
+  "request": {
+    "method": "POST",
+    "target": "/run_sse",
+    "headers": [
+      [
+        "Content-Type",
+        "application/json"
+      ]
+    ],
+    "body": "{\"appName\":\"assistant\",\"userId\":\"alice\",\"sessionId\":\"s1\",\"newMessage\":{\"role\":\"user\",\"parts\":[{\"text\":\"fail\"}]}}"
+  },
+  "response": {
+    "status": 200,
+    "headers": [
+      [
+        "Cache-Control",
+        "no-cache"
+      ],
+      [
+        "Connection",
+        "keep-alive"
+      ],
+      [
+        "Content-Type",
+        "text/event-stream; charset=UTF-8"
+      ]
+    ],
+    "body": "event: error\ndata: {\"error\":\"scripted model failure\"}\n\n"
+  },
+  "compare": "sse"
+}

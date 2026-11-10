@@ -1,0 +1,25 @@
+{
+  "name": "29_artifact_get_version_invalid",
+  "config": "main",
+  "request": {
+    "method": "GET",
+    "target": "/apps/assistant/users/alice/sessions/s1/artifacts/note.txt/versions/x",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 400,
+    "headers": [
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ],
+      [
+        "X-Content-Type-Options",
+        "nosniff"
+      ]
+    ],
+    "body": "version parameter must be an integer\n"
+  },
+  "compare": "exact"
+}

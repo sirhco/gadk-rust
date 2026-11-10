@@ -1,0 +1,21 @@
+{
+  "name": "24_artifacts_list",
+  "config": "main",
+  "request": {
+    "method": "GET",
+    "target": "/apps/assistant/users/alice/sessions/s1/artifacts",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "headers": [
+      [
+        "Content-Type",
+        "application/json; charset=UTF-8"
+      ]
+    ],
+    "body": "[\"note.txt\"]\n"
+  },
+  "compare": "exact"
+}

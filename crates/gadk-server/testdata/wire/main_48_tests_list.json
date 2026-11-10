@@ -1,0 +1,21 @@
+{
+  "name": "48_tests_list",
+  "config": "main",
+  "request": {
+    "method": "GET",
+    "target": "/dev/apps/assistant/tests",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 501,
+    "headers": [
+      [
+        "Content-Type",
+        "application/json; charset=UTF-8"
+      ]
+    ],
+    "body": "{\"error\":\"the tests tab is not implemented in ADK Go\",\"detail\":\"ADK Go does not implement the web UI tests tab. Write Go tests against runner.Run instead.\"}\n"
+  },
+  "compare": "exact"
+}

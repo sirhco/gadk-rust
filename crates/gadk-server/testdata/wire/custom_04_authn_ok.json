@@ -1,0 +1,26 @@
+{
+  "name": "04_authn_ok",
+  "config": "custom",
+  "request": {
+    "method": "GET",
+    "target": "/apps/assistant/users/alice/sessions",
+    "headers": [
+      [
+        "X-Test-User",
+        "alice"
+      ]
+    ],
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "headers": [
+      [
+        "Content-Type",
+        "application/json; charset=UTF-8"
+      ]
+    ],
+    "body": "[]\n"
+  },
+  "compare": "exact"
+}
