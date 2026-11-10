@@ -33,6 +33,7 @@ use std::sync::Arc;
 use axum::extract::ConnectInfo;
 use axum::extract::connect_info::Connected;
 use axum::serve::IncomingStream;
+use gadk_platform::go_to_lower;
 use http::StatusCode;
 use http::request::Parts;
 use tokio::net::TcpListener;
@@ -420,24 +421,6 @@ pub(crate) fn strip_port(host: &str) -> &str {
         Some(port) if !port.is_empty() && port.bytes().all(|c| c.is_ascii_digit()) => bare,
         _ => host,
     }
-}
-
-/// Go `strings.ToLower`: ASCII fast path; otherwise invalid UTF-8 is already U+FFFD (the header
-/// was read lossily) and each rune maps through Go's `unicode.ToLower`, which differs from
-/// Rust's full lowercase mapping only for U+0130.
-fn go_to_lower(s: &str) -> String {
-    if s.is_ascii() {
-        return s.to_ascii_lowercase();
-    }
-    s.chars()
-        .map(|c| {
-            let mut l = c.to_lowercase();
-            match (l.next(), l.next()) {
-                (Some(one), None) => one,
-                _ => 'i', // U+0130 LATIN CAPITAL LETTER I WITH DOT ABOVE → U+0069 in Go
-            }
-        })
-        .collect()
 }
 
 /// The subset of Go `net/url` and `net/netip` the guard and the router rely on, byte for byte:
