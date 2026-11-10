@@ -474,3 +474,61 @@ async fn pub_sub_handler_mounts_on_an_axum_route() {
         .unwrap();
     assert_eq!(app.oneshot(req).await.unwrap().status(), 405);
 }
+
+/// `handler()` mounted behind `authn::middleware`, as the handler docs (and the Go launcher)
+/// prescribe: no credentials is 401 and the agent never runs; an authenticated call runs it.
+#[tokio::test]
+async fn pub_sub_handler_behind_the_authn_middleware() {
+    use gadk_server::authn::{self, AuthnError, Caller};
+
+    let runs = Arc::new(Runs::default());
+    let ctrl = Arc::new(
+        PubSubController::new(triggers_support::controller_config(
+            Arc::new(FakeSessionService::default()),
+            Arc::new(SingleLoader::new(mock_agent(vec![], runs.clone()))),
+        ))
+        .unwrap(),
+    );
+    // A fake authenticator: accepts exactly `Bearer good`.
+    let auth = authn::custom(|parts: &http::request::Parts| {
+        let ok = parts
+            .headers
+            .get(http::header::AUTHORIZATION)
+            .is_some_and(|v| v == "Bearer good");
+        async move {
+            if ok {
+                Ok(Some(Caller {
+                    user_id: "pubsub-push".into(),
+                    claims: None,
+                }))
+            } else {
+                Err(AuthnError::Unauthenticated(None))
+            }
+        }
+    });
+    let app = axum::Router::new()
+        .route(
+            "/apps/{app_name}/trigger/pubsub",
+            ctrl.handler().layer(authn::middleware(auth)),
+        )
+        .layer(DefaultBodyLimit::max(10 << 20));
+
+    let req = http::Request::post("/apps/test-agent/trigger/pubsub")
+        .body(Body::from(pubsub_body("hi", None)))
+        .unwrap();
+    let (code, _) = read(app.clone().oneshot(req).await.unwrap()).await;
+    assert_eq!(code, 401);
+    assert_eq!(
+        runs.count(),
+        0,
+        "an unauthenticated delivery must not run the agent"
+    );
+
+    let req = http::Request::post("/apps/test-agent/trigger/pubsub")
+        .header(http::header::AUTHORIZATION, "Bearer good")
+        .body(Body::from(pubsub_body("hi", None)))
+        .unwrap();
+    let (code, _) = read(app.oneshot(req).await.unwrap()).await;
+    assert_eq!(code, 200);
+    assert_eq!(runs.count(), 1);
+}

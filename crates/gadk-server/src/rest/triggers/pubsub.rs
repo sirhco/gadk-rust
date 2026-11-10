@@ -126,6 +126,31 @@ impl PubSubController {
     /// The body is read under the router's `axum::extract::DefaultBodyLimit`; set it explicitly
     /// where you mount the handler (`DefaultBodyLimit::max(10 << 20)` is the Go launcher's
     /// 10 MiB), since axum's own default is 2 MB.
+    ///
+    /// The handler does not authenticate: it runs the agent as a user ID taken from the
+    /// delivery itself, so any caller that reaches it chooses who the agent runs as. Mount it
+    /// behind [`authn::middleware`](crate::authn::middleware) as the Go launcher does, normally
+    /// with [`google_oidc`](crate::authn::google_oidc) so that only an allow-listed service
+    /// account may call it:
+    ///
+    /// ```no_run
+    /// # use std::sync::Arc;
+    /// # use gadk_server::authn::{self, AuthnError, GoogleOidcConfig};
+    /// # use gadk_server::rest::triggers::PubSubController;
+    /// # fn mount(ctrl: Arc<PubSubController>) -> Result<axum::Router, AuthnError> {
+    /// let auth = authn::google_oidc(GoogleOidcConfig {
+    ///     audience: "https://my-agent.example.com".into(),
+    ///     allowed_service_accounts: vec!["trigger@my-project.iam.gserviceaccount.com".into()],
+    /// })?;
+    /// let app = axum::Router::new()
+    ///     .route(
+    ///         "/apps/{app_name}/trigger/pubsub",
+    ///         ctrl.handler().layer(authn::middleware(auth)),
+    ///     )
+    ///     .layer(axum::extract::DefaultBodyLimit::max(10 << 20));
+    /// # Ok(app)
+    /// # }
+    /// ```
     pub fn handler(self: Arc<Self>) -> axum::routing::MethodRouter {
         axum::routing::post(move |req: Request| async move {
             self.pub_sub_trigger_handler(with_path_vars(req).await)
