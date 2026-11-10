@@ -1,0 +1,21 @@
+{
+  "name": "54_wrong_method",
+  "config": "main",
+  "request": {
+    "method": "PUT",
+    "target": "/list-apps",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 405,
+    "headers": [
+      [
+        "Allow",
+        "GET, HEAD"
+      ]
+    ],
+    "body": ""
+  },
+  "compare": "exact"
+}

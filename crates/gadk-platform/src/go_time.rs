@@ -13,9 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `time` parsing shared by the gadk crates: `time.Parse(time.RFC3339, s)`.
+//! Go `time` parsing and formatting shared by the gadk crates: `time.Parse(time.RFC3339, s)`
+//! and `t.Format(time.RFC3339Nano)`.
 
-use chrono::{DateTime, NaiveDate, TimeDelta, Utc};
+use chrono::{DateTime, NaiveDate, TimeDelta, TimeZone, Timelike, Utc};
 
 /// Go `time.Parse(time.RFC3339, s)`, reduced to the instant. That is Go's general layout
 /// parser for "2006-01-02T15:04:05Z07:00", which is what decides when its RFC 3339 fast path
@@ -98,10 +99,60 @@ pub fn go_parse_rfc3339(s: &str) -> Option<DateTime<Utc>> {
     at.checked_sub_signed(TimeDelta::try_seconds(offset)?)
 }
 
+/// Go `t.Format(time.RFC3339Nano)` (`2006-01-02T15:04:05.999999999Z07:00`) of `t` in its own
+/// zone: the fraction's trailing zeros trimmed (the fraction dropped when zero), `Z` for a zero
+/// offset, `±hh:mm` otherwise. Go's JSON marshalling refuses years outside 0..=9999; callers
+/// that marshal check the year themselves.
+pub fn go_format_rfc3339_nano<Tz: TimeZone>(t: &DateTime<Tz>) -> String {
+    let t = t.fixed_offset();
+    let mut s = t.format("%Y-%m-%dT%H:%M:%S").to_string();
+    let nanos = t.nanosecond() % 1_000_000_000;
+    if nanos != 0 {
+        let frac = format!("{nanos:09}");
+        s.push('.');
+        s.push_str(frac.trim_end_matches('0'));
+    }
+    if t.offset().local_minus_utc() == 0 {
+        s.push('Z');
+    } else {
+        s.push_str(&t.format("%:z").to_string());
+    }
+    s
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+    use chrono::FixedOffset;
+
     use super::*;
+
+    /// Go `time.RFC3339Nano`: trimmed fraction, `Z` for UTC, `±hh:mm` otherwise.
+    #[test]
+    fn go_format_rfc3339_nano_matches_go() {
+        let utc = FixedOffset::east_opt(0).unwrap();
+        let cst = FixedOffset::west_opt(6 * 3600).unwrap();
+        let at = |o: FixedOffset, ns: u32| {
+            o.with_ymd_and_hms(2026, 1, 2, 3, 4, 5)
+                .unwrap()
+                .with_nanosecond(ns)
+                .unwrap()
+        };
+        assert_eq!(go_format_rfc3339_nano(&at(utc, 0)), "2026-01-02T03:04:05Z");
+        assert_eq!(
+            go_format_rfc3339_nano(&at(cst, 256_916_000)),
+            "2026-01-02T03:04:05.256916-06:00"
+        );
+        assert_eq!(
+            go_format_rfc3339_nano(&at(utc, 1)),
+            "2026-01-02T03:04:05.000000001Z"
+        );
+        let t = Utc.with_ymd_and_hms(2026, 7, 17, 10, 0, 0).unwrap();
+        assert_eq!(
+            go_format_rfc3339_nano(&(t + TimeDelta::microseconds(1500))),
+            "2026-07-17T10:00:00.0015Z"
+        );
+    }
 
     /// Every row's expectation is what Go's `time.Parse(time.RFC3339, input)` returned
     /// (go1.27, module go 1.26), as a UTC instant; `None` is a parse error (the zero time).

@@ -1,0 +1,21 @@
+{
+  "name": "01_health_get",
+  "config": "main",
+  "request": {
+    "method": "GET",
+    "target": "/health",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "headers": [
+      [
+        "Content-Type",
+        "application/json"
+      ]
+    ],
+    "body": "{\"status\":\"ok\"}\n"
+  },
+  "compare": "exact"
+}

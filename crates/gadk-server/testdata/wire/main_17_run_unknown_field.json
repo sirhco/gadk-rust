@@ -1,0 +1,30 @@
+{
+  "name": "17_run_unknown_field",
+  "config": "main",
+  "request": {
+    "method": "POST",
+    "target": "/run",
+    "headers": [
+      [
+        "Content-Type",
+        "application/json"
+      ]
+    ],
+    "body": "{\"appName\":\"assistant\",\"bogus\":1}"
+  },
+  "response": {
+    "status": 400,
+    "headers": [
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ],
+      [
+        "X-Content-Type-Options",
+        "nosniff"
+      ]
+    ],
+    "body": "failed to decode request: json: unknown field \"bogus\"\n"
+  },
+  "compare": "exact"
+}

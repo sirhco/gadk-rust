@@ -1,0 +1,25 @@
+{
+  "name": "45_build_graph_unknown_app",
+  "config": "main",
+  "request": {
+    "method": "GET",
+    "target": "/dev/apps/nobody/build_graph",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 404,
+    "headers": [
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ],
+      [
+        "X-Content-Type-Options",
+        "nosniff"
+      ]
+    ],
+    "body": "agent nobody not found. Please specify one of those: [assistant pipeline]\n"
+  },
+  "compare": "exact"
+}

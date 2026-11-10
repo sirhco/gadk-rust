@@ -1,0 +1,25 @@
+{
+  "name": "28_artifact_get_version_missing",
+  "config": "main",
+  "request": {
+    "method": "GET",
+    "target": "/apps/assistant/users/alice/sessions/s1/artifacts/note.txt/versions/7",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 404,
+    "headers": [
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ],
+      [
+        "X-Content-Type-Options",
+        "nosniff"
+      ]
+    ],
+    "body": "artifact not found: file does not exist\n"
+  },
+  "compare": "exact"
+}

@@ -1,0 +1,21 @@
+{
+  "name": "56_options_session",
+  "config": "main",
+  "request": {
+    "method": "OPTIONS",
+    "target": "/apps/assistant/users/alice/sessions/s1",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 204,
+    "headers": [
+      [
+        "Allow",
+        "GET, HEAD, POST, PATCH, DELETE, OPTIONS"
+      ]
+    ],
+    "body": ""
+  },
+  "compare": "exact"
+}

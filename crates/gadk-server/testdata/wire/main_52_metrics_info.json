@@ -1,0 +1,21 @@
+{
+  "name": "52_metrics_info",
+  "config": "main",
+  "request": {
+    "method": "GET",
+    "target": "/dev/apps/assistant/metrics-info",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "headers": [
+      [
+        "Content-Type",
+        "application/json; charset=UTF-8"
+      ]
+    ],
+    "body": "{\"metricsInfo\":[]}\n"
+  },
+  "compare": "exact"
+}

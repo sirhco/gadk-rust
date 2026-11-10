@@ -840,7 +840,7 @@ class ThreeBTest(unittest.TestCase):
         err = io.StringIO()
         with contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
             pc.main(["--adk-go", str(self.go), "--repo", str(self.repo), "--ledger", "all", "--count"])
-        self.assertIn("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a, 4b or 4c", err.getvalue())
+        self.assertIn("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a, 4b, 4c or 5a", err.getvalue())
 
 
 LEDGER_4A = (
@@ -989,6 +989,86 @@ class FourCTest(unittest.TestCase):
         ])
 
 
+LEDGER_5A = (
+    "# Parity ledger — sub-project 5a\n\n"
+    "<!-- in-scope:\ninternal/compactionvalidate/validate_test.go\n"
+    "server/adkrest/controllers/version_test.go\n"
+    "internal/telemetry/functionaltest/telemetry_schema_test.go\n-->\n\n"
+    + pc.TABLE_HEADER + "\n" + pc.TABLE_SEP + "\n"
+)
+
+VALIDATE_TARGET = "crates/gadk-engine/src/parity_tests/internal_compactionvalidate_validate.rs"
+VERSION_TARGET = "crates/gadk-server/tests/server_adkrest_controllers_version.rs"
+SCHEMA_DIR = "crates/gadk-engine/tests/internal_telemetry_functionaltest_telemetry_schema"
+
+
+class FiveATest(unittest.TestCase):
+    """5a: Go test files spread over two crates, in `src/parity_tests/` (internal packages), in
+    `tests/` (public API) and in a test directory (`functionaltest`)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        d = pathlib.Path(self._tmp.name)
+        self.go, self.repo = d / "go", d / "repo"
+        for f, body in (
+            ("internal/compactionvalidate/validate_test.go",
+             "func TestAgainstAgentsRefusesAConfigNoAgentCanServe(t *testing.T) {}\n"),
+            ("server/adkrest/controllers/version_test.go",
+             "func TestVersionHandler(t *testing.T) {}\nfunc TestVersionIsPublic(t *testing.T) {}\n"),
+            ("internal/telemetry/functionaltest/telemetry_schema_test.go",
+             "func TestTelemetrySchema(t *testing.T) {}\n"),
+        ):
+            (self.go / f).parent.mkdir(parents=True, exist_ok=True)
+            (self.go / f).write_text("package x\n" + body)
+        for f in (VALIDATE_TARGET, VERSION_TARGET, SCHEMA_DIR + "/main.rs"):
+            (self.repo / f).parent.mkdir(parents=True, exist_ok=True)
+        (self.repo / VALIDATE_TARGET).write_text(
+            "#[test]\nfn test_against_agents_refuses_a_config_no_agent_can_serve() {}\n")
+        (self.repo / VERSION_TARGET).write_text(
+            "#[tokio::test]\nasync fn test_version_handler() {}\n"
+            "// parity: skipped TestVersionIsPublic: covered by the router\n")
+        (self.repo / SCHEMA_DIR / "main.rs").write_text("#[test]\nfn test_telemetry_schema() {}\n")
+        (self.repo / "docs/parity").mkdir(parents=True)
+        self.ledger = self.repo / "docs/parity/5a.md"
+        self.ledger.write_text(LEDGER_5A)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def run_cli(self, *args):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = pc.main(["--adk-go", str(self.go), "--repo", str(self.repo), *args])
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_ledger_5a_is_registered(self):
+        self.assertIn("5a", pc.GENERATED_LEDGERS)
+
+    def test_header_only_ledger_fails_until_targets_hold_tests(self):
+        (self.repo / VERSION_TARGET).write_text("//! Ports of ADK-Go `server/adkrest/controllers/version_test.go`.\n")
+        rc, out, err = self.run_cli("--ledger", "5a")
+        self.assertEqual((rc, out), (1, ""))
+        self.assertIn(
+            "server/adkrest/controllers/version_test.go TestVersionHandler: missing (no fn test_version_handler"
+            " and no `// parity: skipped TestVersionHandler:` in " + VERSION_TARGET + ")", err)
+
+    def test_targets_generate_and_check(self):
+        self.assertEqual(self.run_cli("--ledger", "5a", "--count"), (0, "4\n", ""))
+        self.assertEqual(self.run_cli("--ledger", "5a", "--generate")[0], 0)
+        self.assertEqual(self.run_cli("--ledger", "5a"), (0, "", ""))
+        rows = self.ledger.read_text().splitlines()[-4:]
+        self.assertEqual(rows, [
+            "| internal/compactionvalidate/validate_test.go | TestAgainstAgentsRefusesAConfigNoAgentCanServe"
+            " | ported | " + VALIDATE_TARGET + " | test_against_agents_refuses_a_config_no_agent_can_serve |",
+            "| server/adkrest/controllers/version_test.go | TestVersionHandler | ported | " + VERSION_TARGET
+            + " | test_version_handler |",
+            "| server/adkrest/controllers/version_test.go | TestVersionIsPublic | skipped | " + VERSION_TARGET
+            + " | covered by the router |",
+            "| internal/telemetry/functionaltest/telemetry_schema_test.go | TestTelemetrySchema | ported | "
+            + SCHEMA_DIR + "/main.rs | test_telemetry_schema |",
+        ])
+
+
 class FourATest(unittest.TestCase):
     """4a: a Go package whose test files land in two crates' `src/parity_tests/`."""
 
@@ -1081,9 +1161,8 @@ class RealTreeTest(unittest.TestCase):
             "session/compaction/llm_summarizer_test.go",
         ])
         self.assertEqual(deferred, {
-            "internal/compactionvalidate/validate_test.go": "launcher and server validation (sub-projects 5 and 6)",
+            # 5a: validate_test.go and compaction_integration_test.go moved to the 5a ledger.
             "cmd/launcher/console/compaction_test.go": "launcher (sub-project 6)",
-            "server/adkrest/compaction_integration_test.go": "REST server (sub-project 5)",
             "session/vertexai/compaction_persistence_test.go": "Vertex AI session service (sub-project 4)",
         })
         self.assertEqual(pc.count(ADK_GO, in_scope), 190)
@@ -1233,6 +1312,14 @@ class RealTreeTest(unittest.TestCase):
         self.assertEqual(deferred, {})
         self.assertEqual(pc.count(ADK_GO, in_scope), 35)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "4c"), [])
+
+    def test_5a_count_is_246(self):
+        in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/5a.md")
+        self.assertEqual(len(in_scope), 42)
+        self.assertNotIn("agent/loader_test.go", in_scope)
+        self.assertEqual(deferred, {})
+        self.assertEqual(pc.count(ADK_GO, in_scope), 246)
+        self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "5a"), [])
 
 
 if __name__ == "__main__":

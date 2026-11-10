@@ -1,0 +1,21 @@
+{
+  "name": "38_event_graph_dev",
+  "config": "main",
+  "request": {
+    "method": "GET",
+    "target": "/dev/apps/assistant/users/alice/sessions/s1/events/00000000-0000-4000-8000-000000000015/graph",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "headers": [
+      [
+        "Content-Type",
+        "application/json; charset=UTF-8"
+      ]
+    ],
+    "body": "{\"dotSrc\":\"digraph AgentGraph {\\n\\tbgcolor=\\\"#333537\\\";\\n\\trankdir=LR;\\n\\tassistant-\\u003esave_note[ arrowhead=normal, color=\\\"#69CB87\\\", dir=back ];\\n\\tassistant [ color=\\\"#0F5223\\\", fontcolor=\\\"#cccccc\\\", label=\\\"🤖 assistant\\\", shape=ellipse, style=filled ];\\n\\tsave_note [ color=\\\"#0F5223\\\", fontcolor=\\\"#cccccc\\\", label=\\\"🔧 save_note\\\", shape=box, style=filled ];\\n\\n}\\n\"}\n"
+  },
+  "compare": "exact"
+}

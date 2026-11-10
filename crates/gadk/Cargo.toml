@@ -28,6 +28,8 @@ database = ["dep:gadk-session-database"]
 gcs = ["dep:gadk-artifact-gcs"]
 # Sessions and memory in a Vertex AI Agent Engine (gadk-vertexai); not in `default`.
 vertexai = ["dep:gadk-vertexai"]
+# The ADK REST API server with inbound authn/authz (gadk-server); not in `default`.
+server = ["dep:gadk-server"]
 
 [dependencies]
 gadk-genai = { workspace = true }
@@ -48,6 +50,7 @@ gadk-anthropic = { workspace = true, optional = true }
 gadk-openai = { workspace = true, optional = true }
 gadk-session-database = { workspace = true, optional = true }
 gadk-vertexai = { workspace = true, optional = true }
+gadk-server = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
@@ -67,6 +70,8 @@ rmcp = { workspace = true, features = ["server", "macros"] }
 gadk-httprr = { workspace = true }
 # The openai façade test answers through the scripted fake client (no network).
 gadk-model = { workspace = true, features = ["test-util"] }
+# The rest_server example and the server façade test serve the router on a loopback socket.
+axum = { workspace = true }
 
 [[example]]
 name = "quickstart"
@@ -139,6 +144,10 @@ required-features = ["gcs"]
 name = "vertexai_session"
 required-features = ["vertexai", "gemini"]
 
+[[example]]
+name = "rest_server"
+required-features = ["server"]
+
 [[test]]
 name = "model_anthropicmodel_agent_runner"
 required-features = ["anthropic"]
@@ -146,3 +155,7 @@ required-features = ["anthropic"]
 [[test]]
 name = "facade_openai"
 required-features = ["openai"]
+
+[[test]]
+name = "facade_server"
+required-features = ["server"]

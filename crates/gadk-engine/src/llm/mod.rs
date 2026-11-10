@@ -28,3 +28,50 @@ pub(crate) mod node_wrapper;
 pub(crate) mod processors;
 pub(crate) mod state;
 pub(crate) mod transfer;
+
+use std::sync::Arc;
+
+use gadk_agent::{Agent, Tool};
+
+/// The tools of an LLM agent (Go `llminternal.Reveal(agent).Tools`: the configured tools plus any
+/// the engine installed, such as task tools for sub-agents); `None` for any other agent. The
+/// REST server's agent graph draws them.
+pub fn agent_tools(agent: &dyn Agent) -> Option<Vec<Arc<dyn Tool>>> {
+    state::reveal(agent).map(|s| s.tools())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use gadk_agent::AgentConfig;
+
+    use super::*;
+    use crate::agents::sequential_agent::{self, SequentialAgentConfig};
+    use crate::tool::exit_loop;
+
+    #[test]
+    fn agent_tools_returns_an_llm_agents_tools_and_none_otherwise() {
+        let llm = agent::new(LlmAgentConfig {
+            name: "llm".into(),
+            tools: vec![exit_loop()],
+            ..Default::default()
+        })
+        .unwrap();
+        let names: Vec<String> = agent_tools(&*llm)
+            .unwrap()
+            .iter()
+            .map(|t| t.name().to_owned())
+            .collect();
+        assert_eq!(names, ["exit_loop"]);
+
+        let seq = sequential_agent::new(SequentialAgentConfig {
+            agent: AgentConfig {
+                name: "seq".into(),
+                sub_agents: vec![llm],
+                ..Default::default()
+            },
+        })
+        .unwrap();
+        assert!(agent_tools(&*seq).is_none());
+    }
+}

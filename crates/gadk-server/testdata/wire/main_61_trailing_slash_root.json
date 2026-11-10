@@ -1,0 +1,25 @@
+{
+  "name": "61_trailing_slash_root",
+  "config": "main",
+  "request": {
+    "method": "GET",
+    "target": "/",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 404,
+    "headers": [
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ],
+      [
+        "X-Content-Type-Options",
+        "nosniff"
+      ]
+    ],
+    "body": "404 page not found\n"
+  },
+  "compare": "exact"
+}

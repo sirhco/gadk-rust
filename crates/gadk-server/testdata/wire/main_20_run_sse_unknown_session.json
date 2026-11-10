@@ -1,0 +1,30 @@
+{
+  "name": "20_run_sse_unknown_session",
+  "config": "main",
+  "request": {
+    "method": "POST",
+    "target": "/run_sse",
+    "headers": [
+      [
+        "Content-Type",
+        "application/json"
+      ]
+    ],
+    "body": "{\"appName\":\"assistant\",\"userId\":\"alice\",\"sessionId\":\"nope\",\"newMessage\":{\"role\":\"user\",\"parts\":[{\"text\":\"hello\"}]}}"
+  },
+  "response": {
+    "status": 404,
+    "headers": [
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ],
+      [
+        "X-Content-Type-Options",
+        "nosniff"
+      ]
+    ],
+    "body": "failed to find the session: failed to get session: session not found: \"nope\"\n"
+  },
+  "compare": "exact"
+}

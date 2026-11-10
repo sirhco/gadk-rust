@@ -1,0 +1,21 @@
+{
+  "name": "22_pipeline_session_create",
+  "config": "main",
+  "request": {
+    "method": "POST",
+    "target": "/apps/pipeline/users/alice/sessions/p1",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "headers": [
+      [
+        "Content-Type",
+        "application/json; charset=UTF-8"
+      ]
+    ],
+    "body": "{\"id\":\"p1\",\"appName\":\"pipeline\",\"userId\":\"alice\",\"lastUpdateTime\":1767323064,\"events\":[],\"state\":{}}\n"
+  },
+  "compare": "exact"
+}

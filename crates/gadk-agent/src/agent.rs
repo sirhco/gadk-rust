@@ -248,27 +248,33 @@ struct RunState {
     phase: Phase,
     pending: VecDeque<Result<Event, AgentError>>,
     span: tracing::Span,
-    last_error: Option<String>,
+    /// The last item's error: Go `err.Error()` and `errorType(err)`.
+    last_error: Option<(String, String)>,
 }
 
 /// Port of Go `telemetry.StartNodeSpan(OperationAgent)` (`internal/telemetry/node_tracing.go`):
-/// `invoke_workflow` for workflow agents only, `invoke_agent` otherwise.
-///
-/// Go also sets `gen_ai.workflow.nested = true` on a workflow span started inside another workflow
-/// span (its private workflow-scope context value). Rust contexts carry no such value, so the
-/// attribute is omitted.
+/// `invoke_workflow` for workflow agents only, `invoke_agent` otherwise. A workflow span started
+/// inside another `invoke_workflow` span gets `gen_ai.workflow.nested = true` (Go
+/// `startInvokeWorkflowSpan`'s workflow-scope context value; default schema only).
 fn agent_run_span(agent: &CustomAgent, ctx: &InvocationContext) -> tracing::Span {
     use tracing::field::Empty;
     if agent.state.agent_type == AgentType::WorkflowAgent {
-        tracing::info_span!(
+        let nested = telemetry::in_workflow_scope() && !telemetry::use_legacy_schema();
+        let span = tracing::info_span!(
             "invoke_workflow",
             otel.name = %format!("invoke_workflow {}", agent.name),
             gen_ai.operation.name = "invoke_workflow",
             gen_ai.workflow.name = %agent.name,
             gen_ai.conversation.id = %ctx.session_id(),
+            gen_ai.workflow.nested = Empty,
+            error.type = Empty,
             otel.status_code = Empty,
             error.message = Empty,
-        )
+        );
+        if nested {
+            span.record("gen_ai.workflow.nested", true);
+        }
+        span
     } else {
         tracing::info_span!(
             "invoke_agent",
@@ -278,6 +284,7 @@ fn agent_run_span(agent: &CustomAgent, ctx: &InvocationContext) -> tracing::Span
             gen_ai.agent.description = %agent.description,
             gen_ai.conversation.id = %ctx.session_id(),
             gcp.vertex.agent.invocation_id = %ctx.invocation_id(),
+            error.type = Empty,
             otel.status_code = Empty,
             error.message = Empty,
         )
@@ -286,11 +293,15 @@ fn agent_run_span(agent: &CustomAgent, ctx: &InvocationContext) -> tracing::Span
 
 impl Drop for RunState {
     /// Go `WrapYield`'s deferred `endSpan`: the span's status follows the last yielded item
-    /// (`TraceAgentResult` → `RecordError`), at the end of the stream or when it is dropped early.
+    /// (`TraceAgentResult` → `RecordError`: status, description and, in the default schema,
+    /// `error.type`), at the end of the stream or when it is dropped early.
     fn drop(&mut self) {
-        if let Some(msg) = self.last_error.take() {
+        if let Some((msg, error_type)) = self.last_error.take() {
             self.span.record("otel.status_code", "ERROR");
             self.span.record("error.message", msg.as_str());
+            if !telemetry::use_legacy_schema() {
+                self.span.record("error.type", error_type.as_str());
+            }
         }
     }
 }
@@ -300,7 +311,10 @@ fn track(
     mut st: RunState,
     item: Result<Event, AgentError>,
 ) -> Option<(Result<Event, AgentError>, RunState)> {
-    st.last_error = item.as_ref().err().map(ToString::to_string);
+    st.last_error = item
+        .as_ref()
+        .err()
+        .map(|e| (e.to_string(), telemetry::error_type(e)));
     Some((item, st))
 }
 
@@ -491,6 +505,126 @@ async fn run_after_agent_callbacks(
     Ok(None)
 }
 
+/// The parts of Go `internal/telemetry` that gadk-agent's agent spans and gadk-engine's
+/// `telemetry` module share (gadk-engine depends on gadk-agent): the environment provider and
+/// the legacy-schema switch, Go `errorType`, and the workflow scope of Go
+/// `startInvokeWorkflowSpan`. Applications install the provider with
+/// `gadk_engine::telemetry::set_env_provider`; the rest is the engine's.
+#[doc(hidden)]
+pub mod telemetry {
+    use std::sync::{Arc, OnceLock};
+
+    use gadk_model::ModelError;
+    use gadk_platform::env::{EnvProvider, ProcessEnv};
+    use gadk_platform::go_to_lower;
+    use parking_lot::RwLock;
+    use tracing_subscriber::registry::LookupSpan;
+
+    use crate::error::AgentError;
+
+    /// Go `adkTelemetrySchemaVersionOptIn`: `otel_semconv_1_36` or `1` selects the legacy (1.36)
+    /// schema; anything else the default (1.44).
+    pub const SCHEMA_VERSION_OPT_IN_ENV_VAR: &str = "ADK_TELEMETRY_SCHEMA_VERSION_OPT_IN";
+    /// Go `otelSemconv136`.
+    pub const OTEL_SEMCONV_1_36: &str = "otel_semconv_1_36";
+    /// Go `errorType`'s value for an error that is not a `genai.APIError`: the type of a Go
+    /// `errors.New` error, which is what an ADK-Go error reaching a span usually is.
+    pub const GO_ERROR_STRING_TYPE: &str = "*errors.errorString";
+
+    static PROVIDER: RwLock<Option<Arc<dyn EnvProvider>>> = RwLock::new(None);
+
+    /// Stores the process-wide telemetry environment. Call
+    /// `gadk_engine::telemetry::set_env_provider`, which also drops the engine's cached
+    /// content-capture mode.
+    pub fn set_env_provider(env: Arc<dyn EnvProvider>) {
+        *PROVIDER.write() = Some(env);
+    }
+
+    /// The installed provider ([`ProcessEnv`] when none was installed).
+    pub fn env_provider() -> Arc<dyn EnvProvider> {
+        PROVIDER
+            .read()
+            .clone()
+            .unwrap_or_else(|| Arc::new(ProcessEnv))
+    }
+
+    /// Go `useLegacySchema`: whether `ADK_TELEMETRY_SCHEMA_VERSION_OPT_IN` selects the 1.36
+    /// schema; read on every call.
+    pub fn use_legacy_schema() -> bool {
+        let v = env_provider()
+            .var(SCHEMA_VERSION_OPT_IN_ENV_VAR)
+            .unwrap_or_default();
+        matches!(go_to_lower(v.trim()).as_str(), OTEL_SEMCONV_1_36 | "1")
+    }
+
+    /// Names the Go dynamic type of an error crate gadk-agent cannot see (Go `%T`); `None` for
+    /// an error it does not name.
+    pub type GoErrorTypeResolver = fn(&(dyn std::error::Error + 'static)) -> Option<&'static str>;
+
+    static GO_ERROR_TYPE_RESOLVER: OnceLock<GoErrorTypeResolver> = OnceLock::new();
+
+    /// Installs the resolver [`error_type`] asks for the Go type of the error itself (the first
+    /// one installed wins). gadk-engine installs one when it builds a `workflow.NodeRunError`.
+    pub fn set_go_error_type_resolver(f: GoErrorTypeResolver) {
+        let _ = GO_ERROR_TYPE_RESOLVER.set(f);
+    }
+
+    /// Go `errorType`: an API error's HTTP code (Go `errors.As(err, &genai.APIError{})`, through
+    /// wrapping), else the Go type of the error itself (Go `semconv.ErrorType`'s `%T`) when the
+    /// installed resolver names it (seen through [`AgentError::Workflow`], which is transparent),
+    /// else [`GO_ERROR_STRING_TYPE`] (a Rust error has no Go type; an ADK-Go error reaching a span
+    /// is usually an `errors.New` one).
+    pub fn error_type(err: &(dyn std::error::Error + 'static)) -> String {
+        if let Some(code) = api_error_code(err) {
+            return code;
+        }
+        let top = match err.downcast_ref::<AgentError>() {
+            Some(AgentError::Workflow(inner)) => &**inner as &(dyn std::error::Error + 'static),
+            _ => err,
+        };
+        if let Some(t) = GO_ERROR_TYPE_RESOLVER.get().and_then(|f| f(top)) {
+            return t.to_owned();
+        }
+        GO_ERROR_STRING_TYPE.to_owned()
+    }
+
+    /// Go `errors.As(err, &genai.APIError{})`: the HTTP code of the first API error in `err`'s
+    /// chain.
+    fn api_error_code(err: &(dyn std::error::Error + 'static)) -> Option<String> {
+        let mut cur: Option<&(dyn std::error::Error + 'static)> = Some(err);
+        while let Some(e) = cur {
+            let model = e.downcast_ref::<ModelError>().or_else(|| {
+                e.downcast_ref::<AgentError>().and_then(|a| match a {
+                    AgentError::Model(m) => Some(m),
+                    _ => None,
+                })
+            });
+            if let Some(ModelError::Api { code, .. }) = model {
+                return Some(code.to_string());
+            }
+            cur = e.source();
+        }
+        None
+    }
+
+    /// Whether the current span is inside an `invoke_workflow` span (Go's `workflowScopeKey`
+    /// context value, which `startInvokeWorkflowSpan` sets). Read from the subscriber's span
+    /// registry; `false` under a subscriber that is not a `tracing_subscriber::Registry` stack.
+    pub fn in_workflow_scope() -> bool {
+        let Some(id) = tracing::Span::current().id() else {
+            return false;
+        };
+        tracing::dispatcher::get_default(|d| {
+            let Some(registry) = d.downcast_ref::<tracing_subscriber::Registry>() else {
+                return false;
+            };
+            registry
+                .span(&id)
+                .is_some_and(|s| s.scope().any(|s| s.name() == "invoke_workflow"))
+        })
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod live_tests {
@@ -556,5 +690,199 @@ mod live_tests {
         }
         // The trait is object-safe and shareable.
         let _shared: Arc<dyn LiveAgent> = Arc::new(NoopLive);
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod span_tests {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+
+    use futures::StreamExt;
+    use gadk_model::ModelError;
+    use gadk_platform::env::MapEnv;
+    use parking_lot::Mutex;
+    use tracing::field::{Field, Visit};
+    use tracing::span::{Attributes, Id, Record};
+    use tracing_subscriber::layer::{Context as LayerContext, Layer, SubscriberExt};
+
+    use super::telemetry::{OTEL_SEMCONV_1_36, SCHEMA_VERSION_OPT_IN_ENV_VAR, set_env_provider};
+    use super::{AgentConfig, new, new_with_state};
+    use crate::context::InvocationContext;
+    use crate::error::AgentError;
+    use crate::state::{AgentState, AgentType};
+
+    /// Serialises the tests that install a telemetry environment (held across awaits).
+    static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    type Spans = Arc<Mutex<Vec<(String, BTreeMap<String, String>)>>>;
+
+    struct Capture(Spans);
+    struct Fields<'a>(&'a mut BTreeMap<String, String>);
+    impl Visit for Fields<'_> {
+        fn record_str(&mut self, f: &Field, v: &str) {
+            self.0.insert(f.name().to_owned(), v.to_owned());
+        }
+        fn record_debug(&mut self, f: &Field, v: &dyn std::fmt::Debug) {
+            self.0.insert(f.name().to_owned(), format!("{v:?}"));
+        }
+    }
+    struct Idx(usize);
+    impl<S> Layer<S> for Capture
+    where
+        S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+    {
+        fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, ctx: LayerContext<'_, S>) {
+            let mut fields = BTreeMap::new();
+            attrs.record(&mut Fields(&mut fields));
+            let mut spans = self.0.lock();
+            spans.push((attrs.metadata().name().to_owned(), fields));
+            if let Some(span) = ctx.span(id) {
+                span.extensions_mut().insert(Idx(spans.len() - 1));
+            }
+        }
+        fn on_record(&self, id: &Id, values: &Record<'_>, ctx: LayerContext<'_, S>) {
+            let Some(i) = ctx
+                .span(id)
+                .and_then(|s| s.extensions().get::<Idx>().map(|i| i.0))
+            else {
+                return;
+            };
+            if let Some((_, fields)) = self.0.lock().get_mut(i) {
+                values.record(&mut Fields(fields));
+            }
+        }
+    }
+
+    /// Installs (once per process) a no-op global `Registry`, so the global max-level hint and
+    /// callsite interest never collapse to "off" while thread-default capture subscribers come
+    /// and go on parallel test threads (as gadk-engine's `span_digest::pin_tracing_interest`).
+    fn pin_tracing_interest() {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| {
+            let _ = tracing::subscriber::set_global_default(tracing_subscriber::registry());
+        });
+    }
+
+    /// Runs `agent` to completion under `schema`, inside an `invoke_workflow` span when `in_workflow`,
+    /// and returns the spans' names and recorded fields.
+    async fn run_spans(
+        agent: Arc<dyn super::Agent>,
+        schema: &str,
+        in_workflow: bool,
+    ) -> Vec<(String, BTreeMap<String, String>)> {
+        let _lock = ENV_LOCK.lock().await;
+        set_env_provider(Arc::new(MapEnv(
+            [(SCHEMA_VERSION_OPT_IN_ENV_VAR.to_owned(), schema.to_owned())].into(),
+        )));
+        pin_tracing_interest();
+        let spans: Spans = Arc::default();
+        let sub = tracing_subscriber::registry().with(Capture(spans.clone()));
+        {
+            let _g = tracing::subscriber::set_default(sub);
+            let outer = in_workflow.then(|| tracing::info_span!("invoke_workflow"));
+            let _entered = outer.as_ref().map(tracing::Span::enter);
+            let ctx = InvocationContext::builder()
+                .agent(agent.clone())
+                .build_invocation();
+            let mut s = agent.run(ctx);
+            while s.next().await.is_some() {}
+        }
+        set_env_provider(Arc::new(MapEnv::default()));
+        spans.lock().clone()
+    }
+
+    fn failing(err: AgentError, state: Option<AgentState>) -> Arc<dyn super::Agent> {
+        let err = Arc::new(Mutex::new(Some(err)));
+        let cfg = AgentConfig {
+            name: "a".into(),
+            run: Some(Arc::new(move |_| {
+                let e = err.lock().take();
+                Box::pin(futures::stream::iter(e.map(Err)))
+            })),
+            ..Default::default()
+        };
+        match state {
+            Some(st) => new_with_state(cfg, st).unwrap(),
+            None => new(cfg).unwrap(),
+        }
+    }
+
+    fn workflow_state() -> AgentState {
+        AgentState {
+            agent_type: AgentType::WorkflowAgent,
+            config: None,
+            on_before_agent_callback_event: None,
+            live: None,
+        }
+    }
+
+    /// Go `TraceAgentResult` → `RecordError`: a failed agent span gets `error.type` (Go
+    /// `errorType`) in the default schema only.
+    #[tokio::test]
+    async fn agent_span_records_error_type_in_the_default_schema() {
+        for (schema, err, want) in [
+            (
+                "otel_semconv_1_44",
+                AgentError::Config("boom".into()),
+                Some("*errors.errorString"),
+            ),
+            (
+                "otel_semconv_1_44",
+                AgentError::Model(ModelError::Api {
+                    code: 429,
+                    message: "quota".into(),
+                    status: String::new(),
+                    details: vec![],
+                }),
+                Some("429"),
+            ),
+            (OTEL_SEMCONV_1_36, AgentError::Config("boom".into()), None),
+        ] {
+            let spans = run_spans(failing(err, None), schema, false).await;
+            let (name, fields) = &spans[0];
+            assert_eq!(name, "invoke_agent");
+            assert_eq!(
+                fields.get("otel.status_code").map(String::as_str),
+                Some("ERROR")
+            );
+            assert_eq!(
+                fields.get("error.type").map(String::as_str),
+                want,
+                "{schema}"
+            );
+        }
+        let spans = run_spans(
+            failing(AgentError::Config("x".into()), Some(workflow_state())),
+            "",
+            false,
+        )
+        .await;
+        assert_eq!(spans[0].0, "invoke_workflow");
+        assert_eq!(
+            spans[0].1.get("error.type").map(String::as_str),
+            Some("*errors.errorString")
+        );
+    }
+
+    /// Go `startInvokeWorkflowSpan`: a workflow agent's span inside another `invoke_workflow` span
+    /// is marked nested, in the default schema only.
+    #[tokio::test]
+    async fn workflow_agent_span_is_nested_inside_a_workflow_span() {
+        for (schema, in_workflow, want) in [
+            ("", true, Some("true")),
+            ("", false, None),
+            (OTEL_SEMCONV_1_36, true, None),
+        ] {
+            let agent = failing(AgentError::Config("x".into()), Some(workflow_state()));
+            let spans = run_spans(agent, schema, in_workflow).await;
+            let (_, fields) = spans.last().unwrap();
+            assert_eq!(
+                fields.get("gen_ai.workflow.nested").map(String::as_str),
+                want,
+                "{schema:?} in_workflow={in_workflow}"
+            );
+        }
     }
 }

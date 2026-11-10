@@ -19,6 +19,7 @@ members = [
   "crates/gadk-openai",
   "crates/gadk-session-database",
   "crates/gadk-vertexai",
+  "crates/gadk-server",
   "crates/gadk",
 ]
 
@@ -48,6 +49,7 @@ gadk-anthropic = { path = "crates/gadk-anthropic", version = "0.1.0" }
 gadk-openai = { path = "crates/gadk-openai", version = "0.1.0" }
 gadk-session-database = { path = "crates/gadk-session-database", version = "0.1.0" }
 gadk-vertexai = { path = "crates/gadk-vertexai", version = "0.1.0" }
+gadk-server = { path = "crates/gadk-server", version = "0.1.0" }
 tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
 tokio-util = "0.7.20"
 futures = "0.3.34"
@@ -87,6 +89,9 @@ tower = { version = "0.5.3", default-features = false }
 rand = "0.10.3"
 sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "chrono"] }
 tempfile = "3.27.0"
+axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "query", "tokio", "ws", "matched-path"] }
+jsonwebtoken = { version = "11.1.0", default-features = false, features = ["use_pem", "aws_lc_rs"] }
+tower-http = { version = "0.7.1", default-features = false, features = ["catch-panic"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

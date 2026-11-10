@@ -1,0 +1,30 @@
+{
+  "name": "11_run",
+  "config": "strict",
+  "request": {
+    "method": "POST",
+    "target": "/run",
+    "headers": [
+      [
+        "Content-Type",
+        "application/json"
+      ],
+      [
+        "X-Test-User",
+        "alice"
+      ]
+    ],
+    "body": "{\"appName\":\"assistant\",\"userId\":\"alice\",\"sessionId\":\"s1\",\"newMessage\":{\"role\":\"user\",\"parts\":[{\"text\":\"hello\"}]}}"
+  },
+  "response": {
+    "status": 200,
+    "headers": [
+      [
+        "Content-Type",
+        "application/json; charset=UTF-8"
+      ]
+    ],
+    "body": "[{\"id\":\"00000000-0000-4000-8000-000000000004\",\"invocationId\":\"e-00000000-0000-4000-8000-000000000001\",\"author\":\"assistant\",\"groundingMetadata\":null,\"usageMetadata\":{\"candidatesTokenCount\":5,\"promptTokenCount\":10,\"totalTokenCount\":15},\"finishReason\":\"STOP\",\"actions\":{\"stateDelta\":{},\"artifactDelta\":{}},\"nodeInfo\":{\"path\":\"assistant\"},\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"Hello! How can I help?\"}]}}]\n"
+  },
+  "compare": "exact"
+}

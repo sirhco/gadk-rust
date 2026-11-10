@@ -1,0 +1,21 @@
+{
+  "name": "25_artifact_get",
+  "config": "main",
+  "request": {
+    "method": "GET",
+    "target": "/apps/assistant/users/alice/sessions/s1/artifacts/note.txt",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "headers": [
+      [
+        "Content-Type",
+        "application/json; charset=UTF-8"
+      ]
+    ],
+    "body": "{\"text\":\"buy eggs\"}\n"
+  },
+  "compare": "exact"
+}

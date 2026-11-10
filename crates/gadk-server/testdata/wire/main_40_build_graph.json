@@ -1,0 +1,21 @@
+{
+  "name": "40_build_graph",
+  "config": "main",
+  "request": {
+    "method": "GET",
+    "target": "/dev/apps/pipeline/build_graph",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "headers": [
+      [
+        "Content-Type",
+        "application/json; charset=UTF-8"
+      ]
+    ],
+    "body": "{\"root_agent\":{\"name\":\"pipeline\",\"description\":\"Drafts, then reviews.\",\"sub_agents\":[{\"name\":\"drafter\",\"description\":\"Writes a draft.\",\"sub_agents\":[]},{\"name\":\"reviewer\",\"description\":\"Reviews the draft.\",\"sub_agents\":[]}]},\"readme\":\"\"}\n"
+  },
+  "compare": "exact"
+}
