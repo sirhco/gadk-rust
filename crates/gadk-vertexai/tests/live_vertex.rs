@@ -159,7 +159,14 @@ async fn round_trip(
     assert_eq!(got.user_id(), user);
     let events = got.events();
     assert_eq!(events.len(), 1, "{events:?}");
-    assert_eq!(events[0].id, event.id);
+    // `event_to_session_event` sends no event ID (and, for this event, no `rawEvent`), so the
+    // engine assigns its own numeric ID, which is read back from the event's resource name; the
+    // caller's ID cannot round-trip.
+    assert!(
+        !events[0].id.is_empty() && events[0].id.bytes().all(|b| b.is_ascii_digit()),
+        "engine-assigned event ID: {:?}",
+        events[0].id
+    );
     assert_eq!(events[0].author, "user");
     assert_eq!(
         events[0].response.content.as_ref().unwrap().parts[0].text,

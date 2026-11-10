@@ -28,8 +28,9 @@ pub(crate) type BoxError = Box<dyn StdError + Send + Sync>;
 
 /// An HTTP error from the Vertex AI API (Google's JSON error body), or an operation that
 /// completed with an error. It displays as Go's gRPC status text,
-/// `rpc error: code = {name} desc = {message}`, and is reachable from a service error through
-/// the `source()` chain.
+/// `rpc error: code = {name} desc = {message}`. It is reachable through the `source()` chain
+/// only from `Backend` service errors; `SessionError::InvalidRequest` (flattened to a string) and
+/// `NotFound` do not carry it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VertexError {
     /// The HTTP status (for an operation error: the status Google maps its gRPC code to).
