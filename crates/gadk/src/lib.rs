@@ -24,6 +24,10 @@ pub use gadk_agent as agent;
 #[cfg(feature = "anthropic")]
 pub use gadk_anthropic as anthropic;
 pub use gadk_artifact as artifact;
+/// Artifacts in Google Cloud Storage (feature `gcs`, not on by default; re-export of
+/// `gadk-artifact-gcs`).
+#[cfg(feature = "gcs")]
+pub use gadk_artifact_gcs as artifact_gcs;
 /// Authentication for outbound HTTP calls: credentials, credential providers, the credential
 /// store, the refresh-and-retry transport and (feature `gcp`) per-user Google Cloud credentials
 /// (re-export of `gadk-auth`).

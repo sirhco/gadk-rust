@@ -13,6 +13,9 @@ workspace = true
 # `rest::test_util`: the scripted fake `HttpClient` and the 127.0.0.1 fake server shared by the
 # provider crates' tests.
 test-util = ["dep:hyper", "dep:hyper-util"]
+# `gcp_auth`: Google Application Default Credentials (google-cloud-auth), shared by the Google
+# Cloud clients (gadk-anthropic on Vertex AI, gadk-artifact-gcs).
+gcp-auth = ["dep:google-cloud-auth"]
 
 [dependencies]
 gadk-genai = { workspace = true }
@@ -30,6 +33,7 @@ tracing = { workspace = true }
 tokio = { workspace = true }
 chrono = { workspace = true }
 rand = { workspace = true }
+google-cloud-auth = { workspace = true, optional = true }
 hyper = { workspace = true, optional = true, features = ["server", "http1"] }
 hyper-util = { workspace = true, optional = true, features = ["tokio", "service"] }
 
@@ -38,3 +42,4 @@ gadk-model = { path = ".", features = ["test-util"] }
 tokio = { workspace = true, features = ["test-util"] }
 pretty_assertions = { workspace = true }
 rstest = { workspace = true }
+tempfile = { workspace = true }

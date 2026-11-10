@@ -172,6 +172,7 @@ impl RestTransport {
     /// response that ends the call unless it is a streaming status < 400 (SDK `readsBody`).
     async fn attempt(
         &self,
+        method: &Method,
         uri: &Uri,
         body: &Bytes,
         stream: bool,
@@ -183,7 +184,7 @@ impl RestTransport {
             Err(e) => return Attempt::NoResponse(e),
         };
         let mut req = http::Request::new(body.clone());
-        *req.method_mut() = Method::POST;
+        *req.method_mut() = method.clone();
         *req.uri_mut() = uri.clone();
         *req.headers_mut() = headers;
         let sent = match self.response_header_timeout {
@@ -225,7 +226,21 @@ impl RestTransport {
     }
 
     /// `POST`s `body` to `uri` with the policy's retries and returns the response that ends
-    /// the call.
+    /// the call: [`send_method`](Self::send_method) with [`Method::POST`].
+    pub async fn send(
+        &self,
+        uri: &Uri,
+        body: Bytes,
+        stream: bool,
+        headers: &dyn RequestHeaders,
+        timeout: CallTimeout,
+    ) -> Result<RestReply, RestError> {
+        self.send_method(Method::POST, uri, body, stream, headers, timeout)
+            .await
+    }
+
+    /// Sends `body` to `uri` as a `method` request (an empty body for a `GET` or `DELETE`)
+    /// with the policy's retries and returns the response that ends the call.
     ///
     /// - Attempts: `policy.max_retries + 1`. Each attempt fetches `headers` first. A header
     ///   failure, a connection error and the response-header timeout are retried with backoff;
@@ -242,8 +257,9 @@ impl RestTransport {
     ///   allow it and attempts remain; otherwise it is [`RestError::DroppedBody`].
     /// - `timeout`: see [`CallTimeout`].
     /// - Every await is cancelled by dropping the future (no task is spawned).
-    pub async fn send(
+    pub async fn send_method(
         &self,
+        method: Method,
         uri: &Uri,
         body: Bytes,
         stream: bool,
@@ -265,7 +281,7 @@ impl RestTransport {
             let deadline = per_attempt
                 .and_then(|t| Instant::now().checked_add(t))
                 .or(call_deadline);
-            let attempt = self.attempt(uri, &body, stream, headers, retry_count);
+            let attempt = self.attempt(&method, uri, &body, stream, headers, retry_count);
             let outcome = match deadline {
                 Some(deadline) => tokio::time::timeout_at(deadline, attempt)
                     .await
@@ -483,6 +499,60 @@ mod tests {
         assert_eq!(seen[0].url, URI);
         assert_eq!(seen[0].body, BODY);
         assert_eq!(seen[0].headers, fixed_headers());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn send_method_sends_get_and_delete_through_the_retry_loop() {
+        for method in [Method::GET, Method::DELETE] {
+            let fake = ScriptedClient::sequence(vec![reply(503, BOOM), reply(200, OK)]);
+            let RestReply::Read(parts, body) = anthropic(fake.clone(), 2)
+                .send_method(
+                    method.clone(),
+                    &Uri::from_static(URI),
+                    Bytes::new(),
+                    false,
+                    &fixed_headers(),
+                    CallTimeout::None,
+                )
+                .await
+                .unwrap()
+            else {
+                panic!("want a read reply");
+            };
+            assert_eq!(parts.status, StatusCode::OK);
+            assert_eq!(body, OK.as_bytes());
+            let seen = fake.requests();
+            assert_eq!(seen.len(), 2, "{method}");
+            for s in &seen {
+                assert_eq!(s.method, method.as_str());
+                assert_eq!(s.url, URI);
+                assert!(s.body.is_empty());
+            }
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn send_is_send_method_post() {
+        let fake = ScriptedClient::always(reply(200, OK));
+        send(&anthropic(fake.clone(), 0), false).await.unwrap();
+        anthropic(fake.clone(), 0)
+            .send_method(
+                Method::POST,
+                &Uri::from_static(URI),
+                Bytes::from_static(BODY),
+                false,
+                &fixed_headers(),
+                CallTimeout::None,
+            )
+            .await
+            .unwrap();
+        let seen = fake.requests();
+        assert_eq!(seen.len(), 2);
+        for s in &seen {
+            assert_eq!(s.method, "POST");
+            assert_eq!(s.body, BODY);
+            assert_eq!(s.headers, fixed_headers());
+        }
     }
 
     #[tokio::test(start_paused = true)]

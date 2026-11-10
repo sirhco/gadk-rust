@@ -19,6 +19,7 @@ pub mod inmemory;
 pub mod service;
 #[cfg(feature = "testsuite")]
 pub mod testsuite;
+pub mod util;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
