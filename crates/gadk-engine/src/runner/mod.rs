@@ -22,15 +22,13 @@ pub(crate) mod find_agent;
 pub(crate) mod live;
 pub(crate) mod run_node;
 
-use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context as TaskContext, Poll};
 use std::time::Duration;
 
-use futures::{Stream, StreamExt};
+use futures::StreamExt;
 use gadk_agent::{
-    Agent, AgentError, AgentType, Context, ContextDelta, EventStream, InvocationContext, Mode,
-    ParentMap, Plugin, PluginManager, RunConfig,
+    Agent, AgentError, Context, ContextDelta, EventStream, InvocationContext, Mode, ParentMap,
+    Plugin, PluginManager, RunConfig,
 };
 use gadk_genai::{Content, Part};
 use gadk_platform::Platform;
@@ -217,22 +215,6 @@ impl Drop for AfterRunGuard {
     }
 }
 
-/// Port of Go `telemetry.InstrumentInvocation`: the invocation span is entered on every poll.
-struct Instrumented {
-    inner: EventStream,
-    span: tracing::Span,
-}
-
-impl Stream for Instrumented {
-    type Item = Result<Event, AgentError>;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.get_mut();
-        let _entered = this.span.enter();
-        this.inner.as_mut().poll_next(cx)
-    }
-}
-
 impl Runner {
     /// Port of Go `runner.New`. Go's nil-agent and nil-service checks have no Rust counterpart.
     pub fn new(cfg: RunnerConfig) -> Result<Runner, AgentError> {
@@ -302,17 +284,9 @@ impl Runner {
         opts: RunOptions,
     ) -> EventStream {
         let inner = self.inner.clone();
-        // Go InstrumentInvocation: a workflow-agent root opens its own invoke_workflow in
-        // CustomAgent::run, so the runner does not double-wrap it. No agent span is created here.
-        let span = if inner.root_agent.agent_state().agent_type == AgentType::WorkflowAgent {
-            tracing::Span::none()
-        } else {
-            crate::telemetry::workflow_span(inner.root_agent.name())
-        };
-        let stream = inner.run_stream(user_id.to_string(), session_id.to_string(), msg, cfg, opts);
-        Box::pin(Instrumented {
-            inner: stream,
-            span,
+        let root = inner.root_agent.clone();
+        crate::telemetry::instrumentation::instrument_invocation(root.as_ref(), session_id, || {
+            inner.run_stream(user_id.to_string(), session_id.to_string(), msg, cfg, opts)
         })
     }
 

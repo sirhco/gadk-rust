@@ -162,7 +162,7 @@ pub(crate) fn start_node_span(ctx: &Context, n: &Arc<dyn Node>) -> Option<tracin
     if is_start(n) || n.config().emits_own_span {
         return None;
     }
-    Some(crate::telemetry::node_span(n.name(), &ctx.path()))
+    Some(crate::telemetry::node_span(n.name(), ctx.session_id()))
 }
 
 /// Port of Go isNodeControlFlow: cancellation or a HITL / wait-for-output pause.
@@ -183,8 +183,10 @@ pub(crate) fn record_node_error(
     if control_flow.unwrap_or_else(|| is_node_control_flow(err)) {
         return;
     }
-    span.record("otel.status_code", "ERROR");
-    span.record("error.message", tracing::field::display(err));
+    crate::telemetry::attrs::record_error(
+        span,
+        Some(&crate::telemetry::attrs::SpanError::new(err)),
+    );
 }
 
 // ---------- queue items and per-activation accumulator ----------

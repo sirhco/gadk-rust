@@ -10,7 +10,7 @@ repository.workspace = true
 workspace = true
 
 [features]
-testutil = ["dep:gadk-gemini", "dep:gadk-httprr", "dep:http", "dep:bytes", "dep:tracing-subscriber"]
+testutil = ["dep:gadk-gemini", "dep:gadk-httprr", "dep:http", "dep:bytes"]
 
 [dependencies]
 gadk-agent = { workspace = true }
@@ -33,8 +33,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-# The telemetry capture behind `testutil::telemetry` (feature `testutil`).
-tracing-subscriber = { workspace = true, optional = true }
+# The span registry the telemetry reads its workflow scope from (Go's `workflowScopeKey`), and the
+# capture behind `testutil::telemetry`.
+tracing-subscriber = { workspace = true }
 schemars = { workspace = true }
 jsonschema = { workspace = true }
 chrono = { workspace = true }
