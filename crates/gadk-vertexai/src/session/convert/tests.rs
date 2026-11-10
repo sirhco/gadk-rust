@@ -1352,3 +1352,24 @@ fn session_event_to_event_accepts_well_formed_edge_scalars() {
     );
     assert!(g.grounding_supports[0].confidence_scores[0].is_nan());
 }
+
+#[test]
+fn session_event_to_event_rejects_null_list_elements_and_map_values() {
+    let wire = json!({"name": "a/b", "eventMetadata": {"groundingMetadata": {
+        "groundingSupports": [{"groundingChunkIndices": [0, null]}]
+    }}});
+    assert_eq!(
+        decode_err(wire),
+        "error fetching session events: invalid value for int32 field groundingChunkIndices: null"
+    );
+    let wire = json!({"name": "a/b", "actions": {"artifactDelta": {"f": null}}});
+    assert_eq!(
+        decode_err(wire),
+        "error fetching session events: invalid value for int32 field value: null"
+    );
+    // A singular null is absent.
+    let wire = json!({"name": "a/b", "eventMetadata": {"groundingMetadata": {
+        "groundingSupports": [{"segment": {"partIndex": null}}]
+    }}});
+    assert!(session_event_to_event(&wire).is_ok());
+}

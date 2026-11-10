@@ -858,7 +858,9 @@ fn check_bytes(v: &Value, key: &str) -> Result<(), String> {
 
 /// `name` is the descriptor's JSON name (`value` for a map value).
 fn check_int32(f: &Value, name: &str) -> Result<(), String> {
-    if f.is_null() || int64_value(f).is_some_and(|n| i32::try_from(n).is_ok()) {
+    // `null` is rejected here: protojson skips it only for a singular field (see
+    // `check_int32_field`), not for list elements or map values.
+    if int64_value(f).is_some_and(|n| i32::try_from(n).is_ok()) {
         Ok(())
     } else {
         Err(invalid_scalar("int32", name, f))
@@ -866,7 +868,7 @@ fn check_int32(f: &Value, name: &str) -> Result<(), String> {
 }
 
 fn check_int32_field(v: &Value, key: &str) -> Result<(), String> {
-    v.get(key).map_or(Ok(()), |f| check_int32(f, key))
+    field(v, key).map_or(Ok(()), |f| check_int32(f, key))
 }
 
 fn check_int32_list(v: &Value, key: &str) -> Result<(), String> {
