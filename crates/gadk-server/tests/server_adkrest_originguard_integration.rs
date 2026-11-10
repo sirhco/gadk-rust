@@ -22,6 +22,7 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use gadk_artifact::InMemoryArtifactService;
 use gadk_memory::InMemoryMemoryService;
@@ -231,26 +232,43 @@ async fn server_answers_precede_the_origin_guard() {
         (loopback.as_str(), "http://evil.com"),
         ("evil.com", "http://evil.com"),
     ] {
-        for (method, target, want_head, want_header, want_body) in [
-            ("OPTIONS", "*", "HTTP/1.1 200 OK", "content-length: 0", ""),
+        // The 400 case sends no `Connection: close` of its own, so the `connection: close` it
+        // gets back (and the closed connection that ends the read) is the server's answer.
+        for (method, target, close, want_head, want_header, want_body) in [
+            (
+                "OPTIONS",
+                "*",
+                true,
+                "HTTP/1.1 200 OK",
+                "content-length: 0",
+                "",
+            ),
             (
                 "GET",
                 "/list-apps%zz",
+                false,
                 "HTTP/1.1 400 Bad Request",
                 "connection: close",
                 "400 Bad Request",
             ),
         ] {
             let mut conn = TcpStream::connect(addr).await.unwrap();
-            let mut req =
-                format!("{method} {target} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n");
+            let mut req = format!("{method} {target} HTTP/1.1\r\nHost: {host}\r\n");
+            if close {
+                req.push_str("Connection: close\r\n");
+            }
             if !origin.is_empty() {
                 req.push_str(&format!("Origin: {origin}\r\n"));
             }
             req.push_str("\r\n");
             conn.write_all(req.as_bytes()).await.unwrap();
             let mut resp = Vec::new();
-            conn.read_to_end(&mut resp).await.unwrap();
+            tokio::time::timeout(Duration::from_secs(5), conn.read_to_end(&mut resp))
+                .await
+                .unwrap_or_else(|_| {
+                    panic!("{method} {target}: the server did not close the connection")
+                })
+                .unwrap();
             let resp = String::from_utf8_lossy(&resp).into_owned();
             let (head, body) = resp.split_once("\r\n\r\n").unwrap();
             let what = format!("{method} {target} (Host {host:?}, Origin {origin:?})");
