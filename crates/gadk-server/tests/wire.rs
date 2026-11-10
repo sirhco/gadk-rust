@@ -349,8 +349,9 @@ fn pin_tracing_interest() {
     });
 }
 
-/// Replays every fixture of `config` against a fresh server and fails with every mismatch.
-async fn replay(config: WireConfig) {
+/// Replays every fixture of `config` (exactly `expected` of them, so a lost fixture file fails)
+/// against a fresh server and fails with every mismatch.
+async fn replay(config: WireConfig, expected: usize) {
     pin_tracing_interest();
     let server = wire_server(config).unwrap();
     // The main configuration's debug store sees the engine's spans and log records, as the
@@ -362,7 +363,7 @@ async fn replay(config: WireConfig) {
 
     let mut failures = Vec::new();
     let all = fixtures(config);
-    assert!(!all.is_empty(), "no {} fixtures", config.name());
+    assert_eq!(all.len(), expected, "{} fixture count", config.name());
     for f in &all {
         let got = exchange(addr, &f.request).await;
         if let Some(diff) = mismatch(&f.compare, &f.response, &got) {
@@ -389,17 +390,17 @@ async fn wire_main_matches_go() {
         let _env = ENV_LOCK.lock();
         gadk_engine::telemetry::set_env_provider(Arc::new(MapEnv::default()));
     }
-    replay(WireConfig::Main).await;
+    replay(WireConfig::Main, 67).await;
 }
 
 /// The `strict` configuration (11 fixtures): header authentication and the strict authorizer.
 #[tokio::test]
 async fn wire_strict_matches_go() {
-    replay(WireConfig::Strict).await;
+    replay(WireConfig::Strict, 11).await;
 }
 
 /// The `custom` configuration (4 fixtures): a custom authenticator's outcomes.
 #[tokio::test]
 async fn wire_custom_matches_go() {
-    replay(WireConfig::Custom).await;
+    replay(WireConfig::Custom, 4).await;
 }
