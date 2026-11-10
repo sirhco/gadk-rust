@@ -456,8 +456,7 @@ async fn test_session_spans_handler_unrepresentable_log_keeps_other_spans() {
     let dt = setup_test_telemetry();
     emit_elided_message_logs(&dt, "test-session", "good-event", "generate_content");
     with_layer(&dt, || {
-        let bad =
-            tracing::info_span!(parent: None, "bad-span", gen_ai.conversation.id = "test-session");
+        let bad = tracing::info_span!(parent: None, "bad-span", otel.name = "bad-span", gen_ai.conversation.id = "test-session");
         emit_log(
             &bad,
             "gen_ai.user.message",

@@ -19,16 +19,20 @@
 //! Go registers the store as an OTel span processor and log processor; gadk's telemetry is
 //! `tracing`, so [`DebugTelemetry`] is a [`tracing_subscriber::Layer`] reading the engine's spans
 //! and log events as plan decision D6 lays them out:
+//! - an OTel span is a span whose metadata declares an `otel.name` field (every span gadk emits
+//!   for Go's telemetry does); any other span in the process (e.g. h2's `Connection`,
+//!   `hpack::encode`) is transparent: it gets no IDs, is never stored, and an OTel span or log
+//!   record under it belongs to its nearest OTel ancestor, as Go's store only sees ADK's spans;
 //! - a span's Go name is its `otel.name` field, else its static name; every other field is an
 //!   OTel attribute (str → STRING, i64/u64 → INT64, f64 → FLOAT64, bool → BOOL, bytes → the JSON
 //!   text of a structured value, an all-string array being Go's STRINGSLICE), except the other
 //!   `otel.*` fields and `error.message` (the span status and its description);
 //! - an OTel log record is an event with target `gadk_engine::telemetry::log` and fields
 //!   `event.name`, `otel.log.body` (JSON text) and `otel.log.attributes` (JSON object text),
-//!   attached to the span it is emitted under.
+//!   attached to the nearest OTel span it is emitted under.
 //!
 //! Trace and span IDs are random (16 and 8 bytes, lowercase hex) as the OTel SDK's; a span keeps
-//! its parent's trace ID, a root span (`parent_span_id` sixteen zeros) starts a trace. Times are
+//! its OTel parent's trace ID, a span without an OTel ancestor (`parent_span_id` sixteen zeros) starts a trace. Times are
 //! wall-clock Unix nanoseconds. A span is stored when it closes (Go: when it ends), with the log
 //! records emitted under it; the store keeps the most recently used `trace_capacity` traces.
 
@@ -393,6 +397,12 @@ impl DebugTelemetry {
 
 /// An open span's record, kept in the span's registry extensions until it closes.
 struct OpenSpan(SpanRecord);
+
+/// Whether a span is an OTel span (an ADK span, as Go's store would see it): its metadata
+/// declares `otel.name`.
+fn is_otel_span(meta: &tracing::Metadata<'_>) -> bool {
+    meta.fields().field("otel.name").is_some()
+}
 
 /// Unix nanoseconds now (Go `time.Now().UnixNano()`).
 fn now_unix_nano() -> i64 {
@@ -810,8 +820,12 @@ where
     S: tracing::Subscriber + for<'a> LookupSpan<'a>,
 {
     fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, ctx: LayerContext<'_, S>) {
+        if !is_otel_span(attrs.metadata()) {
+            return;
+        }
         let Some(span) = ctx.span(id) else { return };
-        let parent = span.parent().and_then(|p| {
+        // The nearest OTel ancestor: only OTel spans hold an `OpenSpan`.
+        let parent = span.scope().skip(1).find_map(|p| {
             p.extensions()
                 .get::<OpenSpan>()
                 .map(|o| (o.0.trace_id, o.0.span_id))
@@ -842,8 +856,12 @@ where
         if event.metadata().target() != LOG_TARGET {
             return;
         }
-        // Go drops a record without a span: it would never be returned.
-        let Some(span) = ctx.event_span(event) else {
+        // Go drops a record without a span: it would never be returned. The record belongs to
+        // the nearest OTel span in scope.
+        let Some(span) = ctx
+            .event_scope(event)
+            .and_then(|mut scope| scope.find(|s| s.extensions().get::<OpenSpan>().is_some()))
+        else {
             return;
         };
         let mut fields = LogFields::default();
@@ -1016,9 +1034,10 @@ mod tests {
         let dt = DebugTelemetry::new(DebugTelemetryConfig::default());
         let sub = tracing_subscriber::registry().with(dt.clone());
         tracing::subscriber::with_default(sub, || {
-            let root = tracing::info_span!("root", gen_ai.conversation.id = "s");
+            let root =
+                tracing::info_span!("root", otel.name = "root", gen_ai.conversation.id = "s");
             let _g = root.enter();
-            let child = tracing::info_span!("child");
+            let child = tracing::info_span!("child", otel.name = "child");
             drop(child);
         });
         let mut spans = dt.get_spans_by_session_id("s");
@@ -1048,7 +1067,7 @@ mod tests {
         let dt = DebugTelemetry::new(DebugTelemetryConfig::default());
         let sub = tracing_subscriber::registry().with(dt.clone());
         tracing::subscriber::with_default(sub, || {
-            let span = tracing::info_span!("s", gen_ai.conversation.id = "s");
+            let span = tracing::info_span!("s", otel.name = "s", gen_ai.conversation.id = "s");
             tracing::event!(
                 target: "gadk_engine::telemetry::log",
                 parent: &span,
@@ -1071,6 +1090,85 @@ mod tests {
         assert_eq!(logs[0].trace_id, spans[0].trace_id);
         assert_eq!(logs[0].span_id, spans[0].span_id);
         assert!(DateTime::parse_from_rfc3339(&logs[0].observed_timestamp).is_ok());
+    }
+
+    /// A span without `otel.name` (e.g. h2's `Connection`) is not an OTel span: neither it nor
+    /// its non-OTel children are stored, so they appear under no session or event.
+    #[test]
+    fn foreign_spans_are_not_stored() {
+        let dt = DebugTelemetry::new(DebugTelemetryConfig::default());
+        let sub = tracing_subscriber::registry().with(dt.clone());
+        tracing::subscriber::with_default(sub, || {
+            let root = tracing::debug_span!(
+                parent: None,
+                "Connection",
+                gen_ai.conversation.id = "s",
+                gcp.vertex.agent.event_id = "e"
+            );
+            drop(tracing::trace_span!(parent: &root, "poll_ready"));
+            drop(root);
+        });
+        assert!(dt.get_spans_by_session_id("s").is_empty());
+        assert!(dt.get_spans_by_event_id("e").is_empty());
+        assert!(dt.store.inner.lock().traces.entries.is_empty());
+    }
+
+    /// A foreign span between two OTel spans is skipped: the OTel grandchild's parent is the OTel
+    /// grandparent, in its trace.
+    #[test]
+    fn foreign_spans_are_transparent_to_parenting() {
+        let dt = DebugTelemetry::new(DebugTelemetryConfig::default());
+        let sub = tracing_subscriber::registry().with(dt.clone());
+        tracing::subscriber::with_default(sub, || {
+            let root = tracing::info_span!(
+                parent: None,
+                "generate_content",
+                otel.name = "generate_content m",
+                gen_ai.conversation.id = "s"
+            );
+            let foreign = tracing::trace_span!(parent: &root, "hpack::encode");
+            drop(
+                tracing::info_span!(parent: &foreign, "execute_tool", otel.name = "execute_tool f"),
+            );
+            drop(foreign);
+            drop(root);
+        });
+        let spans = dt.get_spans_by_session_id("s");
+        let names: Vec<&str> = spans.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["generate_content m", "execute_tool f"]);
+        let (root, child) = (&spans[0], &spans[1]);
+        assert_eq!(root.parent_span_id, "0000000000000000");
+        assert_eq!(child.parent_span_id, root.span_id);
+        assert_eq!(child.trace_id, root.trace_id);
+    }
+
+    /// A log record emitted inside a foreign span nested in an OTel span attaches to the OTel span.
+    #[test]
+    fn log_events_under_foreign_spans_attach_to_the_otel_span() {
+        let dt = DebugTelemetry::new(DebugTelemetryConfig::default());
+        let sub = tracing_subscriber::registry().with(dt.clone());
+        tracing::subscriber::with_default(sub, || {
+            let span = tracing::info_span!(
+                parent: None,
+                "generate_content",
+                otel.name = "generate_content m",
+                gen_ai.conversation.id = "s"
+            );
+            let foreign = tracing::trace_span!(parent: &span, "client_handshake");
+            tracing::event!(
+                target: "gadk_engine::telemetry::log",
+                parent: &foreign,
+                tracing::Level::DEBUG,
+                event.name = "e",
+                otel.log.body = "null"
+            );
+        });
+        let spans = dt.get_spans_by_session_id("s");
+        assert_eq!(spans.len(), 1);
+        let logs = &spans[0].logs;
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].event_name, "e");
+        assert_eq!(logs[0].span_id, spans[0].span_id);
     }
 
     /// Go `time.RFC3339Nano`: trimmed fraction, `Z` for UTC, `±hh:mm` otherwise.

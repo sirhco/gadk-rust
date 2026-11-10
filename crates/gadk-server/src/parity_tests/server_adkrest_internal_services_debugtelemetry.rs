@@ -18,7 +18,9 @@
 //! Go feeds the store from an OTel tracer and logger; these tests emit the equivalent `tracing`
 //! spans and D6 log events (target `gadk_engine::telemetry::log`, fields `event.name`,
 //! `otel.log.body`, `otel.log.attributes`) under a subscriber with the [`DebugTelemetry`] layer.
-//! A Go root span (`tracer.Start` from a context without a span) is a span with `parent: None`.
+//! A Go span is a span declaring `otel.name` (the layer records only those; here it repeats the
+//! span's name). A Go root span (`tracer.Start` from a context without a span) is a span with
+//! `parent: None`.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -131,8 +133,9 @@ fn test_debug_telemetry_get_spans_by_session_id() {
         (
             "root span with conversation id",
             || {
-                let root = tracing::info_span!(parent: None, "root-span", gen_ai.conversation.id = "session-1");
-                let child = tracing::info_span!(parent: &root, "child-span");
+                let root = tracing::info_span!(parent: None, "root-span", otel.name = "root-span", gen_ai.conversation.id = "session-1");
+                let child =
+                    tracing::info_span!(parent: &root, "child-span", otel.name = "child-span");
                 emit_log(&child, "child-log-event", r#""child-log-body""#, None);
                 drop(child);
                 emit_log(
@@ -163,16 +166,17 @@ fn test_debug_telemetry_get_spans_by_session_id() {
         (
             "child span with conversation id",
             || {
-                let root = tracing::info_span!(parent: None, "root");
-                let child = tracing::info_span!(parent: &root, "child");
-                let second_child = tracing::info_span!(parent: &root, "child-2");
-                let third_child = tracing::info_span!(parent: &child, "grandchild", gen_ai.conversation.id = "test-session-id");
+                let root = tracing::info_span!(parent: None, "root", otel.name = "root");
+                let child = tracing::info_span!(parent: &root, "child", otel.name = "child");
+                let second_child =
+                    tracing::info_span!(parent: &root, "child-2", otel.name = "child-2");
+                let third_child = tracing::info_span!(parent: &child, "grandchild", otel.name = "grandchild", gen_ai.conversation.id = "test-session-id");
                 drop(third_child);
                 drop(second_child);
                 drop(child);
                 drop(root);
                 // Another trace with a different session ID (should not be returned).
-                let root3 = tracing::info_span!(parent: None, "root-3", gen_ai.conversation.id = "test-session-id-1");
+                let root3 = tracing::info_span!(parent: None, "root-3", otel.name = "root-3", gen_ai.conversation.id = "test-session-id-1");
                 drop(root3);
             },
             "test-session-id",
@@ -191,13 +195,13 @@ fn test_debug_telemetry_get_spans_by_session_id() {
             "multiple traces with same session id",
             || {
                 // Trace 1.
-                let root1 = tracing::info_span!(parent: None, "root-1", gen_ai.conversation.id = "session-1");
-                drop(tracing::info_span!(parent: &root1, "child-1"));
+                let root1 = tracing::info_span!(parent: None, "root-1", otel.name = "root-1", gen_ai.conversation.id = "session-1");
+                drop(tracing::info_span!(parent: &root1, "child-1", otel.name = "child-1"));
                 drop(root1);
                 // Trace 2 (different trace ID, same session ID on the child span).
-                let root2 = tracing::info_span!(parent: None, "root-2");
+                let root2 = tracing::info_span!(parent: None, "root-2", otel.name = "root-2");
                 drop(
-                    tracing::info_span!(parent: &root2, "child-2", gen_ai.conversation.id = "session-1"),
+                    tracing::info_span!(parent: &root2, "child-2", otel.name = "child-2", gen_ai.conversation.id = "session-1"),
                 );
                 drop(root2);
             },
@@ -232,7 +236,7 @@ fn test_debug_telemetry_get_spans_by_session_id() {
             || {
                 drop(tracing::info_span!(
                     parent: None,
-                    "root-1",
+                    "root-1", otel.name = "root-1",
                     gen_ai.conversation.id = "session-1",
                     gcp.vertex.agent.event_id = "event-1"
                 ));
@@ -268,9 +272,10 @@ fn test_debug_telemetry_get_spans_by_session_id() {
 }
 
 fn mixed_session_ids() {
-    let root =
-        tracing::info_span!(parent: None, "mixed-root", gen_ai.conversation.id = "session-1");
-    drop(tracing::info_span!(parent: &root, "mixed-child", gen_ai.conversation.id = "session-2"));
+    let root = tracing::info_span!(parent: None, "mixed-root", otel.name = "mixed-root", gen_ai.conversation.id = "session-1");
+    drop(
+        tracing::info_span!(parent: &root, "mixed-child", otel.name = "mixed-child", gen_ai.conversation.id = "session-2"),
+    );
     drop(root);
 }
 
@@ -283,7 +288,7 @@ fn test_debug_telemetry_get_spans_by_event_id() {
             || {
                 let span = tracing::info_span!(
                     parent: None,
-                    "root-1",
+                    "root-1", otel.name = "root-1",
                     gcp.vertex.agent.event_id = "event-1",
                     genai.operation.name = "generate_content"
                 );
@@ -304,13 +309,13 @@ fn test_debug_telemetry_get_spans_by_event_id() {
             || {
                 let span1 = tracing::info_span!(
                     parent: None,
-                    "root-1",
+                    "root-1", otel.name = "root-1",
                     gcp.vertex.agent.event_id = "event-1",
                     genai.operation.name = "generate_content"
                 );
                 let span2 = tracing::info_span!(
                     parent: &span1,
-                    "root-2",
+                    "root-2", otel.name = "root-2",
                     gcp.vertex.agent.event_id = "event-1",
                     genai.operation.name = "execute_tool"
                 );
@@ -342,7 +347,7 @@ fn test_debug_telemetry_get_spans_by_event_id() {
             || {
                 drop(tracing::info_span!(
                     parent: None,
-                    "root-1",
+                    "root-1", otel.name = "root-1",
                     gcp.vertex.agent.event_id = "event-1",
                     genai.operation.name = "generate_content"
                 ));
@@ -619,8 +624,7 @@ fn test_inference_details_parts_match_web_ui() {
     })
     .to_string();
     with_layer(&dt, || {
-        let agent =
-            tracing::info_span!(parent: None, "invoke_agent", gen_ai.conversation.id = "session-1");
+        let agent = tracing::info_span!(parent: None, "invoke_agent", otel.name = "invoke_agent", gen_ai.conversation.id = "session-1");
         let gc = tracing::info_span!(parent: &agent, "generate_content", otel.name = "generate_content m");
         tracing::event!(
             target: "gadk_engine::telemetry::log",
@@ -674,7 +678,7 @@ fn test_inference_details_parts_match_web_ui() {
 fn test_unrepresentable_log_attributes_are_dropped() {
     let dt = setup();
     with_layer(&dt, || {
-        let span = tracing::info_span!(parent: None, "span", gen_ai.conversation.id = "session-1");
+        let span = tracing::info_span!(parent: None, "span", otel.name = "span", gen_ai.conversation.id = "session-1");
         emit_log(&span, "some.event", "null", Some(r#"{"nan":NaN}"#));
     });
     let spans = dt.get_spans_by_session_id("session-1");
