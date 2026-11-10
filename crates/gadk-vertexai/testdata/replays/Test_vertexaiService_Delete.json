@@ -1,0 +1,134 @@
+{
+  "calls": [
+    {
+      "method": "/google.cloud.aiplatform.v1beta1.SessionService/CreateSession",
+      "request": {
+        "parent": "projects/adk-go-e2e/locations/us-central1/reasoningEngines/1491331942182813696",
+        "session": {
+          "userId": "user1"
+        }
+      },
+      "response": {
+        "done": true,
+        "metadata": {
+          "@type": "type.googleapis.com/google.cloud.aiplatform.v1beta1.CreateSessionOperationMetadata",
+          "genericMetadata": {
+            "createTime": "2026-08-03T09:57:59.028343Z",
+            "updateTime": "2026-08-03T09:57:59.028343Z"
+          }
+        },
+        "name": "projects/69593958020/locations/us-central1/reasoningEngines/1491331942182813696/sessions/8685635740484239360/operations/8397361903558459392",
+        "response": {
+          "@type": "type.googleapis.com/google.cloud.aiplatform.v1beta1.Session",
+          "createTime": "2026-08-03T09:57:59.022967Z",
+          "name": "projects/69593958020/locations/us-central1/reasoningEngines/1491331942182813696/sessions/8685635740484239360",
+          "updateTime": "2026-08-03T09:57:59.022967Z",
+          "userId": "user1"
+        }
+      }
+    },
+    {
+      "method": "/google.cloud.aiplatform.v1beta1.SessionService/GetSession",
+      "request": {
+        "name": "projects/adk-go-e2e/locations/us-central1/reasoningEngines/1491331942182813696/sessions/8685635740484239360"
+      },
+      "response": {
+        "createTime": "2026-08-03T09:57:59.014804Z",
+        "expireTime": "2027-08-03T09:57:59.010544Z",
+        "name": "projects/69593958020/locations/us-central1/reasoningEngines/1491331942182813696/sessions/8685635740484239360",
+        "sessionState": {
+          "app:k1": "v1",
+          "app:k2": "v2",
+          "user:k2": "v2"
+        },
+        "updateTime": "2026-08-03T09:57:59.014804Z",
+        "userId": "user1"
+      }
+    },
+    {
+      "method": "/google.cloud.aiplatform.v1beta1.SessionService/GetSession",
+      "request": {
+        "name": "projects/adk-go-e2e/locations/us-central1/reasoningEngines/1491331942182813696/sessions/8685635740484239360"
+      },
+      "response": {
+        "createTime": "2026-08-03T09:57:59.014804Z",
+        "expireTime": "2027-08-03T09:57:59.010544Z",
+        "name": "projects/69593958020/locations/us-central1/reasoningEngines/1491331942182813696/sessions/8685635740484239360",
+        "sessionState": {
+          "app:k1": "v1",
+          "app:k2": "v2",
+          "user:k2": "v2"
+        },
+        "updateTime": "2026-08-03T09:57:59.014804Z",
+        "userId": "user1"
+      }
+    },
+    {
+      "method": "/google.cloud.aiplatform.v1beta1.SessionService/DeleteSession",
+      "request": {
+        "name": "projects/adk-go-e2e/locations/us-central1/reasoningEngines/1491331942182813696/sessions/8685635740484239360"
+      },
+      "response": {
+        "done": true,
+        "metadata": {
+          "@type": "type.googleapis.com/google.cloud.aiplatform.v1beta1.DeleteOperationMetadata",
+          "genericMetadata": {
+            "createTime": "2026-08-03T09:57:59.912673Z",
+            "updateTime": "2026-08-03T09:57:59.912673Z"
+          }
+        },
+        "name": "projects/69593958020/locations/us-central1/operations/58947193481986048",
+        "response": {
+          "@type": "type.googleapis.com/google.protobuf.Empty"
+        }
+      }
+    },
+    {
+      "method": "/google.cloud.aiplatform.v1beta1.SessionService/ListEvents",
+      "request": {
+        "parent": "projects/adk-go-e2e/locations/us-central1/reasoningEngines/1491331942182813696/sessions/8685635740484239360"
+      },
+      "error": {
+        "code": 5,
+        "codeName": "NotFound",
+        "message": "Session projects/adk-go-e2e/locations/us-central1/reasoningEngines/1491331942182813696/sessions/8685635740484239360 not found."
+      }
+    },
+    {
+      "method": "/google.cloud.aiplatform.v1beta1.SessionService/GetSession",
+      "request": {
+        "name": "projects/adk-go-e2e/locations/us-central1/reasoningEngines/1491331942182813696/sessions/8685635740484239360"
+      },
+      "error": {
+        "code": 1,
+        "codeName": "Canceled",
+        "message": "context canceled"
+      }
+    },
+    {
+      "method": "/google.cloud.aiplatform.v1beta1.SessionService/GetSession",
+      "request": {
+        "name": "projects/adk-go-e2e/locations/us-central1/reasoningEngines/1491331942182813696/sessions/nonExistent"
+      },
+      "error": {
+        "code": 3,
+        "codeName": "InvalidArgument",
+        "message": "List of found errors:\t1.Field: name; Message: Invalid Session resource name.\t"
+      }
+    },
+    {
+      "method": "/google.cloud.aiplatform.v1beta1.SessionService/ListSessions",
+      "request": {
+        "parent": "projects/adk-go-e2e/locations/us-central1/reasoningEngines/1491331942182813696"
+      },
+      "response": {}
+    },
+    {
+      "method": "/google.cloud.aiplatform.v1beta1.SessionService/ListSessions",
+      "request": {
+        "parent": "projects/adk-go-e2e/locations/us-central1/reasoningEngines/6857370898194759680"
+      },
+      "response": {}
+    }
+  ]
+}

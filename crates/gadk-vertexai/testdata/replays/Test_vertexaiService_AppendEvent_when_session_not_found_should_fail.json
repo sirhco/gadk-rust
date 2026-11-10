@@ -1,0 +1,35 @@
+{
+  "calls": [
+    {
+      "method": "/google.cloud.aiplatform.v1beta1.SessionService/AppendEvent",
+      "request": {
+        "event": {
+          "author": "user",
+          "eventMetadata": {},
+          "invocationId": "inv1",
+          "timestamp": "0001-01-01T00:00:00Z"
+        },
+        "name": "projects/adk-go-e2e/locations/us-central1/reasoningEngines/1491331942182813696/sessions/nonExistent"
+      },
+      "error": {
+        "code": 3,
+        "codeName": "InvalidArgument",
+        "message": "Request contains an invalid argument."
+      }
+    },
+    {
+      "method": "/google.cloud.aiplatform.v1beta1.SessionService/ListSessions",
+      "request": {
+        "parent": "projects/adk-go-e2e/locations/us-central1/reasoningEngines/1491331942182813696"
+      },
+      "response": {}
+    },
+    {
+      "method": "/google.cloud.aiplatform.v1beta1.SessionService/ListSessions",
+      "request": {
+        "parent": "projects/adk-go-e2e/locations/us-central1/reasoningEngines/6857370898194759680"
+      },
+      "response": {}
+    }
+  ]
+}
