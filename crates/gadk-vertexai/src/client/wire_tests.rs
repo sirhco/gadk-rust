@@ -21,36 +21,13 @@
 use std::sync::Arc;
 
 use gadk_model::ReqwestClient;
-use gadk_model::rest::test_util::{FakeResponse, FakeServer, RecordedRequest, ScriptedClient};
-use google_cloud_auth::credentials::{CacheableResource, CredentialsProvider, EntityTag};
-use google_cloud_auth::errors::CredentialsError;
+use gadk_model::rest::test_util::{
+    FakeResponse, FakeServer, RecordedRequest, ScriptedClient, bearer_credentials,
+};
 use pretty_assertions::assert_eq;
 use serde_json::json;
 
 use super::*;
-
-/// Credentials whose headers are `Authorization: Bearer test-token`.
-#[derive(Debug)]
-struct TestCreds;
-
-impl CredentialsProvider for TestCreds {
-    async fn headers(
-        &self,
-        _extensions: http::Extensions,
-    ) -> Result<CacheableResource<HeaderMap>, CredentialsError> {
-        Ok(CacheableResource::New {
-            entity_tag: EntityTag::new(),
-            data: HeaderMap::from_iter([(
-                http::header::AUTHORIZATION,
-                HeaderValue::from_static("Bearer test-token"),
-            )]),
-        })
-    }
-
-    async fn universe_domain(&self) -> Option<String> {
-        None
-    }
-}
 
 /// A client for `base_url` sending through reqwest.
 fn client_at(base_url: &str, credentials: Option<Credentials>) -> VertexClient {
@@ -145,7 +122,7 @@ async fn call_keeps_an_endpoint_path_prefix() {
 #[tokio::test]
 async fn call_sends_the_json_body_and_credential_headers() {
     let server = FakeServer::json(r#"{"name":"op","done":true}"#);
-    let client = client_at(&server.url(), Some(Credentials::from(TestCreds)));
+    let client = client_at(&server.url(), Some(bearer_credentials("test-token")));
     let body =
         json!({"author": "user", "invocationId": "inv", "timestamp": "2026-01-02T03:04:05Z"});
     let got = client

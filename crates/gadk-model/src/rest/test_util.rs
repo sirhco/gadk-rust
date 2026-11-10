@@ -25,7 +25,9 @@
 //!   ([`FakeResponse::fail`], a dropped connection), a body that never ends
 //!   ([`FakeResponse::hang`]), a request never answered ([`FakeResponse::never`]) and a
 //!   connection error ([`FakeResponse::reset`]);
-//! - [`sse_event`] / [`sse_lines`]: SSE transcripts as Go's tests write them.
+//! - [`sse_event`] / [`sse_lines`]: SSE transcripts as Go's tests write them;
+//! - [`fixed_header_credentials`] / [`bearer_credentials`]: Google credentials whose headers
+//!   are fixed (Go's tests' static token sources).
 //!
 //! [`ScriptedClient`] works under paused tokio time (`start_paused`); [`FakeServer`] needs a
 //! running tokio runtime and real time.
@@ -861,12 +863,71 @@ pub fn sse_lines(lines: &[&str]) -> String {
     lines.join("\n")
 }
 
+// ---------------------------------------------------------------------------------- credentials
+
+/// A credentials provider whose headers are always the same.
+#[derive(Debug)]
+struct FixedHeaders(http::HeaderMap);
+
+impl google_cloud_auth::credentials::CredentialsProvider for FixedHeaders {
+    async fn headers(
+        &self,
+        _extensions: http::Extensions,
+    ) -> Result<
+        google_cloud_auth::credentials::CacheableResource<http::HeaderMap>,
+        google_cloud_auth::errors::CredentialsError,
+    > {
+        Ok(google_cloud_auth::credentials::CacheableResource::New {
+            entity_tag: google_cloud_auth::credentials::EntityTag::new(),
+            data: self.0.clone(),
+        })
+    }
+
+    async fn universe_domain(&self) -> Option<String> {
+        None
+    }
+}
+
+/// Credentials whose headers are always `headers`.
+pub fn fixed_header_credentials(
+    headers: http::HeaderMap,
+) -> google_cloud_auth::credentials::Credentials {
+    google_cloud_auth::credentials::Credentials::from(FixedHeaders(headers))
+}
+
+/// Credentials whose headers are always `Authorization: Bearer {token}` (Go's tests'
+/// `staticTokenSource`). Panics if `token` is not a valid header value.
+pub fn bearer_credentials(token: &str) -> google_cloud_auth::credentials::Credentials {
+    fixed_header_credentials(http::HeaderMap::from_iter([(
+        http::header::AUTHORIZATION,
+        http::HeaderValue::from_str(&format!("Bearer {token}")).expect("ASCII token"),
+    )]))
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
     use super::*;
+    use crate::gcp_auth::credential_headers;
     use crate::http::collect_body;
+
+    #[tokio::test]
+    async fn bearer_credentials_send_a_fixed_token() {
+        let headers = credential_headers(&bearer_credentials("t")).await.unwrap();
+        assert_eq!(headers.len(), 1);
+        assert_eq!(headers[http::header::AUTHORIZATION], "Bearer t");
+        let custom = http::HeaderMap::from_iter([(
+            http::header::HeaderName::from_static("x-goog-user-project"),
+            http::HeaderValue::from_static("p"),
+        )]);
+        assert_eq!(
+            credential_headers(&fixed_header_credentials(custom.clone()))
+                .await
+                .unwrap(),
+            custom
+        );
+    }
 
     const MSG: &str = r#"{"id":"msg_1","text":"ok"}"#;
 

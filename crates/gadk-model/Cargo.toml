@@ -10,9 +10,9 @@ repository.workspace = true
 workspace = true
 
 [features]
-# `rest::test_util`: the scripted fake `HttpClient` and the 127.0.0.1 fake server shared by the
-# provider crates' tests.
-test-util = ["dep:hyper", "dep:hyper-util"]
+# `rest::test_util`: the scripted fake `HttpClient`, the 127.0.0.1 fake server and fixed-header
+# Google credentials (hence `gcp-auth`) shared by the provider crates' tests.
+test-util = ["dep:hyper", "dep:hyper-util", "gcp-auth"]
 # `gcp_auth`: Google Application Default Credentials (google-cloud-auth), shared by the Google
 # Cloud clients (gadk-anthropic on Vertex AI, gadk-artifact-gcs).
 gcp-auth = ["dep:google-cloud-auth"]

@@ -28,12 +28,10 @@ use bytes::Bytes;
 use common::ws::WsServer;
 use gadk_gemini::{ClientConfig, GeminiError, GeminiModel, LiveConnection, MapEnv, RealtimeInput};
 use gadk_genai::{Blob, Content, FunctionResponse, LiveConnectConfig};
+use gadk_model::rest::test_util::bearer_credentials;
 use gadk_model::{Backend, HttpOptions, LiveConnErrorKind, Llm, LlmResponse};
-use google_cloud_auth::credentials::{
-    CacheableResource, Credentials, CredentialsProvider, EntityTag,
-};
-use google_cloud_auth::errors::CredentialsError;
-use http::{HeaderMap, HeaderValue};
+use google_cloud_auth::credentials::Credentials;
+use http::HeaderValue;
 use pretty_assertions::assert_eq;
 use rstest::rstest;
 use serde_json::{Value, json};
@@ -41,37 +39,12 @@ use serde_json::{Value, json};
 const MODEL: &str = "gemini-live-x";
 const PNG: [u8; 9] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00];
 
-/// Credentials returning fixed headers.
-#[derive(Debug)]
-struct FixedHeaders(HeaderMap);
-
-impl CredentialsProvider for FixedHeaders {
-    async fn headers(
-        &self,
-        _extensions: http::Extensions,
-    ) -> Result<CacheableResource<HeaderMap>, CredentialsError> {
-        Ok(CacheableResource::New {
-            entity_tag: EntityTag::new(),
-            data: self.0.clone(),
-        })
-    }
-
-    async fn universe_domain(&self) -> Option<String> {
-        None
-    }
-}
-
 fn anonymous() -> Credentials {
     google_cloud_auth::credentials::anonymous::Builder::new().build()
 }
 
 fn bearer() -> Credentials {
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        http::header::AUTHORIZATION,
-        HeaderValue::from_static("Bearer t"),
-    );
-    Credentials::from(FixedHeaders(headers))
+    bearer_credentials("t")
 }
 
 /// A client config pointing at `base_url`. Vertex AI sets project, location and (anonymous)
