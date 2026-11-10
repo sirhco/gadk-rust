@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `fmt` verb and `strings` ports shared by the gadk crates: `strconv.Quote` (`%q`),
-//! `strings.ToLower` and `strings.ToUpper`.
+//! Go `fmt` verb, `strings` and `net/url` ports shared by the gadk crates: `strconv.Quote`
+//! (`%q`), `strings.ToLower`, `strings.ToUpper` and `url.QueryEscape`.
 
 use std::sync::LazyLock;
 
@@ -119,9 +119,51 @@ pub fn go_to_upper(s: &str) -> String {
     s.chars().map(go_upper_rune).collect()
 }
 
+/// Port of Go `url.QueryEscape` (net/url/url.go `escape(s, encodeQueryComponent)`): every byte
+/// except ASCII letters, digits, `-`, `.`, `_` and `~` becomes `%XX` (upper-case hex, per UTF-8
+/// byte), and a space becomes `+`.
+pub fn go_query_escape(s: &str) -> String {
+    const UPPER_HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut out = String::with_capacity(s.len());
+    for &b in s.as_bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(char::from(b));
+            }
+            b' ' => out.push('+'),
+            _ => {
+                out.push('%');
+                out.push(char::from(UPPER_HEX[usize::from(b >> 4)]));
+                out.push(char::from(UPPER_HEX[usize::from(b & 15)]));
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{go_quote, go_to_lower, go_to_upper};
+    use super::{go_query_escape, go_quote, go_to_lower, go_to_upper};
+
+    /// Go net/url/url_test.go `queryEscapeTests`, plus non-ASCII and the unreserved marks.
+    #[test]
+    fn go_query_escape_matches_go() {
+        for (input, want) in [
+            ("", ""),
+            ("abc", "abc"),
+            ("one two", "one+two"),
+            ("10%", "10%25"),
+            (
+                " ?&=#+%!<>#\"{}|\\^[]`☺\t:/@$'()*,;",
+                "+%3F%26%3D%23%2B%25%21%3C%3E%23%22%7B%7D%7C%5C%5E%5B%5D%60%E2%98%BA%09%3A%2F%40%24%27%28%29%2A%2C%3B",
+            ),
+            ("my_agent", "my_agent"),
+            ("agent-1.v2~x", "agent-1.v2~x"),
+            ("Ünï", "%C3%9Cn%C3%AF"),
+        ] {
+            assert_eq!(go_query_escape(input), want, "QueryEscape({input:?})");
+        }
+    }
 
     /// Expected values are Go `strings.ToLower` / `strings.ToUpper` output. (The rune mappings
     /// were checked against Go 1.27's `unicode.ToLower`/`ToUpper` for every code point.)

@@ -29,10 +29,11 @@ use gadk_agent::{Context, ReadonlyContext, Tool, ToolError, Toolset, go_quote};
 use gadk_engine::tool::{FunctionTool, FunctionToolConfig};
 use gadk_genai::FunctionDeclaration;
 use gadk_model::LlmRequest;
+use gadk_platform::go_query_escape;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Value, json};
 
-use crate::go_fmt::{url_query_escape, wrap_err};
+use crate::go_fmt::wrap_err;
 use crate::ranksearch;
 
 /// The name of the search tool exposed to the model (Go `ToolName`).
@@ -264,7 +265,7 @@ pub fn reveal_tools(ctx: &Context, names: &[&str]) -> Result<(), ToolError> {
 /// tool names may contain one, and an unescaped agent "a" revealing tool "b:t" would write the
 /// key agent "a:b" reads as tool "t".
 fn discovered_key_prefix(agent_name: &str) -> String {
-    format!("{STATE_KEY_PREFIX}{}:", url_query_escape(agent_name))
+    format!("{STATE_KEY_PREFIX}{}:", go_query_escape(agent_name))
 }
 
 /// The agent's discovered tools in discovery order (Go `discoveredNames`). Calls in one model
