@@ -291,7 +291,8 @@ impl Server {
         let platform = cfg.platform;
         let handler = routing::handler(move |mut req: Request| {
             // Go's `net/http` server answers `OPTIONS *` and an undecodable target itself,
-            // before `policy.Middleware` sees the request.
+            // before `policy.Middleware` sees the request. `RouteTable::dispatch` decodes the
+            // path again on purpose: tests drive the table directly, without this handler.
             if let Err(answer) = routing::decoded_path(&req) {
                 return Box::pin(std::future::ready(answer.response()))
                     as BoxFuture<'static, Response>;
