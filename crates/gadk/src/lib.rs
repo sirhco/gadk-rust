@@ -56,6 +56,10 @@ pub use gadk_session_database as session_database;
 /// the example tool, tool search, the skills toolset and the `toolauth` wire model (re-export of
 /// `gadk-tools`).
 pub use gadk_tools as tools;
+/// Sessions and memory in a Vertex AI Agent Engine (feature `vertexai`, not on by default;
+/// re-export of `gadk-vertexai`).
+#[cfg(feature = "vertexai")]
+pub use gadk_vertexai as vertexai;
 
 /// Context compaction (re-export of `gadk_session::compaction`).
 ///

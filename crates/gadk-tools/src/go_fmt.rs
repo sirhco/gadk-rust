@@ -13,36 +13,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go standard-library formatting and path helpers the tools reproduce byte-for-byte: `net/url`
-//! `QueryEscape`, `html` `EscapeString`, `path` `Clean`, `io/fs` `ValidPath`, `encoding/json` of a
-//! Go `string(bytes)`, and `fmt` `%v` of a JSON-decoded value; plus the crate's one
+//! Go standard-library formatting and path helpers the tools reproduce byte-for-byte: `html`
+//! `EscapeString`, `path` `Clean`, `io/fs` `ValidPath`, `encoding/json` of a Go `string(bytes)`,
+//! and `fmt` `%v` of a JSON-decoded value (`url.QueryEscape` is
+//! [`gadk_platform::go_query_escape`]); plus the crate's one
 //! `fmt.Errorf("<msg>: %w", err)` wrapper, [`wrap_err`]. Private to the crate (the engine's and
 //! gadk-session's copies are private to those crates).
 
 use gadk_agent::ToolError;
 use serde_json::Value;
-
-/// Go `url.QueryEscape` (net/url/url.go `escape(s, encodeQueryComponent)`): every byte except
-/// ASCII letters, digits, `-`, `.`, `_` and `~` becomes `%XX` (upper-case hex, per UTF-8 byte), and
-/// a space becomes `+`.
-pub(crate) fn url_query_escape(s: &str) -> String {
-    const UPPER_HEX: &[u8; 16] = b"0123456789ABCDEF";
-    let mut out = String::with_capacity(s.len());
-    for &b in s.as_bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                out.push(char::from(b));
-            }
-            b' ' => out.push('+'),
-            _ => {
-                out.push('%');
-                out.push(char::from(UPPER_HEX[usize::from(b >> 4)]));
-                out.push(char::from(UPPER_HEX[usize::from(b & 15)]));
-            }
-        }
-    }
-    out
-}
 
 /// Go `html.EscapeString`: `&`, `'`, `<`, `>` and `"` become `&amp;`, `&#39;`, `&lt;`, `&gt;` and
 /// `&#34;`; every other character is kept.
@@ -227,26 +206,6 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
-
-    /// Go net/url/url_test.go `queryEscapeTests`, plus non-ASCII and the unreserved marks.
-    #[test]
-    fn url_query_escape_matches_go() {
-        for (input, want) in [
-            ("", ""),
-            ("abc", "abc"),
-            ("one two", "one+two"),
-            ("10%", "10%25"),
-            (
-                " ?&=#+%!<>#\"{}|\\^[]`☺\t:/@$'()*,;",
-                "+%3F%26%3D%23%2B%25%21%3C%3E%23%22%7B%7D%7C%5C%5E%5B%5D%60%E2%98%BA%09%3A%2F%40%24%27%28%29%2A%2C%3B",
-            ),
-            ("my_agent", "my_agent"),
-            ("agent-1.v2~x", "agent-1.v2~x"),
-            ("Ünï", "%C3%9Cn%C3%AF"),
-        ] {
-            assert_eq!(url_query_escape(input), want, "QueryEscape({input:?})");
-        }
-    }
 
     #[test]
     fn wrap_err_keeps_go_text_and_source() {

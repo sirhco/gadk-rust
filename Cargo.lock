@@ -879,6 +879,7 @@ dependencies = [
  "gadk-session",
  "gadk-session-database",
  "gadk-tools",
+ "gadk-vertexai",
  "pretty_assertions",
  "rmcp",
  "schemars 1.2.3",
@@ -1272,6 +1273,34 @@ dependencies = [
  "serde_json",
  "sha2 0.11.1",
  "tokio",
+]
+
+[[package]]
+name = "gadk-vertexai"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.23.1",
+ "bytes",
+ "chrono",
+ "futures",
+ "gadk-genai",
+ "gadk-memory",
+ "gadk-model",
+ "gadk-platform",
+ "gadk-session",
+ "gadk-vertexai",
+ "google-cloud-auth",
+ "http",
+ "parking_lot 0.13.0",
+ "pretty_assertions",
+ "rand",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "url",
 ]
 
 [[package]]
