@@ -39,6 +39,7 @@ use serde::de::DeserializeOwned;
 use tokio::sync::{Semaphore, SemaphorePermit};
 
 use crate::rest::PathVars;
+use crate::rest::controllers::handlers::path_vars;
 use crate::rest::http_error::encode_json_response;
 use crate::rest::models::TriggerResponse;
 use crate::rest::routing::{Request, Response};
@@ -275,11 +276,10 @@ fn respond_success() -> Response {
 
 /// Go `appName(r)`: the `app_name` path variable.
 fn app_name(req: &Request) -> Result<String, String> {
-    req.extensions()
-        .get::<PathVars>()
-        .and_then(|vars| vars.0.get("app_name"))
+    path_vars(req)
+        .0
+        .remove("app_name")
         .filter(|name| !name.is_empty())
-        .cloned()
         .ok_or_else(|| "no application name provided".to_owned())
 }
 

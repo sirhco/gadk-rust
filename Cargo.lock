@@ -914,6 +914,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "axum",
  "futures",
  "gadk-agent",
  "gadk-anthropic",
@@ -1288,6 +1289,7 @@ dependencies = [
  "pretty_assertions",
  "rand 0.10.3",
  "reqwest",
+ "schemars 1.2.3",
  "serde",
  "serde_json",
  "thiserror",

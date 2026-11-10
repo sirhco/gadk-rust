@@ -655,7 +655,6 @@ pub(crate) fn build_graph(
 
 /// Go `GetAgentGraph`: the agent tree as Graphviz DOT in the dark theme (the event graph's
 /// palette).
-#[cfg_attr(not(test), allow(dead_code))] // Task 12's event graph is the production caller.
 pub(crate) fn get_agent_graph(agent: &dyn Agent, highlighted_pairs: &[Vec<String>]) -> String {
     get_agent_graph_with_theme(agent, highlighted_pairs, DARK_THEME)
 }

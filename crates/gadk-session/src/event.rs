@@ -46,7 +46,7 @@ const MAX_TIME_SECS: i64 = 253_402_300_799;
 /// RFC 3339 with trailing-zero-trimmed nanoseconds (`time.RFC3339Nano`); `null` decodes
 /// to [`zero_time`].
 pub(crate) mod go_time {
-    use chrono::{DateTime, Datelike, Timelike, Utc};
+    use chrono::{DateTime, Datelike, Utc};
     use serde::{Deserialize, Deserializer, Serializer};
 
     /// Formats `t` as Go's `time.RFC3339Nano`; `None` outside years 0..=9999, which Go
@@ -55,15 +55,7 @@ pub(crate) mod go_time {
         if !(0..=9999).contains(&t.year()) {
             return None;
         }
-        let mut s = t.format("%Y-%m-%dT%H:%M:%S").to_string();
-        let nanos = t.nanosecond() % 1_000_000_000;
-        if nanos != 0 {
-            let frac = format!("{nanos:09}");
-            s.push('.');
-            s.push_str(frac.trim_end_matches('0'));
-        }
-        s.push('Z');
-        Some(s)
+        Some(gadk_platform::go_format_rfc3339_nano(t))
     }
 
     pub(crate) fn serialize<S: Serializer>(t: &DateTime<Utc>, s: S) -> Result<S::Ok, S::Error> {

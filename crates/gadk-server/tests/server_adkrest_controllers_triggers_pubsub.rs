@@ -23,6 +23,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::body::Body;
+use axum::extract::DefaultBodyLimit;
 use futures::StreamExt;
 use gadk_agent::{AgentConfig, SingleLoader, new_agent};
 use gadk_server::rest::testutil::FakeSessionService;
@@ -453,7 +454,10 @@ async fn pub_sub_handler_mounts_on_an_axum_route() {
         ))
         .unwrap(),
     );
-    let app = axum::Router::new().route("/apps/{app_name}/trigger/pubsub", ctrl.handler());
+    // The Go launcher's 10 MiB trigger body limit.
+    let app = axum::Router::new()
+        .route("/apps/{app_name}/trigger/pubsub", ctrl.handler())
+        .layer(DefaultBodyLimit::max(10 << 20));
 
     let req = http::Request::post("/apps/test%2Dagent/trigger/pubsub")
         .body(Body::from(pubsub_body("hi", None)))

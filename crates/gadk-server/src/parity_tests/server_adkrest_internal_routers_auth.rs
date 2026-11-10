@@ -16,7 +16,6 @@
 //! Ports of ADK-Go `server/adkrest/internal/routers/auth_test.go`.
 
 use std::collections::HashSet;
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 
 use axum::body::Body;
@@ -148,26 +147,20 @@ fn auth_test_routers() -> Vec<RouterAuthCase> {
             public_routes: HashSet::new(),
         },
     ];
-    // The debug store is filled by plan 5a Task 12; until it lands its constructor panics and
-    // the debug case cannot be built.
-    if let Ok(telemetry) = catch_unwind(AssertUnwindSafe(|| {
-        DebugTelemetry::new(DebugTelemetryConfig::default())
-    })) {
-        let c = Arc::new(DebugApiController::new(
-            session_svc,
-            Some(loader),
-            telemetry,
-        ));
-        cases.push(RouterAuthCase {
-            name: "debug",
-            routes: Box::new(move || debug_routes(Arc::clone(&c))),
-            public_routes: HashSet::new(),
-        });
-    }
+    let c = Arc::new(DebugApiController::new(
+        session_svc,
+        Some(loader),
+        DebugTelemetry::new(DebugTelemetryConfig::default()),
+    ));
+    cases.push(RouterAuthCase {
+        name: "debug",
+        routes: Box::new(move || debug_routes(Arc::clone(&c))),
+        public_routes: HashSet::new(),
+    });
     cases
 }
 
-// parity: adapted: each router is mounted alone in a RouteTable (Go: SetupSubRouters on a fresh mux.Router); a public route whose handler is not yet implemented answers 500 from the panic catcher, which the test (like Go's) accepts as not 401
+// parity: adapted: each router is mounted alone in a RouteTable (Go: SetupSubRouters on a fresh mux.Router)
 #[tokio::test]
 async fn test_router_authentication() {
     // NewHeader rejects a request without the named header, so a credential-less request to a

@@ -18,20 +18,21 @@
 //! case-insensitive key matching is not reproduced); a JSON `null` for a non-pointer Go field
 //! leaves its zero value, as Go's decoder does.
 
-// Used by the controllers (plan 5a Tasks 6-10).
-#![allow(dead_code, unused_imports)]
-
 mod event;
 mod runtime;
 mod session;
 mod triggers;
 
-pub use event::{Event, EventActions};
-pub use runtime::{LiveBlob, LiveRequest, RunAgentRequest};
+pub use event::Event;
+#[cfg(test)]
+pub use event::EventActions;
+pub use runtime::{LiveRequest, RunAgentRequest};
 pub use session::{
     CreateSessionRequest, Session, SessionId, UpdateSessionRequest, session_id_from_http_parameters,
 };
-pub use triggers::{EventarcTriggerRequest, PubSubMessage, PubSubTriggerRequest, TriggerResponse};
+#[cfg(test)]
+pub use triggers::PubSubMessage;
+pub use triggers::{EventarcTriggerRequest, PubSubTriggerRequest, TriggerResponse};
 
 use serde::{Deserialize, Deserializer};
 

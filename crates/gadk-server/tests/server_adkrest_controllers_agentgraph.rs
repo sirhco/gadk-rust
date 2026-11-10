@@ -22,13 +22,12 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use axum::body::Body;
-use gadk_agent::{Agent, AgentConfig, Loader, MultiLoader, SingleLoader, Tool};
-use gadk_engine::llm::LlmAgentConfig;
-use gadk_engine::sequential_agent::{self, SequentialAgentConfig};
+use gadk_agent::{Agent, AgentConfig, SingleLoader};
 use gadk_server::rest::PathVars;
 use gadk_server::rest::controllers::{
     AgentGraphApiController, AgentNode, AppInfoResponse, DotGraph,
 };
+use gadk_server::rest::testutil::wire_scenario::scenario_loader;
 use http::{Request, StatusCode};
 use serde_json::Value;
 
@@ -449,54 +448,6 @@ async fn test_graph_handlers_nil_agent_loader() {
 }
 
 // parity: skipped TestAgentGraphHandlersSurviveANilAgent: a gadk Loader returns Arc<dyn Agent>, which cannot be null, so the nil-agent guard has nothing to guard
-
-/// A tool that only has a name (the probe's `save_note` as the graph sees it).
-struct NamedTool(&'static str);
-
-impl Tool for NamedTool {
-    fn name(&self) -> &str {
-        self.0
-    }
-    fn description(&self) -> &str {
-        ""
-    }
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-}
-
-fn llm(name: &str, description: &str, tools: Vec<Arc<dyn Tool>>) -> Arc<dyn Agent> {
-    gadk_engine::llm_agent::new(LlmAgentConfig {
-        name: name.into(),
-        description: description.into(),
-        tools,
-        ..Default::default()
-    })
-    .unwrap()
-}
-
-/// The probe's loader (`scripts/gen-go-adkrest/SCENARIO.md`, "Sample agents"), as far as the
-/// graph endpoints see it: names, descriptions, the sub-agent tree and tool names.
-fn scenario_loader() -> Arc<dyn Loader> {
-    let assistant = llm(
-        "assistant",
-        "Answers greetings and saves notes.",
-        vec![Arc::new(NamedTool("save_note"))],
-    );
-    let pipeline = sequential_agent::new(SequentialAgentConfig {
-        agent: AgentConfig {
-            name: "pipeline".into(),
-            description: "Drafts, then reviews.".into(),
-            sub_agents: vec![
-                llm("drafter", "Writes a draft.", vec![]),
-                llm("reviewer", "Reviews the draft.", vec![]),
-            ],
-            ..Default::default()
-        },
-    })
-    .unwrap();
-    Arc::new(MultiLoader::new(assistant, vec![pipeline]).unwrap())
-}
 
 /// Fixtures `main_40` … `main_45`: status, Content-Type and body byte for byte.
 #[tokio::test]

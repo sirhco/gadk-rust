@@ -23,26 +23,19 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use async_trait::async_trait;
 use axum::body::Body;
 use futures::{FutureExt as _, StreamExt as _};
 use gadk_agent::{AgentConfig, AgentError, Plugin, PluginConfig, SingleLoader};
-use gadk_engine::llm::LlmAgentConfig;
-use gadk_engine::llm::agent as llm_agent;
 use gadk_engine::runner::PluginConfig as RunnerPluginConfig;
-use gadk_engine::testutil::MockModel;
 use gadk_genai::{Content, Part};
-use gadk_model::ModelError;
-use gadk_platform::{Platform, go_quote};
+use gadk_platform::Platform;
 use gadk_server::authn::Caller;
 use gadk_server::rest::Timeout;
 use gadk_server::rest::controllers::{RuntimeApiController, RuntimeApiControllerConfig};
+use gadk_server::rest::testutil::wire_scenario::scenario_loader;
 use gadk_server::rest::testutil::{FakeSessionService, SessionKey, TestSession};
 use gadk_session::compaction::Config as CompactionConfig;
-use gadk_session::{
-    CreateRequest, DeleteRequest, Event, GetRequest, InMemorySessionService, ListRequest, Session,
-    SessionError, SessionService,
-};
+use gadk_session::{CreateRequest, Event, InMemorySessionService, SessionService};
 use http::{Method, StatusCode};
 use serde_json::Value;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
@@ -316,7 +309,6 @@ async fn test_new_runtime_api_controller_carries_compaction() {
 }
 
 #[tokio::test]
-#[ignore = "run_live_handler is plan 5a Task 8's; Task 13 removes this ignore"]
 async fn test_run_live_handler_uses_configured_check_origin() {
     let seen_origin = Arc::new(parking_lot::Mutex::new(None::<String>));
     let mut cfg = RuntimeApiControllerConfig::new(Arc::new(InMemorySessionService::new()));
@@ -377,54 +369,9 @@ fn fixture(name: &str) -> (String, u16, Vec<(String, String)>, String) {
     )
 }
 
-/// The in-memory session service answering a missing session with Go's
-/// `session not found: "<id>"` (gadk's in-memory text has no ID; this check is about the
-/// controller's framing).
-struct GoNotFound(InMemorySessionService);
-
-#[async_trait]
-impl SessionService for GoNotFound {
-    async fn create(&self, req: CreateRequest) -> Result<Arc<dyn Session>, SessionError> {
-        self.0.create(req).await
-    }
-    async fn get(&self, req: GetRequest) -> Result<Arc<dyn Session>, SessionError> {
-        let id = req.session_id.clone();
-        self.0.get(req).await.map_err(|err| match err {
-            SessionError::NotFound => {
-                SessionError::Backend(format!("session not found: {}", go_quote(&id)).into())
-            }
-            other => other,
-        })
-    }
-    async fn list(&self, req: ListRequest) -> Result<Vec<Arc<dyn Session>>, SessionError> {
-        self.0.list(req).await
-    }
-    async fn delete(&self, req: DeleteRequest) -> Result<(), SessionError> {
-        self.0.delete(req).await
-    }
-    async fn append_event(
-        &self,
-        session: &dyn Session,
-        event: &mut Event,
-    ) -> Result<(), SessionError> {
-        self.0.append_event(session, event).await
-    }
-}
-
-/// The probe's `assistant` (SCENARIO.md) reduced to its `fail` reply (twice: one `/run`, one
-/// `/run_sse`), with session
-/// `assistant`/`alice`/`s1`.
-async fn failing_assistant() -> RuntimeApiController {
-    let fail = || Err(ModelError::Other("scripted model failure".into()));
-    let model = MockModel::new(vec![fail(), fail()]).name_as("scripted-assistant");
-    let assistant = llm_agent::new(LlmAgentConfig {
-        name: "assistant".into(),
-        description: "Answers greetings and saves notes.".into(),
-        model: Some(model),
-        ..Default::default()
-    })
-    .unwrap();
-    let sessions = Arc::new(GoNotFound(InMemorySessionService::new()));
+/// The probe's agents (SCENARIO.md) with session `assistant`/`alice`/`s1`.
+async fn scenario_controller() -> RuntimeApiController {
+    let sessions = Arc::new(InMemorySessionService::new());
     sessions
         .create(CreateRequest {
             app_name: "assistant".into(),
@@ -435,7 +382,7 @@ async fn failing_assistant() -> RuntimeApiController {
         .await
         .unwrap();
     let mut cfg = RuntimeApiControllerConfig::new(sessions);
-    cfg.agent_loader = Some(Arc::new(SingleLoader::new(assistant)));
+    cfg.agent_loader = Some(scenario_loader());
     RuntimeApiController::new(cfg)
 }
 
@@ -458,7 +405,7 @@ where
 
 #[tokio::test]
 async fn wire_run_error_and_bad_requests_match_go() {
-    let c = failing_assistant().await;
+    let c = scenario_controller().await;
     assert_fixture("main_15_run_error", |r| c.run_handler(r)).await;
     assert_fixture("main_16_run_unknown_session", |r| c.run_handler(r)).await;
     assert_fixture("main_17_run_unknown_field", |r| c.run_handler(r)).await;
@@ -470,7 +417,7 @@ async fn wire_run_error_and_bad_requests_match_go() {
 /// `Connection: keep-alive`, and the error frame arrives chunked.
 #[tokio::test]
 async fn wire_run_sse_headers_on_the_socket() {
-    let c = Arc::new(failing_assistant().await);
+    let c = Arc::new(scenario_controller().await);
     let app = axum::Router::new().fallback(move |req: axum::extract::Request| {
         let c = c.clone();
         async move { c.run_sse_handler(req).await }

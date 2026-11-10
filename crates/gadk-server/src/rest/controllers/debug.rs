@@ -117,7 +117,9 @@ impl DebugApiController {
             Err(e) => return http_error(StatusCode::BAD_REQUEST, &e),
         };
         // The route is user-scoped: a caller may only read their own session's event graph.
-        if let Some(resp) = forbid_unless_can_act_as(&*self.authorizer, &req, &sid.user_id) {
+        if let Some(resp) =
+            forbid_unless_can_act_as(&*self.authorizer, req.extensions(), &sid.user_id)
+        {
             return resp;
         }
         let session = match self
@@ -218,7 +220,6 @@ fn convert_event_span(span: &DebugSpan) -> BTreeMap<&str, FlatValue<'_>> {
 }
 
 /// Go `DebugAPIRouter.Routes`.
-#[allow(dead_code)] // mounted by `Server::router` (plan 5a Task 13)
 pub(crate) fn debug_routes(c: Arc<DebugApiController>) -> Vec<Route> {
     vec![
         route(

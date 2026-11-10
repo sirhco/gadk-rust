@@ -24,7 +24,9 @@ use super::handlers::{encode_nil_json_response, forbid_unless_can_act_as, path_v
 use crate::authz::{self, Authorizer};
 use crate::rest::http_error::{encode_json_response, http_error};
 use crate::rest::models::{SessionId, session_id_from_http_parameters};
-use crate::rest::routing::{PathVars, Request, Response, Route, controller_handler, route};
+use crate::rest::routing::{
+    PathVars, Request, Response, Route, controller_handler, query_get, route,
+};
 
 /// Port of Go `controllers.ArtifactsAPIController`; without a service every handler answers 503
 /// `artifact service is not configured`.
@@ -59,7 +61,9 @@ impl ArtifactsApiController {
             Err(e) => return http_error(StatusCode::BAD_REQUEST, &e),
         };
         // Go checks authorization before the session ID here (the other handlers after).
-        if let Some(resp) = forbid_unless_can_act_as(&*self.authorizer, &req, &sid.user_id) {
+        if let Some(resp) =
+            forbid_unless_can_act_as(&*self.authorizer, req.extensions(), &sid.user_id)
+        {
             return resp;
         }
         if sid.id.is_empty() {
@@ -91,7 +95,7 @@ impl ArtifactsApiController {
             file_name,
             version: 0,
         };
-        let version = query_get(req.uri().query().unwrap_or_default(), "version");
+        let version = query_get(req.uri().query(), "version");
         if !version.is_empty() {
             match go_atoi(&version) {
                 Some(v) => load.version = v,
@@ -188,7 +192,9 @@ impl ArtifactsApiController {
                 "session_id parameter is required",
             )));
         }
-        if let Some(resp) = forbid_unless_can_act_as(&*self.authorizer, req, &sid.user_id) {
+        if let Some(resp) =
+            forbid_unless_can_act_as(&*self.authorizer, req.extensions(), &sid.user_id)
+        {
             return Err(Box::new(resp));
         }
         let file_name = vars.0.get("artifact_name").cloned().unwrap_or_default();
@@ -211,14 +217,6 @@ fn write_artifact_error(err: &ArtifactError) -> Response {
     http_error(status, &err.to_string())
 }
 
-/// Go `req.URL.Query().Get(key)`: the first value of `key`, form-decoded; empty when absent.
-fn query_get(query: &str, key: &str) -> String {
-    url::form_urlencoded::parse(query.as_bytes())
-        .find(|(k, _)| k == key)
-        .map(|(_, v)| v.into_owned())
-        .unwrap_or_default()
-}
-
 /// Go `strconv.Atoi` on a 64-bit platform: an optional sign and ASCII digits in `i64` range.
 fn go_atoi(s: &str) -> Option<i64> {
     let digits = s.strip_prefix(['+', '-']).unwrap_or(s);
@@ -229,8 +227,6 @@ fn go_atoi(s: &str) -> Option<i64> {
 }
 
 /// Go `ArtifactsAPIRouter.Routes`.
-// Mounted by `Server::new` (plan 5a Task 13).
-#[allow(dead_code)]
 pub(crate) fn artifacts_routes(c: Arc<ArtifactsApiController>) -> Vec<Route> {
     const BASE: &str = "/apps/{app_name}/users/{user_id}/sessions/{session_id}/artifacts";
     vec![

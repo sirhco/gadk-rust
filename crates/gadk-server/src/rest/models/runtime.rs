@@ -57,7 +57,8 @@ pub struct RunAgentRequest {
 impl RunAgentRequest {
     /// Port of Go `AssertRunAgentRequestRequired`: `<name> is required` for the first zero field
     /// of `appName`, `userId`, `sessionId`, `newMessage` (Go iterates a map, so its order is
-    /// unspecified).
+    /// unspecified). ADK-Go's handlers do not call it either; only its test does.
+    #[cfg(test)]
     pub fn assert_run_agent_request_required(&self) -> Result<(), String> {
         let zero = [
             ("appName", self.app_name.is_empty()),

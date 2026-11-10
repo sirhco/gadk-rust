@@ -35,7 +35,7 @@ pub use go_err::GoWrapped;
 pub use go_fmt::{
     go_query_escape, go_quote, go_sprint_value, go_to_lower, go_to_upper, go_type_name,
 };
-pub use go_time::go_parse_rfc3339;
+pub use go_time::{go_format_rfc3339_nano, go_parse_rfc3339};
 pub use time::TimeProvider;
 pub use tracking::tracking_header;
 pub use uuid::UuidProvider;

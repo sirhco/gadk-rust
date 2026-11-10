@@ -10,9 +10,9 @@ repository.workspace = true
 workspace = true
 
 [features]
-# Test fixtures: `rest::testutil` (Go `internal/fakes` `FakeSessionService`; from Task 13 the
-# wire-scenario builders). Enabled for this crate's own tests by the self dev-dependency.
-testutil = []
+# Test fixtures: `rest::testutil` (Go `internal/fakes` `FakeSessionService` and the wire probe's
+# scenario). Enabled for this crate's own tests by the self dev-dependency.
+testutil = ["dep:schemars"]
 
 [dependencies]
 gadk-agent = { workspace = true }
@@ -44,6 +44,7 @@ chrono = { workspace = true }
 parking_lot = { workspace = true }
 rand = { workspace = true }
 base64 = { workspace = true }
+schemars = { workspace = true, optional = true }
 
 [dev-dependencies]
 gadk-server = { path = ".", features = ["testutil"] }

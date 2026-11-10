@@ -41,12 +41,11 @@ use tokio::sync::{Mutex, OwnedSemaphorePermit};
 use tokio::time::{Instant, MissedTickBehavior};
 use tokio_util::sync::CancellationToken;
 
+use super::handlers::forbid_unless_can_act_as;
 use super::runtime::RuntimeApiController;
-use crate::authn::Caller;
-use crate::authz;
 use crate::rest::http_error::http_error;
 use crate::rest::models::{Event as ApiEvent, LiveRequest as ApiLiveRequest, RunAgentRequest};
-use crate::rest::routing::{Request, Response};
+use crate::rest::routing::{Request, Response, query_get};
 
 /// Go `maxCloseReason`: the longest close reason a control frame carries (a 125-byte payload
 /// less the two-byte code).
@@ -84,18 +83,25 @@ impl RuntimeApiController {
     pub async fn run_live_handler(&self, req: Request) -> Response {
         let (mut parts, _body) = req.into_parts();
 
-        let query = parse_query(parts.uri.query());
-        let app_name = query_get(&query, "appName", "app_name");
-        let user_id = query_get(&query, "userId", "user_id");
+        // Go `q.Get(name)`, falling back to `q.Get(alt)` when that is empty.
+        let query = parts.uri.query().map(str::to_owned);
+        let param = |name: &str, alt: &str| {
+            let v = query_get(query.as_deref(), name);
+            if v.is_empty() {
+                query_get(query.as_deref(), alt)
+            } else {
+                v
+            }
+        };
+        let app_name = param("appName", "app_name");
+        let user_id = param("userId", "user_id");
 
-        if let Err(e) = self
-            .authorizer
-            .can_act_as_user(parts.extensions.get::<Caller>(), &user_id)
+        if let Some(resp) = forbid_unless_can_act_as(&*self.authorizer, &parts.extensions, &user_id)
         {
-            return authz::write_http_status_for_auth_error(Some(&e));
+            return resp;
         }
 
-        let session_id = query_get(&query, "sessionId", "session_id");
+        let session_id = param("sessionId", "session_id");
         if app_name.is_empty() || user_id.is_empty() || session_id.is_empty() {
             return http_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -242,26 +248,6 @@ fn upgrade_error(status: StatusCode, reason: &str) -> Response {
     resp.headers_mut()
         .insert(SEC_WEBSOCKET_VERSION, HeaderValue::from_static("13"));
     resp
-}
-
-/// Go `url.Values` of the request's query.
-fn parse_query(query: Option<&str>) -> Vec<(String, String)> {
-    url::form_urlencoded::parse(query.unwrap_or_default().as_bytes())
-        .map(|(k, v)| (k.into_owned(), v.into_owned()))
-        .collect()
-}
-
-/// Go `q.Get(name)`, falling back to `q.Get(alt)` when that is empty.
-fn query_get(query: &[(String, String)], name: &str, alt: &str) -> String {
-    let get = |key: &str| {
-        query
-            .iter()
-            .find(|(k, _)| k == key)
-            .map(|(_, v)| v.clone())
-            .unwrap_or_default()
-    };
-    let v = get(name);
-    if v.is_empty() { get(alt) } else { v }
 }
 
 /// gorilla `tokenListContainsValue`: whether a comma-separated token list in any `name` header

@@ -65,7 +65,9 @@ impl SessionsApiController {
             Ok(sid) => sid,
             Err(e) => return http_error(StatusCode::BAD_REQUEST, &e),
         };
-        if let Some(resp) = forbid_unless_can_act_as(&*self.authorizer, &req, &sid.user_id) {
+        if let Some(resp) =
+            forbid_unless_can_act_as(&*self.authorizer, req.extensions(), &sid.user_id)
+        {
             return resp;
         }
         let create: CreateSessionRequest = match decode_optional_json_body(req.into_body()).await {
@@ -113,7 +115,9 @@ impl SessionsApiController {
         if sid.id.is_empty() {
             return http_error(StatusCode::BAD_REQUEST, "session_id parameter is required");
         }
-        if let Some(resp) = forbid_unless_can_act_as(&*self.authorizer, &req, &sid.user_id) {
+        if let Some(resp) =
+            forbid_unless_can_act_as(&*self.authorizer, req.extensions(), &sid.user_id)
+        {
             return resp;
         }
         let deleted = self
@@ -139,7 +143,9 @@ impl SessionsApiController {
         if sid.id.is_empty() {
             return http_error(StatusCode::BAD_REQUEST, "session_id parameter is required");
         }
-        if let Some(resp) = forbid_unless_can_act_as(&*self.authorizer, &req, &sid.user_id) {
+        if let Some(resp) =
+            forbid_unless_can_act_as(&*self.authorizer, req.extensions(), &sid.user_id)
+        {
             return resp;
         }
         let stored = match self.service.get(get_request(&sid)).await {
@@ -163,7 +169,9 @@ impl SessionsApiController {
         if sid.id.is_empty() {
             return http_error(StatusCode::BAD_REQUEST, "session_id parameter is required");
         }
-        if let Some(resp) = forbid_unless_can_act_as(&*self.authorizer, &req, &sid.user_id) {
+        if let Some(resp) =
+            forbid_unless_can_act_as(&*self.authorizer, req.extensions(), &sid.user_id)
+        {
             return resp;
         }
         let platform = request_platform(&req);
@@ -221,7 +229,9 @@ impl SessionsApiController {
             Ok(sid) => sid,
             Err(e) => return http_error(StatusCode::BAD_REQUEST, &e),
         };
-        if let Some(resp) = forbid_unless_can_act_as(&*self.authorizer, &req, &sid.user_id) {
+        if let Some(resp) =
+            forbid_unless_can_act_as(&*self.authorizer, req.extensions(), &sid.user_id)
+        {
             return resp;
         }
         let listed = self
@@ -309,8 +319,6 @@ fn matches_stored_value(stored: &dyn State, key: &str, value: &Value) -> bool {
 }
 
 /// Go `SessionsAPIRouter.Routes`.
-// Mounted by `Server::new` (plan 5a Task 13).
-#[allow(dead_code)]
 pub(crate) fn sessions_routes(c: Arc<SessionsApiController>) -> Vec<Route> {
     const SESSION: &str = "/apps/{app_name}/users/{user_id}/sessions/{session_id}";
     const SESSIONS: &str = "/apps/{app_name}/users/{user_id}/sessions";

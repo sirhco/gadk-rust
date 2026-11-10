@@ -18,9 +18,6 @@
 //! per-route body limit and authentication, and Go's fallback for unmatched requests (plan
 //! decision D4).
 
-// Wired into the server by plan 5a Task 13.
-#![allow(dead_code)]
-
 use std::collections::BTreeMap;
 use std::convert::Infallible;
 use std::future::Future;
@@ -101,6 +98,20 @@ macro_rules! controller_handler {
     }};
 }
 pub(crate) use controller_handler;
+
+/// Go `req.URL.Query().Get(key)` on the request target's `query`: the first value of `key`,
+/// form-decoded, or `""`. Like Go's `url.ParseQuery`, a `&`-separated pair containing `;` is
+/// dropped.
+pub(crate) fn query_get(query: Option<&str>, key: &str) -> String {
+    query
+        .unwrap_or_default()
+        .split('&')
+        .filter(|pair| !pair.contains(';'))
+        .flat_map(|pair| url::form_urlencoded::parse(pair.as_bytes()))
+        .find(|(k, _)| k == key)
+        .map(|(_, v)| v.into_owned())
+        .unwrap_or_default()
+}
 
 /// Go `routers.DevPrefix`: the path prefix of the developer-only endpoints.
 pub const DEV_PREFIX: &str = "/dev/apps/{app_name}";
@@ -230,9 +241,25 @@ fn match_from(pieces: &[Piece], path: &[u8], pos: usize, spans: &mut Vec<(usize,
 
 /// A registered route with its compiled template and service stack.
 struct Entry {
+    name: &'static str,
     methods: Vec<Method>,
+    pattern: String,
+    public: bool,
     template: Template,
     service: RouteService,
+}
+
+/// A registered route as [`RouteTable::walk`] reports it (Go `mux.Router.Walk`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RouteInfo {
+    /// The route's name.
+    pub name: &'static str,
+    /// The methods it serves, HEAD included wherever GET is.
+    pub methods: Vec<Method>,
+    /// Its gorilla/mux path template.
+    pub pattern: String,
+    /// Exempt from authentication.
+    pub public: bool,
 }
 
 /// The routes of a server in registration order, with their matcher, body limit and
@@ -267,8 +294,11 @@ impl RouteTable {
                     _ => BoxCloneSyncService::new(inner),
                 };
                 Entry {
+                    name: r.name,
                     methods: with_head(r.methods),
                     template: Template::parse(&r.pattern),
+                    pattern: r.pattern,
+                    public: r.public,
                     service,
                 }
             })
@@ -277,6 +307,19 @@ impl RouteTable {
             routes,
             max_payload_size,
         }
+    }
+
+    /// Every route in registration order (Go `mux.Router.Walk`).
+    pub fn walk(&self) -> Vec<RouteInfo> {
+        self.routes
+            .iter()
+            .map(|e| RouteInfo {
+                name: e.name,
+                methods: e.methods.clone(),
+                pattern: e.pattern.clone(),
+                public: e.public,
+            })
+            .collect()
     }
 
     /// Serves `req`: the first matching route (path variables as [`PathVars`]) runs the body
@@ -291,15 +334,11 @@ impl RouteTable {
     }
 
     async fn dispatch(&self, req: Request) -> Response {
-        // Go's http.Server answers `OPTIONS *` itself (globalOptionsHandler).
-        if req.method() == Method::OPTIONS && req.uri().path() == "*" {
-            return options_star();
-        }
-        let raw = req.uri().path().to_owned();
-        // Go's http.Server refuses a request target whose escapes do not decode.
-        let Some(path) = go_url::unescape_path(&raw) else {
-            return bad_request();
+        let path = match decoded_path(&req) {
+            Ok(path) => path,
+            Err(answer) => return answer.response(),
         };
+        let raw = req.uri().path().to_owned();
         // mux matches the decoded path and first redirects one that is not clean.
         let clean = clean_path(&path);
         if clean != path {
@@ -361,6 +400,15 @@ impl RouteTable {
             }
         })
         .await
+    }
+}
+
+impl std::fmt::Debug for RouteTable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RouteTable")
+            .field("routes", &self.walk())
+            .field("max_payload_size", &self.max_payload_size)
+            .finish()
     }
 }
 
@@ -469,6 +517,35 @@ fn redirect(uri: &Uri, clean: &[u8]) -> Response {
         resp.headers_mut().insert(LOCATION, v);
     }
     resp
+}
+
+/// The answers Go's `net/http` server gives before any handler runs (so before the origin guard
+/// too): `OPTIONS *` (`globalOptionsHandler`) and a request target whose escapes do not decode
+/// (`400 Bad Request`). `Ok` is the decoded path of any other request.
+pub(crate) fn decoded_path(req: &Request) -> Result<Vec<u8>, ServerAnswer> {
+    if req.method() == Method::OPTIONS && req.uri().path() == "*" {
+        return Err(ServerAnswer::OptionsStar);
+    }
+    go_url::unescape_path(req.uri().path()).ok_or(ServerAnswer::BadRequest)
+}
+
+/// An answer of Go's `net/http` server itself (see [`decoded_path`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ServerAnswer {
+    /// `OPTIONS *`: 200 with `Content-Length: 0`.
+    OptionsStar,
+    /// An undecodable request target: `400 Bad Request`, connection closed.
+    BadRequest,
+}
+
+impl ServerAnswer {
+    /// The response Go's server writes.
+    pub(crate) fn response(self) -> Response {
+        match self {
+            ServerAnswer::OptionsStar => options_star(),
+            ServerAnswer::BadRequest => bad_request(),
+        }
+    }
 }
 
 /// Go's http.Server answer to a request target that does not parse: `400 Bad Request` as plain
