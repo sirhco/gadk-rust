@@ -32,10 +32,10 @@ use http::StatusCode;
 use crate::rest::http_error::http_error;
 
 mod custom;
-mod google_oidc;
+pub(crate) mod google_oidc;
 mod header;
 mod iap;
-mod jwks;
+pub(crate) mod jwks;
 mod noop;
 
 pub use custom::custom;
