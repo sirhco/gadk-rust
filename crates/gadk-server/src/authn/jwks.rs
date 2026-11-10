@@ -29,6 +29,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use base64::Engine as _;
 use base64::alphabet;
 use base64::engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig};
+use futures::FutureExt as _;
+use futures::future::{BoxFuture, Shared};
 use gadk_platform::go_quote;
 use jsonwebtoken::{Algorithm, DecodingKey};
 use parking_lot::Mutex;
@@ -39,6 +41,11 @@ use serde_json::{Map, Value};
 pub(crate) const GOOGLE_SA_CERTS_URL: &str = "https://www.googleapis.com/oauth2/v3/certs";
 /// idtoken `googleIAPCertsURL`: the key set of IAP-signed (ES256) ID tokens.
 pub(crate) const GOOGLE_IAP_CERTS_URL: &str = "https://www.gstatic.com/iap/verify/public_key-jwk";
+
+/// How long one key-set fetch may take. idtoken bounds it by the request's context; a hyper
+/// handler future is not reliably dropped when its client goes away, so the fetch carries its own
+/// deadline.
+const CERT_FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Go `base64.RawURLEncoding` for decoding: URL alphabet, no padding, non-zero trailing bits
 /// accepted.
@@ -149,6 +156,14 @@ impl Validator {
             sa_certs_url: sa_certs_url.to_owned(),
             iap_certs_url: iap_certs_url.to_owned(),
         }
+    }
+
+    /// This validator with its key-set fetches bounded by `timeout` instead of
+    /// [`CERT_FETCH_TIMEOUT`].
+    #[cfg(test)]
+    fn with_fetch_timeout(mut self, timeout: Duration) -> Self {
+        self.client.fetch_timeout = timeout;
+        self
     }
 
     /// Port of idtoken `Validator.validate`: decodes the token, checks the audience (skipped when
@@ -318,10 +333,18 @@ fn unix_now() -> i64 {
         .unwrap_or_default()
 }
 
-/// Port of idtoken `cachingClient`: key sets cached per URL until their expiry.
+/// A key-set fetch in progress, shared by every caller that misses the cache meanwhile.
+type InFlight = Shared<BoxFuture<'static, Result<Arc<CertResponse>, String>>>;
+
+/// Port of idtoken `cachingClient`: key sets cached per URL until their expiry. Concurrent misses
+/// on one URL share a single fetch (idtoken fetches once per caller; tokens are checked for
+/// audience and expiry before the fetch, so unauthenticated callers can reach it, and the shared
+/// fetch keeps them from piling up requests to Google).
 struct CachingClient {
     client: reqwest::Client,
-    certs: Mutex<HashMap<String, CachedResponse>>,
+    certs: Arc<Mutex<HashMap<String, CachedResponse>>>,
+    in_flight: Mutex<HashMap<String, InFlight>>,
+    fetch_timeout: Duration,
 }
 
 /// idtoken `cachedResponse`.
@@ -334,60 +357,105 @@ impl CachingClient {
     fn new(client: reqwest::Client) -> Self {
         Self {
             client,
-            certs: Mutex::new(HashMap::with_capacity(2)),
+            certs: Arc::new(Mutex::new(HashMap::with_capacity(2))),
+            in_flight: Mutex::new(HashMap::with_capacity(2)),
+            fetch_timeout: CERT_FETCH_TIMEOUT,
         }
     }
 
-    /// idtoken `getCert`: the cached key set of `url`, else a fresh GET (only a 200 is accepted;
-    /// the body's first JSON value is decoded) cached per its headers.
+    /// idtoken `getCert`: the cached key set of `url`, else a fresh fetch, joining one already in
+    /// progress for `url`.
     async fn get_cert(&self, url: &str) -> Result<Arc<CertResponse>, String> {
-        if let Some(resp) = self.get(url) {
+        if let Some(resp) = get(&self.certs, url) {
             return Ok(resp);
         }
-        let resp = self
-            .client
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
-        if resp.status() != reqwest::StatusCode::OK {
-            return Err(format!(
-                "idtoken: unable to retrieve cert, got status code {}",
-                resp.status().as_u16()
-            ));
-        }
-        let headers = resp.headers().clone();
-        let body = resp.bytes().await.map_err(|e| e.to_string())?;
-        // Go `json.NewDecoder(body).Decode`: the first value; trailing bytes are not read.
-        let cert_resp = match serde_json::Deserializer::from_slice(&body)
-            .into_iter::<CertResponse>()
-            .next()
-        {
-            Some(Ok(c)) => Arc::new(c),
-            Some(Err(e)) => return Err(e.to_string()),
-            None => return Err("EOF".into()),
+        let fetch = {
+            let mut in_flight = self.in_flight.lock();
+            match in_flight.get(url) {
+                // A finished entry is left over from callers that went away before it completed.
+                Some(f) if f.peek().is_none() => f.clone(),
+                _ => {
+                    // Spawned, so the fetch completes (within its timeout) and is cached even if
+                    // every waiting caller goes away.
+                    let task = tokio::spawn(fetch_cert(
+                        self.client.clone(),
+                        self.certs.clone(),
+                        url.to_owned(),
+                        self.fetch_timeout,
+                    ));
+                    let f = async move { task.await.unwrap_or_else(|e| Err(e.to_string())) }
+                        .boxed()
+                        .shared();
+                    in_flight.insert(url.to_owned(), f.clone());
+                    f
+                }
+            }
         };
-        self.set(url, cert_resp.clone(), &headers);
-        Ok(cert_resp)
-    }
-
-    /// idtoken `cachingClient.get`: a hit until the current time is after the entry's expiry.
-    fn get(&self, url: &str) -> Option<Arc<CertResponse>> {
-        let certs = self.certs.lock();
-        let cached = certs.get(url)?;
-        if Instant::now() > cached.exp {
-            return None;
+        let result = fetch.clone().await;
+        let mut in_flight = self.in_flight.lock();
+        if in_flight.get(url).is_some_and(|f| f.ptr_eq(&fetch)) {
+            in_flight.remove(url);
         }
-        Some(cached.resp.clone())
+        result
     }
+}
 
-    /// idtoken `cachingClient.set`.
-    fn set(&self, url: &str, resp: Arc<CertResponse>, headers: &http::HeaderMap) {
-        let exp = calculate_expire_time(Instant::now(), headers);
-        self.certs
-            .lock()
-            .insert(url.to_owned(), CachedResponse { resp, exp });
+/// The GET half of idtoken `getCert`: only a 200 is accepted, the body's first JSON value is
+/// decoded and cached per the response headers. The whole fetch is bounded by `timeout`.
+async fn fetch_cert(
+    client: reqwest::Client,
+    certs: Arc<Mutex<HashMap<String, CachedResponse>>>,
+    url: String,
+    timeout: Duration,
+) -> Result<Arc<CertResponse>, String> {
+    let resp = client
+        .get(&url)
+        .timeout(timeout)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if resp.status() != reqwest::StatusCode::OK {
+        return Err(format!(
+            "idtoken: unable to retrieve cert, got status code {}",
+            resp.status().as_u16()
+        ));
     }
+    let headers = resp.headers().clone();
+    let body = resp.bytes().await.map_err(|e| e.to_string())?;
+    // Go `json.NewDecoder(body).Decode`: the first value; trailing bytes are not read.
+    let cert_resp = match serde_json::Deserializer::from_slice(&body)
+        .into_iter::<CertResponse>()
+        .next()
+    {
+        Some(Ok(c)) => Arc::new(c),
+        Some(Err(e)) => return Err(e.to_string()),
+        None => return Err("EOF".into()),
+    };
+    set(&certs, &url, cert_resp.clone(), &headers);
+    Ok(cert_resp)
+}
+
+/// idtoken `cachingClient.get`: a hit until the current time is after the entry's expiry.
+fn get(certs: &Mutex<HashMap<String, CachedResponse>>, url: &str) -> Option<Arc<CertResponse>> {
+    let certs = certs.lock();
+    let cached = certs.get(url)?;
+    if Instant::now() > cached.exp {
+        return None;
+    }
+    Some(cached.resp.clone())
+}
+
+/// idtoken `cachingClient.set`.
+fn set(
+    certs: &Mutex<HashMap<String, CachedResponse>>,
+    url: &str,
+    resp: Arc<CertResponse>,
+    headers: &http::HeaderMap,
+) {
+    let exp = calculate_expire_time(Instant::now(), headers);
+    certs
+        .lock()
+        .insert(url.to_owned(), CachedResponse { resp, exp });
 }
 
 /// Port of idtoken `calculateExpireTime`: `now` plus the last `max-age` directive of the first
@@ -840,6 +908,81 @@ mod tests {
             through_middleware(v, &foreign).await,
             (http::StatusCode::UNAUTHORIZED, None)
         );
+    }
+
+    /// A key-set endpoint that accepts connections and never answers: the fetch gives up after
+    /// the client's timeout instead of holding the request open.
+    #[tokio::test]
+    async fn a_hanging_certificate_endpoint_times_out() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut held = Vec::new();
+            loop {
+                let (conn, _) = listener.accept().await.unwrap();
+                held.push(conn);
+            }
+        });
+        let v = Validator::with_cert_urls(
+            reqwest::Client::new(),
+            &format!("http://{addr}/sa"),
+            &format!("http://{addr}/iap"),
+        )
+        .with_fetch_timeout(Duration::from_millis(200));
+        let token = sign(
+            Algorithm::RS256,
+            &rsa_key(),
+            "rsa-1",
+            &claims(AUD, unix_now() + 60),
+        );
+        let r = tokio::time::timeout(Duration::from_secs(5), v.validate(&token, AUD))
+            .await
+            .expect("the certificate fetch must time out on its own");
+        assert!(r.is_err());
+    }
+
+    /// Concurrent cache misses on one URL collapse into a single fetch whose answer they share
+    /// (max-age=0, so a waiter could not just find the entry in the cache afterwards).
+    #[tokio::test]
+    async fn concurrent_cache_misses_share_one_fetch() {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let body = rsa_set().to_string();
+        let counted = hits.clone();
+        let app = Router::new().route(
+            "/sa",
+            get(move || {
+                let hits = counted.clone();
+                let body = body.clone();
+                async move {
+                    hits.fetch_add(1, Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                    ([("cache-control", "max-age=0")], body).into_response()
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await });
+        let v = Arc::new(Validator::with_cert_urls(
+            reqwest::Client::new(),
+            &format!("http://{addr}/sa"),
+            &format!("http://{addr}/iap"),
+        ));
+        let token = sign(
+            Algorithm::RS256,
+            &rsa_key(),
+            "rsa-1",
+            &claims(AUD, unix_now() + 60),
+        );
+        let calls = (0..8).map(|_| {
+            let v = v.clone();
+            let token = token.clone();
+            tokio::spawn(async move { v.validate(&token, AUD).await })
+        });
+        for r in futures::future::join_all(calls).await {
+            r.unwrap().unwrap();
+        }
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
     }
 
     /// Go answers a signing-certificate fetch failure 401, not 500 (googleoidc.go `deny`).
