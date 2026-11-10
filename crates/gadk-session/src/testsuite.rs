@@ -19,7 +19,8 @@
 //! (port of ADK-Go `session/sessiontestsuite`).
 //!
 //! Enabled by the `testsuite` feature. Call [`run`] from a backend's tests with a factory
-//! that returns a fresh service.
+//! that returns a fresh service, or [`run_named`] when the factory needs the case name (to
+//! pick a per-case recording, for example).
 
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -83,12 +84,25 @@ where
     F: Fn() -> Fut,
     Fut: Future<Output = Arc<dyn SessionService>>,
 {
+    run_named(opts, |_| factory()).await;
+}
+
+/// Like [`run`], but passes each case's name to the factory before the case runs. The name is
+/// spelled exactly as the failure lines spell it after `sessiontestsuite/` (`"Create/full_key"`,
+/// `"Get/ok"`, `"Create/when_already_exists,_it_fails"`, `"List"`, …: Go's subtest names with
+/// spaces as `_`), so a backend can, for example, replay the recording Go's
+/// `Test_vertexaiService` subtest of that name made.
+pub async fn run_named<F, Fut>(opts: SuiteOptions, factory: F)
+where
+    F: Fn(&'static str) -> Fut,
+    Fut: Future<Output = Arc<dyn SessionService>>,
+{
     macro_rules! cases {
         ($($name:literal => $f:ident),* $(,)?) => {{
             let mut failures: Vec<String> = Vec::new();
             $(
                 let mut t = T::default();
-                let svc = factory().await;
+                let svc = factory($name).await;
                 if let Err(fatal) = $f(&mut t, svc, &opts).await {
                     t.errors.push(fatal);
                 }
@@ -1260,4 +1274,63 @@ async fn state_management_temp_state_is_not_persisted(
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use parking_lot::Mutex;
+    use pretty_assertions::assert_eq;
+
+    use super::{SuiteOptions, run_named};
+    use crate::{InMemorySessionService, SessionService};
+
+    /// `run_named` hands the factory every case name, in suite order, spelled as the failure
+    /// lines spell it; the in-memory backend passes every case.
+    #[tokio::test]
+    async fn run_named_passes_each_case_name_in_order() {
+        let seen: Arc<Mutex<Vec<&'static str>>> = Arc::default();
+        let record = Arc::clone(&seen);
+        run_named(
+            SuiteOptions {
+                supports_user_provided_session_id: true,
+                ..Default::default()
+            },
+            move |name| {
+                record.lock().push(name);
+                async { Arc::new(InMemorySessionService::new()) as Arc<dyn SessionService> }
+            },
+        )
+        .await;
+        assert_eq!(
+            *seen.lock(),
+            vec![
+                "Create/full_key",
+                "Create/generated_session_id",
+                "Create/when_already_exists,_it_fails",
+                "Get/ok",
+                "Get/error_when_not_found",
+                "Get/get_session_respects_user_id",
+                "Get/with_config_filters",
+                "List",
+                "Delete",
+                "delete_session_respects_user_id",
+                "AppendEvent/when_session_not_found_should_fail",
+                "AppendEvent/when_session_deleted_returns_ErrNotFound",
+                "AppendEvent/ok",
+                "AppendEvent/compaction_record_round_trips",
+                "AppendEvent/a_hole_still_names_its_event_after_a_round_trip",
+                "AppendEvent/a_missing_event_id_is_assigned",
+                "AppendEvent/partial_events_are_not_persisted",
+                "AppendEvent/with_bytes_content",
+                "AppendEvent/with_existing_events",
+                "AppendEvent/with_all_fields",
+                "StateManagement/app_state_is_shared",
+                "StateManagement/user_state_is_user_specific",
+                "StateManagement/session_state_is_not_shared",
+                "StateManagement/temp_state_is_not_persisted",
+            ]
+        );
+    }
 }

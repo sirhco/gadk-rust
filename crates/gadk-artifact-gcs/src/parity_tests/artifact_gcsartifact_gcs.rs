@@ -26,11 +26,12 @@ use gadk_artifact::{
     LoadRequest, SaveRequest, VersionsRequest,
 };
 use gadk_genai::Part;
+use gadk_platform::GoWrapped;
 use pretty_assertions::assert_eq;
 use serde_json::{Map, Value, json};
 
 use crate::bucket::GcsBucket;
-use crate::error::{GcsError, GoWrapped, backend_chain_any};
+use crate::error::{GcsError, backend_chain_any};
 use crate::service::{
     MAX_SAVE_ATTEMPTS, SAVE_RETRY_MAX_DELAY, backoff_delay, build_blob_name,
     is_precondition_failed, sleep_context,
