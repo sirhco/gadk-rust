@@ -27,9 +27,6 @@
 //! Both rest on the server being reachable from this machine only; a server reachable over a
 //! network cannot tell a rebound page from an ordinary remote browser. Authentication closes that.
 
-// Wired into the server by plan 5a Task 13.
-#![allow(dead_code)]
-
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 

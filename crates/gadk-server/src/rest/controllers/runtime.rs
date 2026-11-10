@@ -16,10 +16,6 @@
 //! Port of Go `controllers/runtime.go` (`/run`, `/run_sse`) and `internal/routers/runtime.go`.
 //! The `/run_live` handler is in [`super::live`].
 
-// The live fields are read by `live.rs` (plan 5a Task 8) and `runtime_routes` is mounted by
-// `Server::new` (Task 13), which removes this allowance.
-#![allow(dead_code)]
-
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -39,7 +35,7 @@ use http::{HeaderValue, Method, StatusCode};
 use tokio::sync::Semaphore;
 use tokio::time::Instant;
 
-use crate::authn::Caller;
+use super::handlers::{forbid_unless_can_act_as, session_error_text};
 use crate::authz::{self, Authorizer};
 use crate::rest::Timeout;
 use crate::rest::http_error::{
@@ -189,11 +185,12 @@ impl RuntimeApiController {
     async fn run(&self, req: Request) -> Result<Response, StatusError> {
         let (parts, body) = req.into_parts();
         let run_agent_request = decode_request_body(body).await?;
-        if let Err(err) = self
-            .authorizer
-            .can_act_as_user(parts.extensions.get::<Caller>(), &run_agent_request.user_id)
-        {
-            return Ok(authz::write_http_status_for_auth_error(Some(&err)));
+        if let Some(resp) = forbid_unless_can_act_as(
+            &*self.authorizer,
+            &parts.extensions,
+            &run_agent_request.user_id,
+        ) {
+            return Ok(resp);
         }
         let session_events = self.run_agent(run_agent_request).await?;
         let events: Option<Vec<Event>> = (!session_events.is_empty()).then(|| {
@@ -249,11 +246,12 @@ impl RuntimeApiController {
                 );
             }
         };
-        if let Err(err) = self
-            .authorizer
-            .can_act_as_user(parts.extensions.get::<Caller>(), &run_agent_request.user_id)
-        {
-            return authz::write_http_status_for_auth_error(Some(&err));
+        if let Some(resp) = forbid_unless_can_act_as(
+            &*self.authorizer,
+            &parts.extensions,
+            &run_agent_request.user_id,
+        ) {
+            return resp;
         }
         if let Err(err) = self
             .validate_session_exists(
@@ -311,7 +309,10 @@ impl RuntimeApiController {
             .map_err(|err| {
                 StatusError::new(
                     StatusCode::NOT_FOUND,
-                    format!("failed to get session: {err}"),
+                    format!(
+                        "failed to get session: {}",
+                        session_error_text(&err, session_id, false)
+                    ),
                 )
             })
     }

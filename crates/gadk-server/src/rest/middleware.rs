@@ -16,9 +16,6 @@
 //! Request-body limit (port of Go `server/adkrest/middleware.go` `MaxBytesMiddleware` and the
 //! `net/http` behaviour of `http.MaxBytesReader`) and the panic catcher.
 
-// Wired into the server by plan 5a Task 13.
-#![allow(dead_code)]
-
 use std::any::Any;
 use std::convert::Infallible;
 use std::future::Future;
@@ -49,7 +46,9 @@ pub(crate) struct MaxBytesError {
 }
 
 /// Go `errors.As(err, &maxBytesErr)`: whether `err` or an error in its source chain is a
-/// [`MaxBytesError`].
+/// [`MaxBytesError`]. No server handler needs to tell it apart (each answers every body read
+/// failure with 400 and the error's text); the tests do.
+#[cfg(test)]
 pub(crate) fn is_max_bytes_error(err: &(dyn std::error::Error + 'static)) -> bool {
     let mut cur = Some(err);
     while let Some(e) = cur {

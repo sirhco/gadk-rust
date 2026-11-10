@@ -50,8 +50,9 @@ use serde_json::Value;
 
 use attrs::SpanError;
 
-/// The `tracing` target of the OTel log records (plan decision D6).
-pub(crate) const LOG_TARGET: &str = "gadk_engine::telemetry::log";
+/// The `tracing` target of the OTel log records (plan decision D6); a `tracing` layer that
+/// collects them (gadk-server's debug store) filters on it.
+pub const LOG_TARGET: &str = "gadk_engine::telemetry::log";
 
 /// Port of Go startInvokeAgentSpan. Engine-internal: agents' own spans come from
 /// `CustomAgent::run` (gadk-agent), and engine code never wraps `Agent::run` in another one, so

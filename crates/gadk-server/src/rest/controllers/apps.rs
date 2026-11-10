@@ -49,8 +49,6 @@ impl AppsApiController {
 }
 
 /// Go `AppsAPIRouter.Routes`.
-// Mounted by `Server::new` (plan 5a Task 13).
-#[allow(dead_code)]
 pub(crate) fn apps_routes(c: Arc<AppsApiController>) -> Vec<Route> {
     vec![route(
         "ListApps",

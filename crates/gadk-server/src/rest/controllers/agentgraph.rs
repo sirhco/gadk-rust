@@ -25,10 +25,11 @@ use gadk_platform::go_quote;
 use http::{Method, StatusCode};
 use serde::{Deserialize, Serialize};
 
+use super::handlers::path_vars;
 use crate::rest::agent_graph::{get_agent_graph_with_theme, theme_for};
 use crate::rest::http_error::{encode_json_response, http_error};
 use crate::rest::routing::{
-    DEV_PREFIX, PathVars, Request, Response, Route, controller_handler, route,
+    DEV_PREFIX, Request, Response, Route, controller_handler, query_get, route,
 };
 
 /// Port of Go `controllers.AgentGraphAPIController`.
@@ -67,8 +68,8 @@ impl AgentGraphApiController {
             Ok(root) => root,
             Err(resp) => return resp,
         };
-        let theme = theme_for(query_get(&req, "dark_mode") == "true");
-        let node = query_get(&req, "node");
+        let theme = theme_for(query_get(req.uri().query(), "dark_mode") == "true");
+        let node = query_get(req.uri().query(), "node");
         if node.is_empty() {
             let dot = get_agent_graph_with_theme(&*root, &[], theme);
             let body = BTreeMap::from([(root.name().to_owned(), DotGraph { dot_src: dot })]);
@@ -93,10 +94,10 @@ impl AgentGraphApiController {
                 "no agent loader configured",
             ));
         };
-        let app_name = req
-            .extensions()
-            .get::<PathVars>()
-            .and_then(|v| v.0.get("app_name"))
+        let vars = path_vars(req);
+        let app_name = vars
+            .0
+            .get("app_name")
             .map(String::as_str)
             .unwrap_or_default();
         if app_name.is_empty() {
@@ -147,20 +148,6 @@ fn to_agent_node(agent: &dyn Agent) -> AgentNode {
     }
 }
 
-/// Go `req.URL.Query().Get(key)`: the first value of query parameter `key`, or `""`. Like Go's
-/// `url.ParseQuery`, a `&`-separated pair containing `;` is dropped.
-fn query_get(req: &Request, key: &str) -> String {
-    req.uri()
-        .query()
-        .unwrap_or_default()
-        .split('&')
-        .filter(|pair| !pair.contains(';'))
-        .flat_map(|pair| url::form_urlencoded::parse(pair.as_bytes()))
-        .find(|(k, _)| k == key)
-        .map(|(_, v)| v.into_owned())
-        .unwrap_or_default()
-}
-
 /// Port of Go `controllers.AgentNode`: one agent of the tree `build_graph` returns. The UI walks
 /// children through `sub_agents` entries carrying a `name`, so both are part of the contract.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -193,7 +180,6 @@ pub struct DotGraph {
 }
 
 /// Go `AgentGraphAPIRouter.Routes`.
-#[allow(dead_code)] // mounted by `Server::router` (plan 5a Task 13)
 pub(crate) fn agent_graph_routes(c: Arc<AgentGraphApiController>) -> Vec<Route> {
     vec![
         route(

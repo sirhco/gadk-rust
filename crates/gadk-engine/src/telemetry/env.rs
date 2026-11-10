@@ -22,9 +22,6 @@
 //! call, as Go's `useLegacySchema`). The provider and the schema switch live in gadk-agent
 //! (`gadk_agent::agent::telemetry`), whose agent spans read them too.
 
-// `apply_env` and the cache are read by the log records (Task 11).
-#![allow(dead_code)]
-
 use std::sync::Arc;
 
 #[cfg(test)]
@@ -87,7 +84,9 @@ pub(crate) fn evals_to_true(s: &str) -> bool {
     u == "1" || u == "true"
 }
 
-/// Go `ApplyEnv`: re-reads the content-capture mode from the installed provider now.
+/// Go `ApplyEnv`: re-reads the content-capture mode from the installed provider now. Only tests
+/// call it: the first-use read is [`capture_mode`]'s own.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn apply_env() {
     *CAPTURE_MODE.lock() = Some(parse_content_capture_mode(&getenv(
         CAPTURE_MESSAGE_CONTENT_ENV_VAR,

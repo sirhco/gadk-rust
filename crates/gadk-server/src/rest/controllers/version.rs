@@ -71,8 +71,6 @@ impl VersionResponse {
 }
 
 /// Go `VersionAPIRouter.Routes` (public: no authentication).
-// Mounted by `Server::new` (plan 5a Task 13).
-#[allow(dead_code)]
 pub(crate) fn version_routes(c: Arc<VersionApiController>) -> Vec<Route> {
     let mut r = route(
         "GetVersion",

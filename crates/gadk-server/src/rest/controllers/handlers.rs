@@ -48,14 +48,14 @@ pub(crate) fn request_platform(req: &Request) -> Platform {
 }
 
 /// Go `authorizer.CanActAsUser(req.Context(), userID)` answered with
-/// `authz.WriteHTTPStatusForAuthError`: `Some(403 response)` when the request's [`Caller`] may
-/// not act as `user_id`.
+/// `authz.WriteHTTPStatusForAuthError`: `Some(403 response)` when the [`Caller`] among the
+/// request's `extensions` may not act as `user_id`.
 pub(crate) fn forbid_unless_can_act_as(
     authorizer: &dyn Authorizer,
-    req: &Request,
+    extensions: &http::Extensions,
     user_id: &str,
 ) -> Option<Response> {
-    let caller = req.extensions().get::<Caller>();
+    let caller = extensions.get::<Caller>();
     authorizer
         .can_act_as_user(caller, user_id)
         .err()

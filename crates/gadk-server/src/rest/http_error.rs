@@ -16,9 +16,6 @@
 //! Go's response helpers, byte for byte: `net/http` `Error` and `NotFound`, ADK-Go
 //! `controllers.EncodeJSONResponse`, and the `NewErrorHandler` rendering of a `statusError`.
 
-// Used by the controllers (plan 5a Tasks 4-12).
-#![allow(dead_code)]
-
 use axum::body::Body;
 use http::header::{CONTENT_TYPE, X_CONTENT_TYPE_OPTIONS};
 use http::{HeaderValue, StatusCode};

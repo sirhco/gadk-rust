@@ -14,21 +14,35 @@
 // limitations under the License.
 
 //! Test fixtures (feature `testutil`): a port of Go `server/adkrest/internal/fakes`
-//! `testsessionservice.go`, the session service the Go controller tests run against. Plan 5a
-//! Task 13 adds the wire-scenario builders.
+//! `testsessionservice.go`, the session service the Go controller tests run against; the
+//! helpers the Go `adkrest` package tests share (a bare-agent loader, a fixed caller, serving on
+//! a loopback port, in-process requests, `postJSON`); and [`wire_scenario`], the Go wire probe's
+//! agents, providers and server configurations.
 
 use std::any::Any;
 use std::collections::BTreeMap;
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use axum::body::Body;
 use chrono::{DateTime, Utc};
+use gadk_agent::{AgentConfig, Loader, SingleLoader};
 use gadk_session::{
     CreateRequest, DeleteRequest, Event, GetRequest, ListRequest, Session, SessionError,
     SessionService, State,
 };
+use http::StatusCode;
+use http::header::CONTENT_TYPE;
 use parking_lot::Mutex;
+use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
+use tower::ServiceExt;
+
+use crate::authn::{self, Authenticator, Caller};
+use crate::rest::{LocalAddr, Server};
+
+pub mod wire_scenario;
 
 /// Go `fakes.TestState`: a map with Go map reference semantics (clones share it).
 #[derive(Debug, Clone, Default)]
@@ -242,6 +256,87 @@ impl SessionService for FakeSessionService {
         sessions.insert(s.id.clone(), s.clone());
         Ok(())
     }
+}
+
+/// Go `agent.NewSingleLoader(agent.New(agent.Config{Name: name, Description: "root agent"}))`:
+/// a loader serving one bare agent.
+pub fn single_agent_loader(name: &str) -> Arc<dyn Loader> {
+    let root = gadk_agent::new_agent(AgentConfig {
+        name: name.into(),
+        description: "root agent".into(),
+        ..Default::default()
+    })
+    .unwrap_or_else(|e| panic!("agent {name}: {e}"));
+    Arc::new(SingleLoader::new(root))
+}
+
+/// Go `authn.NewCustom` authenticating every request as `user_id` (possibly empty).
+pub fn authenticate_as(user_id: impl Into<String>) -> Arc<dyn Authenticator> {
+    let user_id: String = user_id.into();
+    authn::custom(move |_parts: &http::request::Parts| {
+        let user_id = user_id.clone();
+        async move {
+            Ok(Some(Caller {
+                user_id,
+                claims: None,
+            }))
+        }
+    })
+}
+
+/// Go `httptest.NewServer(handler)`: serves `router` on a fresh 127.0.0.1 port (with the
+/// [`LocalAddr`] connect info the origin guard reads) in a spawned task and returns the address.
+pub async fn serve_loopback(router: axum::Router) -> std::io::Result<SocketAddr> {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let app = router.into_make_service_with_connect_info::<LocalAddr>();
+    tokio::spawn(async move { axum::serve(listener, app).await });
+    Ok(addr)
+}
+
+/// Go `handler.ServeHTTP(httptest.NewRecorder(), req)`: the status and body text of `req`
+/// served in process.
+pub async fn record(router: &axum::Router, req: http::Request<Body>) -> (StatusCode, String) {
+    let resp = match router.clone().oneshot(req).await {
+        Ok(resp) => resp,
+        Err(never) => match never {},
+    };
+    let status = resp.status();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap_or_else(|e| panic!("read response body: {e}"));
+    (status, String::from_utf8_lossy(&body).into_owned())
+}
+
+/// Go `srv.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(method, target, nil))`: the
+/// status and body text of a bodiless request served in process.
+pub async fn serve_http(
+    server: &Server,
+    method: http::Method,
+    target: &str,
+) -> (StatusCode, String) {
+    let req = http::Request::builder()
+        .method(method)
+        .uri(target)
+        .body(Body::empty())
+        .unwrap_or_else(|e| panic!("{target}: {e}"));
+    record(&server.router(), req).await
+}
+
+/// Go `postJSON`: POSTs `body` as JSON to `target`, requires 200 and decodes the answer.
+pub async fn post_json<T: DeserializeOwned>(
+    router: &axum::Router,
+    target: &str,
+    body: &Value,
+) -> T {
+    let req = http::Request::post(target)
+        .header(CONTENT_TYPE, "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap_or_else(|e| panic!("POST {target}: {e}"));
+    let (status, text) = record(router, req).await;
+    assert_eq!(status, StatusCode::OK, "POST {target}: body {text}");
+    serde_json::from_str(&text)
+        .unwrap_or_else(|e| panic!("decode response from {target}: {e}\nbody: {text}"))
 }
 
 #[cfg(test)]

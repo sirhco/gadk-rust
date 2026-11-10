@@ -29,11 +29,11 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use chrono::Utc;
-use gadk_agent::{Agent, AgentConfig, SingleLoader, Tool};
-use gadk_engine::llm::LlmAgentConfig;
+use gadk_agent::{AgentConfig, SingleLoader};
 use gadk_genai::{Content, FunctionCall, FunctionResponse, Part};
 use gadk_model::LlmResponse;
 use gadk_server::rest::controllers::DebugApiController;
+use gadk_server::rest::testutil::wire_scenario::assistant_agent;
 use gadk_server::rest::testutil::{FakeSessionService, SessionKey, TestSession};
 use gadk_server::rest::{DebugTelemetry, DebugTelemetryConfig, PathVars};
 use gadk_session::{Event, InMemorySessionService, SessionService};
@@ -543,32 +543,6 @@ async fn test_event_graph_handler_response_shape() {
 
 // parity: skipped TestEventGraphHandlerRejectsANilAgent: a gadk Loader returns Arc<dyn Agent>, which cannot be null, so the nil-agent guard has nothing to guard
 
-/// A tool that only has a name (the probe's `save_note` as the graph sees it).
-struct NamedTool(&'static str);
-
-impl Tool for NamedTool {
-    fn name(&self) -> &str {
-        self.0
-    }
-    fn description(&self) -> &str {
-        ""
-    }
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-}
-
-/// The probe's `assistant` (`scripts/gen-go-adkrest/SCENARIO.md`) as the graph sees it.
-fn scenario_assistant() -> Arc<dyn Agent> {
-    gadk_engine::llm_agent::new(LlmAgentConfig {
-        name: "assistant".into(),
-        description: "Answers greetings and saves notes.".into(),
-        tools: vec![Arc::new(NamedTool("save_note"))],
-        ..Default::default()
-    })
-    .unwrap()
-}
-
 fn event_with_parts(id: &str, parts: Vec<Part>) -> Event {
     Event {
         id: id.into(),
@@ -625,7 +599,7 @@ async fn debug_wire_fixtures_match_go() {
     )]));
     let c = DebugApiController::new(
         sessions,
-        Some(Arc::new(SingleLoader::new(scenario_assistant()))),
+        Some(Arc::new(SingleLoader::new(assistant_agent()))),
         setup_test_telemetry(),
     );
     for fixture in [

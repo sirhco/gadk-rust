@@ -122,6 +122,10 @@ impl PubSubController {
     /// The trigger endpoint (POST) as an axum `MethodRouter` to mount at a path of the caller's
     /// choosing with an `{app_name}` parameter (the Go launcher uses
     /// `/apps/{app_name}/trigger/pubsub`). Other methods answer axum's 405.
+    ///
+    /// The body is read under the router's `axum::extract::DefaultBodyLimit`; set it explicitly
+    /// where you mount the handler (`DefaultBodyLimit::max(10 << 20)` is the Go launcher's
+    /// 10 MiB), since axum's own default is 2 MB.
     pub fn handler(self: Arc<Self>) -> axum::routing::MethodRouter {
         axum::routing::post(move |req: Request| async move {
             self.pub_sub_trigger_handler(with_path_vars(req).await)

@@ -95,8 +95,6 @@ pub async fn agent_builder_config_handler(_req: Request) -> Response {
 }
 
 /// Go `AgentBuilderAPIRouter.Routes`.
-// Mounted by `Server::new` (plan 5a Task 13).
-#[allow(dead_code)]
 pub(crate) fn agent_builder_routes() -> Vec<Route> {
     let not_implemented = new_not_implemented_handler("the agent builder", BUILDER_DETAIL);
     vec![
@@ -122,8 +120,6 @@ pub(crate) fn agent_builder_routes() -> Vec<Route> {
 }
 
 /// Go `TestsAPIRouter.Routes`.
-// Mounted by `Server::new` (plan 5a Task 13).
-#[allow(dead_code)]
 pub(crate) fn tests_routes() -> Vec<Route> {
     let not_implemented = new_not_implemented_handler("the tests tab", TESTS_DETAIL);
     [
@@ -147,8 +143,6 @@ pub(crate) fn tests_routes() -> Vec<Route> {
 }
 
 /// Go `EvalAPIRouter.Routes`.
-// Mounted by `Server::new` (plan 5a Task 13).
-#[allow(dead_code)]
 pub(crate) fn eval_routes() -> Vec<Route> {
     let unavailable = new_not_implemented_handler("eval", &eval_detail());
     let mut routes = vec![route(

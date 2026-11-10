@@ -41,8 +41,9 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::Engine as _;
-use chrono::{DateTime, FixedOffset, Local, Timelike};
-use gadk_platform::go_sprint_value;
+use chrono::Local;
+use gadk_engine::telemetry::LOG_TARGET;
+use gadk_platform::{go_format_rfc3339_nano, go_sprint_value};
 use parking_lot::Mutex;
 use serde::Serialize;
 use serde_json::{Map, Number, Value};
@@ -55,10 +56,6 @@ use super::DebugTelemetryConfig;
 
 /// Go `defaultTraceCapacity`.
 pub(crate) const DEFAULT_TRACE_CAPACITY: usize = 10_000;
-
-/// The `tracing` target of the engine's OTel log records (plan decision D6; gadk-engine's
-/// `telemetry::LOG_TARGET`).
-const LOG_TARGET: &str = "gadk_engine::telemetry::log";
 
 /// Go `eventIDKey` / `eventIDAttribute`.
 pub(crate) const EVENT_ID_ATTRIBUTE: &str = "gcp.vertex.agent.event_id";
@@ -590,24 +587,6 @@ impl Visit for LogFields {
     }
 }
 
-/// Go `log.ObservedTimestamp().Format(time.RFC3339Nano)` of the local wall clock: trailing zeros
-/// of the fraction trimmed (the fraction dropped when zero), `Z` for a zero offset.
-fn go_rfc3339_nano_local(t: DateTime<FixedOffset>) -> String {
-    let mut s = t.format("%Y-%m-%dT%H:%M:%S").to_string();
-    let nanos = t.nanosecond() % 1_000_000_000;
-    if nanos != 0 {
-        let frac = format!("{nanos:09}");
-        s.push('.');
-        s.push_str(frac.trim_end_matches('0'));
-    }
-    if t.offset().local_minus_utc() == 0 {
-        s.push('Z');
-    } else {
-        s.push_str(&t.format("%:z").to_string());
-    }
-    s
-}
-
 /// Go `normalizeLogBody`: the body reshaped for the web UI ([`normalize_message_shape`]); a body
 /// that is not representable (`Err`) becomes `{"content": "<unrepresentable>"}`, reshaped too.
 pub(crate) fn normalize_log_body(event_name: &str, body: Result<Value, ()>) -> Value {
@@ -866,7 +845,7 @@ where
         };
         let mut fields = LogFields::default();
         event.record(&mut fields);
-        let observed = go_rfc3339_nano_local(Local::now().fixed_offset());
+        let observed = go_format_rfc3339_nano(&Local::now());
         let mut ext = span.extensions_mut();
         let Some(open) = ext.get_mut::<OpenSpan>() else {
             return;
@@ -938,7 +917,7 @@ fn is_none_or_empty(m: &Option<Map<String, Value>>) -> bool {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
-    use chrono::TimeZone;
+    use chrono::DateTime;
     use tracing_subscriber::layer::SubscriberExt;
 
     use super::*;
@@ -1169,28 +1148,6 @@ mod tests {
         assert_eq!(logs.len(), 1);
         assert_eq!(logs[0].event_name, "e");
         assert_eq!(logs[0].span_id, spans[0].span_id);
-    }
-
-    /// Go `time.RFC3339Nano`: trimmed fraction, `Z` for UTC, `±hh:mm` otherwise.
-    #[test]
-    fn observed_timestamp_formats_like_go() {
-        let utc = FixedOffset::east_opt(0).unwrap();
-        let cst = FixedOffset::west_opt(6 * 3600).unwrap();
-        let at = |o: FixedOffset, ns: u32| {
-            o.with_ymd_and_hms(2026, 1, 2, 3, 4, 5)
-                .unwrap()
-                .with_nanosecond(ns)
-                .unwrap()
-        };
-        assert_eq!(go_rfc3339_nano_local(at(utc, 0)), "2026-01-02T03:04:05Z");
-        assert_eq!(
-            go_rfc3339_nano_local(at(cst, 256_916_000)),
-            "2026-01-02T03:04:05.256916-06:00"
-        );
-        assert_eq!(
-            go_rfc3339_nano_local(at(utc, 1)),
-            "2026-01-02T03:04:05.000000001Z"
-        );
     }
 
     /// Go `textParts` prints a non-string with `fmt.Sprint` (an int64 in full).
