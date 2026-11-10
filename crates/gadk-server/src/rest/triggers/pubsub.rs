@@ -245,6 +245,21 @@ mod tests {
         );
     }
 
+    /// Attribute keys come out sorted whatever their order on the wire: the attributes are a
+    /// `BTreeMap` and the outer object a struct, so no `serde_json::Map` (whose order follows
+    /// the `preserve_order` feature) is involved.
+    #[test]
+    fn message_content_key_order_does_not_follow_the_wire() {
+        let req: PubSubTriggerRequest = serde_json::from_str(
+            r#"{"message":{"attributes":{"z":"1","a":"2","m":"3"},"data":"aGk="}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            message_content_from_pub_sub(&req).unwrap(),
+            r#"{"attributes":{"a":"2","m":"3","z":"1"},"data":"hi"}"#
+        );
+    }
+
     /// Invalid UTF-8 in `data` is Go's `json.Marshal(string(data))`: `\ufffd` per invalid
     /// byte, valid runs (multibyte, `"`, HTML-significant, U+2028) escaped as Go escapes them.
     /// Expected bytes from a go1.27.2 `json.Marshal(map[string]any{...})` program.
