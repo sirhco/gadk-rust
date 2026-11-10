@@ -14,17 +14,22 @@
 // limitations under the License.
 
 //! Port of Go `controllers/agentgraph.go` and the agent-graph router of
-//! `internal/routers/agentgraph.go` (plan 5a Task 9).
+//! `internal/routers/agentgraph.go` (plan 5a Task 9): the endpoints behind the web UI's "Agent
+//! structure" panel.
 
-#![allow(dead_code, unused_variables, unused_imports, clippy::todo)]
-
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use gadk_agent::Loader;
-use http::Method;
+use gadk_agent::{Agent, Loader};
+use gadk_platform::go_quote;
+use http::{Method, StatusCode};
 use serde::{Deserialize, Serialize};
 
-use crate::rest::routing::{DEV_PREFIX, Request, Response, Route, controller_handler, route};
+use crate::rest::agent_graph::{get_agent_graph_with_theme, theme_for};
+use crate::rest::http_error::{encode_json_response, http_error};
+use crate::rest::routing::{
+    DEV_PREFIX, PathVars, Request, Response, Route, controller_handler, route,
+};
 
 /// Port of Go `controllers.AgentGraphAPIController`.
 pub struct AgentGraphApiController {
@@ -37,18 +42,127 @@ impl AgentGraphApiController {
         Self { loader }
     }
 
-    /// Go `BuildGraphHandler`: the agent tree as [`AppInfoResponse`].
+    /// Go `BuildGraphHandler`: the agent tree as [`AppInfoResponse`], which the UI builds its
+    /// breadcrumb navigation from.
     pub async fn build_graph_handler(&self, req: Request) -> Response {
-        todo!("plan 5a Task 9")
+        let root = match self.load_agent(&req) {
+            Ok(root) => root,
+            Err(resp) => return resp,
+        };
+        encode_json_response(
+            &AppInfoResponse {
+                root_agent: to_agent_node(&*root),
+                readme: String::new(),
+            },
+            StatusCode::OK,
+        )
     }
 
-    /// Go `BuildGraphImageHandler`: the agent tree's DOT source as [`DotGraph`].
+    /// Go `BuildGraphImageHandler`: the agent tree's DOT source. Without a `node` query parameter
+    /// the body maps the root agent's name to its [`DotGraph`] (the UI preloads every level);
+    /// with one it is the bare [`DotGraph`] of the subtree that breadcrumb path names. The
+    /// palette follows `dark_mode=true`.
     pub async fn build_graph_image_handler(&self, req: Request) -> Response {
-        todo!("plan 5a Task 9")
+        let root = match self.load_agent(&req) {
+            Ok(root) => root,
+            Err(resp) => return resp,
+        };
+        let theme = theme_for(query_get(&req, "dark_mode") == "true");
+        let node = query_get(&req, "node");
+        if node.is_empty() {
+            let dot = get_agent_graph_with_theme(&*root, &[], theme);
+            let body = BTreeMap::from([(root.name().to_owned(), DotGraph { dot_src: dot })]);
+            return encode_json_response(&body, StatusCode::OK);
+        }
+        let target = match resolve_agent_path(&root, &node) {
+            Ok(target) => target,
+            Err(msg) => return http_error(StatusCode::NOT_FOUND, &msg),
+        };
+        let dot = get_agent_graph_with_theme(&*target, &[], theme);
+        encode_json_response(&DotGraph { dot_src: dot }, StatusCode::OK)
+    }
+
+    /// Go `loadAgent`: resolves the `app_name` path variable, or the error response to send.
+    /// (Go also answers 404 `agent <name> not found` for a loader that returns a nil agent
+    /// without an error; a gadk [`Loader`] cannot.)
+    #[allow(clippy::result_large_err)] // the Err side is the response itself, as in Go
+    fn load_agent(&self, req: &Request) -> Result<Arc<dyn Agent>, Response> {
+        let Some(loader) = &self.loader else {
+            return Err(http_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "no agent loader configured",
+            ));
+        };
+        let app_name = req
+            .extensions()
+            .get::<PathVars>()
+            .and_then(|v| v.0.get("app_name"))
+            .map(String::as_str)
+            .unwrap_or_default();
+        if app_name.is_empty() {
+            return Err(http_error(
+                StatusCode::BAD_REQUEST,
+                "app_name parameter is required",
+            ));
+        }
+        loader
+            .load_agent(app_name)
+            .map_err(|e| http_error(StatusCode::NOT_FOUND, &e.to_string()))
     }
 }
 
-/// Port of Go `controllers.AgentNode`: one agent of the tree `build_graph` returns.
+/// Go `resolveAgentPath`: walks a slash-separated breadcrumb path from the root agent, with no
+/// fallback to a name search. A segment's `@<discriminator>` suffix is dropped, empty segments
+/// are skipped, and a first segment equal to the root's name is skipped.
+fn resolve_agent_path(root: &Arc<dyn Agent>, path: &str) -> Result<Arc<dyn Agent>, String> {
+    let mut current = root.clone();
+    for (i, segment) in path.split('/').enumerate() {
+        let name = segment.split_once('@').map_or(segment, |(name, _)| name);
+        if name.is_empty() || (i == 0 && name == root.name()) {
+            continue;
+        }
+        let Some(next) = current.find_sub_agent(name) else {
+            return Err(format!(
+                "agent {} not found under {} in path {}",
+                go_quote(name),
+                go_quote(current.name()),
+                go_quote(path)
+            ));
+        };
+        current = next;
+    }
+    Ok(current)
+}
+
+/// Go `toAgentNode`.
+fn to_agent_node(agent: &dyn Agent) -> AgentNode {
+    AgentNode {
+        name: agent.name().to_owned(),
+        description: agent.description().to_owned(),
+        sub_agents: agent
+            .sub_agents()
+            .iter()
+            .map(|s| to_agent_node(&**s))
+            .collect(),
+    }
+}
+
+/// Go `req.URL.Query().Get(key)`: the first value of query parameter `key`, or `""`. Like Go's
+/// `url.ParseQuery`, a `&`-separated pair containing `;` is dropped.
+fn query_get(req: &Request, key: &str) -> String {
+    req.uri()
+        .query()
+        .unwrap_or_default()
+        .split('&')
+        .filter(|pair| !pair.contains(';'))
+        .flat_map(|pair| url::form_urlencoded::parse(pair.as_bytes()))
+        .find(|(k, _)| k == key)
+        .map(|(_, v)| v.into_owned())
+        .unwrap_or_default()
+}
+
+/// Port of Go `controllers.AgentNode`: one agent of the tree `build_graph` returns. The UI walks
+/// children through `sub_agents` entries carrying a `name`, so both are part of the contract.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentNode {
     /// The agent's name.
@@ -56,7 +170,7 @@ pub struct AgentNode {
     /// `omitempty`.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
-    /// The agent's sub-agents.
+    /// The agent's sub-agents; always a list (never `null`), even when empty.
     #[serde(default)]
     pub sub_agents: Vec<AgentNode>,
 }
@@ -70,7 +184,7 @@ pub struct AppInfoResponse {
     pub readme: String,
 }
 
-/// Port of Go `controllers.DotGraph`: Graphviz DOT source.
+/// Port of Go `controllers.DotGraph`: Graphviz DOT source, which the UI renders client-side.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DotGraph {
     /// Go `DotSrc` (`dotSrc`).
@@ -79,6 +193,7 @@ pub struct DotGraph {
 }
 
 /// Go `AgentGraphAPIRouter.Routes`.
+#[allow(dead_code)] // mounted by `Server::router` (plan 5a Task 13)
 pub(crate) fn agent_graph_routes(c: Arc<AgentGraphApiController>) -> Vec<Route> {
     vec![
         route(
