@@ -840,7 +840,7 @@ class ThreeBTest(unittest.TestCase):
         err = io.StringIO()
         with contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
             pc.main(["--adk-go", str(self.go), "--repo", str(self.repo), "--ledger", "all", "--count"])
-        self.assertIn("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a or 4b", err.getvalue())
+        self.assertIn("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a, 4b or 4c", err.getvalue())
 
 
 LEDGER_4A = (
@@ -906,6 +906,86 @@ class FourBTest(unittest.TestCase):
             + " | test_object_wrapper_if_not_exist |",
             "| artifact/gcsartifact/gcs_test.go | TestSleepContext | ported | " + GCS_TARGET
             + " | test_sleep_context |",
+        ])
+
+
+
+LEDGER_4C = (
+    "# Parity ledger — sub-project 4c\n\n"
+    "<!-- in-scope:\nsession/vertexai/filter_test.go\nsession/vertexai/vertexai_test.go\n-->\n\n"
+    + pc.TABLE_HEADER + "\n" + pc.TABLE_SEP + "\n"
+)
+
+FILTER_TARGET = "crates/gadk-vertexai/src/parity_tests/session_vertexai_filter.rs"
+VERTEXAI_DIR = "crates/gadk-vertexai/src/parity_tests/session_vertexai_vertexai"
+
+
+class FourCTest(unittest.TestCase):
+    """4c: one Go package whose test files land in one crate's `src/parity_tests/`, one of them
+    (`vertexai_test.go`) in a module directory split into `convert.rs` and `client.rs`."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        d = pathlib.Path(self._tmp.name)
+        self.go, self.repo = d / "go", d / "repo"
+        (self.go / "session/vertexai").mkdir(parents=True)
+        (self.go / "session/vertexai/filter_test.go").write_text(
+            "package vertexai\nfunc TestQuoteFilterLiteral(t *testing.T) {}\n")
+        (self.go / "session/vertexai/vertexai_test.go").write_text(
+            "package vertexai\nfunc TestToStructPB(t *testing.T) {}\n"
+            "func TestGetReasoningEngineID(t *testing.T) {}\n"
+            "func TestAiplatformToGenaiContentPreservesFunctionIDs(t *testing.T) {}\n")
+        (self.repo / VERTEXAI_DIR).mkdir(parents=True)
+        (self.repo / FILTER_TARGET).write_text("#[test]\nfn test_quote_filter_literal() {}\n")
+        (self.repo / VERTEXAI_DIR / "mod.rs").write_text("mod client;\nmod convert;\n")
+        (self.repo / VERTEXAI_DIR / "convert.rs").write_text(
+            "#[test]\nfn test_to_struct_pb() {}\n\n"
+            "#[test]\nfn test_aiplatform_to_genai_content_preserves_function_i_ds() {}\n")
+        (self.repo / VERTEXAI_DIR / "client.rs").write_text(
+            "// parity: adapted: REST resource names\n#[test]\nfn test_get_reasoning_engine_id() {}\n")
+        (self.repo / "docs/parity").mkdir(parents=True)
+        self.ledger = self.repo / "docs/parity/4c.md"
+        self.ledger.write_text(LEDGER_4C)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def run_cli(self, *args):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = pc.main(["--adk-go", str(self.go), "--repo", str(self.repo), *args])
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_ledger_4c_is_registered(self):
+        self.assertIn("4c", pc.GENERATED_LEDGERS)
+
+    def test_function_ids_name(self):
+        self.assertEqual(pc.go_test_to_rust("TestAiplatformToGenaiContentPreservesFunctionIDs"),
+                         "test_aiplatform_to_genai_content_preserves_function_i_ds")
+
+    def test_header_only_ledger_fails_until_targets_hold_tests(self):
+        (self.repo / FILTER_TARGET).write_text("//! placeholder\n")
+        rc, out, err = self.run_cli("--ledger", "4c")
+        self.assertEqual((rc, out), (1, ""))
+        self.assertIn(
+            "session/vertexai/filter_test.go TestQuoteFilterLiteral: missing (no fn test_quote_filter_literal"
+            " and no `// parity: skipped TestQuoteFilterLiteral:` in " + FILTER_TARGET + ")", err)
+
+    def test_targets_generate_and_check(self):
+        self.assertEqual(self.run_cli("--ledger", "4c", "--count"), (0, "4\n", ""))
+        self.assertEqual(self.run_cli("--ledger", "4c", "--generate")[0], 0)
+        self.assertEqual(self.run_cli("--ledger", "4c"), (0, "", ""))
+        rows = self.ledger.read_text().splitlines()[-4:]
+        self.assertEqual(rows, [
+            "| session/vertexai/filter_test.go | TestQuoteFilterLiteral | ported | " + FILTER_TARGET
+            + " | test_quote_filter_literal |",
+            "| session/vertexai/vertexai_test.go | TestToStructPB | ported | " + VERTEXAI_DIR
+            + "/convert.rs | test_to_struct_pb |",
+            "| session/vertexai/vertexai_test.go | TestGetReasoningEngineID"
+            " | ported (adapted: REST resource names) | " + VERTEXAI_DIR
+            + "/client.rs | test_get_reasoning_engine_id |",
+            "| session/vertexai/vertexai_test.go | TestAiplatformToGenaiContentPreservesFunctionIDs"
+            " | ported | " + VERTEXAI_DIR + "/convert.rs | test_aiplatform_to_genai_content_preserves_function_i_ds |",
         ])
 
 
@@ -1136,6 +1216,23 @@ class RealTreeTest(unittest.TestCase):
         self.assertEqual(deferred, {})
         self.assertEqual(pc.count(ADK_GO, in_scope), 16)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "4b"), [])
+
+    def test_4c_count_is_35(self):
+        in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/4c.md")
+        self.assertEqual(in_scope, [
+            "session/vertexai/append_event_temp_state_test.go",
+            "session/vertexai/compaction_persistence_test.go",
+            "session/vertexai/delete_ownership_test.go",
+            "session/vertexai/filter_test.go",
+            "session/vertexai/notfound_test.go",
+            "session/vertexai/raw_event_crossruntime_test.go",
+            "session/vertexai/service_test.go",
+            "session/vertexai/session_test.go",
+            "session/vertexai/vertexai_test.go",
+        ])
+        self.assertEqual(deferred, {})
+        self.assertEqual(pc.count(ADK_GO, in_scope), 35)
+        self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "4c"), [])
 
 
 if __name__ == "__main__":
