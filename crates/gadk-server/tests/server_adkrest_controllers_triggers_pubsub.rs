@@ -215,6 +215,32 @@ async fn pub_sub_trigger_handler_passes_gos_message_text() {
     );
 }
 
+/// Binary Pub/Sub `data` reaches the agent as Go's `json.Marshal(string(data))`: `\ufffd` per
+/// invalid byte (go1.27.2 output for `[]byte{0x61, 0xff, 0xfe, 0x62}`), not one U+FFFD per
+/// invalid sequence.
+#[tokio::test]
+async fn pub_sub_trigger_handler_escapes_invalid_utf8_as_go() {
+    let runs = Arc::new(Runs::default());
+    let service = Arc::new(FakeSessionService::default());
+    let cfg = triggers_support::controller_config(
+        service.clone(),
+        Arc::new(SingleLoader::new(mock_agent(vec![], runs.clone()))),
+    );
+    let controller = PubSubController::new(cfg).unwrap();
+    let body = br#"{"message":{"data":"Yf/+Yg==","attributes":{"k":"v"}},"subscription":"s"}"#;
+    let (code, _) = read(
+        controller
+            .pub_sub_trigger_handler(post("/", &[], body.to_vec()))
+            .await,
+    )
+    .await;
+    assert_eq!(code, 200);
+    assert_eq!(
+        runs.received.lock().clone().unwrap(),
+        r#"{"attributes":{"k":"v"},"data":"a\ufffd\ufffdb"}"#
+    );
+}
+
 /// Go `TestPubSubTriggerSurvivesACompactionFailure`.
 #[tokio::test]
 async fn test_pub_sub_trigger_survives_a_compaction_failure() {

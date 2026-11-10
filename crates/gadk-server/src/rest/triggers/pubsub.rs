@@ -18,7 +18,10 @@
 use std::sync::Arc;
 
 use http::StatusCode;
-use serde_json::{Map, Value};
+use std::collections::BTreeMap;
+
+use serde::Serialize;
+use serde_json::value::RawValue;
 use tokio::sync::Semaphore;
 
 use super::{
@@ -130,28 +133,45 @@ impl PubSubController {
 /// Go `messageContentFromPubSub`: the agent's input, Go's `json.Marshal` of
 /// `{"attributes": …, "data": "<decoded data>"}` with empty members left out.
 pub(super) fn message_content_from_pub_sub(req: &PubSubTriggerRequest) -> Result<String, String> {
-    let mut content = Map::new();
-    if !req.message.data.is_empty() {
-        content.insert(
-            "data".to_owned(),
-            Value::String(String::from_utf8_lossy(&req.message.data).into_owned()),
-        );
-    }
-    if let Some(attributes) = req.message.attributes.as_ref().filter(|a| !a.is_empty()) {
-        let attributes = attributes
-            .iter()
-            .map(|(k, v)| (k.clone(), Value::String(v.clone())))
-            .collect();
-        content.insert("attributes".to_owned(), Value::Object(attributes));
+    /// The marshaled map: fields in Go's sorted key order.
+    #[derive(Serialize)]
+    struct MessageContent<'a> {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        attributes: Option<&'a BTreeMap<String, String>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        data: Option<Box<RawValue>>,
     }
 
-    if content.is_empty() {
+    let data = if req.message.data.is_empty() {
+        None
+    } else {
+        Some(go_json_string(&req.message.data)?)
+    };
+    let attributes = req.message.attributes.as_ref().filter(|a| !a.is_empty());
+    if data.is_none() && attributes.is_none() {
         return Err("empty message data and attributes".to_owned());
     }
 
-    gadk_model::to_go_json(&content)
+    gadk_model::to_go_json(&MessageContent { attributes, data })
         .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
         .map_err(|e| format!("failed to marshal agent message: {e}"))
+}
+
+/// Go's `json.Marshal(string(data))` for arbitrary bytes: valid UTF-8 runs escaped as Go's
+/// `encoding/json` escapes them, and `\ufffd` once per byte of each invalid sequence.
+fn go_json_string(data: &[u8]) -> Result<Box<RawValue>, String> {
+    let marshal_err = |e: serde_json::Error| format!("failed to marshal agent message: {e}");
+    let mut out = String::from("\"");
+    for chunk in data.utf8_chunks() {
+        let valid = gadk_model::to_go_json(chunk.valid()).map_err(marshal_err)?;
+        let valid = String::from_utf8_lossy(&valid);
+        out.push_str(&valid[1..valid.len() - 1]);
+        for _ in chunk.invalid() {
+            out.push_str("\\ufffd");
+        }
+    }
+    out.push('"');
+    RawValue::from_string(out).map_err(marshal_err)
 }
 
 #[cfg(test)]
@@ -193,6 +213,25 @@ mod tests {
         assert_eq!(
             message_content_from_pub_sub(&request(b"", None)).unwrap_err(),
             "empty message data and attributes"
+        );
+    }
+
+    /// Invalid UTF-8 in `data` is Go's `json.Marshal(string(data))`: `\ufffd` per invalid
+    /// byte, valid runs (multibyte, `"`, HTML-significant, U+2028) escaped as Go escapes them.
+    /// Expected bytes from a go1.27.2 `json.Marshal(map[string]any{...})` program.
+    #[test]
+    fn message_content_escapes_invalid_utf8_per_byte_as_go() {
+        assert_eq!(
+            message_content_from_pub_sub(&request(&[0x61, 0xff, 0xfe, 0x62], Some(&[("k", "v")])))
+                .unwrap(),
+            r#"{"attributes":{"k":"v"},"data":"a\ufffd\ufffdb"}"#
+        );
+        let mut mixed = "<\"é".as_bytes().to_vec();
+        mixed.extend_from_slice(&[0xff, 0xe2, 0x82]);
+        mixed.extend_from_slice(">&\u{2028}".as_bytes());
+        assert_eq!(
+            message_content_from_pub_sub(&request(&mixed, Some(&[("k", "v")]))).unwrap(),
+            r#"{"attributes":{"k":"v"},"data":"\u003c\"é\ufffd\ufffd\ufffd\u003e\u0026\u2028"}"#
         );
     }
 }
