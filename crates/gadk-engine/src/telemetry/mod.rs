@@ -47,7 +47,6 @@ use gadk_genai::GenerateContentResponseUsageMetadata;
 use gadk_model::Backend;
 use gadk_session::{Event, zero_time};
 use serde_json::Value;
-use tracing_subscriber::registry::LookupSpan;
 
 use attrs::SpanError;
 
@@ -67,22 +66,9 @@ pub(crate) fn agent_span(agent_name: &str) -> tracing::Span {
     )
 }
 
-/// Whether the current span is inside an `invoke_workflow` span (Go's `workflowScopeKey`
-/// context value, which `startInvokeWorkflowSpan` sets). Read from the subscriber's span
-/// registry; `false` under a subscriber that is not a `tracing_subscriber::Registry` stack.
-pub(crate) fn in_workflow_scope() -> bool {
-    let Some(id) = tracing::Span::current().id() else {
-        return false;
-    };
-    tracing::dispatcher::get_default(|d| {
-        let Some(registry) = d.downcast_ref::<tracing_subscriber::Registry>() else {
-            return false;
-        };
-        registry
-            .span(&id)
-            .is_some_and(|s| s.scope().any(|s| s.name() == "invoke_workflow"))
-    })
-}
+/// Whether the current span is inside an `invoke_workflow` span (Go's `workflowScopeKey`; shared
+/// with gadk-agent's agent spans).
+pub(crate) use gadk_agent::agent::telemetry::in_workflow_scope;
 
 /// Port of Go startInvokeWorkflowSpan: `gen_ai.workflow.nested` marks a span started inside
 /// another `invoke_workflow` span (default schema only).

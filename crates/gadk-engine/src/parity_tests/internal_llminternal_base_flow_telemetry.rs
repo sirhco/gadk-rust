@@ -19,7 +19,9 @@ use std::{any::Any, sync::Arc};
 
 use futures::{StreamExt, stream::BoxStream};
 use gadk_agent::InvocationContext;
-use gadk_genai::{FinishReason, GenerateContentResponseUsageMetadata};
+use gadk_genai::{
+    Content, FinishReason, GenerateContentConfig, GenerateContentResponseUsageMetadata, Part,
+};
 use gadk_model::{Llm, LlmRequest, LlmResponse, ModelError};
 use pretty_assertions::assert_eq;
 
@@ -27,6 +29,10 @@ use crate::llm::flow::{
     generate_content,
     span_capture::{CapturedSpan, capture_spans, closed_count},
 };
+use crate::telemetry::env::{
+    CAPTURE_MESSAGE_CONTENT_ENV_VAR, SCHEMA_VERSION_OPT_IN_ENV_VAR, test_env,
+};
+use crate::telemetry::span_digest::capture;
 
 /// Go mockModelForTest with a scripted stream.
 struct ScriptModel(parking_lot::Mutex<Option<Vec<Result<LlmResponse, ModelError>>>>);
@@ -185,5 +191,149 @@ async fn test_generate_content_tracing_error() {
     );
 }
 
-// parity: skipped TestLoggingSpanIDPropagation: OTel log-record export and semconv opt-in env (no OpenTelemetry dependency in 1b, spec R18)
-// parity: skipped TestInferenceEventDescribesTheRequestTheSpanDoes: OTel inference log event / message-capture env (no OpenTelemetry dependency in 1b, spec R18)
+/// Go `mockModelForTest` with a `generateContent` hook: `on_call` sees the request (and the
+/// current span) when the model is called, then the model yields `resp`.
+struct HookModel {
+    on_call: Box<dyn Fn(&LlmRequest) + Send + Sync>,
+    resp: LlmResponse,
+}
+
+impl Llm for HookModel {
+    fn name(&self) -> &str {
+        "test-model"
+    }
+    fn generate_content(
+        &self,
+        req: LlmRequest,
+        _: bool,
+    ) -> BoxStream<'static, Result<LlmResponse, ModelError>> {
+        (self.on_call)(&req);
+        Box::pin(futures::stream::iter([Ok(self.resp.clone())]))
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+fn text(role: &str, t: &str) -> Content {
+    Content {
+        role: role.into(),
+        parts: vec![Part {
+            text: t.into(),
+            ..Default::default()
+        }],
+    }
+}
+
+// parity: adapted: a captured LogRecord's span ID is the capture's index of the span it was emitted under, so the span the model sees is identified by name (the one generate_content span) instead of its OTel span ID
+#[tokio::test]
+async fn test_logging_span_id_propagation() {
+    let _env = test_env(&[(SCHEMA_VERSION_OPT_IN_ENV_VAR, "otel_semconv_1_44")]);
+    let seen = Arc::new(parking_lot::Mutex::new(Vec::<String>::new()));
+    let model = Arc::new(HookModel {
+        on_call: Box::new({
+            let seen = seen.clone();
+            move |_| {
+                // Capture the span the model is called in.
+                let name = tracing::Span::current()
+                    .metadata()
+                    .map_or("", |m| m.name())
+                    .to_owned();
+                seen.lock().push(name);
+            }
+        }),
+        resp: LlmResponse {
+            usage_metadata: usage(1, 2),
+            content: Some(text("model", "Response")),
+            ..Default::default()
+        },
+    });
+    let req = LlmRequest {
+        config: Some(GenerateContentConfig {
+            system_instruction: Some(text("system", "You are a helpful assistant.")),
+            ..Default::default()
+        }),
+        contents: vec![text("user", "Hello")],
+        ..Default::default()
+    };
+    let ctx = InvocationContext::builder().build_invocation();
+    let ((), spans, logs) = capture(async {
+        let mut s = generate_content(&ctx, model, req, true);
+        while s.next().await.is_some() {}
+    })
+    .await;
+    assert_eq!(
+        *seen.lock(),
+        ["generate_content"],
+        "the model runs inside the span"
+    );
+    let generate: Vec<_> = spans
+        .iter()
+        .filter(|s| s.name == "generate_content test-model")
+        .collect();
+    assert_eq!(generate.len(), 1, "{spans:#?}");
+    let want_span_id = Some(generate[0].span_id);
+    let want_events = ["gen_ai.client.inference.operation.details"];
+    assert_eq!(
+        logs.len(),
+        want_events.len(),
+        "expected {} log records, got {logs:#?}",
+        want_events.len()
+    );
+    for (i, record) in logs.iter().enumerate() {
+        assert_eq!(record.span_id, want_span_id, "record[{i}]: span ID");
+        assert_eq!(record.event_name, want_events[i], "record[{i}]: event name");
+    }
+}
+
+/// The number of messages in `gen_ai.input.messages` among `attrs`.
+fn input_messages(attrs: &[(String, serde_json::Value)]) -> usize {
+    attrs
+        .iter()
+        .find(|(k, _)| k == "gen_ai.input.messages")
+        .and_then(|(_, v)| v.as_array())
+        .map_or(0, Vec::len)
+}
+
+// parity: adapted: Go's model appends a message to the request it was handed and the span and the event both describe the edited request; a Rust model receives the request by value and cannot edit the caller's, so the span and the event both describe the request the model received (one message)
+#[tokio::test]
+async fn test_inference_event_describes_the_request_the_span_does() {
+    let _env = test_env(&[
+        (SCHEMA_VERSION_OPT_IN_ENV_VAR, "otel_semconv_1_44"),
+        (CAPTURE_MESSAGE_CONTENT_ENV_VAR, "SPAN_AND_EVENT"),
+    ]);
+    let received = Arc::new(parking_lot::Mutex::new(0usize));
+    let model = Arc::new(HookModel {
+        on_call: Box::new({
+            let received = received.clone();
+            move |req| *received.lock() = req.contents.len()
+        }),
+        resp: LlmResponse {
+            content: Some(text("model", "Response")),
+            ..Default::default()
+        },
+    });
+    let req = LlmRequest {
+        contents: vec![text("user", "Hello")],
+        ..Default::default()
+    };
+    let ctx = InvocationContext::builder().build_invocation();
+    let ((), spans, logs) = capture(async {
+        let mut s = generate_content(&ctx, model, req, false);
+        while s.next().await.is_some() {}
+    })
+    .await;
+    let want = *received.lock();
+    assert_eq!(want, 1);
+    assert_eq!(
+        input_messages(&spans[0].attributes),
+        want,
+        "span gen_ai.input.messages"
+    );
+    assert_eq!(logs.len(), 1, "expected 1 log record, got {logs:#?}");
+    assert_eq!(
+        input_messages(&logs[0].attributes),
+        want,
+        "event gen_ai.input.messages"
+    );
+}
