@@ -28,11 +28,9 @@ use common::fake::Scripted;
 use futures::StreamExt;
 use gadk_gemini::{ClientConfig, GeminiModel, MapEnv};
 use gadk_genai::Content;
+use gadk_model::rest::test_util::fixed_header_credentials;
 use gadk_model::{Backend, HttpClient, LlmRequest, LlmResponse, ModelError};
-use google_cloud_auth::credentials::{
-    CacheableResource, Credentials, CredentialsProvider, EntityTag,
-};
-use google_cloud_auth::errors::CredentialsError;
+use google_cloud_auth::credentials::Credentials;
 use http::{HeaderMap, HeaderValue};
 use pretty_assertions::assert_eq;
 use serde_json::json;
@@ -62,26 +60,6 @@ fn vertex_with(
 
 fn anonymous() -> Credentials {
     google_cloud_auth::credentials::anonymous::Builder::new().build()
-}
-
-/// A credentials provider returning fixed headers.
-#[derive(Debug)]
-struct FixedHeaders(HeaderMap);
-
-impl CredentialsProvider for FixedHeaders {
-    async fn headers(
-        &self,
-        _extensions: http::Extensions,
-    ) -> Result<CacheableResource<HeaderMap>, CredentialsError> {
-        Ok(CacheableResource::New {
-            entity_tag: EntityTag::new(),
-            data: self.0.clone(),
-        })
-    }
-
-    async fn universe_domain(&self) -> Option<String> {
-        None
-    }
 }
 
 fn user_request() -> LlmRequest {
@@ -206,7 +184,7 @@ async fn vertex_credentials_headers_sent() {
     headers.append("x-goog-test", HeaderValue::from_static("one"));
     headers.append("x-goog-test", HeaderValue::from_static("two"));
     let rec = server(2, "application/json", OK_BODY);
-    let creds = Credentials::from(FixedHeaders(headers));
+    let creds = fixed_header_credentials(headers);
     let cfg = vertex_with("us-central1", rec.clone(), creds.clone());
     let got = run("gemini-2.5-flash", cfg, false).await;
     assert!(got[0].is_ok(), "{:?}", got[0]);

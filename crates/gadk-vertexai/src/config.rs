@@ -16,8 +16,6 @@
 //! [`AgentEngineData`] (Go `util/vertexai`), Go `aiplatform.HostURL`, and the endpoint,
 //! credential and HTTP-client resolution both services share.
 
-#![allow(dead_code)]
-
 use std::sync::Arc;
 
 use gadk_model::gcp_auth::adc_credentials;

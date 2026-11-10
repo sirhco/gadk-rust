@@ -30,6 +30,8 @@ parking_lot = { workspace = true }
 
 [dev-dependencies]
 gadk-httprr = { workspace = true }
+# Fixed-header test credentials (`rest::test_util`).
+gadk-model = { workspace = true, features = ["test-util"] }
 tokio = { workspace = true }
 pretty_assertions = { workspace = true }
 rstest = { workspace = true }

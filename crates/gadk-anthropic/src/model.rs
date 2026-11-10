@@ -589,10 +589,9 @@ mod tests {
     use bytes::Bytes;
 
     use gadk_genai::{Content, GenerateContentConfig, ThinkingConfig};
+    use gadk_model::rest::test_util::bearer_credentials;
     use gadk_model::{BodyStream, HttpOptions};
     use gadk_platform::env::MapEnv;
-    use google_cloud_auth::credentials::{CacheableResource, CredentialsProvider, EntityTag};
-    use google_cloud_auth::errors::CredentialsError;
     use http::{HeaderMap, HeaderValue};
     use pretty_assertions::assert_eq;
 
@@ -619,34 +618,10 @@ mod tests {
         }
     }
 
-    #[derive(Debug)]
-    struct StaticToken;
-
-    impl CredentialsProvider for StaticToken {
-        async fn headers(
-            &self,
-            _extensions: http::Extensions,
-        ) -> Result<CacheableResource<HeaderMap>, CredentialsError> {
-            let mut headers = HeaderMap::new();
-            headers.insert(
-                http::header::AUTHORIZATION,
-                HeaderValue::from_static("Bearer vertex-token"),
-            );
-            Ok(CacheableResource::New {
-                entity_tag: EntityTag::new(),
-                data: headers,
-            })
-        }
-
-        async fn universe_domain(&self) -> Option<String> {
-            None
-        }
-    }
-
     fn vertex(vars: &[(&str, &str)]) -> ClientConfig {
         ClientConfig {
             backend: Backend::Vertex,
-            credentials: Some(Credentials::from(StaticToken)),
+            credentials: Some(bearer_credentials("vertex-token")),
             env: env(vars),
             ..Default::default()
         }

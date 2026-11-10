@@ -51,10 +51,7 @@ use futures::stream::BoxStream;
 use gadk_anthropic::{AnthropicError, AnthropicModel, Backend, ClientConfig, MapEnv};
 use gadk_httprr::{HttprrError, RecordReplay};
 use gadk_model::{HttpClient, Llm, LlmRequest, LlmResponse, ModelError, ReqwestClient};
-use google_cloud_auth::credentials::{
-    CacheableResource, Credentials, CredentialsProvider, EntityTag,
-};
-use google_cloud_auth::errors::CredentialsError;
+use google_cloud_auth::credentials::{CacheableResource, Credentials};
 use tracing::field::{Field, Visit};
 use tracing::{Dispatch, Event, Level, Subscriber};
 use tracing_subscriber::layer::{Context as LayerContext, Layer, SubscriberExt};
@@ -411,31 +408,7 @@ pub fn adc_env(path: &str) -> Arc<MapEnv> {
 /// Go `staticTokenSource{token}`: credentials whose headers are
 /// `authorization: Bearer <token>`.
 pub fn static_token_credentials(token: &str) -> Credentials {
-    Credentials::from(StaticToken(format!("Bearer {token}")))
-}
-
-#[derive(Debug)]
-struct StaticToken(String);
-
-impl CredentialsProvider for StaticToken {
-    async fn headers(
-        &self,
-        _extensions: http::Extensions,
-    ) -> Result<CacheableResource<http::HeaderMap>, CredentialsError> {
-        let mut headers = http::HeaderMap::new();
-        headers.insert(
-            http::header::AUTHORIZATION,
-            http::HeaderValue::from_str(&self.0).expect("ASCII token"),
-        );
-        Ok(CacheableResource::New {
-            entity_tag: EntityTag::new(),
-            data: headers,
-        })
-    }
-
-    async fn universe_domain(&self) -> Option<String> {
-        None
-    }
+    gadk_model::rest::test_util::bearer_credentials(token)
 }
 
 /// Go `ClientConfig{APIKey: "test-key", BaseURL: srv.URL}` with an empty environment.

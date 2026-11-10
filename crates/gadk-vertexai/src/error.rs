@@ -16,8 +16,6 @@
 //! [`VertexError`] (an HTTP or operation error from the Vertex AI API, displayed as Go's gRPC
 //! status text), the gRPC code tables, and the Go `%w` wrapping the services build on top of it.
 
-#![allow(dead_code)]
-
 use std::error::Error as StdError;
 
 use gadk_memory::MemoryError;

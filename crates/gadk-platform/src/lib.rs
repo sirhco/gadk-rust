@@ -32,7 +32,9 @@ mod uuid;
 pub use exec::{TaskRunner, TokioTaskRunner};
 pub use futures::future::BoxFuture;
 pub use go_err::GoWrapped;
-pub use go_fmt::{go_query_escape, go_quote, go_sprint_value, go_to_lower, go_to_upper};
+pub use go_fmt::{
+    go_query_escape, go_quote, go_sprint_value, go_to_lower, go_to_upper, go_type_name,
+};
 pub use go_time::go_parse_rfc3339;
 pub use time::TimeProvider;
 pub use tracking::tracking_header;

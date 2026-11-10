@@ -24,7 +24,7 @@ use gadk_genai::{Content, ROLE_USER};
 use gadk_memory::{MemoryEntry, MemoryError, MemoryService, SearchRequest, SearchResponse};
 use gadk_model::HttpClient;
 use gadk_platform::env::{EnvProvider, ProcessEnv};
-use gadk_platform::{go_parse_rfc3339, go_sprint_value};
+use gadk_platform::{go_parse_rfc3339, go_sprint_value, go_type_name};
 use gadk_session::Session;
 use google_cloud_auth::credentials::Credentials;
 use http::Method;
@@ -204,18 +204,6 @@ fn state_time(value: &Value) -> Result<DateTime<Utc>, BoxError> {
         go_sprint_value(value)
     )
     .into())
-}
-
-/// Go `%T` of a JSON value decoded into `any`.
-fn go_type_name(value: &Value) -> &'static str {
-    match value {
-        Value::Null => "<nil>",
-        Value::Bool(_) => "bool",
-        Value::Number(_) => "float64",
-        Value::String(_) => "string",
-        Value::Array(_) => "[]interface {}",
-        Value::Object(_) => "map[string]interface {}",
-    }
 }
 
 #[async_trait]
