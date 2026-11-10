@@ -189,8 +189,8 @@ impl WorkflowError {
     /// Port of Go `&NodeRunError{..}` (`Error`/`Unwrap`): the kind is the cause's workflow kind, else
     /// `NodeFailed`.
     pub fn node_run(info: NodeRunError) -> Self {
-        // Spans name this error's Go type (`error.type`), which gadk-agent cannot see.
-        gadk_agent::agent::telemetry::set_go_error_type_resolver(go_error_type);
+        // Before any such error can reach a span's `error.type`.
+        crate::telemetry::install_go_error_type_resolver();
         let path = if info.child_path.is_empty() {
             &info.child_name
         } else {
@@ -221,7 +221,7 @@ impl WorkflowError {
 
 /// The Go `%T` of a [`WorkflowError`] reporting a dynamic child run failure
 /// (`*workflow.NodeRunError`); other errors are not named.
-fn go_error_type(err: &(dyn std::error::Error + 'static)) -> Option<&'static str> {
+pub(crate) fn go_error_type(err: &(dyn std::error::Error + 'static)) -> Option<&'static str> {
     err.downcast_ref::<WorkflowError>()
         .and_then(WorkflowError::node_run_error)
         .map(|_| "*workflow.NodeRunError")

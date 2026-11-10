@@ -67,6 +67,17 @@ pub(crate) fn agent_span(agent_name: &str) -> tracing::Span {
     )
 }
 
+/// Installs, once per process, gadk-engine's resolver of the Go `%T` that spans record as
+/// `error.type` for engine errors gadk-agent cannot see ([`crate::error::go_error_type`]:
+/// `*workflow.NodeRunError`). Called where such an error is built, so it is in place before
+/// one can reach a span.
+pub(crate) fn install_go_error_type_resolver() {
+    static INSTALL: std::sync::Once = std::sync::Once::new();
+    INSTALL.call_once(|| {
+        gadk_agent::agent::telemetry::set_go_error_type_resolver(crate::error::go_error_type);
+    });
+}
+
 /// Whether the current span is inside an `invoke_workflow` span (Go's `workflowScopeKey`; shared
 /// with gadk-agent's agent spans).
 pub(crate) use gadk_agent::agent::telemetry::in_workflow_scope;
