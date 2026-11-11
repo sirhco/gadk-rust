@@ -394,6 +394,60 @@ mod tests {
         assert_eq!(resolved.lock().clone(), None);
     }
 
+    /// A runner config for `agent` over an in-memory session service.
+    #[cfg(all(feature = "gadk-server", feature = "client"))]
+    fn runner_config(agent: Arc<dyn gadk_agent::Agent>) -> gadk_engine::runner::RunnerConfig {
+        gadk_engine::runner::RunnerConfig {
+            app_name: agent.name().to_owned(),
+            agent,
+            session_service: Arc::new(gadk_session::InMemorySessionService::new()),
+            artifact_service: None,
+            memory_service: None,
+            plugin_config: gadk_engine::runner::PluginConfig::default(),
+            auto_create_session: false,
+            platform: gadk_platform::Platform::default(),
+            compaction: None,
+        }
+    }
+
+    /// Serves `executor` over JSON-RPC in the mounting order of R15 (gadk-server's authn
+    /// middleware outermost, reading the user from `x-user`; the identity layer inside it) on a
+    /// loopback port; returns the endpoint URL.
+    #[cfg(all(feature = "gadk-server", feature = "client"))]
+    async fn serve_behind_authn(executor: crate::server::Executor) -> String {
+        let handler = Arc::new(a2a_server::DefaultRequestHandler::new(
+            executor,
+            a2a_server::InMemoryTaskStore::new(),
+        ));
+        let app = a2a_server::jsonrpc::jsonrpc_router(handler)
+            .layer(a2a_identity_layer(caller_user))
+            .layer(gadk_server::authn::middleware(gadk_server::authn::header(
+                "x-user",
+            )));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await });
+        url
+    }
+
+    /// A JSON-RPC `SendMessage` of `hi` to `url`, claiming `mallory` in the identity header and
+    /// authenticated as `user` (`x-user`) when given.
+    #[cfg(all(feature = "gadk-server", feature = "client"))]
+    async fn send_hi(url: &str, user: Option<&str>) -> reqwest::Response {
+        let mut req = reqwest::Client::new()
+            .post(url)
+            .header("a2a-version", "1.0")
+            .header(IDENTITY_HEADER, "mallory")
+            .json(&serde_json::json!({
+                "jsonrpc": "2.0", "id": 1, "method": "SendMessage",
+                "params": {"message": {"messageId": "m1", "role": "ROLE_USER", "parts": [{"text": "hi"}]}},
+            }));
+        if let Some(user) = user {
+            req = req.header("x-user", user);
+        }
+        req.send().await.unwrap()
+    }
+
     /// Spec R6 end to end: gadk-server's authn middleware outside, the identity layer inside, the
     /// a2a-rs JSON-RPC router and a real [`crate::server::Executor`] with
     /// [`identity_header_resolver`]: the agent runs as the authenticated caller, never as the
@@ -421,57 +475,122 @@ mod tests {
             .unwrap()
         };
         let executor = Executor::new(ExecutorConfig {
-            runner_config: Some(gadk_engine::runner::RunnerConfig {
-                app_name: "agent".into(),
-                agent,
-                session_service: Arc::new(gadk_session::InMemorySessionService::new()),
-                artifact_service: None,
-                memory_service: None,
-                plugin_config: gadk_engine::runner::PluginConfig::default(),
-                auto_create_session: false,
-                platform: gadk_platform::Platform::default(),
-                compaction: None,
-            }),
+            runner_config: Some(runner_config(agent)),
             user_resolver: Some(identity_header_resolver()),
             ..Default::default()
         });
-        let handler = Arc::new(a2a_server::DefaultRequestHandler::new(
-            executor,
-            a2a_server::InMemoryTaskStore::new(),
-        ));
-        // The mounting order of R15: authn outermost, the identity layer inside it.
-        let app = a2a_server::jsonrpc::jsonrpc_router(handler)
-            .layer(a2a_identity_layer(caller_user))
-            .layer(gadk_server::authn::middleware(gadk_server::authn::header(
-                "x-user",
-            )));
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("http://{}", listener.local_addr().unwrap());
-        tokio::spawn(async move { axum::serve(listener, app).await });
+        let url = serve_behind_authn(executor).await;
 
-        let send = |user: Option<&'static str>| {
-            let mut req = reqwest::Client::new()
-                .post(&url)
-                .header("a2a-version", "1.0")
-                .header(IDENTITY_HEADER, "mallory")
-                .json(&serde_json::json!({
-                    "jsonrpc": "2.0", "id": 1, "method": "SendMessage",
-                    "params": {"message": {"messageId": "m1", "role": "ROLE_USER", "parts": [{"text": "hi"}]}},
-                }));
-            if let Some(user) = user {
-                req = req.header("x-user", user);
-            }
-            req.send()
-        };
-        let resp = send(Some("alice")).await.unwrap();
+        let resp = send_hi(&url, Some("alice")).await;
         assert_eq!(resp.status(), http::StatusCode::OK);
         let body: serde_json::Value = resp.json().await.unwrap();
         assert!(body.get("result").is_some(), "{body}");
         assert_eq!(users.lock().clone(), vec!["alice".to_owned()]);
 
         // Without credentials the authn layer answers 401 and no run starts.
-        let resp = send(None).await.unwrap();
+        let resp = send_hi(&url, None).await;
         assert_eq!(resp.status(), http::StatusCode::UNAUTHORIZED);
         assert_eq!(users.lock().len(), 1);
+    }
+
+    /// Rust-only (no Go counterpart): the whole inbound-to-outbound auth chain across two
+    /// servers. Server A authenticates the caller (`x-user: alice`; the identity header claims
+    /// `mallory`), its executor runs a remote agent configured with `auth`, and that agent calls
+    /// server B. The credential provider sees A's authenticated caller as
+    /// `AuthContext.identity.user_id` (not the anonymous `A2A_USER_<context_id>`), and server B
+    /// receives the credential it returned.
+    #[cfg(all(feature = "gadk-server", feature = "client"))]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_authenticated_caller_reaches_a_remote_sub_agents_credential() {
+        use futures::StreamExt as _;
+        use gadk_agent::{AgentConfig, AgentError, new_agent};
+
+        use crate::remoteagent::{A2AConfig, new_a2a};
+        use crate::server::{Executor, ExecutorConfig};
+        use crate::testutil::spawn_a2a_server;
+
+        // Server B records the `Authorization` values its executor receives (a2a-rs hands the
+        // request headers to the executor as service params).
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let child = new_agent(AgentConfig {
+            name: "child".into(),
+            run: Some(Arc::new(|_ic: gadk_agent::InvocationContext| {
+                futures::stream::empty::<Result<gadk_session::Event, AgentError>>().boxed()
+            })),
+            ..Default::default()
+        })
+        .unwrap();
+        let executor_b = Executor::new(ExecutorConfig {
+            runner_config: Some(runner_config(child)),
+            user_resolver: Some({
+                let received = Arc::clone(&received);
+                Arc::new(move |ctx: &a2a_server::ExecutorContext| {
+                    received
+                        .lock()
+                        .push(ctx.service_params.get("authorization").cloned());
+                    None
+                })
+            }),
+            ..Default::default()
+        });
+        let card: a2a::AgentCard = serde_json::from_value(serde_json::json!({
+            "name": "child", "description": "", "version": "1.0.0",
+            "supportedInterfaces": [], "capabilities": {"streaming": true},
+            "defaultInputModes": [], "defaultOutputModes": [], "skills": [],
+        }))
+        .unwrap();
+        let server_b = spawn_a2a_server(executor_b, card).await;
+
+        // Server A runs a remote agent for B whose credential provider records its identity.
+        let provider_users = Arc::new(Mutex::new(Vec::new()));
+        let auth = {
+            let provider_users = Arc::clone(&provider_users);
+            gadk_auth::ProviderFn::new(move |cx: &gadk_auth::AuthContext| {
+                provider_users
+                    .lock()
+                    .push(cx.identity.as_ref().map(|i| i.user_id.clone()));
+                Box::pin(async {
+                    Ok(Arc::new(gadk_auth::Bearer {
+                        token: "b-token".into(),
+                    }) as Arc<dyn gadk_auth::Credential>)
+                }) as gadk_auth::CredentialFuture
+            })
+            .into_provider()
+        };
+        let remote = new_a2a(A2AConfig {
+            name: "child".into(),
+            agent_card: Some(server_b.card.clone()),
+            auth: Some(auth),
+            ..Default::default()
+        })
+        .unwrap();
+        let executor_a = Executor::new(ExecutorConfig {
+            runner_config: Some(runner_config(remote)),
+            user_resolver: Some(identity_header_resolver()),
+            ..Default::default()
+        });
+        let url_a = serve_behind_authn(executor_a).await;
+
+        let resp = send_hi(&url_a, Some("alice")).await;
+        assert_eq!(resp.status(), http::StatusCode::OK);
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert!(body.get("result").is_some(), "{body}");
+
+        let provider_users = provider_users.lock().clone();
+        assert!(!provider_users.is_empty(), "the provider was never asked");
+        assert!(
+            provider_users
+                .iter()
+                .all(|user| user.as_deref() == Some("alice")),
+            "provider identities = {provider_users:?}"
+        );
+        let received = received.lock().clone();
+        assert!(!received.is_empty(), "server B never ran");
+        assert!(
+            received
+                .iter()
+                .all(|auth| auth.as_deref() == Some(&["Bearer b-token".to_owned()][..])),
+            "server B authorization = {received:?}"
+        );
     }
 }
