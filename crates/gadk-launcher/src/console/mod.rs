@@ -204,7 +204,9 @@ impl ConsoleLauncher {
                 let current = pending_interrupts.remove(0);
                 pending_responses.push(build_interrupt_response(&current, user_input));
                 if let Some(next) = pending_interrupts.first() {
-                    render_interrupt_prompt(&mut *self.out(), next);
+                    let mut out = self.out();
+                    render_interrupt_prompt(&mut *out, next);
+                    let _ = out.flush();
                     continue;
                 }
                 // Every answer is in: one user content carrying every function response.
@@ -515,8 +517,9 @@ mod tests {
         Reply(&'static str, &'static str),
         /// `revise`: SSE partials `Draft `, `answer.`, final `Final answer.`.
         Revise,
-        /// `transfer`: a final `transfer_funds {"amount": 100}` call.
-        Transfer,
+        /// `transfer`: a final response of this many `transfer_funds {"amount": 100}` calls (the
+        /// probe makes one).
+        Transfer(usize),
     }
 
     /// The probe model's calls for a stdin script: one per complete line, the answer to a
@@ -546,7 +549,7 @@ mod tests {
                 "fail" => Call::Fail,
                 "transfer" => {
                     confirming = true;
-                    Call::Transfer
+                    Call::Transfer(1)
                 }
                 _ => Call::Reply("I can only ", "say hello."),
             });
@@ -583,19 +586,20 @@ mod tests {
                     Ok(text("Final answer.", false)),
                 ]),
                 Call::Revise => streams.push(vec![Ok(text("Final answer.", false))]),
-                Call::Transfer => {
-                    let mut r = text("", false);
-                    r.content = Some(Content::from_function_call(
-                        FunctionCall {
+                Call::Transfer(n) => {
+                    let call = Part {
+                        function_call: Some(FunctionCall {
                             name: "transfer_funds".into(),
                             args: json!({"amount": 100})
                                 .as_object()
                                 .cloned()
                                 .unwrap_or_default(),
                             ..Default::default()
-                        },
-                        ROLE_MODEL,
-                    ));
+                        }),
+                        ..Default::default()
+                    };
+                    let mut r = text("", false);
+                    r.content = Some(Content::from_parts(vec![call; *n], ROLE_MODEL));
                     streams.push(vec![Ok(r)]);
                 }
             }
@@ -809,6 +813,66 @@ mod tests {
             String::from_utf8(buf.lock().unwrap().clone()).unwrap(),
             "\n\nUser -> "
         );
+    }
+
+    /// Records the buffer length at every flush.
+    #[derive(Default)]
+    struct FlushRecorder {
+        buf: Vec<u8>,
+        flushed_at: Vec<usize>,
+    }
+
+    impl Write for FlushRecorder {
+        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+            self.buf.extend_from_slice(b);
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.flushed_at.push(self.buf.len());
+            Ok(())
+        }
+    }
+
+    /// Go's stdout is unbuffered: every `User -> ` prompt, the second confirmation of a turn
+    /// paused on two included, reaches the terminal before the next line is read.
+    #[tokio::test]
+    async fn every_prompt_is_flushed_before_reading_its_answer() {
+        let rec = Arc::new(Mutex::new(FlushRecorder::default()));
+        let (agent, _) = assistant(
+            vec![Call::Transfer(2), Call::Reply("Transfer ", "done.")],
+            false,
+        );
+        let mut l = new().with_io(
+            input_lines(Cursor::new(b"transfer\nyes\nyes\n".to_vec())),
+            rec.clone(),
+            false,
+        );
+        Launcher::execute(
+            &mut l,
+            CancellationToken::new(),
+            Config::new(Arc::new(SingleLoader::new(agent))),
+            Vec::new(),
+        )
+        .await
+        .unwrap();
+        let rec = rec.lock().unwrap();
+        let out = String::from_utf8(rec.buf.clone()).unwrap();
+        assert_eq!(
+            out.matches("Agent -> Confirm transfer_funds?").count(),
+            2,
+            "{out}"
+        );
+        let prompts: Vec<usize> = out
+            .match_indices("User -> ")
+            .map(|(i, p)| i + p.len())
+            .collect();
+        assert_eq!(prompts.len(), 4, "{out}");
+        for end in prompts {
+            assert!(
+                rec.flushed_at.contains(&end),
+                "no flush after the prompt ending at {end}:\n{out}"
+            );
+        }
     }
 
     #[test]
