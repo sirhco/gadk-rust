@@ -17,30 +17,13 @@
 //! `controllers.EncodeJSONResponse`, and the `NewErrorHandler` rendering of a `statusError`.
 
 use axum::body::Body;
-use http::header::{CONTENT_TYPE, X_CONTENT_TYPE_OPTIONS};
+use http::header::CONTENT_TYPE;
 use http::{HeaderValue, StatusCode};
 use serde::Serialize;
 
 use super::routing::Response;
 
-/// Go `net/http.Error`: `msg` and a newline as `text/plain; charset=utf-8`, with
-/// `X-Content-Type-Options: nosniff`.
-pub fn http_error(status: StatusCode, msg: &str) -> Response {
-    let mut resp = Response::new(Body::from(format!("{msg}\n")));
-    *resp.status_mut() = status;
-    let h = resp.headers_mut();
-    h.insert(
-        CONTENT_TYPE,
-        HeaderValue::from_static("text/plain; charset=utf-8"),
-    );
-    h.insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
-    resp
-}
-
-/// Go `net/http.NotFound`: 404 `404 page not found`.
-pub fn not_found() -> Response {
-    http_error(StatusCode::NOT_FOUND, "404 page not found")
-}
+pub use crate::mux::http_error;
 
 /// Go `controllers.EncodeJSONResponse`: `value` as Go's `json.Encoder` writes it (HTML-escaped,
 /// newline-terminated; [`gadk_model::to_go_json`]) with `Content-Type: application/json;
@@ -95,6 +78,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
+    use crate::mux::not_found;
 
     /// Status, headers (name → value) and body of `resp`.
     async fn parts(resp: Response) -> (u16, Vec<(String, String)>, String) {

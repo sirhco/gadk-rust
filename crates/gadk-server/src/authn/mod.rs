@@ -39,7 +39,7 @@ pub(crate) mod jwks;
 mod noop;
 
 pub use custom::custom;
-pub use google_oidc::{GoogleOidcConfig, google_oidc};
+pub use google_oidc::{AuthnLog, GoogleOidcConfig, google_oidc, google_oidc_with_log};
 pub use header::header;
 pub use iap::{USER_EMAIL_HEADER, USER_ID_HEADER, identity_aware_proxy};
 pub use noop::noop;
