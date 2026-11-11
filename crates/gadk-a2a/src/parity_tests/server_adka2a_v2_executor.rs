@@ -800,26 +800,22 @@ impl Drop for DropSignal {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-// parity: adapted: a2a-rs does not interrupt a running execution on cancel (Go cancels its context); it drops the execute stream at the next event after the task was canceled, so the agent here yields an event every 20 ms and must be dropped within 1 s
 async fn test_executor_cancel_after_event() {
     let (unblocked_tx, unblocked_rx) = tokio::sync::oneshot::channel::<()>();
     let unblocked_tx = Arc::new(Mutex::new(Some(unblocked_tx)));
+    // Go's agent blocks until its context is done; here the cancel drops the run, so the work
+    // after the wait must never happen.
+    let resumed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let resumed_by_agent = Arc::clone(&resumed);
     let agent = custom_agent(move |ctx: InvocationContext| {
         let guard = DropSignal(unblocked_tx.lock().take());
         let token = ctx.cancellation_token().clone();
+        let resumed = Arc::clone(&resumed_by_agent);
         Box::pin(async_stream::stream! {
             let _guard = guard;
-            loop {
-                tokio::select! {
-                    () = token.cancelled() => {
-                        yield Err(AgentError::other("context canceled"));
-                        return;
-                    }
-                    () = tokio::time::sleep(Duration::from_millis(20)) => {
-                        yield Ok(response_event(model_response_from_parts(vec![Part::from_text("tick")])));
-                    }
-                }
-            }
+            token.cancelled().await;
+            resumed.store(true, std::sync::atomic::Ordering::SeqCst);
+            yield Err(AgentError::other("context canceled"));
         })
     });
     let executor = Executor::new(ExecutorConfig {
@@ -866,6 +862,10 @@ async fn test_executor_cancel_after_event() {
         .await
         .expect("Agent did not unblock")
         .unwrap();
+    assert!(
+        !resumed.load(std::sync::atomic::Ordering::SeqCst),
+        "the agent ran on after the cancel"
+    );
 }
 
 #[tokio::test]

@@ -22,7 +22,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt as _;
-use futures::future::BoxFuture;
+use futures::future::{AbortHandle, Abortable, BoxFuture};
 use futures::stream::BoxStream;
 use gadk_agent::{Agent, EventStream, Plugin, RunConfig};
 use gadk_genai::Content;
@@ -190,10 +190,52 @@ pub struct ExecutorConfig {
 /// Every task and status update carries the ADK extension key
 /// ([`ADK_EXTENSION_URI`](crate::convert::ADK_EXTENSION_URI)). Go's `Cleanup` runs exactly once
 /// per execute or cancel stream: on its terminal event or error, at its end, or when it is
-/// dropped.
+/// dropped. A cancel stops the task's running execution at once (Go cancels its context): the
+/// execute stream ends, dropping the runner, and its cleanup sees the `canceled` task.
 #[derive(Clone)]
 pub struct Executor {
     pub(crate) config: Arc<ExecutorConfig>,
+    /// The running executions, by task ID, that a cancel stops.
+    executions: Executions,
+}
+
+/// The running executions, by task ID.
+type Executions = Arc<parking_lot::Mutex<HashMap<String, Arc<RunningExecution>>>>;
+
+/// A running execute stream that a cancel of its task stops.
+struct RunningExecution {
+    /// Ends the execute stream (Go cancels the execution context).
+    abort: AbortHandle,
+    /// The `canceled` status update the cancel yielded: in Go the cancel event goes through
+    /// the execution's own event queue, so the execution's result is the canceled task.
+    canceled: parking_lot::Mutex<Option<a2a::StreamResponse>>,
+}
+
+/// Keeps an execution registered for cancellation until dropped (by the cleanup guard, when
+/// it starts the cleanup).
+pub(crate) struct ExecutionRegistration {
+    executions: Executions,
+    task_id: String,
+    execution: Arc<RunningExecution>,
+}
+
+impl ExecutionRegistration {
+    /// The `canceled` status update of a cancel that stopped this execution.
+    pub(crate) fn canceled_event(&self) -> Option<a2a::StreamResponse> {
+        self.execution.canceled.lock().clone()
+    }
+}
+
+impl Drop for ExecutionRegistration {
+    fn drop(&mut self) {
+        let mut executions = self.executions.lock();
+        if executions
+            .get(&self.task_id)
+            .is_some_and(|current| Arc::ptr_eq(current, &self.execution))
+        {
+            executions.remove(&self.task_id);
+        }
+    }
 }
 
 impl Executor {
@@ -205,6 +247,40 @@ impl Executor {
         }
         Self {
             config: Arc::new(config),
+            executions: Executions::default(),
+        }
+    }
+
+    /// Registers the execution of `task_id`, which `abort` stops.
+    fn register_execution(&self, task_id: String, abort: AbortHandle) -> ExecutionRegistration {
+        let execution = Arc::new(RunningExecution {
+            abort,
+            canceled: parking_lot::Mutex::new(None),
+        });
+        self.executions
+            .lock()
+            .insert(task_id.clone(), Arc::clone(&execution));
+        ExecutionRegistration {
+            executions: Arc::clone(&self.executions),
+            task_id,
+            execution,
+        }
+    }
+
+    /// Whether no execution is registered for cancellation.
+    #[cfg(test)]
+    pub(crate) fn executions_is_empty(&self) -> bool {
+        self.executions.lock().is_empty()
+    }
+
+    /// Stops the running execution of `task_id`, if any, recording the `canceled` update as
+    /// its result (Go: the canceler writes it to the execution's queue, whose consumer then
+    /// cancels the execution context).
+    fn stop_execution(&self, task_id: &str, canceled: &a2a::StreamResponse) {
+        let execution = self.executions.lock().get(task_id).cloned();
+        if let Some(execution) = execution {
+            *execution.canceled.lock() = Some(canceled.clone());
+            execution.abort.abort();
         }
     }
 
@@ -602,20 +678,25 @@ impl a2a_server::AgentExecutor for Executor {
         ctx: a2a_server::ExecutorContext,
     ) -> BoxStream<'static, Result<a2a::StreamResponse, a2a::A2AError>> {
         let guarded = clone_request(&ctx);
-        Box::pin(CleanupGuard::new(
-            self.clone(),
-            guarded,
-            self.execute_stream(ctx),
-        ))
+        let task_id = ctx.task_id.clone();
+        let (abort, abort_registration) = AbortHandle::new_pair();
+        let inner = Abortable::new(self.execute_stream(ctx), abort_registration);
+        let registration = self.register_execution(task_id, abort);
+        Box::pin(
+            CleanupGuard::new(self.clone(), guarded, Box::pin(inner)).with_execution(registration),
+        )
     }
 
-    /// Go `Cancel`, wrapped in the cleanup guard: one `canceled` status update.
+    /// Go `Cancel`, wrapped in the cleanup guard: one `canceled` status update. The task's
+    /// running execution, if any, stops at once (Go cancels its context).
     fn cancel(
         &self,
         ctx: a2a_server::ExecutorContext,
     ) -> BoxStream<'static, Result<a2a::StreamResponse, a2a::A2AError>> {
         let event = new_status_update(&TaskInfo::of(&ctx), a2a::TaskState::Canceled, None);
-        let inner = futures::stream::iter([Ok(stamped(a2a::StreamResponse::StatusUpdate(event)))]);
+        let event = stamped(a2a::StreamResponse::StatusUpdate(event));
+        self.stop_execution(&ctx.task_id, &event);
+        let inner = futures::stream::iter([Ok(event)]);
         Box::pin(CleanupGuard::new(self.clone(), ctx, Box::pin(inner)))
     }
 }

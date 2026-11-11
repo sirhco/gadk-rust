@@ -22,7 +22,8 @@
 //! first of: a terminal event, an error, the end of the stream, or the stream being dropped.
 //! The cleanup runs as a task spawned on the current Tokio runtime, so it may start before
 //! a2a-rs stores the terminal event (Go runs it after); it reads only the snapshot folded here
-//! and the ADK session.
+//! and the ADK session. An execute stream that a cancel stopped ends without a terminal event
+//! of its own; its snapshot gets the cancel's `canceled` update, as Go's execution result does.
 
 use std::collections::HashMap;
 use std::pin::Pin;
@@ -31,7 +32,7 @@ use std::task::{Context, Poll};
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt as _};
 
-use super::executor::Executor;
+use super::executor::{ExecutionRegistration, Executor};
 use crate::Error;
 
 /// Wraps an execute or cancel stream, folds the yielded events into a task snapshot and runs
@@ -50,6 +51,8 @@ struct CleanupState {
     task: Option<a2a::Task>,
     /// Whether any event was yielded (the result is `None` otherwise).
     yielded: bool,
+    /// An execute stream's registration for cancellation, released with the state.
+    execution: Option<ExecutionRegistration>,
 }
 
 impl CleanupGuard {
@@ -67,15 +70,33 @@ impl CleanupGuard {
                 ctx,
                 task,
                 yielded: false,
+                execution: None,
             }),
         }
     }
 
+    /// Ties the execute stream's cancellation `registration` to this guard: it stays
+    /// registered until the cleanup starts, and a cancel's `canceled` update is folded into
+    /// the result.
+    pub(crate) fn with_execution(mut self, registration: ExecutionRegistration) -> Self {
+        if let Some(state) = self.state.as_mut() {
+            state.execution = Some(registration);
+        }
+        self
+    }
+
     /// Starts the cleanup unless it already started.
     fn finish(&mut self, cause: Option<Error>) {
-        let Some(state) = self.state.take() else {
+        let Some(mut state) = self.state.take() else {
             return;
         };
+        if let Some(canceled) = state
+            .execution
+            .take()
+            .and_then(|registration| registration.canceled_event())
+        {
+            state.fold(&canceled);
+        }
         let result = if state.yielded { state.task } else { None };
         match tokio::runtime::Handle::try_current() {
             Ok(handle) => {
@@ -373,6 +394,73 @@ mod tests {
         assert_eq!(got.len(), 1);
         let seen = expect_once(&mut rx).await;
         assert_eq!(seen, (None, Some("message not provided".into())));
+    }
+
+    /// A runner whose run never yields (Go: an agent blocked in a model or tool call).
+    struct BlockedRunner;
+
+    impl crate::server::Runner for BlockedRunner {
+        fn run(
+            &self,
+            _user_id: &str,
+            _session_id: &str,
+            _msg: Content,
+            _cfg: gadk_agent::RunConfig,
+        ) -> gadk_agent::EventStream {
+            Box::pin(futures::stream::pending())
+        }
+    }
+
+    #[tokio::test]
+    async fn a_cancel_stops_the_running_execution_and_both_cleanups_see_it_canceled() {
+        let (executor, mut rx) = executor(vec![]);
+        let executor = Executor::new(ExecutorConfig {
+            runner_provider: Some({
+                let provider = executor.config.runner_provider.clone().unwrap();
+                Arc::new(move |ctx, plugin| {
+                    let provided = provider(ctx, plugin);
+                    Box::pin(async move {
+                        let (cfg, _) = provided.await?;
+                        let runner: Arc<dyn crate::server::Runner> = Arc::new(BlockedRunner);
+                        Ok((cfg, runner))
+                    })
+                })
+            }),
+            a2a_execution_cleanup_callback: executor.config.a2a_execution_cleanup_callback.clone(),
+            ..Default::default()
+        });
+        let mut execution = executor.execute(request(true));
+        assert!(matches!(
+            execution.next().await.unwrap().unwrap(),
+            a2a::StreamResponse::Task(_)
+        ));
+        assert!(matches!(
+            execution.next().await.unwrap().unwrap(),
+            a2a::StreamResponse::StatusUpdate(_)
+        ));
+
+        let canceled: Vec<_> = executor.cancel(request(false)).collect().await;
+        assert_eq!(canceled.len(), 1);
+        // The blocked run is dropped at once: the execute stream ends.
+        let end = tokio::time::timeout(Duration::from_secs(1), execution.next())
+            .await
+            .expect("the execution was not stopped");
+        assert!(end.is_none(), "want the end of the stream, got {end:?}");
+
+        let mut seen = Vec::new();
+        for _ in 0..2 {
+            seen.push(
+                tokio::time::timeout(Duration::from_secs(2), rx.recv())
+                    .await
+                    .expect("a cleanup did not run")
+                    .unwrap(),
+            );
+        }
+        assert_eq!(seen, vec![(Some(a2a::TaskState::Canceled), None); 2]);
+        assert!(
+            executor.executions_is_empty(),
+            "the execution stayed registered"
+        );
     }
 
     #[test]
