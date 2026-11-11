@@ -380,4 +380,85 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::UNAUTHORIZED);
         assert_eq!(resolved.lock().clone(), None);
     }
+
+    /// Spec R6 end to end: gadk-server's authn middleware outside, the identity layer inside, the
+    /// a2a-rs JSON-RPC router and a real [`crate::server::Executor`] with
+    /// [`identity_header_resolver`]: the agent runs as the authenticated caller, never as the
+    /// user the client claims in the identity header. (The request goes out through reqwest,
+    /// which the `client` feature brings.)
+    #[cfg(all(feature = "gadk-server", feature = "client"))]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_executor_runs_as_the_authenticated_caller() {
+        use futures::StreamExt as _;
+        use gadk_agent::{AgentConfig, AgentError, new_agent};
+
+        use crate::server::{Executor, ExecutorConfig};
+
+        let users = Arc::new(Mutex::new(Vec::new()));
+        let agent = {
+            let users = Arc::clone(&users);
+            new_agent(AgentConfig {
+                name: "agent".into(),
+                run: Some(Arc::new(move |ic: gadk_agent::InvocationContext| {
+                    users.lock().push(ic.session().user_id().to_owned());
+                    futures::stream::empty::<Result<gadk_session::Event, AgentError>>().boxed()
+                })),
+                ..Default::default()
+            })
+            .unwrap()
+        };
+        let executor = Executor::new(ExecutorConfig {
+            runner_config: Some(gadk_engine::runner::RunnerConfig {
+                app_name: "agent".into(),
+                agent,
+                session_service: Arc::new(gadk_session::InMemorySessionService::new()),
+                artifact_service: None,
+                memory_service: None,
+                plugin_config: gadk_engine::runner::PluginConfig::default(),
+                auto_create_session: false,
+                platform: gadk_platform::Platform::default(),
+                compaction: None,
+            }),
+            user_resolver: Some(identity_header_resolver()),
+            ..Default::default()
+        });
+        let handler = Arc::new(a2a_server::DefaultRequestHandler::new(
+            executor,
+            a2a_server::InMemoryTaskStore::new(),
+        ));
+        // The mounting order of R15: authn outermost, the identity layer inside it.
+        let app = a2a_server::jsonrpc::jsonrpc_router(handler)
+            .layer(a2a_identity_layer(caller_user))
+            .layer(gadk_server::authn::middleware(gadk_server::authn::header(
+                "x-user",
+            )));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await });
+
+        let send = |user: Option<&'static str>| {
+            let mut req = reqwest::Client::new()
+                .post(&url)
+                .header("a2a-version", "1.0")
+                .header(IDENTITY_HEADER, "mallory")
+                .json(&serde_json::json!({
+                    "jsonrpc": "2.0", "id": 1, "method": "SendMessage",
+                    "params": {"message": {"messageId": "m1", "role": "ROLE_USER", "parts": [{"text": "hi"}]}},
+                }));
+            if let Some(user) = user {
+                req = req.header("x-user", user);
+            }
+            req.send()
+        };
+        let resp = send(Some("alice")).await.unwrap();
+        assert_eq!(resp.status(), http::StatusCode::OK);
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert!(body.get("result").is_some(), "{body}");
+        assert_eq!(users.lock().clone(), vec!["alice".to_owned()]);
+
+        // Without credentials the authn layer answers 401 and no run starts.
+        let resp = send(None).await.unwrap();
+        assert_eq!(resp.status(), http::StatusCode::UNAUTHORIZED);
+        assert_eq!(users.lock().len(), 1);
+    }
 }
