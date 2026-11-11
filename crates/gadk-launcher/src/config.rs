@@ -30,13 +30,29 @@ use crate::golog::Logger;
 pub type BoxedLayer =
     Box<dyn tracing_subscriber::Layer<tracing_subscriber::Registry> + Send + Sync>;
 
-/// Go `a2asrv.RequestHandlerOption`: receives the a2a-rs default request handler the `a2a`
-/// sub-launcher builds and returns the handler it serves (configured through the handler's
-/// builders, or wrapped, for example in an `InterceptedHandler`).
+/// One of Go's `a2asrv.RequestHandlerOption`s that configures the handler itself: receives the
+/// a2a-rs default request handler the `a2a` sub-launcher builds and returns it configured
+/// through its builders (`with_extended_agent_card`, `with_extended_agent_card_resolver`,
+/// `with_authorizer`, `with_push_config_store`, `with_push_notifications`, `with_capabilities`,
+/// `with_default_input_modes`).
 #[cfg(feature = "a2a")]
-pub type A2AHandlerHook = Arc<
+pub type A2AHandlerOption = Arc<
     dyn Fn(
             gadk_a2a::a2a_server::DefaultRequestHandler,
+        ) -> gadk_a2a::a2a_server::DefaultRequestHandler
+        + Send
+        + Sync,
+>;
+
+/// One of Go's `a2asrv.RequestHandlerOption`s that wraps the handler (Go call interceptors):
+/// receives the handler built so far and returns the one to serve, typically a type of the
+/// caller's that implements `a2a_server::RequestHandler` by checking or rewriting a call and
+/// delegating to the inner handler. (a2a-rs 0.5.3's `InterceptedHandler` does not implement
+/// `RequestHandler`, so it cannot be returned here.)
+#[cfg(feature = "a2a")]
+pub type A2AHandlerWrapper = Arc<
+    dyn Fn(
+            Arc<dyn gadk_a2a::a2a_server::RequestHandler>,
         ) -> Arc<dyn gadk_a2a::a2a_server::RequestHandler>
         + Send
         + Sync,
@@ -53,9 +69,14 @@ pub struct Config {
     pub memory_service: Option<Arc<dyn MemoryService>>,
     /// Go `AgentLoader`.
     pub agent_loader: Arc<dyn Loader>,
-    /// Go `A2AOptions`, applied in order to the `a2a` sub-launcher's request handler.
+    /// Go `A2AOptions` that configure the `a2a` sub-launcher's default request handler, applied
+    /// in order before [`Config::a2a_wrappers`].
     #[cfg(feature = "a2a")]
-    pub a2a_options: Vec<A2AHandlerHook>,
+    pub a2a_options: Vec<A2AHandlerOption>,
+    /// Go `A2AOptions` that wrap the `a2a` sub-launcher's request handler, applied in order
+    /// (each wraps the previous one) after [`Config::a2a_options`].
+    #[cfg(feature = "a2a")]
+    pub a2a_wrappers: Vec<A2AHandlerWrapper>,
     /// Go `PluginConfig`.
     pub plugin_config: gadk_engine::runner::PluginConfig,
     /// Go `TelemetryOptions`: extra `tracing` layers for the launcher's global subscriber (the
@@ -100,6 +121,8 @@ impl Config {
             agent_loader,
             #[cfg(feature = "a2a")]
             a2a_options: Vec::new(),
+            #[cfg(feature = "a2a")]
+            a2a_wrappers: Vec::new(),
             plugin_config: gadk_engine::runner::PluginConfig::default(),
             telemetry_layers: Vec::new(),
             #[cfg(feature = "web")]
