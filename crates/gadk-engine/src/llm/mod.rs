@@ -40,6 +40,27 @@ pub fn agent_tools(agent: &dyn Agent) -> Option<Vec<Arc<dyn Tool>>> {
     state::reveal(agent).map(|s| s.tools())
 }
 
+/// The instructions of an LLM agent (Go `llminternal.Reveal(agent).{Instruction,
+/// GlobalInstruction}`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AgentInstructions {
+    /// Go `State.Instruction`: the configured instruction plus whatever the engine appended to it
+    /// at run time (the live `task_completed` suffix).
+    pub instruction: String,
+    /// Go `State.GlobalInstruction`: the configured global instruction.
+    pub global_instruction: String,
+}
+
+/// The instructions of an LLM agent (Go `llminternal.Reveal(agent).{Instruction,
+/// GlobalInstruction}`); `None` for any other agent. The A2A agent card describes an agent with
+/// them.
+pub fn agent_instructions(agent: &dyn Agent) -> Option<AgentInstructions> {
+    state::reveal(agent).map(|s| AgentInstructions {
+        instruction: s.instruction(),
+        global_instruction: s.cfg.global_instruction.clone(),
+    })
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
@@ -73,5 +94,69 @@ mod tests {
         })
         .unwrap();
         assert!(agent_tools(&*seq).is_none());
+    }
+
+    #[test]
+    fn agent_instructions_returns_an_llm_agents_instructions_and_none_otherwise() {
+        let llm = agent::new(LlmAgentConfig {
+            name: "llm".into(),
+            instruction: "You answer questions.".into(),
+            global_instruction: "You are helpful.".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(
+            agent_instructions(&*llm),
+            Some(AgentInstructions {
+                instruction: "You answer questions.".into(),
+                global_instruction: "You are helpful.".into(),
+            })
+        );
+
+        let seq = sequential_agent::new(SequentialAgentConfig {
+            agent: AgentConfig {
+                name: "seq".into(),
+                sub_agents: vec![llm],
+                ..Default::default()
+            },
+        })
+        .unwrap();
+        assert!(agent_instructions(&*seq).is_none());
+    }
+
+    #[test]
+    fn agent_instructions_reads_the_configured_text_not_the_providers() {
+        let provider: InstructionProvider =
+            Arc::new(|_| Box::pin(async { Ok("dynamic".to_owned()) }));
+        let llm = agent::new(LlmAgentConfig {
+            name: "llm".into(),
+            instruction_provider: Some(provider.clone()),
+            global_instruction_provider: Some(provider),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(
+            agent_instructions(&*llm),
+            Some(AgentInstructions::default())
+        );
+    }
+
+    #[test]
+    fn agent_instructions_includes_the_appended_instruction_suffix() {
+        let llm = agent::new(LlmAgentConfig {
+            name: "llm".into(),
+            instruction: "Base.".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        state::reveal(&*llm)
+            .unwrap()
+            .instruction_suffix
+            .write()
+            .push_str(" Suffix.");
+        assert_eq!(
+            agent_instructions(&*llm).unwrap().instruction,
+            "Base. Suffix."
+        );
     }
 }

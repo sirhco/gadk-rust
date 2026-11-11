@@ -18,6 +18,11 @@
 //! The member crates are re-exported as modules; [`prelude`] gathers the common types for
 //! building and running agents.
 
+/// The Agent2Agent (A2A) protocol: serve a gadk agent over A2A (`a2a::server`) and use a remote
+/// A2A agent as a gadk agent (`a2a::remoteagent`), wire-compatible with ADK-Go (feature `a2a`, not
+/// on by default; re-export of `gadk-a2a`).
+#[cfg(feature = "a2a")]
+pub use gadk_a2a as a2a;
 pub use gadk_agent as agent;
 /// Claude models on the Anthropic Messages API and on Vertex AI (feature `anthropic`, not on
 /// by default; re-export of `gadk-anthropic`).

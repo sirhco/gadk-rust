@@ -840,7 +840,7 @@ class ThreeBTest(unittest.TestCase):
         err = io.StringIO()
         with contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
             pc.main(["--adk-go", str(self.go), "--repo", str(self.repo), "--ledger", "all", "--count"])
-        self.assertIn("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a, 4b, 4c or 5a", err.getvalue())
+        self.assertIn("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a, 4b, 4c, 5a or 5b", err.getvalue())
 
 
 LEDGER_4A = (
@@ -1066,6 +1066,96 @@ class FiveATest(unittest.TestCase):
             + " | covered by the router |",
             "| internal/telemetry/functionaltest/telemetry_schema_test.go | TestTelemetrySchema | ported | "
             + SCHEMA_DIR + "/main.rs | test_telemetry_schema |",
+        ])
+
+
+LEDGER_5B = (
+    "# Parity ledger — sub-project 5b\n\n"
+    "<!-- in-scope:\nserver/adka2a/v2/parts_test.go\nagent/remoteagent/v2/auth_test.go\n"
+    "server/adka2a/v2/example_test.go\n-->\n\n"
+    "<!-- deferred:\nagent/remoteagent/a2a_agent_compat_test.go: out of scope, not ported: v1\n-->\n\n"
+    + pc.TABLE_HEADER + "\n" + pc.TABLE_SEP + "\n"
+)
+
+PARTS_TARGET = "crates/gadk-a2a/tests/server_adka2a_v2_parts.rs"
+AUTH_DIR = "crates/gadk-a2a/src/parity_tests/agent_remoteagent_v2_auth"
+
+
+class FiveBTest(unittest.TestCase):
+    """5b: one crate; a `tests/` target, an in-crate module directory split between two tasks'
+    files (`auth_test.go`), an `Example`-only Go file without rows, and a v1 Go file kept out of
+    scope through the deferred block."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        d = pathlib.Path(self._tmp.name)
+        self.go, self.repo = d / "go", d / "repo"
+        for f, body in (
+            ("server/adka2a/v2/parts_test.go",
+             "func TestPartsTwoWayConversion(t *testing.T) {}\nfunc TestPartsSkip(t *testing.T) {}\n"),
+            ("agent/remoteagent/v2/auth_test.go",
+             "func TestMintGroupDedupes(t *testing.T) {}\nfunc TestAuthCoversTheCardFetchOnce(t *testing.T) {}\n"),
+            ("server/adka2a/v2/example_test.go", "func Example() {}\n"),
+            ("agent/remoteagent/a2a_agent_compat_test.go", "func TestCompat(t *testing.T) {}\n"),
+        ):
+            (self.go / f).parent.mkdir(parents=True, exist_ok=True)
+            (self.go / f).write_text("package x\n" + body)
+        (self.repo / PARTS_TARGET).parent.mkdir(parents=True, exist_ok=True)
+        (self.repo / AUTH_DIR).mkdir(parents=True)
+        (self.repo / PARTS_TARGET).write_text(
+            "#[test]\nfn test_parts_two_way_conversion() {}\n"
+            "// parity: skipped TestPartsSkip: no such API\n")
+        (self.repo / AUTH_DIR / "mod.rs").write_text("mod agent;\nmod transport;\n")
+        (self.repo / AUTH_DIR / "transport.rs").write_text("#[tokio::test]\nasync fn test_mint_group_dedupes() {}\n")
+        (self.repo / AUTH_DIR / "agent.rs").write_text(
+            "// parity: adapted: the card is fetched by gadk-a2a\n#[tokio::test]\n"
+            "async fn test_auth_covers_the_card_fetch_once() {}\n")
+        (self.repo / "docs/parity").mkdir(parents=True)
+        self.ledger = self.repo / "docs/parity/5b.md"
+        self.ledger.write_text(LEDGER_5B)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def run_cli(self, *args):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = pc.main(["--adk-go", str(self.go), "--repo", str(self.repo), *args])
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_ledger_5b_is_registered(self):
+        self.assertIn("5b", pc.GENERATED_LEDGERS)
+        self.assertEqual(self.run_cli("--ledger", "5b", "--count"), (0, "4\n", ""))
+
+    def test_stub_targets_report_missing_tests(self):
+        (self.repo / AUTH_DIR / "agent.rs").write_text("//! Filled by a later task.\n")
+        rc, out, err = self.run_cli("--ledger", "5b")
+        self.assertEqual((rc, out), (1, ""))
+        self.assertIn(
+            "agent/remoteagent/v2/auth_test.go TestAuthCoversTheCardFetchOnce: missing (no fn"
+            " test_auth_covers_the_card_fetch_once and no `// parity: skipped TestAuthCoversTheCardFetchOnce:`"
+            " in " + AUTH_DIR + "/)", err)
+
+    def test_the_out_of_scope_file_cannot_be_in_scope(self):
+        self.ledger.write_text(LEDGER_5B.replace(
+            "server/adka2a/v2/example_test.go\n", "server/adka2a/v2/example_test.go\n"
+            "agent/remoteagent/a2a_agent_compat_test.go\n"))
+        rc, _, err = self.run_cli("--ledger", "5b")
+        self.assertEqual(rc, 1)
+        self.assertIn("file is both in-scope and deferred: agent/remoteagent/a2a_agent_compat_test.go", err)
+
+    def test_targets_generate_and_check(self):
+        self.assertEqual(self.run_cli("--ledger", "5b", "--generate")[0], 0)
+        self.assertEqual(self.run_cli("--ledger", "5b"), (0, "", ""))
+        rows = self.ledger.read_text().splitlines()[-4:]
+        self.assertEqual(rows, [
+            "| server/adka2a/v2/parts_test.go | TestPartsTwoWayConversion | ported | " + PARTS_TARGET
+            + " | test_parts_two_way_conversion |",
+            "| server/adka2a/v2/parts_test.go | TestPartsSkip | skipped | " + PARTS_TARGET + " | no such API |",
+            "| agent/remoteagent/v2/auth_test.go | TestMintGroupDedupes | ported | " + AUTH_DIR
+            + "/transport.rs | test_mint_group_dedupes |",
+            "| agent/remoteagent/v2/auth_test.go | TestAuthCoversTheCardFetchOnce | ported (adapted: the card"
+            " is fetched by gadk-a2a) | " + AUTH_DIR + "/agent.rs | test_auth_covers_the_card_fetch_once |",
         ])
 
 
@@ -1320,6 +1410,14 @@ class RealTreeTest(unittest.TestCase):
         self.assertEqual(deferred, {})
         self.assertEqual(pc.count(ADK_GO, in_scope), 246)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "5a"), [])
+
+    def test_5b_count_is_145(self):
+        in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/5b.md")
+        self.assertEqual(len(in_scope), 16)
+        self.assertEqual(sorted({f.split("/")[0] for f in in_scope}), ["agent", "internal", "server"])
+        self.assertEqual(list(deferred), ["agent/remoteagent/a2a_agent_compat_test.go"])
+        self.assertEqual(pc.count(ADK_GO, in_scope), 145)
+        self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "5b"), [])
 
 
 if __name__ == "__main__":
