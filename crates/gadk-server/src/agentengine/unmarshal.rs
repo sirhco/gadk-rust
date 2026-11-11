@@ -119,6 +119,48 @@ pub(crate) fn is_server_error(err: &str) -> bool {
     err.starts_with(DECODER_UNAVAILABLE)
 }
 
+/// The prefix of an [`on_deep_stack`] error when the thread cannot be spawned (no Go
+/// counterpart: Go's stacks grow).
+const DEEP_STACK_UNAVAILABLE: &str = "agentengine: deep-stack thread unavailable";
+
+/// The prefix of an [`on_deep_stack`] error when `f` panicked on the thread.
+const DEEP_STACK_FAILED: &str = "agentengine: deep-stack thread failed";
+
+/// Whether `payload`'s nesting is past what is decoded, cloned and dropped on the caller's stack
+/// ([`INLINE_DEPTH`]); a value decoded from such a payload is handled through [`on_deep_stack`].
+pub(crate) fn needs_deep_stack(payload: &[u8]) -> bool {
+    !matches!(nesting(payload), Ok(depth) if depth <= INLINE_DEPTH)
+}
+
+/// `f(value)` on a thread with a [`DEEP_STACK`] stack (the caller blocks until it returns), for
+/// work that recurses once per nesting level of `value` (encoding, cloning, `Debug`, dropping): Go
+/// grows goroutine stacks, a Rust stack overflow aborts the process. `value` (and whatever `f`
+/// does not return) is dropped on that thread. `Err` when the thread cannot be spawned
+/// (`agentengine: deep-stack thread unavailable: <e>`; `value` is then leaked, never dropped on
+/// the caller's stack) or `f` panics (`agentengine: deep-stack thread failed: the thread
+/// panicked`; `value` was moved to the thread and dropped there while unwinding).
+pub(crate) fn on_deep_stack<T, R, F>(value: T, f: F) -> Result<R, String>
+where
+    T: Send,
+    R: Send,
+    F: FnOnce(T) -> R + Send,
+{
+    let mut slot = Some(value);
+    let out = std::thread::scope(|scope| {
+        let slot = &mut slot;
+        let worker = spawn_deep(scope, move || slot.take().map(f))
+            .map_err(|e| format!("{DEEP_STACK_UNAVAILABLE}: {e}"))?;
+        worker
+            .join()
+            .map_err(|_| format!("{DEEP_STACK_FAILED}: the thread panicked"))
+    });
+    if let Some(value) = slot {
+        // Not run: dropping it here could overflow this stack.
+        std::mem::forget(value);
+    }
+    out?.ok_or_else(|| format!("{DEEP_STACK_FAILED}: the value was not passed"))
+}
+
 #[cfg(test)]
 thread_local! {
     /// Tests: make the next deep-input decoder spawn on this thread fail.
