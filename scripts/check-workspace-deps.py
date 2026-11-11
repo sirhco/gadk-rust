@@ -45,6 +45,10 @@
   (feature `web`) and `gadk-a2a` (feature `a2a`); it is the fifth crate that may depend on
   `gadk-engine`, and only the façade depends on it (feature `launcher`). `gadk-genai` depends on
   `gadk-platform` for the Go duration port.
+- 5c: `gadk-agentregistry` depends on exactly `gadk-agent`, `gadk-auth`, `gadk-platform` and,
+  optionally, `gadk-a2a` (feature `a2a`, client only) and `gadk-mcp` (feature `mcp`); it may
+  dev-depend on `gadk-engine` (the remote-agent e2e port), and only the façade depends on it
+  (feature `agentregistry`).
 """
 import pathlib, sys, tomllib
 
@@ -75,6 +79,7 @@ ALLOWED = {
                  "gadk-platform", "gadk-server"},
     "gadk-launcher": {"gadk-agent", "gadk-engine", "gadk-session", "gadk-artifact", "gadk-memory",
                       "gadk-genai", "gadk-model", "gadk-platform", "gadk-server", "gadk-a2a"},
+    "gadk-agentregistry": {"gadk-agent", "gadk-auth", "gadk-platform", "gadk-a2a", "gadk-mcp"},
     "gadk": {"gadk-genai", "gadk-platform", "gadk-model", "gadk-session", "gadk-gemini",
              "gadk-agent", "gadk-engine", "gadk-tools", "gadk-auth", "gadk-mcp", "gadk-artifact",
              "gadk-memory", "gadk-anthropic", "gadk-openai", "gadk-session-database",
@@ -82,9 +87,11 @@ ALLOWED = {
 }
 # (crate, dependency) normal edges that must be `optional = true`.
 OPTIONAL = {("gadk-engine", "gadk-gemini"), ("gadk-engine", "gadk-httprr"), ("gadk-a2a", "gadk-server"),
-            ("gadk-launcher", "gadk-server"), ("gadk-launcher", "gadk-a2a")}
+            ("gadk-launcher", "gadk-server"), ("gadk-launcher", "gadk-a2a"),
+            ("gadk-agentregistry", "gadk-a2a"), ("gadk-agentregistry", "gadk-mcp")}
 FACADE = "gadk"  # no crate may dev-depend on the façade
-ENGINE_DEPENDENTS = ("gadk", "gadk-tools", "gadk-server", "gadk-a2a", "gadk-launcher")  # the only crates that may depend on gadk-engine
+ENGINE_DEPENDENTS = ("gadk", "gadk-tools", "gadk-server", "gadk-a2a", "gadk-launcher",
+                     "gadk-agentregistry")  # the only crates that may depend on gadk-engine
 TOOLS_DEPENDENT = "gadk"  # the only crate that may depend on gadk-tools
 OPENAI_DEPENDENT = "gadk"  # the only crate that may depend on gadk-openai (3b)
 
@@ -136,7 +143,7 @@ def check(repo):
             if d == name:
                 continue
             if d == "gadk-engine" and name not in ENGINE_DEPENDENTS:
-                errs.append(f"{rel}: only gadk, gadk-tools, gadk-server, gadk-a2a and gadk-launcher may depend on gadk-engine (dev-dependency)")
+                errs.append(f"{rel}: only gadk, gadk-tools, gadk-server, gadk-a2a, gadk-launcher and gadk-agentregistry may depend on gadk-engine (dev-dependency)")
             elif d == "gadk-tools" and name != TOOLS_DEPENDENT:
                 errs.append(f"{rel}: only {TOOLS_DEPENDENT} may depend on gadk-tools (dev-dependency)")
             elif d == "gadk-openai" and name != OPENAI_DEPENDENT:
