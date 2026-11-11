@@ -62,8 +62,9 @@ enum Durations {
 /// [`encode_shapes`](super::encode_shapes), e.g. `MODELS_QUERY`), producing the Rust model `T`:
 ///
 /// 1. syntax: the whole input must be one JSON value (Go `checkValid`); an empty or truncated
-///    input is `unexpected end of JSON input`; any other syntax error keeps serde_json's text
-///    (ledgered, as in 5a);
+///    input is `unexpected end of JSON input`; nesting deeper than Go's limit (10000 arrays and
+///    objects) is `exceeded max depth`, unless a syntax error comes earlier in the input; any
+///    other syntax error keeps serde_json's text (ledgered, as in 5a);
 /// 2. keys: in each JSON object decoded into a struct (`GoKind::Struct`, also through
 ///    `Pointer`/`Slice`/`Map` elements and into genai structs), a key matches the field whose
 ///    json name (tag name, else Go name) equals it exactly, else case-insensitively (Go
@@ -83,10 +84,104 @@ enum Durations {
 ///    string for `[]byte` appends `: illegal base64 data at input byte <n>`; the first error in
 ///    input order wins;
 /// 4. the canonicalized value is deserialized into `T` (its serde names are the json names).
-pub(crate) fn go_unmarshal<T: DeserializeOwned>(
+///
+/// Go's goroutine stacks grow, so Go decodes the deepest input it accepts; the walk here, serde's
+/// `Value` deserialization and `Value`'s drop recurse once per level, so an input nested deeper
+/// than [`INLINE_DEPTH`] is decoded on a thread with a [`DEEP_STACK`] stack. A `T` holding such
+/// a value must not be dropped natively on a small stack either: see [`drop_value`].
+pub(crate) fn go_unmarshal<T: DeserializeOwned + Send>(
     payload: &[u8],
     shape: &'static GoStruct,
 ) -> Result<T, String> {
+    let depth = match nesting(payload) {
+        Ok(depth) => depth,
+        Err(at) => return Err(too_deep(payload, at)),
+    };
+    if depth <= INLINE_DEPTH {
+        return decode(payload, shape);
+    }
+    std::thread::scope(|scope| {
+        let worker = std::thread::Builder::new()
+            .stack_size(DEEP_STACK)
+            .spawn_scoped(scope, || decode(payload, shape))
+            .map_err(|e| e.to_string())?;
+        worker
+            .join()
+            .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+    })
+}
+
+/// Go's nesting limit (`encoding/json`, Go 1.27: `exceeded max depth` past 10000 arrays and
+/// objects, the top-level value included).
+const MAX_DEPTH: usize = 10_000;
+
+/// The deepest input decoded on the caller's stack.
+const INLINE_DEPTH: usize = 64;
+
+/// The stack for deeper inputs (a debug build needs about 1.5 KiB per level).
+const DEEP_STACK: usize = 64 << 20;
+
+/// The maximum nesting depth of `payload`'s arrays and objects (brackets inside strings not
+/// counted), or `Err(offset)` of the first opener past [`MAX_DEPTH`]. Only meaningful for valid
+/// input; [`too_deep`] and serde's validation take care of the rest.
+fn nesting(payload: &[u8]) -> Result<usize, usize> {
+    let (mut depth, mut max) = (0usize, 0usize);
+    let (mut in_string, mut escaped) = (false, false);
+    for (at, &b) in payload.iter().enumerate() {
+        if in_string {
+            match b {
+                _ if escaped => escaped = false,
+                b'\\' => escaped = true,
+                b'"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match b {
+            b'"' => in_string = true,
+            b'[' | b'{' => {
+                depth += 1;
+                if depth > MAX_DEPTH {
+                    return Err(at);
+                }
+                max = max.max(depth);
+            }
+            b']' | b'}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    Ok(max)
+}
+
+/// The error for an input whose opener at `at` is past [`MAX_DEPTH`]: Go reports the first error
+/// in input order, so a syntax error before it (serde's text, or trailing characters after a
+/// complete value) wins over `exceeded max depth`.
+fn too_deep(payload: &[u8], at: usize) -> String {
+    let prefix = payload.get(..at).unwrap_or_default();
+    match serde_json::from_slice::<&RawValue>(prefix) {
+        Err(e) if !e.is_eof() => e.to_string(),
+        Err(_) => "exceeded max depth".to_owned(),
+        Ok(_) => serde_json::from_slice::<&RawValue>(payload)
+            .err()
+            .map_or_else(|| "exceeded max depth".to_owned(), |e| e.to_string()),
+    }
+}
+
+/// Drops a JSON value without recursing per level (`Value`'s own drop overflows a 2 MiB stack
+/// in a debug build at a few thousand levels; [`go_unmarshal`] accepts 10000).
+pub(crate) fn drop_value(value: Value) {
+    let mut stack = vec![value];
+    while let Some(value) = stack.pop() {
+        match value {
+            Value::Array(items) => stack.extend(items),
+            Value::Object(members) => stack.extend(members.into_iter().map(|(_, v)| v)),
+            _ => {}
+        }
+    }
+}
+
+/// [`go_unmarshal`] on the current stack, after the depth check.
+fn decode<T: DeserializeOwned>(payload: &[u8], shape: &'static GoStruct) -> Result<T, String> {
     let raw: &RawValue = serde_json::from_slice(payload).map_err(|e| {
         if e.is_eof() {
             "unexpected end of JSON input".to_owned()
@@ -365,6 +460,10 @@ fn int_bits(go_type: &str) -> u32 {
 /// A JSON number literal as a Go integer of `bits` (signed or not), or `None` when it has a
 /// fraction or exponent or is out of range (Go `strconv.ParseInt` / `ParseUint` on the text).
 fn parse_int(text: &str, bits: u32, signed: bool) -> Option<Number> {
+    // Go `ParseUint` rejects any sign, `-0` included.
+    if !signed && text.starts_with('-') {
+        return None;
+    }
     let digits = text.strip_prefix('-').unwrap_or(text);
     if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
         return None;
@@ -385,15 +484,77 @@ fn parse_int(text: &str, bits: u32, signed: bool) -> Option<Number> {
     }
 }
 
-/// A JSON number literal as a float (`f32` range for `float32`), keeping integers integral.
+/// A JSON number literal as a float, keeping integers integral; `None` when it rounds to ±Inf
+/// (Go `strconv.ParseFloat(text, 64 or 32)`: `3.4028235e38` is `float32`'s max, `3.40282357e38`
+/// overflows).
 fn parse_float(text: &str, float32: bool) -> Option<Number> {
     let f: f64 = text.parse().ok()?;
-    if !f.is_finite() || (float32 && f.abs() > f64::from(f32::MAX)) {
+    if !f.is_finite() || (float32 && !text.parse::<f32>().ok()?.is_finite()) {
         return None;
     }
     match serde_json::from_str::<Value>(text) {
         Ok(Value::Number(n)) => Some(n),
         _ => Number::from_f64(f),
+    }
+}
+
+/// A cursor over JSON text that serde has already validated.
+struct Cursor<'a> {
+    text: &'a str,
+    at: usize,
+}
+
+impl<'a> Cursor<'a> {
+    /// The next non-whitespace byte (the cursor moves to it).
+    fn peek(&mut self) -> Result<u8, String> {
+        let bytes = self.text.as_bytes();
+        while let Some(b' ' | b'\t' | b'\n' | b'\r') = bytes.get(self.at) {
+            self.at += 1;
+        }
+        bytes
+            .get(self.at)
+            .copied()
+            .ok_or_else(|| "unexpected end of JSON input".to_owned())
+    }
+
+    fn bump(&mut self) {
+        self.at += 1;
+    }
+
+    /// The string token at the cursor, unescaped by serde (its error text as before).
+    fn string(&mut self) -> Result<String, String> {
+        let bytes = self.text.as_bytes();
+        let start = self.at;
+        let mut end = start + 1;
+        while let Some(&b) = bytes.get(end) {
+            match b {
+                b'\\' => end += 2,
+                b'"' => break,
+                _ => end += 1,
+            }
+        }
+        self.at = end + 1;
+        let token = self.text.get(start..self.at).unwrap_or_default();
+        serde_json::from_str(token).map_err(|e| e.to_string())
+    }
+
+    /// An object key and its `:`.
+    fn key(&mut self) -> Result<String, String> {
+        self.peek()?;
+        let key = self.string()?;
+        self.peek()?;
+        self.bump();
+        Ok(key)
+    }
+
+    /// The number token at the cursor.
+    fn number(&mut self) -> &'a str {
+        let bytes = self.text.as_bytes();
+        let start = self.at;
+        while let Some(b'0'..=b'9' | b'-' | b'+' | b'.' | b'e' | b'E') = bytes.get(self.at) {
+            self.at += 1;
+        }
+        self.text.get(start..self.at).unwrap_or_default()
     }
 }
 
@@ -633,36 +794,114 @@ impl Decoder {
 
     /// Go's `any` value: objects, arrays, strings, bools and numbers as JSON has them (`None`
     /// for null); a number outside the `float64` range is `number <text>` of type `float64`.
+    ///
+    /// One pass over the (already validated) text with an explicit stack: an `any` value may be
+    /// nested 10000 deep, so neither native recursion nor re-splitting each level (quadratic in
+    /// the depth) is used here.
     fn interface_value(&mut self, raw: &RawValue) -> Result<Option<Value>, String> {
-        Ok(Some(match node(raw)? {
-            Node::Null => return Ok(None),
-            Node::Bool(b) => Value::Bool(b),
-            Node::String(s) => Value::String(s),
-            Node::Number(text) => match parse_float(text, false) {
-                Some(n) => Value::Number(n),
-                None => return Err(self.type_error(&format!("number {text}"), "float64")),
-            },
-            Node::Array(items) => {
-                let mut out = Vec::with_capacity(items.len());
-                for (i, item) in items.into_iter().enumerate() {
-                    self.path.push(Seg::Index(i));
-                    let result = self.interface_value(item);
-                    self.path.pop();
-                    out.push(result?.unwrap_or(Value::Null));
+        let base = self.path.len();
+        let result = self.interface_walk(raw.get());
+        self.path.truncate(base);
+        result.map(|v| (!v.is_null()).then_some(v))
+    }
+
+    /// [`Self::interface_value`]'s walk; leaves `self.path` extended on error.
+    fn interface_walk(&mut self, text: &str) -> Result<Value, String> {
+        /// An open array or object: its members so far and, for an object, the current key.
+        enum Open {
+            Array(Vec<Value>),
+            Object(Map<String, Value>, String),
+        }
+        let mut cur = Cursor { text, at: 0 };
+        let mut open: Vec<Open> = Vec::new();
+        loop {
+            // One value at the cursor; an array or object with members opens a level.
+            let mut value = match cur.peek()? {
+                b'[' => {
+                    cur.bump();
+                    if cur.peek()? == b']' {
+                        cur.bump();
+                        Value::Array(Vec::new())
+                    } else {
+                        open.push(Open::Array(Vec::new()));
+                        self.path.push(Seg::Index(0));
+                        continue;
+                    }
                 }
-                Value::Array(out)
-            }
-            Node::Object(pairs) => {
-                let mut out = Map::new();
-                for (key, item) in pairs {
-                    self.path.push(Seg::Key(key.clone()));
-                    let result = self.interface_value(item);
-                    self.path.pop();
-                    out.insert(key, result?.unwrap_or(Value::Null));
+                b'{' => {
+                    cur.bump();
+                    if cur.peek()? == b'}' {
+                        cur.bump();
+                        Value::Object(Map::new())
+                    } else {
+                        let key = cur.key()?;
+                        self.path.push(Seg::Key(key.clone()));
+                        open.push(Open::Object(Map::new(), key));
+                        continue;
+                    }
                 }
-                Value::Object(out)
+                b'"' => Value::String(cur.string()?),
+                b't' => {
+                    cur.at += 4;
+                    Value::Bool(true)
+                }
+                b'f' => {
+                    cur.at += 5;
+                    Value::Bool(false)
+                }
+                b'n' => {
+                    cur.at += 4;
+                    Value::Null
+                }
+                _ => {
+                    let text = cur.number();
+                    match parse_float(text, false) {
+                        Some(n) => Value::Number(n),
+                        None => return Err(self.type_error(&format!("number {text}"), "float64")),
+                    }
+                }
+            };
+            // Attach the value to its parent; close every level it completes.
+            loop {
+                match open.last_mut() {
+                    None => return Ok(value),
+                    Some(Open::Array(items)) => {
+                        items.push(value);
+                        if cur.peek()? == b',' {
+                            cur.bump();
+                            if let Some(seg) = self.path.last_mut() {
+                                *seg = Seg::Index(items.len());
+                            }
+                            break;
+                        }
+                        cur.bump();
+                        self.path.pop();
+                        let Some(Open::Array(items)) = open.pop() else {
+                            unreachable!("the top frame is an array")
+                        };
+                        value = Value::Array(items);
+                    }
+                    Some(Open::Object(members, key)) => {
+                        members.insert(std::mem::take(key), value);
+                        if cur.peek()? == b',' {
+                            cur.bump();
+                            let next = cur.key()?;
+                            if let Some(seg) = self.path.last_mut() {
+                                *seg = Seg::Key(next.clone());
+                            }
+                            *key = next;
+                            break;
+                        }
+                        cur.bump();
+                        self.path.pop();
+                        let Some(Open::Object(members, _)) = open.pop() else {
+                            unreachable!("the top frame is an object")
+                        };
+                        value = Value::Object(members);
+                    }
+                }
             }
-        }))
+        }
     }
 }
 
@@ -672,6 +911,8 @@ mod tests {
 
     use gadk_genai::{Content, Part};
     use pretty_assertions::assert_eq;
+
+    use super::super::encode::GoField;
     use serde_json::json;
 
     use super::super::encode_shapes::{
@@ -1059,6 +1300,151 @@ mod tests {
                 decode(shape, payload),
                 Err((*want).to_owned()),
                 "payload {payload}"
+            );
+        }
+    }
+
+    /// Runs `f` on a thread with a tokio worker's default 2 MiB stack.
+    fn on_small_stack(f: impl FnOnce() + Send + 'static) {
+        std::thread::Builder::new()
+            .stack_size(2 << 20)
+            .spawn(f)
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    fn arrays(depth: usize) -> String {
+        format!("{}{}", "[".repeat(depth), "]".repeat(depth))
+    }
+
+    fn input(value: &str) -> String {
+        format!(r#"{{"class_method":"x","input":{value}}}"#)
+    }
+
+    /// Go 1.27.2: 9999 levels inside the top-level object decode, 10000 are `exceeded max
+    /// depth`; the deepest accepted input decodes (and is dropped) on a 2 MiB stack.
+    #[test]
+    fn go_max_depth_decodes_on_a_2_mib_stack() {
+        on_small_stack(|| {
+            let q: Query = go_unmarshal(input(&arrays(9999)).as_bytes(), &MODELS_QUERY).unwrap();
+            assert_eq!(q.class_method, "x");
+            let mut depth = 0;
+            let mut v = q.input.as_ref().unwrap();
+            while let Value::Array(items) = v {
+                depth += 1;
+                match items.first() {
+                    Some(first) => v = first,
+                    None => break,
+                }
+            }
+            assert_eq!(depth, 9999);
+            drop_value(q.input.unwrap());
+
+            let objects = format!("{}1{}", r#"{"a":"#.repeat(9999), "}".repeat(9999));
+            let q: Query = go_unmarshal(input(&objects).as_bytes(), &MODELS_QUERY).unwrap();
+            drop_value(q.input.unwrap());
+
+            assert_eq!(
+                go_unmarshal::<Query>(input(&arrays(10000)).as_bytes(), &MODELS_QUERY).unwrap_err(),
+                "exceeded max depth"
+            );
+        });
+    }
+
+    /// Go reports the depth error where it reaches it: before type errors, truncation and
+    /// trailing characters that come later, after syntax errors that come earlier.
+    #[test]
+    fn exceeded_max_depth_is_the_first_error_in_input_order() {
+        on_small_stack(|| {
+            let deep = arrays(10000);
+            let err = |payload: &str| go_unmarshal::<Query>(payload.as_bytes(), &MODELS_QUERY);
+            for payload in [
+                format!(r#"{{"class_method":5,"input":{deep}}}"#),
+                format!(r#"{{"class_method":"x","input":{}"#, "[".repeat(10001)),
+                format!("{}x", input(&deep)),
+                format!(r#"{{"zz":{deep}}}"#),
+                arrays(10001),
+                input(&format!("[1e400,{deep}]")),
+            ] {
+                assert_eq!(err(&payload).unwrap_err(), "exceeded max depth");
+            }
+            assert_eq!(
+                err(&arrays(10000)).unwrap_err(),
+                "json: cannot unmarshal array into Go value of type models.Query"
+            );
+            // An earlier syntax error keeps serde's text, as for a shallow input.
+            assert_eq!(
+                err(&format!(r#"{{"class_method" 5,"input":{deep}}}"#)).unwrap_err(),
+                err(r#"{"class_method" 5,"input":[]}"#).unwrap_err()
+            );
+            assert_eq!(
+                err(&format!("{{}} {}", "[".repeat(10001))).unwrap_err(),
+                err("{} [").unwrap_err()
+            );
+        });
+    }
+
+    /// A Go struct `main.T { U uint8; B []byte; F float32 }` (the shape of the Go 1.27.2 probe).
+    const PROBE_T: GoStruct = GoStruct {
+        go_type: "main.T",
+        fields: &[
+            GoField {
+                name: "U",
+                tag: "u",
+                embedded: false,
+                exported: true,
+                go_type: "uint8",
+                kind: GoKind::Uint,
+            },
+            GoField {
+                name: "B",
+                tag: "b",
+                embedded: false,
+                exported: true,
+                go_type: "[]uint8",
+                kind: GoKind::Bytes,
+            },
+            GoField {
+                name: "F",
+                tag: "f",
+                embedded: false,
+                exported: true,
+                go_type: "float32",
+                kind: GoKind::Float32,
+            },
+        ],
+    };
+
+    /// Go 1.27.2: `ParseUint` rejects `-0`; `ParseFloat(s, 32)` fails only when `s` rounds to
+    /// ±Inf.
+    #[test]
+    fn unsigned_minus_zero_and_float32_range_as_go() {
+        let probe = |payload: &str| go_unmarshal::<Value>(payload.as_bytes(), &PROBE_T);
+        assert_eq!(
+            probe(r#"{"u":-0}"#).unwrap_err(),
+            "json: cannot unmarshal number -0 into Go struct field T.u of type uint8"
+        );
+        assert_eq!(
+            probe(r#"{"b":[-0]}"#).unwrap_err(),
+            "json: cannot unmarshal number -0 into T.b.0 of type uint8"
+        );
+        assert_eq!(
+            decode(
+                &MODELS_STREAM_QUERY_REQUEST,
+                r#"{"input":{"message":{"parts":[{"thoughtSignature":[-0]}]}}}"#
+            ),
+            Err("json: cannot unmarshal number -0 into StreamQueryRequest.input.message.parts.0.thoughtSignature.0 of type uint8".to_owned())
+        );
+        for ok in ["3.4028235e38", "-3.4028235e38", "3.4028235677973366e38"] {
+            assert!(probe(&format!(r#"{{"f":{ok}}}"#)).is_ok(), "{ok}");
+        }
+        for overflow in ["3.40282357e38", "3.4028235677973367e38"] {
+            assert_eq!(
+                probe(&format!(r#"{{"f":{overflow}}}"#)).unwrap_err(),
+                format!(
+                    "json: cannot unmarshal number {overflow} into Go struct field T.f of type float32"
+                )
             );
         }
     }

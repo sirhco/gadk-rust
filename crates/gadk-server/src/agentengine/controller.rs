@@ -27,7 +27,7 @@ use super::Log;
 use super::encode_shapes;
 use super::method::MethodHandler;
 use super::models::Query;
-use super::unmarshal::go_unmarshal;
+use super::unmarshal::{drop_value, go_unmarshal};
 use crate::mux::{Request, Response, WriteDeadline, http_error};
 
 /// Go `defaultSSETimeout`: the write deadline when none is configured.
@@ -119,7 +119,13 @@ impl Controller {
                 }
             };
             match go_unmarshal::<Query>(&payload, &encode_shapes::MODELS_QUERY) {
-                Ok(query) => class_method = query.class_method,
+                Ok(query) => {
+                    class_method = query.class_method;
+                    // `input` may be nested 10000 deep (Go's limit); its native drop is not.
+                    if let Some(input) = query.input {
+                        drop_value(input);
+                    }
+                }
                 Err(e) => return http_error(StatusCode::BAD_REQUEST, &e),
             }
         }
@@ -401,6 +407,41 @@ mod tests {
             )
         );
         assert!(lines.lock().unwrap().is_empty());
+    }
+
+    /// Go 1.27.2: 9999 levels inside the payload object dispatch, 10000 are `http.Error`
+    /// 400 `exceeded max depth`; on a tokio worker's default 2 MiB stack.
+    #[test]
+    fn go_max_depth_on_a_2_mib_stack() {
+        std::thread::Builder::new()
+            .stack_size(2 << 20)
+            .spawn(|| {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .build()
+                    .unwrap();
+                rt.block_on(async {
+                    let body = |depth: usize| {
+                        format!(
+                            r#"{{"class_method":"m","input":{}{}}}"#,
+                            "[".repeat(depth),
+                            "]".repeat(depth)
+                        )
+                    };
+                    let (c, lines) =
+                        controller(1 << 20, GoDuration(0), vec![Fake::new("m", Ok("ok"))]);
+                    let resp = c.query(post(Body::from(body(9999)))).await;
+                    assert_eq!(parts(resp).await, (200, vec![], "ok".to_owned()));
+                    let resp = c.query(post(Body::from(body(10000)))).await;
+                    assert_eq!(
+                        parts(resp).await,
+                        (400, http_error_headers(), "exceeded max depth\n".to_owned())
+                    );
+                    assert!(lines.lock().unwrap().is_empty());
+                });
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 
     #[tokio::test]
