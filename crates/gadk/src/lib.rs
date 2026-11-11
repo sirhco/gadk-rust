@@ -41,6 +41,12 @@ pub use gadk_engine as engine;
 #[cfg(feature = "gemini")]
 pub use gadk_gemini as gemini;
 pub use gadk_genai as genai;
+/// The ADK-Go launcher: run an agent from the command line in console mode or behind a web server
+/// with the REST API, A2A, the ADK web UI and the Pub/Sub and Eventarc triggers, with ADK-Go's
+/// command lines, flags and output (feature `launcher`, not on by default; re-export of
+/// `gadk-launcher`).
+#[cfg(feature = "launcher")]
+pub use gadk_launcher as launcher;
 /// Model Context Protocol tools: the tools of an MCP server as a toolset (feature `mcp`, on by
 /// default; re-export of `gadk-mcp`).
 #[cfg(feature = "mcp")]

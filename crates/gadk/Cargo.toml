@@ -34,6 +34,9 @@ server = ["dep:gadk-server", "gadk-a2a?/gadk-server"]
 # The Agent2Agent protocol: serve agents over A2A and use remote A2A agents (gadk-a2a); not in
 # `default`.
 a2a = ["dep:gadk-a2a"]
+# The ADK-Go launcher: console and web (REST API, A2A, web UI, triggers) sub-launchers
+# (gadk-launcher, its `full` preset); not in `default`.
+launcher = ["dep:gadk-launcher"]
 
 [dependencies]
 gadk-genai = { workspace = true }
@@ -56,6 +59,7 @@ gadk-session-database = { workspace = true, optional = true }
 gadk-vertexai = { workspace = true, optional = true }
 gadk-server = { workspace = true, optional = true }
 gadk-a2a = { workspace = true, optional = true }
+gadk-launcher = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

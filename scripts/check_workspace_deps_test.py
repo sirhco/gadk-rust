@@ -33,7 +33,7 @@ class EdgeTest(unittest.TestCase):
     def test_agent_dev_dependency_on_engine_is_rejected(self):
         self.edit("gadk-agent", "[dev-dependencies]\n", "[dev-dependencies]\ngadk-engine = { workspace = true }\n")
         errs = cwd.check(self.repo)
-        self.assertTrue(any("only gadk, gadk-tools, gadk-server and gadk-a2a may depend on gadk-engine" in e for e in errs), errs)
+        self.assertTrue(any("only gadk, gadk-tools, gadk-server, gadk-a2a and gadk-launcher may depend on gadk-engine" in e for e in errs), errs)
 
     def test_tools_dev_dependency_on_engine_is_allowed(self):
         text = (self.repo / "crates/gadk-tools/Cargo.toml").read_text()
@@ -157,8 +157,10 @@ class EdgeTest(unittest.TestCase):
         self.assertEqual(cwd.ALLOWED["gadk-server"],
                          {"gadk-agent", "gadk-engine", "gadk-session", "gadk-memory", "gadk-artifact",
                           "gadk-genai", "gadk-model", "gadk-platform"})
-        # 5b: gadk-a2a's optional `gadk-server` feature reads the authn `Caller`.
-        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-server" in deps], ["gadk-a2a", "gadk"])
+        # 5b: gadk-a2a's optional `gadk-server` feature reads the authn `Caller`; 6: the launcher's
+        # `web` feature serves the REST API.
+        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-server" in deps],
+                         ["gadk-a2a", "gadk-launcher", "gadk"])
         self.assertIn("gadk-server", cwd.ENGINE_DEPENDENTS)
 
     def test_server_dev_dependency_on_engine_is_allowed(self):
@@ -181,7 +183,8 @@ class EdgeTest(unittest.TestCase):
         self.assertEqual(cwd.ALLOWED["gadk-a2a"],
                          {"gadk-agent", "gadk-engine", "gadk-session", "gadk-genai", "gadk-model",
                           "gadk-auth", "gadk-platform", "gadk-server"})
-        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-a2a" in deps], ["gadk"])
+        # 6: the launcher's `a2a` feature serves A2A.
+        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-a2a" in deps], ["gadk-launcher", "gadk"])
         self.assertIn("gadk-a2a", cwd.ENGINE_DEPENDENTS)
         self.assertIn(("gadk-a2a", "gadk-server"), cwd.OPTIONAL)
 
@@ -205,6 +208,43 @@ class EdgeTest(unittest.TestCase):
         self.edit("gadk", "gadk-a2a = { workspace = true, optional = true }\n", "")
         errs = cwd.check(self.repo)
         self.assertTrue(any("gadk -> gadk-a2a is missing" in e for e in errs), errs)
+
+    def test_launcher_edges_are_the_engine_stack_plus_optional_server_and_a2a(self):
+        self.assertEqual(cwd.ALLOWED["gadk-launcher"],
+                         {"gadk-agent", "gadk-engine", "gadk-session", "gadk-artifact", "gadk-memory",
+                          "gadk-genai", "gadk-platform", "gadk-server", "gadk-a2a"})
+        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-launcher" in deps], ["gadk"])
+        self.assertIn("gadk-launcher", cwd.ENGINE_DEPENDENTS)
+        self.assertIn(("gadk-launcher", "gadk-server"), cwd.OPTIONAL)
+        self.assertIn(("gadk-launcher", "gadk-a2a"), cwd.OPTIONAL)
+
+    def test_launcher_server_edge_must_be_optional(self):
+        self.edit("gadk-launcher", "gadk-server = { workspace = true, optional = true }",
+                  "gadk-server = { workspace = true }")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-launcher -> gadk-server must be optional = true" in e for e in errs), errs)
+
+    def test_launcher_a2a_edge_must_be_optional(self):
+        self.edit("gadk-launcher", 'gadk-a2a = { workspace = true, optional = true, features = ["server"] }',
+                  'gadk-a2a = { workspace = true, features = ["server"] }')
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-launcher -> gadk-a2a must be optional = true" in e for e in errs), errs)
+
+    def test_launcher_dev_dependency_on_engine_is_allowed(self):
+        text = (self.repo / "crates/gadk-launcher/Cargo.toml").read_text()
+        dev = text.split("[dev-dependencies]\n", 1)[1]
+        self.assertIn('gadk-engine = { workspace = true, features = ["testutil"] }', dev)
+        self.assertEqual(cwd.check(self.repo), [])
+
+    def test_launcher_normal_dependency_on_tools_is_rejected(self):
+        self.edit("gadk-launcher", "[dependencies]\n", "[dependencies]\ngadk-tools = { workspace = true }\n")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-launcher -> gadk-tools is not allowed" in e for e in errs), errs)
+
+    def test_facade_missing_launcher_edge_is_rejected(self):
+        self.edit("gadk", "gadk-launcher = { workspace = true, optional = true }\n", "")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk -> gadk-launcher is missing" in e for e in errs), errs)
 
     def test_model_edges_are_unchanged_by_gcp_auth(self):
         self.assertEqual(cwd.ALLOWED["gadk-model"], {"gadk-genai"})
