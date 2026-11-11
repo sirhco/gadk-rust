@@ -139,17 +139,25 @@ pub(crate) fn needs_deep_stack(payload: &[u8]) -> bool {
 /// (`agentengine: deep-stack thread unavailable: <e>`; `value` is then leaked, never dropped on
 /// the caller's stack) or `f` panics (`agentengine: deep-stack thread failed: the thread
 /// panicked`; `value` was moved to the thread and dropped there while unwinding).
+///
+/// `f` runs under the caller's `tracing` dispatcher (so a thread-scoped subscriber,
+/// `set_default`/`with_default`, still sees it) and inside the caller's current span (so a span
+/// `f` opens has the parent it would have on the caller's stack).
 pub(crate) fn on_deep_stack<T, R, F>(value: T, f: F) -> Result<R, String>
 where
     T: Send,
     R: Send,
     F: FnOnce(T) -> R + Send,
 {
+    let dispatch = tracing::dispatcher::get_default(Clone::clone);
+    let parent = tracing::Span::current();
     let mut slot = Some(value);
     let out = std::thread::scope(|scope| {
         let slot = &mut slot;
-        let worker = spawn_deep(scope, move || slot.take().map(f))
-            .map_err(|e| format!("{DEEP_STACK_UNAVAILABLE}: {e}"))?;
+        let worker = spawn_deep(scope, move || {
+            tracing::dispatcher::with_default(&dispatch, || parent.in_scope(|| slot.take().map(f)))
+        })
+        .map_err(|e| format!("{DEEP_STACK_UNAVAILABLE}: {e}"))?;
         worker
             .join()
             .map_err(|_| format!("{DEEP_STACK_FAILED}: the thread panicked"))
@@ -192,10 +200,12 @@ where
 /// Go's limit (`encoding/json`, Go 1.27) is 10000. This is a temporary cap, ledgered in
 /// `docs/parity/5c.md`: past this crate, a request's message or session state is cloned,
 /// converted and dropped recursively (gadk-engine's runner, `gadk_model::to_go_json`, the
-/// session service), which overflows a 2 MiB stack at about 2000 levels in a debug build. A
-/// later housekeeping task makes those paths depth-safe and restores Go's 10000. The
-/// deep-stack machinery here ([`INLINE_DEPTH`], [`on_deep_stack`], [`drop_value`]) stays: it
-/// also guards the encoder against deep events.
+/// session service), which overflows a 2 MiB stack at about 900–1100 levels (debug build,
+/// scripted model, direct handler call). A later housekeeping task makes those paths depth-safe
+/// and restores Go's 10000. The deep-stack machinery here ([`INLINE_DEPTH`], [`on_deep_stack`],
+/// [`drop_value`]) stays: it also guards the stream encoder against deep events (only that one:
+/// `async_get_session` and `async_list_sessions` encode stored events with `to_go_json` on the
+/// caller's stack).
 pub(crate) const MAX_DEPTH: usize = 512;
 
 /// The deepest input decoded on the caller's stack.

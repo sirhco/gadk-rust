@@ -147,9 +147,11 @@ impl StreamQueryHandler {
 /// counterpart: Go's stacks grow; that thread being unavailable is the run's error).
 ///
 /// On the deep path `Runner::new` and `runner.run` run on that scoped OS thread, not the
-/// caller's tokio task: whatever they read from the current thread (no tokio runtime handle,
-/// `instrument_invocation`'s `in_workflow_scope()`, `tracing::Span::current()` parenting) sees
-/// the scoped thread. The returned stream is polled on the caller's task as usual.
+/// caller's tokio task, so there is no tokio runtime handle there. `on_deep_stack` carries the
+/// caller's `tracing` dispatcher and current span over: the `invoke_workflow` span that
+/// `instrument_invocation` opens (and its `in_workflow_scope()` check) sees the caller's span as
+/// parent and reaches a thread-scoped subscriber, as on the inline path. The returned stream is
+/// polled on the caller's task as usual.
 pub(crate) fn run_request<T, F>(deep: bool, req: T, run: F) -> Result<EventStream, String>
 where
     T: Send,
@@ -200,8 +202,9 @@ pub(crate) fn new_runner(
 /// Each item is handled, and dropped, on a large stack ([`on_deep_stack`]): its `Debug` dump,
 /// encoding and drop recurse once per nesting level, and an agent can yield an event as deep as
 /// Go's decoder allows (10000 levels; gadk caps requests at `unmarshal::MAX_DEPTH`, but an agent
-/// or a tool can build deeper content), which Go's growable stacks survive. The item's log texts are collected there and printed on the caller's task, in
-/// order. When that thread cannot be spawned (no Go counterpart) the item is leaked; when it
+/// or a tool can build deeper content), which Go's growable stacks survive. The item's log
+/// texts are collected there and printed on the caller's task, in order. When that thread
+/// cannot be spawned (no Go counterpart) the item is leaked; when it
 /// panics the item is dropped there; either way the stream ends with the error line
 /// `helper.EmitJSON() failed: <err>`.
 pub(crate) fn ndjson_response<F>(events: EventStream, log: Log, line: F) -> Response
