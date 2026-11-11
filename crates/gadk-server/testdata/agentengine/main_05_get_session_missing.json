@@ -1,0 +1,33 @@
+{
+  "name": "main_05_get_session_missing",
+  "config": "main",
+  "kind": "exchange",
+  "request": {
+    "method": "POST",
+    "target": "/reasoning_engine",
+    "headers": [
+      [
+        "Content-Type",
+        "application/json"
+      ]
+    ],
+    "body": "{\"class_method\":\"async_get_session\",\"input\":{\"user_id\":\"u1\",\"session_id\":\"nope\"}}"
+  },
+  "response": {
+    "status": 500,
+    "headers": [
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ],
+      [
+        "X-Content-Type-Options",
+        "nosniff"
+      ]
+    ],
+    "body": "c.sessionservice.Get() failed: session not found: \"nope\"\n"
+  },
+  "log": "handleQuery failed: c.sessionservice.Get() failed: session not found: \"nope\"\n",
+  "methods": null,
+  "compare": "exact"
+}

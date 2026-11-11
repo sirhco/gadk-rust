@@ -1,0 +1,37 @@
+{
+  "name": "main_12_stream_query_model_error",
+  "config": "main",
+  "kind": "exchange",
+  "request": {
+    "method": "POST",
+    "target": "/stream_reasoning_engine",
+    "headers": [
+      [
+        "Content-Type",
+        "application/json"
+      ]
+    ],
+    "body": "{\"class_method\":\"async_stream_query\",\"input\":{\"user_id\":\"u2\",\"session_id\":\"00000000-0000-4000-8000-000000000003\",\"message\":\"fail\"}}"
+  },
+  "response": {
+    "status": 200,
+    "headers": [
+      [
+        "Cache-Control",
+        "no-cache"
+      ],
+      [
+        "Connection",
+        "keep-alive"
+      ],
+      [
+        "Content-Type",
+        "application/json"
+      ]
+    ],
+    "body": "{\"error\":\"scripted model failure\"}\n"
+  },
+  "log": "error in events: scripted model failure\n",
+  "methods": null,
+  "compare": "exact"
+}

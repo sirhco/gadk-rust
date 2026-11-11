@@ -1,0 +1,33 @@
+{
+  "name": "main_19_unknown_method",
+  "config": "main",
+  "kind": "exchange",
+  "request": {
+    "method": "POST",
+    "target": "/reasoning_engine",
+    "headers": [
+      [
+        "Content-Type",
+        "application/json"
+      ]
+    ],
+    "body": "{\"class_method\":\"nope\",\"input\":{}}"
+  },
+  "response": {
+    "status": 500,
+    "headers": [
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ],
+      [
+        "X-Content-Type-Options",
+        "nosniff"
+      ]
+    ],
+    "body": "unrecognized class method: nope\n"
+  },
+  "log": "handleQuery failed: unrecognized class method: nope\n",
+  "methods": null,
+  "compare": "exact"
+}

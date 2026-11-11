@@ -1,0 +1,19 @@
+{
+  "name": "main_24_wrong_http_method",
+  "config": "main",
+  "kind": "exchange",
+  "request": {
+    "method": "GET",
+    "target": "/reasoning_engine",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 405,
+    "headers": [],
+    "body": ""
+  },
+  "log": "",
+  "methods": null,
+  "compare": "exact"
+}

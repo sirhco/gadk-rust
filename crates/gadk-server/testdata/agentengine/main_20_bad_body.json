@@ -1,0 +1,33 @@
+{
+  "name": "main_20_bad_body",
+  "config": "main",
+  "kind": "exchange",
+  "request": {
+    "method": "POST",
+    "target": "/reasoning_engine",
+    "headers": [
+      [
+        "Content-Type",
+        "application/json"
+      ]
+    ],
+    "body": "{\"class_method\":5}"
+  },
+  "response": {
+    "status": 400,
+    "headers": [
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ],
+      [
+        "X-Content-Type-Options",
+        "nosniff"
+      ]
+    ],
+    "body": "json: cannot unmarshal number into Go struct field Query.class_method of type string\n"
+  },
+  "log": "",
+  "methods": null,
+  "compare": "exact"
+}
