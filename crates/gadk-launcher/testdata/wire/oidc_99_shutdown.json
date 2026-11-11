@@ -1,0 +1,25 @@
+{
+  "name": "oidc_99_shutdown",
+  "server": "oidc",
+  "launcher": "full",
+  "args": [
+    "web",
+    "-port",
+    "<port>",
+    "pubsub",
+    "-oidc_audience",
+    "https://example.com/push",
+    "-oidc_service_accounts",
+    "push@example.iam.gserviceaccount.com",
+    "eventarc"
+  ],
+  "kind": "shutdown",
+  "request": null,
+  "response": null,
+  "log": [
+    "<ts> Shutting down the web server..."
+  ],
+  "exit_status": 0,
+  "stdout": "",
+  "error": null
+}

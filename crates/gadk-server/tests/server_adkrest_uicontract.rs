@@ -16,10 +16,14 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 //! Port of Go `server/adkrest/uicontract_test.go`: every endpoint the ADK web UI calls reaches a
-//! handler on a real server (half 1). Half 2 reads the Angular bundle ADK-Go embeds; gadk ships
-//! no web UI, so only the golden list and half 1 are ported.
+//! handler on a real server (half 1), and the golden list is still in step with the Angular
+//! bundle gadk-launcher vendors byte for byte from ADK-Go (half 2). Half 2 reads the bundle from
+//! disk (`../gadk-launcher/webui/distr`, as Go's `readUIBundle` reads a relative path), so
+//! gadk-server takes no dependency on gadk-launcher.
 
-use std::sync::Arc;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock};
 
 use axum::body::Body;
 use gadk_agent::{Context, SingleLoader};
@@ -30,6 +34,7 @@ use gadk_memory::InMemoryMemoryService;
 use gadk_server::rest::{DebugApiConfig, Server, ServerConfig};
 use gadk_session::InMemorySessionService;
 use http::{Method, StatusCode};
+use regex::Regex;
 use tower::ServiceExt;
 
 /// Go `uiEndpoint`: one request the ADK web UI makes.
@@ -286,4 +291,230 @@ async fn test_ui_contract_every_ui_endpoint_routes() {
     }
 }
 
-// parity: skipped TestUIContractGoldenListMatchesBundle: it reads the Angular bundle embedded in ADK-Go's cmd/launcher/web/webui/distr; gadk ships no web UI bundle, so there is nothing to extract from
+/// Go `placeholderRE`: one `{name}` placeholder in a golden template.
+static PLACEHOLDER_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{[a-z_]+\}").unwrap());
+
+/// Go `canonicalTemplate`: the query string dropped and every placeholder collapsed to `{}` (the
+/// bundle is minified, so only the shape of a path is stable).
+fn canonical_template(tmpl: &str) -> String {
+    let path = tmpl.split_once('?').map_or(tmpl, |(p, _)| p);
+    PLACEHOLDER_RE.replace_all(path, "{}").into_owned()
+}
+
+/// Go `bundleDir`: the web UI bundle gadk-launcher embeds, relative to this package.
+fn bundle_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../gadk-launcher/webui/distr")
+}
+
+/// Go `bundleCallSite`: one family of API calls in the Angular bundle. `min_matches` is a floor
+/// so a bundle refresh that changes how URLs are built fails loudly; `fixed_method` is the verb
+/// of a site whose method is not written next to the URL.
+struct BundleCallSite {
+    name: &'static str,
+    pattern: Regex,
+    min_matches: usize,
+    fixed_method: Option<&'static str>,
+}
+
+/// Go `urlChars`: the body of a URL inside a template literal (Go's `\w` is ASCII).
+const URL_CHARS: &str = r"(?:[0-9A-Za-z_\-./?=&]|\$\{[^{}`]*\})*";
+
+/// Go `bundleCallSites`: the three shapes the UI builds an XHR URL in, plus the WebSocket URL.
+fn bundle_call_sites() -> Vec<BundleCallSite> {
+    vec![
+        BundleCallSite {
+            // `${this.apiServerDomain}/dev/apps/${A}/tests`
+            name: "template literal interpolating apiServerDomain",
+            pattern: Regex::new(&format!(
+                r"`\$\{{[0-9A-Za-z_$.]+\.apiServerDomain\}}({URL_CHARS})`"
+            ))
+            .unwrap(),
+            min_matches: 5,
+            fixed_method: None,
+        },
+        BundleCallSite {
+            // this.apiServerDomain+`/dev/apps/${A}/eval_sets`
+            name: "apiServerDomain concatenated with a template literal",
+            pattern: Regex::new(&format!(r"\.apiServerDomain\s*\+\s*`({URL_CHARS})`")).unwrap(),
+            min_matches: 28,
+            fixed_method: None,
+        },
+        BundleCallSite {
+            // this.apiServerDomain+"/run_sse"
+            name: "apiServerDomain concatenated with a string literal",
+            pattern: Regex::new(r#"\.apiServerDomain\s*\+\s*"([0-9A-Za-z_\-./?=&]*)""#).unwrap(),
+            min_matches: 3,
+            fixed_method: None,
+        },
+        BundleCallSite {
+            // `ws://${Ur.getWSServerUrl()}/run_live?app_name=...`
+            name: "WebSocket URL built from getWSServerUrl",
+            pattern: Regex::new(&format!(
+                r"\$\{{[0-9A-Za-z_$.]+\.getWSServerUrl\(\)\}}({URL_CHARS})`"
+            ))
+            .unwrap(),
+            min_matches: 1,
+            fixed_method: Some("GET"),
+        },
+    ]
+}
+
+/// Go `minBundleTemplates`: a floor on the distinct templates extracted.
+const MIN_BUNDLE_TEMPLATES: usize = 10;
+
+/// Go `verbRE`: the HTTP verb a call site uses, just after the URL literal.
+static VERB_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"\.http\.(get|post|put|patch|delete)\(|method:\s*"(GET|POST|PUT|PATCH|DELETE)""#)
+        .unwrap()
+});
+
+/// Go `verbWindow`: how far after a URL literal the verb may appear.
+const VERB_WINDOW: usize = 260;
+
+/// Go `verbAfterURL`: the HTTP verb of the URL literal ending at byte `end`.
+fn verb_after_url(source: &str, end: usize) -> Option<String> {
+    let window = &source.as_bytes()[end..(end + VERB_WINDOW).min(source.len())];
+    // The window may cut a multi-byte character; the verbs are ASCII.
+    let window = String::from_utf8_lossy(window);
+    let caps = VERB_RE.captures(&window)?;
+    match caps.get(1) {
+        Some(m) => Some(m.as_str().to_ascii_uppercase()),
+        None => caps.get(2).map(|m| m.as_str().to_owned()),
+    }
+}
+
+/// Go `readUIBundle`: the contents and path of the bundle's one `main-*.js`.
+fn read_ui_bundle() -> (String, PathBuf) {
+    let dir = bundle_dir();
+    let matches: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("reading {} failed: {e}", dir.display()))
+        .map(|e| e.unwrap().path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("main-") && n.ends_with(".js"))
+        })
+        .collect();
+    assert_eq!(
+        matches.len(),
+        1,
+        "found {} files matching {}/main-*.js, want exactly 1: {matches:?}\nThe embedded ADK web UI ships one main bundle. Zero means the bundle is missing and this test cannot check anything; more than one means stale bundles are being shipped.",
+        matches.len(),
+        dir.display()
+    );
+    let content = std::fs::read_to_string(&matches[0]).unwrap_or_else(|e| {
+        panic!(
+            "reading the embedded UI bundle {} failed: {e}",
+            matches[0].display()
+        )
+    });
+    (content, matches[0].clone())
+}
+
+fn base_name(path: &Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+/// Go `extractBundleTemplates`: the endpoints the bundle calls, as a set of methods per canonical
+/// path template.
+fn extract_bundle_templates(source: &str, path: &Path) -> BTreeMap<String, BTreeSet<String>> {
+    let interpolation_re = Regex::new(r"\$\{[^{}]*\}").unwrap();
+    let mut templates: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut total = 0;
+    for site in bundle_call_sites() {
+        let found: Vec<regex::Captures<'_>> = site.pattern.captures_iter(source).collect();
+        assert!(
+            found.len() >= site.min_matches,
+            "the {} pattern matched {} call site(s) in {}, want at least {}.\nThe bundle has changed how it builds URLs, so this test is no longer reading it. Repair the pattern in bundleCallSites before trusting any result from this file.\nPattern: {}",
+            site.name,
+            found.len(),
+            base_name(path),
+            site.min_matches,
+            site.pattern
+        );
+        for caps in found {
+            let url = caps.get(1).unwrap().as_str();
+            let raw = url.split_once('?').map_or(url, |(p, _)| p);
+            let template = interpolation_re.replace_all(raw, "{}").into_owned();
+            let method = match site.fixed_method {
+                Some(m) => m.to_owned(),
+                None => verb_after_url(source, caps.get(0).unwrap().end()).unwrap_or_else(|| {
+                    panic!(
+                        "could not find the HTTP verb for the {} call site building {template:?} in {}.\nThe bundle has changed how it issues requests, so this test can no longer tell a GET from a PUT and would stop catching a verb change. Repair verbRE or verbWindow.",
+                        site.name,
+                        base_name(path)
+                    )
+                }),
+            };
+            templates.entry(template).or_default().insert(method);
+            total += 1;
+        }
+    }
+    assert!(
+        templates.len() >= MIN_BUNDLE_TEMPLATES,
+        "extracted only {} distinct API path template(s) from {}, want at least {MIN_BUNDLE_TEMPLATES}.\nAn extraction this thin is not trustworthy; treat it as a broken test, not a passing one.",
+        templates.len(),
+        base_name(path)
+    );
+    eprintln!(
+        "extracted {} distinct API path templates from {total} call sites in {}",
+        templates.len(),
+        base_name(path)
+    );
+    templates
+}
+
+/// Half 2: the golden list is still in step with the bundle actually shipped.
+#[test]
+fn test_ui_contract_golden_list_matches_bundle() {
+    let (source, bundle_path) = read_ui_bundle();
+    let bundle_templates = extract_bundle_templates(&source, &bundle_path);
+
+    let mut golden: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for endpoint in ui_golden() {
+        golden
+            .entry(canonical_template(endpoint.template))
+            .or_default()
+            .insert(endpoint.method.to_string());
+    }
+
+    let mut errors = Vec::new();
+    // bundle_calls_are_all_in_the_golden_list
+    for (tmpl, methods) in &bundle_templates {
+        let Some(known) = golden.get(tmpl) else {
+            errors.push(format!(
+                "the embedded web UI bundle calls {tmpl:?} (in {}), which the golden list does not know about.\nThis is the 2026-06-30 failure mode: the bundle was refreshed and now addresses an endpoint the server does not route, so that part of the UI 404s in the browser with nothing to show for it.\nFix, in order: (1) register the route in the REST server's routes, (2) add the matching entry to ui_golden in this file.",
+                base_name(&bundle_path)
+            ));
+            continue;
+        };
+        for method in methods {
+            if !known.contains(method) {
+                // A verb change is the same failure as a new path: the request 405s.
+                errors.push(format!(
+                    "the bundle now calls {method} {tmpl:?}, a method the golden list does not have (it has {known:?}).\nThe UI changed the verb it uses on an endpoint that already existed, so this request 405s in the browser.\nFix, in order: (1) add {method} to that route's methods in the REST server, (2) update ui_golden here."
+                ));
+            }
+        }
+    }
+    // golden_entries_are_all_still_called_by_the_bundle
+    for (tmpl, methods) in &golden {
+        let Some(called) = bundle_templates.get(tmpl) else {
+            errors.push(format!(
+                "the golden list has {tmpl:?} (methods {methods:?}) but the shipped bundle {} never calls it.\nEither the UI dropped the endpoint and the entry is now stale, or the extraction regexes no longer see how the UI builds it.\nFix: confirm against the bundle, then either drop the entry or repair bundle_call_sites.",
+                base_name(&bundle_path)
+            ));
+            continue;
+        };
+        for method in methods {
+            if !called.contains(method) {
+                errors.push(format!(
+                    "the golden list has {method} {tmpl:?} but the shipped bundle never issues that verb against it (it issues {called:?}).\nFix: confirm against the bundle, then either drop the entry or repair bundle_call_sites."
+                ));
+            }
+        }
+    }
+    assert!(errors.is_empty(), "{}", errors.join("\n\n"));
+}

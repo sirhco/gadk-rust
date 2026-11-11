@@ -1,0 +1,87 @@
+{
+  "name": "full_23_api_redirect_get",
+  "server": "full",
+  "launcher": "full",
+  "args": [
+    "web",
+    "-port",
+    "<port>",
+    "-max_request_body_size",
+    "1024",
+    "-allow_origins",
+    "http://allowed.example",
+    "api",
+    "webui",
+    "a2a",
+    "pubsub",
+    "eventarc"
+  ],
+  "kind": "exchange",
+  "request": {
+    "method": "GET",
+    "target": "/api/health%2F?q=1",
+    "headers": [
+      [
+        "Host",
+        "127.0.0.1:<port>"
+      ],
+      [
+        "Connection",
+        "close"
+      ]
+    ],
+    "body": ""
+  },
+  "response": {
+    "status": 301,
+    "status_text": "Moved Permanently",
+    "headers": [
+      [
+        "Access-Control-Allow-Headers",
+        "Content-Type, Authorization"
+      ],
+      [
+        "Access-Control-Allow-Methods",
+        "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS"
+      ],
+      [
+        "Access-Control-Allow-Origin",
+        "http://localhost:8080"
+      ],
+      [
+        "Connection",
+        "close"
+      ],
+      [
+        "Content-Length",
+        "46"
+      ],
+      [
+        "Content-Type",
+        "text/html; charset=utf-8"
+      ],
+      [
+        "Date",
+        "<date>"
+      ],
+      [
+        "Location",
+        "/api/health?q=1"
+      ],
+      [
+        "Vary",
+        "Origin"
+      ]
+    ],
+    "body": "<a href=\"/health?q=1\">Moved Permanently</a>.\n\n",
+    "body_length": 46,
+    "body_sha256": null,
+    "base_href": null
+  },
+  "log": [
+    "<ts> GET /api/health%2F?q=1 <elapsed>"
+  ],
+  "exit_status": null,
+  "stdout": null,
+  "error": null
+}

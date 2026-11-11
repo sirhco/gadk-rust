@@ -1,0 +1,80 @@
+{
+  "name": "noprefix_04_unknown_path",
+  "server": "noprefix",
+  "launcher": "full",
+  "args": [
+    "web",
+    "-port",
+    "<port>",
+    "api",
+    "-path_prefix="
+  ],
+  "kind": "exchange",
+  "request": {
+    "method": "GET",
+    "target": "/no/such/path",
+    "headers": [
+      [
+        "Host",
+        "127.0.0.1:<port>"
+      ],
+      [
+        "Connection",
+        "close"
+      ]
+    ],
+    "body": ""
+  },
+  "response": {
+    "status": 404,
+    "status_text": "Not Found",
+    "headers": [
+      [
+        "Access-Control-Allow-Headers",
+        "Content-Type, Authorization"
+      ],
+      [
+        "Access-Control-Allow-Methods",
+        "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS"
+      ],
+      [
+        "Access-Control-Allow-Origin",
+        "http://localhost:8080"
+      ],
+      [
+        "Connection",
+        "close"
+      ],
+      [
+        "Content-Length",
+        "19"
+      ],
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ],
+      [
+        "Date",
+        "<date>"
+      ],
+      [
+        "Vary",
+        "Origin"
+      ],
+      [
+        "X-Content-Type-Options",
+        "nosniff"
+      ]
+    ],
+    "body": "404 page not found\n",
+    "body_length": 19,
+    "body_sha256": null,
+    "base_href": null
+  },
+  "log": [
+    "<ts> GET /no/such/path <elapsed>"
+  ],
+  "exit_status": null,
+  "stdout": null,
+  "error": null
+}

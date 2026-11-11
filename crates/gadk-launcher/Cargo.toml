@@ -1,0 +1,75 @@
+[package]
+name = "gadk-launcher"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["full"]
+# The web server (Go `cmd/launcher/web`) with the ADK REST API sub-launcher (`api`).
+web = [
+  "dep:gadk-server",
+  "dep:axum",
+  "dep:hyper",
+  "dep:hyper-util",
+  "dep:tower",
+  "dep:http",
+  "dep:bytes",
+  "dep:url",
+]
+# The A2A sub-launcher (Go `cmd/launcher/web/a2a`), served through gadk-a2a's executor.
+a2a = ["web", "dep:gadk-a2a"]
+# The embedded ADK web UI sub-launcher (Go `cmd/launcher/web/webui`).
+webui = ["web", "dep:regex"]
+# The Pub/Sub and Eventarc trigger sub-launchers (Go `cmd/launcher/web/triggers`).
+triggers = ["web"]
+# Go `prod.NewLauncher()`: web(api, a2a).
+prod = ["web", "a2a"]
+# Go `full.NewLauncher()`: console, web(webui, a2a, pubsub, eventarc, api).
+full = ["web", "a2a", "webui", "triggers"]
+
+[dependencies]
+gadk-agent = { workspace = true }
+gadk-engine = { workspace = true }
+gadk-session = { workspace = true }
+gadk-artifact = { workspace = true }
+gadk-memory = { workspace = true }
+gadk-genai = { workspace = true }
+gadk-model = { workspace = true }
+gadk-platform = { workspace = true }
+gadk-server = { workspace = true, optional = true }
+gadk-a2a = { workspace = true, optional = true, features = ["server"] }
+axum = { workspace = true, optional = true }
+hyper = { workspace = true, optional = true, features = ["server", "http1", "http2"] }
+hyper-util = { workspace = true, optional = true, features = ["server", "server-auto", "http1", "http2", "tokio", "service"] }
+tower = { workspace = true, optional = true, features = ["util"] }
+http = { workspace = true, optional = true }
+bytes = { workspace = true, optional = true }
+url = { workspace = true, optional = true }
+regex = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["signal"] }
+tokio-util = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+gadk-engine = { workspace = true, features = ["testutil"] }
+gadk-server = { workspace = true, features = ["testutil"] }
+gadk-a2a = { workspace = true, features = ["testutil"] }
+tokio = { workspace = true, features = ["test-util"] }
+reqwest = { workspace = true }
+tempfile = { workspace = true }
+pretty_assertions = { workspace = true }
+regex = { workspace = true }
+sha2 = { workspace = true }

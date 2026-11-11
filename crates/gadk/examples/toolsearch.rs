@@ -15,22 +15,22 @@
 
 //! Tools hidden behind `search_tools`: the model loads a tool's declaration only when it needs
 //! that tool (port of Go examples/toolsearch/main.go). The catalog and agent are in
-//! `toolsearch_catalog.rs`, shared with the example's test. Go runs it through the launcher
-//! (sub-project 6); this is a stdin loop.
+//! `toolsearch_catalog.rs`, shared with the example's test. It runs through the launcher, as
+//! Go's does.
 //!
-//! `GOOGLE_API_KEY=... cargo run -p gadk --example toolsearch`, then ask
+//! `GOOGLE_API_KEY=... cargo run -p gadk --features launcher --example toolsearch [console | web
+//! webui api]`, then ask
 //! "What time is it?", "Multiply 6 by 7." or "Convert 21 degrees Celsius to Fahrenheit.".
 
 #[path = "toolsearch_catalog.rs"]
 mod toolsearch_catalog;
 
-use std::io::{BufRead, Write};
+use std::sync::Arc;
 
-use futures::StreamExt;
-use gadk::agent::{RunConfig, StreamingMode};
-use gadk::engine::runner::{RunOptions, Runner};
+use gadk::agent::SingleLoader;
 use gadk::gemini::{ClientConfig, GeminiModel};
-use gadk::genai::{Content, ROLE_USER};
+use gadk::launcher::golog::Logger;
+use gadk::launcher::{CancellationToken, Config, Launcher, full};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -43,47 +43,13 @@ async fn main() -> anyhow::Result<()> {
     )
     .await?;
     let agent = toolsearch_catalog::new_agent(model)?;
-    let runner = Runner::in_memory("toolsearch_example", agent)?;
-    repl(&runner, "user", "session-1").await?;
-    runner.close().await?;
-    Ok(())
-}
-
-/// Go's stdin loop: one line per turn, printing the streamed (partial) model text.
-async fn repl(runner: &Runner, user_id: &str, session_id: &str) -> anyhow::Result<()> {
-    let stdin = std::io::stdin();
-    loop {
-        print!("\nUser -> ");
-        std::io::stdout().flush()?;
-        let mut line = String::new();
-        if stdin.lock().read_line(&mut line)? == 0 {
-            return Ok(());
-        }
-        print!("\nAgent -> ");
-        std::io::stdout().flush()?;
-        let cfg = RunConfig {
-            streaming_mode: StreamingMode::Sse,
-            ..Default::default()
-        };
-        let msg = Content::from_text(line, ROLE_USER);
-        let mut events = runner.run(user_id, session_id, Some(msg), cfg, RunOptions::default());
-        while let Some(event) = events.next().await {
-            let event = match event {
-                Ok(event) => event,
-                Err(e) => {
-                    println!("\nAGENT_ERROR: {e}");
-                    continue;
-                }
-            };
-            // In SSE mode only the partial responses are printed: the final response repeats
-            // their text.
-            if !event.response.partial {
-                continue;
-            }
-            for part in event.response.content.iter().flat_map(|c| c.parts.iter()) {
-                print!("{}", part.text);
-            }
-            std::io::stdout().flush()?;
-        }
+    let config = Config::new(Arc::new(SingleLoader::new(agent)));
+    let mut l = full::new();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Err(e) = l.execute(CancellationToken::new(), config, args).await {
+        // Go `log.Fatalf("Run failed: %v\n\n%s", err, l.CommandLineSyntax())`.
+        Logger::stderr().print(&format!("Run failed: {e}\n\n{}", l.command_line_syntax()));
+        std::process::exit(1);
     }
+    Ok(())
 }

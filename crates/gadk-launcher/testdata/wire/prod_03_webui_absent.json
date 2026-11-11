@@ -1,0 +1,62 @@
+{
+  "name": "prod_03_webui_absent",
+  "server": "prod",
+  "launcher": "prod",
+  "args": [
+    "web",
+    "-port",
+    "<port>",
+    "a2a",
+    "api"
+  ],
+  "kind": "exchange",
+  "request": {
+    "method": "GET",
+    "target": "/ui/",
+    "headers": [
+      [
+        "Host",
+        "127.0.0.1:<port>"
+      ],
+      [
+        "Connection",
+        "close"
+      ]
+    ],
+    "body": ""
+  },
+  "response": {
+    "status": 404,
+    "status_text": "Not Found",
+    "headers": [
+      [
+        "Connection",
+        "close"
+      ],
+      [
+        "Content-Length",
+        "19"
+      ],
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ],
+      [
+        "Date",
+        "<date>"
+      ],
+      [
+        "X-Content-Type-Options",
+        "nosniff"
+      ]
+    ],
+    "body": "404 page not found\n",
+    "body_length": 19,
+    "body_sha256": null,
+    "base_href": null
+  },
+  "log": [],
+  "exit_status": null,
+  "stdout": null,
+  "error": null
+}

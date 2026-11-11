@@ -1,0 +1,76 @@
+{
+  "name": "noprefix_02_list_apps",
+  "server": "noprefix",
+  "launcher": "full",
+  "args": [
+    "web",
+    "-port",
+    "<port>",
+    "api",
+    "-path_prefix="
+  ],
+  "kind": "exchange",
+  "request": {
+    "method": "GET",
+    "target": "/list-apps",
+    "headers": [
+      [
+        "Host",
+        "127.0.0.1:<port>"
+      ],
+      [
+        "Connection",
+        "close"
+      ]
+    ],
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "status_text": "OK",
+    "headers": [
+      [
+        "Access-Control-Allow-Headers",
+        "Content-Type, Authorization"
+      ],
+      [
+        "Access-Control-Allow-Methods",
+        "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS"
+      ],
+      [
+        "Access-Control-Allow-Origin",
+        "http://localhost:8080"
+      ],
+      [
+        "Connection",
+        "close"
+      ],
+      [
+        "Content-Length",
+        "14"
+      ],
+      [
+        "Content-Type",
+        "application/json; charset=UTF-8"
+      ],
+      [
+        "Date",
+        "<date>"
+      ],
+      [
+        "Vary",
+        "Origin"
+      ]
+    ],
+    "body": "[\"assistant\"]\n",
+    "body_length": 14,
+    "body_sha256": null,
+    "base_href": null
+  },
+  "log": [
+    "<ts> GET /list-apps <elapsed>"
+  ],
+  "exit_status": null,
+  "stdout": null,
+  "error": null
+}

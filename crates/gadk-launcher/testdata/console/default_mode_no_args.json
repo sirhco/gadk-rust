@@ -1,0 +1,10 @@
+{
+  "name": "default_mode_no_args",
+  "launcher": "full",
+  "args": [],
+  "stdin": "hello\n",
+  "stdout": "\n\nUser -> \nAgent -> Hello! How can I help?\nUser -> \nEOF detected, exiting...\n",
+  "stderr": "",
+  "exit_status": 0,
+  "error": null
+}

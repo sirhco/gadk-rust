@@ -1,0 +1,44 @@
+{
+  "json_body": "A2A answers are a2a-rs's JSON (compact, a2a-rs's key order; Go: a2a-go's, the card pretty-printed), and the card endpoint adds `Cache-Control: max-age=300` and an `ETag` (the card version).",
+  "deltas": [
+    {
+      "path": "/response/headers/Cache-Control",
+      "actual": "max-age=300",
+      "divergence": "A2A answers are a2a-rs's JSON (compact, a2a-rs's key order; Go: a2a-go's, the card pretty-printed), and the card endpoint adds `Cache-Control: max-age=300` and an `ETag` (the card version)."
+    },
+    {
+      "path": "/response/headers/Etag",
+      "actual": "\"2.0.0\"",
+      "divergence": "A2A answers are a2a-rs's JSON (compact, a2a-rs's key order; Go: a2a-go's, the card pretty-printed), and the card endpoint adds `Cache-Control: max-age=300` and an `ETag` (the card version)."
+    },
+    {
+      "path": "/response/body/capabilities/pushNotifications",
+      "fixture": false,
+      "divergence": "The A2A 0.3 endpoint (`/a2a/invoke`) is not served: gorilla's 404, which the request logger does not log; the agent card has none of its 0.3 union fields (top-level `url`, `protocolVersion`, `preferredTransport`, the 0.3 interface, `capabilities.pushNotifications`)."
+    },
+    {
+      "path": "/response/body/preferredTransport",
+      "fixture": "JSONRPC",
+      "divergence": "The A2A 0.3 endpoint (`/a2a/invoke`) is not served: gorilla's 404, which the request logger does not log; the agent card has none of its 0.3 union fields (top-level `url`, `protocolVersion`, `preferredTransport`, the 0.3 interface, `capabilities.pushNotifications`)."
+    },
+    {
+      "path": "/response/body/protocolVersion",
+      "fixture": "0.3",
+      "divergence": "The A2A 0.3 endpoint (`/a2a/invoke`) is not served: gorilla's 404, which the request logger does not log; the agent card has none of its 0.3 union fields (top-level `url`, `protocolVersion`, `preferredTransport`, the 0.3 interface, `capabilities.pushNotifications`)."
+    },
+    {
+      "path": "/response/body/supportedInterfaces/1",
+      "fixture": {
+        "protocolBinding": "JSONRPC",
+        "protocolVersion": "0.3",
+        "url": "http://localhost:8080/a2a/invoke"
+      },
+      "divergence": "The A2A 0.3 endpoint (`/a2a/invoke`) is not served: gorilla's 404, which the request logger does not log; the agent card has none of its 0.3 union fields (top-level `url`, `protocolVersion`, `preferredTransport`, the 0.3 interface, `capabilities.pushNotifications`)."
+    },
+    {
+      "path": "/response/body/url",
+      "fixture": "http://localhost:8080/a2a/invoke",
+      "divergence": "The A2A 0.3 endpoint (`/a2a/invoke`) is not served: gorilla's 404, which the request logger does not log; the agent card has none of its 0.3 union fields (top-level `url`, `protocolVersion`, `preferredTransport`, the 0.3 interface, `capabilities.pushNotifications`)."
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "name": "full_38_webui_asset_js",
+  "server": "full",
+  "launcher": "full",
+  "args": [
+    "web",
+    "-port",
+    "<port>",
+    "-max_request_body_size",
+    "1024",
+    "-allow_origins",
+    "http://allowed.example",
+    "api",
+    "webui",
+    "a2a",
+    "pubsub",
+    "eventarc"
+  ],
+  "kind": "exchange",
+  "request": {
+    "method": "GET",
+    "target": "/ui/polyfills-5CFQRCPP.js",
+    "headers": [
+      [
+        "Host",
+        "127.0.0.1:<port>"
+      ],
+      [
+        "Connection",
+        "close"
+      ]
+    ],
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "status_text": "OK",
+    "headers": [
+      [
+        "Accept-Ranges",
+        "bytes"
+      ],
+      [
+        "Connection",
+        "close"
+      ],
+      [
+        "Content-Length",
+        "34585"
+      ],
+      [
+        "Content-Type",
+        "text/javascript; charset=utf-8"
+      ],
+      [
+        "Date",
+        "<date>"
+      ]
+    ],
+    "body": null,
+    "body_length": 34585,
+    "body_sha256": "15c6f58707b9b19116fde3a3f6a0ce9cf83427d64a91e95cb91fe1056c3da616",
+    "base_href": null
+  },
+  "log": [
+    "<ts> GET /ui/polyfills-5CFQRCPP.js <elapsed>"
+  ],
+  "exit_status": null,
+  "stdout": null,
+  "error": null
+}

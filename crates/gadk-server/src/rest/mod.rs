@@ -67,7 +67,9 @@ pub(crate) mod originguard;
 pub(crate) mod routing;
 
 pub use debug_telemetry::{DebugLog, DebugSpan, DebugTelemetry};
-pub use originguard::LocalAddr;
+pub use http_error::encode_json_response;
+pub use middleware::max_bytes_middleware;
+pub use originguard::{LocalAddr, normalize_origin, origin_guard_middleware};
 pub use routing::PathVars;
 
 /// Go `adkrest.DefaultMaxPayloadSize`: the request-body limit (10 MiB) when
@@ -377,13 +379,17 @@ fn validate_compaction_against_agents(cfg: &ServerConfig) -> Result<(), ServerEr
 }
 
 /// Go `healthHandler` on `GET`/`HEAD /health`, outside authentication: `{"status":"ok"}` as
-/// `application/json` (no charset, unlike every other JSON answer).
+/// `application/json` (no charset, unlike every other JSON answer). Registered under gorilla's
+/// `StrictSlash(true)`, as in Go.
 fn health_route() -> Route {
     Route {
         name: "Health",
         methods: vec![Method::GET, Method::HEAD],
         pattern: "/health".to_owned(),
         public: true,
+        // Go registers /health on the StrictSlash(true) router before `SetupSubRouters` turns it
+        // off: `/health/` is answered 301 → `/health`.
+        strict_slash: true,
         handler: routing::handler(|_req: Request| async {
             let mut resp = Response::new(Body::from("{\"status\":\"ok\"}\n"));
             resp.headers_mut()

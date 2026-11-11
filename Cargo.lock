@@ -1089,6 +1089,7 @@ dependencies = [
  "gadk-gemini",
  "gadk-genai",
  "gadk-httprr",
+ "gadk-launcher",
  "gadk-mcp",
  "gadk-memory",
  "gadk-model",
@@ -1338,6 +1339,7 @@ dependencies = [
  "base64 0.23.1",
  "bytes",
  "chrono",
+ "gadk-platform",
  "pretty_assertions",
  "rstest",
  "serde",
@@ -1359,6 +1361,44 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "gadk-launcher"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "bytes",
+ "chrono",
+ "futures",
+ "gadk-a2a",
+ "gadk-agent",
+ "gadk-artifact",
+ "gadk-engine",
+ "gadk-genai",
+ "gadk-memory",
+ "gadk-model",
+ "gadk-platform",
+ "gadk-server",
+ "gadk-session",
+ "http",
+ "hyper",
+ "hyper-util",
+ "pretty_assertions",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "url",
 ]
 
 [[package]]
@@ -1489,6 +1529,7 @@ dependencies = [
  "parking_lot 0.13.0",
  "pretty_assertions",
  "rand 0.10.3",
+ "regex",
  "reqwest",
  "schemars 1.2.3",
  "serde",

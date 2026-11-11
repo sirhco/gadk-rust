@@ -40,7 +40,7 @@ use tokio::net::TcpListener;
 
 use super::controllers::CheckOrigin;
 use super::http_error::http_error;
-use super::routing::{Handler, Request, handler};
+use crate::mux::{Handler, Request, handler};
 
 /// The error a refused request is answered with (Go `ErrHostNotAllowed`, `ErrOriginNotAllowed`).
 /// Both are safe to show a caller: they name the check that failed and nothing about the
@@ -239,10 +239,30 @@ impl Policy {
     }
 }
 
-/// Go `NormalizeOrigin`: `addr` as an RFC 6454 origin (`scheme://host[:port]`, lowercased); a
-/// bare host or host:port gets `http://`; `"*"` and `""` pass through, as does anything that does
-/// not parse as a URL with a host.
-pub(crate) fn normalize_origin(addr: &str) -> String {
+/// Go `originguard.New(Config{BindHost, AllowedOrigins}).Middleware` as a handler wrapper.
+///
+/// A request the guard refuses (a rebound Host under a loopback `bind_host`, or an Origin that is
+/// not on `allowed_origins` and either is not the request's own origin or, on a server reached
+/// over loopback, is not a loopback page) answers 403 `Forbidden: host not allowed` / `Forbidden: origin not allowed`
+/// in `http.Error` framing; any other request reaches the wrapped handler. A single `"*"` in
+/// `allowed_origins` turns both checks off. Serve with
+/// `into_make_service_with_connect_info::<`[`LocalAddr`]`>()` so the guard knows the address each
+/// connection was accepted on.
+pub fn origin_guard_middleware(
+    bind_host: &str,
+    allowed_origins: &[String],
+) -> Arc<dyn Fn(Handler) -> Handler + Send + Sync> {
+    let policy = Arc::new(Policy::new(&Config {
+        bind_host: bind_host.to_owned(),
+        allowed_origins: allowed_origins.to_vec(),
+    }));
+    Arc::new(move |next: Handler| policy.middleware(next))
+}
+
+/// Go `originguard.NormalizeOrigin`: `addr` as an RFC 6454 origin (`scheme://host[:port]`,
+/// lowercased); a bare host or host:port gets `http://`; `"*"` and `""` pass through, as does
+/// anything that does not parse as a URL with a host.
+pub fn normalize_origin(addr: &str) -> String {
     let addr = addr.trim();
     if addr.is_empty() || addr == "*" {
         return addr.to_owned();

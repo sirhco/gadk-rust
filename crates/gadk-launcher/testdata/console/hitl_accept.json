@@ -1,0 +1,14 @@
+{
+  "name": "hitl_accept",
+  "launcher": "full",
+  "args": [
+    "console",
+    "-streaming_mode",
+    "none"
+  ],
+  "stdin": "transfer\nyes\n",
+  "stdout": "\n\nUser -> \nAgent -> \nAgent -> Confirm transfer_funds?\n  Type 'yes' to confirm, anything else to reject.\nUser -> \nAgent -> Transfer done.\nUser -> \nEOF detected, exiting...\n",
+  "stderr": "",
+  "exit_status": 0,
+  "error": null
+}

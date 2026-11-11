@@ -1,0 +1,14 @@
+{
+  "name": "none_hello",
+  "launcher": "full",
+  "args": [
+    "console",
+    "-streaming_mode",
+    "none"
+  ],
+  "stdin": "hello\n",
+  "stdout": "\n\nUser -> \nAgent -> Hello! How can I help?\nUser -> \nEOF detected, exiting...\n",
+  "stderr": "",
+  "exit_status": 0,
+  "error": null
+}

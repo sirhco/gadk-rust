@@ -1,0 +1,21 @@
+{
+  "name": "prod_99_shutdown",
+  "server": "prod",
+  "launcher": "prod",
+  "args": [
+    "web",
+    "-port",
+    "<port>",
+    "a2a",
+    "api"
+  ],
+  "kind": "shutdown",
+  "request": null,
+  "response": null,
+  "log": [
+    "<ts> Shutting down the web server..."
+  ],
+  "exit_status": 0,
+  "stdout": "",
+  "error": null
+}

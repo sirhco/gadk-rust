@@ -18,12 +18,15 @@
 //! `strconv.Quote` ([`go_quote`]), `strings.ToLower`/`ToUpper` ([`go_to_lower`],
 //! [`go_to_upper`]), `url.QueryEscape` ([`go_query_escape`]), `fmt` `%v` of a JSON-decoded value
 //! ([`go_sprint_value`]), `time.Parse(time.RFC3339, …)` ([`go_parse_rfc3339`]), `path.Clean`/`path.Join`
-//! ([`go_path_clean`], [`go_path_join`]), the parts of `net/url` gadk reproduces ([`go_url`]) and
-//! Go's `fmt.Errorf("…: %w", err)` wrapping ([`GoWrapped`]).
+//! ([`go_path_clean`], [`go_path_join`]), the parts of `net/url` gadk reproduces ([`go_url`]),
+//! Go's `fmt.Errorf("…: %w", err)` wrapping ([`GoWrapped`]), `time.Duration` ([`GoDuration`],
+//! [`go_parse_duration`], [`go_format_duration`]) and the parts of Go's `flag` package the
+//! launcher uses ([`go_flag`]).
 
 pub mod env;
 mod exec;
 mod go_err;
+pub mod go_flag;
 mod go_fmt;
 mod go_path;
 mod go_time;
@@ -39,7 +42,9 @@ pub use go_fmt::{
     go_query_escape, go_quote, go_sprint_value, go_to_lower, go_to_upper, go_type_name,
 };
 pub use go_path::{go_path_clean, go_path_join};
-pub use go_time::{go_format_rfc3339_nano, go_parse_rfc3339};
+pub use go_time::{
+    GoDuration, go_format_duration, go_format_rfc3339_nano, go_parse_duration, go_parse_rfc3339,
+};
 pub use time::TimeProvider;
 pub use tracking::tracking_header;
 pub use uuid::UuidProvider;

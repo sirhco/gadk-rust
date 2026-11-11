@@ -1,0 +1,75 @@
+{
+  "name": "full_50_eventarc_trigger_structured",
+  "server": "full",
+  "launcher": "full",
+  "args": [
+    "web",
+    "-port",
+    "<port>",
+    "-max_request_body_size",
+    "1024",
+    "-allow_origins",
+    "http://allowed.example",
+    "api",
+    "webui",
+    "a2a",
+    "pubsub",
+    "eventarc"
+  ],
+  "kind": "exchange",
+  "request": {
+    "method": "POST",
+    "target": "/api/apps/assistant/trigger/eventarc",
+    "headers": [
+      [
+        "Host",
+        "127.0.0.1:<port>"
+      ],
+      [
+        "Content-Type",
+        "application/cloudevents+json"
+      ],
+      [
+        "Content-Length",
+        "165"
+      ],
+      [
+        "Connection",
+        "close"
+      ]
+    ],
+    "body": "{\"specversion\":\"1.0\",\"type\":\"google.cloud.storage.object.v1.finalized\",\"source\":\"//storage.googleapis.com/projects/_/buckets/b\",\"id\":\"e1\",\"data\":{\"name\":\"file.txt\"}}"
+  },
+  "response": {
+    "status": 200,
+    "status_text": "OK",
+    "headers": [
+      [
+        "Connection",
+        "close"
+      ],
+      [
+        "Content-Length",
+        "21"
+      ],
+      [
+        "Content-Type",
+        "application/json; charset=UTF-8"
+      ],
+      [
+        "Date",
+        "<date>"
+      ]
+    ],
+    "body": "{\"status\":\"success\"}\n",
+    "body_length": 21,
+    "body_sha256": null,
+    "base_href": null
+  },
+  "log": [
+    "<ts> POST /api/apps/assistant/trigger/eventarc <elapsed>"
+  ],
+  "exit_status": null,
+  "stdout": null,
+  "error": null
+}

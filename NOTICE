@@ -9,3 +9,9 @@ copied from that project.
 This product's behavior is ported from the Google Gen AI Go SDK
 (https://github.com/googleapis/go-genai), Copyright Google LLC,
 licensed under the Apache License, Version 2.0.
+
+crates/gadk-launcher/webui/distr is the prebuilt ADK web UI bundle
+(https://github.com/google/adk-web), Copyright Google LLC, licensed
+under the Apache License, Version 2.0, vendored byte for byte from
+ADK-Go's cmd/launcher/web/webui/distr. Its minified JavaScript bundles
+third-party libraries under their own licenses.

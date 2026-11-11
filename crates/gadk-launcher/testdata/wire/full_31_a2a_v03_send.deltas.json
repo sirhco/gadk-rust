@@ -1,0 +1,50 @@
+{
+  "deltas": [
+    {
+      "path": "/log/0",
+      "fixture": "<ts> POST /a2a/invoke <elapsed>",
+      "divergence": "The A2A 0.3 endpoint (`/a2a/invoke`) is not served: gorilla's 404, which the request logger does not log; the agent card has none of its 0.3 union fields (top-level `url`, `protocolVersion`, `preferredTransport`, the 0.3 interface, `capabilities.pushNotifications`)."
+    },
+    {
+      "path": "/response/status",
+      "fixture": 200,
+      "actual": 404,
+      "divergence": "The A2A 0.3 endpoint (`/a2a/invoke`) is not served: gorilla's 404, which the request logger does not log; the agent card has none of its 0.3 union fields (top-level `url`, `protocolVersion`, `preferredTransport`, the 0.3 interface, `capabilities.pushNotifications`)."
+    },
+    {
+      "path": "/response/status_text",
+      "fixture": "OK",
+      "actual": "Not Found",
+      "divergence": "The A2A 0.3 endpoint (`/a2a/invoke`) is not served: gorilla's 404, which the request logger does not log; the agent card has none of its 0.3 union fields (top-level `url`, `protocolVersion`, `preferredTransport`, the 0.3 interface, `capabilities.pushNotifications`)."
+    },
+    {
+      "path": "/response/headers/Content-Length",
+      "fixture": "<n>",
+      "actual": "19",
+      "divergence": "The A2A 0.3 endpoint (`/a2a/invoke`) is not served: gorilla's 404, which the request logger does not log; the agent card has none of its 0.3 union fields (top-level `url`, `protocolVersion`, `preferredTransport`, the 0.3 interface, `capabilities.pushNotifications`)."
+    },
+    {
+      "path": "/response/headers/Content-Type",
+      "fixture": "application/json",
+      "actual": "text/plain; charset=utf-8",
+      "divergence": "The A2A 0.3 endpoint (`/a2a/invoke`) is not served: gorilla's 404, which the request logger does not log; the agent card has none of its 0.3 union fields (top-level `url`, `protocolVersion`, `preferredTransport`, the 0.3 interface, `capabilities.pushNotifications`)."
+    },
+    {
+      "path": "/response/headers/X-Content-Type-Options",
+      "actual": "nosniff",
+      "divergence": "The A2A 0.3 endpoint (`/a2a/invoke`) is not served: gorilla's 404, which the request logger does not log; the agent card has none of its 0.3 union fields (top-level `url`, `protocolVersion`, `preferredTransport`, the 0.3 interface, `capabilities.pushNotifications`)."
+    },
+    {
+      "path": "/response/body",
+      "fixture": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"kind\":\"task\",\"id\":\"<uuid-1>\",\"artifacts\":[{\"artifactId\":\"<uuid-2>\",\"parts\":[{\"kind\":\"text\",\"text\":\"Hello! How can I help?\"}]}],\"contextId\":\"<uuid-3>\",\"history\":[{\"kind\":\"message\",\"messageId\":\"msg-2\",\"parts\":[{\"kind\":\"text\",\"text\":\"hello\"}],\"role\":\"user\"}],\"metadata\":{\"adk_app_name\":\"assistant\",\"adk_session_id\":\"<uuid-3>\",\"adk_user_id\":\"A2A_USER_<uuid-3>\",\"https://google.github.io/adk-docs/a2a/a2a-extension/\":true},\"status\":{\"state\":\"completed\",\"timestamp\":\"<t>\"}}}\n",
+      "actual": "404 page not found\n",
+      "divergence": "The A2A 0.3 endpoint (`/a2a/invoke`) is not served: gorilla's 404, which the request logger does not log; the agent card has none of its 0.3 union fields (top-level `url`, `protocolVersion`, `preferredTransport`, the 0.3 interface, `capabilities.pushNotifications`)."
+    },
+    {
+      "path": "/response/body_length",
+      "fixture": null,
+      "actual": 19,
+      "divergence": "The A2A 0.3 endpoint (`/a2a/invoke`) is not served: gorilla's 404, which the request logger does not log; the agent card has none of its 0.3 union fields (top-level `url`, `protocolVersion`, `preferredTransport`, the 0.3 interface, `capabilities.pushNotifications`)."
+    }
+  ]
+}

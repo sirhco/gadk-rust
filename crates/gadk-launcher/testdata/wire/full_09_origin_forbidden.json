@@ -1,0 +1,75 @@
+{
+  "name": "full_09_origin_forbidden",
+  "server": "full",
+  "launcher": "full",
+  "args": [
+    "web",
+    "-port",
+    "<port>",
+    "-max_request_body_size",
+    "1024",
+    "-allow_origins",
+    "http://allowed.example",
+    "api",
+    "webui",
+    "a2a",
+    "pubsub",
+    "eventarc"
+  ],
+  "kind": "exchange",
+  "request": {
+    "method": "GET",
+    "target": "/api/list-apps",
+    "headers": [
+      [
+        "Host",
+        "127.0.0.1:<port>"
+      ],
+      [
+        "Origin",
+        "http://evil.example"
+      ],
+      [
+        "Connection",
+        "close"
+      ]
+    ],
+    "body": ""
+  },
+  "response": {
+    "status": 403,
+    "status_text": "Forbidden",
+    "headers": [
+      [
+        "Connection",
+        "close"
+      ],
+      [
+        "Content-Length",
+        "30"
+      ],
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ],
+      [
+        "Date",
+        "<date>"
+      ],
+      [
+        "X-Content-Type-Options",
+        "nosniff"
+      ]
+    ],
+    "body": "Forbidden: origin not allowed\n",
+    "body_length": 30,
+    "body_sha256": null,
+    "base_href": null
+  },
+  "log": [
+    "<ts> GET /api/list-apps <elapsed>"
+  ],
+  "exit_status": null,
+  "stdout": null,
+  "error": null
+}

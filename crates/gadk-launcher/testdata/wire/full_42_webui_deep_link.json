@@ -1,0 +1,71 @@
+{
+  "name": "full_42_webui_deep_link",
+  "server": "full",
+  "launcher": "full",
+  "args": [
+    "web",
+    "-port",
+    "<port>",
+    "-max_request_body_size",
+    "1024",
+    "-allow_origins",
+    "http://allowed.example",
+    "api",
+    "webui",
+    "a2a",
+    "pubsub",
+    "eventarc"
+  ],
+  "kind": "exchange",
+  "request": {
+    "method": "GET",
+    "target": "/ui/apps/assistant/sessions",
+    "headers": [
+      [
+        "Host",
+        "127.0.0.1:<port>"
+      ],
+      [
+        "Connection",
+        "close"
+      ]
+    ],
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "status_text": "OK",
+    "headers": [
+      [
+        "Accept-Ranges",
+        "bytes"
+      ],
+      [
+        "Connection",
+        "close"
+      ],
+      [
+        "Content-Length",
+        "53361"
+      ],
+      [
+        "Content-Type",
+        "text/html; charset=utf-8"
+      ],
+      [
+        "Date",
+        "<date>"
+      ]
+    ],
+    "body": null,
+    "body_length": 53361,
+    "body_sha256": "58bcef6b4efc7d79b3e925cde5c89c74950faa317c6172868aff3e1d200592d2",
+    "base_href": "<base href=\"/ui/\">"
+  },
+  "log": [
+    "<ts> GET /ui/apps/assistant/sessions <elapsed>"
+  ],
+  "exit_status": null,
+  "stdout": null,
+  "error": null
+}

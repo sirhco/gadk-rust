@@ -1,0 +1,91 @@
+{
+  "name": "full_19_api_session_create",
+  "server": "full",
+  "launcher": "full",
+  "args": [
+    "web",
+    "-port",
+    "<port>",
+    "-max_request_body_size",
+    "1024",
+    "-allow_origins",
+    "http://allowed.example",
+    "api",
+    "webui",
+    "a2a",
+    "pubsub",
+    "eventarc"
+  ],
+  "kind": "exchange",
+  "request": {
+    "method": "POST",
+    "target": "/api/apps/assistant/users/u1/sessions/s1",
+    "headers": [
+      [
+        "Host",
+        "127.0.0.1:<port>"
+      ],
+      [
+        "Content-Type",
+        "application/json"
+      ],
+      [
+        "Content-Length",
+        "26"
+      ],
+      [
+        "Connection",
+        "close"
+      ]
+    ],
+    "body": "{\"state\":{\"color\":\"blue\"}}"
+  },
+  "response": {
+    "status": 200,
+    "status_text": "OK",
+    "headers": [
+      [
+        "Access-Control-Allow-Headers",
+        "Content-Type, Authorization"
+      ],
+      [
+        "Access-Control-Allow-Methods",
+        "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS"
+      ],
+      [
+        "Access-Control-Allow-Origin",
+        "http://localhost:8080"
+      ],
+      [
+        "Connection",
+        "close"
+      ],
+      [
+        "Content-Length",
+        "<n>"
+      ],
+      [
+        "Content-Type",
+        "application/json; charset=UTF-8"
+      ],
+      [
+        "Date",
+        "<date>"
+      ],
+      [
+        "Vary",
+        "Origin"
+      ]
+    ],
+    "body": "{\"id\":\"s1\",\"appName\":\"assistant\",\"userId\":\"u1\",\"lastUpdateTime\":\"<t>\",\"events\":[],\"state\":{\"color\":\"blue\"}}\n",
+    "body_length": 113,
+    "body_sha256": null,
+    "base_href": null
+  },
+  "log": [
+    "<ts> POST /api/apps/assistant/users/u1/sessions/s1 <elapsed>"
+  ],
+  "exit_status": null,
+  "stdout": null,
+  "error": null
+}

@@ -78,6 +78,7 @@ fn oidc(allowed: &[&str], validate: Option<TokenValidator>) -> GoogleOidc {
         audience: TEST_AUDIENCE.into(),
         allowed_service_accounts: allowed.iter().map(|s| (*s).to_owned()).collect(),
         validate,
+        log: None,
     }
 }
 
@@ -389,6 +390,7 @@ async fn test_google_oidc_rejection_is_not_an_internal_failure() {
         audience: TEST_AUDIENCE.into(),
         allowed_service_accounts: Vec::new(),
         validate: Some(validator(|_, _| Err("idtoken: invalid token".into()))),
+        log: None,
     };
     let got = serve(Arc::new(g), request("/", &["Bearer forged-token"])).await;
     assert_eq!(got.status, StatusCode::UNAUTHORIZED);

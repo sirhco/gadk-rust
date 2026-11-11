@@ -1,0 +1,60 @@
+{
+  "name": "prod_01_health",
+  "server": "prod",
+  "launcher": "prod",
+  "args": [
+    "web",
+    "-port",
+    "<port>",
+    "a2a",
+    "api"
+  ],
+  "kind": "exchange",
+  "request": {
+    "method": "GET",
+    "target": "/health",
+    "headers": [
+      [
+        "Host",
+        "127.0.0.1:<port>"
+      ],
+      [
+        "Connection",
+        "close"
+      ]
+    ],
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "status_text": "OK",
+    "headers": [
+      [
+        "Connection",
+        "close"
+      ],
+      [
+        "Content-Length",
+        "16"
+      ],
+      [
+        "Content-Type",
+        "application/json"
+      ],
+      [
+        "Date",
+        "<date>"
+      ]
+    ],
+    "body": "{\"status\":\"ok\"}\n",
+    "body_length": 16,
+    "body_sha256": null,
+    "base_href": null
+  },
+  "log": [
+    "<ts> GET /health <elapsed>"
+  ],
+  "exit_status": null,
+  "stdout": null,
+  "error": null
+}
