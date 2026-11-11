@@ -35,7 +35,9 @@ server = ["dep:gadk-server", "gadk-a2a?/gadk-server"]
 # `default`.
 a2a = ["dep:gadk-a2a"]
 # The ADK-Go launcher: console and web (REST API, A2A, web UI, triggers) sub-launchers
-# (gadk-launcher with its `full` and `prod` presets); not in `default`.
+# (gadk-launcher with its `full` and `prod` presets); not in `default`. `full` comes from
+# gadk-launcher's default features, which the dependency below keeps; `full` does not enable
+# the `prod` feature, so it is named here to expose `gadk::launcher::prod`.
 launcher = ["dep:gadk-launcher", "gadk-launcher/prod"]
 
 [dependencies]

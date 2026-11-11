@@ -29,6 +29,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config::Config;
 use crate::golog;
+use crate::test_support::NoAgents;
 use crate::web::webui::WebUiLauncher;
 use crate::web::{self, WebRouter, WebSublauncher, build_base_router, testing};
 
@@ -40,23 +41,6 @@ const ASSET_REF_PATTERN: &str = r#"(?is)<(?:script|link)\s[^>]*?(?:src|href)\s*=
 
 /// Go `docBaseHrefPattern`: the value of the `<base href>` tag.
 const DOC_BASE_HREF_PATTERN: &str = r#"(?is)<base\s[^>]*?href\s*=\s*"([^"]*)""#;
-
-struct NoAgents;
-
-impl gadk_agent::Loader for NoAgents {
-    fn list_agents(&self) -> Vec<String> {
-        Vec::new()
-    }
-    fn load_agent(
-        &self,
-        name: &str,
-    ) -> Result<Arc<dyn gadk_agent::Agent>, gadk_agent::LoaderError> {
-        Err(gadk_agent::LoaderError(format!("no agent {name}")))
-    }
-    fn root_agent(&self) -> Arc<dyn gadk_agent::Agent> {
-        unimplemented!("the web UI tests load no agent")
-    }
-}
 
 /// Go's `nil` `*launcher.Config`: the web UI reads only its logger.
 fn config() -> Config {

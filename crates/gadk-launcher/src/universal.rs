@@ -161,6 +161,7 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
+    use crate::test_support::NoAgents;
 
     /// What a fake sub-launcher saw.
     #[derive(Default)]
@@ -221,23 +222,6 @@ mod tests {
         async fn run(&self, _cancel: CancellationToken, _config: Config) -> Result<(), Error> {
             self.seen.lock().unwrap().ran.push(self.keyword.to_owned());
             Ok(())
-        }
-    }
-
-    struct NoAgents;
-
-    impl gadk_agent::Loader for NoAgents {
-        fn list_agents(&self) -> Vec<String> {
-            Vec::new()
-        }
-        fn load_agent(
-            &self,
-            name: &str,
-        ) -> Result<Arc<dyn gadk_agent::Agent>, gadk_agent::LoaderError> {
-            Err(gadk_agent::LoaderError(format!("no agent {name}")))
-        }
-        fn root_agent(&self) -> Arc<dyn gadk_agent::Agent> {
-            unimplemented!("the universal tests load no agent")
         }
     }
 
@@ -441,20 +425,20 @@ mod tests {
         );
     }
 
-    /// The `full` launcher's syntax header as ADK-Go's probe recorded it (CLI fixture
-    /// `unparsed_args_console`).
+    /// The `full` launcher's syntax as ADK-Go's probe recorded it after the error record (CLI
+    /// fixture `unparsed_args_console`).
+    #[cfg(feature = "full")]
     #[test]
-    fn command_line_syntax_header_matches_the_cli_fixture() {
-        let fixture: serde_json::Value =
-            serde_json::from_str(include_str!("../testdata/cli/unparsed_args_console.json"))
-                .unwrap();
-        let stderr = fixture["stderr"].as_str().unwrap();
-        let header = "Arguments: Specify one of the following:\n\
-                      \x20 * console - runs an agent in console mode.\n\
-                      \x20 * web - starts web server with additional sub-servers specified by sublaunchers\n\
-                      Details:\n\
-                      \x20 console\n";
-        let at = stderr.find("Arguments:").unwrap();
-        assert!(stderr[at..].starts_with(header), "{stderr}");
+    fn command_line_syntax_matches_the_cli_fixture() {
+        use crate::launcher::Launcher as _;
+        let f = crate::test_support::cli("unparsed_args_console");
+        let stderr = f["stderr"].as_str().unwrap();
+        let record = format!("<ts> Run failed: {}\n\n", f["error"].as_str().unwrap());
+        let at = stderr.find(&record).unwrap() + record.len();
+        assert_eq!(
+            crate::full::new().command_line_syntax(),
+            &stderr[at..],
+            "{stderr}"
+        );
     }
 }

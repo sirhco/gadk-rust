@@ -26,9 +26,10 @@ use http::{Method, StatusCode};
 use pretty_assertions::assert_eq;
 
 use super::cmd_launcher_web_triggers_pubsub_pubsub::{
-    TEST_SERVICE_ACCOUNT, auth_args, noop_config, refused, serve, session_count, strings, verified,
+    TEST_SERVICE_ACCOUNT, auth_args, noop_config, refused, serve, session_count, verified,
 };
 use crate::golog::Captured;
+use crate::test_support::strings;
 use crate::web::triggers::eventarc::{self, EventarcLauncher};
 use crate::web::{WebRouter, WebSublauncher};
 

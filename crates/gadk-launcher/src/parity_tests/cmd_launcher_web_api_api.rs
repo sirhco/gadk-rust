@@ -37,6 +37,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config::Config;
 use crate::golog;
+use crate::test_support::strings;
 use crate::web::api::{self, cors_with_args, register_api_routes, rewrite_redirects};
 use crate::web::{self, WebRouter, WebSublauncher, axum_handler, build_base_router, testing};
 
@@ -179,10 +180,6 @@ fn launcher_config() -> Config {
     let (log, _) = golog::capture();
     config.log = log;
     config
-}
-
-fn strings(args: &[&str]) -> Vec<String> {
-    args.iter().map(|s| (*s).to_owned()).collect()
 }
 
 /// A parsed api launcher with its routes set up on a fresh StrictSlash router.

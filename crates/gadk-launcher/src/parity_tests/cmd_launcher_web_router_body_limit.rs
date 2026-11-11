@@ -30,24 +30,8 @@ use crate::config::Config;
 use crate::error::Error;
 use crate::golog;
 use crate::launcher::SubLauncher;
+use crate::test_support::NoAgents;
 use crate::web::{self, WebLauncher, WebRouter, WebSublauncher};
-
-struct NoAgents;
-
-impl gadk_agent::Loader for NoAgents {
-    fn list_agents(&self) -> Vec<String> {
-        Vec::new()
-    }
-    fn load_agent(
-        &self,
-        name: &str,
-    ) -> Result<Arc<dyn gadk_agent::Agent>, gadk_agent::LoaderError> {
-        Err(gadk_agent::LoaderError(format!("no agent {name}")))
-    }
-    fn root_agent(&self) -> Arc<dyn gadk_agent::Agent> {
-        unimplemented!("the body-limit tests load no agent")
-    }
-}
 
 /// Go `&launcher.Config{MaxPayloadSize: max}`.
 fn config(max_payload_size: i64) -> Config {

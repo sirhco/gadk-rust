@@ -242,8 +242,8 @@ impl Policy {
 /// Go `originguard.New(Config{BindHost, AllowedOrigins}).Middleware` as a handler wrapper.
 ///
 /// A request the guard refuses (a rebound Host under a loopback `bind_host`, or an Origin that is
-/// neither the request's own, a loopback page reaching a loopback server, nor on
-/// `allowed_origins`) answers 403 `Forbidden: host not allowed` / `Forbidden: origin not allowed`
+/// not on `allowed_origins` and either is not the request's own origin or, on a server reached
+/// over loopback, is not a loopback page) answers 403 `Forbidden: host not allowed` / `Forbidden: origin not allowed`
 /// in `http.Error` framing; any other request reaches the wrapped handler. A single `"*"` in
 /// `allowed_origins` turns both checks off. Serve with
 /// `into_make_service_with_connect_info::<`[`LocalAddr`]`>()` so the guard knows the address each

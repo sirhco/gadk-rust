@@ -37,27 +37,15 @@ use tokio_util::sync::CancellationToken;
 use crate::config::Config;
 use crate::error::Error;
 use crate::launcher::SubLauncher;
+use crate::test_support::{free_port, strings};
 use crate::web::{self, WebRouter, WebSublauncher, a2a as a2a_launcher, api};
-
-/// Go `getFreePort`.
-fn get_free_port() -> u16 {
-    std::net::TcpListener::bind("localhost:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
-
-fn strings(args: &[&str]) -> Vec<String> {
-    args.iter().map(|s| (*s).to_owned()).collect()
-}
 
 /// The web launcher serves A2A v1 to an A2A client resolving the card from the launcher's
 /// address and sending a message.
 // parity: adapted: Go's "A2A v0 client" subtest is not run: the A2A 0.3 endpoint is not served (plan D13, ledger 6)
 #[tokio::test(flavor = "multi_thread")]
 async fn test_web_launcher_serves_a2_a() {
-    let port = get_free_port();
+    let port = free_port();
 
     let mut l = web::new(vec![Box::new(a2a_launcher::new())]);
     SubLauncher::parse(

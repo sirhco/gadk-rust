@@ -37,27 +37,11 @@ use crate::config::{BoxedLayer, Config};
 use crate::error::Error;
 use crate::golog;
 use crate::launcher::SubLauncher;
+use crate::test_support::{NoAgents, free_port, strings};
 use crate::web::{
     self, DEFAULT_HOST, WebRouter, WebSublauncher, apply_service_defaults, build_base_router,
     register_health_route, testing,
 };
-
-struct NoAgents;
-
-impl gadk_agent::Loader for NoAgents {
-    fn list_agents(&self) -> Vec<String> {
-        Vec::new()
-    }
-    fn load_agent(
-        &self,
-        name: &str,
-    ) -> Result<Arc<dyn gadk_agent::Agent>, gadk_agent::LoaderError> {
-        Err(gadk_agent::LoaderError(format!("no agent {name}")))
-    }
-    fn root_agent(&self) -> Arc<dyn gadk_agent::Agent> {
-        unimplemented!("the web tests load no agent")
-    }
-}
 
 /// Go `&launcher.Config{}`, logging to a buffer.
 fn config() -> (Config, golog::Captured) {
@@ -65,10 +49,6 @@ fn config() -> (Config, golog::Captured) {
     let mut config = Config::new(Arc::new(NoAgents));
     config.log = log.with_clock(|| "2009/11/10 23:00:00 ".to_owned());
     (config, out)
-}
-
-fn strings(args: &[&str]) -> Vec<String> {
-    args.iter().map(|s| (*s).to_owned()).collect()
 }
 
 /// What a fake sub-launcher saw during `Run`.
@@ -156,12 +136,6 @@ impl WebSublauncher for Fake {
     fn user_message(&self, _web_url: &str, _printer: &mut dyn FnMut(&str)) {
         self.seen.lock().unwrap().user_message_called = true;
     }
-}
-
-/// A free port on 127.0.0.1 (bound, then released).
-fn free_port() -> u16 {
-    let ln = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    ln.local_addr().unwrap().port()
 }
 
 /// A layer counting the events it sees (Go's tracking span processor).

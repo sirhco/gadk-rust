@@ -20,22 +20,9 @@ use std::sync::Arc;
 use gadk_launcher::Config;
 use gadk_session::compaction;
 
-struct NoAgents;
+mod support;
 
-impl gadk_agent::Loader for NoAgents {
-    fn list_agents(&self) -> Vec<String> {
-        Vec::new()
-    }
-    fn load_agent(
-        &self,
-        name: &str,
-    ) -> Result<Arc<dyn gadk_agent::Agent>, gadk_agent::LoaderError> {
-        Err(gadk_agent::LoaderError(format!("no agent {name}")))
-    }
-    fn root_agent(&self) -> Arc<dyn gadk_agent::Agent> {
-        unimplemented!("the validate tests load no agent")
-    }
-}
+use support::NoAgents;
 
 fn config(compaction: Option<compaction::Config>) -> Config {
     let mut config = Config::new(Arc::new(NoAgents));

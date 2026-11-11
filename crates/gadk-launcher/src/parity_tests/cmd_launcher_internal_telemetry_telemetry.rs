@@ -21,47 +21,17 @@
 //! installs the layers. The global dispatcher is never touched (the installation is injected).
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use pretty_assertions::assert_eq;
-use tracing_subscriber::{Layer, Registry};
 
 use crate::config::{BoxedLayer, Config};
 use crate::error::Error;
 use crate::telemetry::init_with;
+use crate::test_support::NoAgents;
 
-struct NoAgents;
-
-impl gadk_agent::Loader for NoAgents {
-    fn list_agents(&self) -> Vec<String> {
-        Vec::new()
-    }
-    fn load_agent(
-        &self,
-        name: &str,
-    ) -> Result<Arc<dyn gadk_agent::Agent>, gadk_agent::LoaderError> {
-        Err(gadk_agent::LoaderError(format!("no agent {name}")))
-    }
-    fn root_agent(&self) -> Arc<dyn gadk_agent::Agent> {
-        unimplemented!("the telemetry tests load no agent")
-    }
-}
-
-/// Stands in for a `telemetry.Option`: a layer that counts the events it sees.
-struct CountingOption(Arc<AtomicUsize>);
-
-impl Layer<Registry> for CountingOption {
-    fn on_event(
-        &self,
-        _event: &tracing::Event<'_>,
-        _ctx: tracing_subscriber::layer::Context<'_, Registry>,
-    ) {
-        self.0.fetch_add(1, Ordering::SeqCst);
-    }
-}
-
+/// Stands in for a `telemetry.Option`: a layer that does nothing.
 fn option() -> BoxedLayer {
-    Box::new(CountingOption(Arc::new(AtomicUsize::new(0))))
+    Box::new(tracing_subscriber::layer::Identity::new())
 }
 
 /// Go `initProviders`: `true` when initialization reports that cloud export was asked for (Go:

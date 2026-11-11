@@ -107,23 +107,7 @@ mod tests {
     use super::*;
     use crate::config::BoxedLayer;
     use crate::golog;
-
-    struct NoAgents;
-
-    impl gadk_agent::Loader for NoAgents {
-        fn list_agents(&self) -> Vec<String> {
-            Vec::new()
-        }
-        fn load_agent(
-            &self,
-            name: &str,
-        ) -> Result<Arc<dyn gadk_agent::Agent>, gadk_agent::LoaderError> {
-            Err(gadk_agent::LoaderError(format!("no agent {name}")))
-        }
-        fn root_agent(&self) -> Arc<dyn gadk_agent::Agent> {
-            unimplemented!("the telemetry tests load no agent")
-        }
-    }
+    use crate::test_support::NoAgents;
 
     /// Counts the events it sees.
     struct Counting(Arc<AtomicUsize>);

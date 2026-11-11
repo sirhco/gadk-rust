@@ -25,16 +25,9 @@ use gadk_agent::{AgentConfig, SingleLoader, new_agent};
 use gadk_launcher::{CancellationToken, Config, Error, Launcher};
 use tokio::task::JoinHandle;
 
-/// Go `freePort`: a port nothing is listening on. There is a race between closing the listener
-/// and the server binding it, which is why the caller polls rather than assuming the server is
-/// up.
-fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
+mod support;
+
+use support::free_port;
 
 /// Go `launchedServer`: a full launcher running for the duration of one test.
 struct LaunchedServer {

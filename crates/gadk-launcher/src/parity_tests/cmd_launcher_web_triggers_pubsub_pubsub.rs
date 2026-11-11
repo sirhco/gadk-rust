@@ -32,16 +32,13 @@ use pretty_assertions::assert_eq;
 
 use crate::config::Config;
 use crate::golog::{self, Captured};
+use crate::test_support::strings;
 use crate::web::triggers::pubsub::{self, PubSubLauncher};
 use crate::web::{WebRouter, WebSublauncher};
 
 pub(super) const TEST_SERVICE_ACCOUNT: &str = "push@project.iam.gserviceaccount.com";
 
 const TEST_AUDIENCE: &str = "https://example.run.app/api/apps/noop/trigger/pubsub";
-
-pub(super) fn strings(args: &[&str]) -> Vec<String> {
-    args.iter().map(|s| (*s).to_owned()).collect()
-}
 
 /// Go `authArgs` for `audience`.
 pub(super) fn auth_args(audience: &str) -> Vec<String> {
