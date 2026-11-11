@@ -13,39 +13,73 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `cmd/launcher/web/triggers/eventarc`: the Eventarc trigger endpoint (Task 11).
-// Contract stub (plan D1): Task 11 writes the bodies.
-#![allow(dead_code, unused_variables, unused_imports, clippy::todo)]
+//! Go `cmd/launcher/web/triggers/eventarc`: the sub-launcher that adds the Eventarc trigger
+//! endpoint to the web server.
 
+use std::io::Write;
+use std::sync::{Arc, Mutex};
+
+use gadk_server::mux::{Request, handler};
+use gadk_server::rest::triggers::EventarcController;
+
+use super::triggerauth::Trigger;
 use crate::config::Config;
 use crate::error::Error;
 use crate::web::{WebRouter, WebSublauncher};
 
 /// Go `eventarc.eventarcLauncher`.
-pub struct EventarcLauncher {}
+pub struct EventarcLauncher {
+    pub(crate) trigger: Trigger,
+}
 
 /// Go `eventarc.NewLauncher()`.
 pub fn new() -> EventarcLauncher {
-    EventarcLauncher {}
+    EventarcLauncher {
+        trigger: Trigger::new("eventarc", "Eventarc"),
+    }
+}
+
+impl EventarcLauncher {
+    /// Replaces where the flag set writes its errors and usage (Go `fs.SetOutput`; default
+    /// stderr), for tests and the CLI replay.
+    pub fn with_flag_output(mut self, out: Arc<Mutex<dyn Write + Send>>) -> EventarcLauncher {
+        self.trigger.set_flag_output(out);
+        self
+    }
 }
 
 impl WebSublauncher for EventarcLauncher {
     fn keyword(&self) -> String {
-        todo!("Task 11")
+        "eventarc".to_owned()
     }
+
     fn parse(&mut self, args: Vec<String>) -> Result<Vec<String>, Error> {
-        todo!("Task 11")
+        self.trigger.parse(args)
     }
+
     fn command_line_syntax(&self) -> String {
-        todo!("Task 11")
+        self.trigger.command_line_syntax()
     }
+
     fn simple_description(&self) -> String {
-        todo!("Task 11")
+        "starts ADK Eventarc trigger endpoint server".to_owned()
     }
+
     fn setup_subrouters(&self, router: &mut WebRouter, config: &mut Config) -> Result<(), Error> {
-        todo!("Task 11")
+        self.trigger.setup_subrouters(router, config, |cfg| {
+            let controller = Arc::new(EventarcController::new(cfg)?);
+            Ok(handler(move |req: Request| {
+                let controller = Arc::clone(&controller);
+                async move { controller.eventarc_trigger_handler(req).await }
+            }))
+        })
     }
+
     fn user_message(&self, web_url: &str, printer: &mut dyn FnMut(&str)) {
-        todo!("Task 11")
+        // Go's text: one space after the colon here, two in the other sub-launchers'.
+        printer(&format!(
+            "       eventarc: Eventarc trigger endpoint is available at {web_url}{}/apps/{{app_name}}/trigger/eventarc",
+            self.trigger.path_prefix()
+        ));
     }
 }
