@@ -14,10 +14,14 @@
 // limitations under the License.
 
 //! The identity header bridge: the authenticated user reaches the executor through the
-//! reserved `x-gadk-a2a-user` header (spec R5, R6). Bodies: plan 5b Task 5.
+//! reserved `x-gadk-a2a-user` header (spec R5, R6).
+//!
+//! Go reads the user from the a2a call context; a2a-rs 0.5.3 does not propagate one into
+//! `a2a_server::ExecutorContext::user`, so [`a2a_identity_layer`] (mounted inside the
+//! authentication layer) writes the user into a reserved header that a2a-rs passes on as a
+//! service param, and [`identity_header_resolver`] reads it back.
 
-#![allow(dead_code, unused_variables, unused_imports, clippy::todo)]
-
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use super::executor::UserResolver;
@@ -25,19 +29,44 @@ use super::executor::UserResolver;
 /// The reserved request header that carries the authenticated user to the executor.
 pub const IDENTITY_HEADER: &str = "x-gadk-a2a-user";
 
-/// The default user resolver: `ctx.user.name` when it is non-empty; it never reads headers.
+/// The default user resolver: `ctx.user.name` when it is non-empty; it never reads headers, so a
+/// deployment that does not mount [`a2a_identity_layer`] cannot be spoofed through
+/// [`IDENTITY_HEADER`].
 pub fn default_user_resolver() -> UserResolver {
-    todo!("plan 5b Task 5")
+    Arc::new(context_user)
+}
+
+/// Go's user lookup: the a2a call context's user name, when non-empty.
+fn context_user(ctx: &a2a_server::ExecutorContext) -> Option<String> {
+    ctx.user
+        .as_ref()
+        .map(|u| u.name.as_str())
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
 }
 
 /// The first non-empty [`IDENTITY_HEADER`] service param, else [`default_user_resolver`].
-/// Install it only together with [`a2a_identity_layer`] inside the authentication layer.
+/// Install it only together with [`a2a_identity_layer`] inside the authentication layer: the
+/// layer is what removes a header the client sent.
 pub fn identity_header_resolver() -> UserResolver {
-    todo!("plan 5b Task 5")
+    Arc::new(|ctx: &a2a_server::ExecutorContext| {
+        ctx.service_params
+            .get(IDENTITY_HEADER)
+            .and_then(|values| values.iter().find(|v| !v.is_empty()))
+            .cloned()
+            .or_else(|| context_user(ctx))
+    })
 }
 
 /// A tower layer that removes any inbound [`IDENTITY_HEADER`] and, when `extract` finds a user
 /// in the request extensions, sets the header to it.
+///
+/// Mount it inside the authentication layer (so the extensions already hold the caller) and
+/// around the A2A routers, and install [`identity_header_resolver`] as
+/// `ExecutorConfig::user_resolver`. A user ID that is not a valid header value (control
+/// characters, non-ASCII text) is dropped with a warning, and the executor falls back to its
+/// anonymous `A2A_USER_<context_id>` user: a2a-rs passes only visible-ASCII header values on as
+/// service params.
 pub fn a2a_identity_layer<F>(extract: F) -> IdentityLayer<F>
 where
     F: Fn(&http::Extensions) -> Option<String> + Clone + Send + Sync + 'static,
@@ -79,16 +108,276 @@ where
     type Future = S::Future;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        todo!("plan 5b Task 5")
+        self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, req: http::Request<B>) -> Self::Future {
-        todo!("plan 5b Task 5")
+    fn call(&mut self, mut req: http::Request<B>) -> Self::Future {
+        // Always strip what the client sent: only this layer may set the header.
+        req.headers_mut().remove(IDENTITY_HEADER);
+        if let Some(user) = (self.extract)(req.extensions()) {
+            match http::HeaderValue::from_str(&user) {
+                Ok(value) => {
+                    req.headers_mut()
+                        .insert(http::HeaderName::from_static(IDENTITY_HEADER), value);
+                }
+                Err(_) => tracing::warn!(
+                    "a2a identity: the user ID is not a valid header value, so the request \
+                     reaches the executor without one"
+                ),
+            }
+        }
+        self.inner.call(req)
     }
 }
 
-/// The user ID gadk-server's authentication layer stored (`gadk_server::authn::Caller`).
+/// The user ID gadk-server's authentication layer stored (`gadk_server::authn::Caller`), when it
+/// is non-empty. Pass it to [`a2a_identity_layer`] when the A2A routers sit behind
+/// `gadk_server::authn::middleware`.
 #[cfg(feature = "gadk-server")]
 pub fn caller_user(ext: &http::Extensions) -> Option<String> {
-    todo!("plan 5b Task 5")
+    ext.get::<gadk_server::authn::Caller>()
+        .map(|caller| caller.user_id.clone())
+        .filter(|user_id| !user_id.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::convert::Infallible;
+    use std::sync::Arc;
+
+    use parking_lot::Mutex;
+    use tower::{Layer, ServiceExt};
+
+    use super::*;
+
+    fn executor_context(
+        user: Option<&str>,
+        params: &[(&str, &[&str])],
+    ) -> a2a_server::ExecutorContext {
+        a2a_server::ExecutorContext {
+            message: None,
+            task_id: "task-1".into(),
+            stored_task: None,
+            context_id: "ctx-1".into(),
+            metadata: None,
+            user: user.map(a2a_server::User::authenticated),
+            service_params: params
+                .iter()
+                .map(|(k, vs)| {
+                    (
+                        (*k).to_owned(),
+                        vs.iter().map(|v| (*v).to_owned()).collect(),
+                    )
+                })
+                .collect(),
+            tenant: None,
+        }
+    }
+
+    /// a2a-rs's `extract_service_params` (crate-private there): lowercase header names, values
+    /// that are not visible ASCII skipped, multi-valued headers in order.
+    #[cfg(feature = "gadk-server")]
+    fn service_params(headers: &http::HeaderMap) -> a2a_server::ServiceParams {
+        let mut params = a2a_server::ServiceParams::new();
+        for (name, value) in headers {
+            if let Ok(v) = value.to_str() {
+                params
+                    .entry(name.as_str().to_owned())
+                    .or_default()
+                    .push(v.to_owned());
+            }
+        }
+        params
+    }
+
+    /// Runs one request through `a2a_identity_layer(extract)` and returns the identity header
+    /// values the inner service saw.
+    async fn seen_identity_headers<F>(extract: F, req: http::Request<()>) -> Vec<String>
+    where
+        F: Fn(&http::Extensions) -> Option<String> + Clone + Send + Sync + 'static,
+    {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let seen_in = seen.clone();
+        let inner = tower::service_fn(move |req: http::Request<()>| {
+            let seen = seen_in.clone();
+            async move {
+                *seen.lock() = req
+                    .headers()
+                    .get_all(IDENTITY_HEADER)
+                    .iter()
+                    .map(|v| v.to_str().unwrap().to_owned())
+                    .collect();
+                Ok::<_, Infallible>(())
+            }
+        });
+        a2a_identity_layer(extract)
+            .layer(inner)
+            .oneshot(req)
+            .await
+            .unwrap();
+        seen.lock().clone()
+    }
+
+    fn spoofed_request() -> http::Request<()> {
+        http::Request::builder()
+            .uri("/jsonrpc")
+            .header(IDENTITY_HEADER, "mallory")
+            .header(IDENTITY_HEADER, "eve")
+            .header("x-other", "kept")
+            .body(())
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn inbound_identity_header_is_stripped_when_the_extractor_returns_none() {
+        let seen = seen_identity_headers(|_: &http::Extensions| None, spoofed_request()).await;
+        assert!(seen.is_empty(), "{seen:?}");
+    }
+
+    #[tokio::test]
+    async fn inbound_identity_header_is_replaced_when_the_extractor_returns_some() {
+        #[derive(Clone)]
+        struct Authenticated(String);
+        let mut req = spoofed_request();
+        req.extensions_mut().insert(Authenticated("alice".into()));
+        let seen = seen_identity_headers(
+            |ext: &http::Extensions| ext.get::<Authenticated>().map(|a| a.0.clone()),
+            req,
+        )
+        .await;
+        assert_eq!(seen, ["alice"]);
+    }
+
+    #[tokio::test]
+    async fn a_user_id_that_is_not_a_header_value_is_dropped() {
+        let seen = seen_identity_headers(
+            |_: &http::Extensions| Some("bad\nuser".to_owned()),
+            spoofed_request(),
+        )
+        .await;
+        assert!(seen.is_empty(), "{seen:?}");
+    }
+
+    #[tokio::test]
+    async fn other_headers_pass_through_the_identity_layer() {
+        let inner = tower::service_fn(|req: http::Request<()>| async move {
+            Ok::<_, Infallible>(req.headers().get("x-other").cloned())
+        });
+        let other = a2a_identity_layer(|_: &http::Extensions| None)
+            .layer(inner)
+            .oneshot(spoofed_request())
+            .await
+            .unwrap();
+        assert_eq!(other.unwrap(), "kept");
+    }
+
+    #[test]
+    fn default_resolver_reads_the_context_user_and_ignores_the_header() {
+        let resolve = default_user_resolver();
+        assert_eq!(
+            resolve(&executor_context(
+                Some("alice"),
+                &[(IDENTITY_HEADER, &["mallory"])]
+            )),
+            Some("alice".to_owned())
+        );
+        assert_eq!(
+            resolve(&executor_context(None, &[(IDENTITY_HEADER, &["mallory"])])),
+            None
+        );
+    }
+
+    #[test]
+    fn default_resolver_treats_an_empty_user_name_as_none() {
+        let resolve = default_user_resolver();
+        assert_eq!(resolve(&executor_context(Some(""), &[])), None);
+    }
+
+    #[test]
+    fn identity_header_resolver_prefers_the_first_non_empty_header_value() {
+        let resolve = identity_header_resolver();
+        assert_eq!(
+            resolve(&executor_context(
+                Some("alice"),
+                &[(IDENTITY_HEADER, &["", "bob", "carol"])]
+            )),
+            Some("bob".to_owned())
+        );
+    }
+
+    #[test]
+    fn identity_header_resolver_falls_back_to_the_default_resolver() {
+        let resolve = identity_header_resolver();
+        assert_eq!(
+            resolve(&executor_context(Some("alice"), &[])),
+            Some("alice".to_owned())
+        );
+        assert_eq!(
+            resolve(&executor_context(
+                Some("alice"),
+                &[(IDENTITY_HEADER, &[""])]
+            )),
+            Some("alice".to_owned())
+        );
+        assert_eq!(resolve(&executor_context(None, &[])), None);
+    }
+
+    #[cfg(feature = "gadk-server")]
+    #[test]
+    fn caller_user_reads_a_non_empty_caller_user_id() {
+        let mut ext = http::Extensions::new();
+        assert_eq!(caller_user(&ext), None);
+        ext.insert(gadk_server::authn::Caller::default());
+        assert_eq!(caller_user(&ext), None);
+        ext.insert(gadk_server::authn::Caller {
+            user_id: "alice".into(),
+            claims: None,
+        });
+        assert_eq!(caller_user(&ext), Some("alice".to_owned()));
+    }
+
+    /// gadk-server's authn middleware outside, the identity layer inside: the executor's resolver
+    /// sees the authenticated caller, never the header the client sent.
+    #[cfg(feature = "gadk-server")]
+    #[tokio::test]
+    async fn authn_middleware_and_identity_layer_carry_the_caller_to_the_resolver() {
+        use axum::body::Body;
+        use axum::response::{IntoResponse, Response};
+
+        let resolved = Arc::new(Mutex::new(None));
+        let resolved_in = resolved.clone();
+        let inner = tower::service_fn(move |req: http::Request<Body>| {
+            let resolved = resolved_in.clone();
+            async move {
+                // What a2a-rs hands the executor: the request headers as service params.
+                let mut ctx = executor_context(None, &[]);
+                ctx.service_params = service_params(req.headers());
+                *resolved.lock() = identity_header_resolver()(&ctx);
+                Ok::<Response, Infallible>(http::StatusCode::OK.into_response())
+            }
+        });
+        let svc = gadk_server::authn::middleware(gadk_server::authn::header("x-user"))
+            .layer(a2a_identity_layer(caller_user).layer(inner));
+
+        let req = http::Request::builder()
+            .uri("/jsonrpc")
+            .header("x-user", "alice")
+            .header(IDENTITY_HEADER, "mallory")
+            .body(Body::empty())
+            .unwrap();
+        let resp = svc.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), http::StatusCode::OK);
+        assert_eq!(resolved.lock().clone(), Some("alice".to_owned()));
+
+        // Without credentials the authn layer answers 401 and the executor is never reached.
+        *resolved.lock() = None;
+        let req = http::Request::builder()
+            .uri("/jsonrpc")
+            .header(IDENTITY_HEADER, "mallory")
+            .body(Body::empty())
+            .unwrap();
+        let resp = svc.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), http::StatusCode::UNAUTHORIZED);
+        assert_eq!(resolved.lock().clone(), None);
+    }
 }
