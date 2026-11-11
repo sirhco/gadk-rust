@@ -13,15 +13,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(dead_code, unused_variables, unused_imports, clippy::todo)]
-
 //! Go `agentregistry/factory.go`, MCP part: `MCPToolset` and `mcpEndpointURI`.
 
 use std::collections::BTreeMap;
 
-use super::{Egress, EgressConfig};
+use http::{HeaderMap, HeaderName, HeaderValue};
+
+use super::{Egress, EgressClient, EgressConfig, add_headers};
 use crate::config::Client;
 use crate::error::Error;
+use crate::resolve::{TRANSPORT_HTTP_JSON, TRANSPORT_JSONRPC, connection_uri};
 use crate::types::McpServer;
 
 /// Go `MCPToolsetOption`: customizes [`Client::mcp_toolset`]; applied in order.
@@ -56,7 +57,14 @@ where
 
 /// Go `applyMCPToolsetOptions`.
 pub(crate) fn apply_mcp_toolset_options(opts: &[McpToolsetOption]) -> EgressConfig {
-    todo!("Task 5")
+    let mut ec = EgressConfig::default();
+    for opt in opts {
+        match opt {
+            McpToolsetOption::HttpClient(c) => ec.http_client = Some(c.clone()),
+            McpToolsetOption::Headers(h) => add_headers(&mut ec, h),
+        }
+    }
+    ec
 }
 
 impl Client {
@@ -69,7 +77,13 @@ impl Client {
         name: &str,
         opts: &[McpToolsetOption],
     ) -> Result<gadk_mcp::McpToolset, Error> {
-        todo!("Task 5")
+        let server = self.get_mcp_server(name).await?;
+        let Some(uri) = mcp_endpoint_uri(&server) else {
+            return Err(Error::NoEndpoint(name.to_owned()));
+        };
+        let ec = apply_mcp_toolset_options(opts);
+        let egress = self.egress(&uri, &ec);
+        gadk_mcp::new(self.mcp_config(uri, egress)?).map_err(Error::Mcp)
     }
 
     /// The toolset config for `uri` over `egress`: `McpTransport::StreamableHttp { url, client,
@@ -81,12 +95,37 @@ impl Client {
         uri: String,
         egress: Egress,
     ) -> Result<gadk_mcp::Config, Error> {
-        todo!("Task 5")
+        let (client, auth) = match egress.client {
+            EgressClient::Option(c) => (c, None),
+            EgressClient::Registry => (self.requester.http.clone(), self.requester.auth.clone()),
+            EgressClient::Default => (super::default_http_client()?, None),
+        };
+        let mut headers = HeaderMap::new();
+        for (name, value) in &egress.headers {
+            // Go's `Header.Set` would send any value; one `http` cannot represent is skipped.
+            let (Ok(name), Ok(value)) = (
+                HeaderName::from_bytes(name.as_bytes()),
+                HeaderValue::from_str(value),
+            ) else {
+                continue;
+            };
+            headers.insert(name, value);
+        }
+        let mut cfg = gadk_mcp::Config::new(gadk_mcp::McpTransport::StreamableHttp {
+            url: uri,
+            client,
+            headers,
+        });
+        cfg.auth = auth;
+        Ok(cfg)
     }
 }
 
 /// Go `mcpEndpointURI`: the server's connection URI preferring the JSONRPC binding, then
 /// HTTP_JSON (over its protocols and top-level interfaces).
 pub(crate) fn mcp_endpoint_uri(server: &McpServer) -> Option<String> {
-    todo!("Task 5")
+    [TRANSPORT_JSONRPC, TRANSPORT_HTTP_JSON]
+        .into_iter()
+        .find_map(|transport| connection_uri(&server.protocols, &server.interfaces, "", transport))
+        .map(|c| c.uri)
 }
