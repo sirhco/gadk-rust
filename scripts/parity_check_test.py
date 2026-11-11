@@ -840,7 +840,7 @@ class ThreeBTest(unittest.TestCase):
         err = io.StringIO()
         with contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
             pc.main(["--adk-go", str(self.go), "--repo", str(self.repo), "--ledger", "all", "--count"])
-        self.assertIn("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a, 4b, 4c, 5a or 5b", err.getvalue())
+        self.assertIn("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a, 4b, 4c, 5a, 5b or 6", err.getvalue())
 
 
 LEDGER_4A = (
@@ -1159,6 +1159,67 @@ class FiveBTest(unittest.TestCase):
         ])
 
 
+LEDGER_6 = (
+    "# Parity ledger — sub-project 6\n\n"
+    "<!-- in-scope:\ncmd/launcher/launcher_validate_test.go\ninternal/cli/util/text_helpers_test.go\n-->\n\n"
+    "<!-- deferred:\ncmd/launcher/web/agentengine/agentengine_test.go: sub-project 5c\n-->\n\n"
+    + pc.TABLE_HEADER + "\n" + pc.TABLE_SEP + "\n"
+)
+
+VALIDATE6_TARGET = "crates/gadk-launcher/tests/cmd_launcher_launcher_validate.rs"
+TEXT_HELPERS_TARGET = "crates/gadk-launcher/src/parity_tests/internal_cli_util_text_helpers.rs"
+
+
+class SixTest(unittest.TestCase):
+    """6: one crate; a `tests/` target and an all-skipped `src/parity_tests/` target (6b)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        d = pathlib.Path(self._tmp.name)
+        self.go, self.repo = d / "go", d / "repo"
+        for f, body in (
+            ("cmd/launcher/launcher_validate_test.go",
+             "func TestConfigValidateRejectsUnusableCompaction(t *testing.T) {}\n"),
+            ("internal/cli/util/text_helpers_test.go", "func TestValidateShellArgSafe(t *testing.T) {}\n"),
+            ("cmd/launcher/web/agentengine/agentengine_test.go", "func TestAgentEngine(t *testing.T) {}\n"),
+        ):
+            (self.go / f).parent.mkdir(parents=True, exist_ok=True)
+            (self.go / f).write_text("package x\n" + body)
+        for target in (VALIDATE6_TARGET, TEXT_HELPERS_TARGET):
+            (self.repo / target).parent.mkdir(parents=True, exist_ok=True)
+        (self.repo / VALIDATE6_TARGET).write_text(
+            "#[test]\nfn test_config_validate_rejects_unusable_compaction() {}\n")
+        (self.repo / TEXT_HELPERS_TARGET).write_text(
+            "// parity: skipped TestValidateShellArgSafe: cmd/adkgo helper (sub-project 6b)\n")
+        (self.repo / "docs/parity").mkdir(parents=True)
+        self.ledger = self.repo / "docs/parity/6.md"
+        self.ledger.write_text(LEDGER_6)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def run_cli(self, *args):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = pc.main(["--adk-go", str(self.go), "--repo", str(self.repo), *args])
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_ledger_6_is_registered(self):
+        self.assertIn("6", pc.GENERATED_LEDGERS)
+        self.assertEqual(self.run_cli("--ledger", "6", "--count"), (0, "2\n", ""))
+
+    def test_targets_generate_and_check(self):
+        self.assertEqual(self.run_cli("--ledger", "6", "--generate")[0], 0)
+        self.assertEqual(self.run_cli("--ledger", "6"), (0, "", ""))
+        rows = self.ledger.read_text().splitlines()[-2:]
+        self.assertEqual(rows, [
+            "| cmd/launcher/launcher_validate_test.go | TestConfigValidateRejectsUnusableCompaction | ported | "
+            + VALIDATE6_TARGET + " | test_config_validate_rejects_unusable_compaction |",
+            "| internal/cli/util/text_helpers_test.go | TestValidateShellArgSafe | skipped | " + TEXT_HELPERS_TARGET
+            + " | cmd/adkgo helper (sub-project 6b) |",
+        ])
+
+
 class FourATest(unittest.TestCase):
     """4a: a Go package whose test files land in two crates' `src/parity_tests/`."""
 
@@ -1418,6 +1479,13 @@ class RealTreeTest(unittest.TestCase):
         self.assertEqual(list(deferred), ["agent/remoteagent/a2a_agent_compat_test.go"])
         self.assertEqual(pc.count(ADK_GO, in_scope), 145)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "5b"), [])
+
+    def test_6_count_is_94(self):
+        in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/6.md")
+        self.assertEqual(len(in_scope), 14)
+        self.assertEqual(sorted({f.split("/")[0] for f in in_scope}), ["cmd", "internal"])
+        self.assertEqual(pc.count(ADK_GO, in_scope), 94)
+        self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "6"), [])
 
 
 if __name__ == "__main__":
