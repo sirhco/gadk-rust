@@ -23,22 +23,21 @@
 //!    (<https://github.com/github/github-mcp-server>) over streamable HTTP, authenticated with a
 //!    GitHub personal access token from `GITHUB_PAT` as a static bearer token.
 //!
-//! Go runs it through the launcher (sub-project 6); this is a stdin loop.
+//! It runs through the launcher, as Go's does.
 //!
-//! `GOOGLE_API_KEY=... cargo run -p gadk --example mcp`, then ask "What is the weather in
-//! Paris?"; or `AGENT_MODE=github GITHUB_PAT=... GOOGLE_API_KEY=... cargo run -p gadk --example
-//! mcp` and ask about your repositories.
+//! `GOOGLE_API_KEY=... cargo run -p gadk --features launcher --example mcp [console | web webui
+//! api]`, then ask "What is the weather in Paris?"; or `AGENT_MODE=github GITHUB_PAT=...
+//! GOOGLE_API_KEY=... cargo run -p gadk --features launcher --example mcp` and ask about your
+//! repositories.
 
-use std::io::{BufRead, Write};
 use std::sync::Arc;
 
-use futures::StreamExt;
-use gadk::agent::{RunConfig, StreamingMode};
+use gadk::agent::SingleLoader;
 use gadk::auth::static_token;
 use gadk::engine::llm::LlmAgentConfig;
-use gadk::engine::runner::{RunOptions, Runner};
 use gadk::gemini::{ClientConfig, GeminiModel};
-use gadk::genai::{Content, ROLE_USER};
+use gadk::launcher::golog::Logger;
+use gadk::launcher::{CancellationToken, Config as LauncherConfig, Launcher, full};
 use gadk::mcp::rmcp::handler::server::wrapper::{Json, Parameters};
 use gadk::mcp::rmcp::model::ClientConfig as McpClientConfig;
 use gadk::mcp::rmcp::service::RunningService;
@@ -145,51 +144,18 @@ async fn main() -> anyhow::Result<()> {
         ..Default::default()
     })?;
 
-    let runner = Runner::in_memory("mcp_example", agent)?;
-    repl(&runner, "user", "session-1").await?;
-    runner.close().await?;
+    let config = LauncherConfig::new(Arc::new(SingleLoader::new(agent)));
+    let mut l = full::new();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let result = l.execute(CancellationToken::new(), config, args).await;
     // Ends the MCP session (and, in local mode, the in-memory server).
     if let Err(e) = mcp_tool_set.close().await {
         eprintln!("closing the MCP tool set: {e}");
     }
-    Ok(())
-}
-
-/// Go's stdin loop: one line per turn, printing the streamed (partial) model text.
-async fn repl(runner: &Runner, user_id: &str, session_id: &str) -> anyhow::Result<()> {
-    let stdin = std::io::stdin();
-    loop {
-        print!("\nUser -> ");
-        std::io::stdout().flush()?;
-        let mut line = String::new();
-        if stdin.lock().read_line(&mut line)? == 0 {
-            return Ok(());
-        }
-        print!("\nAgent -> ");
-        std::io::stdout().flush()?;
-        let cfg = RunConfig {
-            streaming_mode: StreamingMode::Sse,
-            ..Default::default()
-        };
-        let msg = Content::from_text(line, ROLE_USER);
-        let mut events = runner.run(user_id, session_id, Some(msg), cfg, RunOptions::default());
-        while let Some(event) = events.next().await {
-            let event = match event {
-                Ok(event) => event,
-                Err(e) => {
-                    println!("\nAGENT_ERROR: {e}");
-                    continue;
-                }
-            };
-            // In SSE mode only the partial responses are printed: the final response repeats
-            // their text.
-            if !event.response.partial {
-                continue;
-            }
-            for part in event.response.content.iter().flat_map(|c| c.parts.iter()) {
-                print!("{}", part.text);
-            }
-            std::io::stdout().flush()?;
-        }
+    if let Err(e) = result {
+        // Go `log.Fatalf("Run failed: %v\n\n%s", err, l.CommandLineSyntax())`.
+        Logger::stderr().print(&format!("Run failed: {e}\n\n{}", l.command_line_syntax()));
+        std::process::exit(1);
     }
+    Ok(())
 }

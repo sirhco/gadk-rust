@@ -13,25 +13,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// parity: adapted: Go example runs through the launcher (sub-project 6)
-
-//! An LLM agent with sliding-window context compaction, chatting over stdin through
-//! `Runner::run` (port of Go examples/compaction/main.go).
+//! An LLM agent with sliding-window context compaction (port of Go examples/compaction/main.go).
 //!
-//! Gemini API: `GOOGLE_API_KEY=... cargo run -p gadk --example compaction`
-//! Vertex AI:  `GOOGLE_GENAI_USE_VERTEXAI=true GOOGLE_CLOUD_PROJECT=... GOOGLE_CLOUD_LOCATION=us-central1 cargo run -p gadk --example compaction`
+//! Setting `compaction` on the launcher's [`Config`] enables compaction on every surface that
+//! reads that config. The launcher used here, `full::new()`, serves the console, the web UI, A2A,
+//! the Pub/Sub and Eventarc triggers, and the REST API.
+//!
+//! Run it and hold a conversation of several turns:
+//!
+//! Gemini API: `GOOGLE_API_KEY=... cargo run -p gadk --features launcher --example compaction console`
+//! (or `… --example compaction web webui api`)
+//! Vertex AI:  `GOOGLE_GENAI_USE_VERTEXAI=true GOOGLE_CLOUD_PROJECT=... GOOGLE_CLOUD_LOCATION=us-central1 cargo run -p gadk --features launcher --example compaction console`
+//!
+//! The web command needs at least one sub-launcher named after it, as above. Running it bare
+//! exits with "no active sublaunchers found".
+//!
+//! After every two turns a compaction event is appended to the session, and the turns it covers
+//! stop being sent to the model. The summary is bookkeeping rather than conversation, so it is
+//! not streamed back with the agent's reply; look for it in the session's event list, for
+//! example in the web UI.
 
-use std::io::{BufRead, Write};
 use std::sync::Arc;
 
-use futures::StreamExt;
-use gadk::agent::RunConfig;
-use gadk::compaction::Config;
+use gadk::agent::SingleLoader;
+use gadk::compaction;
 use gadk::engine::llm::LlmAgentConfig;
-use gadk::engine::runner::{PluginConfig, RunOptions, Runner, RunnerConfig};
 use gadk::gemini::{ClientConfig, GeminiModel};
-use gadk::genai::{Content, ROLE_USER};
-use gadk::session::InMemorySessionService;
+use gadk::launcher::golog::Logger;
+use gadk::launcher::{CancellationToken, Config, Launcher, full};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -45,58 +54,31 @@ async fn main() -> anyhow::Result<()> {
         ..Default::default()
     })?;
 
-    let runner = Runner::new(RunnerConfig {
-        app_name: "compaction_example".to_string(),
-        agent,
-        session_service: Arc::new(InMemorySessionService::new()),
-        artifact_service: None,
-        memory_service: None,
-        plugin_config: PluginConfig::default(),
-        auto_create_session: true,
-        platform: Default::default(),
-        // No summarizer, so the runner summarizes with the root agent's own model.
-        compaction: Some(Config {
-            // Sliding window: after every 2 completed turns, summarize the turns since the last
-            // compaction, carrying 1 earlier turn forward so consecutive summaries overlap.
-            compaction_interval: 2,
-            overlap_size: 1,
-            // Tail retention bounds prompt size instead; it fires mid-turn once a prompt reaches
-            // `token_threshold`. At an interval of 2 it never fires, so to try it replace the two
-            // settings above with, for example:
-            //   token_threshold: 32_000,
-            //   event_retention_size: 10,
-            ..Default::default()
-        }),
-    })?;
+    let mut config = Config::new(Arc::new(SingleLoader::new(agent)));
+    // No summarizer, so the runner summarizes with the root agent's own model.
+    config.compaction = Some(compaction::Config {
+        // Sliding window: after every 2 completed turns, summarize the turns since the last
+        // compaction, carrying 1 earlier turn forward so consecutive summaries overlap and context
+        // is not lost at the seam. Runs once a turn has finished.
+        compaction_interval: 2,
+        overlap_size: 1,
+        // Tail retention, left out on purpose: armed alongside the interval of 2 above it would do
+        // nothing, since the sliding window summarizes every group of two turns, so the events it
+        // looks at never reach `event_retention_size`. To try it, replace the two sliding-window
+        // settings above with these. It runs during a turn, so it also catches a single long
+        // tool-calling turn, and it is the trigger that bounds prompt size rather than just
+        // reducing it. Running both is fine at a larger interval.
+        //   token_threshold: 32_000,
+        //   event_retention_size: 10,
+        ..Default::default()
+    });
 
-    let stdin = std::io::stdin();
-    loop {
-        print!("you> ");
-        std::io::stdout().flush()?;
-        let mut line = String::new();
-        if stdin.lock().read_line(&mut line)? == 0 {
-            break;
-        }
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let mut events = runner.run(
-            "user",
-            "session-1",
-            Some(Content::from_text(line, ROLE_USER)),
-            RunConfig::default(),
-            RunOptions::default(),
-        );
-        while let Some(event) = events.next().await {
-            let event = event?;
-            for part in event.response.content.iter().flat_map(|c| c.parts.iter()) {
-                if !part.thought && !part.text.is_empty() {
-                    println!("[{}] {}", event.author, part.text);
-                }
-            }
-        }
+    let mut l = full::new();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Err(e) = l.execute(CancellationToken::new(), config, args).await {
+        // Go `log.Fatalf("Run failed: %v\n\n%s", err, l.CommandLineSyntax())`.
+        Logger::stderr().print(&format!("Run failed: {e}\n\n{}", l.command_line_syntax()));
+        std::process::exit(1);
     }
-    runner.close().await?;
     Ok(())
 }
