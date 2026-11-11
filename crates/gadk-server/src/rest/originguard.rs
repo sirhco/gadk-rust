@@ -33,7 +33,7 @@ use std::sync::Arc;
 use axum::extract::ConnectInfo;
 use axum::extract::connect_info::Connected;
 use axum::serve::IncomingStream;
-use gadk_platform::go_to_lower;
+use gadk_platform::{go_to_lower, go_url};
 use http::StatusCode;
 use http::request::Parts;
 use tokio::net::TcpListener;
@@ -130,8 +130,8 @@ impl Policy {
                 continue;
             }
             let origin = normalize_origin(origin);
-            if let Some(u) = go_url::parse(&origin) {
-                let hostname = go_url::hostname(&u.host);
+            if let Ok(u) = go_url::parse(&origin) {
+                let hostname = u.hostname();
                 if !hostname.is_empty() {
                     p.hosts.insert(bare_host(hostname));
                 }
@@ -253,7 +253,7 @@ pub(crate) fn normalize_origin(addr: &str) -> String {
         format!("http://{addr}")
     };
     match go_url::parse(&addr) {
-        Some(u) if !u.host.is_empty() => {
+        Ok(u) if !u.host.is_empty() => {
             format!("{}://{}", go_to_lower(&u.scheme), go_to_lower(&u.host))
         }
         _ => addr,
@@ -290,7 +290,7 @@ fn server_host(r: &Parts) -> String {
 /// Go `originHost`: the host of an origin, or `""`.
 fn origin_host(origin: &str) -> String {
     go_url::parse(origin)
-        .map(|u| go_url::hostname(&u.host).to_owned())
+        .map(|u| u.hostname().to_owned())
         .unwrap_or_default()
 }
 
@@ -382,7 +382,7 @@ fn is_loopback_addr(host: &str) -> bool {
     if bare == "localhost" {
         return true;
     }
-    go_url::parse_addr(&bare).is_some_and(|a| a.is_loopback())
+    go_netip::parse_addr(&bare).is_some_and(|a| a.is_loopback())
 }
 
 /// Go `isWildcardAddr`: `host` (with or without a port) names every interface.
@@ -391,7 +391,7 @@ fn is_wildcard_addr(host: &str) -> bool {
     if bare.is_empty() {
         return true;
     }
-    go_url::parse_addr(&bare).is_some_and(|a| a.is_unspecified())
+    go_netip::parse_addr(&bare).is_some_and(|a| a.is_unspecified())
 }
 
 /// Go `bareHost`: lowercased, port and root dot stripped; an unparsable host comes back whole.
@@ -423,364 +423,10 @@ pub(crate) fn strip_port(host: &str) -> &str {
     }
 }
 
-/// The subset of Go `net/url` and `net/netip` the guard and the router rely on, byte for byte:
-/// `url.Parse`'s acceptance rules, its lowercased scheme and unescaped Host, `URL.Hostname`,
-/// path unescaping, escaping and `validEncoded`, and `netip.ParseAddr` with
-/// `IsLoopback`/`IsUnspecified`.
-pub(crate) mod go_url {
+/// Go `net/netip`'s `ParseAddr` with `IsLoopback`/`IsUnspecified`, as far as the guard reads
+/// them (`net/url` is [`gadk_platform::go_url`]).
+pub(crate) mod go_netip {
     use super::{IpAddr, Ipv4Addr, Ipv6Addr};
-
-    /// What `url.Parse` yields that the guard reads.
-    #[derive(Debug, Default, PartialEq, Eq)]
-    pub(super) struct Url {
-        /// Lowercased scheme.
-        pub scheme: String,
-        /// Unescaped `Host` (`host[:port]`, IPv6 in brackets).
-        pub host: String,
-    }
-
-    /// Go's `encoding` modes the guard needs.
-    #[derive(Clone, Copy, PartialEq, Eq)]
-    enum Mode {
-        Path,
-        Host,
-        Zone,
-        UserPassword,
-        Fragment,
-    }
-
-    /// Go `url.Parse(raw)`; `None` where Go returns an error.
-    pub(super) fn parse(raw: &str) -> Option<Url> {
-        let (u, frag) = match raw.split_once('#') {
-            Some((u, f)) => (u, f),
-            None => (raw, ""),
-        };
-        let url = parse_no_fragment(u)?;
-        if !frag.is_empty() {
-            unescape(frag, Mode::Fragment)?;
-        }
-        Some(url)
-    }
-
-    /// Go `parse(rawURL, viaRequest=false)`.
-    fn parse_no_fragment(raw: &str) -> Option<Url> {
-        if raw.bytes().any(|b| b < b' ' || b == 0x7f) {
-            return None;
-        }
-        if raw == "*" {
-            return Some(Url::default());
-        }
-        let (scheme, rest) = get_scheme(raw)?;
-        let scheme = scheme.to_ascii_lowercase();
-        let rest = if rest.ends_with('?') && rest.matches('?').count() == 1 {
-            &rest[..rest.len() - 1]
-        } else {
-            rest.split_once('?').map_or(rest, |(r, _)| r)
-        };
-        if !rest.starts_with('/') {
-            if !scheme.is_empty() {
-                // A rootless path is opaque: no host.
-                return Some(Url {
-                    scheme,
-                    host: String::new(),
-                });
-            }
-            let segment = rest.split_once('/').map_or(rest, |(s, _)| s);
-            if segment.contains(':') {
-                return None;
-            }
-        }
-        let mut host = String::new();
-        let mut path = rest;
-        if (!scheme.is_empty() || !rest.starts_with("///")) && rest.starts_with("//") {
-            let after = &rest[2..];
-            let (authority, p) = match after.find('/') {
-                Some(i) => (&after[..i], &after[i..]),
-                None => (after, ""),
-            };
-            host = parse_authority(&scheme, authority)?;
-            path = p;
-        }
-        unescape(path, Mode::Path)?;
-        Some(Url { scheme, host })
-    }
-
-    /// Go `getScheme`.
-    fn get_scheme(raw: &str) -> Option<(&str, &str)> {
-        for (i, c) in raw.bytes().enumerate() {
-            match c {
-                b'a'..=b'z' | b'A'..=b'Z' => {}
-                b'0'..=b'9' | b'+' | b'-' | b'.' => {
-                    if i == 0 {
-                        return Some(("", raw));
-                    }
-                }
-                b':' => {
-                    if i == 0 {
-                        return None; // "missing protocol scheme"
-                    }
-                    return Some((&raw[..i], &raw[i + 1..]));
-                }
-                _ => return Some(("", raw)),
-            }
-        }
-        Some(("", raw))
-    }
-
-    /// Go `parseAuthority`: the unescaped host; the userinfo is validated and dropped.
-    fn parse_authority(scheme: &str, authority: &str) -> Option<String> {
-        let at = authority.rfind('@');
-        let host = parse_host(scheme, at.map_or(authority, |i| &authority[i + 1..]))?;
-        if let Some(i) = at {
-            let userinfo = &authority[..i];
-            if !valid_userinfo(userinfo) {
-                return None;
-            }
-            match userinfo.split_once(':') {
-                None => {
-                    unescape(userinfo, Mode::UserPassword)?;
-                }
-                Some((user, password)) => {
-                    unescape(user, Mode::UserPassword)?;
-                    unescape(password, Mode::UserPassword)?;
-                }
-            }
-        }
-        Some(host)
-    }
-
-    /// Go `parseHost` (with `urlstrictcolons=1`, Go 1.26+'s default).
-    fn parse_host(scheme: &str, host: &str) -> Option<String> {
-        if let Some(open) = host.rfind('[') {
-            if open > 0 {
-                return None; // "invalid IP-literal"
-            }
-            let close = host.rfind(']')?;
-            let colon_port = &host[close + 1..];
-            if !valid_optional_port(colon_port) {
-                return None;
-            }
-            let colon_port = unescape(colon_port, Mode::Host)?;
-            let hostname = &host[1..close];
-            let unescaped = match hostname.find("%25") {
-                Some(z) => {
-                    let mut h = unescape(&hostname[..z], Mode::Host)?;
-                    h.push_str(&unescape(&hostname[z..], Mode::Zone)?);
-                    h
-                }
-                None => unescape(hostname, Mode::Host)?,
-            };
-            let addr = parse_addr(&unescaped)?;
-            if matches!(addr, Addr::V4(_)) {
-                return None;
-            }
-            return Some(format!("[{unescaped}]{colon_port}"));
-        }
-        if let Some(first) = host.find(':') {
-            let last = host.rfind(':').unwrap_or(first);
-            let i = if last != first && !(scheme == "http" || scheme == "https") {
-                last
-            } else {
-                first
-            };
-            if !valid_optional_port(&host[i..]) {
-                return None;
-            }
-        }
-        unescape(host, Mode::Host)
-    }
-
-    /// Go `validOptionalPort`: empty or `:` followed by digits.
-    fn valid_optional_port(port: &str) -> bool {
-        if port.is_empty() {
-            return true;
-        }
-        match port.strip_prefix(':') {
-            Some(digits) => digits.bytes().all(|b| b.is_ascii_digit()),
-            None => false,
-        }
-    }
-
-    /// Go `validUserinfo`.
-    fn valid_userinfo(s: &str) -> bool {
-        s.chars().all(|r| {
-            r.is_ascii_alphanumeric()
-                || matches!(
-                    r,
-                    '-' | '.'
-                        | '_'
-                        | ':'
-                        | '~'
-                        | '!'
-                        | '$'
-                        | '&'
-                        | '\''
-                        | '('
-                        | ')'
-                        | '*'
-                        | '+'
-                        | ','
-                        | ';'
-                        | '='
-                        | '%'
-                        | '@'
-                )
-        })
-    }
-
-    /// Go `URL.Hostname()`: the host without a valid port and without IPv6 brackets.
-    pub(super) fn hostname(host: &str) -> &str {
-        let mut h = host;
-        if let Some(colon) = h.rfind(':')
-            && valid_optional_port(&h[colon..])
-        {
-            h = &h[..colon];
-        }
-        if h.len() >= 2 && h.starts_with('[') && h.ends_with(']') {
-            h = &h[1..h.len() - 1];
-        }
-        h
-    }
-
-    /// Go `shouldEscape(c, mode)` for the modes above.
-    fn should_escape(c: u8, mode: Mode) -> bool {
-        if c.is_ascii_alphanumeric() {
-            return false;
-        }
-        if matches!(mode, Mode::Host | Mode::Zone)
-            && matches!(
-                c,
-                b'!' | b'$'
-                    | b'&'
-                    | b'\''
-                    | b'('
-                    | b')'
-                    | b'*'
-                    | b'+'
-                    | b','
-                    | b';'
-                    | b'='
-                    | b':'
-                    | b'['
-                    | b']'
-                    | b'<'
-                    | b'>'
-                    | b'"'
-            )
-        {
-            return false;
-        }
-        match c {
-            b'-' | b'_' | b'.' | b'~' => return false,
-            b'$' | b'&' | b'+' | b',' | b'/' | b':' | b';' | b'=' | b'?' | b'@' => match mode {
-                Mode::Path => return c == b'?',
-                Mode::UserPassword => return matches!(c, b'@' | b'/' | b'?' | b':'),
-                Mode::Fragment => return false,
-                Mode::Host | Mode::Zone => {}
-            },
-            _ => {}
-        }
-        if mode == Mode::Fragment && matches!(c, b'!' | b'(' | b')' | b'*') {
-            return false;
-        }
-        true
-    }
-
-    fn unhex(c: u8) -> Option<u8> {
-        match c {
-            b'0'..=b'9' => Some(c - b'0'),
-            b'a'..=b'f' => Some(c - b'a' + 10),
-            b'A'..=b'F' => Some(c - b'A' + 10),
-            _ => None,
-        }
-    }
-
-    /// Go `unescape(s, mode)`; `None` on Go's `EscapeError`/`InvalidHostError`. Bytes that are
-    /// not UTF-8 after decoding become U+FFFD.
-    fn unescape(s: &str, mode: Mode) -> Option<String> {
-        unescape_bytes(s, mode).map(|b| String::from_utf8_lossy(&b).into_owned())
-    }
-
-    /// Go `unescape(s, encodePath)` (how `URL.Path` is decoded); `None` on an invalid escape.
-    pub(crate) fn unescape_path(s: &str) -> Option<Vec<u8>> {
-        unescape_bytes(s, Mode::Path)
-    }
-
-    /// Go `escape(s, encodePath)`, upper-case hex.
-    pub(crate) fn escape_path(s: &[u8]) -> String {
-        const HEX: &[u8; 16] = b"0123456789ABCDEF";
-        let mut out = String::with_capacity(s.len());
-        for &c in s {
-            if should_escape(c, Mode::Path) {
-                out.push('%');
-                out.push(char::from(HEX[usize::from(c >> 4)]));
-                out.push(char::from(HEX[usize::from(c & 15)]));
-            } else {
-                out.push(char::from(c));
-            }
-        }
-        out
-    }
-
-    /// Go `validEncoded(s, encodePath)`: `s` holds no byte that escaping would change.
-    pub(crate) fn valid_encoded_path(s: &str) -> bool {
-        s.bytes().all(|c| {
-            matches!(
-                c,
-                b'!' | b'$'
-                    | b'&'
-                    | b'\''
-                    | b'('
-                    | b')'
-                    | b'*'
-                    | b'+'
-                    | b','
-                    | b';'
-                    | b'='
-                    | b':'
-                    | b'@'
-                    | b'['
-                    | b']'
-                    | b'%'
-            ) || !should_escape(c, Mode::Path)
-        })
-    }
-
-    fn unescape_bytes(s: &str, mode: Mode) -> Option<Vec<u8>> {
-        let b = s.as_bytes();
-        let mut out = Vec::with_capacity(b.len());
-        let mut i = 0;
-        while i < b.len() {
-            match b[i] {
-                b'%' => {
-                    let hi = b.get(i + 1).copied().and_then(unhex)?;
-                    let lo = b.get(i + 2).copied().and_then(unhex)?;
-                    if mode == Mode::Host && hi < 8 && &s[i..i + 3] != "%25" {
-                        return None;
-                    }
-                    let v = (hi << 4) | lo;
-                    if mode == Mode::Zone
-                        && &s[i..i + 3] != "%25"
-                        && v != b' '
-                        && should_escape(v, Mode::Host)
-                    {
-                        return None;
-                    }
-                    out.push(v);
-                    i += 3;
-                }
-                c => {
-                    if matches!(mode, Mode::Host | Mode::Zone) && c < 0x80 && should_escape(c, mode)
-                    {
-                        return None;
-                    }
-                    out.push(c);
-                    i += 1;
-                }
-            }
-        }
-        Some(out)
-    }
 
     /// A Go `netip.Addr`, as far as the guard reads it.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -835,54 +481,6 @@ pub(crate) mod go_url {
     #[allow(clippy::unwrap_used)]
     mod tests {
         use super::*;
-
-        /// Hosts and errors of Go 1.27 `url.Parse` on the inputs the guard sees.
-        #[test]
-        fn parse_matches_go() {
-            let cases: &[(&str, Option<(&str, &str)>)] = &[
-                ("http://localhost:8080", Some(("http", "localhost:8080"))),
-                ("HTTP://LocalHost:80/", Some(("http", "LocalHost:80"))),
-                (
-                    "https://ui.example.com/app?x=1",
-                    Some(("https", "ui.example.com")),
-                ),
-                ("http://user:pw@host:1", Some(("http", "host:1"))),
-                ("http://[::1]:8080", Some(("http", "[::1]:8080"))),
-                ("http://[fe80::1%25en0]", Some(("http", "[fe80::1%en0]"))),
-                ("http://ex%C3%A4mple.com", Some(("http", "exämple.com"))),
-                ("mailto:x@y", Some(("mailto", ""))),
-                ("http:///path", Some(("http", ""))),
-                ("://nonsense", None),
-                ("http://a:b:80", None),
-                ("http://[1.2.3.4]", None),
-                ("http://x[::1]", None),
-                ("http://host:port", None),
-                ("http://%41.com", None),
-                ("http://a b", None),
-                ("http://x/%zz", None),
-                ("http://x/#%zz", None),
-                ("http://x\n", None),
-                ("http://bad user@x", None),
-            ];
-            for (raw, want) in cases {
-                let got = parse(raw).map(|u| (u.scheme, u.host));
-                let want = want.map(|(s, h)| (s.to_owned(), h.to_owned()));
-                assert_eq!(got, want, "url.Parse({raw:?})");
-            }
-        }
-
-        #[test]
-        fn hostname_matches_go() {
-            for (host, want) in [
-                ("localhost:8080", "localhost"),
-                ("[::1]:80", "::1"),
-                ("[::1]", "::1"),
-                ("example.com", "example.com"),
-                ("example.com:", "example.com"),
-            ] {
-                assert_eq!(hostname(host), want, "Hostname({host:?})");
-            }
-        }
 
         #[test]
         fn parse_addr_matches_netip() {

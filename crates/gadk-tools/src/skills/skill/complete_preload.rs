@@ -20,13 +20,13 @@ use std::collections::HashMap;
 use std::sync::{Arc, PoisonError, RwLock};
 
 use async_trait::async_trait;
+use gadk_platform::go_path_clean;
 use tokio::io::AsyncReadExt;
 
 use super::{
     Frontmatter, MAX_RESOURCE_BYTES, ReloadFn, ResourceReader, SkillError, SkillErrorKind, Source,
     quote,
 };
-use crate::go_fmt::path_clean;
 
 /// One preloaded skill (Go `completePreloadSkillData`).
 struct SkillData {
@@ -129,7 +129,7 @@ impl CompletePreloadSource {
                         ),
                     ));
                 }
-                let clean_path = path_clean(resource_path);
+                let clean_path = go_path_clean(resource_path);
                 resources.insert(clean_path.clone(), Arc::from(data));
                 sorted_resource_paths.push(clean_path);
             }
@@ -195,7 +195,7 @@ impl Source for CompletePreloadSource {
     /// Port of Go `ListResources` (`complete_preload.go:105`).
     async fn list_resources(&self, name: &str, subpath: &str) -> Result<Vec<String>, SkillError> {
         let data = self.skill(name)?;
-        let clean_path = path_clean(subpath);
+        let clean_path = go_path_clean(subpath);
         if clean_path == "." || clean_path == "/" {
             return Ok(data.sorted_resource_paths.clone());
         }
@@ -233,7 +233,7 @@ impl Source for CompletePreloadSource {
         let data = self.skill(name)?;
         let bytes = data
             .resources
-            .get(&path_clean(resource_path))
+            .get(&go_path_clean(resource_path))
             .cloned()
             .ok_or_else(|| SkillError::sentinel(SkillErrorKind::ResourceNotFound))?;
         Ok(Box::pin(std::io::Cursor::new(bytes)))

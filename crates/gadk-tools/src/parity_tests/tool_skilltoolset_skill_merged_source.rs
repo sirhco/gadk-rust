@@ -21,10 +21,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tokio::io::AsyncReadExt;
 
-use crate::go_fmt::path_clean;
 use crate::skills::skill::{
     Frontmatter, MergedSource, ResourceReader, SkillError, SkillErrorKind, Source,
 };
+use gadk_platform::go_path_clean;
 
 /// The sources of one case, queried in order.
 type Sources = Vec<Arc<dyn Source>>;
@@ -188,7 +188,7 @@ impl Source for MockMergedBaseSource {
                 "skill not found",
             ));
         };
-        let Some(content) = skill_resource.get(&path_clean(resource_path)) else {
+        let Some(content) = skill_resource.get(&go_path_clean(resource_path)) else {
             return Err(SkillError::new(
                 SkillErrorKind::ResourceNotFound,
                 "resource not found",

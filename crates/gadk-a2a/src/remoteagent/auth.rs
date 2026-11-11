@@ -33,7 +33,7 @@ use std::time::Duration;
 
 use futures::FutureExt as _;
 use gadk_auth::{AuthContext, Credential, CredentialProvider, SharedError, TokenSource};
-use gadk_platform::{go_query_escape, go_quote};
+use gadk_platform::{go_query_escape, go_quote, go_url};
 use http::HeaderMap;
 use http::header::{AUTHORIZATION, HeaderValue};
 use parking_lot::Mutex;
@@ -41,7 +41,7 @@ use tokio::sync::watch;
 use tokio::time::Instant;
 use url::Url;
 
-use super::card::{go_url, is_loopback_host};
+use super::card::is_loopback_host;
 use crate::Error;
 
 /// Go `a2aclient.SessionID` as built by `CredentialScope`: the credential cache key of an
