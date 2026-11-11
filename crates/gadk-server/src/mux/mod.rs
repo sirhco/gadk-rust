@@ -19,8 +19,8 @@
 //! the server's own `OPTIONS *` and bad-request answers, and its HEAD body stripping.
 //!
 //! The REST server's route table ([`rest::Server`](crate::rest::Server)) and the launcher's web
-//! router are both built on it, and [`WriteDeadline`] is the launcher server's
-//! `http.ResponseController.SetWriteDeadline`.
+//! router ([`router::WebRouter`]) are both built on it, and [`WriteDeadline`] is the launcher
+//! server's `http.ResponseController.SetWriteDeadline`.
 //!
 //! This module mirrors gorilla/mux and `net/http` internals and is plumbing shared by gadk's
 //! own crates, not a stable API: it changes with them.
@@ -34,6 +34,8 @@ use futures::future::BoxFuture;
 use gadk_platform::{go_path_clean, go_url};
 use http::header::{CONNECTION, CONTENT_LENGTH, CONTENT_TYPE, LOCATION, X_CONTENT_TYPE_OPTIONS};
 use http::{HeaderValue, Method, StatusCode, Uri};
+
+pub mod router;
 
 /// A request as a handler sees it.
 pub type Request = http::Request<axum::body::Body>;
