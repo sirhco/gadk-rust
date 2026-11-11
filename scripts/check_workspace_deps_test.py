@@ -209,6 +209,15 @@ class EdgeTest(unittest.TestCase):
     def test_model_edges_are_unchanged_by_gcp_auth(self):
         self.assertEqual(cwd.ALLOWED["gadk-model"], {"gadk-genai"})
 
+    def test_genai_edge_is_exactly_platform(self):
+        self.assertEqual(cwd.ALLOWED["gadk-genai"], {"gadk-platform"})
+        self.assertEqual(cwd.ALLOWED["gadk-platform"], set())
+
+    def test_genai_missing_platform_edge_is_rejected(self):
+        self.edit("gadk-genai", "gadk-platform = { workspace = true }\n", "")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-genai -> gadk-platform is missing" in e for e in errs), errs)
+
     def test_disallowed_normal_edge_is_rejected(self):
         self.edit("gadk-artifact", "[dependencies]\n", "[dependencies]\ngadk-session = { workspace = true }\n")
         errs = cwd.check(self.repo)

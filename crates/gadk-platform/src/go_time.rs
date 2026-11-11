@@ -13,10 +13,287 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `time` parsing and formatting shared by the gadk crates: `time.Parse(time.RFC3339, s)`
-//! and `t.Format(time.RFC3339Nano)`.
+//! Go `time` parsing and formatting shared by the gadk crates: `time.Parse(time.RFC3339, s)`,
+//! `t.Format(time.RFC3339Nano)`, `time.Duration` ([`GoDuration`]), `time.ParseDuration`
+//! ([`go_parse_duration`]) and `Duration.String()` ([`go_format_duration`]).
+
+use std::fmt;
 
 use chrono::{DateTime, NaiveDate, TimeDelta, TimeZone, Timelike, Utc};
+
+/// Go `time.Duration`: signed nanoseconds.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct GoDuration(pub i64);
+
+impl GoDuration {
+    /// Go `time.Nanosecond`.
+    pub const NANOSECOND: GoDuration = GoDuration(1);
+    /// Go `time.Microsecond`.
+    pub const MICROSECOND: GoDuration = GoDuration(1_000);
+    /// Go `time.Millisecond`.
+    pub const MILLISECOND: GoDuration = GoDuration(1_000_000);
+    /// Go `time.Second`.
+    pub const SECOND: GoDuration = GoDuration(1_000_000_000);
+    /// Go `time.Minute`.
+    pub const MINUTE: GoDuration = GoDuration(60 * 1_000_000_000);
+    /// Go `time.Hour`.
+    pub const HOUR: GoDuration = GoDuration(3600 * 1_000_000_000);
+
+    /// `s * time.Second`, saturating at the `i64` range.
+    pub const fn from_secs(s: i64) -> GoDuration {
+        GoDuration(s.saturating_mul(1_000_000_000))
+    }
+
+    /// `None` for a negative duration.
+    pub fn to_std(self) -> Option<std::time::Duration> {
+        u64::try_from(self.0)
+            .ok()
+            .map(std::time::Duration::from_nanos)
+    }
+
+    /// Saturates at `i64::MAX` nanoseconds.
+    pub fn from_std(d: std::time::Duration) -> GoDuration {
+        GoDuration(i64::try_from(d.as_nanos()).unwrap_or(i64::MAX))
+    }
+}
+
+/// Go's `%v` of a `time.Duration`: [`go_format_duration`].
+impl fmt::Display for GoDuration {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&go_format_duration(*self))
+    }
+}
+
+/// Go `time.ParseDuration`: a possibly signed sequence of decimal numbers, each with an optional
+/// fraction and a unit suffix (`ns`, `us`/`µs`/`μs`, `ms`, `s`, `m`, `h`), such as `"300ms"`,
+/// `"-1.5h"` or `"2h45m"`. `Err` is Go's error text, e.g. `time: invalid duration "x"`,
+/// `time: missing unit in duration "1"`, `time: unknown unit "d" in duration "1d"`.
+pub fn go_parse_duration(s: &str) -> Result<GoDuration, String> {
+    parse_duration_bytes(s.as_bytes())
+}
+
+const LIMIT: u64 = 1 << 63;
+
+/// Go `parseDurationError.Error()`.
+fn duration_error(message: &str, orig: &[u8]) -> String {
+    format!("time: {message} {}", time_quote(orig))
+}
+
+/// Go `time.ParseDuration` over the bytes of a Go string (which need not be UTF-8).
+fn parse_duration_bytes(orig: &[u8]) -> Result<GoDuration, String> {
+    let invalid = || duration_error("invalid duration", orig);
+    let mut s = orig;
+    let mut neg = false;
+    if let Some(&c) = s.first()
+        && (c == b'-' || c == b'+')
+    {
+        neg = c == b'-';
+        s = &s[1..];
+    }
+    if s == b"0" {
+        return Ok(GoDuration(0));
+    }
+    if s.is_empty() {
+        return Err(invalid());
+    }
+    let mut d: u64 = 0;
+    while let Some(&first) = s.first() {
+        if !(first == b'.' || first.is_ascii_digit()) {
+            return Err(invalid());
+        }
+        // Consume [0-9]* (Go leadingInt).
+        let before = s.len();
+        let mut v: u64 = 0;
+        while let Some(&c) = s.first() {
+            if !c.is_ascii_digit() {
+                break;
+            }
+            if v > LIMIT / 10 {
+                return Err(invalid());
+            }
+            v = v * 10 + u64::from(c - b'0');
+            if v > LIMIT {
+                return Err(invalid());
+            }
+            s = &s[1..];
+        }
+        let pre = before != s.len();
+        // Consume (\.[0-9]*)? (Go leadingFraction).
+        let mut f: u64 = 0;
+        let mut scale: f64 = 1.0;
+        let mut post = false;
+        if s.first() == Some(&b'.') {
+            s = &s[1..];
+            let before = s.len();
+            let mut overflow = false;
+            while let Some(&c) = s.first() {
+                if !c.is_ascii_digit() {
+                    break;
+                }
+                s = &s[1..];
+                if overflow {
+                    continue;
+                }
+                if f > (LIMIT - 1) / 10 {
+                    overflow = true;
+                    continue;
+                }
+                let y = f * 10 + u64::from(c - b'0');
+                if y > LIMIT {
+                    overflow = true;
+                    continue;
+                }
+                f = y;
+                scale *= 10.0;
+            }
+            post = before != s.len();
+        }
+        if !pre && !post {
+            // No digits (e.g. ".s" or "-.s").
+            return Err(invalid());
+        }
+        // Consume the unit.
+        let i = s
+            .iter()
+            .position(|&c| c == b'.' || c.is_ascii_digit())
+            .unwrap_or(s.len());
+        if i == 0 {
+            return Err(duration_error("missing unit in duration", orig));
+        }
+        let (u, rest) = s.split_at(i);
+        s = rest;
+        let unit: u64 = match u {
+            b"ns" => 1,
+            // "us", "µs" (U+00B5 micro sign), "μs" (U+03BC Greek mu).
+            b"us" | b"\xc2\xb5s" | b"\xce\xbcs" => 1_000,
+            b"ms" => 1_000_000,
+            b"s" => 1_000_000_000,
+            b"m" => 60 * 1_000_000_000,
+            b"h" => 3600 * 1_000_000_000,
+            _ => {
+                let message = format!("unknown unit {} in duration", time_quote(u));
+                return Err(duration_error(&message, orig));
+            }
+        };
+        if v > LIMIT / unit {
+            return Err(invalid());
+        }
+        v *= unit;
+        if f > 0 {
+            // Go: v += uint64(float64(f) * (float64(unit) / scale)), a truncating conversion;
+            // the addend is at most 3.6e12 (ns per hour), so neither cast loses range.
+            #[allow(
+                clippy::cast_precision_loss,
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss
+            )]
+            let frac = (f as f64 * (unit as f64 / scale)) as u64;
+            v += frac;
+            if v > LIMIT {
+                return Err(invalid());
+            }
+        }
+        // Go's uint64 addition wraps: both terms are at most 2^63, so only 2^63 + 2^63 wraps,
+        // to 0, which then passes the check (Go 1.27 parses "9223372036854775808ns" twice as 0).
+        d = d.wrapping_add(v);
+        if d > LIMIT {
+            return Err(invalid());
+        }
+    }
+    if neg {
+        // Go: -Duration(d), wrapping 2^63 to math.MinInt64.
+        return Ok(GoDuration(0i64.wrapping_sub_unsigned(d)));
+    }
+    i64::try_from(d).map(GoDuration).map_err(|_| invalid())
+}
+
+/// Go `time.quote` (format.go): double-quoted, `"` and `\` backslash-escaped, and every byte of
+/// a control character or a non-ASCII rune written as `\xNN` (an invalid byte is one rune of
+/// width 1; an encoded U+FFFD is three bytes).
+fn time_quote(s: &[u8]) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    let mut i = 0;
+    while i < s.len() {
+        let (c, width) = decode_rune(&s[i..]);
+        if !(' '..'\u{80}').contains(&c) {
+            for b in &s[i..i + width] {
+                out.push_str(&format!("\\x{b:02x}"));
+            }
+        } else {
+            if c == '"' || c == '\\' {
+                out.push('\\');
+            }
+            out.push(c);
+        }
+        i += width;
+    }
+    out.push('"');
+    out
+}
+
+/// Go `utf8.DecodeRune` as `for range` over a string uses it: the first rune of `s` and its byte
+/// width; an invalid byte is U+FFFD of width 1. `s` must not be empty.
+fn decode_rune(s: &[u8]) -> (char, usize) {
+    let valid = s
+        .utf8_chunks()
+        .next()
+        .map(|chunk| chunk.valid())
+        .unwrap_or_default();
+    match valid.chars().next() {
+        Some(c) => (c, c.len_utf8()),
+        None => (char::REPLACEMENT_CHARACTER, 1),
+    }
+}
+
+/// Go `Duration.String()`: `"0s"`; under one second the largest of ns, µs and ms that keeps an
+/// integer part (`"1.5µs"`, `"500ms"`); from one second up `[Nh][Nm]S[.fff]s` with hours and
+/// minutes written once a larger unit is present (`"1m0s"`, `"1h0m0s"`); a leading `-` for a
+/// negative duration.
+pub fn go_format_duration(d: GoDuration) -> String {
+    let mut u = d.0.unsigned_abs();
+    let mut out = String::new();
+    if u < 1_000_000_000 {
+        let (unit, prec) = match u {
+            0 => return "0s".to_string(),
+            1..1_000 => ("ns", 0),
+            1_000..1_000_000 => ("µs", 3),
+            _ => ("ms", 6),
+        };
+        let frac = fmt_frac(&mut u, prec);
+        out.push_str(&format!("{u}{frac}{unit}"));
+    } else {
+        let frac = fmt_frac(&mut u, 9);
+        let secs = u % 60;
+        u /= 60;
+        if u > 0 {
+            let mins = u % 60;
+            u /= 60;
+            if u > 0 {
+                out.push_str(&format!("{u}h"));
+            }
+            out.push_str(&format!("{mins}m"));
+        }
+        out.push_str(&format!("{secs}{frac}s"));
+    }
+    if d.0 < 0 {
+        out.insert(0, '-');
+    }
+    out
+}
+
+/// Go `fmtFrac`: divides `v` by `10^prec` and returns the fraction as `.ddd` with trailing zeros
+/// dropped (empty, without the point, when the fraction is zero).
+fn fmt_frac(v: &mut u64, prec: u32) -> String {
+    let p = 10u64.pow(prec);
+    let frac = *v % p;
+    *v /= p;
+    if frac == 0 {
+        return String::new();
+    }
+    let digits = format!("{frac:0width$}", width = prec as usize);
+    format!(".{}", digits.trim_end_matches('0'))
+}
 
 /// Go `time.Parse(time.RFC3339, s)`, reduced to the instant. That is Go's general layout
 /// parser for "2006-01-02T15:04:05Z07:00", which is what decides when its RFC 3339 fast path
@@ -126,6 +403,25 @@ mod tests {
     use chrono::FixedOffset;
 
     use super::*;
+
+    /// The rows of Go `TestParseDurationErrors` (time_test.go) whose input is not valid UTF-8,
+    /// which `go_parse_duration(&str)` cannot receive: the byte-level parser and Go's
+    /// `time.quote` give Go's full error text.
+    #[test]
+    fn parse_duration_errors_on_non_utf8_input() {
+        let cases: &[(&[u8], &str)] = &[
+            (b"\x85\x85", r#"time: invalid duration "\x85\x85""#),
+            (b"\xffff", r#"time: invalid duration "\xffff""#),
+            (
+                b"hello \xffff world",
+                r#"time: invalid duration "hello \xffff world""#,
+            ),
+            (b"1\xff", r#"time: unknown unit "\xff" in duration "1\xff""#),
+        ];
+        for (input, want) in cases {
+            assert_eq!(parse_duration_bytes(input).unwrap_err(), *want, "{input:?}");
+        }
+    }
 
     /// Go `time.RFC3339Nano`: trimmed fraction, `Z` for UTC, `±hh:mm` otherwise.
     #[test]
