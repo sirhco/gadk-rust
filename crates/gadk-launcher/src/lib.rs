@@ -41,7 +41,7 @@ pub mod universal;
 pub mod web;
 
 #[cfg(feature = "a2a")]
-pub use config::A2AHandlerHook;
+pub use config::{A2AHandlerOption, A2AHandlerWrapper};
 pub use config::{BoxedLayer, Config};
 pub use error::Error;
 pub use launcher::{Launcher, SubLauncher};
