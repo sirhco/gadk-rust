@@ -1385,6 +1385,46 @@ async fn test_auth_transport_shares_a_mint_within_a_scope() {
 
 // ---------------------------------------------------------------- Rust-only tests
 
+/// `{:?}` of a redacted token error (what `tracing`'s `error = ?e`, an `unwrap_err` panic or a
+/// `Result` returned from `main` print) keeps the response body and the free-text fields out,
+/// for the error a mint returns, for `redact_token_error`'s own result and for a bare
+/// `RetrieveError`.
+#[tokio::test]
+async fn redacted_token_errors_keep_the_body_out_of_debug() {
+    const BODY: &str = "sensitive-echo-of-the-request";
+    const DESCRIPTION: &str = "assertion=eyJhbGciOi-SECRET";
+    const URI: &str = "https://idp.invalid/errors/1";
+    let re = RetrieveError {
+        error_uri: URI.into(),
+        ..retrieve_error("400 Bad Request", BODY, "invalid_grant", DESCRIPTION)
+    };
+    let src = token_source({
+        let re = re.clone();
+        move || {
+            let re = re.clone();
+            Box::pin(async move { Err(gadk_auth::Error::other(re)) })
+        }
+    });
+    let minted = MintGroup::mints()
+        .token(&CredentialScope("sid".into()), src)
+        .await
+        .unwrap_err();
+    let redacted = redact_token_error(gadk_auth::Error::other(re.clone()));
+    // A derived `Debug` prints `body: Vec<u8>` as a byte list, not as text.
+    let body_bytes = format!("{:?}", BODY.as_bytes());
+    let body_bytes = body_bytes.trim_matches(['[', ']']);
+    for (name, debug) in [
+        ("mint error", format!("{minted:?}")),
+        ("redact_token_error", format!("{redacted:?}")),
+        ("RetrieveError", format!("{re:?}")),
+    ] {
+        for secret in [BODY, body_bytes, DESCRIPTION, URI] {
+            assert!(!debug.contains(secret), "{name}: {{:?}} = {debug}");
+        }
+    }
+    assert!(format!("{re:?}").contains("invalid_grant"), "{re:?}");
+}
+
 /// The interceptor writes the scope's credential into the call's service params, replacing a
 /// value under the same name in any letter case, and does nothing outside a scope.
 #[tokio::test]

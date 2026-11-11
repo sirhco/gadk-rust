@@ -433,7 +433,7 @@ pub(crate) fn is_loopback_host(hostname: &str) -> bool {
 
 /// Go `oauth2.RetrieveError`: a token endpoint's non-2xx response. A token source that reports
 /// one lets [`redact_token_error`] keep the response body out of the error text.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub(crate) struct RetrieveError {
     /// Go `Response.Status` (`"400 Bad Request"`); `None` = no response.
     pub status: Option<String>,
@@ -468,13 +468,34 @@ impl fmt::Display for RetrieveError {
     }
 }
 
+/// Leaves out the body and the free-text RFC 6749 fields, which can echo the request (an
+/// assertion, a client secret): `{:?}` of an error that holds this one reaches it through
+/// `SharedError`, which `Display` redaction does not cover.
+impl fmt::Debug for RetrieveError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RetrieveError")
+            .field("status", &self.status)
+            .field("error_code", &self.error_code)
+            .finish_non_exhaustive()
+    }
+}
+
 impl std::error::Error for RetrieveError {}
 
 /// Go `redactedError`: reports `msg` while keeping `cause` reachable through the source chain.
-#[derive(Debug)]
 struct RedactedError {
     msg: String,
     cause: gadk_auth::Error,
+}
+
+/// Prints `msg` only: the cause holds the unredacted response (Go's `%v` never walks `Unwrap`,
+/// so Go's redaction holds for ordinary logging; this keeps `{:?}` to the same).
+impl fmt::Debug for RedactedError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RedactedError")
+            .field("msg", &self.msg)
+            .finish_non_exhaustive()
+    }
 }
 
 impl fmt::Display for RedactedError {
