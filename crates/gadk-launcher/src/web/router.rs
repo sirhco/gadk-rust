@@ -39,7 +39,7 @@ use gadk_server::mux::{
     Handler, PathVars, Request, Response, Template, clean_path, clean_path_redirect,
 };
 use http::header::{CONNECTION, CONTENT_LENGTH, CONTENT_TYPE, LOCATION, X_CONTENT_TYPE_OPTIONS};
-use http::{HeaderValue, Method, StatusCode};
+use http::{HeaderValue, Method, StatusCode, Uri, Version};
 use hyper::body::Body as _;
 use tower::ServiceExt;
 
@@ -175,7 +175,7 @@ impl WebRouter {
         // Router.ServeHTTP: clean the path first (skipClean is false).
         let clean = clean_path(&path);
         if clean != path {
-            return clean_path_redirect(req.uri(), &clean);
+            return clean_path_redirect(&go_request_uri(&req), &clean);
         }
         match self.find(&req, &path) {
             Matched::Route(handler, vars) => {
@@ -254,7 +254,7 @@ impl Route {
             return None;
         }
         // `u, _ := url.Parse(req.URL.String())`, then the slash trimmed or added.
-        let mut u = go_url::parse(&req.uri().to_string()).unwrap_or_default();
+        let mut u = go_url::parse(&go_request_uri(req).to_string()).unwrap_or_default();
         if path_ends_with_slash {
             u.path.pop();
         } else {
@@ -265,6 +265,15 @@ impl Route {
             let resp = redirect(&req, &target, StatusCode::MOVED_PERMANENTLY);
             Box::pin(async move { resp })
         }))
+    }
+}
+
+/// Go's `r.RequestURI` / `r.URL`: an HTTP/2 request has only its `:path` (hyper adds `:scheme`
+/// and `:authority`), an HTTP/1 request its request target as sent (absolute-form included).
+pub(crate) fn go_request_uri(req: &Request) -> Uri {
+    match req.uri().path_and_query() {
+        Some(pq) if req.version() == Version::HTTP_2 => Uri::from(pq.clone()),
+        _ => req.uri().clone(),
     }
 }
 

@@ -344,7 +344,8 @@ impl ConnState {
     }
 
     /// Bytes arrived: on an idle HTTP/1 connection a new request starts (Go: the read deadline
-    /// is reset to `ReadTimeout` from now).
+    /// is reset to `ReadTimeout` from now, and the previous request's write deadline no longer
+    /// applies: Go sets the next one only after `readRequest`).
     fn on_bytes_read(&self) {
         let mut t = self.times();
         if t.idle && !t.h2 {
@@ -352,6 +353,7 @@ impl ConnState {
             t.idle = false;
             t.request_start = now;
             t.read_deadline = self.opts.read_timeout.map(|d| now + d);
+            t.write_deadline = None;
         }
     }
 
@@ -533,9 +535,10 @@ impl AsyncWrite for DeadlineIo {
         self.inner.is_write_vectored()
     }
 
+    /// No deadline: a `TcpStream` flush writes nothing (hyper's buffered bytes go through
+    /// `poll_write*`), and hyper flushes on every dispatch loop, idle connections included.
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        self.get_mut()
-            .poll_write_with(cx, |io, cx| io.poll_flush(cx))
+        Pin::new(&mut self.get_mut().inner).poll_flush(cx)
     }
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
@@ -771,6 +774,25 @@ mod tests {
         conn.read_to_end(&mut rest).await.unwrap();
         assert!(rest.is_empty());
         assert!(started.elapsed() < Duration::from_millis(1500));
+        cancel.cancel();
+    }
+
+    /// Go sets the write deadline only after `readRequest`: an earlier request's deadline, past
+    /// while the connection was idle, must not abort the next request's split head.
+    #[tokio::test]
+    async fn a_stale_write_deadline_does_not_abort_the_next_request() {
+        let (addr, cancel) = start(router(), opts(5000, 100, 5000)).await;
+        let mut conn = TcpStream::connect(addr).await.unwrap();
+        conn.write_all(b"GET /ok HTTP/1.1\r\nHost: x\r\n\r\n")
+            .await
+            .unwrap();
+        read_response(&mut conn).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        conn.write_all(b"GET /ok HTTP/1.1\r\n").await.unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        conn.write_all(b"Host: x\r\n\r\n").await.unwrap();
+        let resp = read_response(&mut conn).await.unwrap();
+        assert!(resp.starts_with("HTTP/1.1 200 OK\r\n"), "{resp}");
         cancel.cancel();
     }
 

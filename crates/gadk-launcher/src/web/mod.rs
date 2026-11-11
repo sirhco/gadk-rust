@@ -467,7 +467,7 @@ fn request_logger(log: Logger) -> Middleware {
             async move {
                 let start = Instant::now();
                 let method = req.method().to_string();
-                let request_uri = req.uri().to_string();
+                let request_uri = router::go_request_uri(&req).to_string();
                 let resp = next(req).await;
                 log.print(&format!(
                     "{method} {request_uri} {}",
@@ -1070,6 +1070,68 @@ mod tests {
             normalize_log(&out.contents()[logged..], port),
             log_lines(&fixture("full_99_shutdown")),
             "shutdown log"
+        );
+    }
+
+    /// Go's HTTP/2 requests carry only `:path` (`RequestURI` and `URL` have no scheme or host):
+    /// the request log line and redirect `Location`s are origin-form under `-h2c`.
+    #[tokio::test]
+    async fn h2c_requests_log_and_redirect_with_the_path_only() {
+        let (log, captured) = crate::golog::capture();
+        let mut router = build_base_router(&log);
+        register_health_route(&mut router);
+        router.handle(
+            &[Method::GET],
+            "/foo/",
+            handler(|_req: Request| async { Response::new(Body::empty()) }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let cancel = CancellationToken::new();
+        let opts = serve::Options::new(
+            GoDuration::from_secs(5),
+            GoDuration::from_secs(5),
+            GoDuration::from_secs(5),
+            true,
+        );
+        let server = tokio::spawn(testing::serve(listener, router, opts, cancel.clone(), log));
+        let client = reqwest::Client::builder()
+            .http2_prior_knowledge()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+
+        let resp = client
+            .get(format!("http://{addr}/health?x=1"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.version(), http::Version::HTTP_2);
+        assert_eq!(resp.status(), 200);
+        let resp = client
+            .get(format!("http://{addr}/foo?y=2"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 301);
+        assert_eq!(resp.headers()[http::header::LOCATION], "/foo/?y=2");
+
+        cancel.cancel();
+        let draining = server.await.unwrap();
+        draining.shutdown(GoDuration::from_secs(5)).await.unwrap();
+        let logged: Vec<String> = captured
+            .contents()
+            .lines()
+            .map(|l| l.rsplit_once(' ').map_or(l, |(head, _)| head).to_owned())
+            .collect();
+        assert_eq!(
+            logged
+                .iter()
+                .filter(|l| l.contains("GET "))
+                .map(|l| &l[l.find("GET ").unwrap()..])
+                .collect::<Vec<_>>(),
+            ["GET /health?x=1", "GET /foo?y=2"],
+            "{logged:?}"
         );
     }
 }
