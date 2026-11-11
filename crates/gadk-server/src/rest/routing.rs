@@ -25,6 +25,7 @@ use std::sync::Arc;
 
 use axum::body::{Body, HttpBody};
 use futures::future::BoxFuture;
+use gadk_platform::go_url;
 use http::header::{ALLOW, CONNECTION, CONTENT_LENGTH, CONTENT_TYPE, LOCATION};
 use http::uri::PathAndQuery;
 use http::{HeaderValue, Method, StatusCode, Uri};
@@ -33,7 +34,6 @@ use tower::{Layer, ServiceExt};
 
 use super::http_error::not_found;
 use super::middleware::{catch_panic, with_max_bytes};
-use super::originguard::go_url;
 use crate::authn::{self, Authenticator};
 
 /// A request as a handler sees it (plan decision D3).
@@ -526,7 +526,7 @@ pub(crate) fn decoded_path(req: &Request) -> Result<Vec<u8>, ServerAnswer> {
     if req.method() == Method::OPTIONS && req.uri().path() == "*" {
         return Err(ServerAnswer::OptionsStar);
     }
-    go_url::unescape_path(req.uri().path()).ok_or(ServerAnswer::BadRequest)
+    go_url::unescape_path(req.uri().path()).map_err(|_| ServerAnswer::BadRequest)
 }
 
 /// An answer of Go's `net/http` server itself (see [`decoded_path`]).

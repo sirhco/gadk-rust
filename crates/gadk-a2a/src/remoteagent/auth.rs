@@ -23,22 +23,17 @@
 //! [`apply_credential`] (the agent-card fetch). The single-flight groups Go keeps on its
 //! `authTransport` (one per remote agent) are kept per credential provider value.
 
-// The card provider (plan 5b Task 6), the remote agent (Task 8) and the server cleanup (Task 7)
-// consume these items; Task 9 removes this allowance once they do.
-#![allow(dead_code)]
-
 use std::any::Any;
 use std::collections::HashMap;
 use std::fmt;
 use std::future::Future;
-use std::net::IpAddr;
 use std::panic::AssertUnwindSafe;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use futures::FutureExt as _;
 use gadk_auth::{AuthContext, Credential, CredentialProvider, SharedError, TokenSource};
-use gadk_platform::{go_query_escape, go_quote};
+use gadk_platform::{go_query_escape, go_quote, go_url};
 use http::HeaderMap;
 use http::header::{AUTHORIZATION, HeaderValue};
 use parking_lot::Mutex;
@@ -46,6 +41,7 @@ use tokio::sync::watch;
 use tokio::time::Instant;
 use url::Url;
 
+use super::card::is_loopback_host;
 use crate::Error;
 
 /// Go `a2aclient.SessionID` as built by `CredentialScope`: the credential cache key of an
@@ -402,33 +398,16 @@ fn request_origin(u: &Url) -> String {
 }
 
 /// Go `cardSendsInClear`: every interface URL of the card that is neither https nor loopback,
-/// in card order. An interface whose URL does not parse is skipped.
+/// in card order. An interface whose URL does not parse (Go `url.Parse`) is skipped.
 pub(crate) fn card_sends_in_clear(card: &a2a::AgentCard) -> Vec<String> {
     card.supported_interfaces
         .iter()
         .filter_map(|iface| {
-            let u = Url::parse(&iface.url).ok()?;
-            let clear =
-                !u.scheme().eq_ignore_ascii_case("https") && !is_loopback_host(hostname(&u));
+            let u = go_url::parse(&iface.url).ok()?;
+            let clear = !u.scheme.eq_ignore_ascii_case("https") && !is_loopback_host(u.hostname());
             clear.then(|| iface.url.clone())
         })
         .collect()
-}
-
-/// Go `isLoopbackHost`: `localhost`, a `.localhost` name, or a loopback IP (an IPv4-mapped
-/// IPv6 loopback included, as Go's `net.IP.IsLoopback` treats it).
-pub(crate) fn is_loopback_host(hostname: &str) -> bool {
-    let h = hostname.to_ascii_lowercase();
-    if h == "localhost" || h.ends_with(".localhost") {
-        return true;
-    }
-    match hostname.parse::<IpAddr>() {
-        Ok(IpAddr::V4(ip)) => ip.is_loopback(),
-        Ok(IpAddr::V6(ip)) => {
-            ip.is_loopback() || ip.to_ipv4_mapped().is_some_and(|v4| v4.is_loopback())
-        }
-        Err(_) => false,
-    }
 }
 
 /// Go `oauth2.RetrieveError`: a token endpoint's non-2xx response. A token source that reports
@@ -822,6 +801,8 @@ impl CredentialCell {
     }
 
     /// A cell that never holds a credential (Go's nil `*credentialCell`).
+    // The server cleanup (child-task cancel) is the only non-test caller.
+    #[cfg(any(test, feature = "server"))]
     pub(crate) fn uncached() -> Self {
         Self { cred: None }
     }

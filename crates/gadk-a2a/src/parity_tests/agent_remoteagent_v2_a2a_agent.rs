@@ -1407,7 +1407,6 @@ mod remote_runs {
     }
 
     #[tokio::test]
-    #[ignore = "needs plan 5b Task 7's server::Executor; Task 9 un-ignores"]
     async fn test_remote_agent_adk2_adk() {
         struct Case {
             name: &'static str,

@@ -17,6 +17,7 @@
 //! `Live.Connect` (lines 64–135) and `transformer.go` `tModel` / `tModelFullName`.
 
 use gadk_model::Backend;
+use gadk_platform::go_path_join;
 use url::Url;
 
 use crate::config::{Auth, ResolvedConfig};
@@ -50,12 +51,13 @@ pub(crate) fn live_url(resolved: &ResolvedConfig) -> Result<Url, GeminiError> {
             // genai: `baseURL.String() != ""` always holds once the client is resolved, so
             // without standard auth the proxy's own path is used.
             if has_standard_auth {
-                path_join(
+                go_path_join(&[
                     base.path(),
-                    &format!(
+                    format!(
                         "ws/google.cloud.aiplatform.{api_version}.LlmBidiService/BidiGenerateContent"
-                    ),
-                )
+                    )
+                    .as_str(),
+                ])
             } else {
                 base.path().to_string()
             }
@@ -75,12 +77,13 @@ pub(crate) fn live_url(resolved: &ResolvedConfig) -> Result<Url, GeminiError> {
                     ));
                 }
             }
-            path_join(
+            go_path_join(&[
                 base.path(),
-                &format!(
+                format!(
                     "ws/google.ai.generativelanguage.{api_version}.GenerativeService.BidiGenerateContent"
-                ),
-            )
+                )
+                .as_str(),
+            ])
         }
     };
 
@@ -99,45 +102,6 @@ pub(crate) fn live_url(resolved: &ResolvedConfig) -> Result<Url, GeminiError> {
     };
     Url::parse(&format!("{scheme}://{authority}{path}"))
         .map_err(|e| GeminiError::Config(format!("invalid Live URL: {e}")))
-}
-
-/// Port of Go `path.Join`: joins the non-empty elements with `/` and cleans the result.
-fn path_join(a: &str, b: &str) -> String {
-    let joined = match (a.is_empty(), b.is_empty()) {
-        (true, true) => return String::new(),
-        (true, false) => b.to_string(),
-        (false, true) => a.to_string(),
-        (false, false) => format!("{a}/{b}"),
-    };
-    path_clean(&joined)
-}
-
-/// Port of Go `path.Clean`.
-fn path_clean(p: &str) -> String {
-    if p.is_empty() {
-        return ".".into();
-    }
-    let rooted = p.starts_with('/');
-    let mut out: Vec<&str> = Vec::new();
-    for seg in p.split('/') {
-        match seg {
-            "" | "." => {}
-            ".." => {
-                if out.last().is_some_and(|s| *s != "..") {
-                    out.pop();
-                } else if !rooted {
-                    out.push("..");
-                }
-            }
-            s => out.push(s),
-        }
-    }
-    let body = out.join("/");
-    match (rooted, body.is_empty()) {
-        (true, _) => format!("/{body}"),
-        (false, true) => ".".into(),
-        (false, false) => body,
-    }
 }
 
 /// Port of genai `tModel` then `tModelFullName`: the `model` of the setup message
@@ -264,14 +228,6 @@ mod tests {
         assert!(matches!(live_url(&r), Err(GeminiError::Config(_))));
         let r = resolved(Backend::GeminiApi, "https://h/", None, None);
         assert!(matches!(live_url(&r), Err(GeminiError::Config(_))));
-    }
-
-    #[test]
-    fn path_join_cleans() {
-        assert_eq!(path_join("/", "ws/x"), "/ws/x");
-        assert_eq!(path_join("/a/b/", "ws/x"), "/a/b/ws/x");
-        assert_eq!(path_join("/a/../b", "./ws"), "/b/ws");
-        assert_eq!(path_join("", "ws/x"), "ws/x");
     }
 
     #[test]

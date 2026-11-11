@@ -192,6 +192,63 @@ pub struct ExecutorConfig {
 /// per execute or cancel stream: on its terminal event or error, at its end, or when it is
 /// dropped. A cancel stops the task's running execution at once (Go cancels its context): the
 /// execute stream ends, dropping the runner, and its cleanup sees the `canceled` task.
+///
+/// Serving an agent over A2A JSON-RPC (Go `ExampleNewExecutor_jsonRPCHandler`): the executor
+/// behind a2a-rs's request handler, the JSON-RPC router at `/invoke` and the static card at
+/// `/.well-known/agent-card.json`.
+///
+/// ```
+/// use std::sync::Arc;
+///
+/// use gadk_a2a::a2a_server::{
+///     DefaultRequestHandler, InMemoryTaskStore, StaticAgentCard, agent_card::agent_card_router,
+///     jsonrpc::jsonrpc_router,
+/// };
+/// use gadk_a2a::server::{Executor, ExecutorConfig};
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// // Build or load your ADK agent here.
+/// let root_agent = gadk_agent::new_agent(gadk_agent::AgentConfig {
+///     name: "weather-agent".into(),
+///     ..Default::default()
+/// })?;
+///
+/// let agent_card: gadk_a2a::a2a::AgentCard = serde_json::from_value(serde_json::json!({
+///     "name": "weather-agent",
+///     "supportedInterfaces": [{
+///         "url": "http://localhost:8080/invoke",
+///         "protocolBinding": "JSONRPC",
+///         "protocolVersion": "1.0",
+///     }],
+///     "version": "1.0.0",
+///     "capabilities": {},
+///     "defaultInputModes": ["text/plain"],
+///     "defaultOutputModes": ["text/plain"],
+///     "skills": [],
+/// }))?;
+///
+/// let executor = Executor::new(ExecutorConfig {
+///     runner_config: Some(gadk_engine::runner::RunnerConfig {
+///         app_name: "weather-agent".into(),
+///         agent: root_agent,
+///         session_service: Arc::new(gadk_session::InMemorySessionService::new()),
+///         artifact_service: None,
+///         memory_service: None,
+///         plugin_config: Default::default(),
+///         auto_create_session: false,
+///         platform: Default::default(),
+///         compaction: None,
+///     }),
+///     ..Default::default()
+/// });
+/// let request_handler = Arc::new(DefaultRequestHandler::new(executor, InMemoryTaskStore::new()));
+///
+/// let router: axum::Router = agent_card_router(Arc::new(StaticAgentCard::new(agent_card)))
+///     .nest("/invoke", jsonrpc_router(request_handler));
+/// # let _ = router;
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Clone)]
 pub struct Executor {
     pub(crate) config: Arc<ExecutorConfig>,
@@ -552,7 +609,7 @@ impl Executor {
     /// credential scope of the invocation that created it (when the sub-agent owns its auth
     /// scope).
     #[cfg(feature = "client")]
-    async fn cancel_child_input_required_tasks(
+    pub(crate) async fn cancel_child_input_required_tasks(
         &self,
         ctx: &a2a_server::ExecutorContext,
         status: &a2a::TaskStatus,
@@ -798,14 +855,14 @@ fn child_cancel_status(
 
 /// Go `remoteAgent`: a remote sub-agent and its A2A configuration.
 #[cfg(feature = "client")]
-struct RemoteSubagent {
+pub(crate) struct RemoteSubagent {
     agent: Arc<dyn Agent>,
     config: Arc<A2AServerConfig>,
 }
 
 /// Go `findRemoteSubagents`: the remote agents of the tree, not descending into them.
 #[cfg(feature = "client")]
-fn find_remote_subagents(root: &Arc<dyn Agent>) -> Vec<RemoteSubagent> {
+pub(crate) fn find_remote_subagents(root: &Arc<dyn Agent>) -> Vec<RemoteSubagent> {
     fn collect(agent: &Arc<dyn Agent>, result: &mut Vec<RemoteSubagent>) {
         if let Some(config) = find_remote_agent_state(agent.as_ref()) {
             result.push(RemoteSubagent {
@@ -1372,6 +1429,45 @@ mod tests {
             ..Default::default()
         })
         .unwrap()
+    }
+
+    /// Go's a2a-go keeps the code of an A2A error wrapped by the executor (`errors.Is` against
+    /// the code sentinels) with the wrapped message.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_wrapped_a2a_error_reaches_the_client_with_its_code() {
+        let agent = new_agent(AgentConfig {
+            name: "agent".into(),
+            run: Some(Arc::new(|_ctx: InvocationContext| {
+                futures::stream::iter([Ok(text_event("out"))]).boxed()
+            })),
+            ..Default::default()
+        })
+        .unwrap();
+        let executor = Executor::new(ExecutorConfig {
+            runner_config: Some(engine_config(
+                agent,
+                Arc::new(InMemorySessionService::new()),
+            )),
+            before_execute_callback: Some(Arc::new(|_ctx, _ext| {
+                Box::pin(async { Err(Error::A2A(a2a::A2AError::invalid_params("bad input"))) })
+            })),
+            ..Default::default()
+        });
+        let server = spawn_a2a_server(executor, card("root")).await;
+        let client = new_a2a_client_provider(None)
+            .create_client(ClientContext::Detached, &server.card)
+            .await
+            .unwrap();
+
+        let req: a2a::SendMessageRequest = serde_json::from_value(json!({
+            "message": {"messageId": a2a::new_message_id(), "role": "ROLE_USER", "parts": [{"text": "Hello"}]},
+        }))
+        .unwrap();
+        let err = client.send_message(&req).await.unwrap_err();
+        assert_eq!(
+            (err.code, err.message.as_str()),
+            (a2a::error_code::INVALID_PARAMS, "before execute: bad input")
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]

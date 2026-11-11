@@ -400,7 +400,6 @@ impl A2AClient for PeerClient {
 // parity: adapted: Go's OnEventCallback mutates the event in place and returns nil; a gadk OnEventCallback owns its event, so it returns the modified copy
 #[cfg(feature = "server")]
 #[tokio::test]
-#[ignore = "needs plan 5b Task 7's server::Executor; Task 9 un-ignores"]
 async fn test_peer_before_run_reply_preserves_remote_session() {
     use super::agent_remoteagent_v2_a2a_agent::harness::MockExecutor;
     use crate::convert::{event_to_message, get_a2a_task_info, to_genai_parts};

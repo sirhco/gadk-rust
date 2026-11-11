@@ -18,10 +18,8 @@
 
 use std::sync::Arc;
 
-use gadk_agent::Agent;
-
 use super::card::AgentCardProvider;
-use super::client::{A2AClient, A2AClientProvider, ClientContext};
+use super::client::A2AClientProvider;
 use crate::Error;
 
 /// Go `A2AServerConfig`: how to reach the remote agent.
@@ -49,7 +47,6 @@ pub struct RemoteAgentState {
 }
 
 /// Go `ResolveAgentCard`: the fixed card, else the provider's.
-#[allow(dead_code)] // called by the remote agent (Task 8) and the executor cleanup (Task 7)
 pub(crate) async fn resolve_agent_card(cfg: &A2AServerConfig) -> Result<a2a::AgentCard, Error> {
     if let Some(card) = &cfg.agent_card {
         return Ok(card.clone());
@@ -64,11 +61,12 @@ pub(crate) async fn resolve_agent_card(cfg: &A2AServerConfig) -> Result<a2a::Age
 
 /// Go `CreateA2AClient`: the resolved card and a client for it. The caller enters the auth
 /// scope around it when `cfg.owns_auth_scope` (the card fetch reads it).
-#[allow(dead_code)] // called by the remote agent (Task 8) and the executor cleanup (Task 7)
+// The server cleanup (child-task cancel) is the only non-test caller.
+#[cfg(any(test, feature = "server"))]
 pub(crate) async fn create_a2a_client(
-    cx: ClientContext<'_>,
+    cx: super::client::ClientContext<'_>,
     cfg: &A2AServerConfig,
-) -> Result<(a2a::AgentCard, Arc<dyn A2AClient>), Error> {
+) -> Result<(a2a::AgentCard, Arc<dyn super::client::A2AClient>), Error> {
     let card = resolve_agent_card(cfg)
         .await
         .map_err(|e| Error::wrap("agent card resolution failed", e))?;
@@ -82,8 +80,11 @@ pub(crate) async fn create_a2a_client(
 
 /// The server config of a remote agent (downcasts `AgentState.config` to
 /// [`RemoteAgentState`]); `None` for any other agent.
-#[allow(dead_code)] // called by the remote agent (Task 8) and the executor cleanup (Task 7)
-pub(crate) fn find_remote_agent_state(agent: &dyn Agent) -> Option<Arc<A2AServerConfig>> {
+// The server cleanup (child-task cancel) is the only non-test caller.
+#[cfg(any(test, feature = "server"))]
+pub(crate) fn find_remote_agent_state(
+    agent: &dyn gadk_agent::Agent,
+) -> Option<Arc<A2AServerConfig>> {
     agent
         .agent_state()
         .config
@@ -100,6 +101,7 @@ mod tests {
     use gadk_agent::{AgentConfig, AgentState, AgentType};
 
     use super::*;
+    use crate::remoteagent::client::{A2AClient, ClientContext};
     use crate::testutil::{FakeA2AClient, FakeClientProvider};
 
     fn card(name: &str) -> a2a::AgentCard {

@@ -152,6 +152,10 @@ required-features = ["vertexai", "gemini"]
 name = "rest_server"
 required-features = ["server"]
 
+[[example]]
+name = "a2a"
+required-features = ["a2a"]
+
 [[test]]
 name = "model_anthropicmodel_agent_runner"
 required-features = ["anthropic"]
@@ -163,3 +167,7 @@ required-features = ["openai"]
 [[test]]
 name = "facade_server"
 required-features = ["server"]
+
+[[test]]
+name = "facade_a2a"
+required-features = ["a2a"]

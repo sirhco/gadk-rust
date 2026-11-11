@@ -1,0 +1,947 @@
+{
+  "deltas": [
+    {
+      "unit": "client.jsonrpc",
+      "path": "/runs/0/exchanges/0/request/headers/Accept",
+      "actual": "*/*",
+      "divergence": "a2a-rs's client sends reqwest's Accept: */* on non-streaming JSON-RPC and REST calls and on the agent-card fetch (a2a-go: no Accept for JSON-RPC, application/json for REST)"
+    },
+    {
+      "unit": "client.jsonrpc",
+      "path": "/runs/1/exchanges/0/request/headers/Accept",
+      "actual": "*/*",
+      "divergence": "a2a-rs's client sends reqwest's Accept: */* on non-streaming JSON-RPC and REST calls and on the agent-card fetch (a2a-go: no Accept for JSON-RPC, application/json for REST)"
+    },
+    {
+      "unit": "client.rest",
+      "path": "/runs/*/exchanges/*/request/headers/Accept",
+      "fixture": "application/json",
+      "actual": "*/*",
+      "divergence": "a2a-rs's client sends reqwest's Accept: */* on non-streaming JSON-RPC and REST calls and on the agent-card fetch (a2a-go: no Accept for JSON-RPC, application/json for REST)"
+    },
+    {
+      "unit": "server.jsonrpc",
+      "path": "/exchanges/0/response/body/result/task/metadata",
+      "fixture": {
+        "adk_app_name": "approver",
+        "adk_session_id": "<ctx-1>",
+        "adk_user_id": "A2A_USER_<ctx-1>",
+        "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+      },
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.jsonrpc",
+      "path": "/exchanges/1/response/body/result/task/history",
+      "fixture": [
+        {
+          "messageId": "msg-1",
+          "parts": [
+            {
+              "text": "Perform important task!"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "contextId": "<ctx-1>",
+          "messageId": "msg-2",
+          "parts": [
+            {
+              "text": "Is it really necessary?"
+            }
+          ],
+          "role": "ROLE_USER",
+          "taskId": "<task-1>"
+        },
+        {
+          "messageId": "<msg-1>",
+          "parts": [
+            {
+              "data": {
+                "id": "adk-<id-1>",
+                "name": "request_approval"
+              },
+              "metadata": {
+                "adk_is_long_running": true,
+                "adk_type": "function_call"
+              }
+            },
+            {
+              "data": {
+                "id": "adk-<id-1>",
+                "name": "request_approval",
+                "response": {
+                  "status": "pending",
+                  "ticket_id": "ticket-1"
+                }
+              },
+              "metadata": {
+                "adk_type": "function_response"
+              }
+            }
+          ],
+          "role": "ROLE_AGENT"
+        }
+      ],
+      "actual": [
+        {
+          "messageId": "msg-1",
+          "parts": [
+            {
+              "text": "Perform important task!"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "contextId": "<ctx-1>",
+          "messageId": "msg-2",
+          "parts": [
+            {
+              "text": "Is it really necessary?"
+            }
+          ],
+          "role": "ROLE_USER",
+          "taskId": "<task-1>"
+        }
+      ],
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.jsonrpc",
+      "path": "/exchanges/1/response/body/result/task/metadata",
+      "fixture": {
+        "adk_app_name": "approver",
+        "adk_session_id": "<ctx-1>",
+        "adk_user_id": "A2A_USER_<ctx-1>",
+        "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+      },
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.jsonrpc",
+      "path": "/exchanges/2/response/body/result/task/history",
+      "fixture": [
+        {
+          "messageId": "msg-1",
+          "parts": [
+            {
+              "text": "Perform important task!"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "contextId": "<ctx-1>",
+          "messageId": "msg-2",
+          "parts": [
+            {
+              "text": "Is it really necessary?"
+            }
+          ],
+          "role": "ROLE_USER",
+          "taskId": "<task-1>"
+        },
+        {
+          "messageId": "<msg-1>",
+          "parts": [
+            {
+              "data": {
+                "id": "adk-<id-1>",
+                "name": "request_approval"
+              },
+              "metadata": {
+                "adk_is_long_running": true,
+                "adk_type": "function_call"
+              }
+            },
+            {
+              "data": {
+                "id": "adk-<id-1>",
+                "name": "request_approval",
+                "response": {
+                  "status": "pending",
+                  "ticket_id": "ticket-1"
+                }
+              },
+              "metadata": {
+                "adk_type": "function_response"
+              }
+            }
+          ],
+          "role": "ROLE_AGENT"
+        },
+        {
+          "contextId": "<ctx-1>",
+          "messageId": "msg-3",
+          "parts": [
+            {
+              "text": "LGTM"
+            },
+            {
+              "data": {
+                "id": "adk-<id-1>",
+                "name": "request_approval",
+                "response": {
+                  "status": "approved",
+                  "ticket_id": "ticket-1"
+                }
+              },
+              "metadata": {
+                "adk_type": "function_response"
+              }
+            }
+          ],
+          "role": "ROLE_USER",
+          "taskId": "<task-1>"
+        },
+        {
+          "contextId": "<ctx-1>",
+          "messageId": "<msg-2>",
+          "parts": [
+            {
+              "data": {
+                "id": "adk-<id-1>",
+                "name": "request_approval"
+              },
+              "metadata": {
+                "adk_is_long_running": true,
+                "adk_type": "function_call"
+              }
+            },
+            {
+              "data": {
+                "id": "adk-<id-1>",
+                "name": "request_approval",
+                "response": {
+                  "status": "pending",
+                  "ticket_id": "ticket-1"
+                }
+              },
+              "metadata": {
+                "adk_type": "function_response"
+              }
+            },
+            {
+              "metadata": {
+                "validation_error": true
+              },
+              "text": "no input provided for function call ID \"adk-<id-1>\""
+            }
+          ],
+          "role": "ROLE_AGENT",
+          "taskId": "<task-1>"
+        }
+      ],
+      "actual": [
+        {
+          "messageId": "msg-1",
+          "parts": [
+            {
+              "text": "Perform important task!"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "contextId": "<ctx-1>",
+          "messageId": "msg-2",
+          "parts": [
+            {
+              "text": "Is it really necessary?"
+            }
+          ],
+          "role": "ROLE_USER",
+          "taskId": "<task-1>"
+        },
+        {
+          "contextId": "<ctx-1>",
+          "messageId": "msg-3",
+          "parts": [
+            {
+              "text": "LGTM"
+            },
+            {
+              "data": {
+                "id": "adk-<id-1>",
+                "name": "request_approval",
+                "response": {
+                  "status": "approved",
+                  "ticket_id": "ticket-1"
+                }
+              },
+              "metadata": {
+                "adk_type": "function_response"
+              }
+            }
+          ],
+          "role": "ROLE_USER",
+          "taskId": "<task-1>"
+        }
+      ],
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.jsonrpc",
+      "path": "/exchanges/2/response/body/result/task/metadata",
+      "fixture": {
+        "adk_app_name": "approver",
+        "adk_session_id": "<ctx-1>",
+        "adk_user_id": "A2A_USER_<ctx-1>",
+        "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+      },
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.jsonrpc",
+      "path": "/exchanges/3/response/body/result/history",
+      "fixture": [
+        {
+          "messageId": "msg-1",
+          "parts": [
+            {
+              "text": "Perform important task!"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "contextId": "<ctx-1>",
+          "messageId": "msg-2",
+          "parts": [
+            {
+              "text": "Is it really necessary?"
+            }
+          ],
+          "role": "ROLE_USER",
+          "taskId": "<task-1>"
+        },
+        {
+          "messageId": "<msg-1>",
+          "parts": [
+            {
+              "data": {
+                "id": "adk-<id-1>",
+                "name": "request_approval"
+              },
+              "metadata": {
+                "adk_is_long_running": true,
+                "adk_type": "function_call"
+              }
+            },
+            {
+              "data": {
+                "id": "adk-<id-1>",
+                "name": "request_approval",
+                "response": {
+                  "status": "pending",
+                  "ticket_id": "ticket-1"
+                }
+              },
+              "metadata": {
+                "adk_type": "function_response"
+              }
+            }
+          ],
+          "role": "ROLE_AGENT"
+        },
+        {
+          "contextId": "<ctx-1>",
+          "messageId": "msg-3",
+          "parts": [
+            {
+              "text": "LGTM"
+            },
+            {
+              "data": {
+                "id": "adk-<id-1>",
+                "name": "request_approval",
+                "response": {
+                  "status": "approved",
+                  "ticket_id": "ticket-1"
+                }
+              },
+              "metadata": {
+                "adk_type": "function_response"
+              }
+            }
+          ],
+          "role": "ROLE_USER",
+          "taskId": "<task-1>"
+        },
+        {
+          "contextId": "<ctx-1>",
+          "messageId": "<msg-2>",
+          "parts": [
+            {
+              "data": {
+                "id": "adk-<id-1>",
+                "name": "request_approval"
+              },
+              "metadata": {
+                "adk_is_long_running": true,
+                "adk_type": "function_call"
+              }
+            },
+            {
+              "data": {
+                "id": "adk-<id-1>",
+                "name": "request_approval",
+                "response": {
+                  "status": "pending",
+                  "ticket_id": "ticket-1"
+                }
+              },
+              "metadata": {
+                "adk_type": "function_response"
+              }
+            },
+            {
+              "metadata": {
+                "validation_error": true
+              },
+              "text": "no input provided for function call ID \"adk-<id-1>\""
+            }
+          ],
+          "role": "ROLE_AGENT",
+          "taskId": "<task-1>"
+        }
+      ],
+      "actual": [
+        {
+          "messageId": "msg-1",
+          "parts": [
+            {
+              "text": "Perform important task!"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "contextId": "<ctx-1>",
+          "messageId": "msg-2",
+          "parts": [
+            {
+              "text": "Is it really necessary?"
+            }
+          ],
+          "role": "ROLE_USER",
+          "taskId": "<task-1>"
+        },
+        {
+          "contextId": "<ctx-1>",
+          "messageId": "msg-3",
+          "parts": [
+            {
+              "text": "LGTM"
+            },
+            {
+              "data": {
+                "id": "adk-<id-1>",
+                "name": "request_approval",
+                "response": {
+                  "status": "approved",
+                  "ticket_id": "ticket-1"
+                }
+              },
+              "metadata": {
+                "adk_type": "function_response"
+              }
+            }
+          ],
+          "role": "ROLE_USER",
+          "taskId": "<task-1>"
+        }
+      ],
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.jsonrpc",
+      "path": "/exchanges/3/response/body/result/metadata",
+      "fixture": {
+        "adk_app_name": "approver",
+        "adk_session_id": "<ctx-1>",
+        "adk_user_id": "A2A_USER_<ctx-1>",
+        "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+      },
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/0/response/body/task/metadata",
+      "fixture": {
+        "adk_app_name": "approver",
+        "adk_session_id": "<ctx-1>",
+        "adk_user_id": "A2A_USER_<ctx-1>",
+        "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+      },
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/0/response/headers/Content-Type",
+      "fixture": "application/json",
+      "actual": "application/a2a+json",
+      "divergence": "a2a-rs's REST binding answers JSON with Content-Type: application/a2a+json (a2a-go: application/json)"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/1/response/body/task/history",
+      "fixture": [
+        {
+          "messageId": "msg-1",
+          "parts": [
+            {
+              "text": "Perform important task!"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "contextId": "<ctx-1>",
+          "messageId": "msg-2",
+          "parts": [
+            {
+              "text": "Is it really necessary?"
+            }
+          ],
+          "role": "ROLE_USER",
+          "taskId": "<task-1>"
+        },
+        {
+          "messageId": "<msg-1>",
+          "parts": [
+            {
+              "data": {
+                "id": "adk-<id-1>",
+                "name": "request_approval"
+              },
+              "metadata": {
+                "adk_is_long_running": true,
+                "adk_type": "function_call"
+              }
+            },
+            {
+              "data": {
+                "id": "adk-<id-1>",
+                "name": "request_approval",
+                "response": {
+                  "status": "pending",
+                  "ticket_id": "ticket-1"
+                }
+              },
+              "metadata": {
+                "adk_type": "function_response"
+              }
+            }
+          ],
+          "role": "ROLE_AGENT"
+        }
+      ],
+      "actual": [
+        {
+          "messageId": "msg-1",
+          "parts": [
+            {
+              "text": "Perform important task!"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "contextId": "<ctx-1>",
+          "messageId": "msg-2",
+          "parts": [
+            {
+              "text": "Is it really necessary?"
+            }
+          ],
+          "role": "ROLE_USER",
+          "taskId": "<task-1>"
+        }
+      ],
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/1/response/body/task/metadata",
+      "fixture": {
+        "adk_app_name": "approver",
+        "adk_session_id": "<ctx-1>",
+        "adk_user_id": "A2A_USER_<ctx-1>",
+        "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+      },
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/1/response/headers/Content-Type",
+      "fixture": "application/json",
+      "actual": "application/a2a+json",
+      "divergence": "a2a-rs's REST binding answers JSON with Content-Type: application/a2a+json (a2a-go: application/json)"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/2/response/body/task/history",
+      "fixture": [
+        {
+          "messageId": "msg-1",
+          "parts": [
+            {
+              "text": "Perform important task!"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "contextId": "<ctx-1>",
+          "messageId": "msg-2",
+          "parts": [
+            {
+              "text": "Is it really necessary?"
+            }
+          ],
+          "role": "ROLE_USER",
+          "taskId": "<task-1>"
+        },
+        {
+          "messageId": "<msg-1>",
+          "parts": [
+            {
+              "data": {
+                "id": "adk-<id-1>",
+                "name": "request_approval"
+              },
+              "metadata": {
+                "adk_is_long_running": true,
+                "adk_type": "function_call"
+              }
+            },
+            {
+              "data": {
+                "id": "adk-<id-1>",
+                "name": "request_approval",
+                "response": {
+                  "status": "pending",
+                  "ticket_id": "ticket-1"
+                }
+              },
+              "metadata": {
+                "adk_type": "function_response"
+              }
+            }
+          ],
+          "role": "ROLE_AGENT"
+        },
+        {
+          "contextId": "<ctx-1>",
+          "messageId": "msg-3",
+          "parts": [
+            {
+              "text": "LGTM"
+            },
+            {
+              "data": {
+                "id": "adk-<id-1>",
+                "name": "request_approval",
+                "response": {
+                  "status": "approved",
+                  "ticket_id": "ticket-1"
+                }
+              },
+              "metadata": {
+                "adk_type": "function_response"
+              }
+            }
+          ],
+          "role": "ROLE_USER",
+          "taskId": "<task-1>"
+        },
+        {
+          "contextId": "<ctx-1>",
+          "messageId": "<msg-2>",
+          "parts": [
+            {
+              "data": {
+                "id": "adk-<id-1>",
+                "name": "request_approval"
+              },
+              "metadata": {
+                "adk_is_long_running": true,
+                "adk_type": "function_call"
+              }
+            },
+            {
+              "data": {
+                "id": "adk-<id-1>",
+                "name": "request_approval",
+                "response": {
+                  "status": "pending",
+                  "ticket_id": "ticket-1"
+                }
+              },
+              "metadata": {
+                "adk_type": "function_response"
+              }
+            },
+            {
+              "metadata": {
+                "validation_error": true
+              },
+              "text": "no input provided for function call ID \"adk-<id-1>\""
+            }
+          ],
+          "role": "ROLE_AGENT",
+          "taskId": "<task-1>"
+        }
+      ],
+      "actual": [
+        {
+          "messageId": "msg-1",
+          "parts": [
+            {
+              "text": "Perform important task!"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "contextId": "<ctx-1>",
+          "messageId": "msg-2",
+          "parts": [
+            {
+              "text": "Is it really necessary?"
+            }
+          ],
+          "role": "ROLE_USER",
+          "taskId": "<task-1>"
+        },
+        {
+          "contextId": "<ctx-1>",
+          "messageId": "msg-3",
+          "parts": [
+            {
+              "text": "LGTM"
+            },
+            {
+              "data": {
+                "id": "adk-<id-1>",
+                "name": "request_approval",
+                "response": {
+                  "status": "approved",
+                  "ticket_id": "ticket-1"
+                }
+              },
+              "metadata": {
+                "adk_type": "function_response"
+              }
+            }
+          ],
+          "role": "ROLE_USER",
+          "taskId": "<task-1>"
+        }
+      ],
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/2/response/body/task/metadata",
+      "fixture": {
+        "adk_app_name": "approver",
+        "adk_session_id": "<ctx-1>",
+        "adk_user_id": "A2A_USER_<ctx-1>",
+        "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+      },
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/2/response/headers/Content-Type",
+      "fixture": "application/json",
+      "actual": "application/a2a+json",
+      "divergence": "a2a-rs's REST binding answers JSON with Content-Type: application/a2a+json (a2a-go: application/json)"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/3/response/body/history",
+      "fixture": [
+        {
+          "messageId": "msg-1",
+          "parts": [
+            {
+              "text": "Perform important task!"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "contextId": "<ctx-1>",
+          "messageId": "msg-2",
+          "parts": [
+            {
+              "text": "Is it really necessary?"
+            }
+          ],
+          "role": "ROLE_USER",
+          "taskId": "<task-1>"
+        },
+        {
+          "messageId": "<msg-1>",
+          "parts": [
+            {
+              "data": {
+                "id": "adk-<id-1>",
+                "name": "request_approval"
+              },
+              "metadata": {
+                "adk_is_long_running": true,
+                "adk_type": "function_call"
+              }
+            },
+            {
+              "data": {
+                "id": "adk-<id-1>",
+                "name": "request_approval",
+                "response": {
+                  "status": "pending",
+                  "ticket_id": "ticket-1"
+                }
+              },
+              "metadata": {
+                "adk_type": "function_response"
+              }
+            }
+          ],
+          "role": "ROLE_AGENT"
+        },
+        {
+          "contextId": "<ctx-1>",
+          "messageId": "msg-3",
+          "parts": [
+            {
+              "text": "LGTM"
+            },
+            {
+              "data": {
+                "id": "adk-<id-1>",
+                "name": "request_approval",
+                "response": {
+                  "status": "approved",
+                  "ticket_id": "ticket-1"
+                }
+              },
+              "metadata": {
+                "adk_type": "function_response"
+              }
+            }
+          ],
+          "role": "ROLE_USER",
+          "taskId": "<task-1>"
+        },
+        {
+          "contextId": "<ctx-1>",
+          "messageId": "<msg-2>",
+          "parts": [
+            {
+              "data": {
+                "id": "adk-<id-1>",
+                "name": "request_approval"
+              },
+              "metadata": {
+                "adk_is_long_running": true,
+                "adk_type": "function_call"
+              }
+            },
+            {
+              "data": {
+                "id": "adk-<id-1>",
+                "name": "request_approval",
+                "response": {
+                  "status": "pending",
+                  "ticket_id": "ticket-1"
+                }
+              },
+              "metadata": {
+                "adk_type": "function_response"
+              }
+            },
+            {
+              "metadata": {
+                "validation_error": true
+              },
+              "text": "no input provided for function call ID \"adk-<id-1>\""
+            }
+          ],
+          "role": "ROLE_AGENT",
+          "taskId": "<task-1>"
+        }
+      ],
+      "actual": [
+        {
+          "messageId": "msg-1",
+          "parts": [
+            {
+              "text": "Perform important task!"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "contextId": "<ctx-1>",
+          "messageId": "msg-2",
+          "parts": [
+            {
+              "text": "Is it really necessary?"
+            }
+          ],
+          "role": "ROLE_USER",
+          "taskId": "<task-1>"
+        },
+        {
+          "contextId": "<ctx-1>",
+          "messageId": "msg-3",
+          "parts": [
+            {
+              "text": "LGTM"
+            },
+            {
+              "data": {
+                "id": "adk-<id-1>",
+                "name": "request_approval",
+                "response": {
+                  "status": "approved",
+                  "ticket_id": "ticket-1"
+                }
+              },
+              "metadata": {
+                "adk_type": "function_response"
+              }
+            }
+          ],
+          "role": "ROLE_USER",
+          "taskId": "<task-1>"
+        }
+      ],
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/3/response/body/metadata",
+      "fixture": {
+        "adk_app_name": "approver",
+        "adk_session_id": "<ctx-1>",
+        "adk_user_id": "A2A_USER_<ctx-1>",
+        "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+      },
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/3/response/headers/Content-Type",
+      "fixture": "application/json",
+      "actual": "application/a2a+json",
+      "divergence": "a2a-rs's REST binding answers JSON with Content-Type: application/a2a+json (a2a-go: application/json)"
+    }
+  ]
+}

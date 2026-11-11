@@ -63,10 +63,10 @@ pub fn identity_header_resolver() -> UserResolver {
 ///
 /// Mount it inside the authentication layer (so the extensions already hold the caller) and
 /// around the A2A routers, and install [`identity_header_resolver`] as
-/// `ExecutorConfig::user_resolver`. A user ID that is not a valid header value (control
-/// characters, non-ASCII text) is dropped with a warning, and the executor falls back to its
-/// anonymous `A2A_USER_<context_id>` user: a2a-rs passes only visible-ASCII header values on as
-/// service params.
+/// `ExecutorConfig::user_resolver`. A user ID that is not a visible-ASCII header value (control
+/// characters, non-ASCII text such as `élodie`) is dropped with a warning, and the executor
+/// falls back to its anonymous `A2A_USER_<context_id>` user: a2a-rs passes only visible-ASCII
+/// header values on as service params.
 pub fn a2a_identity_layer<F>(extract: F) -> IdentityLayer<F>
 where
     F: Fn(&http::Extensions) -> Option<String> + Clone + Send + Sync + 'static,
@@ -115,14 +115,15 @@ where
         // Always strip what the client sent: only this layer may set the header.
         req.headers_mut().remove(IDENTITY_HEADER);
         if let Some(user) = (self.extract)(req.extensions()) {
+            // a2a-rs passes only visible-ASCII header values on as service params.
             match http::HeaderValue::from_str(&user) {
-                Ok(value) => {
+                Ok(value) if value.to_str().is_ok() => {
                     req.headers_mut()
                         .insert(http::HeaderName::from_static(IDENTITY_HEADER), value);
                 }
-                Err(_) => tracing::warn!(
-                    "a2a identity: the user ID is not a valid header value, so the request \
-                     reaches the executor without one"
+                _ => tracing::warn!(
+                    "a2a identity: the user ID is not a visible-ASCII header value, so the \
+                     request reaches the executor without one"
                 ),
             }
         }
@@ -258,6 +259,18 @@ mod tests {
         assert!(seen.is_empty(), "{seen:?}");
     }
 
+    /// A header value a2a-rs would drop from the service params (not visible ASCII) is dropped
+    /// here, with the warning, instead of silently there.
+    #[tokio::test]
+    async fn a_user_id_that_is_not_visible_ascii_is_dropped() {
+        let seen = seen_identity_headers(
+            |_: &http::Extensions| Some("élodie".to_owned()),
+            spoofed_request(),
+        )
+        .await;
+        assert!(seen.is_empty(), "{seen:?}");
+    }
+
     #[tokio::test]
     async fn other_headers_pass_through_the_identity_layer() {
         let inner = tower::service_fn(|req: http::Request<()>| async move {
@@ -379,5 +392,86 @@ mod tests {
         let resp = svc.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), http::StatusCode::UNAUTHORIZED);
         assert_eq!(resolved.lock().clone(), None);
+    }
+
+    /// Spec R6 end to end: gadk-server's authn middleware outside, the identity layer inside, the
+    /// a2a-rs JSON-RPC router and a real [`crate::server::Executor`] with
+    /// [`identity_header_resolver`]: the agent runs as the authenticated caller, never as the
+    /// user the client claims in the identity header. (The request goes out through reqwest,
+    /// which the `client` feature brings.)
+    #[cfg(all(feature = "gadk-server", feature = "client"))]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_executor_runs_as_the_authenticated_caller() {
+        use futures::StreamExt as _;
+        use gadk_agent::{AgentConfig, AgentError, new_agent};
+
+        use crate::server::{Executor, ExecutorConfig};
+
+        let users = Arc::new(Mutex::new(Vec::new()));
+        let agent = {
+            let users = Arc::clone(&users);
+            new_agent(AgentConfig {
+                name: "agent".into(),
+                run: Some(Arc::new(move |ic: gadk_agent::InvocationContext| {
+                    users.lock().push(ic.session().user_id().to_owned());
+                    futures::stream::empty::<Result<gadk_session::Event, AgentError>>().boxed()
+                })),
+                ..Default::default()
+            })
+            .unwrap()
+        };
+        let executor = Executor::new(ExecutorConfig {
+            runner_config: Some(gadk_engine::runner::RunnerConfig {
+                app_name: "agent".into(),
+                agent,
+                session_service: Arc::new(gadk_session::InMemorySessionService::new()),
+                artifact_service: None,
+                memory_service: None,
+                plugin_config: gadk_engine::runner::PluginConfig::default(),
+                auto_create_session: false,
+                platform: gadk_platform::Platform::default(),
+                compaction: None,
+            }),
+            user_resolver: Some(identity_header_resolver()),
+            ..Default::default()
+        });
+        let handler = Arc::new(a2a_server::DefaultRequestHandler::new(
+            executor,
+            a2a_server::InMemoryTaskStore::new(),
+        ));
+        // The mounting order of R15: authn outermost, the identity layer inside it.
+        let app = a2a_server::jsonrpc::jsonrpc_router(handler)
+            .layer(a2a_identity_layer(caller_user))
+            .layer(gadk_server::authn::middleware(gadk_server::authn::header(
+                "x-user",
+            )));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await });
+
+        let send = |user: Option<&'static str>| {
+            let mut req = reqwest::Client::new()
+                .post(&url)
+                .header("a2a-version", "1.0")
+                .header(IDENTITY_HEADER, "mallory")
+                .json(&serde_json::json!({
+                    "jsonrpc": "2.0", "id": 1, "method": "SendMessage",
+                    "params": {"message": {"messageId": "m1", "role": "ROLE_USER", "parts": [{"text": "hi"}]}},
+                }));
+            if let Some(user) = user {
+                req = req.header("x-user", user);
+            }
+            req.send()
+        };
+        let resp = send(Some("alice")).await.unwrap();
+        assert_eq!(resp.status(), http::StatusCode::OK);
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert!(body.get("result").is_some(), "{body}");
+        assert_eq!(users.lock().clone(), vec!["alice".to_owned()]);
+
+        // Without credentials the authn layer answers 401 and no run starts.
+        let resp = send(None).await.unwrap();
+        assert_eq!(resp.status(), http::StatusCode::UNAUTHORIZED);
+        assert_eq!(users.lock().len(), 1);
     }
 }

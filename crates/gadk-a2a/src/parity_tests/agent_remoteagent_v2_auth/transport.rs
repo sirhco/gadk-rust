@@ -459,6 +459,24 @@ fn test_same_credential_target() {
     }
 }
 
+/// Rust-only (a declared divergence): reqwest's redirect URLs are WHATWG-normalized, so an
+/// explicit default port is gone before the check. Go compares the explicit port strings of an
+/// http→https upgrade (`"80" == "80"`, `"443" == "443"`) and follows; gadk sees an implicit
+/// port on one side only and refuses.
+#[test]
+fn an_upgrade_compares_whatwg_normalized_ports() {
+    for (from, to) in [
+        ("http://h:80/rpc", "https://h:80/rpc"),
+        ("http://h:443/rpc", "https://h:443/rpc"),
+    ] {
+        let (from_u, to_u) = (Url::parse(from).unwrap(), Url::parse(to).unwrap());
+        assert!(
+            !same_credential_target(&from_u, &to_u),
+            "same_credential_target({from:?}, {to:?}): Go follows, gadk refuses"
+        );
+    }
+}
+
 /// Go `TestAuthHTTPClientRedirectCap`.
 #[tokio::test]
 async fn test_auth_http_client_redirect_cap() {
@@ -1589,7 +1607,9 @@ async fn card_fetch_http_client_times_out_after_30s() {
     );
 }
 
-/// Go `cardSendsInClear`: non-loopback http interfaces, in card order.
+/// Go `cardSendsInClear`: non-loopback http interfaces, in card order. URLs are parsed as Go's
+/// `url.Parse` does: `not a url` is a relative reference (no scheme, so in the clear) and
+/// `127.1` is not an IP address for `net.ParseIP`.
 #[test]
 fn card_sends_in_clear_reports_non_loopback_http() {
     let card = |urls: &[&str]| a2a::AgentCard {
@@ -1604,7 +1624,7 @@ fn card_sends_in_clear_reports_non_loopback_http() {
         }))
         .unwrap()
     };
-    let cases: [(&[&str], &[&str]); 7] = [
+    let cases: [(&[&str], &[&str]); 8] = [
         (&["http://127.0.0.1:8080"], &[]),
         (&["http://localhost:8080", "http://a.localhost"], &[]),
         (&["http://[::1]:8080", "http://[::ffff:127.0.0.1]/"], &[]),
@@ -1617,7 +1637,8 @@ fn card_sends_in_clear_reports_non_loopback_http() {
             &["http://remote.invalid:8080", "http://other.invalid:8080"],
             &["http://remote.invalid:8080", "http://other.invalid:8080"],
         ),
-        (&["HTTPS://remote.invalid", "not a url"], &[]),
+        (&["HTTPS://remote.invalid", "not a url"], &["not a url"]),
+        (&["http://127.1:8080"], &["http://127.1:8080"]),
     ];
     for (urls, want) in cases {
         assert_eq!(card_sends_in_clear(&card(urls)), want, "{urls:?}");

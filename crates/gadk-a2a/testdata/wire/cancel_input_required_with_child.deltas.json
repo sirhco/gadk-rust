@@ -1,0 +1,578 @@
+{
+  "integral_floats": "a2a-rs encodes A2A metadata through protobuf Struct, so integers in metadata go on the wire as floats (5.0; Go: 5); gadk-a2a decodes metadata through Go's JSON text, so integral floats still fill integer fields",
+  "deltas": [
+    {
+      "unit": "server.jsonrpc",
+      "path": "/exchanges/*/child/*/response/headers/Connection",
+      "fixture": "keep-alive",
+      "divergence": "a2a-rs's SSE responses set only Content-Type and Cache-Control (Go also sends Connection: keep-alive and X-Accel-Buffering: no)"
+    },
+    {
+      "unit": "server.jsonrpc",
+      "path": "/exchanges/*/child/*/response/headers/X-Accel-Buffering",
+      "fixture": "no",
+      "divergence": "a2a-rs's SSE responses set only Content-Type and Cache-Control (Go also sends Connection: keep-alive and X-Accel-Buffering: no)"
+    },
+    {
+      "unit": "server.jsonrpc",
+      "path": "/exchanges/0/child/0/response/sse/0/result/task/status/timestamp",
+      "actual": "<t>",
+      "divergence": "a2a-rs backfills status.timestamp on every task and status event, so the streamed submitted task carries a timestamp (Go: none)"
+    },
+    {
+      "unit": "server.jsonrpc",
+      "path": "/exchanges/0/response/body/result/task/metadata",
+      "fixture": {
+        "adk_app_name": "root",
+        "adk_session_id": "<ctx-2>",
+        "adk_transfer_to_agent": "child",
+        "adk_user_id": "A2A_USER_<ctx-2>",
+        "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+      },
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.jsonrpc",
+      "path": "/exchanges/1/child/0/request/headers/Accept",
+      "actual": "*/*",
+      "divergence": "a2a-rs's client sends reqwest's Accept: */* on non-streaming JSON-RPC and REST calls and on the agent-card fetch (a2a-go: no Accept for JSON-RPC, application/json for REST)"
+    },
+    {
+      "unit": "server.jsonrpc",
+      "path": "/exchanges/1/child/0/response/body/result/history",
+      "fixture": [
+        {
+          "messageId": "<msg-1>",
+          "parts": [
+            {
+              "text": "Hello"
+            },
+            {
+              "text": "For context:"
+            },
+            {
+              "text": "[root] said: transferring to child"
+            },
+            {
+              "text": "[root] called tool transfer_to_agent with parameters: map[agent_name:child]"
+            },
+            {
+              "text": "For context:"
+            },
+            {
+              "text": "[root] transfer_to_agent tool returned result: map[]"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "<msg-2>",
+          "parts": [
+            {
+              "data": {
+                "id": "adk-<id-3>",
+                "name": "request_approval"
+              },
+              "metadata": {
+                "adk_is_long_running": true,
+                "adk_type": "function_call"
+              }
+            },
+            {
+              "data": {
+                "id": "adk-<id-3>",
+                "name": "request_approval",
+                "response": {
+                  "status": "pending",
+                  "ticket_id": "ticket-1"
+                }
+              },
+              "metadata": {
+                "adk_type": "function_response"
+              }
+            }
+          ],
+          "role": "ROLE_AGENT"
+        }
+      ],
+      "actual": [
+        {
+          "messageId": "<msg-1>",
+          "parts": [
+            {
+              "text": "Hello"
+            },
+            {
+              "text": "For context:"
+            },
+            {
+              "text": "[root] said: transferring to child"
+            },
+            {
+              "text": "[root] called tool transfer_to_agent with parameters: map[agent_name:child]"
+            },
+            {
+              "text": "For context:"
+            },
+            {
+              "text": "[root] transfer_to_agent tool returned result: map[]"
+            }
+          ],
+          "role": "ROLE_USER"
+        }
+      ],
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.jsonrpc",
+      "path": "/exchanges/1/child/0/response/body/result/metadata/adk_app_name",
+      "fixture": "approver",
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.jsonrpc",
+      "path": "/exchanges/1/child/0/response/body/result/metadata/adk_session_id",
+      "fixture": "<ctx-1>",
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.jsonrpc",
+      "path": "/exchanges/1/child/0/response/body/result/metadata/adk_user_id",
+      "fixture": "A2A_USER_<ctx-1>",
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.jsonrpc",
+      "path": "/exchanges/1/response/body/result/history",
+      "fixture": [
+        {
+          "messageId": "msg-1",
+          "parts": [
+            {
+              "text": "Hello"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "<msg-3>",
+          "parts": [
+            {
+              "data": {
+                "id": "adk-<id-3>",
+                "name": "request_approval"
+              },
+              "metadata": {
+                "adk_is_long_running": true,
+                "adk_type": "function_call"
+              }
+            },
+            {
+              "data": {
+                "id": "adk-<id-3>",
+                "name": "request_approval",
+                "response": {
+                  "status": "pending",
+                  "ticket_id": "ticket-1"
+                }
+              },
+              "metadata": {
+                "adk_type": "function_response"
+              }
+            }
+          ],
+          "role": "ROLE_AGENT"
+        }
+      ],
+      "actual": [
+        {
+          "messageId": "msg-1",
+          "parts": [
+            {
+              "text": "Hello"
+            }
+          ],
+          "role": "ROLE_USER"
+        }
+      ],
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.jsonrpc",
+      "path": "/exchanges/1/response/body/result/metadata",
+      "fixture": {
+        "adk_app_name": "root",
+        "adk_session_id": "<ctx-2>",
+        "adk_transfer_to_agent": "child",
+        "adk_user_id": "A2A_USER_<ctx-2>",
+        "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+      },
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.jsonrpc",
+      "path": "/exchanges/2/response/body/result/history",
+      "fixture": [
+        {
+          "messageId": "msg-1",
+          "parts": [
+            {
+              "text": "Hello"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "<msg-3>",
+          "parts": [
+            {
+              "data": {
+                "id": "adk-<id-3>",
+                "name": "request_approval"
+              },
+              "metadata": {
+                "adk_is_long_running": true,
+                "adk_type": "function_call"
+              }
+            },
+            {
+              "data": {
+                "id": "adk-<id-3>",
+                "name": "request_approval",
+                "response": {
+                  "status": "pending",
+                  "ticket_id": "ticket-1"
+                }
+              },
+              "metadata": {
+                "adk_type": "function_response"
+              }
+            }
+          ],
+          "role": "ROLE_AGENT"
+        }
+      ],
+      "actual": [
+        {
+          "messageId": "msg-1",
+          "parts": [
+            {
+              "text": "Hello"
+            }
+          ],
+          "role": "ROLE_USER"
+        }
+      ],
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.jsonrpc",
+      "path": "/exchanges/2/response/body/result/metadata",
+      "fixture": {
+        "adk_app_name": "root",
+        "adk_session_id": "<ctx-2>",
+        "adk_transfer_to_agent": "child",
+        "adk_user_id": "A2A_USER_<ctx-2>",
+        "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+      },
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/*/child/*/response/headers/Connection",
+      "fixture": "keep-alive",
+      "divergence": "a2a-rs's SSE responses set only Content-Type and Cache-Control (Go also sends Connection: keep-alive and X-Accel-Buffering: no)"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/*/child/*/response/headers/X-Accel-Buffering",
+      "fixture": "no",
+      "divergence": "a2a-rs's SSE responses set only Content-Type and Cache-Control (Go also sends Connection: keep-alive and X-Accel-Buffering: no)"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/0/child/0/response/sse/0/result/task/status/timestamp",
+      "actual": "<t>",
+      "divergence": "a2a-rs backfills status.timestamp on every task and status event, so the streamed submitted task carries a timestamp (Go: none)"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/0/response/body/task/metadata",
+      "fixture": {
+        "adk_app_name": "root",
+        "adk_session_id": "<ctx-2>",
+        "adk_transfer_to_agent": "child",
+        "adk_user_id": "A2A_USER_<ctx-2>",
+        "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+      },
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/0/response/headers/Content-Type",
+      "fixture": "application/json",
+      "actual": "application/a2a+json",
+      "divergence": "a2a-rs's REST binding answers JSON with Content-Type: application/a2a+json (a2a-go: application/json)"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/1/child/0/request/headers/Accept",
+      "actual": "*/*",
+      "divergence": "a2a-rs's client sends reqwest's Accept: */* on non-streaming JSON-RPC and REST calls and on the agent-card fetch (a2a-go: no Accept for JSON-RPC, application/json for REST)"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/1/child/0/response/body/result/history",
+      "fixture": [
+        {
+          "messageId": "<msg-1>",
+          "parts": [
+            {
+              "text": "Hello"
+            },
+            {
+              "text": "For context:"
+            },
+            {
+              "text": "[root] said: transferring to child"
+            },
+            {
+              "text": "[root] called tool transfer_to_agent with parameters: map[agent_name:child]"
+            },
+            {
+              "text": "For context:"
+            },
+            {
+              "text": "[root] transfer_to_agent tool returned result: map[]"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "<msg-2>",
+          "parts": [
+            {
+              "data": {
+                "id": "adk-<id-3>",
+                "name": "request_approval"
+              },
+              "metadata": {
+                "adk_is_long_running": true,
+                "adk_type": "function_call"
+              }
+            },
+            {
+              "data": {
+                "id": "adk-<id-3>",
+                "name": "request_approval",
+                "response": {
+                  "status": "pending",
+                  "ticket_id": "ticket-1"
+                }
+              },
+              "metadata": {
+                "adk_type": "function_response"
+              }
+            }
+          ],
+          "role": "ROLE_AGENT"
+        }
+      ],
+      "actual": [
+        {
+          "messageId": "<msg-1>",
+          "parts": [
+            {
+              "text": "Hello"
+            },
+            {
+              "text": "For context:"
+            },
+            {
+              "text": "[root] said: transferring to child"
+            },
+            {
+              "text": "[root] called tool transfer_to_agent with parameters: map[agent_name:child]"
+            },
+            {
+              "text": "For context:"
+            },
+            {
+              "text": "[root] transfer_to_agent tool returned result: map[]"
+            }
+          ],
+          "role": "ROLE_USER"
+        }
+      ],
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/1/child/0/response/body/result/metadata/adk_app_name",
+      "fixture": "approver",
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/1/child/0/response/body/result/metadata/adk_session_id",
+      "fixture": "<ctx-1>",
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/1/child/0/response/body/result/metadata/adk_user_id",
+      "fixture": "A2A_USER_<ctx-1>",
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/1/response/body/history",
+      "fixture": [
+        {
+          "messageId": "msg-1",
+          "parts": [
+            {
+              "text": "Hello"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "<msg-3>",
+          "parts": [
+            {
+              "data": {
+                "id": "adk-<id-3>",
+                "name": "request_approval"
+              },
+              "metadata": {
+                "adk_is_long_running": true,
+                "adk_type": "function_call"
+              }
+            },
+            {
+              "data": {
+                "id": "adk-<id-3>",
+                "name": "request_approval",
+                "response": {
+                  "status": "pending",
+                  "ticket_id": "ticket-1"
+                }
+              },
+              "metadata": {
+                "adk_type": "function_response"
+              }
+            }
+          ],
+          "role": "ROLE_AGENT"
+        }
+      ],
+      "actual": [
+        {
+          "messageId": "msg-1",
+          "parts": [
+            {
+              "text": "Hello"
+            }
+          ],
+          "role": "ROLE_USER"
+        }
+      ],
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/1/response/body/metadata",
+      "fixture": {
+        "adk_app_name": "root",
+        "adk_session_id": "<ctx-2>",
+        "adk_transfer_to_agent": "child",
+        "adk_user_id": "A2A_USER_<ctx-2>",
+        "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+      },
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/1/response/headers/Content-Type",
+      "fixture": "application/json",
+      "actual": "application/a2a+json",
+      "divergence": "a2a-rs's REST binding answers JSON with Content-Type: application/a2a+json (a2a-go: application/json)"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/2/response/body/history",
+      "fixture": [
+        {
+          "messageId": "msg-1",
+          "parts": [
+            {
+              "text": "Hello"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "<msg-3>",
+          "parts": [
+            {
+              "data": {
+                "id": "adk-<id-3>",
+                "name": "request_approval"
+              },
+              "metadata": {
+                "adk_is_long_running": true,
+                "adk_type": "function_call"
+              }
+            },
+            {
+              "data": {
+                "id": "adk-<id-3>",
+                "name": "request_approval",
+                "response": {
+                  "status": "pending",
+                  "ticket_id": "ticket-1"
+                }
+              },
+              "metadata": {
+                "adk_type": "function_response"
+              }
+            }
+          ],
+          "role": "ROLE_AGENT"
+        }
+      ],
+      "actual": [
+        {
+          "messageId": "msg-1",
+          "parts": [
+            {
+              "text": "Hello"
+            }
+          ],
+          "role": "ROLE_USER"
+        }
+      ],
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/2/response/body/metadata",
+      "fixture": {
+        "adk_app_name": "root",
+        "adk_session_id": "<ctx-2>",
+        "adk_transfer_to_agent": "child",
+        "adk_user_id": "A2A_USER_<ctx-2>",
+        "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+      },
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/2/response/headers/Content-Type",
+      "fixture": "application/json",
+      "actual": "application/a2a+json",
+      "divergence": "a2a-rs's REST binding answers JSON with Content-Type: application/a2a+json (a2a-go: application/json)"
+    }
+  ]
+}

@@ -21,6 +21,8 @@
 mod agent_remoteagent_v2_a2a_agent;
 #[cfg(feature = "client")]
 mod agent_remoteagent_v2_a2a_agent_run_processor;
+#[cfg(all(feature = "server", feature = "client"))]
+mod agent_remoteagent_v2_a2a_e2e;
 #[cfg(feature = "client")]
 mod agent_remoteagent_v2_auth;
 #[cfg(feature = "client")]

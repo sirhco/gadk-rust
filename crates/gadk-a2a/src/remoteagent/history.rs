@@ -27,10 +27,7 @@ use serde_json::{Map, Value};
 use super::agent::A2AConfig;
 use crate::Error;
 use crate::convert::{get_a2a_task_info, to_a2a_part};
-
-/// Go `plugininternal.BeforeRunReplyKey` (gadk-engine's crate-private
-/// `runner::BEFORE_RUN_REPLY_KEY`; `convert::metadata` keeps another private copy).
-pub(crate) const BEFORE_RUN_REPLY_KEY: &str = "adk:before_run_reply";
+use gadk_engine::runner::BEFORE_RUN_REPLY_KEY;
 
 /// Whether the event is a BeforeRun reply (Go `event.CustomMetadata[BeforeRunReplyKey] == true`).
 fn is_before_run_reply(event: &Event) -> bool {
