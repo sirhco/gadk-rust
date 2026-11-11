@@ -12,18 +12,24 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-#![allow(dead_code, unused_variables, unused_imports, clippy::todo)]
-
 //! Go `server/agentengine/controllers/method/streaming_agent_run_with_events.go`
 //! (`streaming_agent_run_with_events`, Gemini Enterprise's method).
 
 use bytes::Bytes;
+use gadk_agent::{EventStream, RunConfig, StreamingMode};
+use gadk_engine::runner::RunOptions;
+use gadk_session::{CreateRequest, Event, GetRequest};
 use serde_json::{Map, Value};
 
 use super::MethodHandler;
+use super::stream_query::{ndjson_response, new_runner, run_request};
+use crate::agentengine::encode::emit_json;
+use crate::agentengine::encode_shapes;
 use crate::agentengine::models::{
-    StreamingAgentRunWithEventsRequest, StreamingAgentRunWithEventsRunRequest,
+    StreamingAgentRunWithEventsRequest, StreamingAgentRunWithEventsResponse,
+    StreamingAgentRunWithEventsRunRequest,
 };
+use crate::agentengine::unmarshal::{go_unmarshal, needs_deep_stack, on_deep_stack};
 use crate::agentengine::{AgentEngineConfig, Log};
 use crate::mux::Response;
 
@@ -66,7 +72,48 @@ impl StreamingAgentRunWithEventsHandler {
     /// does, each event as one `emit_json(&StreamingAgentRunWithEventsResponse { events:
     /// vec![event], session_id: <backend session ID> })` line.
     pub(crate) async fn stream_jsonl(&self, payload: Bytes) -> Result<Response, String> {
-        todo!("Task 9")
+        let fail = |err: String| {
+            self.log.print(&err);
+            err
+        };
+        let req = go_unmarshal::<StreamingAgentRunWithEventsRequest>(
+            &payload,
+            &encode_shapes::MODELS_STREAMING_AGENT_RUN_WITH_EVENTS_REQUEST,
+        )
+        .map_err(|err| {
+            fail(format!(
+                "json.Unmarshal() failed for models.StreamingAgentRunWithEventsRequest: {err}"
+            ))
+        })?;
+
+        let (mut run_req, requested_session_id) =
+            decode_streaming_agent_run_with_events_request(&req).map_err(|err| {
+                fail(format!(
+                    "decodeStreamingAgentRunWithEventsRequest() failed: {err}"
+                ))
+            })?;
+        // A deep message is cloned into the run and dropped with `run_req`, both recursively.
+        let deep = needs_deep_stack(req.input.request_json.as_bytes());
+        if let Err(err) = self
+            .ensure_backend_session(&mut run_req, &requested_session_id)
+            .await
+        {
+            if deep {
+                // Err only when the thread is unavailable; `run_req` is then leaked.
+                let _ = on_deep_stack(run_req, drop);
+            }
+            return Err(fail(format!("s.ensureBackendSession() failed: {err}")));
+        }
+
+        let session_id = run_req.session_id.clone();
+        let events = run_request(deep, run_req, |run_req| self.run(run_req))
+            .map_err(|err| fail(format!("s.run() failed: {err}")))?;
+
+        Ok(ndjson_response(
+            events,
+            self.log.clone(),
+            envelope_line(session_id),
+        ))
     }
 
     /// Go `ensureBackendSession`: with a non-empty `requested_session_id`, requires `user_id`
@@ -79,15 +126,76 @@ impl StreamingAgentRunWithEventsHandler {
         req: &mut StreamingAgentRunWithEventsRunRequest,
         requested_session_id: &str,
     ) -> Result<(), String> {
-        todo!("Task 9")
+        if requested_session_id.is_empty() {
+            return Ok(());
+        }
+        if req.user_id.is_empty() {
+            return Err("user_id is required for backend session handling".to_owned());
+        }
+
+        let service = &self.config.session_service;
+        let got = service
+            .get(GetRequest {
+                app_name: self.agent_engine_id.clone(),
+                user_id: req.user_id.clone(),
+                session_id: requested_session_id.to_owned(),
+                ..Default::default()
+            })
+            .await;
+        if let Ok(sess) = got {
+            req.session_id = sess.id().to_owned();
+            return Ok(());
+        }
+
+        let created = service
+            .create(CreateRequest {
+                app_name: self.agent_engine_id.clone(),
+                user_id: req.user_id.clone(),
+                session_id: None,
+                state: None,
+            })
+            .await
+            .map_err(|err| format!("sessionService.Create() failed: {err}"))?;
+        req.session_id = created.id().to_owned();
+        Ok(())
     }
 
     /// Go `run`: as `StreamQueryHandler::run` with `StreamingMode::None`.
     pub(crate) fn run(
         &self,
         req: &StreamingAgentRunWithEventsRunRequest,
-    ) -> Result<gadk_agent::EventStream, String> {
-        todo!("Task 9")
+    ) -> Result<EventStream, String> {
+        let runner = new_runner(&self.config, &self.agent_engine_id)?;
+        // The path mirrors Python AdkApp.streaming_agent_run_with_events, which does not force
+        // SSE mode. Sending both partial and final events here causes Gemini Enterprise to
+        // render duplicate answer text.
+        Ok(runner.run(
+            &req.user_id,
+            &req.session_id,
+            Some(req.message.clone()),
+            RunConfig {
+                streaming_mode: StreamingMode::None,
+                ..Default::default()
+            },
+            RunOptions::default(),
+        ))
+    }
+}
+
+/// Go's per-event `helper.EmitJSON(rw, models.StreamingAgentRunWithEventsResponse{Events:
+/// []*session.Event{event}, SessionID: runReq.SessionID})`: the AgentSpace envelope line.
+pub(crate) fn envelope_line(
+    session_id: String,
+) -> impl Fn(&Event, &Log) -> Result<Bytes, String> + Send + 'static {
+    move |event, log| {
+        emit_json(
+            &StreamingAgentRunWithEventsResponse {
+                events: vec![event.clone()],
+                artifacts: Vec::new(),
+                session_id: session_id.clone(),
+            },
+            log,
+        )
     }
 }
 
@@ -96,7 +204,13 @@ impl StreamingAgentRunWithEventsHandler {
 pub(crate) fn decode_streaming_agent_run_with_events_request(
     req: &StreamingAgentRunWithEventsRequest,
 ) -> Result<(StreamingAgentRunWithEventsRunRequest, String), String> {
-    todo!("Task 9")
+    let run_req = go_unmarshal::<StreamingAgentRunWithEventsRunRequest>(
+        req.input.request_json.as_bytes(),
+        &encode_shapes::MODELS_STREAMING_AGENT_RUN_WITH_EVENTS_RUN_REQUEST,
+    )
+    .map_err(|err| format!("json.Unmarshal(input.request_json) failed: {err}"))?;
+    let requested_session_id = run_req.session_id.clone();
+    Ok((run_req, requested_session_id))
 }
 
 /// Go `Metadata()`'s `description`.
@@ -131,7 +245,10 @@ impl MethodHandler for StreamingAgentRunWithEventsHandler {
     /// Go `Handle`: [`StreamingAgentRunWithEventsHandler::stream_jsonl`], an error wrapped as
     /// `s.streamJSONL() failed: <err>`.
     async fn handle(&self, payload: Bytes) -> Result<Response, String> {
-        todo!("Task 9")
+        // stream_jsonl fails only before streaming; the controller answers that with a status.
+        self.stream_jsonl(payload)
+            .await
+            .map_err(|err| format!("s.streamJSONL() failed: {err}"))
     }
 
     fn metadata(&self) -> Map<String, Value> {
