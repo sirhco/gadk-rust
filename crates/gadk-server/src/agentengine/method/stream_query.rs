@@ -145,6 +145,11 @@ impl StreamQueryHandler {
 /// `run(&req)`, then `req` dropped: when `deep` (its payload was nested past what the caller's
 /// stack clones and drops safely, [`needs_deep_stack`]) both happen on [`on_deep_stack`] (no Go
 /// counterpart: Go's stacks grow; that thread being unavailable is the run's error).
+///
+/// On the deep path `Runner::new` and `runner.run` run on that scoped OS thread, not the
+/// caller's tokio task: whatever they read from the current thread (no tokio runtime handle,
+/// `instrument_invocation`'s `in_workflow_scope()`, `tracing::Span::current()` parenting) sees
+/// the scoped thread. The returned stream is polled on the caller's task as usual.
 pub(crate) fn run_request<T, F>(deep: bool, req: T, run: F) -> Result<EventStream, String>
 where
     T: Send,
@@ -195,8 +200,10 @@ pub(crate) fn new_runner(
 /// Each item is handled, and dropped, on a large stack ([`on_deep_stack`]): its `Debug` dump,
 /// encoding and drop recurse once per nesting level, and an event can be as deep as Go's decoder
 /// allows (10000 levels, e.g. echoed request content or session state), which Go's growable
-/// stacks survive. When that thread is unavailable (no Go counterpart) the item is lost and the
-/// stream ends with the error line `helper.EmitJSON() failed: <err>`.
+/// stacks survive. The item's log texts are collected there and printed on the caller's task, in
+/// order. When that thread cannot be spawned (no Go counterpart) the item is leaked; when it
+/// panics the item is dropped there; either way the stream ends with the error line
+/// `helper.EmitJSON() failed: <err>`.
 pub(crate) fn ndjson_response<F>(events: EventStream, log: Log, line: F) -> Response
 where
     F: Fn(&Event, &Log) -> Result<Bytes, String> + Send + 'static,
@@ -205,10 +212,22 @@ where
         let (mut events, log, mut line) = state?;
         loop {
             let item = events.next().await?;
+            // The log texts are built on the deep thread (an event's `Debug` dump recurses)
+            // and printed here, on the caller's task: the `AgentEngineLog` hook (or `tracing`'s
+            // thread-scoped dispatcher) runs where Go's `log.Print` would.
+            let buffered: Arc<parking_lot::Mutex<Vec<String>>> = Arc::default();
+            let sink = Arc::clone(&buffered);
+            let deep_log = Log(Some(Arc::new(move |m: &str| {
+                sink.lock().push(m.to_owned())
+            })));
             let handled = on_deep_stack((item, line), |(item, line)| {
-                let step = step(item, &line, &log);
+                let step = step(item, &line, &deep_log);
                 (step, line)
             });
+            drop(deep_log);
+            for text in std::mem::take(&mut *buffered.lock()) {
+                log.print(&text);
+            }
             let step = match handled {
                 Ok((step, back)) => {
                     line = back;
@@ -607,6 +626,68 @@ mod tests {
         let want = "helper.EmitJSON() failed: agentengine: deep-stack thread unavailable: injected spawn failure";
         assert_eq!(body_text(resp).await, format!("{{\"error\":\"{want}\"}}\n"));
         assert!(lines.lock().unwrap().contains(&want.to_owned()));
+    }
+
+    /// The `AgentEngineLog` hook runs on the caller's task (as Go's `log.Print` does), not on
+    /// the deep-stack thread: a hook that needs the tokio runtime gets every line, in order, and
+    /// the stream writes Go's normal lines.
+    #[tokio::test]
+    async fn log_hook_runs_on_the_runtime() {
+        let lines: Lines = Arc::default();
+        let sink = Arc::clone(&lines);
+        let log = Log(Some(Arc::new(move |m: &str| {
+            // Panics off a tokio runtime.
+            let _handle = tokio::runtime::Handle::current();
+            sink.lock().unwrap().push(m.to_owned());
+        })));
+        let items: Vec<Result<Event, AgentError>> = vec![
+            Ok(event(Some("one"))),
+            Err(AgentError::Compaction(CompactionError::new("squeeze"))),
+            Ok(event(Some("two"))),
+        ];
+        let body = body_text(ndjson_response(
+            Box::pin(stream::iter(items)),
+            log,
+            emit_json,
+        ))
+        .await;
+        let got: Vec<Value> = body
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert_eq!(got.len(), 2, "{body}");
+        assert_eq!(got[0]["content"]["parts"][0]["text"], "one");
+        assert_eq!(got[1]["content"]["parts"][0]["text"], "two");
+        let logged = lines.lock().unwrap().clone();
+        assert_eq!(logged.len(), 4, "{logged:?}");
+        assert!(logged[0].starts_with("Processing event: Event {"));
+        assert_eq!(
+            logged[1],
+            "Processing event: <nil> err: context compaction failed: squeeze\n"
+        );
+        assert_eq!(logged[2], "agentengine: context compaction failed: squeeze");
+        assert!(logged[3].starts_with("Processing event: Event {"));
+    }
+
+    /// A panic on the deep-stack thread (no Go counterpart) drops the item there and ends the
+    /// stream with an error line distinct from the spawn failure's.
+    #[tokio::test]
+    async fn deep_stack_panic_is_an_error_line() {
+        let (log, lines) = capture();
+        let items: Vec<Result<Event, AgentError>> =
+            vec![Ok(event(Some("one"))), Ok(event(Some("two")))];
+        let resp = ndjson_response(Box::pin(stream::iter(items)), log, |_, _| {
+            panic!("line panicked")
+        });
+        let want =
+            "helper.EmitJSON() failed: agentengine: deep-stack thread failed: the thread panicked";
+        assert_eq!(body_text(resp).await, format!("{{\"error\":\"{want}\"}}\n"));
+        let logged = lines.lock().unwrap().clone();
+        assert!(
+            logged[0].starts_with("Processing event: Event {"),
+            "{logged:?}"
+        );
+        assert!(logged.contains(&want.to_owned()));
     }
 
     /// The Go wire fixtures of the stream routes (`testdata/agentengine/main_09`–`main_18`,
