@@ -20,10 +20,17 @@
 //! Timeouts (spec R8), per connection as Go's `net/http` sets its deadlines:
 //! - `-read-timeout`: an HTTP/1 request's headers must arrive within it, counted from the accept
 //!   (first request) or from the first byte after an idle period; its body must be read within
-//!   it from the same start. An HTTP/2 stream's body must be read within it from the stream's
-//!   start. A late read fails with `i/o timeout` (headers: the connection is closed).
+//!   it from the same start. Under `-h2c` the first request's count starts once Go's preface
+//!   peek has its 14 bytes (the peek has no deadline), and an HTTP/2 connection waits for its
+//!   first stream under `-idle-timeout`. An HTTP/2 stream's body must be read within it from
+//!   the stream's start. A late read fails with `i/o timeout` (headers: the connection is
+//!   closed).
 //! - `-write-timeout`: from the end of an HTTP/1 request's headers, every write of the response
-//!   must happen before it, or the connection is aborted; an HTTP/2 stream is reset instead.
+//!   must happen before it, or the connection is aborted; an HTTP/2 stream is reset instead. A
+//!   handler may move or clear its response's deadline through the request's
+//!   [`WriteDeadline`] (Go `ResponseController.SetWriteDeadline`, as `RunSSEHandler` does).
+//!   An HTTP/1 response's deadline lasts until it is flushed; hyper's answer to a request it
+//!   cannot read gets `-write-timeout` from its first write.
 //! - `-idle-timeout` (`-read-timeout` when zero): a keep-alive connection waiting for its next
 //!   request is closed after it.
 //!
@@ -35,7 +42,7 @@
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
@@ -43,6 +50,7 @@ use axum::body::Body;
 use axum::extract::ConnectInfo;
 use bytes::Bytes;
 use gadk_platform::{GoDuration, go_format_duration};
+use gadk_server::mux::WriteDeadline;
 use gadk_server::rest::LocalAddr;
 use http::{StatusCode, Version};
 use hyper::body::{Frame, Incoming, SizeHint};
@@ -92,6 +100,9 @@ fn positive(d: GoDuration) -> Option<Duration> {
 
 /// Go `net.Listen("tcp", addr)` (`ListenAndServe`): the error is Go's text for the common bind
 /// failures (`listen tcp <addr>: bind: address already in use`).
+///
+/// Divergence (ledger 6): any other failure carries Rust's I/O error text after
+/// `listen tcp <addr>: `.
 pub(crate) async fn listen(addr: &str) -> Result<TcpListener, String> {
     TcpListener::bind(addr).await.map_err(|e| {
         let cause = match e.kind() {
@@ -108,18 +119,37 @@ pub(crate) async fn listen(addr: &str) -> Result<TcpListener, String> {
 /// Every connection task holds a receiver of the channel; shutdown signals them all and waits
 /// until every receiver is gone (hyper-util's `GracefulShutdown` scheme, which has no impl for
 /// hyper's HTTP/1 connection with upgrades).
-pub(crate) struct Draining(watch::Sender<bool>);
+pub(crate) struct Draining {
+    shutdown: watch::Sender<bool>,
+    conns: Conns,
+}
+
+/// The server's connections (Go `srv.activeConn`), for [`Draining::shutdown`]'s idle check.
+type Conns = Arc<Mutex<Vec<Weak<ConnState>>>>;
 
 impl Draining {
     /// Go `srv.Shutdown(ctx)` with a `timeout` context: idle connections close at once, active
     /// ones after their current response; `context deadline exceeded` when they have not all
-    /// closed within `timeout` (they keep running, as in Go).
+    /// closed within `timeout` (they keep running, as in Go). As Go's `closeIdleConns` runs
+    /// before its context check, the shutdown succeeds when every connection left is idle,
+    /// even with a zero `timeout`.
     pub(crate) async fn shutdown(self, timeout: GoDuration) -> Result<(), String> {
         let timeout = timeout.to_std().unwrap_or_default();
-        let _ = self.0.send(true);
-        tokio::time::timeout(timeout, self.0.closed())
-            .await
-            .map_err(|_| "context deadline exceeded".to_owned())
+        let _ = self.shutdown.send(true);
+        match tokio::time::timeout(timeout, self.shutdown.closed()).await {
+            Ok(()) => Ok(()),
+            Err(_) if self.quiescent() => Ok(()),
+            Err(_) => Err("context deadline exceeded".to_owned()),
+        }
+    }
+
+    /// Go `closeIdleConns`' result: every open connection is idle (and closing).
+    fn quiescent(&self) -> bool {
+        let conns = self.conns.lock().unwrap_or_else(|e| e.into_inner());
+        conns
+            .iter()
+            .filter_map(Weak::upgrade)
+            .all(|c| c.quiescent())
     }
 }
 
@@ -145,6 +175,9 @@ macro_rules! spawn_connection {
 /// Go `srv.Serve(listener)` until `cancel` fires: every accepted connection served by `router`
 /// with `opts`. Accept errors are retried after Go's backoff (5ms doubling to 1s), logged as Go
 /// logs them. Returns once cancelled, with the listener closed.
+///
+/// Divergence (ledger 6): every accept error is retried; Go retries only temporary ones
+/// (`net.Error.Temporary`) and returns any other from `Serve`.
 pub(crate) async fn serve(
     listener: TcpListener,
     router: WebRouter,
@@ -153,6 +186,7 @@ pub(crate) async fn serve(
     log: Logger,
 ) -> Draining {
     let (shutdown, watching) = watch::channel(false);
+    let conns = Conns::default();
     let builder = builder(opts);
     let mut delay = Duration::ZERO;
     loop {
@@ -189,6 +223,11 @@ pub(crate) async fn serve(
             .local_addr()
             .unwrap_or_else(|_| SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0)));
         let state = ConnState::new(opts);
+        {
+            let mut conns = conns.lock().unwrap_or_else(|e| e.into_inner());
+            conns.retain(|c| c.strong_count() > 0);
+            conns.push(Arc::downgrade(&state));
+        }
         let io = TokioIo::new(DeadlineIo::new(stream, Arc::clone(&state)));
         let service = connection_service(router.clone(), state, local);
         // A connection error (timeouts, resets, a malformed request answered by hyper) ends that
@@ -206,7 +245,7 @@ pub(crate) async fn serve(
     }
     drop(listener);
     drop(watching);
-    Draining(shutdown)
+    Draining { shutdown, conns }
 }
 
 /// The connection builder: HTTP/1 only, or HTTP/1 and prior-knowledge HTTP/2 with `-h2c` (Go
@@ -254,18 +293,28 @@ fn connection_service(
             let started = state.begin_request(req.version());
             let (mut parts, body) = req.into_parts();
             parts.extensions.insert(ConnectInfo(LocalAddr(local)));
+            parts.extensions.insert(started.write_deadline_hook());
             let body = Body::new(ReadDeadlineBody::new(body, started.body_deadline));
             let served = router.serve(http::Request::from_parts(parts, body));
-            let resp = match started.stream_deadline {
-                Some(deadline) => tokio::time::timeout_at(deadline, served)
-                    .await
-                    .map_err(|_| BoxError::from(timed_out()))?,
+            let mut stream_deadline = started.stream_deadline.map(StreamDeadline::new);
+            let resp = match &mut stream_deadline {
+                Some(deadline) => {
+                    let mut served = std::pin::pin!(served);
+                    std::future::poll_fn(|cx| match served.as_mut().poll(cx) {
+                        Poll::Ready(resp) => Poll::Ready(Ok(resp)),
+                        Poll::Pending if deadline.poll_expired(cx) => {
+                            Poll::Ready(Err(BoxError::from(timed_out())))
+                        }
+                        Poll::Pending => Poll::Pending,
+                    })
+                    .await?
+                }
                 None => served.await,
             };
             if resp.status() == StatusCode::SWITCHING_PROTOCOLS {
                 state.hijack();
             }
-            Ok(resp.map(|body| TrackedBody::new(body, started.guard, started.stream_deadline)))
+            Ok(resp.map(|body| TrackedBody::new(body, started.guard, stream_deadline)))
         }
     })
 }
@@ -278,8 +327,14 @@ fn timed_out() -> io::Error {
 /// One connection's deadlines, shared by its IO and its requests.
 struct ConnState {
     opts: Options,
+    /// When the connection was accepted.
+    accepted: Instant,
     times: Mutex<Times>,
 }
+
+/// The prefix Go peeks (`maybeServeUnencryptedHTTP2`, without a read deadline) to tell an
+/// `-h2c` connection's HTTP/2 preface from an HTTP/1 request.
+const H2_PREFACE_PREFIX: &[u8] = b"PRI * HTTP/2.0";
 
 struct Times {
     /// When the current HTTP/1 request started (Go's `t0`): the accept, or the first byte after
@@ -298,6 +353,10 @@ struct Times {
     h2: bool,
     /// The connection was upgraded (101): no deadlines (Go clears them on hijack).
     hijacked: bool,
+    /// No byte has been read yet (Go `StateNew`).
+    fresh: bool,
+    /// `-h2c`: the first bytes, until [`H2_PREFACE_PREFIX`]'s length has arrived.
+    preface: Option<Vec<u8>>,
     /// The task waiting on a read, woken when the read deadline changes.
     read_waker: Option<Waker>,
 }
@@ -307,8 +366,28 @@ struct Started {
     guard: RequestGuard,
     /// The request body's read deadline.
     body_deadline: Option<Instant>,
-    /// HTTP/2: the stream's write deadline.
-    stream_deadline: Option<Instant>,
+    /// HTTP/2: the stream's write deadline, which the handler may move.
+    stream_deadline: Option<Arc<Mutex<Option<Instant>>>>,
+    conn: Arc<ConnState>,
+}
+
+impl Started {
+    /// The request's [`WriteDeadline`] (Go `ResponseController.SetWriteDeadline`): the HTTP/1
+    /// connection's write deadline, or the HTTP/2 stream's.
+    fn write_deadline_hook(&self) -> WriteDeadline {
+        match &self.stream_deadline {
+            Some(cell) => {
+                let cell = Arc::clone(cell);
+                WriteDeadline::new(move |d| {
+                    *cell.lock().unwrap_or_else(|e| e.into_inner()) = d;
+                })
+            }
+            None => {
+                let conn = Arc::clone(&self.conn);
+                WriteDeadline::new(move |d| conn.times().write_deadline = d)
+            }
+        }
+    }
 }
 
 impl ConnState {
@@ -316,17 +395,34 @@ impl ConnState {
         let now = Instant::now();
         Arc::new(ConnState {
             opts,
+            accepted: now,
             times: Mutex::new(Times {
                 request_start: now,
-                read_deadline: opts.read_timeout.map(|d| now + d),
+                // `-h2c`: Go peeks the preface without a read deadline.
+                read_deadline: if opts.h2c {
+                    None
+                } else {
+                    opts.read_timeout.map(|d| now + d)
+                },
                 write_deadline: None,
                 in_flight: 0,
                 idle: false,
                 h2: false,
                 hijacked: false,
+                fresh: true,
+                preface: opts.h2c.then(Vec::new),
                 read_waker: None,
             }),
         })
+    }
+
+    /// Go `closeIdleConns`' test for one connection: idle (`StateIdle`), upgraded (no longer
+    /// tracked), or new for more than 5 seconds. An HTTP/2 connection is never idle to it.
+    fn quiescent(&self) -> bool {
+        let t = self.times();
+        t.hijacked
+            || (!t.h2 && t.idle && t.in_flight == 0)
+            || (t.fresh && self.accepted.elapsed() > Duration::from_secs(5))
     }
 
     fn times(&self) -> std::sync::MutexGuard<'_, Times> {
@@ -338,22 +434,72 @@ impl ConnState {
         if t.hijacked { None } else { t.read_deadline }
     }
 
-    fn write_deadline(&self) -> Option<Instant> {
-        let t = self.times();
-        if t.hijacked { None } else { t.write_deadline }
-    }
-
-    /// Bytes arrived: on an idle HTTP/1 connection a new request starts (Go: the read deadline
-    /// is reset to `ReadTimeout` from now, and the previous request's write deadline no longer
-    /// applies: Go sets the next one only after `readRequest`).
-    fn on_bytes_read(&self) {
+    /// `bytes` arrived: on an idle HTTP/1 connection a new request starts (Go: the read
+    /// deadline is reset to `ReadTimeout` from now). The previous response's write deadline is
+    /// left to [`ConnState::on_flushed`]: its tail may still be buffered.
+    ///
+    /// Under `-h2c` the first bytes are Go's preface peek, which has no deadline: an HTTP/2
+    /// preface starts HTTP/2's idle timer (`IdleTimeout`), anything else an HTTP/1 request
+    /// whose `ReadTimeout` counts from the end of the peek.
+    fn on_bytes_read(&self, bytes: &[u8]) {
         let mut t = self.times();
+        t.fresh = false;
+        if let Some(mut seen) = t.preface.take() {
+            let want = H2_PREFACE_PREFIX.len() - seen.len();
+            seen.extend_from_slice(&bytes[..want.min(bytes.len())]);
+            if seen.len() < H2_PREFACE_PREFIX.len() {
+                t.preface = Some(seen);
+                return;
+            }
+            let now = Instant::now();
+            t.request_start = now;
+            if seen == H2_PREFACE_PREFIX {
+                t.h2 = true;
+                t.read_deadline = self.opts.idle_timeout.map(|d| now + d);
+            } else {
+                t.read_deadline = self.opts.read_timeout.map(|d| now + d);
+            }
+            drop(t);
+            // A pending read registered no timer while there was no deadline.
+            self.wake_reader();
+            return;
+        }
         if t.idle && !t.h2 {
             let now = Instant::now();
             t.idle = false;
             t.request_start = now;
             t.read_deadline = self.opts.read_timeout.map(|d| now + d);
+        }
+    }
+
+    /// Everything written so far was flushed: on an idle HTTP/1 connection the last response
+    /// is complete and its write deadline no longer applies (Go sets the next one when
+    /// `readRequest` returns).
+    fn on_flushed(&self) {
+        let mut t = self.times();
+        if t.idle && t.in_flight == 0 && !t.h2 {
             t.write_deadline = None;
+        }
+    }
+
+    /// The HTTP/1 write deadline, set first when hyper writes with no request in flight: its
+    /// answer to a request it could not read (Go: `readRequest` sets `WriteTimeout` from its
+    /// return, error or not).
+    fn write_deadline_for_write(&self) -> Option<Instant> {
+        let mut t = self.times();
+        if t.hijacked {
+            return None;
+        }
+        if t.in_flight == 0 && !t.h2 && t.write_deadline.is_none() {
+            t.write_deadline = self.opts.write_timeout.map(|d| Instant::now() + d);
+        }
+        t.write_deadline
+    }
+
+    fn wake_reader(&self) {
+        let waker = self.times().read_waker.take();
+        if let Some(waker) = waker {
+            waker.wake();
         }
     }
 
@@ -375,7 +521,8 @@ impl ConnState {
         Started {
             guard: RequestGuard(Arc::clone(self)),
             body_deadline,
-            stream_deadline: if h2 { write_deadline } else { None },
+            stream_deadline: h2.then(|| Arc::new(Mutex::new(write_deadline))),
+            conn: Arc::clone(self),
         }
     }
 
@@ -451,27 +598,24 @@ impl DeadlineIo {
         }
     }
 
-    /// `Err(i/o timeout)` once the write deadline has passed, registering for it otherwise.
-    fn check_write(&mut self, cx: &mut Context<'_>) -> Option<io::Error> {
-        let deadline = self.state.write_deadline()?;
-        (Instant::now() >= deadline || deadline_passed(&mut self.write_timer, deadline, cx))
-            .then(timed_out)
-    }
-
     fn poll_write_with<T>(
         &mut self,
         cx: &mut Context<'_>,
         op: impl FnOnce(Pin<&mut TcpStream>, &mut Context<'_>) -> Poll<io::Result<T>>,
     ) -> Poll<io::Result<T>> {
-        if let Some(deadline) = self.state.write_deadline()
+        let deadline = self.state.write_deadline_for_write();
+        if let Some(deadline) = deadline
             && Instant::now() >= deadline
         {
             return Poll::Ready(Err(timed_out()));
         }
         match op(Pin::new(&mut self.inner), cx) {
-            Poll::Pending => match self.check_write(cx) {
-                Some(e) => Poll::Ready(Err(e)),
-                None => Poll::Pending,
+            // The deadline is read again: the handler may have moved it meanwhile.
+            Poll::Pending => match self.state.write_deadline_for_write() {
+                Some(deadline) if deadline_passed(&mut self.write_timer, deadline, cx) => {
+                    Poll::Ready(Err(timed_out()))
+                }
+                _ => Poll::Pending,
             },
             ready => ready,
         }
@@ -494,7 +638,7 @@ impl AsyncRead for DeadlineIo {
         match Pin::new(&mut this.inner).poll_read(cx, buf) {
             Poll::Ready(Ok(())) => {
                 if buf.filled().len() > before {
-                    this.state.on_bytes_read();
+                    this.state.on_bytes_read(&buf.filled()[before..]);
                 }
                 Poll::Ready(Ok(()))
             }
@@ -537,8 +681,15 @@ impl AsyncWrite for DeadlineIo {
 
     /// No deadline: a `TcpStream` flush writes nothing (hyper's buffered bytes go through
     /// `poll_write*`), and hyper flushes on every dispatch loop, idle connections included.
+    /// hyper flushes its socket only once its own buffer is written, so a completed flush on
+    /// an idle connection ends the last response's write deadline.
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.get_mut().inner).poll_flush(cx)
+        let this = self.get_mut();
+        let flushed = Pin::new(&mut this.inner).poll_flush(cx);
+        if let Poll::Ready(Ok(())) = flushed {
+            this.state.on_flushed();
+        }
+        flushed
     }
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
@@ -601,20 +752,42 @@ impl hyper::body::Body for ReadDeadlineBody {
     }
 }
 
+/// An HTTP/2 stream's write deadline, which the handler may move through its
+/// [`WriteDeadline`].
+struct StreamDeadline {
+    cell: Arc<Mutex<Option<Instant>>>,
+    timer: Pin<Box<Sleep>>,
+}
+
+impl StreamDeadline {
+    fn new(cell: Arc<Mutex<Option<Instant>>>) -> StreamDeadline {
+        StreamDeadline {
+            cell,
+            timer: Box::pin(tokio::time::sleep_until(Instant::now())),
+        }
+    }
+
+    /// Whether the deadline has passed, registering for it otherwise.
+    fn poll_expired(&mut self, cx: &mut Context<'_>) -> bool {
+        let deadline = *self.cell.lock().unwrap_or_else(|e| e.into_inner());
+        deadline.is_some_and(|d| Instant::now() >= d || deadline_passed(&mut self.timer, d, cx))
+    }
+}
+
 /// A response body that ends its request when finished or dropped and, for an HTTP/2 stream,
 /// fails at the stream's write deadline (resetting the stream).
 pub(crate) struct TrackedBody {
     inner: Body,
     guard: Option<RequestGuard>,
-    deadline: Option<Pin<Box<Sleep>>>,
+    deadline: Option<StreamDeadline>,
 }
 
 impl TrackedBody {
-    fn new(inner: Body, guard: RequestGuard, deadline: Option<Instant>) -> TrackedBody {
+    fn new(inner: Body, guard: RequestGuard, deadline: Option<StreamDeadline>) -> TrackedBody {
         TrackedBody {
             inner,
             guard: Some(guard),
-            deadline: deadline.map(|d| Box::pin(tokio::time::sleep_until(d))),
+            deadline,
         }
     }
 }
@@ -628,8 +801,8 @@ impl hyper::body::Body for TrackedBody {
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<Frame<Bytes>, BoxError>>> {
         let this = self.get_mut();
-        if let Some(timer) = &mut this.deadline
-            && timer.as_mut().poll(cx).is_ready()
+        if let Some(deadline) = &mut this.deadline
+            && deadline.poll_expired(cx)
         {
             return Poll::Ready(Some(Err(timed_out().into())));
         }
@@ -703,6 +876,32 @@ mod tests {
             handler(|_req: Request| async {
                 tokio::time::sleep(Duration::from_millis(300)).await;
                 Response::new(Body::from("late"))
+            }),
+        );
+        // An SSE-like handler: moves the write deadline as `?deadline=` says (`none` clears
+        // it), then streams one chunk at once and one 300ms later.
+        r.handle(
+            &[Method::GET],
+            "/stream",
+            handler(|req: Request| async move {
+                let deadline = match req.uri().query() {
+                    Some("deadline=none") => None,
+                    _ => Some(Instant::now() + Duration::from_secs(1)),
+                };
+                if let Some(hook) = req.extensions().get::<WriteDeadline>() {
+                    hook.set(deadline);
+                }
+                let chunks = futures::stream::unfold(0, |n| async move {
+                    match n {
+                        0 => Some((Ok::<_, io::Error>(Bytes::from("a")), 1)),
+                        1 => {
+                            tokio::time::sleep(Duration::from_millis(300)).await;
+                            Some((Ok(Bytes::from("b")), 2))
+                        }
+                        _ => None,
+                    }
+                });
+                Response::new(Body::from_stream(chunks))
             }),
         );
         r.handle(
@@ -793,6 +992,37 @@ mod tests {
         conn.write_all(b"Host: x\r\n\r\n").await.unwrap();
         let resp = read_response(&mut conn).await.unwrap();
         assert!(resp.starts_with("HTTP/1.1 200 OK\r\n"), "{resp}");
+        cancel.cancel();
+    }
+
+    /// Go flushes a response under its write deadline before it reads the next request: a
+    /// client that pipelines an incomplete head and stops reading does not hold the response's
+    /// tail unbounded.
+    #[tokio::test]
+    async fn a_pipelined_head_does_not_lift_the_write_deadline_of_the_unflushed_response() {
+        const BIG: usize = 16 << 20;
+        let mut r = router();
+        r.handle(
+            &[Method::GET],
+            "/big",
+            handler(|_req: Request| async { Response::new(Body::from(vec![b'x'; BIG])) }),
+        );
+        let (addr, cancel) = start(r, opts(0, 200, 0)).await;
+        let mut conn = TcpStream::connect(addr).await.unwrap();
+        conn.write_all(b"GET /big HTTP/1.1\r\nHost: x\r\n\r\n")
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        conn.write_all(b"GET /ok HTTP/1.1\r\n").await.unwrap();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        // The write deadline passed with the response unwritten: the connection was aborted.
+        let mut got = Vec::new();
+        let _ = tokio::time::timeout(Duration::from_secs(5), conn.read_to_end(&mut got)).await;
+        assert!(
+            got.len() < BIG,
+            "the whole response was written ({} bytes)",
+            got.len()
+        );
         cancel.cancel();
     }
 
@@ -889,6 +1119,136 @@ mod tests {
             draining.shutdown(ms(10)).await,
             Err("context deadline exceeded".to_owned())
         );
+    }
+
+    /// Go `RunSSEHandler`'s `rc.SetWriteDeadline`: a handler's deadline overrides the
+    /// server's write timeout, over HTTP/1 and HTTP/2, and `None` clears it.
+    #[tokio::test]
+    async fn a_handler_write_deadline_overrides_the_write_timeout() {
+        for h2c in [false, true] {
+            let opts = Options::new(ms(2000), ms(100), ms(2000), h2c);
+            let (addr, cancel) = start(router(), opts).await;
+            let mut client = reqwest::Client::builder();
+            if h2c {
+                client = client.http2_prior_knowledge();
+            }
+            let client = client.build().unwrap();
+            for query in ["deadline=1s", "deadline=none"] {
+                let resp = client
+                    .get(format!("http://{addr}/stream?{query}"))
+                    .send()
+                    .await
+                    .unwrap();
+                let body = resp.text().await;
+                assert_eq!(body.ok().as_deref(), Some("ab"), "h2c={h2c} {query}");
+            }
+            cancel.cancel();
+        }
+    }
+
+    /// The control for the test above: a stream past `-write-timeout` that does not move its
+    /// deadline is cut off.
+    #[tokio::test]
+    async fn a_stream_past_the_write_timeout_is_cut_off() {
+        let mut r = WebRouter::new(true);
+        r.handle(
+            &[Method::GET],
+            "/stream",
+            handler(|_req: Request| async move {
+                let chunks = futures::stream::unfold(0, |n| async move {
+                    match n {
+                        0 => Some((Ok::<_, io::Error>(Bytes::from("a")), 1)),
+                        1 => {
+                            tokio::time::sleep(Duration::from_millis(300)).await;
+                            Some((Ok(Bytes::from("b")), 2))
+                        }
+                        _ => None,
+                    }
+                });
+                Response::new(Body::from_stream(chunks))
+            }),
+        );
+        for h2c in [false, true] {
+            let (addr, cancel) =
+                start(r.clone(), Options::new(ms(2000), ms(100), ms(2000), h2c)).await;
+            let mut client = reqwest::Client::builder();
+            if h2c {
+                client = client.http2_prior_knowledge();
+            }
+            let resp = client
+                .build()
+                .unwrap()
+                .get(format!("http://{addr}/stream"))
+                .send()
+                .await;
+            let body = match resp {
+                Ok(resp) => resp.text().await.ok(),
+                Err(_) => None,
+            };
+            assert_ne!(body.as_deref(), Some("ab"), "h2c={h2c}");
+            cancel.cancel();
+        }
+    }
+
+    /// Go peeks an `-h2c` connection's preface with no read deadline: a client silent for
+    /// longer than `-read-timeout` before its first request is still served.
+    #[tokio::test]
+    async fn h2c_waits_for_the_first_bytes_without_the_read_timeout() {
+        let (addr, cancel) = start(router(), Options::new(ms(100), ms(2000), ms(2000), true)).await;
+        let mut conn = TcpStream::connect(addr).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        conn.write_all(b"GET /ok HTTP/1.1\r\nHost: x\r\n\r\n")
+            .await
+            .unwrap();
+        let resp = read_response(&mut conn).await.unwrap();
+        assert!(resp.starts_with("HTTP/1.1 200 OK\r\n"), "{resp}");
+        // Once the peek is over, an HTTP/1 request's headers have `-read-timeout` again.
+        let mut conn = TcpStream::connect(addr).await.unwrap();
+        conn.write_all(b"GET /ok HTTP/1.1\r\nHo").await.unwrap();
+        let mut rest = Vec::new();
+        let started = Instant::now();
+        let _ = conn.read_to_end(&mut rest).await;
+        assert!(rest.is_empty(), "{}", String::from_utf8_lossy(&rest));
+        assert!(started.elapsed() < Duration::from_millis(1500));
+        cancel.cancel();
+    }
+
+    /// Go's `Shutdown` closes idle connections before it checks its context: with a zero
+    /// timeout and only an idle keep-alive connection it succeeds.
+    #[tokio::test]
+    async fn shutdown_with_a_zero_timeout_closes_idle_connections() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let cancel = CancellationToken::new();
+        let (log, _) = crate::golog::capture();
+        let server = tokio::spawn(serve(
+            listener,
+            router(),
+            opts(0, 0, 0),
+            cancel.clone(),
+            log,
+        ));
+        // Enough idle connections that they cannot all have closed before a zero timeout.
+        let mut idle = Vec::new();
+        for _ in 0..64 {
+            let mut conn = TcpStream::connect(addr).await.unwrap();
+            conn.write_all(b"GET /ok HTTP/1.1\r\nHost: x\r\n\r\n")
+                .await
+                .unwrap();
+            read_response(&mut conn).await.unwrap();
+            idle.push(conn);
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        cancel.cancel();
+        let draining = server.await.unwrap();
+        assert_eq!(draining.shutdown(GoDuration(0)).await, Ok(()));
+        // And the idle connections are closed.
+        for mut conn in idle {
+            let mut rest = Vec::new();
+            let closed =
+                tokio::time::timeout(Duration::from_secs(2), conn.read_to_end(&mut rest)).await;
+            assert!(closed.is_ok() && rest.is_empty());
+        }
     }
 
     #[tokio::test]

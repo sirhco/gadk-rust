@@ -19,7 +19,11 @@
 //! the server's own `OPTIONS *` and bad-request answers, and its HEAD body stripping.
 //!
 //! The REST server's route table ([`rest::Server`](crate::rest::Server)) and the launcher's web
-//! router are both built on it.
+//! router are both built on it, and [`WriteDeadline`] is the launcher server's
+//! `http.ResponseController.SetWriteDeadline`.
+//!
+//! This module mirrors gorilla/mux and `net/http` internals and is plumbing shared by gadk's
+//! own crates, not a stable API: it changes with them.
 
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -51,6 +55,34 @@ where
 /// it directly (Go `mux.SetURLVars`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PathVars(pub BTreeMap<String, String>);
+
+/// The serving connection's write deadline for this request's response (Go
+/// `http.NewResponseController(rw).SetWriteDeadline`), as a request extension.
+///
+/// A server that honours per-request write deadlines (the web launcher's) inserts it; a handler
+/// that finds it may move the deadline, overriding the server's write timeout for this response.
+/// `None` clears the deadline (Go: the zero time). Without the extension the server's own
+/// timeouts apply unchanged.
+#[derive(Clone)]
+pub struct WriteDeadline(Arc<dyn Fn(Option<tokio::time::Instant>) + Send + Sync>);
+
+impl WriteDeadline {
+    /// The hook calling `set` with each new deadline.
+    pub fn new(set: impl Fn(Option<tokio::time::Instant>) + Send + Sync + 'static) -> Self {
+        WriteDeadline(Arc::new(set))
+    }
+
+    /// Go `SetWriteDeadline`: writes after `deadline` fail; `None` means no deadline.
+    pub fn set(&self, deadline: Option<tokio::time::Instant>) {
+        (self.0)(deadline);
+    }
+}
+
+impl std::fmt::Debug for WriteDeadline {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("WriteDeadline")
+    }
+}
 
 /// One piece of a gorilla/mux path template.
 #[derive(Debug, Clone, PartialEq, Eq)]

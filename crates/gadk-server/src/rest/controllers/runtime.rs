@@ -37,6 +37,7 @@ use tokio::time::Instant;
 
 use super::handlers::{forbid_unless_can_act_as, session_error_text};
 use crate::authz::{self, Authorizer};
+use crate::mux::WriteDeadline;
 use crate::rest::Timeout;
 use crate::rest::http_error::{
     StatusError, encode_json_response, http_error, status_error_response,
@@ -233,9 +234,15 @@ impl RuntimeApiController {
 
     /// Go `RunSSEHandler`: the run's events as server-sent events. The write deadline starts
     /// when the request arrives; once it passes no further frame is written and the
-    /// connection is aborted (Go: the next write fails and the handler returns).
+    /// connection is aborted (Go: the next write fails and the handler returns). Where the
+    /// server offers a [`WriteDeadline`], the connection's write deadline is moved to it too,
+    /// or cleared when there is no SSE timeout (Go `rc.SetWriteDeadline`, which overrides the
+    /// server's write timeout).
     pub async fn run_sse_handler(&self, req: Request) -> Response {
         let deadline = self.sse_timeout.map(|t| Instant::now() + t);
+        if let Some(hook) = req.extensions().get::<WriteDeadline>() {
+            hook.set(deadline);
+        }
         let (parts, body) = req.into_parts();
         let run_agent_request = match decode_request_body(body).await {
             Ok(r) => r,

@@ -710,6 +710,103 @@ mod tests {
         }
     }
 
+    /// A model that streams one chunk, then answers 500ms later.
+    struct SlowModel;
+
+    impl gadk_model::Llm for SlowModel {
+        fn name(&self) -> &str {
+            "slow"
+        }
+
+        fn generate_content(
+            &self,
+            _req: gadk_model::LlmRequest,
+            _stream: bool,
+        ) -> futures::stream::BoxStream<
+            'static,
+            Result<gadk_model::LlmResponse, gadk_model::ModelError>,
+        > {
+            use futures::StreamExt as _;
+            let text = |t: &str, partial: bool| gadk_model::LlmResponse {
+                content: Some(gadk_genai::Content::from_text(t, gadk_genai::ROLE_MODEL)),
+                partial,
+                ..Default::default()
+            };
+            let (first, last) = (text("Slow ", true), text("Slow answer.", false));
+            futures::stream::once(async move { Ok(first) })
+                .chain(futures::stream::once(async move {
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    Ok(last)
+                }))
+                .boxed()
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    /// Go `RunSSEHandler` moves the connection's write deadline to `-sse-write-timeout`: an SSE
+    /// turn outlasting the web server's `-write-timeout` is streamed to the end.
+    #[tokio::test]
+    async fn run_sse_outlives_the_server_write_timeout() {
+        let port = ts::free_port();
+        let mut l = crate::web::new(vec![Box::new(new()) as Box<dyn WebSublauncher>]);
+        let args = strings(&[
+            "-port",
+            &port.to_string(),
+            "-write-timeout",
+            "200ms",
+            "api",
+            "-sse-write-timeout",
+            "5s",
+        ]);
+        assert_eq!(
+            SubLauncher::parse(&mut l, args).unwrap(),
+            Vec::<String>::new()
+        );
+        let l = Arc::new(l);
+        let (log, _) = crate::golog::capture();
+        let agent = ts::probe_agent_with(Arc::new(SlowModel));
+        let mut config = Config::new(Arc::new(SingleLoader::new(agent)));
+        config.log = log;
+        let cancel = CancellationToken::new();
+        let running = {
+            let (l, cancel) = (Arc::clone(&l), cancel.clone());
+            tokio::spawn(async move { l.run_with(cancel, config, |_| true).await })
+        };
+        ts::wait_listening(port).await;
+
+        let base = format!("http://127.0.0.1:{port}/api");
+        let client = reqwest::Client::new();
+        let created = client
+            .post(format!("{base}/apps/assistant/users/u/sessions/s"))
+            .header(http::header::CONTENT_TYPE, "application/json")
+            .body("{}")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(created.status(), 200);
+        let resp = client
+            .post(format!("{base}/run_sse"))
+            .header(http::header::CONTENT_TYPE, "application/json")
+            .body(
+                r#"{"appName":"assistant","userId":"u","sessionId":"s","streaming":true,"newMessage":{"role":"user","parts":[{"text":"hi"}]}}"#,
+            )
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+        let body = resp
+            .text()
+            .await
+            .unwrap_or_else(|e| format!("cut off: {e}"));
+        assert!(body.contains("Slow answer."), "{body}");
+
+        cancel.cancel();
+        running.await.unwrap().unwrap();
+    }
+
     /// The scripted agent's identity (SCENARIO.md "Agent and model"); no fixture used here runs
     /// it.
     fn assistant() -> Arc<dyn gadk_agent::Agent> {

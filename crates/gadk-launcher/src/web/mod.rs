@@ -458,6 +458,11 @@ pub fn build_base_router(log: &Logger) -> WebRouter {
 }
 
 /// Go `logger`: after the handler, logs `<method> <RequestURI> <elapsed>` (Go `time.Duration`).
+/// Go's handler returns once it has written the whole response, so the line is logged when the
+/// response body ends or is dropped (a streamed response: after its last frame).
+///
+/// Divergence (ledger 6): a WebSocket upgrade is logged when its 101 is sent (Go's handler, and
+/// so its log line, returns when the session ends).
 fn request_logger(log: Logger) -> Middleware {
     Arc::new(move |next: Handler| {
         let log = log.clone();
@@ -466,17 +471,65 @@ fn request_logger(log: Logger) -> Middleware {
             let log = log.clone();
             async move {
                 let start = Instant::now();
-                let method = req.method().to_string();
-                let request_uri = router::go_request_uri(&req).to_string();
+                let line = format!("{} {}", req.method(), router::go_request_uri(&req));
                 let resp = next(req).await;
-                log.print(&format!(
-                    "{method} {request_uri} {}",
-                    go_format_duration(GoDuration::from_std(start.elapsed()))
-                ));
-                resp
+                resp.map(|body| {
+                    Body::new(LoggedBody {
+                        inner: body,
+                        pending: Some((log, line, start)),
+                    })
+                })
             }
         })
     })
+}
+
+/// A response body that writes the request log line once it ends, fails or is dropped.
+struct LoggedBody {
+    inner: Body,
+    pending: Option<(Logger, String, Instant)>,
+}
+
+impl LoggedBody {
+    fn log(&mut self) {
+        if let Some((log, line, start)) = self.pending.take() {
+            log.print(&format!(
+                "{line} {}",
+                go_format_duration(GoDuration::from_std(start.elapsed()))
+            ));
+        }
+    }
+}
+
+impl Drop for LoggedBody {
+    fn drop(&mut self) {
+        self.log();
+    }
+}
+
+impl hyper::body::Body for LoggedBody {
+    type Data = bytes::Bytes;
+    type Error = axum::Error;
+
+    fn poll_frame(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Result<hyper::body::Frame<Self::Data>, Self::Error>>> {
+        let this = self.get_mut();
+        let frame = std::pin::Pin::new(&mut this.inner).poll_frame(cx);
+        if let std::task::Poll::Ready(None | Some(Err(_))) = &frame {
+            this.log();
+        }
+        frame
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+
+    fn size_hint(&self) -> hyper::body::SizeHint {
+        self.inner.size_hint()
+    }
 }
 
 /// Go `registerHealthRoute`: `/health` for GET and HEAD.
@@ -847,6 +900,65 @@ mod tests {
             ts::log_lines(&ts::wire("full_99_shutdown")),
             "shutdown log"
         );
+    }
+
+    /// Go's logger logs after `ServeHTTP` returns: a streamed response is logged after its last
+    /// chunk, with the whole time taken.
+    #[tokio::test]
+    async fn a_streamed_response_is_logged_when_it_ends() {
+        let (log, captured) = crate::golog::capture();
+        let mut router = build_base_router(&log);
+        router.handle(
+            &[Method::GET],
+            "/stream",
+            handler(|_req: Request| async {
+                let chunks = futures::stream::unfold(0, |n| async move {
+                    match n {
+                        0 => Some((Ok::<_, std::io::Error>(bytes::Bytes::from("a")), 1)),
+                        1 => {
+                            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                            Some((Ok(bytes::Bytes::from("b")), 2))
+                        }
+                        _ => None,
+                    }
+                });
+                Response::new(Body::from_stream(chunks))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let cancel = CancellationToken::new();
+        let opts = serve::Options::new(
+            GoDuration::from_secs(5),
+            GoDuration::from_secs(5),
+            GoDuration::from_secs(5),
+            false,
+        );
+        tokio::spawn(testing::serve(listener, router, opts, cancel.clone(), log));
+        let resp = reqwest::get(format!("http://{addr}/stream")).await.unwrap();
+        assert!(
+            !captured.contents().contains("GET /stream"),
+            "logged before the body: {}",
+            captured.contents()
+        );
+        assert_eq!(resp.text().await.unwrap(), "ab");
+        let mut line = None;
+        for _ in 0..100 {
+            line = captured
+                .contents()
+                .lines()
+                .find(|l| l.contains("GET /stream"))
+                .map(str::to_owned);
+            if line.is_some() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        let line = line.expect("the request was logged");
+        let elapsed = line.rsplit_once(' ').unwrap().1;
+        let elapsed = gadk_platform::go_parse_duration(elapsed).unwrap();
+        assert!(elapsed.0 >= 300_000_000, "{line}");
+        cancel.cancel();
     }
 
     /// Go's HTTP/2 requests carry only `:path` (`RequestURI` and `URL` have no scheme or host):
