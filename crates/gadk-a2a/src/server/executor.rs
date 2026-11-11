@@ -951,7 +951,6 @@ impl Runner for DefaultRunner {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::time::Duration;
 
     use a2a_server::AgentExecutor as _;
     use gadk_agent::{
@@ -973,7 +972,7 @@ mod tests {
     use crate::server::identity::{IDENTITY_HEADER, identity_header_resolver};
     use crate::server::plugin::EXECUTOR_PLUGIN_NAME;
     use crate::testutil::{
-        FakeA2AClient, FakeCall, FakeClientProvider, ScriptedRunner, spawn_a2a_server,
+        FakeA2AClient, FakeCall, FakeClientProvider, ScriptedRunner, eventually, spawn_a2a_server,
     };
 
     fn engine_config(
@@ -1157,7 +1156,9 @@ mod tests {
             Some(a2a::TaskState::Completed)
         );
 
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        // The cleanup runs on a spawned task once the stream has ended.
+        eventually(|| cleanups.load(Ordering::SeqCst) >= 1 && provided.load(Ordering::SeqCst) >= 2)
+            .await;
         assert_eq!(cleanups.load(Ordering::SeqCst), 1, "cleanup callback");
         // Once for the execution, once for the cleanup (Go `createRunnerConfig`).
         assert_eq!(provided.load(Ordering::SeqCst), 2, "runner_provider");
@@ -1335,7 +1336,7 @@ mod tests {
             panic!("want a task");
         };
         assert_eq!(task.status.state, a2a::TaskState::Completed);
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        eventually(|| !snapshots.lock().is_empty()).await;
         assert_eq!(*snapshots.lock(), vec![Some(a2a::TaskState::Submitted)]);
 
         // With that snapshot the executor starts at `working`.
@@ -1533,10 +1534,7 @@ mod tests {
         assert_eq!(canceled.status.state, a2a::TaskState::Canceled);
 
         // The cleanup cancels the child task asynchronously.
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-        while fake.calls().len() < 2 && tokio::time::Instant::now() < deadline {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
+        eventually(|| fake.calls().len() >= 2).await;
         let calls = fake.calls();
         assert_eq!(calls.len(), 2, "calls = {calls:?}");
         let FakeCall::Cancel(cancel) = &calls[0] else {
@@ -1545,7 +1543,8 @@ mod tests {
         assert_eq!(cancel.id, "child-task-1");
         assert!(matches!(calls[1], FakeCall::Destroy));
 
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        // Both cleanups (the execution's and the cancel's) run on spawned tasks.
+        eventually(|| cleanups.lock().len() >= 2).await;
         let cleanups = cleanups.lock().clone();
         assert_eq!(
             cleanups,

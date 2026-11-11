@@ -278,6 +278,7 @@ mod served {
         credential_scope, current_credential_scope, new_a2a, new_a2a_client_provider,
         new_agent_card_provider,
     };
+    use crate::testutil::eventually;
 
     // ------------------------------------------------------------ helpers
 
@@ -420,17 +421,6 @@ mod served {
         let mut stream = agent.run(ic);
         let first = stream.next().await.expect("one event");
         assert!(first.is_ok(), "agent.Run() error = {:?}", first.err());
-    }
-
-    /// Waits up to 5 s for `cond`.
-    async fn eventually(cond: impl Fn() -> bool) -> bool {
-        for _ in 0..500 {
-            if cond() {
-                return true;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        cond()
     }
 
     /// Go `firstErrorEvent`.

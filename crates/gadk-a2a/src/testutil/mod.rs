@@ -27,3 +27,16 @@ pub use client::{FakeA2AClient, FakeCall, FakeClientProvider};
 pub use runner::ScriptedRunner;
 #[cfg(feature = "server")]
 pub use server::{SpawnedServer, spawn_a2a_server};
+
+/// Waits up to 5 s for `cond` (polled every 10 ms) and returns its last value: for effects that
+/// land on a spawned task (cleanups, cancels) after the call under test returns.
+#[cfg(all(test, feature = "server", feature = "client"))]
+pub(crate) async fn eventually(cond: impl Fn() -> bool) -> bool {
+    for _ in 0..500 {
+        if cond() {
+            return true;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    cond()
+}
