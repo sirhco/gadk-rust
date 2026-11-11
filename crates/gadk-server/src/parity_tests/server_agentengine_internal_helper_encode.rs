@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Ports of ADK-Go `server/agentengine/internal/helper/encode_test.go` (Task 6 fills this module).
+//! Ports of ADK-Go `server/agentengine/internal/helper/encode_test.go`.
 //!
 //! Go's tests call `convertSnake` on test-local structs; here those structs are local
 //! [`GoStruct`] shapes over a `serde_json::Value` of their fields ([`Local`]); a local struct

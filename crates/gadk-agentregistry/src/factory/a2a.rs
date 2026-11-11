@@ -198,6 +198,7 @@ pub(crate) fn agent_card(
 /// Go `json.Unmarshal(content, &a2a.AgentCard{})`: Go leaves absent or `null` fields at their
 /// zero value (a `null` document decodes to the zero card), while a2a-lf requires some of them;
 /// those are filled with Go's zero value before decoding, so only a malformed document fails.
+/// Divergence (ledger 5c): keys are matched case-sensitively (Go's `json.Unmarshal` folds case).
 fn decode_card(content: &str) -> Result<a2a::AgentCard, serde_json::Error> {
     let mut doc: Value = serde_json::from_str(content)?;
     if doc.is_null() {
@@ -218,7 +219,9 @@ fn decode_card(content: &str) -> Result<a2a::AgentCard, serde_json::Error> {
         );
         if let Some(Value::Array(ifaces)) = card.get_mut("supportedInterfaces") {
             // Go `[]*AgentInterface`: a `null` element is a nil pointer, which a2a-go's
-            // factory skips; it cannot reach a client, so it is dropped here.
+            // factory skips; it cannot reach a client, so it is dropped here. Divergence
+            // (ledger 5c): `[null]` thus leaves no interface and `remote_agent` fails fast with
+            // `has no supported interfaces`; Go builds the agent and fails at invocation.
             ifaces.retain(|i| !i.is_null());
             for iface in ifaces.iter_mut().filter_map(Value::as_object_mut) {
                 zero_fill(
@@ -349,7 +352,10 @@ impl A2AClientProvider for CompatClientProvider {
 }
 
 /// Go `headerRoundTripper` for A2A: sets each header on every call (as a2a-client service
-/// params, which its transports send as HTTP headers).
+/// params, which its transports send as HTTP headers). Divergence (ledger 5c): a2a-client-lf
+/// appends the params with reqwest's `builder.header`, so a header the transport also sets
+/// (e.g. `Accept`) is sent with two values (Go `Header.Set` replaces it), and a value reqwest
+/// rejects fails the A2A request (MCP skips such a header; Go sends it).
 pub(crate) struct HeaderInterceptor {
     /// The headers, in key order.
     pub(crate) headers: Vec<(String, String)>,

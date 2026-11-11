@@ -83,7 +83,8 @@ ALLOWED = {
     "gadk": {"gadk-genai", "gadk-platform", "gadk-model", "gadk-session", "gadk-gemini",
              "gadk-agent", "gadk-engine", "gadk-tools", "gadk-auth", "gadk-mcp", "gadk-artifact",
              "gadk-memory", "gadk-anthropic", "gadk-openai", "gadk-session-database",
-             "gadk-artifact-gcs", "gadk-vertexai", "gadk-server", "gadk-a2a", "gadk-launcher"},
+             "gadk-artifact-gcs", "gadk-vertexai", "gadk-server", "gadk-a2a", "gadk-launcher",
+             "gadk-agentregistry"},
 }
 # (crate, dependency) normal edges that must be `optional = true`.
 OPTIONAL = {("gadk-engine", "gadk-gemini"), ("gadk-engine", "gadk-httprr"), ("gadk-a2a", "gadk-server"),

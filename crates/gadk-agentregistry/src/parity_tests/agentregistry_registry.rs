@@ -123,6 +123,7 @@ async fn test_new_wires_rest_requester() {
 
 /// Go `TestNewHTTPClientEndpointKeepsVersionPath` (adapted: Go drives `htransport` directly; the
 /// ADC path's endpoint choice is `endpoint_for(env, false)`).
+// parity: adapted: Go drives htransport directly; the port asserts the ADC path's endpoint choice, endpoint_for(env, false)
 #[test]
 fn test_new_http_client_endpoint_keeps_version_path() {
     for (name, mtls_env, want) in [

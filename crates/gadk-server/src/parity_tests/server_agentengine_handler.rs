@@ -73,7 +73,7 @@ fn test_new_handler_rejects_unusable_compaction() {
     }
 }
 
-// parity: adapted: the handler is called directly with a recording WriteDeadline request extension (Go: an httptest server and a SetWriteDeadline-recording ResponseWriter); the request names an unknown class method, so the answer is the 500 `unrecognized class method` instead of Go's created session (the session methods' bodies are Task 7's)
+// parity: adapted: the handler is called directly with a recording WriteDeadline request extension (Go: an httptest server and a SetWriteDeadline-recording ResponseWriter)
 #[tokio::test]
 async fn test_query_sse_write_timeout() {
     let cases = [
@@ -95,7 +95,7 @@ async fn test_query_sse_write_timeout() {
         let recorded: Arc<Mutex<Vec<Option<tokio::time::Instant>>>> = Arc::default();
         let sink = Arc::clone(&recorded);
         let mut req = Request::new(Body::from(
-            r#"{"class_method":"nope","input":{"user_id":"u"}}"#,
+            r#"{"class_method":"async_create_session","input":{"user_id":"u"}}"#,
         ));
         *req.method_mut() = Method::POST;
         *req.uri_mut() = "/reasoning_engine".parse().unwrap();
@@ -109,8 +109,15 @@ async fn test_query_sse_write_timeout() {
         let end = tokio::time::Instant::now();
         let status = resp.status().as_u16();
         let got = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
-        assert_eq!(status, 500, "{name}: body {got:?}");
-        assert_eq!(&got[..], b"unrecognized class method: nope\n", "{name}");
+        let got = String::from_utf8(got.to_vec()).unwrap();
+        assert_eq!(
+            status, 200,
+            "POST /reasoning_engine status = {status}, want 200; body: {got}"
+        );
+        assert!(
+            got.contains(r#""user_id":"u""#),
+            "response does not contain the created session:\n{got}"
+        );
 
         let deadlines = recorded.lock().unwrap().clone();
         assert_eq!(

@@ -840,7 +840,7 @@ class ThreeBTest(unittest.TestCase):
         err = io.StringIO()
         with contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
             pc.main(["--adk-go", str(self.go), "--repo", str(self.repo), "--ledger", "all", "--count"])
-        self.assertIn("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a, 4b, 4c, 5a, 5b or 6", err.getvalue())
+        self.assertIn("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a, 4b, 4c, 5a, 5b, 5c or 6", err.getvalue())
 
 
 LEDGER_4A = (
@@ -1220,6 +1220,62 @@ class SixTest(unittest.TestCase):
         ])
 
 
+LEDGER_5C = (
+    "# Parity ledger — sub-project 5c\n\n"
+    "<!-- in-scope:\nagentregistry/resolve_test.go\nserver/agentengine/handler_test.go\n-->\n\n"
+    + pc.TABLE_HEADER + "\n" + pc.TABLE_SEP + "\n"
+)
+
+RESOLVE_TARGET = "crates/gadk-agentregistry/src/parity_tests/agentregistry_resolve.rs"
+HANDLER_TARGET = "crates/gadk-server/src/parity_tests/server_agentengine_handler.rs"
+
+
+class FiveCTest(unittest.TestCase):
+    """5c: two crates' `src/parity_tests/` targets (the registry crate and gadk-server)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        d = pathlib.Path(self._tmp.name)
+        self.go, self.repo = d / "go", d / "repo"
+        for f, body in (
+            ("agentregistry/resolve_test.go", "func TestCleanName(t *testing.T) {}\n"),
+            ("server/agentengine/handler_test.go", "func TestQuerySSEWriteTimeout(t *testing.T) {}\n"),
+        ):
+            (self.go / f).parent.mkdir(parents=True, exist_ok=True)
+            (self.go / f).write_text("package x\n" + body)
+        for target in (RESOLVE_TARGET, HANDLER_TARGET):
+            (self.repo / target).parent.mkdir(parents=True, exist_ok=True)
+        (self.repo / RESOLVE_TARGET).write_text("#[test]\nfn test_clean_name() {}\n")
+        (self.repo / HANDLER_TARGET).write_text(
+            "// parity: adapted: a recording WriteDeadline\n#[tokio::test]\nasync fn test_query_sse_write_timeout() {}\n")
+        (self.repo / "docs/parity").mkdir(parents=True)
+        self.ledger = self.repo / "docs/parity/5c.md"
+        self.ledger.write_text(LEDGER_5C)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def run_cli(self, *args):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = pc.main(["--adk-go", str(self.go), "--repo", str(self.repo), *args])
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_ledger_5c_is_registered(self):
+        self.assertIn("5c", pc.GENERATED_LEDGERS)
+        self.assertEqual(self.run_cli("--ledger", "5c", "--count"), (0, "2\n", ""))
+
+    def test_targets_generate_and_check(self):
+        self.assertEqual(self.run_cli("--ledger", "5c", "--generate")[0], 0)
+        self.assertEqual(self.run_cli("--ledger", "5c"), (0, "", ""))
+        rows = self.ledger.read_text().splitlines()[-2:]
+        self.assertEqual(rows, [
+            "| agentregistry/resolve_test.go | TestCleanName | ported | " + RESOLVE_TARGET + " | test_clean_name |",
+            "| server/agentengine/handler_test.go | TestQuerySSEWriteTimeout | ported (adapted: a recording"
+            " WriteDeadline) | " + HANDLER_TARGET + " | test_query_sse_write_timeout |",
+        ])
+
+
 class FourATest(unittest.TestCase):
     """4a: a Go package whose test files land in two crates' `src/parity_tests/`."""
 
@@ -1479,6 +1535,14 @@ class RealTreeTest(unittest.TestCase):
         self.assertEqual(list(deferred), ["agent/remoteagent/a2a_agent_compat_test.go"])
         self.assertEqual(pc.count(ADK_GO, in_scope), 145)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "5b"), [])
+
+    def test_5c_count_is_62(self):
+        in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/5c.md")
+        self.assertEqual(len(in_scope), 11)
+        self.assertEqual(sorted({f.split("/")[0] for f in in_scope}), ["agentregistry", "server"])
+        self.assertEqual(deferred, {})
+        self.assertEqual(pc.count(ADK_GO, in_scope), 62)
+        self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "5c"), [])
 
     def test_6_count_is_94(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/6.md")

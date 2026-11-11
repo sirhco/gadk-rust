@@ -158,6 +158,7 @@ async fn remote_reply(record: serde_json::Value) -> String {
 }
 
 /// Go `TestRemoteAgent_E2E`.
+// parity: adapted: one gadk-a2a server serves JSON-RPC at /jsonrpc and HTTP+JSON under /rest (Go: each transport at the root of its own server)
 #[tokio::test]
 async fn test_remote_agent_e2_e() {
     type Record = fn(&str) -> Agent;

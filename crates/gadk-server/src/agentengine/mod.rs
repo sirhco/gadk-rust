@@ -22,7 +22,7 @@
 
 pub(crate) mod controller;
 pub(crate) mod encode;
-// Generated (Task 2's probe); its own fixed layout, diffed by check-fixtures.sh.
+// Generated (`scripts/gen-go-agentengine --shapes`); its own fixed layout, diffed by check-fixtures.sh.
 #[rustfmt::skip]
 pub(crate) mod encode_shapes;
 pub(crate) mod metadata;
@@ -156,7 +156,8 @@ pub(crate) const STREAM_METHODS: [(&str, &str); 2] = [
 /// (`compactionvalidate::against_root_agent`, error returned unwrapped), builds the two
 /// controllers (non-streaming: the four session methods; streaming: `async_stream_query` and
 /// `streaming_agent_run_with_events`) on a strict-slash `WebRouter` ([`routes::router`]), and
-/// logs `Supported methods:` then one line per [`list_class_methods`] entry (Go
+/// logs `Supported methods:` then one line per [`list_class_methods`] entry, taken from the
+/// handlers' own [`MethodHandler::metadata`](method::MethodHandler::metadata) (Go
 /// `log.Println(<json.Encoder output>)`, see [`metadata::structpb_json`]).
 ///
 /// `sse_write_timeout`: zero means 120 s, negative means no write deadline. Go's
@@ -230,6 +231,13 @@ pub fn new_handler(
             run_mode,
         )),
     ];
+    // Go logs `ListClassMethods()`, the same handlers' `Metadata()` (the agent engine ID does
+    // not enter it).
+    let methods: Vec<Map<String, Value>> = non_stream
+        .iter()
+        .chain(&stream)
+        .map(|h| h.metadata())
+        .collect();
     let non_stream = Controller::new(sse_write_timeout, max_payload_size, non_stream, log.clone())
         .map_err(|name| Error::DuplicateMethod {
             kind: "non-streaming",
@@ -243,7 +251,7 @@ pub fn new_handler(
     let router = routes::router(Arc::new(non_stream), Arc::new(stream));
 
     log.println("Supported methods:");
-    for m in list_class_methods() {
+    for m in methods {
         log.println(&metadata::structpb_json(&m).map_err(Error::Encode)?);
     }
 

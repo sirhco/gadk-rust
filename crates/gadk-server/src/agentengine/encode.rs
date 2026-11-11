@@ -12,9 +12,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-// D1: `emit_json`/`emit_json_error` have no caller before Task 9's stream methods (Task 10
-// removes this line).
-#![allow(dead_code)]
 
 //! Go `server/agentengine/internal/helper/encode.go` (`ConvertSnake`) and `emit_json.go`
 //! (`EmitJSON`, `EmitJSONError`).
@@ -493,7 +490,9 @@ fn convert_kind(
     path: &str,
 ) -> Result<GoValue, ConvertError> {
     if *kind == GoKind::RawMessage {
-        // empty → nil; anything present (even `null`) is the JSON text.
+        // empty → nil; anything present (even `null`) is the JSON text. Divergence (ledger
+        // 5c): the text is re-serialised from serde's `Value` (keys sorted, number text
+        // normalised, e.g. a jsonschema `Default`); Go keeps the author's compacted text.
         return Ok(v.map_or(GoValue::Null, |v| GoValue::Raw(v.to_string())));
     }
     let v = v.filter(|v| !v.is_null());
@@ -506,6 +505,9 @@ fn convert_kind(
                 uint_kind(go_type)
             )));
         }
+        // Divergence (ledger 5c): a NaN or ±Inf float is already `null` in serde's `to_value`
+        // output, so it becomes `0` here (a pointer to it is nil, then dropped); Go fails the
+        // encode with `json: unsupported value: NaN` and logs the error line.
         GoKind::Float32 => GoValue::Float(
             v.and_then(Value::as_f64)
                 .map_or(0.0, |f| f64::from(f as f32)),
@@ -795,6 +797,16 @@ mod tests {
     use serde_json::{Map, Value, json};
 
     use super::*;
+
+    /// `shape` finds every generated table by its Go type (the probe writes `ALL` sorted by
+    /// `go_type`, which the binary search relies on) and nothing else.
+    #[test]
+    fn shape_finds_every_table() {
+        for s in encode_shapes::ALL {
+            assert_eq!(shape(s.go_type), Some(*s), "{}", s.go_type);
+        }
+        assert!(shape("genai.Nope").is_none());
+    }
 
     /// A [`Log`] that records every text it is given.
     fn recording_log() -> (Log, Arc<Mutex<Vec<String>>>) {
@@ -1130,7 +1142,7 @@ mod tests {
         serde_json::from_value(Value::Object(camel)).unwrap()
     }
 
-    /// Every NDJSON line Go's agentengine server wrote in Task 2's server fixtures (the
+    /// Every NDJSON line Go's agentengine server wrote in the server fixtures (the
     /// scripted scenario's events, the `streaming_agent_run_with_events` envelopes and the
     /// model-error line) is reproduced byte for byte: each event is decoded back into a
     /// `gadk_session::Event` and re-encoded with `emit_json`.

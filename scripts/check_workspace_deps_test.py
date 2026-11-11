@@ -243,8 +243,9 @@ class EdgeTest(unittest.TestCase):
     def test_agentregistry_edges_are_agent_auth_platform_plus_optional_a2a_and_mcp(self):
         self.assertEqual(cwd.ALLOWED["gadk-agentregistry"],
                          {"gadk-agent", "gadk-auth", "gadk-platform", "gadk-a2a", "gadk-mcp"})
-        # Until the façade's `agentregistry` feature (5c Task 10) nothing depends on it.
-        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-agentregistry" in deps], [])
+        # Only the façade depends on it (feature `agentregistry`).
+        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-agentregistry" in deps],
+                         ["gadk"])
         self.assertIn("gadk-agentregistry", cwd.ENGINE_DEPENDENTS)
         self.assertIn(("gadk-agentregistry", "gadk-a2a"), cwd.OPTIONAL)
         self.assertIn(("gadk-agentregistry", "gadk-mcp"), cwd.OPTIONAL)

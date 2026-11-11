@@ -59,6 +59,9 @@ impl RestRequester {
         } else {
             format!("{}/{}/{}", self.base_url, self.base_path, resource_path)
         };
+        // Divergence (ledger 5c): `Url::parse` (WHATWG) normalises `.` / `..` path segments and
+        // accepts an invalid escape such as `%zz`; Go's `url.Parse` + `RequestURI()` sends
+        // `projects/p/../x` as written and fails `%zz` with `building request:`.
         let mut url =
             reqwest::Url::parse(&full_url).map_err(|e| Error::BuildRequest(e.to_string()))?;
         if !params.is_empty() {

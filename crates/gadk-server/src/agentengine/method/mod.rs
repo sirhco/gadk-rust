@@ -12,7 +12,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-#![allow(dead_code, unused_variables, unused_imports, clippy::todo)]
 
 //! Go `server/agentengine/controllers/method`: `MethodHandler` and the six methods.
 
@@ -90,7 +89,7 @@ pub(crate) fn session_error_text(err: &SessionError, session_id: &str) -> String
     }
 }
 
-/// Replays `testdata/agentengine` exchange fixtures (Appendix C C.11) through
+/// Replays `testdata/agentengine` fixtures (Appendix C C.11) through
 /// [`new_handler`](crate::agentengine::new_handler) over the probe's scenario.
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -107,7 +106,8 @@ pub(crate) mod replay {
     use pretty_assertions::assert_eq;
     use serde_json::Value;
 
-    use crate::agentengine::{AgentEngineConfig, new_handler};
+    use crate::agentengine::unmarshal::MAX_DEPTH;
+    use crate::agentengine::{AgentEngineConfig, list_class_methods, new_handler};
     use crate::mux::{Handler, WriteDeadline};
     use crate::rest::testutil::wire_scenario::{assistant_agent, fixed_platform};
 
@@ -119,17 +119,27 @@ pub(crate) mod replay {
         config: &'static str,
         handler: Handler,
         log: Arc<Mutex<String>>,
+        /// What `new_handler` logged.
+        startup_log: String,
     }
 
     impl Scenario {
         /// Go `NewHandler(cfg, 0, <limit>, "test-engine")` on a fresh fixed platform; the
-        /// startup log is discarded.
+        /// startup log is kept for the `startup` fixture.
         pub(crate) fn new(config: &'static str) -> Scenario {
             let max_payload_size = match config {
                 "main" => 4096,
                 "small" => 32,
                 other => panic!("unknown fixture configuration {other}"),
             };
+            Scenario::with_max_payload_size(config, max_payload_size)
+        }
+
+        /// [`Scenario::new`]'s handler with another payload limit.
+        pub(crate) fn with_max_payload_size(
+            config: &'static str,
+            max_payload_size: i64,
+        ) -> Scenario {
             let platform = fixed_platform();
             let mut cfg = AgentEngineConfig::new(
                 Arc::new(InMemorySessionService::with_platform(platform.clone())),
@@ -150,17 +160,19 @@ pub(crate) mod replay {
                 }
             }));
             let handler = new_handler(cfg, GoDuration(0), max_payload_size, "test-engine").unwrap();
-            log.lock().unwrap().clear();
+            let startup_log = std::mem::take(&mut *log.lock().unwrap());
             Scenario {
                 config,
                 handler,
                 log,
+                startup_log,
             }
         }
 
-        /// Sends fixture `name`'s request and asserts status, headers (without
-        /// [`SERVER_HEADERS`]), body and log byte for byte (`Processing event: ` lines dropped
-        /// on both sides).
+        /// Replays fixture `name` by its `kind`: `startup` compares the startup log,
+        /// `class_methods` compares [`list_class_methods`], and `exchange` sends the request and
+        /// compares status, headers (without [`SERVER_HEADERS`]), body and log byte for byte
+        /// (`Processing event: ` lines dropped on both sides).
         pub(crate) async fn replay(&self, name: &str) {
             let path = format!(
                 "{}/testdata/agentengine/{name}.json",
@@ -169,8 +181,29 @@ pub(crate) mod replay {
             let fx: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
             assert_eq!(fx["name"], name);
             assert_eq!(fx["config"], self.config, "{name}");
-            assert_eq!(fx["kind"], "exchange", "{name}");
             assert_eq!(fx["compare"], "exact", "{name}");
+            match fx["kind"].as_str().unwrap() {
+                "exchange" => {}
+                "startup" => {
+                    assert_eq!(
+                        drop_processing_lines(&self.startup_log),
+                        drop_processing_lines(fx["log"].as_str().unwrap()),
+                        "{name}: startup log"
+                    );
+                    return;
+                }
+                "class_methods" => {
+                    let got = Value::Array(
+                        list_class_methods()
+                            .into_iter()
+                            .map(Value::Object)
+                            .collect(),
+                    );
+                    assert_eq!(got, fx["methods"], "{name}: methods");
+                    return;
+                }
+                other => panic!("{name}: unknown fixture kind {other}"),
+            }
 
             let request = &fx["request"];
             let mut req = Request::builder()
@@ -226,6 +259,23 @@ pub(crate) mod replay {
         }
     }
 
+    impl Scenario {
+        /// POSTs `body` (JSON) to `target`: the status and the body text.
+        pub(crate) async fn post(&self, target: &str, body: String) -> (u16, String) {
+            let mut req = Request::builder()
+                .method(Method::POST)
+                .uri(target)
+                .header("Content-Type", "application/json")
+                .body(Body::from(body))
+                .unwrap();
+            req.extensions_mut().insert(WriteDeadline::new(|_| {}));
+            let resp = (self.handler)(req).await;
+            let status = resp.status().as_u16();
+            let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+            (status, String::from_utf8(body.to_vec()).unwrap())
+        }
+    }
+
     /// The text without its `Processing event: ` lines (C.11).
     fn drop_processing_lines(text: &str) -> String {
         text.split_inclusive('\n')
@@ -239,6 +289,127 @@ pub(crate) mod replay {
         for name in names {
             scenario.replay(name).await;
         }
+    }
+
+    /// The server fixtures (C.11), sorted: `*.json` without `*.deltas.json`.
+    fn fixture_names() -> Vec<String> {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/agentengine");
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .filter(|n| n.ends_with(".json") && !n.ends_with(".deltas.json"))
+            .map(|n| n.trim_end_matches(".json").to_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// Every server fixture `scripts/gen-go-agentengine` recorded from ADK-Go (29, spec R19), replayed in
+    /// file-name order through the real handlers, one handler per configuration (`main_*`,
+    /// then `small_*`), so later requests see earlier state and draw later clock and UUID
+    /// values exactly as in the probe.
+    #[tokio::test]
+    async fn replays_every_server_fixture_in_order() {
+        let names = fixture_names();
+        assert_eq!(names.len(), 29, "{names:?}");
+        let mut replayed = 0;
+        for config in ["main", "small"] {
+            let prefix = format!("{config}_");
+            let of_config: Vec<&str> = names
+                .iter()
+                .map(String::as_str)
+                .filter(|n| n.starts_with(&prefix))
+                .collect();
+            assert!(!of_config.is_empty(), "{config}");
+            replayed += of_config.len();
+            replay_all(config, &of_config).await;
+        }
+        assert_eq!(replayed, names.len());
+    }
+
+    /// `levels` nested objects `{"a":…}` around `1`.
+    fn nested(levels: usize) -> String {
+        format!("{}1{}", r#"{"a":"#.repeat(levels), "}".repeat(levels))
+    }
+
+    /// Runs `f` on a current-thread runtime on a thread with a tokio worker's default 2 MiB
+    /// stack.
+    fn on_2_mib_stack<F: std::future::Future<Output = ()>>(f: impl FnOnce() -> F + Send + 'static) {
+        std::thread::Builder::new()
+            .stack_size(2 << 20)
+            .spawn(move || {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap()
+                    .block_on(f());
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// The deepest session state the request cap ([`MAX_DEPTH`]) accepts goes through the real
+    /// handler on a 2 MiB stack without aborting: `async_create_session` stores it (body 1,
+    /// `input` 2, `state` 3, then `MAX_DEPTH - 3` levels) and `async_get_session` answers it;
+    /// one more level is Go's 400 `exceeded max depth`.
+    #[test]
+    fn deepest_session_state_is_created_and_read_on_a_2_mib_stack() {
+        on_2_mib_stack(|| async {
+            let scenario = Scenario::with_max_payload_size("main", 1 << 20);
+            let levels = MAX_DEPTH - 3;
+            let create = |levels: usize| {
+                format!(
+                    r#"{{"class_method":"async_create_session","input":{{"user_id":"u","state":{{"k":{}}}}}}}"#,
+                    nested(levels)
+                )
+            };
+            let (status, body) = scenario.post("/reasoning_engine", create(levels + 1)).await;
+            assert_eq!((status, body.as_str()), (400, "exceeded max depth\n"));
+
+            let (status, body) = scenario.post("/reasoning_engine", create(levels)).await;
+            assert_eq!(status, 200, "{}", &body[..body.len().min(200)]);
+            assert_eq!(body.matches(r#"{"a":"#).count(), levels);
+            let id_at = body.find(r#""id":""#).unwrap() + 6;
+            let id = &body[id_at..id_at + body[id_at..].find('"').unwrap()];
+
+            let get = format!(
+                r#"{{"class_method":"async_get_session","input":{{"user_id":"u","session_id":"{id}"}}}}"#
+            );
+            let (status, body) = scenario.post("/reasoning_engine", get).await;
+            assert_eq!(status, 200, "{}", &body[..body.len().min(200)]);
+            assert_eq!(body.matches(r#"{"a":"#).count(), levels);
+        });
+    }
+
+    /// The deepest message the request cap ([`MAX_DEPTH`]) accepts runs through the real
+    /// handler, the runner and the scripted model on a 2 MiB stack without aborting: a function
+    /// response part (body 1, `input` 2, `message` 3, `parts` 4, the part 5,
+    /// `functionResponse` 6, `response` 7, then `MAX_DEPTH - 7` levels); one more level is Go's
+    /// 400 `exceeded max depth`.
+    #[test]
+    fn deepest_stream_query_message_runs_on_a_2_mib_stack() {
+        on_2_mib_stack(|| async {
+            let scenario = Scenario::with_max_payload_size("main", 1 << 20);
+            let levels = MAX_DEPTH - 7;
+            let query = |levels: usize| {
+                format!(
+                    r#"{{"class_method":"async_stream_query","input":{{"user_id":"u","message":{{"role":"user","parts":[{{"functionResponse":{{"name":"save_note","response":{{"r":{}}}}}}}]}}}}}}"#,
+                    nested(levels)
+                )
+            };
+            let (status, body) = scenario
+                .post("/stream_reasoning_engine", query(levels + 1))
+                .await;
+            assert_eq!((status, body.as_str()), (400, "exceeded max depth\n"));
+
+            let (status, body) = scenario
+                .post("/stream_reasoning_engine", query(levels))
+                .await;
+            assert_eq!(status, 200, "{}", &body[..body.len().min(200)]);
+            assert!(body.contains("Saved your note."), "{body}");
+            assert!(!body.contains(r#""error""#), "{body}");
+        });
     }
 }
 

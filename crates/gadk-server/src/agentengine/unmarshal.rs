@@ -25,8 +25,7 @@ use serde::{Deserialize, Deserializer};
 use serde_json::value::RawValue;
 use serde_json::{Map, Number, Value};
 
-use super::encode::{GoKind, GoStruct};
-use super::encode_shapes;
+use super::encode::{self, GoKind, GoStruct};
 
 /// The genai types reachable from the request models that have their own `UnmarshalJSON`
 /// (`genai.Content` → `Part.VideoMetadata`, `Part.AudioTranscription`): Go type, Go's type text
@@ -62,8 +61,9 @@ enum Durations {
 /// [`encode_shapes`](super::encode_shapes), e.g. `MODELS_QUERY`), producing the Rust model `T`:
 ///
 /// 1. syntax: the whole input must be one JSON value (Go `checkValid`); an empty or truncated
-///    input is `unexpected end of JSON input`; nesting deeper than Go's limit (10000 arrays and
-///    objects) is `exceeded max depth`, unless a syntax error comes earlier in the input; any
+///    input is `unexpected end of JSON input`; nesting deeper than [`MAX_DEPTH`] (512 arrays and
+///    objects; Go's limit is 10000) is `exceeded max depth`, unless a syntax error comes earlier
+///    in the input; any
 ///    other syntax error keeps serde_json's text (ledgered, as in 5a);
 /// 2. keys: in each JSON object decoded into a struct (`GoKind::Struct`, also through
 ///    `Pointer`/`Slice`/`Map` elements and into genai structs), a key matches the field whose
@@ -185,9 +185,18 @@ where
         .spawn_scoped(scope, f)
 }
 
-/// Go's nesting limit (`encoding/json`, Go 1.27: `exceeded max depth` past 10000 arrays and
-/// objects, the top-level value included).
-const MAX_DEPTH: usize = 10_000;
+/// The agentengine server's nesting limit for request bodies: `exceeded max depth` past 512
+/// arrays and objects, the top-level value included (Go's error text and counting rule; the
+/// controller answers it 400 as Go does).
+///
+/// Go's limit (`encoding/json`, Go 1.27) is 10000. This is a temporary cap, ledgered in
+/// `docs/parity/5c.md`: past this crate, a request's message or session state is cloned,
+/// converted and dropped recursively (gadk-engine's runner, `gadk_model::to_go_json`, the
+/// session service), which overflows a 2 MiB stack at about 2000 levels in a debug build. A
+/// later housekeeping task makes those paths depth-safe and restores Go's 10000. The
+/// deep-stack machinery here ([`INLINE_DEPTH`], [`on_deep_stack`], [`drop_value`]) stays: it
+/// also guards the encoder against deep events.
+pub(crate) const MAX_DEPTH: usize = 512;
 
 /// The deepest input decoded on the caller's stack.
 const INLINE_DEPTH: usize = 64;
@@ -242,7 +251,7 @@ fn too_deep(payload: &[u8], at: usize) -> String {
 }
 
 /// Drops a JSON value without recursing per level (`Value`'s own drop overflows a 2 MiB stack
-/// in a debug build at a few thousand levels; [`go_unmarshal`] accepts 10000).
+/// in a debug build at a few thousand levels; events can be that deep).
 pub(crate) fn drop_value(value: Value) {
     let mut stack = vec![value];
     while let Some(value) = stack.pop() {
@@ -398,7 +407,7 @@ fn fold_eq(a: &str, b: &str) -> bool {
 
 /// The decodable fields of `shape` with their json names (Go `cachedTypeFields`): `-`-tagged
 /// and unexported fields excluded, an untagged embedded struct's fields promoted.
-fn fields_of(shape: &'static GoStruct) -> Vec<(String, &'static super::encode::GoField)> {
+fn fields_of(shape: &'static GoStruct) -> Vec<(String, &'static encode::GoField)> {
     let mut out = Vec::new();
     for field in shape.fields {
         if field.tag == "-" {
@@ -411,7 +420,7 @@ fn fields_of(shape: &'static GoStruct) -> Vec<(String, &'static super::encode::G
                 GoKind::Pointer(GoKind::Struct(name)) => Some(*name),
                 _ => None,
             };
-            if let Some(inner) = inner.and_then(shape_named) {
+            if let Some(inner) = inner.and_then(encode::shape) {
                 out.extend(fields_of(inner));
                 continue;
             }
@@ -427,14 +436,6 @@ fn fields_of(shape: &'static GoStruct) -> Vec<(String, &'static super::encode::G
         out.push((name.to_owned(), field));
     }
     out
-}
-
-/// The shape named `go_type` among [`encode_shapes::ALL`].
-fn shape_named(go_type: &str) -> Option<&'static GoStruct> {
-    encode_shapes::ALL
-        .iter()
-        .copied()
-        .find(|s| s.go_type == go_type)
 }
 
 /// Go's `encoding/base64.StdEncoding.Decode` (`\r` and `\n` ignored, padding required, trailing
@@ -788,11 +789,14 @@ impl Decoder {
                 other => return Err(self.type_error(other.kind(), go_type)),
             },
             GoKind::RawMessage => {
+                // Divergence (ledger 5c): serde_json's 128-level recursion limit and its error
+                // text apply here (Go: its 10000 max depth); no request shape has a
+                // `json.RawMessage` field, so no request reaches it.
                 *slot = Some(serde_json::from_str(raw.get()).map_err(|e| e.to_string())?);
             }
             GoKind::Interface => *slot = self.interface_value(raw)?,
             GoKind::Struct(name) => {
-                let Some(shape) = shape_named(name) else {
+                let Some(shape) = encode::shape(name) else {
                     return Err(format!("json: no shape for Go type {name}"));
                 };
                 let mut obj = match slot.take() {
@@ -870,8 +874,8 @@ impl Decoder {
     /// for null); a number outside the `float64` range is `number <text>` of type `float64`.
     ///
     /// One pass over the (already validated) text with an explicit stack: an `any` value may be
-    /// nested 10000 deep, so neither native recursion nor re-splitting each level (quadratic in
-    /// the depth) is used here.
+    /// nested [`MAX_DEPTH`] deep (Go: 10000), so neither native recursion nor re-splitting each
+    /// level (quadratic in the depth) is used here.
     fn interface_value(&mut self, raw: &RawValue) -> Result<Option<Value>, String> {
         let base = self.path.len();
         let result = self.interface_walk(raw.get());
@@ -1392,12 +1396,14 @@ mod tests {
         format!(r#"{{"class_method":"x","input":{value}}}"#)
     }
 
-    /// Go 1.27.2: 9999 levels inside the top-level object decode, 10000 are `exceeded max
-    /// depth`; the deepest accepted input decodes (and is dropped) on a 2 MiB stack.
+    /// Go 1.27.2's counting rule with the server's cap ([`MAX_DEPTH`], 512; Go's is 10000): 511
+    /// levels inside the top-level object decode, 512 are `exceeded max depth`; the deepest
+    /// accepted input decodes (and is dropped) on a 2 MiB stack.
     #[test]
-    fn go_max_depth_decodes_on_a_2_mib_stack() {
+    fn max_depth_decodes_on_a_2_mib_stack() {
         on_small_stack(|| {
-            let q: Query = go_unmarshal(input(&arrays(9999)).as_bytes(), &MODELS_QUERY).unwrap();
+            let q: Query =
+                go_unmarshal(input(&arrays(MAX_DEPTH - 1)).as_bytes(), &MODELS_QUERY).unwrap();
             assert_eq!(q.class_method, "x");
             let mut depth = 0;
             let mut v = q.input.as_ref().unwrap();
@@ -1408,15 +1414,20 @@ mod tests {
                     None => break,
                 }
             }
-            assert_eq!(depth, 9999);
+            assert_eq!(depth, MAX_DEPTH - 1);
             drop_value(q.input.unwrap());
 
-            let objects = format!("{}1{}", r#"{"a":"#.repeat(9999), "}".repeat(9999));
+            let objects = format!(
+                "{}1{}",
+                r#"{"a":"#.repeat(MAX_DEPTH - 1),
+                "}".repeat(MAX_DEPTH - 1)
+            );
             let q: Query = go_unmarshal(input(&objects).as_bytes(), &MODELS_QUERY).unwrap();
             drop_value(q.input.unwrap());
 
             assert_eq!(
-                go_unmarshal::<Query>(input(&arrays(10000)).as_bytes(), &MODELS_QUERY).unwrap_err(),
+                go_unmarshal::<Query>(input(&arrays(MAX_DEPTH)).as_bytes(), &MODELS_QUERY)
+                    .unwrap_err(),
                 "exceeded max depth"
             );
         });
@@ -1427,20 +1438,23 @@ mod tests {
     #[test]
     fn exceeded_max_depth_is_the_first_error_in_input_order() {
         on_small_stack(|| {
-            let deep = arrays(10000);
+            let deep = arrays(MAX_DEPTH);
             let err = |payload: &str| go_unmarshal::<Query>(payload.as_bytes(), &MODELS_QUERY);
             for payload in [
                 format!(r#"{{"class_method":5,"input":{deep}}}"#),
-                format!(r#"{{"class_method":"x","input":{}"#, "[".repeat(10001)),
+                format!(
+                    r#"{{"class_method":"x","input":{}"#,
+                    "[".repeat(MAX_DEPTH + 1)
+                ),
                 format!("{}x", input(&deep)),
                 format!(r#"{{"zz":{deep}}}"#),
-                arrays(10001),
+                arrays(MAX_DEPTH + 1),
                 input(&format!("[1e400,{deep}]")),
             ] {
                 assert_eq!(err(&payload).unwrap_err(), "exceeded max depth");
             }
             assert_eq!(
-                err(&arrays(10000)).unwrap_err(),
+                err(&arrays(MAX_DEPTH)).unwrap_err(),
                 "json: cannot unmarshal array into Go value of type models.Query"
             );
             // An earlier syntax error keeps serde's text, as for a shallow input.
@@ -1449,7 +1463,7 @@ mod tests {
                 err(r#"{"class_method" 5,"input":[]}"#).unwrap_err()
             );
             assert_eq!(
-                err(&format!("{{}} {}", "[".repeat(10001))).unwrap_err(),
+                err(&format!("{{}} {}", "[".repeat(MAX_DEPTH + 1))).unwrap_err(),
                 err("{} [").unwrap_err()
             );
         });

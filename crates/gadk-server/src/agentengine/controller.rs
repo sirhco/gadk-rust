@@ -121,7 +121,8 @@ impl Controller {
             match go_unmarshal::<Query>(&payload, &encode_shapes::MODELS_QUERY) {
                 Ok(query) => {
                     class_method = query.class_method;
-                    // `input` may be nested 10000 deep (Go's limit); its native drop is not.
+                    // `input` may be nested deeper than a native drop survives on a small
+                    // stack (see `unmarshal::MAX_DEPTH`); `drop_value` is not recursive.
                     if let Some(input) = query.input {
                         drop_value(input);
                     }
@@ -414,10 +415,11 @@ mod tests {
         assert!(lines.lock().unwrap().is_empty());
     }
 
-    /// Go 1.27.2: 9999 levels inside the payload object dispatch, 10000 are `http.Error`
-    /// 400 `exceeded max depth`; on a tokio worker's default 2 MiB stack.
+    /// Go 1.27.2's counting rule with the server's cap (`unmarshal::MAX_DEPTH`, 512; Go's is
+    /// 10000): 511 levels inside the payload object dispatch, 512 are `http.Error` 400
+    /// `exceeded max depth`; on a tokio worker's default 2 MiB stack.
     #[test]
-    fn go_max_depth_on_a_2_mib_stack() {
+    fn max_depth_on_a_2_mib_stack() {
         std::thread::Builder::new()
             .stack_size(2 << 20)
             .spawn(|| {
@@ -434,9 +436,10 @@ mod tests {
                     };
                     let (c, lines) =
                         controller(1 << 20, GoDuration(0), vec![Fake::new("m", Ok("ok"))]);
-                    let resp = c.query(post(Body::from(body(9999)))).await;
+                    let max = crate::agentengine::unmarshal::MAX_DEPTH;
+                    let resp = c.query(post(Body::from(body(max - 1)))).await;
                     assert_eq!(parts(resp).await, (200, vec![], "ok".to_owned()));
-                    let resp = c.query(post(Body::from(body(10000)))).await;
+                    let resp = c.query(post(Body::from(body(max)))).await;
                     assert_eq!(
                         parts(resp).await,
                         (400, http_error_headers(), "exceeded max depth\n".to_owned())
