@@ -39,7 +39,8 @@ pub use exec::{TaskRunner, TokioTaskRunner};
 pub use futures::future::BoxFuture;
 pub use go_err::GoWrapped;
 pub use go_fmt::{
-    go_query_escape, go_quote, go_sprint_value, go_to_lower, go_to_upper, go_type_name,
+    go_format_float_v, go_query_escape, go_quote, go_sprint_value, go_to_lower, go_to_upper,
+    go_type_name,
 };
 pub use go_path::{go_path_clean, go_path_join};
 pub use go_time::{

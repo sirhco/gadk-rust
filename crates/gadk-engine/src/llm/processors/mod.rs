@@ -120,7 +120,7 @@ pub(crate) fn go_sprint(v: &Value) -> String {
             .as_i64()
             .map(|i| i.to_string())
             .or_else(|| n.as_u64().map(|u| u.to_string()))
-            .unwrap_or_else(|| go_format_float_v(n.as_f64().unwrap_or_default())),
+            .unwrap_or_else(|| gadk_platform::go_format_float_v(n.as_f64().unwrap_or_default())),
         Value::String(s) => s.clone(),
         Value::Array(a) => format!(
             "[{}]",
@@ -152,26 +152,6 @@ pub(crate) fn as_go_floats(v: &Value) -> Value {
                 .collect(),
         ),
         other => other.clone(),
-    }
-}
-
-/// Go `%v` of a float64 = `strconv.FormatFloat(f, 'g', -1, 64)`: shortest round-trip digits; `%e`
-/// form (`d.ddde±XX`, at least two exponent digits) when the decimal exponent is < -4 or >= 6
-/// (strconv ftoa.go `%g`: `if shortest { eprec = 6 }; exp := digs.dp - 1; if exp < -4 || exp >=
-/// eprec` → %e), else plain decimal with no trailing zeros. So 1e6 → "1e+06", 1234567.0 →
-/// "1.234567e+06", 123456.0 → "123456", 1.5 → "1.5", 0.0001 → "0.0001", 0.00001 → "1e-05".
-fn go_format_float_v(f: f64) -> String {
-    let sci = format!("{f:e}"); // Rust: shortest round-trip mantissa, e.g. "1.234567e6", "1e-5", "0e0"
-    let (mant, exp) = sci.split_once('e').unwrap_or((sci.as_str(), "0"));
-    let exp: i32 = exp.parse().unwrap_or(0);
-    if !(-4..6).contains(&exp) {
-        format!(
-            "{mant}e{}{:02}",
-            if exp < 0 { '-' } else { '+' },
-            exp.unsigned_abs()
-        )
-    } else {
-        format!("{f}") // Rust Display: shortest round-trip, never exponent form
     }
 }
 
@@ -361,6 +341,15 @@ mod tests {
 
     use super::*;
     use crate::llm::{config::LlmAgentConfig, flow::Flow};
+
+    /// Go `strconv` rounds an exact decimal tie half to even; Rust's shortest `{:e}` rounds it up.
+    #[test]
+    fn go_sprint_rounds_a_float_tie_half_to_even_like_go() {
+        assert_eq!(
+            go_sprint(&serde_json::from_str("141016749166520.625").unwrap()),
+            "1.4101674916652062e+14"
+        );
+    }
 
     #[test]
     fn go_sprint_formats_like_go_percent_v() {

@@ -21,7 +21,6 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
 use gadk_agent::tool_util::append_instructions;
 use gadk_agent::{Context, RunnableTool, Tool, ToolError};
 use gadk_genai::{FunctionDeclaration, Schema, Type};
@@ -149,11 +148,10 @@ pub(crate) fn go_json_entry(e: &MemoryEntry) -> Value {
     m.insert("Author".into(), Value::String(e.author.clone()));
     m.insert(
         "Timestamp".into(),
-        Value::String(
-            e.timestamp
-                .as_ref()
-                .map_or_else(|| GO_ZERO_TIME_JSON.to_string(), go_rfc3339_nano),
-        ),
+        Value::String(e.timestamp.as_ref().map_or_else(
+            || GO_ZERO_TIME_JSON.to_string(),
+            gadk_platform::go_format_rfc3339_nano,
+        )),
     );
     m.insert(
         "CustomMetadata".into(),
@@ -166,23 +164,6 @@ pub(crate) fn go_json_entry(e: &MemoryEntry) -> Value {
     Value::Object(m)
 }
 
-/// Go `time.Time.MarshalJSON` for a UTC time: `time.RFC3339Nano`
-/// (`2006-01-02T15:04:05.999999999Z07:00`). The fraction drops its trailing zeros and is omitted
-/// when the nanoseconds are zero. For a chrono leap second (nanoseconds >= 1e9) the fraction is
-/// taken modulo 1e9 so it stays nine digits, but chrono's `%S` prints that second as `60`, which
-/// Go (with no leap seconds) never writes.
-fn go_rfc3339_nano(t: &DateTime<Utc>) -> String {
-    let nanos = t.timestamp_subsec_nanos() % 1_000_000_000;
-    let mut s = t.format("%Y-%m-%dT%H:%M:%S").to_string();
-    if nanos != 0 {
-        let frac = format!("{nanos:09}");
-        s.push('.');
-        s.push_str(frac.trim_end_matches('0'));
-    }
-    s.push('Z');
-    s
-}
-
 /// A [`ToolError::Execution`] carrying Go's `errors.New(msg)` text.
 pub(crate) fn go_error(msg: impl Into<String>) -> ToolError {
     let msg: String = msg.into();
@@ -193,7 +174,7 @@ pub(crate) fn go_error(msg: impl Into<String>) -> ToolError {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use chrono::{TimeZone, Timelike};
+    use chrono::{TimeZone, Timelike, Utc};
     use gadk_genai::Content;
     use serde_json::json;
 
@@ -232,20 +213,6 @@ mod tests {
                 "Timestamp": "2025-01-02T03:04:05.123456789Z",
                 "CustomMetadata": {"k": "v"}
             })
-        );
-    }
-
-    #[test]
-    fn go_rfc3339_nano_trims_trailing_zeros() {
-        let base = Utc.with_ymd_and_hms(2025, 1, 2, 3, 4, 5).unwrap();
-        assert_eq!(go_rfc3339_nano(&base), "2025-01-02T03:04:05Z");
-        assert_eq!(
-            go_rfc3339_nano(&base.with_nanosecond(500_000_000).unwrap()),
-            "2025-01-02T03:04:05.5Z"
-        );
-        assert_eq!(
-            go_rfc3339_nano(&base.with_nanosecond(1_000).unwrap()),
-            "2025-01-02T03:04:05.000001Z"
         );
     }
 }

@@ -372,7 +372,10 @@ impl CachingClient {
         let fetch = {
             let mut in_flight = self.in_flight.lock();
             match in_flight.get(url) {
-                // A finished entry is left over from callers that went away before it completed.
+                // Join a fetch `peek` reports unfinished. That includes one whose callers all
+                // went away before it finished: nothing polled its `Shared`, but its spawned task
+                // ran on and this caller gets that result. An entry `peek` reports finished was
+                // answered to its callers, and the last of them is about to remove it: fetch anew.
                 Some(f) if f.peek().is_none() => f.clone(),
                 _ => {
                     // Spawned, so the fetch completes (within its timeout) and is cached even if

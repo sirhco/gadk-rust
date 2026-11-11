@@ -18,7 +18,6 @@
 
 use std::collections::HashSet;
 
-use chrono::{DateTime, Datelike, Timelike, Utc};
 use gadk_genai::{Content, GenerateContentResponseUsageMetadata};
 use gadk_model::LlmResponse;
 use gadk_session::compaction::is_prose_part;
@@ -182,37 +181,14 @@ pub(crate) fn ref_key(ev: &Event) -> String {
     format!(
         "{}@{}",
         ev.invocation_id,
-        go_rfc3339_nano(truncate_to_ref(ev.timestamp))
+        gadk_platform::go_format_rfc3339_nano(&truncate_to_ref(ev.timestamp))
     )
-}
-
-/// Go `t.UTC().Format(time.RFC3339Nano)`: fractional seconds with trailing zeros trimmed and
-/// the dot omitted when they are all zero.
-fn go_rfc3339_nano(t: DateTime<Utc>) -> String {
-    let mut s = format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
-        t.year(),
-        t.month(),
-        t.day(),
-        t.hour(),
-        t.minute(),
-        t.second()
-    );
-    // chrono reports a leap second as nanosecond >= 1e9; Go has no leap seconds.
-    let nanos = t.nanosecond() % 1_000_000_000;
-    if nanos != 0 {
-        let frac = format!("{nanos:09}");
-        s.push('.');
-        s.push_str(frac.trim_end_matches('0'));
-    }
-    s.push('Z');
-    s
 }
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
-    use chrono::TimeZone;
+    use chrono::{DateTime, TimeZone, Utc};
     use pretty_assertions::assert_eq;
 
     use super::*;

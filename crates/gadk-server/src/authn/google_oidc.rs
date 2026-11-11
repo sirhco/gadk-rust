@@ -75,6 +75,9 @@ pub(crate) struct GoogleOidc {
 /// [`AuthnError::Other`]. A missing, malformed or unverifiable token — including one whose
 /// signing certificates cannot be fetched — is [`AuthnError::Unauthenticated`] (401); a verified
 /// token naming an unlisted or unverified principal is [`AuthnError::Forbidden`] (403).
+///
+/// Authenticating must run inside a Tokio runtime: a certificate-cache miss spawns its fetch
+/// (`tokio::spawn`) so it completes and is cached even if the request goes away.
 pub fn google_oidc(cfg: GoogleOidcConfig) -> Result<Arc<dyn Authenticator>, AuthnError> {
     Ok(Arc::new(new_google_oidc(cfg)?))
 }

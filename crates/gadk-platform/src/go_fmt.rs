@@ -200,7 +200,7 @@ pub fn go_type_name(v: &Value) -> &'static str {
 /// (141016749166520.625 → Go `1.4101674916652062e+14`). So only the shortest digit count is taken
 /// from `{f:e}`; the digits themselves come from Rust's exact-precision formatting at that count,
 /// which rounds ties to even as Go does.
-fn go_format_float_v(f: f64) -> String {
+pub fn go_format_float_v(f: f64) -> String {
     let shortest = format!("{f:e}"); // e.g. "1.234567e6", "-0e0"
     let shortest_mant = shortest
         .split_once('e')
