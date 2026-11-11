@@ -92,6 +92,10 @@ pub fn new_a2a_client_provider(
 /// a2a-go's default factory: JSON-RPC and REST over one HTTP client with
 /// `defaultRequestTimeout`.
 fn default_client_factory() -> a2a_client::A2AClientFactory {
+    // `build` fails only when reqwest cannot initialize its TLS backend. The fallback is
+    // `reqwest::Client::new()`, which panics on that same failure: this panics exactly when
+    // reqwest's own `Client::new` would. `new_a2a_client_provider` (Go `NewA2AClientProvider`)
+    // does not return an error, so there is nothing to propagate it through.
     let http = reqwest::Client::builder()
         .timeout(DEFAULT_REQUEST_TIMEOUT)
         .build()
@@ -101,11 +105,11 @@ fn default_client_factory() -> a2a_client::A2AClientFactory {
 
 /// The factory Go `NewA2A` builds when `A2AConfig.Auth` is set: JSON-RPC and REST over
 /// [`auth_http_client`] (Go `authHTTPClient`), with [`AuthInterceptor`] applying the credential
-/// of the current auth scope to every call.
-pub(crate) fn auth_client_factory() -> a2a_client::A2AClientFactory {
-    transport_factory(auth_http_client())
+/// of the current auth scope to every call. Fails as [`auth_http_client`] does.
+pub(crate) fn auth_client_factory() -> Result<a2a_client::A2AClientFactory, Error> {
+    Ok(transport_factory(auth_http_client()?)
         .with_interceptor(Arc::new(AuthInterceptor))
-        .build()
+        .build())
 }
 
 /// A factory builder with the JSON-RPC and REST transports over `http`.

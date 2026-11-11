@@ -246,7 +246,7 @@ async fn test_cancel_child_input_required_tasks_authenticates_cancel() {
         // Stands in for the provider new_a2a builds for itself when auth is set, which is the
         // only way owns_auth_scope is ever true in production.
         client_provider: Arc::new(ScopeRequiringProvider(new_a2a_client_provider(Some(
-            Arc::new(auth_client_factory()),
+            Arc::new(auth_client_factory().unwrap()),
         )))),
         owns_auth_scope: true,
         card_fetch_client: None,

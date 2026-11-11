@@ -482,6 +482,7 @@ fn an_upgrade_compares_whatwg_normalized_ports() {
 async fn test_auth_http_client_redirect_cap() {
     let (base, heads) = serve(|_, path| redirect_to(path)).await;
     let err = auth_http_client()
+        .unwrap()
         .get(format!("{base}/loop"))
         .send()
         .await
@@ -502,7 +503,12 @@ async fn test_auth_http_client_timeout() {
     let silent = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}/", silent.local_addr().unwrap());
     let start = tokio::time::Instant::now();
-    let err = auth_http_client().get(url).send().await.unwrap_err();
+    let err = auth_http_client()
+        .unwrap()
+        .get(url)
+        .send()
+        .await
+        .unwrap_err();
     assert!(err.is_timeout(), "error = {err:?}");
     let waited = start.elapsed();
     assert!(
@@ -1560,7 +1566,7 @@ async fn redirects_follow_go_check_redirect_on_the_wire() {
         _ => ok_response(),
     })
     .await;
-    let client = auth_http_client();
+    let client = auth_http_client().unwrap();
 
     let resp = client
         .get(format!("{base}/a"))
@@ -1598,7 +1604,12 @@ async fn card_fetch_http_client_times_out_after_30s() {
     let silent = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}/", silent.local_addr().unwrap());
     let start = tokio::time::Instant::now();
-    let err = card_fetch_http_client().get(url).send().await.unwrap_err();
+    let err = card_fetch_http_client()
+        .unwrap()
+        .get(url)
+        .send()
+        .await
+        .unwrap_err();
     assert!(err.is_timeout(), "error = {err:?}");
     let waited = start.elapsed();
     assert!(

@@ -19,7 +19,7 @@
 //! fetch gadk-a2a performs itself).
 
 use std::net::IpAddr;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures::future::BoxFuture;
@@ -71,15 +71,24 @@ pub fn new_agent_card_provider(
 ) -> AgentCardProvider {
     let source: Arc<str> = Arc::from(source.into());
     let opts = Arc::new(opts);
+    // One client per provider, not per process: a pooled connection is bound to the runtime
+    // that opened it, so a process-wide client breaks a provider used from another runtime.
+    let default_client = default_card_client();
     Arc::new(move || {
         let source = Arc::clone(&source);
         let opts = Arc::clone(&opts);
-        Box::pin(async move { resolve_card(&source, &opts).await })
+        let default_client = default_client.clone();
+        Box::pin(async move { resolve_card(&source, &opts, &default_client).await })
     })
 }
 
-/// The body of a [`new_agent_card_provider`] provider.
-async fn resolve_card(source: &str, opts: &CardResolveOptions) -> Result<a2a::AgentCard, Error> {
+/// The body of a [`new_agent_card_provider`] provider; `default_client` sends the fetch outside
+/// an auth scope.
+async fn resolve_card(
+    source: &str,
+    opts: &CardResolveOptions,
+    default_client: &reqwest::Client,
+) -> Result<a2a::AgentCard, Error> {
     if classify_card_source(source)? {
         return read_card_file(source);
     }
@@ -91,7 +100,7 @@ async fn resolve_card(source: &str, opts: &CardResolveOptions) -> Result<a2a::Ag
             require_secure_card_source(source)?;
             fetch_card(&client, source, opts, true).await
         }
-        None => fetch_card(default_card_client(), source, opts, false).await,
+        None => fetch_card(default_client, source, opts, false).await,
     }
     .map_err(|e| Error::wrap("failed to fetch an agent card", e))?;
     validate_card_interface_origins(&card, source)?;
@@ -99,14 +108,15 @@ async fn resolve_card(source: &str, opts: &CardResolveOptions) -> Result<a2a::Ag
 }
 
 /// a2a-go `agentcard.defaultClient`: a 30 s timeout and the default redirect policy.
-fn default_card_client() -> &'static reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .timeout(DEFAULT_CARD_FETCH_TIMEOUT)
-            .build()
-            .unwrap_or_default()
-    })
+fn default_card_client() -> reqwest::Client {
+    // `build` fails only when reqwest cannot initialize its TLS backend. The fallback is
+    // `reqwest::Client::new()`, which panics on that same failure: this panics exactly when
+    // reqwest's own `Client::new` would. `new_agent_card_provider` (Go `NewAgentCardProvider`)
+    // does not return an error, so there is nothing to propagate it through.
+    reqwest::Client::builder()
+        .timeout(DEFAULT_CARD_FETCH_TIMEOUT)
+        .build()
+        .unwrap_or_default()
 }
 
 /// a2a-go `Resolver.Resolve` for an http(s) source: build the URL, send the request (with the

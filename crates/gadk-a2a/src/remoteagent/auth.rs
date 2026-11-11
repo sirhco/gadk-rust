@@ -288,17 +288,21 @@ const CARD_FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_REDIRECTS: usize = 10;
 
 /// Go `authHTTPClient`: 3 min timeout, Go `checkRedirect` policy, at most 10 redirects.
-pub(crate) fn auth_http_client() -> reqwest::Client {
+///
+/// Fails only when reqwest cannot initialize its TLS backend (Go's `http.Client` literal cannot
+/// fail), so [`new_a2a`](super::new_a2a) returns the error instead of panicking.
+pub(crate) fn auth_http_client() -> Result<reqwest::Client, Error> {
     http_client(A2A_REQUEST_TIMEOUT)
 }
 
-/// Go `cardFetchHTTPClient`: the RPC client's redirect policy with a 30 s timeout.
-pub(crate) fn card_fetch_http_client() -> reqwest::Client {
+/// Go `cardFetchHTTPClient`: the RPC client's redirect policy with a 30 s timeout. Fails as
+/// [`auth_http_client`] does.
+pub(crate) fn card_fetch_http_client() -> Result<reqwest::Client, Error> {
     http_client(CARD_FETCH_TIMEOUT)
 }
 
-fn http_client(timeout: Duration) -> reqwest::Client {
-    let built = reqwest::Client::builder()
+fn http_client(timeout: Duration) -> Result<reqwest::Client, Error> {
+    reqwest::Client::builder()
         .timeout(timeout)
         .redirect(reqwest::redirect::Policy::custom(
             |attempt| match check_redirect(attempt.url(), attempt.previous()) {
@@ -306,17 +310,8 @@ fn http_client(timeout: Duration) -> reqwest::Client {
                 Err(err) => attempt.error(err),
             },
         ))
-        .build();
-    match built {
-        Ok(client) => client,
-        Err(err) => {
-            // `build` fails only when the TLS backend cannot be initialized, and
-            // `Client::new` then fails on the same error (reqwest documents that it panics);
-            // no client exists to return without one.
-            tracing::error!(error = %err, "remoteagent: build the A2A HTTP client");
-            reqwest::Client::new()
-        }
-    }
+        .build()
+        .map_err(|err| Error::wrap("remoteagent: build the A2A HTTP client", err))
 }
 
 /// Go `checkRedirect`: the hop cap, then the same-credential-target check against the original

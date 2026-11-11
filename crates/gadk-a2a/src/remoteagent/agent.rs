@@ -160,8 +160,8 @@ pub fn new_a2a(cfg: A2AConfig) -> Result<Arc<dyn Agent>, Error> {
         None if cfg.auth.is_some() => {
             // Go `cardFetchHTTPClient(authHTTPClient(cfg.Auth))`: the card fetch shares the RPC
             // client's redirect policy, with its own timeout.
-            card_client = Some(card_fetch_http_client());
-            new_a2a_client_provider(Some(Arc::new(auth_client_factory())))
+            card_client = Some(card_fetch_http_client()?);
+            new_a2a_client_provider(Some(Arc::new(auth_client_factory()?)))
         }
         None => new_a2a_client_provider(None),
     };
