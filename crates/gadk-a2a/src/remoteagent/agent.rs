@@ -900,6 +900,169 @@ mod tests {
         assert!(matches!(calls[2], FakeCall::Destroy), "{calls:?}");
     }
 
+    /// Records, per client call (and per stream poll), whether an auth scope was in effect.
+    #[derive(Default)]
+    struct ScopeProbe {
+        seen: Arc<Mutex<Vec<(&'static str, bool)>>>,
+    }
+
+    fn record(seen: &Mutex<Vec<(&'static str, bool)>>, what: &'static str) {
+        let scoped = crate::remoteagent::auth::current_credential_scope().is_some();
+        seen.lock().push((what, scoped));
+    }
+
+    #[async_trait::async_trait]
+    impl A2AClientProvider for ScopeProbe {
+        async fn create_client(
+            &self,
+            _cx: ClientContext<'_>,
+            _card: &a2a::AgentCard,
+        ) -> Result<Arc<dyn A2AClient>, Error> {
+            record(&self.seen, "create_client");
+            Ok(Arc::new(ScopeProbeClient {
+                seen: Arc::clone(&self.seen),
+            }))
+        }
+    }
+
+    struct ScopeProbeClient {
+        seen: Arc<Mutex<Vec<(&'static str, bool)>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl A2AClient for ScopeProbeClient {
+        async fn send_message(
+            &self,
+            _req: &a2a::SendMessageRequest,
+        ) -> Result<a2a::SendMessageResponse, a2a::A2AError> {
+            record(&self.seen, "send");
+            Ok(a2a::SendMessageResponse::Task(task(
+                a2a::TaskState::Working,
+            )))
+        }
+
+        async fn send_streaming_message(
+            &self,
+            _req: &a2a::SendMessageRequest,
+        ) -> Result<BoxStream<'static, Result<a2a::StreamResponse, a2a::A2AError>>, a2a::A2AError>
+        {
+            record(&self.seen, "stream");
+            let seen = Arc::clone(&self.seen);
+            let mut left = 2;
+            Ok(Box::pin(futures::stream::poll_fn(move |_| {
+                record(&seen, "poll");
+                if left == 0 {
+                    return std::task::Poll::Ready(None);
+                }
+                left -= 1;
+                std::task::Poll::Ready(Some(Ok(working_update())))
+            })))
+        }
+
+        async fn cancel_task(
+            &self,
+            _req: &a2a::CancelTaskRequest,
+        ) -> Result<a2a::Task, a2a::A2AError> {
+            record(&self.seen, "cancel");
+            Ok(task(a2a::TaskState::Canceled))
+        }
+
+        async fn destroy(&self) -> Result<(), a2a::A2AError> {
+            record(&self.seen, "destroy");
+            Ok(())
+        }
+    }
+
+    struct NeverCalled;
+
+    #[async_trait::async_trait]
+    impl gadk_auth::CredentialProvider for NeverCalled {
+        async fn credential(
+            &self,
+            _cx: &gadk_auth::AuthContext,
+        ) -> Result<Arc<dyn gadk_auth::Credential>, gadk_auth::Error> {
+            panic!("the probe client never resolves a credential")
+        }
+    }
+
+    /// A remote agent with `auth` over a scope-recording client provider. `new_a2a` refuses
+    /// `auth` with a custom provider, so the agent is assembled directly: this observes the
+    /// scope around `create_client` and each stream poll, which the built-in transport cannot
+    /// show (it sends nothing on either).
+    fn scoped_remote(probe: Arc<ScopeProbe>) -> Arc<RemoteAgent> {
+        let auth: Arc<dyn gadk_auth::CredentialProvider> = Arc::new(NeverCalled);
+        Arc::new(RemoteAgent {
+            cfg: Arc::new(A2AConfig {
+                name: "remote".into(),
+                agent_card: Some(card()),
+                auth: Some(Arc::clone(&auth)),
+                ..Default::default()
+            }),
+            server_config: Arc::new(A2AServerConfig {
+                agent_card: Some(card()),
+                agent_card_provider: None,
+                client_provider: probe,
+                owns_auth_scope: true,
+                card_fetch_client: None,
+                auth: Some(auth),
+            }),
+            card_client: None,
+            warned_cleartext: Mutex::new(HashSet::new()),
+        })
+    }
+
+    /// D3: with `auth`, client creation, the send, every stream poll and the cleanup cancel
+    /// (inline, and on the spawned task of an abandoned run) run inside the invocation's auth
+    /// scope; `destroy` runs outside it (Go: `destroy(ctx, …)`, not the send context).
+    #[tokio::test]
+    async fn every_authenticated_call_runs_inside_the_auth_scope() {
+        let fake = Arc::new(FakeA2AClient::new());
+        let ctx_agent = remote(&fake, None);
+
+        for mode in [StreamingMode::None, StreamingMode::Sse] {
+            let probe = Arc::new(ScopeProbe::default());
+            let remote = scoped_remote(Arc::clone(&probe));
+            let events: Vec<_> = remote.run(context(&ctx_agent, mode)).collect().await;
+            assert!(events.iter().all(Result::is_ok), "{mode:?}: {events:?}");
+            let seen = probe.seen.lock().clone();
+            let (sent, polls) = if mode == StreamingMode::None {
+                (&["create_client", "send", "cancel"][..], 0)
+            } else {
+                (&["create_client", "stream", "cancel"][..], 3)
+            };
+            for what in sent {
+                assert_eq!(
+                    seen.iter().filter(|(w, _)| w == what).collect::<Vec<_>>(),
+                    vec![&(*what, true)],
+                    "{mode:?}: {seen:?}"
+                );
+            }
+            let poll_scopes: Vec<_> = seen.iter().filter(|(w, _)| *w == "poll").collect();
+            assert_eq!(poll_scopes.len(), polls, "{mode:?}: {seen:?}");
+            assert!(poll_scopes.iter().all(|(_, s)| *s), "{mode:?}: {seen:?}");
+            assert_eq!(seen.last(), Some(&("destroy", false)), "{mode:?}: {seen:?}");
+        }
+
+        // An abandoned run cancels on a spawned task, still inside the scope.
+        let probe = Arc::new(ScopeProbe::default());
+        let remote = scoped_remote(Arc::clone(&probe));
+        let mut stream = remote.run(context(&ctx_agent, StreamingMode::Sse));
+        stream.next().await.unwrap().unwrap();
+        drop(stream);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while !probe.seen.lock().iter().any(|(w, _)| *w == "destroy") {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "{:?}",
+                probe.seen.lock()
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        let seen = probe.seen.lock().clone();
+        assert!(seen.contains(&("cancel", true)), "{seen:?}");
+        assert!(!seen.contains(&("cancel", false)), "{seen:?}");
+    }
+
     /// Go `NewA2A`'s validation texts.
     #[test]
     fn new_a2a_validates_the_config() {
