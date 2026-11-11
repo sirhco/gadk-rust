@@ -12,6 +12,9 @@
 # fixtures, and is not counted.
 # 5b: the A2A wire probe (scripts/gen-go-a2a) wrote exactly 7 fixtures under
 # crates/gadk-a2a/testdata/wire/; the replay's declared deltas (*.deltas.json) are not counted.
+# 6: the vendored web UI bundle crates/gadk-launcher/webui/distr/ holds exactly 106 files, they
+# match crates/gadk-launcher/webui/SHA256SUMS (106 lines), and, when ADK-Go is present, they are
+# byte-identical to its cmd/launcher/web/webui/distr/ (scripts/sync-webui regenerates all three).
 set -euo pipefail
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 go="${ADK_GO_DIR:-$repo/../adk-go}"
@@ -68,8 +71,36 @@ if [ "$a2a_wire_n" -ne "$a2a_wire_expected" ]; then
   fail=1
 fi
 
+webui="$repo/crates/gadk-launcher/webui"
+webui_go="$go/cmd/launcher/web/webui/distr"
+webui_expected=106
+webui_n="$(find "$webui/distr" -type f | wc -l | tr -d ' ')"
+if [ "$webui_n" -ne "$webui_expected" ]; then
+  echo "expected $webui_expected web UI files under $webui/distr, found $webui_n" >&2
+  fail=1
+fi
+webui_sums_n="$(wc -l <"$webui/SHA256SUMS" | tr -d ' ')"
+if [ "$webui_sums_n" -ne "$webui_expected" ]; then
+  echo "expected $webui_expected lines in $webui/SHA256SUMS, found $webui_sums_n" >&2
+  fail=1
+fi
+if command -v sha256sum >/dev/null 2>&1; then
+  sha256_check=(sha256sum -c)
+else
+  sha256_check=(shasum -a 256 -c)
+fi
+if ! webui_sums_out="$(cd "$webui/distr" && "${sha256_check[@]}" ../SHA256SUMS 2>&1)"; then
+  printf '%s\n' "$webui_sums_out" | grep -v ': OK$' >&2 || true
+  echo "web UI bundle does not match $webui/SHA256SUMS" >&2
+  fail=1
+fi
+if [ -d "$webui_go" ] && ! diff -rq "$webui/distr" "$webui_go" >&2; then
+  echo "web UI bundle differs from ADK-Go's $webui_go" >&2
+  fail=1
+fi
+
 if [ "$fail" -eq 0 ]; then
   echo "ok: $n fixtures and $schema_n telemetry goldens match ADK-Go; $wire_n wire fixtures;" \
-    "$a2a_wire_n A2A wire fixtures"
+    "$a2a_wire_n A2A wire fixtures; $webui_n web UI files"
 fi
 exit "$fail"
