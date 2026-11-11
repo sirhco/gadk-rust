@@ -12,17 +12,19 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-#![allow(dead_code, unused_variables, unused_imports, clippy::todo)]
 
 //! Go `server/agentengine/controllers/method/delete_session.go` (`async_delete_session`).
 
 use std::sync::Arc;
 
 use bytes::Bytes;
-use gadk_session::SessionService;
+use gadk_session::{DeleteRequest, SessionService};
 use serde_json::{Map, Value};
 
-use super::MethodHandler;
+use super::{MethodHandler, encode_plain, session_error_text};
+use crate::agentengine::encode_shapes;
+use crate::agentengine::models::{DeleteSessionRequest, DeleteSessionResponse};
+use crate::agentengine::unmarshal::go_unmarshal;
 use crate::mux::Response;
 
 /// Go `NewDeleteSessionHandler`'s handler. Deletes the session; answers `{"output":""}`. Errors: `json.Unmarshal() failed: <err>`, `g.sessionservice.Delete() failed: <err>`.
@@ -87,10 +89,88 @@ impl MethodHandler for DeleteSessionHandler {
     /// Decodes `models::DeleteSessionRequest` with `go_unmarshal`, calls the session service, and answers
     /// with `encode_plain`.
     async fn handle(&self, payload: Bytes) -> Result<Response, String> {
-        todo!("Task 7")
+        let req: DeleteSessionRequest =
+            go_unmarshal(&payload, &encode_shapes::MODELS_DELETE_SESSION_REQUEST)
+                .map_err(|e| format!("json.Unmarshal() failed: {e}"))?;
+        let session_id = req.input.session_id;
+        self.session_service
+            .delete(DeleteRequest {
+                app_name: self.agent_engine_id.clone(),
+                user_id: req.input.user_id,
+                session_id: session_id.clone(),
+            })
+            .await
+            .map_err(|e| {
+                format!(
+                    "g.sessionservice.Delete() failed: {}",
+                    session_error_text(&e, &session_id)
+                )
+            })?;
+        encode_plain(&DeleteSessionResponse::default())
     }
 
     fn metadata(&self) -> Map<String, Value> {
         metadata(&self.method_name, &self.api_mode)
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use gadk_session::InMemorySessionService;
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+    use crate::agentengine::method::replay::replay_all;
+
+    fn handler() -> DeleteSessionHandler {
+        DeleteSessionHandler::new(
+            Arc::new(InMemorySessionService::new()),
+            "test-engine",
+            "async_delete_session",
+            "async",
+        )
+    }
+
+    #[tokio::test]
+    async fn replays_the_delete_fixtures() {
+        replay_all(
+            "main",
+            &[
+                "main_02_create_session",
+                "main_03_create_session_with_state",
+                "main_07_delete_session",
+                "main_08_delete_session_missing",
+            ],
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn decode_error_is_go_text() {
+        let err = handler()
+            .handle(Bytes::from(r#"{"input":{"user_id":"u","session_id":1.5}}"#))
+            .await
+            .err();
+        assert_eq!(
+            err.as_deref(),
+            Some(
+                "json.Unmarshal() failed: json: cannot unmarshal number into Go struct field DeleteSessionRequest.input.session_id of type string"
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn service_error_is_go_text() {
+        let err = handler()
+            .handle(Bytes::from(r#"{"input":{"session_id":"s"}}"#))
+            .await
+            .err();
+        assert_eq!(
+            err.as_deref(),
+            Some(
+                "g.sessionservice.Delete() failed: app_name, user_id, session_id are required, got app_name: \"test-engine\", user_id: \"\", session_id: \"s\""
+            )
+        );
     }
 }

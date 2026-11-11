@@ -177,7 +177,20 @@ pub(crate) struct DeleteSessionResponse {
 /// Go `FromSession`: the session's user, `last_update_time` (`UnixNano() / 1e9`), app name, ID,
 /// state (all keys) and events.
 pub(crate) fn from_session(sess: &dyn Session) -> SessionData {
-    todo!("Task 7")
+    let t = sess.last_update_time();
+    // Go `UnixNano()`: seconds * 1e9 + nanoseconds, wrapping on overflow.
+    let unix_nano = t
+        .timestamp()
+        .wrapping_mul(1_000_000_000)
+        .wrapping_add(i64::from(t.timestamp_subsec_nanos()));
+    SessionData {
+        user_id: sess.user_id().to_owned(),
+        last_update_time: unix_nano as f64 / 1e9,
+        app_name: sess.app_name().to_owned(),
+        id: sess.id().to_owned(),
+        state: sess.state().all().into_iter().collect(),
+        events: sess.events(),
+    }
 }
 
 /// Go `StreamQueryRequest`: `async_stream_query` with a full `genai.Content` message.
