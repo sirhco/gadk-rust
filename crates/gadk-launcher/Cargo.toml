@@ -28,6 +28,9 @@ a2a = ["web", "dep:gadk-a2a"]
 webui = ["web", "dep:regex"]
 # The Pub/Sub and Eventarc trigger sub-launchers (Go `cmd/launcher/web/triggers`).
 triggers = ["web"]
+# The Agent Engine sub-launcher (Go `cmd/launcher/web/agentengine`) and
+# `agentengine::new_launcher` (Go `cmd/launcher/agentengine`); not in `prod` or `full` (as in Go).
+agentengine = ["web", "gadk-server/agentengine"]
 # Go `prod.NewLauncher()`: web(api, a2a).
 prod = ["web", "a2a"]
 # Go `full.NewLauncher()`: console, web(webui, a2a, pubsub, eventarc, api).
