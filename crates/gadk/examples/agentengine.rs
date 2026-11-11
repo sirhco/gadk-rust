@@ -171,14 +171,16 @@ async fn main() -> anyhow::Result<()> {
     let random_tool: Arc<dyn Tool> = FunctionTool::new(
         FunctionToolConfig::new("random", "Returns a random number between min and max"),
         random,
-    )?;
+    )
+    .inspect_err(|e| log.print(&format!("Failed to create tool: {e}")))?;
     let memory_search_tool: Arc<dyn Tool> = FunctionTool::new(
         FunctionToolConfig::new(
             "search_past_conversations",
             "Searches past conversations for relevant information.",
         ),
         memory_search,
-    )?;
+    )
+    .inspect_err(|e| log.print(&format!("Failed to create tool: {e}")))?;
 
     let agent = gadk::engine::llm::agent::new(LlmAgentConfig {
         name: "ae_agent".to_string(),
@@ -187,7 +189,8 @@ async fn main() -> anyhow::Result<()> {
         instruction: "You are a helpful agent, you should answer any questions you are given. Use 'random' tool to provide random numbers. Use search_past_conversations tool to get the facts about the user".to_string(),
         tools: vec![random_tool, memory_search_tool],
         ..Default::default()
-    })?;
+    })
+    .inspect_err(|e| log.print(&format!("Failed to create agent: {e}")))?;
 
     let mut config = Config::new(Arc::new(SingleLoader::new(agent)));
     config.plugin_config = RunnerPluginConfig {
