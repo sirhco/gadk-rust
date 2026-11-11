@@ -1431,6 +1431,45 @@ mod tests {
         .unwrap()
     }
 
+    /// Go's a2a-go keeps the code of an A2A error wrapped by the executor (`errors.Is` against
+    /// the code sentinels) with the wrapped message.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_wrapped_a2a_error_reaches_the_client_with_its_code() {
+        let agent = new_agent(AgentConfig {
+            name: "agent".into(),
+            run: Some(Arc::new(|_ctx: InvocationContext| {
+                futures::stream::iter([Ok(text_event("out"))]).boxed()
+            })),
+            ..Default::default()
+        })
+        .unwrap();
+        let executor = Executor::new(ExecutorConfig {
+            runner_config: Some(engine_config(
+                agent,
+                Arc::new(InMemorySessionService::new()),
+            )),
+            before_execute_callback: Some(Arc::new(|_ctx, _ext| {
+                Box::pin(async { Err(Error::A2A(a2a::A2AError::invalid_params("bad input"))) })
+            })),
+            ..Default::default()
+        });
+        let server = spawn_a2a_server(executor, card("root")).await;
+        let client = new_a2a_client_provider(None)
+            .create_client(ClientContext::Detached, &server.card)
+            .await
+            .unwrap();
+
+        let req: a2a::SendMessageRequest = serde_json::from_value(json!({
+            "message": {"messageId": a2a::new_message_id(), "role": "ROLE_USER", "parts": [{"text": "Hello"}]},
+        }))
+        .unwrap();
+        let err = client.send_message(&req).await.unwrap_err();
+        assert_eq!(
+            (err.code, err.message.as_str()),
+            (a2a::error_code::INVALID_PARAMS, "before execute: bad input")
+        );
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn cancelling_an_input_required_task_cancels_the_child_task() {
         let fake = Arc::new(
