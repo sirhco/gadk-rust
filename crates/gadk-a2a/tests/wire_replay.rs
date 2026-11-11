@@ -40,6 +40,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use axum::body::Body;
@@ -49,7 +50,10 @@ use gadk_a2a::a2a_server::{
     DefaultRequestHandler, InMemoryTaskStore, StaticAgentCard, agent_card::agent_card_router,
     jsonrpc::jsonrpc_router, rest::rest_router,
 };
-use gadk_a2a::remoteagent::{A2AConfig, CardResolveOptions, new_a2a, new_agent_card_provider};
+use gadk_a2a::remoteagent::{
+    A2AClient, A2AClientProvider, A2AConfig, CardResolveOptions, ClientContext, new_a2a,
+    new_a2a_client_provider, new_agent_card_provider,
+};
 use gadk_a2a::server::{Executor, ExecutorConfig, OutputMode, build_agent_skills};
 use gadk_agent::{
     Agent, AgentConfig, Context, EventStream, InvocationContext, RunConfig, StreamingMode,
@@ -1398,6 +1402,76 @@ async fn serve_recorded(fake: SharedFake, req: axum::extract::Request) -> axum::
     }
 }
 
+/// How many clients the remote agent has created and destroyed.
+#[derive(Default)]
+struct ClientCounts {
+    created: AtomicUsize,
+    destroyed: AtomicUsize,
+}
+
+impl ClientCounts {
+    /// Every created client has been destroyed: the remote agent's run is over, its cleanup
+    /// (which runs before the destroy) included.
+    fn settled(&self) -> bool {
+        self.destroyed.load(Ordering::SeqCst) == self.created.load(Ordering::SeqCst)
+    }
+}
+
+/// The default client provider (`new_a2a_client_provider(None)`, what `new_a2a` uses without
+/// `auth`), counting the clients it creates and their destroys.
+struct CountingProvider {
+    inner: Arc<dyn A2AClientProvider>,
+    counts: Arc<ClientCounts>,
+}
+
+#[async_trait::async_trait]
+impl A2AClientProvider for CountingProvider {
+    async fn create_client(
+        &self,
+        cx: ClientContext<'_>,
+        card: &a2a::AgentCard,
+    ) -> Result<Arc<dyn A2AClient>, gadk_a2a::Error> {
+        let inner = self.inner.create_client(cx, card).await?;
+        self.counts.created.fetch_add(1, Ordering::SeqCst);
+        Ok(Arc::new(CountingClient {
+            inner,
+            counts: Arc::clone(&self.counts),
+        }))
+    }
+}
+
+struct CountingClient {
+    inner: Arc<dyn A2AClient>,
+    counts: Arc<ClientCounts>,
+}
+
+#[async_trait::async_trait]
+impl A2AClient for CountingClient {
+    async fn send_message(
+        &self,
+        req: &a2a::SendMessageRequest,
+    ) -> Result<a2a::SendMessageResponse, a2a::A2AError> {
+        self.inner.send_message(req).await
+    }
+    async fn send_streaming_message(
+        &self,
+        req: &a2a::SendMessageRequest,
+    ) -> Result<
+        futures::stream::BoxStream<'static, Result<a2a::StreamResponse, a2a::A2AError>>,
+        a2a::A2AError,
+    > {
+        self.inner.send_streaming_message(req).await
+    }
+    async fn cancel_task(&self, req: &a2a::CancelTaskRequest) -> Result<a2a::Task, a2a::A2AError> {
+        self.inner.cancel_task(req).await
+    }
+    async fn destroy(&self) -> Result<(), a2a::A2AError> {
+        let result = self.inner.destroy().await;
+        self.counts.destroyed.fetch_add(1, Ordering::SeqCst);
+        result
+    }
+}
+
 /// Replays one client unit; returns the actual (not normalized) unit and its base URL.
 async fn run_client_unit(name: &str, fixture: &Value) -> (Value, Vec<(String, &'static str)>) {
     let runs = fixture["runs"].as_array().unwrap();
@@ -1426,6 +1500,11 @@ async fn run_client_unit(name: &str, fixture: &Value) -> (Value, Vec<(String, &'
             CardResolveOptions::default(),
         ));
     }
+    let counts = Arc::new(ClientCounts::default());
+    cfg.client_provider = Some(Arc::new(CountingProvider {
+        inner: new_a2a_client_provider(None),
+        counts: Arc::clone(&counts),
+    }));
     let remote = new_a2a(cfg).unwrap();
     let sessions = Arc::new(InMemorySessionService::new());
     sessions
@@ -1485,8 +1564,9 @@ async fn run_client_unit(name: &str, fixture: &Value) -> (Value, Vec<(String, &'
             fake.lock().served.len() >= expected_served
         })
         .await;
-        // Let a late request (a cleanup cancel the fixture does not expect) arrive and fail.
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        // A late request (a cleanup cancel the fixture does not expect) is sent before the
+        // client is destroyed, so once every client is destroyed it has been recorded.
+        wait_until("the remote agent's client destroy", || counts.settled()).await;
         let exchanges: Vec<Value> = fake.lock().served[served_before..].to_vec();
         event_bindings.align(&run["events"], &Value::Array(events.clone()));
         actual_runs.push(json!({
