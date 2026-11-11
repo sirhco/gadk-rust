@@ -31,7 +31,7 @@ use tower_http::catch_panic::CatchPanicLayer;
 
 use super::DEFAULT_MAX_PAYLOAD_SIZE;
 use super::http_error::http_error;
-use super::routing::{Request, Response};
+use crate::mux::{Handler, Request, Response, handler};
 
 /// Go `http.MaxBytesError`: reading the request body went past the limit. Its text is what Go's
 /// handlers send back (`http.Error(w, err.Error(), 400)` answers `http: request body too large`).
@@ -93,6 +93,23 @@ where
     resp
 }
 
+/// Go `adkrest.MaxBytesMiddleware(limit)` as a handler wrapper (zero/negative: the 10 MiB default,
+/// [`DEFAULT_MAX_PAYLOAD_SIZE`](super::DEFAULT_MAX_PAYLOAD_SIZE)).
+///
+/// The wrapped handler's request body fails once more than the limit is read: the read error's
+/// text is Go's `http: request body too large`, and a handler answering after hitting the limit
+/// gets `Connection: close` added to its response, as Go's `net/http` does. The wrapper itself
+/// writes no status; the handler reading the body answers.
+pub fn max_bytes_middleware(limit: i64) -> Arc<dyn Fn(Handler) -> Handler + Send + Sync> {
+    let limit = resolve_max_bytes(limit);
+    Arc::new(move |next: Handler| {
+        handler(move |req: Request| {
+            let next = Arc::clone(&next);
+            async move { with_max_bytes(limit, req, |req| next(req)).await }
+        })
+    })
+}
+
 /// `body` failing with [`MaxBytesError`] on the chunk that takes it past `limit` bytes, setting
 /// `hit` (Go `http.MaxBytesReader`).
 fn limited(body: Body, limit: i64, hit: Arc<AtomicBool>) -> Body {
@@ -150,7 +167,6 @@ fn panic_response(err: Box<dyn Any + Send + 'static>) -> Response {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use crate::rest::routing::handler;
 
     /// Go `TestMaxBytesMiddlewarePinsTheDefaultLimit`'s handler: read the whole body; a
     /// [`MaxBytesError`] answers 400 with its text, anything else 500; success 204.

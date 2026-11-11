@@ -67,7 +67,8 @@ pub(crate) mod originguard;
 pub(crate) mod routing;
 
 pub use debug_telemetry::{DebugLog, DebugSpan, DebugTelemetry};
-pub use originguard::LocalAddr;
+pub use middleware::max_bytes_middleware;
+pub use originguard::{LocalAddr, normalize_origin, origin_guard_middleware};
 pub use routing::PathVars;
 
 /// Go `adkrest.DefaultMaxPayloadSize`: the request-body limit (10 MiB) when
