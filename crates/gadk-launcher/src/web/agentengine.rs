@@ -23,8 +23,8 @@
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 
+use gadk_platform::GoDuration;
 use gadk_platform::go_flag::{Flag, FlagSet};
-use gadk_platform::{GoDuration, Platform};
 use gadk_server::agentengine::{AgentEngineConfig, new_handler};
 use http::Method;
 
@@ -109,7 +109,6 @@ pub(crate) fn engine_config(config: &Config) -> Result<AgentEngineConfig, Error>
     cfg.artifact_service = config.artifact_service.clone();
     cfg.plugin_config = config.plugin_config.clone();
     cfg.compaction = config.compaction.clone();
-    cfg.platform = Platform::default();
     let logger = config.log.clone();
     cfg.log = Some(Arc::new(move |m: &str| logger.print(m)));
     Ok(cfg)

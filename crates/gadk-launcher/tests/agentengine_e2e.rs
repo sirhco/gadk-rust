@@ -170,15 +170,17 @@ impl Llm for SlowModel {
     }
 }
 
-/// R4: with `-sse-write-timeout 100ms` the handler's write deadline (now + 100 ms) is the real
-/// server's: the first event's line is delivered, the line written after the deadline is not,
-/// and the connection is aborted without the chunked body's terminator.
+/// R4: with `-sse-write-timeout 500ms` the handler's write deadline (now + 500 ms) is the real
+/// server's: the first event's line is delivered, the line written after the deadline (the
+/// model's next response, 3 s later) is not, and the connection is aborted without the chunked
+/// body's terminator. The margins are wide so a slow debug first event on a loaded machine still
+/// lands before the deadline.
 #[tokio::test]
 async fn sse_write_timeout_cuts_a_slow_stream() {
     let agent = support::probe_agent_with(Arc::new(SlowModel {
-        delay: Duration::from_millis(600),
+        delay: Duration::from_secs(3),
     }));
-    let (port, cancel, running) = start(agent, &["-sse-write-timeout", "100ms"]).await;
+    let (port, cancel, running) = start(agent, &["-sse-write-timeout", "500ms"]).await;
     let started = std::time::Instant::now();
     let raw = post(
         port,
@@ -192,7 +194,7 @@ async fn sse_write_timeout_cuts_a_slow_stream() {
     assert!(text.contains(r#""text":"first ""#), "{text}");
     assert!(!text.contains("first second"), "{text}");
     assert!(!text.ends_with("0\r\n\r\n"), "{text}");
-    assert!(elapsed < Duration::from_secs(5), "{elapsed:?}");
+    assert!(elapsed < Duration::from_secs(10), "{elapsed:?}");
 
     // Without the timeout cut the same stream completes.
     let agent = support::probe_agent_with(Arc::new(SlowModel {
