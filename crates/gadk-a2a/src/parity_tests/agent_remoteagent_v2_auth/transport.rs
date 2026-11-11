@@ -1689,3 +1689,39 @@ async fn redact_token_error_redacts_a_reqwest_status_error() {
     );
     assert!(find_in_chain::<reqwest::Error>(&got).is_some());
 }
+
+/// A credential header value that is not UTF-8 cannot travel in the call's `ServiceParams`
+/// (string values): the call fails with an apply error instead of sending a lossy copy, and the
+/// params are left as they were.
+#[tokio::test]
+async fn interceptor_refuses_a_credential_header_that_is_not_utf8() {
+    #[derive(Debug)]
+    struct Latin1Key;
+
+    #[async_trait::async_trait]
+    impl Credential for Latin1Key {
+        async fn apply(&self, headers: &mut HeaderMap) -> Result<(), gadk_auth::Error> {
+            headers.insert(
+                HeaderName::from_static("x-api-key"),
+                HeaderValue::from_bytes(b"caf\xe9").unwrap(),
+            );
+            Ok(())
+        }
+    }
+
+    let id = call_identity(
+        credential_scope("shop", "alice", "s1", "crm"),
+        provider(|_| Box::pin(async { Ok(Arc::new(Latin1Key) as Arc<dyn Credential>) })),
+    );
+    let mut params = a2a_client::ServiceParams::new();
+    params.insert("X-Api-Key".into(), vec!["stale".into()]);
+    let err = with_auth_scope(Some(id), AuthInterceptor.before("SendMessage", &mut params))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        err.message,
+        "remoteagent: apply auth credential: header \"x-api-key\" has a value that is not valid UTF-8"
+    );
+    assert_eq!(params.get("X-Api-Key"), Some(&vec!["stale".to_owned()]));
+    assert_eq!(params.len(), 1);
+}

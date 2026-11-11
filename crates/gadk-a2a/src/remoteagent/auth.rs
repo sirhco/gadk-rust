@@ -127,23 +127,40 @@ impl a2a_client::middleware::CallInterceptor for AuthInterceptor {
     ) -> Result<(), a2a::A2AError> {
         let mut headers = HeaderMap::new();
         apply_credential(&mut headers).await?;
-        write_service_params(params, &headers);
+        write_service_params(params, &headers)?;
         Ok(())
     }
 }
 
 /// Copies `headers` into `params`, each name replacing whatever values `params` held under it
 /// in any letter case (Go `h[k] = v` on a canonical key).
-fn write_service_params(params: &mut a2a_client::ServiceParams, headers: &HeaderMap) {
+///
+/// `ServiceParams` values are strings, so a value that is not UTF-8 (Go's byte-string header
+/// would carry it) fails the call rather than being sent altered; `params` is then untouched.
+fn write_service_params(
+    params: &mut a2a_client::ServiceParams,
+    headers: &HeaderMap,
+) -> Result<(), Error> {
+    let mut copied = Vec::with_capacity(headers.keys_len());
     for name in headers.keys() {
-        params.retain(|key, _| !key.eq_ignore_ascii_case(name.as_str()));
         let values = headers
             .get_all(name)
             .iter()
-            .map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned())
-            .collect();
+            .map(|v| String::from_utf8(v.as_bytes().to_vec()))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| {
+                Error::msg(format!(
+                    "remoteagent: apply auth credential: header {:?} has a value that is not valid UTF-8",
+                    name.as_str()
+                ))
+            })?;
+        copied.push((name, values));
+    }
+    for (name, values) in copied {
+        params.retain(|key, _| !key.eq_ignore_ascii_case(name.as_str()));
         params.insert(name.as_str().to_owned(), values);
     }
+    Ok(())
 }
 
 /// Applies the credential of the current auth scope to `headers`; a no-op outside a scope.
