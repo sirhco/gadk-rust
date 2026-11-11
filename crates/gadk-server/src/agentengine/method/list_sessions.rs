@@ -12,17 +12,19 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-#![allow(dead_code, unused_variables, unused_imports, clippy::todo)]
 
 //! Go `server/agentengine/controllers/method/list_sessions.go` (`async_list_sessions`).
 
 use std::sync::Arc;
 
 use bytes::Bytes;
-use gadk_session::SessionService;
+use gadk_session::{ListRequest, SessionService};
 use serde_json::{Map, Value};
 
-use super::MethodHandler;
+use super::{MethodHandler, encode_plain, session_error_text};
+use crate::agentengine::encode_shapes;
+use crate::agentengine::models::{ListSessionRequest, ListSessionResponse, Sessions, from_session};
+use crate::agentengine::unmarshal::go_unmarshal;
 use crate::mux::Response;
 
 /// Go `NewListSessionHandler`'s handler. Lists the user's sessions; answers `{"output":{"sessions":[SessionData…]}}`. Errors: `json.Unmarshal() failed: <err>`, `c.sessionservice.List() failed: <err>`.
@@ -83,10 +85,95 @@ impl MethodHandler for ListSessionsHandler {
     /// Decodes `models::ListSessionRequest` with `go_unmarshal`, calls the session service, and answers
     /// with `encode_plain`.
     async fn handle(&self, payload: Bytes) -> Result<Response, String> {
-        todo!("Task 7")
+        let req: ListSessionRequest =
+            go_unmarshal(&payload, &encode_shapes::MODELS_LIST_SESSION_REQUEST)
+                .map_err(|e| format!("json.Unmarshal() failed: {e}"))?;
+        let sessions = self
+            .session_service
+            .list(ListRequest {
+                app_name: self.agent_engine_id.clone(),
+                user_id: req.input.user_id,
+            })
+            .await
+            .map_err(|e| {
+                format!(
+                    "c.sessionservice.List() failed: {}",
+                    session_error_text(&e, "")
+                )
+            })?;
+        encode_plain(&ListSessionResponse {
+            output: Sessions {
+                sessions: sessions.iter().map(|s| from_session(&**s)).collect(),
+            },
+        })
     }
 
     fn metadata(&self) -> Map<String, Value> {
         metadata(&self.method_name, &self.api_mode)
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use gadk_session::InMemorySessionService;
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+    use crate::agentengine::method::replay::replay_all;
+
+    #[tokio::test]
+    async fn replays_the_session_fixtures_in_order() {
+        replay_all(
+            "main",
+            &[
+                "main_02_create_session",
+                "main_03_create_session_with_state",
+                "main_04_get_session",
+                "main_05_get_session_missing",
+                "main_06_list_sessions",
+                "main_07_delete_session",
+                "main_08_delete_session_missing",
+                "main_22_uppercase_keys",
+                "main_27_reasoning_engine_query",
+            ],
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn decode_error_is_go_text() {
+        let err = ListSessionsHandler::new(
+            Arc::new(InMemorySessionService::new()),
+            "test-engine",
+            "async_list_sessions",
+            "async",
+        )
+        .handle(Bytes::from(r#"{"input":{"user_id":true}}"#))
+        .await
+        .err();
+        assert_eq!(
+            err.as_deref(),
+            Some(
+                "json.Unmarshal() failed: json: cannot unmarshal bool into Go struct field ListSessionRequest.input.user_id of type string"
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn service_error_is_go_text() {
+        let err = ListSessionsHandler::new(
+            Arc::new(InMemorySessionService::new()),
+            "",
+            "async_list_sessions",
+            "async",
+        )
+        .handle(Bytes::from(r#"{"input":{"user_id":"u"}}"#))
+        .await
+        .err();
+        assert_eq!(
+            err.as_deref(),
+            Some("c.sessionservice.List() failed: app_name is required, got app_name: \"\"")
+        );
     }
 }
