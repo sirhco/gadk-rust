@@ -39,6 +39,12 @@ a2a = ["dep:gadk-a2a"]
 # gadk-launcher's default features, which the dependency below keeps; `full` does not enable
 # the `prod` feature, so it is named here to expose `gadk::launcher::prod`.
 launcher = ["dep:gadk-launcher", "gadk-launcher/prod"]
+# The Agent Engine server (`gadk_server::agentengine`) and its launcher
+# (`agentengine::new_launcher`, Go `cmd/launcher/agentengine`); not in `default`.
+agentengine = ["launcher", "dep:gadk-server", "gadk-launcher/agentengine", "gadk-server/agentengine"]
+# The Agent Registry client (gadk-agentregistry: registered A2A agents and MCP servers); not in
+# `default`.
+agentregistry = ["dep:gadk-agentregistry"]
 
 [dependencies]
 gadk-genai = { workspace = true }
@@ -62,6 +68,7 @@ gadk-vertexai = { workspace = true, optional = true }
 gadk-server = { workspace = true, optional = true }
 gadk-a2a = { workspace = true, optional = true }
 gadk-launcher = { workspace = true, optional = true }
+gadk-agentregistry = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
@@ -167,6 +174,10 @@ required-features = ["server"]
 name = "a2a"
 required-features = ["a2a"]
 
+[[example]]
+name = "agentengine"
+required-features = ["gemini", "agentengine"]
+
 [[test]]
 name = "model_anthropicmodel_agent_runner"
 required-features = ["anthropic"]
@@ -186,3 +197,11 @@ required-features = ["a2a"]
 [[test]]
 name = "facade_launcher"
 required-features = ["launcher"]
+
+[[test]]
+name = "facade_agentengine"
+required-features = ["agentengine"]
+
+[[test]]
+name = "facade_agentregistry"
+required-features = ["agentregistry"]

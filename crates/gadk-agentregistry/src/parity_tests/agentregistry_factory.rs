@@ -133,6 +133,7 @@ fn test_is_google_api() {
 }
 
 /// Go `TestEgressClient` (adapted: the chosen variant instead of the client pointer).
+// parity: adapted: asserts the chosen EgressClient variant instead of comparing *http.Client pointers
 #[test]
 fn test_egress_client() {
     let c = offline_client(None);
@@ -172,6 +173,7 @@ fn test_egress_client() {
 
 /// Go `TestEgressClient_HeadersProduceDistinctClient` (adapted: the registry client is kept as
 /// the base and the headers are layered on it, never written into the shared client).
+// parity: adapted: asserts the Egress header list layered on the registry client instead of a distinct *http.Client
 #[test]
 fn test_egress_client_headers_produce_distinct_client() {
     let c = offline_client(None);
@@ -187,6 +189,7 @@ fn test_egress_client_headers_produce_distinct_client() {
 }
 
 /// Go `TestClientWithHeaders_NoHeadersReturnsBase` (adapted).
+// parity: adapted: asserts the Egress (base variant, no headers) instead of client identity
 #[test]
 fn test_client_with_headers_no_headers_returns_base() {
     let got = client_with_headers(EgressClient::Default, &BTreeMap::new());
@@ -196,6 +199,7 @@ fn test_client_with_headers_no_headers_returns_base() {
 
 /// Go `TestClientWithHeaders_AppliesAndDoesNotMutateBase` (adapted): an A2A transport built from
 /// the [`Egress`] sends `X-Test: v`; the base client itself still sends no `X-Test`.
+// parity: adapted: an A2A transport built from the Egress sends the header to an axum server; the base client sends none
 #[tokio::test]
 async fn test_client_with_headers_applies_and_does_not_mutate_base() {
     let srv = serve(|_| (200, "{}".to_owned())).await;

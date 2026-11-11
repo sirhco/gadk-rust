@@ -198,9 +198,9 @@ pub(crate) fn new_runner(
 /// ends the stream without a line.
 ///
 /// Each item is handled, and dropped, on a large stack ([`on_deep_stack`]): its `Debug` dump,
-/// encoding and drop recurse once per nesting level, and an event can be as deep as Go's decoder
-/// allows (10000 levels, e.g. echoed request content or session state), which Go's growable
-/// stacks survive. The item's log texts are collected there and printed on the caller's task, in
+/// encoding and drop recurse once per nesting level, and an agent can yield an event as deep as
+/// Go's decoder allows (10000 levels; gadk caps requests at `unmarshal::MAX_DEPTH`, but an agent
+/// or a tool can build deeper content), which Go's growable stacks survive. The item's log texts are collected there and printed on the caller's task, in
 /// order. When that thread cannot be spawned (no Go counterpart) the item is leaked; when it
 /// panics the item is dropped there; either way the stream ends with the error line
 /// `helper.EmitJSON() failed: <err>`.
@@ -387,19 +387,11 @@ mod tests {
 
     use axum::body::to_bytes;
     use futures::stream;
-    use gadk_agent::{AgentError, SingleLoader};
-    use gadk_artifact::InMemoryArtifactService;
-    use gadk_memory::InMemoryMemoryService;
-    use gadk_platform::GoDuration;
+    use gadk_agent::AgentError;
     use gadk_session::compaction::CompactionError;
-    use gadk_session::{CreateRequest, DeleteRequest, InMemorySessionService, SessionService};
-    use http::Method;
     use pretty_assertions::assert_eq;
 
     use super::*;
-    use crate::agentengine::new_handler;
-    use crate::mux::{Request, WriteDeadline};
-    use crate::rest::testutil::wire_scenario::{assistant_agent, fixed_platform};
 
     type Lines = Arc<Mutex<Vec<String>>>;
 
@@ -509,10 +501,10 @@ mod tests {
         v
     }
 
-    /// A function response ~10000 levels deep (what Go's decoder accepts).
-    fn deep_content() -> Content {
+    /// A function response whose `r` is `levels` deep.
+    fn deep_content(levels: usize) -> Content {
         let mut response = Map::new();
-        response.insert("r".to_owned(), deep_value(9_990));
+        response.insert("r".to_owned(), deep_value(levels));
         Content {
             role: "model".into(),
             parts: vec![gadk_genai::Part {
@@ -530,7 +522,7 @@ mod tests {
     /// decoder accepts and an agent can echo back).
     fn deep_event() -> Event {
         let mut e = event(None);
-        e.response.content = Some(deep_content());
+        e.response.content = Some(deep_content(9_990));
         e.response
             .custom_metadata
             .insert("deep".to_owned(), deep_value(9_990));
@@ -587,13 +579,14 @@ mod tests {
     }
 
     /// A deep request (decoded on a large stack by `go_unmarshal`) is cloned into the run and
-    /// dropped on a large stack too, so a 2 MiB caller does not abort.
+    /// dropped on a large stack too, so a 2 MiB caller does not abort. The content is as deep as
+    /// the request cap (`unmarshal::MAX_DEPTH`), deeper than any accepted request carries.
     #[test]
     fn deep_request_is_cloned_and_dropped_on_a_large_stack() {
         let worker = std::thread::Builder::new()
             .stack_size(2 << 20)
             .spawn(|| {
-                let req = deep_content();
+                let req = deep_content(crate::agentengine::unmarshal::MAX_DEPTH);
                 let events = run_request(true, req, |req| {
                     let message = req.clone();
                     Ok(Box::pin(stream::once(async move {
@@ -691,132 +684,32 @@ mod tests {
     }
 
     /// The Go wire fixtures of the stream routes (`testdata/agentengine/main_09`–`main_18`,
-    /// C.11) replayed through `new_handler` with the probe's scenario: status, headers (without
-    /// `Date`, `Content-Length`, `Transfer-Encoding`), body and log (without `Processing
-    /// event: ` lines) byte for byte. `main_02`–`main_08` (the session methods) are replayed as
-    /// the session-service calls they make, so the clock and UUID sequences match.
+    /// C.11) replayed through `new_handler` with the probe's scenario, after the session
+    /// fixtures `main_02`–`main_08` they build on (so the clock and UUID sequences match).
     #[tokio::test]
     async fn replays_the_stream_fixtures() {
-        let platform = fixed_platform();
-        let session_service: Arc<dyn SessionService> =
-            Arc::new(InMemorySessionService::with_platform(platform.clone()));
-        let mut cfg = AgentEngineConfig::new(
-            Arc::clone(&session_service),
-            Arc::new(SingleLoader::new(assistant_agent())),
-        );
-        cfg.memory_service = Some(Arc::new(InMemoryMemoryService::new()));
-        cfg.artifact_service = Some(Arc::new(InMemoryArtifactService::with_platform(
-            platform.clone(),
-        )));
-        cfg.platform = platform;
-        let (log, lines) = capture();
-        cfg.log = log.0.clone();
-        let handler = new_handler(cfg, GoDuration(0), 4096, "test-engine").unwrap();
-
-        // main_02..main_08: create u1, create u1 with state, get, get missing, list, delete
-        // main_03's session, delete missing (only the creates read the clock and UUIDs).
-        let create = |state: Option<Map<String, Value>>| CreateRequest {
-            app_name: "test-engine".into(),
-            user_id: "u1".into(),
-            session_id: None,
-            state,
-        };
-        session_service.create(create(None)).await.unwrap();
-        let state = serde_json::json!({"k": "v", "n": 1});
-        let second = session_service
-            .create(create(state.as_object().cloned()))
-            .await
-            .unwrap();
-        session_service
-            .delete(DeleteRequest {
-                app_name: "test-engine".into(),
-                user_id: "u1".into(),
-                session_id: second.id().to_owned(),
-            })
-            .await
-            .unwrap();
-
-        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/agentengine");
-        let names = [
-            "main_09_stream_query_text",
-            "main_10_stream_query_content",
-            "main_11_stream_query_tool_call",
-            "main_12_stream_query_model_error",
-            "main_13_stream_query_bad_input",
-            "main_14_run_with_events_new_session",
-            "main_15_run_with_events_reuse_session",
-            "main_16_run_with_events_bad_request_json",
-            "main_17_session_method_on_stream_route",
-            "main_18_stream_method_on_session_route",
-        ];
-        for name in names {
-            let text = std::fs::read_to_string(format!("{dir}/{name}.json")).unwrap();
-            let fx: Value = serde_json::from_str(&text).unwrap();
-            assert_eq!(fx["compare"], "exact", "{name}");
-            let rq = &fx["request"];
-            let mut req = Request::new(axum::body::Body::from(
-                rq["body"].as_str().unwrap().to_owned(),
-            ));
-            *req.method_mut() =
-                Method::from_bytes(rq["method"].as_str().unwrap().as_bytes()).unwrap();
-            *req.uri_mut() = rq["target"].as_str().unwrap().parse().unwrap();
-            for h in rq["headers"].as_array().unwrap() {
-                req.headers_mut().append(
-                    http::HeaderName::from_bytes(h[0].as_str().unwrap().as_bytes()).unwrap(),
-                    HeaderValue::from_str(h[1].as_str().unwrap()).unwrap(),
-                );
-            }
-            req.extensions_mut().insert(WriteDeadline::new(|_| {}));
-            lines.lock().unwrap().clear();
-
-            let resp = handler(req).await;
-
-            let want = &fx["response"];
-            assert_eq!(
-                u64::from(resp.status().as_u16()),
-                want["status"].as_u64().unwrap(),
-                "{name}: status"
-            );
-            let mut got_headers: Vec<(String, String)> = resp
-                .headers()
-                .iter()
-                .filter(|(k, _)| {
-                    !matches!(k.as_str(), "date" | "content-length" | "transfer-encoding")
-                })
-                .map(|(k, v)| (k.to_string(), v.to_str().unwrap().to_owned()))
-                .collect();
-            got_headers.sort();
-            let want_headers: Vec<(String, String)> = want["headers"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|h| {
-                    (
-                        h[0].as_str().unwrap().to_ascii_lowercase(),
-                        h[1].as_str().unwrap().to_owned(),
-                    )
-                })
-                .collect();
-            assert_eq!(got_headers, want_headers, "{name}: headers");
-            assert_eq!(
-                body_text(resp).await,
-                want["body"].as_str().unwrap(),
-                "{name}: body"
-            );
-            let got_log: String = lines
-                .lock()
-                .unwrap()
-                .iter()
-                .map(|l| {
-                    if l.ends_with('\n') {
-                        l.clone()
-                    } else {
-                        format!("{l}\n")
-                    }
-                })
-                .filter(|l| !l.starts_with("Processing event: "))
-                .collect();
-            assert_eq!(got_log, fx["log"].as_str().unwrap(), "{name}: log");
-        }
+        crate::agentengine::method::replay::replay_all(
+            "main",
+            &[
+                "main_02_create_session",
+                "main_03_create_session_with_state",
+                "main_04_get_session",
+                "main_05_get_session_missing",
+                "main_06_list_sessions",
+                "main_07_delete_session",
+                "main_08_delete_session_missing",
+                "main_09_stream_query_text",
+                "main_10_stream_query_content",
+                "main_11_stream_query_tool_call",
+                "main_12_stream_query_model_error",
+                "main_13_stream_query_bad_input",
+                "main_14_run_with_events_new_session",
+                "main_15_run_with_events_reuse_session",
+                "main_16_run_with_events_bad_request_json",
+                "main_17_session_method_on_stream_route",
+                "main_18_stream_method_on_session_route",
+            ],
+        )
+        .await;
     }
 }

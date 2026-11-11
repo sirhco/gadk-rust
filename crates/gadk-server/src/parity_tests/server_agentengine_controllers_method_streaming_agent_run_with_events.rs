@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Ports of ADK-Go `server/agentengine/controllers/method/streaming_agent_run_with_events_test.go` (Task 9 fills this module).
+//! Ports of ADK-Go `server/agentengine/controllers/method/streaming_agent_run_with_events_test.go`.
 
 use std::sync::Arc;
 

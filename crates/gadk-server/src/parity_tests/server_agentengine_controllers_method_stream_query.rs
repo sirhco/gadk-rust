@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Ports of ADK-Go `server/agentengine/controllers/method/stream_query_test.go` (Task 9 fills this module).
+//! Ports of ADK-Go `server/agentengine/controllers/method/stream_query_test.go`.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};

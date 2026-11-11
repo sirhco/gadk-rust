@@ -24,6 +24,24 @@
 #[cfg(feature = "a2a")]
 pub use gadk_a2a as a2a;
 pub use gadk_agent as agent;
+/// The Agent Engine server and launcher: serve an agent with the Vertex AI Agent Engine
+/// reasoning-engine API (`/reasoning_engine`, `/stream_reasoning_engine`), wire-compatible with
+/// ADK-Go's `server/agentengine` and `cmd/launcher/agentengine` (feature `agentengine`, not on by
+/// default).
+#[cfg(feature = "agentengine")]
+pub mod agentengine {
+    pub use gadk_launcher::agentengine::new_launcher;
+    pub use gadk_launcher::web::agentengine::{AgentEngineLauncher, new};
+    pub use gadk_server::agentengine::{
+        AgentEngineConfig, AgentEngineLog, Error, list_class_methods, new_handler,
+    };
+}
+/// The Agent Registry client: list and resolve registered agents, MCP servers and endpoints,
+/// and use them as a remote A2A agent (`remote_agent`, feature `a2a` of the crate) or an MCP
+/// toolset (`mcp_toolset`, feature `mcp`), as ADK-Go's `agentregistry` (feature `agentregistry`,
+/// not on by default; re-export of `gadk-agentregistry`).
+#[cfg(feature = "agentregistry")]
+pub use gadk_agentregistry as agentregistry;
 /// Claude models on the Anthropic Messages API and on Vertex AI (feature `anthropic`, not on
 /// by default; re-export of `gadk-anthropic`).
 #[cfg(feature = "anthropic")]

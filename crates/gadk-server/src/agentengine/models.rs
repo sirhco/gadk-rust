@@ -12,7 +12,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-#![allow(dead_code, unused_variables, unused_imports, clippy::todo)]
 
 //! Go `server/agentengine/internal/models`: the request and response models, with Go's JSON
 //! names. Requests are decoded by [`go_unmarshal`](super::unmarshal::go_unmarshal) (Go key

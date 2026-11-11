@@ -143,6 +143,8 @@ pub(crate) fn quota_project_id(env: &dyn EnvProvider, creds_json: Option<&[u8]>)
     let Some(json) = creds_json.filter(|j| !j.is_empty()) else {
         return String::new();
     };
+    // Divergence (ledger 5c): the key is matched case-sensitively (Go's `json.Unmarshal`
+    // also accepts e.g. `Quota_Project_ID`).
     #[derive(serde::Deserialize)]
     struct Parsed {
         #[serde(default)]

@@ -12,10 +12,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-// D1: the factory (Task 5) is these helpers' only caller outside the tests, and without the
-// `a2a`/`mcp` features it is compiled out. Task 10 narrows this to
-// `#![cfg_attr(not(any(feature = "a2a", feature = "mcp")), allow(dead_code))]`.
-#![allow(dead_code)]
+// The factory is these helpers' only caller outside the tests, and without the `a2a`/`mcp`
+// features it is compiled out (`clean_name` and `PROTOCOL_TYPE_A2A_AGENT` serve `a2a` only).
+#![cfg_attr(not(any(feature = "a2a", feature = "mcp")), allow(dead_code))]
 
 //! Go `agentregistry/resolve.go`: name cleaning and connection-URI resolution. The A2A
 //! transport names are a2a's wire strings (`JSONRPC`, `HTTP+JSON`, `GRPC`), held here as
@@ -24,6 +23,7 @@
 use crate::types::{Interface, Protocol};
 
 /// Go `protocolTypeA2AAgent`.
+#[cfg_attr(not(feature = "a2a"), allow(dead_code))]
 pub(crate) const PROTOCOL_TYPE_A2A_AGENT: &str = "A2A_AGENT";
 /// Go `bindingJSONRPC`: registry protocol-binding wire value.
 pub(crate) const BINDING_JSONRPC: &str = "JSONRPC";
@@ -42,6 +42,7 @@ pub(crate) const TRANSPORT_GRPC: &str = "GRPC";
 /// Go `cleanName`: non-identifier bytes (`[^a-zA-Z0-9_]`, per UTF-8 character as Go's regexp)
 /// become `_`, runs of `_` collapse, leading/trailing `_` are trimmed, and a leading digit gets a
 /// `_` prefix.
+#[cfg_attr(not(feature = "a2a"), allow(dead_code))]
 pub(crate) fn clean_name(name: &str) -> String {
     let mut collapsed = String::with_capacity(name.len());
     for c in name.chars() {

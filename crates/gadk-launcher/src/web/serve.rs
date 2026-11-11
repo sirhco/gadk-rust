@@ -290,6 +290,7 @@ fn connection_service(
         let router = router.clone();
         let state = Arc::clone(&state);
         async move {
+            let close_after_reply = close_after_reply(&req);
             let started = state.begin_request(req.version());
             let (mut parts, body) = req.into_parts();
             parts.extensions.insert(ConnectInfo(LocalAddr(local)));
@@ -314,9 +315,53 @@ fn connection_service(
             if resp.status() == StatusCode::SWITCHING_PROTOCOLS {
                 state.hijack();
             }
+            let mut resp = resp;
+            if let Some(connection) = close_after_reply {
+                set_close_connection(resp.headers_mut(), connection);
+            }
             Ok(resp.map(|body| TrackedBody::new(body, started.guard, stream_deadline)))
         }
     })
+}
+
+/// Go `w.closeAfterReply` for an HTTP/1 request that asks to close the connection
+/// (`req.wantsClose()`: HTTP/1.1 `Connection: close`, HTTP/1.0 without `keep-alive`): the
+/// `Connection` value Go writes in place of the handler's (`close` for HTTP/1.1, none for
+/// HTTP/1.0). `None` when the connection stays open.
+fn close_after_reply<B>(req: &http::Request<B>) -> Option<Option<http::HeaderValue>> {
+    let has_token = |token: &str| {
+        req.headers()
+            .get_all(http::header::CONNECTION)
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .flat_map(|v| v.split(','))
+            .any(|t| t.trim().eq_ignore_ascii_case(token))
+    };
+    match req.version() {
+        Version::HTTP_11 if has_token("close") => {
+            Some(Some(http::HeaderValue::from_static("close")))
+        }
+        Version::HTTP_10 if !has_token("keep-alive") => Some(None),
+        _ => None,
+    }
+}
+
+/// Go `chunkWriter.writeHeader` when closing after the reply: a handler's `Connection` header
+/// without a `close` token is dropped and Go's own value (if any) written instead.
+fn set_close_connection(headers: &mut http::HeaderMap, connection: Option<http::HeaderValue>) {
+    let has_close = headers
+        .get_all(http::header::CONNECTION)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(','))
+        .any(|t| t.trim().eq_ignore_ascii_case("close"));
+    if has_close {
+        return;
+    }
+    headers.remove(http::header::CONNECTION);
+    if let Some(value) = connection {
+        headers.insert(http::header::CONNECTION, value);
+    }
 }
 
 /// Go's `os.ErrDeadlineExceeded` (`i/o timeout`).
@@ -833,6 +878,53 @@ mod tests {
 
     fn ms(n: i64) -> GoDuration {
         GoDuration(n * 1_000_000)
+    }
+
+    /// Go's `closeAfterReply` header rule: a handler's `Connection: keep-alive` gives way to
+    /// `close` (HTTP/1.1) or to nothing (HTTP/1.0); a `close` token the handler set stays.
+    #[test]
+    fn closing_after_reply_replaces_the_handler_connection_header() {
+        let req = |version: Version, connection: Option<&str>| {
+            let mut b = http::Request::builder().version(version);
+            if let Some(c) = connection {
+                b = b.header(http::header::CONNECTION, c);
+            }
+            b.body(()).unwrap()
+        };
+        let apply = |req: &http::Request<()>, handler: Option<&str>| {
+            let mut headers = http::HeaderMap::new();
+            if let Some(h) = handler {
+                headers.insert(http::header::CONNECTION, h.parse().unwrap());
+            }
+            if let Some(connection) = close_after_reply(req) {
+                set_close_connection(&mut headers, connection);
+            }
+            headers
+                .get(http::header::CONNECTION)
+                .map(|v| v.to_str().unwrap().to_owned())
+        };
+        let close11 = req(Version::HTTP_11, Some("Close"));
+        assert_eq!(
+            apply(&close11, Some("keep-alive")).as_deref(),
+            Some("close")
+        );
+        assert_eq!(apply(&close11, None).as_deref(), Some("close"));
+        assert_eq!(
+            apply(&close11, Some("upgrade, close")).as_deref(),
+            Some("upgrade, close")
+        );
+        let open11 = req(Version::HTTP_11, None);
+        assert_eq!(
+            apply(&open11, Some("keep-alive")).as_deref(),
+            Some("keep-alive")
+        );
+        let plain10 = req(Version::HTTP_10, None);
+        assert_eq!(apply(&plain10, Some("keep-alive")), None);
+        let keep10 = req(Version::HTTP_10, Some("keep-alive"));
+        assert_eq!(
+            apply(&keep10, Some("keep-alive")).as_deref(),
+            Some("keep-alive")
+        );
     }
 
     fn opts(read: i64, write: i64, idle: i64) -> Options {

@@ -221,9 +221,12 @@ mod tests {
     /// Go's `Config.Validate` text for `&compaction.Config{}` ("no strategy at all").
     const NO_STRATEGY: &str = "invalid Compaction: no compaction strategy is enabled, set CompactionInterval or TokenThreshold (or leave the whole config nil to disable compaction)";
 
-    /// A launcher config over the probe's scripted `assistant` agent.
+    /// A launcher config over the agentengine probe's `assistant` agent (the 5a scenario's,
+    /// C.11; not the 6 launcher probe's streaming one).
     fn config() -> Config {
-        Config::new(Arc::new(SingleLoader::new(ts::probe_agent())))
+        Config::new(Arc::new(SingleLoader::new(
+            gadk_server::rest::testutil::wire_scenario::assistant_agent(),
+        )))
     }
 
     #[test]
@@ -537,18 +540,45 @@ mod tests {
         running.await.unwrap().unwrap();
     }
 
-    /// `wire_agentengine_*`: the default `/api` mount. `_01_create_session` and
-    /// `_02_stream_query` need the session and stream methods (Tasks 7 and 9) and are replayed
-    /// by Task 10 (`tests/agentengine_e2e.rs`).
+    /// `wire_agentengine_*`: the default `/api` mount — a session created, a stream query
+    /// answered, and the outer router's 405 for `GET`.
     #[tokio::test]
     async fn the_api_mount_matches_go_wire_fixtures() {
-        replay("agentengine", &["wire_agentengine_03_get_not_allowed"]).await;
+        replay(
+            "agentengine",
+            &[
+                "wire_agentengine_01_create_session",
+                "wire_agentengine_02_stream_query",
+                "wire_agentengine_03_get_not_allowed",
+            ],
+        )
+        .await;
     }
 
     /// `wire_prefix_*`: `-path_prefix custom/` mounts under `/custom`, while the user message
-    /// still names `/api`. `_01_create_session` is replayed by Task 10.
+    /// still names `/api`.
     #[tokio::test]
     async fn the_custom_prefix_mount_matches_go_wire_fixtures() {
-        replay("prefix", &[]).await;
+        replay("prefix", &["wire_prefix_01_create_session"]).await;
+    }
+
+    /// Every `wire_*` fixture is replayed by one of the two tests above.
+    #[test]
+    fn every_wire_fixture_is_replayed() {
+        let names: Vec<String> = ts::fixture_names(DIR)
+            .into_iter()
+            .filter(|n| n.starts_with("wire_"))
+            .collect();
+        assert_eq!(
+            names,
+            strings(&[
+                "wire_agentengine_00_startup",
+                "wire_agentengine_01_create_session",
+                "wire_agentengine_02_stream_query",
+                "wire_agentengine_03_get_not_allowed",
+                "wire_prefix_00_startup",
+                "wire_prefix_01_create_session",
+            ])
+        );
     }
 }

@@ -1081,6 +1081,7 @@ dependencies = [
  "futures",
  "gadk-a2a",
  "gadk-agent",
+ "gadk-agentregistry",
  "gadk-anthropic",
  "gadk-artifact",
  "gadk-artifact-gcs",
