@@ -14,7 +14,10 @@
 # crates/gadk-a2a/testdata/wire/; the replay's declared deltas (*.deltas.json) are not counted.
 # 6: the vendored web UI bundle crates/gadk-launcher/webui/distr/ holds exactly 106 files, they
 # match crates/gadk-launcher/webui/SHA256SUMS (106 lines), and, when ADK-Go is present, they are
-# byte-identical to its cmd/launcher/web/webui/distr/ (scripts/sync-webui regenerates all three).
+# byte-identical to its cmd/launcher/web/webui/distr/ (scripts/sync-webui regenerates all three);
+# the launcher probe (scripts/gen-go-launcher) wrote exactly 70 web, 15 console and 34 CLI fixtures
+# under crates/gadk-launcher/testdata/{wire,console,cli}/; the replay's declared deltas
+# (*.deltas.json) are not counted.
 set -euo pipefail
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 go="${ADK_GO_DIR:-$repo/../adk-go}"
@@ -99,8 +102,20 @@ if [ -d "$webui_go" ] && ! diff -rq "$webui/distr" "$webui_go" >&2; then
   fail=1
 fi
 
+launcher_counts=""
+for spec in wire:70 console:15 cli:34; do
+  dir="$repo/crates/gadk-launcher/testdata/${spec%%:*}"
+  want="${spec#*:}"
+  got="$(find "$dir" -type f -name '*.json' ! -name '*.deltas.json' | wc -l | tr -d ' ')"
+  if [ "$got" -ne "$want" ]; then
+    echo "expected $want launcher fixtures under $dir, found $got" >&2
+    fail=1
+  fi
+  launcher_counts="$launcher_counts ${spec%%:*}=$got"
+done
+
 if [ "$fail" -eq 0 ]; then
   echo "ok: $n fixtures and $schema_n telemetry goldens match ADK-Go; $wire_n wire fixtures;" \
-    "$a2a_wire_n A2A wire fixtures; $webui_n web UI files"
+    "$a2a_wire_n A2A wire fixtures; $webui_n web UI files; launcher fixtures$launcher_counts"
 fi
 exit "$fail"
