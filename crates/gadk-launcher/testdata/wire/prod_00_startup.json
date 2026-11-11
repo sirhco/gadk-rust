@@ -1,0 +1,31 @@
+{
+  "name": "prod_00_startup",
+  "server": "prod",
+  "launcher": "prod",
+  "args": [
+    "web",
+    "-port",
+    "<port>",
+    "a2a",
+    "api"
+  ],
+  "kind": "startup",
+  "request": null,
+  "response": null,
+  "log": [
+    "<ts> No session service configured. Using an in-memory one, so whatever it holds is lost when the process exits.",
+    "<ts> No artifact service configured. Using an in-memory one, so whatever it holds is lost when the process exits.",
+    "<ts> No memory service configured. Using an in-memory one, so whatever it holds is lost when the process exits.",
+    "<ts> Starting the web server: &{port:<port> host:127.0.0.1 allowOrigins:[] writeTimeout:15000000000 readTimeout:15000000000 idleTimeout:60000000000 shutdownTimeout:15000000000 otelToCloud:false useH2C:false maxPayloadSize:0}",
+    "<ts> ",
+    "<ts> Web servers starts on http://localhost:<port>",
+    "<ts>        api:  you can access API using http://localhost:<port>/api",
+    "<ts>        api:      for instance: http://localhost:<port>/api/list-apps",
+    "<ts>        api:      debug excluded: for the web UI's Traces and agent structure panels, use -include_debug_api",
+    "<ts>        a2a:  you can access A2A using jsonrpc protocol: http://localhost:<port>",
+    "<ts> "
+  ],
+  "exit_status": null,
+  "stdout": null,
+  "error": null
+}

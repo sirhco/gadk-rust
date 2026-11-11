@@ -1,0 +1,28 @@
+{
+  "name": "full_99_shutdown",
+  "server": "full",
+  "launcher": "full",
+  "args": [
+    "web",
+    "-port",
+    "<port>",
+    "-max_request_body_size",
+    "1024",
+    "-allow_origins",
+    "http://allowed.example",
+    "api",
+    "webui",
+    "a2a",
+    "pubsub",
+    "eventarc"
+  ],
+  "kind": "shutdown",
+  "request": null,
+  "response": null,
+  "log": [
+    "<ts> Shutting down the web server..."
+  ],
+  "exit_status": 0,
+  "stdout": "",
+  "error": null
+}

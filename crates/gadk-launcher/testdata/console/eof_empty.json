@@ -1,0 +1,14 @@
+{
+  "name": "eof_empty",
+  "launcher": "full",
+  "args": [
+    "console",
+    "-streaming_mode",
+    "none"
+  ],
+  "stdin": "",
+  "stdout": "\n\nUser -> \nEOF detected, exiting...\n",
+  "stderr": "",
+  "exit_status": 0,
+  "error": null
+}

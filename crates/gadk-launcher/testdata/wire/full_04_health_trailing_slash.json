@@ -1,0 +1,71 @@
+{
+  "name": "full_04_health_trailing_slash",
+  "server": "full",
+  "launcher": "full",
+  "args": [
+    "web",
+    "-port",
+    "<port>",
+    "-max_request_body_size",
+    "1024",
+    "-allow_origins",
+    "http://allowed.example",
+    "api",
+    "webui",
+    "a2a",
+    "pubsub",
+    "eventarc"
+  ],
+  "kind": "exchange",
+  "request": {
+    "method": "GET",
+    "target": "/health/",
+    "headers": [
+      [
+        "Host",
+        "127.0.0.1:<port>"
+      ],
+      [
+        "Connection",
+        "close"
+      ]
+    ],
+    "body": ""
+  },
+  "response": {
+    "status": 301,
+    "status_text": "Moved Permanently",
+    "headers": [
+      [
+        "Connection",
+        "close"
+      ],
+      [
+        "Content-Length",
+        "42"
+      ],
+      [
+        "Content-Type",
+        "text/html; charset=utf-8"
+      ],
+      [
+        "Date",
+        "<date>"
+      ],
+      [
+        "Location",
+        "/health"
+      ]
+    ],
+    "body": "<a href=\"/health\">Moved Permanently</a>.\n\n",
+    "body_length": 42,
+    "body_sha256": null,
+    "base_href": null
+  },
+  "log": [
+    "<ts> GET /health/ <elapsed>"
+  ],
+  "exit_status": null,
+  "stdout": null,
+  "error": null
+}

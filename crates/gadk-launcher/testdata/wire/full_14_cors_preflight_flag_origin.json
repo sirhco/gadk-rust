@@ -1,0 +1,87 @@
+{
+  "name": "full_14_cors_preflight_flag_origin",
+  "server": "full",
+  "launcher": "full",
+  "args": [
+    "web",
+    "-port",
+    "<port>",
+    "-max_request_body_size",
+    "1024",
+    "-allow_origins",
+    "http://allowed.example",
+    "api",
+    "webui",
+    "a2a",
+    "pubsub",
+    "eventarc"
+  ],
+  "kind": "exchange",
+  "request": {
+    "method": "OPTIONS",
+    "target": "/api/list-apps",
+    "headers": [
+      [
+        "Host",
+        "127.0.0.1:<port>"
+      ],
+      [
+        "Origin",
+        "http://allowed.example"
+      ],
+      [
+        "Access-Control-Request-Method",
+        "GET"
+      ],
+      [
+        "Connection",
+        "close"
+      ]
+    ],
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "status_text": "OK",
+    "headers": [
+      [
+        "Access-Control-Allow-Headers",
+        "Content-Type, Authorization"
+      ],
+      [
+        "Access-Control-Allow-Methods",
+        "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS"
+      ],
+      [
+        "Access-Control-Allow-Origin",
+        "http://allowed.example"
+      ],
+      [
+        "Connection",
+        "close"
+      ],
+      [
+        "Content-Length",
+        "0"
+      ],
+      [
+        "Date",
+        "<date>"
+      ],
+      [
+        "Vary",
+        "Origin"
+      ]
+    ],
+    "body": "",
+    "body_length": 0,
+    "body_sha256": null,
+    "base_href": null
+  },
+  "log": [
+    "<ts> OPTIONS /api/list-apps <elapsed>"
+  ],
+  "exit_status": null,
+  "stdout": null,
+  "error": null
+}

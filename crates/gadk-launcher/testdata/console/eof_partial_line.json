@@ -1,0 +1,14 @@
+{
+  "name": "eof_partial_line",
+  "launcher": "full",
+  "args": [
+    "console",
+    "-streaming_mode",
+    "none"
+  ],
+  "stdin": "hello",
+  "stdout": "\n\nUser -> \nEOF detected, exiting...\n",
+  "stderr": "",
+  "exit_status": 0,
+  "error": null
+}

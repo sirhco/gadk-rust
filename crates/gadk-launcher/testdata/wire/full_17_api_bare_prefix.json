@@ -1,0 +1,87 @@
+{
+  "name": "full_17_api_bare_prefix",
+  "server": "full",
+  "launcher": "full",
+  "args": [
+    "web",
+    "-port",
+    "<port>",
+    "-max_request_body_size",
+    "1024",
+    "-allow_origins",
+    "http://allowed.example",
+    "api",
+    "webui",
+    "a2a",
+    "pubsub",
+    "eventarc"
+  ],
+  "kind": "exchange",
+  "request": {
+    "method": "GET",
+    "target": "/api",
+    "headers": [
+      [
+        "Host",
+        "127.0.0.1:<port>"
+      ],
+      [
+        "Connection",
+        "close"
+      ]
+    ],
+    "body": ""
+  },
+  "response": {
+    "status": 404,
+    "status_text": "Not Found",
+    "headers": [
+      [
+        "Access-Control-Allow-Headers",
+        "Content-Type, Authorization"
+      ],
+      [
+        "Access-Control-Allow-Methods",
+        "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS"
+      ],
+      [
+        "Access-Control-Allow-Origin",
+        "http://localhost:8080"
+      ],
+      [
+        "Connection",
+        "close"
+      ],
+      [
+        "Content-Length",
+        "19"
+      ],
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ],
+      [
+        "Date",
+        "<date>"
+      ],
+      [
+        "Vary",
+        "Origin"
+      ],
+      [
+        "X-Content-Type-Options",
+        "nosniff"
+      ]
+    ],
+    "body": "404 page not found\n",
+    "body_length": 19,
+    "body_sha256": null,
+    "base_href": null
+  },
+  "log": [
+    "<ts> GET /api <elapsed>"
+  ],
+  "exit_status": null,
+  "stdout": null,
+  "error": null
+}

@@ -1,0 +1,71 @@
+{
+  "name": "full_28_a2a_card",
+  "server": "full",
+  "launcher": "full",
+  "args": [
+    "web",
+    "-port",
+    "<port>",
+    "-max_request_body_size",
+    "1024",
+    "-allow_origins",
+    "http://allowed.example",
+    "api",
+    "webui",
+    "a2a",
+    "pubsub",
+    "eventarc"
+  ],
+  "kind": "exchange",
+  "request": {
+    "method": "GET",
+    "target": "/.well-known/agent-card.json",
+    "headers": [
+      [
+        "Host",
+        "127.0.0.1:<port>"
+      ],
+      [
+        "Connection",
+        "close"
+      ]
+    ],
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "status_text": "OK",
+    "headers": [
+      [
+        "Access-Control-Allow-Origin",
+        "*"
+      ],
+      [
+        "Connection",
+        "close"
+      ],
+      [
+        "Content-Length",
+        "1341"
+      ],
+      [
+        "Content-Type",
+        "application/json"
+      ],
+      [
+        "Date",
+        "<date>"
+      ]
+    ],
+    "body": "{\n  \"defaultInputModes\": [\n    \"text/plain\"\n  ],\n  \"defaultOutputModes\": [\n    \"text/plain\"\n  ],\n  \"description\": \"Answers greetings and transfers funds.\",\n  \"name\": \"assistant\",\n  \"version\": \"2.0.0\",\n  \"skills\": [\n    {\n      \"description\": \"Answers greetings and transfers funds. Answer briefly. Use transfer_funds to transfer funds.\",\n      \"id\": \"assistant\",\n      \"name\": \"model\",\n      \"tags\": [\n        \"llm\"\n      ]\n    },\n    {\n      \"description\": \"Transfers funds.\",\n      \"id\": \"assistant-transfer_funds\",\n      \"name\": \"transfer_funds\",\n      \"tags\": [\n        \"llm\",\n        \"tools\"\n      ]\n    }\n  ],\n  \"capabilities\": {\n    \"extensions\": [\n      {\n        \"description\": \"Content is spread across task artifacts and the status message, which carries long-running function calls.\",\n        \"uri\": \"https://google.github.io/adk-docs/a2a/a2a-extension/\"\n      }\n    ],\n    \"pushNotifications\": false,\n    \"streaming\": true\n  },\n  \"supportedInterfaces\": [\n    {\n      \"url\": \"http://localhost:8080/a2a/v1/invoke\",\n      \"protocolBinding\": \"JSONRPC\",\n      \"protocolVersion\": \"1.0\"\n    },\n    {\n      \"url\": \"http://localhost:8080/a2a/invoke\",\n      \"protocolBinding\": \"JSONRPC\",\n      \"protocolVersion\": \"0.3\"\n    }\n  ],\n  \"url\": \"http://localhost:8080/a2a/invoke\",\n  \"protocolVersion\": \"0.3\",\n  \"preferredTransport\": \"JSONRPC\"\n}",
+    "body_length": 1341,
+    "body_sha256": null,
+    "base_href": null
+  },
+  "log": [
+    "<ts> GET /.well-known/agent-card.json <elapsed>"
+  ],
+  "exit_status": null,
+  "stdout": null,
+  "error": null
+}

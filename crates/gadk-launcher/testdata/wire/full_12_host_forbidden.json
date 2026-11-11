@@ -1,0 +1,71 @@
+{
+  "name": "full_12_host_forbidden",
+  "server": "full",
+  "launcher": "full",
+  "args": [
+    "web",
+    "-port",
+    "<port>",
+    "-max_request_body_size",
+    "1024",
+    "-allow_origins",
+    "http://allowed.example",
+    "api",
+    "webui",
+    "a2a",
+    "pubsub",
+    "eventarc"
+  ],
+  "kind": "exchange",
+  "request": {
+    "method": "GET",
+    "target": "/health",
+    "headers": [
+      [
+        "Host",
+        "evil.example"
+      ],
+      [
+        "Connection",
+        "close"
+      ]
+    ],
+    "body": ""
+  },
+  "response": {
+    "status": 403,
+    "status_text": "Forbidden",
+    "headers": [
+      [
+        "Connection",
+        "close"
+      ],
+      [
+        "Content-Length",
+        "28"
+      ],
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ],
+      [
+        "Date",
+        "<date>"
+      ],
+      [
+        "X-Content-Type-Options",
+        "nosniff"
+      ]
+    ],
+    "body": "Forbidden: host not allowed\n",
+    "body_length": 28,
+    "body_sha256": null,
+    "base_href": null
+  },
+  "log": [
+    "<ts> GET /health <elapsed>"
+  ],
+  "exit_status": null,
+  "stdout": null,
+  "error": null
+}

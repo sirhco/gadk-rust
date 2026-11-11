@@ -1,0 +1,69 @@
+{
+  "name": "full_06_non_clean_path_post",
+  "server": "full",
+  "launcher": "full",
+  "args": [
+    "web",
+    "-port",
+    "<port>",
+    "-max_request_body_size",
+    "1024",
+    "-allow_origins",
+    "http://allowed.example",
+    "api",
+    "webui",
+    "a2a",
+    "pubsub",
+    "eventarc"
+  ],
+  "kind": "exchange",
+  "request": {
+    "method": "POST",
+    "target": "//api/list-apps",
+    "headers": [
+      [
+        "Host",
+        "127.0.0.1:<port>"
+      ],
+      [
+        "Content-Length",
+        "0"
+      ],
+      [
+        "Connection",
+        "close"
+      ]
+    ],
+    "body": ""
+  },
+  "response": {
+    "status": 301,
+    "status_text": "Moved Permanently",
+    "headers": [
+      [
+        "Connection",
+        "close"
+      ],
+      [
+        "Content-Length",
+        "0"
+      ],
+      [
+        "Date",
+        "<date>"
+      ],
+      [
+        "Location",
+        "/api/list-apps"
+      ]
+    ],
+    "body": "",
+    "body_length": 0,
+    "body_sha256": null,
+    "base_href": null
+  },
+  "log": [],
+  "exit_status": null,
+  "stdout": null,
+  "error": null
+}

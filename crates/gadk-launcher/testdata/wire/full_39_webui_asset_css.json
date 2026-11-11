@@ -1,0 +1,71 @@
+{
+  "name": "full_39_webui_asset_css",
+  "server": "full",
+  "launcher": "full",
+  "args": [
+    "web",
+    "-port",
+    "<port>",
+    "-max_request_body_size",
+    "1024",
+    "-allow_origins",
+    "http://allowed.example",
+    "api",
+    "webui",
+    "a2a",
+    "pubsub",
+    "eventarc"
+  ],
+  "kind": "exchange",
+  "request": {
+    "method": "GET",
+    "target": "/ui/styles-LBC36Z6S.css",
+    "headers": [
+      [
+        "Host",
+        "127.0.0.1:<port>"
+      ],
+      [
+        "Connection",
+        "close"
+      ]
+    ],
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "status_text": "OK",
+    "headers": [
+      [
+        "Accept-Ranges",
+        "bytes"
+      ],
+      [
+        "Connection",
+        "close"
+      ],
+      [
+        "Content-Length",
+        "23428"
+      ],
+      [
+        "Content-Type",
+        "text/css; charset=utf-8"
+      ],
+      [
+        "Date",
+        "<date>"
+      ]
+    ],
+    "body": null,
+    "body_length": 23428,
+    "body_sha256": "802ca5561aa0c0a768b9d68d6a992c0c43bd507769608da11cff060b5b191fff",
+    "base_href": null
+  },
+  "log": [
+    "<ts> GET /ui/styles-LBC36Z6S.css <elapsed>"
+  ],
+  "exit_status": null,
+  "stdout": null,
+  "error": null
+}

@@ -1,0 +1,81 @@
+{
+  "name": "oidc_02_pubsub_malformed_token",
+  "server": "oidc",
+  "launcher": "full",
+  "args": [
+    "web",
+    "-port",
+    "<port>",
+    "pubsub",
+    "-oidc_audience",
+    "https://example.com/push",
+    "-oidc_service_accounts",
+    "push@example.iam.gserviceaccount.com",
+    "eventarc"
+  ],
+  "kind": "exchange",
+  "request": {
+    "method": "POST",
+    "target": "/api/apps/assistant/trigger/pubsub",
+    "headers": [
+      [
+        "Host",
+        "127.0.0.1:<port>"
+      ],
+      [
+        "Authorization",
+        "Bearer not-a-jwt"
+      ],
+      [
+        "Content-Type",
+        "application/json"
+      ],
+      [
+        "Content-Length",
+        "115"
+      ],
+      [
+        "Connection",
+        "close"
+      ]
+    ],
+    "body": "{\"message\":{\"data\":\"aGVsbG8=\",\"messageId\":\"m1\",\"attributes\":{\"k\":\"v\"}},\"subscription\":\"projects/p/subscriptions/s\"}"
+  },
+  "response": {
+    "status": 401,
+    "status_text": "Unauthorized",
+    "headers": [
+      [
+        "Connection",
+        "close"
+      ],
+      [
+        "Content-Length",
+        "13"
+      ],
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ],
+      [
+        "Date",
+        "<date>"
+      ],
+      [
+        "X-Content-Type-Options",
+        "nosniff"
+      ]
+    ],
+    "body": "unauthorized\n",
+    "body_length": 13,
+    "body_sha256": null,
+    "base_href": null
+  },
+  "log": [
+    "<ts> adk: authn: rejected an OIDC-authenticated request: invalid identity token: idtoken: invalid token, token must have three segments; found 1",
+    "<ts> POST /api/apps/assistant/trigger/pubsub <elapsed>"
+  ],
+  "exit_status": null,
+  "stdout": null,
+  "error": null
+}

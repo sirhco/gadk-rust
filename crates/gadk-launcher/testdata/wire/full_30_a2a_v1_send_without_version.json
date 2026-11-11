@@ -1,0 +1,75 @@
+{
+  "name": "full_30_a2a_v1_send_without_version",
+  "server": "full",
+  "launcher": "full",
+  "args": [
+    "web",
+    "-port",
+    "<port>",
+    "-max_request_body_size",
+    "1024",
+    "-allow_origins",
+    "http://allowed.example",
+    "api",
+    "webui",
+    "a2a",
+    "pubsub",
+    "eventarc"
+  ],
+  "kind": "exchange",
+  "request": {
+    "method": "POST",
+    "target": "/a2a/v1/invoke",
+    "headers": [
+      [
+        "Host",
+        "127.0.0.1:<port>"
+      ],
+      [
+        "Content-Type",
+        "application/json"
+      ],
+      [
+        "Content-Length",
+        "136"
+      ],
+      [
+        "Connection",
+        "close"
+      ]
+    ],
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"SendMessage\",\"params\":{\"message\":{\"messageId\":\"msg-1\",\"role\":\"ROLE_USER\",\"parts\":[{\"text\":\"hello\"}]}}}"
+  },
+  "response": {
+    "status": 200,
+    "status_text": "OK",
+    "headers": [
+      [
+        "Connection",
+        "close"
+      ],
+      [
+        "Content-Length",
+        "<n>"
+      ],
+      [
+        "Content-Type",
+        "application/json"
+      ],
+      [
+        "Date",
+        "<date>"
+      ]
+    ],
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"task\":{\"id\":\"<uuid-1>\",\"artifacts\":[{\"artifactId\":\"<uuid-2>\",\"parts\":[{\"text\":\"Hello! How can I help?\"}]}],\"contextId\":\"<uuid-3>\",\"history\":[{\"messageId\":\"msg-1\",\"parts\":[{\"text\":\"hello\"}],\"role\":\"ROLE_USER\"}],\"metadata\":{\"adk_app_name\":\"assistant\",\"adk_session_id\":\"<uuid-3>\",\"adk_user_id\":\"A2A_USER_<uuid-3>\",\"https://google.github.io/adk-docs/a2a/a2a-extension/\":true},\"status\":{\"state\":\"TASK_STATE_COMPLETED\",\"timestamp\":\"<t>\"}}}}\n",
+    "body_length": null,
+    "body_sha256": null,
+    "base_href": null
+  },
+  "log": [
+    "<ts> POST /a2a/v1/invoke <elapsed>"
+  ],
+  "exit_status": null,
+  "stdout": null,
+  "error": null
+}

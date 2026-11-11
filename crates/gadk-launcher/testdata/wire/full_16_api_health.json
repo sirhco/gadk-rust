@@ -1,0 +1,83 @@
+{
+  "name": "full_16_api_health",
+  "server": "full",
+  "launcher": "full",
+  "args": [
+    "web",
+    "-port",
+    "<port>",
+    "-max_request_body_size",
+    "1024",
+    "-allow_origins",
+    "http://allowed.example",
+    "api",
+    "webui",
+    "a2a",
+    "pubsub",
+    "eventarc"
+  ],
+  "kind": "exchange",
+  "request": {
+    "method": "GET",
+    "target": "/api/health",
+    "headers": [
+      [
+        "Host",
+        "127.0.0.1:<port>"
+      ],
+      [
+        "Connection",
+        "close"
+      ]
+    ],
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "status_text": "OK",
+    "headers": [
+      [
+        "Access-Control-Allow-Headers",
+        "Content-Type, Authorization"
+      ],
+      [
+        "Access-Control-Allow-Methods",
+        "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS"
+      ],
+      [
+        "Access-Control-Allow-Origin",
+        "http://localhost:8080"
+      ],
+      [
+        "Connection",
+        "close"
+      ],
+      [
+        "Content-Length",
+        "16"
+      ],
+      [
+        "Content-Type",
+        "application/json"
+      ],
+      [
+        "Date",
+        "<date>"
+      ],
+      [
+        "Vary",
+        "Origin"
+      ]
+    ],
+    "body": "{\"status\":\"ok\"}\n",
+    "body_length": 16,
+    "body_sha256": null,
+    "base_href": null
+  },
+  "log": [
+    "<ts> GET /api/health <elapsed>"
+  ],
+  "exit_status": null,
+  "stdout": null,
+  "error": null
+}

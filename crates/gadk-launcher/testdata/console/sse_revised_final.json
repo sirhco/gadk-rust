@@ -1,0 +1,14 @@
+{
+  "name": "sse_revised_final",
+  "launcher": "full",
+  "args": [
+    "console",
+    "-streaming_mode",
+    "sse"
+  ],
+  "stdin": "revise\n",
+  "stdout": "\n\nUser -> \nAgent -> Draft answer.Final answer.\nUser -> \nEOF detected, exiting...\n",
+  "stderr": "",
+  "exit_status": 0,
+  "error": null
+}

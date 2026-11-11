@@ -1,0 +1,14 @@
+{
+  "name": "sse_agent_error",
+  "launcher": "full",
+  "args": [
+    "console",
+    "-streaming_mode",
+    "sse"
+  ],
+  "stdin": "fail\n",
+  "stdout": "\n\nUser -> \nAgent -> \nAGENT_ERROR: scripted model failure\n\nUser -> \nEOF detected, exiting...\n",
+  "stderr": "",
+  "exit_status": 0,
+  "error": null
+}
