@@ -25,6 +25,8 @@
 
 #[cfg(feature = "a2a")]
 pub mod a2a;
+#[cfg(feature = "agentengine")]
+pub mod agentengine;
 pub mod api;
 mod router;
 mod serve;

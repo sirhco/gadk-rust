@@ -24,4 +24,12 @@ mod server_adkrest_internal_models_event_actions;
 mod server_adkrest_internal_routers_auth;
 mod server_adkrest_internal_services_agentgraphgenerator;
 mod server_adkrest_internal_services_debugtelemetry;
+#[cfg(feature = "agentengine")]
+mod server_agentengine_controllers_method_stream_query;
+#[cfg(feature = "agentengine")]
+mod server_agentengine_controllers_method_streaming_agent_run_with_events;
+#[cfg(feature = "agentengine")]
+mod server_agentengine_handler;
+#[cfg(feature = "agentengine")]
+mod server_agentengine_internal_helper_encode;
 mod server_authn_googleoidc;
