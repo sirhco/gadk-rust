@@ -1,0 +1,2331 @@
+{
+  "client": {
+    "jsonrpc": {
+      "card": {
+        "capabilities": {
+          "pushNotifications": false,
+          "streaming": true
+        },
+        "defaultInputModes": [
+          "text/plain"
+        ],
+        "defaultOutputModes": [
+          "text/plain"
+        ],
+        "description": "Reports the weather.",
+        "name": "weather",
+        "skills": [
+          {
+            "description": "Reports the weather. Use get_weather to answer.",
+            "id": "weather",
+            "name": "model",
+            "tags": [
+              "llm"
+            ]
+          },
+          {
+            "description": "Returns the forecast for a city.",
+            "id": "weather-get_weather",
+            "name": "get_weather",
+            "tags": [
+              "llm",
+              "tools"
+            ]
+          }
+        ],
+        "supportedInterfaces": [
+          {
+            "protocolBinding": "JSONRPC",
+            "protocolVersion": "1.0",
+            "url": "<base>/jsonrpc"
+          }
+        ],
+        "version": "1.0.0"
+      },
+      "runs": [
+        {
+          "events": [
+            {
+              "actions": {},
+              "author": "remote",
+              "content": {
+                "parts": [
+                  {
+                    "text": "Let me "
+                  }
+                ],
+                "role": "model"
+              },
+              "customMetadata": {
+                "a2a:context_id": "<ctx-1>",
+                "a2a:response": {
+                  "artifact": {
+                    "artifactId": "<artifact-1>",
+                    "metadata": {
+                      "adk_app_name": "weather",
+                      "adk_author": "weather",
+                      "adk_invocation_id": "e-<id-1>",
+                      "adk_session_id": "<ctx-1>",
+                      "adk_user_id": "A2A_USER_<ctx-1>"
+                    },
+                    "parts": [
+                      {
+                        "text": "Let me "
+                      }
+                    ]
+                  },
+                  "contextId": "<ctx-1>",
+                  "taskId": "<task-1>"
+                },
+                "a2a:task_id": "<task-1>"
+              },
+              "id": "<id-2>",
+              "invocationId": "e-<id-3>",
+              "partial": true,
+              "timestamp": "<t>"
+            },
+            {
+              "actions": {},
+              "author": "remote",
+              "content": {
+                "parts": [
+                  {
+                    "text": "check."
+                  }
+                ],
+                "role": "model"
+              },
+              "customMetadata": {
+                "a2a:context_id": "<ctx-1>",
+                "a2a:response": {
+                  "append": true,
+                  "artifact": {
+                    "artifactId": "<artifact-1>",
+                    "metadata": {
+                      "adk_app_name": "weather",
+                      "adk_author": "weather",
+                      "adk_invocation_id": "e-<id-1>",
+                      "adk_session_id": "<ctx-1>",
+                      "adk_user_id": "A2A_USER_<ctx-1>"
+                    },
+                    "parts": [
+                      {
+                        "text": "check."
+                      }
+                    ]
+                  },
+                  "contextId": "<ctx-1>",
+                  "taskId": "<task-1>"
+                },
+                "a2a:task_id": "<task-1>"
+              },
+              "id": "<id-4>",
+              "invocationId": "e-<id-3>",
+              "partial": true,
+              "timestamp": "<t>"
+            },
+            {
+              "actions": {},
+              "author": "remote",
+              "content": {
+                "parts": [
+                  {
+                    "text": "Let me check."
+                  },
+                  {
+                    "functionCall": {
+                      "args": {
+                        "city": "Paris"
+                      },
+                      "id": "adk-<id-5>",
+                      "name": "get_weather"
+                    }
+                  }
+                ],
+                "role": "model"
+              },
+              "customMetadata": {
+                "a2a:context_id": "<ctx-1>",
+                "a2a:response": {
+                  "artifact": {
+                    "artifactId": "<artifact-1>",
+                    "metadata": {
+                      "adk_app_name": "weather",
+                      "adk_author": "weather",
+                      "adk_invocation_id": "e-<id-1>",
+                      "adk_session_id": "<ctx-1>",
+                      "adk_usage_metadata": {
+                        "candidatesTokenCount": 5,
+                        "promptTokenCount": 10,
+                        "totalTokenCount": 15
+                      },
+                      "adk_user_id": "A2A_USER_<ctx-1>"
+                    },
+                    "parts": [
+                      {
+                        "text": "Let me check."
+                      },
+                      {
+                        "data": {
+                          "args": {
+                            "city": "Paris"
+                          },
+                          "id": "adk-<id-5>",
+                          "name": "get_weather"
+                        },
+                        "metadata": {
+                          "adk_is_long_running": false,
+                          "adk_type": "function_call"
+                        }
+                      }
+                    ]
+                  },
+                  "contextId": "<ctx-1>",
+                  "lastChunk": true,
+                  "taskId": "<task-1>"
+                },
+                "a2a:task_id": "<task-1>"
+              },
+              "id": "<id-6>",
+              "invocationId": "e-<id-3>",
+              "timestamp": "<t>",
+              "usageMetadata": {
+                "candidatesTokenCount": 5,
+                "promptTokenCount": 10,
+                "totalTokenCount": 15
+              }
+            },
+            {
+              "actions": {},
+              "author": "remote",
+              "content": {
+                "parts": [
+                  {
+                    "functionResponse": {
+                      "id": "adk-<id-5>",
+                      "name": "get_weather",
+                      "response": {
+                        "forecast": "sunny"
+                      }
+                    }
+                  }
+                ],
+                "role": "model"
+              },
+              "customMetadata": {
+                "a2a:context_id": "<ctx-1>",
+                "a2a:response": {
+                  "artifact": {
+                    "artifactId": "<artifact-2>",
+                    "metadata": {
+                      "adk_app_name": "weather",
+                      "adk_author": "weather",
+                      "adk_invocation_id": "e-<id-1>",
+                      "adk_session_id": "<ctx-1>",
+                      "adk_user_id": "A2A_USER_<ctx-1>"
+                    },
+                    "parts": [
+                      {
+                        "data": {
+                          "id": "adk-<id-5>",
+                          "name": "get_weather",
+                          "response": {
+                            "forecast": "sunny"
+                          }
+                        },
+                        "metadata": {
+                          "adk_type": "function_response"
+                        }
+                      }
+                    ]
+                  },
+                  "contextId": "<ctx-1>",
+                  "lastChunk": true,
+                  "taskId": "<task-1>"
+                },
+                "a2a:task_id": "<task-1>"
+              },
+              "id": "<id-7>",
+              "invocationId": "e-<id-3>",
+              "timestamp": "<t>"
+            },
+            {
+              "actions": {},
+              "author": "remote",
+              "content": {
+                "parts": [
+                  {
+                    "text": "It is "
+                  }
+                ],
+                "role": "model"
+              },
+              "customMetadata": {
+                "a2a:context_id": "<ctx-1>",
+                "a2a:response": {
+                  "artifact": {
+                    "artifactId": "<artifact-3>",
+                    "metadata": {
+                      "adk_app_name": "weather",
+                      "adk_author": "weather",
+                      "adk_invocation_id": "e-<id-1>",
+                      "adk_session_id": "<ctx-1>",
+                      "adk_user_id": "A2A_USER_<ctx-1>"
+                    },
+                    "parts": [
+                      {
+                        "text": "It is "
+                      }
+                    ]
+                  },
+                  "contextId": "<ctx-1>",
+                  "taskId": "<task-1>"
+                },
+                "a2a:task_id": "<task-1>"
+              },
+              "id": "<id-8>",
+              "invocationId": "e-<id-3>",
+              "partial": true,
+              "timestamp": "<t>"
+            },
+            {
+              "actions": {},
+              "author": "remote",
+              "content": {
+                "parts": [
+                  {
+                    "text": "sunny."
+                  }
+                ],
+                "role": "model"
+              },
+              "customMetadata": {
+                "a2a:context_id": "<ctx-1>",
+                "a2a:response": {
+                  "append": true,
+                  "artifact": {
+                    "artifactId": "<artifact-3>",
+                    "metadata": {
+                      "adk_app_name": "weather",
+                      "adk_author": "weather",
+                      "adk_invocation_id": "e-<id-1>",
+                      "adk_session_id": "<ctx-1>",
+                      "adk_user_id": "A2A_USER_<ctx-1>"
+                    },
+                    "parts": [
+                      {
+                        "text": "sunny."
+                      }
+                    ]
+                  },
+                  "contextId": "<ctx-1>",
+                  "taskId": "<task-1>"
+                },
+                "a2a:task_id": "<task-1>"
+              },
+              "id": "<id-9>",
+              "invocationId": "e-<id-3>",
+              "partial": true,
+              "timestamp": "<t>"
+            },
+            {
+              "actions": {},
+              "author": "remote",
+              "content": {
+                "parts": [
+                  {
+                    "text": "It is sunny."
+                  }
+                ],
+                "role": "model"
+              },
+              "customMetadata": {
+                "a2a:context_id": "<ctx-1>",
+                "a2a:response": {
+                  "artifact": {
+                    "artifactId": "<artifact-3>",
+                    "metadata": {
+                      "adk_app_name": "weather",
+                      "adk_author": "weather",
+                      "adk_invocation_id": "e-<id-1>",
+                      "adk_session_id": "<ctx-1>",
+                      "adk_usage_metadata": {
+                        "candidatesTokenCount": 5,
+                        "promptTokenCount": 10,
+                        "totalTokenCount": 15
+                      },
+                      "adk_user_id": "A2A_USER_<ctx-1>"
+                    },
+                    "parts": [
+                      {
+                        "text": "It is sunny."
+                      }
+                    ]
+                  },
+                  "contextId": "<ctx-1>",
+                  "lastChunk": true,
+                  "taskId": "<task-1>"
+                },
+                "a2a:task_id": "<task-1>"
+              },
+              "id": "<id-10>",
+              "invocationId": "e-<id-3>",
+              "timestamp": "<t>",
+              "usageMetadata": {
+                "candidatesTokenCount": 5,
+                "promptTokenCount": 10,
+                "totalTokenCount": 15
+              }
+            },
+            {
+              "actions": {},
+              "author": "remote",
+              "customMetadata": {
+                "a2a:context_id": "<ctx-1>",
+                "a2a:request": {
+                  "message": {
+                    "messageId": "<msg-1>",
+                    "parts": [
+                      {
+                        "text": "weather in Paris?"
+                      }
+                    ],
+                    "role": "ROLE_USER"
+                  }
+                },
+                "a2a:response": {
+                  "contextId": "<ctx-1>",
+                  "metadata": {
+                    "adk_app_name": "weather",
+                    "adk_session_id": "<ctx-1>",
+                    "adk_user_id": "A2A_USER_<ctx-1>",
+                    "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                  },
+                  "status": {
+                    "state": "TASK_STATE_COMPLETED",
+                    "timestamp": "<t>"
+                  },
+                  "taskId": "<task-1>"
+                },
+                "a2a:task_id": "<task-1>"
+              },
+              "id": "<id-11>",
+              "invocationId": "e-<id-3>",
+              "timestamp": "<t>",
+              "turnComplete": true
+            }
+          ],
+          "exchanges": [
+            {
+              "request": {
+                "body": {
+                  "id": "<id-12>",
+                  "jsonrpc": "2.0",
+                  "method": "SendStreamingMessage",
+                  "params": {
+                    "message": {
+                      "messageId": "<msg-1>",
+                      "parts": [
+                        {
+                          "text": "weather in Paris?"
+                        }
+                      ],
+                      "role": "ROLE_USER"
+                    }
+                  }
+                },
+                "headers": {
+                  "A2a-Version": "1.0",
+                  "Accept": "text/event-stream",
+                  "Content-Type": "application/json"
+                },
+                "method": "POST",
+                "path": "/jsonrpc"
+              },
+              "response": {
+                "body": null,
+                "headers": {
+                  "Cache-Control": "no-cache",
+                  "Connection": "keep-alive",
+                  "Content-Type": "text/event-stream",
+                  "X-Accel-Buffering": "no"
+                },
+                "sse": [
+                  {
+                    "id": "<id-12>",
+                    "jsonrpc": "2.0",
+                    "result": {
+                      "task": {
+                        "contextId": "<ctx-1>",
+                        "history": [
+                          {
+                            "messageId": "<msg-1>",
+                            "parts": [
+                              {
+                                "text": "weather in Paris?"
+                              }
+                            ],
+                            "role": "ROLE_USER"
+                          }
+                        ],
+                        "id": "<task-1>",
+                        "metadata": {
+                          "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                        },
+                        "status": {
+                          "state": "TASK_STATE_SUBMITTED"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "id": "<id-12>",
+                    "jsonrpc": "2.0",
+                    "result": {
+                      "statusUpdate": {
+                        "contextId": "<ctx-1>",
+                        "metadata": {
+                          "adk_app_name": "weather",
+                          "adk_session_id": "<ctx-1>",
+                          "adk_user_id": "A2A_USER_<ctx-1>",
+                          "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                        },
+                        "status": {
+                          "state": "TASK_STATE_WORKING",
+                          "timestamp": "<t>"
+                        },
+                        "taskId": "<task-1>"
+                      }
+                    }
+                  },
+                  {
+                    "id": "<id-12>",
+                    "jsonrpc": "2.0",
+                    "result": {
+                      "artifactUpdate": {
+                        "artifact": {
+                          "artifactId": "<artifact-1>",
+                          "metadata": {
+                            "adk_app_name": "weather",
+                            "adk_author": "weather",
+                            "adk_invocation_id": "e-<id-1>",
+                            "adk_session_id": "<ctx-1>",
+                            "adk_user_id": "A2A_USER_<ctx-1>"
+                          },
+                          "parts": [
+                            {
+                              "text": "Let me "
+                            }
+                          ]
+                        },
+                        "contextId": "<ctx-1>",
+                        "taskId": "<task-1>"
+                      }
+                    }
+                  },
+                  {
+                    "id": "<id-12>",
+                    "jsonrpc": "2.0",
+                    "result": {
+                      "artifactUpdate": {
+                        "append": true,
+                        "artifact": {
+                          "artifactId": "<artifact-1>",
+                          "metadata": {
+                            "adk_app_name": "weather",
+                            "adk_author": "weather",
+                            "adk_invocation_id": "e-<id-1>",
+                            "adk_session_id": "<ctx-1>",
+                            "adk_user_id": "A2A_USER_<ctx-1>"
+                          },
+                          "parts": [
+                            {
+                              "text": "check."
+                            }
+                          ]
+                        },
+                        "contextId": "<ctx-1>",
+                        "taskId": "<task-1>"
+                      }
+                    }
+                  },
+                  {
+                    "id": "<id-12>",
+                    "jsonrpc": "2.0",
+                    "result": {
+                      "artifactUpdate": {
+                        "artifact": {
+                          "artifactId": "<artifact-1>",
+                          "metadata": {
+                            "adk_app_name": "weather",
+                            "adk_author": "weather",
+                            "adk_invocation_id": "e-<id-1>",
+                            "adk_session_id": "<ctx-1>",
+                            "adk_usage_metadata": {
+                              "candidatesTokenCount": 5,
+                              "promptTokenCount": 10,
+                              "totalTokenCount": 15
+                            },
+                            "adk_user_id": "A2A_USER_<ctx-1>"
+                          },
+                          "parts": [
+                            {
+                              "text": "Let me check."
+                            },
+                            {
+                              "data": {
+                                "args": {
+                                  "city": "Paris"
+                                },
+                                "id": "adk-<id-5>",
+                                "name": "get_weather"
+                              },
+                              "metadata": {
+                                "adk_is_long_running": false,
+                                "adk_type": "function_call"
+                              }
+                            }
+                          ]
+                        },
+                        "contextId": "<ctx-1>",
+                        "lastChunk": true,
+                        "taskId": "<task-1>"
+                      }
+                    }
+                  },
+                  {
+                    "id": "<id-12>",
+                    "jsonrpc": "2.0",
+                    "result": {
+                      "artifactUpdate": {
+                        "artifact": {
+                          "artifactId": "<artifact-2>",
+                          "metadata": {
+                            "adk_app_name": "weather",
+                            "adk_author": "weather",
+                            "adk_invocation_id": "e-<id-1>",
+                            "adk_session_id": "<ctx-1>",
+                            "adk_user_id": "A2A_USER_<ctx-1>"
+                          },
+                          "parts": [
+                            {
+                              "data": {
+                                "id": "adk-<id-5>",
+                                "name": "get_weather",
+                                "response": {
+                                  "forecast": "sunny"
+                                }
+                              },
+                              "metadata": {
+                                "adk_type": "function_response"
+                              }
+                            }
+                          ]
+                        },
+                        "contextId": "<ctx-1>",
+                        "lastChunk": true,
+                        "taskId": "<task-1>"
+                      }
+                    }
+                  },
+                  {
+                    "id": "<id-12>",
+                    "jsonrpc": "2.0",
+                    "result": {
+                      "artifactUpdate": {
+                        "artifact": {
+                          "artifactId": "<artifact-3>",
+                          "metadata": {
+                            "adk_app_name": "weather",
+                            "adk_author": "weather",
+                            "adk_invocation_id": "e-<id-1>",
+                            "adk_session_id": "<ctx-1>",
+                            "adk_user_id": "A2A_USER_<ctx-1>"
+                          },
+                          "parts": [
+                            {
+                              "text": "It is "
+                            }
+                          ]
+                        },
+                        "contextId": "<ctx-1>",
+                        "taskId": "<task-1>"
+                      }
+                    }
+                  },
+                  {
+                    "id": "<id-12>",
+                    "jsonrpc": "2.0",
+                    "result": {
+                      "artifactUpdate": {
+                        "append": true,
+                        "artifact": {
+                          "artifactId": "<artifact-3>",
+                          "metadata": {
+                            "adk_app_name": "weather",
+                            "adk_author": "weather",
+                            "adk_invocation_id": "e-<id-1>",
+                            "adk_session_id": "<ctx-1>",
+                            "adk_user_id": "A2A_USER_<ctx-1>"
+                          },
+                          "parts": [
+                            {
+                              "text": "sunny."
+                            }
+                          ]
+                        },
+                        "contextId": "<ctx-1>",
+                        "taskId": "<task-1>"
+                      }
+                    }
+                  },
+                  {
+                    "id": "<id-12>",
+                    "jsonrpc": "2.0",
+                    "result": {
+                      "artifactUpdate": {
+                        "artifact": {
+                          "artifactId": "<artifact-3>",
+                          "metadata": {
+                            "adk_app_name": "weather",
+                            "adk_author": "weather",
+                            "adk_invocation_id": "e-<id-1>",
+                            "adk_session_id": "<ctx-1>",
+                            "adk_usage_metadata": {
+                              "candidatesTokenCount": 5,
+                              "promptTokenCount": 10,
+                              "totalTokenCount": 15
+                            },
+                            "adk_user_id": "A2A_USER_<ctx-1>"
+                          },
+                          "parts": [
+                            {
+                              "text": "It is sunny."
+                            }
+                          ]
+                        },
+                        "contextId": "<ctx-1>",
+                        "lastChunk": true,
+                        "taskId": "<task-1>"
+                      }
+                    }
+                  },
+                  {
+                    "id": "<id-12>",
+                    "jsonrpc": "2.0",
+                    "result": {
+                      "statusUpdate": {
+                        "contextId": "<ctx-1>",
+                        "metadata": {
+                          "adk_app_name": "weather",
+                          "adk_session_id": "<ctx-1>",
+                          "adk_user_id": "A2A_USER_<ctx-1>",
+                          "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                        },
+                        "status": {
+                          "state": "TASK_STATE_COMPLETED",
+                          "timestamp": "<t>"
+                        },
+                        "taskId": "<task-1>"
+                      }
+                    }
+                  }
+                ],
+                "status": 200
+              }
+            }
+          ],
+          "new_message": {
+            "parts": [
+              {
+                "text": "weather in Paris?"
+              }
+            ],
+            "role": "user"
+          },
+          "streaming_mode": "sse"
+        }
+      ]
+    },
+    "rest": {
+      "card": {
+        "capabilities": {
+          "pushNotifications": false,
+          "streaming": true
+        },
+        "defaultInputModes": [
+          "text/plain"
+        ],
+        "defaultOutputModes": [
+          "text/plain"
+        ],
+        "description": "Reports the weather.",
+        "name": "weather",
+        "skills": [
+          {
+            "description": "Reports the weather. Use get_weather to answer.",
+            "id": "weather",
+            "name": "model",
+            "tags": [
+              "llm"
+            ]
+          },
+          {
+            "description": "Returns the forecast for a city.",
+            "id": "weather-get_weather",
+            "name": "get_weather",
+            "tags": [
+              "llm",
+              "tools"
+            ]
+          }
+        ],
+        "supportedInterfaces": [
+          {
+            "protocolBinding": "HTTP+JSON",
+            "protocolVersion": "1.0",
+            "url": "<base>/rest"
+          }
+        ],
+        "version": "1.0.0"
+      },
+      "runs": [
+        {
+          "events": [
+            {
+              "actions": {},
+              "author": "remote",
+              "content": {
+                "parts": [
+                  {
+                    "text": "Let me "
+                  }
+                ],
+                "role": "model"
+              },
+              "customMetadata": {
+                "a2a:context_id": "<ctx-1>",
+                "a2a:response": {
+                  "artifact": {
+                    "artifactId": "<artifact-1>",
+                    "metadata": {
+                      "adk_app_name": "weather",
+                      "adk_author": "weather",
+                      "adk_invocation_id": "e-<id-1>",
+                      "adk_session_id": "<ctx-1>",
+                      "adk_user_id": "A2A_USER_<ctx-1>"
+                    },
+                    "parts": [
+                      {
+                        "text": "Let me "
+                      }
+                    ]
+                  },
+                  "contextId": "<ctx-1>",
+                  "taskId": "<task-1>"
+                },
+                "a2a:task_id": "<task-1>"
+              },
+              "id": "<id-2>",
+              "invocationId": "e-<id-3>",
+              "partial": true,
+              "timestamp": "<t>"
+            },
+            {
+              "actions": {},
+              "author": "remote",
+              "content": {
+                "parts": [
+                  {
+                    "text": "check."
+                  }
+                ],
+                "role": "model"
+              },
+              "customMetadata": {
+                "a2a:context_id": "<ctx-1>",
+                "a2a:response": {
+                  "append": true,
+                  "artifact": {
+                    "artifactId": "<artifact-1>",
+                    "metadata": {
+                      "adk_app_name": "weather",
+                      "adk_author": "weather",
+                      "adk_invocation_id": "e-<id-1>",
+                      "adk_session_id": "<ctx-1>",
+                      "adk_user_id": "A2A_USER_<ctx-1>"
+                    },
+                    "parts": [
+                      {
+                        "text": "check."
+                      }
+                    ]
+                  },
+                  "contextId": "<ctx-1>",
+                  "taskId": "<task-1>"
+                },
+                "a2a:task_id": "<task-1>"
+              },
+              "id": "<id-4>",
+              "invocationId": "e-<id-3>",
+              "partial": true,
+              "timestamp": "<t>"
+            },
+            {
+              "actions": {},
+              "author": "remote",
+              "content": {
+                "parts": [
+                  {
+                    "text": "Let me check."
+                  },
+                  {
+                    "functionCall": {
+                      "args": {
+                        "city": "Paris"
+                      },
+                      "id": "adk-<id-5>",
+                      "name": "get_weather"
+                    }
+                  }
+                ],
+                "role": "model"
+              },
+              "customMetadata": {
+                "a2a:context_id": "<ctx-1>",
+                "a2a:response": {
+                  "artifact": {
+                    "artifactId": "<artifact-1>",
+                    "metadata": {
+                      "adk_app_name": "weather",
+                      "adk_author": "weather",
+                      "adk_invocation_id": "e-<id-1>",
+                      "adk_session_id": "<ctx-1>",
+                      "adk_usage_metadata": {
+                        "candidatesTokenCount": 5,
+                        "promptTokenCount": 10,
+                        "totalTokenCount": 15
+                      },
+                      "adk_user_id": "A2A_USER_<ctx-1>"
+                    },
+                    "parts": [
+                      {
+                        "text": "Let me check."
+                      },
+                      {
+                        "data": {
+                          "args": {
+                            "city": "Paris"
+                          },
+                          "id": "adk-<id-5>",
+                          "name": "get_weather"
+                        },
+                        "metadata": {
+                          "adk_is_long_running": false,
+                          "adk_type": "function_call"
+                        }
+                      }
+                    ]
+                  },
+                  "contextId": "<ctx-1>",
+                  "lastChunk": true,
+                  "taskId": "<task-1>"
+                },
+                "a2a:task_id": "<task-1>"
+              },
+              "id": "<id-6>",
+              "invocationId": "e-<id-3>",
+              "timestamp": "<t>",
+              "usageMetadata": {
+                "candidatesTokenCount": 5,
+                "promptTokenCount": 10,
+                "totalTokenCount": 15
+              }
+            },
+            {
+              "actions": {},
+              "author": "remote",
+              "content": {
+                "parts": [
+                  {
+                    "functionResponse": {
+                      "id": "adk-<id-5>",
+                      "name": "get_weather",
+                      "response": {
+                        "forecast": "sunny"
+                      }
+                    }
+                  }
+                ],
+                "role": "model"
+              },
+              "customMetadata": {
+                "a2a:context_id": "<ctx-1>",
+                "a2a:response": {
+                  "artifact": {
+                    "artifactId": "<artifact-2>",
+                    "metadata": {
+                      "adk_app_name": "weather",
+                      "adk_author": "weather",
+                      "adk_invocation_id": "e-<id-1>",
+                      "adk_session_id": "<ctx-1>",
+                      "adk_user_id": "A2A_USER_<ctx-1>"
+                    },
+                    "parts": [
+                      {
+                        "data": {
+                          "id": "adk-<id-5>",
+                          "name": "get_weather",
+                          "response": {
+                            "forecast": "sunny"
+                          }
+                        },
+                        "metadata": {
+                          "adk_type": "function_response"
+                        }
+                      }
+                    ]
+                  },
+                  "contextId": "<ctx-1>",
+                  "lastChunk": true,
+                  "taskId": "<task-1>"
+                },
+                "a2a:task_id": "<task-1>"
+              },
+              "id": "<id-7>",
+              "invocationId": "e-<id-3>",
+              "timestamp": "<t>"
+            },
+            {
+              "actions": {},
+              "author": "remote",
+              "content": {
+                "parts": [
+                  {
+                    "text": "It is "
+                  }
+                ],
+                "role": "model"
+              },
+              "customMetadata": {
+                "a2a:context_id": "<ctx-1>",
+                "a2a:response": {
+                  "artifact": {
+                    "artifactId": "<artifact-3>",
+                    "metadata": {
+                      "adk_app_name": "weather",
+                      "adk_author": "weather",
+                      "adk_invocation_id": "e-<id-1>",
+                      "adk_session_id": "<ctx-1>",
+                      "adk_user_id": "A2A_USER_<ctx-1>"
+                    },
+                    "parts": [
+                      {
+                        "text": "It is "
+                      }
+                    ]
+                  },
+                  "contextId": "<ctx-1>",
+                  "taskId": "<task-1>"
+                },
+                "a2a:task_id": "<task-1>"
+              },
+              "id": "<id-8>",
+              "invocationId": "e-<id-3>",
+              "partial": true,
+              "timestamp": "<t>"
+            },
+            {
+              "actions": {},
+              "author": "remote",
+              "content": {
+                "parts": [
+                  {
+                    "text": "sunny."
+                  }
+                ],
+                "role": "model"
+              },
+              "customMetadata": {
+                "a2a:context_id": "<ctx-1>",
+                "a2a:response": {
+                  "append": true,
+                  "artifact": {
+                    "artifactId": "<artifact-3>",
+                    "metadata": {
+                      "adk_app_name": "weather",
+                      "adk_author": "weather",
+                      "adk_invocation_id": "e-<id-1>",
+                      "adk_session_id": "<ctx-1>",
+                      "adk_user_id": "A2A_USER_<ctx-1>"
+                    },
+                    "parts": [
+                      {
+                        "text": "sunny."
+                      }
+                    ]
+                  },
+                  "contextId": "<ctx-1>",
+                  "taskId": "<task-1>"
+                },
+                "a2a:task_id": "<task-1>"
+              },
+              "id": "<id-9>",
+              "invocationId": "e-<id-3>",
+              "partial": true,
+              "timestamp": "<t>"
+            },
+            {
+              "actions": {},
+              "author": "remote",
+              "content": {
+                "parts": [
+                  {
+                    "text": "It is sunny."
+                  }
+                ],
+                "role": "model"
+              },
+              "customMetadata": {
+                "a2a:context_id": "<ctx-1>",
+                "a2a:response": {
+                  "artifact": {
+                    "artifactId": "<artifact-3>",
+                    "metadata": {
+                      "adk_app_name": "weather",
+                      "adk_author": "weather",
+                      "adk_invocation_id": "e-<id-1>",
+                      "adk_session_id": "<ctx-1>",
+                      "adk_usage_metadata": {
+                        "candidatesTokenCount": 5,
+                        "promptTokenCount": 10,
+                        "totalTokenCount": 15
+                      },
+                      "adk_user_id": "A2A_USER_<ctx-1>"
+                    },
+                    "parts": [
+                      {
+                        "text": "It is sunny."
+                      }
+                    ]
+                  },
+                  "contextId": "<ctx-1>",
+                  "lastChunk": true,
+                  "taskId": "<task-1>"
+                },
+                "a2a:task_id": "<task-1>"
+              },
+              "id": "<id-10>",
+              "invocationId": "e-<id-3>",
+              "timestamp": "<t>",
+              "usageMetadata": {
+                "candidatesTokenCount": 5,
+                "promptTokenCount": 10,
+                "totalTokenCount": 15
+              }
+            },
+            {
+              "actions": {},
+              "author": "remote",
+              "customMetadata": {
+                "a2a:context_id": "<ctx-1>",
+                "a2a:request": {
+                  "message": {
+                    "messageId": "<msg-1>",
+                    "parts": [
+                      {
+                        "text": "weather in Paris?"
+                      }
+                    ],
+                    "role": "ROLE_USER"
+                  }
+                },
+                "a2a:response": {
+                  "contextId": "<ctx-1>",
+                  "metadata": {
+                    "adk_app_name": "weather",
+                    "adk_session_id": "<ctx-1>",
+                    "adk_user_id": "A2A_USER_<ctx-1>",
+                    "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                  },
+                  "status": {
+                    "state": "TASK_STATE_COMPLETED",
+                    "timestamp": "<t>"
+                  },
+                  "taskId": "<task-1>"
+                },
+                "a2a:task_id": "<task-1>"
+              },
+              "id": "<id-11>",
+              "invocationId": "e-<id-3>",
+              "timestamp": "<t>",
+              "turnComplete": true
+            }
+          ],
+          "exchanges": [
+            {
+              "request": {
+                "body": {
+                  "message": {
+                    "messageId": "<msg-1>",
+                    "parts": [
+                      {
+                        "text": "weather in Paris?"
+                      }
+                    ],
+                    "role": "ROLE_USER"
+                  }
+                },
+                "headers": {
+                  "A2a-Version": "1.0",
+                  "Accept": "text/event-stream",
+                  "Content-Type": "application/json"
+                },
+                "method": "POST",
+                "path": "/rest/message:stream"
+              },
+              "response": {
+                "body": null,
+                "headers": {
+                  "Cache-Control": "no-cache",
+                  "Connection": "keep-alive",
+                  "Content-Type": "text/event-stream",
+                  "X-Accel-Buffering": "no"
+                },
+                "sse": [
+                  {
+                    "task": {
+                      "contextId": "<ctx-1>",
+                      "history": [
+                        {
+                          "messageId": "<msg-1>",
+                          "parts": [
+                            {
+                              "text": "weather in Paris?"
+                            }
+                          ],
+                          "role": "ROLE_USER"
+                        }
+                      ],
+                      "id": "<task-1>",
+                      "metadata": {
+                        "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                      },
+                      "status": {
+                        "state": "TASK_STATE_SUBMITTED"
+                      }
+                    }
+                  },
+                  {
+                    "statusUpdate": {
+                      "contextId": "<ctx-1>",
+                      "metadata": {
+                        "adk_app_name": "weather",
+                        "adk_session_id": "<ctx-1>",
+                        "adk_user_id": "A2A_USER_<ctx-1>",
+                        "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                      },
+                      "status": {
+                        "state": "TASK_STATE_WORKING",
+                        "timestamp": "<t>"
+                      },
+                      "taskId": "<task-1>"
+                    }
+                  },
+                  {
+                    "artifactUpdate": {
+                      "artifact": {
+                        "artifactId": "<artifact-1>",
+                        "metadata": {
+                          "adk_app_name": "weather",
+                          "adk_author": "weather",
+                          "adk_invocation_id": "e-<id-1>",
+                          "adk_session_id": "<ctx-1>",
+                          "adk_user_id": "A2A_USER_<ctx-1>"
+                        },
+                        "parts": [
+                          {
+                            "text": "Let me "
+                          }
+                        ]
+                      },
+                      "contextId": "<ctx-1>",
+                      "taskId": "<task-1>"
+                    }
+                  },
+                  {
+                    "artifactUpdate": {
+                      "append": true,
+                      "artifact": {
+                        "artifactId": "<artifact-1>",
+                        "metadata": {
+                          "adk_app_name": "weather",
+                          "adk_author": "weather",
+                          "adk_invocation_id": "e-<id-1>",
+                          "adk_session_id": "<ctx-1>",
+                          "adk_user_id": "A2A_USER_<ctx-1>"
+                        },
+                        "parts": [
+                          {
+                            "text": "check."
+                          }
+                        ]
+                      },
+                      "contextId": "<ctx-1>",
+                      "taskId": "<task-1>"
+                    }
+                  },
+                  {
+                    "artifactUpdate": {
+                      "artifact": {
+                        "artifactId": "<artifact-1>",
+                        "metadata": {
+                          "adk_app_name": "weather",
+                          "adk_author": "weather",
+                          "adk_invocation_id": "e-<id-1>",
+                          "adk_session_id": "<ctx-1>",
+                          "adk_usage_metadata": {
+                            "candidatesTokenCount": 5,
+                            "promptTokenCount": 10,
+                            "totalTokenCount": 15
+                          },
+                          "adk_user_id": "A2A_USER_<ctx-1>"
+                        },
+                        "parts": [
+                          {
+                            "text": "Let me check."
+                          },
+                          {
+                            "data": {
+                              "args": {
+                                "city": "Paris"
+                              },
+                              "id": "adk-<id-5>",
+                              "name": "get_weather"
+                            },
+                            "metadata": {
+                              "adk_is_long_running": false,
+                              "adk_type": "function_call"
+                            }
+                          }
+                        ]
+                      },
+                      "contextId": "<ctx-1>",
+                      "lastChunk": true,
+                      "taskId": "<task-1>"
+                    }
+                  },
+                  {
+                    "artifactUpdate": {
+                      "artifact": {
+                        "artifactId": "<artifact-2>",
+                        "metadata": {
+                          "adk_app_name": "weather",
+                          "adk_author": "weather",
+                          "adk_invocation_id": "e-<id-1>",
+                          "adk_session_id": "<ctx-1>",
+                          "adk_user_id": "A2A_USER_<ctx-1>"
+                        },
+                        "parts": [
+                          {
+                            "data": {
+                              "id": "adk-<id-5>",
+                              "name": "get_weather",
+                              "response": {
+                                "forecast": "sunny"
+                              }
+                            },
+                            "metadata": {
+                              "adk_type": "function_response"
+                            }
+                          }
+                        ]
+                      },
+                      "contextId": "<ctx-1>",
+                      "lastChunk": true,
+                      "taskId": "<task-1>"
+                    }
+                  },
+                  {
+                    "artifactUpdate": {
+                      "artifact": {
+                        "artifactId": "<artifact-3>",
+                        "metadata": {
+                          "adk_app_name": "weather",
+                          "adk_author": "weather",
+                          "adk_invocation_id": "e-<id-1>",
+                          "adk_session_id": "<ctx-1>",
+                          "adk_user_id": "A2A_USER_<ctx-1>"
+                        },
+                        "parts": [
+                          {
+                            "text": "It is "
+                          }
+                        ]
+                      },
+                      "contextId": "<ctx-1>",
+                      "taskId": "<task-1>"
+                    }
+                  },
+                  {
+                    "artifactUpdate": {
+                      "append": true,
+                      "artifact": {
+                        "artifactId": "<artifact-3>",
+                        "metadata": {
+                          "adk_app_name": "weather",
+                          "adk_author": "weather",
+                          "adk_invocation_id": "e-<id-1>",
+                          "adk_session_id": "<ctx-1>",
+                          "adk_user_id": "A2A_USER_<ctx-1>"
+                        },
+                        "parts": [
+                          {
+                            "text": "sunny."
+                          }
+                        ]
+                      },
+                      "contextId": "<ctx-1>",
+                      "taskId": "<task-1>"
+                    }
+                  },
+                  {
+                    "artifactUpdate": {
+                      "artifact": {
+                        "artifactId": "<artifact-3>",
+                        "metadata": {
+                          "adk_app_name": "weather",
+                          "adk_author": "weather",
+                          "adk_invocation_id": "e-<id-1>",
+                          "adk_session_id": "<ctx-1>",
+                          "adk_usage_metadata": {
+                            "candidatesTokenCount": 5,
+                            "promptTokenCount": 10,
+                            "totalTokenCount": 15
+                          },
+                          "adk_user_id": "A2A_USER_<ctx-1>"
+                        },
+                        "parts": [
+                          {
+                            "text": "It is sunny."
+                          }
+                        ]
+                      },
+                      "contextId": "<ctx-1>",
+                      "lastChunk": true,
+                      "taskId": "<task-1>"
+                    }
+                  },
+                  {
+                    "statusUpdate": {
+                      "contextId": "<ctx-1>",
+                      "metadata": {
+                        "adk_app_name": "weather",
+                        "adk_session_id": "<ctx-1>",
+                        "adk_user_id": "A2A_USER_<ctx-1>",
+                        "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                      },
+                      "status": {
+                        "state": "TASK_STATE_COMPLETED",
+                        "timestamp": "<t>"
+                      },
+                      "taskId": "<task-1>"
+                    }
+                  }
+                ],
+                "status": 200
+              }
+            }
+          ],
+          "new_message": {
+            "parts": [
+              {
+                "text": "weather in Paris?"
+              }
+            ],
+            "role": "user"
+          },
+          "streaming_mode": "sse"
+        }
+      ]
+    }
+  },
+  "scenario": "streaming_partials_per_event",
+  "server": {
+    "jsonrpc": {
+      "exchanges": [
+        {
+          "request": {
+            "body": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "method": "SendStreamingMessage",
+              "params": {
+                "message": {
+                  "messageId": "msg-1",
+                  "parts": [
+                    {
+                      "text": "weather in Paris?"
+                    }
+                  ],
+                  "role": "ROLE_USER"
+                }
+              }
+            },
+            "headers": {
+              "A2a-Version": "1.0",
+              "Accept": "text/event-stream",
+              "Content-Type": "application/json"
+            },
+            "method": "POST",
+            "path": "/jsonrpc"
+          },
+          "response": {
+            "body": null,
+            "headers": {
+              "Cache-Control": "no-cache",
+              "Connection": "keep-alive",
+              "Content-Type": "text/event-stream",
+              "X-Accel-Buffering": "no"
+            },
+            "sse": [
+              {
+                "id": 1,
+                "jsonrpc": "2.0",
+                "result": {
+                  "task": {
+                    "contextId": "<ctx-1>",
+                    "history": [
+                      {
+                        "messageId": "msg-1",
+                        "parts": [
+                          {
+                            "text": "weather in Paris?"
+                          }
+                        ],
+                        "role": "ROLE_USER"
+                      }
+                    ],
+                    "id": "<task-1>",
+                    "metadata": {
+                      "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                    },
+                    "status": {
+                      "state": "TASK_STATE_SUBMITTED"
+                    }
+                  }
+                }
+              },
+              {
+                "id": 1,
+                "jsonrpc": "2.0",
+                "result": {
+                  "statusUpdate": {
+                    "contextId": "<ctx-1>",
+                    "metadata": {
+                      "adk_app_name": "weather",
+                      "adk_session_id": "<ctx-1>",
+                      "adk_user_id": "A2A_USER_<ctx-1>",
+                      "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                    },
+                    "status": {
+                      "state": "TASK_STATE_WORKING",
+                      "timestamp": "<t>"
+                    },
+                    "taskId": "<task-1>"
+                  }
+                }
+              },
+              {
+                "id": 1,
+                "jsonrpc": "2.0",
+                "result": {
+                  "artifactUpdate": {
+                    "artifact": {
+                      "artifactId": "<artifact-1>",
+                      "metadata": {
+                        "adk_app_name": "weather",
+                        "adk_author": "weather",
+                        "adk_invocation_id": "e-<id-1>",
+                        "adk_session_id": "<ctx-1>",
+                        "adk_user_id": "A2A_USER_<ctx-1>"
+                      },
+                      "parts": [
+                        {
+                          "text": "Let me "
+                        }
+                      ]
+                    },
+                    "contextId": "<ctx-1>",
+                    "taskId": "<task-1>"
+                  }
+                }
+              },
+              {
+                "id": 1,
+                "jsonrpc": "2.0",
+                "result": {
+                  "artifactUpdate": {
+                    "append": true,
+                    "artifact": {
+                      "artifactId": "<artifact-1>",
+                      "metadata": {
+                        "adk_app_name": "weather",
+                        "adk_author": "weather",
+                        "adk_invocation_id": "e-<id-1>",
+                        "adk_session_id": "<ctx-1>",
+                        "adk_user_id": "A2A_USER_<ctx-1>"
+                      },
+                      "parts": [
+                        {
+                          "text": "check."
+                        }
+                      ]
+                    },
+                    "contextId": "<ctx-1>",
+                    "taskId": "<task-1>"
+                  }
+                }
+              },
+              {
+                "id": 1,
+                "jsonrpc": "2.0",
+                "result": {
+                  "artifactUpdate": {
+                    "artifact": {
+                      "artifactId": "<artifact-1>",
+                      "metadata": {
+                        "adk_app_name": "weather",
+                        "adk_author": "weather",
+                        "adk_invocation_id": "e-<id-1>",
+                        "adk_session_id": "<ctx-1>",
+                        "adk_usage_metadata": {
+                          "candidatesTokenCount": 5,
+                          "promptTokenCount": 10,
+                          "totalTokenCount": 15
+                        },
+                        "adk_user_id": "A2A_USER_<ctx-1>"
+                      },
+                      "parts": [
+                        {
+                          "text": "Let me check."
+                        },
+                        {
+                          "data": {
+                            "args": {
+                              "city": "Paris"
+                            },
+                            "id": "adk-<id-2>",
+                            "name": "get_weather"
+                          },
+                          "metadata": {
+                            "adk_is_long_running": false,
+                            "adk_type": "function_call"
+                          }
+                        }
+                      ]
+                    },
+                    "contextId": "<ctx-1>",
+                    "lastChunk": true,
+                    "taskId": "<task-1>"
+                  }
+                }
+              },
+              {
+                "id": 1,
+                "jsonrpc": "2.0",
+                "result": {
+                  "artifactUpdate": {
+                    "artifact": {
+                      "artifactId": "<artifact-2>",
+                      "metadata": {
+                        "adk_app_name": "weather",
+                        "adk_author": "weather",
+                        "adk_invocation_id": "e-<id-1>",
+                        "adk_session_id": "<ctx-1>",
+                        "adk_user_id": "A2A_USER_<ctx-1>"
+                      },
+                      "parts": [
+                        {
+                          "data": {
+                            "id": "adk-<id-2>",
+                            "name": "get_weather",
+                            "response": {
+                              "forecast": "sunny"
+                            }
+                          },
+                          "metadata": {
+                            "adk_type": "function_response"
+                          }
+                        }
+                      ]
+                    },
+                    "contextId": "<ctx-1>",
+                    "lastChunk": true,
+                    "taskId": "<task-1>"
+                  }
+                }
+              },
+              {
+                "id": 1,
+                "jsonrpc": "2.0",
+                "result": {
+                  "artifactUpdate": {
+                    "artifact": {
+                      "artifactId": "<artifact-3>",
+                      "metadata": {
+                        "adk_app_name": "weather",
+                        "adk_author": "weather",
+                        "adk_invocation_id": "e-<id-1>",
+                        "adk_session_id": "<ctx-1>",
+                        "adk_user_id": "A2A_USER_<ctx-1>"
+                      },
+                      "parts": [
+                        {
+                          "text": "It is "
+                        }
+                      ]
+                    },
+                    "contextId": "<ctx-1>",
+                    "taskId": "<task-1>"
+                  }
+                }
+              },
+              {
+                "id": 1,
+                "jsonrpc": "2.0",
+                "result": {
+                  "artifactUpdate": {
+                    "append": true,
+                    "artifact": {
+                      "artifactId": "<artifact-3>",
+                      "metadata": {
+                        "adk_app_name": "weather",
+                        "adk_author": "weather",
+                        "adk_invocation_id": "e-<id-1>",
+                        "adk_session_id": "<ctx-1>",
+                        "adk_user_id": "A2A_USER_<ctx-1>"
+                      },
+                      "parts": [
+                        {
+                          "text": "sunny."
+                        }
+                      ]
+                    },
+                    "contextId": "<ctx-1>",
+                    "taskId": "<task-1>"
+                  }
+                }
+              },
+              {
+                "id": 1,
+                "jsonrpc": "2.0",
+                "result": {
+                  "artifactUpdate": {
+                    "artifact": {
+                      "artifactId": "<artifact-3>",
+                      "metadata": {
+                        "adk_app_name": "weather",
+                        "adk_author": "weather",
+                        "adk_invocation_id": "e-<id-1>",
+                        "adk_session_id": "<ctx-1>",
+                        "adk_usage_metadata": {
+                          "candidatesTokenCount": 5,
+                          "promptTokenCount": 10,
+                          "totalTokenCount": 15
+                        },
+                        "adk_user_id": "A2A_USER_<ctx-1>"
+                      },
+                      "parts": [
+                        {
+                          "text": "It is sunny."
+                        }
+                      ]
+                    },
+                    "contextId": "<ctx-1>",
+                    "lastChunk": true,
+                    "taskId": "<task-1>"
+                  }
+                }
+              },
+              {
+                "id": 1,
+                "jsonrpc": "2.0",
+                "result": {
+                  "statusUpdate": {
+                    "contextId": "<ctx-1>",
+                    "metadata": {
+                      "adk_app_name": "weather",
+                      "adk_session_id": "<ctx-1>",
+                      "adk_user_id": "A2A_USER_<ctx-1>",
+                      "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                    },
+                    "status": {
+                      "state": "TASK_STATE_COMPLETED",
+                      "timestamp": "<t>"
+                    },
+                    "taskId": "<task-1>"
+                  }
+                }
+              }
+            ],
+            "status": 200
+          }
+        },
+        {
+          "request": {
+            "body": {
+              "id": 2,
+              "jsonrpc": "2.0",
+              "method": "SendMessage",
+              "params": {
+                "message": {
+                  "messageId": "msg-2",
+                  "parts": [
+                    {
+                      "text": "weather in Paris?"
+                    }
+                  ],
+                  "role": "ROLE_USER"
+                }
+              }
+            },
+            "headers": {
+              "A2a-Version": "1.0",
+              "Content-Type": "application/json"
+            },
+            "method": "POST",
+            "path": "/jsonrpc"
+          },
+          "response": {
+            "body": {
+              "id": 2,
+              "jsonrpc": "2.0",
+              "result": {
+                "task": {
+                  "artifacts": [
+                    {
+                      "artifactId": "<artifact-4>",
+                      "metadata": {
+                        "adk_app_name": "weather",
+                        "adk_author": "weather",
+                        "adk_invocation_id": "e-<id-3>",
+                        "adk_session_id": "<id-4>",
+                        "adk_usage_metadata": {
+                          "candidatesTokenCount": 5,
+                          "promptTokenCount": 10,
+                          "totalTokenCount": 15
+                        },
+                        "adk_user_id": "A2A_USER_<id-4>"
+                      },
+                      "parts": [
+                        {
+                          "text": "Let me check."
+                        },
+                        {
+                          "data": {
+                            "args": {
+                              "city": "Paris"
+                            },
+                            "id": "adk-<id-5>",
+                            "name": "get_weather"
+                          },
+                          "metadata": {
+                            "adk_is_long_running": false,
+                            "adk_type": "function_call"
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "artifactId": "<artifact-5>",
+                      "metadata": {
+                        "adk_app_name": "weather",
+                        "adk_author": "weather",
+                        "adk_invocation_id": "e-<id-3>",
+                        "adk_session_id": "<id-4>",
+                        "adk_user_id": "A2A_USER_<id-4>"
+                      },
+                      "parts": [
+                        {
+                          "data": {
+                            "id": "adk-<id-5>",
+                            "name": "get_weather",
+                            "response": {
+                              "forecast": "sunny"
+                            }
+                          },
+                          "metadata": {
+                            "adk_type": "function_response"
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "artifactId": "<artifact-6>",
+                      "metadata": {
+                        "adk_app_name": "weather",
+                        "adk_author": "weather",
+                        "adk_invocation_id": "e-<id-3>",
+                        "adk_session_id": "<id-4>",
+                        "adk_usage_metadata": {
+                          "candidatesTokenCount": 5,
+                          "promptTokenCount": 10,
+                          "totalTokenCount": 15
+                        },
+                        "adk_user_id": "A2A_USER_<id-4>"
+                      },
+                      "parts": [
+                        {
+                          "text": "It is sunny."
+                        }
+                      ]
+                    }
+                  ],
+                  "contextId": "<id-4>",
+                  "history": [
+                    {
+                      "messageId": "msg-2",
+                      "parts": [
+                        {
+                          "text": "weather in Paris?"
+                        }
+                      ],
+                      "role": "ROLE_USER"
+                    }
+                  ],
+                  "id": "<task-2>",
+                  "metadata": {
+                    "adk_app_name": "weather",
+                    "adk_session_id": "<id-4>",
+                    "adk_user_id": "A2A_USER_<id-4>",
+                    "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                  },
+                  "status": {
+                    "state": "TASK_STATE_COMPLETED",
+                    "timestamp": "<t>"
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "status": 200
+          }
+        }
+      ]
+    },
+    "rest": {
+      "exchanges": [
+        {
+          "request": {
+            "body": {
+              "message": {
+                "messageId": "msg-1",
+                "parts": [
+                  {
+                    "text": "weather in Paris?"
+                  }
+                ],
+                "role": "ROLE_USER"
+              }
+            },
+            "headers": {
+              "A2a-Version": "1.0",
+              "Accept": "text/event-stream",
+              "Content-Type": "application/json"
+            },
+            "method": "POST",
+            "path": "/rest/message:stream"
+          },
+          "response": {
+            "body": null,
+            "headers": {
+              "Cache-Control": "no-cache",
+              "Connection": "keep-alive",
+              "Content-Type": "text/event-stream",
+              "X-Accel-Buffering": "no"
+            },
+            "sse": [
+              {
+                "task": {
+                  "contextId": "<ctx-1>",
+                  "history": [
+                    {
+                      "messageId": "msg-1",
+                      "parts": [
+                        {
+                          "text": "weather in Paris?"
+                        }
+                      ],
+                      "role": "ROLE_USER"
+                    }
+                  ],
+                  "id": "<task-1>",
+                  "metadata": {
+                    "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                  },
+                  "status": {
+                    "state": "TASK_STATE_SUBMITTED"
+                  }
+                }
+              },
+              {
+                "statusUpdate": {
+                  "contextId": "<ctx-1>",
+                  "metadata": {
+                    "adk_app_name": "weather",
+                    "adk_session_id": "<ctx-1>",
+                    "adk_user_id": "A2A_USER_<ctx-1>",
+                    "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                  },
+                  "status": {
+                    "state": "TASK_STATE_WORKING",
+                    "timestamp": "<t>"
+                  },
+                  "taskId": "<task-1>"
+                }
+              },
+              {
+                "artifactUpdate": {
+                  "artifact": {
+                    "artifactId": "<artifact-1>",
+                    "metadata": {
+                      "adk_app_name": "weather",
+                      "adk_author": "weather",
+                      "adk_invocation_id": "e-<id-1>",
+                      "adk_session_id": "<ctx-1>",
+                      "adk_user_id": "A2A_USER_<ctx-1>"
+                    },
+                    "parts": [
+                      {
+                        "text": "Let me "
+                      }
+                    ]
+                  },
+                  "contextId": "<ctx-1>",
+                  "taskId": "<task-1>"
+                }
+              },
+              {
+                "artifactUpdate": {
+                  "append": true,
+                  "artifact": {
+                    "artifactId": "<artifact-1>",
+                    "metadata": {
+                      "adk_app_name": "weather",
+                      "adk_author": "weather",
+                      "adk_invocation_id": "e-<id-1>",
+                      "adk_session_id": "<ctx-1>",
+                      "adk_user_id": "A2A_USER_<ctx-1>"
+                    },
+                    "parts": [
+                      {
+                        "text": "check."
+                      }
+                    ]
+                  },
+                  "contextId": "<ctx-1>",
+                  "taskId": "<task-1>"
+                }
+              },
+              {
+                "artifactUpdate": {
+                  "artifact": {
+                    "artifactId": "<artifact-1>",
+                    "metadata": {
+                      "adk_app_name": "weather",
+                      "adk_author": "weather",
+                      "adk_invocation_id": "e-<id-1>",
+                      "adk_session_id": "<ctx-1>",
+                      "adk_usage_metadata": {
+                        "candidatesTokenCount": 5,
+                        "promptTokenCount": 10,
+                        "totalTokenCount": 15
+                      },
+                      "adk_user_id": "A2A_USER_<ctx-1>"
+                    },
+                    "parts": [
+                      {
+                        "text": "Let me check."
+                      },
+                      {
+                        "data": {
+                          "args": {
+                            "city": "Paris"
+                          },
+                          "id": "adk-<id-2>",
+                          "name": "get_weather"
+                        },
+                        "metadata": {
+                          "adk_is_long_running": false,
+                          "adk_type": "function_call"
+                        }
+                      }
+                    ]
+                  },
+                  "contextId": "<ctx-1>",
+                  "lastChunk": true,
+                  "taskId": "<task-1>"
+                }
+              },
+              {
+                "artifactUpdate": {
+                  "artifact": {
+                    "artifactId": "<artifact-2>",
+                    "metadata": {
+                      "adk_app_name": "weather",
+                      "adk_author": "weather",
+                      "adk_invocation_id": "e-<id-1>",
+                      "adk_session_id": "<ctx-1>",
+                      "adk_user_id": "A2A_USER_<ctx-1>"
+                    },
+                    "parts": [
+                      {
+                        "data": {
+                          "id": "adk-<id-2>",
+                          "name": "get_weather",
+                          "response": {
+                            "forecast": "sunny"
+                          }
+                        },
+                        "metadata": {
+                          "adk_type": "function_response"
+                        }
+                      }
+                    ]
+                  },
+                  "contextId": "<ctx-1>",
+                  "lastChunk": true,
+                  "taskId": "<task-1>"
+                }
+              },
+              {
+                "artifactUpdate": {
+                  "artifact": {
+                    "artifactId": "<artifact-3>",
+                    "metadata": {
+                      "adk_app_name": "weather",
+                      "adk_author": "weather",
+                      "adk_invocation_id": "e-<id-1>",
+                      "adk_session_id": "<ctx-1>",
+                      "adk_user_id": "A2A_USER_<ctx-1>"
+                    },
+                    "parts": [
+                      {
+                        "text": "It is "
+                      }
+                    ]
+                  },
+                  "contextId": "<ctx-1>",
+                  "taskId": "<task-1>"
+                }
+              },
+              {
+                "artifactUpdate": {
+                  "append": true,
+                  "artifact": {
+                    "artifactId": "<artifact-3>",
+                    "metadata": {
+                      "adk_app_name": "weather",
+                      "adk_author": "weather",
+                      "adk_invocation_id": "e-<id-1>",
+                      "adk_session_id": "<ctx-1>",
+                      "adk_user_id": "A2A_USER_<ctx-1>"
+                    },
+                    "parts": [
+                      {
+                        "text": "sunny."
+                      }
+                    ]
+                  },
+                  "contextId": "<ctx-1>",
+                  "taskId": "<task-1>"
+                }
+              },
+              {
+                "artifactUpdate": {
+                  "artifact": {
+                    "artifactId": "<artifact-3>",
+                    "metadata": {
+                      "adk_app_name": "weather",
+                      "adk_author": "weather",
+                      "adk_invocation_id": "e-<id-1>",
+                      "adk_session_id": "<ctx-1>",
+                      "adk_usage_metadata": {
+                        "candidatesTokenCount": 5,
+                        "promptTokenCount": 10,
+                        "totalTokenCount": 15
+                      },
+                      "adk_user_id": "A2A_USER_<ctx-1>"
+                    },
+                    "parts": [
+                      {
+                        "text": "It is sunny."
+                      }
+                    ]
+                  },
+                  "contextId": "<ctx-1>",
+                  "lastChunk": true,
+                  "taskId": "<task-1>"
+                }
+              },
+              {
+                "statusUpdate": {
+                  "contextId": "<ctx-1>",
+                  "metadata": {
+                    "adk_app_name": "weather",
+                    "adk_session_id": "<ctx-1>",
+                    "adk_user_id": "A2A_USER_<ctx-1>",
+                    "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                  },
+                  "status": {
+                    "state": "TASK_STATE_COMPLETED",
+                    "timestamp": "<t>"
+                  },
+                  "taskId": "<task-1>"
+                }
+              }
+            ],
+            "status": 200
+          }
+        },
+        {
+          "request": {
+            "body": {
+              "message": {
+                "messageId": "msg-2",
+                "parts": [
+                  {
+                    "text": "weather in Paris?"
+                  }
+                ],
+                "role": "ROLE_USER"
+              }
+            },
+            "headers": {
+              "A2a-Version": "1.0",
+              "Accept": "application/json",
+              "Content-Type": "application/json"
+            },
+            "method": "POST",
+            "path": "/rest/message:send"
+          },
+          "response": {
+            "body": {
+              "task": {
+                "artifacts": [
+                  {
+                    "artifactId": "<artifact-4>",
+                    "metadata": {
+                      "adk_app_name": "weather",
+                      "adk_author": "weather",
+                      "adk_invocation_id": "e-<id-3>",
+                      "adk_session_id": "<id-4>",
+                      "adk_usage_metadata": {
+                        "candidatesTokenCount": 5,
+                        "promptTokenCount": 10,
+                        "totalTokenCount": 15
+                      },
+                      "adk_user_id": "A2A_USER_<id-4>"
+                    },
+                    "parts": [
+                      {
+                        "text": "Let me check."
+                      },
+                      {
+                        "data": {
+                          "args": {
+                            "city": "Paris"
+                          },
+                          "id": "adk-<id-5>",
+                          "name": "get_weather"
+                        },
+                        "metadata": {
+                          "adk_is_long_running": false,
+                          "adk_type": "function_call"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "artifactId": "<artifact-5>",
+                    "metadata": {
+                      "adk_app_name": "weather",
+                      "adk_author": "weather",
+                      "adk_invocation_id": "e-<id-3>",
+                      "adk_session_id": "<id-4>",
+                      "adk_user_id": "A2A_USER_<id-4>"
+                    },
+                    "parts": [
+                      {
+                        "data": {
+                          "id": "adk-<id-5>",
+                          "name": "get_weather",
+                          "response": {
+                            "forecast": "sunny"
+                          }
+                        },
+                        "metadata": {
+                          "adk_type": "function_response"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "artifactId": "<artifact-6>",
+                    "metadata": {
+                      "adk_app_name": "weather",
+                      "adk_author": "weather",
+                      "adk_invocation_id": "e-<id-3>",
+                      "adk_session_id": "<id-4>",
+                      "adk_usage_metadata": {
+                        "candidatesTokenCount": 5,
+                        "promptTokenCount": 10,
+                        "totalTokenCount": 15
+                      },
+                      "adk_user_id": "A2A_USER_<id-4>"
+                    },
+                    "parts": [
+                      {
+                        "text": "It is sunny."
+                      }
+                    ]
+                  }
+                ],
+                "contextId": "<id-4>",
+                "history": [
+                  {
+                    "messageId": "msg-2",
+                    "parts": [
+                      {
+                        "text": "weather in Paris?"
+                      }
+                    ],
+                    "role": "ROLE_USER"
+                  }
+                ],
+                "id": "<task-2>",
+                "metadata": {
+                  "adk_app_name": "weather",
+                  "adk_session_id": "<id-4>",
+                  "adk_user_id": "A2A_USER_<id-4>",
+                  "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                },
+                "status": {
+                  "state": "TASK_STATE_COMPLETED",
+                  "timestamp": "<t>"
+                }
+              }
+            },
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "status": 200
+          }
+        }
+      ]
+    }
+  }
+}

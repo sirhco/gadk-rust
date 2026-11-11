@@ -20,12 +20,13 @@ use std::io::ErrorKind;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use gadk_platform::{go_path_clean, go_path_join};
 use tokio::io::{AsyncReadExt, BufReader};
 
 use super::{
     Frontmatter, ResourceReader, SkillError, SkillErrorKind, SkillFs, Source, parse, quote,
 };
-use crate::go_fmt::{go_lossy_utf8, path_clean, valid_path};
+use crate::go_fmt::{go_lossy_utf8, valid_path};
 
 /// The directories a skill resource may live in, in Go's listing order.
 const RESOURCE_DIRS: [&str; 3] = ["references", "assets", "scripts"];
@@ -62,7 +63,7 @@ impl FileSystemSource {
         &self,
         name: &str,
     ) -> Result<(Frontmatter, BufReader<ResourceReader>), SkillError> {
-        let skill_file_path = path_join(name, "SKILL.md");
+        let skill_file_path = go_path_join(&[name, "SKILL.md"]);
         let file = match self.fs.open(&skill_file_path).await {
             Ok(file) => file,
             Err(e) if e.kind() == ErrorKind::NotFound => {
@@ -112,7 +113,7 @@ impl FileSystemSource {
     ) -> Result<(), SkillError> {
         let walk_err =
             |e: std::io::Error| SkillError::io(format!("walk target {}", quote(target)), e);
-        let root = match self.fs.metadata(&path_join(name, target)).await {
+        let root = match self.fs.metadata(&go_path_join(&[name, target])).await {
             Ok(meta) => meta,
             Err(e) if e.kind() == ErrorKind::NotFound => return Ok(()),
             Err(e) => return Err(walk_err(e)),
@@ -125,7 +126,7 @@ impl FileSystemSource {
                 out.push(path);
                 continue;
             }
-            let entries = match self.fs.read_dir(&path_join(name, &path)).await {
+            let entries = match self.fs.read_dir(&go_path_join(&[name, &path])).await {
                 Ok(entries) => entries,
                 Err(e) if e.kind() == ErrorKind::NotFound => continue,
                 Err(e) => return Err(walk_err(e)),
@@ -164,7 +165,7 @@ impl Source for FileSystemSource {
     /// Port of Go `ListResources` (`filesystem_source.go:141`).
     async fn list_resources(&self, name: &str, subpath: &str) -> Result<Vec<String>, SkillError> {
         self.validate_skill(name).await?;
-        let clean_path = path_clean(subpath);
+        let clean_path = go_path_clean(subpath);
         let is_root = clean_path == "." || clean_path.is_empty();
         if !is_root {
             let first = clean_path.split('/').next().unwrap_or_default();
@@ -189,7 +190,7 @@ impl Source for FileSystemSource {
             ));
         }
         // Go `fs.Stat(skillFS, cleanPath)`.
-        if let Err(e) = self.fs.metadata(&path_join(name, &clean_path)).await {
+        if let Err(e) = self.fs.metadata(&go_path_join(&[name, &clean_path])).await {
             if e.kind() == ErrorKind::NotFound {
                 return Err(SkillError::sentinel_with(
                     SkillErrorKind::ResourceNotFound,
@@ -237,7 +238,7 @@ impl Source for FileSystemSource {
         resource_path: &str,
     ) -> Result<ResourceReader, SkillError> {
         self.validate_skill(name).await?;
-        let clean_path = path_clean(resource_path);
+        let clean_path = go_path_clean(resource_path);
         if !RESOURCE_DIRS.iter().any(|dir| {
             clean_path
                 .strip_prefix(dir)
@@ -251,7 +252,7 @@ impl Source for FileSystemSource {
                 ),
             ));
         }
-        let full_path = path_join(name, &clean_path);
+        let full_path = go_path_join(&[name, &clean_path]);
         match self.fs.open(&full_path).await {
             Ok(file) => Ok(file),
             Err(e) if e.kind() == ErrorKind::NotFound => Err(SkillError::sentinel_with(
@@ -263,16 +264,6 @@ impl Source for FileSystemSource {
                 e,
             )),
         }
-    }
-}
-
-/// Go `path.Join` for two elements.
-fn path_join(a: &str, b: &str) -> String {
-    match (a.is_empty(), b.is_empty()) {
-        (true, true) => String::new(),
-        (true, false) => path_clean(b),
-        (false, true) => path_clean(a),
-        (false, false) => path_clean(&format!("{a}/{b}")),
     }
 }
 

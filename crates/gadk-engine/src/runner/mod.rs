@@ -44,7 +44,7 @@ use find_agent::find_active_task_isolation_scope;
 use run_node::is_llm_agent;
 
 /// Go `plugininternal.BeforeRunReplyKey`: marks a before-run reply in `custom_metadata`.
-pub(crate) const BEFORE_RUN_REPLY_KEY: &str = "adk:before_run_reply";
+pub const BEFORE_RUN_REPLY_KEY: &str = "adk:before_run_reply";
 
 /// Port of Go `runner.Config`.
 #[derive(Clone)]

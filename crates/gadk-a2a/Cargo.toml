@@ -1,0 +1,62 @@
+[package]
+name = "gadk-a2a"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["server", "client"]
+# Serve a gadk agent over A2A (Go `server/adka2a/v2`): the executor, agent-card skills and the
+# identity header bridge.
+server = ["dep:a2a-server-lf", "dep:axum"]
+# Use a remote A2A agent as a gadk agent (Go `agent/remoteagent/v2` and
+# `internal/agent/remoteagent`).
+client = ["dep:a2a-client-lf", "dep:reqwest", "dep:url"]
+# `server::caller_user`: reads the user of gadk-server's authn layer (`gadk_server::authn::Caller`).
+gadk-server = ["server", "dep:gadk-server"]
+# Test fixtures (`testutil`): the scripted runner, the fake A2A client and provider, and an
+# in-process a2a-rs server. Enabled for this crate's own tests by the self dev-dependency.
+testutil = []
+
+[dependencies]
+gadk-agent = { workspace = true }
+gadk-engine = { workspace = true }
+gadk-session = { workspace = true }
+gadk-genai = { workspace = true }
+gadk-model = { workspace = true }
+gadk-auth = { workspace = true }
+gadk-platform = { workspace = true }
+gadk-server = { workspace = true, optional = true }
+a2a-lf = { workspace = true }
+a2a-server-lf = { workspace = true, optional = true }
+a2a-client-lf = { workspace = true, optional = true }
+axum = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
+url = { workspace = true, optional = true }
+async-stream = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+tokio = { workspace = true }
+http = { workspace = true }
+tower = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+parking_lot = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+base64 = { workspace = true }
+
+[dev-dependencies]
+gadk-a2a = { path = ".", default-features = false, features = ["testutil"] }
+gadk-engine = { workspace = true, features = ["testutil"] }
+tokio = { workspace = true, features = ["test-util"] }
+tower = { workspace = true, features = ["util"] }
+tempfile = { workspace = true }
+pretty_assertions = { workspace = true }

@@ -29,7 +29,11 @@ gcs = ["dep:gadk-artifact-gcs"]
 # Sessions and memory in a Vertex AI Agent Engine (gadk-vertexai); not in `default`.
 vertexai = ["dep:gadk-vertexai"]
 # The ADK REST API server with inbound authn/authz (gadk-server); not in `default`.
-server = ["dep:gadk-server"]
+# With `a2a` it also enables `gadk::a2a::server::caller_user` (gadk-a2a feature `gadk-server`).
+server = ["dep:gadk-server", "gadk-a2a?/gadk-server"]
+# The Agent2Agent protocol: serve agents over A2A and use remote A2A agents (gadk-a2a); not in
+# `default`.
+a2a = ["dep:gadk-a2a"]
 
 [dependencies]
 gadk-genai = { workspace = true }
@@ -51,6 +55,7 @@ gadk-openai = { workspace = true, optional = true }
 gadk-session-database = { workspace = true, optional = true }
 gadk-vertexai = { workspace = true, optional = true }
 gadk-server = { workspace = true, optional = true }
+gadk-a2a = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
@@ -148,6 +153,10 @@ required-features = ["vertexai", "gemini"]
 name = "rest_server"
 required-features = ["server"]
 
+[[example]]
+name = "a2a"
+required-features = ["a2a"]
+
 [[test]]
 name = "model_anthropicmodel_agent_runner"
 required-features = ["anthropic"]
@@ -159,3 +168,7 @@ required-features = ["openai"]
 [[test]]
 name = "facade_server"
 required-features = ["server"]
+
+[[test]]
+name = "facade_a2a"
+required-features = ["a2a"]

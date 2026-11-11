@@ -402,8 +402,8 @@ pub(crate) fn remove_client_function_call_id(c: &mut Content) {
 /// Port of Go utils.Content (shared with `gadk_session::compaction`).
 pub(crate) use gadk_session::compaction::content;
 
-/// Port of Go utils.FunctionCalls.
-pub(crate) fn function_calls(c: Option<&Content>) -> Vec<&FunctionCall> {
+/// Port of Go `utils.FunctionCalls`: the function calls of `c`, in order (none for `None`).
+pub fn function_calls(c: Option<&Content>) -> Vec<&FunctionCall> {
     c.map(|c| {
         c.parts
             .iter()

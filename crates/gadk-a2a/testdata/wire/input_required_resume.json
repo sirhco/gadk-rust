@@ -1,0 +1,2430 @@
+{
+  "client": {
+    "jsonrpc": {
+      "card": {
+        "capabilities": {
+          "pushNotifications": false,
+          "streaming": true
+        },
+        "defaultInputModes": [
+          "text/plain"
+        ],
+        "defaultOutputModes": [
+          "text/plain"
+        ],
+        "description": "Requests approval before acting.",
+        "name": "approver",
+        "skills": [
+          {
+            "description": "Requests approval before acting. Ask for approval first.",
+            "id": "approver",
+            "name": "model",
+            "tags": [
+              "llm"
+            ]
+          },
+          {
+            "description": "Request approval before proceeding.",
+            "id": "approver-request_approval",
+            "name": "request_approval",
+            "tags": [
+              "llm",
+              "tools"
+            ]
+          }
+        ],
+        "supportedInterfaces": [
+          {
+            "protocolBinding": "JSONRPC",
+            "protocolVersion": "1.0",
+            "url": "<base>/jsonrpc"
+          }
+        ],
+        "version": "1.0.0"
+      },
+      "runs": [
+        {
+          "events": [
+            {
+              "actions": {},
+              "author": "remote",
+              "content": {
+                "parts": [
+                  {
+                    "text": "need to request approval first!"
+                  },
+                  {
+                    "text": "waiting for user's approval..."
+                  },
+                  {
+                    "functionCall": {
+                      "id": "adk-<id-1>",
+                      "name": "request_approval"
+                    }
+                  },
+                  {
+                    "functionResponse": {
+                      "id": "adk-<id-1>",
+                      "name": "request_approval",
+                      "response": {
+                        "status": "pending",
+                        "ticket_id": "ticket-1"
+                      }
+                    }
+                  }
+                ],
+                "role": "model"
+              },
+              "customMetadata": {
+                "a2a:context_id": "<ctx-1>",
+                "a2a:request": {
+                  "message": {
+                    "messageId": "<msg-1>",
+                    "parts": [
+                      {
+                        "text": "Perform important task!"
+                      }
+                    ],
+                    "role": "ROLE_USER"
+                  }
+                },
+                "a2a:response": {
+                  "artifacts": [
+                    {
+                      "artifactId": "<artifact-1>",
+                      "parts": [
+                        {
+                          "text": "need to request approval first!"
+                        },
+                        {
+                          "text": "waiting for user's approval..."
+                        }
+                      ]
+                    }
+                  ],
+                  "contextId": "<ctx-1>",
+                  "history": [
+                    {
+                      "messageId": "<msg-1>",
+                      "parts": [
+                        {
+                          "text": "Perform important task!"
+                        }
+                      ],
+                      "role": "ROLE_USER"
+                    }
+                  ],
+                  "id": "<task-1>",
+                  "metadata": {
+                    "adk_app_name": "approver",
+                    "adk_session_id": "<ctx-1>",
+                    "adk_user_id": "A2A_USER_<ctx-1>",
+                    "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                  },
+                  "status": {
+                    "message": {
+                      "messageId": "<msg-2>",
+                      "parts": [
+                        {
+                          "data": {
+                            "id": "adk-<id-1>",
+                            "name": "request_approval"
+                          },
+                          "metadata": {
+                            "adk_is_long_running": true,
+                            "adk_type": "function_call"
+                          }
+                        },
+                        {
+                          "data": {
+                            "id": "adk-<id-1>",
+                            "name": "request_approval",
+                            "response": {
+                              "status": "pending",
+                              "ticket_id": "ticket-1"
+                            }
+                          },
+                          "metadata": {
+                            "adk_type": "function_response"
+                          }
+                        }
+                      ],
+                      "role": "ROLE_AGENT"
+                    },
+                    "state": "TASK_STATE_INPUT_REQUIRED",
+                    "timestamp": "<t>"
+                  }
+                },
+                "a2a:task_id": "<task-1>"
+              },
+              "id": "<id-2>",
+              "invocationId": "e-<id-3>",
+              "longRunningToolIds": [
+                "adk-<id-1>"
+              ],
+              "timestamp": "<t>",
+              "turnComplete": true
+            }
+          ],
+          "exchanges": [
+            {
+              "request": {
+                "body": {
+                  "id": "<id-4>",
+                  "jsonrpc": "2.0",
+                  "method": "SendMessage",
+                  "params": {
+                    "message": {
+                      "messageId": "<msg-1>",
+                      "parts": [
+                        {
+                          "text": "Perform important task!"
+                        }
+                      ],
+                      "role": "ROLE_USER"
+                    }
+                  }
+                },
+                "headers": {
+                  "A2a-Version": "1.0",
+                  "Content-Type": "application/json"
+                },
+                "method": "POST",
+                "path": "/jsonrpc"
+              },
+              "response": {
+                "body": {
+                  "id": "<id-4>",
+                  "jsonrpc": "2.0",
+                  "result": {
+                    "task": {
+                      "artifacts": [
+                        {
+                          "artifactId": "<artifact-1>",
+                          "parts": [
+                            {
+                              "text": "need to request approval first!"
+                            },
+                            {
+                              "text": "waiting for user's approval..."
+                            }
+                          ]
+                        }
+                      ],
+                      "contextId": "<ctx-1>",
+                      "history": [
+                        {
+                          "messageId": "<msg-1>",
+                          "parts": [
+                            {
+                              "text": "Perform important task!"
+                            }
+                          ],
+                          "role": "ROLE_USER"
+                        }
+                      ],
+                      "id": "<task-1>",
+                      "metadata": {
+                        "adk_app_name": "approver",
+                        "adk_session_id": "<ctx-1>",
+                        "adk_user_id": "A2A_USER_<ctx-1>",
+                        "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                      },
+                      "status": {
+                        "message": {
+                          "messageId": "<msg-2>",
+                          "parts": [
+                            {
+                              "data": {
+                                "id": "adk-<id-1>",
+                                "name": "request_approval"
+                              },
+                              "metadata": {
+                                "adk_is_long_running": true,
+                                "adk_type": "function_call"
+                              }
+                            },
+                            {
+                              "data": {
+                                "id": "adk-<id-1>",
+                                "name": "request_approval",
+                                "response": {
+                                  "status": "pending",
+                                  "ticket_id": "ticket-1"
+                                }
+                              },
+                              "metadata": {
+                                "adk_type": "function_response"
+                              }
+                            }
+                          ],
+                          "role": "ROLE_AGENT"
+                        },
+                        "state": "TASK_STATE_INPUT_REQUIRED",
+                        "timestamp": "<t>"
+                      }
+                    }
+                  }
+                },
+                "headers": {
+                  "Content-Type": "application/json"
+                },
+                "status": 200
+              }
+            }
+          ],
+          "new_message": {
+            "parts": [
+              {
+                "text": "Perform important task!"
+              }
+            ],
+            "role": "user"
+          },
+          "streaming_mode": "none"
+        },
+        {
+          "events": [
+            {
+              "actions": {},
+              "author": "remote",
+              "content": {
+                "parts": [
+                  {
+                    "text": "need to request approval first!"
+                  },
+                  {
+                    "text": "waiting for user's approval..."
+                  },
+                  {
+                    "text": "Task complete!"
+                  }
+                ],
+                "role": "model"
+              },
+              "customMetadata": {
+                "a2a:context_id": "<ctx-1>",
+                "a2a:request": {
+                  "message": {
+                    "contextId": "<ctx-1>",
+                    "messageId": "<msg-3>",
+                    "parts": [
+                      {
+                        "data": {
+                          "id": "adk-<id-1>",
+                          "name": "request_approval",
+                          "response": {
+                            "status": "approved",
+                            "ticket_id": "ticket-1"
+                          }
+                        },
+                        "metadata": {
+                          "adk_type": "function_response"
+                        }
+                      }
+                    ],
+                    "role": "ROLE_USER",
+                    "taskId": "<task-1>"
+                  }
+                },
+                "a2a:response": {
+                  "artifacts": [
+                    {
+                      "artifactId": "<artifact-1>",
+                      "parts": [
+                        {
+                          "text": "need to request approval first!"
+                        },
+                        {
+                          "text": "waiting for user's approval..."
+                        }
+                      ]
+                    },
+                    {
+                      "artifactId": "<artifact-2>",
+                      "parts": [
+                        {
+                          "text": "Task complete!"
+                        }
+                      ]
+                    }
+                  ],
+                  "contextId": "<ctx-1>",
+                  "history": [
+                    {
+                      "messageId": "<msg-1>",
+                      "parts": [
+                        {
+                          "text": "Perform important task!"
+                        }
+                      ],
+                      "role": "ROLE_USER"
+                    },
+                    {
+                      "contextId": "<ctx-1>",
+                      "messageId": "<msg-3>",
+                      "parts": [
+                        {
+                          "data": {
+                            "id": "adk-<id-1>",
+                            "name": "request_approval",
+                            "response": {
+                              "status": "approved",
+                              "ticket_id": "ticket-1"
+                            }
+                          },
+                          "metadata": {
+                            "adk_type": "function_response"
+                          }
+                        }
+                      ],
+                      "role": "ROLE_USER",
+                      "taskId": "<task-1>"
+                    },
+                    {
+                      "messageId": "<msg-2>",
+                      "parts": [
+                        {
+                          "data": {
+                            "id": "adk-<id-1>",
+                            "name": "request_approval"
+                          },
+                          "metadata": {
+                            "adk_is_long_running": true,
+                            "adk_type": "function_call"
+                          }
+                        },
+                        {
+                          "data": {
+                            "id": "adk-<id-1>",
+                            "name": "request_approval",
+                            "response": {
+                              "status": "pending",
+                              "ticket_id": "ticket-1"
+                            }
+                          },
+                          "metadata": {
+                            "adk_type": "function_response"
+                          }
+                        }
+                      ],
+                      "role": "ROLE_AGENT"
+                    }
+                  ],
+                  "id": "<task-1>",
+                  "metadata": {
+                    "adk_app_name": "approver",
+                    "adk_session_id": "<ctx-1>",
+                    "adk_user_id": "A2A_USER_<ctx-1>",
+                    "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                  },
+                  "status": {
+                    "state": "TASK_STATE_COMPLETED",
+                    "timestamp": "<t>"
+                  }
+                },
+                "a2a:task_id": "<task-1>"
+              },
+              "id": "<id-5>",
+              "invocationId": "e-<id-3>",
+              "timestamp": "<t>",
+              "turnComplete": true
+            }
+          ],
+          "exchanges": [
+            {
+              "request": {
+                "body": {
+                  "id": "<id-6>",
+                  "jsonrpc": "2.0",
+                  "method": "SendMessage",
+                  "params": {
+                    "message": {
+                      "contextId": "<ctx-1>",
+                      "messageId": "<msg-3>",
+                      "parts": [
+                        {
+                          "data": {
+                            "id": "adk-<id-1>",
+                            "name": "request_approval",
+                            "response": {
+                              "status": "approved",
+                              "ticket_id": "ticket-1"
+                            }
+                          },
+                          "metadata": {
+                            "adk_type": "function_response"
+                          }
+                        }
+                      ],
+                      "role": "ROLE_USER",
+                      "taskId": "<task-1>"
+                    }
+                  }
+                },
+                "headers": {
+                  "A2a-Version": "1.0",
+                  "Content-Type": "application/json"
+                },
+                "method": "POST",
+                "path": "/jsonrpc"
+              },
+              "response": {
+                "body": {
+                  "id": "<id-6>",
+                  "jsonrpc": "2.0",
+                  "result": {
+                    "task": {
+                      "artifacts": [
+                        {
+                          "artifactId": "<artifact-1>",
+                          "parts": [
+                            {
+                              "text": "need to request approval first!"
+                            },
+                            {
+                              "text": "waiting for user's approval..."
+                            }
+                          ]
+                        },
+                        {
+                          "artifactId": "<artifact-2>",
+                          "parts": [
+                            {
+                              "text": "Task complete!"
+                            }
+                          ]
+                        }
+                      ],
+                      "contextId": "<ctx-1>",
+                      "history": [
+                        {
+                          "messageId": "<msg-1>",
+                          "parts": [
+                            {
+                              "text": "Perform important task!"
+                            }
+                          ],
+                          "role": "ROLE_USER"
+                        },
+                        {
+                          "contextId": "<ctx-1>",
+                          "messageId": "<msg-3>",
+                          "parts": [
+                            {
+                              "data": {
+                                "id": "adk-<id-1>",
+                                "name": "request_approval",
+                                "response": {
+                                  "status": "approved",
+                                  "ticket_id": "ticket-1"
+                                }
+                              },
+                              "metadata": {
+                                "adk_type": "function_response"
+                              }
+                            }
+                          ],
+                          "role": "ROLE_USER",
+                          "taskId": "<task-1>"
+                        },
+                        {
+                          "messageId": "<msg-2>",
+                          "parts": [
+                            {
+                              "data": {
+                                "id": "adk-<id-1>",
+                                "name": "request_approval"
+                              },
+                              "metadata": {
+                                "adk_is_long_running": true,
+                                "adk_type": "function_call"
+                              }
+                            },
+                            {
+                              "data": {
+                                "id": "adk-<id-1>",
+                                "name": "request_approval",
+                                "response": {
+                                  "status": "pending",
+                                  "ticket_id": "ticket-1"
+                                }
+                              },
+                              "metadata": {
+                                "adk_type": "function_response"
+                              }
+                            }
+                          ],
+                          "role": "ROLE_AGENT"
+                        }
+                      ],
+                      "id": "<task-1>",
+                      "metadata": {
+                        "adk_app_name": "approver",
+                        "adk_session_id": "<ctx-1>",
+                        "adk_user_id": "A2A_USER_<ctx-1>",
+                        "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                      },
+                      "status": {
+                        "state": "TASK_STATE_COMPLETED",
+                        "timestamp": "<t>"
+                      }
+                    }
+                  }
+                },
+                "headers": {
+                  "Content-Type": "application/json"
+                },
+                "status": 200
+              }
+            }
+          ],
+          "new_message": {
+            "parts": [
+              {
+                "functionResponse": {
+                  "id": "adk-<id-1>",
+                  "name": "request_approval",
+                  "response": {
+                    "status": "approved",
+                    "ticket_id": "ticket-1"
+                  }
+                }
+              }
+            ],
+            "role": "user"
+          },
+          "streaming_mode": "none"
+        }
+      ]
+    },
+    "rest": {
+      "card": {
+        "capabilities": {
+          "pushNotifications": false,
+          "streaming": true
+        },
+        "defaultInputModes": [
+          "text/plain"
+        ],
+        "defaultOutputModes": [
+          "text/plain"
+        ],
+        "description": "Requests approval before acting.",
+        "name": "approver",
+        "skills": [
+          {
+            "description": "Requests approval before acting. Ask for approval first.",
+            "id": "approver",
+            "name": "model",
+            "tags": [
+              "llm"
+            ]
+          },
+          {
+            "description": "Request approval before proceeding.",
+            "id": "approver-request_approval",
+            "name": "request_approval",
+            "tags": [
+              "llm",
+              "tools"
+            ]
+          }
+        ],
+        "supportedInterfaces": [
+          {
+            "protocolBinding": "HTTP+JSON",
+            "protocolVersion": "1.0",
+            "url": "<base>/rest"
+          }
+        ],
+        "version": "1.0.0"
+      },
+      "runs": [
+        {
+          "events": [
+            {
+              "actions": {},
+              "author": "remote",
+              "content": {
+                "parts": [
+                  {
+                    "text": "need to request approval first!"
+                  },
+                  {
+                    "text": "waiting for user's approval..."
+                  },
+                  {
+                    "functionCall": {
+                      "id": "adk-<id-1>",
+                      "name": "request_approval"
+                    }
+                  },
+                  {
+                    "functionResponse": {
+                      "id": "adk-<id-1>",
+                      "name": "request_approval",
+                      "response": {
+                        "status": "pending",
+                        "ticket_id": "ticket-1"
+                      }
+                    }
+                  }
+                ],
+                "role": "model"
+              },
+              "customMetadata": {
+                "a2a:context_id": "<ctx-1>",
+                "a2a:request": {
+                  "message": {
+                    "messageId": "<msg-1>",
+                    "parts": [
+                      {
+                        "text": "Perform important task!"
+                      }
+                    ],
+                    "role": "ROLE_USER"
+                  }
+                },
+                "a2a:response": {
+                  "artifacts": [
+                    {
+                      "artifactId": "<artifact-1>",
+                      "parts": [
+                        {
+                          "text": "need to request approval first!"
+                        },
+                        {
+                          "text": "waiting for user's approval..."
+                        }
+                      ]
+                    }
+                  ],
+                  "contextId": "<ctx-1>",
+                  "history": [
+                    {
+                      "messageId": "<msg-1>",
+                      "parts": [
+                        {
+                          "text": "Perform important task!"
+                        }
+                      ],
+                      "role": "ROLE_USER"
+                    }
+                  ],
+                  "id": "<task-1>",
+                  "metadata": {
+                    "adk_app_name": "approver",
+                    "adk_session_id": "<ctx-1>",
+                    "adk_user_id": "A2A_USER_<ctx-1>",
+                    "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                  },
+                  "status": {
+                    "message": {
+                      "messageId": "<msg-2>",
+                      "parts": [
+                        {
+                          "data": {
+                            "id": "adk-<id-1>",
+                            "name": "request_approval"
+                          },
+                          "metadata": {
+                            "adk_is_long_running": true,
+                            "adk_type": "function_call"
+                          }
+                        },
+                        {
+                          "data": {
+                            "id": "adk-<id-1>",
+                            "name": "request_approval",
+                            "response": {
+                              "status": "pending",
+                              "ticket_id": "ticket-1"
+                            }
+                          },
+                          "metadata": {
+                            "adk_type": "function_response"
+                          }
+                        }
+                      ],
+                      "role": "ROLE_AGENT"
+                    },
+                    "state": "TASK_STATE_INPUT_REQUIRED",
+                    "timestamp": "<t>"
+                  }
+                },
+                "a2a:task_id": "<task-1>"
+              },
+              "id": "<id-2>",
+              "invocationId": "e-<id-3>",
+              "longRunningToolIds": [
+                "adk-<id-1>"
+              ],
+              "timestamp": "<t>",
+              "turnComplete": true
+            }
+          ],
+          "exchanges": [
+            {
+              "request": {
+                "body": {
+                  "message": {
+                    "messageId": "<msg-1>",
+                    "parts": [
+                      {
+                        "text": "Perform important task!"
+                      }
+                    ],
+                    "role": "ROLE_USER"
+                  }
+                },
+                "headers": {
+                  "A2a-Version": "1.0",
+                  "Accept": "application/json",
+                  "Content-Type": "application/json"
+                },
+                "method": "POST",
+                "path": "/rest/message:send"
+              },
+              "response": {
+                "body": {
+                  "task": {
+                    "artifacts": [
+                      {
+                        "artifactId": "<artifact-1>",
+                        "parts": [
+                          {
+                            "text": "need to request approval first!"
+                          },
+                          {
+                            "text": "waiting for user's approval..."
+                          }
+                        ]
+                      }
+                    ],
+                    "contextId": "<ctx-1>",
+                    "history": [
+                      {
+                        "messageId": "<msg-1>",
+                        "parts": [
+                          {
+                            "text": "Perform important task!"
+                          }
+                        ],
+                        "role": "ROLE_USER"
+                      }
+                    ],
+                    "id": "<task-1>",
+                    "metadata": {
+                      "adk_app_name": "approver",
+                      "adk_session_id": "<ctx-1>",
+                      "adk_user_id": "A2A_USER_<ctx-1>",
+                      "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                    },
+                    "status": {
+                      "message": {
+                        "messageId": "<msg-2>",
+                        "parts": [
+                          {
+                            "data": {
+                              "id": "adk-<id-1>",
+                              "name": "request_approval"
+                            },
+                            "metadata": {
+                              "adk_is_long_running": true,
+                              "adk_type": "function_call"
+                            }
+                          },
+                          {
+                            "data": {
+                              "id": "adk-<id-1>",
+                              "name": "request_approval",
+                              "response": {
+                                "status": "pending",
+                                "ticket_id": "ticket-1"
+                              }
+                            },
+                            "metadata": {
+                              "adk_type": "function_response"
+                            }
+                          }
+                        ],
+                        "role": "ROLE_AGENT"
+                      },
+                      "state": "TASK_STATE_INPUT_REQUIRED",
+                      "timestamp": "<t>"
+                    }
+                  }
+                },
+                "headers": {
+                  "Content-Type": "application/json"
+                },
+                "status": 200
+              }
+            }
+          ],
+          "new_message": {
+            "parts": [
+              {
+                "text": "Perform important task!"
+              }
+            ],
+            "role": "user"
+          },
+          "streaming_mode": "none"
+        },
+        {
+          "events": [
+            {
+              "actions": {},
+              "author": "remote",
+              "content": {
+                "parts": [
+                  {
+                    "text": "need to request approval first!"
+                  },
+                  {
+                    "text": "waiting for user's approval..."
+                  },
+                  {
+                    "text": "Task complete!"
+                  }
+                ],
+                "role": "model"
+              },
+              "customMetadata": {
+                "a2a:context_id": "<ctx-1>",
+                "a2a:request": {
+                  "message": {
+                    "contextId": "<ctx-1>",
+                    "messageId": "<msg-3>",
+                    "parts": [
+                      {
+                        "data": {
+                          "id": "adk-<id-1>",
+                          "name": "request_approval",
+                          "response": {
+                            "status": "approved",
+                            "ticket_id": "ticket-1"
+                          }
+                        },
+                        "metadata": {
+                          "adk_type": "function_response"
+                        }
+                      }
+                    ],
+                    "role": "ROLE_USER",
+                    "taskId": "<task-1>"
+                  }
+                },
+                "a2a:response": {
+                  "artifacts": [
+                    {
+                      "artifactId": "<artifact-1>",
+                      "parts": [
+                        {
+                          "text": "need to request approval first!"
+                        },
+                        {
+                          "text": "waiting for user's approval..."
+                        }
+                      ]
+                    },
+                    {
+                      "artifactId": "<artifact-2>",
+                      "parts": [
+                        {
+                          "text": "Task complete!"
+                        }
+                      ]
+                    }
+                  ],
+                  "contextId": "<ctx-1>",
+                  "history": [
+                    {
+                      "messageId": "<msg-1>",
+                      "parts": [
+                        {
+                          "text": "Perform important task!"
+                        }
+                      ],
+                      "role": "ROLE_USER"
+                    },
+                    {
+                      "contextId": "<ctx-1>",
+                      "messageId": "<msg-3>",
+                      "parts": [
+                        {
+                          "data": {
+                            "id": "adk-<id-1>",
+                            "name": "request_approval",
+                            "response": {
+                              "status": "approved",
+                              "ticket_id": "ticket-1"
+                            }
+                          },
+                          "metadata": {
+                            "adk_type": "function_response"
+                          }
+                        }
+                      ],
+                      "role": "ROLE_USER",
+                      "taskId": "<task-1>"
+                    },
+                    {
+                      "messageId": "<msg-2>",
+                      "parts": [
+                        {
+                          "data": {
+                            "id": "adk-<id-1>",
+                            "name": "request_approval"
+                          },
+                          "metadata": {
+                            "adk_is_long_running": true,
+                            "adk_type": "function_call"
+                          }
+                        },
+                        {
+                          "data": {
+                            "id": "adk-<id-1>",
+                            "name": "request_approval",
+                            "response": {
+                              "status": "pending",
+                              "ticket_id": "ticket-1"
+                            }
+                          },
+                          "metadata": {
+                            "adk_type": "function_response"
+                          }
+                        }
+                      ],
+                      "role": "ROLE_AGENT"
+                    }
+                  ],
+                  "id": "<task-1>",
+                  "metadata": {
+                    "adk_app_name": "approver",
+                    "adk_session_id": "<ctx-1>",
+                    "adk_user_id": "A2A_USER_<ctx-1>",
+                    "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                  },
+                  "status": {
+                    "state": "TASK_STATE_COMPLETED",
+                    "timestamp": "<t>"
+                  }
+                },
+                "a2a:task_id": "<task-1>"
+              },
+              "id": "<id-4>",
+              "invocationId": "e-<id-3>",
+              "timestamp": "<t>",
+              "turnComplete": true
+            }
+          ],
+          "exchanges": [
+            {
+              "request": {
+                "body": {
+                  "message": {
+                    "contextId": "<ctx-1>",
+                    "messageId": "<msg-3>",
+                    "parts": [
+                      {
+                        "data": {
+                          "id": "adk-<id-1>",
+                          "name": "request_approval",
+                          "response": {
+                            "status": "approved",
+                            "ticket_id": "ticket-1"
+                          }
+                        },
+                        "metadata": {
+                          "adk_type": "function_response"
+                        }
+                      }
+                    ],
+                    "role": "ROLE_USER",
+                    "taskId": "<task-1>"
+                  }
+                },
+                "headers": {
+                  "A2a-Version": "1.0",
+                  "Accept": "application/json",
+                  "Content-Type": "application/json"
+                },
+                "method": "POST",
+                "path": "/rest/message:send"
+              },
+              "response": {
+                "body": {
+                  "task": {
+                    "artifacts": [
+                      {
+                        "artifactId": "<artifact-1>",
+                        "parts": [
+                          {
+                            "text": "need to request approval first!"
+                          },
+                          {
+                            "text": "waiting for user's approval..."
+                          }
+                        ]
+                      },
+                      {
+                        "artifactId": "<artifact-2>",
+                        "parts": [
+                          {
+                            "text": "Task complete!"
+                          }
+                        ]
+                      }
+                    ],
+                    "contextId": "<ctx-1>",
+                    "history": [
+                      {
+                        "messageId": "<msg-1>",
+                        "parts": [
+                          {
+                            "text": "Perform important task!"
+                          }
+                        ],
+                        "role": "ROLE_USER"
+                      },
+                      {
+                        "contextId": "<ctx-1>",
+                        "messageId": "<msg-3>",
+                        "parts": [
+                          {
+                            "data": {
+                              "id": "adk-<id-1>",
+                              "name": "request_approval",
+                              "response": {
+                                "status": "approved",
+                                "ticket_id": "ticket-1"
+                              }
+                            },
+                            "metadata": {
+                              "adk_type": "function_response"
+                            }
+                          }
+                        ],
+                        "role": "ROLE_USER",
+                        "taskId": "<task-1>"
+                      },
+                      {
+                        "messageId": "<msg-2>",
+                        "parts": [
+                          {
+                            "data": {
+                              "id": "adk-<id-1>",
+                              "name": "request_approval"
+                            },
+                            "metadata": {
+                              "adk_is_long_running": true,
+                              "adk_type": "function_call"
+                            }
+                          },
+                          {
+                            "data": {
+                              "id": "adk-<id-1>",
+                              "name": "request_approval",
+                              "response": {
+                                "status": "pending",
+                                "ticket_id": "ticket-1"
+                              }
+                            },
+                            "metadata": {
+                              "adk_type": "function_response"
+                            }
+                          }
+                        ],
+                        "role": "ROLE_AGENT"
+                      }
+                    ],
+                    "id": "<task-1>",
+                    "metadata": {
+                      "adk_app_name": "approver",
+                      "adk_session_id": "<ctx-1>",
+                      "adk_user_id": "A2A_USER_<ctx-1>",
+                      "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                    },
+                    "status": {
+                      "state": "TASK_STATE_COMPLETED",
+                      "timestamp": "<t>"
+                    }
+                  }
+                },
+                "headers": {
+                  "Content-Type": "application/json"
+                },
+                "status": 200
+              }
+            }
+          ],
+          "new_message": {
+            "parts": [
+              {
+                "functionResponse": {
+                  "id": "adk-<id-1>",
+                  "name": "request_approval",
+                  "response": {
+                    "status": "approved",
+                    "ticket_id": "ticket-1"
+                  }
+                }
+              }
+            ],
+            "role": "user"
+          },
+          "streaming_mode": "none"
+        }
+      ]
+    }
+  },
+  "scenario": "input_required_resume",
+  "server": {
+    "jsonrpc": {
+      "exchanges": [
+        {
+          "request": {
+            "body": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "method": "SendMessage",
+              "params": {
+                "message": {
+                  "messageId": "msg-1",
+                  "parts": [
+                    {
+                      "text": "Perform important task!"
+                    }
+                  ],
+                  "role": "ROLE_USER"
+                }
+              }
+            },
+            "headers": {
+              "A2a-Version": "1.0",
+              "Content-Type": "application/json"
+            },
+            "method": "POST",
+            "path": "/jsonrpc"
+          },
+          "response": {
+            "body": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "result": {
+                "task": {
+                  "artifacts": [
+                    {
+                      "artifactId": "<artifact-1>",
+                      "parts": [
+                        {
+                          "text": "need to request approval first!"
+                        },
+                        {
+                          "text": "waiting for user's approval..."
+                        }
+                      ]
+                    }
+                  ],
+                  "contextId": "<ctx-1>",
+                  "history": [
+                    {
+                      "messageId": "msg-1",
+                      "parts": [
+                        {
+                          "text": "Perform important task!"
+                        }
+                      ],
+                      "role": "ROLE_USER"
+                    }
+                  ],
+                  "id": "<task-1>",
+                  "metadata": {
+                    "adk_app_name": "approver",
+                    "adk_session_id": "<ctx-1>",
+                    "adk_user_id": "A2A_USER_<ctx-1>",
+                    "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                  },
+                  "status": {
+                    "message": {
+                      "messageId": "<msg-1>",
+                      "parts": [
+                        {
+                          "data": {
+                            "id": "adk-<id-1>",
+                            "name": "request_approval"
+                          },
+                          "metadata": {
+                            "adk_is_long_running": true,
+                            "adk_type": "function_call"
+                          }
+                        },
+                        {
+                          "data": {
+                            "id": "adk-<id-1>",
+                            "name": "request_approval",
+                            "response": {
+                              "status": "pending",
+                              "ticket_id": "ticket-1"
+                            }
+                          },
+                          "metadata": {
+                            "adk_type": "function_response"
+                          }
+                        }
+                      ],
+                      "role": "ROLE_AGENT"
+                    },
+                    "state": "TASK_STATE_INPUT_REQUIRED",
+                    "timestamp": "<t>"
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "status": 200
+          }
+        },
+        {
+          "request": {
+            "body": {
+              "id": 2,
+              "jsonrpc": "2.0",
+              "method": "SendMessage",
+              "params": {
+                "message": {
+                  "contextId": "<ctx-1>",
+                  "messageId": "msg-2",
+                  "parts": [
+                    {
+                      "text": "Is it really necessary?"
+                    }
+                  ],
+                  "role": "ROLE_USER",
+                  "taskId": "<task-1>"
+                }
+              }
+            },
+            "headers": {
+              "A2a-Version": "1.0",
+              "Content-Type": "application/json"
+            },
+            "method": "POST",
+            "path": "/jsonrpc"
+          },
+          "response": {
+            "body": {
+              "id": 2,
+              "jsonrpc": "2.0",
+              "result": {
+                "task": {
+                  "artifacts": [
+                    {
+                      "artifactId": "<artifact-1>",
+                      "parts": [
+                        {
+                          "text": "need to request approval first!"
+                        },
+                        {
+                          "text": "waiting for user's approval..."
+                        }
+                      ]
+                    }
+                  ],
+                  "contextId": "<ctx-1>",
+                  "history": [
+                    {
+                      "messageId": "msg-1",
+                      "parts": [
+                        {
+                          "text": "Perform important task!"
+                        }
+                      ],
+                      "role": "ROLE_USER"
+                    },
+                    {
+                      "contextId": "<ctx-1>",
+                      "messageId": "msg-2",
+                      "parts": [
+                        {
+                          "text": "Is it really necessary?"
+                        }
+                      ],
+                      "role": "ROLE_USER",
+                      "taskId": "<task-1>"
+                    },
+                    {
+                      "messageId": "<msg-1>",
+                      "parts": [
+                        {
+                          "data": {
+                            "id": "adk-<id-1>",
+                            "name": "request_approval"
+                          },
+                          "metadata": {
+                            "adk_is_long_running": true,
+                            "adk_type": "function_call"
+                          }
+                        },
+                        {
+                          "data": {
+                            "id": "adk-<id-1>",
+                            "name": "request_approval",
+                            "response": {
+                              "status": "pending",
+                              "ticket_id": "ticket-1"
+                            }
+                          },
+                          "metadata": {
+                            "adk_type": "function_response"
+                          }
+                        }
+                      ],
+                      "role": "ROLE_AGENT"
+                    }
+                  ],
+                  "id": "<task-1>",
+                  "metadata": {
+                    "adk_app_name": "approver",
+                    "adk_session_id": "<ctx-1>",
+                    "adk_user_id": "A2A_USER_<ctx-1>",
+                    "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                  },
+                  "status": {
+                    "message": {
+                      "contextId": "<ctx-1>",
+                      "messageId": "<msg-2>",
+                      "parts": [
+                        {
+                          "data": {
+                            "id": "adk-<id-1>",
+                            "name": "request_approval"
+                          },
+                          "metadata": {
+                            "adk_is_long_running": true,
+                            "adk_type": "function_call"
+                          }
+                        },
+                        {
+                          "data": {
+                            "id": "adk-<id-1>",
+                            "name": "request_approval",
+                            "response": {
+                              "status": "pending",
+                              "ticket_id": "ticket-1"
+                            }
+                          },
+                          "metadata": {
+                            "adk_type": "function_response"
+                          }
+                        },
+                        {
+                          "metadata": {
+                            "validation_error": true
+                          },
+                          "text": "no input provided for function call ID \"adk-<id-1>\""
+                        }
+                      ],
+                      "role": "ROLE_AGENT",
+                      "taskId": "<task-1>"
+                    },
+                    "state": "TASK_STATE_INPUT_REQUIRED",
+                    "timestamp": "<t>"
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "status": 200
+          }
+        },
+        {
+          "request": {
+            "body": {
+              "id": 3,
+              "jsonrpc": "2.0",
+              "method": "SendMessage",
+              "params": {
+                "message": {
+                  "contextId": "<ctx-1>",
+                  "messageId": "msg-3",
+                  "parts": [
+                    {
+                      "text": "LGTM"
+                    },
+                    {
+                      "data": {
+                        "id": "adk-<id-1>",
+                        "name": "request_approval",
+                        "response": {
+                          "status": "approved",
+                          "ticket_id": "ticket-1"
+                        }
+                      },
+                      "metadata": {
+                        "adk_type": "function_response"
+                      }
+                    }
+                  ],
+                  "role": "ROLE_USER",
+                  "taskId": "<task-1>"
+                }
+              }
+            },
+            "headers": {
+              "A2a-Version": "1.0",
+              "Content-Type": "application/json"
+            },
+            "method": "POST",
+            "path": "/jsonrpc"
+          },
+          "response": {
+            "body": {
+              "id": 3,
+              "jsonrpc": "2.0",
+              "result": {
+                "task": {
+                  "artifacts": [
+                    {
+                      "artifactId": "<artifact-1>",
+                      "parts": [
+                        {
+                          "text": "need to request approval first!"
+                        },
+                        {
+                          "text": "waiting for user's approval..."
+                        }
+                      ]
+                    },
+                    {
+                      "artifactId": "<artifact-2>",
+                      "parts": [
+                        {
+                          "text": "Task complete!"
+                        }
+                      ]
+                    }
+                  ],
+                  "contextId": "<ctx-1>",
+                  "history": [
+                    {
+                      "messageId": "msg-1",
+                      "parts": [
+                        {
+                          "text": "Perform important task!"
+                        }
+                      ],
+                      "role": "ROLE_USER"
+                    },
+                    {
+                      "contextId": "<ctx-1>",
+                      "messageId": "msg-2",
+                      "parts": [
+                        {
+                          "text": "Is it really necessary?"
+                        }
+                      ],
+                      "role": "ROLE_USER",
+                      "taskId": "<task-1>"
+                    },
+                    {
+                      "messageId": "<msg-1>",
+                      "parts": [
+                        {
+                          "data": {
+                            "id": "adk-<id-1>",
+                            "name": "request_approval"
+                          },
+                          "metadata": {
+                            "adk_is_long_running": true,
+                            "adk_type": "function_call"
+                          }
+                        },
+                        {
+                          "data": {
+                            "id": "adk-<id-1>",
+                            "name": "request_approval",
+                            "response": {
+                              "status": "pending",
+                              "ticket_id": "ticket-1"
+                            }
+                          },
+                          "metadata": {
+                            "adk_type": "function_response"
+                          }
+                        }
+                      ],
+                      "role": "ROLE_AGENT"
+                    },
+                    {
+                      "contextId": "<ctx-1>",
+                      "messageId": "msg-3",
+                      "parts": [
+                        {
+                          "text": "LGTM"
+                        },
+                        {
+                          "data": {
+                            "id": "adk-<id-1>",
+                            "name": "request_approval",
+                            "response": {
+                              "status": "approved",
+                              "ticket_id": "ticket-1"
+                            }
+                          },
+                          "metadata": {
+                            "adk_type": "function_response"
+                          }
+                        }
+                      ],
+                      "role": "ROLE_USER",
+                      "taskId": "<task-1>"
+                    },
+                    {
+                      "contextId": "<ctx-1>",
+                      "messageId": "<msg-2>",
+                      "parts": [
+                        {
+                          "data": {
+                            "id": "adk-<id-1>",
+                            "name": "request_approval"
+                          },
+                          "metadata": {
+                            "adk_is_long_running": true,
+                            "adk_type": "function_call"
+                          }
+                        },
+                        {
+                          "data": {
+                            "id": "adk-<id-1>",
+                            "name": "request_approval",
+                            "response": {
+                              "status": "pending",
+                              "ticket_id": "ticket-1"
+                            }
+                          },
+                          "metadata": {
+                            "adk_type": "function_response"
+                          }
+                        },
+                        {
+                          "metadata": {
+                            "validation_error": true
+                          },
+                          "text": "no input provided for function call ID \"adk-<id-1>\""
+                        }
+                      ],
+                      "role": "ROLE_AGENT",
+                      "taskId": "<task-1>"
+                    }
+                  ],
+                  "id": "<task-1>",
+                  "metadata": {
+                    "adk_app_name": "approver",
+                    "adk_session_id": "<ctx-1>",
+                    "adk_user_id": "A2A_USER_<ctx-1>",
+                    "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                  },
+                  "status": {
+                    "state": "TASK_STATE_COMPLETED",
+                    "timestamp": "<t>"
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "status": 200
+          }
+        },
+        {
+          "request": {
+            "body": {
+              "id": 4,
+              "jsonrpc": "2.0",
+              "method": "GetTask",
+              "params": {
+                "id": "<task-1>"
+              }
+            },
+            "headers": {
+              "A2a-Version": "1.0",
+              "Content-Type": "application/json"
+            },
+            "method": "POST",
+            "path": "/jsonrpc"
+          },
+          "response": {
+            "body": {
+              "id": 4,
+              "jsonrpc": "2.0",
+              "result": {
+                "artifacts": [
+                  {
+                    "artifactId": "<artifact-1>",
+                    "parts": [
+                      {
+                        "text": "need to request approval first!"
+                      },
+                      {
+                        "text": "waiting for user's approval..."
+                      }
+                    ]
+                  },
+                  {
+                    "artifactId": "<artifact-2>",
+                    "parts": [
+                      {
+                        "text": "Task complete!"
+                      }
+                    ]
+                  }
+                ],
+                "contextId": "<ctx-1>",
+                "history": [
+                  {
+                    "messageId": "msg-1",
+                    "parts": [
+                      {
+                        "text": "Perform important task!"
+                      }
+                    ],
+                    "role": "ROLE_USER"
+                  },
+                  {
+                    "contextId": "<ctx-1>",
+                    "messageId": "msg-2",
+                    "parts": [
+                      {
+                        "text": "Is it really necessary?"
+                      }
+                    ],
+                    "role": "ROLE_USER",
+                    "taskId": "<task-1>"
+                  },
+                  {
+                    "messageId": "<msg-1>",
+                    "parts": [
+                      {
+                        "data": {
+                          "id": "adk-<id-1>",
+                          "name": "request_approval"
+                        },
+                        "metadata": {
+                          "adk_is_long_running": true,
+                          "adk_type": "function_call"
+                        }
+                      },
+                      {
+                        "data": {
+                          "id": "adk-<id-1>",
+                          "name": "request_approval",
+                          "response": {
+                            "status": "pending",
+                            "ticket_id": "ticket-1"
+                          }
+                        },
+                        "metadata": {
+                          "adk_type": "function_response"
+                        }
+                      }
+                    ],
+                    "role": "ROLE_AGENT"
+                  },
+                  {
+                    "contextId": "<ctx-1>",
+                    "messageId": "msg-3",
+                    "parts": [
+                      {
+                        "text": "LGTM"
+                      },
+                      {
+                        "data": {
+                          "id": "adk-<id-1>",
+                          "name": "request_approval",
+                          "response": {
+                            "status": "approved",
+                            "ticket_id": "ticket-1"
+                          }
+                        },
+                        "metadata": {
+                          "adk_type": "function_response"
+                        }
+                      }
+                    ],
+                    "role": "ROLE_USER",
+                    "taskId": "<task-1>"
+                  },
+                  {
+                    "contextId": "<ctx-1>",
+                    "messageId": "<msg-2>",
+                    "parts": [
+                      {
+                        "data": {
+                          "id": "adk-<id-1>",
+                          "name": "request_approval"
+                        },
+                        "metadata": {
+                          "adk_is_long_running": true,
+                          "adk_type": "function_call"
+                        }
+                      },
+                      {
+                        "data": {
+                          "id": "adk-<id-1>",
+                          "name": "request_approval",
+                          "response": {
+                            "status": "pending",
+                            "ticket_id": "ticket-1"
+                          }
+                        },
+                        "metadata": {
+                          "adk_type": "function_response"
+                        }
+                      },
+                      {
+                        "metadata": {
+                          "validation_error": true
+                        },
+                        "text": "no input provided for function call ID \"adk-<id-1>\""
+                      }
+                    ],
+                    "role": "ROLE_AGENT",
+                    "taskId": "<task-1>"
+                  }
+                ],
+                "id": "<task-1>",
+                "metadata": {
+                  "adk_app_name": "approver",
+                  "adk_session_id": "<ctx-1>",
+                  "adk_user_id": "A2A_USER_<ctx-1>",
+                  "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                },
+                "status": {
+                  "state": "TASK_STATE_COMPLETED",
+                  "timestamp": "<t>"
+                }
+              }
+            },
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "status": 200
+          }
+        }
+      ]
+    },
+    "rest": {
+      "exchanges": [
+        {
+          "request": {
+            "body": {
+              "message": {
+                "messageId": "msg-1",
+                "parts": [
+                  {
+                    "text": "Perform important task!"
+                  }
+                ],
+                "role": "ROLE_USER"
+              }
+            },
+            "headers": {
+              "A2a-Version": "1.0",
+              "Accept": "application/json",
+              "Content-Type": "application/json"
+            },
+            "method": "POST",
+            "path": "/rest/message:send"
+          },
+          "response": {
+            "body": {
+              "task": {
+                "artifacts": [
+                  {
+                    "artifactId": "<artifact-1>",
+                    "parts": [
+                      {
+                        "text": "need to request approval first!"
+                      },
+                      {
+                        "text": "waiting for user's approval..."
+                      }
+                    ]
+                  }
+                ],
+                "contextId": "<ctx-1>",
+                "history": [
+                  {
+                    "messageId": "msg-1",
+                    "parts": [
+                      {
+                        "text": "Perform important task!"
+                      }
+                    ],
+                    "role": "ROLE_USER"
+                  }
+                ],
+                "id": "<task-1>",
+                "metadata": {
+                  "adk_app_name": "approver",
+                  "adk_session_id": "<ctx-1>",
+                  "adk_user_id": "A2A_USER_<ctx-1>",
+                  "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                },
+                "status": {
+                  "message": {
+                    "messageId": "<msg-1>",
+                    "parts": [
+                      {
+                        "data": {
+                          "id": "adk-<id-1>",
+                          "name": "request_approval"
+                        },
+                        "metadata": {
+                          "adk_is_long_running": true,
+                          "adk_type": "function_call"
+                        }
+                      },
+                      {
+                        "data": {
+                          "id": "adk-<id-1>",
+                          "name": "request_approval",
+                          "response": {
+                            "status": "pending",
+                            "ticket_id": "ticket-1"
+                          }
+                        },
+                        "metadata": {
+                          "adk_type": "function_response"
+                        }
+                      }
+                    ],
+                    "role": "ROLE_AGENT"
+                  },
+                  "state": "TASK_STATE_INPUT_REQUIRED",
+                  "timestamp": "<t>"
+                }
+              }
+            },
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "status": 200
+          }
+        },
+        {
+          "request": {
+            "body": {
+              "message": {
+                "contextId": "<ctx-1>",
+                "messageId": "msg-2",
+                "parts": [
+                  {
+                    "text": "Is it really necessary?"
+                  }
+                ],
+                "role": "ROLE_USER",
+                "taskId": "<task-1>"
+              }
+            },
+            "headers": {
+              "A2a-Version": "1.0",
+              "Accept": "application/json",
+              "Content-Type": "application/json"
+            },
+            "method": "POST",
+            "path": "/rest/message:send"
+          },
+          "response": {
+            "body": {
+              "task": {
+                "artifacts": [
+                  {
+                    "artifactId": "<artifact-1>",
+                    "parts": [
+                      {
+                        "text": "need to request approval first!"
+                      },
+                      {
+                        "text": "waiting for user's approval..."
+                      }
+                    ]
+                  }
+                ],
+                "contextId": "<ctx-1>",
+                "history": [
+                  {
+                    "messageId": "msg-1",
+                    "parts": [
+                      {
+                        "text": "Perform important task!"
+                      }
+                    ],
+                    "role": "ROLE_USER"
+                  },
+                  {
+                    "contextId": "<ctx-1>",
+                    "messageId": "msg-2",
+                    "parts": [
+                      {
+                        "text": "Is it really necessary?"
+                      }
+                    ],
+                    "role": "ROLE_USER",
+                    "taskId": "<task-1>"
+                  },
+                  {
+                    "messageId": "<msg-1>",
+                    "parts": [
+                      {
+                        "data": {
+                          "id": "adk-<id-1>",
+                          "name": "request_approval"
+                        },
+                        "metadata": {
+                          "adk_is_long_running": true,
+                          "adk_type": "function_call"
+                        }
+                      },
+                      {
+                        "data": {
+                          "id": "adk-<id-1>",
+                          "name": "request_approval",
+                          "response": {
+                            "status": "pending",
+                            "ticket_id": "ticket-1"
+                          }
+                        },
+                        "metadata": {
+                          "adk_type": "function_response"
+                        }
+                      }
+                    ],
+                    "role": "ROLE_AGENT"
+                  }
+                ],
+                "id": "<task-1>",
+                "metadata": {
+                  "adk_app_name": "approver",
+                  "adk_session_id": "<ctx-1>",
+                  "adk_user_id": "A2A_USER_<ctx-1>",
+                  "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                },
+                "status": {
+                  "message": {
+                    "contextId": "<ctx-1>",
+                    "messageId": "<msg-2>",
+                    "parts": [
+                      {
+                        "data": {
+                          "id": "adk-<id-1>",
+                          "name": "request_approval"
+                        },
+                        "metadata": {
+                          "adk_is_long_running": true,
+                          "adk_type": "function_call"
+                        }
+                      },
+                      {
+                        "data": {
+                          "id": "adk-<id-1>",
+                          "name": "request_approval",
+                          "response": {
+                            "status": "pending",
+                            "ticket_id": "ticket-1"
+                          }
+                        },
+                        "metadata": {
+                          "adk_type": "function_response"
+                        }
+                      },
+                      {
+                        "metadata": {
+                          "validation_error": true
+                        },
+                        "text": "no input provided for function call ID \"adk-<id-1>\""
+                      }
+                    ],
+                    "role": "ROLE_AGENT",
+                    "taskId": "<task-1>"
+                  },
+                  "state": "TASK_STATE_INPUT_REQUIRED",
+                  "timestamp": "<t>"
+                }
+              }
+            },
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "status": 200
+          }
+        },
+        {
+          "request": {
+            "body": {
+              "message": {
+                "contextId": "<ctx-1>",
+                "messageId": "msg-3",
+                "parts": [
+                  {
+                    "text": "LGTM"
+                  },
+                  {
+                    "data": {
+                      "id": "adk-<id-1>",
+                      "name": "request_approval",
+                      "response": {
+                        "status": "approved",
+                        "ticket_id": "ticket-1"
+                      }
+                    },
+                    "metadata": {
+                      "adk_type": "function_response"
+                    }
+                  }
+                ],
+                "role": "ROLE_USER",
+                "taskId": "<task-1>"
+              }
+            },
+            "headers": {
+              "A2a-Version": "1.0",
+              "Accept": "application/json",
+              "Content-Type": "application/json"
+            },
+            "method": "POST",
+            "path": "/rest/message:send"
+          },
+          "response": {
+            "body": {
+              "task": {
+                "artifacts": [
+                  {
+                    "artifactId": "<artifact-1>",
+                    "parts": [
+                      {
+                        "text": "need to request approval first!"
+                      },
+                      {
+                        "text": "waiting for user's approval..."
+                      }
+                    ]
+                  },
+                  {
+                    "artifactId": "<artifact-2>",
+                    "parts": [
+                      {
+                        "text": "Task complete!"
+                      }
+                    ]
+                  }
+                ],
+                "contextId": "<ctx-1>",
+                "history": [
+                  {
+                    "messageId": "msg-1",
+                    "parts": [
+                      {
+                        "text": "Perform important task!"
+                      }
+                    ],
+                    "role": "ROLE_USER"
+                  },
+                  {
+                    "contextId": "<ctx-1>",
+                    "messageId": "msg-2",
+                    "parts": [
+                      {
+                        "text": "Is it really necessary?"
+                      }
+                    ],
+                    "role": "ROLE_USER",
+                    "taskId": "<task-1>"
+                  },
+                  {
+                    "messageId": "<msg-1>",
+                    "parts": [
+                      {
+                        "data": {
+                          "id": "adk-<id-1>",
+                          "name": "request_approval"
+                        },
+                        "metadata": {
+                          "adk_is_long_running": true,
+                          "adk_type": "function_call"
+                        }
+                      },
+                      {
+                        "data": {
+                          "id": "adk-<id-1>",
+                          "name": "request_approval",
+                          "response": {
+                            "status": "pending",
+                            "ticket_id": "ticket-1"
+                          }
+                        },
+                        "metadata": {
+                          "adk_type": "function_response"
+                        }
+                      }
+                    ],
+                    "role": "ROLE_AGENT"
+                  },
+                  {
+                    "contextId": "<ctx-1>",
+                    "messageId": "msg-3",
+                    "parts": [
+                      {
+                        "text": "LGTM"
+                      },
+                      {
+                        "data": {
+                          "id": "adk-<id-1>",
+                          "name": "request_approval",
+                          "response": {
+                            "status": "approved",
+                            "ticket_id": "ticket-1"
+                          }
+                        },
+                        "metadata": {
+                          "adk_type": "function_response"
+                        }
+                      }
+                    ],
+                    "role": "ROLE_USER",
+                    "taskId": "<task-1>"
+                  },
+                  {
+                    "contextId": "<ctx-1>",
+                    "messageId": "<msg-2>",
+                    "parts": [
+                      {
+                        "data": {
+                          "id": "adk-<id-1>",
+                          "name": "request_approval"
+                        },
+                        "metadata": {
+                          "adk_is_long_running": true,
+                          "adk_type": "function_call"
+                        }
+                      },
+                      {
+                        "data": {
+                          "id": "adk-<id-1>",
+                          "name": "request_approval",
+                          "response": {
+                            "status": "pending",
+                            "ticket_id": "ticket-1"
+                          }
+                        },
+                        "metadata": {
+                          "adk_type": "function_response"
+                        }
+                      },
+                      {
+                        "metadata": {
+                          "validation_error": true
+                        },
+                        "text": "no input provided for function call ID \"adk-<id-1>\""
+                      }
+                    ],
+                    "role": "ROLE_AGENT",
+                    "taskId": "<task-1>"
+                  }
+                ],
+                "id": "<task-1>",
+                "metadata": {
+                  "adk_app_name": "approver",
+                  "adk_session_id": "<ctx-1>",
+                  "adk_user_id": "A2A_USER_<ctx-1>",
+                  "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                },
+                "status": {
+                  "state": "TASK_STATE_COMPLETED",
+                  "timestamp": "<t>"
+                }
+              }
+            },
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "status": 200
+          }
+        },
+        {
+          "request": {
+            "body": null,
+            "headers": {
+              "A2a-Version": "1.0",
+              "Accept": "application/json"
+            },
+            "method": "GET",
+            "path": "/rest/tasks/<task-1>"
+          },
+          "response": {
+            "body": {
+              "artifacts": [
+                {
+                  "artifactId": "<artifact-1>",
+                  "parts": [
+                    {
+                      "text": "need to request approval first!"
+                    },
+                    {
+                      "text": "waiting for user's approval..."
+                    }
+                  ]
+                },
+                {
+                  "artifactId": "<artifact-2>",
+                  "parts": [
+                    {
+                      "text": "Task complete!"
+                    }
+                  ]
+                }
+              ],
+              "contextId": "<ctx-1>",
+              "history": [
+                {
+                  "messageId": "msg-1",
+                  "parts": [
+                    {
+                      "text": "Perform important task!"
+                    }
+                  ],
+                  "role": "ROLE_USER"
+                },
+                {
+                  "contextId": "<ctx-1>",
+                  "messageId": "msg-2",
+                  "parts": [
+                    {
+                      "text": "Is it really necessary?"
+                    }
+                  ],
+                  "role": "ROLE_USER",
+                  "taskId": "<task-1>"
+                },
+                {
+                  "messageId": "<msg-1>",
+                  "parts": [
+                    {
+                      "data": {
+                        "id": "adk-<id-1>",
+                        "name": "request_approval"
+                      },
+                      "metadata": {
+                        "adk_is_long_running": true,
+                        "adk_type": "function_call"
+                      }
+                    },
+                    {
+                      "data": {
+                        "id": "adk-<id-1>",
+                        "name": "request_approval",
+                        "response": {
+                          "status": "pending",
+                          "ticket_id": "ticket-1"
+                        }
+                      },
+                      "metadata": {
+                        "adk_type": "function_response"
+                      }
+                    }
+                  ],
+                  "role": "ROLE_AGENT"
+                },
+                {
+                  "contextId": "<ctx-1>",
+                  "messageId": "msg-3",
+                  "parts": [
+                    {
+                      "text": "LGTM"
+                    },
+                    {
+                      "data": {
+                        "id": "adk-<id-1>",
+                        "name": "request_approval",
+                        "response": {
+                          "status": "approved",
+                          "ticket_id": "ticket-1"
+                        }
+                      },
+                      "metadata": {
+                        "adk_type": "function_response"
+                      }
+                    }
+                  ],
+                  "role": "ROLE_USER",
+                  "taskId": "<task-1>"
+                },
+                {
+                  "contextId": "<ctx-1>",
+                  "messageId": "<msg-2>",
+                  "parts": [
+                    {
+                      "data": {
+                        "id": "adk-<id-1>",
+                        "name": "request_approval"
+                      },
+                      "metadata": {
+                        "adk_is_long_running": true,
+                        "adk_type": "function_call"
+                      }
+                    },
+                    {
+                      "data": {
+                        "id": "adk-<id-1>",
+                        "name": "request_approval",
+                        "response": {
+                          "status": "pending",
+                          "ticket_id": "ticket-1"
+                        }
+                      },
+                      "metadata": {
+                        "adk_type": "function_response"
+                      }
+                    },
+                    {
+                      "metadata": {
+                        "validation_error": true
+                      },
+                      "text": "no input provided for function call ID \"adk-<id-1>\""
+                    }
+                  ],
+                  "role": "ROLE_AGENT",
+                  "taskId": "<task-1>"
+                }
+              ],
+              "id": "<task-1>",
+              "metadata": {
+                "adk_app_name": "approver",
+                "adk_session_id": "<ctx-1>",
+                "adk_user_id": "A2A_USER_<ctx-1>",
+                "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+              },
+              "status": {
+                "state": "TASK_STATE_COMPLETED",
+                "timestamp": "<t>"
+              }
+            },
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "status": 200
+          }
+        }
+      ]
+    }
+  }
+}

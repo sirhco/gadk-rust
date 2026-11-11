@@ -32,3 +32,5 @@ pub(crate) mod finish_task;
 pub(crate) mod single_turn;
 pub(crate) mod task_agent_tool;
 pub(crate) mod utils;
+
+pub use utils::function_calls;

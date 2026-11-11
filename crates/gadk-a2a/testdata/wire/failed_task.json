@@ -1,0 +1,1121 @@
+{
+  "client": {
+    "jsonrpc": {
+      "card": {
+        "capabilities": {
+          "pushNotifications": false,
+          "streaming": true
+        },
+        "defaultInputModes": [
+          "text/plain"
+        ],
+        "defaultOutputModes": [
+          "text/plain"
+        ],
+        "description": "Always fails.",
+        "name": "broken",
+        "skills": [
+          {
+            "description": "Always fails. Fail.",
+            "id": "broken",
+            "name": "model",
+            "tags": [
+              "llm"
+            ]
+          }
+        ],
+        "supportedInterfaces": [
+          {
+            "protocolBinding": "JSONRPC",
+            "protocolVersion": "1.0",
+            "url": "<base>/jsonrpc"
+          }
+        ],
+        "version": "1.0.0"
+      },
+      "runs": [
+        {
+          "events": [
+            {
+              "actions": {},
+              "author": "remote",
+              "customMetadata": {
+                "a2a:context_id": "<ctx-1>",
+                "a2a:request": {
+                  "message": {
+                    "messageId": "<msg-1>",
+                    "parts": [
+                      {
+                        "text": "hello"
+                      }
+                    ],
+                    "role": "ROLE_USER"
+                  }
+                },
+                "a2a:response": {
+                  "contextId": "<ctx-1>",
+                  "history": [
+                    {
+                      "messageId": "<msg-1>",
+                      "parts": [
+                        {
+                          "text": "hello"
+                        }
+                      ],
+                      "role": "ROLE_USER"
+                    }
+                  ],
+                  "id": "<task-1>",
+                  "metadata": {
+                    "adk_app_name": "broken",
+                    "adk_session_id": "<ctx-1>",
+                    "adk_user_id": "A2A_USER_<ctx-1>",
+                    "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                  },
+                  "status": {
+                    "message": {
+                      "contextId": "<ctx-1>",
+                      "messageId": "<msg-2>",
+                      "parts": [
+                        {
+                          "metadata": {
+                            "adk_is_error_message": true
+                          },
+                          "text": "agent run failed: scripted model failure"
+                        }
+                      ],
+                      "role": "ROLE_AGENT",
+                      "taskId": "<task-1>"
+                    },
+                    "state": "TASK_STATE_FAILED",
+                    "timestamp": "<t>"
+                  }
+                },
+                "a2a:task_id": "<task-1>"
+              },
+              "errorMessage": "agent run failed: scripted model failure",
+              "id": "<id-1>",
+              "invocationId": "e-<id-2>",
+              "timestamp": "<t>",
+              "turnComplete": true
+            }
+          ],
+          "exchanges": [
+            {
+              "request": {
+                "body": {
+                  "id": "<id-3>",
+                  "jsonrpc": "2.0",
+                  "method": "SendMessage",
+                  "params": {
+                    "message": {
+                      "messageId": "<msg-1>",
+                      "parts": [
+                        {
+                          "text": "hello"
+                        }
+                      ],
+                      "role": "ROLE_USER"
+                    }
+                  }
+                },
+                "headers": {
+                  "A2a-Version": "1.0",
+                  "Content-Type": "application/json"
+                },
+                "method": "POST",
+                "path": "/jsonrpc"
+              },
+              "response": {
+                "body": {
+                  "id": "<id-3>",
+                  "jsonrpc": "2.0",
+                  "result": {
+                    "task": {
+                      "contextId": "<ctx-1>",
+                      "history": [
+                        {
+                          "messageId": "<msg-1>",
+                          "parts": [
+                            {
+                              "text": "hello"
+                            }
+                          ],
+                          "role": "ROLE_USER"
+                        }
+                      ],
+                      "id": "<task-1>",
+                      "metadata": {
+                        "adk_app_name": "broken",
+                        "adk_session_id": "<ctx-1>",
+                        "adk_user_id": "A2A_USER_<ctx-1>",
+                        "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                      },
+                      "status": {
+                        "message": {
+                          "contextId": "<ctx-1>",
+                          "messageId": "<msg-2>",
+                          "parts": [
+                            {
+                              "metadata": {
+                                "adk_is_error_message": true
+                              },
+                              "text": "agent run failed: scripted model failure"
+                            }
+                          ],
+                          "role": "ROLE_AGENT",
+                          "taskId": "<task-1>"
+                        },
+                        "state": "TASK_STATE_FAILED",
+                        "timestamp": "<t>"
+                      }
+                    }
+                  }
+                },
+                "headers": {
+                  "Content-Type": "application/json"
+                },
+                "status": 200
+              }
+            }
+          ],
+          "new_message": {
+            "parts": [
+              {
+                "text": "hello"
+              }
+            ],
+            "role": "user"
+          },
+          "streaming_mode": "none"
+        },
+        {
+          "events": [
+            {
+              "actions": {},
+              "author": "remote",
+              "customMetadata": {
+                "a2a:context_id": "<ctx-1>",
+                "a2a:request": {
+                  "message": {
+                    "contextId": "<ctx-1>",
+                    "messageId": "<msg-3>",
+                    "parts": [
+                      {
+                        "text": "hello again"
+                      }
+                    ],
+                    "role": "ROLE_USER"
+                  }
+                },
+                "a2a:response": {
+                  "contextId": "<ctx-1>",
+                  "metadata": {
+                    "adk_app_name": "broken",
+                    "adk_session_id": "<ctx-1>",
+                    "adk_user_id": "A2A_USER_<ctx-1>",
+                    "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                  },
+                  "status": {
+                    "message": {
+                      "contextId": "<ctx-1>",
+                      "messageId": "<msg-4>",
+                      "parts": [
+                        {
+                          "metadata": {
+                            "adk_is_error_message": true
+                          },
+                          "text": "agent run failed: scripted model failure"
+                        }
+                      ],
+                      "role": "ROLE_AGENT",
+                      "taskId": "<task-2>"
+                    },
+                    "state": "TASK_STATE_FAILED",
+                    "timestamp": "<t>"
+                  },
+                  "taskId": "<task-2>"
+                },
+                "a2a:task_id": "<task-2>"
+              },
+              "errorMessage": "agent run failed: scripted model failure",
+              "id": "<id-4>",
+              "invocationId": "e-<id-5>",
+              "timestamp": "<t>",
+              "turnComplete": true
+            }
+          ],
+          "exchanges": [
+            {
+              "request": {
+                "body": {
+                  "id": "<id-6>",
+                  "jsonrpc": "2.0",
+                  "method": "SendStreamingMessage",
+                  "params": {
+                    "message": {
+                      "contextId": "<ctx-1>",
+                      "messageId": "<msg-3>",
+                      "parts": [
+                        {
+                          "text": "hello again"
+                        }
+                      ],
+                      "role": "ROLE_USER"
+                    }
+                  }
+                },
+                "headers": {
+                  "A2a-Version": "1.0",
+                  "Accept": "text/event-stream",
+                  "Content-Type": "application/json"
+                },
+                "method": "POST",
+                "path": "/jsonrpc"
+              },
+              "response": {
+                "body": null,
+                "headers": {
+                  "Cache-Control": "no-cache",
+                  "Connection": "keep-alive",
+                  "Content-Type": "text/event-stream",
+                  "X-Accel-Buffering": "no"
+                },
+                "sse": [
+                  {
+                    "id": "<id-6>",
+                    "jsonrpc": "2.0",
+                    "result": {
+                      "task": {
+                        "contextId": "<ctx-1>",
+                        "history": [
+                          {
+                            "contextId": "<ctx-1>",
+                            "messageId": "<msg-3>",
+                            "parts": [
+                              {
+                                "text": "hello again"
+                              }
+                            ],
+                            "role": "ROLE_USER"
+                          }
+                        ],
+                        "id": "<task-2>",
+                        "metadata": {
+                          "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                        },
+                        "status": {
+                          "state": "TASK_STATE_SUBMITTED"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "id": "<id-6>",
+                    "jsonrpc": "2.0",
+                    "result": {
+                      "statusUpdate": {
+                        "contextId": "<ctx-1>",
+                        "metadata": {
+                          "adk_app_name": "broken",
+                          "adk_session_id": "<ctx-1>",
+                          "adk_user_id": "A2A_USER_<ctx-1>",
+                          "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                        },
+                        "status": {
+                          "state": "TASK_STATE_WORKING",
+                          "timestamp": "<t>"
+                        },
+                        "taskId": "<task-2>"
+                      }
+                    }
+                  },
+                  {
+                    "id": "<id-6>",
+                    "jsonrpc": "2.0",
+                    "result": {
+                      "statusUpdate": {
+                        "contextId": "<ctx-1>",
+                        "metadata": {
+                          "adk_app_name": "broken",
+                          "adk_session_id": "<ctx-1>",
+                          "adk_user_id": "A2A_USER_<ctx-1>",
+                          "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                        },
+                        "status": {
+                          "message": {
+                            "contextId": "<ctx-1>",
+                            "messageId": "<msg-4>",
+                            "parts": [
+                              {
+                                "metadata": {
+                                  "adk_is_error_message": true
+                                },
+                                "text": "agent run failed: scripted model failure"
+                              }
+                            ],
+                            "role": "ROLE_AGENT",
+                            "taskId": "<task-2>"
+                          },
+                          "state": "TASK_STATE_FAILED",
+                          "timestamp": "<t>"
+                        },
+                        "taskId": "<task-2>"
+                      }
+                    }
+                  }
+                ],
+                "status": 200
+              }
+            }
+          ],
+          "new_message": {
+            "parts": [
+              {
+                "text": "hello again"
+              }
+            ],
+            "role": "user"
+          },
+          "streaming_mode": "sse"
+        }
+      ]
+    },
+    "rest": {
+      "card": {
+        "capabilities": {
+          "pushNotifications": false,
+          "streaming": true
+        },
+        "defaultInputModes": [
+          "text/plain"
+        ],
+        "defaultOutputModes": [
+          "text/plain"
+        ],
+        "description": "Always fails.",
+        "name": "broken",
+        "skills": [
+          {
+            "description": "Always fails. Fail.",
+            "id": "broken",
+            "name": "model",
+            "tags": [
+              "llm"
+            ]
+          }
+        ],
+        "supportedInterfaces": [
+          {
+            "protocolBinding": "HTTP+JSON",
+            "protocolVersion": "1.0",
+            "url": "<base>/rest"
+          }
+        ],
+        "version": "1.0.0"
+      },
+      "runs": [
+        {
+          "events": [
+            {
+              "actions": {},
+              "author": "remote",
+              "customMetadata": {
+                "a2a:context_id": "<ctx-1>",
+                "a2a:request": {
+                  "message": {
+                    "messageId": "<msg-1>",
+                    "parts": [
+                      {
+                        "text": "hello"
+                      }
+                    ],
+                    "role": "ROLE_USER"
+                  }
+                },
+                "a2a:response": {
+                  "contextId": "<ctx-1>",
+                  "history": [
+                    {
+                      "messageId": "<msg-1>",
+                      "parts": [
+                        {
+                          "text": "hello"
+                        }
+                      ],
+                      "role": "ROLE_USER"
+                    }
+                  ],
+                  "id": "<task-1>",
+                  "metadata": {
+                    "adk_app_name": "broken",
+                    "adk_session_id": "<ctx-1>",
+                    "adk_user_id": "A2A_USER_<ctx-1>",
+                    "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                  },
+                  "status": {
+                    "message": {
+                      "contextId": "<ctx-1>",
+                      "messageId": "<msg-2>",
+                      "parts": [
+                        {
+                          "metadata": {
+                            "adk_is_error_message": true
+                          },
+                          "text": "agent run failed: scripted model failure"
+                        }
+                      ],
+                      "role": "ROLE_AGENT",
+                      "taskId": "<task-1>"
+                    },
+                    "state": "TASK_STATE_FAILED",
+                    "timestamp": "<t>"
+                  }
+                },
+                "a2a:task_id": "<task-1>"
+              },
+              "errorMessage": "agent run failed: scripted model failure",
+              "id": "<id-1>",
+              "invocationId": "e-<id-2>",
+              "timestamp": "<t>",
+              "turnComplete": true
+            }
+          ],
+          "exchanges": [
+            {
+              "request": {
+                "body": {
+                  "message": {
+                    "messageId": "<msg-1>",
+                    "parts": [
+                      {
+                        "text": "hello"
+                      }
+                    ],
+                    "role": "ROLE_USER"
+                  }
+                },
+                "headers": {
+                  "A2a-Version": "1.0",
+                  "Accept": "application/json",
+                  "Content-Type": "application/json"
+                },
+                "method": "POST",
+                "path": "/rest/message:send"
+              },
+              "response": {
+                "body": {
+                  "task": {
+                    "contextId": "<ctx-1>",
+                    "history": [
+                      {
+                        "messageId": "<msg-1>",
+                        "parts": [
+                          {
+                            "text": "hello"
+                          }
+                        ],
+                        "role": "ROLE_USER"
+                      }
+                    ],
+                    "id": "<task-1>",
+                    "metadata": {
+                      "adk_app_name": "broken",
+                      "adk_session_id": "<ctx-1>",
+                      "adk_user_id": "A2A_USER_<ctx-1>",
+                      "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                    },
+                    "status": {
+                      "message": {
+                        "contextId": "<ctx-1>",
+                        "messageId": "<msg-2>",
+                        "parts": [
+                          {
+                            "metadata": {
+                              "adk_is_error_message": true
+                            },
+                            "text": "agent run failed: scripted model failure"
+                          }
+                        ],
+                        "role": "ROLE_AGENT",
+                        "taskId": "<task-1>"
+                      },
+                      "state": "TASK_STATE_FAILED",
+                      "timestamp": "<t>"
+                    }
+                  }
+                },
+                "headers": {
+                  "Content-Type": "application/json"
+                },
+                "status": 200
+              }
+            }
+          ],
+          "new_message": {
+            "parts": [
+              {
+                "text": "hello"
+              }
+            ],
+            "role": "user"
+          },
+          "streaming_mode": "none"
+        },
+        {
+          "events": [
+            {
+              "actions": {},
+              "author": "remote",
+              "customMetadata": {
+                "a2a:context_id": "<ctx-1>",
+                "a2a:request": {
+                  "message": {
+                    "contextId": "<ctx-1>",
+                    "messageId": "<msg-3>",
+                    "parts": [
+                      {
+                        "text": "hello again"
+                      }
+                    ],
+                    "role": "ROLE_USER"
+                  }
+                },
+                "a2a:response": {
+                  "contextId": "<ctx-1>",
+                  "metadata": {
+                    "adk_app_name": "broken",
+                    "adk_session_id": "<ctx-1>",
+                    "adk_user_id": "A2A_USER_<ctx-1>",
+                    "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                  },
+                  "status": {
+                    "message": {
+                      "contextId": "<ctx-1>",
+                      "messageId": "<msg-4>",
+                      "parts": [
+                        {
+                          "metadata": {
+                            "adk_is_error_message": true
+                          },
+                          "text": "agent run failed: scripted model failure"
+                        }
+                      ],
+                      "role": "ROLE_AGENT",
+                      "taskId": "<task-2>"
+                    },
+                    "state": "TASK_STATE_FAILED",
+                    "timestamp": "<t>"
+                  },
+                  "taskId": "<task-2>"
+                },
+                "a2a:task_id": "<task-2>"
+              },
+              "errorMessage": "agent run failed: scripted model failure",
+              "id": "<id-3>",
+              "invocationId": "e-<id-4>",
+              "timestamp": "<t>",
+              "turnComplete": true
+            }
+          ],
+          "exchanges": [
+            {
+              "request": {
+                "body": {
+                  "message": {
+                    "contextId": "<ctx-1>",
+                    "messageId": "<msg-3>",
+                    "parts": [
+                      {
+                        "text": "hello again"
+                      }
+                    ],
+                    "role": "ROLE_USER"
+                  }
+                },
+                "headers": {
+                  "A2a-Version": "1.0",
+                  "Accept": "text/event-stream",
+                  "Content-Type": "application/json"
+                },
+                "method": "POST",
+                "path": "/rest/message:stream"
+              },
+              "response": {
+                "body": null,
+                "headers": {
+                  "Cache-Control": "no-cache",
+                  "Connection": "keep-alive",
+                  "Content-Type": "text/event-stream",
+                  "X-Accel-Buffering": "no"
+                },
+                "sse": [
+                  {
+                    "task": {
+                      "contextId": "<ctx-1>",
+                      "history": [
+                        {
+                          "contextId": "<ctx-1>",
+                          "messageId": "<msg-3>",
+                          "parts": [
+                            {
+                              "text": "hello again"
+                            }
+                          ],
+                          "role": "ROLE_USER"
+                        }
+                      ],
+                      "id": "<task-2>",
+                      "metadata": {
+                        "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                      },
+                      "status": {
+                        "state": "TASK_STATE_SUBMITTED"
+                      }
+                    }
+                  },
+                  {
+                    "statusUpdate": {
+                      "contextId": "<ctx-1>",
+                      "metadata": {
+                        "adk_app_name": "broken",
+                        "adk_session_id": "<ctx-1>",
+                        "adk_user_id": "A2A_USER_<ctx-1>",
+                        "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                      },
+                      "status": {
+                        "state": "TASK_STATE_WORKING",
+                        "timestamp": "<t>"
+                      },
+                      "taskId": "<task-2>"
+                    }
+                  },
+                  {
+                    "statusUpdate": {
+                      "contextId": "<ctx-1>",
+                      "metadata": {
+                        "adk_app_name": "broken",
+                        "adk_session_id": "<ctx-1>",
+                        "adk_user_id": "A2A_USER_<ctx-1>",
+                        "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                      },
+                      "status": {
+                        "message": {
+                          "contextId": "<ctx-1>",
+                          "messageId": "<msg-4>",
+                          "parts": [
+                            {
+                              "metadata": {
+                                "adk_is_error_message": true
+                              },
+                              "text": "agent run failed: scripted model failure"
+                            }
+                          ],
+                          "role": "ROLE_AGENT",
+                          "taskId": "<task-2>"
+                        },
+                        "state": "TASK_STATE_FAILED",
+                        "timestamp": "<t>"
+                      },
+                      "taskId": "<task-2>"
+                    }
+                  }
+                ],
+                "status": 200
+              }
+            }
+          ],
+          "new_message": {
+            "parts": [
+              {
+                "text": "hello again"
+              }
+            ],
+            "role": "user"
+          },
+          "streaming_mode": "sse"
+        }
+      ]
+    }
+  },
+  "scenario": "failed_task",
+  "server": {
+    "jsonrpc": {
+      "exchanges": [
+        {
+          "request": {
+            "body": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "method": "SendMessage",
+              "params": {
+                "message": {
+                  "messageId": "msg-1",
+                  "parts": [
+                    {
+                      "text": "hello"
+                    }
+                  ],
+                  "role": "ROLE_USER"
+                }
+              }
+            },
+            "headers": {
+              "A2a-Version": "1.0",
+              "Content-Type": "application/json"
+            },
+            "method": "POST",
+            "path": "/jsonrpc"
+          },
+          "response": {
+            "body": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "result": {
+                "task": {
+                  "contextId": "<ctx-1>",
+                  "history": [
+                    {
+                      "messageId": "msg-1",
+                      "parts": [
+                        {
+                          "text": "hello"
+                        }
+                      ],
+                      "role": "ROLE_USER"
+                    }
+                  ],
+                  "id": "<task-1>",
+                  "metadata": {
+                    "adk_app_name": "broken",
+                    "adk_session_id": "<ctx-1>",
+                    "adk_user_id": "A2A_USER_<ctx-1>",
+                    "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                  },
+                  "status": {
+                    "message": {
+                      "contextId": "<ctx-1>",
+                      "messageId": "<msg-1>",
+                      "parts": [
+                        {
+                          "metadata": {
+                            "adk_is_error_message": true
+                          },
+                          "text": "agent run failed: scripted model failure"
+                        }
+                      ],
+                      "role": "ROLE_AGENT",
+                      "taskId": "<task-1>"
+                    },
+                    "state": "TASK_STATE_FAILED",
+                    "timestamp": "<t>"
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "status": 200
+          }
+        },
+        {
+          "request": {
+            "body": {
+              "id": 2,
+              "jsonrpc": "2.0",
+              "method": "SendStreamingMessage",
+              "params": {
+                "message": {
+                  "messageId": "msg-2",
+                  "parts": [
+                    {
+                      "text": "hello"
+                    }
+                  ],
+                  "role": "ROLE_USER"
+                }
+              }
+            },
+            "headers": {
+              "A2a-Version": "1.0",
+              "Accept": "text/event-stream",
+              "Content-Type": "application/json"
+            },
+            "method": "POST",
+            "path": "/jsonrpc"
+          },
+          "response": {
+            "body": null,
+            "headers": {
+              "Cache-Control": "no-cache",
+              "Connection": "keep-alive",
+              "Content-Type": "text/event-stream",
+              "X-Accel-Buffering": "no"
+            },
+            "sse": [
+              {
+                "id": 2,
+                "jsonrpc": "2.0",
+                "result": {
+                  "task": {
+                    "contextId": "<ctx-2>",
+                    "history": [
+                      {
+                        "messageId": "msg-2",
+                        "parts": [
+                          {
+                            "text": "hello"
+                          }
+                        ],
+                        "role": "ROLE_USER"
+                      }
+                    ],
+                    "id": "<task-2>",
+                    "metadata": {
+                      "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                    },
+                    "status": {
+                      "state": "TASK_STATE_SUBMITTED"
+                    }
+                  }
+                }
+              },
+              {
+                "id": 2,
+                "jsonrpc": "2.0",
+                "result": {
+                  "statusUpdate": {
+                    "contextId": "<ctx-2>",
+                    "metadata": {
+                      "adk_app_name": "broken",
+                      "adk_session_id": "<ctx-2>",
+                      "adk_user_id": "A2A_USER_<ctx-2>",
+                      "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                    },
+                    "status": {
+                      "state": "TASK_STATE_WORKING",
+                      "timestamp": "<t>"
+                    },
+                    "taskId": "<task-2>"
+                  }
+                }
+              },
+              {
+                "id": 2,
+                "jsonrpc": "2.0",
+                "result": {
+                  "statusUpdate": {
+                    "contextId": "<ctx-2>",
+                    "metadata": {
+                      "adk_app_name": "broken",
+                      "adk_session_id": "<ctx-2>",
+                      "adk_user_id": "A2A_USER_<ctx-2>",
+                      "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                    },
+                    "status": {
+                      "message": {
+                        "contextId": "<ctx-2>",
+                        "messageId": "<msg-2>",
+                        "parts": [
+                          {
+                            "metadata": {
+                              "adk_is_error_message": true
+                            },
+                            "text": "agent run failed: scripted model failure"
+                          }
+                        ],
+                        "role": "ROLE_AGENT",
+                        "taskId": "<task-2>"
+                      },
+                      "state": "TASK_STATE_FAILED",
+                      "timestamp": "<t>"
+                    },
+                    "taskId": "<task-2>"
+                  }
+                }
+              }
+            ],
+            "status": 200
+          }
+        }
+      ]
+    },
+    "rest": {
+      "exchanges": [
+        {
+          "request": {
+            "body": {
+              "message": {
+                "messageId": "msg-1",
+                "parts": [
+                  {
+                    "text": "hello"
+                  }
+                ],
+                "role": "ROLE_USER"
+              }
+            },
+            "headers": {
+              "A2a-Version": "1.0",
+              "Accept": "application/json",
+              "Content-Type": "application/json"
+            },
+            "method": "POST",
+            "path": "/rest/message:send"
+          },
+          "response": {
+            "body": {
+              "task": {
+                "contextId": "<ctx-1>",
+                "history": [
+                  {
+                    "messageId": "msg-1",
+                    "parts": [
+                      {
+                        "text": "hello"
+                      }
+                    ],
+                    "role": "ROLE_USER"
+                  }
+                ],
+                "id": "<task-1>",
+                "metadata": {
+                  "adk_app_name": "broken",
+                  "adk_session_id": "<ctx-1>",
+                  "adk_user_id": "A2A_USER_<ctx-1>",
+                  "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                },
+                "status": {
+                  "message": {
+                    "contextId": "<ctx-1>",
+                    "messageId": "<msg-1>",
+                    "parts": [
+                      {
+                        "metadata": {
+                          "adk_is_error_message": true
+                        },
+                        "text": "agent run failed: scripted model failure"
+                      }
+                    ],
+                    "role": "ROLE_AGENT",
+                    "taskId": "<task-1>"
+                  },
+                  "state": "TASK_STATE_FAILED",
+                  "timestamp": "<t>"
+                }
+              }
+            },
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "status": 200
+          }
+        },
+        {
+          "request": {
+            "body": {
+              "message": {
+                "messageId": "msg-2",
+                "parts": [
+                  {
+                    "text": "hello"
+                  }
+                ],
+                "role": "ROLE_USER"
+              }
+            },
+            "headers": {
+              "A2a-Version": "1.0",
+              "Accept": "text/event-stream",
+              "Content-Type": "application/json"
+            },
+            "method": "POST",
+            "path": "/rest/message:stream"
+          },
+          "response": {
+            "body": null,
+            "headers": {
+              "Cache-Control": "no-cache",
+              "Connection": "keep-alive",
+              "Content-Type": "text/event-stream",
+              "X-Accel-Buffering": "no"
+            },
+            "sse": [
+              {
+                "task": {
+                  "contextId": "<ctx-2>",
+                  "history": [
+                    {
+                      "messageId": "msg-2",
+                      "parts": [
+                        {
+                          "text": "hello"
+                        }
+                      ],
+                      "role": "ROLE_USER"
+                    }
+                  ],
+                  "id": "<task-2>",
+                  "metadata": {
+                    "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                  },
+                  "status": {
+                    "state": "TASK_STATE_SUBMITTED"
+                  }
+                }
+              },
+              {
+                "statusUpdate": {
+                  "contextId": "<ctx-2>",
+                  "metadata": {
+                    "adk_app_name": "broken",
+                    "adk_session_id": "<ctx-2>",
+                    "adk_user_id": "A2A_USER_<ctx-2>",
+                    "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                  },
+                  "status": {
+                    "state": "TASK_STATE_WORKING",
+                    "timestamp": "<t>"
+                  },
+                  "taskId": "<task-2>"
+                }
+              },
+              {
+                "statusUpdate": {
+                  "contextId": "<ctx-2>",
+                  "metadata": {
+                    "adk_app_name": "broken",
+                    "adk_session_id": "<ctx-2>",
+                    "adk_user_id": "A2A_USER_<ctx-2>",
+                    "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                  },
+                  "status": {
+                    "message": {
+                      "contextId": "<ctx-2>",
+                      "messageId": "<msg-2>",
+                      "parts": [
+                        {
+                          "metadata": {
+                            "adk_is_error_message": true
+                          },
+                          "text": "agent run failed: scripted model failure"
+                        }
+                      ],
+                      "role": "ROLE_AGENT",
+                      "taskId": "<task-2>"
+                    },
+                    "state": "TASK_STATE_FAILED",
+                    "timestamp": "<t>"
+                  },
+                  "taskId": "<task-2>"
+                }
+              }
+            ],
+            "status": 200
+          }
+        }
+      ]
+    }
+  }
+}

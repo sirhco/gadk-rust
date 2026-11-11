@@ -1,0 +1,737 @@
+{
+  "client": {
+    "card_provider": {
+      "runs": [
+        {
+          "events": [
+            {
+              "actions": {},
+              "author": "remote",
+              "content": {
+                "parts": [
+                  {
+                    "text": "Draft ready."
+                  },
+                  {
+                    "text": "Facts checked."
+                  },
+                  {
+                    "text": "Polished."
+                  },
+                  {
+                    "text": "Stamped."
+                  }
+                ],
+                "role": "model"
+              },
+              "customMetadata": {
+                "a2a:context_id": "<ctx-1>",
+                "a2a:request": {
+                  "message": {
+                    "messageId": "<msg-1>",
+                    "parts": [
+                      {
+                        "text": "go"
+                      }
+                    ],
+                    "role": "ROLE_USER"
+                  }
+                },
+                "a2a:response": {
+                  "artifacts": [
+                    {
+                      "artifactId": "<artifact-1>",
+                      "parts": [
+                        {
+                          "text": "Draft ready."
+                        },
+                        {
+                          "text": "Facts checked."
+                        },
+                        {
+                          "text": "Polished."
+                        },
+                        {
+                          "text": "Stamped."
+                        }
+                      ]
+                    }
+                  ],
+                  "contextId": "<ctx-1>",
+                  "history": [
+                    {
+                      "messageId": "<msg-1>",
+                      "parts": [
+                        {
+                          "text": "go"
+                        }
+                      ],
+                      "role": "ROLE_USER"
+                    }
+                  ],
+                  "id": "<task-1>",
+                  "metadata": {
+                    "adk_app_name": "pipeline",
+                    "adk_session_id": "<ctx-1>",
+                    "adk_user_id": "A2A_USER_<ctx-1>",
+                    "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                  },
+                  "status": {
+                    "state": "TASK_STATE_COMPLETED",
+                    "timestamp": "<t>"
+                  }
+                },
+                "a2a:task_id": "<task-1>"
+              },
+              "id": "<id-1>",
+              "invocationId": "e-<id-2>",
+              "timestamp": "<t>",
+              "turnComplete": true
+            }
+          ],
+          "exchanges": [
+            {
+              "request": {
+                "body": null,
+                "headers": {},
+                "method": "GET",
+                "path": "/.well-known/agent-card.json"
+              },
+              "response": {
+                "body": {
+                  "capabilities": {
+                    "pushNotifications": false,
+                    "streaming": true
+                  },
+                  "defaultInputModes": [
+                    "text/plain"
+                  ],
+                  "defaultOutputModes": [
+                    "text/plain"
+                  ],
+                  "description": "Drafts, checks, polishes and stamps a reply.",
+                  "name": "pipeline",
+                  "skills": [
+                    {
+                      "description": "Drafts, checks, polishes and stamps a reply. First, this agent will Writes a draft.. Then, this agent will execute the checks agent. Then, this agent will Polishes the draft.. Finally, this agent will execute the stamper agent.",
+                      "id": "pipeline",
+                      "name": "workflow",
+                      "tags": [
+                        "sequential_workflow"
+                      ]
+                    },
+                    {
+                      "description": "Orchestrates: Writes a draft.; No description; Polishes the draft.; No description",
+                      "id": "pipeline-sub-agents",
+                      "name": "sub-agents",
+                      "tags": [
+                        "sequential_workflow",
+                        "orchestration"
+                      ]
+                    },
+                    {
+                      "description": "Writes a draft. I write a draft of my reply.",
+                      "id": "drafter_drafter",
+                      "name": "drafter: model",
+                      "tags": [
+                        "sub_agent:drafter",
+                        "llm"
+                      ]
+                    },
+                    {
+                      "description": "Tool: lookup",
+                      "id": "drafter_drafter-lookup",
+                      "name": "drafter: lookup",
+                      "tags": [
+                        "sub_agent:drafter",
+                        "llm",
+                        "tools"
+                      ]
+                    },
+                    {
+                      "description": "This agent will Checks facts. simultaneously.",
+                      "id": "checks_checks",
+                      "name": "checks: workflow",
+                      "tags": [
+                        "sub_agent:checks",
+                        "parallel_workflow"
+                      ]
+                    },
+                    {
+                      "description": "Orchestrates: Checks facts.",
+                      "id": "checks_checks-sub-agents",
+                      "name": "checks: sub-agents",
+                      "tags": [
+                        "sub_agent:checks",
+                        "parallel_workflow",
+                        "orchestration"
+                      ]
+                    },
+                    {
+                      "description": "Polishes the draft. This agent will execute the editor agent in a loop (max 1 iterations).",
+                      "id": "polisher_polisher",
+                      "name": "polisher: workflow",
+                      "tags": [
+                        "sub_agent:polisher",
+                        "loop_workflow"
+                      ]
+                    },
+                    {
+                      "description": "Orchestrates: No description",
+                      "id": "polisher_polisher-sub-agents",
+                      "name": "polisher: sub-agents",
+                      "tags": [
+                        "sub_agent:polisher",
+                        "loop_workflow",
+                        "orchestration"
+                      ]
+                    },
+                    {
+                      "description": "A custom agent",
+                      "id": "stamper_stamper",
+                      "name": "stamper: custom",
+                      "tags": [
+                        "sub_agent:stamper",
+                        "custom_agent"
+                      ]
+                    }
+                  ],
+                  "supportedInterfaces": [
+                    {
+                      "protocolBinding": "JSONRPC",
+                      "protocolVersion": "1.0",
+                      "url": "<base>/jsonrpc"
+                    },
+                    {
+                      "protocolBinding": "HTTP+JSON",
+                      "protocolVersion": "1.0",
+                      "url": "<base>/rest"
+                    }
+                  ],
+                  "version": "1.0.0"
+                },
+                "headers": {
+                  "Access-Control-Allow-Origin": "*",
+                  "Content-Type": "application/json"
+                },
+                "status": 200
+              }
+            },
+            {
+              "request": {
+                "body": {
+                  "id": "<id-3>",
+                  "jsonrpc": "2.0",
+                  "method": "SendMessage",
+                  "params": {
+                    "message": {
+                      "messageId": "<msg-1>",
+                      "parts": [
+                        {
+                          "text": "go"
+                        }
+                      ],
+                      "role": "ROLE_USER"
+                    }
+                  }
+                },
+                "headers": {
+                  "A2a-Version": "1.0",
+                  "Content-Type": "application/json"
+                },
+                "method": "POST",
+                "path": "/jsonrpc"
+              },
+              "response": {
+                "body": {
+                  "id": "<id-3>",
+                  "jsonrpc": "2.0",
+                  "result": {
+                    "task": {
+                      "artifacts": [
+                        {
+                          "artifactId": "<artifact-1>",
+                          "parts": [
+                            {
+                              "text": "Draft ready."
+                            },
+                            {
+                              "text": "Facts checked."
+                            },
+                            {
+                              "text": "Polished."
+                            },
+                            {
+                              "text": "Stamped."
+                            }
+                          ]
+                        }
+                      ],
+                      "contextId": "<ctx-1>",
+                      "history": [
+                        {
+                          "messageId": "<msg-1>",
+                          "parts": [
+                            {
+                              "text": "go"
+                            }
+                          ],
+                          "role": "ROLE_USER"
+                        }
+                      ],
+                      "id": "<task-1>",
+                      "metadata": {
+                        "adk_app_name": "pipeline",
+                        "adk_session_id": "<ctx-1>",
+                        "adk_user_id": "A2A_USER_<ctx-1>",
+                        "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                      },
+                      "status": {
+                        "state": "TASK_STATE_COMPLETED",
+                        "timestamp": "<t>"
+                      }
+                    }
+                  }
+                },
+                "headers": {
+                  "Content-Type": "application/json"
+                },
+                "status": 200
+              }
+            }
+          ],
+          "new_message": {
+            "parts": [
+              {
+                "text": "go"
+              }
+            ],
+            "role": "user"
+          },
+          "streaming_mode": "none"
+        }
+      ]
+    }
+  },
+  "scenario": "agent_card_workflow",
+  "server": {
+    "jsonrpc": {
+      "exchanges": [
+        {
+          "request": {
+            "body": null,
+            "headers": {},
+            "method": "GET",
+            "path": "/.well-known/agent-card.json"
+          },
+          "response": {
+            "body": {
+              "capabilities": {
+                "pushNotifications": false,
+                "streaming": true
+              },
+              "defaultInputModes": [
+                "text/plain"
+              ],
+              "defaultOutputModes": [
+                "text/plain"
+              ],
+              "description": "Drafts, checks, polishes and stamps a reply.",
+              "name": "pipeline",
+              "skills": [
+                {
+                  "description": "Drafts, checks, polishes and stamps a reply. First, this agent will Writes a draft.. Then, this agent will execute the checks agent. Then, this agent will Polishes the draft.. Finally, this agent will execute the stamper agent.",
+                  "id": "pipeline",
+                  "name": "workflow",
+                  "tags": [
+                    "sequential_workflow"
+                  ]
+                },
+                {
+                  "description": "Orchestrates: Writes a draft.; No description; Polishes the draft.; No description",
+                  "id": "pipeline-sub-agents",
+                  "name": "sub-agents",
+                  "tags": [
+                    "sequential_workflow",
+                    "orchestration"
+                  ]
+                },
+                {
+                  "description": "Writes a draft. I write a draft of my reply.",
+                  "id": "drafter_drafter",
+                  "name": "drafter: model",
+                  "tags": [
+                    "sub_agent:drafter",
+                    "llm"
+                  ]
+                },
+                {
+                  "description": "Tool: lookup",
+                  "id": "drafter_drafter-lookup",
+                  "name": "drafter: lookup",
+                  "tags": [
+                    "sub_agent:drafter",
+                    "llm",
+                    "tools"
+                  ]
+                },
+                {
+                  "description": "This agent will Checks facts. simultaneously.",
+                  "id": "checks_checks",
+                  "name": "checks: workflow",
+                  "tags": [
+                    "sub_agent:checks",
+                    "parallel_workflow"
+                  ]
+                },
+                {
+                  "description": "Orchestrates: Checks facts.",
+                  "id": "checks_checks-sub-agents",
+                  "name": "checks: sub-agents",
+                  "tags": [
+                    "sub_agent:checks",
+                    "parallel_workflow",
+                    "orchestration"
+                  ]
+                },
+                {
+                  "description": "Polishes the draft. This agent will execute the editor agent in a loop (max 1 iterations).",
+                  "id": "polisher_polisher",
+                  "name": "polisher: workflow",
+                  "tags": [
+                    "sub_agent:polisher",
+                    "loop_workflow"
+                  ]
+                },
+                {
+                  "description": "Orchestrates: No description",
+                  "id": "polisher_polisher-sub-agents",
+                  "name": "polisher: sub-agents",
+                  "tags": [
+                    "sub_agent:polisher",
+                    "loop_workflow",
+                    "orchestration"
+                  ]
+                },
+                {
+                  "description": "A custom agent",
+                  "id": "stamper_stamper",
+                  "name": "stamper: custom",
+                  "tags": [
+                    "sub_agent:stamper",
+                    "custom_agent"
+                  ]
+                }
+              ],
+              "supportedInterfaces": [
+                {
+                  "protocolBinding": "JSONRPC",
+                  "protocolVersion": "1.0",
+                  "url": "<base>/jsonrpc"
+                },
+                {
+                  "protocolBinding": "HTTP+JSON",
+                  "protocolVersion": "1.0",
+                  "url": "<base>/rest"
+                }
+              ],
+              "version": "1.0.0"
+            },
+            "headers": {
+              "Access-Control-Allow-Origin": "*",
+              "Content-Type": "application/json"
+            },
+            "status": 200
+          }
+        },
+        {
+          "request": {
+            "body": {
+              "id": 2,
+              "jsonrpc": "2.0",
+              "method": "SendMessage",
+              "params": {
+                "message": {
+                  "messageId": "msg-1",
+                  "parts": [
+                    {
+                      "text": "go"
+                    }
+                  ],
+                  "role": "ROLE_USER"
+                }
+              }
+            },
+            "headers": {
+              "A2a-Version": "1.0",
+              "Content-Type": "application/json"
+            },
+            "method": "POST",
+            "path": "/jsonrpc"
+          },
+          "response": {
+            "body": {
+              "id": 2,
+              "jsonrpc": "2.0",
+              "result": {
+                "task": {
+                  "artifacts": [
+                    {
+                      "artifactId": "<artifact-1>",
+                      "parts": [
+                        {
+                          "text": "Draft ready."
+                        },
+                        {
+                          "text": "Facts checked."
+                        },
+                        {
+                          "text": "Polished."
+                        },
+                        {
+                          "text": "Stamped."
+                        }
+                      ]
+                    }
+                  ],
+                  "contextId": "<ctx-1>",
+                  "history": [
+                    {
+                      "messageId": "msg-1",
+                      "parts": [
+                        {
+                          "text": "go"
+                        }
+                      ],
+                      "role": "ROLE_USER"
+                    }
+                  ],
+                  "id": "<task-1>",
+                  "metadata": {
+                    "adk_app_name": "pipeline",
+                    "adk_session_id": "<ctx-1>",
+                    "adk_user_id": "A2A_USER_<ctx-1>",
+                    "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                  },
+                  "status": {
+                    "state": "TASK_STATE_COMPLETED",
+                    "timestamp": "<t>"
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "status": 200
+          }
+        }
+      ]
+    },
+    "rest": {
+      "exchanges": [
+        {
+          "request": {
+            "body": null,
+            "headers": {},
+            "method": "GET",
+            "path": "/.well-known/agent-card.json"
+          },
+          "response": {
+            "body": {
+              "capabilities": {
+                "pushNotifications": false,
+                "streaming": true
+              },
+              "defaultInputModes": [
+                "text/plain"
+              ],
+              "defaultOutputModes": [
+                "text/plain"
+              ],
+              "description": "Drafts, checks, polishes and stamps a reply.",
+              "name": "pipeline",
+              "skills": [
+                {
+                  "description": "Drafts, checks, polishes and stamps a reply. First, this agent will Writes a draft.. Then, this agent will execute the checks agent. Then, this agent will Polishes the draft.. Finally, this agent will execute the stamper agent.",
+                  "id": "pipeline",
+                  "name": "workflow",
+                  "tags": [
+                    "sequential_workflow"
+                  ]
+                },
+                {
+                  "description": "Orchestrates: Writes a draft.; No description; Polishes the draft.; No description",
+                  "id": "pipeline-sub-agents",
+                  "name": "sub-agents",
+                  "tags": [
+                    "sequential_workflow",
+                    "orchestration"
+                  ]
+                },
+                {
+                  "description": "Writes a draft. I write a draft of my reply.",
+                  "id": "drafter_drafter",
+                  "name": "drafter: model",
+                  "tags": [
+                    "sub_agent:drafter",
+                    "llm"
+                  ]
+                },
+                {
+                  "description": "Tool: lookup",
+                  "id": "drafter_drafter-lookup",
+                  "name": "drafter: lookup",
+                  "tags": [
+                    "sub_agent:drafter",
+                    "llm",
+                    "tools"
+                  ]
+                },
+                {
+                  "description": "This agent will Checks facts. simultaneously.",
+                  "id": "checks_checks",
+                  "name": "checks: workflow",
+                  "tags": [
+                    "sub_agent:checks",
+                    "parallel_workflow"
+                  ]
+                },
+                {
+                  "description": "Orchestrates: Checks facts.",
+                  "id": "checks_checks-sub-agents",
+                  "name": "checks: sub-agents",
+                  "tags": [
+                    "sub_agent:checks",
+                    "parallel_workflow",
+                    "orchestration"
+                  ]
+                },
+                {
+                  "description": "Polishes the draft. This agent will execute the editor agent in a loop (max 1 iterations).",
+                  "id": "polisher_polisher",
+                  "name": "polisher: workflow",
+                  "tags": [
+                    "sub_agent:polisher",
+                    "loop_workflow"
+                  ]
+                },
+                {
+                  "description": "Orchestrates: No description",
+                  "id": "polisher_polisher-sub-agents",
+                  "name": "polisher: sub-agents",
+                  "tags": [
+                    "sub_agent:polisher",
+                    "loop_workflow",
+                    "orchestration"
+                  ]
+                },
+                {
+                  "description": "A custom agent",
+                  "id": "stamper_stamper",
+                  "name": "stamper: custom",
+                  "tags": [
+                    "sub_agent:stamper",
+                    "custom_agent"
+                  ]
+                }
+              ],
+              "supportedInterfaces": [
+                {
+                  "protocolBinding": "JSONRPC",
+                  "protocolVersion": "1.0",
+                  "url": "<base>/jsonrpc"
+                },
+                {
+                  "protocolBinding": "HTTP+JSON",
+                  "protocolVersion": "1.0",
+                  "url": "<base>/rest"
+                }
+              ],
+              "version": "1.0.0"
+            },
+            "headers": {
+              "Access-Control-Allow-Origin": "*",
+              "Content-Type": "application/json"
+            },
+            "status": 200
+          }
+        },
+        {
+          "request": {
+            "body": {
+              "message": {
+                "messageId": "msg-1",
+                "parts": [
+                  {
+                    "text": "go"
+                  }
+                ],
+                "role": "ROLE_USER"
+              }
+            },
+            "headers": {
+              "A2a-Version": "1.0",
+              "Accept": "application/json",
+              "Content-Type": "application/json"
+            },
+            "method": "POST",
+            "path": "/rest/message:send"
+          },
+          "response": {
+            "body": {
+              "task": {
+                "artifacts": [
+                  {
+                    "artifactId": "<artifact-1>",
+                    "parts": [
+                      {
+                        "text": "Draft ready."
+                      },
+                      {
+                        "text": "Facts checked."
+                      },
+                      {
+                        "text": "Polished."
+                      },
+                      {
+                        "text": "Stamped."
+                      }
+                    ]
+                  }
+                ],
+                "contextId": "<ctx-1>",
+                "history": [
+                  {
+                    "messageId": "msg-1",
+                    "parts": [
+                      {
+                        "text": "go"
+                      }
+                    ],
+                    "role": "ROLE_USER"
+                  }
+                ],
+                "id": "<task-1>",
+                "metadata": {
+                  "adk_app_name": "pipeline",
+                  "adk_session_id": "<ctx-1>",
+                  "adk_user_id": "A2A_USER_<ctx-1>",
+                  "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                },
+                "status": {
+                  "state": "TASK_STATE_COMPLETED",
+                  "timestamp": "<t>"
+                }
+              }
+            },
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "status": 200
+          }
+        }
+      ]
+    }
+  }
+}

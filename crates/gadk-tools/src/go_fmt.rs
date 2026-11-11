@@ -14,8 +14,9 @@
 // limitations under the License.
 
 //! Go standard-library formatting and path helpers the tools reproduce byte-for-byte: `html`
-//! `EscapeString`, `path` `Clean`, `io/fs` `ValidPath` and `encoding/json` of a Go
-//! `string(bytes)` (`url.QueryEscape` is [`gadk_platform::go_query_escape`], `fmt` `%v` of a
+//! `EscapeString`, `io/fs` `ValidPath` and `encoding/json` of a Go
+//! `string(bytes)` (`url.QueryEscape` is [`gadk_platform::go_query_escape`], `path.Clean`
+//! [`gadk_platform::go_path_clean`], `fmt` `%v` of a
 //! JSON-decoded value [`gadk_platform::go_sprint_value`]); plus the crate's one
 //! `fmt.Errorf("<msg>: %w", err)` wrapper, [`wrap_err`]. Private to the crate (the engine's and
 //! gadk-session's copies are private to those crates).
@@ -37,36 +38,6 @@ pub(crate) fn html_escape_string(s: &str) -> String {
         }
     }
     out
-}
-
-/// Go `path.Clean` (lexical, slash-separated): drops empty and `.` elements, resolves `..`
-/// against the preceding element, keeps leading `..` elements of a relative path, drops `..`
-/// at the root of a rooted path, and returns `.` for an empty result (`/` when rooted).
-pub(crate) fn path_clean(p: &str) -> String {
-    if p.is_empty() {
-        return ".".to_owned();
-    }
-    let rooted = p.starts_with('/');
-    let mut elems: Vec<&str> = Vec::new();
-    for elem in p.split('/') {
-        match elem {
-            "" | "." => {}
-            ".." => {
-                if elems.last().is_some_and(|last| *last != "..") {
-                    elems.pop();
-                } else if !rooted {
-                    elems.push("..");
-                }
-            }
-            real => elems.push(real),
-        }
-    }
-    let joined = elems.join("/");
-    match (rooted, joined.is_empty()) {
-        (true, _) => format!("/{joined}"),
-        (false, true) => ".".to_owned(),
-        (false, false) => joined,
-    }
 }
 
 /// Go `fs.ValidPath`: an unrooted, slash-separated path whose elements are all non-empty and
@@ -165,57 +136,6 @@ mod tests {
             ("héllo ☺", "héllo ☺"),
         ] {
             assert_eq!(html_escape_string(input), want, "EscapeString({input:?})");
-        }
-    }
-
-    /// Go path/path_test.go `cleantests`.
-    #[test]
-    fn path_clean_matches_go() {
-        for (input, want) in [
-            // Already clean
-            ("", "."),
-            ("abc", "abc"),
-            ("abc/def", "abc/def"),
-            ("a/b/c", "a/b/c"),
-            (".", "."),
-            ("..", ".."),
-            ("../..", "../.."),
-            ("../../abc", "../../abc"),
-            ("/abc", "/abc"),
-            ("/", "/"),
-            // Remove trailing slash
-            ("abc/", "abc"),
-            ("abc/def/", "abc/def"),
-            ("a/b/c/", "a/b/c"),
-            ("./", "."),
-            ("../", ".."),
-            ("../../", "../.."),
-            ("/abc/", "/abc"),
-            // Remove doubled slash
-            ("abc//def//ghi", "abc/def/ghi"),
-            ("//abc", "/abc"),
-            ("///abc", "/abc"),
-            ("//abc//", "/abc"),
-            ("abc//", "abc"),
-            // Remove . elements
-            ("abc/./def", "abc/def"),
-            ("/./abc/def", "/abc/def"),
-            ("abc/.", "abc"),
-            // Remove .. elements
-            ("abc/def/ghi/../jkl", "abc/def/jkl"),
-            ("abc/def/../ghi/../jkl", "abc/jkl"),
-            ("abc/def/..", "abc"),
-            ("abc/def/../..", "."),
-            ("/abc/def/../..", "/"),
-            ("abc/def/../../..", ".."),
-            ("/abc/def/../../..", "/"),
-            ("abc/def/../../../ghi/jkl/../../../mno", "../../mno"),
-            // Combinations
-            ("abc/./../def", "def"),
-            ("abc//./../def", "def"),
-            ("abc/../../././../def", "../../def"),
-        ] {
-            assert_eq!(path_clean(input), want, "Clean({input:?})");
         }
     }
 
