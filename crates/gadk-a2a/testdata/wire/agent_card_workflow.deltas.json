@@ -1,0 +1,69 @@
+{
+  "deltas": [
+    {
+      "unit": "client.card_provider",
+      "path": "/runs/0/exchanges/0/request/headers/Accept",
+      "actual": "*/*",
+      "divergence": "a2a-rs's client sends reqwest's Accept: */* on non-streaming JSON-RPC and REST calls and on the agent-card fetch (a2a-go: no Accept for JSON-RPC, application/json for REST)"
+    },
+    {
+      "unit": "client.card_provider",
+      "path": "/runs/0/exchanges/1/request/headers/Accept",
+      "actual": "*/*",
+      "divergence": "a2a-rs's client sends reqwest's Accept: */* on non-streaming JSON-RPC and REST calls and on the agent-card fetch (a2a-go: no Accept for JSON-RPC, application/json for REST)"
+    },
+    {
+      "unit": "server.jsonrpc",
+      "path": "/exchanges/0/response/headers/Cache-Control",
+      "actual": "max-age=300",
+      "divergence": "a2a-rs's agent-card endpoint adds Cache-Control: max-age=300 and an ETag (the card version)"
+    },
+    {
+      "unit": "server.jsonrpc",
+      "path": "/exchanges/0/response/headers/Etag",
+      "actual": "\"1.0.0\"",
+      "divergence": "a2a-rs's agent-card endpoint adds Cache-Control: max-age=300 and an ETag (the card version)"
+    },
+    {
+      "unit": "server.jsonrpc",
+      "path": "/exchanges/1/response/body/result/task/metadata",
+      "fixture": {
+        "adk_app_name": "pipeline",
+        "adk_session_id": "<ctx-1>",
+        "adk_user_id": "A2A_USER_<ctx-1>",
+        "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+      },
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/0/response/headers/Cache-Control",
+      "actual": "max-age=300",
+      "divergence": "a2a-rs's agent-card endpoint adds Cache-Control: max-age=300 and an ETag (the card version)"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/0/response/headers/Etag",
+      "actual": "\"1.0.0\"",
+      "divergence": "a2a-rs's agent-card endpoint adds Cache-Control: max-age=300 and an ETag (the card version)"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/1/response/body/task/metadata",
+      "fixture": {
+        "adk_app_name": "pipeline",
+        "adk_session_id": "<ctx-1>",
+        "adk_user_id": "A2A_USER_<ctx-1>",
+        "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+      },
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/1/response/headers/Content-Type",
+      "fixture": "application/json",
+      "actual": "application/a2a+json",
+      "divergence": "a2a-rs's REST binding answers JSON with Content-Type: application/a2a+json (a2a-go: application/json)"
+    }
+  ]
+}

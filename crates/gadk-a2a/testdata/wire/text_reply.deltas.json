@@ -1,0 +1,141 @@
+{
+  "integral_floats": "a2a-rs encodes A2A metadata through protobuf Struct, so integers in metadata go on the wire as floats (5.0; Go: 5); gadk-a2a decodes metadata through Go's JSON text, so integral floats still fill integer fields",
+  "deltas": [
+    {
+      "unit": "client.jsonrpc",
+      "path": "/runs/0/exchanges/0/request/headers/Accept",
+      "actual": "*/*",
+      "divergence": "a2a-rs's client sends reqwest's Accept: */* on non-streaming JSON-RPC and REST calls and on the agent-card fetch (a2a-go: no Accept for JSON-RPC, application/json for REST)"
+    },
+    {
+      "unit": "client.rest",
+      "path": "/runs/*/exchanges/*/request/headers/Accept",
+      "fixture": "application/json",
+      "actual": "*/*",
+      "divergence": "a2a-rs's client sends reqwest's Accept: */* on non-streaming JSON-RPC and REST calls and on the agent-card fetch (a2a-go: no Accept for JSON-RPC, application/json for REST)"
+    },
+    {
+      "unit": "server.jsonrpc",
+      "path": "/exchanges/0/response/body/result/task/metadata",
+      "fixture": {
+        "adk_app_name": "assistant",
+        "adk_session_id": "<ctx-1>",
+        "adk_user_id": "A2A_USER_<ctx-1>",
+        "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+      },
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.jsonrpc",
+      "path": "/exchanges/1/response/body/result/metadata",
+      "fixture": {
+        "adk_app_name": "assistant",
+        "adk_session_id": "<ctx-1>",
+        "adk_user_id": "A2A_USER_<ctx-1>",
+        "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+      },
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.jsonrpc",
+      "path": "/exchanges/*/response/headers/Connection",
+      "fixture": "keep-alive",
+      "divergence": "a2a-rs's SSE responses set only Content-Type and Cache-Control (Go also sends Connection: keep-alive and X-Accel-Buffering: no)"
+    },
+    {
+      "unit": "server.jsonrpc",
+      "path": "/exchanges/*/response/headers/X-Accel-Buffering",
+      "fixture": "no",
+      "divergence": "a2a-rs's SSE responses set only Content-Type and Cache-Control (Go also sends Connection: keep-alive and X-Accel-Buffering: no)"
+    },
+    {
+      "unit": "server.jsonrpc",
+      "path": "/exchanges/2/response/sse/0/result/task/status/timestamp",
+      "actual": "<t>",
+      "divergence": "a2a-rs backfills status.timestamp on every task and status event, so the streamed submitted task carries a timestamp (Go: none)"
+    },
+    {
+      "unit": "server.jsonrpc",
+      "path": "/exchanges/3/response/body/result/task/metadata",
+      "fixture": {
+        "adk_app_name": "assistant",
+        "adk_session_id": "<ctx-1>",
+        "adk_user_id": "A2A_USER_<ctx-1>",
+        "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+      },
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/0/response/body/task/metadata",
+      "fixture": {
+        "adk_app_name": "assistant",
+        "adk_session_id": "<ctx-1>",
+        "adk_user_id": "A2A_USER_<ctx-1>",
+        "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+      },
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/0/response/headers/Content-Type",
+      "fixture": "application/json",
+      "actual": "application/a2a+json",
+      "divergence": "a2a-rs's REST binding answers JSON with Content-Type: application/a2a+json (a2a-go: application/json)"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/1/response/body/metadata",
+      "fixture": {
+        "adk_app_name": "assistant",
+        "adk_session_id": "<ctx-1>",
+        "adk_user_id": "A2A_USER_<ctx-1>",
+        "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+      },
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/1/response/headers/Content-Type",
+      "fixture": "application/json",
+      "actual": "application/a2a+json",
+      "divergence": "a2a-rs's REST binding answers JSON with Content-Type: application/a2a+json (a2a-go: application/json)"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/*/response/headers/Connection",
+      "fixture": "keep-alive",
+      "divergence": "a2a-rs's SSE responses set only Content-Type and Cache-Control (Go also sends Connection: keep-alive and X-Accel-Buffering: no)"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/*/response/headers/X-Accel-Buffering",
+      "fixture": "no",
+      "divergence": "a2a-rs's SSE responses set only Content-Type and Cache-Control (Go also sends Connection: keep-alive and X-Accel-Buffering: no)"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/2/response/sse/0/task/status/timestamp",
+      "actual": "<t>",
+      "divergence": "a2a-rs backfills status.timestamp on every task and status event, so the streamed submitted task carries a timestamp (Go: none)"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/3/response/body/task/metadata",
+      "fixture": {
+        "adk_app_name": "assistant",
+        "adk_session_id": "<ctx-1>",
+        "adk_user_id": "A2A_USER_<ctx-1>",
+        "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+      },
+      "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
+    },
+    {
+      "unit": "server.rest",
+      "path": "/exchanges/3/response/headers/Content-Type",
+      "fixture": "application/json",
+      "actual": "application/a2a+json",
+      "divergence": "a2a-rs's REST binding answers JSON with Content-Type: application/a2a+json (a2a-go: application/json)"
+    }
+  ]
+}
