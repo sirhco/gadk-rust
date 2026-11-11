@@ -1338,6 +1338,7 @@ dependencies = [
  "base64 0.23.1",
  "bytes",
  "chrono",
+ "gadk-platform",
  "pretty_assertions",
  "rstest",
  "serde",

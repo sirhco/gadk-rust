@@ -117,7 +117,7 @@ pub enum Error {
     /// with Go's `%v` (not wrapped): "…exceeded 30s: context deadline exceeded: <init_error>".
     #[error(
         "auth: credential initialization exceeded {}: context deadline exceeded{}",
-        crate::go_fmt::go_duration(*.bound),
+        gadk_platform::go_format_duration(gadk_platform::GoDuration::from_std(*.bound)),
         .init_error.as_deref().map(|e| format!(": {e}")).unwrap_or_default()
     )]
     InitTimeout {

@@ -43,7 +43,7 @@
 import pathlib, sys, tomllib
 
 ALLOWED = {
-    "gadk-genai": set(),
+    "gadk-genai": {"gadk-platform"},  # 6: Go durations (gadk_platform::go_parse_duration)
     "gadk-platform": set(),
     "gadk-model": {"gadk-genai"},
     "gadk-gemini": {"gadk-genai", "gadk-model", "gadk-platform"},

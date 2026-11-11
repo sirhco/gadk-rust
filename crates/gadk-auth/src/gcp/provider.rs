@@ -42,9 +42,10 @@ use tokio::sync::watch;
 use tokio::time::Instant;
 
 use gadk_agent::go_quote;
+use gadk_platform::{GoDuration, go_format_duration};
 
 use crate::credential::{ApiKey, Bearer, Credential};
-use crate::go_fmt::{go_duration, hex_encode};
+use crate::go_fmt::hex_encode;
 use crate::provider::{AuthContext, CredentialProvider, RefreshingProvider};
 use crate::providers::AdcSource;
 use crate::store::{CredentialKey, CredentialStore, InMemoryCredentialStore};
@@ -368,7 +369,7 @@ impl Provider {
             format!(
                 "{}: the attempt exceeded {} and is still running",
                 ErrorKind::ClientUnavailable,
-                go_duration(self.init_timeout)
+                go_format_duration(GoDuration::from_std(self.init_timeout))
             ),
         )
     }
@@ -631,7 +632,7 @@ impl RefreshingProvider for Provider {
             return Err(Error::new(format!(
                 "gcp: refusing to force-refresh {} twice inside {}",
                 self.scheme.name,
-                go_duration(REFRESH_COOLDOWN)
+                go_format_duration(GoDuration::from_std(REFRESH_COOLDOWN))
             ))
             .into());
         }
