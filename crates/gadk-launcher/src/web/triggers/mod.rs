@@ -18,4 +18,4 @@
 
 pub mod eventarc;
 pub mod pubsub;
-mod triggerauth;
+pub(crate) mod triggerauth;
