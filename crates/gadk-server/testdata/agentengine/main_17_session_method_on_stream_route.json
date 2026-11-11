@@ -1,0 +1,33 @@
+{
+  "name": "main_17_session_method_on_stream_route",
+  "config": "main",
+  "kind": "exchange",
+  "request": {
+    "method": "POST",
+    "target": "/stream_reasoning_engine",
+    "headers": [
+      [
+        "Content-Type",
+        "application/json"
+      ]
+    ],
+    "body": "{\"class_method\":\"async_list_sessions\",\"input\":{\"user_id\":\"u1\"}}"
+  },
+  "response": {
+    "status": 500,
+    "headers": [
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ],
+      [
+        "X-Content-Type-Options",
+        "nosniff"
+      ]
+    ],
+    "body": "unrecognized class method: async_list_sessions\n"
+  },
+  "log": "handleQuery failed: unrecognized class method: async_list_sessions\n",
+  "methods": null,
+  "compare": "exact"
+}

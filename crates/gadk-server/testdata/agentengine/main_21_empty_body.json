@@ -1,0 +1,28 @@
+{
+  "name": "main_21_empty_body",
+  "config": "main",
+  "kind": "exchange",
+  "request": {
+    "method": "POST",
+    "target": "/reasoning_engine",
+    "headers": [],
+    "body": ""
+  },
+  "response": {
+    "status": 500,
+    "headers": [
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ],
+      [
+        "X-Content-Type-Options",
+        "nosniff"
+      ]
+    ],
+    "body": "unrecognized class method: \n"
+  },
+  "log": "handleQuery failed: unrecognized class method: \n",
+  "methods": null,
+  "compare": "exact"
+}

@@ -1,0 +1,33 @@
+{
+  "name": "main_16_run_with_events_bad_request_json",
+  "config": "main",
+  "kind": "exchange",
+  "request": {
+    "method": "POST",
+    "target": "/stream_reasoning_engine",
+    "headers": [
+      [
+        "Content-Type",
+        "application/json"
+      ]
+    ],
+    "body": "{\"class_method\":\"streaming_agent_run_with_events\",\"input\":{\"request_json\":\"{\"}}"
+  },
+  "response": {
+    "status": 500,
+    "headers": [
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ],
+      [
+        "X-Content-Type-Options",
+        "nosniff"
+      ]
+    ],
+    "body": "s.streamJSONL() failed: decodeStreamingAgentRunWithEventsRequest() failed: json.Unmarshal(input.request_json) failed: unexpected end of JSON input\n"
+  },
+  "log": "decodeStreamingAgentRunWithEventsRequest() failed: json.Unmarshal(input.request_json) failed: unexpected end of JSON input\nhandleQuery failed: s.streamJSONL() failed: decodeStreamingAgentRunWithEventsRequest() failed: json.Unmarshal(input.request_json) failed: unexpected end of JSON input\n",
+  "methods": null,
+  "compare": "exact"
+}

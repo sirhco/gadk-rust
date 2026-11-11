@@ -1,0 +1,29 @@
+{
+  "name": "main_26_unclean_path",
+  "config": "main",
+  "kind": "exchange",
+  "request": {
+    "method": "POST",
+    "target": "/x/../reasoning_engine",
+    "headers": [
+      [
+        "Content-Type",
+        "application/json"
+      ]
+    ],
+    "body": "{\"class_method\":\"async_list_sessions\",\"input\":{\"user_id\":\"u1\"}}"
+  },
+  "response": {
+    "status": 301,
+    "headers": [
+      [
+        "Location",
+        "/reasoning_engine"
+      ]
+    ],
+    "body": ""
+  },
+  "log": "",
+  "methods": null,
+  "compare": "exact"
+}

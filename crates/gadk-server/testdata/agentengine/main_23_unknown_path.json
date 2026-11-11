@@ -1,0 +1,33 @@
+{
+  "name": "main_23_unknown_path",
+  "config": "main",
+  "kind": "exchange",
+  "request": {
+    "method": "POST",
+    "target": "/nope",
+    "headers": [
+      [
+        "Content-Type",
+        "application/json"
+      ]
+    ],
+    "body": "{\"class_method\":\"async_list_sessions\",\"input\":{\"user_id\":\"u1\"}}"
+  },
+  "response": {
+    "status": 404,
+    "headers": [
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ],
+      [
+        "X-Content-Type-Options",
+        "nosniff"
+      ]
+    ],
+    "body": "404 page not found\n"
+  },
+  "log": "",
+  "methods": null,
+  "compare": "exact"
+}

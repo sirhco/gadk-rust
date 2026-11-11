@@ -1,0 +1,29 @@
+{
+  "name": "main_04_get_session",
+  "config": "main",
+  "kind": "exchange",
+  "request": {
+    "method": "POST",
+    "target": "/reasoning_engine",
+    "headers": [
+      [
+        "Content-Type",
+        "application/json"
+      ]
+    ],
+    "body": "{\"class_method\":\"async_get_session\",\"input\":{\"session_id\":\"00000000-0000-4000-8000-000000000001\",\"user_id\":\"u1\"}}"
+  },
+  "response": {
+    "status": 200,
+    "headers": [
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ]
+    ],
+    "body": "{\"output\":{\"user_id\":\"u1\",\"last_update_time\":1767323045,\"app_name\":\"test-engine\",\"id\":\"00000000-0000-4000-8000-000000000001\",\"state\":{},\"events\":[]}}\n"
+  },
+  "log": "",
+  "methods": null,
+  "compare": "exact"
+}
