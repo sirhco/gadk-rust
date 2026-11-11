@@ -52,3 +52,4 @@ gadk-engine = { workspace = true, features = ["testutil"] }
 tokio = { workspace = true, features = ["test-util"] }
 tokio-tungstenite = { workspace = true }
 pretty_assertions = { workspace = true }
+regex = { workspace = true }

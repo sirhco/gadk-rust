@@ -15,7 +15,8 @@
 
 //! The parts of gorilla/mux v1.8.1 that gadk's routers reproduce: the handler types, the path
 //! template matcher (`Route.Path` and `Route.PathPrefix`), `cleanPath` and `Router.ServeHTTP`'s
-//! clean-path redirect.
+//! clean-path redirect; and the `net/http` answers they share: `Error`, `NotFound`, `Redirect`,
+//! the server's own `OPTIONS *` and bad-request answers, and its HEAD body stripping.
 //!
 //! The REST server's route table ([`rest::Server`](crate::rest::Server)) and the launcher's web
 //! router are both built on it.
@@ -24,11 +25,11 @@ use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::Arc;
 
-use axum::body::Body;
+use axum::body::{Body, HttpBody};
 use futures::future::BoxFuture;
-use gadk_platform::go_url;
-use http::header::LOCATION;
-use http::{HeaderValue, StatusCode, Uri};
+use gadk_platform::{go_path_clean, go_url};
+use http::header::{CONNECTION, CONTENT_LENGTH, CONTENT_TYPE, LOCATION, X_CONTENT_TYPE_OPTIONS};
+use http::{HeaderValue, Method, StatusCode, Uri};
 
 /// A request as a handler sees it.
 pub type Request = http::Request<axum::body::Body>;
@@ -115,7 +116,7 @@ impl Template {
     /// Whole-path match (gorilla `Path`): the path variables, or `None`. `path` is Go's
     /// `URL.Path` (decoded). Variables are greedy and backtrack, so the submatches are those of
     /// Go's leftmost-first regexp `^…([^/]+)…$`.
-    pub fn matches(&self, path: &[u8]) -> Option<crate::rest::PathVars> {
+    pub fn matches(&self, path: &[u8]) -> Option<PathVars> {
         let mut spans = Vec::new();
         match_from(&self.0, path, 0, true, &mut spans)?;
         Some(self.vars(path, spans))
@@ -125,7 +126,7 @@ impl Template {
     /// mux compiles a prefix template without the `$` anchor, so the match is the leftmost-first
     /// match of `^…([^/]+)…`: a variable takes as much as it can and a literal need not end at a
     /// `/` (`/foo` matches `/foobar`).
-    pub fn matches_prefix(&self, path: &[u8]) -> Option<(crate::rest::PathVars, usize)> {
+    pub fn matches_prefix(&self, path: &[u8]) -> Option<(PathVars, usize)> {
         let mut spans = Vec::new();
         let end = match_from(&self.0, path, 0, false, &mut spans)?;
         Some((self.vars(path, spans), end))
@@ -258,6 +259,165 @@ pub fn clean_path_redirect(uri: &Uri, clean: &[u8]) -> Response {
     resp
 }
 
+/// Go's `r.RequestURI` / `r.URL` of a request: an HTTP/2 request has only its `:path` (hyper adds
+/// `:scheme` and `:authority` to the URI), an HTTP/1 request its request target as sent
+/// (absolute-form included).
+pub fn go_request_uri(req: &Request) -> Uri {
+    match req.uri().path_and_query() {
+        Some(pq) if req.version() == http::Version::HTTP_2 => Uri::from(pq.clone()),
+        _ => req.uri().clone(),
+    }
+}
+
+/// Go `net/http.Error`: `msg` and a newline as `text/plain; charset=utf-8`, with
+/// `X-Content-Type-Options: nosniff`.
+pub fn http_error(status: StatusCode, msg: &str) -> Response {
+    let mut resp = Response::new(Body::from(format!("{msg}\n")));
+    *resp.status_mut() = status;
+    let h = resp.headers_mut();
+    h.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("text/plain; charset=utf-8"),
+    );
+    h.insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+    resp
+}
+
+/// Go `net/http.NotFound`: 404 `404 page not found`.
+pub fn not_found() -> Response {
+    http_error(StatusCode::NOT_FOUND, "404 page not found")
+}
+
+/// Go's `net/http` server answer to a request target whose escapes do not decode: `400 Bad
+/// Request` as plain text, and the connection closed.
+pub fn bad_request() -> Response {
+    let mut resp = Response::new(Body::from("400 Bad Request"));
+    *resp.status_mut() = StatusCode::BAD_REQUEST;
+    let h = resp.headers_mut();
+    h.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("text/plain; charset=utf-8"),
+    );
+    h.insert(CONNECTION, HeaderValue::from_static("close"));
+    resp
+}
+
+/// Go `globalOptionsHandler`: `OPTIONS *` answers 200 with `Content-Length: 0`.
+pub fn options_star() -> Response {
+    let mut resp = Response::new(Body::empty());
+    resp.headers_mut()
+        .insert(CONTENT_LENGTH, HeaderValue::from_static("0"));
+    resp
+}
+
+/// A HEAD response as Go's server writes it: the headers of the GET response, the would-be body
+/// length as `Content-Length` when the handler wrote a body of known length (Go's `chunkWriter`
+/// sets it for HEAD only when something was written), and no body.
+pub fn strip_body(mut resp: Response) -> Response {
+    if !resp.headers().contains_key(CONTENT_LENGTH)
+        && let Some(len) = resp.body().size_hint().exact()
+        && len > 0
+    {
+        resp.headers_mut()
+            .insert(CONTENT_LENGTH, HeaderValue::from(len));
+    }
+    *resp.body_mut() = Body::empty();
+    resp
+}
+
+/// Go `URL.EscapedPath()` of a request target's path: the path as sent when it is a valid
+/// encoding, else the default escaping of its decoded form.
+pub fn escaped_path(uri: &Uri) -> String {
+    let raw = uri.path();
+    if go_url::valid_encoded_path(raw) {
+        return raw.to_owned();
+    }
+    match go_url::unescape_path(raw) {
+        Ok(decoded) => go_url::escape_path(&decoded),
+        Err(_) => raw.to_owned(),
+    }
+}
+
+/// Go `net/http.Redirect(w, r, url, code)` on a fresh response: a relative `url` is made absolute
+/// against the request's escaped path and cleaned (keeping a trailing slash and the query);
+/// `Location` is `url` with non-ASCII bytes hex-escaped; GET and HEAD get
+/// `Content-Type: text/html; charset=utf-8`, and GET the short HTML body.
+pub fn redirect(req: &Request, url: &str, code: StatusCode) -> Response {
+    let mut url = url.to_owned();
+    if let Ok(u) = go_url::parse(&url)
+        && u.scheme.is_empty()
+        && u.host.is_empty()
+    {
+        let mut old_path = escaped_path(req.uri());
+        if old_path.is_empty() {
+            old_path = "/".to_owned();
+        }
+        if !url.starts_with('/') {
+            // `path.Split(oldpath)`'s directory.
+            let old_dir = &old_path[..old_path.rfind('/').map_or(0, |i| i + 1)];
+            url = format!("{old_dir}{url}");
+        }
+        let (path, query) = match url.find('?') {
+            Some(i) => (url[..i].to_owned(), url[i..].to_owned()),
+            None => (url.clone(), String::new()),
+        };
+        let trailing = path.ends_with('/');
+        let mut cleaned = go_path_clean(&path);
+        if trailing && !cleaned.ends_with('/') {
+            cleaned.push('/');
+        }
+        url = cleaned + &query;
+    }
+    let mut resp = Response::new(Body::empty());
+    *resp.status_mut() = code;
+    if let Ok(v) = HeaderValue::from_str(&hex_escape_non_ascii(&url)) {
+        resp.headers_mut().insert(LOCATION, v);
+    }
+    let method = req.method();
+    if method == Method::GET || method == Method::HEAD {
+        resp.headers_mut().insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static("text/html; charset=utf-8"),
+        );
+    }
+    if method == Method::GET {
+        // `fmt.Fprintln(w, body)` where body already ends in a newline.
+        let text = code.canonical_reason().unwrap_or_default();
+        *resp.body_mut() = Body::from(format!("<a href=\"{}\">{text}</a>.\n\n", html_escape(&url)));
+    }
+    resp
+}
+
+/// Go `hexEscapeNonASCII`: bytes outside ASCII as `%` and lowercase hex.
+pub fn hex_escape_non_ascii(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for &b in s.as_bytes() {
+        if b >= 0x80 {
+            out.push_str(&format!("%{b:x}"));
+        } else {
+            out.push(char::from(b));
+        }
+    }
+    out
+}
+
+/// Go `net/http`'s `htmlEscape` (its `htmlReplacer`), which is also `html.EscapeString`:
+/// `&`, `<`, `>`, `"` and `'` as entities.
+pub fn html_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&#34;"),
+            '\'' => out.push_str("&#39;"),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
@@ -306,5 +466,43 @@ mod tests {
                 "cleanPath({p:?})"
             );
         }
+    }
+
+    fn get(method: &str, target: &str) -> Request {
+        http::Request::builder()
+            .method(method)
+            .uri(target)
+            .body(Body::empty())
+            .unwrap()
+    }
+
+    #[test]
+    fn redirect_helpers_match_go() {
+        assert_eq!(hex_escape_non_ascii("/a\u{e9}"), "/a%c3%a9");
+        assert_eq!(html_escape("<a&'\">"), "&lt;a&amp;&#39;&#34;&gt;");
+        // Relative to the escaped request path (Go `r.URL.EscapedPath()`), cleaned, query kept.
+        let resp = redirect(&get("GET", "/dir/sub"), "../x?y=1", StatusCode::FOUND);
+        assert_eq!(resp.headers()[LOCATION], "/x?y=1");
+        let resp = redirect(&get("GET", "/a%2Fb/c"), "d/", StatusCode::FOUND);
+        assert_eq!(resp.headers()[LOCATION], "/a%2Fb/d/");
+        assert_eq!(resp.headers()[CONTENT_TYPE], "text/html; charset=utf-8");
+        // Not GET or HEAD: no Content-Type and no body.
+        let resp = redirect(&get("POST", "/a"), "/b", StatusCode::MOVED_PERMANENTLY);
+        assert!(!resp.headers().contains_key(CONTENT_TYPE));
+        assert_eq!(resp.body().size_hint().exact(), Some(0));
+        assert_eq!(escaped_path(&"/a%20b".parse().unwrap()), "/a%20b");
+        assert_eq!(escaped_path(&"/a%7Eb".parse().unwrap()), "/a%7Eb");
+    }
+
+    #[test]
+    fn strip_body_sets_a_length_only_for_a_written_body() {
+        let resp = strip_body(Response::new(Body::from("abcd")));
+        assert_eq!(resp.headers()[CONTENT_LENGTH], "4");
+        assert_eq!(resp.body().size_hint().exact(), Some(0));
+        let resp = strip_body(Response::new(Body::empty()));
+        assert!(!resp.headers().contains_key(CONTENT_LENGTH));
+        assert_eq!(options_star().headers()[CONTENT_LENGTH], "0");
+        assert_eq!(bad_request().headers()[CONNECTION], "close");
+        assert_eq!(not_found().status(), StatusCode::NOT_FOUND);
     }
 }

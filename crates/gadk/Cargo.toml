@@ -35,8 +35,8 @@ server = ["dep:gadk-server", "gadk-a2a?/gadk-server"]
 # `default`.
 a2a = ["dep:gadk-a2a"]
 # The ADK-Go launcher: console and web (REST API, A2A, web UI, triggers) sub-launchers
-# (gadk-launcher, its `full` preset); not in `default`.
-launcher = ["dep:gadk-launcher"]
+# (gadk-launcher with its `full` and `prod` presets); not in `default`.
+launcher = ["dep:gadk-launcher", "gadk-launcher/prod"]
 
 [dependencies]
 gadk-genai = { workspace = true }
@@ -87,6 +87,10 @@ name = "quickstart"
 required-features = ["gemini"]
 
 [[example]]
+name = "launcher"
+required-features = ["gemini", "launcher"]
+
+[[example]]
 name = "agent_tool"
 required-features = ["gemini"]
 
@@ -107,7 +111,7 @@ required-features = ["gemini"]
 
 [[example]]
 name = "compaction"
-required-features = ["gemini"]
+required-features = ["gemini", "launcher"]
 
 [[example]]
 name = "load_memory"
@@ -119,19 +123,19 @@ required-features = ["gemini"]
 
 [[example]]
 name = "multiple_tools"
-required-features = ["gemini"]
+required-features = ["gemini", "launcher"]
 
 [[example]]
 name = "toolsearch"
-required-features = ["gemini"]
+required-features = ["gemini", "launcher"]
 
 [[example]]
 name = "skills"
-required-features = ["gemini"]
+required-features = ["gemini", "launcher"]
 
 [[example]]
 name = "mcp"
-required-features = ["gemini", "mcp"]
+required-features = ["gemini", "mcp", "launcher"]
 
 [[example]]
 name = "anthropic"
@@ -176,3 +180,7 @@ required-features = ["server"]
 [[test]]
 name = "facade_a2a"
 required-features = ["a2a"]
+
+[[test]]
+name = "facade_launcher"
+required-features = ["launcher"]

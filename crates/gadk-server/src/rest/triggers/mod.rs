@@ -41,6 +41,7 @@ use tokio::sync::{Semaphore, SemaphorePermit};
 use crate::rest::PathVars;
 use crate::rest::controllers::handlers::path_vars;
 use crate::rest::http_error::encode_json_response;
+use crate::rest::middleware::is_max_bytes_error;
 use crate::rest::models::TriggerResponse;
 use crate::rest::routing::{Request, Response};
 
@@ -303,11 +304,20 @@ impl fmt::Display for BodyError {
 }
 
 /// Reads the whole body under axum's limit: the caller's `DefaultBodyLimit` (axum's default when
-/// none is set) or a length-limited body; exceeding either is [`BodyError::TooLarge`].
+/// none is set), a length-limited body, or a body limited by [`max_bytes_middleware`] (Go
+/// `http.MaxBytesReader`, which the web launcher applies to every route); exceeding any of them is
+/// [`BodyError::TooLarge`].
+///
+/// [`max_bytes_middleware`]: crate::rest::max_bytes_middleware
 async fn read_body(req: Request) -> Result<Bytes, BodyError> {
     match Bytes::from_request(req, &()).await {
         Ok(body) => Ok(body),
         Err(BytesRejection::FailedToBufferBody(FailedToBufferBody::LengthLimitError(_))) => {
+            Err(BodyError::TooLarge)
+        }
+        Err(BytesRejection::FailedToBufferBody(FailedToBufferBody::UnknownBodyError(e)))
+            if is_max_bytes_error(&e) =>
+        {
             Err(BodyError::TooLarge)
         }
         Err(e) => Err(BodyError::Other(e.to_string())),
@@ -378,6 +388,41 @@ mod tests {
     use super::*;
 
     const MS: Duration = Duration::from_millis(1);
+
+    /// A body cut by `max_bytes_middleware` (the web launcher's Go `http.MaxBytesReader`) is Go's
+    /// `*http.MaxBytesError`, like axum's own length limit.
+    #[tokio::test]
+    async fn read_body_reports_the_max_bytes_limit_as_too_large() {
+        let seen = Arc::new(std::sync::Mutex::new(None));
+        let inner = {
+            let seen = Arc::clone(&seen);
+            crate::mux::handler(move |req: Request| {
+                let seen = Arc::clone(&seen);
+                async move {
+                    *seen.lock().unwrap() = Some(read_body(req).await.map_err(|e| e.to_string()));
+                    Response::default()
+                }
+            })
+        };
+        let limited = crate::rest::max_bytes_middleware(4)(inner);
+        let req = |body: &'static str| {
+            http::Request::builder()
+                .method("POST")
+                .uri("/")
+                .body(axum::body::Body::from(body))
+                .unwrap()
+        };
+        limited(req("abcdef")).await;
+        assert!(matches!(
+            seen.lock().unwrap().take(),
+            Some(Err(e)) if e == "http: request body too large"
+        ));
+        limited(req("abcd")).await;
+        assert!(matches!(
+            seen.lock().unwrap().take(),
+            Some(Ok(b)) if b.as_ref() == b"abcd"
+        ));
+    }
 
     /// Go `calculateBackoff(attempt, 1ms, 5ms)` with `rand.Float64()` at its extremes.
     #[test]

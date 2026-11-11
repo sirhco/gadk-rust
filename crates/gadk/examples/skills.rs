@@ -16,22 +16,21 @@
 //! An agent that discovers and follows skills through the `SkillToolset` (port of Go
 //! examples/skills/main.go). The skills (`grocery-prices` and `weather`) are Go's, copied under
 //! `examples/skills/`; they are read through `DirFs` from the crate directory, so the example
-//! runs from any directory. Go runs it through the launcher (sub-project 6); this is a stdin loop.
+//! runs from any directory. It runs through the launcher, as Go's does.
 //!
-//! `GOOGLE_API_KEY=... cargo run -p gadk --example skills`, then ask
+//! `GOOGLE_API_KEY=... cargo run -p gadk --features launcher --example skills [console | web
+//! webui api]`, then ask
 //! "What countries do you know current prices for? List the countries. Then find the prices for
 //! each. Then re-organize these prices into a table: products on one side - countries on
 //! another."
 
-use std::io::{BufRead, Write};
 use std::sync::Arc;
 
-use futures::StreamExt;
-use gadk::agent::{RunConfig, StreamingMode};
+use gadk::agent::SingleLoader;
 use gadk::engine::llm::LlmAgentConfig;
-use gadk::engine::runner::{RunOptions, Runner};
 use gadk::gemini::{ClientConfig, GeminiModel};
-use gadk::genai::{Content, ROLE_USER};
+use gadk::launcher::golog::Logger;
+use gadk::launcher::{CancellationToken, Config, Launcher, full};
 use gadk::tools::skills::skill::{self, DirFs, FileSystemSource};
 use gadk::tools::skills::{SkillToolset, SkillToolsetConfig};
 
@@ -68,47 +67,13 @@ async fn main() -> anyhow::Result<()> {
         ..Default::default()
     })?;
 
-    let runner = Runner::in_memory("skills_example", agent)?;
-    repl(&runner, "user", "session-1").await?;
-    runner.close().await?;
-    Ok(())
-}
-
-/// Go's stdin loop: one line per turn, printing the streamed (partial) model text.
-async fn repl(runner: &Runner, user_id: &str, session_id: &str) -> anyhow::Result<()> {
-    let stdin = std::io::stdin();
-    loop {
-        print!("\nUser -> ");
-        std::io::stdout().flush()?;
-        let mut line = String::new();
-        if stdin.lock().read_line(&mut line)? == 0 {
-            return Ok(());
-        }
-        print!("\nAgent -> ");
-        std::io::stdout().flush()?;
-        let cfg = RunConfig {
-            streaming_mode: StreamingMode::Sse,
-            ..Default::default()
-        };
-        let msg = Content::from_text(line, ROLE_USER);
-        let mut events = runner.run(user_id, session_id, Some(msg), cfg, RunOptions::default());
-        while let Some(event) = events.next().await {
-            let event = match event {
-                Ok(event) => event,
-                Err(e) => {
-                    println!("\nAGENT_ERROR: {e}");
-                    continue;
-                }
-            };
-            // In SSE mode only the partial responses are printed: the final response repeats
-            // their text.
-            if !event.response.partial {
-                continue;
-            }
-            for part in event.response.content.iter().flat_map(|c| c.parts.iter()) {
-                print!("{}", part.text);
-            }
-            std::io::stdout().flush()?;
-        }
+    let config = Config::new(Arc::new(SingleLoader::new(agent)));
+    let mut l = full::new();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Err(e) = l.execute(CancellationToken::new(), config, args).await {
+        // Go `log.Fatalf("Run failed: %v\n\n%s", err, l.CommandLineSyntax())`.
+        Logger::stderr().print(&format!("Run failed: {e}\n\n{}", l.command_line_syntax()));
+        std::process::exit(1);
     }
+    Ok(())
 }

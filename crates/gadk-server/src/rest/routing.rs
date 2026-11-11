@@ -21,19 +21,21 @@
 use std::convert::Infallible;
 use std::sync::Arc;
 
-use axum::body::{Body, HttpBody};
+use axum::body::Body;
 use gadk_platform::go_url;
-use http::header::{ALLOW, CONNECTION, CONTENT_LENGTH, CONTENT_TYPE};
+use http::header::ALLOW;
 use http::uri::PathAndQuery;
 use http::{HeaderValue, Method, StatusCode, Uri};
 use tower::util::BoxCloneSyncService;
 use tower::{Layer, ServiceExt};
 
-use super::http_error::not_found;
 use super::middleware::{catch_panic, with_max_bytes};
 use crate::authn::{self, Authenticator};
 pub use crate::mux::{Handler, PathVars, Request, Response, handler};
-use crate::mux::{Template, clean_path, clean_path_redirect};
+use crate::mux::{
+    Template, bad_request, clean_path, clean_path_redirect, go_request_uri, not_found,
+    options_star, redirect, strip_body,
+};
 
 /// Port of Go `routers.Route`.
 pub struct Route {
@@ -45,6 +47,10 @@ pub struct Route {
     pub pattern: String,
     /// Exempt from authentication (Go `Public`).
     pub public: bool,
+    /// Registered while the router had gorilla's `StrictSlash(true)` (Go registers `/health`
+    /// before `SetupSubRouters` turns it off): the path with the other trailing-slash form also
+    /// matches, and is answered with a 301 to the route's own form instead of the handler.
+    pub strict_slash: bool,
     /// The handler.
     pub handler: Handler,
 }
@@ -61,6 +67,7 @@ pub(crate) fn route(
         methods: methods.to_vec(),
         pattern: pattern.into(),
         public: false,
+        strict_slash: false,
         handler,
     }
 }
@@ -115,7 +122,10 @@ struct Entry {
     methods: Vec<Method>,
     pattern: String,
     public: bool,
+    /// The pattern's template, minus its trailing slash for a strict-slash route.
     template: Template,
+    /// See [`Route::strict_slash`].
+    strict_slash: bool,
     service: RouteService,
 }
 
@@ -163,10 +173,16 @@ impl RouteTable {
                     Some(layer) if !r.public => BoxCloneSyncService::new(layer.layer(inner)),
                     _ => BoxCloneSyncService::new(inner),
                 };
+                let template = if r.strict_slash {
+                    Template::parse(r.pattern.strip_suffix('/').unwrap_or(&r.pattern))
+                } else {
+                    Template::parse(&r.pattern)
+                };
                 Entry {
                     name: r.name,
                     methods: with_head(r.methods),
-                    template: Template::parse(&r.pattern),
+                    template,
+                    strict_slash: r.strict_slash,
                     pattern: r.pattern,
                     public: r.public,
                     service,
@@ -212,7 +228,7 @@ impl RouteTable {
         // mux matches the decoded path and first redirects one that is not clean.
         let clean = clean_path(&path);
         if clean != path {
-            return clean_path_redirect(req.uri(), &clean);
+            return clean_path_redirect(&go_request_uri(&req), &clean);
         }
         if let Some((entry, vars)) = self.find(req.method(), &path) {
             return self.call(entry, vars, req).await;
@@ -256,11 +272,19 @@ impl RouteTable {
         self.routes
             .iter()
             .filter(|e| e.methods.contains(method))
-            .find_map(|e| e.template.matches(path).map(|vars| (e, vars)))
+            .find_map(|e| e.path_vars(path).map(|vars| (e, vars)))
     }
 
-    /// Runs a matched route: body limit (mux middleware), then its service stack.
+    /// Runs a matched route: body limit (mux middleware), then its service stack, or for a
+    /// strict-slash route reached with the other trailing-slash form, gorilla's redirect in place
+    /// of the stack (so without authentication, as gorilla replaces the route's handler).
     async fn call(&self, entry: &Entry, vars: PathVars, mut req: Request) -> Response {
+        if let Some(target) = entry.strict_slash_target(&req) {
+            return with_max_bytes(self.max_payload_size, req, |req| async move {
+                redirect(&req, &target, StatusCode::MOVED_PERMANENTLY)
+            })
+            .await;
+        }
         req.extensions_mut().insert(vars);
         let service = entry.service.clone();
         with_max_bytes(self.max_payload_size, req, |req| async move {
@@ -270,6 +294,43 @@ impl RouteTable {
             }
         })
         .await
+    }
+}
+
+impl Entry {
+    /// The path variables when the route's path matches `path` (gorilla `…[/]?$` under
+    /// `StrictSlash(true)`: the `[^/]+` variables never take a `/`, so the optional slash is the
+    /// path's last byte).
+    fn path_vars(&self, path: &[u8]) -> Option<PathVars> {
+        self.template.matches(path).or_else(|| {
+            if self.strict_slash {
+                path.strip_suffix(b"/")
+                    .and_then(|p| self.template.matches(p))
+            } else {
+                None
+            }
+        })
+    }
+
+    /// gorilla `setMatch`'s strict-slash check: when the decoded path's trailing slash differs
+    /// from the pattern's, the redirect target, Go `URL.String` of `url.Parse(req.URL.String())`
+    /// with the slash trimmed or added.
+    fn strict_slash_target(&self, req: &Request) -> Option<String> {
+        if !self.strict_slash {
+            return None;
+        }
+        let path = go_url::unescape_path(req.uri().path()).ok()?;
+        let path_ends_with_slash = path.ends_with(b"/");
+        if path_ends_with_slash == self.pattern.ends_with('/') {
+            return None;
+        }
+        let mut u = go_url::parse(&go_request_uri(req).to_string()).unwrap_or_default();
+        if path_ends_with_slash {
+            u.path.pop();
+        } else {
+            u.path.push(b'/');
+        }
+        Some(u.to_go_string())
     }
 }
 
@@ -347,41 +408,6 @@ impl ServerAnswer {
     }
 }
 
-/// Go's http.Server answer to a request target that does not parse: `400 Bad Request` as plain
-/// text, and the connection closed.
-fn bad_request() -> Response {
-    let mut resp = Response::new(Body::from("400 Bad Request"));
-    *resp.status_mut() = StatusCode::BAD_REQUEST;
-    let h = resp.headers_mut();
-    h.insert(
-        CONTENT_TYPE,
-        HeaderValue::from_static("text/plain; charset=utf-8"),
-    );
-    h.insert(CONNECTION, HeaderValue::from_static("close"));
-    resp
-}
-
-/// Go `globalOptionsHandler`: `OPTIONS *` answers 200 with `Content-Length: 0`.
-fn options_star() -> Response {
-    let mut resp = Response::new(Body::empty());
-    resp.headers_mut()
-        .insert(CONTENT_LENGTH, HeaderValue::from_static("0"));
-    resp
-}
-
-/// A HEAD response: the headers of the GET response, its exact length as `Content-Length` when
-/// known, and no body.
-fn strip_body(mut resp: Response) -> Response {
-    if !resp.headers().contains_key(CONTENT_LENGTH)
-        && let Some(len) = resp.body().size_hint().exact()
-    {
-        resp.headers_mut()
-            .insert(CONTENT_LENGTH, HeaderValue::from(len));
-    }
-    *resp.body_mut() = Body::empty();
-    resp
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
@@ -390,6 +416,7 @@ mod tests {
     use axum::extract::ConnectInfo;
     use axum::response::IntoResponse;
     use gadk_session::InMemorySessionService;
+    use http::header::CONTENT_TYPE;
     use serde_json::Value;
 
     use super::*;
@@ -628,6 +655,88 @@ mod tests {
             serve(&t, "GET", "/a%20b/./c", "").await,
             (301, h(&[("location", "/a%20b/c")]), String::new())
         );
+    }
+
+    /// Go's `r.URL` of an HTTP/2 request is its `:path` alone (hyper's request URI also carries
+    /// `:scheme` and `:authority`), so neither redirect gains `scheme://authority`; an HTTP/1
+    /// absolute-form target keeps them, as Go's `URL.String` does.
+    #[tokio::test]
+    async fn http2_redirects_use_the_path_only_request_uri() {
+        let mut health = public(route("Health", &[Method::GET], "/health", echo()));
+        health.strict_slash = true;
+        let t = RouteTable::new(vec![health], None, 0);
+        let h2 = |target: &str| {
+            let mut r = req("GET", target, "");
+            *r.version_mut() = http::Version::HTTP_2;
+            r
+        };
+        let resp = t.serve(h2("http://example.com/x/../health?a=1")).await;
+        assert_eq!(resp.headers()[http::header::LOCATION], "/health?a=1");
+        let resp = t.serve(h2("http://example.com/health/?a=1")).await;
+        assert_eq!(resp.headers()[http::header::LOCATION], "/health?a=1");
+        let resp = t
+            .serve(req("GET", "http://example.com/x/../health", ""))
+            .await;
+        assert_eq!(
+            resp.headers()[http::header::LOCATION],
+            "http://example.com/health"
+        );
+    }
+
+    /// Go's `/health`, registered before `SetupSubRouters` turns StrictSlash off: the other
+    /// trailing-slash form (`%2F` included, as gorilla matches the decoded path) is a 301 for
+    /// GET and HEAD and, through the fallback's probe, a 405 with `Allow` for other methods.
+    #[tokio::test]
+    async fn strict_slash_route_redirects_like_gorilla() {
+        let mut health = public(route(
+            "Health",
+            &[Method::GET, Method::HEAD],
+            "/health",
+            echo(),
+        ));
+        health.strict_slash = true;
+        let t = RouteTable::new(
+            vec![health, route("RunAgent", &[Method::POST], "/run", echo())],
+            None,
+            0,
+        );
+        assert_eq!(
+            serve(&t, "GET", "/health%2F?q=1", "").await,
+            (
+                301,
+                h(&[
+                    ("content-type", "text/html; charset=utf-8"),
+                    ("location", "/health?q=1")
+                ]),
+                "<a href=\"/health?q=1\">Moved Permanently</a>.\n\n".to_owned()
+            )
+        );
+        assert_eq!(
+            serve(&t, "HEAD", "/health%2F", "").await,
+            (
+                301,
+                h(&[
+                    ("content-type", "text/html; charset=utf-8"),
+                    ("location", "/health")
+                ]),
+                String::new()
+            )
+        );
+        assert_eq!(
+            serve(&t, "GET", "/health/", "").await.1,
+            h(&[
+                ("content-type", "text/html; charset=utf-8"),
+                ("location", "/health")
+            ])
+        );
+        assert_eq!(
+            serve(&t, "POST", "/health%2F", "").await,
+            (405, h(&[("allow", "GET, HEAD")]), String::new())
+        );
+        assert_eq!(serve(&t, "GET", "/health", "").await.0, 200);
+        // Without StrictSlash the trailing slash is the fallback's to trim.
+        let (status, _, body) = serve(&t, "POST", "/run/", "x").await;
+        assert_eq!((status, body.as_str()), (200, "POST /run {} - x"));
     }
 
     #[tokio::test]

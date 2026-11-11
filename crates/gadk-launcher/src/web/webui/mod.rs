@@ -35,11 +35,11 @@ use axum::body::Body;
 use bytes::Bytes;
 use gadk_platform::go_flag::{Flag, FlagSet};
 use gadk_platform::{go_path_clean, go_path_join, go_url};
-use gadk_server::mux::{Request, Response, handler};
+use gadk_server::mux::{Request, Response, handler, html_escape, http_error, not_found, redirect};
+use gadk_server::rest::encode_json_response;
 use http::header::{
     ACCEPT_RANGES, CACHE_CONTROL, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE,
     ETAG, IF_MATCH, IF_NONE_MATCH, IF_RANGE, LAST_MODIFIED, LOCATION, RANGE,
-    X_CONTENT_TYPE_OPTIONS,
 };
 use http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
 use regex::bytes::{NoExpand, Regex};
@@ -90,6 +90,13 @@ pub fn new() -> WebUiLauncher {
 }
 
 impl WebUiLauncher {
+    /// Sends the flag set's usage and parse errors to `out` instead of stderr (Go
+    /// `flag.FlagSet.SetOutput`).
+    pub fn with_flag_output(self, out: Arc<Mutex<dyn std::io::Write + Send>>) -> WebUiLauncher {
+        lock(&self.flags).set_output(out);
+        self
+    }
+
     /// Go's tests' `&webUILauncher{config: &webUIConfig{pathPrefix: …}}`: the launcher serving
     /// under `path_prefix` (the backend address keeps its default, the tests' address).
     #[cfg(test)]
@@ -170,10 +177,7 @@ fn add_subrouter(
 
     // The subrouter: generate /assets/config/runtime-config.json at runtime (Go's `Path` inside a
     // `PathPrefix` subrouter appends to the prefix minus its trailing slashes).
-    let runtime_config = Bytes::from(format!(
-        "{{\"backendUrl\":{}}}\n",
-        go_json_string(backend_address)
-    ));
+    let runtime_config = serde_json::json!({ "backendUrl": backend_address });
     router.handle(
         &ui_methods,
         &format!(
@@ -181,8 +185,8 @@ fn add_subrouter(
             path_prefix.trim_end_matches('/')
         ),
         handler(move |_req: Request| {
-            let body = runtime_config.clone();
-            async move { encode_json_response(body) }
+            let resp = encode_json_response(&runtime_config, StatusCode::OK);
+            async move { resp }
         }),
     );
     let spa = Arc::new(Spa {
@@ -866,137 +870,6 @@ fn status_only(status: StatusCode) -> Response {
     resp
 }
 
-/// Go `controllers.EncodeJSONResponse(v, http.StatusOK, w)` for an already encoded body.
-fn encode_json_response(body: Bytes) -> Response {
-    let mut resp = Response::new(Body::from(body));
-    resp.headers_mut().insert(
-        CONTENT_TYPE,
-        HeaderValue::from_static("application/json; charset=UTF-8"),
-    );
-    resp
-}
-
-/// A string as Go's `json.Encoder` writes it (HTML-escaped): `"`, `\`, `\b`, `\f`, `\n`, `\r`,
-/// `\t` escaped by name, other control bytes and `<`, `>`, `&` as `\u00XX`, U+2028/U+2029 as
-/// ` `/` `.
-fn go_json_string(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\u{8}' => out.push_str("\\b"),
-            '\u{c}' => out.push_str("\\f"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            '\u{0}'..='\u{1f}' | '<' | '>' | '&' => {
-                out.push_str(&format!("\\u{:04x}", u32::from(c)));
-            }
-            '\u{2028}' | '\u{2029}' => out.push_str(&format!("\\u{:04x}", u32::from(c))),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
-}
-
-/// Go `html.EscapeString`.
-fn html_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '&' => out.push_str("&amp;"),
-            '\'' => out.push_str("&#39;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&#34;"),
-            c => out.push(c),
-        }
-    }
-    out
-}
-
-/// Go `net/http.Redirect(w, r, url, code)`.
-fn redirect(req: &Request, url: &str, code: StatusCode) -> Response {
-    let mut url = url.to_owned();
-    if let Ok(u) = go_url::parse(&url)
-        && u.scheme.is_empty()
-        && u.host.is_empty()
-    {
-        // No scheme or host: make a relative path absolute, clean it, keep a trailing slash.
-        let mut old_path = ReqUrl::of(req).escaped_path();
-        if old_path.is_empty() {
-            old_path = "/".to_owned();
-        }
-        if !url.starts_with('/') {
-            let old_dir = &old_path[..old_path.rfind('/').map_or(0, |i| i + 1)];
-            url = format!("{old_dir}{url}");
-        }
-        let (path, query) = match url.find('?') {
-            Some(i) => (url[..i].to_owned(), url[i..].to_owned()),
-            None => (url.clone(), String::new()),
-        };
-        let trailing = path.ends_with('/');
-        let mut cleaned = go_path_clean(&path);
-        if trailing && !cleaned.ends_with('/') {
-            cleaned.push('/');
-        }
-        url = cleaned + &query;
-    }
-    let mut resp = Response::new(Body::empty());
-    *resp.status_mut() = code;
-    if let Ok(v) = HeaderValue::from_str(&hex_escape_non_ascii(&url)) {
-        resp.headers_mut().insert(LOCATION, v);
-    }
-    let method = req.method();
-    if method == Method::GET || method == Method::HEAD {
-        resp.headers_mut().insert(
-            CONTENT_TYPE,
-            HeaderValue::from_static("text/html; charset=utf-8"),
-        );
-    }
-    if method == Method::GET {
-        // `fmt.Fprintln(w, body)` where body already ends in a newline.
-        let text = code.canonical_reason().unwrap_or_default();
-        *resp.body_mut() = Body::from(format!("<a href=\"{}\">{text}</a>.\n\n", html_escape(&url)));
-    }
-    resp
-}
-
-/// Go `hexEscapeNonASCII`: bytes outside ASCII as `%` and lower-case hex.
-fn hex_escape_non_ascii(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for &b in s.as_bytes() {
-        if b >= 0x80 {
-            out.push_str(&format!("%{b:x}"));
-        } else {
-            out.push(char::from(b));
-        }
-    }
-    out
-}
-
-/// Go `net/http.Error`: `msg` and a newline as `text/plain; charset=utf-8`, with
-/// `X-Content-Type-Options: nosniff`.
-fn http_error(status: StatusCode, msg: &str) -> Response {
-    let mut resp = Response::new(Body::from(format!("{msg}\n")));
-    *resp.status_mut() = status;
-    let h = resp.headers_mut();
-    h.insert(
-        CONTENT_TYPE,
-        HeaderValue::from_static("text/plain; charset=utf-8"),
-    );
-    h.insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
-    resp
-}
-
-/// Go `net/http.NotFound`.
-fn not_found() -> Response {
-    http_error(StatusCode::NOT_FOUND, "404 page not found")
-}
-
 /// Go `path.Ext`: the suffix from the last `.` in the final element, or empty.
 fn path_ext(p: &str) -> &str {
     for (i, b) in p.bytes().enumerate().rev() {
@@ -1031,49 +904,21 @@ fn lock<T: ?Sized>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
-    use std::time::{Duration, Instant};
-
     use pretty_assertions::assert_eq;
-    use serde_json::{Value, json};
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::TcpStream;
     use tokio_util::sync::CancellationToken;
 
     use super::*;
     use crate::golog::{Captured, capture};
     use crate::launcher::SubLauncher;
-
-    /// The fixed `golog` clock of these tests.
-    const TS: &str = "2009/11/10 23:00:00 ";
+    use crate::test_support::{self as ts, NoAgents, TS, strings};
     /// The bundle's `adk_favicon.svg` length.
     const FAVICON_LEN: usize = 3132;
-
-    struct NoAgents;
-
-    impl gadk_agent::Loader for NoAgents {
-        fn list_agents(&self) -> Vec<String> {
-            Vec::new()
-        }
-        fn load_agent(
-            &self,
-            name: &str,
-        ) -> Result<Arc<dyn gadk_agent::Agent>, gadk_agent::LoaderError> {
-            Err(gadk_agent::LoaderError(format!("no agent {name}")))
-        }
-        fn root_agent(&self) -> Arc<dyn gadk_agent::Agent> {
-            unimplemented!("the web UI tests load no agent")
-        }
-    }
 
     fn test_config() -> (Config, Captured) {
         let (log, out) = capture();
         let mut config = Config::new(Arc::new(NoAgents));
         config.log = log.with_clock(|| TS.to_owned());
         (config, out)
-    }
-
-    fn strings(args: &[&str]) -> Vec<String> {
-        args.iter().map(|s| (*s).to_owned()).collect()
     }
 
     /// The UI routes of `launcher` on a `StrictSlash(true)` router.
@@ -1539,16 +1384,12 @@ mod tests {
         assert_eq!(spa.fs_path("/ui/"), ".");
         assert_eq!(spa.fs_path("/ui/../../etc/passwd"), "etc/passwd");
         assert_eq!(spa.fs_path("/ui/a/./b/"), "a/b");
-        assert_eq!(
-            go_json_string("a\u{8}\u{c}\n\r\t\u{7f}é\u{2029}"),
-            "\"a\\b\\f\\n\\r\\t\u{7f}é\\u2029\""
-        );
     }
 
     #[test]
     fn sha256_matches_the_bundle_manifest() {
         assert_eq!(
-            sha256_hex(b"abc"),
+            ts::sha256_hex(b"abc"),
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
         let manifest =
@@ -1560,271 +1401,24 @@ mod tests {
             let Some(Entry::File(bytes)) = stat(path) else {
                 panic!("{path} is in the manifest but not embedded");
             };
-            assert_eq!(sha256_hex(bytes), hash, "{path}");
+            assert_eq!(ts::sha256_hex(bytes), hash, "{path}");
             checked += 1;
         }
         assert_eq!(checked, assets::ASSETS.len());
     }
 
-    /// SHA-256 (FIPS 180-4), for the fixtures' `body_sha256` (gadk-launcher has no hash
-    /// dependency).
-    #[allow(clippy::needless_range_loop)]
-    fn sha256_hex(data: &[u8]) -> String {
-        const K: [u32; 64] = [
-            0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
-            0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
-            0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
-            0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
-            0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
-            0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
-            0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116,
-            0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-            0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
-            0xc67178f2,
-        ];
-        let mut state: [u32; 8] = [
-            0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
-            0x5be0cd19,
-        ];
-        let mut msg = data.to_vec();
-        let bits = u64::try_from(data.len()).unwrap() * 8;
-        msg.push(0x80);
-        while msg.len() % 64 != 56 {
-            msg.push(0);
-        }
-        msg.extend_from_slice(&bits.to_be_bytes());
-        for chunk in msg.chunks(64) {
-            let mut w = [0u32; 64];
-            for i in 0..16 {
-                w[i] = u32::from_be_bytes(chunk[4 * i..4 * i + 4].try_into().unwrap());
-            }
-            for i in 16..64 {
-                let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
-                let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
-                w[i] = w[i - 16]
-                    .wrapping_add(s0)
-                    .wrapping_add(w[i - 7])
-                    .wrapping_add(s1);
-            }
-            let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut hh] = state;
-            for i in 0..64 {
-                let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
-                let ch = (e & f) ^ (!e & g);
-                let t1 = hh
-                    .wrapping_add(s1)
-                    .wrapping_add(ch)
-                    .wrapping_add(K[i])
-                    .wrapping_add(w[i]);
-                let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
-                let maj = (a & b) ^ (a & c) ^ (b & c);
-                let t2 = s0.wrapping_add(maj);
-                hh = g;
-                g = f;
-                f = e;
-                e = d.wrapping_add(t1);
-                d = c;
-                c = b;
-                b = a;
-                a = t1.wrapping_add(t2);
-            }
-            for (s, v) in state.iter_mut().zip([a, b, c, d, e, f, g, hh]) {
-                *s = s.wrapping_add(v);
-            }
-        }
-        state.iter().map(|x| format!("{x:08x}")).collect()
-    }
-
-    // ---- Task 2's web fixtures (SCENARIO.md) for the web UI ----
-
-    fn fixture(name: &str) -> Value {
-        let path = format!("{}/testdata/wire/{name}.json", env!("CARGO_MANIFEST_DIR"));
-        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap()
-    }
-
-    /// SCENARIO.md N2.
-    fn normalize_port(s: &str, port: u16) -> String {
-        let mut s = s.to_owned();
-        for host in ["127.0.0.1", "localhost", "port"] {
-            s = s.replace(&format!("{host}:{port}"), &format!("{host}:<port>"));
-        }
-        s
-    }
-
-    /// SCENARIO.md N1 (fixed clock), N2 and N3 on log text.
-    fn normalize_log(text: &str, port: u16) -> Vec<String> {
-        text.lines()
-            .map(|line| {
-                let line = normalize_port(&line.replacen(TS, "<ts> ", 1), port);
-                let fields: Vec<&str> = line.split(' ').collect();
-                if fields.len() == 4
-                    && fields[0] == "<ts>"
-                    && !fields[1].is_empty()
-                    && fields[1].bytes().all(|b| b.is_ascii_uppercase())
-                    && fields[3].starts_with(|c: char| c.is_ascii_digit())
-                    && fields[3].ends_with('s')
-                {
-                    format!("<ts> {} {} <elapsed>", fields[1], fields[2])
-                } else {
-                    line
-                }
-            })
-            .collect()
-    }
-
-    /// The raw request of a fixture (SCENARIO.md "Request").
-    fn raw_request(request: &Value, port: u16) -> Vec<u8> {
-        let mut raw = format!(
-            "{} {} HTTP/1.1\r\n",
-            request["method"].as_str().unwrap(),
-            request["target"].as_str().unwrap()
-        );
-        for h in request["headers"].as_array().unwrap() {
-            let value = h[1].as_str().unwrap().replace("<port>", &port.to_string());
-            raw.push_str(&format!("{}: {value}\r\n", h[0].as_str().unwrap()));
-        }
-        raw.push_str("\r\n");
-        raw.push_str(request["body"].as_str().unwrap());
-        raw.into_bytes()
-    }
-
-    /// A response read to EOF as the fixture's `response` (SCENARIO.md "Response", N2, N7;
-    /// header names lower-cased and sorted, as they are compared case-insensitively).
-    fn parse_response(raw: &[u8], head_request: bool, port: u16) -> Value {
-        let split = raw.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
-        let head = String::from_utf8(raw[..split].to_vec()).unwrap();
-        let mut body = raw[split + 4..].to_vec();
-        if head_request {
-            body.clear();
-        }
-        let mut lines = head.split("\r\n");
-        let (_, rest) = lines.next().unwrap().split_once(' ').unwrap();
-        let (status, status_text) = rest.split_once(' ').unwrap();
-        let headers: Vec<(String, String)> = lines
-            .map(|l| {
-                let (k, v) = l.split_once(':').unwrap();
-                (k.to_owned(), v.trim().to_owned())
-            })
-            .collect();
-        assert!(
-            !headers
-                .iter()
-                .any(|(k, _)| k.eq_ignore_ascii_case("transfer-encoding")),
-            "the web UI answers with a length"
-        );
-        let html = headers
-            .iter()
-            .any(|(k, v)| k.eq_ignore_ascii_case("content-type") && v.starts_with("text/html"));
-        let base_href = html
-            .then(|| {
-                regex::bytes::Regex::new(r"(?is)<base\s[^>]*>")
-                    .unwrap()
-                    .find(&body)
-                    .map(|m| String::from_utf8_lossy(m.as_bytes()).into_owned())
-            })
-            .flatten();
-        let (inline, sha) = match std::str::from_utf8(&body) {
-            Ok(text) if body.len() <= 8192 => (Some(normalize_port(text, port)), None),
-            _ => (None, Some(sha256_hex(&body))),
-        };
-        let changed = inline
-            .as_deref()
-            .is_some_and(|t| t.as_bytes() != body.as_slice());
-        let headers = headers
-            .into_iter()
-            .map(|(k, v)| {
-                let v = if k.eq_ignore_ascii_case("date") {
-                    "<date>".to_owned()
-                } else if k.eq_ignore_ascii_case("content-length") && changed {
-                    "<n>".to_owned()
-                } else {
-                    normalize_port(&v, port)
-                };
-                (k, v)
-            })
-            .collect();
-        response_value(
-            status.parse().unwrap(),
-            status_text,
-            headers,
-            json!({
-                "body": inline,
-                "body_length": body.len(),
-                "body_sha256": sha,
-                "base_href": base_href,
-            }),
-        )
-    }
-
-    fn response_value(
-        status: u64,
-        status_text: &str,
-        headers: Vec<(String, String)>,
-        body: Value,
-    ) -> Value {
-        let mut headers: Vec<(String, String)> = headers
-            .into_iter()
-            .map(|(k, v)| (k.to_ascii_lowercase(), v))
-            .collect();
-        headers.sort();
-        json!({
-            "status": status,
-            "status_text": status_text,
-            "headers": headers,
-            "body": body,
-        })
-    }
-
-    /// The fixture's response in the shape [`parse_response`] produces.
-    fn expected_response(fixture: &Value) -> Value {
-        let r = &fixture["response"];
-        let headers = r["headers"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|h| {
-                (
-                    h[0].as_str().unwrap().to_owned(),
-                    h[1].as_str().unwrap().to_owned(),
-                )
-            })
-            .collect();
-        response_value(
-            r["status"].as_u64().unwrap(),
-            r["status_text"].as_str().unwrap(),
-            headers,
-            json!({
-                "body": r["body"],
-                "body_length": r["body_length"],
-                "body_sha256": r["body_sha256"],
-                "base_href": r["base_href"],
-            }),
-        )
-    }
-
-    fn log_lines(fixture: &Value) -> Vec<String> {
-        fixture["log"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|l| l.as_str().unwrap().to_owned())
-            .collect()
-    }
-
     /// The `full` server's web UI exchanges (`full_32`–`full_45`) and the web UI's startup line,
     /// byte for byte after the SCENARIO.md normalizations, from a web launcher started with the
-    /// fixture's `web` flags and only `webui` active (Task 12 replays the whole server).
+    /// fixture's `web` flags and only `webui` active (`tests/wire_replay.rs` replays the whole
+    /// server).
     #[tokio::test]
     async fn the_web_ui_matches_go_wire_fixtures() {
-        let startup = fixture("full_00_startup");
-        let port = std::net::TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
-        let args: Vec<String> = startup["args"].as_array().unwrap()[1..]
+        let startup = ts::wire("full_00_startup");
+        let port = ts::free_port();
+        let args: Vec<String> = ts::args(&startup, port)[1..]
             .iter()
-            .map(|a| a.as_str().unwrap().replace("<port>", &port.to_string()))
-            .take_while(|a| a != "api")
+            .take_while(|a| *a != "api")
+            .cloned()
             .chain(["webui".to_owned()])
             .collect();
         let mut l = crate::web::new(vec![Box::new(new()) as Box<dyn WebSublauncher>]);
@@ -1839,59 +1433,27 @@ mod tests {
             let (l, cancel) = (Arc::clone(&l), cancel.clone());
             tokio::spawn(async move { l.run_with(cancel, config, |_| true).await })
         };
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while TcpStream::connect(("127.0.0.1", port)).await.is_err() {
-            assert!(Instant::now() < deadline, "the server did not start");
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
+        ts::wait_listening(port).await;
 
         // Startup: Go's lines without the other sub-launchers' (trigger warnings, user messages).
-        let want: Vec<String> = log_lines(&startup)
-            .into_iter()
-            .filter(|l| {
-                let rest = l.strip_prefix("<ts> ").unwrap_or(l);
-                let user_message_of = rest
-                    .starts_with(' ')
-                    .then(|| rest.trim_start().split_once(':').map(|(k, _)| k.to_owned()))
-                    .flatten();
-                !rest.starts_with("adk: ")
-                    && user_message_of.is_none_or(|keyword| keyword == "webui")
-            })
-            .collect();
+        let want = ts::startup_log_of(&startup, &["webui"]);
         assert!(want.contains(
             &"<ts>        webui:  you can access API using http://localhost:<port>/ui/".to_owned()
         ));
-        assert_eq!(normalize_log(&out.contents(), port), want, "startup log");
+        assert_eq!(
+            ts::normalize_log(&out.contents(), port),
+            want,
+            "startup log"
+        );
 
-        let mut exchanges = 0;
-        for n in 32..=45 {
-            let name = std::fs::read_dir(format!("{}/testdata/wire", env!("CARGO_MANIFEST_DIR")))
-                .unwrap()
-                .map(|e| e.unwrap().file_name().into_string().unwrap())
-                .find(|f| f.starts_with(&format!("full_{n}_webui_")))
-                .unwrap();
-            let f = fixture(name.trim_end_matches(".json"));
-            let logged = out.contents().len();
-            let mut conn = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-            conn.write_all(&raw_request(&f["request"], port))
-                .await
-                .unwrap();
-            let mut raw = Vec::new();
-            conn.read_to_end(&mut raw).await.unwrap();
-            let head = f["request"]["method"] == "HEAD";
-            assert_eq!(
-                parse_response(&raw, head, port),
-                expected_response(&f),
-                "{name}: response"
-            );
-            assert_eq!(
-                normalize_log(&out.contents()[logged..], port),
-                log_lines(&f),
-                "{name}: log"
-            );
-            exchanges += 1;
+        let names: Vec<String> = ts::fixture_names("wire")
+            .into_iter()
+            .filter(|n| (32..=45).any(|i| n.starts_with(&format!("full_{i}_webui_"))))
+            .collect();
+        assert_eq!(names.len(), 14);
+        for name in &names {
+            ts::assert_exchange(port, name, || out.contents()).await;
         }
-        assert_eq!(exchanges, 14);
 
         cancel.cancel();
         running.await.unwrap().unwrap();

@@ -1,0 +1,9 @@
+{
+  "deltas": [
+    {
+      "path": "/log/5",
+      "actual": "<ts> a global tracing subscriber is already installed; the launcher keeps it and does not install its telemetry layers (launcher.Config.TelemetryOptions)",
+      "divergence": "An existing global `tracing` subscriber is kept and the launcher logs that its telemetry layers were not installed (Go always replaces the global OpenTelemetry providers)."
+    }
+  ]
+}

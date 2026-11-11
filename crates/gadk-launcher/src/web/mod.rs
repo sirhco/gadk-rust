@@ -565,45 +565,20 @@ pub(crate) mod testing {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
-    use std::time::Duration;
-
     use pretty_assertions::assert_eq;
-    use serde_json::{Value, json};
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::TcpStream;
 
     use super::*;
     use crate::golog::Captured;
+    use crate::test_support::{self as ts, NoAgents, strings};
 
     /// The fixed `golog` clock of these tests.
     const TS: &str = "2009/11/10 23:00:00 ";
-
-    struct NoAgents;
-
-    impl gadk_agent::Loader for NoAgents {
-        fn list_agents(&self) -> Vec<String> {
-            Vec::new()
-        }
-        fn load_agent(
-            &self,
-            name: &str,
-        ) -> Result<Arc<dyn gadk_agent::Agent>, gadk_agent::LoaderError> {
-            Err(gadk_agent::LoaderError(format!("no agent {name}")))
-        }
-        fn root_agent(&self) -> Arc<dyn gadk_agent::Agent> {
-            unimplemented!("the web tests load no agent")
-        }
-    }
 
     fn test_config() -> (Config, Captured) {
         let (log, out) = crate::golog::capture();
         let mut config = Config::new(Arc::new(NoAgents));
         config.log = log.with_clock(|| TS.to_owned());
         (config, out)
-    }
-
-    fn strings(args: &[&str]) -> Vec<String> {
-        args.iter().map(|s| (*s).to_owned()).collect()
     }
 
     /// A sub-launcher with flags-free parsing, no routes and one user-message line.
@@ -809,184 +784,20 @@ mod tests {
 
     // ---- Task 2's web fixtures (SCENARIO.md), for the exchanges the web core answers alone ----
 
-    fn fixture(name: &str) -> Value {
-        let path = format!("{}/testdata/wire/{name}.json", env!("CARGO_MANIFEST_DIR"));
-        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap()
-    }
-
-    /// SCENARIO.md N1 (fixed clock), N2 and N3 on log text.
-    fn normalize_log(text: &str, port: u16) -> Vec<String> {
-        text.lines()
-            .map(|line| {
-                let line = line.replacen(TS, "<ts> ", 1);
-                let line = normalize_port(&line, port);
-                // N3: `<ts> METHOD URI elapsed`.
-                let fields: Vec<&str> = line.split(' ').collect();
-                if fields.len() == 4
-                    && fields[0] == "<ts>"
-                    && !fields[1].is_empty()
-                    && fields[1].bytes().all(|b| b.is_ascii_uppercase())
-                    && fields[3].ends_with('s')
-                    && fields[3].starts_with(|c: char| c.is_ascii_digit())
-                {
-                    format!("<ts> {} {} <elapsed>", fields[1], fields[2])
-                } else {
-                    line
-                }
-            })
-            .collect()
-    }
-
-    /// SCENARIO.md N2.
-    fn normalize_port(s: &str, port: u16) -> String {
-        let mut s = s.to_owned();
-        for host in ["127.0.0.1", "localhost", "port"] {
-            s = s.replace(&format!("{host}:{port}"), &format!("{host}:<port>"));
-        }
-        s
-    }
-
-    /// The raw request of a fixture (SCENARIO.md "Request").
-    fn raw_request(request: &Value, port: u16) -> Vec<u8> {
-        let mut raw = format!(
-            "{} {} HTTP/1.1\r\n",
-            request["method"].as_str().unwrap(),
-            request["target"].as_str().unwrap()
-        );
-        for h in request["headers"].as_array().unwrap() {
-            let value = h[1].as_str().unwrap().replace("<port>", &port.to_string());
-            raw.push_str(&format!("{}: {value}\r\n", h[0].as_str().unwrap()));
-        }
-        raw.push_str("\r\n");
-        raw.push_str(request["body"].as_str().unwrap());
-        raw.into_bytes()
-    }
-
-    /// A response read to EOF as the fixture's `response` (N2, N7; header names lowercased and
-    /// sorted, as the fixtures' are compared case-insensitively).
-    fn parse_response(raw: &[u8], head_request: bool, port: u16) -> Value {
-        let split = raw.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
-        let head = String::from_utf8(raw[..split].to_vec()).unwrap();
-        let mut body = raw[split + 4..].to_vec();
-        let mut lines = head.split("\r\n");
-        let status_line = lines.next().unwrap();
-        let (_, rest) = status_line.split_once(' ').unwrap();
-        let (status, status_text) = rest.split_once(' ').unwrap();
-        let mut headers: Vec<(String, String)> = lines
-            .map(|l| {
-                let (k, v) = l.split_once(':').unwrap();
-                (k.to_owned(), v.trim().to_owned())
-            })
-            .collect();
-        if headers.iter().any(|(k, v)| {
-            k.eq_ignore_ascii_case("transfer-encoding") && v.eq_ignore_ascii_case("chunked")
-        }) {
-            body = dechunk(&body);
-        }
-        if head_request {
-            body.clear();
-        }
-        for (k, v) in &mut headers {
-            *v = if k.eq_ignore_ascii_case("date") {
-                "<date>".to_owned()
-            } else {
-                normalize_port(v, port)
-            };
-        }
-        let body_text = String::from_utf8(body.clone()).unwrap();
-        response_value(
-            status.parse().unwrap(),
-            status_text,
-            headers,
-            &normalize_port(&body_text, port),
-            body.len(),
-        )
-    }
-
-    fn dechunk(mut raw: &[u8]) -> Vec<u8> {
-        let mut out = Vec::new();
-        loop {
-            let eol = raw.windows(2).position(|w| w == b"\r\n").unwrap();
-            let len = usize::from_str_radix(std::str::from_utf8(&raw[..eol]).unwrap(), 16).unwrap();
-            raw = &raw[eol + 2..];
-            if len == 0 {
-                return out;
-            }
-            out.extend_from_slice(&raw[..len]);
-            raw = &raw[len + 2..];
-        }
-    }
-
-    fn response_value(
-        status: u64,
-        status_text: &str,
-        headers: Vec<(String, String)>,
-        body: &str,
-        body_length: usize,
-    ) -> Value {
-        let mut headers: Vec<(String, String)> = headers
-            .into_iter()
-            .map(|(k, v)| (k.to_ascii_lowercase(), v))
-            .collect();
-        headers.sort();
-        json!({
-            "status": status,
-            "status_text": status_text,
-            "headers": headers,
-            "body": body,
-            "body_length": body_length,
-        })
-    }
-
-    /// The fixture's response in the shape [`parse_response`] produces.
-    fn expected_response(fixture: &Value) -> Value {
-        let r = &fixture["response"];
-        let headers = r["headers"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|h| {
-                (
-                    h[0].as_str().unwrap().to_owned(),
-                    h[1].as_str().unwrap().to_owned(),
-                )
-            })
-            .collect();
-        response_value(
-            r["status"].as_u64().unwrap(),
-            r["status_text"].as_str().unwrap(),
-            headers,
-            r["body"].as_str().unwrap(),
-            usize::try_from(r["body_length"].as_u64().unwrap()).unwrap(),
-        )
-    }
-
-    fn log_lines(fixture: &Value) -> Vec<String> {
-        fixture["log"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|l| l.as_str().unwrap().to_owned())
-            .collect()
-    }
-
     /// The `full` server's exchanges, startup and shutdown that the web core answers without the
-    /// api/webui/a2a/trigger sub-launchers (Task 12 replays the rest), byte for byte after the
-    /// SCENARIO.md normalizations: health, the gorilla 405/404 and clean-path 301, StrictSlash,
-    /// the origin guard's host check, the request log, the startup banner and the shutdown line.
+    /// api/webui/a2a/trigger sub-launchers (`tests/wire_replay.rs` replays the rest), byte for
+    /// byte after the SCENARIO.md normalizations: health, the gorilla 405/404 and clean-path 301,
+    /// StrictSlash, the origin guard's host check, the request log, the startup banner and the
+    /// shutdown line.
     #[tokio::test]
     async fn the_web_core_matches_go_wire_fixtures() {
-        let startup = fixture("full_00_startup");
-        let port = std::net::TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
+        let startup = ts::wire("full_00_startup");
+        let port = ts::free_port();
         // The fixture's `web` flags; a quiet sub-launcher stands in for the five real ones.
-        let args: Vec<String> = startup["args"].as_array().unwrap()[1..]
+        let args: Vec<String> = ts::args(&startup, port)[1..]
             .iter()
-            .map(|a| a.as_str().unwrap().replace("<port>", &port.to_string()))
-            .take_while(|a| a != "api")
+            .take_while(|a| *a != "api")
+            .cloned()
             .chain(["fake".to_owned()])
             .collect();
         let mut l = new(vec![Box::new(Quiet {
@@ -994,7 +805,6 @@ mod tests {
             syntax: "",
             fail_parse: false,
         }) as Box<dyn WebSublauncher>]);
-        // No user message from the stand-in, like the fixture lines filtered below.
         assert_eq!(
             SubLauncher::parse(&mut l, args).unwrap(),
             Vec::<String>::new()
@@ -1006,30 +816,14 @@ mod tests {
             let (l, cancel) = (Arc::clone(&l), cancel.clone());
             tokio::spawn(async move { l.run_with(cancel, config, |_| true).await })
         };
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while TcpStream::connect(("127.0.0.1", port)).await.is_err() {
-            assert!(Instant::now() < deadline, "the server did not start");
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
+        ts::wait_listening(port).await;
 
         // Startup: every Go line but the sub-launchers' own (trigger warnings, user messages).
-        let want: Vec<String> = log_lines(&startup)
+        let got: Vec<String> = ts::normalize_log(&out.contents(), port)
             .into_iter()
-            .filter(|l| {
-                let rest = l.strip_prefix("<ts> ").unwrap_or(l);
-                !(rest.starts_with("adk: ")
-                    || (rest.starts_with(' ')
-                        && rest
-                            .trim_start()
-                            .split_once(':')
-                            .is_some_and(|(k, _)| k.bytes().all(|b| b.is_ascii_alphanumeric()))))
-            })
+            .filter(|l| !ts::is_line_of_other(l, &[]))
             .collect();
-        let got: Vec<String> = normalize_log(&out.contents(), port)
-            .into_iter()
-            .filter(|l| !l.starts_with("<ts>        fake:"))
-            .collect();
-        assert_eq!(got, want, "startup log");
+        assert_eq!(got, ts::startup_log_of(&startup, &[]), "startup log");
 
         for name in [
             "full_01_health_get",
@@ -1042,33 +836,15 @@ mod tests {
             "full_08_unmatched_path_cross_origin",
             "full_12_host_forbidden",
         ] {
-            let f = fixture(name);
-            let logged = out.contents().len();
-            let mut conn = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-            conn.write_all(&raw_request(&f["request"], port))
-                .await
-                .unwrap();
-            let mut raw = Vec::new();
-            conn.read_to_end(&mut raw).await.unwrap();
-            let head = f["request"]["method"] == "HEAD";
-            assert_eq!(
-                parse_response(&raw, head, port),
-                expected_response(&f),
-                "{name}: response"
-            );
-            assert_eq!(
-                normalize_log(&out.contents()[logged..], port),
-                log_lines(&f),
-                "{name}: log"
-            );
+            ts::assert_exchange(port, name, || out.contents()).await;
         }
 
         let logged = out.contents().len();
         cancel.cancel();
         running.await.unwrap().unwrap();
         assert_eq!(
-            normalize_log(&out.contents()[logged..], port),
-            log_lines(&fixture("full_99_shutdown")),
+            ts::normalize_log(&out.contents()[logged..], port),
+            ts::log_lines(&ts::wire("full_99_shutdown")),
             "shutdown log"
         );
     }

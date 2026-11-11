@@ -192,7 +192,9 @@ async fn main() -> anyhow::Result<()> {
         ..Default::default()
     })?;
 
-    // Go hands the remote agent to the launcher; here one turn runs through a runner.
+    // Go hands the remote agent to the launcher (`full.NewLauncher()`); here one turn runs through
+    // a runner, so the example stays self-contained. `examples/launcher.rs` shows an agent run
+    // through `gadk::launcher::full::new()` (feature `launcher`).
     let session_service: Arc<dyn SessionService> = Arc::new(InMemorySessionService::new());
     let runner = Runner::new(RunnerConfig {
         app_name: "a2a_example".into(),

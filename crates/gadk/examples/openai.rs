@@ -15,9 +15,10 @@
 
 //! An `LlmAgent` on an OpenAI (or OpenAI-compatible) model with a function tool (port of
 //! ADK-Go `examples/openai/responses/main.go` and `examples/openai/completions/main.go`, which
-//! differ only in `ClientConfig.API`). Go hands the agent to its console launcher; this example
-//! reads turns from stdin (one line per turn, until end of input) in one session, like the other
-//! gadk examples.
+//! differ only in `ClientConfig.API`). Go hands the agent to its launcher (`full.NewLauncher()`);
+//! this example reads turns from stdin (one line per turn, until end of input) in one session, so
+//! it builds without the `launcher` feature. To run the agent through the launcher instead, give
+//! it to `gadk::launcher::full::new()` as `examples/launcher.rs` does.
 //!
 //! OpenAI:            `OPENAI_API_KEY=... cargo run -p gadk --example openai --features openai`
 //! Compatible server: `OPENAI_BASE_URL=http://localhost:11434/v1/ cargo run -p gadk --example openai --features openai`

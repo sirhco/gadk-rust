@@ -25,3 +25,37 @@ pub fn new() -> UniversalLauncher {
         Box::new(a2a::new()),
     ]))])
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use crate::launcher::Launcher;
+    use crate::test_support as ts;
+
+    /// `new()` composes Go's `prod.NewLauncher()`: the universal launcher's web alone, with api
+    /// then a2a. Its syntax is the one every `prod` CLI fixture ends with.
+    #[test]
+    fn preset_order_and_syntax_match_go() {
+        let syntax = super::new().command_line_syntax();
+        let keywords: Vec<&str> = syntax
+            .lines()
+            .filter_map(|l| l.strip_prefix("  * ").or_else(|| l.strip_prefix("    * ")))
+            .filter_map(|l| l.split(' ').next())
+            .collect();
+        assert_eq!(keywords, ["web", "api", "a2a"]);
+        let mut checked = 0;
+        for name in ts::fixture_names("cli") {
+            let f = ts::cli(&name);
+            if f["launcher"] == "prod" {
+                let stderr = f["stderr"].as_str().unwrap();
+                let record = format!("<ts> Run failed: {}\n\n", f["error"].as_str().unwrap());
+                let at = stderr.find(&record).unwrap() + record.len();
+                assert_eq!(&stderr[at..], syntax, "{name}");
+                checked += 1;
+            }
+        }
+        assert_eq!(checked, 2);
+    }
+}

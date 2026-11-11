@@ -16,21 +16,20 @@
 //! Using Google Search together with a function tool (port of Go
 //! examples/tools/multipletools/main.go). Gemini does not accept a built-in tool and function
 //! tools in one request, so each kind lives in its own agent, and a root agent calls both
-//! through agent tools. Go runs it through the launcher (sub-project 6); this is a stdin loop.
+//! through agent tools. It runs through the launcher, as Go's does.
 //!
-//! `GOOGLE_API_KEY=... cargo run -p gadk --example multiple_tools`, then ask
+//! `GOOGLE_API_KEY=... cargo run -p gadk --features launcher --example multiple_tools [console |
+//! web webui api]`, then ask
 //! "What is the weather in Paris?" or "Write a 3-line poem.".
 
-use std::io::{BufRead, Write};
 use std::sync::Arc;
 
-use futures::StreamExt;
-use gadk::agent::{Context, RunConfig, StreamingMode, Tool, ToolError};
+use gadk::agent::{Context, SingleLoader, Tool, ToolError};
 use gadk::engine::llm::LlmAgentConfig;
-use gadk::engine::runner::{RunOptions, Runner};
 use gadk::engine::tool::{AgentTool, FunctionTool, FunctionToolConfig};
 use gadk::gemini::{ClientConfig, GeminiModel};
-use gadk::genai::{Content, ROLE_USER};
+use gadk::launcher::golog::Logger;
+use gadk::launcher::{CancellationToken, Config, Launcher, full};
 use gadk::tools::gemini::GoogleSearch;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -97,48 +96,15 @@ async fn main() -> anyhow::Result<()> {
     })?;
 
     // Go also sets OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true for its launcher's
-    // telemetry; setting the environment is `unsafe` in Rust 2024 and the workspace forbids it.
-    let runner = Runner::in_memory("multiple_tools_example", root_agent)?;
-    repl(&runner, "user", "session-1").await?;
-    runner.close().await?;
-    Ok(())
-}
-
-/// Go's stdin loop: one line per turn, printing the streamed (partial) model text.
-async fn repl(runner: &Runner, user_id: &str, session_id: &str) -> anyhow::Result<()> {
-    let stdin = std::io::stdin();
-    loop {
-        print!("\nUser -> ");
-        std::io::stdout().flush()?;
-        let mut line = String::new();
-        if stdin.lock().read_line(&mut line)? == 0 {
-            return Ok(());
-        }
-        print!("\nAgent -> ");
-        std::io::stdout().flush()?;
-        let cfg = RunConfig {
-            streaming_mode: StreamingMode::Sse,
-            ..Default::default()
-        };
-        let msg = Content::from_text(line, ROLE_USER);
-        let mut events = runner.run(user_id, session_id, Some(msg), cfg, RunOptions::default());
-        while let Some(event) = events.next().await {
-            let event = match event {
-                Ok(event) => event,
-                Err(e) => {
-                    println!("\nAGENT_ERROR: {e}");
-                    continue;
-                }
-            };
-            // In SSE mode only the partial responses are printed: the final response repeats
-            // their text.
-            if !event.response.partial {
-                continue;
-            }
-            for part in event.response.content.iter().flat_map(|c| c.parts.iter()) {
-                print!("{}", part.text);
-            }
-            std::io::stdout().flush()?;
-        }
+    // OpenTelemetry export, which gadk adds in sub-project 7 (and setting the environment is
+    // `unsafe` in Rust 2024, which the workspace forbids).
+    let config = Config::new(Arc::new(SingleLoader::new(root_agent)));
+    let mut l = full::new();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Err(e) = l.execute(CancellationToken::new(), config, args).await {
+        // Go `log.Fatalf("Run failed: %v\n\n%s", err, l.CommandLineSyntax())`.
+        Logger::stderr().print(&format!("Run failed: {e}\n\n{}", l.command_line_syntax()));
+        std::process::exit(1);
     }
+    Ok(())
 }

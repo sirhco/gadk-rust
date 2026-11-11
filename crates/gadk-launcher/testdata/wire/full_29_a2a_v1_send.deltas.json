@@ -1,0 +1,15 @@
+{
+  "json_body": "A2A answers are a2a-rs's JSON (compact, a2a-rs's key order; Go: a2a-go's, the card pretty-printed), and the card endpoint adds `Cache-Control: max-age=300` and an `ETag` (the card version).",
+  "deltas": [
+    {
+      "path": "/response/body/result/task/metadata",
+      "fixture": {
+        "adk_app_name": "assistant",
+        "adk_session_id": "<uuid#2>",
+        "adk_user_id": "A2A_USER_<uuid#2>",
+        "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+      },
+      "divergence": "A2A task results lack Go's merged status-update metadata (`adk_app_name`, `adk_session_id`, `adk_user_id`, the ADK extension key): a2a-rs's task store keeps only a `Task` event's own metadata (ledger 5b)."
+    }
+  ]
+}

@@ -40,12 +40,13 @@ gadk-session = { workspace = true }
 gadk-artifact = { workspace = true }
 gadk-memory = { workspace = true }
 gadk-genai = { workspace = true }
+gadk-model = { workspace = true }
 gadk-platform = { workspace = true }
 gadk-server = { workspace = true, optional = true }
 gadk-a2a = { workspace = true, optional = true, features = ["server"] }
 axum = { workspace = true, optional = true }
 hyper = { workspace = true, optional = true, features = ["server", "http1", "http2"] }
-hyper-util = { workspace = true, optional = true, features = ["server", "server-auto", "server-graceful", "http1", "http2", "tokio", "service"] }
+hyper-util = { workspace = true, optional = true, features = ["server", "server-auto", "http1", "http2", "tokio", "service"] }
 tower = { workspace = true, optional = true, features = ["util"] }
 http = { workspace = true, optional = true }
 bytes = { workspace = true, optional = true }
@@ -70,3 +71,5 @@ tokio = { workspace = true, features = ["test-util"] }
 reqwest = { workspace = true }
 tempfile = { workspace = true }
 pretty_assertions = { workspace = true }
+regex = { workspace = true }
+sha2 = { workspace = true }

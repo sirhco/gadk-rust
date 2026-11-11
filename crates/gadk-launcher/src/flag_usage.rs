@@ -20,8 +20,6 @@ use gadk_platform::go_flag::FlagSet;
 
 /// Go `util.FormatFlagUsage`: the set's `PrintDefaults` text (Go swaps the output to a builder
 /// around `PrintDefaults`; `print_defaults` returns the text and writes nothing).
-// Used by the sub-launchers' `command_line_syntax` (Tasks 6-11).
-#[allow(dead_code)]
 pub(crate) fn format_flag_usage(fs: &FlagSet) -> String {
     fs.print_defaults()
 }

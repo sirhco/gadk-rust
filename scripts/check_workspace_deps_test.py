@@ -212,7 +212,7 @@ class EdgeTest(unittest.TestCase):
     def test_launcher_edges_are_the_engine_stack_plus_optional_server_and_a2a(self):
         self.assertEqual(cwd.ALLOWED["gadk-launcher"],
                          {"gadk-agent", "gadk-engine", "gadk-session", "gadk-artifact", "gadk-memory",
-                          "gadk-genai", "gadk-platform", "gadk-server", "gadk-a2a"})
+                          "gadk-genai", "gadk-model", "gadk-platform", "gadk-server", "gadk-a2a"})
         self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-launcher" in deps], ["gadk"])
         self.assertIn("gadk-launcher", cwd.ENGINE_DEPENDENTS)
         self.assertIn(("gadk-launcher", "gadk-server"), cwd.OPTIONAL)

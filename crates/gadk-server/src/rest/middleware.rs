@@ -46,9 +46,8 @@ pub(crate) struct MaxBytesError {
 }
 
 /// Go `errors.As(err, &maxBytesErr)`: whether `err` or an error in its source chain is a
-/// [`MaxBytesError`]. No server handler needs to tell it apart (each answers every body read
-/// failure with 400 and the error's text); the tests do.
-#[cfg(test)]
+/// [`MaxBytesError`] (the trigger controllers' body reader tells it apart, as Go's
+/// `*http.MaxBytesError` check does).
 pub(crate) fn is_max_bytes_error(err: &(dyn std::error::Error + 'static)) -> bool {
     let mut cur = Some(err);
     while let Some(e) = cur {

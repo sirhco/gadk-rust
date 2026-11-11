@@ -51,6 +51,10 @@ pub struct GoogleOidcConfig {
     pub allowed_service_accounts: Vec<String>,
 }
 
+/// Where a Google OIDC authenticator writes Go's `log.Printf` records (`adk: authn: rejected …`,
+/// `adk: authn: refused …`): the message without the log prefix. See [`google_oidc_with_log`].
+pub type AuthnLog = Arc<dyn Fn(&str) + Send + Sync>;
+
 /// Port of Go `googleOIDC`.
 pub(crate) struct GoogleOidc {
     pub(crate) audience: String,
@@ -58,6 +62,8 @@ pub(crate) struct GoogleOidc {
     /// Go `validate`: [`jwks::validate`] in production; tests install fakes. `None` is Go's nil
     /// func, which [`GoogleOidc::validate_token`] turns into a rejection.
     pub(crate) validate: Option<TokenValidator>,
+    /// Go's `log` for the rejection records; `None` writes them as `tracing` warnings.
+    pub(crate) log: Option<AuthnLog>,
 }
 
 /// Port of Go `authn.NewGoogleOIDC`: an [`Authenticator`] requiring a Google-signed OIDC bearer
@@ -71,6 +77,18 @@ pub(crate) struct GoogleOidc {
 /// token naming an unlisted or unverified principal is [`AuthnError::Forbidden`] (403).
 pub fn google_oidc(cfg: GoogleOidcConfig) -> Result<Arc<dyn Authenticator>, AuthnError> {
     Ok(Arc::new(new_google_oidc(cfg)?))
+}
+
+/// [`google_oidc`] writing its rejection records (Go's `log.Printf` lines `adk: authn: rejected an
+/// OIDC-authenticated request: …` and `adk: authn: refused an OIDC-authenticated principal: …`)
+/// to `log` instead of `tracing`: the launcher passes its Go log, so they land where Go's do.
+pub fn google_oidc_with_log(
+    cfg: GoogleOidcConfig,
+    log: AuthnLog,
+) -> Result<Arc<dyn Authenticator>, AuthnError> {
+    let mut g = new_google_oidc(cfg)?;
+    g.log = Some(log);
+    Ok(Arc::new(g))
 }
 
 /// [`google_oidc`] before type erasure (Go tests type-assert the result to `*googleOIDC`).
@@ -101,6 +119,7 @@ pub(crate) fn new_google_oidc(cfg: GoogleOidcConfig) -> Result<GoogleOidc, Authn
         audience: cfg.audience,
         allowed_service_accounts: cfg.allowed_service_accounts,
         validate: Some(validate),
+        log: None,
     })
 }
 
@@ -113,20 +132,17 @@ impl Authenticator for GoogleOidc {
             .iter()
             .map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned())
             .collect();
-        let token = bearer_token(&auth_headers).map_err(deny)?;
+        let token = bearer_token(&auth_headers).map_err(|e| self.deny(e))?;
 
         let payload = self
             .validate_token(&token)
             .await
-            .map_err(|e| deny(format!("invalid identity token: {e}")))?;
+            .map_err(|e| self.deny(format!("invalid identity token: {e}")))?;
         let Some(payload) = payload else {
-            return Err(deny("identity token verified with no payload".into()));
+            return Err(self.deny("identity token verified with no payload".into()));
         };
         if !GOOGLE_ISSUERS.contains(&payload.issuer.as_str()) {
-            return Err(deny(format!(
-                "untrusted issuer {}",
-                go_quote(&payload.issuer)
-            )));
+            return Err(self.deny(format!("untrusted issuer {}", go_quote(&payload.issuer))));
         }
 
         let email = payload
@@ -142,7 +158,7 @@ impl Authenticator for GoogleOidc {
             .and_then(Value::as_bool)
             .unwrap_or(false);
         if !email_verified || !self.allowed_service_accounts.contains(&email) {
-            return Err(forbid(format!(
+            return Err(self.forbid(format!(
                 "principal {} (verified={email_verified}) is not an allowed service account",
                 go_quote(&email)
             )));
@@ -197,17 +213,31 @@ fn panicked(p: Box<dyn Any + Send>) -> String {
     format!("identity token validation panicked: {msg}")
 }
 
-/// Go `deny`: logs the reason and returns it as a credential problem (401). The reason stays
-/// server-side.
-fn deny(reason: String) -> AuthnError {
-    tracing::warn!("adk: authn: rejected an OIDC-authenticated request: {reason}");
-    AuthnError::Unauthenticated(Some(reason))
-}
+impl GoogleOidc {
+    /// Go `log.Printf(msg)` through [`GoogleOidc::log`], or a `tracing` warning without one.
+    fn log_printf(&self, msg: &str) {
+        match &self.log {
+            Some(log) => log(msg),
+            None => tracing::warn!("{msg}"),
+        }
+    }
 
-/// Go `forbid`: logs the reason and returns it as an authorization problem (403).
-fn forbid(reason: String) -> AuthnError {
-    tracing::warn!("adk: authn: refused an OIDC-authenticated principal: {reason}");
-    AuthnError::Forbidden(Some(reason))
+    /// Go `deny`: logs the reason and returns it as a credential problem (401). The reason stays
+    /// server-side.
+    fn deny(&self, reason: String) -> AuthnError {
+        self.log_printf(&format!(
+            "adk: authn: rejected an OIDC-authenticated request: {reason}"
+        ));
+        AuthnError::Unauthenticated(Some(reason))
+    }
+
+    /// Go `forbid`: logs the reason and returns it as an authorization problem (403).
+    fn forbid(&self, reason: String) -> AuthnError {
+        self.log_printf(&format!(
+            "adk: authn: refused an OIDC-authenticated principal: {reason}"
+        ));
+        AuthnError::Forbidden(Some(reason))
+    }
 }
 
 /// Go `bearerToken`: the credential of the single `Authorization` header, whose scheme is
@@ -234,4 +264,50 @@ pub(crate) fn bearer_token(auth_headers: &[String]) -> Result<String, String> {
         return Err("bearer credential is empty".into());
     }
     Ok(token.to_owned())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use std::sync::Mutex;
+
+    use super::*;
+
+    /// [`google_oidc_with_log`] writes Go's `log.Printf` records to the given log, not `tracing`.
+    #[tokio::test]
+    async fn with_log_writes_the_rejection_records_to_the_log() {
+        let lines = Arc::new(Mutex::new(Vec::<String>::new()));
+        let log: AuthnLog = {
+            let lines = Arc::clone(&lines);
+            Arc::new(move |msg: &str| lines.lock().unwrap().push(msg.to_owned()))
+        };
+        let a = google_oidc_with_log(
+            GoogleOidcConfig {
+                audience: "https://example.com/push".into(),
+                allowed_service_accounts: vec!["push@example.iam.gserviceaccount.com".into()],
+            },
+            log,
+        )
+        .unwrap();
+        let (parts, ()) = http::Request::post("/").body(()).unwrap().into_parts();
+        assert!(matches!(
+            a.authenticate(&parts).await,
+            Err(AuthnError::Unauthenticated(_))
+        ));
+        let (parts, ()) = http::Request::post("/")
+            .header("Authorization", "Bearer not-a-jwt")
+            .body(())
+            .unwrap()
+            .into_parts();
+        assert!(a.authenticate(&parts).await.is_err());
+        assert_eq!(
+            *lines.lock().unwrap(),
+            vec![
+                "adk: authn: rejected an OIDC-authenticated request: no Authorization header"
+                    .to_owned(),
+                "adk: authn: rejected an OIDC-authenticated request: invalid identity token: idtoken: invalid token, token must have three segments; found 1"
+                    .to_owned(),
+            ]
+        );
+    }
 }

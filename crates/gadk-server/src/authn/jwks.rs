@@ -836,6 +836,7 @@ mod tests {
                 "pubsub-push@example-project.iam.gserviceaccount.com".into(),
             ],
             validate: Some(validate),
+            log: None,
         };
         let next = tower::service_fn(|req: http::Request<axum::body::Body>| async move {
             let user = req
