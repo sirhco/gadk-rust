@@ -73,3 +73,18 @@ fn facade_a2a_builds_an_executor_and_a_remote_agent() {
     .unwrap();
     assert_eq!(agent.name(), "remote");
 }
+
+/// With the façade's `server` feature too, `gadk::a2a::server::caller_user` reads the user that
+/// `gadk::server::authn` stored, so the identity layer can sit behind the REST server's authn.
+#[cfg(feature = "server")]
+#[test]
+fn facade_a2a_with_server_names_caller_user() {
+    let extract: fn(&axum::http::Extensions) -> Option<String> = gadk::a2a::server::caller_user;
+    let mut ext = axum::http::Extensions::new();
+    assert_eq!(extract(&ext), None);
+    ext.insert(gadk::server::authn::Caller {
+        user_id: "alice".into(),
+        claims: None,
+    });
+    assert_eq!(extract(&ext), Some("alice".to_owned()));
+}

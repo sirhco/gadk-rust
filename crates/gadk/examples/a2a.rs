@@ -90,7 +90,7 @@ struct CallerId(String);
 
 /// A stand-in authentication middleware: `Authorization: Bearer demo-token` is user `alice`,
 /// anything else is refused. In a gadk-server deployment this is `gadk::server::authn` with
-/// `gadk::a2a::server::caller_user` as the identity extractor (gadk-a2a feature `gadk-server`).
+/// `gadk::a2a::server::caller_user` as the identity extractor (façade features `a2a` and `server`).
 async fn authenticate(
     mut req: axum::extract::Request,
     next: axum::middleware::Next,

@@ -29,7 +29,8 @@ gcs = ["dep:gadk-artifact-gcs"]
 # Sessions and memory in a Vertex AI Agent Engine (gadk-vertexai); not in `default`.
 vertexai = ["dep:gadk-vertexai"]
 # The ADK REST API server with inbound authn/authz (gadk-server); not in `default`.
-server = ["dep:gadk-server"]
+# With `a2a` it also enables `gadk::a2a::server::caller_user` (gadk-a2a feature `gadk-server`).
+server = ["dep:gadk-server", "gadk-a2a?/gadk-server"]
 # The Agent2Agent protocol: serve agents over A2A and use remote A2A agents (gadk-a2a); not in
 # `default`.
 a2a = ["dep:gadk-a2a"]
