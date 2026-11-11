@@ -101,14 +101,46 @@ pub(crate) fn go_unmarshal<T: DeserializeOwned + Send>(
         return decode(payload, shape);
     }
     std::thread::scope(|scope| {
-        let worker = std::thread::Builder::new()
-            .stack_size(DEEP_STACK)
-            .spawn_scoped(scope, || decode(payload, shape))
-            .map_err(|e| e.to_string())?;
+        let worker = spawn_deep(scope, || decode(payload, shape))
+            .map_err(|e| format!("{DECODER_UNAVAILABLE}: {e}"))?;
         worker
             .join()
-            .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+            .map_err(|_| format!("{DECODER_UNAVAILABLE}: the decoder thread panicked"))?
     })
+}
+
+/// The prefix of a [`go_unmarshal`] error that is the server's failure (the deep-input decoder
+/// thread could not run), not the input's: no Go counterpart (Go's stacks grow), so the caller
+/// answers it as a server error ([`is_server_error`]). No JSON error text starts with it.
+const DECODER_UNAVAILABLE: &str = "agentengine: deep-input decoder unavailable";
+
+/// Whether a [`go_unmarshal`] error is the server's failure rather than the input's.
+pub(crate) fn is_server_error(err: &str) -> bool {
+    err.starts_with(DECODER_UNAVAILABLE)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests: make the next deep-input decoder spawn on this thread fail.
+    pub(crate) static FAIL_DEEP_SPAWN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Spawns the deep-input decoder thread with a [`DEEP_STACK`] stack.
+fn spawn_deep<'scope, F, R>(
+    scope: &'scope std::thread::Scope<'scope, '_>,
+    f: F,
+) -> std::io::Result<std::thread::ScopedJoinHandle<'scope, R>>
+where
+    F: FnOnce() -> R + Send + 'scope,
+    R: Send + 'scope,
+{
+    #[cfg(test)]
+    if FAIL_DEEP_SPAWN.with(|fail| fail.replace(false)) {
+        return Err(std::io::Error::other("injected spawn failure"));
+    }
+    std::thread::Builder::new()
+        .stack_size(DEEP_STACK)
+        .spawn_scoped(scope, f)
 }
 
 /// Go's nesting limit (`encoding/json`, Go 1.27: `exceeded max depth` past 10000 arrays and
@@ -874,12 +906,6 @@ impl Decoder {
                             }
                             break;
                         }
-                        cur.bump();
-                        self.path.pop();
-                        let Some(Open::Array(items)) = open.pop() else {
-                            unreachable!("the top frame is an array")
-                        };
-                        value = Value::Array(items);
                     }
                     Some(Open::Object(members, key)) => {
                         members.insert(std::mem::take(key), value);
@@ -892,14 +918,16 @@ impl Decoder {
                             *key = next;
                             break;
                         }
-                        cur.bump();
-                        self.path.pop();
-                        let Some(Open::Object(members, _)) = open.pop() else {
-                            unreachable!("the top frame is an object")
-                        };
-                        value = Value::Object(members);
                     }
                 }
+                // No `,`: the `]` or `}` closes the innermost level.
+                cur.bump();
+                self.path.pop();
+                value = match open.pop() {
+                    Some(Open::Array(items)) => Value::Array(items),
+                    Some(Open::Object(members, _)) => Value::Object(members),
+                    None => return Err("unexpected end of JSON input".to_owned()),
+                };
             }
         }
     }

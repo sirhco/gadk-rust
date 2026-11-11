@@ -27,7 +27,7 @@ use super::Log;
 use super::encode_shapes;
 use super::method::MethodHandler;
 use super::models::Query;
-use super::unmarshal::{drop_value, go_unmarshal};
+use super::unmarshal::{drop_value, go_unmarshal, is_server_error};
 use crate::mux::{Request, Response, WriteDeadline, http_error};
 
 /// Go `defaultSSETimeout`: the write deadline when none is configured.
@@ -125,6 +125,11 @@ impl Controller {
                     if let Some(input) = query.input {
                         drop_value(input);
                     }
+                }
+                // Not Go's: the server could not run the decoder (see `is_server_error`).
+                Err(e) if is_server_error(&e) => {
+                    self.log.print(&format!("handleQuery failed: {e}"));
+                    return http_error(StatusCode::INTERNAL_SERVER_ERROR, &e);
                 }
                 Err(e) => return http_error(StatusCode::BAD_REQUEST, &e),
             }
@@ -437,6 +442,20 @@ mod tests {
                         (400, http_error_headers(), "exceeded max depth\n".to_owned())
                     );
                     assert!(lines.lock().unwrap().is_empty());
+
+                    // Not Go's: the decoder thread failing to start is the server's 500.
+                    crate::agentengine::unmarshal::FAIL_DEEP_SPAWN.with(|fail| fail.set(true));
+                    let resp = c.query(post(Body::from(body(100)))).await;
+                    let text =
+                        "agentengine: deep-input decoder unavailable: injected spawn failure";
+                    assert_eq!(
+                        parts(resp).await,
+                        (500, http_error_headers(), format!("{text}\n"))
+                    );
+                    assert_eq!(
+                        *lines.lock().unwrap(),
+                        vec![format!("handleQuery failed: {text}")]
+                    );
                 });
             })
             .unwrap()
