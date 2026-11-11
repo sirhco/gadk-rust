@@ -153,6 +153,9 @@ fn test_parse_duration() {
             "0.830103483285477580700h",
             49 * MIN + 48 * SEC + 372539827 * NS,
         ),
+        // Go's uint64 accumulator wraps: 2^63 + 2^63 = 0 passes the `> 1<<63` check (Go 1.27).
+        ("9223372036854775808ns9223372036854775808ns", 0),
+        ("-9223372036854775808ns9223372036854775808ns", 0),
     ];
     for (input, want) in cases {
         assert_eq!(
@@ -227,6 +230,14 @@ fn parse_duration_error_texts_match_go() {
         ("1\"\\", r#"time: unknown unit "\"\\" in duration "1\"\\""#),
         ("1\n", r#"time: unknown unit "\x0a" in duration "1\x0a""#),
         ("3000000h", r#"time: invalid duration "3000000h""#),
+        (
+            "9223372036854775808ns1ns",
+            r#"time: invalid duration "9223372036854775808ns1ns""#,
+        ),
+        (
+            "-9223372036854775808ns1ns",
+            r#"time: invalid duration "-9223372036854775808ns1ns""#,
+        ),
     ];
     for (input, want) in cases {
         assert_eq!(go_parse_duration(input), Err(want.to_string()), "{input:?}");

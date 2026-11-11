@@ -193,8 +193,9 @@ fn parse_duration_bytes(orig: &[u8]) -> Result<GoDuration, String> {
                 return Err(invalid());
             }
         }
-        // Both terms are at most 2^63 here, so the sum fits in u64.
-        d += v;
+        // Go's uint64 addition wraps: both terms are at most 2^63, so only 2^63 + 2^63 wraps,
+        // to 0, which then passes the check (Go 1.27 parses "9223372036854775808ns" twice as 0).
+        d = d.wrapping_add(v);
         if d > LIMIT {
             return Err(invalid());
         }
