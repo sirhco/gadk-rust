@@ -14,19 +14,16 @@
 // limitations under the License.
 
 //! The route table (port of ADK-Go `server/adkrest/internal/routers/routers.go` on a
-//! gorilla/mux v1.8.1 router): each controller's [`Route`]s, the mux path-template matcher, the
-//! per-route body limit and authentication, and Go's fallback for unmatched requests (plan
-//! decision D4).
+//! gorilla/mux v1.8.1 router): each controller's [`Route`]s matched with the [`crate::mux`]
+//! path templates, the per-route body limit and authentication, and Go's fallback for unmatched
+//! requests (plan decision D4).
 
-use std::collections::BTreeMap;
 use std::convert::Infallible;
-use std::future::Future;
 use std::sync::Arc;
 
 use axum::body::{Body, HttpBody};
-use futures::future::BoxFuture;
 use gadk_platform::go_url;
-use http::header::{ALLOW, CONNECTION, CONTENT_LENGTH, CONTENT_TYPE, LOCATION};
+use http::header::{ALLOW, CONNECTION, CONTENT_LENGTH, CONTENT_TYPE};
 use http::uri::PathAndQuery;
 use http::{HeaderValue, Method, StatusCode, Uri};
 use tower::util::BoxCloneSyncService;
@@ -35,18 +32,8 @@ use tower::{Layer, ServiceExt};
 use super::http_error::not_found;
 use super::middleware::{catch_panic, with_max_bytes};
 use crate::authn::{self, Authenticator};
-
-/// A request as a handler sees it (plan decision D3).
-pub type Request = http::Request<axum::body::Body>;
-/// A handler's response.
-pub type Response = axum::response::Response;
-/// A route's handler (Go `http.HandlerFunc`).
-pub type Handler = Arc<dyn Fn(Request) -> BoxFuture<'static, Response> + Send + Sync>;
-
-/// The path variables of the matched route (Go `mux.Vars`), as a request extension; tests insert
-/// it directly (Go `mux.SetURLVars`).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct PathVars(pub BTreeMap<String, String>);
+pub use crate::mux::{Handler, PathVars, Request, Response, handler};
+use crate::mux::{Template, clean_path, clean_path_redirect};
 
 /// Port of Go `routers.Route`.
 pub struct Route {
@@ -60,15 +47,6 @@ pub struct Route {
     pub public: bool,
     /// The handler.
     pub handler: Handler,
-}
-
-/// Wraps an async function as a [`Handler`].
-pub fn handler<F, Fut>(f: F) -> Handler
-where
-    F: Fn(Request) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = Response> + Send + 'static,
-{
-    Arc::new(move |req| Box::pin(f(req)))
 }
 
 /// A non-public [`Route`].
@@ -130,114 +108,6 @@ const PROBE_METHODS: [Method; 7] = [
 
 /// A matched route's stack: authentication (unless public), the panic catcher, the handler.
 type RouteService = BoxCloneSyncService<Request, Response, Infallible>;
-
-/// One piece of a gorilla/mux path template.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Piece {
-    /// Bytes matched exactly.
-    Literal(Vec<u8>),
-    /// `{name}`: one or more bytes other than `/` (mux's default `[^/]+`).
-    Var(String),
-}
-
-/// A compiled gorilla/mux path template (`StrictSlash(false)`: anchored at both ends, no
-/// optional trailing slash). Only `{name}` variables are supported; no gadk route uses mux's
-/// `{name:pattern}` form.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Template(Vec<Piece>);
-
-impl Template {
-    /// Splits `pattern` into literals and `{name}` variables (mux `braceIndices`: nested braces
-    /// belong to the outer variable; a `:pattern` suffix is dropped).
-    fn parse(pattern: &str) -> Template {
-        let mut pieces = Vec::new();
-        let mut literal = Vec::new();
-        let bytes = pattern.as_bytes();
-        let mut i = 0;
-        while i < bytes.len() {
-            if bytes[i] == b'{' {
-                let mut level = 0;
-                let mut j = i;
-                while j < bytes.len() {
-                    match bytes[j] {
-                        b'{' => level += 1,
-                        b'}' => {
-                            level -= 1;
-                            if level == 0 {
-                                break;
-                            }
-                        }
-                        _ => {}
-                    }
-                    j += 1;
-                }
-                let inner = &pattern[i + 1..j.min(bytes.len())];
-                let name = inner.split_once(':').map_or(inner, |(n, _)| n);
-                if !literal.is_empty() {
-                    pieces.push(Piece::Literal(std::mem::take(&mut literal)));
-                }
-                pieces.push(Piece::Var(name.to_owned()));
-                i = j + 1;
-            } else {
-                literal.push(bytes[i]);
-                i += 1;
-            }
-        }
-        if !literal.is_empty() {
-            pieces.push(Piece::Literal(literal));
-        }
-        Template(pieces)
-    }
-
-    /// The variables of `path` (Go `URL.Path`, decoded) when the template matches all of it.
-    /// Variables are greedy and backtrack, so the submatches are those of Go's leftmost-first
-    /// regexp `^…([^/]+)…$`.
-    fn matches(&self, path: &[u8]) -> Option<PathVars> {
-        let mut spans = Vec::new();
-        if !match_from(&self.0, path, 0, &mut spans) {
-            return None;
-        }
-        let vars = self
-            .0
-            .iter()
-            .filter_map(|p| match p {
-                Piece::Var(name) => Some(name.clone()),
-                Piece::Literal(_) => None,
-            })
-            .zip(spans)
-            .map(|(name, (start, end))| {
-                (
-                    name,
-                    String::from_utf8_lossy(&path[start..end]).into_owned(),
-                )
-            })
-            .collect();
-        Some(PathVars(vars))
-    }
-}
-
-/// Matches `pieces` against `path[pos..]`, recording each variable's span.
-fn match_from(pieces: &[Piece], path: &[u8], pos: usize, spans: &mut Vec<(usize, usize)>) -> bool {
-    let Some((first, rest)) = pieces.split_first() else {
-        return pos == path.len();
-    };
-    match first {
-        Piece::Literal(lit) => {
-            path[pos..].starts_with(lit) && match_from(rest, path, pos + lit.len(), spans)
-        }
-        Piece::Var(_) => {
-            let run = path[pos..].iter().take_while(|&&b| b != b'/').count();
-            for end in (pos + 1..=pos + run).rev() {
-                spans.push((pos, end));
-                if match_from(rest, path, end, spans) {
-                    return true;
-                }
-                spans.pop();
-            }
-            false
-        }
-    }
-}
 
 /// A registered route with its compiled template and service stack.
 struct Entry {
@@ -342,7 +212,7 @@ impl RouteTable {
         // mux matches the decoded path and first redirects one that is not clean.
         let clean = clean_path(&path);
         if clean != path {
-            return redirect(req.uri(), &clean);
+            return clean_path_redirect(req.uri(), &clean);
         }
         if let Some((entry, vars)) = self.find(req.method(), &path) {
             return self.call(entry, vars, req).await;
@@ -446,77 +316,6 @@ fn without_trailing_slash(uri: &Uri, raw: &str, path: &[u8]) -> Option<(Uri, Vec
     let mut parts = uri.clone().into_parts();
     parts.path_and_query = Some(PathAndQuery::try_from(target).ok()?);
     Some((Uri::from_parts(parts).ok()?, trimmed_path))
-}
-
-/// mux `cleanPath`: Go `path.Clean` of a rooted path, keeping a trailing slash.
-fn clean_path(p: &[u8]) -> Vec<u8> {
-    if p.is_empty() {
-        return b"/".to_vec();
-    }
-    let mut rooted = Vec::with_capacity(p.len() + 1);
-    if p[0] != b'/' {
-        rooted.push(b'/');
-    }
-    rooted.extend_from_slice(p);
-    let mut np = go_path_clean_rooted(&rooted);
-    if rooted.ends_with(b"/") && np != b"/" {
-        np.push(b'/');
-    }
-    np
-}
-
-/// Go `path.Clean` for a path starting with `/`.
-fn go_path_clean_rooted(path: &[u8]) -> Vec<u8> {
-    let n = path.len();
-    let mut out = vec![b'/'];
-    let (mut r, dotdot) = (1, 1);
-    while r < n {
-        if path[r] == b'/' || (path[r] == b'.' && (r + 1 == n || path[r + 1] == b'/')) {
-            // An empty or `.` element.
-            r += 1;
-        } else if path[r] == b'.' && path[r + 1] == b'.' && (r + 2 == n || path[r + 2] == b'/') {
-            r += 2;
-            // Back up to the previous `/` (Go's `out.w--` loop).
-            if out.len() > dotdot {
-                let mut w = out.len() - 1;
-                while w > dotdot && out[w] != b'/' {
-                    w -= 1;
-                }
-                out.truncate(w);
-            }
-        } else {
-            if out.len() != 1 {
-                out.push(b'/');
-            }
-            while r < n && path[r] != b'/' {
-                out.push(path[r]);
-                r += 1;
-            }
-        }
-    }
-    out
-}
-
-/// mux's redirect of an unclean path: 301 to the same URL with the clean path (Go
-/// `URL.String`: the escaped path, the query kept).
-fn redirect(uri: &Uri, clean: &[u8]) -> Response {
-    let mut location = String::new();
-    if let (Some(scheme), Some(authority)) = (uri.scheme_str(), uri.authority()) {
-        location.push_str(scheme);
-        location.push_str("://");
-        location.push_str(authority.as_str());
-    }
-    location.push_str(&go_url::escape_path(clean));
-    if let Some(q) = uri.query() {
-        location.push('?');
-        location.push_str(q);
-    }
-    let mut resp = Response::new(Body::empty());
-    *resp.status_mut() = StatusCode::MOVED_PERMANENTLY;
-    if let Ok(v) = HeaderValue::from_str(&location) {
-        resp.headers_mut().insert(LOCATION, v);
-    }
-    resp
 }
 
 /// The answers Go's `net/http` server gives before any handler runs (so before the origin guard
@@ -696,25 +495,6 @@ mod tests {
     }
 
     #[test]
-    fn template_matches_like_mux() {
-        let t = Template::parse("/apps/{app_name}/users/{user_id}");
-        let vars = t.matches(b"/apps/a b/users/u").unwrap();
-        assert_eq!(vars.0["app_name"], "a b");
-        assert_eq!(vars.0["user_id"], "u");
-        assert_eq!(t.matches(b"/apps//users/u"), None, "empty segment");
-        assert_eq!(t.matches(b"/apps/a/b/users/u"), None, "two segments");
-        assert_eq!(t.matches(b"/apps/a/users/u/"), None, "trailing slash");
-        // Greedy, leftmost-first like Go's regexp `^/pair/([^/]+)-([^/]+)$`.
-        let pair = Template::parse("/pair/{a}-{b}");
-        let vars = pair.matches(b"/pair/x-y-z").unwrap();
-        assert_eq!((vars.0["a"].as_str(), vars.0["b"].as_str()), ("x-y", "z"));
-        assert_eq!(
-            Template::parse("/x/{id:[0-9]+}").0[1],
-            Piece::Var("id".into())
-        );
-    }
-
-    #[test]
     fn with_head_adds_head_to_get_routes_only() {
         assert_eq!(
             with_head(vec![Method::GET]),
@@ -725,30 +505,6 @@ mod tests {
             vec![Method::HEAD, Method::GET]
         );
         assert_eq!(with_head(vec![Method::POST]), vec![Method::POST]);
-    }
-
-    #[test]
-    fn clean_path_matches_go() {
-        for (p, want) in [
-            ("/", "/"),
-            ("/a/b", "/a/b"),
-            ("/a/b/", "/a/b/"),
-            ("//a", "/a"),
-            ("/a//b", "/a/b"),
-            ("/a/./b", "/a/b"),
-            ("/a/../b", "/b"),
-            ("/../a", "/a"),
-            ("/a/b/..", "/a"),
-            ("/a/b/../", "/a/"),
-            ("/a/..", "/"),
-            ("/a/../", "/"),
-        ] {
-            assert_eq!(
-                String::from_utf8(clean_path(p.as_bytes())).unwrap(),
-                want,
-                "cleanPath({p:?})"
-            );
-        }
     }
 
     #[tokio::test]

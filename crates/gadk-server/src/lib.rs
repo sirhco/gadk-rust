@@ -18,10 +18,13 @@
 //! authorization ([`authz`], Go `server/authz`), wire-compatible with an ADK-Go server.
 //!
 //! [`rest::Server`] serves the routes ADK-Go's `adkrest.NewServer` registers as an
-//! [`axum::Router`]; mount it on any axum or hyper server.
+//! [`axum::Router`]; mount it on any axum or hyper server. [`mux`] is the gorilla/mux v1.8.1
+//! port (handler types, path templates, `cleanPath`) its route table and the launcher's web
+//! router share.
 
 pub mod authn;
 pub mod authz;
+pub mod mux;
 pub mod rest;
 
 #[cfg(test)]
