@@ -1,0 +1,33 @@
+{
+  "name": "main_13_stream_query_bad_input",
+  "config": "main",
+  "kind": "exchange",
+  "request": {
+    "method": "POST",
+    "target": "/stream_reasoning_engine",
+    "headers": [
+      [
+        "Content-Type",
+        "application/json"
+      ]
+    ],
+    "body": "{\"class_method\":\"async_stream_query\",\"input\":{\"user_id\":\"u2\",\"message\":5}}"
+  },
+  "response": {
+    "status": 500,
+    "headers": [
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ],
+      [
+        "X-Content-Type-Options",
+        "nosniff"
+      ]
+    ],
+    "body": "s.streamJSONL() failed: json.Unmarshal() failed both for models.StreamQueryRequest (json: cannot unmarshal number into Go struct field StreamQueryRequest.input.message of type genai.Content) and models.StreamQueryTextRequest (json: cannot unmarshal number into Go struct field StreamQueryTextRequest.input.message of type string)\n"
+  },
+  "log": "json.Unmarshal() failed both for models.StreamQueryRequest (json: cannot unmarshal number into Go struct field StreamQueryRequest.input.message of type genai.Content) and models.StreamQueryTextRequest (json: cannot unmarshal number into Go struct field StreamQueryTextRequest.input.message of type string)\nhandleQuery failed: s.streamJSONL() failed: json.Unmarshal() failed both for models.StreamQueryRequest (json: cannot unmarshal number into Go struct field StreamQueryRequest.input.message of type genai.Content) and models.StreamQueryTextRequest (json: cannot unmarshal number into Go struct field StreamQueryTextRequest.input.message of type string)\n",
+  "methods": null,
+  "compare": "exact"
+}

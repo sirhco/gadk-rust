@@ -22,6 +22,7 @@ members = [
   "crates/gadk-server",
   "crates/gadk-a2a",
   "crates/gadk-launcher",
+  "crates/gadk-agentregistry",
   "crates/gadk",
 ]
 
@@ -54,6 +55,7 @@ gadk-vertexai = { path = "crates/gadk-vertexai", version = "0.1.0" }
 gadk-server = { path = "crates/gadk-server", version = "0.1.0" }
 gadk-a2a = { path = "crates/gadk-a2a", version = "0.1.0" }
 gadk-launcher = { path = "crates/gadk-launcher", version = "0.1.0" }
+gadk-agentregistry = { path = "crates/gadk-agentregistry", version = "0.1.0" }
 tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
 tokio-util = "0.7.20"
 futures = "0.3.34"

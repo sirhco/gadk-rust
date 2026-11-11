@@ -22,6 +22,8 @@
 //! port (handler types, path templates, `cleanPath`) its route table and the launcher's web
 //! router share.
 
+#[cfg(feature = "agentengine")]
+pub mod agentengine;
 pub mod authn;
 pub mod authz;
 pub mod mux;

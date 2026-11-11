@@ -1,0 +1,69 @@
+{
+  "name": "wire_prefix_01_create_session",
+  "server": "prefix",
+  "launcher": "agentengine",
+  "args": [
+    "web",
+    "-port",
+    "<port>",
+    "agentengine",
+    "-path_prefix",
+    "custom/"
+  ],
+  "kind": "exchange",
+  "request": {
+    "method": "POST",
+    "target": "/custom/reasoning_engine",
+    "headers": [
+      [
+        "Host",
+        "127.0.0.1:<port>"
+      ],
+      [
+        "Content-Type",
+        "application/json"
+      ],
+      [
+        "Content-Length",
+        "64"
+      ],
+      [
+        "Connection",
+        "close"
+      ]
+    ],
+    "body": "{\"class_method\":\"async_create_session\",\"input\":{\"user_id\":\"u1\"}}"
+  },
+  "response": {
+    "status": 200,
+    "status_text": "OK",
+    "headers": [
+      [
+        "Connection",
+        "close"
+      ],
+      [
+        "Content-Length",
+        "<n>"
+      ],
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ],
+      [
+        "Date",
+        "<date>"
+      ]
+    ],
+    "body": "{\"output\":{\"user_id\":\"u1\",\"last_update_time\":\"<t>\",\"app_name\":\"test-engine\",\"id\":\"<uuid-1>\",\"state\":{},\"events\":[]}}\n",
+    "body_length": null,
+    "body_sha256": null,
+    "base_href": null
+  },
+  "log": [
+    "<ts> POST /custom/reasoning_engine <elapsed>"
+  ],
+  "exit_status": null,
+  "stdout": null,
+  "error": null
+}

@@ -1,0 +1,33 @@
+{
+  "name": "main_18_stream_method_on_session_route",
+  "config": "main",
+  "kind": "exchange",
+  "request": {
+    "method": "POST",
+    "target": "/reasoning_engine",
+    "headers": [
+      [
+        "Content-Type",
+        "application/json"
+      ]
+    ],
+    "body": "{\"class_method\":\"async_stream_query\",\"input\":{\"user_id\":\"u1\",\"message\":\"hello\"}}"
+  },
+  "response": {
+    "status": 500,
+    "headers": [
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ],
+      [
+        "X-Content-Type-Options",
+        "nosniff"
+      ]
+    ],
+    "body": "unrecognized class method: async_stream_query\n"
+  },
+  "log": "handleQuery failed: unrecognized class method: async_stream_query\n",
+  "methods": null,
+  "compare": "exact"
+}

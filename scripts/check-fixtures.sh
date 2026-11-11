@@ -18,6 +18,11 @@
 # the launcher probe (scripts/gen-go-launcher) wrote exactly 70 web, 15 console and 34 CLI fixtures
 # under crates/gadk-launcher/testdata/{wire,console,cli}/; the replay's declared deltas
 # (*.deltas.json) are not counted.
+# 5c: the Agent Engine probe (scripts/gen-go-agentengine) wrote exactly 29 server fixtures under
+# crates/gadk-server/testdata/agentengine/ and 13 launcher fixtures under
+# crates/gadk-launcher/testdata/agentengine/ (declared deltas, *.deltas.json, not counted); when
+# go and ADK-Go are present, its --shapes generator reproduces
+# crates/gadk-server/src/agentengine/encode_shapes.rs byte for byte.
 set -euo pipefail
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 go="${ADK_GO_DIR:-$repo/../adk-go}"
@@ -114,8 +119,44 @@ for spec in wire:70 console:15 cli:34; do
   launcher_counts="$launcher_counts ${spec%%:*}=$got"
 done
 
+agentengine_counts=""
+for spec in gadk-server:29 gadk-launcher:13; do
+  dir="$repo/crates/${spec%%:*}/testdata/agentengine"
+  want="${spec#*:}"
+  got="$(find "$dir" -type f -name '*.json' ! -name '*.deltas.json' | wc -l | tr -d ' ')"
+  if [ "$got" -ne "$want" ]; then
+    echo "expected $want agentengine fixtures under $dir, found $got" >&2
+    fail=1
+  fi
+  agentengine_counts="$agentengine_counts ${spec%%:*}=$got"
+done
+
+shapes="$repo/crates/gadk-server/src/agentengine/encode_shapes.rs"
+shapes_status="not checked"
+if ! command -v go >/dev/null 2>&1 || [ ! -d "$go/server/agentengine" ]; then
+  echo "skipping the encode_shapes.rs check: needs go and ADK-Go at $go (set ADK_GO_DIR)" >&2
+else
+  go_abs="$(cd "$go" && pwd)"
+  shapes_tmp="$(mktemp -d)"
+  sed "s#=> ../../../adk-go#=> $go_abs#" "$repo/scripts/gen-go-agentengine/go.mod" >"$shapes_tmp/go.mod"
+  cp "$repo/scripts/gen-go-agentengine/go.sum" "$shapes_tmp/go.sum"
+  if ! (cd "$repo/scripts/gen-go-agentengine" && ADK_GO_DIR="$go_abs" \
+    go run -modfile="$shapes_tmp/go.mod" . --shapes --out "$shapes_tmp/encode_shapes.rs" >/dev/null); then
+    echo "scripts/gen-go-agentengine --shapes failed" >&2
+    fail=1
+  elif ! cmp -s "$shapes_tmp/encode_shapes.rs" "$shapes"; then
+    diff -u "$shapes" "$shapes_tmp/encode_shapes.rs" | head -40 >&2 || true
+    echo "$shapes differs from scripts/gen-go-agentengine --shapes output" >&2
+    fail=1
+  else
+    shapes_status="matches the generator"
+  fi
+  rm -rf "$shapes_tmp"
+fi
+
 if [ "$fail" -eq 0 ]; then
   echo "ok: $n fixtures and $schema_n telemetry goldens match ADK-Go; $wire_n wire fixtures;" \
-    "$a2a_wire_n A2A wire fixtures; $webui_n web UI files; launcher fixtures$launcher_counts"
+    "$a2a_wire_n A2A wire fixtures; $webui_n web UI files; launcher fixtures$launcher_counts;" \
+    "agentengine fixtures$agentengine_counts; encode_shapes.rs $shapes_status"
 fi
 exit "$fail"

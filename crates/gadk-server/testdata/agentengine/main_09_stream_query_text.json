@@ -1,0 +1,37 @@
+{
+  "name": "main_09_stream_query_text",
+  "config": "main",
+  "kind": "exchange",
+  "request": {
+    "method": "POST",
+    "target": "/stream_reasoning_engine",
+    "headers": [
+      [
+        "Content-Type",
+        "application/json"
+      ]
+    ],
+    "body": "{\"class_method\":\"async_stream_query\",\"input\":{\"user_id\":\"u2\",\"message\":\"hello\"}}"
+  },
+  "response": {
+    "status": 200,
+    "headers": [
+      [
+        "Cache-Control",
+        "no-cache"
+      ],
+      [
+        "Connection",
+        "keep-alive"
+      ],
+      [
+        "Content-Type",
+        "application/json"
+      ]
+    ],
+    "body": "{\"actions\":{\"artifact_delta\":{},\"state_delta\":{}},\"author\":\"assistant\",\"avg_logprobs\":0,\"content\":{\"parts\":[{\"media_processing\":\"\",\"text\":\"Hello! How can I help?\"}],\"role\":\"model\"},\"finish_reason\":\"STOP\",\"id\":\"00000000-0000-4000-8000-000000000007\",\"invocation_id\":\"e-00000000-0000-4000-8000-000000000004\",\"node_info\":{\"path\":\"assistant\"},\"timestamp\":1767323049,\"usage_metadata\":{\"cached_content_token_count\":0,\"candidates_token_count\":5,\"prompt_token_count\":10,\"thoughts_token_count\":0,\"tool_use_prompt_token_count\":0,\"total_token_count\":15,\"traffic_type\":\"\"}}\n"
+  },
+  "log": "",
+  "methods": null,
+  "compare": "exact"
+}

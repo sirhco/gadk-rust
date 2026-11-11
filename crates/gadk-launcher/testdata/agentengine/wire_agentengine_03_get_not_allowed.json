@@ -1,0 +1,53 @@
+{
+  "name": "wire_agentengine_03_get_not_allowed",
+  "server": "agentengine",
+  "launcher": "agentengine",
+  "args": [
+    "web",
+    "-port",
+    "<port>",
+    "agentengine"
+  ],
+  "kind": "exchange",
+  "request": {
+    "method": "GET",
+    "target": "/api/reasoning_engine",
+    "headers": [
+      [
+        "Host",
+        "127.0.0.1:<port>"
+      ],
+      [
+        "Connection",
+        "close"
+      ]
+    ],
+    "body": ""
+  },
+  "response": {
+    "status": 405,
+    "status_text": "Method Not Allowed",
+    "headers": [
+      [
+        "Connection",
+        "close"
+      ],
+      [
+        "Content-Length",
+        "0"
+      ],
+      [
+        "Date",
+        "<date>"
+      ]
+    ],
+    "body": "",
+    "body_length": 0,
+    "body_sha256": null,
+    "base_href": null
+  },
+  "log": [],
+  "exit_status": null,
+  "stdout": null,
+  "error": null
+}

@@ -1081,6 +1081,7 @@ dependencies = [
  "futures",
  "gadk-a2a",
  "gadk-agent",
+ "gadk-agentregistry",
  "gadk-anthropic",
  "gadk-artifact",
  "gadk-artifact-gcs",
@@ -1169,6 +1170,34 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "gadk-agentregistry"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "bytes",
+ "futures",
+ "gadk-a2a",
+ "gadk-agent",
+ "gadk-auth",
+ "gadk-engine",
+ "gadk-genai",
+ "gadk-mcp",
+ "gadk-model",
+ "gadk-platform",
+ "gadk-session",
+ "http",
+ "pretty_assertions",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

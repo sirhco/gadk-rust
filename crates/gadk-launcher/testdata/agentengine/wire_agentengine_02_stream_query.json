@@ -1,0 +1,71 @@
+{
+  "name": "wire_agentengine_02_stream_query",
+  "server": "agentengine",
+  "launcher": "agentengine",
+  "args": [
+    "web",
+    "-port",
+    "<port>",
+    "agentengine"
+  ],
+  "kind": "exchange",
+  "request": {
+    "method": "POST",
+    "target": "/api/stream_reasoning_engine",
+    "headers": [
+      [
+        "Host",
+        "127.0.0.1:<port>"
+      ],
+      [
+        "Content-Type",
+        "application/json"
+      ],
+      [
+        "Content-Length",
+        "80"
+      ],
+      [
+        "Connection",
+        "close"
+      ]
+    ],
+    "body": "{\"class_method\":\"async_stream_query\",\"input\":{\"user_id\":\"u1\",\"message\":\"hello\"}}"
+  },
+  "response": {
+    "status": 200,
+    "status_text": "OK",
+    "headers": [
+      [
+        "Cache-Control",
+        "no-cache"
+      ],
+      [
+        "Connection",
+        "close"
+      ],
+      [
+        "Content-Type",
+        "application/json"
+      ],
+      [
+        "Date",
+        "<date>"
+      ],
+      [
+        "Transfer-Encoding",
+        "chunked"
+      ]
+    ],
+    "body": "{\"actions\":{\"artifact_delta\":{},\"state_delta\":{}},\"author\":\"assistant\",\"avg_logprobs\":0,\"content\":{\"parts\":[{\"media_processing\":\"\",\"text\":\"Hello! How can I help?\"}],\"role\":\"model\"},\"finish_reason\":\"STOP\",\"id\":\"<uuid-1>\",\"invocation_id\":\"e-<uuid-2>\",\"node_info\":{\"path\":\"assistant\"},\"timestamp\":\"<t>\",\"usage_metadata\":{\"cached_content_token_count\":0,\"candidates_token_count\":5,\"prompt_token_count\":10,\"thoughts_token_count\":0,\"tool_use_prompt_token_count\":0,\"total_token_count\":15,\"traffic_type\":\"\"}}\n",
+    "body_length": 561,
+    "body_sha256": null,
+    "base_href": null
+  },
+  "log": [
+    "<ts> POST /api/stream_reasoning_engine <elapsed>"
+  ],
+  "exit_status": null,
+  "stdout": null,
+  "error": null
+}

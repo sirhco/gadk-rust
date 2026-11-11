@@ -23,6 +23,8 @@
 //! Features: `web` (the web server and the REST API sub-launcher), `a2a`, `webui`, `triggers`,
 //! `prod` (`web` + `a2a`) and `full` (all of them, the default). The console is always built.
 
+#[cfg(feature = "agentengine")]
+pub mod agentengine;
 pub mod config;
 pub mod console;
 pub mod error;

@@ -33,7 +33,7 @@ class EdgeTest(unittest.TestCase):
     def test_agent_dev_dependency_on_engine_is_rejected(self):
         self.edit("gadk-agent", "[dev-dependencies]\n", "[dev-dependencies]\ngadk-engine = { workspace = true }\n")
         errs = cwd.check(self.repo)
-        self.assertTrue(any("only gadk, gadk-tools, gadk-server, gadk-a2a and gadk-launcher may depend on gadk-engine" in e for e in errs), errs)
+        self.assertTrue(any("only gadk, gadk-tools, gadk-server, gadk-a2a, gadk-launcher and gadk-agentregistry may depend on gadk-engine" in e for e in errs), errs)
 
     def test_tools_dev_dependency_on_engine_is_allowed(self):
         text = (self.repo / "crates/gadk-tools/Cargo.toml").read_text()
@@ -59,9 +59,10 @@ class EdgeTest(unittest.TestCase):
     def test_auth_edges_are_exactly_agent_and_platform(self):
         self.assertEqual(cwd.ALLOWED["gadk-auth"], {"gadk-agent", "gadk-platform"})
         self.assertIn("gadk-auth", cwd.ALLOWED["gadk"])
-        # 2c: gadk-mcp applies credentials to MCP requests; 5b: gadk-a2a applies them to A2A calls.
+        # 2c: gadk-mcp applies credentials to MCP requests; 5b: gadk-a2a applies them to A2A calls;
+        # 5c: gadk-agentregistry authenticates registry calls with ADC.
         self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-auth" in deps],
-                         ["gadk-mcp", "gadk-a2a", "gadk"])
+                         ["gadk-mcp", "gadk-a2a", "gadk-agentregistry", "gadk"])
 
     def test_auth_normal_dependency_on_engine_is_rejected(self):
         self.edit("gadk-auth", "[dependencies]\n", "[dependencies]\ngadk-engine = { workspace = true }\n")
@@ -85,7 +86,9 @@ class EdgeTest(unittest.TestCase):
 
     def test_mcp_edges_are_exactly_agent_auth_genai_platform(self):
         self.assertEqual(cwd.ALLOWED["gadk-mcp"], {"gadk-agent", "gadk-auth", "gadk-genai", "gadk-platform"})
-        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-mcp" in deps], ["gadk"])
+        # 5c: the registry's `mcp` feature builds MCP toolsets.
+        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-mcp" in deps],
+                         ["gadk-agentregistry", "gadk"])
         self.assertIn("gadk-platform", cwd.ALLOWED["gadk-gemini"])
 
     def test_mcp_normal_dependency_on_engine_is_rejected(self):
@@ -183,8 +186,9 @@ class EdgeTest(unittest.TestCase):
         self.assertEqual(cwd.ALLOWED["gadk-a2a"],
                          {"gadk-agent", "gadk-engine", "gadk-session", "gadk-genai", "gadk-model",
                           "gadk-auth", "gadk-platform", "gadk-server"})
-        # 6: the launcher's `a2a` feature serves A2A.
-        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-a2a" in deps], ["gadk-launcher", "gadk"])
+        # 6: the launcher's `a2a` feature serves A2A; 5c: the registry's `a2a` feature builds remote agents.
+        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-a2a" in deps],
+                         ["gadk-launcher", "gadk-agentregistry", "gadk"])
         self.assertIn("gadk-a2a", cwd.ENGINE_DEPENDENTS)
         self.assertIn(("gadk-a2a", "gadk-server"), cwd.OPTIONAL)
 
@@ -232,6 +236,34 @@ class EdgeTest(unittest.TestCase):
 
     def test_launcher_dev_dependency_on_engine_is_allowed(self):
         text = (self.repo / "crates/gadk-launcher/Cargo.toml").read_text()
+        dev = text.split("[dev-dependencies]\n", 1)[1]
+        self.assertIn('gadk-engine = { workspace = true, features = ["testutil"] }', dev)
+        self.assertEqual(cwd.check(self.repo), [])
+
+    def test_agentregistry_edges_are_agent_auth_platform_plus_optional_a2a_and_mcp(self):
+        self.assertEqual(cwd.ALLOWED["gadk-agentregistry"],
+                         {"gadk-agent", "gadk-auth", "gadk-platform", "gadk-a2a", "gadk-mcp"})
+        # Only the façade depends on it (feature `agentregistry`).
+        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-agentregistry" in deps],
+                         ["gadk"])
+        self.assertIn("gadk-agentregistry", cwd.ENGINE_DEPENDENTS)
+        self.assertIn(("gadk-agentregistry", "gadk-a2a"), cwd.OPTIONAL)
+        self.assertIn(("gadk-agentregistry", "gadk-mcp"), cwd.OPTIONAL)
+
+    def test_agentregistry_a2a_edge_must_be_optional(self):
+        self.edit("gadk-agentregistry",
+                  'gadk-a2a = { workspace = true, optional = true, default-features = false, features = ["client"] }',
+                  'gadk-a2a = { workspace = true, default-features = false, features = ["client"] }')
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-agentregistry -> gadk-a2a must be optional = true" in e for e in errs), errs)
+
+    def test_agentregistry_normal_dependency_on_engine_is_rejected(self):
+        self.edit("gadk-agentregistry", "[dependencies]\n", "[dependencies]\ngadk-engine = { workspace = true }\n")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-agentregistry -> gadk-engine is not allowed" in e for e in errs), errs)
+
+    def test_agentregistry_dev_dependency_on_engine_is_allowed(self):
+        text = (self.repo / "crates/gadk-agentregistry/Cargo.toml").read_text()
         dev = text.split("[dev-dependencies]\n", 1)[1]
         self.assertIn('gadk-engine = { workspace = true, features = ["testutil"] }', dev)
         self.assertEqual(cwd.check(self.repo), [])
