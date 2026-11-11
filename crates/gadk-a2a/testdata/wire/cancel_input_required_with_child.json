@@ -1,0 +1,2043 @@
+{
+  "scenario": "cancel_input_required_with_child",
+  "server": {
+    "jsonrpc": {
+      "exchanges": [
+        {
+          "child": [
+            {
+              "request": {
+                "body": {
+                  "id": "<id-1>",
+                  "jsonrpc": "2.0",
+                  "method": "SendStreamingMessage",
+                  "params": {
+                    "message": {
+                      "messageId": "<msg-1>",
+                      "parts": [
+                        {
+                          "text": "Hello"
+                        },
+                        {
+                          "text": "For context:"
+                        },
+                        {
+                          "text": "[root] said: transferring to child"
+                        },
+                        {
+                          "text": "[root] called tool transfer_to_agent with parameters: map[agent_name:child]"
+                        },
+                        {
+                          "text": "For context:"
+                        },
+                        {
+                          "text": "[root] transfer_to_agent tool returned result: map[]"
+                        }
+                      ],
+                      "role": "ROLE_USER"
+                    }
+                  }
+                },
+                "headers": {
+                  "A2a-Version": "1.0",
+                  "Accept": "text/event-stream",
+                  "Content-Type": "application/json"
+                },
+                "method": "POST",
+                "path": "/jsonrpc"
+              },
+              "response": {
+                "body": null,
+                "headers": {
+                  "Cache-Control": "no-cache",
+                  "Connection": "keep-alive",
+                  "Content-Type": "text/event-stream",
+                  "X-Accel-Buffering": "no"
+                },
+                "sse": [
+                  {
+                    "id": "<id-1>",
+                    "jsonrpc": "2.0",
+                    "result": {
+                      "task": {
+                        "contextId": "<ctx-1>",
+                        "history": [
+                          {
+                            "messageId": "<msg-1>",
+                            "parts": [
+                              {
+                                "text": "Hello"
+                              },
+                              {
+                                "text": "For context:"
+                              },
+                              {
+                                "text": "[root] said: transferring to child"
+                              },
+                              {
+                                "text": "[root] called tool transfer_to_agent with parameters: map[agent_name:child]"
+                              },
+                              {
+                                "text": "For context:"
+                              },
+                              {
+                                "text": "[root] transfer_to_agent tool returned result: map[]"
+                              }
+                            ],
+                            "role": "ROLE_USER"
+                          }
+                        ],
+                        "id": "<task-1>",
+                        "metadata": {
+                          "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                        },
+                        "status": {
+                          "state": "TASK_STATE_SUBMITTED"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "id": "<id-1>",
+                    "jsonrpc": "2.0",
+                    "result": {
+                      "statusUpdate": {
+                        "contextId": "<ctx-1>",
+                        "metadata": {
+                          "adk_app_name": "approver",
+                          "adk_session_id": "<ctx-1>",
+                          "adk_user_id": "A2A_USER_<ctx-1>",
+                          "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                        },
+                        "status": {
+                          "state": "TASK_STATE_WORKING",
+                          "timestamp": "<t>"
+                        },
+                        "taskId": "<task-1>"
+                      }
+                    }
+                  },
+                  {
+                    "id": "<id-1>",
+                    "jsonrpc": "2.0",
+                    "result": {
+                      "artifactUpdate": {
+                        "artifact": {
+                          "artifactId": "<artifact-1>",
+                          "metadata": {
+                            "adk_app_name": "approver",
+                            "adk_author": "approver",
+                            "adk_invocation_id": "e-<id-2>",
+                            "adk_session_id": "<ctx-1>",
+                            "adk_usage_metadata": {
+                              "candidatesTokenCount": 5,
+                              "promptTokenCount": 10,
+                              "totalTokenCount": 15
+                            },
+                            "adk_user_id": "A2A_USER_<ctx-1>"
+                          },
+                          "parts": [
+                            {
+                              "text": "need to request approval first!"
+                            }
+                          ]
+                        },
+                        "contextId": "<ctx-1>",
+                        "lastChunk": true,
+                        "taskId": "<task-1>"
+                      }
+                    }
+                  },
+                  {
+                    "id": "<id-1>",
+                    "jsonrpc": "2.0",
+                    "result": {
+                      "artifactUpdate": {
+                        "artifact": {
+                          "artifactId": "<artifact-2>",
+                          "metadata": {
+                            "adk_app_name": "approver",
+                            "adk_author": "approver",
+                            "adk_invocation_id": "e-<id-2>",
+                            "adk_session_id": "<ctx-1>",
+                            "adk_usage_metadata": {
+                              "candidatesTokenCount": 5,
+                              "promptTokenCount": 10,
+                              "totalTokenCount": 15
+                            },
+                            "adk_user_id": "A2A_USER_<ctx-1>"
+                          },
+                          "parts": [
+                            {
+                              "text": "waiting for user's approval..."
+                            }
+                          ]
+                        },
+                        "contextId": "<ctx-1>",
+                        "lastChunk": true,
+                        "taskId": "<task-1>"
+                      }
+                    }
+                  },
+                  {
+                    "id": "<id-1>",
+                    "jsonrpc": "2.0",
+                    "result": {
+                      "statusUpdate": {
+                        "contextId": "<ctx-1>",
+                        "metadata": {
+                          "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                        },
+                        "status": {
+                          "message": {
+                            "messageId": "<msg-2>",
+                            "parts": [
+                              {
+                                "data": {
+                                  "id": "adk-<id-3>",
+                                  "name": "request_approval"
+                                },
+                                "metadata": {
+                                  "adk_is_long_running": true,
+                                  "adk_type": "function_call"
+                                }
+                              },
+                              {
+                                "data": {
+                                  "id": "adk-<id-3>",
+                                  "name": "request_approval",
+                                  "response": {
+                                    "status": "pending",
+                                    "ticket_id": "ticket-1"
+                                  }
+                                },
+                                "metadata": {
+                                  "adk_type": "function_response"
+                                }
+                              }
+                            ],
+                            "role": "ROLE_AGENT"
+                          },
+                          "state": "TASK_STATE_INPUT_REQUIRED",
+                          "timestamp": "<t>"
+                        },
+                        "taskId": "<task-1>"
+                      }
+                    }
+                  }
+                ],
+                "status": 200
+              }
+            }
+          ],
+          "request": {
+            "body": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "method": "SendMessage",
+              "params": {
+                "message": {
+                  "messageId": "msg-1",
+                  "parts": [
+                    {
+                      "text": "Hello"
+                    }
+                  ],
+                  "role": "ROLE_USER"
+                }
+              }
+            },
+            "headers": {
+              "A2a-Version": "1.0",
+              "Content-Type": "application/json"
+            },
+            "method": "POST",
+            "path": "/jsonrpc"
+          },
+          "response": {
+            "body": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "result": {
+                "task": {
+                  "artifacts": [
+                    {
+                      "artifactId": "<artifact-3>",
+                      "parts": [
+                        {
+                          "text": "transferring to child"
+                        },
+                        {
+                          "data": {
+                            "args": {
+                              "agent_name": "child"
+                            },
+                            "id": "adk-<id-4>",
+                            "name": "transfer_to_agent"
+                          },
+                          "metadata": {
+                            "adk_is_long_running": false,
+                            "adk_type": "function_call"
+                          }
+                        },
+                        {
+                          "data": {
+                            "id": "adk-<id-4>",
+                            "name": "transfer_to_agent"
+                          },
+                          "metadata": {
+                            "adk_type": "function_response"
+                          }
+                        },
+                        {
+                          "text": "need to request approval first!"
+                        },
+                        {
+                          "text": "waiting for user's approval..."
+                        }
+                      ]
+                    }
+                  ],
+                  "contextId": "<ctx-2>",
+                  "history": [
+                    {
+                      "messageId": "msg-1",
+                      "parts": [
+                        {
+                          "text": "Hello"
+                        }
+                      ],
+                      "role": "ROLE_USER"
+                    }
+                  ],
+                  "id": "<task-2>",
+                  "metadata": {
+                    "adk_app_name": "root",
+                    "adk_session_id": "<ctx-2>",
+                    "adk_transfer_to_agent": "child",
+                    "adk_user_id": "A2A_USER_<ctx-2>",
+                    "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                  },
+                  "status": {
+                    "message": {
+                      "messageId": "<msg-3>",
+                      "parts": [
+                        {
+                          "data": {
+                            "id": "adk-<id-3>",
+                            "name": "request_approval"
+                          },
+                          "metadata": {
+                            "adk_is_long_running": true,
+                            "adk_type": "function_call"
+                          }
+                        },
+                        {
+                          "data": {
+                            "id": "adk-<id-3>",
+                            "name": "request_approval",
+                            "response": {
+                              "status": "pending",
+                              "ticket_id": "ticket-1"
+                            }
+                          },
+                          "metadata": {
+                            "adk_type": "function_response"
+                          }
+                        }
+                      ],
+                      "role": "ROLE_AGENT"
+                    },
+                    "state": "TASK_STATE_INPUT_REQUIRED",
+                    "timestamp": "<t>"
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "status": 200
+          }
+        },
+        {
+          "child": [
+            {
+              "request": {
+                "body": {
+                  "id": "<id-5>",
+                  "jsonrpc": "2.0",
+                  "method": "CancelTask",
+                  "params": {
+                    "id": "<task-1>"
+                  }
+                },
+                "headers": {
+                  "A2a-Version": "1.0",
+                  "Content-Type": "application/json"
+                },
+                "method": "POST",
+                "path": "/jsonrpc"
+              },
+              "response": {
+                "body": {
+                  "id": "<id-5>",
+                  "jsonrpc": "2.0",
+                  "result": {
+                    "artifacts": [
+                      {
+                        "artifactId": "<artifact-1>",
+                        "metadata": {
+                          "adk_app_name": "approver",
+                          "adk_author": "approver",
+                          "adk_invocation_id": "e-<id-2>",
+                          "adk_session_id": "<ctx-1>",
+                          "adk_usage_metadata": {
+                            "candidatesTokenCount": 5,
+                            "promptTokenCount": 10,
+                            "totalTokenCount": 15
+                          },
+                          "adk_user_id": "A2A_USER_<ctx-1>"
+                        },
+                        "parts": [
+                          {
+                            "text": "need to request approval first!"
+                          }
+                        ]
+                      },
+                      {
+                        "artifactId": "<artifact-2>",
+                        "metadata": {
+                          "adk_app_name": "approver",
+                          "adk_author": "approver",
+                          "adk_invocation_id": "e-<id-2>",
+                          "adk_session_id": "<ctx-1>",
+                          "adk_usage_metadata": {
+                            "candidatesTokenCount": 5,
+                            "promptTokenCount": 10,
+                            "totalTokenCount": 15
+                          },
+                          "adk_user_id": "A2A_USER_<ctx-1>"
+                        },
+                        "parts": [
+                          {
+                            "text": "waiting for user's approval..."
+                          }
+                        ]
+                      }
+                    ],
+                    "contextId": "<ctx-1>",
+                    "history": [
+                      {
+                        "messageId": "<msg-1>",
+                        "parts": [
+                          {
+                            "text": "Hello"
+                          },
+                          {
+                            "text": "For context:"
+                          },
+                          {
+                            "text": "[root] said: transferring to child"
+                          },
+                          {
+                            "text": "[root] called tool transfer_to_agent with parameters: map[agent_name:child]"
+                          },
+                          {
+                            "text": "For context:"
+                          },
+                          {
+                            "text": "[root] transfer_to_agent tool returned result: map[]"
+                          }
+                        ],
+                        "role": "ROLE_USER"
+                      },
+                      {
+                        "messageId": "<msg-2>",
+                        "parts": [
+                          {
+                            "data": {
+                              "id": "adk-<id-3>",
+                              "name": "request_approval"
+                            },
+                            "metadata": {
+                              "adk_is_long_running": true,
+                              "adk_type": "function_call"
+                            }
+                          },
+                          {
+                            "data": {
+                              "id": "adk-<id-3>",
+                              "name": "request_approval",
+                              "response": {
+                                "status": "pending",
+                                "ticket_id": "ticket-1"
+                              }
+                            },
+                            "metadata": {
+                              "adk_type": "function_response"
+                            }
+                          }
+                        ],
+                        "role": "ROLE_AGENT"
+                      }
+                    ],
+                    "id": "<task-1>",
+                    "metadata": {
+                      "adk_app_name": "approver",
+                      "adk_session_id": "<ctx-1>",
+                      "adk_user_id": "A2A_USER_<ctx-1>",
+                      "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                    },
+                    "status": {
+                      "state": "TASK_STATE_CANCELED",
+                      "timestamp": "<t>"
+                    }
+                  }
+                },
+                "headers": {
+                  "Content-Type": "application/json"
+                },
+                "status": 200
+              }
+            }
+          ],
+          "request": {
+            "body": {
+              "id": 2,
+              "jsonrpc": "2.0",
+              "method": "CancelTask",
+              "params": {
+                "id": "<task-2>"
+              }
+            },
+            "headers": {
+              "A2a-Version": "1.0",
+              "Content-Type": "application/json"
+            },
+            "method": "POST",
+            "path": "/jsonrpc"
+          },
+          "response": {
+            "body": {
+              "id": 2,
+              "jsonrpc": "2.0",
+              "result": {
+                "artifacts": [
+                  {
+                    "artifactId": "<artifact-3>",
+                    "parts": [
+                      {
+                        "text": "transferring to child"
+                      },
+                      {
+                        "data": {
+                          "args": {
+                            "agent_name": "child"
+                          },
+                          "id": "adk-<id-4>",
+                          "name": "transfer_to_agent"
+                        },
+                        "metadata": {
+                          "adk_is_long_running": false,
+                          "adk_type": "function_call"
+                        }
+                      },
+                      {
+                        "data": {
+                          "id": "adk-<id-4>",
+                          "name": "transfer_to_agent"
+                        },
+                        "metadata": {
+                          "adk_type": "function_response"
+                        }
+                      },
+                      {
+                        "text": "need to request approval first!"
+                      },
+                      {
+                        "text": "waiting for user's approval..."
+                      }
+                    ]
+                  }
+                ],
+                "contextId": "<ctx-2>",
+                "history": [
+                  {
+                    "messageId": "msg-1",
+                    "parts": [
+                      {
+                        "text": "Hello"
+                      }
+                    ],
+                    "role": "ROLE_USER"
+                  },
+                  {
+                    "messageId": "<msg-3>",
+                    "parts": [
+                      {
+                        "data": {
+                          "id": "adk-<id-3>",
+                          "name": "request_approval"
+                        },
+                        "metadata": {
+                          "adk_is_long_running": true,
+                          "adk_type": "function_call"
+                        }
+                      },
+                      {
+                        "data": {
+                          "id": "adk-<id-3>",
+                          "name": "request_approval",
+                          "response": {
+                            "status": "pending",
+                            "ticket_id": "ticket-1"
+                          }
+                        },
+                        "metadata": {
+                          "adk_type": "function_response"
+                        }
+                      }
+                    ],
+                    "role": "ROLE_AGENT"
+                  }
+                ],
+                "id": "<task-2>",
+                "metadata": {
+                  "adk_app_name": "root",
+                  "adk_session_id": "<ctx-2>",
+                  "adk_transfer_to_agent": "child",
+                  "adk_user_id": "A2A_USER_<ctx-2>",
+                  "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                },
+                "status": {
+                  "state": "TASK_STATE_CANCELED",
+                  "timestamp": "<t>"
+                }
+              }
+            },
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "status": 200
+          }
+        },
+        {
+          "request": {
+            "body": {
+              "id": 3,
+              "jsonrpc": "2.0",
+              "method": "GetTask",
+              "params": {
+                "id": "<task-2>"
+              }
+            },
+            "headers": {
+              "A2a-Version": "1.0",
+              "Content-Type": "application/json"
+            },
+            "method": "POST",
+            "path": "/jsonrpc"
+          },
+          "response": {
+            "body": {
+              "id": 3,
+              "jsonrpc": "2.0",
+              "result": {
+                "artifacts": [
+                  {
+                    "artifactId": "<artifact-3>",
+                    "parts": [
+                      {
+                        "text": "transferring to child"
+                      },
+                      {
+                        "data": {
+                          "args": {
+                            "agent_name": "child"
+                          },
+                          "id": "adk-<id-4>",
+                          "name": "transfer_to_agent"
+                        },
+                        "metadata": {
+                          "adk_is_long_running": false,
+                          "adk_type": "function_call"
+                        }
+                      },
+                      {
+                        "data": {
+                          "id": "adk-<id-4>",
+                          "name": "transfer_to_agent"
+                        },
+                        "metadata": {
+                          "adk_type": "function_response"
+                        }
+                      },
+                      {
+                        "text": "need to request approval first!"
+                      },
+                      {
+                        "text": "waiting for user's approval..."
+                      }
+                    ]
+                  }
+                ],
+                "contextId": "<ctx-2>",
+                "history": [
+                  {
+                    "messageId": "msg-1",
+                    "parts": [
+                      {
+                        "text": "Hello"
+                      }
+                    ],
+                    "role": "ROLE_USER"
+                  },
+                  {
+                    "messageId": "<msg-3>",
+                    "parts": [
+                      {
+                        "data": {
+                          "id": "adk-<id-3>",
+                          "name": "request_approval"
+                        },
+                        "metadata": {
+                          "adk_is_long_running": true,
+                          "adk_type": "function_call"
+                        }
+                      },
+                      {
+                        "data": {
+                          "id": "adk-<id-3>",
+                          "name": "request_approval",
+                          "response": {
+                            "status": "pending",
+                            "ticket_id": "ticket-1"
+                          }
+                        },
+                        "metadata": {
+                          "adk_type": "function_response"
+                        }
+                      }
+                    ],
+                    "role": "ROLE_AGENT"
+                  }
+                ],
+                "id": "<task-2>",
+                "metadata": {
+                  "adk_app_name": "root",
+                  "adk_session_id": "<ctx-2>",
+                  "adk_transfer_to_agent": "child",
+                  "adk_user_id": "A2A_USER_<ctx-2>",
+                  "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                },
+                "status": {
+                  "state": "TASK_STATE_CANCELED",
+                  "timestamp": "<t>"
+                }
+              }
+            },
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "status": 200
+          }
+        }
+      ],
+      "session_events": [
+        {
+          "actions": {
+            "artifactDelta": {},
+            "stateDelta": {}
+          },
+          "author": "user",
+          "content": {
+            "parts": [
+              {
+                "text": "Hello"
+              }
+            ],
+            "role": "user"
+          },
+          "id": "<id-6>",
+          "invocationId": "e-<id-2>",
+          "timestamp": "<t>"
+        },
+        {
+          "actions": {
+            "artifactDelta": {},
+            "stateDelta": {}
+          },
+          "author": "root",
+          "content": {
+            "parts": [
+              {
+                "text": "transferring to child"
+              },
+              {
+                "functionCall": {
+                  "args": {
+                    "agent_name": "child"
+                  },
+                  "id": "adk-<id-4>",
+                  "name": "transfer_to_agent"
+                }
+              }
+            ],
+            "role": "model"
+          },
+          "finishReason": "STOP",
+          "id": "<id-7>",
+          "invocationId": "e-<id-2>",
+          "nodeInfo": {
+            "path": "root"
+          },
+          "timestamp": "<t>",
+          "usageMetadata": {
+            "candidatesTokenCount": 5,
+            "promptTokenCount": 10,
+            "totalTokenCount": 15
+          }
+        },
+        {
+          "actions": {
+            "artifactDelta": {},
+            "stateDelta": {},
+            "transferToAgent": "child"
+          },
+          "author": "root",
+          "content": {
+            "parts": [
+              {
+                "functionResponse": {
+                  "id": "adk-<id-4>",
+                  "name": "transfer_to_agent"
+                }
+              }
+            ],
+            "role": "user"
+          },
+          "id": "<id-8>",
+          "invocationId": "e-<id-2>",
+          "nodeInfo": {
+            "path": "root"
+          },
+          "timestamp": "<t>"
+        },
+        {
+          "actions": {},
+          "author": "child",
+          "content": {
+            "parts": [
+              {
+                "text": "need to request approval first!"
+              }
+            ],
+            "role": "model"
+          },
+          "customMetadata": {
+            "a2a:context_id": "<ctx-1>",
+            "a2a:response": {
+              "artifact": {
+                "artifactId": "<artifact-1>",
+                "metadata": {
+                  "adk_app_name": "approver",
+                  "adk_author": "approver",
+                  "adk_invocation_id": "e-<id-2>",
+                  "adk_session_id": "<ctx-1>",
+                  "adk_usage_metadata": {
+                    "candidatesTokenCount": 5,
+                    "promptTokenCount": 10,
+                    "totalTokenCount": 15
+                  },
+                  "adk_user_id": "A2A_USER_<ctx-1>"
+                },
+                "parts": [
+                  {
+                    "text": "need to request approval first!"
+                  }
+                ]
+              },
+              "contextId": "<ctx-1>",
+              "lastChunk": true,
+              "taskId": "<task-1>"
+            },
+            "a2a:task_id": "<task-1>"
+          },
+          "id": "<id-9>",
+          "invocationId": "e-<id-2>",
+          "nodeInfo": {
+            "path": "root"
+          },
+          "timestamp": "<t>",
+          "usageMetadata": {
+            "candidatesTokenCount": 5,
+            "promptTokenCount": 10,
+            "totalTokenCount": 15
+          }
+        },
+        {
+          "actions": {},
+          "author": "child",
+          "content": {
+            "parts": [
+              {
+                "text": "waiting for user's approval..."
+              }
+            ],
+            "role": "model"
+          },
+          "customMetadata": {
+            "a2a:context_id": "<ctx-1>",
+            "a2a:response": {
+              "artifact": {
+                "artifactId": "<artifact-2>",
+                "metadata": {
+                  "adk_app_name": "approver",
+                  "adk_author": "approver",
+                  "adk_invocation_id": "e-<id-2>",
+                  "adk_session_id": "<ctx-1>",
+                  "adk_usage_metadata": {
+                    "candidatesTokenCount": 5,
+                    "promptTokenCount": 10,
+                    "totalTokenCount": 15
+                  },
+                  "adk_user_id": "A2A_USER_<ctx-1>"
+                },
+                "parts": [
+                  {
+                    "text": "waiting for user's approval..."
+                  }
+                ]
+              },
+              "contextId": "<ctx-1>",
+              "lastChunk": true,
+              "taskId": "<task-1>"
+            },
+            "a2a:task_id": "<task-1>"
+          },
+          "id": "<id-10>",
+          "invocationId": "e-<id-2>",
+          "nodeInfo": {
+            "path": "root"
+          },
+          "timestamp": "<t>",
+          "usageMetadata": {
+            "candidatesTokenCount": 5,
+            "promptTokenCount": 10,
+            "totalTokenCount": 15
+          }
+        },
+        {
+          "actions": {},
+          "author": "child",
+          "content": {
+            "parts": [
+              {
+                "functionCall": {
+                  "id": "adk-<id-3>",
+                  "name": "request_approval"
+                }
+              },
+              {
+                "functionResponse": {
+                  "id": "adk-<id-3>",
+                  "name": "request_approval",
+                  "response": {
+                    "status": "pending",
+                    "ticket_id": "ticket-1"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          },
+          "customMetadata": {
+            "a2a:context_id": "<ctx-1>",
+            "a2a:request": {
+              "message": {
+                "messageId": "<msg-1>",
+                "parts": [
+                  {
+                    "text": "Hello"
+                  },
+                  {
+                    "text": "For context:"
+                  },
+                  {
+                    "text": "[root] said: transferring to child"
+                  },
+                  {
+                    "text": "[root] called tool transfer_to_agent with parameters: map[agent_name:child]"
+                  },
+                  {
+                    "text": "For context:"
+                  },
+                  {
+                    "text": "[root] transfer_to_agent tool returned result: map[]"
+                  }
+                ],
+                "role": "ROLE_USER"
+              }
+            },
+            "a2a:response": {
+              "contextId": "<ctx-1>",
+              "metadata": {
+                "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+              },
+              "status": {
+                "message": {
+                  "messageId": "<msg-2>",
+                  "parts": [
+                    {
+                      "data": {
+                        "id": "adk-<id-3>",
+                        "name": "request_approval"
+                      },
+                      "metadata": {
+                        "adk_is_long_running": true,
+                        "adk_type": "function_call"
+                      }
+                    },
+                    {
+                      "data": {
+                        "id": "adk-<id-3>",
+                        "name": "request_approval",
+                        "response": {
+                          "status": "pending",
+                          "ticket_id": "ticket-1"
+                        }
+                      },
+                      "metadata": {
+                        "adk_type": "function_response"
+                      }
+                    }
+                  ],
+                  "role": "ROLE_AGENT"
+                },
+                "state": "TASK_STATE_INPUT_REQUIRED",
+                "timestamp": "<t>"
+              },
+              "taskId": "<task-1>"
+            },
+            "a2a:task_id": "<task-1>"
+          },
+          "id": "<id-11>",
+          "invocationId": "e-<id-2>",
+          "longRunningToolIds": [
+            "adk-<id-3>"
+          ],
+          "nodeInfo": {
+            "path": "root"
+          },
+          "timestamp": "<t>",
+          "turnComplete": true
+        }
+      ]
+    },
+    "rest": {
+      "exchanges": [
+        {
+          "child": [
+            {
+              "request": {
+                "body": {
+                  "id": "<id-1>",
+                  "jsonrpc": "2.0",
+                  "method": "SendStreamingMessage",
+                  "params": {
+                    "message": {
+                      "messageId": "<msg-1>",
+                      "parts": [
+                        {
+                          "text": "Hello"
+                        },
+                        {
+                          "text": "For context:"
+                        },
+                        {
+                          "text": "[root] said: transferring to child"
+                        },
+                        {
+                          "text": "[root] called tool transfer_to_agent with parameters: map[agent_name:child]"
+                        },
+                        {
+                          "text": "For context:"
+                        },
+                        {
+                          "text": "[root] transfer_to_agent tool returned result: map[]"
+                        }
+                      ],
+                      "role": "ROLE_USER"
+                    }
+                  }
+                },
+                "headers": {
+                  "A2a-Version": "1.0",
+                  "Accept": "text/event-stream",
+                  "Content-Type": "application/json"
+                },
+                "method": "POST",
+                "path": "/jsonrpc"
+              },
+              "response": {
+                "body": null,
+                "headers": {
+                  "Cache-Control": "no-cache",
+                  "Connection": "keep-alive",
+                  "Content-Type": "text/event-stream",
+                  "X-Accel-Buffering": "no"
+                },
+                "sse": [
+                  {
+                    "id": "<id-1>",
+                    "jsonrpc": "2.0",
+                    "result": {
+                      "task": {
+                        "contextId": "<ctx-1>",
+                        "history": [
+                          {
+                            "messageId": "<msg-1>",
+                            "parts": [
+                              {
+                                "text": "Hello"
+                              },
+                              {
+                                "text": "For context:"
+                              },
+                              {
+                                "text": "[root] said: transferring to child"
+                              },
+                              {
+                                "text": "[root] called tool transfer_to_agent with parameters: map[agent_name:child]"
+                              },
+                              {
+                                "text": "For context:"
+                              },
+                              {
+                                "text": "[root] transfer_to_agent tool returned result: map[]"
+                              }
+                            ],
+                            "role": "ROLE_USER"
+                          }
+                        ],
+                        "id": "<task-1>",
+                        "metadata": {
+                          "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                        },
+                        "status": {
+                          "state": "TASK_STATE_SUBMITTED"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "id": "<id-1>",
+                    "jsonrpc": "2.0",
+                    "result": {
+                      "statusUpdate": {
+                        "contextId": "<ctx-1>",
+                        "metadata": {
+                          "adk_app_name": "approver",
+                          "adk_session_id": "<ctx-1>",
+                          "adk_user_id": "A2A_USER_<ctx-1>",
+                          "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                        },
+                        "status": {
+                          "state": "TASK_STATE_WORKING",
+                          "timestamp": "<t>"
+                        },
+                        "taskId": "<task-1>"
+                      }
+                    }
+                  },
+                  {
+                    "id": "<id-1>",
+                    "jsonrpc": "2.0",
+                    "result": {
+                      "artifactUpdate": {
+                        "artifact": {
+                          "artifactId": "<artifact-1>",
+                          "metadata": {
+                            "adk_app_name": "approver",
+                            "adk_author": "approver",
+                            "adk_invocation_id": "e-<id-2>",
+                            "adk_session_id": "<ctx-1>",
+                            "adk_usage_metadata": {
+                              "candidatesTokenCount": 5,
+                              "promptTokenCount": 10,
+                              "totalTokenCount": 15
+                            },
+                            "adk_user_id": "A2A_USER_<ctx-1>"
+                          },
+                          "parts": [
+                            {
+                              "text": "need to request approval first!"
+                            }
+                          ]
+                        },
+                        "contextId": "<ctx-1>",
+                        "lastChunk": true,
+                        "taskId": "<task-1>"
+                      }
+                    }
+                  },
+                  {
+                    "id": "<id-1>",
+                    "jsonrpc": "2.0",
+                    "result": {
+                      "artifactUpdate": {
+                        "artifact": {
+                          "artifactId": "<artifact-2>",
+                          "metadata": {
+                            "adk_app_name": "approver",
+                            "adk_author": "approver",
+                            "adk_invocation_id": "e-<id-2>",
+                            "adk_session_id": "<ctx-1>",
+                            "adk_usage_metadata": {
+                              "candidatesTokenCount": 5,
+                              "promptTokenCount": 10,
+                              "totalTokenCount": 15
+                            },
+                            "adk_user_id": "A2A_USER_<ctx-1>"
+                          },
+                          "parts": [
+                            {
+                              "text": "waiting for user's approval..."
+                            }
+                          ]
+                        },
+                        "contextId": "<ctx-1>",
+                        "lastChunk": true,
+                        "taskId": "<task-1>"
+                      }
+                    }
+                  },
+                  {
+                    "id": "<id-1>",
+                    "jsonrpc": "2.0",
+                    "result": {
+                      "statusUpdate": {
+                        "contextId": "<ctx-1>",
+                        "metadata": {
+                          "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                        },
+                        "status": {
+                          "message": {
+                            "messageId": "<msg-2>",
+                            "parts": [
+                              {
+                                "data": {
+                                  "id": "adk-<id-3>",
+                                  "name": "request_approval"
+                                },
+                                "metadata": {
+                                  "adk_is_long_running": true,
+                                  "adk_type": "function_call"
+                                }
+                              },
+                              {
+                                "data": {
+                                  "id": "adk-<id-3>",
+                                  "name": "request_approval",
+                                  "response": {
+                                    "status": "pending",
+                                    "ticket_id": "ticket-1"
+                                  }
+                                },
+                                "metadata": {
+                                  "adk_type": "function_response"
+                                }
+                              }
+                            ],
+                            "role": "ROLE_AGENT"
+                          },
+                          "state": "TASK_STATE_INPUT_REQUIRED",
+                          "timestamp": "<t>"
+                        },
+                        "taskId": "<task-1>"
+                      }
+                    }
+                  }
+                ],
+                "status": 200
+              }
+            }
+          ],
+          "request": {
+            "body": {
+              "message": {
+                "messageId": "msg-1",
+                "parts": [
+                  {
+                    "text": "Hello"
+                  }
+                ],
+                "role": "ROLE_USER"
+              }
+            },
+            "headers": {
+              "A2a-Version": "1.0",
+              "Accept": "application/json",
+              "Content-Type": "application/json"
+            },
+            "method": "POST",
+            "path": "/rest/message:send"
+          },
+          "response": {
+            "body": {
+              "task": {
+                "artifacts": [
+                  {
+                    "artifactId": "<artifact-3>",
+                    "parts": [
+                      {
+                        "text": "transferring to child"
+                      },
+                      {
+                        "data": {
+                          "args": {
+                            "agent_name": "child"
+                          },
+                          "id": "adk-<id-4>",
+                          "name": "transfer_to_agent"
+                        },
+                        "metadata": {
+                          "adk_is_long_running": false,
+                          "adk_type": "function_call"
+                        }
+                      },
+                      {
+                        "data": {
+                          "id": "adk-<id-4>",
+                          "name": "transfer_to_agent"
+                        },
+                        "metadata": {
+                          "adk_type": "function_response"
+                        }
+                      },
+                      {
+                        "text": "need to request approval first!"
+                      },
+                      {
+                        "text": "waiting for user's approval..."
+                      }
+                    ]
+                  }
+                ],
+                "contextId": "<ctx-2>",
+                "history": [
+                  {
+                    "messageId": "msg-1",
+                    "parts": [
+                      {
+                        "text": "Hello"
+                      }
+                    ],
+                    "role": "ROLE_USER"
+                  }
+                ],
+                "id": "<task-2>",
+                "metadata": {
+                  "adk_app_name": "root",
+                  "adk_session_id": "<ctx-2>",
+                  "adk_transfer_to_agent": "child",
+                  "adk_user_id": "A2A_USER_<ctx-2>",
+                  "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                },
+                "status": {
+                  "message": {
+                    "messageId": "<msg-3>",
+                    "parts": [
+                      {
+                        "data": {
+                          "id": "adk-<id-3>",
+                          "name": "request_approval"
+                        },
+                        "metadata": {
+                          "adk_is_long_running": true,
+                          "adk_type": "function_call"
+                        }
+                      },
+                      {
+                        "data": {
+                          "id": "adk-<id-3>",
+                          "name": "request_approval",
+                          "response": {
+                            "status": "pending",
+                            "ticket_id": "ticket-1"
+                          }
+                        },
+                        "metadata": {
+                          "adk_type": "function_response"
+                        }
+                      }
+                    ],
+                    "role": "ROLE_AGENT"
+                  },
+                  "state": "TASK_STATE_INPUT_REQUIRED",
+                  "timestamp": "<t>"
+                }
+              }
+            },
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "status": 200
+          }
+        },
+        {
+          "child": [
+            {
+              "request": {
+                "body": {
+                  "id": "<id-5>",
+                  "jsonrpc": "2.0",
+                  "method": "CancelTask",
+                  "params": {
+                    "id": "<task-1>"
+                  }
+                },
+                "headers": {
+                  "A2a-Version": "1.0",
+                  "Content-Type": "application/json"
+                },
+                "method": "POST",
+                "path": "/jsonrpc"
+              },
+              "response": {
+                "body": {
+                  "id": "<id-5>",
+                  "jsonrpc": "2.0",
+                  "result": {
+                    "artifacts": [
+                      {
+                        "artifactId": "<artifact-1>",
+                        "metadata": {
+                          "adk_app_name": "approver",
+                          "adk_author": "approver",
+                          "adk_invocation_id": "e-<id-2>",
+                          "adk_session_id": "<ctx-1>",
+                          "adk_usage_metadata": {
+                            "candidatesTokenCount": 5,
+                            "promptTokenCount": 10,
+                            "totalTokenCount": 15
+                          },
+                          "adk_user_id": "A2A_USER_<ctx-1>"
+                        },
+                        "parts": [
+                          {
+                            "text": "need to request approval first!"
+                          }
+                        ]
+                      },
+                      {
+                        "artifactId": "<artifact-2>",
+                        "metadata": {
+                          "adk_app_name": "approver",
+                          "adk_author": "approver",
+                          "adk_invocation_id": "e-<id-2>",
+                          "adk_session_id": "<ctx-1>",
+                          "adk_usage_metadata": {
+                            "candidatesTokenCount": 5,
+                            "promptTokenCount": 10,
+                            "totalTokenCount": 15
+                          },
+                          "adk_user_id": "A2A_USER_<ctx-1>"
+                        },
+                        "parts": [
+                          {
+                            "text": "waiting for user's approval..."
+                          }
+                        ]
+                      }
+                    ],
+                    "contextId": "<ctx-1>",
+                    "history": [
+                      {
+                        "messageId": "<msg-1>",
+                        "parts": [
+                          {
+                            "text": "Hello"
+                          },
+                          {
+                            "text": "For context:"
+                          },
+                          {
+                            "text": "[root] said: transferring to child"
+                          },
+                          {
+                            "text": "[root] called tool transfer_to_agent with parameters: map[agent_name:child]"
+                          },
+                          {
+                            "text": "For context:"
+                          },
+                          {
+                            "text": "[root] transfer_to_agent tool returned result: map[]"
+                          }
+                        ],
+                        "role": "ROLE_USER"
+                      },
+                      {
+                        "messageId": "<msg-2>",
+                        "parts": [
+                          {
+                            "data": {
+                              "id": "adk-<id-3>",
+                              "name": "request_approval"
+                            },
+                            "metadata": {
+                              "adk_is_long_running": true,
+                              "adk_type": "function_call"
+                            }
+                          },
+                          {
+                            "data": {
+                              "id": "adk-<id-3>",
+                              "name": "request_approval",
+                              "response": {
+                                "status": "pending",
+                                "ticket_id": "ticket-1"
+                              }
+                            },
+                            "metadata": {
+                              "adk_type": "function_response"
+                            }
+                          }
+                        ],
+                        "role": "ROLE_AGENT"
+                      }
+                    ],
+                    "id": "<task-1>",
+                    "metadata": {
+                      "adk_app_name": "approver",
+                      "adk_session_id": "<ctx-1>",
+                      "adk_user_id": "A2A_USER_<ctx-1>",
+                      "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+                    },
+                    "status": {
+                      "state": "TASK_STATE_CANCELED",
+                      "timestamp": "<t>"
+                    }
+                  }
+                },
+                "headers": {
+                  "Content-Type": "application/json"
+                },
+                "status": 200
+              }
+            }
+          ],
+          "request": {
+            "body": null,
+            "headers": {
+              "A2a-Version": "1.0",
+              "Accept": "application/json"
+            },
+            "method": "POST",
+            "path": "/rest/tasks/<task-2>:cancel"
+          },
+          "response": {
+            "body": {
+              "artifacts": [
+                {
+                  "artifactId": "<artifact-3>",
+                  "parts": [
+                    {
+                      "text": "transferring to child"
+                    },
+                    {
+                      "data": {
+                        "args": {
+                          "agent_name": "child"
+                        },
+                        "id": "adk-<id-4>",
+                        "name": "transfer_to_agent"
+                      },
+                      "metadata": {
+                        "adk_is_long_running": false,
+                        "adk_type": "function_call"
+                      }
+                    },
+                    {
+                      "data": {
+                        "id": "adk-<id-4>",
+                        "name": "transfer_to_agent"
+                      },
+                      "metadata": {
+                        "adk_type": "function_response"
+                      }
+                    },
+                    {
+                      "text": "need to request approval first!"
+                    },
+                    {
+                      "text": "waiting for user's approval..."
+                    }
+                  ]
+                }
+              ],
+              "contextId": "<ctx-2>",
+              "history": [
+                {
+                  "messageId": "msg-1",
+                  "parts": [
+                    {
+                      "text": "Hello"
+                    }
+                  ],
+                  "role": "ROLE_USER"
+                },
+                {
+                  "messageId": "<msg-3>",
+                  "parts": [
+                    {
+                      "data": {
+                        "id": "adk-<id-3>",
+                        "name": "request_approval"
+                      },
+                      "metadata": {
+                        "adk_is_long_running": true,
+                        "adk_type": "function_call"
+                      }
+                    },
+                    {
+                      "data": {
+                        "id": "adk-<id-3>",
+                        "name": "request_approval",
+                        "response": {
+                          "status": "pending",
+                          "ticket_id": "ticket-1"
+                        }
+                      },
+                      "metadata": {
+                        "adk_type": "function_response"
+                      }
+                    }
+                  ],
+                  "role": "ROLE_AGENT"
+                }
+              ],
+              "id": "<task-2>",
+              "metadata": {
+                "adk_app_name": "root",
+                "adk_session_id": "<ctx-2>",
+                "adk_transfer_to_agent": "child",
+                "adk_user_id": "A2A_USER_<ctx-2>",
+                "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+              },
+              "status": {
+                "state": "TASK_STATE_CANCELED",
+                "timestamp": "<t>"
+              }
+            },
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "status": 200
+          }
+        },
+        {
+          "request": {
+            "body": null,
+            "headers": {
+              "A2a-Version": "1.0",
+              "Accept": "application/json"
+            },
+            "method": "GET",
+            "path": "/rest/tasks/<task-2>"
+          },
+          "response": {
+            "body": {
+              "artifacts": [
+                {
+                  "artifactId": "<artifact-3>",
+                  "parts": [
+                    {
+                      "text": "transferring to child"
+                    },
+                    {
+                      "data": {
+                        "args": {
+                          "agent_name": "child"
+                        },
+                        "id": "adk-<id-4>",
+                        "name": "transfer_to_agent"
+                      },
+                      "metadata": {
+                        "adk_is_long_running": false,
+                        "adk_type": "function_call"
+                      }
+                    },
+                    {
+                      "data": {
+                        "id": "adk-<id-4>",
+                        "name": "transfer_to_agent"
+                      },
+                      "metadata": {
+                        "adk_type": "function_response"
+                      }
+                    },
+                    {
+                      "text": "need to request approval first!"
+                    },
+                    {
+                      "text": "waiting for user's approval..."
+                    }
+                  ]
+                }
+              ],
+              "contextId": "<ctx-2>",
+              "history": [
+                {
+                  "messageId": "msg-1",
+                  "parts": [
+                    {
+                      "text": "Hello"
+                    }
+                  ],
+                  "role": "ROLE_USER"
+                },
+                {
+                  "messageId": "<msg-3>",
+                  "parts": [
+                    {
+                      "data": {
+                        "id": "adk-<id-3>",
+                        "name": "request_approval"
+                      },
+                      "metadata": {
+                        "adk_is_long_running": true,
+                        "adk_type": "function_call"
+                      }
+                    },
+                    {
+                      "data": {
+                        "id": "adk-<id-3>",
+                        "name": "request_approval",
+                        "response": {
+                          "status": "pending",
+                          "ticket_id": "ticket-1"
+                        }
+                      },
+                      "metadata": {
+                        "adk_type": "function_response"
+                      }
+                    }
+                  ],
+                  "role": "ROLE_AGENT"
+                }
+              ],
+              "id": "<task-2>",
+              "metadata": {
+                "adk_app_name": "root",
+                "adk_session_id": "<ctx-2>",
+                "adk_transfer_to_agent": "child",
+                "adk_user_id": "A2A_USER_<ctx-2>",
+                "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+              },
+              "status": {
+                "state": "TASK_STATE_CANCELED",
+                "timestamp": "<t>"
+              }
+            },
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "status": 200
+          }
+        }
+      ],
+      "session_events": [
+        {
+          "actions": {
+            "artifactDelta": {},
+            "stateDelta": {}
+          },
+          "author": "user",
+          "content": {
+            "parts": [
+              {
+                "text": "Hello"
+              }
+            ],
+            "role": "user"
+          },
+          "id": "<id-6>",
+          "invocationId": "e-<id-2>",
+          "timestamp": "<t>"
+        },
+        {
+          "actions": {
+            "artifactDelta": {},
+            "stateDelta": {}
+          },
+          "author": "root",
+          "content": {
+            "parts": [
+              {
+                "text": "transferring to child"
+              },
+              {
+                "functionCall": {
+                  "args": {
+                    "agent_name": "child"
+                  },
+                  "id": "adk-<id-4>",
+                  "name": "transfer_to_agent"
+                }
+              }
+            ],
+            "role": "model"
+          },
+          "finishReason": "STOP",
+          "id": "<id-7>",
+          "invocationId": "e-<id-2>",
+          "nodeInfo": {
+            "path": "root"
+          },
+          "timestamp": "<t>",
+          "usageMetadata": {
+            "candidatesTokenCount": 5,
+            "promptTokenCount": 10,
+            "totalTokenCount": 15
+          }
+        },
+        {
+          "actions": {
+            "artifactDelta": {},
+            "stateDelta": {},
+            "transferToAgent": "child"
+          },
+          "author": "root",
+          "content": {
+            "parts": [
+              {
+                "functionResponse": {
+                  "id": "adk-<id-4>",
+                  "name": "transfer_to_agent"
+                }
+              }
+            ],
+            "role": "user"
+          },
+          "id": "<id-8>",
+          "invocationId": "e-<id-2>",
+          "nodeInfo": {
+            "path": "root"
+          },
+          "timestamp": "<t>"
+        },
+        {
+          "actions": {},
+          "author": "child",
+          "content": {
+            "parts": [
+              {
+                "text": "need to request approval first!"
+              }
+            ],
+            "role": "model"
+          },
+          "customMetadata": {
+            "a2a:context_id": "<ctx-1>",
+            "a2a:response": {
+              "artifact": {
+                "artifactId": "<artifact-1>",
+                "metadata": {
+                  "adk_app_name": "approver",
+                  "adk_author": "approver",
+                  "adk_invocation_id": "e-<id-2>",
+                  "adk_session_id": "<ctx-1>",
+                  "adk_usage_metadata": {
+                    "candidatesTokenCount": 5,
+                    "promptTokenCount": 10,
+                    "totalTokenCount": 15
+                  },
+                  "adk_user_id": "A2A_USER_<ctx-1>"
+                },
+                "parts": [
+                  {
+                    "text": "need to request approval first!"
+                  }
+                ]
+              },
+              "contextId": "<ctx-1>",
+              "lastChunk": true,
+              "taskId": "<task-1>"
+            },
+            "a2a:task_id": "<task-1>"
+          },
+          "id": "<id-9>",
+          "invocationId": "e-<id-2>",
+          "nodeInfo": {
+            "path": "root"
+          },
+          "timestamp": "<t>",
+          "usageMetadata": {
+            "candidatesTokenCount": 5,
+            "promptTokenCount": 10,
+            "totalTokenCount": 15
+          }
+        },
+        {
+          "actions": {},
+          "author": "child",
+          "content": {
+            "parts": [
+              {
+                "text": "waiting for user's approval..."
+              }
+            ],
+            "role": "model"
+          },
+          "customMetadata": {
+            "a2a:context_id": "<ctx-1>",
+            "a2a:response": {
+              "artifact": {
+                "artifactId": "<artifact-2>",
+                "metadata": {
+                  "adk_app_name": "approver",
+                  "adk_author": "approver",
+                  "adk_invocation_id": "e-<id-2>",
+                  "adk_session_id": "<ctx-1>",
+                  "adk_usage_metadata": {
+                    "candidatesTokenCount": 5,
+                    "promptTokenCount": 10,
+                    "totalTokenCount": 15
+                  },
+                  "adk_user_id": "A2A_USER_<ctx-1>"
+                },
+                "parts": [
+                  {
+                    "text": "waiting for user's approval..."
+                  }
+                ]
+              },
+              "contextId": "<ctx-1>",
+              "lastChunk": true,
+              "taskId": "<task-1>"
+            },
+            "a2a:task_id": "<task-1>"
+          },
+          "id": "<id-10>",
+          "invocationId": "e-<id-2>",
+          "nodeInfo": {
+            "path": "root"
+          },
+          "timestamp": "<t>",
+          "usageMetadata": {
+            "candidatesTokenCount": 5,
+            "promptTokenCount": 10,
+            "totalTokenCount": 15
+          }
+        },
+        {
+          "actions": {},
+          "author": "child",
+          "content": {
+            "parts": [
+              {
+                "functionCall": {
+                  "id": "adk-<id-3>",
+                  "name": "request_approval"
+                }
+              },
+              {
+                "functionResponse": {
+                  "id": "adk-<id-3>",
+                  "name": "request_approval",
+                  "response": {
+                    "status": "pending",
+                    "ticket_id": "ticket-1"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          },
+          "customMetadata": {
+            "a2a:context_id": "<ctx-1>",
+            "a2a:request": {
+              "message": {
+                "messageId": "<msg-1>",
+                "parts": [
+                  {
+                    "text": "Hello"
+                  },
+                  {
+                    "text": "For context:"
+                  },
+                  {
+                    "text": "[root] said: transferring to child"
+                  },
+                  {
+                    "text": "[root] called tool transfer_to_agent with parameters: map[agent_name:child]"
+                  },
+                  {
+                    "text": "For context:"
+                  },
+                  {
+                    "text": "[root] transfer_to_agent tool returned result: map[]"
+                  }
+                ],
+                "role": "ROLE_USER"
+              }
+            },
+            "a2a:response": {
+              "contextId": "<ctx-1>",
+              "metadata": {
+                "https://google.github.io/adk-docs/a2a/a2a-extension/": true
+              },
+              "status": {
+                "message": {
+                  "messageId": "<msg-2>",
+                  "parts": [
+                    {
+                      "data": {
+                        "id": "adk-<id-3>",
+                        "name": "request_approval"
+                      },
+                      "metadata": {
+                        "adk_is_long_running": true,
+                        "adk_type": "function_call"
+                      }
+                    },
+                    {
+                      "data": {
+                        "id": "adk-<id-3>",
+                        "name": "request_approval",
+                        "response": {
+                          "status": "pending",
+                          "ticket_id": "ticket-1"
+                        }
+                      },
+                      "metadata": {
+                        "adk_type": "function_response"
+                      }
+                    }
+                  ],
+                  "role": "ROLE_AGENT"
+                },
+                "state": "TASK_STATE_INPUT_REQUIRED",
+                "timestamp": "<t>"
+              },
+              "taskId": "<task-1>"
+            },
+            "a2a:task_id": "<task-1>"
+          },
+          "id": "<id-11>",
+          "invocationId": "e-<id-2>",
+          "longRunningToolIds": [
+            "adk-<id-3>"
+          ],
+          "nodeInfo": {
+            "path": "root"
+          },
+          "timestamp": "<t>",
+          "turnComplete": true
+        }
+      ]
+    }
+  }
+}
