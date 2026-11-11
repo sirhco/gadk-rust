@@ -71,15 +71,23 @@ impl From<Error> for a2a::A2AError {
     fn from(err: Error) -> Self {
         match err {
             Error::A2A(e) => e,
-            other => match chained_a2a_error(&other) {
-                Some(inner) => a2a::A2AError {
-                    code: inner.code,
-                    message: other.to_string(),
-                    details: inner.details.clone(),
-                },
-                None => a2a::A2AError::internal(other.to_string()),
-            },
+            other => to_a2a_error(&other),
         }
+    }
+}
+
+/// The [`a2a::A2AError`] for `err`, as `From<Error>` maps it, without consuming `err`.
+pub(crate) fn to_a2a_error(err: &Error) -> a2a::A2AError {
+    if let Error::A2A(e) = err {
+        return e.clone();
+    }
+    match chained_a2a_error(err) {
+        Some(inner) => a2a::A2AError {
+            code: inner.code,
+            message: err.to_string(),
+            details: inner.details.clone(),
+        },
+        None => a2a::A2AError::internal(err.to_string()),
     }
 }
 

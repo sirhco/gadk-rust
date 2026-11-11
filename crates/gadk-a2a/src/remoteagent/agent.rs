@@ -50,6 +50,7 @@ use crate::convert::{
     A2APartConverter, GenAIPartConverter, new_remote_agent_event, stream_meta, stream_task_info,
     to_adk_meta_key, transfer_to_agent_from_meta,
 };
+use crate::error::to_a2a_error;
 
 /// Go `BeforeA2ARequestCallback`: an event short-circuits the request.
 pub type BeforeA2ARequestCallback = Arc<
@@ -473,15 +474,6 @@ fn split(result: Result<Option<Event>, Error>) -> (Option<Event>, Option<Error>)
     match result {
         Ok(event) => (event, None),
         Err(err) => (None, Some(err)),
-    }
-}
-
-/// The error an after-request callback sees (its `err` parameter is an `A2AError`): an A2A
-/// error as is, any other as an internal error with the same text.
-fn to_a2a_error(err: &Error) -> a2a::A2AError {
-    match err {
-        Error::A2A(err) => err.clone(),
-        other => a2a::A2AError::internal(other.to_string()),
     }
 }
 

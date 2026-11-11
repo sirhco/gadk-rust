@@ -2214,6 +2214,58 @@ mod remote_runs {
         }
     }
 
+    /// Rust-only: Go hands the after-request callback the raw error, so `errors.As` finds an A2A
+    /// error wrapped by a before-request callback; here the callback's `A2AError` keeps that
+    /// wrapped error's code and details, with the outer text (as on the wire, `error.rs`).
+    #[tokio::test]
+    async fn an_after_request_callback_sees_a_wrapped_a2a_error_with_its_code() {
+        let inner = a2a::A2AError::invalid_params("bad input").with_details(vec![
+            a2a::errordetails::TypedDetail::error_info("INVALID_PARAMS", "a2a-protocol.org", None),
+        ]);
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let before_err = inner.clone();
+        let seen_by_after = Arc::clone(&seen);
+        let server = start_a2a_server(MockExecutor {
+            execute: None,
+            cancel: None,
+        })
+        .await;
+        let remote = new_a2a(A2AConfig {
+            name: "a2a".into(),
+            agent_card: Some(jsonrpc_card(&server.url)),
+            before_request_callbacks: vec![before(move |_| {
+                Err(Error::wrap("check", before_err.clone()))
+            })],
+            after_request_callbacks: vec![after(move |_, _, err| {
+                let err = err.unwrap();
+                seen_by_after
+                    .lock()
+                    .push((err.code, err.message.clone(), err.details.clone()));
+                Ok(None)
+            })],
+            ..Default::default()
+        })
+        .unwrap();
+        let ic = invocation_context(
+            "AfterCallbackSeesWrappedA2AError",
+            remote.clone(),
+            vec![user_hello()],
+            StreamingMode::Sse,
+        )
+        .await;
+        let (events, err) = run_and_collect(ic, &remote).await;
+        assert!(events.is_empty(), "events = {events:?}");
+        assert_eq!(err.unwrap().to_string(), "check: bad input");
+        assert_eq!(
+            *seen.lock(),
+            vec![(
+                inner.code,
+                "check: bad input".to_owned(),
+                inner.details.clone()
+            )]
+        );
+    }
+
     #[tokio::test]
     async fn test_remote_agent_after_callback_runs_on_aggregated_artifact() {
         let executor = MockExecutor {
