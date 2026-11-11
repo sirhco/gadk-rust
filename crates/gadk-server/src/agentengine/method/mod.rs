@@ -111,7 +111,10 @@ pub(crate) mod replay {
     use crate::mux::{Handler, WriteDeadline};
     use crate::rest::testutil::wire_scenario::{assistant_agent, fixed_platform};
 
-    /// Response headers the fixtures leave out (server-owned).
+    /// Response headers the fixtures leave out (server-owned). Dropping the framing headers
+    /// hides two divergences the replay cannot see (ledgered in `docs/parity/5c.md`): a stream
+    /// with no line is Go's `Content-Length: 0` but gadk's empty chunked body, and a session
+    /// body over 2048 bytes is chunked in Go but has a `Content-Length` here.
     const SERVER_HEADERS: [&str; 3] = ["date", "content-length", "transfer-encoding"];
 
     /// One fixture configuration's handler (`main`: 4096 bytes, `small`: 32), with its log.
@@ -257,9 +260,7 @@ pub(crate) mod replay {
                 "{name}: log"
             );
         }
-    }
 
-    impl Scenario {
         /// POSTs `body` (JSON) to `target`: the status and the body text.
         pub(crate) async fn post(&self, target: &str, body: String) -> (u16, String) {
             let mut req = Request::builder()
@@ -410,6 +411,84 @@ pub(crate) mod replay {
             assert!(body.contains("Saved your note."), "{body}");
             assert!(!body.contains(r#""error""#), "{body}");
         });
+    }
+
+    /// The deepest inner `request_json` message the request cap ([`MAX_DEPTH`]) accepts runs
+    /// through `streaming_agent_run_with_events`, the runner and the scripted model on a 2 MiB
+    /// stack without aborting. `request_json` is a string, so the cap counts from the inner
+    /// document's top level: a function response part (top 1, `message` 2, `parts` 3, the part
+    /// 4, `functionResponse` 5, `response` 6, then `MAX_DEPTH - 6` levels). One more level fails
+    /// the inner decode, which Go (past its 10000) answers as any `request_json` decode error: a
+    /// 500 with the wrapped `exceeded max depth` text.
+    #[test]
+    fn deepest_run_with_events_request_json_runs_on_a_2_mib_stack() {
+        on_2_mib_stack(|| async {
+            let scenario = Scenario::with_max_payload_size("main", 1 << 20);
+            let levels = MAX_DEPTH - 6;
+            let run = |levels: usize| {
+                let inner = format!(
+                    r#"{{"user_id":"u","message":{{"role":"user","parts":[{{"functionResponse":{{"name":"save_note","response":{{"r":{}}}}}}}]}}}}"#,
+                    nested(levels)
+                );
+                format!(
+                    r#"{{"class_method":"streaming_agent_run_with_events","input":{{"request_json":{}}}}}"#,
+                    serde_json::to_string(&inner).unwrap()
+                )
+            };
+            let (status, body) = scenario
+                .post("/stream_reasoning_engine", run(levels + 1))
+                .await;
+            assert_eq!(
+                (status, body.as_str()),
+                (
+                    500,
+                    "s.streamJSONL() failed: decodeStreamingAgentRunWithEventsRequest() failed: \
+                     json.Unmarshal(input.request_json) failed: exceeded max depth\n"
+                )
+            );
+
+            let (status, body) = scenario.post("/stream_reasoning_engine", run(levels)).await;
+            assert_eq!(status, 200, "{}", &body[..body.len().min(200)]);
+            assert!(body.contains("Saved your note."), "{body}");
+            assert!(body.starts_with(r#"{"events":[{"#), "{body}");
+            assert!(!body.contains(r#""error""#), "{body}");
+        });
+    }
+
+    /// A deep request (past the inline depth, so `Runner::run` runs on the deep-stack thread)
+    /// still opens its `invoke_workflow` span under the caller's thread-scoped subscriber
+    /// (gadk-engine's `capture_spans`, a `set_default` capture) and inside the caller's span, as
+    /// an inline request does.
+    #[tokio::test]
+    async fn deep_stream_query_span_has_the_callers_dispatcher_and_parent() {
+        use tracing::Instrument as _;
+
+        let scenario = Scenario::with_max_payload_size("main", 1 << 20);
+        let query = format!(
+            r#"{{"class_method":"async_stream_query","input":{{"user_id":"u","message":{{"role":"user","parts":[{{"functionResponse":{{"name":"save_note","response":{{"r":{}}}}}}}]}}}}}}"#,
+            nested(100)
+        );
+        let ((status, body), spans) = gadk_engine::testutil::telemetry::capture_spans(async move {
+            let caller = tracing::info_span!("caller");
+            scenario
+                .post("/stream_reasoning_engine", query)
+                .instrument(caller)
+                .await
+        })
+        .await;
+        assert_eq!(status, 200, "{}", &body[..body.len().min(200)]);
+        assert!(body.contains("Saved your note."), "{body}");
+
+        let names: Vec<&str> = spans.iter().map(|s| s.name.as_str()).collect();
+        let caller = spans
+            .iter()
+            .find(|s| s.name == "caller")
+            .expect("caller span");
+        let workflow = spans
+            .iter()
+            .find(|s| s.name == "invoke_workflow assistant")
+            .unwrap_or_else(|| panic!("no invoke_workflow span: {names:?}"));
+        assert_eq!(workflow.parent_span_id, Some(caller.span_id), "{names:?}");
     }
 }
 
