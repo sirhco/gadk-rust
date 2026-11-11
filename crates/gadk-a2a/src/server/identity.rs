@@ -63,10 +63,10 @@ pub fn identity_header_resolver() -> UserResolver {
 ///
 /// Mount it inside the authentication layer (so the extensions already hold the caller) and
 /// around the A2A routers, and install [`identity_header_resolver`] as
-/// `ExecutorConfig::user_resolver`. A user ID that is not a valid header value (control
-/// characters, non-ASCII text) is dropped with a warning, and the executor falls back to its
-/// anonymous `A2A_USER_<context_id>` user: a2a-rs passes only visible-ASCII header values on as
-/// service params.
+/// `ExecutorConfig::user_resolver`. A user ID that is not a visible-ASCII header value (control
+/// characters, non-ASCII text such as `élodie`) is dropped with a warning, and the executor
+/// falls back to its anonymous `A2A_USER_<context_id>` user: a2a-rs passes only visible-ASCII
+/// header values on as service params.
 pub fn a2a_identity_layer<F>(extract: F) -> IdentityLayer<F>
 where
     F: Fn(&http::Extensions) -> Option<String> + Clone + Send + Sync + 'static,
@@ -115,14 +115,15 @@ where
         // Always strip what the client sent: only this layer may set the header.
         req.headers_mut().remove(IDENTITY_HEADER);
         if let Some(user) = (self.extract)(req.extensions()) {
+            // a2a-rs passes only visible-ASCII header values on as service params.
             match http::HeaderValue::from_str(&user) {
-                Ok(value) => {
+                Ok(value) if value.to_str().is_ok() => {
                     req.headers_mut()
                         .insert(http::HeaderName::from_static(IDENTITY_HEADER), value);
                 }
-                Err(_) => tracing::warn!(
-                    "a2a identity: the user ID is not a valid header value, so the request \
-                     reaches the executor without one"
+                _ => tracing::warn!(
+                    "a2a identity: the user ID is not a visible-ASCII header value, so the \
+                     request reaches the executor without one"
                 ),
             }
         }
@@ -252,6 +253,18 @@ mod tests {
     async fn a_user_id_that_is_not_a_header_value_is_dropped() {
         let seen = seen_identity_headers(
             |_: &http::Extensions| Some("bad\nuser".to_owned()),
+            spoofed_request(),
+        )
+        .await;
+        assert!(seen.is_empty(), "{seen:?}");
+    }
+
+    /// A header value a2a-rs would drop from the service params (not visible ASCII) is dropped
+    /// here, with the warning, instead of silently there.
+    #[tokio::test]
+    async fn a_user_id_that_is_not_visible_ascii_is_dropped() {
+        let seen = seen_identity_headers(
+            |_: &http::Extensions| Some("élodie".to_owned()),
             spoofed_request(),
         )
         .await;
