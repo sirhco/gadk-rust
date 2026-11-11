@@ -33,10 +33,12 @@ use super::agent_remoteagent_v2_a2a_agent::harness::prepare_session;
 use crate::convert::{GenAIPartConverter, to_a2a_meta_key, to_custom_metadata};
 use crate::remoteagent::A2AConfig;
 use crate::remoteagent::agent::new_message;
+use gadk_engine::runner::BEFORE_RUN_REPLY_KEY;
+
 use crate::remoteagent::history::{
-    BEFORE_RUN_REPLY_KEY, collect_remote_function_call_ids, convert_parts,
-    get_user_function_call_at, marshal_function_response_json, present_as_user_message,
-    to_missing_remote_session_parts, unmatched_function_response_text,
+    collect_remote_function_call_ids, convert_parts, get_user_function_call_at,
+    marshal_function_response_json, present_as_user_message, to_missing_remote_session_parts,
+    unmatched_function_response_text,
 };
 
 /// Go `newTestInvocationContext`: a session holding `events` and an agent named `agent_name`.

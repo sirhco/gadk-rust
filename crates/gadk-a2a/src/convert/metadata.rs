@@ -19,6 +19,7 @@
 
 use std::collections::HashMap;
 
+use gadk_engine::runner::BEFORE_RUN_REPLY_KEY;
 use gadk_session::{Event, EventActions};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -50,10 +51,6 @@ pub(crate) const METADATA_CUSTOM_META_KEY: &str = "adk_custom_metadata";
 pub(crate) const METADATA_PARTIAL_KEY: &str = "adk_partial";
 /// Go `metadataIsErrMessageKey`.
 pub(crate) const METADATA_IS_ERR_MESSAGE_KEY: &str = "adk_is_error_message";
-
-/// Go `plugininternal.BeforeRunReplyKey` (gadk-engine's `runner::BEFORE_RUN_REPLY_KEY`, which is
-/// crate-private there): a BeforeRun origin is local to the runner that created the event.
-const BEFORE_RUN_REPLY_KEY: &str = "adk:before_run_reply";
 
 /// Go `ToA2AMetaKey`: adds the prefix that marks ADK values in A2A metadata.
 pub fn to_a2a_meta_key(key: &str) -> String {
@@ -196,10 +193,9 @@ pub(crate) fn process_meta_view(
 
     event.response.custom_metadata = to_custom_metadata(task_id, context_id);
     if let Some(Value::Object(user_meta)) = meta.and_then(|m| m.get(METADATA_CUSTOM_META_KEY)) {
-        event
-            .response
-            .custom_metadata
-            .extend(user_meta.iter().map(|(k, v)| (k.clone(), v.clone())));
+        // Through Go's JSON text, so protobuf-decoded integral floats (`12.0`) are integers again.
+        let user_meta: Map<String, Value> = from_map_structure(user_meta)?;
+        event.response.custom_metadata.extend(user_meta);
         event.response.custom_metadata.remove(BEFORE_RUN_REPLY_KEY);
     }
 
@@ -314,7 +310,52 @@ fn process_meta<T: DeserializeOwned>(
     target: &mut Option<T>,
 ) -> Result<(), Error> {
     if let Some(Value::Object(map)) = meta.and_then(|m| m.get(key)) {
-        *target = Some(serde_json::from_value(Value::Object(map.clone()))?);
+        *target = Some(from_map_structure(map)?);
     }
     Ok(())
+}
+
+/// Go `converters.FromMapStructure`: `json.Marshal` then `json.Unmarshal` into `T`. Going
+/// through Go's JSON text matters: a2a-rs's JSON-RPC and REST clients decode metadata through
+/// protobuf `Struct`, so every number arrives as an `f64` (`12.0`), which serde refuses for an
+/// integer field; Go's marshaller writes an integral float as `12`, which decodes.
+pub(crate) fn from_map_structure<T: DeserializeOwned>(
+    data: &Map<String, Value>,
+) -> Result<T, Error> {
+    let bytes = gadk_model::to_go_json(data)?;
+    Ok(serde_json::from_slice(&bytes)?)
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+    use serde_json::json;
+
+    /// a2a-rs clients decode metadata through protobuf `Struct`, so integers arrive as `f64`;
+    /// Go's `FromMapStructure` goes through JSON text, where `12.0` is written `12`.
+    #[test]
+    fn integral_floats_decode_into_integer_fields() {
+        let meta = HashMap::from([
+            (
+                METADATA_USAGE_KEY.to_owned(),
+                json!({"candidatesTokenCount": 12.0, "thoughtsTokenCount": 42.0}),
+            ),
+            (
+                METADATA_CUSTOM_META_KEY.to_owned(),
+                json!({"count": 3.0, "ratio": 0.5}),
+            ),
+        ]);
+        let mut event = Event::default();
+        process_meta_view("t", "c", Some(&meta), None, &mut event).unwrap();
+        let usage = event.response.usage_metadata.unwrap();
+        assert_eq!(usage.candidates_token_count, 12);
+        assert_eq!(usage.thoughts_token_count, 42);
+        assert_eq!(event.response.custom_metadata.get("count"), Some(&json!(3)));
+        assert_eq!(
+            event.response.custom_metadata.get("ratio"),
+            Some(&json!(0.5))
+        );
+    }
 }
