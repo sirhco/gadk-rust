@@ -4,6 +4,13 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
+ignore = [
+    # SQLite < 3.54 page-cache read with a crafted db + mismatched -wal pair. sqlx-sqlite 0.9.0
+    # (latest) pins libsqlite3-sys 0.37; the fix needs 0.39. gadk-session-database opens only the
+    # operator-configured database, never a file a less trusted party supplies. Drop this ignore
+    # once sqlx ships libsqlite3-sys >= 0.39.
+    { id = "RUSTSEC-2026-0459", reason = "sqlx-sqlite 0.9 pins libsqlite3-sys 0.37; operator-chosen db only" },
+]
 
 [licenses]
 version = 2

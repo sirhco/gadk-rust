@@ -332,8 +332,8 @@ struct ConnState {
     times: Mutex<Times>,
 }
 
-/// The prefix Go peeks (`maybeServeUnencryptedHTTP2`, without a read deadline) to tell an
-/// `-h2c` connection's HTTP/2 preface from an HTTP/1 request.
+/// The prefix Go peeks (`maybeServeUnencryptedHTTP2`, under the accept-time read deadline) to
+/// tell an `-h2c` connection's HTTP/2 preface from an HTTP/1 request.
 const H2_PREFACE_PREFIX: &[u8] = b"PRI * HTTP/2.0";
 
 struct Times {
@@ -398,12 +398,8 @@ impl ConnState {
             accepted: now,
             times: Mutex::new(Times {
                 request_start: now,
-                // `-h2c`: Go peeks the preface without a read deadline.
-                read_deadline: if opts.h2c {
-                    None
-                } else {
-                    opts.read_timeout.map(|d| now + d)
-                },
+                // Go sets `readHeaderTimeout()` at accept, before an `-h2c` preface peek too.
+                read_deadline: opts.read_timeout.map(|d| now + d),
                 write_deadline: None,
                 in_flight: 0,
                 idle: false,
@@ -438,9 +434,9 @@ impl ConnState {
     /// deadline is reset to `ReadTimeout` from now). The previous response's write deadline is
     /// left to [`ConnState::on_flushed`]: its tail may still be buffered.
     ///
-    /// Under `-h2c` the first bytes are Go's preface peek, which has no deadline: an HTTP/2
-    /// preface starts HTTP/2's idle timer (`IdleTimeout`), anything else an HTTP/1 request
-    /// whose `ReadTimeout` counts from the end of the peek.
+    /// Under `-h2c` the first bytes are Go's preface peek, under the accept-time `ReadTimeout`:
+    /// an HTTP/2 preface starts HTTP/2's idle timer (`IdleTimeout`), anything else an HTTP/1
+    /// request whose `ReadTimeout` counts again from the end of the peek (Go `readRequest`).
     fn on_bytes_read(&self, bytes: &[u8]) {
         let mut t = self.times();
         t.fresh = false;
@@ -460,7 +456,7 @@ impl ConnState {
                 t.read_deadline = self.opts.read_timeout.map(|d| now + d);
             }
             drop(t);
-            // A pending read registered no timer while there was no deadline.
+            // The read deadline moved: a pending read re-arms its timer.
             self.wake_reader();
             return;
         }
@@ -1190,18 +1186,20 @@ mod tests {
         }
     }
 
-    /// Go peeks an `-h2c` connection's preface with no read deadline: a client silent for
-    /// longer than `-read-timeout` before its first request is still served.
+    /// Go sets `readHeaderTimeout()` (here `-read-timeout`) at accept, before it peeks an
+    /// `-h2c` connection's preface (server.go `conn.serve`): a client silent past it is closed.
     #[tokio::test]
-    async fn h2c_waits_for_the_first_bytes_without_the_read_timeout() {
+    async fn h2c_preface_peek_has_the_read_timeout_from_accept() {
         let (addr, cancel) = start(router(), Options::new(ms(100), ms(2000), ms(2000), true)).await;
         let mut conn = TcpStream::connect(addr).await.unwrap();
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        conn.write_all(b"GET /ok HTTP/1.1\r\nHost: x\r\n\r\n")
-            .await
-            .unwrap();
-        let resp = read_response(&mut conn).await.unwrap();
-        assert!(resp.starts_with("HTTP/1.1 200 OK\r\n"), "{resp}");
+        let mut rest = Vec::new();
+        let closed =
+            tokio::time::timeout(Duration::from_millis(1500), conn.read_to_end(&mut rest)).await;
+        assert!(
+            closed.is_ok(),
+            "a silent h2c client still holds the connection"
+        );
+        assert!(rest.is_empty(), "{}", String::from_utf8_lossy(&rest));
         // Once the peek is over, an HTTP/1 request's headers have `-read-timeout` again.
         let mut conn = TcpStream::connect(addr).await.unwrap();
         conn.write_all(b"GET /ok HTTP/1.1\r\nHo").await.unwrap();
