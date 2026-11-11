@@ -1,0 +1,21 @@
+{
+  "name": "noprefix_99_shutdown",
+  "server": "noprefix",
+  "launcher": "full",
+  "args": [
+    "web",
+    "-port",
+    "<port>",
+    "api",
+    "-path_prefix="
+  ],
+  "kind": "shutdown",
+  "request": null,
+  "response": null,
+  "log": [
+    "<ts> Shutting down the web server..."
+  ],
+  "exit_status": 0,
+  "stdout": "",
+  "error": null
+}

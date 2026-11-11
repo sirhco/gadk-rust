@@ -1,0 +1,71 @@
+{
+  "name": "full_35_webui_index_head",
+  "server": "full",
+  "launcher": "full",
+  "args": [
+    "web",
+    "-port",
+    "<port>",
+    "-max_request_body_size",
+    "1024",
+    "-allow_origins",
+    "http://allowed.example",
+    "api",
+    "webui",
+    "a2a",
+    "pubsub",
+    "eventarc"
+  ],
+  "kind": "exchange",
+  "request": {
+    "method": "HEAD",
+    "target": "/ui/",
+    "headers": [
+      [
+        "Host",
+        "127.0.0.1:<port>"
+      ],
+      [
+        "Connection",
+        "close"
+      ]
+    ],
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "status_text": "OK",
+    "headers": [
+      [
+        "Accept-Ranges",
+        "bytes"
+      ],
+      [
+        "Connection",
+        "close"
+      ],
+      [
+        "Content-Length",
+        "53361"
+      ],
+      [
+        "Content-Type",
+        "text/html; charset=utf-8"
+      ],
+      [
+        "Date",
+        "<date>"
+      ]
+    ],
+    "body": "",
+    "body_length": 0,
+    "body_sha256": null,
+    "base_href": null
+  },
+  "log": [
+    "<ts> HEAD /ui/ <elapsed>"
+  ],
+  "exit_status": null,
+  "stdout": null,
+  "error": null
+}

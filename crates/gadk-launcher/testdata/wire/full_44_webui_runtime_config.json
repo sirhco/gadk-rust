@@ -1,0 +1,67 @@
+{
+  "name": "full_44_webui_runtime_config",
+  "server": "full",
+  "launcher": "full",
+  "args": [
+    "web",
+    "-port",
+    "<port>",
+    "-max_request_body_size",
+    "1024",
+    "-allow_origins",
+    "http://allowed.example",
+    "api",
+    "webui",
+    "a2a",
+    "pubsub",
+    "eventarc"
+  ],
+  "kind": "exchange",
+  "request": {
+    "method": "GET",
+    "target": "/ui/assets/config/runtime-config.json",
+    "headers": [
+      [
+        "Host",
+        "127.0.0.1:<port>"
+      ],
+      [
+        "Connection",
+        "close"
+      ]
+    ],
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "status_text": "OK",
+    "headers": [
+      [
+        "Connection",
+        "close"
+      ],
+      [
+        "Content-Length",
+        "43"
+      ],
+      [
+        "Content-Type",
+        "application/json; charset=UTF-8"
+      ],
+      [
+        "Date",
+        "<date>"
+      ]
+    ],
+    "body": "{\"backendUrl\":\"http://localhost:8080/api\"}\n",
+    "body_length": 43,
+    "body_sha256": null,
+    "base_href": null
+  },
+  "log": [
+    "<ts> GET /ui/assets/config/runtime-config.json <elapsed>"
+  ],
+  "exit_status": null,
+  "stdout": null,
+  "error": null
+}

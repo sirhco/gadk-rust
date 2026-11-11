@@ -1,0 +1,43 @@
+{
+  "name": "full_00_startup",
+  "server": "full",
+  "launcher": "full",
+  "args": [
+    "web",
+    "-port",
+    "<port>",
+    "-max_request_body_size",
+    "1024",
+    "-allow_origins",
+    "http://allowed.example",
+    "api",
+    "webui",
+    "a2a",
+    "pubsub",
+    "eventarc"
+  ],
+  "kind": "startup",
+  "request": null,
+  "response": null,
+  "log": [
+    "<ts> No session service configured. Using an in-memory one, so whatever it holds is lost when the process exits.",
+    "<ts> No artifact service configured. Using an in-memory one, so whatever it holds is lost when the process exits.",
+    "<ts> No memory service configured. Using an in-memory one, so whatever it holds is lost when the process exits.",
+    "<ts> adk: the pubsub trigger endpoint is unauthenticated, so any caller that reaches it chooses the user ID the agent runs as. Set -oidc_audience and -oidc_service_accounts after the pubsub keyword to require a Google-signed OIDC token.",
+    "<ts> adk: the eventarc trigger endpoint is unauthenticated, so any caller that reaches it chooses the user ID the agent runs as. Set -oidc_audience and -oidc_service_accounts after the eventarc keyword to require a Google-signed OIDC token.",
+    "<ts> Starting the web server: &{port:<port> host:127.0.0.1 allowOrigins:[http://allowed.example] writeTimeout:15000000000 readTimeout:15000000000 idleTimeout:60000000000 shutdownTimeout:15000000000 otelToCloud:false useH2C:false maxPayloadSize:1024}",
+    "<ts> ",
+    "<ts> Web servers starts on http://localhost:<port>",
+    "<ts>        webui:  you can access API using http://localhost:<port>/ui/",
+    "<ts>        a2a:  you can access A2A using jsonrpc protocol: http://localhost:<port>",
+    "<ts>        pubsub:  PubSub trigger endpoint is available at http://localhost:<port>/api/apps/{app_name}/trigger/pubsub",
+    "<ts>        eventarc: Eventarc trigger endpoint is available at http://localhost:<port>/api/apps/{app_name}/trigger/eventarc",
+    "<ts>        api:  you can access API using http://localhost:<port>/api",
+    "<ts>        api:      for instance: http://localhost:<port>/api/list-apps",
+    "<ts>        api:      debug excluded: for the web UI's Traces and agent structure panels, use -include_debug_api",
+    "<ts> "
+  ],
+  "exit_status": null,
+  "stdout": null,
+  "error": null
+}

@@ -1,0 +1,75 @@
+{
+  "name": "full_46_pubsub_trigger",
+  "server": "full",
+  "launcher": "full",
+  "args": [
+    "web",
+    "-port",
+    "<port>",
+    "-max_request_body_size",
+    "1024",
+    "-allow_origins",
+    "http://allowed.example",
+    "api",
+    "webui",
+    "a2a",
+    "pubsub",
+    "eventarc"
+  ],
+  "kind": "exchange",
+  "request": {
+    "method": "POST",
+    "target": "/api/apps/assistant/trigger/pubsub",
+    "headers": [
+      [
+        "Host",
+        "127.0.0.1:<port>"
+      ],
+      [
+        "Content-Type",
+        "application/json"
+      ],
+      [
+        "Content-Length",
+        "115"
+      ],
+      [
+        "Connection",
+        "close"
+      ]
+    ],
+    "body": "{\"message\":{\"data\":\"aGVsbG8=\",\"messageId\":\"m1\",\"attributes\":{\"k\":\"v\"}},\"subscription\":\"projects/p/subscriptions/s\"}"
+  },
+  "response": {
+    "status": 200,
+    "status_text": "OK",
+    "headers": [
+      [
+        "Connection",
+        "close"
+      ],
+      [
+        "Content-Length",
+        "21"
+      ],
+      [
+        "Content-Type",
+        "application/json; charset=UTF-8"
+      ],
+      [
+        "Date",
+        "<date>"
+      ]
+    ],
+    "body": "{\"status\":\"success\"}\n",
+    "body_length": 21,
+    "body_sha256": null,
+    "base_href": null
+  },
+  "log": [
+    "<ts> POST /api/apps/assistant/trigger/pubsub <elapsed>"
+  ],
+  "exit_status": null,
+  "stdout": null,
+  "error": null
+}
