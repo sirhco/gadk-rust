@@ -459,6 +459,24 @@ fn test_same_credential_target() {
     }
 }
 
+/// Rust-only (a declared divergence): reqwest's redirect URLs are WHATWG-normalized, so an
+/// explicit default port is gone before the check. Go compares the explicit port strings of an
+/// http→https upgrade (`"80" == "80"`, `"443" == "443"`) and follows; gadk sees an implicit
+/// port on one side only and refuses.
+#[test]
+fn an_upgrade_compares_whatwg_normalized_ports() {
+    for (from, to) in [
+        ("http://h:80/rpc", "https://h:80/rpc"),
+        ("http://h:443/rpc", "https://h:443/rpc"),
+    ] {
+        let (from_u, to_u) = (Url::parse(from).unwrap(), Url::parse(to).unwrap());
+        assert!(
+            !same_credential_target(&from_u, &to_u),
+            "same_credential_target({from:?}, {to:?}): Go follows, gadk refuses"
+        );
+    }
+}
+
 /// Go `TestAuthHTTPClientRedirectCap`.
 #[tokio::test]
 async fn test_auth_http_client_redirect_cap() {

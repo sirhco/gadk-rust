@@ -208,6 +208,7 @@ impl Drop for CleanupGuard {
 mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
     use a2a_server::AgentExecutor as _;
@@ -414,6 +415,7 @@ mod tests {
     #[tokio::test]
     async fn a_cancel_stops_the_running_execution_and_both_cleanups_see_it_canceled() {
         let (executor, mut rx) = executor(vec![]);
+        let after_execute = Arc::new(AtomicUsize::new(0));
         let executor = Executor::new(ExecutorConfig {
             runner_provider: Some({
                 let provider = executor.config.runner_provider.clone().unwrap();
@@ -427,6 +429,15 @@ mod tests {
                 })
             }),
             a2a_execution_cleanup_callback: executor.config.a2a_execution_cleanup_callback.clone(),
+            // The run is dropped, not cancelled: Go calls it with the failed "agent run failed:
+            // context canceled" status, gadk does not call it (a declared divergence).
+            after_execute_callback: Some({
+                let after_execute = Arc::clone(&after_execute);
+                Arc::new(move |_ctx, _status, _err| {
+                    after_execute.fetch_add(1, Ordering::SeqCst);
+                    Box::pin(async { Ok(()) })
+                })
+            }),
             ..Default::default()
         });
         let mut execution = executor.execute(request(true));
@@ -460,6 +471,11 @@ mod tests {
         assert!(
             executor.executions_is_empty(),
             "the execution stayed registered"
+        );
+        assert_eq!(
+            after_execute.load(Ordering::SeqCst),
+            0,
+            "after_execute_callback ran for a stopped execution"
         );
     }
 
