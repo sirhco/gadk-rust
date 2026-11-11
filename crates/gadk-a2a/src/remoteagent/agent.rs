@@ -543,10 +543,20 @@ impl RunGuard {
         }
     }
 
-    /// Runs the cleanup and destroys the client now.
+    /// Runs the cleanup and destroys the client now, in order, before the run ends. The work
+    /// runs on its own task (awaited here) so that dropping the event stream while it is in
+    /// flight does not abort it (Go's defers always run); without a runtime it runs inline.
     async fn finish(&mut self) {
-        if let Some(state) = self.state.take() {
-            state.run().await;
+        let Some(state) = self.state.take() else {
+            return;
+        };
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                if let Err(err) = handle.spawn(state.run()).await {
+                    tracing::warn!(error = %err, "remote task cleanup failed");
+                }
+            }
+            Err(_) => state.run().await,
         }
     }
 }
@@ -1061,6 +1071,97 @@ mod tests {
         let seen = probe.seen.lock().clone();
         assert!(seen.contains(&("cancel", true)), "{seen:?}");
         assert!(!seen.contains(&("cancel", false)), "{seen:?}");
+    }
+
+    /// A client whose `cancel_task` waits for `release`; records every call.
+    struct SlowCancelClient {
+        seen: Arc<Mutex<Vec<&'static str>>>,
+        release: Arc<tokio::sync::Notify>,
+    }
+
+    #[async_trait::async_trait]
+    impl A2AClient for SlowCancelClient {
+        async fn send_message(
+            &self,
+            _req: &a2a::SendMessageRequest,
+        ) -> Result<a2a::SendMessageResponse, a2a::A2AError> {
+            Err(a2a::A2AError::internal("unexpected send"))
+        }
+
+        async fn send_streaming_message(
+            &self,
+            _req: &a2a::SendMessageRequest,
+        ) -> Result<BoxStream<'static, Result<a2a::StreamResponse, a2a::A2AError>>, a2a::A2AError>
+        {
+            Ok(Box::pin(futures::stream::iter([Ok(working_update())])))
+        }
+
+        async fn cancel_task(
+            &self,
+            _req: &a2a::CancelTaskRequest,
+        ) -> Result<a2a::Task, a2a::A2AError> {
+            self.seen.lock().push("cancel started");
+            self.release.notified().await;
+            self.seen.lock().push("cancel done");
+            Ok(task(a2a::TaskState::Canceled))
+        }
+
+        async fn destroy(&self) -> Result<(), a2a::A2AError> {
+            self.seen.lock().push("destroy");
+            Ok(())
+        }
+    }
+
+    struct SlowCancelProvider(Arc<SlowCancelClient>);
+
+    #[async_trait::async_trait]
+    impl A2AClientProvider for SlowCancelProvider {
+        async fn create_client(
+            &self,
+            _cx: ClientContext<'_>,
+            _card: &a2a::AgentCard,
+        ) -> Result<Arc<dyn A2AClient>, Error> {
+            Ok(Arc::clone(&self.0) as Arc<dyn A2AClient>)
+        }
+    }
+
+    /// Dropping the event stream while the end-of-run cleanup cancel is in flight neither
+    /// aborts the cancel nor skips `destroy` (Go's deferred cleanup and destroy always run).
+    #[tokio::test]
+    async fn dropping_the_stream_during_the_cleanup_cancel_still_destroys_the_client() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let release = Arc::new(tokio::sync::Notify::new());
+        let client = Arc::new(SlowCancelClient {
+            seen: Arc::clone(&seen),
+            release: Arc::clone(&release),
+        });
+        let agent = new_a2a(A2AConfig {
+            name: "remote".into(),
+            agent_card: Some(card()),
+            client_provider: Some(Arc::new(SlowCancelProvider(client))),
+            ..Default::default()
+        })
+        .unwrap();
+        let mut stream = agent.run(context(&agent, StreamingMode::Sse));
+        stream.next().await.unwrap().unwrap();
+        // The stream ended on a working task: the run is now awaiting the cleanup cancel.
+        let pending = tokio::time::timeout(Duration::from_millis(50), stream.next()).await;
+        assert!(
+            pending.is_err(),
+            "the run ended before the cancel was released"
+        );
+        assert_eq!(*seen.lock(), vec!["cancel started"]);
+        drop(stream);
+        release.notify_one();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while !seen.lock().contains(&"destroy") {
+            assert!(tokio::time::Instant::now() < deadline, "{:?}", seen.lock());
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert_eq!(
+            *seen.lock(),
+            vec!["cancel started", "cancel done", "destroy"]
+        );
     }
 
     /// Go `NewA2A`'s validation texts.
