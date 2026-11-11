@@ -24,7 +24,7 @@ use gadk_agent::{REQUEST_CONFIRMATION_FUNCTION_CALL_NAME, original_call_from};
 use gadk_engine::workflow::WORKFLOW_INPUT_FUNCTION_CALL_NAME;
 use gadk_genai::{FunctionCall, FunctionResponse, Part};
 use gadk_session::Event;
-use serde_json::{Map, Number, Value};
+use serde_json::{Map, Value};
 
 /// Go `pendingInterrupt`: one HITL prompt the agent emitted on the previous turn that still needs
 /// a user reply on the next. The id and name come from a `FunctionCall` part whose ID appears in
@@ -142,7 +142,8 @@ fn workflow_input_response_from_user_input(line: &str) -> Map<String, Value> {
 /// itself there (`internal/llminternal/functions.go`), so the assertion fails and Go always prints
 /// the fallback (the probe's `hitl_*` fixtures record `Confirm transfer_funds?` for a tool whose
 /// hint is `Please approve or reject the tool call transfer_funds() …`). gadk's args are JSON, so
-/// the hint is skipped here to print what Go prints.
+/// the hint is skipped here to print what Go prints. Go does print the hint when the args were
+/// decoded from JSON into a map (e.g. a remote A2A sub-agent's events); gadk never does (ledger 6).
 fn render_tool_confirmation_prompt(out: &mut dyn Write, args: &Map<String, Value>) {
     let call = FunctionCall {
         args: args.clone(),
@@ -205,104 +206,77 @@ pub(crate) fn render_output(v: &Value) -> String {
 }
 
 /// Go `json.Marshal` (`indent == None`) or `json.MarshalIndent(v, prefix, indent)` of a decoded
-/// JSON value: map keys sorted (as `serde_json::Map` is without `preserve_order`), `<`, `>`, `&`,
-/// U+2028 and U+2029 escaped, floats in Go's format.
+/// JSON value: [`gadk_model::to_go_json`] (map keys sorted, `<`, `>`, `&`, U+2028 and U+2029
+/// escaped, floats in Go's format), then Go's `json.Indent` when indenting.
 fn go_json(v: &Value, indent: Option<(&str, &str)>) -> String {
-    let mut out = String::new();
-    write_go_json(&mut out, v, indent, 0);
-    out
-}
-
-fn write_go_json(out: &mut String, v: &Value, indent: Option<(&str, &str)>, depth: usize) {
-    match v {
-        Value::Null => out.push_str("null"),
-        Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
-        Value::Number(n) => out.push_str(&go_number(n)),
-        Value::String(s) => out.push_str(&go_string(s)),
-        Value::Array(items) => {
-            if items.is_empty() {
-                out.push_str("[]");
-                return;
-            }
-            out.push('[');
-            for (i, item) in items.iter().enumerate() {
-                if i > 0 {
-                    out.push(',');
-                }
-                newline(out, indent, depth + 1);
-                write_go_json(out, item, indent, depth + 1);
-            }
-            newline(out, indent, depth);
-            out.push(']');
-        }
-        Value::Object(m) => {
-            if m.is_empty() {
-                out.push_str("{}");
-                return;
-            }
-            out.push('{');
-            for (i, (k, item)) in m.iter().enumerate() {
-                if i > 0 {
-                    out.push(',');
-                }
-                newline(out, indent, depth + 1);
-                out.push_str(&go_string(k));
-                out.push(':');
-                if indent.is_some() {
-                    out.push(' ');
-                }
-                write_go_json(out, item, indent, depth + 1);
-            }
-            newline(out, indent, depth);
-            out.push('}');
-        }
-    }
-}
-
-/// Go `json.Indent`'s line break: newline, prefix, one indent per nesting level.
-fn newline(out: &mut String, indent: Option<(&str, &str)>, depth: usize) {
-    if let Some((prefix, unit)) = indent {
-        out.push('\n');
-        out.push_str(prefix);
-        for _ in 0..depth {
-            out.push_str(unit);
-        }
-    }
-}
-
-/// A Go `encoding/json` string literal: serde's escaping plus Go's HTML and line-separator
-/// escapes (serde never produces these characters inside an escape sequence).
-fn go_string(s: &str) -> String {
-    let quoted = serde_json::to_string(s).unwrap_or_default();
-    let mut out = String::with_capacity(quoted.len());
-    for c in quoted.chars() {
-        match c {
-            '<' => out.push_str("\\u003c"),
-            '>' => out.push_str("\\u003e"),
-            '&' => out.push_str("\\u0026"),
-            '\u{2028}' => out.push_str("\\u2028"),
-            '\u{2029}' => out.push_str("\\u2029"),
-            c => out.push(c),
-        }
-    }
-    out
-}
-
-/// Go `encoding/json` `floatEncoder` for floats (`'f'` shortest, `'e'` below 1e-6 or from 1e21
-/// on, a positive exponent with at least two digits); integers as they are.
-fn go_number(n: &Number) -> String {
-    let Some(f) = n.as_f64().filter(|_| n.is_f64()) else {
-        return n.to_string();
+    let compact = gadk_model::to_go_json(v).unwrap_or_default();
+    let bytes = match indent {
+        Some((prefix, unit)) => go_indent(&compact, prefix, unit),
+        None => compact,
     };
-    let abs = f.abs();
-    if abs == 0.0 || (1e-6..1e21).contains(&abs) {
-        return format!("{f}");
+    String::from_utf8(bytes).unwrap_or_default()
+}
+
+/// Go `json.Indent(dst, src, prefix, indent)` of compact JSON: a line break (newline, `prefix`,
+/// one `indent` per nesting level) after `{`, `[` and `,` and before the closing bracket, a space
+/// after `:`; `{}` and `[]` stay as they are.
+fn go_indent(src: &[u8], prefix: &str, indent: &str) -> Vec<u8> {
+    fn newline(out: &mut Vec<u8>, prefix: &str, indent: &str, depth: usize) {
+        out.push(b'\n');
+        out.extend_from_slice(prefix.as_bytes());
+        for _ in 0..depth {
+            out.extend_from_slice(indent.as_bytes());
+        }
     }
-    let e = format!("{f:e}");
-    match e.split_once('e') {
-        Some((mantissa, exp)) if !exp.starts_with('-') => format!("{mantissa}e+{exp:0>2}"),
-        _ => e,
+    let mut out = Vec::with_capacity(src.len() * 2);
+    let (mut depth, mut in_string, mut escaped, mut need_indent) = (0usize, false, false, false);
+    for &c in src {
+        if in_string {
+            out.push(c);
+            if escaped {
+                escaped = false;
+            } else if c == b'\\' {
+                escaped = true;
+            } else if c == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        if c.is_ascii_whitespace() {
+            continue;
+        }
+        if need_indent && c != b']' && c != b'}' {
+            need_indent = false;
+            depth += 1;
+            newline(&mut out, prefix, indent, depth);
+        }
+        match c {
+            b'"' => {
+                in_string = true;
+                out.push(c);
+            }
+            b'{' | b'[' => {
+                out.push(c);
+                need_indent = true;
+            }
+            b',' => {
+                out.push(c);
+                newline(&mut out, prefix, indent, depth);
+            }
+            b':' => out.extend_from_slice(b": "),
+            b'}' | b']' => {
+                if need_indent {
+                    need_indent = false;
+                } else {
+                    depth = depth.saturating_sub(1);
+                    newline(&mut out, prefix, indent, depth);
+                }
+                out.push(c);
+            }
+            _ => out.push(c),
+        }
     }
+    out
 }
 
 #[cfg(test)]
@@ -328,6 +302,12 @@ mod tests {
             go_json(&v, Some(("  ", "  "))),
             "{\n    \"days\": 5,\n    \"empty\": {},\n    \"list\": [\n      1,\n      {\n        \"k\": true\n      }\n    ],\n    \"user\": \"alice\"\n  }"
         );
+        // Brackets, commas, colons and escaped quotes inside strings are left alone.
+        assert_eq!(
+            go_json(&json!({"a": "x{,}:\"[]"}), Some(("", "\t"))),
+            "{\n\t\"a\": \"x{,}:\\\"[]\"\n}"
+        );
+        assert_eq!(go_json(&json!([]), Some(("", " "))), "[]");
     }
 
     #[test]

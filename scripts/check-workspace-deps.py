@@ -40,7 +40,8 @@
   second (after `gadk-mcp`) besides the façade that depends on `gadk-auth`, and only the façade
   depends on it (feature `a2a`).
 - 6: `gadk-launcher` depends on exactly `gadk-agent`, `gadk-engine`, `gadk-session`,
-  `gadk-artifact`, `gadk-memory`, `gadk-genai`, `gadk-platform` and, optionally, `gadk-server`
+  `gadk-artifact`, `gadk-memory`, `gadk-genai`, `gadk-model` (Go JSON for the console's HITL
+  prompts), `gadk-platform` and, optionally, `gadk-server`
   (feature `web`) and `gadk-a2a` (feature `a2a`); it is the fifth crate that may depend on
   `gadk-engine`, and only the façade depends on it (feature `launcher`). `gadk-genai` depends on
   `gadk-platform` for the Go duration port.
@@ -73,7 +74,7 @@ ALLOWED = {
     "gadk-a2a": {"gadk-agent", "gadk-engine", "gadk-session", "gadk-genai", "gadk-model", "gadk-auth",
                  "gadk-platform", "gadk-server"},
     "gadk-launcher": {"gadk-agent", "gadk-engine", "gadk-session", "gadk-artifact", "gadk-memory",
-                      "gadk-genai", "gadk-platform", "gadk-server", "gadk-a2a"},
+                      "gadk-genai", "gadk-model", "gadk-platform", "gadk-server", "gadk-a2a"},
     "gadk": {"gadk-genai", "gadk-platform", "gadk-model", "gadk-session", "gadk-gemini",
              "gadk-agent", "gadk-engine", "gadk-tools", "gadk-auth", "gadk-mcp", "gadk-artifact",
              "gadk-memory", "gadk-anthropic", "gadk-openai", "gadk-session-database",

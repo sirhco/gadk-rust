@@ -490,183 +490,31 @@ fn take_or(slot: &Mutex<Option<InputLines>>, default: impl FnOnce() -> InputLine
 }
 
 /// The console against the Go probe's console fixtures (`testdata/console`, format in
-/// `scripts/gen-go-launcher/SCENARIO.md`): the probe's agent and scripted model, rebuilt from
-/// gadk's `MockModel`, give the same stdout bytes and no log output.
+/// `scripts/gen-go-launcher/SCENARIO.md`): the probe's agent and scripted model
+/// (`test_support::probe_agent`) give the same stdout bytes and no log output.
 #[cfg(test)]
 mod tests {
     use std::io::Cursor;
-    use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use gadk_agent::{AgentError, BeforeModelCallback, SingleLoader, ToolError};
-    use gadk_engine::llm::LlmAgentConfig;
-    use gadk_engine::testutil::MockModel;
-    use gadk_engine::tool::{FunctionTool, FunctionToolConfig};
-    use gadk_genai::{FinishReason, FunctionCall, ROLE_MODEL};
+    use gadk_agent::SingleLoader;
     use pretty_assertions::assert_eq;
-    use serde_json::json;
 
     use super::*;
     use crate::golog;
-
-    /// One model call of the probe's scripted model.
-    enum Call {
-        /// `fail`: Go's model yields `errors.New("scripted model failure")`; here a before-model
-        /// callback fails the call with that text.
-        Fail,
-        /// The texts of a `reply(c1, c2)` (SSE: two partial chunks and the final).
-        Reply(&'static str, &'static str),
-        /// `revise`: SSE partials `Draft `, `answer.`, final `Final answer.`.
-        Revise,
-        /// `transfer`: a final response of this many `transfer_funds {"amount": 100}` calls (the
-        /// probe makes one).
-        Transfer(usize),
-    }
-
-    /// The probe model's calls for a stdin script: one per complete line, the answer to a
-    /// confirmation prompt continuing the transfer.
-    fn calls_for(stdin: &str) -> Vec<Call> {
-        let mut calls = Vec::new();
-        let mut confirming = false;
-        let mut lines = stdin.split_inclusive('\n').filter(|l| l.ends_with('\n'));
-        for line in lines.by_ref() {
-            let line = line.trim_end_matches(['\r', '\n']);
-            if confirming {
-                confirming = false;
-                let yes = matches!(
-                    line.trim().to_lowercase().as_str(),
-                    "y" | "yes" | "true" | "confirm"
-                );
-                calls.push(if yes {
-                    Call::Reply("Transfer ", "done.")
-                } else {
-                    Call::Reply("Transfer ", "cancelled.")
-                });
-                continue;
-            }
-            calls.push(match line {
-                "hello" => Call::Reply("Hello! ", "How can I help?"),
-                "revise" => Call::Revise,
-                "fail" => Call::Fail,
-                "transfer" => {
-                    confirming = true;
-                    Call::Transfer(1)
-                }
-                _ => Call::Reply("I can only ", "say hello."),
-            });
-        }
-        calls
-    }
-
-    /// The probe's `assistant` over a `MockModel` scripted with `calls`, and the model.
-    fn assistant(calls: Vec<Call>, sse: bool) -> (Arc<dyn gadk_agent::Agent>, Arc<MockModel>) {
-        let text = |t: &str, partial: bool| {
-            let mut r = Event::default().response;
-            r.content = Some(Content::from_text(t, ROLE_MODEL));
-            r.partial = partial;
-            if !partial {
-                r.finish_reason = Some(FinishReason::Stop);
-            }
-            r
-        };
-        let mut fails = Vec::new();
-        let mut streams = Vec::new();
-        for call in &calls {
-            fails.push(matches!(call, Call::Fail));
-            match call {
-                Call::Fail => {}
-                Call::Reply(a, b) if sse => streams.push(vec![
-                    Ok(text(a, true)),
-                    Ok(text(b, true)),
-                    Ok(text(&format!("{a}{b}"), false)),
-                ]),
-                Call::Reply(a, b) => streams.push(vec![Ok(text(&format!("{a}{b}"), false))]),
-                Call::Revise if sse => streams.push(vec![
-                    Ok(text("Draft ", true)),
-                    Ok(text("answer.", true)),
-                    Ok(text("Final answer.", false)),
-                ]),
-                Call::Revise => streams.push(vec![Ok(text("Final answer.", false))]),
-                Call::Transfer(n) => {
-                    let call = Part {
-                        function_call: Some(FunctionCall {
-                            name: "transfer_funds".into(),
-                            args: json!({"amount": 100})
-                                .as_object()
-                                .cloned()
-                                .unwrap_or_default(),
-                            ..Default::default()
-                        }),
-                        ..Default::default()
-                    };
-                    let mut r = text("", false);
-                    r.content = Some(Content::from_parts(vec![call; *n], ROLE_MODEL));
-                    streams.push(vec![Ok(r)]);
-                }
-            }
-        }
-        let model = MockModel::with_stream(streams).name_as("scripted-assistant");
-        let next = Arc::new(AtomicUsize::new(0));
-        let fail_call: BeforeModelCallback = Arc::new(move |_ctx, req| {
-            let i = next.fetch_add(1, Ordering::SeqCst);
-            let fail = fails.get(i).copied().unwrap_or(false);
-            Box::pin(async move {
-                if fail {
-                    (req, Err(AgentError::other("scripted model failure")))
-                } else {
-                    (req, Ok(None))
-                }
-            })
-        });
-        let transfer_funds = FunctionTool::new(
-            FunctionToolConfig {
-                input_schema: Some(json!({
-                    "type": "object",
-                    "properties": {"amount": {"type": "integer"}},
-                })),
-                require_confirmation: true,
-                ..FunctionToolConfig::new("transfer_funds", "Transfers funds.")
-            },
-            |_ctx, args: serde_json::Map<String, Value>| async move {
-                let amount = args.get("amount").cloned().unwrap_or_default();
-                Ok::<Value, ToolError>(json!({"status": format!("transferred {amount}")}))
-            },
-        )
-        .unwrap();
-        let agent = gadk_engine::llm_agent::new(LlmAgentConfig {
-            name: "assistant".into(),
-            description: "Answers greetings and transfers funds.".into(),
-            instruction: "Answer briefly. Use transfer_funds to transfer funds.".into(),
-            model: Some(model.clone()),
-            tools: vec![transfer_funds],
-            before_model_callbacks: vec![fail_call],
-            ..Default::default()
-        })
-        .unwrap();
-        (agent, model)
-    }
+    use crate::test_support as ts;
 
     /// Runs one fixture through `ConsoleLauncher::execute` (the `console` keyword dropped, as the
-    /// universal launcher does) and returns (stdout, log output, the model).
-    async fn replay(fixture: &Value) -> (String, String, Arc<MockModel>) {
-        let args: Vec<String> = fixture["args"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|a| a.as_str().unwrap().to_owned())
-            .collect();
+    /// universal launcher does) with the probe's agent, and returns (stdout, log output).
+    async fn replay(fixture: &Value) -> (String, String) {
+        let args = ts::args(fixture, 0);
         let args = match args.first().map(String::as_str) {
             Some("console") => args[1..].to_vec(),
             _ => args,
         };
-        let sse = args
-            .windows(2)
-            .any(|w| w[0] == "-streaming_mode" && w[1] == "sse");
         let stdin = fixture["stdin"].as_str().unwrap().to_owned();
-        let (agent, model) = assistant(calls_for(&stdin), sse);
-
         let buf = Arc::new(Mutex::new(Vec::<u8>::new()));
         let (log, logged) = golog::capture();
-        let mut config = Config::new(Arc::new(SingleLoader::new(agent)));
+        let mut config = Config::new(Arc::new(SingleLoader::new(ts::probe_agent())));
         config.log = log;
         let mut l = new().with_io(
             input_lines(Cursor::new(stdin.into_bytes())),
@@ -677,26 +525,16 @@ mod tests {
             .await
             .unwrap();
         let stdout = String::from_utf8(buf.lock().unwrap().clone()).unwrap();
-        (stdout, logged.contents(), model)
+        (stdout, logged.contents())
     }
 
     #[tokio::test]
     async fn console_fixtures_replay_byte_for_byte() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/console");
-        let mut names: Vec<_> = std::fs::read_dir(&dir)
-            .unwrap()
-            .map(|e| e.unwrap().path())
-            .filter(|p| {
-                p.extension().is_some_and(|x| x == "json")
-                    && !p.to_string_lossy().ends_with(".deltas.json")
-            })
-            .collect();
-        names.sort();
-        assert_eq!(names.len(), 15, "console fixtures in {}", dir.display());
-        for path in names {
-            let fixture: Value =
-                serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-            let (stdout, stderr, model) = replay(&fixture).await;
+        let names = ts::fixture_names("console");
+        assert_eq!(names.len(), 15);
+        for name in names {
+            let fixture = ts::fixture("console", &name);
+            let (stdout, stderr) = replay(&fixture).await;
             let name = fixture["name"].as_str().unwrap();
             assert_eq!(
                 stdout,
@@ -708,18 +546,6 @@ mod tests {
                 fixture["stderr"].as_str().unwrap(),
                 "{name}: stderr"
             );
-            if name.contains("hitl") {
-                // The probe model answers from the tool's function response: an `error` key
-                // (a rejected confirmation) gives `Transfer cancelled.`.
-                let requests = model.requests();
-                let last = requests.last().and_then(|r| r.contents.last()).unwrap();
-                let response = &last.parts[0].function_response.as_ref().unwrap().response;
-                assert_eq!(
-                    response.contains_key("error"),
-                    name == "hitl_reject",
-                    "{name}: {response:?}"
-                );
-            }
         }
     }
 
@@ -772,7 +598,7 @@ mod tests {
             Arc::new(Mutex::new(Vec::<u8>::new())),
             false,
         );
-        let (agent, _) = assistant(Vec::new(), false);
+        let agent = ts::probe_agent();
         let err = Launcher::execute(
             &mut l,
             CancellationToken::new(),
@@ -799,7 +625,7 @@ mod tests {
             .into_iter(),
         );
         let mut l = new().with_io(input, buf.clone(), false);
-        let (agent, _) = assistant(Vec::new(), false);
+        let agent = ts::probe_agent();
         let (log, logged) = golog::capture();
         let mut config = Config::new(Arc::new(SingleLoader::new(agent)));
         config.log = log;
@@ -813,6 +639,61 @@ mod tests {
             String::from_utf8(buf.lock().unwrap().clone()).unwrap(),
             "\n\nUser -> "
         );
+    }
+
+    /// The probe's model, except that `transfer` asks for two `transfer_funds` calls at once (a
+    /// turn paused on two confirmations).
+    struct TwoTransfers;
+
+    impl gadk_model::Llm for TwoTransfers {
+        fn name(&self) -> &str {
+            "two-transfers"
+        }
+
+        fn generate_content(
+            &self,
+            req: gadk_model::LlmRequest,
+            _stream: bool,
+        ) -> futures::stream::BoxStream<
+            'static,
+            Result<gadk_model::LlmResponse, gadk_model::ModelError>,
+        > {
+            let answered = req
+                .contents
+                .last()
+                .is_some_and(|c| c.parts.iter().any(|p| p.function_response.is_some()));
+            let parts = if answered {
+                vec![gadk_genai::Part::from_text("Transfer done.")]
+            } else {
+                (1..=2)
+                    .map(|n| gadk_genai::Part {
+                        function_call: Some(gadk_genai::FunctionCall {
+                            id: format!("call-{n}"),
+                            name: "transfer_funds".into(),
+                            args: serde_json::json!({"amount": n})
+                                .as_object()
+                                .cloned()
+                                .unwrap(),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    })
+                    .collect()
+            };
+            let resp = gadk_model::LlmResponse {
+                content: Some(gadk_genai::Content::from_parts(
+                    parts,
+                    gadk_genai::ROLE_MODEL,
+                )),
+                finish_reason: Some(gadk_genai::FinishReason::Stop),
+                ..Default::default()
+            };
+            Box::pin(futures::stream::iter([Ok(resp)]))
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
     }
 
     /// Records the buffer length at every flush.
@@ -838,10 +719,7 @@ mod tests {
     #[tokio::test]
     async fn every_prompt_is_flushed_before_reading_its_answer() {
         let rec = Arc::new(Mutex::new(FlushRecorder::default()));
-        let (agent, _) = assistant(
-            vec![Call::Transfer(2), Call::Reply("Transfer ", "done.")],
-            false,
-        );
+        let agent = ts::probe_agent_with(Arc::new(TwoTransfers));
         let mut l = new().with_io(
             input_lines(Cursor::new(b"transfer\nyes\nyes\n".to_vec())),
             rec.clone(),
@@ -887,9 +765,7 @@ mod tests {
     /// `Details:`.
     #[test]
     fn help_matches_the_cli_fixture() {
-        let path =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/cli/help_console.json");
-        let fixture: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let fixture = ts::cli("help_console");
         let stderr = fixture["stderr"].as_str().unwrap();
 
         let out = Arc::new(Mutex::new(Vec::<u8>::new()));

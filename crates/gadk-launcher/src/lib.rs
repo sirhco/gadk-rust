@@ -36,6 +36,9 @@ mod parity_tests;
 #[cfg(feature = "prod")]
 pub mod prod;
 pub mod telemetry;
+#[cfg(test)]
+#[path = "../tests/support/mod.rs"]
+mod test_support;
 pub mod universal;
 #[cfg(feature = "web")]
 pub mod web;

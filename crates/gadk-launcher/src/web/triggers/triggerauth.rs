@@ -24,7 +24,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use gadk_platform::go_flag::{Flag, FlagSet};
 use gadk_platform::{GoDuration, go_quote};
-use gadk_server::authn::{self, Authenticator, AuthnError, GoogleOidcConfig};
+use gadk_server::authn::{self, Authenticator, AuthnError, AuthnLog, GoogleOidcConfig};
 use gadk_server::mux::{Handler, Request, handler};
 use gadk_server::rest::ServerError;
 use gadk_server::rest::triggers::{ControllerConfig, TriggerConfig};
@@ -34,6 +34,7 @@ use tower::{Layer, Service};
 use crate::config::Config;
 use crate::error::Error;
 use crate::flag_usage::format_flag_usage;
+use crate::golog::Logger;
 use crate::web::WebRouter;
 
 /// Go `authn.NewGoogleOIDC`'s signature: the seam Go's tests replace (`newGoogleOIDC`) to see the
@@ -69,6 +70,7 @@ impl Flags {
     /// Go `(*Flags).Authenticator`: the authenticator the flags describe; `None` (neither flag
     /// passed) keeps the endpoint unauthenticated. `fs` is the set the flags were registered on
     /// (Go keeps it in `Flags.fs` for `passed`).
+    #[cfg(test)]
     pub(crate) fn authenticator(
         &self,
         fs: &FlagSet,
@@ -78,6 +80,21 @@ impl Flags {
             &self.service_accounts.get(),
             &|name| fs.is_set(name),
             &authn::google_oidc,
+        )
+    }
+
+    /// [`Flags::authenticator`] whose Google OIDC authenticator writes its rejection records
+    /// (Go's `log.Printf` in `authn`) to `log`.
+    pub(crate) fn authenticator_logging_to(
+        &self,
+        fs: &FlagSet,
+        log: AuthnLog,
+    ) -> Result<Option<Arc<dyn Authenticator>>, Error> {
+        authenticator_with(
+            &self.audience.get(),
+            &self.service_accounts.get(),
+            &|name| fs.is_set(name),
+            &move |cfg| authn::google_oidc_with_log(cfg, Arc::clone(&log)),
         )
     }
 }
@@ -183,6 +200,10 @@ pub(crate) struct Trigger {
     normalized_path_prefix: Option<String>,
     /// Go `auth`: built from the flags by `parse`. `None` leaves the endpoint open.
     pub(crate) auth: Option<Arc<dyn Authenticator>>,
+    /// Go's global `log` as the authenticator sees it: stderr until `setup_subrouters` hands it
+    /// the launcher's [`Config::log`] (the authenticator is built by `parse`, before the config
+    /// is known).
+    log: Arc<Mutex<Logger>>,
 }
 
 impl Trigger {
@@ -227,6 +248,7 @@ impl Trigger {
             auth_flags,
             normalized_path_prefix: None,
             auth: None,
+            log: Arc::new(Mutex::new(Logger::stderr())),
         }
     }
 
@@ -289,7 +311,11 @@ impl Trigger {
         self.normalized_path_prefix = Some(prefix);
 
         self.auth = None;
-        self.auth = self.auth_flags.authenticator(&lock(&self.flags))?;
+        let cell = Arc::clone(&self.log);
+        let log: AuthnLog = Arc::new(move |msg: &str| lock(&cell).print(msg));
+        self.auth = self
+            .auth_flags
+            .authenticator_logging_to(&lock(&self.flags), log)?;
 
         Ok(rest)
     }
@@ -314,6 +340,7 @@ impl Trigger {
         config: &Config,
         new_handler: impl FnOnce(ControllerConfig) -> Result<Handler, ServerError>,
     ) -> Result<(), Error> {
+        *lock(&self.log) = config.log.clone();
         let trigger_config = TriggerConfig {
             // Go `int`s: saturated into the controller's `i32`s (validated > 0).
             max_retries: saturate(self.trigger_max_retries.get()),
@@ -397,31 +424,20 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
-    use std::time::{Duration, Instant};
-
     use axum::body::Body;
     use futures::StreamExt;
     use gadk_agent::{AgentConfig, SingleLoader, new_agent};
     use gadk_server::mux::Response;
     use http::StatusCode;
     use pretty_assertions::assert_eq;
-    use serde_json::{Value, json};
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::TcpStream;
     use tokio_util::sync::CancellationToken;
 
     use super::*;
     use crate::golog::Captured;
     use crate::launcher::SubLauncher;
+    use crate::test_support::{self as ts, TS, strings};
     use crate::web::triggers::{eventarc, pubsub};
     use crate::web::{self as webl, WebSublauncher};
-
-    /// The fixed `golog` clock of these tests.
-    const TS: &str = "2009/11/10 23:00:00 ";
-
-    fn strings(args: &[&str]) -> Vec<String> {
-        args.iter().map(|s| (*s).to_owned()).collect()
-    }
 
     /// A config serving a do-nothing agent named `name`, its log captured with the fixed clock.
     fn config_serving(name: &str) -> (Config, Captured) {
@@ -476,7 +492,7 @@ mod tests {
             ("pubsub", Box::new(pubsub::new()) as Box<dyn WebSublauncher>),
             ("eventarc", Box::new(eventarc::new())),
         ] {
-            let f = cli_fixture(&format!("help_web_{keyword}"));
+            let f = ts::cli(&format!("help_web_{keyword}"));
             let stderr = f["stderr"].as_str().unwrap();
             let usage = stderr.split("<ts> ").next().unwrap();
             assert_eq!(
@@ -485,11 +501,6 @@ mod tests {
                 "{keyword}: usage"
             );
         }
-    }
-
-    fn cli_fixture(name: &str) -> Value {
-        let path = format!("{}/testdata/cli/{name}.json", env!("CARGO_MANIFEST_DIR"));
-        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap()
     }
 
     /// Task 2's CLI fixtures for the trigger flags: the error `Execute` returns, through the web
@@ -509,7 +520,7 @@ mod tests {
             "oidc_accounts_without_audience",
             "oidc_audience_without_accounts",
         ] {
-            let f = cli_fixture(name);
+            let f = ts::cli(name);
             let args: Vec<String> = f["args"].as_array().unwrap()[1..]
                 .iter()
                 .map(|a| a.as_str().unwrap().to_owned())
@@ -686,169 +697,17 @@ mod tests {
 
     // ---- Task 2's wire fixtures (SCENARIO.md) for the trigger exchanges ----
 
-    fn fixture(name: &str) -> Value {
-        let path = format!("{}/testdata/wire/{name}.json", env!("CARGO_MANIFEST_DIR"));
-        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap()
-    }
-
-    /// SCENARIO.md N1 (fixed clock), N2 and N3 on log text.
-    fn normalize_log(text: &str, port: u16) -> Vec<String> {
-        text.lines()
-            .map(|line| {
-                let line = line.replacen(TS, "<ts> ", 1);
-                let line = normalize_port(&line, port);
-                // N3: `<ts> METHOD URI elapsed`.
-                let fields: Vec<&str> = line.split(' ').collect();
-                if fields.len() == 4
-                    && fields[0] == "<ts>"
-                    && !fields[1].is_empty()
-                    && fields[1].bytes().all(|b| b.is_ascii_uppercase())
-                    && fields[3].ends_with('s')
-                    && fields[3].starts_with(|c: char| c.is_ascii_digit())
-                {
-                    format!("<ts> {} {} <elapsed>", fields[1], fields[2])
-                } else {
-                    line
-                }
-            })
-            .collect()
-    }
-
-    /// SCENARIO.md N2.
-    fn normalize_port(s: &str, port: u16) -> String {
-        let mut s = s.to_owned();
-        for host in ["127.0.0.1", "localhost", "port"] {
-            s = s.replace(&format!("{host}:{port}"), &format!("{host}:<port>"));
-        }
-        s
-    }
-
-    /// The raw request of a fixture (SCENARIO.md "Request").
-    fn raw_request(request: &Value, port: u16) -> Vec<u8> {
-        let mut raw = format!(
-            "{} {} HTTP/1.1\r\n",
-            request["method"].as_str().unwrap(),
-            request["target"].as_str().unwrap()
-        );
-        for h in request["headers"].as_array().unwrap() {
-            let value = h[1].as_str().unwrap().replace("<port>", &port.to_string());
-            raw.push_str(&format!("{}: {value}\r\n", h[0].as_str().unwrap()));
-        }
-        raw.push_str("\r\n");
-        raw.push_str(request["body"].as_str().unwrap());
-        raw.into_bytes()
-    }
-
-    /// A response read to EOF in the fixture's `response` shape (N2, N7; header names lowercased
-    /// and sorted, as the fixtures' are compared case-insensitively). The trigger responses are
-    /// never chunked.
-    fn parse_response(raw: &[u8], port: u16) -> Value {
-        let split = raw.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
-        let head = String::from_utf8(raw[..split].to_vec()).unwrap();
-        let body = String::from_utf8(raw[split + 4..].to_vec()).unwrap();
-        let mut lines = head.split("\r\n");
-        let (_, rest) = lines.next().unwrap().split_once(' ').unwrap();
-        let (status, status_text) = rest.split_once(' ').unwrap();
-        let headers = lines
-            .map(|l| {
-                let (k, v) = l.split_once(':').unwrap();
-                let v = if k.eq_ignore_ascii_case("date") {
-                    "<date>".to_owned()
-                } else {
-                    normalize_port(v.trim(), port)
-                };
-                (k.to_owned(), v)
-            })
-            .collect();
-        response_value(
-            status.parse().unwrap(),
-            status_text,
-            headers,
-            &normalize_port(&body, port),
-            body.len(),
-        )
-    }
-
-    fn response_value(
-        status: u64,
-        status_text: &str,
-        headers: Vec<(String, String)>,
-        body: &str,
-        body_length: usize,
-    ) -> Value {
-        let mut headers: Vec<(String, String)> = headers
-            .into_iter()
-            .map(|(k, v)| (k.to_ascii_lowercase(), v))
-            .collect();
-        headers.sort();
-        json!({
-            "status": status,
-            "status_text": status_text,
-            "headers": headers,
-            "body": body,
-            "body_length": body_length,
-        })
-    }
-
-    /// The fixture's response in the shape [`parse_response`] produces.
-    fn expected_response(fixture: &Value) -> Value {
-        let r = &fixture["response"];
-        let headers = r["headers"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|h| {
-                (
-                    h[0].as_str().unwrap().to_owned(),
-                    h[1].as_str().unwrap().to_owned(),
-                )
-            })
-            .collect();
-        response_value(
-            r["status"].as_u64().unwrap(),
-            r["status_text"].as_str().unwrap(),
-            headers,
-            r["body"].as_str().unwrap(),
-            usize::try_from(r["body_length"].as_u64().unwrap()).unwrap(),
-        )
-    }
-
-    fn log_lines(fixture: &Value) -> Vec<String> {
-        fixture["log"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|l| l.as_str().unwrap().to_owned())
-            .collect()
-    }
-
-    /// Is `line` (a fixture log line) one of the Google OIDC provider's own records? gadk-server
-    /// writes those through `tracing`, not the launcher's Go log (Task 12 replay).
-    fn is_oidc_provider_line(line: &str) -> bool {
-        line.starts_with("<ts> adk: authn: ")
-    }
-
-    /// Is `line` (a startup log line) the user message of a sub-launcher these tests leave out?
-    fn is_absent_user_message(line: &str) -> bool {
-        ["webui:", "a2a:", "api:"]
-            .iter()
-            .any(|k| line.starts_with(&format!("<ts>        {k}")))
-    }
-
     /// Starts the web launcher with only the two trigger sub-launchers on the fixture server's
     /// arguments (the other sub-launchers' keywords dropped), replays `exchanges` byte for byte
-    /// after the SCENARIO.md normalizations, and checks the startup and shutdown logs.
+    /// after the SCENARIO.md normalizations (the OIDC provider's `adk: authn: …` records
+    /// included: they go to the launcher's Go log), and checks the startup and shutdown logs.
     async fn replay(server: &str, exchanges: &[&str]) {
-        let startup = fixture(&format!("{server}_00_startup"));
-        let port = std::net::TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
-        let args: Vec<String> = startup["args"].as_array().unwrap()[1..]
+        let startup = ts::wire(&format!("{server}_00_startup"));
+        let port = ts::free_port();
+        let args: Vec<String> = ts::args(&startup, port)[1..]
             .iter()
-            .map(|a| a.as_str().unwrap().replace("<port>", &port.to_string()))
             .filter(|a| !["api", "webui", "a2a"].contains(&a.as_str()))
+            .cloned()
             .collect();
         let mut l = webl::new(vec![Box::new(pubsub::new()), Box::new(eventarc::new())]);
         assert_eq!(
@@ -863,59 +722,29 @@ mod tests {
             let (l, cancel) = (Arc::clone(&l), cancel.clone());
             tokio::spawn(async move { l.run_with(cancel, config, |_| true).await })
         };
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while TcpStream::connect(("127.0.0.1", port)).await.is_err() {
-            assert!(Instant::now() < deadline, "the server did not start");
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
+        ts::wait_listening(port).await;
 
-        let want: Vec<String> = log_lines(&startup)
-            .into_iter()
-            .filter(|l| !is_absent_user_message(l))
-            .collect();
         assert_eq!(
-            normalize_log(&out.contents(), port),
-            want,
+            ts::normalize_log(&out.contents(), port),
+            ts::startup_log_of(&startup, &["pubsub", "eventarc"]),
             "{server}: startup log"
         );
-
         for name in exchanges {
-            let f = fixture(name);
-            let logged = out.contents().len();
-            let mut conn = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-            conn.write_all(&raw_request(&f["request"], port))
-                .await
-                .unwrap();
-            let mut raw = Vec::new();
-            conn.read_to_end(&mut raw).await.unwrap();
-            assert_eq!(
-                parse_response(&raw, port),
-                expected_response(&f),
-                "{name}: response"
-            );
-            let want: Vec<String> = log_lines(&f)
-                .into_iter()
-                .filter(|l| !is_oidc_provider_line(l))
-                .collect();
-            assert_eq!(
-                normalize_log(&out.contents()[logged..], port),
-                want,
-                "{name}: log"
-            );
+            ts::assert_exchange(port, name, || out.contents()).await;
         }
-
         let logged = out.contents().len();
         cancel.cancel();
         running.await.unwrap().unwrap();
         assert_eq!(
-            normalize_log(&out.contents()[logged..], port),
-            log_lines(&fixture(&format!("{server}_99_shutdown"))),
+            ts::normalize_log(&out.contents()[logged..], port),
+            ts::log_lines(&ts::wire(&format!("{server}_99_shutdown"))),
             "{server}: shutdown log"
         );
     }
 
     /// The `oidc` server whole: pubsub behind OIDC (401 without a token and with a malformed
-    /// one), eventarc open, and the startup log naming only the open endpoint.
+    /// one, each with the provider's Go log record), eventarc open, and the startup log naming
+    /// only the open endpoint.
     #[tokio::test]
     async fn the_oidc_server_matches_go_wire_fixtures() {
         replay(
@@ -929,18 +758,17 @@ mod tests {
         .await;
     }
 
-    /// The `full` server's trigger exchanges that need no other sub-launcher. Left to Task 12:
-    /// the GET fall-through to the API mount (`full_49`, needs `api`), the bad-JSON body
-    /// (`full_47`: serde's decode text after Go's prefix, the 5a ledger's declared divergence)
-    /// and the body over `-max_request_body_size` (`full_48`: gadk-server's trigger `read_body`
-    /// recognizes only axum's length-limit error, not the launcher middleware's
-    /// `MaxBytesError`).
+    /// The `full` server's trigger exchanges that need no other sub-launcher, the body over
+    /// `-max_request_body_size` (`full_48`) included. `tests/wire_replay.rs` replays the GET
+    /// fall-through to the API mount (`full_49`) and the bad-JSON body (`full_47`, a declared
+    /// delta).
     #[tokio::test]
     async fn the_full_server_trigger_exchanges_match_go_wire_fixtures() {
         replay(
             "full",
             &[
                 "full_46_pubsub_trigger",
+                "full_48_pubsub_trigger_body_too_large",
                 "full_50_eventarc_trigger_structured",
                 "full_51_eventarc_trigger_binary",
             ],

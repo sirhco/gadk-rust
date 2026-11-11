@@ -34,13 +34,13 @@ use std::convert::Infallible;
 use std::sync::{Arc, RwLock};
 
 use axum::body::Body;
-use gadk_platform::{go_path_clean, go_url};
+use gadk_platform::go_url;
+pub(crate) use gadk_server::mux::go_request_uri;
 use gadk_server::mux::{
-    Handler, PathVars, Request, Response, Template, clean_path, clean_path_redirect,
+    Handler, PathVars, Request, Response, Template, bad_request, clean_path, clean_path_redirect,
+    not_found, options_star, redirect, strip_body,
 };
-use http::header::{CONNECTION, CONTENT_LENGTH, CONTENT_TYPE, LOCATION, X_CONTENT_TYPE_OPTIONS};
-use http::{HeaderValue, Method, StatusCode, Uri, Version};
-use hyper::body::Body as _;
+use http::{Method, StatusCode};
 use tower::ServiceExt;
 
 /// Go `router.Use(mw)`: wraps a matched route's handler.
@@ -268,15 +268,6 @@ impl Route {
     }
 }
 
-/// Go's `r.RequestURI` / `r.URL`: an HTTP/2 request has only its `:path` (hyper adds `:scheme`
-/// and `:authority`), an HTTP/1 request its request target as sent (absolute-form included).
-pub(crate) fn go_request_uri(req: &Request) -> Uri {
-    match req.uri().path_and_query() {
-        Some(pq) if req.version() == Version::HTTP_2 => Uri::from(pq.clone()),
-        _ => req.uri().clone(),
-    }
-}
-
 /// Wraps an `axum::Router` as a `Handler` (the request is passed unchanged).
 pub fn axum_handler(router: axum::Router) -> Handler {
     Arc::new(move |req: Request| {
@@ -298,146 +289,10 @@ fn write(inner: &RwLock<Inner>) -> std::sync::RwLockWriteGuard<'_, Inner> {
     inner.write().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Go `net/http.Redirect(w, r, url, code)`.
-fn redirect(req: &Request, url: &str, code: StatusCode) -> Response {
-    let mut url = url.to_owned();
-    if let Ok(u) = go_url::parse(&url)
-        && u.scheme.is_empty()
-        && u.host.is_empty()
-    {
-        // No scheme or host: make a relative path absolute, clean it, keep a trailing slash.
-        let old_path = go_url::unescape_path(req.uri().path())
-            .map(|p| String::from_utf8_lossy(&p).into_owned())
-            .unwrap_or_default();
-        let old_path = if old_path.is_empty() {
-            "/".to_owned()
-        } else {
-            old_path
-        };
-        if !url.starts_with('/') {
-            let old_dir = &old_path[..old_path.rfind('/').map_or(0, |i| i + 1)];
-            url = format!("{old_dir}{url}");
-        }
-        let (path, query) = match url.find('?') {
-            Some(i) => (url[..i].to_owned(), url[i..].to_owned()),
-            None => (url.clone(), String::new()),
-        };
-        let trailing = path.ends_with('/');
-        let mut cleaned = go_path_clean(&path);
-        if trailing && !cleaned.ends_with('/') {
-            cleaned.push('/');
-        }
-        url = cleaned + &query;
-    }
-    let mut resp = Response::new(Body::empty());
-    *resp.status_mut() = code;
-    if let Ok(v) = HeaderValue::from_str(&hex_escape_non_ascii(&url)) {
-        resp.headers_mut().insert(LOCATION, v);
-    }
-    let method = req.method();
-    if method == Method::GET || method == Method::HEAD {
-        resp.headers_mut().insert(
-            CONTENT_TYPE,
-            HeaderValue::from_static("text/html; charset=utf-8"),
-        );
-    }
-    if method == Method::GET {
-        // `fmt.Fprintln(w, body)` where body already ends in a newline.
-        let text = code.canonical_reason().unwrap_or_default();
-        *resp.body_mut() = Body::from(format!("<a href=\"{}\">{text}</a>.\n\n", html_escape(&url)));
-    }
-    resp
-}
-
-/// Go `hexEscapeNonASCII`: bytes outside ASCII as `%` and lowercase hex.
-fn hex_escape_non_ascii(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for &b in s.as_bytes() {
-        if b >= 0x80 {
-            out.push_str(&format!("%{b:x}"));
-        } else {
-            out.push(char::from(b));
-        }
-    }
-    out
-}
-
-/// Go `htmlEscape` (`net/http`'s `htmlReplacer`).
-fn html_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&#34;"),
-            '\'' => out.push_str("&#39;"),
-            c => out.push(c),
-        }
-    }
-    out
-}
-
 /// gorilla `methodNotAllowed`: 405 with nothing but the status.
 fn method_not_allowed() -> Response {
     let mut resp = Response::new(Body::empty());
     *resp.status_mut() = StatusCode::METHOD_NOT_ALLOWED;
-    resp
-}
-
-/// Go `net/http.Error`: `msg` and a newline as `text/plain; charset=utf-8`, with
-/// `X-Content-Type-Options: nosniff`.
-fn http_error(status: StatusCode, msg: &str) -> Response {
-    let mut resp = Response::new(Body::from(format!("{msg}\n")));
-    *resp.status_mut() = status;
-    let h = resp.headers_mut();
-    h.insert(
-        CONTENT_TYPE,
-        HeaderValue::from_static("text/plain; charset=utf-8"),
-    );
-    h.insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
-    resp
-}
-
-/// Go `net/http.NotFound`: 404 `404 page not found`.
-fn not_found() -> Response {
-    http_error(StatusCode::NOT_FOUND, "404 page not found")
-}
-
-/// Go's server answer to a request target whose escapes do not decode: `400 Bad Request` as
-/// plain text, and the connection closed.
-fn bad_request() -> Response {
-    let mut resp = Response::new(Body::from("400 Bad Request"));
-    *resp.status_mut() = StatusCode::BAD_REQUEST;
-    let h = resp.headers_mut();
-    h.insert(
-        CONTENT_TYPE,
-        HeaderValue::from_static("text/plain; charset=utf-8"),
-    );
-    h.insert(CONNECTION, HeaderValue::from_static("close"));
-    resp
-}
-
-/// Go `globalOptionsHandler`: `OPTIONS *` answers 200 with `Content-Length: 0`.
-fn options_star() -> Response {
-    let mut resp = Response::new(Body::empty());
-    resp.headers_mut()
-        .insert(CONTENT_LENGTH, HeaderValue::from_static("0"));
-    resp
-}
-
-/// A HEAD response as Go's server writes it: the headers of the GET response, the would-be body
-/// length as `Content-Length` when the handler wrote a body of known length (Go sets it only when
-/// something was written), and no body.
-fn strip_body(mut resp: Response) -> Response {
-    if !resp.headers().contains_key(CONTENT_LENGTH)
-        && let Some(len) = resp.body().size_hint().exact()
-        && len > 0
-    {
-        resp.headers_mut()
-            .insert(CONTENT_LENGTH, HeaderValue::from(len));
-    }
-    *resp.body_mut() = Body::empty();
     resp
 }
 
@@ -678,14 +533,5 @@ mod tests {
         let svc = r.into_service();
         let resp = svc.oneshot(req("GET", "/a/b")).await.unwrap();
         assert_eq!(parts(resp).await.2, "axum");
-    }
-
-    #[test]
-    fn redirect_helpers_match_go() {
-        assert_eq!(hex_escape_non_ascii("/a\u{e9}"), "/a%c3%a9");
-        assert_eq!(html_escape("<a&'\">"), "&lt;a&amp;&#39;&#34;&gt;");
-        let r = req("GET", "/dir/sub");
-        let resp = redirect(&r, "../x?y=1", StatusCode::FOUND);
-        assert_eq!(resp.headers()[LOCATION], "/x?y=1");
     }
 }

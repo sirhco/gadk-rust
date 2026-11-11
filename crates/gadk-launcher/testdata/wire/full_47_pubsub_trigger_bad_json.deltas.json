@@ -1,0 +1,22 @@
+{
+  "deltas": [
+    {
+      "path": "/response/headers/Content-Length",
+      "fixture": "54",
+      "actual": "86",
+      "divergence": "Request-body JSON syntax and type errors keep serde's text after Go's prefix (ledger 5a; Go's `encoding/json` words them differently, e.g. `unexpected EOF`)."
+    },
+    {
+      "path": "/response/body",
+      "fixture": "{\"status\":\"failed to decode request: unexpected EOF\"}\n",
+      "actual": "{\"status\":\"failed to decode request: EOF while parsing an object at line 1 column 1\"}\n",
+      "divergence": "Request-body JSON syntax and type errors keep serde's text after Go's prefix (ledger 5a; Go's `encoding/json` words them differently, e.g. `unexpected EOF`)."
+    },
+    {
+      "path": "/response/body_length",
+      "fixture": 54,
+      "actual": 86,
+      "divergence": "Request-body JSON syntax and type errors keep serde's text after Go's prefix (ledger 5a; Go's `encoding/json` words them differently, e.g. `unexpected EOF`)."
+    }
+  ]
+}

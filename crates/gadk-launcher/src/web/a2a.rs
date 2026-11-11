@@ -356,6 +356,7 @@ mod tests {
     use crate::config::{A2AHandlerOption, A2AHandlerWrapper};
     use crate::golog::{self, Captured};
     use crate::launcher::SubLauncher;
+    use crate::test_support::{self as ts, strings};
 
     /// The fixed `golog` clock of these tests.
     const TS: &str = "2009/11/10 23:00:00 ";
@@ -393,15 +394,6 @@ mod tests {
         (config, out)
     }
 
-    fn strings(args: &[&str]) -> Vec<String> {
-        args.iter().map(|s| (*s).to_owned()).collect()
-    }
-
-    fn fixture(name: &str) -> Value {
-        let path = format!("{}/testdata/wire/{name}.json", env!("CARGO_MANIFEST_DIR"));
-        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap()
-    }
-
     /// The a2a routes alone, as `setup_subrouters` mounts them.
     fn routes(l: &A2ALauncher, config: &mut Config) -> WebRouter {
         let mut router = WebRouter::new(true);
@@ -424,7 +416,7 @@ mod tests {
     }
 
     fn send_message_request(version: Option<&str>) -> http::Request<Body> {
-        let body = fixture("full_29_a2a_v1_send")["request"]["body"]
+        let body = ts::wire("full_29_a2a_v1_send")["request"]["body"]
             .as_str()
             .unwrap()
             .to_owned();
@@ -499,14 +491,7 @@ mod tests {
             "failed to parse a2a flags: flag: help requested"
         );
         // The CLI fixture `help_web_a2a`: the usage the flag set prints before the error.
-        let help: Value = serde_json::from_str(
-            &std::fs::read_to_string(format!(
-                "{}/testdata/cli/help_web_a2a.json",
-                env!("CARGO_MANIFEST_DIR")
-            ))
-            .unwrap(),
-        )
-        .unwrap();
+        let help = ts::cli("help_web_a2a");
         let usage = String::from_utf8(out.lock().unwrap().clone()).unwrap();
         assert!(
             help["stderr"].as_str().unwrap().starts_with(&usage),
@@ -533,7 +518,7 @@ mod tests {
         assert_eq!(headers["content-type"], "application/json");
 
         let mut want: Value = serde_json::from_str(
-            fixture("full_28_a2a_card")["response"]["body"]
+            ts::wire("full_28_a2a_card")["response"]["body"]
                 .as_str()
                 .unwrap(),
         )
@@ -649,7 +634,7 @@ mod tests {
             format!("{agent_url}/a2a/v1/invoke")
         );
 
-        let send = fixture("full_29_a2a_v1_send");
+        let send = ts::wire("full_29_a2a_v1_send");
         let body = send["request"]["body"].as_str().unwrap().to_owned();
         let resp = client
             .post(format!("{base}{API_PATH}"))
@@ -705,7 +690,7 @@ mod tests {
             .post(format!("{base}/a2a/invoke"))
             .header("Content-Type", "application/json")
             .body(
-                fixture("full_31_a2a_v03_send")["request"]["body"]
+                ts::wire("full_31_a2a_v03_send")["request"]["body"]
                     .as_str()
                     .unwrap()
                     .to_owned(),

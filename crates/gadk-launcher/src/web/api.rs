@@ -29,7 +29,7 @@ use std::sync::{Arc, Mutex};
 
 use gadk_platform::go_flag::{Flag, FlagSet};
 use gadk_platform::{GoDuration, go_url};
-use gadk_server::mux::{Handler, Request, Response};
+use gadk_server::mux::{Handler, Request, Response, not_found};
 use gadk_server::rest::{
     DebugApiConfig, DebugTelemetryConfig, Server, ServerConfig, ServerError, Timeout,
     normalize_origin,
@@ -300,6 +300,11 @@ pub(crate) fn cors_with_args(frontend_address: &str, allowed_origins: &[String])
                 } else {
                     next(req).await
                 };
+                // gorilla's `Upgrade` hijacks the connection and writes the 101 itself, without
+                // the headers set on `w`.
+                if resp.status() == StatusCode::SWITCHING_PROTOCOLS {
+                    return resp;
+                }
                 with_cors_headers(resp, &allow_origin, vary)
             })
         })
@@ -380,6 +385,8 @@ impl GoPath {
             target.push_str(q);
         }
         let mut parts = req.uri().clone().into_parts();
+        // An escaped path and the request's own query always form a valid target; were it not
+        // so, the request would keep its target (and so the mount's unstripped path).
         let Ok(pq) = PathAndQuery::try_from(target) else {
             return;
         };
@@ -510,43 +517,48 @@ pub(crate) fn register_api_routes(router: &mut WebRouter, path_prefix: &str, han
     router.handle(&[], path_prefix, mounted);
 }
 
-/// Go `net/http.NotFound`.
-fn not_found() -> Response {
-    let mut resp = Response::new(axum::body::Body::from("404 page not found\n"));
-    *resp.status_mut() = StatusCode::NOT_FOUND;
-    let h = resp.headers_mut();
-    h.insert(
-        http::header::CONTENT_TYPE,
-        HeaderValue::from_static("text/plain; charset=utf-8"),
-    );
-    h.insert(
-        http::header::X_CONTENT_TYPE_OPTIONS,
-        HeaderValue::from_static("nosniff"),
-    );
-    resp
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
     use gadk_agent::{AgentConfig, SingleLoader};
     use pretty_assertions::assert_eq;
-    use serde_json::{Value, json};
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::TcpStream;
     use tokio_util::sync::CancellationToken;
 
     use super::*;
-    use crate::golog::Captured;
     use crate::launcher::SubLauncher;
+    use crate::test_support::{self as ts, strings};
 
-    /// The fixed `golog` clock of these tests.
-    const TS: &str = "2009/11/10 23:00:00 ";
-
-    fn strings(args: &[&str]) -> Vec<String> {
-        args.iter().map(|s| (*s).to_owned()).collect()
+    /// gorilla's `Upgrade` writes the 101 itself, without the headers the CORS middleware set on
+    /// `w`: a WebSocket upgrade (`/run_live`) carries no CORS headers.
+    #[tokio::test]
+    async fn cors_headers_are_not_added_to_a_101_upgrade() {
+        let mw = cors_with_args("http://localhost:8080", &strings(&["http://a.example"]));
+        let upgrade: Handler = Arc::new(|_req: Request| {
+            Box::pin(async {
+                let mut resp = Response::new(axum::body::Body::empty());
+                *resp.status_mut() = StatusCode::SWITCHING_PROTOCOLS;
+                resp
+            })
+        });
+        let req = || {
+            http::Request::builder()
+                .uri("/run_live")
+                .header(ORIGIN, "http://a.example")
+                .body(axum::body::Body::empty())
+                .unwrap()
+        };
+        let resp = mw(upgrade)(req()).await;
+        assert_eq!(resp.status(), StatusCode::SWITCHING_PROTOCOLS);
+        assert!(resp.headers().is_empty(), "{:?}", resp.headers());
+        let ok: Handler =
+            Arc::new(|_req: Request| Box::pin(async { Response::new(axum::body::Body::empty()) }));
+        let resp = mw(ok)(req()).await;
+        assert_eq!(
+            resp.headers()[ACCESS_CONTROL_ALLOW_ORIGIN],
+            "http://a.example"
+        );
     }
 
     #[test]
@@ -669,14 +681,7 @@ mod tests {
     #[test]
     fn flag_errors_and_usage_match_go_cli_fixtures() {
         for name in ["help_web_api", "api_bad_flag"] {
-            let f: Value = serde_json::from_str(
-                &std::fs::read_to_string(format!(
-                    "{}/testdata/cli/{name}.json",
-                    env!("CARGO_MANIFEST_DIR")
-                ))
-                .unwrap(),
-            )
-            .unwrap();
+            let f = ts::cli(name);
             let out = Arc::new(Mutex::new(Vec::<u8>::new()));
             let mut l = crate::web::new(vec![Box::new(
                 new().with_flag_output(Arc::clone(&out) as Arc<Mutex<dyn Write + Send>>),
@@ -719,267 +724,17 @@ mod tests {
         .unwrap()
     }
 
-    // ---- Task 2's web fixtures (SCENARIO.md) for the API mount ----
-
-    fn fixture(name: &str) -> Value {
-        let path = format!("{}/testdata/wire/{name}.json", env!("CARGO_MANIFEST_DIR"));
-        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap()
-    }
-
-    /// SCENARIO.md N1 (fixed clock), N2 and N3 on log text.
-    fn normalize_log(text: &str, port: u16) -> Vec<String> {
-        text.lines()
-            .map(|line| {
-                let line = line.replacen(TS, "<ts> ", 1);
-                let line = normalize_port(&line, port);
-                let fields: Vec<&str> = line.split(' ').collect();
-                if fields.len() == 4
-                    && fields[0] == "<ts>"
-                    && !fields[1].is_empty()
-                    && fields[1].bytes().all(|b| b.is_ascii_uppercase())
-                    && fields[3].ends_with('s')
-                    && fields[3].starts_with(|c: char| c.is_ascii_digit())
-                {
-                    format!("<ts> {} {} <elapsed>", fields[1], fields[2])
-                } else {
-                    line
-                }
-            })
-            .collect()
-    }
-
-    /// SCENARIO.md N2.
-    fn normalize_port(s: &str, port: u16) -> String {
-        let mut s = s.to_owned();
-        for host in ["127.0.0.1", "localhost", "port"] {
-            s = s.replace(&format!("{host}:{port}"), &format!("{host}:<port>"));
-        }
-        s
-    }
-
-    /// SCENARIO.md N5: `"lastUpdateTime"` and `"timestamp"` values become `"<t>"`.
-    fn normalize_times(s: &str) -> String {
-        let mut out = String::with_capacity(s.len());
-        let mut rest = s;
-        'scan: while !rest.is_empty() {
-            for key in ["\"lastUpdateTime\":", "\"timestamp\":"] {
-                if let Some(after) = rest.strip_prefix(key) {
-                    let value_len = if let Some(v) = after.strip_prefix('"') {
-                        v.find('"').map(|i| i + 2)
-                    } else {
-                        let b = after.as_bytes();
-                        let start = usize::from(b.first() == Some(&b'-'));
-                        if b.get(start).is_some_and(u8::is_ascii_digit) {
-                            let n = b[start + 1..]
-                                .iter()
-                                .take_while(|c| {
-                                    c.is_ascii_digit()
-                                        || matches!(c, b'.' | b'e' | b'E' | b'+' | b'-')
-                                })
-                                .count();
-                            Some(start + 1 + n)
-                        } else {
-                            None
-                        }
-                    };
-                    if let Some(len) = value_len {
-                        out.push_str(key);
-                        out.push_str("\"<t>\"");
-                        rest = &after[len..];
-                        continue 'scan;
-                    }
-                }
-            }
-            let c = rest.chars().next().unwrap();
-            out.push(c);
-            rest = &rest[c.len_utf8()..];
-        }
-        out
-    }
-
-    /// SCENARIO.md N6: UUIDs become `<uuid-N>` in order of first appearance.
-    fn normalize_uuids(s: &str) -> String {
-        fn is_uuid(b: &[u8]) -> bool {
-            b.len() >= 36
-                && b[..36].iter().enumerate().all(|(i, c)| {
-                    if matches!(i, 8 | 13 | 18 | 23) {
-                        *c == b'-'
-                    } else {
-                        c.is_ascii_hexdigit()
-                    }
-                })
-        }
-        let mut seen: Vec<String> = Vec::new();
-        let mut out = String::with_capacity(s.len());
-        let mut i = 0;
-        while i < s.len() {
-            if s.is_char_boundary(i) && is_uuid(&s.as_bytes()[i..]) {
-                let id = s[i..i + 36].to_ascii_lowercase();
-                let n = match seen.iter().position(|u| *u == id) {
-                    Some(n) => n + 1,
-                    None => {
-                        seen.push(id);
-                        seen.len()
-                    }
-                };
-                out.push_str(&format!("<uuid-{n}>"));
-                i += 36;
-            } else {
-                let c = s[i..].chars().next().unwrap();
-                out.push(c);
-                i += c.len_utf8();
-            }
-        }
-        out
-    }
-
-    /// The raw request of a fixture (SCENARIO.md "Request").
-    fn raw_request(request: &Value, port: u16) -> Vec<u8> {
-        let mut raw = format!(
-            "{} {} HTTP/1.1\r\n",
-            request["method"].as_str().unwrap(),
-            request["target"].as_str().unwrap()
-        );
-        for h in request["headers"].as_array().unwrap() {
-            let value = h[1].as_str().unwrap().replace("<port>", &port.to_string());
-            raw.push_str(&format!("{}: {value}\r\n", h[0].as_str().unwrap()));
-        }
-        raw.push_str("\r\n");
-        raw.push_str(request["body"].as_str().unwrap());
-        raw.into_bytes()
-    }
-
-    fn dechunk(mut raw: &[u8]) -> Vec<u8> {
-        let mut out = Vec::new();
-        loop {
-            let eol = raw.windows(2).position(|w| w == b"\r\n").unwrap();
-            let len = usize::from_str_radix(std::str::from_utf8(&raw[..eol]).unwrap(), 16).unwrap();
-            raw = &raw[eol + 2..];
-            if len == 0 {
-                return out;
-            }
-            out.extend_from_slice(&raw[..len]);
-            raw = &raw[len + 2..];
-        }
-    }
-
-    /// A response read to EOF as the fixture's `response` (N2, N5–N7; header names lowercased
-    /// and sorted, as the fixtures' are compared case-insensitively).
-    fn parse_response(raw: &[u8], head_request: bool, port: u16) -> Value {
-        let split = raw.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
-        let head = String::from_utf8(raw[..split].to_vec()).unwrap();
-        let mut body = raw[split + 4..].to_vec();
-        let mut lines = head.split("\r\n");
-        let status_line = lines.next().unwrap();
-        let (_, rest) = status_line.split_once(' ').unwrap();
-        let (status, status_text) = rest.split_once(' ').unwrap();
-        let mut headers: Vec<(String, String)> = lines
-            .map(|l| {
-                let (k, v) = l.split_once(':').unwrap();
-                (k.to_owned(), v.trim().to_owned())
-            })
-            .collect();
-        if headers.iter().any(|(k, v)| {
-            k.eq_ignore_ascii_case("transfer-encoding") && v.eq_ignore_ascii_case("chunked")
-        }) {
-            body = dechunk(&body);
-        }
-        if head_request {
-            body.clear();
-        }
-        let raw_body = String::from_utf8(body.clone()).unwrap();
-        let normalized = normalize_uuids(&normalize_times(&normalize_port(&raw_body, port)));
-        for (k, v) in &mut headers {
-            *v = if k.eq_ignore_ascii_case("date") {
-                "<date>".to_owned()
-            } else if k.eq_ignore_ascii_case("content-length") && normalized != raw_body {
-                "<n>".to_owned()
-            } else {
-                normalize_port(v, port)
-            };
-        }
-        response_value(
-            status.parse().unwrap(),
-            status_text,
-            headers,
-            &normalized,
-            body.len(),
-        )
-    }
-
-    fn response_value(
-        status: u64,
-        status_text: &str,
-        headers: Vec<(String, String)>,
-        body: &str,
-        body_length: usize,
-    ) -> Value {
-        let mut headers: Vec<(String, String)> = headers
-            .into_iter()
-            .map(|(k, v)| (k.to_ascii_lowercase(), v))
-            .collect();
-        headers.sort();
-        json!({
-            "status": status,
-            "status_text": status_text,
-            "headers": headers,
-            "body": body,
-            "body_length": body_length,
-        })
-    }
-
-    /// The fixture's response in the shape [`parse_response`] produces.
-    fn expected_response(fixture: &Value) -> Value {
-        let r = &fixture["response"];
-        let headers = r["headers"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|h| {
-                (
-                    h[0].as_str().unwrap().to_owned(),
-                    h[1].as_str().unwrap().to_owned(),
-                )
-            })
-            .collect();
-        response_value(
-            r["status"].as_u64().unwrap(),
-            r["status_text"].as_str().unwrap(),
-            headers,
-            r["body"].as_str().unwrap(),
-            usize::try_from(r["body_length"].as_u64().unwrap()).unwrap(),
-        )
-    }
-
-    fn log_lines(fixture: &Value) -> Vec<String> {
-        fixture["log"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|l| l.as_str().unwrap().to_owned())
-            .collect()
-    }
-
-    /// Starts a web launcher with only the api sub-launcher on the `server`'s `00_startup` flags
-    /// (sub-launcher keywords other than `api`, with their flags, dropped); returns the port, the
-    /// log capture, the token and the running task.
-    async fn start(
-        startup: &Value,
-    ) -> (
-        u16,
-        Captured,
-        CancellationToken,
-        tokio::task::JoinHandle<Result<(), Error>>,
-    ) {
-        let port = std::net::TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
+    /// Replays `exchanges` of one fixture server against a web launcher with only the api
+    /// sub-launcher, started on the server's flags (the other sub-launcher keywords, with their
+    /// flags, dropped), byte for byte after the SCENARIO.md normalizations: the startup log
+    /// (minus the other sub-launchers' lines), each response and its log lines, and the shutdown
+    /// line.
+    async fn replay(server: &str, exchanges: &[&str]) {
+        let startup = ts::wire(&format!("{server}_00_startup"));
+        let port = ts::free_port();
         let mut args: Vec<String> = Vec::new();
         let mut keep = true;
-        for a in &startup["args"].as_array().unwrap()[1..] {
-            let a = a.as_str().unwrap().replace("<port>", &port.to_string());
+        for a in &ts::args(&startup, port)[1..] {
             if ["webui", "a2a", "pubsub", "eventarc"].contains(&a.as_str()) {
                 keep = false;
                 continue;
@@ -988,7 +743,7 @@ mod tests {
                 keep = true;
             }
             if keep {
-                args.push(a);
+                args.push(a.clone());
             }
         }
         let mut l = crate::web::new(vec![Box::new(new()) as Box<dyn WebSublauncher>]);
@@ -999,91 +754,36 @@ mod tests {
         let l = Arc::new(l);
         let (log, out) = crate::golog::capture();
         let mut config = Config::new(Arc::new(SingleLoader::new(assistant())));
-        config.log = log.with_clock(|| TS.to_owned());
+        config.log = log.with_clock(|| ts::TS.to_owned());
         let cancel = CancellationToken::new();
         let running = {
             let (l, cancel) = (Arc::clone(&l), cancel.clone());
             tokio::spawn(async move { l.run_with(cancel, config, |_| true).await })
         };
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while TcpStream::connect(("127.0.0.1", port)).await.is_err() {
-            assert!(Instant::now() < deadline, "the server did not start");
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        (port, out, cancel, running)
-    }
+        ts::wait_listening(port).await;
 
-    /// Replays `exchanges` of one fixture server against an api-only web launcher, byte for byte
-    /// after the SCENARIO.md normalizations: the startup log (minus the other sub-launchers'
-    /// lines), each response and its log lines, and the shutdown line.
-    async fn replay(server: &str, exchanges: &[&str]) {
-        let startup = fixture(&format!("{server}_00_startup"));
-        let (port, out, cancel, running) = start(&startup).await;
-
-        let want: Vec<String> = log_lines(&startup)
-            .into_iter()
-            .filter(|l| {
-                let rest = l.strip_prefix("<ts> ").unwrap_or(l);
-                if rest.starts_with("adk: ") {
-                    return false;
-                }
-                match rest.strip_prefix(' ').map(str::trim_start) {
-                    Some(r) => match r.split_once(':') {
-                        Some((k, _)) if k.bytes().all(|b| b.is_ascii_alphanumeric()) => k == "api",
-                        _ => true,
-                    },
-                    None => true,
-                }
-            })
-            .collect();
         assert_eq!(
-            normalize_log(&out.contents(), port),
-            want,
+            ts::normalize_log(&out.contents(), port),
+            ts::startup_log_of(&startup, &["api"]),
             "{server}: startup log"
         );
-
         for name in exchanges {
-            let f = fixture(name);
-            let logged = out.contents().len();
-            let mut conn = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-            conn.write_all(&raw_request(&f["request"], port))
-                .await
-                .unwrap();
-            let mut raw = Vec::new();
-            conn.read_to_end(&mut raw).await.unwrap();
-            let head = f["request"]["method"] == "HEAD";
-            assert_eq!(
-                parse_response(&raw, head, port),
-                expected_response(&f),
-                "{name}: response"
-            );
-            assert_eq!(
-                normalize_log(&out.contents()[logged..], port),
-                log_lines(&f),
-                "{name}: log"
-            );
+            ts::assert_exchange(port, name, || out.contents()).await;
         }
-
         let logged = out.contents().len();
         cancel.cancel();
         running.await.unwrap().unwrap();
         assert_eq!(
-            normalize_log(&out.contents()[logged..], port),
-            log_lines(&fixture(&format!("{server}_99_shutdown"))),
+            ts::normalize_log(&out.contents()[logged..], port),
+            ts::log_lines(&ts::wire(&format!("{server}_99_shutdown"))),
             "{server}: shutdown log"
         );
     }
 
     /// The `full` server's exchanges that reach (or pass by) the API mount: origin and CORS
     /// handling, the REST routes under `/api`, segment-aware mounting, trailing slashes, the
-    /// redirect rewriter, 405 with `Allow` and the body limit.
-    ///
-    /// Not here: `full_23`–`full_25` (`/api/health%2F`). Go's REST server registers `/health`
-    /// before `SetupSubRouters` turns StrictSlash off, so its decoded path `/health/` gets a
-    /// StrictSlash 301 (GET, HEAD) or a 405 with `Allow: GET, HEAD` (POST); gadk-server's
-    /// `/health` route has no StrictSlash and answers 404. That difference is the REST server's
-    /// (Task 12); the mount's part (the `Location` rewrite and the 308/307 promotion) is covered
-    /// by the `api_test.go` ports.
+    /// REST server's StrictSlash `/health` behind the redirect rewriter (`full_23`–`full_25`),
+    /// 405 with `Allow` and the body limit.
     #[tokio::test]
     async fn the_api_mount_matches_go_wire_fixtures() {
         replay(
@@ -1111,6 +811,9 @@ mod tests {
                 "full_20_api_session_create_generated_id",
                 "full_21_api_session_get_trailing_slash",
                 "full_22_api_session_post_trailing_slash",
+                "full_23_api_redirect_get",
+                "full_24_api_redirect_head",
+                "full_25_api_redirect_post",
                 "full_26_api_wrong_method",
                 "full_27_api_body_too_large",
                 "full_49_pubsub_trigger_get",
