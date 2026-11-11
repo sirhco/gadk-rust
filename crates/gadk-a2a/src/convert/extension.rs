@@ -15,8 +15,10 @@
 
 //! The ADK A2A extension marker (port of ADK-Go `server/adka2a/v2/extension.go`).
 
+#[cfg(any(test, feature = "server"))]
 use std::collections::HashMap;
 
+#[cfg(any(test, feature = "server"))]
 use serde_json::Value;
 
 /// Go `ADKExtensionURI`: the metadata key the executor writes on every task and task status
@@ -28,8 +30,7 @@ pub const ADK_EXTENSION_URI: &str = "https://google.github.io/adk-docs/a2a/a2a-e
 /// Go `addADKExtensionMeta`: adds [`ADK_EXTENSION_URI`] to the metadata of events whose metadata
 /// reaches the task's metadata — tasks and task status updates. Messages and artifact updates
 /// (whose metadata is merged into the artifact) are left alone.
-// The server executor calls it; builds without `server` do not.
-#[allow(dead_code)]
+#[cfg(any(test, feature = "server"))]
 pub(crate) fn add_adk_extension_meta(event: &mut a2a::StreamResponse) {
     match event {
         a2a::StreamResponse::Task(task) => {
@@ -45,7 +46,7 @@ pub(crate) fn add_adk_extension_meta(event: &mut a2a::StreamResponse) {
 /// Go `metaWithADKExtension`: `meta` (or an empty map) holding [`ADK_EXTENSION_URI`] = `true`.
 /// Go copies the map so a map shared with other events never sees the key; taking the map by
 /// value gives the same guarantee.
-#[allow(dead_code)]
+#[cfg(any(test, feature = "server"))]
 pub(crate) fn meta_with_adk_extension(
     meta: Option<HashMap<String, Value>>,
 ) -> HashMap<String, Value> {

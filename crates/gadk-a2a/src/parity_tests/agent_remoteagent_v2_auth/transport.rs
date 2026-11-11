@@ -1589,7 +1589,9 @@ async fn card_fetch_http_client_times_out_after_30s() {
     );
 }
 
-/// Go `cardSendsInClear`: non-loopback http interfaces, in card order.
+/// Go `cardSendsInClear`: non-loopback http interfaces, in card order. URLs are parsed as Go's
+/// `url.Parse` does: `not a url` is a relative reference (no scheme, so in the clear) and
+/// `127.1` is not an IP address for `net.ParseIP`.
 #[test]
 fn card_sends_in_clear_reports_non_loopback_http() {
     let card = |urls: &[&str]| a2a::AgentCard {
@@ -1604,7 +1606,7 @@ fn card_sends_in_clear_reports_non_loopback_http() {
         }))
         .unwrap()
     };
-    let cases: [(&[&str], &[&str]); 7] = [
+    let cases: [(&[&str], &[&str]); 8] = [
         (&["http://127.0.0.1:8080"], &[]),
         (&["http://localhost:8080", "http://a.localhost"], &[]),
         (&["http://[::1]:8080", "http://[::ffff:127.0.0.1]/"], &[]),
@@ -1617,7 +1619,8 @@ fn card_sends_in_clear_reports_non_loopback_http() {
             &["http://remote.invalid:8080", "http://other.invalid:8080"],
             &["http://remote.invalid:8080", "http://other.invalid:8080"],
         ),
-        (&["HTTPS://remote.invalid", "not a url"], &[]),
+        (&["HTTPS://remote.invalid", "not a url"], &["not a url"]),
+        (&["http://127.1:8080"], &["http://127.1:8080"]),
     ];
     for (urls, want) in cases {
         assert_eq!(card_sends_in_clear(&card(urls)), want, "{urls:?}");

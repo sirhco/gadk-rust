@@ -26,7 +26,7 @@ use futures::future::BoxFuture;
 use gadk_platform::{go_quote, go_to_lower};
 use serde_json::Value;
 
-use super::auth::{AUTH_SCOPE, apply_credential, card_fetch_http_client};
+use super::auth::{apply_credential, current_card_fetch_client};
 use crate::Error;
 
 /// Go `AgentCardProvider`: resolves the remote agent's card.
@@ -61,9 +61,9 @@ const DEFAULT_CARD_FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 ///
 /// A file source is read and parsed. An http(s) source is fetched with `GET <source><path>`
 /// (a2a-go `agentcard.Resolver` URL rules, `opts.request_headers` attached); inside an auth scope
-/// the source must be https or loopback http ([`require_secure_card_source`], checked before any
-/// request), the scope's card-fetch client (else [`card_fetch_http_client`]) sends it, and the
-/// scope's credential is applied. Every interface of a fetched card must share the source's
+/// that carries a card-fetch client (Go `CardFetchClientFrom`) the source must be https or
+/// loopback http ([`require_secure_card_source`], checked before any request), that client sends
+/// it, and the scope's credential is applied. Every interface of a fetched card must share the source's
 /// origin ([`validate_card_interface_origins`]).
 pub fn new_agent_card_provider(
     source: impl Into<String>,
@@ -84,13 +84,11 @@ async fn resolve_card(source: &str, opts: &CardResolveOptions) -> Result<a2a::Ag
         return read_card_file(source);
     }
     // Go `iremoteagent.CardFetchClientFrom(ctx)`: present exactly when the remote agent owns the
-    // auth scope of this call.
-    let scoped = AUTH_SCOPE.try_with(|id| id.card_fetch_client.clone()).ok();
-    let card = match scoped {
+    // auth scope of this call (`new_a2a` with `auth` always attaches one).
+    let card = match current_card_fetch_client() {
         Some(client) => {
             // The fetch carries the credential, so the scheme is checked before it goes out.
             require_secure_card_source(source)?;
-            let client = client.unwrap_or_else(card_fetch_http_client);
             fetch_card(&client, source, opts, true).await
         }
         None => fetch_card(default_card_client(), source, opts, false).await,
@@ -1702,7 +1700,7 @@ pub(crate) mod tests {
     /// credential is touched).
     #[tokio::test]
     async fn provider_in_an_auth_scope_refuses_an_insecure_source_first() {
-        use crate::remoteagent::auth::{CallIdentity, CredentialCell, CredentialScope};
+        use crate::remoteagent::auth::{AUTH_SCOPE, CallIdentity, CredentialCell, CredentialScope};
 
         struct NoCredential;
         #[async_trait::async_trait]

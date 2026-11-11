@@ -15,18 +15,26 @@
 
 //! Input-required handling (port of ADK-Go `server/adka2a/v2/input_required.go`).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+#[cfg(feature = "client")]
+use std::collections::HashSet;
 
-use gadk_genai::{Content, FunctionCall, Part};
+#[cfg(feature = "client")]
+use gadk_engine::tool::function_calls;
+use gadk_genai::{Content, Part};
 use gadk_platform::go_quote;
-use gadk_session::{Event, Session};
+use gadk_session::Event;
+#[cfg(feature = "client")]
+use gadk_session::Session;
 use serde_json::Value;
 
 use super::processor::{TaskInfo, new_message_for_task, new_status_update};
 use crate::Error;
+#[cfg(feature = "client")]
+use crate::convert::get_a2a_task_info;
 use crate::convert::{
-    DATA_PART_META_TYPE_KEY, DATA_PART_TYPE_FUNCTION_CALL, GenAIPartConverter, get_a2a_task_info,
-    part_meta, to_a2a_parts, to_genai_parts,
+    DATA_PART_META_TYPE_KEY, DATA_PART_TYPE_FUNCTION_CALL, GenAIPartConverter, part_meta,
+    to_a2a_parts, to_genai_parts,
 };
 
 /// The part metadata key marking the missing-input error part.
@@ -234,7 +242,7 @@ pub async fn handle_input_required(
 
 /// Go `subagentTask`: a remote sub-agent's task waiting for input.
 // Used by the cleanup's child-task cancel, which needs the client side (plan D12).
-#[cfg_attr(not(feature = "client"), allow(dead_code))]
+#[cfg(feature = "client")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SubagentTask {
     pub(crate) agent_name: String,
@@ -244,7 +252,7 @@ pub(crate) struct SubagentTask {
 /// Go `getSubagentTasksToCancel`: the remote tasks behind the pending long-running calls of
 /// `status`, found from the newest session event backwards.
 // Used by the cleanup's child-task cancel, which needs the client side (plan D12).
-#[cfg_attr(not(feature = "client"), allow(dead_code))]
+#[cfg(feature = "client")]
 pub(crate) fn get_subagent_tasks_to_cancel(
     status: &a2a::TaskStatus,
     session: &dyn Session,
@@ -305,7 +313,7 @@ pub(crate) fn get_subagent_tasks_to_cancel(
 /// Go `getPendingLongRunningCallIDs`: the function-call IDs in an input-required status
 /// message (none for any other state).
 // Used by the cleanup's child-task cancel, which needs the client side (plan D12).
-#[cfg_attr(not(feature = "client"), allow(dead_code))]
+#[cfg(feature = "client")]
 pub(crate) fn get_pending_long_running_call_ids(
     status: &a2a::TaskStatus,
 ) -> Result<Vec<String>, Error> {
@@ -345,18 +353,4 @@ fn make_input_missing_error_message(
         .collect();
     preserved.push(err_part);
     preserved
-}
-
-/// Go `utils.FunctionCalls`: the function calls of `content`, in order.
-// Used by the cleanup's child-task cancel, which needs the client side (plan D12).
-#[cfg_attr(not(feature = "client"), allow(dead_code))]
-fn function_calls(content: Option<&Content>) -> Vec<&FunctionCall> {
-    content
-        .map(|c| {
-            c.parts
-                .iter()
-                .filter_map(|p| p.function_call.as_ref())
-                .collect()
-        })
-        .unwrap_or_default()
 }

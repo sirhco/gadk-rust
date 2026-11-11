@@ -102,7 +102,6 @@ fn default_client_factory() -> a2a_client::A2AClientFactory {
 /// The factory Go `NewA2A` builds when `A2AConfig.Auth` is set: JSON-RPC and REST over
 /// [`auth_http_client`] (Go `authHTTPClient`), with [`AuthInterceptor`] applying the credential
 /// of the current auth scope to every call.
-#[allow(dead_code)] // called by `new_a2a` (Task 8)
 pub(crate) fn auth_client_factory() -> a2a_client::A2AClientFactory {
     transport_factory(auth_http_client())
         .with_interceptor(Arc::new(AuthInterceptor))
