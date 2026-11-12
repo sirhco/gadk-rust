@@ -15,25 +15,28 @@
 
 //! Port of ADK-Go `cmd/launcher/web/web_test.go`.
 //!
-//! Go's telemetry options are OpenTelemetry providers; gadk's are `tracing` layers with nothing to
-//! flush in sub-project 6, so the telemetry cases fail initialization with `-otel_to_cloud` (the
-//! only failure gadk's telemetry has) and observe layers through an injected installation. The
-//! fake sub-launchers keep what they saw behind shared handles, since `Run` owns them.
+//! Go's `l.Run` is `run_with(…, |_| true)` where a test sets up telemetry: an empty environment
+//! and no global tracer provider or dispatcher (the crate's tests share the process). The fake
+//! sub-launchers keep what they saw behind shared handles, since `Run` owns them.
 
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use axum::body::Body;
 use gadk_server::mux::{Request, Response, handler};
+use gadk_telemetry::{TelemetryOption, with_resource, with_span_processors};
 use http::{Method, StatusCode};
+use opentelemetry::Context;
+use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
+use opentelemetry_sdk::trace::{Span, SpanData, SpanProcessor};
 use pretty_assertions::assert_eq;
 use tokio_util::sync::CancellationToken;
 use tower::ServiceExt;
-use tracing_subscriber::{Layer, Registry};
 
-use crate::config::{BoxedLayer, Config};
+use crate::config::Config;
 use crate::error::Error;
 use crate::golog;
 use crate::launcher::SubLauncher;
@@ -63,13 +66,13 @@ struct Seen {
 /// Go's fake sub-launchers (`telemetryFailSublauncher` and the ones embedding it): `keyword`,
 /// `Parse` returning its arguments, and a `SetupSubrouters` that records what it was given,
 /// optionally contributes an origin (`guardedSublauncher.contributes`), registers
-/// `PathPrefix("/"+keyword)` answering 418 (`guardedSublauncher`) and appends a telemetry layer
+/// `PathPrefix("/"+keyword)` answering 418 (`guardedSublauncher`) and appends a telemetry option
 /// (`optionAppendingSublauncher`).
 struct Fake {
     keyword: &'static str,
     contributes: Option<&'static str>,
     route: bool,
-    layer: Mutex<Option<BoxedLayer>>,
+    option: Mutex<Option<TelemetryOption>>,
     seen: Arc<Mutex<Seen>>,
 }
 
@@ -79,7 +82,7 @@ impl Fake {
             keyword,
             contributes: None,
             route: false,
-            layer: Mutex::new(None),
+            option: Mutex::new(None),
             seen: Arc::new(Mutex::new(Seen::default())),
         }
     }
@@ -114,8 +117,8 @@ impl WebSublauncher for Fake {
         if let Some(origin) = self.contributes {
             config.allowed_origins.push(origin.to_owned());
         }
-        if let Some(layer) = self.layer.lock().unwrap().take() {
-            config.telemetry_layers.push(layer);
+        if let Some(option) = self.option.lock().unwrap().take() {
+            config.telemetry_options.push(option);
         }
         if self.route {
             // StatusTeapot so that reaching the handler cannot be confused with any status the
@@ -138,39 +141,68 @@ impl WebSublauncher for Fake {
     }
 }
 
-/// A layer counting the events it sees (Go's tracking span processor).
-struct Counting(Arc<AtomicUsize>);
+/// Go `trackingSpanProcessor`: records that its `Shutdown` was called.
+#[derive(Debug, Default)]
+struct TrackingSpanProcessor {
+    shutdown_called: Arc<AtomicBool>,
+}
 
-impl Layer<Registry> for Counting {
-    fn on_event(
-        &self,
-        _event: &tracing::Event<'_>,
-        _ctx: tracing_subscriber::layer::Context<'_, Registry>,
-    ) {
-        self.0.fetch_add(1, Ordering::SeqCst);
+impl SpanProcessor for TrackingSpanProcessor {
+    fn on_start(&self, _span: &mut Span, _cx: &Context) {}
+    fn on_end(&self, _span: SpanData) {}
+    fn force_flush(&self) -> OTelSdkResult {
+        Ok(())
+    }
+    fn shutdown_with_timeout(&self, _timeout: Duration) -> OTelSdkResult {
+        self.shutdown_called.store(true, Ordering::SeqCst);
+        Ok(())
     }
 }
 
-fn counting() -> (BoxedLayer, Arc<AtomicUsize>) {
-    let n = Arc::new(AtomicUsize::new(0));
-    (Box::new(Counting(Arc::clone(&n))), n)
+/// Go `failingSpanProcessor`: its `Shutdown` fails with `shutdown_err`.
+#[derive(Debug)]
+struct FailingSpanProcessor {
+    shutdown_err: &'static str,
 }
 
-/// Runs `l` with the global installation injected; the dispatch it was handed, if any.
-async fn run_capturing_dispatch(
-    l: &web::WebLauncher,
-    config: Config,
-) -> (Result<(), Error>, Option<tracing::Dispatch>) {
-    let installed = Arc::new(Mutex::new(None));
-    let slot = Arc::clone(&installed);
-    let result = l
-        .run_with(CancellationToken::new(), config, move |d| {
-            *slot.lock().unwrap() = Some(d);
-            true
-        })
-        .await;
-    let dispatch = installed.lock().unwrap().take();
-    (result, dispatch)
+impl SpanProcessor for FailingSpanProcessor {
+    fn on_start(&self, _span: &mut Span, _cx: &Context) {}
+    fn on_end(&self, _span: SpanData) {}
+    fn force_flush(&self) -> OTelSdkResult {
+        Ok(())
+    }
+    fn shutdown_with_timeout(&self, _timeout: Duration) -> OTelSdkResult {
+        Err(OTelSdkError::InternalFailure(self.shutdown_err.to_owned()))
+    }
+}
+
+/// `telemetry.WithSpanProcessors(p)` and a handle on `p`'s shutdown flag.
+fn tracking() -> (TelemetryOption, Arc<AtomicBool>) {
+    let tracker = TrackingSpanProcessor::default();
+    let called = Arc::clone(&tracker.shutdown_called);
+    (
+        with_span_processors([Box::new(tracker) as Box<dyn SpanProcessor>]),
+        called,
+    )
+}
+
+/// Go `resource.NewWithAttributes("https://conflicting.invalid/schema/v1")`: its schema URL
+/// conflicts with the default resource's, so `resource.Merge` fails and telemetry init fails
+/// without touching the network.
+fn conflicting_resource() -> TelemetryOption {
+    with_resource(
+        Resource::builder_empty()
+            .with_schema_url(
+                Vec::<opentelemetry::KeyValue>::new(),
+                "https://conflicting.invalid/schema/v1",
+            )
+            .build(),
+    )
+}
+
+/// Go `l.Run(ctx, config)` with telemetry's globals injected.
+async fn run(l: &web::WebLauncher, config: Config) -> Result<(), Error> {
+    l.run_with(CancellationToken::new(), config, |_| true).await
 }
 
 // parity: adapted: the launcher's server options serve a router on a pre-bound listener (Go: buildHTTPServer(handler).Serve(listener)); reqwest's prior-knowledge HTTP/2 client stands in for Go's UnencryptedHTTP2 transport
@@ -243,21 +275,17 @@ async fn test_h2_c_flag() {
     }
 }
 
-// parity: adapted: telemetry initialization fails through -otel_to_cloud (gadk has no resource merge to break)
 #[tokio::test]
 async fn test_run_does_not_leak_listener_when_telemetry_init_fails() {
     let port = free_port();
     let mut l = web::new(vec![Box::new(Fake::new("repro"))]);
-    l.parse(strings(&[
-        "--port",
-        &port.to_string(),
-        "-otel_to_cloud",
-        "repro",
-    ]))
-    .unwrap();
-    let (config, _) = config();
+    l.parse(strings(&["--port", &port.to_string(), "repro"]))
+        .unwrap();
+
+    let (mut config, _) = config();
+    config.telemetry_options = vec![conflicting_resource()];
     assert!(
-        l.run(CancellationToken::new(), config).await.is_err(),
+        run(&l, config).await.is_err(),
         "Run() succeeded, want telemetry initialization failure"
     );
 
@@ -495,7 +523,6 @@ async fn test_build_base_router_leaves_health_to_the_caller() {
     );
 }
 
-// parity: adapted: gadk's telemetry has nothing to flush (sub-project 6); the layer reaching the installed subscriber and Run returning the bind failure after telemetry init stand in for the span processor's Shutdown
 #[tokio::test]
 async fn test_run_shuts_down_telemetry_when_server_fails_to_start() {
     let taken = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -504,43 +531,62 @@ async fn test_run_shuts_down_telemetry_when_server_fails_to_start() {
     l.parse(strings(&["--port", &port.to_string(), "repro"]))
         .unwrap();
 
+    let (option, shutdown_called) = tracking();
     let (mut config, _) = config();
-    let (layer, events) = counting();
-    config.telemetry_layers.push(layer);
+    config.telemetry_options = vec![option];
 
-    let (result, dispatch) = run_capturing_dispatch(&l, config).await;
-    let err = result.expect_err("Run() succeeded, want server bind failure");
-    assert_eq!(
-        err.to_string(),
-        format!("server failed: listen tcp 127.0.0.1:{port}: bind: address already in use")
+    assert!(
+        run(&l, config).await.is_err(),
+        "Run() succeeded, want server bind failure"
     );
-    let dispatch = dispatch.expect("the telemetry layers were not installed");
-    tracing::dispatcher::with_default(&dispatch, || tracing::info!("one event"));
-    assert_eq!(events.load(Ordering::SeqCst), 1);
+    assert!(
+        shutdown_called.load(Ordering::SeqCst),
+        "telemetry shutdown was not called after server startup failure"
+    );
 }
 
-// parity: skipped TestRunLogsWhenTelemetryShutdownFails: gadk's TelemetryGuard::shutdown cannot fail in sub-project 6 (no exporters to flush); Run still logs `telemetry shutdown failed: <err>` on an error
+// parity: adapted: opentelemetry_sdk wraps the processor's error (`Operation failed: Shutdown errors: [InternalFailure("…")]`), so the logged line is checked whole instead of Go's `telemetry shutdown failed: simulated flush error` substring
+#[tokio::test]
+async fn test_run_logs_when_telemetry_shutdown_fails() {
+    let taken = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = taken.local_addr().unwrap().port();
+    let mut l = web::new(vec![Box::new(Fake::new("repro"))]);
+    l.parse(strings(&["--port", &port.to_string(), "repro"]))
+        .unwrap();
 
-// parity: adapted: telemetry initialization fails through -otel_to_cloud
+    let failing_processor = FailingSpanProcessor {
+        shutdown_err: "simulated flush error",
+    };
+    let (mut config, out) = config();
+    config.telemetry_options = vec![with_span_processors([
+        Box::new(failing_processor) as Box<dyn SpanProcessor>
+    ])];
+
+    assert!(
+        run(&l, config).await.is_err(),
+        "Run() succeeded, want server bind failure"
+    );
+    let got = out.contents();
+    assert!(
+        got.contains(
+            "telemetry shutdown failed: Operation failed: Shutdown errors: [InternalFailure(\"simulated flush error\")]\n"
+        ),
+        "expected log output to contain telemetry shutdown error, got {got:?}"
+    );
+}
+
 #[tokio::test]
 async fn test_run_does_not_announce_url_when_telemetry_init_fails() {
     let port = free_port();
     let sub = Fake::new("repro");
     let seen = Arc::clone(&sub.seen);
     let mut l = web::new(vec![Box::new(sub)]);
-    l.parse(strings(&[
-        "--port",
-        &port.to_string(),
-        "-otel_to_cloud",
-        "repro",
-    ]))
-    .unwrap();
+    l.parse(strings(&["--port", &port.to_string(), "repro"]))
+        .unwrap();
 
-    let (config, out) = config();
-    let err = l
-        .run(CancellationToken::new(), config)
-        .await
-        .expect_err("Run() succeeded");
+    let (mut config, out) = config();
+    config.telemetry_options = vec![conflicting_resource()];
+    let err = run(&l, config).await.expect_err("Run() succeeded");
     assert!(
         err.to_string().contains("telemetry initialization failed"),
         "Run() error = {err}, want error containing \"telemetry initialization failed\""
@@ -556,24 +602,26 @@ async fn test_run_does_not_announce_url_when_telemetry_init_fails() {
     );
 }
 
-// parity: adapted: the sub-launcher appends a tracing layer; the subscriber handed to the (injected) installation runs it
 #[tokio::test]
 async fn test_run_setup_subrouters_can_append_telemetry_options() {
     let taken = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = taken.local_addr().unwrap().port();
+    let (option, shutdown_called) = tracking();
     let sub = Fake::new("appending");
-    let (layer, events) = counting();
-    *sub.layer.lock().unwrap() = Some(layer);
+    *sub.option.lock().unwrap() = Some(option);
     let mut l = web::new(vec![Box::new(sub)]);
     l.parse(strings(&["--port", &port.to_string(), "appending"]))
         .unwrap();
 
     let (config, _) = config();
-    let (result, dispatch) = run_capturing_dispatch(&l, config).await;
-    assert!(result.is_err(), "Run() succeeded, want server bind failure");
-    let dispatch = dispatch.expect("layer appended in SetupSubrouters was not installed");
-    tracing::dispatcher::with_default(&dispatch, || tracing::info!("one event"));
-    assert_eq!(events.load(Ordering::SeqCst), 1);
+    assert!(
+        run(&l, config).await.is_err(),
+        "Run() succeeded, want server bind failure"
+    );
+    assert!(
+        shutdown_called.load(Ordering::SeqCst),
+        "span processor appended in SetupSubrouters was not initialized/shut down"
+    );
 }
 
 #[test]
@@ -665,7 +713,9 @@ async fn test_run_passes_resolved_bind_host_to_sublaunchers() {
 
         let (config, _) = config();
         assert!(
-            l.run(CancellationToken::new(), config).await.is_err(),
+            l.run_with(CancellationToken::new(), config, |_| true)
+                .await
+                .is_err(),
             "{name}: Run() succeeded, want server bind failure"
         );
 
@@ -700,7 +750,9 @@ async fn run_for_router(config: Config, args: &[&str], subs: Vec<Fake>) -> WebRo
     let mut l = web::new(boxed);
     l.parse(all).unwrap();
     assert!(
-        l.run(CancellationToken::new(), config).await.is_err(),
+        l.run_with(CancellationToken::new(), config, |_| true)
+            .await
+            .is_err(),
         "Run() succeeded, want server bind failure"
     );
     let router = first.lock().unwrap().router.clone();

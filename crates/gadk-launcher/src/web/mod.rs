@@ -49,7 +49,6 @@ use gadk_server::rest::{max_bytes_middleware, origin_guard_middleware};
 use http::header::CONTENT_TYPE;
 use http::{HeaderValue, Method};
 use tokio_util::sync::CancellationToken;
-use tracing::Dispatch;
 
 use crate::config::Config;
 use crate::error::Error;
@@ -305,21 +304,40 @@ impl WebLauncher {
     }
 
     /// Go `Run` with the global subscriber installation injected (`install` returns `false` when
-    /// one is already set); tests never touch the process-global dispatcher.
+    /// one is already set) over an empty environment, leaving the global OpenTelemetry providers
+    /// alone: tests never touch the process-global dispatcher, providers or environment.
+    #[cfg(test)]
     pub(crate) async fn run_with(
         &self,
         cancel: CancellationToken,
+        config: Config,
+        install: impl FnOnce(tracing::Dispatch) -> bool + Send + 'static,
+    ) -> Result<(), Error> {
+        self.run_in(cancel, config, telemetry::Globals::injected(install))
+            .await
+    }
+
+    /// Go `Run` over the telemetry [`telemetry::Globals`] given: services, router, telemetry,
+    /// then the server; telemetry is shut down under `-shutdown-timeout` however the server ends.
+    pub(crate) async fn run_in(
+        &self,
+        cancel: CancellationToken,
         mut config: Config,
-        install: impl FnOnce(Dispatch) -> bool + Send,
+        globals: telemetry::Globals,
     ) -> Result<(), Error> {
         apply_service_defaults(&mut config);
         let router = self.build_router(&mut config)?;
-        let telemetry = telemetry::init_with(&mut config, self.config.otel_to_cloud.get(), install)
+        let telemetry = telemetry::init_with(&mut config, self.config.otel_to_cloud.get(), globals)
+            .await
             .map_err(|e| Error::Telemetry(format!("telemetry initialization failed: {e}")))?;
         let result = self.serve(cancel, &config.log, router).await;
-        if let Err(e) = telemetry.shutdown() {
-            config.log.print(&format!("telemetry shutdown failed: {e}"));
-        }
+        let timeout = self
+            .config
+            .shutdown_timeout
+            .get()
+            .to_std()
+            .unwrap_or_default();
+        telemetry.shutdown_logged(timeout, &config.log).await;
         result
     }
 
@@ -418,10 +436,8 @@ impl SubLauncher for WebLauncher {
 
     /// Go `Run`: serves until `cancel` is cancelled.
     async fn run(&self, cancel: CancellationToken, config: Config) -> Result<(), Error> {
-        self.run_with(cancel, config, |dispatch| {
-            tracing::dispatcher::set_global_default(dispatch).is_ok()
-        })
-        .await
+        self.run_in(cancel, config, telemetry::Globals::process())
+            .await
     }
 }
 
@@ -766,13 +782,26 @@ mod tests {
         let err = l.run(CancellationToken::new(), config).await.unwrap_err();
         assert_eq!(err.to_string(), "broken subrouter setup failed: no");
 
-        let (config, _) = test_config();
+        // A resource whose schema URL conflicts with the default resource's fails telemetry
+        // initialization without touching the network (Go web_test.go:176).
+        let (mut config, _) = test_config();
+        config.telemetry_options = vec![gadk_telemetry::with_resource(
+            opentelemetry_sdk::Resource::builder_empty()
+                .with_schema_url(
+                    Vec::<opentelemetry::KeyValue>::new(),
+                    "https://conflicting.invalid/schema/v1",
+                )
+                .build(),
+        )];
         let mut l = new(vec![quiet("a")]);
-        SubLauncher::parse(&mut l, strings(&["-otel_to_cloud", "a"])).unwrap();
-        let err = l.run(CancellationToken::new(), config).await.unwrap_err();
+        SubLauncher::parse(&mut l, strings(&["a"])).unwrap();
+        let err = l
+            .run_with(CancellationToken::new(), config, |_| true)
+            .await
+            .unwrap_err();
         assert_eq!(
             err.to_string(),
-            "telemetry initialization failed: -otel_to_cloud requires OpenTelemetry export, which gadk adds in sub-project 7"
+            "telemetry initialization failed: failed to resolve resource: failed to merge with config resource: conflicting Schema URL: https://opentelemetry.io/schemas/1.43.0 and https://conflicting.invalid/schema/v1"
         );
     }
 

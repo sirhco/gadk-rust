@@ -20,7 +20,8 @@
 //! the fields it declares, so each constructor declares every attribute Go may set on it later
 //! as `Empty`, plus `otel.status_code` and `error.message` (Go's span status and description).
 //!
-//! The module is public only for [`set_env_provider`]; everything else stays crate-private.
+//! The module is public for [`set_env_provider`], [`LOG_TARGET`] and [`d6`] (the shared decoder
+//! of this layout, plan 7a); everything else stays crate-private.
 //! Submodules (plan 5a): `env` (the process-wide environment provider, Go `logger.go`'s
 //! environment rules), the span attributes of Go `telemetry.go` and friends (`attrs`,
 //! `converters`, `inference`, `instrumentation`, `semconv`, `genai_messages`), the OTel log
@@ -29,6 +30,7 @@
 
 pub(crate) mod attrs;
 pub(crate) mod converters;
+pub mod d6;
 pub(crate) mod env;
 pub(crate) mod genai_messages;
 pub(crate) mod inference;

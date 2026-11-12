@@ -15,90 +15,120 @@
 
 //! Port of ADK-Go `cmd/launcher/internal/telemetry/telemetry_test.go`.
 //!
-//! Go's cases decide whether GCP export turns on from the `-otel_to_cloud` flag and a
-//! `telemetry.WithOtelToCloud` option. gadk's telemetry options are `tracing` layers, none of
-//! which turns export on, and export itself is sub-project 7: the flag is an error, everything else
-//! installs the layers. The global dispatcher is never touched (the installation is injected).
+//! Go's `t.Setenv` is the injected environment of [`Globals::injected_with`]; neither the global
+//! tracer provider nor the global dispatcher is touched.
 
 use std::sync::Arc;
 
+use gadk_telemetry::{TelemetryOption, with_otel_to_cloud};
 use pretty_assertions::assert_eq;
 
-use crate::config::{BoxedLayer, Config};
-use crate::error::Error;
-use crate::telemetry::init_with;
+use crate::config::Config;
+use crate::telemetry::{Globals, init_with};
 use crate::test_support::NoAgents;
 
-/// Stands in for a `telemetry.Option`: a layer that does nothing.
-fn option() -> BoxedLayer {
-    Box::new(tracing_subscriber::layer::Identity::new())
+/// Go `withoutCloudCredentials`: export to GCP fails as soon as it is turned on, without network
+/// access, because the credentials file the environment names does not exist. The error then
+/// tells whether export was turned on.
+struct WithoutCloudCredentials {
+    _dir: tempfile::TempDir,
+    missing: String,
 }
 
-/// Go `initProviders`: `true` when initialization reports that cloud export was asked for (Go:
-/// a credentials error from the GCP exporter; gadk: the sub-project 7 error).
-fn init_providers(config: &mut Config, otel_to_cloud: bool) -> bool {
-    match init_with(config, otel_to_cloud, |_| true) {
-        Ok(providers) => {
-            providers.shutdown().unwrap();
-            false
-        }
-        Err(Error::Telemetry(text)) => {
-            assert_eq!(
-                text,
-                "-otel_to_cloud requires OpenTelemetry export, which gadk adds in sub-project 7"
-            );
-            true
-        }
-        Err(e) => panic!("init() error = {e}, want nil or the -otel_to_cloud error"),
+impl WithoutCloudCredentials {
+    fn new() -> WithoutCloudCredentials {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir
+            .path()
+            .join("missing.json")
+            .to_string_lossy()
+            .into_owned();
+        WithoutCloudCredentials { _dir: dir, missing }
+    }
+
+    fn globals(&self) -> Globals {
+        Globals::injected_with(
+            &[
+                ("GOOGLE_APPLICATION_CREDENTIALS", &self.missing),
+                ("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
+                ("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", ""),
+            ],
+            |_| {},
+            |_| true,
+        )
     }
 }
 
-// parity: adapted: telemetry options are tracing layers (none turns export on); -otel_to_cloud is the sub-project 7 error
-#[test]
-fn test_init_and_set_global_otel_providers_otel_to_cloud() {
+/// Go `initProviders`: `true` when initialization failed with a credentials error (export to GCP
+/// was turned on).
+async fn init_providers(
+    env: &WithoutCloudCredentials,
+    config: &mut Config,
+    otel_to_cloud: bool,
+) -> bool {
+    match init_with(config, otel_to_cloud, env.globals()).await {
+        Ok(providers) => {
+            if let Err(e) = providers.shutdown().await {
+                panic!("Shutdown() error = {e}");
+            }
+            false
+        }
+        Err(e) => {
+            assert!(
+                e.to_string().contains("credentials"),
+                "InitAndSetGlobalOtelProviders() error = {e}, want nil or a credentials error"
+            );
+            true
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_init_and_set_global_otel_providers_otel_to_cloud() {
+    let env = WithoutCloudCredentials::new();
     struct Case {
         name: &'static str,
-        options: usize,
+        options: Vec<TelemetryOption>,
         flag: bool,
         want_cloud_export: bool,
     }
     let cases = [
         Case {
             name: "no flag, no option",
-            options: 0,
+            options: Vec::new(),
             flag: false,
             want_cloud_export: false,
         },
         Case {
             name: "flag",
-            options: 0,
+            options: Vec::new(),
             flag: true,
             want_cloud_export: true,
         },
         Case {
             name: "option without flag",
-            options: 1,
+            options: vec![with_otel_to_cloud(true)],
             flag: false,
-            want_cloud_export: false,
+            want_cloud_export: true,
         },
         Case {
-            name: "flag with an option",
-            options: 1,
+            name: "flag overrides disabling option",
+            options: vec![with_otel_to_cloud(false)],
             flag: true,
             want_cloud_export: true,
         },
         Case {
-            name: "two options without flag",
-            options: 2,
+            name: "disabling option without flag",
+            options: vec![with_otel_to_cloud(false)],
             flag: false,
             want_cloud_export: false,
         },
     ];
     for tc in cases {
         let mut config = Config::new(Arc::new(NoAgents));
-        config.telemetry_layers = (0..tc.options).map(|_| option()).collect();
+        config.telemetry_options = tc.options;
         assert_eq!(
-            init_providers(&mut config, tc.flag),
+            init_providers(&env, &mut config, tc.flag).await,
             tc.want_cloud_export,
             "{}: export to GCP turned on",
             tc.name
@@ -106,15 +136,21 @@ fn test_init_and_set_global_otel_providers_otel_to_cloud() {
     }
 }
 
-// parity: adapted: the launcher takes the layers only when it installs them; a failed init leaves the embedder's list as it was
-#[test]
-fn test_init_and_set_global_otel_providers_keeps_telemetry_options() {
+// parity: adapted: a Rust Vec cannot share its spare capacity with a copy, so the embedder's list keeping its one option is checked instead of Go's backing-array slot
+#[tokio::test]
+async fn test_init_and_set_global_otel_providers_keeps_telemetry_options() {
+    let env = WithoutCloudCredentials::new();
+    // Spare capacity, as Go's test gives its slice.
+    let mut options = Vec::with_capacity(2);
+    options.push(with_otel_to_cloud(false));
     let mut config = Config::new(Arc::new(NoAgents));
-    config.telemetry_layers = vec![option()];
-    init_providers(&mut config, true);
+    config.telemetry_options = options;
+
+    init_providers(&env, &mut config, true).await;
+
     assert_eq!(
-        config.telemetry_layers.len(),
+        config.telemetry_options.len(),
         1,
-        "the launcher changed the embedder's TelemetryOptions"
+        "the launcher wrote into the embedder's TelemetryOptions"
     );
 }

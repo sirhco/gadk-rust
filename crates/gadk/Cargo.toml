@@ -38,10 +38,14 @@ a2a = ["dep:gadk-a2a"]
 # (gadk-launcher with its `full` and `prod` presets); not in `default`. `full` comes from
 # gadk-launcher's default features, which the dependency below keeps; `full` does not enable
 # the `prod` feature, so it is named here to expose `gadk::launcher::prod`.
-launcher = ["dep:gadk-launcher", "gadk-launcher/prod"]
+launcher = ["dep:gadk-launcher", "gadk-launcher/prod", "telemetry"]
 # The Agent Engine server (`gadk_server::agentengine`) and its launcher
 # (`agentengine::new_launcher`, Go `cmd/launcher/agentengine`); not in `default`.
 agentengine = ["launcher", "dep:gadk-server", "gadk-launcher/agentengine", "gadk-server/agentengine"]
+# OpenTelemetry export (gadk-telemetry, Go's `telemetry` package): tracer and logger providers,
+# OTLP/HTTP and GCP export, the GCP resource detector and the `tracing` bridge layer; not in
+# `default` (`launcher` enables it, as Go's launcher always links telemetry).
+telemetry = ["dep:gadk-telemetry"]
 # The Agent Registry client (gadk-agentregistry: registered A2A agents and MCP servers); not in
 # `default`.
 agentregistry = ["dep:gadk-agentregistry"]
@@ -68,6 +72,7 @@ gadk-vertexai = { workspace = true, optional = true }
 gadk-server = { workspace = true, optional = true }
 gadk-a2a = { workspace = true, optional = true }
 gadk-launcher = { workspace = true, optional = true }
+gadk-telemetry = { workspace = true, optional = true }
 gadk-agentregistry = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -90,6 +95,12 @@ gadk-httprr = { workspace = true }
 gadk-model = { workspace = true, features = ["test-util"] }
 # The rest_server example and the server façade test serve the router on a loopback socket.
 axum = { workspace = true }
+# The telemetry example builds its resource; the telemetry façade test exports a span into an
+# in-memory exporter through the bridge layer.
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true, features = ["testing"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 [[example]]
 name = "quickstart"
@@ -178,6 +189,10 @@ required-features = ["a2a"]
 name = "agentengine"
 required-features = ["gemini", "agentengine"]
 
+[[example]]
+name = "telemetry"
+required-features = ["gemini", "launcher"]
+
 [[test]]
 name = "model_anthropicmodel_agent_runner"
 required-features = ["anthropic"]
@@ -205,3 +220,7 @@ required-features = ["agentengine"]
 [[test]]
 name = "facade_agentregistry"
 required-features = ["agentregistry"]
+
+[[test]]
+name = "facade_telemetry"
+required-features = ["telemetry"]

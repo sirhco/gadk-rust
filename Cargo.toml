@@ -23,6 +23,7 @@ members = [
   "crates/gadk-a2a",
   "crates/gadk-launcher",
   "crates/gadk-agentregistry",
+  "crates/gadk-telemetry",
   "crates/gadk",
 ]
 
@@ -56,6 +57,7 @@ gadk-server = { path = "crates/gadk-server", version = "0.1.0" }
 gadk-a2a = { path = "crates/gadk-a2a", version = "0.1.0" }
 gadk-launcher = { path = "crates/gadk-launcher", version = "0.1.0" }
 gadk-agentregistry = { path = "crates/gadk-agentregistry", version = "0.1.0" }
+gadk-telemetry = { path = "crates/gadk-telemetry", version = "0.1.0" }
 tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
 tokio-util = "0.7.20"
 futures = "0.3.34"
@@ -101,6 +103,12 @@ tower-http = { version = "0.7.1", default-features = false, features = ["catch-p
 a2a-lf = { version = "=0.4.2", default-features = false }
 a2a-client-lf = { version = "=0.2.9", default-features = false, features = ["rustls-tls"] }
 a2a-server-lf = { version = "=0.5.3", default-features = false, features = ["rustls-tls"] }
+opentelemetry = { version = "0.33.1", default-features = false, features = ["trace", "logs"] }
+opentelemetry_sdk = { version = "0.33.1", default-features = false, features = ["trace", "logs"] }
+opentelemetry-otlp = { version = "0.33.1", default-features = false, features = ["http-proto", "trace", "logs"] }
+opentelemetry-http = { version = "0.33.1", default-features = false }
+opentelemetry-proto = { version = "0.33.1", default-features = false, features = ["gen-tonic-messages", "trace", "logs"] }
+prost = "0.14.5"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

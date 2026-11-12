@@ -79,9 +79,14 @@ pub struct Config {
     pub a2a_wrappers: Vec<A2AHandlerWrapper>,
     /// Go `PluginConfig`.
     pub plugin_config: gadk_engine::runner::PluginConfig,
-    /// Go `TelemetryOptions`: extra `tracing` layers for the launcher's global subscriber (the
-    /// `api` sub-launcher adds the REST server's debug layer). The launcher takes them when it
-    /// installs the subscriber.
+    /// Go `TelemetryOptions`: the options the launcher builds gadk-telemetry's providers with
+    /// (Go `telemetry.New`). The launcher clones the list (appending
+    /// `with_otel_to_cloud(true)` for `-otel_to_cloud`), so this one is never changed.
+    pub telemetry_options: Vec<gadk_telemetry::TelemetryOption>,
+    /// Rust-only: extra `tracing` layers for the launcher's global subscriber, installed after
+    /// the providers' bridge layer (Go's `api` sub-launcher appends the REST server's debug span
+    /// and log processors to `TelemetryOptions`; gadk's adds its debug layer here). The launcher
+    /// takes them when it installs the subscriber.
     pub telemetry_layers: Vec<BoxedLayer>,
     /// Go `Authenticator`: when set, authenticates inbound requests to every REST API endpoint
     /// except the public ones (like `/health` and `/version`). It protects the REST API alone; the
@@ -124,6 +129,7 @@ impl Config {
             #[cfg(feature = "a2a")]
             a2a_wrappers: Vec::new(),
             plugin_config: gadk_engine::runner::PluginConfig::default(),
+            telemetry_options: Vec::new(),
             telemetry_layers: Vec::new(),
             #[cfg(feature = "web")]
             authenticator: None,

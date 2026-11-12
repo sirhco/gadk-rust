@@ -65,7 +65,8 @@ impl CountingSummarizer {
 }
 
 /// Go `runConsole`: drives the console launcher over a scripted stdin and returns what it
-/// printed. The end of the input ends the loop the way EOF does in a terminal.
+/// printed. The end of the input ends the loop the way EOF does in a terminal. Telemetry runs over
+/// injected globals: an empty environment and no global tracer provider or dispatcher.
 async fn run_console(config: Config, input: &str) -> String {
     let out = Arc::new(Mutex::new(Vec::<u8>::new()));
     let mut l = console::new().with_io(
@@ -74,7 +75,7 @@ async fn run_console(config: Config, input: &str) -> String {
         false,
     );
     l.parse(Vec::new()).expect("Parse()");
-    let run = l.run(CancellationToken::new(), config).await;
+    let run = l.run_with(CancellationToken::new(), config, |_| true).await;
     let printed = String::from_utf8(out.lock().unwrap().clone()).unwrap();
     if let Err(e) = run {
         panic!("Run() error = {e}. Output:\n{printed}");

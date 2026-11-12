@@ -46,6 +46,7 @@ use crate::config::Config;
 use crate::error::Error;
 use crate::flag_usage::format_flag_usage;
 use crate::launcher::{Launcher, SubLauncher};
+use crate::telemetry;
 use crate::universal::error_on_unparsed_args;
 
 /// Line source for the console (default: stdin read on a blocking task).
@@ -121,6 +122,87 @@ impl ConsoleLauncher {
     pub fn with_flag_output(self, out: Arc<Mutex<dyn Write + Send>>) -> ConsoleLauncher {
         lock(&self.flags).set_output(out);
         self
+    }
+
+    /// Go `consoleLauncher.Execute` over the telemetry [`telemetry::Globals`] given: validate,
+    /// parse, refuse leftovers, run.
+    async fn execute_in(
+        &mut self,
+        cancel: CancellationToken,
+        config: Config,
+        args: Vec<String>,
+        globals: telemetry::Globals,
+    ) -> Result<(), Error> {
+        config.validate()?;
+        let remaining = self
+            .parse(args)
+            .map_err(|e| wrapped("cannot parse args", e))?;
+        error_on_unparsed_args(&remaining)
+            .map_err(|e| wrapped("cannot parse all the arguments", e))?;
+        self.run_in(cancel, config, globals).await
+    }
+
+    /// Go `Execute` with the global subscriber installation injected (`install` returns `false`
+    /// when one is already set) over an empty environment, leaving the global OpenTelemetry
+    /// providers alone: tests never touch the process-global dispatcher, providers or
+    /// environment.
+    #[cfg(test)]
+    pub(crate) async fn execute_with(
+        &mut self,
+        cancel: CancellationToken,
+        config: Config,
+        args: Vec<String>,
+        install: impl FnOnce(tracing::Dispatch) -> bool + Send + 'static,
+    ) -> Result<(), Error> {
+        self.execute_in(cancel, config, args, telemetry::Globals::injected(install))
+            .await
+    }
+
+    /// Go `Run` with the global subscriber installation injected, as
+    /// [`ConsoleLauncher::execute_with`].
+    #[cfg(test)]
+    pub(crate) async fn run_with(
+        &self,
+        cancel: CancellationToken,
+        config: Config,
+        install: impl FnOnce(tracing::Dispatch) -> bool + Send + 'static,
+    ) -> Result<(), Error> {
+        self.run_in(cancel, config, telemetry::Globals::injected(install))
+            .await
+    }
+
+    /// Go `Run` over the telemetry [`telemetry::Globals`] given: Ctrl-C cancels a child token
+    /// (Go `signal.NotifyContext(ctx, os.Interrupt)`), telemetry starts, then the session,
+    /// runner and interaction loop; telemetry is shut down under `-shutdown-timeout`.
+    pub(crate) async fn run_in(
+        &self,
+        cancel: CancellationToken,
+        mut config: Config,
+        globals: telemetry::Globals,
+    ) -> Result<(), Error> {
+        let ctx = cancel.child_token();
+        // Go `defer cancel()`: ends the Ctrl-C watcher when `run` returns.
+        let _stop = ctx.clone().drop_guard();
+        {
+            let ctx = ctx.clone();
+            tokio::spawn(async move {
+                tokio::select! {
+                    r = tokio::signal::ctrl_c() => if r.is_ok() { ctx.cancel() },
+                    _ = ctx.cancelled() => {}
+                }
+            });
+        }
+
+        let telemetry = telemetry::init_with(&mut config, self.otel_to_cloud.get(), globals)
+            .await
+            .map_err(|e| wrapped("telemetry initialization failed", e))?;
+
+        let result = self.run_loop(&ctx, &config).await;
+
+        // Go's deferred `telemetry.Shutdown` under `-shutdown-timeout`.
+        let timeout = self.shutdown_timeout.get().to_std().unwrap_or_default();
+        telemetry.shutdown_logged(timeout, &config.log).await;
+        result
     }
 
     /// Go `Run` after telemetry is up: session, runner and the read-eval-print loop on `ctx`.
@@ -350,37 +432,10 @@ impl SubLauncher for ConsoleLauncher {
         "runs an agent in console mode.".to_owned()
     }
 
-    /// Go `Run`: Ctrl-C cancels a child token (Go `signal.NotifyContext(ctx, os.Interrupt)`),
-    /// telemetry starts, then the session, runner and interaction loop.
-    async fn run(&self, cancel: CancellationToken, mut config: Config) -> Result<(), Error> {
-        let ctx = cancel.child_token();
-        // Go `defer cancel()`: ends the Ctrl-C watcher when `run` returns.
-        let _stop = ctx.clone().drop_guard();
-        {
-            let ctx = ctx.clone();
-            tokio::spawn(async move {
-                tokio::select! {
-                    r = tokio::signal::ctrl_c() => if r.is_ok() { ctx.cancel() },
-                    _ = ctx.cancelled() => {}
-                }
-            });
-        }
-
-        let telemetry = crate::telemetry::init(&mut config, self.otel_to_cloud.get())
-            .map_err(|e| wrapped("telemetry initialization failed", e))?;
-
-        let result = self.run_loop(&ctx, &config).await;
-
-        // Go's deferred `telemetry.Shutdown` under `-shutdown-timeout`.
-        let timeout = self.shutdown_timeout.get().to_std().unwrap_or_default();
-        match tokio::time::timeout(timeout, async { telemetry.shutdown() }).await {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => config.log.print(&format!("telemetry shutdown failed: {e}")),
-            Err(_) => config
-                .log
-                .print("telemetry shutdown failed: context deadline exceeded"),
-        }
-        result
+    /// Go `Run` over the process's telemetry globals (see [`ConsoleLauncher::run_in`]).
+    async fn run(&self, cancel: CancellationToken, config: Config) -> Result<(), Error> {
+        self.run_in(cancel, config, telemetry::Globals::process())
+            .await
     }
 }
 
@@ -393,13 +448,8 @@ impl Launcher for ConsoleLauncher {
         config: Config,
         args: Vec<String>,
     ) -> Result<(), Error> {
-        config.validate()?;
-        let remaining = self
-            .parse(args)
-            .map_err(|e| wrapped("cannot parse args", e))?;
-        error_on_unparsed_args(&remaining)
-            .map_err(|e| wrapped("cannot parse all the arguments", e))?;
-        self.run(cancel, config).await
+        self.execute_in(cancel, config, args, telemetry::Globals::process())
+            .await
     }
 
     fn command_line_syntax(&self) -> String {
@@ -521,7 +571,7 @@ mod tests {
             buf.clone(),
             false,
         );
-        Launcher::execute(&mut l, CancellationToken::new(), config, args)
+        l.execute_with(CancellationToken::new(), config, args, |_| true)
             .await
             .unwrap();
         let stdout = String::from_utf8(buf.lock().unwrap().clone()).unwrap();
@@ -599,14 +649,15 @@ mod tests {
             false,
         );
         let agent = ts::probe_agent();
-        let err = Launcher::execute(
-            &mut l,
-            CancellationToken::new(),
-            Config::new(Arc::new(SingleLoader::new(agent))),
-            vec!["extra".into()],
-        )
-        .await
-        .unwrap_err();
+        let err = l
+            .execute_with(
+                CancellationToken::new(),
+                Config::new(Arc::new(SingleLoader::new(agent))),
+                vec!["extra".into()],
+                |_| true,
+            )
+            .await
+            .unwrap_err();
         assert_eq!(
             err.to_string(),
             "cannot parse all the arguments: cannot parse following arguments: [extra]"
@@ -629,7 +680,8 @@ mod tests {
         let (log, logged) = golog::capture();
         let mut config = Config::new(Arc::new(SingleLoader::new(agent)));
         config.log = log;
-        let err = Launcher::execute(&mut l, CancellationToken::new(), config, Vec::new())
+        let err = l
+            .execute_with(CancellationToken::new(), config, Vec::new(), |_| true)
             .await
             .unwrap_err();
         assert!(matches!(err, Error::Serve(_)), "{err:?}");
@@ -725,11 +777,11 @@ mod tests {
             rec.clone(),
             false,
         );
-        Launcher::execute(
-            &mut l,
+        l.execute_with(
             CancellationToken::new(),
             Config::new(Arc::new(SingleLoader::new(agent))),
             Vec::new(),
+            |_| true,
         )
         .await
         .unwrap();
