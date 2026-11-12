@@ -30,10 +30,12 @@
   `gadk-platform`, and only the façade depends on it (feature `gcs`); `gadk-model`'s `gcp-auth`
   feature adds no gadk-* edge.
 - 4c: `gadk-vertexai` depends on exactly `gadk-session`, `gadk-memory`, `gadk-genai`, `gadk-model`
-  and `gadk-platform`, and only the façade depends on it (feature `vertexai`).
+  and `gadk-platform`, and only the façade (and, from 6b, `gadk-cli`) depends on it (feature
+  `vertexai`).
 - 5a: `gadk-server` depends on exactly `gadk-agent`, `gadk-engine`, `gadk-session`, `gadk-memory`,
   `gadk-artifact`, `gadk-genai`, `gadk-model` and `gadk-platform`; it is the third crate that may
-  depend on `gadk-engine`, and only the façade depends on it (feature `server`).
+  depend on `gadk-engine`, and only the façade (and, from 6b, `gadk-cli`) depends on it (feature
+  `server`).
 - 5b: `gadk-a2a` depends on exactly `gadk-agent`, `gadk-engine`, `gadk-session`, `gadk-genai`,
   `gadk-model`, `gadk-auth`, `gadk-platform` and, optionally (its `gadk-server` feature, for the
   authn `Caller`), `gadk-server`; it is the fourth crate that may depend on `gadk-engine`, the
@@ -54,6 +56,9 @@
   `gadk-engine`, and it may dev-depend on `gadk-server` (the shared-ID test with the debug
   layer). `gadk-launcher` depends on it (required: Go's launcher always links telemetry) and the
   façade optionally (feature `telemetry`).
+- 6b: `gadk-cli` (the `gadk` deploy binary) depends on exactly `gadk-platform`, `gadk-vertexai`
+  (the Reasoning Engine client), `gadk-server` (feature `agentengine`, the class methods) and
+  `gadk-model` (Go JSON); nothing depends on it. It has no direct `gadk-engine` edge.
 """
 import pathlib, sys, tomllib
 
@@ -87,6 +92,7 @@ ALLOWED = {
                       "gadk-telemetry"},
     "gadk-agentregistry": {"gadk-agent", "gadk-auth", "gadk-platform", "gadk-a2a", "gadk-mcp"},
     "gadk-telemetry": {"gadk-engine", "gadk-model", "gadk-platform"},
+    "gadk-cli": {"gadk-platform", "gadk-vertexai", "gadk-server", "gadk-model"},
     "gadk": {"gadk-genai", "gadk-platform", "gadk-model", "gadk-session", "gadk-gemini",
              "gadk-agent", "gadk-engine", "gadk-tools", "gadk-auth", "gadk-mcp", "gadk-artifact",
              "gadk-memory", "gadk-anthropic", "gadk-openai", "gadk-session-database",
