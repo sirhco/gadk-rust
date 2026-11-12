@@ -24,6 +24,7 @@ members = [
   "crates/gadk-launcher",
   "crates/gadk-agentregistry",
   "crates/gadk-telemetry",
+  "crates/gadk-cli",
   "crates/gadk",
 ]
 
@@ -58,6 +59,7 @@ gadk-a2a = { path = "crates/gadk-a2a", version = "0.1.0" }
 gadk-launcher = { path = "crates/gadk-launcher", version = "0.1.0" }
 gadk-agentregistry = { path = "crates/gadk-agentregistry", version = "0.1.0" }
 gadk-telemetry = { path = "crates/gadk-telemetry", version = "0.1.0" }
+gadk-cli = { path = "crates/gadk-cli", version = "0.1.0" }
 tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
 tokio-util = "0.7.20"
 futures = "0.3.34"
@@ -109,6 +111,9 @@ opentelemetry-otlp = { version = "0.33.1", default-features = false, features = 
 opentelemetry-http = { version = "0.33.1", default-features = false }
 opentelemetry-proto = { version = "0.33.1", default-features = false, features = ["gen-tonic-messages", "trace", "logs"] }
 prost = "0.14.5"
+clap = { version = "4.6.7", default-features = false, features = ["std", "help", "usage", "error-context"] }
+tar = "0.4.46"
+flate2 = "1.1.11"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
