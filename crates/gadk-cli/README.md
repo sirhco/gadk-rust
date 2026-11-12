@@ -61,6 +61,8 @@ Credentials are Application Default Credentials (`gcloud auth application-defaul
 
 ## Notes and limitations
 
+- **Unix only (Linux and macOS).** `gadk` uses Unix file permissions and symbolic links when
+  staging; it does not build on Windows.
 - **Cloud Build timeout.** Cloud Run images are built remotely, from source, on Cloud Build.
   A cold release build of a gadk agent can take longer than Cloud Build's default timeout
   (10 minutes). Raise it once for your gcloud configuration:
