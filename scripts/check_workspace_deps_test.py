@@ -33,7 +33,7 @@ class EdgeTest(unittest.TestCase):
     def test_agent_dev_dependency_on_engine_is_rejected(self):
         self.edit("gadk-agent", "[dev-dependencies]\n", "[dev-dependencies]\ngadk-engine = { workspace = true }\n")
         errs = cwd.check(self.repo)
-        self.assertTrue(any("only gadk, gadk-tools, gadk-server, gadk-a2a, gadk-launcher and gadk-agentregistry may depend on gadk-engine" in e for e in errs), errs)
+        self.assertTrue(any("only gadk, gadk-tools, gadk-server, gadk-a2a, gadk-launcher, gadk-agentregistry and gadk-telemetry may depend on gadk-engine" in e for e in errs), errs)
 
     def test_tools_dev_dependency_on_engine_is_allowed(self):
         text = (self.repo / "crates/gadk-tools/Cargo.toml").read_text()
@@ -266,6 +266,26 @@ class EdgeTest(unittest.TestCase):
         text = (self.repo / "crates/gadk-agentregistry/Cargo.toml").read_text()
         dev = text.split("[dev-dependencies]\n", 1)[1]
         self.assertIn('gadk-engine = { workspace = true, features = ["testutil"] }', dev)
+        self.assertEqual(cwd.check(self.repo), [])
+
+    def test_telemetry_edges_are_exactly_engine_model_platform(self):
+        self.assertEqual(cwd.ALLOWED["gadk-telemetry"], {"gadk-engine", "gadk-model", "gadk-platform"})
+        self.assertIn("gadk-telemetry", cwd.ENGINE_DEPENDENTS)
+
+    def test_telemetry_normal_dependency_on_server_is_rejected(self):
+        self.edit("gadk-telemetry", "[dependencies]\n", "[dependencies]\ngadk-server = { workspace = true }\n")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-telemetry -> gadk-server is not allowed" in e for e in errs), errs)
+
+    def test_telemetry_missing_engine_edge_is_rejected(self):
+        self.edit("gadk-telemetry", "[dependencies]\ngadk-engine = { workspace = true }\n", "[dependencies]\n")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-telemetry -> gadk-engine is missing" in e for e in errs), errs)
+
+    def test_telemetry_dev_dependency_on_server_is_allowed(self):
+        text = (self.repo / "crates/gadk-telemetry/Cargo.toml").read_text()
+        dev = text.split("[dev-dependencies]\n", 1)[1]
+        self.assertIn("gadk-server = { workspace = true }", dev)
         self.assertEqual(cwd.check(self.repo), [])
 
     def test_launcher_normal_dependency_on_tools_is_rejected(self):
