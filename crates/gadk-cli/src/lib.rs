@@ -46,6 +46,7 @@ use chrono::Utc;
 use gadk_platform::TimeProvider;
 use gadk_platform::env::{EnvProvider, ProcessEnv};
 use gadk_platform::{go_path_clean, go_path_join};
+use gadk_vertexai::reasoning_engine::ReasoningEngineOptions;
 
 use crate::runner::{Cmd, CommandRunner, TokioRunner};
 
@@ -108,11 +109,16 @@ pub struct Env {
     pub env: Arc<dyn EnvProvider>,
     /// Go `time.Now`.
     pub time: Arc<dyn TimeProvider>,
+    /// How `gadk deploy agentengine` reaches Vertex AI (Go: the `aiplatform` client options;
+    /// endpoint, credentials and HTTP client are injectable for tests). An unset
+    /// [`ReasoningEngineOptions::env`] means [`Env::env`].
+    pub vertex: ReasoningEngineOptions,
 }
 
 impl Env {
-    /// An `Env` from its parts. Outside this file an `Env` is built only here, by
-    /// [`Env::process`] or by the test builder, never by a struct literal (plan decision D3).
+    /// An `Env` from its parts, with default Vertex options (tests set [`Env::vertex`] on the
+    /// built value). Outside this file an `Env` is built only here, by [`Env::process`] or by
+    /// the test builder, never by a struct literal (plan decision D3).
     pub fn new(
         runner: Arc<dyn CommandRunner>,
         out: SharedWriter,
@@ -128,11 +134,13 @@ impl Env {
             cwd,
             env,
             time,
+            vertex: ReasoningEngineOptions::default(),
         }
     }
 
     /// The production environment: real processes, stdout/stderr, the current directory (empty
-    /// when it cannot be read), the process environment and the system clock.
+    /// when it cannot be read), the process environment, the system clock and Vertex AI at
+    /// its regional endpoint with Application Default Credentials.
     pub fn process() -> Env {
         Env::new(
             Arc::new(TokioRunner),
@@ -242,6 +250,19 @@ mod tests {
             v.starts_with(|c: char| c.is_ascii_digit()) && v.contains('.'),
             "unexpected rustc version {v:?}"
         );
+    }
+
+    /// Plan D3: `Env::new` (and so the test builder) starts from the default Vertex options:
+    /// the regional endpoint, Application Default Credentials, reqwest, [`Env::env`].
+    #[test]
+    fn env_vertex_defaults_to_the_regional_endpoint_and_adc() {
+        let t = TestEnv::builder("/w").build();
+        let v = &t.env.vertex;
+        assert_eq!(v.endpoint, None);
+        assert!(v.credentials.is_none());
+        assert!(!v.without_authentication);
+        assert!(v.http_client.is_none());
+        assert!(v.env.is_none());
     }
 
     #[test]
