@@ -45,6 +45,8 @@ gadk-memory = { workspace = true }
 gadk-genai = { workspace = true }
 gadk-model = { workspace = true }
 gadk-platform = { workspace = true }
+# Go's launcher always links telemetry (`InitAndSetGlobalOtelProviders`).
+gadk-telemetry = { workspace = true }
 gadk-server = { workspace = true, optional = true }
 gadk-a2a = { workspace = true, optional = true, features = ["server"] }
 axum = { workspace = true, optional = true }
@@ -76,3 +78,7 @@ tempfile = { workspace = true }
 pretty_assertions = { workspace = true }
 regex = { workspace = true }
 sha2 = { workspace = true }
+# The telemetry tests implement span processors, build a conflicting resource and read spans
+# back from an in-memory exporter.
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true, features = ["testing"] }

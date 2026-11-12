@@ -1,4 +1,5 @@
 import contextlib, importlib.machinery, importlib.util, io, os, pathlib, tempfile, unittest
+from unittest import mock
 
 HERE = pathlib.Path(__file__).resolve().parent
 loader = importlib.machinery.SourceFileLoader("parity_check", str(HERE / "parity-check"))
@@ -840,7 +841,7 @@ class ThreeBTest(unittest.TestCase):
         err = io.StringIO()
         with contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
             pc.main(["--adk-go", str(self.go), "--repo", str(self.repo), "--ledger", "all", "--count"])
-        self.assertIn("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a, 4b, 4c, 5a, 5b, 5c or 6", err.getvalue())
+        self.assertIn("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a, 4b, 4c, 5a, 5b, 5c, 6 or 7a", err.getvalue())
 
 
 LEDGER_4A = (
@@ -1220,6 +1221,95 @@ class SixTest(unittest.TestCase):
         ])
 
 
+LEDGER_7A = (
+    "# Parity ledger — sub-project 7a\n\n"
+    "<!-- in-scope:\ncontrib/detectors/gcp/cloud-run_test.go\ncontrib/detectors/gcp/internal/gke_test.go\n"
+    "contrib/detectors/gcp/internal/utils_test.go\ntelemetry/telemetry_test.go\n-->\n\n"
+    + pc.TABLE_HEADER + "\n" + pc.TABLE_SEP + "\n"
+)
+
+TELEMETRY_TARGET = "crates/gadk-telemetry/src/parity_tests/telemetry_telemetry.rs"
+GKE_TARGET = "crates/gadk-telemetry/src/parity_tests/contrib_detectors_gcp_internal_gke.rs"
+CLOUD_RUN_TARGET = "crates/gadk-telemetry/src/parity_tests/contrib_detectors_gcp_cloud-run.rs"
+
+
+class SevenATest(unittest.TestCase):
+    """7a: ADK-Go's `telemetry` and the contrib GCP detector module's files, resolved under
+    `$GCP_DETECTOR_DIR` (a hyphenated target, a helpers-only file)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        d = pathlib.Path(self._tmp.name)
+        self.go, self.detector, self.repo = d / "go", d / "gcp", d / "repo"
+        for root, f, body in (
+            (self.go, "telemetry/telemetry_test.go", "func TestTelemetrySmoke(t *testing.T) {}\n"),
+            (self.detector, "cloud-run_test.go", "func TestCloudRunDetectorNotOnGCE(t *testing.T) {}\n"),
+            (self.detector, "internal/gke_test.go", "func TestGKEHostType(t *testing.T) {}\n"),
+            (self.detector, "internal/utils_test.go", "func helper() {}\n"),
+        ):
+            (root / f).parent.mkdir(parents=True, exist_ok=True)
+            (root / f).write_text("package x\n" + body)
+        for target in (TELEMETRY_TARGET, GKE_TARGET, CLOUD_RUN_TARGET):
+            (self.repo / target).parent.mkdir(parents=True, exist_ok=True)
+        (self.repo / TELEMETRY_TARGET).write_text(
+            "// parity: adapted: the returned provider's tracer\n#[tokio::test]\nasync fn test_telemetry_smoke() {}\n")
+        (self.repo / GKE_TARGET).write_text("#[tokio::test]\nasync fn test_gke_host_type() {}\n")
+        (self.repo / CLOUD_RUN_TARGET).write_text(
+            "// parity: skipped TestCloudRunDetectorNotOnGCE: deprecated detector\n")
+        (self.repo / "docs/parity").mkdir(parents=True)
+        self.ledger = self.repo / "docs/parity/7a.md"
+        self.ledger.write_text(LEDGER_7A)
+        env = mock.patch.dict(os.environ, {"GCP_DETECTOR_DIR": str(self.detector)})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def run_cli(self, *args):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = pc.main(["--adk-go", str(self.go), "--repo", str(self.repo), *args])
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_ledger_7a_is_registered(self):
+        self.assertIn("7a", pc.GENERATED_LEDGERS)
+        self.assertEqual(self.run_cli("--ledger", "7a", "--count"), (0, "3\n", ""))
+
+    def test_contrib_files_resolve_under_the_detector_module(self):
+        self.assertEqual(pc.go_path(self.go, "contrib/detectors/gcp/internal/gke_test.go"),
+                         self.detector / "internal/gke_test.go")
+        self.assertEqual(pc.go_path(self.go, "telemetry/telemetry_test.go"),
+                         self.go / "telemetry/telemetry_test.go")
+        self.assertEqual(pc.target_name("contrib/detectors/gcp/cloud-run_test.go"),
+                         "contrib_detectors_gcp_cloud-run")
+
+    def test_the_module_cache_is_the_default_root(self):
+        with mock.patch.dict(os.environ, {"GCP_DETECTOR_DIR": ""}), \
+                mock.patch.object(pc, "go_mod_cache", return_value="/cache"):
+            self.assertEqual(pc.gcp_detector_dir(),
+                             pathlib.Path("/cache/go.opentelemetry.io/contrib/detectors/gcp@v1.47.0"))
+
+    def test_a_missing_detector_file_is_reported(self):
+        (self.detector / "internal/gke_test.go").unlink()
+        rc, _, err = self.run_cli("--ledger", "7a")
+        self.assertEqual(rc, 1)
+        self.assertIn("in-scope file missing in ADK-Go: contrib/detectors/gcp/internal/gke_test.go", err)
+
+    def test_targets_generate_and_check(self):
+        self.assertEqual(self.run_cli("--ledger", "7a", "--generate")[0], 0)
+        self.assertEqual(self.run_cli("--ledger", "7a"), (0, "", ""))
+        rows = self.ledger.read_text().splitlines()[-3:]
+        self.assertEqual(rows, [
+            "| contrib/detectors/gcp/cloud-run_test.go | TestCloudRunDetectorNotOnGCE | skipped | "
+            + CLOUD_RUN_TARGET + " | deprecated detector |",
+            "| contrib/detectors/gcp/internal/gke_test.go | TestGKEHostType | ported | " + GKE_TARGET
+            + " | test_gke_host_type |",
+            "| telemetry/telemetry_test.go | TestTelemetrySmoke | ported (adapted: the returned provider's"
+            " tracer) | " + TELEMETRY_TARGET + " | test_telemetry_smoke |",
+        ])
+
+
 LEDGER_5C = (
     "# Parity ledger — sub-project 5c\n\n"
     "<!-- in-scope:\nagentregistry/resolve_test.go\nserver/agentengine/handler_test.go\n-->\n\n"
@@ -1543,6 +1633,15 @@ class RealTreeTest(unittest.TestCase):
         self.assertEqual(deferred, {})
         self.assertEqual(pc.count(ADK_GO, in_scope), 62)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "5c"), [])
+
+    def test_7a_count_is_86(self):
+        in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/7a.md")
+        self.assertEqual(len(in_scope), 13)
+        self.assertEqual(sorted({f.split("/")[0] for f in in_scope}), ["contrib", "telemetry"])
+        self.assertEqual(deferred, {})
+        self.assertEqual(pc.count(ADK_GO, in_scope), 86)
+        self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "7a"), [])
+        self.assertEqual(len(pc.go_tests(ADK_GO, "telemetry/telemetry_test.go")), 6)
 
     def test_6_count_is_94(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/6.md")

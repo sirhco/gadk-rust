@@ -251,6 +251,10 @@ pub(crate) fn configure_exporters(
 /// per-signal variable as is, else the generic endpoint with `path` joined to its path (Go
 /// `path.Join`, query dropped). An unparsable generic endpoint is returned as is, for the
 /// exporter to reject.
+///
+/// Divergence (ledger 7a): Go drops an unparsable endpoint and uses the default one;
+/// opentelemetry-otlp rejects it, so `new` fails with `failed to configure exporters: failed to
+/// create OTLP HTTP exporter: <opentelemetry-otlp error>`.
 fn signal_endpoint(generic: &str, signal: &str, path: &str) -> String {
     if !signal.is_empty() {
         return signal.to_owned();
@@ -295,6 +299,9 @@ pub(crate) fn new_gcp_span_exporter(
     {
         client = client.with_credentials(credentials);
     }
+    // Divergence (ledger 7a): Go's `WithHeaders` replaces the environment's headers;
+    // opentelemetry-otlp still adds `OTEL_EXPORTER_OTLP_HEADERS` to this exporter's requests.
+    // `x-goog-user-project` is still sent exactly once.
     // Pass the quota project id in headers to fix auth errors.
     // https://cloud.google.com/docs/authentication/adc-troubleshooting/user-creds
     let quota_project = HeaderValue::from_str(&cfg.gcp_quota_project).map_err(|e| e.to_string())?;
