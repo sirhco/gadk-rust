@@ -327,6 +327,7 @@ async fn read_body(req: Request) -> Result<Bytes, BodyError> {
 /// Go `json.NewDecoder(r.Body).Decode(&v)` into a struct: decodes the first JSON value and
 /// ignores what follows it; an empty body is Go's `EOF`; `null` leaves the zero value.
 fn decode_first<T: DeserializeOwned + Default>(body: &[u8]) -> Result<T, String> {
+    // Divergence (ledger 5a): nesting past 127 is serde's error (Go: 10000); see 5c.md.
     match serde_json::Deserializer::from_slice(body)
         .into_iter::<Option<T>>()
         .next()
