@@ -713,7 +713,9 @@ async fn test_run_passes_resolved_bind_host_to_sublaunchers() {
 
         let (config, _) = config();
         assert!(
-            l.run(CancellationToken::new(), config).await.is_err(),
+            l.run_with(CancellationToken::new(), config, |_| true)
+                .await
+                .is_err(),
             "{name}: Run() succeeded, want server bind failure"
         );
 
@@ -748,7 +750,9 @@ async fn run_for_router(config: Config, args: &[&str], subs: Vec<Fake>) -> WebRo
     let mut l = web::new(boxed);
     l.parse(all).unwrap();
     assert!(
-        l.run(CancellationToken::new(), config).await.is_err(),
+        l.run_with(CancellationToken::new(), config, |_| true)
+            .await
+            .is_err(),
         "Run() succeeded, want server bind failure"
     );
     let router = first.lock().unwrap().router.clone();
