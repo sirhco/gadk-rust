@@ -15,15 +15,22 @@
 
 //! Port of `internal/bms.go`: Bare Metal Solution.
 
-#![allow(dead_code, unused_variables, unused_imports, clippy::todo)]
-
 use super::detector::{Detector, DetectorError};
+
+/// Go `bmsProjectIDEnv`.
+const BMS_PROJECT_ID_ENV: &str = "BMS_PROJECT_ID";
+/// Go `bmsRegionEnv`.
+const BMS_REGION_ENV: &str = "BMS_REGION";
+/// Go `bmsInstanceIDEnv`.
+const BMS_INSTANCE_ID_ENV: &str = "BMS_INSTANCE_ID";
 
 impl Detector {
     /// Go `onBareMetalSolution`: `BMS_PROJECT_ID`, `BMS_REGION` and `BMS_INSTANCE_ID` all set
     /// and non-empty.
     pub(super) fn on_bare_metal_solution(&self) -> bool {
-        todo!()
+        [BMS_PROJECT_ID_ENV, BMS_REGION_ENV, BMS_INSTANCE_ID_ENV]
+            .iter()
+            .all(|key| self.os.var(key).is_some_and(|v| !v.is_empty()))
     }
 
     /// Go `BareMetalSolutionInstanceID`: `BMS_INSTANCE_ID`.
@@ -32,7 +39,9 @@ impl Detector {
     ///
     /// [`DetectorError::EnvVarNotFound`].
     pub fn bare_metal_solution_instance_id(&self) -> Result<String, DetectorError> {
-        todo!()
+        self.os
+            .var(BMS_INSTANCE_ID_ENV)
+            .ok_or(DetectorError::EnvVarNotFound)
     }
 
     /// Go `BareMetalSolutionCloudRegion`: `BMS_REGION`.
@@ -41,7 +50,9 @@ impl Detector {
     ///
     /// [`DetectorError::EnvVarNotFound`].
     pub fn bare_metal_solution_cloud_region(&self) -> Result<String, DetectorError> {
-        todo!()
+        self.os
+            .var(BMS_REGION_ENV)
+            .ok_or(DetectorError::EnvVarNotFound)
     }
 
     /// Go `BareMetalSolutionProjectID`: `BMS_PROJECT_ID`.
@@ -50,6 +61,8 @@ impl Detector {
     ///
     /// [`DetectorError::EnvVarNotFound`].
     pub fn bare_metal_solution_project_id(&self) -> Result<String, DetectorError> {
-        todo!()
+        self.os
+            .var(BMS_PROJECT_ID_ENV)
+            .ok_or(DetectorError::EnvVarNotFound)
     }
 }

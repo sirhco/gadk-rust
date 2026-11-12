@@ -14,3 +14,7 @@
 // limitations under the License.
 
 //! Port of `go.opentelemetry.io/contrib/detectors/gcp` v1.47.0 `cloud-run_test.go`.
+
+// parity: skipped TestCloudRunDetectorNotOnGCE: the deprecated CloudRun detector (cloud-run.go) is not ported; ADK uses only gcp.NewDetector (spec R9)
+// parity: skipped TestCloudRunDetectorExpectSuccess: the deprecated CloudRun detector (cloud-run.go) is not ported; ADK uses only gcp.NewDetector (spec R9)
+// parity: skipped TestCloudRunDetectorExpectFail: the deprecated CloudRun detector (cloud-run.go) is not ported; ADK uses only gcp.NewDetector (spec R9)

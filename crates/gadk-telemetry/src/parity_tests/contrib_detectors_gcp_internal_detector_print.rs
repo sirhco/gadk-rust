@@ -14,3 +14,5 @@
 // limitations under the License.
 
 //! Port of `go.opentelemetry.io/contrib/detectors/gcp` v1.47.0 `internal/detector_print_test.go`.
+
+// parity: skipped TestDetectorPrint: built only with the `print` build tag; an always-passing manual check that logs the detected environment on a real GCP VM
