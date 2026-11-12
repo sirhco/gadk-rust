@@ -22,14 +22,14 @@ use gadk_session::{CreateRequest, Event, GetRequest};
 use serde_json::{Map, Value};
 
 use super::MethodHandler;
-use super::stream_query::{ndjson_response, new_runner, run_request};
+use super::stream_query::{ndjson_response, new_runner};
 use crate::agentengine::encode::emit_json;
 use crate::agentengine::encode_shapes;
 use crate::agentengine::models::{
     StreamingAgentRunWithEventsRequest, StreamingAgentRunWithEventsResponse,
     StreamingAgentRunWithEventsRunRequest,
 };
-use crate::agentengine::unmarshal::{go_unmarshal, needs_deep_stack, on_deep_stack};
+use crate::agentengine::unmarshal::go_unmarshal;
 use crate::agentengine::{AgentEngineConfig, Log};
 use crate::mux::Response;
 
@@ -92,22 +92,15 @@ impl StreamingAgentRunWithEventsHandler {
                     "decodeStreamingAgentRunWithEventsRequest() failed: {err}"
                 ))
             })?;
-        // A deep message is cloned into the run and dropped with `run_req`, both recursively.
-        let deep = needs_deep_stack(req.input.request_json.as_bytes());
-        if let Err(err) = self
-            .ensure_backend_session(&mut run_req, &requested_session_id)
+        self.ensure_backend_session(&mut run_req, &requested_session_id)
             .await
-        {
-            if deep {
-                // Err only when the thread is unavailable; `run_req` is then leaked.
-                let _ = on_deep_stack(run_req, drop);
-            }
-            return Err(fail(format!("s.ensureBackendSession() failed: {err}")));
-        }
+            .map_err(|err| fail(format!("s.ensureBackendSession() failed: {err}")))?;
 
-        let session_id = run_req.session_id.clone();
-        let events = run_request(deep, run_req, |run_req| self.run(run_req))
+        let events = self
+            .run(&run_req)
             .map_err(|err| fail(format!("s.run() failed: {err}")))?;
+
+        let session_id = run_req.session_id;
 
         Ok(ndjson_response(
             events,

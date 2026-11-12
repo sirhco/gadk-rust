@@ -61,10 +61,10 @@ enum Durations {
 /// [`encode_shapes`](super::encode_shapes), e.g. `MODELS_QUERY`), producing the Rust model `T`:
 ///
 /// 1. syntax: the whole input must be one JSON value (Go `checkValid`); an empty or truncated
-///    input is `unexpected end of JSON input`; nesting deeper than [`MAX_DEPTH`] (512 arrays and
-///    objects; Go's limit is 10000) is `exceeded max depth`, unless a syntax error comes earlier
-///    in the input; any
-///    other syntax error keeps serde_json's text (ledgered, as in 5a);
+///    input is `unexpected end of JSON input`; nesting deeper than [`MAX_DEPTH`] (127 arrays and
+///    objects, serde_json's limit; Go's is 10000) is `exceeded max depth`, unless a syntax error
+///    comes earlier in the input; any other syntax error keeps serde_json's text (ledgered, as
+///    in 5a);
 /// 2. keys: in each JSON object decoded into a struct (`GoKind::Struct`, also through
 ///    `Pointer`/`Slice`/`Map` elements and into genai structs), a key matches the field whose
 ///    json name (tag name, else Go name) equals it exactly, else case-insensitively (Go
@@ -85,134 +85,29 @@ enum Durations {
 ///    input order wins;
 /// 4. the canonicalized value is deserialized into `T` (its serde names are the json names).
 ///
-/// Go's goroutine stacks grow, so Go decodes the deepest input it accepts; the walk here, serde's
-/// `Value` deserialization and `Value`'s drop recurse once per level, so an input nested deeper
-/// than [`INLINE_DEPTH`] is decoded on a thread with a [`DEEP_STACK`] stack. A `T` holding such
-/// a value must not be dropped natively on a small stack either: see [`drop_value`].
-pub(crate) fn go_unmarshal<T: DeserializeOwned + Send>(
+/// Everything runs on the caller's stack: [`MAX_DEPTH`] keeps the decoded value shallow enough
+/// for the recursive walk, serde's `Value` deserialization and the value's drop.
+pub(crate) fn go_unmarshal<T: DeserializeOwned>(
     payload: &[u8],
     shape: &'static GoStruct,
 ) -> Result<T, String> {
-    let depth = match nesting(payload) {
-        Ok(depth) => depth,
-        Err(at) => return Err(too_deep(payload, at)),
-    };
-    if depth <= INLINE_DEPTH {
-        return decode(payload, shape);
+    if let Err(at) = nesting(payload) {
+        return Err(too_deep(payload, at));
     }
-    std::thread::scope(|scope| {
-        let worker = spawn_deep(scope, || decode(payload, shape))
-            .map_err(|e| format!("{DECODER_UNAVAILABLE}: {e}"))?;
-        worker
-            .join()
-            .map_err(|_| format!("{DECODER_UNAVAILABLE}: the decoder thread panicked"))?
-    })
+    decode(payload, shape)
 }
 
-/// The prefix of a [`go_unmarshal`] error that is the server's failure (the deep-input decoder
-/// thread could not run), not the input's: no Go counterpart (Go's stacks grow), so the caller
-/// answers it as a server error ([`is_server_error`]). No JSON error text starts with it.
-const DECODER_UNAVAILABLE: &str = "agentengine: deep-input decoder unavailable";
-
-/// Whether a [`go_unmarshal`] error is the server's failure rather than the input's.
-pub(crate) fn is_server_error(err: &str) -> bool {
-    err.starts_with(DECODER_UNAVAILABLE)
-}
-
-/// The prefix of an [`on_deep_stack`] error when the thread cannot be spawned (no Go
-/// counterpart: Go's stacks grow).
-const DEEP_STACK_UNAVAILABLE: &str = "agentengine: deep-stack thread unavailable";
-
-/// The prefix of an [`on_deep_stack`] error when `f` panicked on the thread.
-const DEEP_STACK_FAILED: &str = "agentengine: deep-stack thread failed";
-
-/// Whether `payload`'s nesting is past what is decoded, cloned and dropped on the caller's stack
-/// ([`INLINE_DEPTH`]); a value decoded from such a payload is handled through [`on_deep_stack`].
-pub(crate) fn needs_deep_stack(payload: &[u8]) -> bool {
-    !matches!(nesting(payload), Ok(depth) if depth <= INLINE_DEPTH)
-}
-
-/// `f(value)` on a thread with a [`DEEP_STACK`] stack (the caller blocks until it returns), for
-/// work that recurses once per nesting level of `value` (encoding, cloning, `Debug`, dropping): Go
-/// grows goroutine stacks, a Rust stack overflow aborts the process. `value` (and whatever `f`
-/// does not return) is dropped on that thread. `Err` when the thread cannot be spawned
-/// (`agentengine: deep-stack thread unavailable: <e>`; `value` is then leaked, never dropped on
-/// the caller's stack) or `f` panics (`agentengine: deep-stack thread failed: the thread
-/// panicked`; `value` was moved to the thread and dropped there while unwinding).
-///
-/// `f` runs under the caller's `tracing` dispatcher (so a thread-scoped subscriber,
-/// `set_default`/`with_default`, still sees it) and inside the caller's current span (so a span
-/// `f` opens has the parent it would have on the caller's stack).
-pub(crate) fn on_deep_stack<T, R, F>(value: T, f: F) -> Result<R, String>
-where
-    T: Send,
-    R: Send,
-    F: FnOnce(T) -> R + Send,
-{
-    let dispatch = tracing::dispatcher::get_default(Clone::clone);
-    let parent = tracing::Span::current();
-    let mut slot = Some(value);
-    let out = std::thread::scope(|scope| {
-        let slot = &mut slot;
-        let worker = spawn_deep(scope, move || {
-            tracing::dispatcher::with_default(&dispatch, || parent.in_scope(|| slot.take().map(f)))
-        })
-        .map_err(|e| format!("{DEEP_STACK_UNAVAILABLE}: {e}"))?;
-        worker
-            .join()
-            .map_err(|_| format!("{DEEP_STACK_FAILED}: the thread panicked"))
-    });
-    if let Some(value) = slot {
-        // Not run: dropping it here could overflow this stack.
-        std::mem::forget(value);
-    }
-    out?.ok_or_else(|| format!("{DEEP_STACK_FAILED}: the value was not passed"))
-}
-
-#[cfg(test)]
-thread_local! {
-    /// Tests: make the next deep-input decoder spawn on this thread fail.
-    pub(crate) static FAIL_DEEP_SPAWN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-/// Spawns the deep-input decoder thread with a [`DEEP_STACK`] stack.
-fn spawn_deep<'scope, F, R>(
-    scope: &'scope std::thread::Scope<'scope, '_>,
-    f: F,
-) -> std::io::Result<std::thread::ScopedJoinHandle<'scope, R>>
-where
-    F: FnOnce() -> R + Send + 'scope,
-    R: Send + 'scope,
-{
-    #[cfg(test)]
-    if FAIL_DEEP_SPAWN.with(|fail| fail.replace(false)) {
-        return Err(std::io::Error::other("injected spawn failure"));
-    }
-    std::thread::Builder::new()
-        .stack_size(DEEP_STACK)
-        .spawn_scoped(scope, f)
-}
-
-/// The agentengine server's nesting limit for request bodies: `exceeded max depth` past 512
+/// The agentengine server's nesting limit for request bodies: `exceeded max depth` past 127
 /// arrays and objects, the top-level value included (Go's error text and counting rule; the
 /// controller answers it 400 as Go does).
 ///
-/// Go's limit (`encoding/json`, Go 1.27) is 10000. This is a temporary cap, ledgered in
-/// `docs/parity/5c.md`: past this crate, a request's message or session state is cloned,
-/// converted and dropped recursively (gadk-engine's runner, `gadk_model::to_go_json`, the
-/// session service), which overflows a 2 MiB stack at about 900–1100 levels (debug build,
-/// scripted model, direct handler call). A later housekeeping task makes those paths depth-safe
-/// and restores Go's 10000. The deep-stack machinery here ([`INLINE_DEPTH`], [`on_deep_stack`],
-/// [`drop_value`]) stays: it also guards the stream encoder against deep events (only that one:
-/// `async_get_session` and `async_list_sessions` encode stored events with `to_go_json` on the
-/// caller's stack).
-pub(crate) const MAX_DEPTH: usize = 512;
-
-/// The deepest input decoded on the caller's stack.
-const INLINE_DEPTH: usize = 64;
-
-/// The stack for deeper inputs (a debug build needs about 1.5 KiB per level).
-const DEEP_STACK: usize = 64 << 20;
+/// This equals serde_json's recursion limit for the values it materializes (its deserializer
+/// starts `remaining_depth` at 128 and fails at 0), so agentengine accepts exactly the nesting
+/// that gadk's serde-based decoders (REST, A2A, the session loaders) materialize, and every
+/// request-derived value stays shallow enough for the recursive clone, convert and drop past
+/// this crate on a 2 MiB stack. Go's `encoding/json` allows 10000: a ledgered divergence
+/// (`docs/parity/5c.md`, Agent Engine server and Workspace JSON depth).
+pub(crate) const MAX_DEPTH: usize = 127;
 
 /// The maximum nesting depth of `payload`'s arrays and objects (brackets inside strings not
 /// counted), or `Err(offset)` of the first opener past [`MAX_DEPTH`]. Only meaningful for valid
@@ -260,20 +155,7 @@ fn too_deep(payload: &[u8], at: usize) -> String {
     }
 }
 
-/// Drops a JSON value without recursing per level (`Value`'s own drop overflows a 2 MiB stack
-/// in a debug build at a few thousand levels; events can be that deep).
-pub(crate) fn drop_value(value: Value) {
-    let mut stack = vec![value];
-    while let Some(value) = stack.pop() {
-        match value {
-            Value::Array(items) => stack.extend(items),
-            Value::Object(members) => stack.extend(members.into_iter().map(|(_, v)| v)),
-            _ => {}
-        }
-    }
-}
-
-/// [`go_unmarshal`] on the current stack, after the depth check.
+/// [`go_unmarshal`] after the depth check.
 fn decode<T: DeserializeOwned>(payload: &[u8], shape: &'static GoStruct) -> Result<T, String> {
     let raw: &RawValue = serde_json::from_slice(payload).map_err(|e| {
         if e.is_eof() {
@@ -799,9 +681,9 @@ impl Decoder {
                 other => return Err(self.type_error(other.kind(), go_type)),
             },
             GoKind::RawMessage => {
-                // Divergence (ledger 5c): serde_json's 128-level recursion limit and its error
-                // text apply here (Go: its 10000 max depth); no request shape has a
-                // `json.RawMessage` field, so no request reaches it.
+                // serde_json's recursion limit (127 levels) cannot fail here: `nesting()` has
+                // already rejected any input deeper than `MAX_DEPTH`, which equals it. No
+                // request shape has a `json.RawMessage` field.
                 *slot = Some(serde_json::from_str(raw.get()).map_err(|e| e.to_string())?);
             }
             GoKind::Interface => *slot = self.interface_value(raw)?,
@@ -1406,14 +1288,13 @@ mod tests {
         format!(r#"{{"class_method":"x","input":{value}}}"#)
     }
 
-    /// Go 1.27.2's counting rule with the server's cap ([`MAX_DEPTH`], 512; Go's is 10000): 511
-    /// levels inside the top-level object decode, 512 are `exceeded max depth`; the deepest
-    /// accepted input decodes (and is dropped) on a 2 MiB stack.
+    /// Go 1.27.2's counting rule at serde_json's limit ([`MAX_DEPTH`], 127; Go's is 10000): 126
+    /// levels inside the top-level object (127 with it) decode, 127 inside (128 with it) are
+    /// `exceeded max depth`; the deepest accepted input decodes and drops on a 2 MiB stack.
     #[test]
     fn max_depth_decodes_on_a_2_mib_stack() {
         on_small_stack(|| {
-            let q: Query =
-                go_unmarshal(input(&arrays(MAX_DEPTH - 1)).as_bytes(), &MODELS_QUERY).unwrap();
+            let q: Query = go_unmarshal(input(&arrays(126)).as_bytes(), &MODELS_QUERY).unwrap();
             assert_eq!(q.class_method, "x");
             let mut depth = 0;
             let mut v = q.input.as_ref().unwrap();
@@ -1424,20 +1305,20 @@ mod tests {
                     None => break,
                 }
             }
-            assert_eq!(depth, MAX_DEPTH - 1);
-            drop_value(q.input.unwrap());
+            assert_eq!(depth, 126);
+            drop(q);
 
-            let objects = format!(
-                "{}1{}",
-                r#"{"a":"#.repeat(MAX_DEPTH - 1),
-                "}".repeat(MAX_DEPTH - 1)
-            );
+            let objects = format!("{}1{}", r#"{"a":"#.repeat(126), "}".repeat(126));
             let q: Query = go_unmarshal(input(&objects).as_bytes(), &MODELS_QUERY).unwrap();
-            drop_value(q.input.unwrap());
+            drop(q);
 
             assert_eq!(
-                go_unmarshal::<Query>(input(&arrays(MAX_DEPTH)).as_bytes(), &MODELS_QUERY)
-                    .unwrap_err(),
+                go_unmarshal::<Query>(input(&arrays(127)).as_bytes(), &MODELS_QUERY).unwrap_err(),
+                "exceeded max depth"
+            );
+            let objects = format!("{}1{}", r#"{"a":"#.repeat(127), "}".repeat(127));
+            assert_eq!(
+                go_unmarshal::<Query>(input(&objects).as_bytes(), &MODELS_QUERY).unwrap_err(),
                 "exceeded max depth"
             );
         });

@@ -27,7 +27,7 @@ use super::Log;
 use super::encode_shapes;
 use super::method::MethodHandler;
 use super::models::Query;
-use super::unmarshal::{drop_value, go_unmarshal, is_server_error};
+use super::unmarshal::go_unmarshal;
 use crate::mux::{Request, Response, WriteDeadline, http_error};
 
 /// Go `defaultSSETimeout`: the write deadline when none is configured.
@@ -119,19 +119,7 @@ impl Controller {
                 }
             };
             match go_unmarshal::<Query>(&payload, &encode_shapes::MODELS_QUERY) {
-                Ok(query) => {
-                    class_method = query.class_method;
-                    // `input` may be nested deeper than a native drop survives on a small
-                    // stack (see `unmarshal::MAX_DEPTH`); `drop_value` is not recursive.
-                    if let Some(input) = query.input {
-                        drop_value(input);
-                    }
-                }
-                // Not Go's: the server could not run the decoder (see `is_server_error`).
-                Err(e) if is_server_error(&e) => {
-                    self.log.print(&format!("handleQuery failed: {e}"));
-                    return http_error(StatusCode::INTERNAL_SERVER_ERROR, &e);
-                }
+                Ok(query) => class_method = query.class_method,
                 Err(e) => return http_error(StatusCode::BAD_REQUEST, &e),
             }
         }
@@ -415,9 +403,9 @@ mod tests {
         assert!(lines.lock().unwrap().is_empty());
     }
 
-    /// Go 1.27.2's counting rule with the server's cap (`unmarshal::MAX_DEPTH`, 512; Go's is
-    /// 10000): 511 levels inside the payload object dispatch, 512 are `http.Error` 400
-    /// `exceeded max depth`; on a tokio worker's default 2 MiB stack.
+    /// Go 1.27.2's counting rule at serde_json's limit (`unmarshal::MAX_DEPTH`, 127; Go's is
+    /// 10000): 126 levels inside the payload object (127 with it) dispatch, 127 inside (128 with
+    /// it) are `http.Error` 400 `exceeded max depth`; on a tokio worker's default 2 MiB stack.
     #[test]
     fn max_depth_on_a_2_mib_stack() {
         std::thread::Builder::new()
@@ -436,29 +424,14 @@ mod tests {
                     };
                     let (c, lines) =
                         controller(1 << 20, GoDuration(0), vec![Fake::new("m", Ok("ok"))]);
-                    let max = crate::agentengine::unmarshal::MAX_DEPTH;
-                    let resp = c.query(post(Body::from(body(max - 1)))).await;
+                    let resp = c.query(post(Body::from(body(126)))).await;
                     assert_eq!(parts(resp).await, (200, vec![], "ok".to_owned()));
-                    let resp = c.query(post(Body::from(body(max)))).await;
+                    let resp = c.query(post(Body::from(body(127)))).await;
                     assert_eq!(
                         parts(resp).await,
                         (400, http_error_headers(), "exceeded max depth\n".to_owned())
                     );
                     assert!(lines.lock().unwrap().is_empty());
-
-                    // Not Go's: the decoder thread failing to start is the server's 500.
-                    crate::agentengine::unmarshal::FAIL_DEEP_SPAWN.with(|fail| fail.set(true));
-                    let resp = c.query(post(Body::from(body(100)))).await;
-                    let text =
-                        "agentengine: deep-input decoder unavailable: injected spawn failure";
-                    assert_eq!(
-                        parts(resp).await,
-                        (500, http_error_headers(), format!("{text}\n"))
-                    );
-                    assert_eq!(
-                        *lines.lock().unwrap(),
-                        vec![format!("handleQuery failed: {text}")]
-                    );
                 });
             })
             .unwrap()
