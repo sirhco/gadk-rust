@@ -14,3 +14,6 @@
 // limitations under the License.
 
 //! Port of `go.opentelemetry.io/contrib/detectors/gcp` v1.47.0 `cloud-function_test.go`.
+
+// parity: skipped TestCloudFunctionDetect: the deprecated CloudFunction detector (cloud-function.go) is not ported; ADK uses only gcp.NewDetector (spec R9)
+// parity: skipped TestNotOnCloudFunction: the deprecated CloudFunction detector (cloud-function.go) is not ported; ADK uses only gcp.NewDetector (spec R9)

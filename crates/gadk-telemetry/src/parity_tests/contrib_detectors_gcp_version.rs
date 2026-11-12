@@ -14,3 +14,5 @@
 // limitations under the License.
 
 //! Port of `go.opentelemetry.io/contrib/detectors/gcp` v1.47.0 `version_test.go`.
+
+// parity: skipped TestVersionSemver: the contrib module's Version() release string has no gadk counterpart (gadk_telemetry is versioned by its crate)

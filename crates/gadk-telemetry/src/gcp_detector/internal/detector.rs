@@ -15,8 +15,6 @@
 
 //! Port of `internal/detector.go`: [`Detector`], [`Platform`] and platform detection.
 
-#![allow(dead_code, unused_variables, unused_imports, clippy::todo)]
-
 use std::fmt;
 use std::sync::Arc;
 
@@ -76,12 +74,17 @@ pub struct Detector {
 impl Detector {
     /// Go `NewDetector`: the metadata server named by `env` and `env` itself.
     pub fn new(env: Arc<dyn EnvProvider>) -> Self {
-        todo!()
+        Self::new_with(MetadataClient::new(Arc::clone(&env)), env)
     }
 
     /// Go `NewTestDetector`: an injected metadata client and environment.
     pub fn new_with(metadata: MetadataClient, env: Arc<dyn EnvProvider>) -> Self {
-        todo!()
+        Self {
+            metadata,
+            os: env,
+            http_client: None,
+            compute_base_url: String::new(),
+        }
     }
 
     /// Go's test seam `d.httpClient = …; d.computeBaseURL = …`: the Compute API client (used
@@ -92,12 +95,36 @@ impl Detector {
         http_client: reqwest::Client,
         compute_base_url: impl Into<String>,
     ) -> Self {
-        todo!()
+        Self {
+            http_client: Some(http_client),
+            compute_base_url: compute_base_url.into(),
+            ..self
+        }
     }
 
     /// Go `CloudPlatform`.
     pub async fn cloud_platform(&self) -> Platform {
-        todo!()
+        if self.on_bare_metal_solution() {
+            Platform::BareMetalSolution
+        } else if self.on_gke().await {
+            Platform::Gke
+        } else if self.on_cloud_functions() {
+            Platform::CloudFunctions
+        } else if self.on_cloud_run() {
+            Platform::CloudRun
+        } else if self.on_cloud_run_job() {
+            Platform::CloudRunJob
+        } else if self.on_cloud_run_worker_pool() {
+            Platform::CloudRunWorkerPool
+        } else if self.on_app_engine_standard() {
+            Platform::AppEngineStandard
+        } else if self.on_app_engine() {
+            Platform::AppEngineFlex
+        } else if self.on_gce().await {
+            Platform::Gce
+        } else {
+            Platform::UnknownPlatform
+        }
     }
 
     /// Go `ProjectID`: `project/project-id`, trimmed.
@@ -106,12 +133,18 @@ impl Detector {
     ///
     /// [`DetectorError`].
     pub async fn project_id(&self) -> Result<String, DetectorError> {
-        todo!()
+        // Go reads `project/project-id` uncached (the metadata package caches `ProjectID`).
+        Ok(self
+            .metadata
+            .get("project/project-id")
+            .await?
+            .trim()
+            .to_owned())
     }
 
     /// Go `instanceID`: `instance/id`, trimmed.
     pub(super) async fn instance_id(&self) -> Result<String, DetectorError> {
-        todo!()
+        Ok(self.metadata.get("instance/id").await?.trim().to_owned())
     }
 }
 

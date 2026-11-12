@@ -15,29 +15,48 @@
 
 //! Port of `internal/faas.go`: Cloud Functions, Cloud Run services, jobs and worker pools.
 
-#![allow(dead_code, unused_variables, unused_imports, clippy::todo)]
-
 use super::detector::{Detector, DetectorError};
+
+/// Go `cloudFunctionsTargetEnv`.
+const CLOUD_FUNCTIONS_TARGET_ENV: &str = "FUNCTION_TARGET";
+/// Go `cloudRunConfigurationEnv`.
+const CLOUD_RUN_CONFIGURATION_ENV: &str = "K_CONFIGURATION";
+/// Go `cloudRunJobsEnv`.
+const CLOUD_RUN_JOBS_ENV: &str = "CLOUD_RUN_JOB";
+/// Go `faasServiceEnv`.
+const FAAS_SERVICE_ENV: &str = "K_SERVICE";
+/// Go `faasRevisionEnv`.
+const FAAS_REVISION_ENV: &str = "K_REVISION";
+/// Go `cloudRunJobExecutionEnv`.
+const CLOUD_RUN_JOB_EXECUTION_ENV: &str = "CLOUD_RUN_EXECUTION";
+/// Go `cloudRunJobTaskIndexEnv`.
+const CLOUD_RUN_JOB_TASK_INDEX_ENV: &str = "CLOUD_RUN_TASK_INDEX";
+/// Go `cloudRunWorkerPoolEnv`.
+const CLOUD_RUN_WORKER_POOL_ENV: &str = "CLOUD_RUN_WORKER_POOL";
+/// Go `cloudRunRevisionEnv`.
+const CLOUD_RUN_REVISION_ENV: &str = "CLOUD_RUN_REVISION";
+/// Go `regionMetadataAttr`.
+const REGION_METADATA_ATTR: &str = "instance/region";
 
 impl Detector {
     /// Go `onCloudFunctions`: `FUNCTION_TARGET` is set.
     pub(super) fn on_cloud_functions(&self) -> bool {
-        todo!()
+        self.os.var(CLOUD_FUNCTIONS_TARGET_ENV).is_some()
     }
 
     /// Go `onCloudRun`: `K_CONFIGURATION` is set.
     pub(super) fn on_cloud_run(&self) -> bool {
-        todo!()
+        self.os.var(CLOUD_RUN_CONFIGURATION_ENV).is_some()
     }
 
     /// Go `onCloudRunJob`: `CLOUD_RUN_JOB` is set.
     pub(super) fn on_cloud_run_job(&self) -> bool {
-        todo!()
+        self.os.var(CLOUD_RUN_JOBS_ENV).is_some()
     }
 
     /// Go `onCloudRunWorkerPool`: `CLOUD_RUN_WORKER_POOL` is set.
     pub(super) fn on_cloud_run_worker_pool(&self) -> bool {
-        todo!()
+        self.os.var(CLOUD_RUN_WORKER_POOL_ENV).is_some()
     }
 
     /// Go `FaaSName`: `K_SERVICE`, else `CLOUD_RUN_JOB`, else `CLOUD_RUN_WORKER_POOL`.
@@ -46,7 +65,11 @@ impl Detector {
     ///
     /// [`DetectorError::EnvVarNotFound`].
     pub fn faas_name(&self) -> Result<String, DetectorError> {
-        todo!()
+        self.os
+            .var(FAAS_SERVICE_ENV)
+            .or_else(|| self.os.var(CLOUD_RUN_JOBS_ENV))
+            .or_else(|| self.os.var(CLOUD_RUN_WORKER_POOL_ENV))
+            .ok_or(DetectorError::EnvVarNotFound)
     }
 
     /// Go `FaaSVersion`: `CLOUD_RUN_REVISION`, else `K_REVISION`.
@@ -55,7 +78,10 @@ impl Detector {
     ///
     /// [`DetectorError::EnvVarNotFound`].
     pub fn faas_version(&self) -> Result<String, DetectorError> {
-        todo!()
+        self.os
+            .var(CLOUD_RUN_REVISION_ENV)
+            .or_else(|| self.os.var(FAAS_REVISION_ENV))
+            .ok_or(DetectorError::EnvVarNotFound)
     }
 
     /// Go `CloudRunJobExecution`: `CLOUD_RUN_EXECUTION`.
@@ -64,7 +90,9 @@ impl Detector {
     ///
     /// [`DetectorError::EnvVarNotFound`].
     pub fn cloud_run_job_execution(&self) -> Result<String, DetectorError> {
-        todo!()
+        self.os
+            .var(CLOUD_RUN_JOB_EXECUTION_ENV)
+            .ok_or(DetectorError::EnvVarNotFound)
     }
 
     /// Go `CloudRunJobTaskIndex`: `CLOUD_RUN_TASK_INDEX`.
@@ -73,7 +101,9 @@ impl Detector {
     ///
     /// [`DetectorError::EnvVarNotFound`].
     pub fn cloud_run_job_task_index(&self) -> Result<String, DetectorError> {
-        todo!()
+        self.os
+            .var(CLOUD_RUN_JOB_TASK_INDEX_ENV)
+            .ok_or(DetectorError::EnvVarNotFound)
     }
 
     /// Go `FaaSID`: the instance ID.
@@ -82,7 +112,7 @@ impl Detector {
     ///
     /// [`DetectorError`].
     pub async fn faas_id(&self) -> Result<String, DetectorError> {
-        todo!()
+        self.instance_id().await
     }
 
     /// Go `FaaSCloudRegion`: the last path segment of `instance/region`.
@@ -91,6 +121,11 @@ impl Detector {
     ///
     /// [`DetectorError`].
     pub async fn faas_cloud_region(&self) -> Result<String, DetectorError> {
-        todo!()
+        // Format: /projects/<project_number>/regions/<region>.
+        let region = self.metadata.get(REGION_METADATA_ATTR).await?;
+        Ok(match region.rfind('/') {
+            Some(i) => region[i + 1..].to_owned(),
+            None => region,
+        })
     }
 }
