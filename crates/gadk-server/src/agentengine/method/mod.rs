@@ -350,10 +350,10 @@ pub(crate) mod replay {
             .unwrap();
     }
 
-    /// The deepest session state the request cap ([`MAX_DEPTH`]) accepts goes through the real
-    /// handler on a 2 MiB stack without aborting: `async_create_session` stores it (body 1,
-    /// `input` 2, `state` 3, then `MAX_DEPTH - 3` levels) and `async_get_session` answers it;
-    /// one more level is Go's 400 `exceeded max depth`.
+    /// The deepest session state the request limit ([`MAX_DEPTH`], 127) accepts goes through the
+    /// real handler on a 2 MiB stack (debug build) without aborting: `async_create_session`
+    /// stores it (body 1, `input` 2, `state` 3, then `MAX_DEPTH - 3` levels) and
+    /// `async_get_session` answers it; one more level is Go's 400 `exceeded max depth`.
     #[test]
     fn deepest_session_state_is_created_and_read_on_a_2_mib_stack() {
         on_2_mib_stack(|| async {
@@ -383,11 +383,11 @@ pub(crate) mod replay {
         });
     }
 
-    /// The deepest message the request cap ([`MAX_DEPTH`]) accepts runs through the real
-    /// handler, the runner and the scripted model on a 2 MiB stack without aborting: a function
-    /// response part (body 1, `input` 2, `message` 3, `parts` 4, the part 5,
-    /// `functionResponse` 6, `response` 7, then `MAX_DEPTH - 7` levels); one more level is Go's
-    /// 400 `exceeded max depth`.
+    /// The deepest message the request limit ([`MAX_DEPTH`], 127) accepts runs through the real
+    /// handler, the runner and the scripted model on a 2 MiB stack (debug build) without
+    /// aborting: a function response part (body 1, `input` 2, `message` 3, `parts` 4, the part
+    /// 5, `functionResponse` 6, `response` 7, then `MAX_DEPTH - 7` levels); one more level is
+    /// Go's 400 `exceeded max depth`.
     #[test]
     fn deepest_stream_query_message_runs_on_a_2_mib_stack() {
         on_2_mib_stack(|| async {
@@ -413,13 +413,14 @@ pub(crate) mod replay {
         });
     }
 
-    /// The deepest inner `request_json` message the request cap ([`MAX_DEPTH`]) accepts runs
-    /// through `streaming_agent_run_with_events`, the runner and the scripted model on a 2 MiB
-    /// stack without aborting. `request_json` is a string, so the cap counts from the inner
-    /// document's top level: a function response part (top 1, `message` 2, `parts` 3, the part
-    /// 4, `functionResponse` 5, `response` 6, then `MAX_DEPTH - 6` levels). One more level fails
-    /// the inner decode, which Go (past its 10000) answers as any `request_json` decode error: a
-    /// 500 with the wrapped `exceeded max depth` text.
+    /// The deepest inner `request_json` message the request limit ([`MAX_DEPTH`], 127) accepts
+    /// runs through `streaming_agent_run_with_events`, the runner and the scripted model on a
+    /// 2 MiB stack (debug build) without aborting. `request_json` is a string, so the limit
+    /// counts from the inner document's top level: a function response part (top 1, `message`
+    /// 2, `parts` 3, the part 4, `functionResponse` 5, `response` 6, then `MAX_DEPTH - 6`
+    /// levels). One more level fails the inner decode, which Go (past its 10000) answers as any
+    /// `request_json` decode error: fixture `main_16`'s 500 and log lines with the wrapped
+    /// `exceeded max depth` text.
     #[test]
     fn deepest_run_with_events_request_json_runs_on_a_2_mib_stack() {
         on_2_mib_stack(|| async {
@@ -435,6 +436,7 @@ pub(crate) mod replay {
                     serde_json::to_string(&inner).unwrap()
                 )
             };
+            scenario.log.lock().unwrap().clear();
             let (status, body) = scenario
                 .post("/stream_reasoning_engine", run(levels + 1))
                 .await;
@@ -446,6 +448,14 @@ pub(crate) mod replay {
                      json.Unmarshal(input.request_json) failed: exceeded max depth\n"
                 )
             );
+            assert_eq!(
+                *scenario.log.lock().unwrap(),
+                "decodeStreamingAgentRunWithEventsRequest() failed: \
+                 json.Unmarshal(input.request_json) failed: exceeded max depth\n\
+                 handleQuery failed: s.streamJSONL() failed: \
+                 decodeStreamingAgentRunWithEventsRequest() failed: \
+                 json.Unmarshal(input.request_json) failed: exceeded max depth\n"
+            );
 
             let (status, body) = scenario.post("/stream_reasoning_engine", run(levels)).await;
             assert_eq!(status, 200, "{}", &body[..body.len().min(200)]);
@@ -453,42 +463,6 @@ pub(crate) mod replay {
             assert!(body.starts_with(r#"{"events":[{"#), "{body}");
             assert!(!body.contains(r#""error""#), "{body}");
         });
-    }
-
-    /// A deep request (past the inline depth, so `Runner::run` runs on the deep-stack thread)
-    /// still opens its `invoke_workflow` span under the caller's thread-scoped subscriber
-    /// (gadk-engine's `capture_spans`, a `set_default` capture) and inside the caller's span, as
-    /// an inline request does.
-    #[tokio::test]
-    async fn deep_stream_query_span_has_the_callers_dispatcher_and_parent() {
-        use tracing::Instrument as _;
-
-        let scenario = Scenario::with_max_payload_size("main", 1 << 20);
-        let query = format!(
-            r#"{{"class_method":"async_stream_query","input":{{"user_id":"u","message":{{"role":"user","parts":[{{"functionResponse":{{"name":"save_note","response":{{"r":{}}}}}}}]}}}}}}"#,
-            nested(100)
-        );
-        let ((status, body), spans) = gadk_engine::testutil::telemetry::capture_spans(async move {
-            let caller = tracing::info_span!("caller");
-            scenario
-                .post("/stream_reasoning_engine", query)
-                .instrument(caller)
-                .await
-        })
-        .await;
-        assert_eq!(status, 200, "{}", &body[..body.len().min(200)]);
-        assert!(body.contains("Saved your note."), "{body}");
-
-        let names: Vec<&str> = spans.iter().map(|s| s.name.as_str()).collect();
-        let caller = spans
-            .iter()
-            .find(|s| s.name == "caller")
-            .expect("caller span");
-        let workflow = spans
-            .iter()
-            .find(|s| s.name == "invoke_workflow assistant")
-            .unwrap_or_else(|| panic!("no invoke_workflow span: {names:?}"));
-        assert_eq!(workflow.parent_span_id, Some(caller.span_id), "{names:?}");
     }
 }
 

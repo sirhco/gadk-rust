@@ -395,6 +395,7 @@ async fn decode_request_body(body: Body) -> Result<RunAgentRequest, StatusError>
     let bytes = axum::body::to_bytes(body, usize::MAX)
         .await
         .map_err(|err| bad_request(err.to_string()))?;
+    // Divergence (ledger 5a): nesting past 127 is serde's error (Go: 10000); see 5c.md.
     let mut values = serde_json::Deserializer::from_slice(&bytes).into_iter::<RunAgentRequest>();
     match values.next() {
         Some(Ok(req)) => Ok(req),

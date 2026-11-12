@@ -73,6 +73,7 @@ pub(crate) async fn decode_optional_json_body<T: DeserializeOwned + Default>(
     let bytes = axum::body::to_bytes(body, usize::MAX)
         .await
         .map_err(|e| e.to_string())?;
+    // Divergence (ledger 5a): nesting past 127 is serde's error (Go: 10000); see 5c.md.
     let mut values = serde_json::Deserializer::from_slice(&bytes).into_iter::<Option<T>>();
     match values.next() {
         None => Ok(T::default()),

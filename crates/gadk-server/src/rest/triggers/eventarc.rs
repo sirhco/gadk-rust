@@ -234,6 +234,7 @@ fn header(req: &Request, name: &str) -> String {
 fn marshal_event(event: &EventarcTriggerRequest, data: &[u8]) -> Result<String, String> {
     let mut out = gadk_model::to_go_json(event).map_err(|e| e.to_string())?;
     if !data.is_empty() {
+        // Divergence (ledger 5a): `data` is skipped, so any depth passes (Go: 10000); see 5c.md.
         serde_json::from_slice::<IgnoredAny>(data).map_err(|e| {
             format!("json: error calling MarshalJSON for type json.RawMessage: {e}")
         })?;

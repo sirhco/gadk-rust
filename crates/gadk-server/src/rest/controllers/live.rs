@@ -771,6 +771,7 @@ async fn read_client(
                 true,
             ),
             Message::Text(text) => {
+                // Divergence (ledger 5a): nesting past 127 is serde's error (Go: 10000); see 5c.md.
                 let api: ApiLiveRequest = match serde_json::from_str(text.as_str()) {
                     Ok(r) => r,
                     Err(e) => {

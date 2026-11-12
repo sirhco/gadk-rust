@@ -32,7 +32,7 @@ use super::MethodHandler;
 use crate::agentengine::encode::{emit_json, emit_json_error};
 use crate::agentengine::encode_shapes;
 use crate::agentengine::models::{StreamQueryInput, StreamQueryRequest, StreamQueryTextRequest};
-use crate::agentengine::unmarshal::{go_unmarshal, needs_deep_stack, on_deep_stack};
+use crate::agentengine::unmarshal::go_unmarshal;
 use crate::agentengine::{AgentEngineConfig, Log};
 use crate::mux::Response;
 
@@ -111,9 +111,7 @@ impl StreamQueryHandler {
             }
         };
 
-        // A deep message is cloned into the run and dropped with `req`, both recursively.
-        let deep = needs_deep_stack(&payload);
-        let events = run_request(deep, req, |req| self.run(req)).map_err(|err| {
+        let events = self.run(&req).map_err(|err| {
             let err = format!("s.run() failed: {err}");
             self.log.print(&err);
             err
@@ -142,27 +140,6 @@ impl StreamQueryHandler {
     }
 }
 
-/// `run(&req)`, then `req` dropped: when `deep` (its payload was nested past what the caller's
-/// stack clones and drops safely, [`needs_deep_stack`]) both happen on [`on_deep_stack`] (no Go
-/// counterpart: Go's stacks grow; that thread being unavailable is the run's error).
-///
-/// On the deep path `Runner::new` and `runner.run` run on that scoped OS thread, not the
-/// caller's tokio task, so there is no tokio runtime handle there. `on_deep_stack` carries the
-/// caller's `tracing` dispatcher and current span over: the `invoke_workflow` span that
-/// `instrument_invocation` opens (and its `in_workflow_scope()` check) sees the caller's span as
-/// parent and reaches a thread-scoped subscriber, as on the inline path. The returned stream is
-/// polled on the caller's task as usual.
-pub(crate) fn run_request<T, F>(deep: bool, req: T, run: F) -> Result<EventStream, String>
-where
-    T: Send,
-    F: FnOnce(&T) -> Result<EventStream, String> + Send,
-{
-    if !deep {
-        return run(&req);
-    }
-    on_deep_stack(req, |req| run(&req))?
-}
-
 /// The `runner.New` call of both stream methods' `run`: `app_name` = the agent engine ID, the
 /// loader's root agent, the config's services, plugins, compaction and platform, and
 /// `auto_create_session: true`. An error is Go's `failed to create runner: <err>`.
@@ -187,7 +164,7 @@ pub(crate) fn new_runner(
 /// The response both stream methods answer once the run has started: 200 with Go's three
 /// headers (`Content-Type: application/json`, `Cache-Control: no-cache`, `Connection:
 /// keep-alive`) and an NDJSON body streamed from `events`, one body chunk per line (Go flushes
-/// each line). Go's loop, per runner item ([`step`]):
+/// each line). Go's loop, per runner item:
 ///
 /// - log `Processing event: <event> err: <err>` (Go's `%+v` dumps; ledgered);
 /// - a compaction error: log `agentengine: <err>` and go on;
@@ -198,56 +175,39 @@ pub(crate) fn new_runner(
 ///
 /// An error line that cannot be encoded is logged `helper.EmitJSONError() failed: <err>` and
 /// ends the stream without a line.
-///
-/// Each item is handled, and dropped, on a large stack ([`on_deep_stack`]): its `Debug` dump,
-/// encoding and drop recurse once per nesting level, and an agent can yield an event as deep as
-/// Go's decoder allows (10000 levels; gadk caps requests at `unmarshal::MAX_DEPTH`, but an agent
-/// or a tool can build deeper content), which Go's growable stacks survive. The item's log
-/// texts are collected there and printed on the caller's task, in order. When that thread
-/// cannot be spawned (no Go counterpart) the item is leaked; when it
-/// panics the item is dropped there; either way the stream ends with the error line
-/// `helper.EmitJSON() failed: <err>`.
 pub(crate) fn ndjson_response<F>(events: EventStream, log: Log, line: F) -> Response
 where
     F: Fn(&Event, &Log) -> Result<Bytes, String> + Send + 'static,
 {
     let lines = futures::stream::unfold(Some((events, log, line)), |state| async move {
-        let (mut events, log, mut line) = state?;
+        let (mut events, log, line) = state?;
         loop {
             let item = events.next().await?;
-            // The log texts are built on the deep thread (an event's `Debug` dump recurses)
-            // and printed here, on the caller's task: the `AgentEngineLog` hook (or `tracing`'s
-            // thread-scoped dispatcher) runs where Go's `log.Print` would.
-            let buffered: Arc<parking_lot::Mutex<Vec<String>>> = Arc::default();
-            let sink = Arc::clone(&buffered);
-            let deep_log = Log(Some(Arc::new(move |m: &str| {
-                sink.lock().push(m.to_owned())
-            })));
-            let handled = on_deep_stack((item, line), |(item, line)| {
-                let step = step(item, &line, &deep_log);
-                (step, line)
-            });
-            drop(deep_log);
-            for text in std::mem::take(&mut *buffered.lock()) {
-                log.print(&text);
-            }
-            let step = match handled {
-                Ok((step, back)) => {
-                    line = back;
-                    step
+            log.print(&processing_event(&item));
+            let event = match item {
+                // A compaction failure is bookkeeping, not the turn (Go's comment): log, go on.
+                Err(err) if err.is_compaction() => {
+                    log.print(&format!("agentengine: {err}"));
+                    continue;
                 }
+                Err(err) => {
+                    log.print(&format!("error in events: {err}\n"));
+                    let chunk = error_line(&err.to_string(), &log)?;
+                    return Some((Ok::<Bytes, Infallible>(chunk), None));
+                }
+                Ok(event) => event,
+            };
+            if event.response.content.is_none() {
+                continue;
+            }
+            return match line(&event, &log) {
+                Ok(chunk) => Some((Ok(chunk), Some((events, log, line)))),
                 Err(err) => {
                     let e = format!("helper.EmitJSON() failed: {err}");
                     log.print(&e);
-                    return error_line(&e, &log).map(|chunk| (Ok(chunk), None));
+                    let chunk = error_line(&e, &log)?;
+                    Some((Ok(chunk), None))
                 }
-            };
-            return match step {
-                Step::Skip => continue,
-                Step::Line(chunk) => {
-                    Some((Ok::<Bytes, Infallible>(chunk), Some((events, log, line))))
-                }
-                Step::Last(chunk) => chunk.map(|chunk| (Ok(chunk), None)),
             };
         }
     });
@@ -258,47 +218,6 @@ where
     headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
     headers.insert(CONNECTION, HeaderValue::from_static("keep-alive"));
     resp
-}
-
-/// What Go's loop does with one runner item.
-enum Step {
-    /// `continue`.
-    Skip,
-    /// A line, then the next item.
-    Line(Bytes),
-    /// The last line (`None`: none could be encoded), then `break`.
-    Last(Option<Bytes>),
-}
-
-/// One iteration of Go's loop over `item` (see [`ndjson_response`]); `item` is dropped here.
-fn step<F>(item: Result<Event, gadk_agent::AgentError>, line: &F, log: &Log) -> Step
-where
-    F: Fn(&Event, &Log) -> Result<Bytes, String>,
-{
-    log.print(&processing_event(&item));
-    let event = match item {
-        // A compaction failure is bookkeeping, not the turn (Go's comment): log, go on.
-        Err(err) if err.is_compaction() => {
-            log.print(&format!("agentengine: {err}"));
-            return Step::Skip;
-        }
-        Err(err) => {
-            log.print(&format!("error in events: {err}\n"));
-            return Step::Last(error_line(&err.to_string(), log));
-        }
-        Ok(event) => event,
-    };
-    if event.response.content.is_none() {
-        return Step::Skip;
-    }
-    match line(&event, log) {
-        Ok(chunk) => Step::Line(chunk),
-        Err(err) => {
-            let e = format!("helper.EmitJSON() failed: {err}");
-            log.print(&e);
-            Step::Last(error_line(&e, log))
-        }
-    }
 }
 
 /// Go `helper.EmitJSONError(rw, err)` in the stream loop: the line, or `None` after logging
@@ -493,140 +412,9 @@ mod tests {
         ));
     }
 
-    /// A JSON value nested `levels` objects deep, built without recursion.
-    fn deep_value(levels: usize) -> Value {
-        let mut v = Value::Null;
-        for _ in 0..levels {
-            let mut m = Map::new();
-            m.insert("a".to_owned(), v);
-            v = Value::Object(m);
-        }
-        v
-    }
-
-    /// A function response whose `r` is `levels` deep.
-    fn deep_content(levels: usize) -> Content {
-        let mut response = Map::new();
-        response.insert("r".to_owned(), deep_value(levels));
-        Content {
-            role: "model".into(),
-            parts: vec![gadk_genai::Part {
-                function_response: Some(gadk_genai::FunctionResponse {
-                    name: "f".into(),
-                    response,
-                    ..Default::default()
-                }),
-                ..Default::default()
-            }],
-        }
-    }
-
-    /// An event whose `custom_metadata` and function response are ~10000 levels deep (what Go's
-    /// decoder accepts and an agent can echo back).
-    fn deep_event() -> Event {
-        let mut e = event(None);
-        e.response.content = Some(deep_content(9_990));
-        e.response
-            .custom_metadata
-            .insert("deep".to_owned(), deep_value(9_990));
-        e
-    }
-
-    /// Go grows goroutine stacks, so a ~10000-deep event is one line there; here the encode (and
-    /// the event's drop) runs on a large stack, so a 2 MiB caller (a tokio worker's default)
-    /// does not abort. Both stream methods' line functions.
-    #[test]
-    fn deep_event_is_one_line_on_a_small_stack() {
-        let worker = std::thread::Builder::new()
-            .stack_size(2 << 20)
-            .spawn(|| {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .build()
-                    .unwrap();
-                rt.block_on(async {
-                    let (log, _) = capture();
-                    let resp = ndjson_response(
-                        Box::pin(stream::iter(vec![Ok(deep_event())])),
-                        log.clone(),
-                        emit_json,
-                    );
-                    let plain = body_text(resp).await;
-                    let resp = ndjson_response(
-                        Box::pin(stream::iter(vec![Ok(deep_event())])),
-                        log,
-                        super::super::streaming_agent_run_with_events::envelope_line("s".into()),
-                    );
-                    let envelope = body_text(resp).await;
-                    (plain, envelope)
-                })
-            })
-            .unwrap();
-        let (plain, envelope) = worker.join().unwrap();
-        for (name, body, prefix) in [
-            ("event", &plain, "{\"actions\":"),
-            ("envelope", &envelope, "{\"events\":[{\"actions\":"),
-        ] {
-            assert_eq!(body.matches('\n').count(), 1, "{name}: one line");
-            assert!(body.starts_with(prefix), "{name}: {}", &body[..80]);
-            assert!(!body.contains("\"error\""), "{name}: an error line");
-            assert!(
-                body.contains("\"custom_metadata\":{\"deep\":{\"a\":{\"a\":"),
-                "{name}: custom_metadata"
-            );
-            assert!(
-                body.contains("\"response\":{\"r\":{\"a\":{\"a\":"),
-                "{name}: function response"
-            );
-            assert!(body.ends_with("}\n"), "{name}");
-        }
-    }
-
-    /// A deep request (decoded on a large stack by `go_unmarshal`) is cloned into the run and
-    /// dropped on a large stack too, so a 2 MiB caller does not abort. The content is as deep as
-    /// the request cap (`unmarshal::MAX_DEPTH`), deeper than any accepted request carries.
-    #[test]
-    fn deep_request_is_cloned_and_dropped_on_a_large_stack() {
-        let worker = std::thread::Builder::new()
-            .stack_size(2 << 20)
-            .spawn(|| {
-                let req = deep_content(crate::agentengine::unmarshal::MAX_DEPTH);
-                let events = run_request(true, req, |req| {
-                    let message = req.clone();
-                    Ok(Box::pin(stream::once(async move {
-                        let mut e = event(None);
-                        e.response.content = Some(message);
-                        Ok(e)
-                    })) as EventStream)
-                });
-                // The stream (holding the clone) is dropped with the run, on the large stack.
-                run_request(true, events, |_| {
-                    Ok(Box::pin(stream::empty()) as EventStream)
-                })
-                .is_ok()
-            })
-            .unwrap();
-        assert!(worker.join().unwrap());
-    }
-
-    /// When the large-stack thread cannot be spawned (no Go counterpart), the item is lost and
-    /// the stream ends with an error line instead of encoding on the caller's stack.
-    #[tokio::test]
-    async fn deep_stack_unavailable_is_an_error_line() {
-        let (log, lines) = capture();
-        let items: Vec<Result<Event, AgentError>> =
-            vec![Ok(event(Some("one"))), Ok(event(Some("two")))];
-        crate::agentengine::unmarshal::FAIL_DEEP_SPAWN.with(|fail| fail.set(true));
-        let resp = ndjson_response(Box::pin(stream::iter(items)), log, |e, log| {
-            emit_json(e, log)
-        });
-        let want = "helper.EmitJSON() failed: agentengine: deep-stack thread unavailable: injected spawn failure";
-        assert_eq!(body_text(resp).await, format!("{{\"error\":\"{want}\"}}\n"));
-        assert!(lines.lock().unwrap().contains(&want.to_owned()));
-    }
-
-    /// The `AgentEngineLog` hook runs on the caller's task (as Go's `log.Print` does), not on
-    /// the deep-stack thread: a hook that needs the tokio runtime gets every line, in order, and
-    /// the stream writes Go's normal lines.
+    /// The `AgentEngineLog` hook runs on the caller's task (as Go's `log.Print` does): a hook
+    /// that needs the tokio runtime gets every line, in order, and the stream writes Go's normal
+    /// lines.
     #[tokio::test]
     async fn log_hook_runs_on_the_runtime() {
         let lines: Lines = Arc::default();
@@ -663,27 +451,6 @@ mod tests {
         );
         assert_eq!(logged[2], "agentengine: context compaction failed: squeeze");
         assert!(logged[3].starts_with("Processing event: Event {"));
-    }
-
-    /// A panic on the deep-stack thread (no Go counterpart) drops the item there and ends the
-    /// stream with an error line distinct from the spawn failure's.
-    #[tokio::test]
-    async fn deep_stack_panic_is_an_error_line() {
-        let (log, lines) = capture();
-        let items: Vec<Result<Event, AgentError>> =
-            vec![Ok(event(Some("one"))), Ok(event(Some("two")))];
-        let resp = ndjson_response(Box::pin(stream::iter(items)), log, |_, _| {
-            panic!("line panicked")
-        });
-        let want =
-            "helper.EmitJSON() failed: agentengine: deep-stack thread failed: the thread panicked";
-        assert_eq!(body_text(resp).await, format!("{{\"error\":\"{want}\"}}\n"));
-        let logged = lines.lock().unwrap().clone();
-        assert!(
-            logged[0].starts_with("Processing event: Event {"),
-            "{logged:?}"
-        );
-        assert!(logged.contains(&want.to_owned()));
     }
 
     /// The Go wire fixtures of the stream routes (`testdata/agentengine/main_09`–`main_18`,
