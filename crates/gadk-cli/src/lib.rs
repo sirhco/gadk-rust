@@ -22,8 +22,6 @@
 //! never spawn `gcloud` or `cargo`, never read the process environment and never change the
 //! current directory.
 
-#![allow(dead_code, unused_variables, unused_imports, clippy::todo)]
-
 pub mod deploy;
 pub mod flags;
 pub mod root;
@@ -69,21 +67,23 @@ impl SharedWriter {
 
     /// Go `fmt.Fprint(w, s)`: writes `s`, ignoring a write error as `fmt.Println` callers do.
     pub fn write_str(&self, s: &str) {
-        todo!("Task 2")
+        let mut w = self.lock();
+        let _ = w.write_all(s.as_bytes());
+        let _ = w.flush();
     }
 
     fn lock(&self) -> MutexGuard<'_, dyn Write + Send + 'static> {
-        todo!("Task 2")
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
 
 impl Write for SharedWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        todo!("Task 2")
+        self.lock().write(buf)
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        todo!("Task 2")
+        self.lock().flush()
     }
 }
 
@@ -134,23 +134,37 @@ impl Env {
     /// The production environment: real processes, stdout/stderr, the current directory (empty
     /// when it cannot be read), the process environment and the system clock.
     pub fn process() -> Env {
-        todo!("Task 2")
+        Env::new(
+            Arc::new(TokioRunner),
+            SharedWriter::new(io::stdout()),
+            SharedWriter::new(io::stderr()),
+            std::env::current_dir().unwrap_or_default(),
+            Arc::new(ProcessEnv),
+            Arc::new(Utc::now),
+        )
     }
 
     /// Go `filepath.Abs(path)` against [`Env::cwd`]: an absolute `path` is cleaned, a relative
     /// one is joined to the working directory and cleaned; `""` is the working directory.
     pub fn abs(&self, path: &str) -> PathBuf {
-        todo!("Task 2")
+        if path.starts_with('/') {
+            return PathBuf::from(go_path_clean(path));
+        }
+        let cwd = self.cwd.to_string_lossy();
+        PathBuf::from(go_path_join(&[cwd.as_ref(), path]))
     }
 
     /// Go `os.TempDir()` on Unix: `$TMPDIR`, else `/tmp`.
     pub fn temp_dir(&self) -> PathBuf {
-        todo!("Task 2")
+        match self.env.var("TMPDIR") {
+            Some(dir) if !dir.is_empty() => PathBuf::from(dir),
+            _ => PathBuf::from("/tmp"),
+        }
     }
 
     /// Go `exec.Command(name, args...)`, its `LookPath` reading `PATH` from [`Env::env`].
     pub fn command(&self, name: &str, args: &[&str]) -> Cmd {
-        todo!("Task 2")
+        Cmd::new(self.env.as_ref(), &self.cwd, name, args)
     }
 }
 
@@ -161,5 +175,83 @@ where
     I: IntoIterator<Item = T>,
     T: Into<OsString>,
 {
-    todo!("Task 2")
+    let args: Vec<OsString> = args.into_iter().map(Into::into).collect();
+    ExitCode::from(root::execute(args, env).await)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::path::{Path, PathBuf};
+
+    use pretty_assertions::assert_eq;
+
+    use crate::testutil::TestEnv;
+
+    #[test]
+    fn abs_resolves_against_the_working_directory_like_go_filepath_abs() {
+        let t = TestEnv::builder("/work/space").build();
+        assert_eq!(t.env.abs(""), PathBuf::from("/work/space"));
+        assert_eq!(t.env.abs("."), PathBuf::from("/work/space"));
+        assert_eq!(t.env.abs("agent"), PathBuf::from("/work/space/agent"));
+        assert_eq!(t.env.abs("../x/./y/"), PathBuf::from("/work/x/y"));
+        assert_eq!(t.env.abs("/abs//p/../q"), PathBuf::from("/abs/q"));
+    }
+
+    #[test]
+    fn temp_dir_is_go_os_temp_dir() {
+        let t = TestEnv::builder("/w").build();
+        assert_eq!(t.env.temp_dir(), PathBuf::from("/tmp"));
+        let t = TestEnv::builder("/w").var("TMPDIR", "").build();
+        assert_eq!(t.env.temp_dir(), PathBuf::from("/tmp"));
+        let t = TestEnv::builder("/w").var("TMPDIR", "/var/tmp/x").build();
+        assert_eq!(t.env.temp_dir(), PathBuf::from("/var/tmp/x"));
+    }
+
+    #[test]
+    fn command_looks_the_program_up_through_the_injected_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("gcloud");
+        std::fs::write(&bin, "#!/bin/sh\n").unwrap();
+        make_executable(&bin);
+        let path = format!("/nonexistent:{}", dir.path().display());
+        let t = TestEnv::builder("/w")
+            .vars(HashMap::from([("PATH".to_string(), path)]))
+            .build();
+        let cmd = t.env.command("gcloud", &["run", "deploy"]);
+        assert_eq!(cmd.path, bin.display().to_string());
+        assert_eq!(cmd.err, None);
+        assert_eq!(cmd.to_string(), format!("{} run deploy", bin.display()));
+    }
+
+    #[cfg(unix)]
+    fn make_executable(p: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[cfg(not(unix))]
+    fn make_executable(_: &Path) {}
+
+    /// `build.rs` stores the second word of `$RUSTC --version` (R5).
+    #[test]
+    fn build_script_captures_the_compiling_rustc_version() {
+        let v = crate::target::COMPILED_RUSTC_VERSION;
+        // e.g. `1.99.1` (from `rustc 1.99.1 (…)`) or `1.100.0-nightly`.
+        assert!(
+            v.starts_with(|c: char| c.is_ascii_digit()) && v.contains('.'),
+            "unexpected rustc version {v:?}"
+        );
+    }
+
+    #[test]
+    fn shared_writer_clones_write_to_one_buffer() {
+        use std::io::Write;
+        let t = TestEnv::builder("/w").build();
+        let mut a = t.env.out.clone();
+        a.write_all(b"one ").unwrap();
+        t.env.out.write_str("two");
+        assert_eq!(t.out.text(), "one two");
+        assert_eq!(t.err.text(), "");
+    }
 }

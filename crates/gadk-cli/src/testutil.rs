@@ -258,3 +258,38 @@ impl TestEnvBuilder {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn recording_runner_records_and_answers() {
+        let runner = RecordingRunner::with_responder(|c| {
+            if c.args.get(1).map(String::as_str) == Some("metadata") {
+                Canned::success(b"{}".to_vec())
+            } else {
+                Canned::exit(1)
+            }
+        });
+        let t = TestEnv::builder("/w")
+            .runner(runner)
+            .now(default_now())
+            .build();
+        let meta = t.env.command("cargo", &["metadata"]).with_dir("/w/a");
+        let got = t.env.runner.output(&meta).await.unwrap();
+        assert_eq!((got.exit, got.stdout), (Exit::Code(0), b"{}".to_vec()));
+        let other = t.env.command("gcloud", &["x"]);
+        let (mut o, mut e) = (Vec::new(), Vec::new());
+        assert_eq!(
+            t.env.runner.run(&other, &mut o, &mut e).await,
+            Ok(Exit::Code(1))
+        );
+        assert_eq!(t.runner.calls(), vec![meta, other]);
+        assert_eq!(t.runner.calls()[0].dir, "/w/a");
+        assert_eq!(t.env.time.now(), default_now());
+        assert_eq!(t.env.cwd, PathBuf::from("/w"));
+    }
+}

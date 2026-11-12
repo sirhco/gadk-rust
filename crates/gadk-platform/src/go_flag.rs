@@ -496,6 +496,27 @@ fn parse_bool(s: &str) -> Option<bool> {
     }
 }
 
+/// Go `strconv.ParseBool` with its error: `Err` is the `*strconv.NumError` text,
+/// `strconv.ParseBool: parsing "<s>": invalid syntax` (the cause pflag's bool flags report).
+pub fn go_parse_bool(s: &str) -> Result<bool, String> {
+    parse_bool(s).ok_or_else(|| num_error("ParseBool", s, "invalid syntax"))
+}
+
+/// Go `strconv.ParseInt(s, 0, 64)` with its error: `Err` is the `*strconv.NumError` text,
+/// `strconv.ParseInt: parsing "<s>": invalid syntax` or `…: value out of range` (the cause
+/// pflag's int flags report).
+pub fn go_parse_int(s: &str) -> Result<i64, String> {
+    parse_int(s).map_err(|e| match e {
+        IntError::Syntax => num_error("ParseInt", s, "invalid syntax"),
+        IntError::Range(_) => num_error("ParseInt", s, "value out of range"),
+    })
+}
+
+/// Go `strconv.NumError.Error()`: `strconv.<func>: parsing <%q num>: <err>`.
+fn num_error(func: &str, num: &str, err: &str) -> String {
+    format!("strconv.{func}: parsing {}: {err}", go_quote(num))
+}
+
 /// A `strconv.ParseInt` failure as `flag`'s `numError` sees it.
 enum IntError {
     /// `strconv.ErrSyntax` (flag's `parse error`).

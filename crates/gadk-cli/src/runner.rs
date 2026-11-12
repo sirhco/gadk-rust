@@ -17,8 +17,6 @@
 //! `exec.Command`'s `LookPath` and `Cmd.String()`; a [`CommandRunner`] starts it. Production
 //! uses [`TokioRunner`]; tests inject a recording runner, so no test spawns `gcloud` or `cargo`.
 
-#![allow(dead_code, unused_variables, unused_imports, clippy::todo)]
-
 use std::fmt;
 use std::io::Write;
 use std::path::Path;
@@ -46,13 +44,16 @@ pub enum Exit {
 impl Exit {
     /// Go `ProcessState.Success()`.
     pub fn success(self) -> bool {
-        todo!("Task 2")
+        self == Exit::Code(0)
     }
 
     /// Go's `*exec.ExitError` text (`ProcessState.String()`): `exit status 1`,
     /// `signal: killed`.
     pub fn go_error(self) -> String {
-        todo!("Task 2")
+        match self {
+            Exit::Code(code) => format!("exit status {code}"),
+            Exit::Signal(sig) => format!("signal: {}", signal_name(sig)),
+        }
     }
 }
 
@@ -60,7 +61,24 @@ impl Exit {
 // Divergence (ledger 6b): Go names every signal of its table and appends ` (core dumped)`;
 // gadk names the common ones and never reports a core dump.
 fn signal_name(sig: i32) -> String {
-    todo!("Task 2")
+    let name = match sig {
+        1 => "hangup",
+        2 => "interrupt",
+        3 => "quit",
+        4 => "illegal instruction",
+        #[cfg(target_os = "linux")]
+        6 => "aborted",
+        #[cfg(not(target_os = "linux"))]
+        6 => "abort trap",
+        8 => "floating point exception",
+        9 => "killed",
+        11 => "segmentation fault",
+        13 => "broken pipe",
+        14 => "alarm clock",
+        15 => "terminated",
+        _ => return format!("signal {sig}"),
+    };
+    name.to_string()
 }
 
 /// A finished child's exit and captured output (Go `cmd.Output()` plus the stderr Go keeps in
@@ -90,7 +108,24 @@ impl Cmd {
     /// through `PATH` as `env` holds it (an empty `PATH` element is `.`; relative elements are
     /// checked against `cwd` and, as Go reports `ErrDot`, fail).
     pub fn new(env: &dyn EnvProvider, cwd: &Path, name: &str, args: &[&str]) -> Cmd {
-        todo!("Task 2")
+        let mut cmd = Cmd {
+            path: name.to_string(),
+            args: std::iter::once(name)
+                .chain(args.iter().copied())
+                .map(str::to_string)
+                .collect(),
+            dir: String::new(),
+            err: None,
+        };
+        if !name.contains('/') {
+            let path_var = env.var("PATH").unwrap_or_default();
+            let (lp, err) = look_path(&path_var, cwd, name);
+            if !lp.is_empty() {
+                cmd.path = lp;
+            }
+            cmd.err = err;
+        }
+        cmd
     }
 
     /// Sets Go `Cmd.Dir`.
@@ -104,19 +139,60 @@ impl Cmd {
 /// name as given and the arguments, space-joined.
 impl fmt::Display for Cmd {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!("Task 2")
+        if self.err.is_some() {
+            return f.write_str(&self.args.join(" "));
+        }
+        f.write_str(&self.path)?;
+        for a in self.args.iter().skip(1) {
+            write!(f, " {a}")?;
+        }
+        Ok(())
     }
 }
 
 /// Go `exec.LookPath` on Unix (`lp_unix.go`), returning Go's `(path, err)` pair: `err` is the
 /// `*exec.Error` text, and `path` is set with `ErrDot` as Go sets it.
 fn look_path(path_var: &str, cwd: &Path, file: &str) -> (String, Option<String>) {
-    todo!("Task 2")
+    let exec_error = |e: &str| Some(format!("exec: {}: {e}", go_quote(file)));
+    if matches!(file, "" | "." | "..") {
+        return (String::new(), exec_error(ERR_NOT_FOUND));
+    }
+    // Go `filepath.SplitList("")` is empty.
+    let dirs: Vec<&str> = if path_var.is_empty() {
+        Vec::new()
+    } else {
+        path_var.split(':').collect()
+    };
+    for dir in dirs {
+        let dir = if dir.is_empty() { "." } else { dir };
+        let path = go_path_join(&[dir, file]);
+        if is_executable(&cwd.join(&path)) {
+            if !path.starts_with('/') {
+                return (path, exec_error(ERR_DOT));
+            }
+            return (path, None);
+        }
+    }
+    (String::new(), exec_error(ERR_NOT_FOUND))
 }
 
 /// Go `findExecutable`: a non-directory with an execute permission bit.
 fn is_executable(p: &Path) -> bool {
-    todo!("Task 2")
+    let Ok(meta) = std::fs::metadata(p) else {
+        return false;
+    };
+    if meta.is_dir() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        meta.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
 }
 
 /// Starts processes. `Err` is the text of Go's error from starting the child (`Cmd.Err`
@@ -142,7 +218,15 @@ pub struct TokioRunner;
 
 impl TokioRunner {
     fn command(cmd: &Cmd) -> Result<tokio::process::Command, String> {
-        todo!("Task 2")
+        if let Some(err) = &cmd.err {
+            return Err(err.clone());
+        }
+        let mut c = tokio::process::Command::new(&cmd.path);
+        c.args(cmd.args.iter().skip(1)).stdin(Stdio::null());
+        if !cmd.dir.is_empty() {
+            c.current_dir(&cmd.dir);
+        }
+        Ok(c)
     }
 }
 
@@ -154,11 +238,28 @@ impl CommandRunner for TokioRunner {
         stdout: &mut (dyn Write + Send),
         stderr: &mut (dyn Write + Send),
     ) -> Result<Exit, String> {
-        todo!("Task 2")
+        let mut c = TokioRunner::command(cmd)?;
+        c.stdout(Stdio::piped()).stderr(Stdio::piped());
+        // Divergence (ledger 6b): a spawn failure other than the lookup reports Rust's
+        // `io::Error` text, not Go's `fork/exec`/`chdir` `*PathError` text.
+        let mut child = c.spawn().map_err(|e| e.to_string())?;
+        let (out_pipe, err_pipe) = (child.stdout.take(), child.stderr.take());
+        let (copied_out, copied_err) =
+            tokio::join!(copy_to(out_pipe, stdout), copy_to(err_pipe, stderr));
+        let status = child.wait().await.map_err(|e| e.to_string())?;
+        copied_out.map_err(|e| e.to_string())?;
+        copied_err.map_err(|e| e.to_string())?;
+        Ok(exit_of(status))
     }
 
     async fn output(&self, cmd: &Cmd) -> Result<CmdOutput, String> {
-        todo!("Task 2")
+        let mut c = TokioRunner::command(cmd)?;
+        let out = c.output().await.map_err(|e| e.to_string())?;
+        Ok(CmdOutput {
+            exit: exit_of(out.status),
+            stdout: out.stdout,
+            stderr: out.stderr,
+        })
     }
 }
 
@@ -167,9 +268,195 @@ async fn copy_to<R: AsyncRead + Unpin>(
     pipe: Option<R>,
     w: &mut (dyn Write + Send),
 ) -> std::io::Result<()> {
-    todo!("Task 2")
+    let Some(mut pipe) = pipe else {
+        return Ok(());
+    };
+    let mut buf = vec![0u8; 32 * 1024];
+    loop {
+        let n = pipe.read(&mut buf).await?;
+        if n == 0 {
+            return Ok(());
+        }
+        w.write_all(&buf[..n])?;
+        w.flush()?;
+    }
 }
 
 fn exit_of(status: std::process::ExitStatus) -> Exit {
-    todo!("Task 2")
+    if let Some(code) = status.code() {
+        return Exit::Code(code);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if let Some(sig) = status.signal() {
+            return Exit::Signal(sig);
+        }
+    }
+    Exit::Code(-1)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::path::Path;
+
+    use gadk_platform::env::MapEnv;
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+
+    fn env_with_path(path: &str) -> MapEnv {
+        MapEnv(HashMap::from([("PATH".to_string(), path.to_string())]))
+    }
+
+    fn executable(dir: &Path, name: &str) -> String {
+        let p = dir.join(name);
+        std::fs::write(&p, "#!/bin/sh\nexit 0\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        p.display().to_string()
+    }
+
+    #[test]
+    fn exit_texts_are_go_process_state_strings() {
+        assert_eq!(Exit::Code(1).go_error(), "exit status 1");
+        assert_eq!(Exit::Code(127).go_error(), "exit status 127");
+        assert_eq!(Exit::Signal(9).go_error(), "signal: killed");
+        assert_eq!(Exit::Signal(2).go_error(), "signal: interrupt");
+        assert_eq!(Exit::Signal(15).go_error(), "signal: terminated");
+        assert_eq!(Exit::Signal(64).go_error(), "signal: signal 64");
+        assert!(Exit::Code(0).success());
+        assert!(!Exit::Code(2).success());
+        assert!(!Exit::Signal(9).success());
+    }
+
+    #[test]
+    fn command_resolves_the_first_executable_on_path() {
+        let a = tempfile::tempdir().unwrap();
+        let b = tempfile::tempdir().unwrap();
+        // A non-executable file and a directory of the same name are skipped, as in Go.
+        std::fs::write(a.path().join("gcloud"), "").unwrap();
+        std::fs::create_dir(b.path().join("gcloud")).unwrap();
+        let c = tempfile::tempdir().unwrap();
+        let want = executable(c.path(), "gcloud");
+        let path = format!(
+            "{}:{}:{}",
+            a.path().display(),
+            b.path().display(),
+            c.path().display()
+        );
+        let cmd = Cmd::new(
+            &env_with_path(&path),
+            Path::new("/"),
+            "gcloud",
+            &["run", "x"],
+        )
+        .with_dir("/tmp/d");
+        assert_eq!(cmd.path, want);
+        assert_eq!(cmd.args, ["gcloud", "run", "x"]);
+        assert_eq!(cmd.dir, "/tmp/d");
+        assert_eq!(cmd.err, None);
+        assert_eq!(cmd.to_string(), format!("{want} run x"));
+    }
+
+    #[test]
+    fn a_failed_lookup_keeps_the_name_and_prints_the_args() {
+        let cmd = Cmd::new(
+            &env_with_path("/nonexistent"),
+            Path::new("/"),
+            "gcloud",
+            &["a"],
+        );
+        assert_eq!(cmd.path, "gcloud");
+        assert_eq!(
+            cmd.err.as_deref(),
+            Some(r#"exec: "gcloud": executable file not found in $PATH"#)
+        );
+        assert_eq!(cmd.to_string(), "gcloud a");
+        // An unset PATH is Go's empty `filepath.SplitList`.
+        let cmd = Cmd::new(&MapEnv::default(), Path::new("/"), "gcloud", &[]);
+        assert_eq!(
+            cmd.err.as_deref(),
+            Some(r#"exec: "gcloud": executable file not found in $PATH"#)
+        );
+    }
+
+    #[test]
+    fn a_relative_path_entry_is_go_err_dot() {
+        let cwd = tempfile::tempdir().unwrap();
+        std::fs::create_dir(cwd.path().join("bin")).unwrap();
+        executable(&cwd.path().join("bin"), "tool");
+        let cmd = Cmd::new(&env_with_path("bin"), cwd.path(), "tool", &["x"]);
+        assert_eq!(cmd.path, "bin/tool");
+        assert_eq!(
+            cmd.err.as_deref(),
+            Some(r#"exec: "tool": cannot run executable found relative to current directory"#)
+        );
+        assert_eq!(cmd.to_string(), "tool x");
+        // An empty element is ".".
+        executable(cwd.path(), "dot");
+        let cmd = Cmd::new(&env_with_path(":/nonexistent"), cwd.path(), "dot", &[]);
+        assert_eq!(cmd.path, "dot");
+        assert!(cmd.err.as_deref().unwrap_or_default().contains("relative"));
+    }
+
+    #[test]
+    fn a_name_with_a_slash_is_not_looked_up() {
+        let cmd = Cmd::new(&MapEnv::default(), Path::new("/"), "./gadk", &["x"]);
+        assert_eq!((cmd.path.as_str(), cmd.err), ("./gadk", None));
+        let cmd = Cmd::new(&MapEnv::default(), Path::new("/"), "", &[]);
+        assert_eq!(
+            cmd.err.as_deref(),
+            Some(r#"exec: "": executable file not found in $PATH"#)
+        );
+    }
+
+    /// A real child (`/bin/sh`, no lookup): output is streamed to the two writers, the working
+    /// directory and the exit status are honoured, stdin is the null device.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn tokio_runner_streams_output_and_reports_the_exit() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir_s = dir.path().canonicalize().unwrap().display().to_string();
+        let script = "pwd; printf err >&2; read x || printf eof; exit 3";
+        let cmd = Cmd::new(
+            &MapEnv::default(),
+            Path::new("/"),
+            "/bin/sh",
+            &["-c", script],
+        )
+        .with_dir(dir_s.clone());
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let got = TokioRunner.run(&cmd, &mut out, &mut err).await;
+        assert_eq!(got, Ok(Exit::Code(3)));
+        assert_eq!(String::from_utf8(out).unwrap(), format!("{dir_s}\neof"));
+        assert_eq!(String::from_utf8(err).unwrap(), "err");
+
+        let got = TokioRunner.output(&cmd).await.unwrap();
+        assert_eq!(got.exit, Exit::Code(3));
+        assert_eq!(
+            String::from_utf8(got.stdout).unwrap(),
+            format!("{dir_s}\neof")
+        );
+        assert_eq!(got.stderr, b"err");
+    }
+
+    #[tokio::test]
+    async fn tokio_runner_returns_the_lookup_error_without_starting() {
+        let cmd = Cmd::new(&MapEnv::default(), Path::new("/"), "gcloud", &[]);
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let got = TokioRunner.run(&cmd, &mut out, &mut err).await;
+        assert_eq!(
+            got,
+            Err(r#"exec: "gcloud": executable file not found in $PATH"#.to_string())
+        );
+        assert_eq!(
+            TokioRunner.output(&cmd).await,
+            Err(r#"exec: "gcloud": executable file not found in $PATH"#.to_string())
+        );
+    }
 }

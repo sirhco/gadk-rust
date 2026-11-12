@@ -22,7 +22,7 @@
 use std::sync::{Arc, Mutex};
 
 use gadk_platform::GoDuration;
-use gadk_platform::go_flag::{FlagError, FlagSet};
+use gadk_platform::go_flag::{FlagError, FlagSet, go_parse_bool, go_parse_int};
 
 /// A shared buffer to pass to `set_output`, and a reader of its text.
 fn sink(fs: &mut FlagSet) -> Arc<Mutex<Vec<u8>>> {
@@ -552,6 +552,60 @@ fn int_flag_values_match_go_strconv() {
         };
         assert_eq!((v.get(), got_err), (*want, want_err), "{input:?}");
     }
+}
+
+/// `go_parse_int` is Go `strconv.ParseInt(s, 0, 64)` with the `*strconv.NumError` text (the
+/// cause pflag's int flags print); expectations are Go 1.27 output.
+#[test]
+fn go_parse_int_returns_strconv_num_errors() {
+    let cases: &[(&str, Result<i64, &str>)] = &[
+        ("0x10", Ok(16)),
+        ("010", Ok(8)),
+        ("0b1", Ok(1)),
+        ("1_000", Ok(1000)),
+        ("-0x10", Ok(-16)),
+        ("8080", Ok(8080)),
+        ("x", Err(r#"strconv.ParseInt: parsing "x": invalid syntax"#)),
+        ("", Err(r#"strconv.ParseInt: parsing "": invalid syntax"#)),
+        (
+            "1_",
+            Err(r#"strconv.ParseInt: parsing "1_": invalid syntax"#),
+        ),
+        (
+            "9223372036854775808",
+            Err(r#"strconv.ParseInt: parsing "9223372036854775808": value out of range"#),
+        ),
+        (
+            "-9223372036854775809",
+            Err(r#"strconv.ParseInt: parsing "-9223372036854775809": value out of range"#),
+        ),
+    ];
+    for (input, want) in cases {
+        assert_eq!(
+            go_parse_int(input),
+            want.map_err(str::to_string),
+            "{input:?}"
+        );
+    }
+}
+
+/// `go_parse_bool` is Go `strconv.ParseBool` with the `*strconv.NumError` text.
+#[test]
+fn go_parse_bool_returns_strconv_num_errors() {
+    for s in ["1", "t", "T", "true", "TRUE", "True"] {
+        assert_eq!(go_parse_bool(s), Ok(true), "{s:?}");
+    }
+    for s in ["0", "f", "F", "false", "FALSE", "False"] {
+        assert_eq!(go_parse_bool(s), Ok(false), "{s:?}");
+    }
+    assert_eq!(
+        go_parse_bool("yes"),
+        Err(r#"strconv.ParseBool: parsing "yes": invalid syntax"#.to_string())
+    );
+    assert_eq!(
+        go_parse_bool(""),
+        Err(r#"strconv.ParseBool: parsing "": invalid syntax"#.to_string())
+    );
 }
 
 /// `strconv.ParseBool` through `-v=x` on a bool flag defaulting to true (a failed parse
