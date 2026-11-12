@@ -34,7 +34,10 @@ use pretty_assertions::assert_eq;
 use serde_json::{Value, json};
 
 use super::*;
-use crate::testutil::{Canned, RecordingRunner, TestEnv, default_now};
+use crate::testutil::{
+    Canned, RecordingRunner, TestEnv, cargo_metadata_json, cargo_metadata_runner, default_now,
+    write_cargo_workspace,
+};
 use crate::util::{GREEN, RED, RESET};
 
 pub(crate) const PARENT: &str = "projects/my-project/locations/us-central1";
@@ -43,59 +46,13 @@ const OP: &str = "projects/my-project/locations/us-central1/reasoningEngines/42/
 /// Go `url.Values.Encode` of `$alt=json;enum-encoding=int`.
 const ALT_QUERY: &str = "%24alt=json%3Benum-encoding%3Dint";
 
-/// Writes a one-package Cargo workspace at `root`: `Cargo.toml`, `Cargo.lock`,
-/// `agent/Cargo.toml`, `agent/src/main.rs`.
+/// Writes the one-package Cargo workspace `agent` (member `agent`) at `root`.
 pub(crate) fn write_workspace(root: &Path) {
-    fs::create_dir_all(root.join("agent/src")).unwrap();
-    fs::write(
-        root.join("Cargo.toml"),
-        "[workspace]\nmembers = [\"agent\"]\n",
-    )
-    .unwrap();
-    fs::write(root.join("Cargo.lock"), "version = 4\n").unwrap();
-    fs::write(
-        root.join("agent/Cargo.toml"),
-        "[package]\nname = \"agent\"\nversion = \"0.1.0\"\n",
-    )
-    .unwrap();
-    fs::write(root.join("agent/src/main.rs"), "fn main() {}\n").unwrap();
+    write_cargo_workspace(root, "agent", "agent");
 }
 
-/// `cargo metadata --format-version 1 --no-deps` output for a workspace at `workspace_root`
-/// whose only package `package` lives at `manifest` with the binaries `bins` and the `path`
-/// dependencies `deps`.
-pub(crate) fn metadata_json(
-    workspace_root: &Path,
-    manifest: &str,
-    package: &str,
-    bins: &[&str],
-    deps: &[PathBuf],
-) -> String {
-    let targets: Vec<Value> = bins
-        .iter()
-        .map(|b| json!({"kind": ["bin"], "crate_types": ["bin"], "name": b}))
-        .chain([json!({"kind": ["lib"], "crate_types": ["lib"], "name": package})])
-        .collect();
-    let dependencies: Vec<Value> = deps
-        .iter()
-        .map(|d| json!({"name": "dep", "source": null, "path": d}))
-        .collect();
-    json!({
-        "packages": [{
-            "name": package,
-            "manifest_path": manifest,
-            "targets": targets,
-            "dependencies": dependencies,
-            "rust_version": null,
-        }],
-        "workspace_root": workspace_root,
-        "version": 1,
-    })
-    .to_string()
-}
-
-/// A runner answering every `cargo metadata` as [`metadata_json`] for the `--manifest-path`
-/// it is asked about (so any `-e` resolves to `package` with `bins`).
+/// A runner answering every `cargo metadata` as [`cargo_metadata_json`] for the
+/// `--manifest-path` it is asked about (so any `-e` resolves to `package` with `bins`).
 pub(crate) fn metadata_runner(
     workspace_root: &Path,
     package: &str,
@@ -106,11 +63,14 @@ pub(crate) fn metadata_runner(
     let package = package.to_string();
     let bins: Vec<String> = bins.iter().map(|b| b.to_string()).collect();
     let deps = deps.to_vec();
-    RecordingRunner::with_responder(move |cmd| {
-        let manifest = cmd.args.last().cloned().unwrap_or_default();
-        let bins: Vec<&str> = bins.iter().map(String::as_str).collect();
-        Canned::success(metadata_json(&root, &manifest, &package, &bins, &deps))
-    })
+    cargo_metadata_runner(
+        move |cmd| {
+            let manifest = PathBuf::from(cmd.args.last().cloned().unwrap_or_default());
+            let bins: Vec<&str> = bins.iter().map(String::as_str).collect();
+            cargo_metadata_json(&root, &manifest, &package, &bins, &deps)
+        },
+        |_| Canned::success(Vec::new()),
+    )
 }
 
 /// A [`TestEnv`] at `cwd` whose `cargo metadata` resolves to package `package` with `bins` in

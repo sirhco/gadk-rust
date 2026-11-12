@@ -838,19 +838,19 @@ pub(crate) mod fixture {
     use std::fs;
     use std::path::{Path, PathBuf};
 
-    use serde_json::json;
-
     use super::{CloudRunFlags, CloudRunServiceFlags};
     use crate::runner::Cmd;
     use crate::target::CargoTarget;
-    use crate::testutil::{Canned, RecordingRunner, TestEnv};
+    use crate::testutil::{
+        Canned, TestEnv, cargo_metadata_json, cargo_metadata_runner, write_cargo_workspace,
+    };
 
     /// The `rust-toolchain.toml` channel every fixture workspace pins.
     pub(crate) const CHANNEL: &str = "1.90.0";
 
-    /// `<dir>/ws`: a Cargo workspace (`Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`,
-    /// `src/main.rs`) whose package `package` lives at `<dir>/ws/<member>` with the binary
-    /// targets `bins`; `<dir>/tmp` is the temp parent (Go `t.TempDir()`).
+    /// `<dir>/ws`: a Cargo workspace ([`write_cargo_workspace`] plus `rust-toolchain.toml`)
+    /// whose package `package` lives at `<dir>/ws/<member>` with the binary targets `bins`;
+    /// `<dir>/tmp` is the temp parent (Go `t.TempDir()`).
     pub(crate) struct Workspace {
         pub dir: tempfile::TempDir,
         pub member: String,
@@ -864,16 +864,13 @@ pub(crate) mod fixture {
         pub(crate) fn new(member: &str, package: &str, bins: &[&str]) -> Workspace {
             let dir = tempfile::tempdir().unwrap();
             let root = dir.path().join("ws");
-            fs::create_dir_all(root.join(member).join("src")).unwrap();
             fs::create_dir_all(dir.path().join("tmp")).unwrap();
-            fs::write(root.join("Cargo.toml"), "[workspace]\n").unwrap();
-            fs::write(root.join("Cargo.lock"), "version = 4\n").unwrap();
+            write_cargo_workspace(&root, member, package);
             fs::write(
                 root.join("rust-toolchain.toml"),
                 format!("[toolchain]\nchannel = \"{CHANNEL}\"\n"),
             )
             .unwrap();
-            fs::write(root.join(member).join("src/main.rs"), "fn main() {}\n").unwrap();
             Workspace {
                 dir,
                 member: member.to_string(),
@@ -904,31 +901,14 @@ pub(crate) mod fixture {
 
         /// What `cargo metadata --format-version 1 --no-deps` prints for the workspace.
         pub(crate) fn metadata(&self) -> String {
-            let targets: Vec<_> = self
-                .bins
-                .iter()
-                .map(|b| json!({"kind": ["bin"], "crate_types": ["bin"], "name": b}))
-                .collect();
-            let dependencies: Vec<_> = self
-                .path_dependencies
-                .iter()
-                .map(
-                    |p| json!({"name": "dep", "source": null, "req": "*", "kind": null, "path": p}),
-                )
-                .collect();
-            json!({
-                "packages": [{
-                    "name": self.package,
-                    "version": "0.1.0",
-                    "dependencies": dependencies,
-                    "targets": targets,
-                    "manifest_path": self.manifest_dir().join("Cargo.toml"),
-                    "rust_version": null
-                }],
-                "workspace_root": self.root(),
-                "version": 1
-            })
-            .to_string()
+            let bins: Vec<&str> = self.bins.iter().map(String::as_str).collect();
+            cargo_metadata_json(
+                &self.root(),
+                &self.manifest_dir().join("Cargo.toml"),
+                &self.package,
+                &bins,
+                &self.path_dependencies,
+            )
         }
 
         /// A [`TestEnv`] in the workspace root whose runner answers `cargo metadata` with
@@ -944,13 +924,7 @@ pub(crate) mod fixture {
             other: impl Fn(&Cmd) -> Canned + Send + Sync + 'static,
         ) -> TestEnv {
             let metadata = self.metadata();
-            let runner = RecordingRunner::with_responder(move |c| {
-                if c.args.get(1).map(String::as_str) == Some("metadata") {
-                    Canned::success(metadata.clone())
-                } else {
-                    other(c)
-                }
-            });
+            let runner = cargo_metadata_runner(move |_| metadata.clone(), other);
             TestEnv::builder(self.root()).runner(runner).build()
         }
 
