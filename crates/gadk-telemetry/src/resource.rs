@@ -78,6 +78,10 @@ fn merge(a: &Resource, b: &Resource) -> (Resource, Option<String>) {
 /// Go `resource.Default()`: `service.name` (`unknown_service:<executable>`), then
 /// `OTEL_RESOURCE_ATTRIBUTES` and `OTEL_SERVICE_NAME` from `env` (Go `fromEnv`), then the
 /// `telemetry.sdk.*` attributes, under [`SCHEMA_URL`].
+///
+/// Divergence (ledger 7a): the `telemetry.sdk.*` values are opentelemetry_sdk's
+/// (`telemetry.sdk.language` `rust`, `telemetry.sdk.version` `0.33.1`); Go's are `go` and the Go
+/// SDK's version (`1.47.0`).
 pub(crate) fn go_default_resource(env: &dyn EnvProvider) -> Resource {
     let sdk = TelemetryResourceDetector.detect();
     let telemetry_sdk = new_with_attributes(

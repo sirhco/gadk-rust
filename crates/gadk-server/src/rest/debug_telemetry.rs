@@ -465,9 +465,7 @@ fn emit_float(f: f64) -> String {
     }
 }
 
-/// Go `attribute.Value.Emit` of a STRINGSLICE: `json.Marshal` (HTML-escaped). A structured
-/// value of another shape (a SLICE or MAP) is [`append_otel_json`]'s (OTel's own JSON rendering:
-/// no HTML escaping, floats as `%g`); bytes that are not JSON are a BYTESLICE (base64).
+/// Go `Emit` of a STRINGSLICE: `json.Marshal` (HTML-escaped); OTel JSON if that fails.
 fn emit_string_slice(items: &[String]) -> String {
     let value = Value::Array(items.iter().cloned().map(Value::String).collect());
     if let Ok(bytes) = gadk_model::to_go_json(&value) {

@@ -127,6 +127,8 @@ pub(crate) async fn init_with(
         .await
         .map_err(|e| Error::Telemetry(e.to_string()))?;
     (globals.set_providers)(&providers);
+    // Divergence (ledger 7a; also ledger 6): an existing global `tracing` subscriber is kept and
+    // logged; Go always replaces the global OpenTelemetry providers.
     if let Some(dispatch) = build(config, &providers)
         && !(globals.set_subscriber)(dispatch)
     {
@@ -176,6 +178,10 @@ impl TelemetryGuard {
     /// Go's deferred `telemetryService.Shutdown` under `context.WithTimeout(shutdownTimeout)`:
     /// a failure is logged as `telemetry shutdown failed: <err>`, a timeout as
     /// `telemetry shutdown failed: context deadline exceeded`.
+    ///
+    /// Divergence (ledger 6): `<err>` is opentelemetry_sdk's provider error
+    /// (`Operation failed: Shutdown errors: [InternalFailure("<processor error>")]`); Go prints the
+    /// processor's error.
     pub(crate) async fn shutdown_logged(self, timeout: Duration, log: &Logger) {
         match tokio::time::timeout(timeout, self.shutdown()).await {
             Ok(Ok(())) => {}

@@ -41,6 +41,8 @@ use crate::resource::{go_default_resource, go_merge, new_with_attributes};
 pub(crate) const GCP_TRACES_ENDPOINT: &str = "https://telemetry.googleapis.com/v1/traces";
 
 /// Why an exporter could not be created outside a Tokio runtime.
+// Divergence (ledger 7a): Go has no runtime to require; gadk's exporters send on the Tokio
+// runtime that created them.
 const NO_RUNTIME: &str = "no Tokio runtime: telemetry exporters must be created from within one";
 
 /// Go `configure`: ADC when cloud export is on and no credentials were given, the quota and
@@ -182,6 +184,7 @@ fn trimmed_var(env: &dyn EnvProvider, key: &str) -> String {
 }
 
 /// The runtime exporters send on.
+// Divergence (ledger 7a): outside a Tokio runtime exporter creation fails with [`NO_RUNTIME`].
 fn runtime_handle() -> Result<Handle, String> {
     Handle::try_current().map_err(|_| NO_RUNTIME.to_owned())
 }
@@ -304,6 +307,9 @@ pub(crate) fn new_gcp_span_exporter(
     // `x-goog-user-project` is still sent exactly once.
     // Pass the quota project id in headers to fix auth errors.
     // https://cloud.google.com/docs/authentication/adc-troubleshooting/user-creds
+    // Divergence (ledger 7a): a quota project that is not a valid header value fails here
+    // (`failed to parse header value`); Go accepts any string and `net/http` rejects the
+    // request at export time.
     let quota_project = HeaderValue::from_str(&cfg.gcp_quota_project).map_err(|e| e.to_string())?;
     client = client.with_header(
         HeaderName::from_static("x-goog-user-project"),

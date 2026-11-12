@@ -128,6 +128,8 @@ impl Detector {
             .await
             .map_err(|e| DetectorError::Other(transport_text(&url, &e)))?;
         let status = res.status();
+        // Divergence (ledger 7a): the reason is the status code's canonical reason (empty for a
+        // code without one: `499 `); Go's `res.Status` is the server's own reason phrase.
         if !status.is_success() {
             return Err(DetectorError::Other(format!(
                 "compute instances.get returned {} {}",
@@ -216,11 +218,13 @@ fn path_escape(s: &str) -> String {
 }
 
 /// Go `json.NewDecoder(res.Body).Decode(&struct{ MachineType string \`json:"machineType"\` })`:
-/// the first JSON value's `machineType` (key matched case-insensitively, later keys win, `null`
-/// skipped), with Go's type-mismatch and EOF texts. Syntax errors carry serde_json's text.
+/// the first JSON value's `machineType` (key matched case-insensitively, `null` skipped), with
+/// Go's type-mismatch and EOF texts. Syntax errors carry serde_json's text.
 ///
 /// Divergence (ledger 7a): JSON syntax-error texts are serde_json's, not Go's `encoding/json`
-/// `*json.SyntaxError` texts.
+/// `*json.SyntaxError` texts. serde_json's map keeps one value per key (the document's last) and
+/// iterates keys in sorted order, so of keys differing only in case (`MachineType`,
+/// `machineType`) the last in sorted order wins; Go's last in the document does.
 fn decode_machine_type(body: &[u8]) -> Result<String, String> {
     let value = match serde_json::Deserializer::from_slice(body)
         .into_iter::<Value>()

@@ -100,6 +100,8 @@ impl Providers {
 
 /// Records a provider shutdown error; the SDK's already-shut-down error is success, as a
 /// second Go `Shutdown` is.
+// Divergence (ledger 7a): the text is opentelemetry_sdk's provider error
+// (`Operation failed: Shutdown errors: [InternalFailure("<processor error>")]`), not Go's.
 fn push_err(errs: &mut Vec<String>, result: OTelSdkResult) {
     match result {
         Ok(()) | Err(OTelSdkError::AlreadyShutdown) => {}
