@@ -17,10 +17,12 @@
 //!
 //! [`session::VertexAiSessionService`] keeps sessions and their events in an Agent Engine
 //! (reasoning engine) session store; [`memory::VertexAiMemoryService`] generates and retrieves
-//! memories with the engine's Memory Bank. Both speak the Vertex AI `v1beta1` REST API through
-//! gadk's own REST transport, with the resource names, request bodies and error texts ADK-Go
-//! uses, so a gadk service and an ADK-Go service can share one engine. Requests are
-//! authenticated with Application Default Credentials unless credentials are given.
+//! memories with the engine's Memory Bank; [`reasoning_engine::ReasoningEngineClient`] creates
+//! and updates the engine itself (the calls `adkgo deploy agentengine` makes). All speak the
+//! Vertex AI `v1beta1` REST API through gadk's own REST transport, with the resource names,
+//! request bodies and error texts ADK-Go uses, so a gadk service and an ADK-Go service can
+//! share one engine. Requests are authenticated with Application Default Credentials unless
+//! credentials are given.
 //!
 //! ```no_run
 //! # fn demo() -> Result<(), gadk_session::SessionError> {
@@ -35,6 +37,7 @@
 //! ```
 
 pub mod memory;
+pub mod reasoning_engine;
 pub mod session;
 
 mod client;
