@@ -38,6 +38,8 @@ mod setup;
 
 #[cfg(test)]
 mod parity_tests;
+#[cfg(test)]
+mod test_support;
 
 pub use bridge::OtelBridge;
 pub use config::{

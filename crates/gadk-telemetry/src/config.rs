@@ -17,8 +17,6 @@
 //! in order to the private [`Config`] — a later option overrides an earlier one and the processor
 //! options accumulate, as Go's functional options do.
 
-#![allow(dead_code, unused_variables, unused_imports, clippy::todo)]
-
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
@@ -246,5 +244,123 @@ impl LogProcessor for SharedLogProcessor {
 
     fn set_resource(&mut self, resource: &Resource) {
         self.0.write().set_resource(resource);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use opentelemetry::KeyValue;
+    use opentelemetry::trace::{Tracer as _, TracerProvider as _};
+    use opentelemetry_sdk::logs::{InMemoryLogExporter, SimpleLogProcessor};
+    use opentelemetry_sdk::trace::{InMemorySpanExporter, SimpleSpanProcessor};
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+
+    fn span_processor() -> Box<dyn SpanProcessor> {
+        Box::new(SimpleSpanProcessor::new(InMemorySpanExporter::default()))
+    }
+
+    fn log_processor() -> Box<dyn LogProcessor> {
+        Box::new(SimpleLogProcessor::new(InMemoryLogExporter::default()))
+    }
+
+    fn resource(name: &'static str) -> Resource {
+        Resource::builder_empty()
+            .with_attribute(KeyValue::new("service.name", name))
+            .build()
+    }
+
+    fn credentials(project_id: &str) -> GoogleCredentials {
+        GoogleCredentials {
+            credentials: None,
+            project_id: project_id.to_owned(),
+        }
+    }
+
+    #[test]
+    fn no_options_is_the_zero_config() {
+        let cfg = config_from_opts(&[]);
+        assert!(!cfg.otel_to_cloud);
+        assert_eq!(cfg.gcp_resource_project, "");
+        assert_eq!(cfg.gcp_quota_project, "");
+        assert!(cfg.google_credentials.is_none());
+        assert!(cfg.resource.is_none());
+        assert!(cfg.span_processors.is_empty());
+        assert!(cfg.log_processors.is_empty());
+        assert!(cfg.tracer_provider.is_none());
+        assert!(cfg.logger_provider.is_none());
+    }
+
+    #[test]
+    fn later_options_override_earlier_ones() {
+        let first = InMemorySpanExporter::default();
+        let second = InMemorySpanExporter::default();
+        let provider = |exporter: &InMemorySpanExporter| {
+            SdkTracerProvider::builder()
+                .with_span_processor(SimpleSpanProcessor::new(exporter.clone()))
+                .build()
+        };
+        let cfg = config_from_opts(&[
+            with_otel_to_cloud(true),
+            with_gcp_resource_project("resource-1"),
+            with_gcp_quota_project("quota-1"),
+            with_google_credentials(credentials("creds-1")),
+            with_resource(resource("svc-1")),
+            with_tracer_provider(provider(&first)),
+            with_otel_to_cloud(false),
+            with_gcp_resource_project("resource-2"),
+            with_gcp_quota_project("quota-2"),
+            with_google_credentials(credentials("creds-2")),
+            with_resource(resource("svc-2")),
+            with_tracer_provider(provider(&second)),
+        ]);
+        assert!(!cfg.otel_to_cloud);
+        assert_eq!(cfg.gcp_resource_project, "resource-2");
+        assert_eq!(cfg.gcp_quota_project, "quota-2");
+        assert_eq!(cfg.google_credentials.unwrap().project_id, "creds-2");
+        assert_eq!(cfg.resource, Some(resource("svc-2")));
+        let tp = cfg.tracer_provider.unwrap();
+        tp.tracer("t").in_span("s", |_| {});
+        assert_eq!(first.get_finished_spans().unwrap().len(), 0);
+        assert_eq!(second.get_finished_spans().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn later_logger_provider_overrides_an_earlier_one() {
+        let first = SdkLoggerProvider::builder().build();
+        let second = SdkLoggerProvider::builder().build();
+        let cfg = config_from_opts(&[
+            with_logger_provider(first.clone()),
+            with_logger_provider(second.clone()),
+        ]);
+        let got = cfg.logger_provider.unwrap();
+        // Shutting the chosen provider down shuts `second` down (they share their state).
+        got.shutdown().unwrap();
+        assert!(second.shutdown().is_err());
+        assert!(first.shutdown().is_ok());
+    }
+
+    #[test]
+    fn processor_options_accumulate() {
+        let cfg = config_from_opts(&[
+            with_span_processors([span_processor(), span_processor()]),
+            with_log_record_processors([log_processor()]),
+            with_otel_to_cloud(true),
+            with_span_processors([span_processor()]),
+            with_log_record_processors([log_processor(), log_processor()]),
+        ]);
+        assert_eq!(cfg.span_processors.len(), 3);
+        assert_eq!(cfg.log_processors.len(), 3);
+    }
+
+    #[test]
+    fn cloned_options_share_their_processors() {
+        let spans = with_span_processors([span_processor()]);
+        let logs = with_log_record_processors([log_processor()]);
+        let a = config_from_opts(&[spans.clone(), logs.clone()]);
+        let b = config_from_opts(&[spans, logs]);
+        assert!(a.span_processors[0].ptr_eq(&b.span_processors[0]));
+        assert!(a.log_processors[0].ptr_eq(&b.log_processors[0]));
     }
 }
