@@ -154,7 +154,9 @@ class EdgeTest(unittest.TestCase):
     def test_vertexai_edges_are_exactly_session_memory_genai_model_platform(self):
         self.assertEqual(cwd.ALLOWED["gadk-vertexai"],
                          {"gadk-session", "gadk-memory", "gadk-genai", "gadk-model", "gadk-platform"})
-        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-vertexai" in deps], ["gadk"])
+        # 6b: the deploy CLI uses the Reasoning Engine client.
+        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-vertexai" in deps],
+                         ["gadk-cli", "gadk"])
 
     def test_server_edges_are_exactly_the_engine_stack(self):
         self.assertEqual(cwd.ALLOWED["gadk-server"],
@@ -162,8 +164,9 @@ class EdgeTest(unittest.TestCase):
                           "gadk-genai", "gadk-model", "gadk-platform"})
         # 5b: gadk-a2a's optional `gadk-server` feature reads the authn `Caller`; 6: the launcher's
         # `web` feature serves the REST API.
+        # 6b: the deploy CLI lists the Agent Engine class methods (feature `agentengine`).
         self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-server" in deps],
-                         ["gadk-a2a", "gadk-launcher", "gadk"])
+                         ["gadk-a2a", "gadk-launcher", "gadk-cli", "gadk"])
         self.assertIn("gadk-server", cwd.ENGINE_DEPENDENTS)
 
     def test_server_dev_dependency_on_engine_is_allowed(self):
@@ -312,6 +315,23 @@ class EdgeTest(unittest.TestCase):
         self.edit("gadk", "gadk-launcher = { workspace = true, optional = true }\n", "")
         errs = cwd.check(self.repo)
         self.assertTrue(any("gadk -> gadk-launcher is missing" in e for e in errs), errs)
+
+    def test_cli_edges_are_exactly_platform_vertexai_server_model(self):
+        self.assertEqual(cwd.ALLOWED["gadk-cli"],
+                         {"gadk-platform", "gadk-vertexai", "gadk-server", "gadk-model"})
+        # Nothing depends on the deploy binary's crate, and it has no direct engine edge.
+        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-cli" in deps], [])
+        self.assertNotIn("gadk-cli", cwd.ENGINE_DEPENDENTS)
+
+    def test_cli_normal_dependency_on_engine_is_rejected(self):
+        self.edit("gadk-cli", "[dependencies]\n", "[dependencies]\ngadk-engine = { workspace = true }\n")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-cli -> gadk-engine is not allowed" in e for e in errs), errs)
+
+    def test_cli_missing_server_edge_is_rejected(self):
+        self.edit("gadk-cli", 'gadk-server = { workspace = true, features = ["agentengine"] }\n', "")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-cli -> gadk-server is missing" in e for e in errs), errs)
 
     def test_model_edges_are_unchanged_by_gcp_auth(self):
         self.assertEqual(cwd.ALLOWED["gadk-model"], {"gadk-genai"})

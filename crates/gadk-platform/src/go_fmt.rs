@@ -43,32 +43,50 @@ fn go_is_print(c: char) -> bool {
 /// printable runes (Go `unicode.IsPrint`) stay raw, `\a \b \f \n \r \t \v` use their short
 /// escapes, and every other rune becomes `\xNN` (below U+0020 and U+007F), `\uNNNN` or
 /// `\UNNNNNNNN`, in lowercase hex. A `&str` cannot hold invalid UTF-8, so Go's invalid-byte
-/// branch does not arise.
+/// branch does not arise ([`go_quote_bytes`] has it).
 #[doc(hidden)]
 pub fn go_quote(s: &str) -> String {
+    go_quote_bytes(s.as_bytes())
+}
+
+/// Port of Go `strconv.Quote` on a Go string that may hold invalid UTF-8: as [`go_quote`], and
+/// each byte that is not part of a valid UTF-8 sequence becomes `\xNN` (Go's `RuneError` of
+/// width 1 branch).
+#[doc(hidden)]
+pub fn go_quote_bytes(s: &[u8]) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            c if go_is_print(c) => out.push(c),
-            '\u{7}' => out.push_str("\\a"),
-            '\u{8}' => out.push_str("\\b"),
-            '\u{c}' => out.push_str("\\f"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            '\u{b}' => out.push_str("\\v"),
-            c if (c as u32) < 0x20 || c == '\u{7f}' => {
-                out.push_str(&format!("\\x{:02x}", c as u32));
-            }
-            c if (c as u32) < 0x10000 => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push_str(&format!("\\U{:08x}", c as u32)),
+    for chunk in s.utf8_chunks() {
+        for c in chunk.valid().chars() {
+            push_quoted_rune(&mut out, c);
+        }
+        for b in chunk.invalid() {
+            out.push_str(&format!("\\x{b:02x}"));
         }
     }
     out.push('"');
     out
+}
+
+/// One valid rune of Go `strconv.Quote`'s output.
+fn push_quoted_rune(out: &mut String, c: char) {
+    match c {
+        '"' => out.push_str("\\\""),
+        '\\' => out.push_str("\\\\"),
+        c if go_is_print(c) => out.push(c),
+        '\u{7}' => out.push_str("\\a"),
+        '\u{8}' => out.push_str("\\b"),
+        '\u{c}' => out.push_str("\\f"),
+        '\n' => out.push_str("\\n"),
+        '\r' => out.push_str("\\r"),
+        '\t' => out.push_str("\\t"),
+        '\u{b}' => out.push_str("\\v"),
+        c if (c as u32) < 0x20 || c == '\u{7f}' => {
+            out.push_str(&format!("\\x{:02x}", c as u32));
+        }
+        c if (c as u32) < 0x10000 => out.push_str(&format!("\\u{:04x}", c as u32)),
+        c => out.push_str(&format!("\\U{:08x}", c as u32)),
+    }
 }
 
 /// Go `unicode.ToLower`: the simple (one-rune) lowercase mapping. Rust's `char::to_lowercase`
@@ -229,7 +247,8 @@ mod tests {
     use serde_json::Value;
 
     use super::{
-        go_query_escape, go_quote, go_sprint_value, go_to_lower, go_to_upper, go_type_name,
+        go_query_escape, go_quote, go_quote_bytes, go_sprint_value, go_to_lower, go_to_upper,
+        go_type_name,
     };
 
     /// Go net/url/url_test.go `queryEscapeTests`, plus non-ASCII and the unreserved marks.
@@ -296,6 +315,24 @@ mod tests {
         for (input, want) in cases {
             assert_eq!(go_quote(input), want, "go_quote({input:?})");
         }
+    }
+
+    /// Expected values are Go `strconv.Quote` output for strings holding invalid UTF-8: each
+    /// stray byte is `\xNN`; a valid U+FFFD stays raw.
+    #[test]
+    fn go_quote_bytes_matches_strconv_quote_on_invalid_utf8() {
+        let cases: [(&[u8], &str); 6] = [
+            (b"http://x\xffy", "\"http://x\\xffy\""),
+            (b"agent\x80", "\"agent\\x80\""),
+            (b"\xc3", "\"\\xc3\""),
+            (b"\xe2\x82", "\"\\xe2\\x82\""),
+            ("caf\u{e9}\u{fffd}".as_bytes(), "\"caf\u{e9}\u{fffd}\""),
+            (b"q\"\n\xff", "\"q\\\"\\n\\xff\""),
+        ];
+        for (input, want) in cases {
+            assert_eq!(go_quote_bytes(input), want, "go_quote_bytes({input:?})");
+        }
+        assert_eq!(go_quote_bytes(b"plain"), go_quote("plain"));
     }
 
     /// `fmt.Sprintf("%v", v)` after Go `json.Unmarshal(input, &v)` (go1.27 run of the same

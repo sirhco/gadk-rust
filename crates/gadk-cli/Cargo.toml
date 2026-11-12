@@ -1,0 +1,36 @@
+[package]
+name = "gadk-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "gadk"
+path = "src/main.rs"
+
+[dependencies]
+gadk-platform = { workspace = true }
+gadk-vertexai = { workspace = true }
+gadk-server = { workspace = true, features = ["agentengine"] }
+gadk-model = { workspace = true }
+clap = { workspace = true }
+tar = { workspace = true }
+flate2 = { workspace = true }
+tempfile = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+base64 = { workspace = true }
+chrono = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true, features = ["process"] }
+
+[dev-dependencies]
+gadk-model = { workspace = true, features = ["test-util"] }
+gadk-vertexai = { workspace = true, features = ["testutil"] }
+tokio = { workspace = true, features = ["test-util"] }
+pretty_assertions = { workspace = true }
