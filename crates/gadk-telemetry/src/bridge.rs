@@ -249,6 +249,8 @@ fn span_value(value: D6Value) -> Value {
         D6Value::Str(s) => Value::String(s.into()),
         D6Value::I64(i) => Value::I64(i),
         // Go's attribute package has no unsigned integer; ADK records none.
+        // Divergence (ledger 7a): a u64 is exported as its decimal text (above `i64::MAX` an
+        // OTel Rust `I64` cannot hold it).
         D6Value::U64(u) => Value::String(u.to_string().into()),
         D6Value::F64(f) => Value::F64(f),
         D6Value::Bool(b) => Value::Bool(b),
@@ -268,6 +270,9 @@ fn span_value(value: D6Value) -> Value {
 /// A JSON value as a log `AnyValue`, as Go's `toLogValue` builds it: a number is an integer when
 /// it fits `i64`, else a float, else its text. OTel Rust's `AnyValue` has no empty value: a
 /// `null` (Go's EMPTY) is `None`, and dropped from maps and lists.
+///
+/// Divergence (ledger 7a): a JSON `null` is dropped (no empty `AnyValue`), and a `null` body
+/// leaves the record without a body.
 fn any_value(value: Json) -> Option<AnyValue> {
     Some(match value {
         Json::Null => return None,

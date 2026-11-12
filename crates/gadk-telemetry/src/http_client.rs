@@ -27,6 +27,9 @@ use opentelemetry_http::{Bytes, HttpClient, HttpError, Request, Response};
 use tokio::runtime::Handle;
 
 /// Go's OTLP exporters' default request timeout (`otlptracehttp` `DefaultTimeout`).
+///
+/// Divergence (ledger 7a): every request has this timeout; `OTEL_EXPORTER_OTLP_TIMEOUT` bounds
+/// only opentelemetry-otlp's retry deadline (Go applies it per request).
 const EXPORT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// An OTLP exporter HTTP client on gadk's async reqwest stack.
