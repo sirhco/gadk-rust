@@ -18,7 +18,7 @@
 //!
 //! Go registers the store as an OTel span processor and log processor; gadk's telemetry is
 //! `tracing`, so [`DebugTelemetry`] is a [`tracing_subscriber::Layer`] reading the engine's spans
-//! and log events as plan decision D6 lays them out:
+//! and log events as plan decision D6 lays them out (decoded by [`gadk_engine::telemetry::d6`]):
 //! - an OTel span is a span whose metadata declares an `otel.name` field (every span gadk emits
 //!   for Go's telemetry does); any other span in the process (e.g. h2's `Connection`,
 //!   `hpack::encode`) is transparent: it gets no IDs, is never stored, and an OTel span or log
@@ -31,8 +31,10 @@
 //!   `event.name`, `otel.log.body` (JSON text) and `otel.log.attributes` (JSON object text),
 //!   attached to the nearest OTel span it is emitted under.
 //!
-//! Trace and span IDs are random (16 and 8 bytes, lowercase hex) as the OTel SDK's; a span keeps
-//! its OTel parent's trace ID, a span without an OTel ancestor (`parent_span_id` sixteen zeros) starts a trace. Times are
+//! Trace and span IDs are a span's [`SpanIds`] extension when a layer before this one (the OTel
+//! bridge) stored valid ones; otherwise they are random (16 and 8 bytes, lowercase hex) as the
+//! OTel SDK's. Either way they print as lowercase hex; a span keeps its OTel parent's trace ID, a
+//! span without an OTel ancestor (`parent_span_id` sixteen zeros) starts a trace. Times are
 //! wall-clock Unix nanoseconds. A span is stored when it closes (Go: when it ends), with the log
 //! records emitted under it; the store keeps the most recently used `trace_capacity` traces.
 
@@ -42,12 +44,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::Engine as _;
 use chrono::Local;
-use gadk_engine::telemetry::LOG_TARGET;
+use gadk_engine::telemetry::d6::{self, D6Fields, D6Value, SpanIds};
 use gadk_platform::{go_format_rfc3339_nano, go_sprint_value};
 use parking_lot::Mutex;
 use serde::Serialize;
 use serde_json::{Map, Number, Value};
-use tracing::field::{Field, Visit};
 use tracing::span::{Attributes, Id, Record};
 use tracing_subscriber::layer::Context as LayerContext;
 use tracing_subscriber::registry::LookupSpan;
@@ -395,12 +396,6 @@ impl DebugTelemetry {
 /// An open span's record, kept in the span's registry extensions until it closes.
 struct OpenSpan(SpanRecord);
 
-/// Whether a span is an OTel span (an ADK span, as Go's store would see it): its metadata
-/// declares `otel.name`.
-fn is_otel_span(meta: &tracing::Metadata<'_>) -> bool {
-    meta.fields().field("otel.name").is_some()
-}
-
 /// Unix nanoseconds now (Go `time.Now().UnixNano()`).
 fn now_unix_nano() -> i64 {
     SystemTime::now()
@@ -430,49 +425,32 @@ fn random_span_id() -> [u8; 8] {
     }
 }
 
-/// Reads span fields as Go span attributes (see the module docs).
-struct SpanFields<'a>(&'a mut SpanRecord);
-
-impl SpanFields<'_> {
-    fn set(&mut self, f: &Field, v: String) {
-        match f.name() {
-            "otel.name" => self.0.name = v,
-            "error.message" => {}
-            n if n.starts_with("otel.") => {}
-            n => {
-                self.0.attributes.insert(n.to_owned(), v);
-            }
-        }
+/// Merges one visit's decoded span fields into `record`: a recorded name replaces the current
+/// one, every attribute is stored as its Go string ([`emit`]); the status is not stored.
+fn apply(record: &mut SpanRecord, fields: D6Fields) {
+    if let Some(name) = fields.name {
+        record.name = name;
+    }
+    for (key, value) in fields.attributes {
+        record.attributes.insert(key, emit(&value));
     }
 }
 
-impl Visit for SpanFields<'_> {
-    fn record_str(&mut self, f: &Field, v: &str) {
-        self.set(f, v.to_owned());
-    }
-    fn record_bool(&mut self, f: &Field, v: bool) {
-        self.set(f, v.to_string());
-    }
-    fn record_i64(&mut self, f: &Field, v: i64) {
-        self.set(f, v.to_string());
-    }
-    fn record_u64(&mut self, f: &Field, v: u64) {
-        self.set(f, v.to_string());
-    }
-    fn record_i128(&mut self, f: &Field, v: i128) {
-        self.set(f, v.to_string());
-    }
-    fn record_u128(&mut self, f: &Field, v: u128) {
-        self.set(f, v.to_string());
-    }
-    fn record_f64(&mut self, f: &Field, v: f64) {
-        self.set(f, emit_float(v));
-    }
-    fn record_bytes(&mut self, f: &Field, v: &[u8]) {
-        self.set(f, emit_structured(v));
-    }
-    fn record_debug(&mut self, f: &Field, v: &dyn std::fmt::Debug) {
-        self.set(f, format!("{v:?}"));
+/// Go `attribute.Value.Emit` of a decoded attribute (see the module docs).
+fn emit(v: &D6Value) -> String {
+    match v {
+        D6Value::Str(s) => s.clone(),
+        D6Value::I64(i) => i.to_string(),
+        D6Value::U64(u) => u.to_string(),
+        D6Value::F64(f) => emit_float(*f),
+        D6Value::Bool(b) => b.to_string(),
+        D6Value::StrSlice(items) => emit_string_slice(items),
+        D6Value::Json(value) => {
+            let mut out = String::new();
+            append_otel_json(&mut out, value);
+            out
+        }
+        D6Value::Bytes(bytes) => base64::engine::general_purpose::STANDARD.encode(bytes),
     }
 }
 
@@ -487,18 +465,12 @@ fn emit_float(f: f64) -> String {
     }
 }
 
-/// Go `attribute.Value.Emit` of a structured attribute recorded as the bytes of its JSON text: a
-/// JSON array of strings is a STRINGSLICE (`json.Marshal`, HTML-escaped), another array a SLICE
-/// and an object a MAP (OTel's own JSON rendering: no HTML escaping, floats as `%g`). Bytes that
-/// are not JSON are a BYTESLICE (base64).
-fn emit_structured(v: &[u8]) -> String {
-    let Ok(value) = serde_json::from_slice::<Value>(v) else {
-        return base64::engine::general_purpose::STANDARD.encode(v);
-    };
-    if let Value::Array(items) = &value
-        && items.iter().all(Value::is_string)
-        && let Ok(bytes) = gadk_model::to_go_json(&value)
-    {
+/// Go `attribute.Value.Emit` of a STRINGSLICE: `json.Marshal` (HTML-escaped). A structured
+/// value of another shape (a SLICE or MAP) is [`append_otel_json`]'s (OTel's own JSON rendering:
+/// no HTML escaping, floats as `%g`); bytes that are not JSON are a BYTESLICE (base64).
+fn emit_string_slice(items: &[String]) -> String {
+    let value = Value::Array(items.iter().cloned().map(Value::String).collect());
+    if let Ok(bytes) = gadk_model::to_go_json(&value) {
         return String::from_utf8_lossy(&bytes).into_owned();
     }
     let mut out = String::new();
@@ -560,31 +532,6 @@ fn append_otel_json_string(out: &mut String, s: &str) {
         }
     }
     out.push('"');
-}
-
-/// Reads the fields of a D6 log event. `None` body/attributes: the field was absent;
-/// `Some(Err(()))`: its text is not JSON (Go: a value `encoding/json` cannot marshal).
-#[derive(Default)]
-struct LogFields {
-    event_name: String,
-    body: Option<Result<Value, ()>>,
-    attributes: Option<Result<Value, ()>>,
-}
-
-impl Visit for LogFields {
-    fn record_str(&mut self, f: &Field, v: &str) {
-        match f.name() {
-            "event.name" => self.event_name = v.to_owned(),
-            "otel.log.body" => self.body = Some(serde_json::from_str(v).map_err(|_| ())),
-            "otel.log.attributes" => {
-                self.attributes = Some(serde_json::from_str(v).map_err(|_| ()));
-            }
-            _ => {}
-        }
-    }
-    fn record_debug(&mut self, f: &Field, v: &dyn std::fmt::Debug) {
-        self.record_str(f, &format!("{v:?}"));
-    }
 }
 
 /// Go `normalizeLogBody`: the body reshaped for the web UI ([`normalize_message_shape`]); a body
@@ -703,15 +650,13 @@ fn go_sprint_log_value(v: &Value) -> String {
 }
 
 /// Go `normalizeLogAttributes`: in an inference-details record, rewrites the message parts the
-/// web UI cannot render ([`ui_parts`]); attributes that are not representable (`Err`, or not a
-/// JSON object) are dropped.
+/// web UI cannot render ([`ui_parts`]); attributes that are not representable (`None`: absent,
+/// not JSON or not a JSON object, as [`d6::decode_log`] reads them) stay dropped.
 pub(crate) fn normalize_log_attributes(
     event_name: &str,
-    attrs: Option<Result<Value, ()>>,
+    attrs: Option<Map<String, Value>>,
 ) -> Option<Map<String, Value>> {
-    let Some(Ok(Value::Object(mut attrs))) = attrs else {
-        return None;
-    };
+    let mut attrs = attrs?;
     if event_name == INFERENCE_DETAILS_EVENT_NAME {
         for key in [INPUT_MESSAGES_KEY, OUTPUT_MESSAGES_KEY] {
             if let Some(Value::Array(msgs)) = attrs.get_mut(key) {
@@ -799,7 +744,7 @@ where
     S: tracing::Subscriber + for<'a> LookupSpan<'a>,
 {
     fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, ctx: LayerContext<'_, S>) {
-        if !is_otel_span(attrs.metadata()) {
+        if !d6::is_adk_span(attrs.metadata()) {
             return;
         }
         let Some(span) = ctx.span(id) else { return };
@@ -809,32 +754,49 @@ where
                 .get::<OpenSpan>()
                 .map(|o| (o.0.trace_id, o.0.span_id))
         });
-        let (trace_id, parent_span_id) = parent.unwrap_or_else(|| (random_trace_id(), [0; 8]));
+        // IDs a layer before this one (the OTel bridge) owns, when valid (spec R11).
+        let shared = span
+            .extensions()
+            .get::<SpanIds>()
+            .copied()
+            .filter(SpanIds::is_valid);
+        let parent_span_id = parent.map_or([0; 8], |(_, span_id)| span_id);
+        let (trace_id, span_id) = match shared {
+            Some(ids) => (ids.trace_id, ids.span_id),
+            None => (
+                parent.map_or_else(random_trace_id, |(trace_id, _)| trace_id),
+                random_span_id(),
+            ),
+        };
         let mut record = SpanRecord {
             name: attrs.metadata().name().to_owned(),
             start_time: now_unix_nano(),
             end_time: 0,
             trace_id,
-            span_id: random_span_id(),
+            span_id,
             parent_span_id,
             attributes: BTreeMap::new(),
             logs: Vec::new(),
         };
-        attrs.record(&mut SpanFields(&mut record));
+        let mut fields = D6Fields::default();
+        attrs.record(&mut fields);
+        apply(&mut record, fields);
         span.extensions_mut().insert(OpenSpan(record));
     }
 
     fn on_record(&self, id: &Id, values: &Record<'_>, ctx: LayerContext<'_, S>) {
         let Some(span) = ctx.span(id) else { return };
         if let Some(open) = span.extensions_mut().get_mut::<OpenSpan>() {
-            values.record(&mut SpanFields(&mut open.0));
+            let mut fields = D6Fields::default();
+            values.record(&mut fields);
+            apply(&mut open.0, fields);
         }
     }
 
     fn on_event(&self, event: &tracing::Event<'_>, ctx: LayerContext<'_, S>) {
-        if event.metadata().target() != LOG_TARGET {
+        let Some(log) = d6::decode_log(event) else {
             return;
-        }
+        };
         // Go drops a record without a span: it would never be returned. The record belongs to
         // the nearest OTel span in scope.
         let Some(span) = ctx
@@ -843,17 +805,15 @@ where
         else {
             return;
         };
-        let mut fields = LogFields::default();
-        event.record(&mut fields);
         let observed = go_format_rfc3339_nano(&Local::now());
         let mut ext = span.extensions_mut();
         let Some(open) = ext.get_mut::<OpenSpan>() else {
             return;
         };
-        let event_name = fields.event_name;
+        let event_name = log.event_name;
         open.0.logs.push(DebugLog {
-            body: normalize_log_body(&event_name, fields.body.unwrap_or(Ok(Value::Null))),
-            attributes: normalize_log_attributes(&event_name, fields.attributes),
+            body: normalize_log_body(&event_name, log.body),
+            attributes: normalize_log_attributes(&event_name, log.attributes),
             observed_timestamp: observed,
             trace_id: hex(&open.0.trace_id),
             span_id: hex(&open.0.span_id),
@@ -1148,6 +1108,90 @@ mod tests {
         assert_eq!(logs.len(), 1);
         assert_eq!(logs[0].event_name, "e");
         assert_eq!(logs[0].span_id, spans[0].span_id);
+    }
+
+    /// Stores fixed [`SpanIds`] on every ADK span, as the OTel bridge does: per span name, the
+    /// IDs to store.
+    struct IdsLayer(Vec<(&'static str, SpanIds)>);
+
+    impl<S> tracing_subscriber::Layer<S> for IdsLayer
+    where
+        S: tracing::Subscriber + for<'a> LookupSpan<'a>,
+    {
+        fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, ctx: LayerContext<'_, S>) {
+            let name = attrs.metadata().name();
+            if let (Some(span), Some((_, ids))) =
+                (ctx.span(id), self.0.iter().find(|(n, _)| *n == name))
+            {
+                span.extensions_mut().insert(*ids);
+            }
+        }
+    }
+
+    fn ids(trace: u8, span: u8) -> SpanIds {
+        SpanIds {
+            trace_id: [trace; 16],
+            span_id: [span; 8],
+        }
+    }
+
+    /// Valid `SpanIds` stored by a layer before the debug layer are the stored IDs (spec R11);
+    /// the parent is the nearest OTel ancestor's span ID.
+    #[test]
+    fn shared_span_ids_are_used() {
+        let dt = DebugTelemetry::new(DebugTelemetryConfig::default());
+        let sub = tracing_subscriber::Registry::default()
+            .with(IdsLayer(vec![("root", ids(1, 2)), ("child", ids(1, 3))]))
+            .with(dt.clone());
+        tracing::subscriber::with_default(sub, || {
+            let root =
+                tracing::info_span!("root", otel.name = "root", gen_ai.conversation.id = "s");
+            let _g = root.enter();
+            let child = tracing::info_span!("child", otel.name = "child");
+            let _c = child.enter();
+            tracing::event!(
+                target: "gadk_engine::telemetry::log",
+                tracing::Level::DEBUG,
+                event.name = "e",
+                otel.log.body = "null"
+            );
+        });
+        let mut spans = dt.get_spans_by_session_id("s");
+        spans.sort_by(|a, b| b.name.cmp(&a.name));
+        let (root, child) = (&spans[0], &spans[1]);
+        assert_eq!(root.trace_id, "01".repeat(16));
+        assert_eq!(root.span_id, "02".repeat(8));
+        assert_eq!(root.parent_span_id, "0000000000000000");
+        assert_eq!(child.trace_id, "01".repeat(16));
+        assert_eq!(child.span_id, "03".repeat(8));
+        assert_eq!(child.parent_span_id, "02".repeat(8));
+        assert_eq!(child.logs[0].trace_id, "01".repeat(16));
+        assert_eq!(child.logs[0].span_id, "03".repeat(8));
+    }
+
+    /// Invalid (all-zero, e.g. after provider shutdown) `SpanIds` are replaced by generated IDs.
+    #[test]
+    fn invalid_span_ids_are_generated() {
+        let dt = DebugTelemetry::new(DebugTelemetryConfig::default());
+        let sub = tracing_subscriber::Registry::default()
+            .with(IdsLayer(vec![("root", ids(0, 0)), ("child", ids(1, 0))]))
+            .with(dt.clone());
+        tracing::subscriber::with_default(sub, || {
+            let root =
+                tracing::info_span!("root", otel.name = "root", gen_ai.conversation.id = "s");
+            let _g = root.enter();
+            drop(tracing::info_span!("child", otel.name = "child"));
+        });
+        let mut spans = dt.get_spans_by_session_id("s");
+        assert_eq!(spans.len(), 2);
+        spans.sort_by(|a, b| b.name.cmp(&a.name));
+        let (root, child) = (&spans[0], &spans[1]);
+        assert_ne!(root.trace_id, "0".repeat(32));
+        assert_ne!(root.span_id, "0".repeat(16));
+        assert_ne!(child.span_id, "0".repeat(16));
+        assert_ne!(child.trace_id, "01".repeat(16));
+        assert_eq!(child.trace_id, root.trace_id);
+        assert_eq!(child.parent_span_id, root.span_id);
     }
 
     /// Go `textParts` prints a non-string with `fmt.Sprint` (an int64 in full).

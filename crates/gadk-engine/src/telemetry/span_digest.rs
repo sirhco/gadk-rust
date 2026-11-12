@@ -26,12 +26,11 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use tracing::field::{Field, Visit};
 use tracing::span::{Attributes, Id, Record};
 use tracing_subscriber::layer::{Context as LayerContext, Layer, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
 
-use super::LOG_TARGET;
+use super::d6::{self, D6Fields};
 use super::log_digest::{LogDigest, LogRecord, build_log_digest};
 
 /// Go `present`: stands in for a value that cannot be pinned (a generated ID).
@@ -194,9 +193,8 @@ pub async fn capture_spans<F: Future>(fut: F) -> (F::Output, Vec<SpanStub>) {
 }
 
 /// The one recording subscriber behind [`capture_spans`] and
-/// [`capture_logs`](super::log_digest::capture_logs): spans, and the D6 log events (target
-/// `gadk_engine::telemetry::log`, fields `event.name`, `otel.log.body`, `otel.log.attributes`)
-/// as [`LogRecord`]s attached to their span.
+/// [`capture_logs`](super::log_digest::capture_logs): spans (fields decoded by [`D6Fields`]),
+/// and the D6 log events ([`d6::decode_log`]) as [`LogRecord`]s attached to their span.
 pub(crate) async fn capture<F: Future>(fut: F) -> (F::Output, Vec<SpanStub>, Vec<LogRecord>) {
     pin_tracing_interest();
     let store: Arc<Mutex<Store>> = Arc::default();
@@ -231,90 +229,22 @@ struct CaptureLayer(Arc<Mutex<Store>>);
 /// The index of a span in the captured list (in the span's extensions).
 struct Idx(usize);
 
-/// Reads span fields as D6 attributes: `otel.name` and `otel.status_code` set the name and
-/// status, `error.message` (the status description) and other `otel.*` fields are not
-/// attributes, a byte field is a structured value's JSON text.
-struct SpanFields<'a> {
-    stub: &'a mut SpanStub,
-}
-
-impl SpanFields<'_> {
-    fn set(&mut self, f: &Field, v: Value) {
-        let name = f.name();
-        match name {
-            "otel.name" => {
-                if let Value::String(s) = v {
-                    self.stub.name = s;
-                }
-            }
-            "otel.status_code" => {
-                self.stub.status = match v.as_str() {
-                    Some("ERROR") => "ERROR",
-                    Some("OK") => "OK",
-                    _ => "UNSET",
-                }
-                .to_owned();
-            }
-            "error.message" => {}
-            n if n.starts_with("otel.") => {}
-            _ => match self.stub.attributes.iter_mut().find(|(k, _)| k == name) {
-                Some(slot) => slot.1 = v,
-                None => self.stub.attributes.push((name.to_owned(), v)),
-            },
+/// Merges one visit's decoded D6 fields into `stub`: a recorded name or status replaces the
+/// current one, an attribute recorded again keeps its position and takes the new value (as JSON,
+/// [`d6::D6Value::to_json`]).
+fn apply(stub: &mut SpanStub, fields: D6Fields) {
+    if let Some(name) = fields.name {
+        stub.name = name;
+    }
+    if let Some(code) = fields.status_code {
+        stub.status = code.as_str().to_owned();
+    }
+    for (key, value) in fields.attributes {
+        let value = value.to_json();
+        match stub.attributes.iter_mut().find(|(k, _)| *k == key) {
+            Some(slot) => slot.1 = value,
+            None => stub.attributes.push((key, value)),
         }
-    }
-}
-
-impl Visit for SpanFields<'_> {
-    fn record_str(&mut self, f: &Field, v: &str) {
-        self.set(f, Value::String(v.to_owned()));
-    }
-    fn record_bool(&mut self, f: &Field, v: bool) {
-        self.set(f, Value::Bool(v));
-    }
-    fn record_i64(&mut self, f: &Field, v: i64) {
-        self.set(f, Value::from(v));
-    }
-    fn record_u64(&mut self, f: &Field, v: u64) {
-        self.set(f, Value::from(v));
-    }
-    fn record_f64(&mut self, f: &Field, v: f64) {
-        self.set(
-            f,
-            serde_json::Number::from_f64(v).map_or(Value::Null, Value::Number),
-        );
-    }
-    fn record_bytes(&mut self, f: &Field, v: &[u8]) {
-        self.set(f, serde_json::from_slice(v).unwrap_or(Value::Null));
-    }
-    fn record_debug(&mut self, f: &Field, v: &dyn std::fmt::Debug) {
-        self.set(f, Value::String(format!("{v:?}")));
-    }
-}
-
-/// Reads the fields of a D6 log event.
-#[derive(Default)]
-struct LogFields {
-    event_name: String,
-    body: Value,
-    attributes: Vec<(String, Value)>,
-}
-
-impl Visit for LogFields {
-    fn record_str(&mut self, f: &Field, v: &str) {
-        match f.name() {
-            "event.name" => self.event_name = v.to_owned(),
-            "otel.log.body" => self.body = serde_json::from_str(v).unwrap_or(Value::Null),
-            "otel.log.attributes" => {
-                if let Ok(Value::Object(m)) = serde_json::from_str::<Value>(v) {
-                    self.attributes = m.into_iter().collect();
-                }
-            }
-            _ => {}
-        }
-    }
-    fn record_debug(&mut self, f: &Field, v: &dyn std::fmt::Debug) {
-        self.record_str(f, &format!("{v:?}"));
     }
 }
 
@@ -346,7 +276,9 @@ where
             attributes: Vec::new(),
             status: "UNSET".to_owned(),
         };
-        attrs.record(&mut SpanFields { stub: &mut stub });
+        let mut fields = D6Fields::default();
+        attrs.record(&mut fields);
+        apply(&mut stub, fields);
         store.spans.push(stub);
         drop(store);
         if let Some(span) = ctx.span(id) {
@@ -358,25 +290,28 @@ where
         let Some(i) = Self::index_of(id, &ctx) else {
             return;
         };
+        let mut fields = D6Fields::default();
+        values.record(&mut fields);
         if let Some(stub) = self.0.lock().spans.get_mut(i) {
-            values.record(&mut SpanFields { stub });
+            apply(stub, fields);
         }
     }
 
     fn on_event(&self, event: &tracing::Event<'_>, ctx: LayerContext<'_, S>) {
-        if event.metadata().target() != LOG_TARGET {
+        let Some(log) = d6::decode_log(event) else {
             return;
-        }
-        let mut fields = LogFields::default();
-        event.record(&mut fields);
+        };
         let span_id = ctx
             .event_span(event)
             .and_then(|s| s.extensions().get::<Idx>().map(|i| i.0 as u64 + 1));
         self.0.lock().logs.push(LogRecord {
-            event_name: fields.event_name,
+            event_name: log.event_name,
             span_id,
-            body: fields.body,
-            attributes: fields.attributes,
+            body: log.body.unwrap_or(Value::Null),
+            attributes: log
+                .attributes
+                .map(|m| m.into_iter().collect())
+                .unwrap_or_default(),
         });
     }
 }
