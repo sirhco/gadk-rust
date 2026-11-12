@@ -218,6 +218,8 @@ where
         let otel_span = state.cx.span();
         // A start attribute recorded again with the same value is already on the span (the SDK
         // appends, it does not replace).
+        // Divergence (ledger 7a): a start attribute recorded again with a different value is
+        // exported twice (Go replaces it); no emitter does this today.
         let start = &state.start;
         otel_span.set_attributes(
             state
