@@ -107,8 +107,8 @@ impl MetadataClient {
     /// Go `OnGCE`: `true` when `GCE_METADATA_HOST` is set (non-empty), else the result of
     /// probing the metadata server raced with a DNS lookup of `metadata.google.internal.`.
     ///
-    /// With an injected base URL only that URL is probed (no DNS lookup). Unlike Go's
-    /// package-level `OnGCE`, the answer is not cached for the process.
+    /// Divergence (ledger 7a): with an injected base URL only that URL is probed (no DNS
+    /// lookup). Unlike Go's package-level `OnGCE`, the answer is not cached for the process.
     pub async fn on_gce(&self) -> bool {
         if self
             .env
@@ -208,7 +208,7 @@ impl MetadataClient {
 
     /// Go `ProjectIDWithContext`: `project/project-id`, trimmed.
     ///
-    /// Go caches the value for the process; gadk does not.
+    /// Divergence (ledger 7a): Go caches the value for the process; gadk does not.
     ///
     /// # Errors
     ///
@@ -380,6 +380,9 @@ fn should_retry_error(err: &reqwest::Error) -> bool {
 }
 
 /// Go's `*url.Error` text, `Get "<url>": <cause>`, with the innermost cause's text.
+///
+/// Divergence (ledger 7a): the cause is reqwest's innermost error text, not Go's `net/http`
+/// transport text; only the `Get "<url>": ` shape is Go's.
 pub(crate) fn transport_text(url: &str, err: &(dyn std::error::Error + 'static)) -> String {
     let mut cause: &(dyn std::error::Error + 'static) = err;
     while let Some(inner) = cause.source() {

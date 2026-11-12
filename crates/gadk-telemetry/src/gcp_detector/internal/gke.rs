@@ -218,6 +218,9 @@ fn path_escape(s: &str) -> String {
 /// Go `json.NewDecoder(res.Body).Decode(&struct{ MachineType string \`json:"machineType"\` })`:
 /// the first JSON value's `machineType` (key matched case-insensitively, later keys win, `null`
 /// skipped), with Go's type-mismatch and EOF texts. Syntax errors carry serde_json's text.
+///
+/// Divergence (ledger 7a): JSON syntax-error texts are serde_json's, not Go's `encoding/json`
+/// `*json.SyntaxError` texts.
 fn decode_machine_type(body: &[u8]) -> Result<String, String> {
     let value = match serde_json::Deserializer::from_slice(body)
         .into_iter::<Value>()
