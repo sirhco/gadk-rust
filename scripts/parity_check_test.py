@@ -841,7 +841,7 @@ class ThreeBTest(unittest.TestCase):
         err = io.StringIO()
         with contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
             pc.main(["--adk-go", str(self.go), "--repo", str(self.repo), "--ledger", "all", "--count"])
-        self.assertIn("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a, 4b, 4c, 5a, 5b, 5c, 6 or 7a", err.getvalue())
+        self.assertIn("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a, 4b, 4c, 5a, 5b, 5c, 6, 6b or 7a", err.getvalue())
 
 
 LEDGER_4A = (
@@ -1219,6 +1219,81 @@ class SixTest(unittest.TestCase):
             "| internal/cli/util/text_helpers_test.go | TestValidateShellArgSafe | skipped | " + TEXT_HELPERS_TARGET
             + " | cmd/adkgo helper (sub-project 6b) |",
         ])
+
+
+LEDGER_6B = (
+    "# Parity ledger — sub-project 6b\n\n"
+    "<!-- in-scope:\ncmd/adkgo/internal/deploy/cloudrun/cloudrun_test.go\n"
+    "internal/cli/util/text_helpers_test.go\n-->\n\n"
+    + pc.TABLE_HEADER + "\n" + pc.TABLE_SEP + "\n"
+)
+
+CLI_CLOUDRUN_TARGET = "crates/gadk-cli/src/parity_tests/cmd_adkgo_internal_deploy_cloudrun_cloudrun.rs"
+CLI_TEXT_HELPERS_TARGET = "crates/gadk-cli/src/parity_tests/internal_cli_util_text_helpers.rs"
+
+
+class SixBTest(unittest.TestCase):
+    """6b: the deploy CLI's `cmd/adkgo` tests and `text_helpers_test.go`, which moved from ledger
+    6 (a second, launcher target for it is an error)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        d = pathlib.Path(self._tmp.name)
+        self.go, self.repo = d / "go", d / "repo"
+        for f, body in (
+            ("cmd/adkgo/internal/deploy/cloudrun/cloudrun_test.go",
+             "func TestComputeFlags_RejectsUnsafeEntryPointBasename(t *testing.T) {}\n"
+             "func TestPrepareDockerfile_ReadsReceiverNotGlobal(t *testing.T) {}\n"),
+            ("internal/cli/util/text_helpers_test.go", "func TestValidateShellArgSafe(t *testing.T) {}\n"),
+        ):
+            (self.go / f).parent.mkdir(parents=True, exist_ok=True)
+            (self.go / f).write_text("package x\n" + body)
+        for target in (CLI_CLOUDRUN_TARGET, CLI_TEXT_HELPERS_TARGET):
+            (self.repo / target).parent.mkdir(parents=True, exist_ok=True)
+        (self.repo / CLI_CLOUDRUN_TARGET).write_text(
+            "// parity: adapted: canned cargo metadata binary names\n#[tokio::test]\n"
+            "async fn test_compute_flags_rejects_unsafe_entry_point_basename() {}\n"
+            "#[test]\nfn test_prepare_dockerfile_reads_receiver_not_global() {}\n")
+        (self.repo / CLI_TEXT_HELPERS_TARGET).write_text("#[test]\nfn test_validate_shell_arg_safe() {}\n")
+        (self.repo / "docs/parity").mkdir(parents=True)
+        self.ledger = self.repo / "docs/parity/6b.md"
+        self.ledger.write_text(LEDGER_6B)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def run_cli(self, *args):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = pc.main(["--adk-go", str(self.go), "--repo", str(self.repo), *args])
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_ledger_6b_is_registered(self):
+        self.assertIn("6b", pc.GENERATED_LEDGERS)
+        self.assertEqual(self.run_cli("--ledger", "6b", "--count"), (0, "3\n", ""))
+
+    def test_targets_generate_and_check(self):
+        self.assertEqual(self.run_cli("--ledger", "6b", "--generate")[0], 0)
+        self.assertEqual(self.run_cli("--ledger", "6b"), (0, "", ""))
+        rows = self.ledger.read_text().splitlines()[-3:]
+        self.assertEqual(rows, [
+            "| cmd/adkgo/internal/deploy/cloudrun/cloudrun_test.go | TestComputeFlags_RejectsUnsafeEntryPointBasename"
+            " | ported (adapted: canned cargo metadata binary names) | " + CLI_CLOUDRUN_TARGET
+            + " | test_compute_flags_rejects_unsafe_entry_point_basename |",
+            "| cmd/adkgo/internal/deploy/cloudrun/cloudrun_test.go | TestPrepareDockerfile_ReadsReceiverNotGlobal"
+            " | ported | " + CLI_CLOUDRUN_TARGET + " | test_prepare_dockerfile_reads_receiver_not_global |",
+            "| internal/cli/util/text_helpers_test.go | TestValidateShellArgSafe | ported | "
+            + CLI_TEXT_HELPERS_TARGET + " | test_validate_shell_arg_safe |",
+        ])
+
+    def test_a_leftover_launcher_target_is_reported(self):
+        (self.repo / TEXT_HELPERS_TARGET).parent.mkdir(parents=True)
+        (self.repo / TEXT_HELPERS_TARGET).write_text(
+            "// parity: skipped TestValidateShellArgSafe: cmd/adkgo helper (sub-project 6b)\n")
+        rc, _, err = self.run_cli("--ledger", "6b")
+        self.assertEqual(rc, 1)
+        self.assertIn("internal/cli/util/text_helpers_test.go: multiple Rust targets: " + CLI_TEXT_HELPERS_TARGET
+                      + ", " + TEXT_HELPERS_TARGET, err)
 
 
 LEDGER_7A = (
@@ -1643,12 +1718,24 @@ class RealTreeTest(unittest.TestCase):
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "7a"), [])
         self.assertEqual(len(pc.go_tests(ADK_GO, "telemetry/telemetry_test.go")), 6)
 
-    def test_6_count_is_94(self):
+    def test_6_count_is_90(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/6.md")
-        self.assertEqual(len(in_scope), 14)
-        self.assertEqual(sorted({f.split("/")[0] for f in in_scope}), ["cmd", "internal"])
-        self.assertEqual(pc.count(ADK_GO, in_scope), 94)
+        self.assertEqual(len(in_scope), 13)
+        self.assertEqual(sorted({f.split("/")[0] for f in in_scope}), ["cmd"])
+        self.assertEqual(deferred, {})
+        self.assertEqual(pc.count(ADK_GO, in_scope), 90)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "6"), [])
+
+    def test_6b_count_is_40(self):
+        in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/6b.md")
+        self.assertEqual(in_scope, [
+            "cmd/adkgo/internal/deploy/agentengine/agentengine_test.go",
+            "cmd/adkgo/internal/deploy/cloudrun/cloudrun_test.go",
+            "internal/cli/util/text_helpers_test.go",
+        ])
+        self.assertEqual(deferred, {})
+        self.assertEqual(pc.count(ADK_GO, in_scope), 40)
+        self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "6b"), [])
 
 
 if __name__ == "__main__":

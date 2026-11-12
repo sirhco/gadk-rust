@@ -355,6 +355,8 @@ impl AgentEngineFlags {
                     self.build.temp_dir = env.temp_dir().to_string_lossy().into_owned();
                 }
                 let absp = env.abs(&self.build.temp_dir);
+                // Divergence (ledger 6b): the wrapped error is Rust's `io::Error` text (Go's
+                // is the `*PathError`, e.g. `mkdir <path>: permission denied`).
                 let dir = make_temp(&absp, "agentEngine_", env.time.now()).map_err(|e| {
                     format!(
                         "cannot create a temporary sub directory in '{}': {e}",
@@ -400,6 +402,7 @@ impl AgentEngineFlags {
     pub async fn clean_temp(&self, env: &Env) -> Result<(), String> {
         log_start_stop(&env.out, "Cleaning temp", async |p: Printer| {
             p.print(&[&"Clean temp starting with", &self.build.temp_dir]);
+            // Divergence (ledger 6b): the wrapped error is Rust's `io::Error` text.
             match fs::remove_dir_all(&self.build.temp_dir) {
                 // Go `os.RemoveAll`: a missing path is not an error.
                 Err(e) if e.kind() != ErrorKind::NotFound => Err(format!(
@@ -446,6 +449,8 @@ impl AgentEngineFlags {
                 self.agent_engine.server_port,
                 r#", "agentengine""#,
             );
+            // Divergence (ledger 6b): the error is Rust's `io::Error` text (Go: the
+            // `*PathError`, `open <path>: …`).
             OpenOptions::new()
                 .write(true)
                 .create(true)
@@ -524,6 +529,8 @@ impl AgentEngineFlags {
     /// the `sourceCodeSpec` (inline archive, empty `imageSpec`) and the class methods,
     /// printing `Methods: <json>` as Go does.
     fn source_code_spec_and_methods(&self, p: &Printer) -> Result<(Value, Value), String> {
+        // Divergence (ledger 6b): the wrapped error is Rust's `io::Error` text (Go: the
+        // `*PathError`).
         let archive = fs::read(&self.build.archive_path)
             .map_err(|e| format!("cannot read archive file: {e}"))?;
         let methods = gadk_server::agentengine::list_class_methods();

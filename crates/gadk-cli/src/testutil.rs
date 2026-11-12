@@ -16,9 +16,12 @@
 //! Test fixtures shared by every gadk-cli test: [`TestEnv`] (an [`Env`] with captured
 //! stdout/stderr, a map environment, a fixed clock and a [`RecordingRunner`]) and the
 //! recording runner itself (canned exits and output, every [`Cmd`] recorded with its working
-//! directory). Nothing here touches the process environment or the current directory.
+//! directory), plus the fixture Cargo workspace on disk and the canned `cargo metadata` answer
+//! both deploy commands' tests resolve their target through. Nothing here touches the process
+//! environment or the current directory.
 
 use std::collections::HashMap;
+use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -26,6 +29,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use async_trait::async_trait;
 use chrono::{DateTime, TimeZone, Utc};
 use gadk_platform::env::MapEnv;
+use serde_json::{Value, json};
 
 use crate::runner::{Cmd, CmdOutput, CommandRunner, Exit};
 use crate::{Env, SharedWriter};
@@ -259,6 +263,90 @@ impl TestEnvBuilder {
     }
 }
 
+/// Writes a one-package Cargo workspace at `root`: `Cargo.lock` and, for an empty `member`, a
+/// root `Cargo.toml` that is both the package `package` and the workspace; otherwise a root
+/// `Cargo.toml` listing `member` and `<member>/Cargo.toml` for `package`; the package's
+/// `src/main.rs` either way.
+pub fn write_cargo_workspace(root: &Path, member: &str, package: &str) {
+    let manifest = format!("[package]\nname = \"{package}\"\nversion = \"0.1.0\"\n");
+    let package_dir = if member.is_empty() {
+        root.to_path_buf()
+    } else {
+        root.join(member)
+    };
+    fs::create_dir_all(package_dir.join("src")).unwrap();
+    if member.is_empty() {
+        fs::write(
+            root.join("Cargo.toml"),
+            format!("{manifest}\n[workspace]\n"),
+        )
+        .unwrap();
+    } else {
+        fs::write(
+            root.join("Cargo.toml"),
+            format!("[workspace]\nmembers = [\"{member}\"]\n"),
+        )
+        .unwrap();
+        fs::write(package_dir.join("Cargo.toml"), manifest).unwrap();
+    }
+    fs::write(root.join("Cargo.lock"), "version = 4\n").unwrap();
+    fs::write(package_dir.join("src/main.rs"), "fn main() {}\n").unwrap();
+}
+
+/// What `cargo metadata --format-version 1 --no-deps` prints for a workspace at
+/// `workspace_root` whose only package `package` (manifest `manifest_path`) has the binary
+/// targets `bins`, a library target, and the `path` dependencies `path_dependencies`.
+pub fn cargo_metadata_json(
+    workspace_root: &Path,
+    manifest_path: &Path,
+    package: &str,
+    bins: &[&str],
+    path_dependencies: &[PathBuf],
+) -> String {
+    let targets: Vec<Value> = bins
+        .iter()
+        .map(|b| json!({"kind": ["bin"], "crate_types": ["bin"], "name": b}))
+        .chain([json!({"kind": ["lib"], "crate_types": ["lib"], "name": package})])
+        .collect();
+    let dependencies: Vec<Value> = path_dependencies
+        .iter()
+        .map(|p| json!({"name": "dep", "source": null, "req": "*", "kind": null, "path": p}))
+        .collect();
+    json!({
+        "packages": [{
+            "name": package,
+            "version": "0.1.0",
+            "dependencies": dependencies,
+            "targets": targets,
+            "manifest_path": manifest_path,
+            "rust_version": null
+        }],
+        "workspace_root": workspace_root,
+        "version": 1
+    })
+    .to_string()
+}
+
+/// Whether `cmd` is `cargo metadata …`.
+pub fn is_cargo_metadata(cmd: &Cmd) -> bool {
+    cmd.args.get(1).map(String::as_str) == Some("metadata")
+}
+
+/// A runner answering `cargo metadata` with exit 0 and the text `metadata` returns for the
+/// command, and every other command with `other`.
+pub fn cargo_metadata_runner(
+    metadata: impl Fn(&Cmd) -> String + Send + Sync + 'static,
+    other: impl Fn(&Cmd) -> Canned + Send + Sync + 'static,
+) -> RecordingRunner {
+    RecordingRunner::with_responder(move |c| {
+        if is_cargo_metadata(c) {
+            Canned::success(metadata(c))
+        } else {
+            other(c)
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
@@ -267,13 +355,7 @@ mod tests {
 
     #[tokio::test]
     async fn recording_runner_records_and_answers() {
-        let runner = RecordingRunner::with_responder(|c| {
-            if c.args.get(1).map(String::as_str) == Some("metadata") {
-                Canned::success(b"{}".to_vec())
-            } else {
-                Canned::exit(1)
-            }
-        });
+        let runner = cargo_metadata_runner(|_| "{}".to_string(), |_| Canned::exit(1));
         let t = TestEnv::builder("/w")
             .runner(runner)
             .now(default_now())

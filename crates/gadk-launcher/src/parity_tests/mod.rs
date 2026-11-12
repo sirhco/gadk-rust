@@ -34,4 +34,3 @@ mod cmd_launcher_web_triggers_pubsub_pubsub;
 mod cmd_launcher_web_web;
 #[cfg(feature = "webui")]
 mod cmd_launcher_web_webui_webui;
-mod internal_cli_util_text_helpers;
