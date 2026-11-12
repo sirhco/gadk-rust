@@ -216,7 +216,8 @@ class EdgeTest(unittest.TestCase):
     def test_launcher_edges_are_the_engine_stack_plus_optional_server_and_a2a(self):
         self.assertEqual(cwd.ALLOWED["gadk-launcher"],
                          {"gadk-agent", "gadk-engine", "gadk-session", "gadk-artifact", "gadk-memory",
-                          "gadk-genai", "gadk-model", "gadk-platform", "gadk-server", "gadk-a2a"})
+                          "gadk-genai", "gadk-model", "gadk-platform", "gadk-server", "gadk-a2a",
+                      "gadk-telemetry"})
         self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-launcher" in deps], ["gadk"])
         self.assertIn("gadk-launcher", cwd.ENGINE_DEPENDENTS)
         self.assertIn(("gadk-launcher", "gadk-server"), cwd.OPTIONAL)
@@ -287,6 +288,20 @@ class EdgeTest(unittest.TestCase):
         dev = text.split("[dev-dependencies]\n", 1)[1]
         self.assertIn("gadk-server = { workspace = true }", dev)
         self.assertEqual(cwd.check(self.repo), [])
+
+    def test_launcher_depends_on_telemetry_required(self):
+        self.assertIn("gadk-telemetry", cwd.ALLOWED["gadk-launcher"])
+        self.assertNotIn(("gadk-launcher", "gadk-telemetry"), cwd.OPTIONAL)
+        self.edit("gadk-launcher", "gadk-telemetry = { workspace = true }\n", "")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-launcher -> gadk-telemetry is missing" in e for e in errs), errs)
+
+    def test_facade_telemetry_edge_must_be_optional(self):
+        self.assertIn("gadk-telemetry", cwd.ALLOWED["gadk"])
+        self.edit("gadk", "gadk-telemetry = { workspace = true, optional = true }\n",
+                  "gadk-telemetry = { workspace = true }\n")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk -> gadk-telemetry must be optional = true" in e for e in errs), errs)
 
     def test_launcher_normal_dependency_on_tools_is_rejected(self):
         self.edit("gadk-launcher", "[dependencies]\n", "[dependencies]\ngadk-tools = { workspace = true }\n")

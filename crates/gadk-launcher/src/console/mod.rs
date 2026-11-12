@@ -367,19 +367,14 @@ impl SubLauncher for ConsoleLauncher {
         }
 
         let telemetry = crate::telemetry::init(&mut config, self.otel_to_cloud.get())
+            .await
             .map_err(|e| wrapped("telemetry initialization failed", e))?;
 
         let result = self.run_loop(&ctx, &config).await;
 
         // Go's deferred `telemetry.Shutdown` under `-shutdown-timeout`.
         let timeout = self.shutdown_timeout.get().to_std().unwrap_or_default();
-        match tokio::time::timeout(timeout, async { telemetry.shutdown() }).await {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => config.log.print(&format!("telemetry shutdown failed: {e}")),
-            Err(_) => config
-                .log
-                .print("telemetry shutdown failed: context deadline exceeded"),
-        }
+        telemetry.shutdown_logged(timeout, &config.log).await;
         result
     }
 }

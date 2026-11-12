@@ -118,8 +118,15 @@ pub async fn new(opts: &[TelemetryOption]) -> Result<Providers, Error> {
     new_with(env, &detector, opts).await
 }
 
-/// [`new`] with the environment and the GCP resource detector injected.
-pub(crate) async fn new_with(
+/// [`new`] with the environment and the GCP resource detector injected: `new` is
+/// `new_with(Arc::new(ProcessEnv), &gcp_detector::new_detector(env), opts)`. The launcher's tests
+/// pass a `MapEnv` so that no test reads the process environment, ADC files or the metadata
+/// server.
+///
+/// # Errors
+///
+/// As [`new`].
+pub async fn new_with(
     env: Arc<dyn EnvProvider>,
     detector: &dyn ResourceDetector,
     opts: &[TelemetryOption],

@@ -49,4 +49,4 @@ pub use config::{
 };
 pub use error::Error;
 pub use http_client::RuntimeHttpClient;
-pub use providers::{Providers, new};
+pub use providers::{Providers, new, new_with};

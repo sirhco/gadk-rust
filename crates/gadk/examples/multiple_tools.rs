@@ -95,9 +95,9 @@ async fn main() -> anyhow::Result<()> {
         ..Default::default()
     })?;
 
-    // Go also sets OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true for its launcher's
-    // OpenTelemetry export, which gadk adds in sub-project 7 (and setting the environment is
-    // `unsafe` in Rust 2024, which the workspace forbids).
+    // Go also sets OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true so that its launcher's
+    // OpenTelemetry export carries message content; setting the environment is `unsafe` in Rust
+    // 2024, which the workspace forbids: set it in the shell that runs this example.
     let config = Config::new(Arc::new(SingleLoader::new(root_agent)));
     let mut l = full::new();
     let args: Vec<String> = std::env::args().skip(1).collect();
