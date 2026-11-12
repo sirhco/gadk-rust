@@ -55,11 +55,25 @@ pub async fn execute(args: Vec<OsString>, env: &Env) -> u8 {
         .skip(1)
         .map(|a| a.to_string_lossy().into_owned())
         .collect();
+    let (path, rest) = match cobra_find(&raw) {
+        Found::Command { path, rest } => (path, rest),
+        Found::UnknownCommand(name) => return unknown_command(&name, env),
+    };
+    // clap parses the found command's own arguments: flags written before a subcommand name
+    // move after it, as cobra parses every remaining argument with the found command's flags.
+    let argv: Vec<OsString> = args
+        .iter()
+        .take(1)
+        .cloned()
+        .chain(path.iter().map(OsString::from))
+        .chain(rest.iter().map(|&i| args[i + 1].clone()))
+        .collect();
+    let parsed: Vec<String> = rest.iter().map(|&i| raw[i].clone()).collect();
     // Divergence (ledger 6b): a non-UTF-8 argument is a clap parse error (Go keeps the bytes
     // and the shell-safe checks reject them later).
-    let matches = match command().try_get_matches_from(&args) {
+    let matches = match command().try_get_matches_from(&argv) {
         Ok(m) => m,
-        Err(e) => return report_parse_error(&e, &raw, env),
+        Err(e) => return report_parse_error(&e, &path, &parsed, env),
     };
     let Some(("deploy", deploy_m)) = matches.subcommand() else {
         // Go: the root command is not runnable, so cobra prints its help.
@@ -96,62 +110,155 @@ fn report(env: &Env, msg: &str, path: &[&str]) -> u8 {
     1
 }
 
-fn report_parse_error(e: &clap::Error, raw: &[String], env: &Env) -> u8 {
+fn report_parse_error(e: &clap::Error, path: &[&str], args: &[String], env: &Env) -> u8 {
     match e.kind() {
         ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => {
             env.out.write_str(&e.render().to_string());
             0
         }
         ErrorKind::InvalidSubcommand => {
-            // Go `legacyArgs` on the root: the unknown command, cobra's suggestions, and a
-            // pointer to `--help` instead of the usage.
+            // clap's `help` subcommand naming an unknown command.
             let name = match e.get(ContextKind::InvalidSubcommand) {
                 Some(ContextValue::String(s)) => s.clone(),
-                _ => raw.first().cloned().unwrap_or_default(),
+                _ => args.first().cloned().unwrap_or_default(),
             };
-            env.err.write_str(&format!(
-                "Error: unknown command {} for {}{}\n",
-                go_quote(&name),
-                go_quote(NAME),
-                suggestions(&name)
-            ));
-            env.err
-                .write_str(&format!("Run '{NAME} --help' for usage.\n"));
-            1
+            unknown_command(&name, env)
         }
         _ => {
-            let path = command_path(raw);
-            let msg = pflag_error(e, &find(&path), raw);
-            report(env, &msg, &path)
+            let msg = pflag_error(e, &find(path), args);
+            report(env, &msg, path)
         }
     }
 }
 
-/// The subcommand path cobra's `Find` would select for `raw`: the first non-flag argument of
-/// each level, when it names a subcommand (flags before `--` are skipped; `gadk` and
-/// `deploy` have no value-taking flags).
-fn command_path(raw: &[String]) -> Vec<&'static str> {
-    let mut path = Vec::new();
+/// Go `legacyArgs` on the root: the unknown command, cobra's suggestions, and a pointer to
+/// `--help` instead of the usage.
+fn unknown_command(name: &str, env: &Env) -> u8 {
+    env.err.write_str(&format!(
+        "Error: unknown command {} for {}{}\n",
+        go_quote(name),
+        go_quote(NAME),
+        suggestions(name)
+    ));
+    env.err
+        .write_str(&format!("Run '{NAME} --help' for usage.\n"));
+    1
+}
+
+/// What cobra's `Find` selects for the arguments after the program name.
+#[derive(Debug, PartialEq, Eq)]
+enum Found {
+    /// The command at `path`, to be parsed from the arguments at the indices `rest` (the
+    /// arguments without the subcommand names, in their original order).
+    Command {
+        path: Vec<&'static str>,
+        rest: Vec<usize>,
+    },
+    /// Go `legacyArgs`: the first non-flag argument left at the root names no command.
+    UnknownCommand(String),
+}
+
+// Go: cobra Find/stripFlags (cobra v1.10.2 `Find`, `stripFlags`, `argsMinusFirstX`). At each
+// level the first argument that is not a flag or a flag's value names the next subcommand,
+// and that one occurrence is removed. Neither `gadk` nor `deploy` has a flag when `Find`
+// runs (cobra adds `-h/--help` to the found command only, later), so every `--x` and `-x`
+// written without `=` takes the next argument as its value: `gadk deploy -r x cloudrun` runs
+// cloudrun with region x, and `gadk -h deploy agentengine` is an unknown command
+// "agentengine".
+fn cobra_find(raw: &[String]) -> Found {
+    let mut path: Vec<&'static str> = Vec::new();
+    let mut rest: Vec<usize> = (0..raw.len()).collect();
     let mut cmd = command();
-    for arg in raw {
-        if arg == "--" {
-            break;
-        }
-        if arg.starts_with('-') && arg.len() > 1 {
-            continue;
-        }
-        let Some(sub) = cmd.get_subcommands().find(|s| s.get_name() == arg).cloned() else {
+    loop {
+        let args: Vec<&str> = rest.iter().map(|&i| raw[i].as_str()).collect();
+        let Some(next) = strip_flags(&args).first().map(|s| s.to_string()) else {
             break;
         };
-        path.push(match sub.get_name() {
+        let Some(sub) = cmd
+            .get_subcommands()
+            .find(|s| s.get_name() == next)
+            .cloned()
+        else {
+            if !path.is_empty() {
+                break;
+            }
+            if next == "help" {
+                // clap's `help` subcommand (cobra's `help` command) parses the arguments as
+                // given.
+                return Found::Command {
+                    path,
+                    rest: (0..raw.len()).collect(),
+                };
+            }
+            return Found::UnknownCommand(next);
+        };
+        let name = match sub.get_name() {
             "deploy" => "deploy",
             "cloudrun" => "cloudrun",
             "agentengine" => "agentengine",
             _ => break,
-        });
+        };
+        if let Some(pos) = position_of_first(&args, name) {
+            rest.remove(pos);
+        }
+        path.push(name);
         cmd = sub;
     }
-    path
+    if path.is_empty() {
+        // Go: the root is not runnable; pflag leaves the arguments after `--` alone and cobra
+        // prints the help (the root has no positional arguments in clap).
+        if let Some(end) = rest.iter().position(|&i| raw[i] == "--") {
+            rest.truncate(end);
+        }
+    }
+    Found::Command { path, rest }
+}
+
+/// cobra `stripFlags` on a command without flags: `--x`/`-x` (no `=`) take the next argument,
+/// `--` ends the flags, and the other non-flag arguments are returned.
+fn strip_flags<'a>(args: &[&'a str]) -> Vec<&'a str> {
+    let mut commands = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        let s = args[i];
+        i += 1;
+        if s == "--" {
+            break;
+        }
+        if takes_next(s) {
+            i += 1;
+        } else if !s.is_empty() && !s.starts_with('-') {
+            commands.push(s);
+        }
+    }
+    commands
+}
+
+/// cobra `argsMinusFirstX`'s position: the first argument equal to `x` that is not a flag or
+/// a flag's value, before any `--`.
+fn position_of_first(args: &[&str], x: &str) -> Option<usize> {
+    let mut pos = 0;
+    while pos < args.len() {
+        let s = args[pos];
+        if s == "--" {
+            return None;
+        }
+        if takes_next(s) {
+            pos += 2;
+            continue;
+        }
+        if !s.starts_with('-') && s == x {
+            return Some(pos);
+        }
+        pos += 1;
+    }
+    None
+}
+
+/// A flag cobra's `Find` treats as taking the next argument: `--x` or a two-byte `-x`,
+/// without `=` (no flag of `gadk` or `deploy` has a no-option default at `Find` time).
+fn takes_next(s: &str) -> bool {
+    !s.contains('=') && (s.starts_with("--") || (s.starts_with('-') && s.len() == 2))
 }
 
 /// The built (`gadk deploy …`-named) subcommand at `path`.
@@ -435,11 +542,118 @@ mod tests {
             "{err}"
         );
 
-        let (code, _, err) = run(&["deploy", "--region", "x", "cloudrun"]).await;
+        // Go: cobra Find/stripFlags. A flag before the subcommand name swallows the name as its
+        // value, so the parent command is found and fails on the flag.
+        for flag in ["--nope", "--a2a", "--region"] {
+            let (code, out, err) = run(&["deploy", flag, "cloudrun"]).await;
+            assert_eq!((code, out.as_str()), (1, ""));
+            assert_eq!(
+                err,
+                format!("Error: unknown flag: {flag}\n{}\n", usage(&["deploy"]))
+            );
+        }
+        let (code, _, err) = run(&["--region", "x"]).await;
         assert_eq!(code, 1);
         assert_eq!(
             err,
-            format!("Error: unknown flag: --region\n{}\n", usage(&["deploy"]))
+            format!("Error: unknown flag: --region\n{}\n", usage(&[]))
+        );
+        let (code, _, err) = run(&["-x", "deploy"]).await;
+        assert_eq!(code, 1);
+        assert_eq!(
+            err,
+            format!("Error: unknown shorthand flag: 'x' in -x\n{}\n", usage(&[]))
+        );
+    }
+
+    /// The arguments clap parses for `args` after cobra's `Find`: the command path, then the
+    /// remaining arguments in their original order.
+    fn found_argv(args: &[&str]) -> Vec<String> {
+        let raw: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        match cobra_find(&raw) {
+            Found::Command { path, rest } => path
+                .iter()
+                .map(|p| p.to_string())
+                .chain(rest.iter().map(|&i| raw[i].clone()))
+                .collect(),
+            Found::UnknownCommand(name) => panic!("unknown command {name:?}"),
+        }
+    }
+
+    /// Go: cobra Find/stripFlags. Flags written before a subcommand name are parsed by the
+    /// found subcommand (cobra v1.10.2: `adkgo deploy --region x cloudrun`, `adkgo --region x
+    /// deploy cloudrun` and `adkgo deploy -r x cloudrun` all run cloudrun with region "x").
+    #[test]
+    fn flags_before_the_subcommand_name_reach_the_subcommand() {
+        for args in [
+            &["deploy", "--region", "x", "cloudrun"][..],
+            &["--region", "x", "deploy", "cloudrun"],
+            &["deploy", "-r", "x", "cloudrun"],
+            &["-r", "x", "deploy", "cloudrun"],
+        ] {
+            let argv = found_argv(args);
+            assert_eq!(argv[..2], ["deploy", "cloudrun"], "{args:?}");
+            let m = command()
+                .try_get_matches_from(std::iter::once("gadk".to_string()).chain(argv))
+                .unwrap_or_else(|e| panic!("{args:?}: {e}"));
+            let (_, deploy_m) = m.subcommand().unwrap();
+            let (name, leaf) = deploy_m.subcommand().unwrap();
+            assert_eq!(name, "cloudrun");
+            assert_eq!(crate::flags::string_value(leaf, "region"), "x", "{args:?}");
+        }
+        // The flag's value may itself be a subcommand name; the next occurrence is the command.
+        assert_eq!(
+            found_argv(&[
+                "--region",
+                "cloudrun",
+                "deploy",
+                "cloudrun",
+                "--server_port",
+                "9"
+            ]),
+            [
+                "deploy",
+                "cloudrun",
+                "--region",
+                "cloudrun",
+                "--server_port",
+                "9"
+            ]
+        );
+        assert_eq!(
+            found_argv(&["deploy", "--server_port=9", "agentengine", "x"]),
+            ["deploy", "agentengine", "--server_port=9", "x"]
+        );
+        assert_eq!(
+            found_argv(&["deploy", "-rx", "cloudrun"]),
+            ["deploy", "cloudrun", "-rx"]
+        );
+    }
+
+    /// cobra registers `-h/--help` only on the found command, so during `Find` it swallows the
+    /// next argument like any other flag (cobra v1.10.2 output).
+    #[tokio::test]
+    async fn a_help_flag_before_the_subcommand_name_is_a_flag_of_the_parent() {
+        let (code, out, err) = run(&["-h", "deploy", "agentengine"]).await;
+        assert_eq!((code, out.as_str()), (1, ""));
+        assert_eq!(
+            err,
+            "Error: unknown command \"agentengine\" for \"gadk\"\nRun 'gadk --help' for usage.\n"
+        );
+        let (code, out, err) = run(&["deploy", "-h", "cloudrun"]).await;
+        assert_eq!((code, err.as_str()), (0, ""));
+        assert!(out.contains("Usage: gadk deploy [COMMAND]"), "{out}");
+        let (code, out, err) = run(&["-h", "foo"]).await;
+        assert_eq!((code, err.as_str()), (0, ""));
+        assert!(out.contains("Usage: gadk [COMMAND]"), "{out}");
+        let (code, out, err) = run(&["--", "foo"]).await;
+        assert_eq!((code, err.as_str()), (0, ""));
+        assert!(out.contains(LONG), "{out}");
+        let (code, _, err) = run(&["--region", "x", "foo"]).await;
+        assert_eq!(code, 1);
+        assert!(
+            err.starts_with("Error: unknown command \"foo\" for \"gadk\"\n"),
+            "{err}"
         );
     }
 
@@ -471,15 +685,26 @@ mod tests {
     }
 
     #[test]
-    fn command_path_follows_cobra_find() {
-        let p = |a: &[&str]| command_path(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>());
-        assert_eq!(p(&["deploy", "cloudrun", "--x"]), ["deploy", "cloudrun"]);
+    fn cobra_find_follows_cobra() {
+        let f = |a: &[&str]| cobra_find(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        let cmd = |path: &[&'static str], rest: &[usize]| Found::Command {
+            path: path.to_vec(),
+            rest: rest.to_vec(),
+        };
         assert_eq!(
-            p(&["-h", "deploy", "agentengine"]),
-            ["deploy", "agentengine"]
+            f(&["deploy", "cloudrun", "--x"]),
+            cmd(&["deploy", "cloudrun"], &[2])
         );
-        assert_eq!(p(&["deploy", "x", "cloudrun"]), ["deploy"]);
-        assert_eq!(p(&["deploy", "--", "cloudrun"]), ["deploy"]);
-        assert_eq!(p(&["nope"]), Vec::<&str>::new());
+        assert_eq!(
+            f(&["-h", "deploy", "agentengine"]),
+            Found::UnknownCommand("agentengine".into())
+        );
+        assert_eq!(f(&["deploy", "x", "cloudrun"]), cmd(&["deploy"], &[1, 2]));
+        assert_eq!(f(&["deploy", "--", "cloudrun"]), cmd(&["deploy"], &[1, 2]));
+        assert_eq!(f(&["deploy", "-h", "cloudrun"]), cmd(&["deploy"], &[1, 2]));
+        assert_eq!(f(&["--", "deploy"]), cmd(&[], &[]));
+        assert_eq!(f(&["help", "deploy"]), cmd(&[], &[0, 1]));
+        assert_eq!(f(&["nope"]), Found::UnknownCommand("nope".into()));
+        assert_eq!(f(&[]), cmd(&[], &[]));
     }
 }
