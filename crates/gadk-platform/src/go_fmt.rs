@@ -14,8 +14,8 @@
 // limitations under the License.
 
 //! Go `fmt` verb, `strings` and `net/url` ports shared by the gadk crates: `strconv.Quote`
-//! (`%q`), `strings.ToLower`, `strings.ToUpper`, `url.QueryEscape` and `fmt` `%v` of a
-//! JSON-decoded value.
+//! (`%q`), `strconv.FormatFloat(f, 'g', -1, 32|64)`, `strings.ToLower`, `strings.ToUpper`,
+//! `url.QueryEscape` and `fmt` `%v` of a JSON-decoded value.
 
 use std::sync::LazyLock;
 
@@ -209,36 +209,98 @@ pub fn go_type_name(v: &Value) -> &'static str {
     }
 }
 
-/// Go `%v` of a float64 = `strconv.FormatFloat(f, 'g', -1, 64)`: the shortest round-trip digits,
-/// in `%e` form (`d.ddde±XX`, at least two exponent digits) when the decimal exponent is below -4
-/// or at least 6 (strconv ftoa.go: `if shortest { eprec = 6 }`), otherwise plain decimal. So
+/// Go `%v` of a float64 = `strconv.FormatFloat(f, 'g', -1, 64)` (see [`go_format_float_g`]):
 /// 1e6 → `1e+06`, 123456 → `123456`, 0.00001 → `1e-05`, -0.0 → `-0`.
-///
-/// Rust's shortest formatters round an exact decimal tie up, while Go rounds it half to even
-/// (141016749166520.625 → Go `1.4101674916652062e+14`). So only the shortest digit count is taken
-/// from `{f:e}`; the digits themselves come from Rust's exact-precision formatting at that count,
-/// which rounds ties to even as Go does.
 pub fn go_format_float_v(f: f64) -> String {
-    let shortest = format!("{f:e}"); // e.g. "1.234567e6", "-0e0"
-    let shortest_mant = shortest
+    go_format_float_g(f, 64)
+}
+
+/// Go `strconv.FormatFloat(f, 'g', -1, bits)` for `bits` 32 or 64 (any other value is treated
+/// as 64; an `f32` is passed widened): `NaN`, `+Inf`, `-Inf`; otherwise the shortest decimal
+/// digits that round-trip at that bit size (for 32, of `f as f32`), in `%e` form (`d.ddde±XX`,
+/// at least two exponent digits) when the decimal exponent is below -4 or at least 6
+/// (`internal/strconv/ftoa.go`: `if shortest { eprec = 6 }`), otherwise plain decimal.
+///
+/// Rust's shortest formatter rounds an exact decimal tie up where Go's picks the even digit
+/// (141016749166520.625 → Go `1.4101674916652062e+14`), so the digit count comes from `{:e}`
+/// and the digits from Rust's exact formatting at that count (ties to even), unless those digits
+/// do not round-trip (an asymmetric interval at a power of two), when the shortest ones stand.
+pub fn go_format_float_g(f: f64, bits: u32) -> String {
+    if f.is_nan() {
+        return "NaN".to_owned();
+    }
+    if f.is_infinite() {
+        return if f > 0.0 { "+Inf" } else { "-Inf" }.to_owned();
+    }
+    // FormatFloat(f, _, _, 32) first rounds f to float32.
+    let sci = if bits == 32 {
+        shortest_sci(f as f32)
+    } else {
+        shortest_sci(f)
+    };
+    let (mant, exp) = sci.split_once('e').unwrap_or((sci.as_str(), "0"));
+    let exp: i64 = exp.parse().unwrap_or(0);
+    let (neg, mant) = match mant.strip_prefix('-') {
+        Some(m) => (true, m),
+        None => (false, mant),
+    };
+    let digits: String = mant.chars().filter(char::is_ascii_digit).collect();
+    let mut out = String::with_capacity(digits.len() + 8);
+    if neg {
+        out.push('-');
+    }
+    // Go: `if exp < -4 || exp >= eprec` with `eprec = 6`.
+    if !(-4..6).contains(&exp) {
+        out.push_str(&digits[..1]);
+        if digits.len() > 1 {
+            out.push('.');
+            out.push_str(&digits[1..]);
+        }
+        out.push('e');
+        out.push(if exp < 0 { '-' } else { '+' });
+        out.push_str(&format!("{:02}", exp.unsigned_abs()));
+        return out;
+    }
+    // Plain decimal: the decimal point sits after `dp` digits (`dp` may be ≤ 0 or past the end).
+    let dp = exp + 1;
+    let nd = i64::try_from(digits.len()).unwrap_or(i64::MAX);
+    let zeros = |n: i64| "0".repeat(usize::try_from(n).unwrap_or(0));
+    if dp <= 0 {
+        out.push_str("0.");
+        out.push_str(&zeros(-dp));
+        out.push_str(&digits);
+    } else if dp >= nd {
+        out.push_str(&digits);
+        out.push_str(&zeros(dp - nd));
+    } else {
+        let split = usize::try_from(dp).unwrap_or(0);
+        out.push_str(&digits[..split]);
+        out.push('.');
+        out.push_str(&digits[split..]);
+    }
+    out
+}
+
+/// The shortest round-trip digits of `v` as Rust's `{:e}` writes them (`-1.2345e-6`), with an
+/// exact decimal tie between two shortest candidates resolved to the even digit as Go does.
+fn shortest_sci<T>(v: T) -> String
+where
+    T: std::fmt::LowerExp + std::str::FromStr + PartialEq + Copy,
+{
+    let shortest = format!("{v:e}");
+    let mant = shortest
         .split_once('e')
         .map_or(shortest.as_str(), |(m, _)| m);
-    let digits = shortest_mant.bytes().filter(u8::is_ascii_digit).count();
-    let prec = digits.saturating_sub(1);
-    let sci = format!("{f:.prec$e}");
-    let (mant, exp) = sci.split_once('e').unwrap_or((sci.as_str(), "0"));
-    let exp: i32 = exp.parse().unwrap_or(0);
-    if (-4..6).contains(&exp) {
-        // Plain decimal with the same significant digits: `prec - exp` fraction digits.
-        let frac =
-            usize::try_from(i64::try_from(prec).unwrap_or(i64::MAX) - i64::from(exp)).unwrap_or(0);
-        format!("{f:.frac$}")
+    let prec = mant
+        .bytes()
+        .filter(u8::is_ascii_digit)
+        .count()
+        .saturating_sub(1);
+    let exact = format!("{v:.prec$e}");
+    if exact.parse::<T>().is_ok_and(|back| back == v) {
+        exact
     } else {
-        format!(
-            "{mant}e{}{:02}",
-            if exp < 0 { '-' } else { '+' },
-            exp.unsigned_abs()
-        )
+        shortest
     }
 }
 
