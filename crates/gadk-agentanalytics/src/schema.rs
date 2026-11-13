@@ -1045,11 +1045,3 @@ mod tests {
         assert!(merged[11].repeated);
     }
 }
-
-// The crate-internal half of the R1 config golden (`tests/golden_config.rs` is the public half):
-// `Config::apply_defaults` and its accessors are `pub(crate)`, so their fixture test is compiled
-// into the unit tests. It lives under `tests/support/` with the shared projection helper, and is
-// declared here because `src/config.rs` and `src/lib.rs` are final (Task 1).
-#[cfg(test)]
-#[path = "../tests/support/golden_apply_defaults.rs"]
-mod golden_apply_defaults;

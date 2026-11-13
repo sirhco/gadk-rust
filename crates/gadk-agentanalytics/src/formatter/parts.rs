@@ -329,7 +329,9 @@ impl PartsCollector {
     }
 
     /// Go `addInlineData(entry, blob, contentOrd, index)`: a binary part. The bytes are kept
-    /// (a cheap immutable `Bytes` handle, Go's `bytes.Clone`) if they are to be uploaded;
+    /// if they are to be uploaded (Divergence (ledger 7b-1): a cheap handle sharing the
+    /// caller's immutable `Bytes` buffer, where Go copies with `bytes.Clone`; nothing can change
+    /// the bytes through the message, so the queued data is the same);
     /// otherwise a placeholder stands in for them. Offloading records
     /// [`DEFAULT_BINARY_MIME_TYPE`] for a blob without a MIME type.
     fn add_inline_data(

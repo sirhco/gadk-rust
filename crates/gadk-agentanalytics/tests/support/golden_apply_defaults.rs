@@ -18,7 +18,7 @@
 //! `viewLogf`) against `config/apply_defaults.json` and `config/default_config.json`, and the
 //! config constants against `config/constants.json`. `Config::apply_defaults` and the
 //! accessors are `pub(crate)`, so this file is compiled into the library's unit tests (declared
-//! with `#[path]` from `src/schema.rs`), not as an integration test.
+//! with `#[path]` from `src/config.rs`), not as an integration test.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -78,7 +78,7 @@ fn apply_defaults_matches_go() {
         let name = case["name"].as_str().unwrap();
         let (input, unrepresentable) = build(&case["input"]);
         if name == "negatives" {
-            // Divergence (ledger 7b-1): negative durations do not exist in Rust; Go keeps a
+            // Pins `apply_defaults`' ledgered divergence (7b-1): negative durations do not exist in Rust; Go keeps a
             // negative BatchFlushIntv / ShutdownTimeout and replaces a negative
             // GCSUploadTimeout, Rust only sees zero there. The negative integers are compared.
             assert_eq!(

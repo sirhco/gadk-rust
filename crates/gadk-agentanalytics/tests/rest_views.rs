@@ -30,146 +30,19 @@
 //! (`view_dropped_client`), plus `sync_analytics_views` over the REST runner.
 
 use std::collections::BTreeSet;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use gadk_agentanalytics::bigquery::fake::RecordingLogger;
 use gadk_agentanalytics::{
-    BigQueryClient, BigQueryViewRunner, ClientOptions, Context, ViewDefinition, ViewRunner,
-    sync_analytics_views,
+    BigQueryViewRunner, Context, ViewDefinition, ViewRunner, sync_analytics_views,
 };
 use gadk_model::rest::test_util::{FakeResponse, FakeServer, RecordedRequest};
 use pretty_assertions::assert_eq;
-use serde_json::Value;
 
-const WIRE_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/wire");
+#[path = "support/wire.rs"]
+mod wire;
 
-/// Headers the comparison leaves out (as `tests/rest_wire.rs`): credentials and client
-/// identification, and those the HTTP transports add themselves.
-const IGNORED_HEADERS: [&str; 7] = [
-    "authorization",
-    "user-agent",
-    "x-goog-api-client",
-    "accept",
-    "accept-encoding",
-    "content-length",
-    "host",
-];
-
-fn load(name: &str) -> Value {
-    let text = std::fs::read_to_string(format!("{WIRE_DIR}/{name}.json")).unwrap();
-    serde_json::from_str(&text).unwrap()
-}
-
-/// A fake BigQuery API answering a scenario's canned responses in order (as
-/// `tests/rest_wire.rs`'s `Replay`).
-struct Replay {
-    server: FakeServer,
-    job_id: Arc<Mutex<String>>,
-}
-
-impl Replay {
-    fn start(fixture: &Value) -> Replay {
-        let responses: Vec<(u16, String)> = fixture["exchanges"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|e| {
-                let status = u16::try_from(e["response"]["status"].as_u64().unwrap()).unwrap();
-                (status, e["response"]["body"].to_string())
-            })
-            .collect();
-        let job_id = Arc::new(Mutex::new(String::new()));
-        let next = AtomicUsize::new(0);
-        let server_job_id = job_id.clone();
-        let server = FakeServer::start(move |req: &RecordedRequest| {
-            if req.method == "POST" && req.path.ends_with("/jobs") {
-                let id = req.json()["jobReference"]["jobId"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .to_owned();
-                let mut current = server_job_id.lock().unwrap();
-                if current.is_empty() {
-                    *current = id;
-                }
-            }
-            let i = next.fetch_add(1, Ordering::SeqCst);
-            // An unexpected request gets a 400, which Go's retry policy never retries (a 5xx
-            // would be retried until the context ends), so the test fails instead of hanging.
-            let Some((status, body)) = responses.get(i) else {
-                return FakeResponse::json_status(
-                    400,
-                    r#"{"error":{"code":400,"message":"unexpected request"}}"#,
-                );
-            };
-            let body = body.replace("{{JOB_ID}}", &server_job_id.lock().unwrap());
-            FakeResponse::json_status(*status, body)
-        });
-        Replay { server, job_id }
-    }
-
-    fn job_id(&self) -> String {
-        self.job_id.lock().unwrap().clone()
-    }
-}
-
-/// Go `bq.NewClient(ctx, project, option.WithEndpoint(server+"/bigquery/v2/"),
-/// option.WithoutAuthentication())`.
-fn client(project: &str, server: &FakeServer) -> Arc<BigQueryClient> {
-    let options = ClientOptions {
-        endpoint: Some(format!("{}/bigquery/v2/", server.url())),
-        without_authentication: true,
-        ..ClientOptions::default()
-    };
-    Arc::new(BigQueryClient::new(project, &options).unwrap())
-}
-
-/// Replaces `{{JOB_ID}}` in every string of `v`.
-fn with_job_id(v: &Value, job_id: &str) -> Value {
-    serde_json::from_str(&v.to_string().replace("{{JOB_ID}}", job_id)).unwrap()
-}
-
-/// Asserts the Rust request equals Go's recorded one.
-fn assert_request(scenario: &str, i: usize, got: &RecordedRequest, want: &Value, job_id: &str) {
-    let want = with_job_id(want, job_id);
-    let at = format!("{scenario} request {i}");
-    assert_eq!(got.method, want["method"].as_str().unwrap(), "{at}: method");
-    assert_eq!(got.path, want["path"].as_str().unwrap(), "{at}: path");
-    assert_eq!(
-        got.query.clone().unwrap_or_default(),
-        want["raw_query"].as_str().unwrap(),
-        "{at}: query"
-    );
-    let mut got_headers: Vec<(String, Vec<String>)> = got
-        .headers
-        .keys()
-        .map(|k| k.as_str().to_ascii_lowercase())
-        .filter(|k| !IGNORED_HEADERS.contains(&k.as_str()))
-        .map(|k| (k.clone(), got.header_values(&k)))
-        .collect();
-    got_headers.sort();
-    got_headers.dedup();
-    let mut want_headers: Vec<(String, Vec<String>)> = want["headers"]
-        .as_object()
-        .unwrap()
-        .iter()
-        .map(|(k, v)| {
-            (
-                k.to_ascii_lowercase(),
-                serde_json::from_value(v.clone()).unwrap(),
-            )
-        })
-        .filter(|(k, _)| !IGNORED_HEADERS.contains(&k.as_str()))
-        .collect();
-    want_headers.sort();
-    assert_eq!(got_headers, want_headers, "{at}: headers");
-    if want["body"].is_null() {
-        assert_eq!(got.body_text(), "", "{at}: body");
-    } else {
-        let got_body: Value = serde_json::from_slice(&got.body).unwrap();
-        assert_eq!(got_body, want["body"], "{at}: body");
-    }
-}
+use wire::{Replay, assert_request, client, load, scenario_names};
 
 /// Runs `BigQueryViewRunner::run_view_ddl` as Go's probe ran `bqViewRunner.RunViewDDL` for
 /// scenario `name`, and checks the requests and the result against Go's.
@@ -295,13 +168,10 @@ scenarios!(
 
 #[test]
 fn every_view_wire_fixture_is_run() {
-    let mut names: Vec<String> = std::fs::read_dir(WIRE_DIR)
-        .unwrap()
-        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-        .filter_map(|f| f.strip_suffix(".json").map(str::to_owned))
+    let names: Vec<String> = scenario_names()
+        .into_iter()
         .filter(|n| n.starts_with("view_"))
         .collect();
-    names.sort();
     assert_eq!(names, VIEW_SCENARIOS);
 }
 

@@ -57,7 +57,8 @@ pub(crate) const TRUNCATION_SUFFIX: &str = "...[TRUNCATED]";
 pub(crate) const INLINE_DATA_TEXT: &str = "[BINARY DATA]";
 /// Go `binaryDataPlaceholder`: non-UTF-8 bytes in a sanitized value.
 pub(crate) const BINARY_DATA_PLACEHOLDER: &str = "[BINARY_DATA]";
-/// Go `circularRefPlaceholder`.
+/// Go `circularRefPlaceholder`. Divergence (ledger 7b-1): unused — a `Serialize` value cannot
+/// contain itself, so there is no cycle detection (Go tracks visited maps, slices and pointers).
 pub(crate) const CIRCULAR_REF_PLACEHOLDER: &str = "[CIRCULAR_REFERENCE]";
 /// Go `maxDepthPlaceholder`.
 pub(crate) const MAX_DEPTH_PLACEHOLDER: &str = "[MAX_DEPTH_EXCEEDED]";

@@ -844,7 +844,7 @@ class ThreeBTest(unittest.TestCase):
         err = io.StringIO()
         with contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
             pc.main(["--adk-go", str(self.go), "--repo", str(self.repo), "--ledger", "all", "--count"])
-        self.assertIn("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a, 4b, 4c, 5a, 5b, 5c, 6, 6b, 6c-1, 6c-2 or 7a", err.getvalue())
+        self.assertIn("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a, 4b, 4c, 5a, 5b, 5c, 6, 6b, 6c-1, 6c-2, 7a or 7b-1", err.getvalue())
 
 
 LEDGER_4A = (
@@ -1867,6 +1867,38 @@ class RealTreeTest(unittest.TestCase):
             "internal_configurable_conformance_recordplugin_yaml_clean",
         )
         self.assertIn("6c-2", pc.GENERATED_LEDGERS)
+
+    def test_7b_1_count_is_55(self):
+        in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/7b-1.md")
+        self.assertEqual(in_scope, [
+            "plugin/agentanalytics/json_formatter_test.go",
+            "plugin/agentanalytics/schema_upgrade_test.go",
+            "plugin/agentanalytics/views_test.go",
+        ])
+        self.assertEqual(sorted(deferred), [
+            "plugin/agentanalytics/arrow_test_helper_test.go",
+            "plugin/agentanalytics/batch_processor_test.go",
+            "plugin/agentanalytics/bigquery_agent_analytics_plugin_test.go",
+            "plugin/agentanalytics/events_test.go",
+            "plugin/agentanalytics/gcs_offloader_test.go",
+            "plugin/agentanalytics/late_callbacks_test.go",
+            "plugin/agentanalytics/norace_test.go",
+            "plugin/agentanalytics/race_test.go",
+            "plugin/agentanalytics/trace_manager_test.go",
+        ])
+        self.assertEqual(pc.count(ADK_GO, in_scope), 55)
+        self.assertEqual([len(pc.go_tests(ADK_GO, f)) for f in in_scope], [29, 11, 15])
+        self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "7b-1"), [])
+        # Every agentanalytics test file is in scope or deferred.
+        go_files = sorted("plugin/agentanalytics/" + f.name
+                          for f in (ADK_GO / "plugin/agentanalytics").glob("*_test.go"))
+        self.assertEqual(sorted(in_scope + list(deferred)), go_files)
+        # json_formatter_test.go's target is a module directory (mod.rs + redaction.rs).
+        target, errs = pc.find_target(HERE.parent, "plugin/agentanalytics/json_formatter_test.go")
+        self.assertEqual((target, errs), (
+            "crates/gadk-agentanalytics/src/parity_tests/plugin_agentanalytics_json_formatter/mod.rs", []))
+        self.assertIn("7b-1", pc.GENERATED_LEDGERS)
+        self.assertEqual(pc.check_1b(ADK_GO, HERE.parent, HERE.parent / "docs/parity/7b-1.md", name="7b-1"), [])
 
     def test_6b_count_is_40(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/6b.md")

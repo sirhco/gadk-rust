@@ -397,8 +397,9 @@ class EdgeTest(unittest.TestCase):
     def test_agentanalytics_edges_are_exactly_genai_model_platform_session(self):
         self.assertEqual(cwd.ALLOWED["gadk-agentanalytics"],
                          {"gadk-genai", "gadk-model", "gadk-platform", "gadk-session"})
-        # 7b-1: no crate depends on it until the façade's `agentanalytics` feature (Task 10).
-        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-agentanalytics" in deps], [])
+        # 7b-1: only the façade depends on it, optionally (feature `agentanalytics`).
+        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-agentanalytics" in deps], ["gadk"])
+        self.assertIn(("gadk", "gadk-agentanalytics"), cwd.OPTIONAL)
         self.assertNotIn("gadk-agentanalytics", cwd.ENGINE_DEPENDENTS)
         self.assertNotIn("gadk-agentanalytics", cwd.LICENSE_OVERRIDES)
 
@@ -406,6 +407,17 @@ class EdgeTest(unittest.TestCase):
         self.edit("gadk-agentanalytics", "[dependencies]\n", "[dependencies]\ngadk-engine = { workspace = true }\n")
         errs = cwd.check(self.repo)
         self.assertTrue(any("gadk-agentanalytics -> gadk-engine is not allowed" in e for e in errs), errs)
+
+    def test_facade_agentanalytics_edge_must_be_optional(self):
+        self.edit("gadk", "gadk-agentanalytics = { workspace = true, optional = true }\n",
+                  "gadk-agentanalytics = { workspace = true }\n")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk -> gadk-agentanalytics must be optional = true" in e for e in errs), errs)
+
+    def test_facade_missing_agentanalytics_edge_is_rejected(self):
+        self.edit("gadk", "gadk-agentanalytics = { workspace = true, optional = true }\n", "")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk -> gadk-agentanalytics is missing" in e for e in errs), errs)
 
     def test_agentanalytics_missing_session_edge_is_rejected(self):
         self.edit("gadk-agentanalytics", "gadk-session = { workspace = true }\n", "")

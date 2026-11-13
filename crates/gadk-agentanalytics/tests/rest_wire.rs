@@ -22,26 +22,27 @@
 //! `TableOps` (Go `bqTableAdapter`) for the table scenarios, `BigQueryClient::get_table` plus
 //! `insert_query_job` / `wait_job` for the view scenarios (Go `bqViewRunner.RunViewDDL`'s
 //! calls). The call sequence is read off Go's recorded requests (`ensure_table_and_schema` and
-//! `run_view_ddl` themselves are Tasks 8 and 9): each recorded request starts one client call,
+//! `run_view_ddl` themselves run in `tests/rest_schema_upgrade.rs` and `tests/rest_views.rs`): each recorded request starts one client call,
 //! and the requests the client sends for it (its retries and job polling included) must be
 //! exactly Go's — method, path, query, headers (`Authorization`, `User-Agent`,
 //! `X-Goog-Api-Client` and the transport's `Accept`, `Accept-Encoding`, `Content-Length`,
 //! `Host` aside), JSON body semantically, job IDs by shape and count. A call that ended the
 //! scenario with an error must produce Go's error text.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use gadk_agentanalytics::schema_upgrade::{Clustering, TimePartitioning};
 use gadk_agentanalytics::{
-    BigQueryClient, ClientOptions, Context, Error, TableMetadata, TableMetadataOps,
-    TableMetadataUpdate, TableOps, TableSchema,
+    BigQueryClient, Context, Error, TableMetadata, TableMetadataOps, TableMetadataUpdate, TableOps,
+    TableSchema,
 };
-use gadk_model::rest::test_util::{FakeResponse, FakeServer, RecordedRequest};
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 
-const WIRE_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/wire");
+#[path = "support/wire.rs"]
+mod wire;
+
+use wire::{Replay, assert_request, client_for, load, scenario_names};
 
 /// Every scenario of `tests/fixtures/wire` (SCENARIO.md), one test each.
 const SCENARIOS: [&str; 41] = [
@@ -87,82 +88,6 @@ const SCENARIOS: [&str; 41] = [
     "view_runner_empty_project_uses_client",
     "view_runner_project_differs_from_client",
 ];
-
-/// Headers the comparison leaves out: credentials and client identification (gadk sends its
-/// own `User-Agent`, as the GCS crate does), and those the HTTP transports add themselves (Go's
-/// `net/http`: `Accept-Encoding`, `Content-Length`; reqwest/hyper: `Accept`, `Host`, …).
-const IGNORED_HEADERS: [&str; 7] = [
-    "authorization",
-    "user-agent",
-    "x-goog-api-client",
-    "accept",
-    "accept-encoding",
-    "content-length",
-    "host",
-];
-
-fn load(name: &str) -> Value {
-    let text = std::fs::read_to_string(format!("{WIRE_DIR}/{name}.json")).unwrap();
-    serde_json::from_str(&text).unwrap()
-}
-
-/// A fake BigQuery API answering a scenario's canned responses in order.
-struct Replay {
-    server: FakeServer,
-    job_id: Arc<Mutex<String>>,
-}
-
-impl Replay {
-    fn start(fixture: &Value) -> Replay {
-        let responses: Vec<(u16, String)> = fixture["exchanges"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|e| {
-                let status = u16::try_from(e["response"]["status"].as_u64().unwrap()).unwrap();
-                (status, e["response"]["body"].to_string())
-            })
-            .collect();
-        let job_id = Arc::new(Mutex::new(String::new()));
-        let next = AtomicUsize::new(0);
-        let server_job_id = job_id.clone();
-        let server = FakeServer::start(move |req: &RecordedRequest| {
-            if req.method == "POST" && req.path.ends_with("/jobs") {
-                let id = req.json()["jobReference"]["jobId"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .to_owned();
-                let mut current = server_job_id.lock().unwrap();
-                if current.is_empty() {
-                    *current = id;
-                }
-            }
-            let i = next.fetch_add(1, Ordering::SeqCst);
-            let Some((status, body)) = responses.get(i) else {
-                return FakeResponse::json_status(500, r#"{"error":"unexpected request"}"#);
-            };
-            let body = body.replace("{{JOB_ID}}", &server_job_id.lock().unwrap());
-            FakeResponse::json_status(*status, body)
-        });
-        Replay { server, job_id }
-    }
-
-    fn job_id(&self) -> String {
-        self.job_id.lock().unwrap().clone()
-    }
-}
-
-/// Go `bq.NewClient(ctx, project, option.WithEndpoint(server+"/bigquery/v2/"),
-/// option.WithoutAuthentication())`.
-fn client_for(fixture: &Value, server: &FakeServer) -> Arc<BigQueryClient> {
-    let options = ClientOptions {
-        endpoint: Some(format!("{}/bigquery/v2/", server.url())),
-        without_authentication: true,
-        ..ClientOptions::default()
-    };
-    let project = fixture["client"]["project"].as_str().unwrap();
-    Arc::new(BigQueryClient::new(project, &options).unwrap())
-}
 
 /// A recorded request's REST method, from its method and path under `/bigquery/v2/`.
 #[derive(Debug)]
@@ -276,53 +201,6 @@ async fn run_call(
                 None => Ok(()),
             }
         }
-    }
-}
-
-/// Replaces `{{JOB_ID}}` in every string of `v`.
-fn with_job_id(v: &Value, job_id: &str) -> Value {
-    serde_json::from_str(&v.to_string().replace("{{JOB_ID}}", job_id)).unwrap()
-}
-
-/// Asserts the Rust request equals Go's recorded one.
-fn assert_request(scenario: &str, i: usize, got: &RecordedRequest, want: &Value, job_id: &str) {
-    let want = with_job_id(want, job_id);
-    let at = format!("{scenario} request {i}");
-    assert_eq!(got.method, want["method"].as_str().unwrap(), "{at}: method");
-    assert_eq!(got.path, want["path"].as_str().unwrap(), "{at}: path");
-    assert_eq!(
-        got.query.clone().unwrap_or_default(),
-        want["raw_query"].as_str().unwrap(),
-        "{at}: query"
-    );
-    let mut got_headers: Vec<(String, Vec<String>)> = got
-        .headers
-        .keys()
-        .map(|k| k.as_str().to_ascii_lowercase())
-        .filter(|k| !IGNORED_HEADERS.contains(&k.as_str()))
-        .map(|k| (k.clone(), got.header_values(&k)))
-        .collect();
-    got_headers.sort();
-    got_headers.dedup();
-    let mut want_headers: Vec<(String, Vec<String>)> = want["headers"]
-        .as_object()
-        .unwrap()
-        .iter()
-        .map(|(k, v)| {
-            (
-                k.to_ascii_lowercase(),
-                serde_json::from_value(v.clone()).unwrap(),
-            )
-        })
-        .filter(|(k, _)| !IGNORED_HEADERS.contains(&k.as_str()))
-        .collect();
-    want_headers.sort();
-    assert_eq!(got_headers, want_headers, "{at}: headers");
-    if want["body"].is_null() {
-        assert_eq!(got.body_text(), "", "{at}: body");
-    } else {
-        let got_body: Value = serde_json::from_slice(&got.body).unwrap();
-        assert_eq!(got_body, want["body"], "{at}: body");
     }
 }
 
@@ -464,16 +342,10 @@ scenarios!(
 
 #[test]
 fn every_wire_fixture_is_replayed() {
-    let mut names: Vec<String> = std::fs::read_dir(WIRE_DIR)
-        .unwrap()
-        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-        .filter_map(|f| f.strip_suffix(".json").map(str::to_owned))
-        .collect();
-    names.sort();
-    assert_eq!(names, SCENARIOS.map(String::from).to_vec());
+    assert_eq!(scenario_names(), SCENARIOS.map(String::from).to_vec());
 }
 
-/// `view_dropped_client`: Go sent nothing (the weak client pointer was empty; Task 9's
+/// `view_dropped_client`: Go sent nothing (the weak client pointer was empty;
 /// `BigQueryViewRunner` returns the error before any request).
 #[test]
 fn dropped_client_sends_nothing() {
