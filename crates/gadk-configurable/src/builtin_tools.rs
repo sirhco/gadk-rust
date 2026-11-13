@@ -660,7 +660,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "passes after batch-2 merge (Task 3 Registry bodies)"]
     async fn agent_tool_wraps_the_referenced_agent() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("root_agent.yaml");
@@ -688,7 +687,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "passes after batch-2 merge (Task 3 Registry bodies)"]
     async fn agent_tool_returns_the_resolve_error_unwrapped() {
         let got = tool_err(agent_tool(
             registry_with_fake_agent_class(),
@@ -755,7 +753,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "passes after batch-2 merge (Task 3 Registry bodies)"]
     async fn long_running_function_tool_resolves_func_with_the_same_args() {
         let seen = Arc::new(parking_lot::Mutex::new(None));
         let a = args(&[("func", s("my_tool")), ("extra", GoValue::Int(7))]);
@@ -771,7 +768,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "passes after batch-2 merge (Task 3 Registry bodies)"]
     async fn long_running_function_tool_rejects_toolsets_and_unknown_names() {
         let mcp_args = |func: &str| {
             args(&[

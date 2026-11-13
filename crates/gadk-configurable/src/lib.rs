@@ -245,10 +245,8 @@ pub(crate) struct Registries {
     /// Go `callbackRegistry`.
     pub(crate) callbacks: HashMap<String, Callback>,
     /// Go `nodeFunctionRegistry`.
-    #[allow(dead_code)] // read by workflow.rs (Task 8); Task 13 removes this allow
     pub(crate) node_functions: HashMap<String, NodeFn>,
     /// Go `nodeRegistry`: an absolute YAML path (lossy UTF-8) or a function reference → node.
-    #[allow(dead_code)] // read by workflow.rs (Task 8); Task 13 removes this allow
     pub(crate) nodes: HashMap<String, Arc<dyn Node>>,
     /// Go's `os.Getenv` source for the `LlmAgent` factory (`GOOGLE_API_KEY`) and the Gemini
     /// client it builds: the process environment ([`ProcessEnv`]) unless a test swaps it.
@@ -582,12 +580,12 @@ impl Registry {
 }
 
 /// Go `filepath.IsAbs` (Unix): a path starting with `/`.
-fn go_is_abs(path: &str) -> bool {
+pub(crate) fn go_is_abs(path: &str) -> bool {
     path.starts_with('/')
 }
 
 /// Go `filepath.Dir` (Unix): everything up to the last `/`, cleaned; `.` without a `/`.
-fn go_dir(path: &str) -> String {
+pub(crate) fn go_dir(path: &str) -> String {
     let end = path.rfind('/').map_or(0, |i| i + 1);
     go_path_clean(&path[..end])
 }
@@ -595,7 +593,7 @@ fn go_dir(path: &str) -> String {
 /// Go `filepath.Abs` (Unix): an absolute path cleaned, a relative one joined to the working
 /// directory (`os.Getwd`, its only error) and cleaned. Lexical: `..` is resolved without
 /// following symlinks, unlike `std::fs::canonicalize`.
-fn go_abs(path: &Path) -> io::Result<PathBuf> {
+pub(crate) fn go_abs(path: &Path) -> io::Result<PathBuf> {
     let p = path.to_string_lossy();
     if go_is_abs(&p) {
         return Ok(PathBuf::from(go_path_clean(&p)));
@@ -615,7 +613,7 @@ fn eval_symlinks(path: &Path) -> Option<PathBuf> {
 
 /// Go `os.ReadFile`: an `open` *PathError when the file cannot be opened, a `read` one when it
 /// cannot be read (a directory opens but fails with `is a directory`).
-fn read_file(path: &Path) -> Result<Vec<u8>, ConfigError> {
+pub(crate) fn read_file(path: &Path) -> Result<Vec<u8>, ConfigError> {
     let mut file = std::fs::File::open(path).map_err(|e| ConfigError::path("open", path, &e))?;
     let mut data = Vec::new();
     file.read_to_end(&mut data)
@@ -624,7 +622,7 @@ fn read_file(path: &Path) -> Result<Vec<u8>, ConfigError> {
 }
 
 /// A bare OS error as Go prints a `syscall.Errno` (`os.Getwd`'s error).
-fn go_io_error(err: &io::Error) -> ConfigError {
+pub(crate) fn go_io_error(err: &io::Error) -> ConfigError {
     ConfigError::msg(error::go_errno_text(err))
 }
 
@@ -802,9 +800,7 @@ mod tests {
         assert!(g.node_functions.is_empty() && g.nodes.is_empty());
     }
 
-    // Needs Task 4's `builtin_tool_factories` body: un-ignore after the batch-2 merge.
     #[test]
-    #[ignore = "needs Task 4 builtin_tools (batch-2 merge)"]
     fn new_registers_go_init_set() {
         let r = Registry::new();
         let g = r.inner.read();
