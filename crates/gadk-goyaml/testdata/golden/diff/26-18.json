@@ -1,0 +1,201 @@
+{
+  "case": "26-18",
+  "input_b64": "LSAne31bWyInCi0gM25gIW58MHlnCi0ge30K",
+  "source": {
+    "t": "seq",
+    "v": [
+      {
+        "t": "string",
+        "v": "{}[[\""
+      },
+      {
+        "t": "string",
+        "v": "3n`!n|0yg"
+      },
+      {
+        "t": "map",
+        "v": []
+      }
+    ]
+  },
+  "node": {
+    "kind": "document",
+    "style": [],
+    "tag": "",
+    "value": "",
+    "anchor": "",
+    "alias": null,
+    "head": "",
+    "line_comment": "",
+    "foot": "",
+    "line": 1,
+    "column": 1,
+    "content": [
+      {
+        "kind": "sequence",
+        "style": [],
+        "tag": "!!seq",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "scalar",
+            "style": [
+              "single"
+            ],
+            "tag": "!!str",
+            "value": "{}[[\"",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 3,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "3n`!n|0yg",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 2,
+            "column": 3,
+            "content": []
+          },
+          {
+            "kind": "mapping",
+            "style": [
+              "flow"
+            ],
+            "tag": "!!map",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 3,
+            "column": 3,
+            "content": []
+          }
+        ]
+      }
+    ]
+  },
+  "error": null,
+  "marshal_b64": "LSAne31bWyInCi0gM25gIW58MHlnCi0ge30K",
+  "marshal_error": null,
+  "indent2_b64": "LSAne31bWyInCi0gM25gIW58MHlnCi0ge30K",
+  "stream": {
+    "nodes": [
+      {
+        "kind": "document",
+        "style": [],
+        "tag": "",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "sequence",
+            "style": [],
+            "tag": "!!seq",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": [
+              {
+                "kind": "scalar",
+                "style": [
+                  "single"
+                ],
+                "tag": "!!str",
+                "value": "{}[[\"",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 1,
+                "column": 3,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "3n`!n|0yg",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 2,
+                "column": 3,
+                "content": []
+              },
+              {
+                "kind": "mapping",
+                "style": [
+                  "flow"
+                ],
+                "tag": "!!map",
+                "value": "",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 3,
+                "column": 3,
+                "content": []
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "error": null,
+    "marshal_b64": "LSAne31bWyInCi0gM25gIW58MHlnCi0ge30K"
+  },
+  "value": {
+    "t": "seq",
+    "v": [
+      {
+        "t": "string",
+        "v": "{}[[\""
+      },
+      {
+        "t": "string",
+        "v": "3n`!n|0yg"
+      },
+      {
+        "t": "map",
+        "v": []
+      }
+    ]
+  },
+  "value_error": null
+}

@@ -1,0 +1,110 @@
+{
+  "case": "decode-decoderTests-003",
+  "input_b64": "LS0tCidoZWxsbycKLi4uCi0tLQpnb29kYnllCi4uLgo=",
+  "node": {
+    "kind": "document",
+    "style": [],
+    "tag": "",
+    "value": "",
+    "anchor": "",
+    "alias": null,
+    "head": "",
+    "line_comment": "",
+    "foot": "",
+    "line": 1,
+    "column": 1,
+    "content": [
+      {
+        "kind": "scalar",
+        "style": [
+          "single"
+        ],
+        "tag": "!!str",
+        "value": "hello",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 2,
+        "column": 1,
+        "content": []
+      }
+    ]
+  },
+  "error": null,
+  "marshal_b64": "J2hlbGxvJwo=",
+  "marshal_error": null,
+  "indent2_b64": "J2hlbGxvJwo=",
+  "stream": {
+    "nodes": [
+      {
+        "kind": "document",
+        "style": [],
+        "tag": "",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "scalar",
+            "style": [
+              "single"
+            ],
+            "tag": "!!str",
+            "value": "hello",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 2,
+            "column": 1,
+            "content": []
+          }
+        ]
+      },
+      {
+        "kind": "document",
+        "style": [],
+        "tag": "",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 4,
+        "column": 1,
+        "content": [
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "goodbye",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 5,
+            "column": 1,
+            "content": []
+          }
+        ]
+      }
+    ],
+    "error": null,
+    "marshal_b64": "J2hlbGxvJwotLS0KZ29vZGJ5ZQo="
+  },
+  "value": {
+    "t": "string",
+    "v": "hello"
+  },
+  "value_error": null
+}

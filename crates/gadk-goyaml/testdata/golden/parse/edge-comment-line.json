@@ -1,0 +1,272 @@
+{
+  "case": "edge-comment-line",
+  "input_b64": "YTogMSAjIGxpbmUgYQpiOiAjIGxpbmUgYiBrZXkKICBjOiAyICMgbGluZSBjCg==",
+  "node": {
+    "kind": "document",
+    "style": [],
+    "tag": "",
+    "value": "",
+    "anchor": "",
+    "alias": null,
+    "head": "",
+    "line_comment": "",
+    "foot": "",
+    "line": 1,
+    "column": 1,
+    "content": [
+      {
+        "kind": "mapping",
+        "style": [],
+        "tag": "!!map",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "a",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!int",
+            "value": "1",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "# line a",
+            "foot": "",
+            "line": 1,
+            "column": 4,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "b",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "# line b key",
+            "foot": "",
+            "line": 2,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "mapping",
+            "style": [],
+            "tag": "!!map",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 3,
+            "column": 3,
+            "content": [
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "c",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 3,
+                "column": 3,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!int",
+                "value": "2",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "# line c",
+                "foot": "",
+                "line": 3,
+                "column": 6,
+                "content": []
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "error": null,
+  "marshal_b64": "YTogMSAjIGxpbmUgYQpiOiAjIGxpbmUgYiBrZXkKICAgIGM6IDIgIyBsaW5lIGMK",
+  "marshal_error": null,
+  "indent2_b64": "YTogMSAjIGxpbmUgYQpiOiAjIGxpbmUgYiBrZXkKICBjOiAyICMgbGluZSBjCg==",
+  "stream": {
+    "nodes": [
+      {
+        "kind": "document",
+        "style": [],
+        "tag": "",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "mapping",
+            "style": [],
+            "tag": "!!map",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": [
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "a",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 1,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!int",
+                "value": "1",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "# line a",
+                "foot": "",
+                "line": 1,
+                "column": 4,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "b",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "# line b key",
+                "foot": "",
+                "line": 2,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "mapping",
+                "style": [],
+                "tag": "!!map",
+                "value": "",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 3,
+                "column": 3,
+                "content": [
+                  {
+                    "kind": "scalar",
+                    "style": [],
+                    "tag": "!!str",
+                    "value": "c",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "",
+                    "line_comment": "",
+                    "foot": "",
+                    "line": 3,
+                    "column": 3,
+                    "content": []
+                  },
+                  {
+                    "kind": "scalar",
+                    "style": [],
+                    "tag": "!!int",
+                    "value": "2",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "",
+                    "line_comment": "# line c",
+                    "foot": "",
+                    "line": 3,
+                    "column": 6,
+                    "content": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "error": null,
+    "marshal_b64": "YTogMSAjIGxpbmUgYQpiOiAjIGxpbmUgYiBrZXkKICAgIGM6IDIgIyBsaW5lIGMK"
+  },
+  "value": {
+    "t": "map",
+    "v": [
+      [
+        "a",
+        {
+          "t": "int",
+          "v": "1"
+        }
+      ],
+      [
+        "b",
+        {
+          "t": "map",
+          "v": [
+            [
+              "c",
+              {
+                "t": "int",
+                "v": "2"
+              }
+            ]
+          ]
+        }
+      ]
+    ]
+  },
+  "value_error": null
+}

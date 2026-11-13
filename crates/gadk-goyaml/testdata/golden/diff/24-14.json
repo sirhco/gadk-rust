@@ -1,0 +1,85 @@
+{
+  "case": "24-14",
+  "input_b64": "fC0KICAgICViIgogICAgKgktOmQ6Jwo=",
+  "source": {
+    "t": "string",
+    "v": "%b\"\n*\t-:d:'"
+  },
+  "node": {
+    "kind": "document",
+    "style": [],
+    "tag": "",
+    "value": "",
+    "anchor": "",
+    "alias": null,
+    "head": "",
+    "line_comment": "",
+    "foot": "",
+    "line": 1,
+    "column": 1,
+    "content": [
+      {
+        "kind": "scalar",
+        "style": [
+          "literal"
+        ],
+        "tag": "!!str",
+        "value": "%b\"\n*\t-:d:'",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": []
+      }
+    ]
+  },
+  "error": null,
+  "marshal_b64": "fC0KICAgICViIgogICAgKgktOmQ6Jwo=",
+  "marshal_error": null,
+  "indent2_b64": "fC0KICAlYiIKICAqCS06ZDonCg==",
+  "stream": {
+    "nodes": [
+      {
+        "kind": "document",
+        "style": [],
+        "tag": "",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "scalar",
+            "style": [
+              "literal"
+            ],
+            "tag": "!!str",
+            "value": "%b\"\n*\t-:d:'",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": []
+          }
+        ]
+      }
+    ],
+    "error": null,
+    "marshal_b64": "fC0KICAgICViIgogICAgKgktOmQ6Jwo="
+  },
+  "value": {
+    "t": "string",
+    "v": "%b\"\n*\t-:d:'"
+  },
+  "value_error": null
+}

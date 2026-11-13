@@ -1,0 +1,199 @@
+{
+  "case": "8-16",
+  "input_b64": "LSA6MHE/MjkjNkU6IFtdCg==",
+  "source": {
+    "t": "seq",
+    "v": [
+      {
+        "t": "map",
+        "v": [
+          [
+            ":0q?29#6E",
+            {
+              "t": "seq",
+              "v": []
+            }
+          ]
+        ]
+      }
+    ]
+  },
+  "node": {
+    "kind": "document",
+    "style": [],
+    "tag": "",
+    "value": "",
+    "anchor": "",
+    "alias": null,
+    "head": "",
+    "line_comment": "",
+    "foot": "",
+    "line": 1,
+    "column": 1,
+    "content": [
+      {
+        "kind": "sequence",
+        "style": [],
+        "tag": "!!seq",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "mapping",
+            "style": [],
+            "tag": "!!map",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 3,
+            "content": [
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": ":0q?29#6E",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 1,
+                "column": 3,
+                "content": []
+              },
+              {
+                "kind": "sequence",
+                "style": [
+                  "flow"
+                ],
+                "tag": "!!seq",
+                "value": "",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 1,
+                "column": 14,
+                "content": []
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "error": null,
+  "marshal_b64": "LSA6MHE/MjkjNkU6IFtdCg==",
+  "marshal_error": null,
+  "indent2_b64": "LSA6MHE/MjkjNkU6IFtdCg==",
+  "stream": {
+    "nodes": [
+      {
+        "kind": "document",
+        "style": [],
+        "tag": "",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "sequence",
+            "style": [],
+            "tag": "!!seq",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": [
+              {
+                "kind": "mapping",
+                "style": [],
+                "tag": "!!map",
+                "value": "",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 1,
+                "column": 3,
+                "content": [
+                  {
+                    "kind": "scalar",
+                    "style": [],
+                    "tag": "!!str",
+                    "value": ":0q?29#6E",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "",
+                    "line_comment": "",
+                    "foot": "",
+                    "line": 1,
+                    "column": 3,
+                    "content": []
+                  },
+                  {
+                    "kind": "sequence",
+                    "style": [
+                      "flow"
+                    ],
+                    "tag": "!!seq",
+                    "value": "",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "",
+                    "line_comment": "",
+                    "foot": "",
+                    "line": 1,
+                    "column": 14,
+                    "content": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "error": null,
+    "marshal_b64": "LSA6MHE/MjkjNkU6IFtdCg=="
+  },
+  "value": {
+    "t": "seq",
+    "v": [
+      {
+        "t": "map",
+        "v": [
+          [
+            ":0q?29#6E",
+            {
+              "t": "seq",
+              "v": []
+            }
+          ]
+        ]
+      }
+    ]
+  },
+  "value_error": null
+}

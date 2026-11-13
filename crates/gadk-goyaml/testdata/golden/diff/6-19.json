@@ -1,0 +1,163 @@
+{
+  "case": "6-19",
+  "input_b64": "PyB8LQogICAgfAogICAgejE4fGwjJDUKOiAnWzZgKjsoPCNONHsnCg==",
+  "source": {
+    "t": "map",
+    "v": [
+      [
+        "|\nz18|l#$5",
+        {
+          "t": "string",
+          "v": "[6`*;(<#N4{"
+        }
+      ]
+    ]
+  },
+  "node": {
+    "kind": "document",
+    "style": [],
+    "tag": "",
+    "value": "",
+    "anchor": "",
+    "alias": null,
+    "head": "",
+    "line_comment": "",
+    "foot": "",
+    "line": 1,
+    "column": 1,
+    "content": [
+      {
+        "kind": "mapping",
+        "style": [],
+        "tag": "!!map",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "scalar",
+            "style": [
+              "literal"
+            ],
+            "tag": "!!str",
+            "value": "|\nz18|l#$5",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 3,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "single"
+            ],
+            "tag": "!!str",
+            "value": "[6`*;(<#N4{",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 4,
+            "column": 3,
+            "content": []
+          }
+        ]
+      }
+    ]
+  },
+  "error": null,
+  "marshal_b64": "PyB8LQogICAgfAogICAgejE4fGwjJDUKOiAnWzZgKjsoPCNONHsnCg==",
+  "marshal_error": null,
+  "indent2_b64": "PyB8LQogIHwKICB6MTh8bCMkNQo6ICdbNmAqOyg8I040eycK",
+  "stream": {
+    "nodes": [
+      {
+        "kind": "document",
+        "style": [],
+        "tag": "",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "mapping",
+            "style": [],
+            "tag": "!!map",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": [
+              {
+                "kind": "scalar",
+                "style": [
+                  "literal"
+                ],
+                "tag": "!!str",
+                "value": "|\nz18|l#$5",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 1,
+                "column": 3,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "single"
+                ],
+                "tag": "!!str",
+                "value": "[6`*;(<#N4{",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 4,
+                "column": 3,
+                "content": []
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "error": null,
+    "marshal_b64": "PyB8LQogICAgfAogICAgejE4fGwjJDUKOiAnWzZgKjsoPCNONHsnCg=="
+  },
+  "value": {
+    "t": "map",
+    "v": [
+      [
+        "|\nz18|l#$5",
+        {
+          "t": "string",
+          "v": "[6`*;(<#N4{"
+        }
+      ]
+    ]
+  },
+  "value_error": null
+}

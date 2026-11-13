@@ -1,0 +1,242 @@
+{
+  "case": "decode-unmarshalTests-055",
+  "input_b64": "c2VxOgogLSBBCiAtIEIKIC0gQw==",
+  "node": {
+    "kind": "document",
+    "style": [],
+    "tag": "",
+    "value": "",
+    "anchor": "",
+    "alias": null,
+    "head": "",
+    "line_comment": "",
+    "foot": "",
+    "line": 1,
+    "column": 1,
+    "content": [
+      {
+        "kind": "mapping",
+        "style": [],
+        "tag": "!!map",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "seq",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "sequence",
+            "style": [],
+            "tag": "!!seq",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 2,
+            "column": 2,
+            "content": [
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "A",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 2,
+                "column": 4,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "B",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 3,
+                "column": 4,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "C",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 4,
+                "column": 4,
+                "content": []
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "error": null,
+  "marshal_b64": "c2VxOgogICAgLSBBCiAgICAtIEIKICAgIC0gQwo=",
+  "marshal_error": null,
+  "indent2_b64": "c2VxOgogIC0gQQogIC0gQgogIC0gQwo=",
+  "stream": {
+    "nodes": [
+      {
+        "kind": "document",
+        "style": [],
+        "tag": "",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "mapping",
+            "style": [],
+            "tag": "!!map",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": [
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "seq",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 1,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "sequence",
+                "style": [],
+                "tag": "!!seq",
+                "value": "",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 2,
+                "column": 2,
+                "content": [
+                  {
+                    "kind": "scalar",
+                    "style": [],
+                    "tag": "!!str",
+                    "value": "A",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "",
+                    "line_comment": "",
+                    "foot": "",
+                    "line": 2,
+                    "column": 4,
+                    "content": []
+                  },
+                  {
+                    "kind": "scalar",
+                    "style": [],
+                    "tag": "!!str",
+                    "value": "B",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "",
+                    "line_comment": "",
+                    "foot": "",
+                    "line": 3,
+                    "column": 4,
+                    "content": []
+                  },
+                  {
+                    "kind": "scalar",
+                    "style": [],
+                    "tag": "!!str",
+                    "value": "C",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "",
+                    "line_comment": "",
+                    "foot": "",
+                    "line": 4,
+                    "column": 4,
+                    "content": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "error": null,
+    "marshal_b64": "c2VxOgogICAgLSBBCiAgICAtIEIKICAgIC0gQwo="
+  },
+  "value": {
+    "t": "map",
+    "v": [
+      [
+        "seq",
+        {
+          "t": "seq",
+          "v": [
+            {
+              "t": "string",
+              "v": "A"
+            },
+            {
+              "t": "string",
+              "v": "B"
+            },
+            {
+              "t": "string",
+              "v": "C"
+            }
+          ]
+        }
+      ]
+    ]
+  },
+  "value_error": null
+}

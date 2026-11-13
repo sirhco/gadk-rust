@@ -1,0 +1,16 @@
+{
+  "case": "edge-multiline-plain",
+  "input_b64": "YTogb25lCiAgdHdvCgogIHRocmVlCmI6IC0gbm90IGEgc2VxCiAgY29udGludWVkCg==",
+  "node": null,
+  "error": "yaml: line 5: block sequence entries are not allowed in this context",
+  "marshal_b64": null,
+  "marshal_error": null,
+  "indent2_b64": null,
+  "stream": {
+    "nodes": [],
+    "error": "yaml: line 5: block sequence entries are not allowed in this context",
+    "marshal_b64": null
+  },
+  "value": null,
+  "value_error": "yaml: line 5: block sequence entries are not allowed in this context"
+}

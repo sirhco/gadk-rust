@@ -1,0 +1,4435 @@
+{
+  "case": "edge-quote-double",
+  "input_b64": "azAwOiAidHJ1ZSIKazAxOiAiVHJ1ZSIKazAyOiAiVFJVRSIKazAzOiAiZmFsc2UiCmswNDogInllcyIKazA1OiAibm8iCmswNjogIm9uIgprMDc6ICJvZmYiCmswODogInkiCmswOTogIm4iCmsxMDogIm51bGwiCmsxMTogIk51bGwiCmsxMjogIk5VTEwiCmsxMzogIn4iCmsxNDogIiIKazE1OiAiIGxlYWQiCmsxNjogInRyYWlsICIKazE3OiAiYTogYiIKazE4OiAiYSAjYiIKazE5OiAiI3giCmsyMDogIi0geCIKazIxOiAiPyB4IgprMjI6ICJAYXQiCmsyMzogImB0aWNrIgprMjQ6ICJ8IgprMjU6ICI+IgprMjY6ICIlcCIKazI3OiAiIXQiCmsyODogIiZhIgprMjk6ICIqYSIKazMwOiAiW3giCmszMTogInt4IgprMzI6ICJdIgprMzM6ICJ9IgprMzQ6ICIsIgprMzU6ICIwbzE3IgprMzY6ICIwMTciCmszNzogIjB4MUYiCmszODogIjBiMTAxIgprMzk6ICIxZTMiCms0MDogIjFfMDAwIgprNDE6ICIrMSIKazQyOiAiLTAiCms0MzogIi41IgprNDQ6ICIxLiIKazQ1OiAiLS5pbmYiCms0NjogIi5OYU4iCms0NzogIisuSU5GIgprNDg6ICIyMDAxLTEyLTE0IgprNDk6ICIyMDAxLTEyLTE0dDIxOjU5OjQzLjEwLTA1OjAwIgprNTA6ICIxOjIwIgprNTE6ICI8PCIKazUyOiAiPSIKazUzOiAiLSIKazU0OiAiLS0iCms1NTogIi0tLSIKazU2OiAiLi4uIgprNTc6ICJhXFxiIgprNTg6ICJ0YWJcdGhlcmUiCms1OTogIng6eSIKazYwOiAieDogIgprNjE6ICInIgprNjI6ICJcIiIKazYzOiAiaXQncyIKazY0OiAic2F5IFwiaGlcIiIK",
+  "node": {
+    "kind": "document",
+    "style": [],
+    "tag": "",
+    "value": "",
+    "anchor": "",
+    "alias": null,
+    "head": "",
+    "line_comment": "",
+    "foot": "",
+    "line": 1,
+    "column": 1,
+    "content": [
+      {
+        "kind": "mapping",
+        "style": [],
+        "tag": "!!map",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k00",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "true",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k01",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 2,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "True",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 2,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k02",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 3,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "TRUE",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 3,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k03",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 4,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "false",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 4,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k04",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 5,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "yes",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 5,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k05",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 6,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "no",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 6,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k06",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 7,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "on",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 7,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k07",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 8,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "off",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 8,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k08",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 9,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "y",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 9,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k09",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 10,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "n",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 10,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k10",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 11,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "null",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 11,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k11",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 12,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "Null",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 12,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k12",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 13,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "NULL",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 13,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k13",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 14,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "~",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 14,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k14",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 15,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 15,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k15",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 16,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": " lead",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 16,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k16",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 17,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "trail ",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 17,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k17",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 18,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "a: b",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 18,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k18",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 19,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "a #b",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 19,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k19",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 20,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "#x",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 20,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k20",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 21,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "- x",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 21,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k21",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 22,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "? x",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 22,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k22",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 23,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "@at",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 23,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k23",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 24,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "`tick",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 24,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k24",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 25,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "|",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 25,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k25",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 26,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": ">",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 26,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k26",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 27,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "%p",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 27,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k27",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 28,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "!t",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 28,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k28",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 29,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "&a",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 29,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k29",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 30,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "*a",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 30,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k30",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 31,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "[x",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 31,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k31",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 32,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "{x",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 32,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k32",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 33,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "]",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 33,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k33",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 34,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "}",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 34,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k34",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 35,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": ",",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 35,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k35",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 36,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "0o17",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 36,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k36",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 37,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "017",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 37,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k37",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 38,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "0x1F",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 38,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k38",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 39,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "0b101",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 39,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k39",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 40,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "1e3",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 40,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k40",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 41,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "1_000",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 41,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k41",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 42,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "+1",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 42,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k42",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 43,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "-0",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 43,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k43",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 44,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": ".5",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 44,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k44",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 45,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "1.",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 45,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k45",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 46,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "-.inf",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 46,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k46",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 47,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": ".NaN",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 47,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k47",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 48,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "+.INF",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 48,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k48",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 49,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "2001-12-14",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 49,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k49",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 50,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "2001-12-14t21:59:43.10-05:00",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 50,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k50",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 51,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "1:20",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 51,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k51",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 52,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "<<",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 52,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k52",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 53,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "=",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 53,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k53",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 54,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "-",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 54,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k54",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 55,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "--",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 55,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k55",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 56,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "---",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 56,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k56",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 57,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "...",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 57,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k57",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 58,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "a\\b",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 58,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k58",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 59,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "tab\there",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 59,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k59",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 60,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "x:y",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 60,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k60",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 61,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "x: ",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 61,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k61",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 62,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "'",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 62,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k62",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 63,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "\"",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 63,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k63",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 64,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "it's",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 64,
+            "column": 6,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k64",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 65,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "say \"hi\"",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 65,
+            "column": 6,
+            "content": []
+          }
+        ]
+      }
+    ]
+  },
+  "error": null,
+  "marshal_b64": "azAwOiAidHJ1ZSIKazAxOiAiVHJ1ZSIKazAyOiAiVFJVRSIKazAzOiAiZmFsc2UiCmswNDogInllcyIKazA1OiAibm8iCmswNjogIm9uIgprMDc6ICJvZmYiCmswODogInkiCmswOTogIm4iCmsxMDogIm51bGwiCmsxMTogIk51bGwiCmsxMjogIk5VTEwiCmsxMzogIn4iCmsxNDogIiIKazE1OiAiIGxlYWQiCmsxNjogInRyYWlsICIKazE3OiAiYTogYiIKazE4OiAiYSAjYiIKazE5OiAiI3giCmsyMDogIi0geCIKazIxOiAiPyB4IgprMjI6ICJAYXQiCmsyMzogImB0aWNrIgprMjQ6ICJ8IgprMjU6ICI+IgprMjY6ICIlcCIKazI3OiAiIXQiCmsyODogIiZhIgprMjk6ICIqYSIKazMwOiAiW3giCmszMTogInt4IgprMzI6ICJdIgprMzM6ICJ9IgprMzQ6ICIsIgprMzU6ICIwbzE3IgprMzY6ICIwMTciCmszNzogIjB4MUYiCmszODogIjBiMTAxIgprMzk6ICIxZTMiCms0MDogIjFfMDAwIgprNDE6ICIrMSIKazQyOiAiLTAiCms0MzogIi41IgprNDQ6ICIxLiIKazQ1OiAiLS5pbmYiCms0NjogIi5OYU4iCms0NzogIisuSU5GIgprNDg6ICIyMDAxLTEyLTE0IgprNDk6ICIyMDAxLTEyLTE0dDIxOjU5OjQzLjEwLTA1OjAwIgprNTA6ICIxOjIwIgprNTE6ICI8PCIKazUyOiAiPSIKazUzOiAiLSIKazU0OiAiLS0iCms1NTogIi0tLSIKazU2OiAiLi4uIgprNTc6ICJhXFxiIgprNTg6ICJ0YWJcdGhlcmUiCms1OTogIng6eSIKazYwOiAieDogIgprNjE6ICInIgprNjI6ICJcIiIKazYzOiAiaXQncyIKazY0OiAic2F5IFwiaGlcIiIK",
+  "marshal_error": null,
+  "indent2_b64": "azAwOiAidHJ1ZSIKazAxOiAiVHJ1ZSIKazAyOiAiVFJVRSIKazAzOiAiZmFsc2UiCmswNDogInllcyIKazA1OiAibm8iCmswNjogIm9uIgprMDc6ICJvZmYiCmswODogInkiCmswOTogIm4iCmsxMDogIm51bGwiCmsxMTogIk51bGwiCmsxMjogIk5VTEwiCmsxMzogIn4iCmsxNDogIiIKazE1OiAiIGxlYWQiCmsxNjogInRyYWlsICIKazE3OiAiYTogYiIKazE4OiAiYSAjYiIKazE5OiAiI3giCmsyMDogIi0geCIKazIxOiAiPyB4IgprMjI6ICJAYXQiCmsyMzogImB0aWNrIgprMjQ6ICJ8IgprMjU6ICI+IgprMjY6ICIlcCIKazI3OiAiIXQiCmsyODogIiZhIgprMjk6ICIqYSIKazMwOiAiW3giCmszMTogInt4IgprMzI6ICJdIgprMzM6ICJ9IgprMzQ6ICIsIgprMzU6ICIwbzE3IgprMzY6ICIwMTciCmszNzogIjB4MUYiCmszODogIjBiMTAxIgprMzk6ICIxZTMiCms0MDogIjFfMDAwIgprNDE6ICIrMSIKazQyOiAiLTAiCms0MzogIi41IgprNDQ6ICIxLiIKazQ1OiAiLS5pbmYiCms0NjogIi5OYU4iCms0NzogIisuSU5GIgprNDg6ICIyMDAxLTEyLTE0IgprNDk6ICIyMDAxLTEyLTE0dDIxOjU5OjQzLjEwLTA1OjAwIgprNTA6ICIxOjIwIgprNTE6ICI8PCIKazUyOiAiPSIKazUzOiAiLSIKazU0OiAiLS0iCms1NTogIi0tLSIKazU2OiAiLi4uIgprNTc6ICJhXFxiIgprNTg6ICJ0YWJcdGhlcmUiCms1OTogIng6eSIKazYwOiAieDogIgprNjE6ICInIgprNjI6ICJcIiIKazYzOiAiaXQncyIKazY0OiAic2F5IFwiaGlcIiIK",
+  "stream": {
+    "nodes": [
+      {
+        "kind": "document",
+        "style": [],
+        "tag": "",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "mapping",
+            "style": [],
+            "tag": "!!map",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": [
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k00",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 1,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "true",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 1,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k01",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 2,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "True",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 2,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k02",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 3,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "TRUE",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 3,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k03",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 4,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "false",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 4,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k04",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 5,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "yes",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 5,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k05",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 6,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "no",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 6,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k06",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 7,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "on",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 7,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k07",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 8,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "off",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 8,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k08",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 9,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "y",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 9,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k09",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 10,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "n",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 10,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k10",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 11,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "null",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 11,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k11",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 12,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "Null",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 12,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k12",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 13,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "NULL",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 13,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k13",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 14,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "~",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 14,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k14",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 15,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 15,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k15",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 16,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": " lead",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 16,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k16",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 17,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "trail ",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 17,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k17",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 18,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "a: b",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 18,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k18",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 19,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "a #b",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 19,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k19",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 20,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "#x",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 20,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k20",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 21,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "- x",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 21,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k21",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 22,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "? x",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 22,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k22",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 23,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "@at",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 23,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k23",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 24,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "`tick",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 24,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k24",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 25,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "|",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 25,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k25",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 26,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": ">",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 26,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k26",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 27,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "%p",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 27,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k27",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 28,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "!t",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 28,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k28",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 29,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "&a",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 29,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k29",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 30,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "*a",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 30,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k30",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 31,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "[x",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 31,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k31",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 32,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "{x",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 32,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k32",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 33,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "]",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 33,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k33",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 34,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "}",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 34,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k34",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 35,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": ",",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 35,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k35",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 36,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "0o17",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 36,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k36",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 37,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "017",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 37,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k37",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 38,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "0x1F",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 38,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k38",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 39,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "0b101",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 39,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k39",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 40,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "1e3",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 40,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k40",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 41,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "1_000",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 41,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k41",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 42,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "+1",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 42,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k42",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 43,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "-0",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 43,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k43",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 44,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": ".5",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 44,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k44",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 45,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "1.",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 45,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k45",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 46,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "-.inf",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 46,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k46",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 47,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": ".NaN",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 47,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k47",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 48,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "+.INF",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 48,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k48",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 49,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "2001-12-14",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 49,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k49",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 50,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "2001-12-14t21:59:43.10-05:00",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 50,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k50",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 51,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "1:20",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 51,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k51",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 52,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "<<",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 52,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k52",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 53,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "=",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 53,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k53",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 54,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "-",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 54,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k54",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 55,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "--",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 55,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k55",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 56,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "---",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 56,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k56",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 57,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "...",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 57,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k57",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 58,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "a\\b",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 58,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k58",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 59,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "tab\there",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 59,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k59",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 60,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "x:y",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 60,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k60",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 61,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "x: ",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 61,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k61",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 62,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "'",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 62,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k62",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 63,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "\"",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 63,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k63",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 64,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "it's",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 64,
+                "column": 6,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k64",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 65,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "say \"hi\"",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 65,
+                "column": 6,
+                "content": []
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "error": null,
+    "marshal_b64": "azAwOiAidHJ1ZSIKazAxOiAiVHJ1ZSIKazAyOiAiVFJVRSIKazAzOiAiZmFsc2UiCmswNDogInllcyIKazA1OiAibm8iCmswNjogIm9uIgprMDc6ICJvZmYiCmswODogInkiCmswOTogIm4iCmsxMDogIm51bGwiCmsxMTogIk51bGwiCmsxMjogIk5VTEwiCmsxMzogIn4iCmsxNDogIiIKazE1OiAiIGxlYWQiCmsxNjogInRyYWlsICIKazE3OiAiYTogYiIKazE4OiAiYSAjYiIKazE5OiAiI3giCmsyMDogIi0geCIKazIxOiAiPyB4IgprMjI6ICJAYXQiCmsyMzogImB0aWNrIgprMjQ6ICJ8IgprMjU6ICI+IgprMjY6ICIlcCIKazI3OiAiIXQiCmsyODogIiZhIgprMjk6ICIqYSIKazMwOiAiW3giCmszMTogInt4IgprMzI6ICJdIgprMzM6ICJ9IgprMzQ6ICIsIgprMzU6ICIwbzE3IgprMzY6ICIwMTciCmszNzogIjB4MUYiCmszODogIjBiMTAxIgprMzk6ICIxZTMiCms0MDogIjFfMDAwIgprNDE6ICIrMSIKazQyOiAiLTAiCms0MzogIi41IgprNDQ6ICIxLiIKazQ1OiAiLS5pbmYiCms0NjogIi5OYU4iCms0NzogIisuSU5GIgprNDg6ICIyMDAxLTEyLTE0IgprNDk6ICIyMDAxLTEyLTE0dDIxOjU5OjQzLjEwLTA1OjAwIgprNTA6ICIxOjIwIgprNTE6ICI8PCIKazUyOiAiPSIKazUzOiAiLSIKazU0OiAiLS0iCms1NTogIi0tLSIKazU2OiAiLi4uIgprNTc6ICJhXFxiIgprNTg6ICJ0YWJcdGhlcmUiCms1OTogIng6eSIKazYwOiAieDogIgprNjE6ICInIgprNjI6ICJcIiIKazYzOiAiaXQncyIKazY0OiAic2F5IFwiaGlcIiIK"
+  },
+  "value": {
+    "t": "map",
+    "v": [
+      [
+        "k00",
+        {
+          "t": "string",
+          "v": "true"
+        }
+      ],
+      [
+        "k01",
+        {
+          "t": "string",
+          "v": "True"
+        }
+      ],
+      [
+        "k02",
+        {
+          "t": "string",
+          "v": "TRUE"
+        }
+      ],
+      [
+        "k03",
+        {
+          "t": "string",
+          "v": "false"
+        }
+      ],
+      [
+        "k04",
+        {
+          "t": "string",
+          "v": "yes"
+        }
+      ],
+      [
+        "k05",
+        {
+          "t": "string",
+          "v": "no"
+        }
+      ],
+      [
+        "k06",
+        {
+          "t": "string",
+          "v": "on"
+        }
+      ],
+      [
+        "k07",
+        {
+          "t": "string",
+          "v": "off"
+        }
+      ],
+      [
+        "k08",
+        {
+          "t": "string",
+          "v": "y"
+        }
+      ],
+      [
+        "k09",
+        {
+          "t": "string",
+          "v": "n"
+        }
+      ],
+      [
+        "k10",
+        {
+          "t": "string",
+          "v": "null"
+        }
+      ],
+      [
+        "k11",
+        {
+          "t": "string",
+          "v": "Null"
+        }
+      ],
+      [
+        "k12",
+        {
+          "t": "string",
+          "v": "NULL"
+        }
+      ],
+      [
+        "k13",
+        {
+          "t": "string",
+          "v": "~"
+        }
+      ],
+      [
+        "k14",
+        {
+          "t": "string",
+          "v": ""
+        }
+      ],
+      [
+        "k15",
+        {
+          "t": "string",
+          "v": " lead"
+        }
+      ],
+      [
+        "k16",
+        {
+          "t": "string",
+          "v": "trail "
+        }
+      ],
+      [
+        "k17",
+        {
+          "t": "string",
+          "v": "a: b"
+        }
+      ],
+      [
+        "k18",
+        {
+          "t": "string",
+          "v": "a #b"
+        }
+      ],
+      [
+        "k19",
+        {
+          "t": "string",
+          "v": "#x"
+        }
+      ],
+      [
+        "k20",
+        {
+          "t": "string",
+          "v": "- x"
+        }
+      ],
+      [
+        "k21",
+        {
+          "t": "string",
+          "v": "? x"
+        }
+      ],
+      [
+        "k22",
+        {
+          "t": "string",
+          "v": "@at"
+        }
+      ],
+      [
+        "k23",
+        {
+          "t": "string",
+          "v": "`tick"
+        }
+      ],
+      [
+        "k24",
+        {
+          "t": "string",
+          "v": "|"
+        }
+      ],
+      [
+        "k25",
+        {
+          "t": "string",
+          "v": ">"
+        }
+      ],
+      [
+        "k26",
+        {
+          "t": "string",
+          "v": "%p"
+        }
+      ],
+      [
+        "k27",
+        {
+          "t": "string",
+          "v": "!t"
+        }
+      ],
+      [
+        "k28",
+        {
+          "t": "string",
+          "v": "&a"
+        }
+      ],
+      [
+        "k29",
+        {
+          "t": "string",
+          "v": "*a"
+        }
+      ],
+      [
+        "k30",
+        {
+          "t": "string",
+          "v": "[x"
+        }
+      ],
+      [
+        "k31",
+        {
+          "t": "string",
+          "v": "{x"
+        }
+      ],
+      [
+        "k32",
+        {
+          "t": "string",
+          "v": "]"
+        }
+      ],
+      [
+        "k33",
+        {
+          "t": "string",
+          "v": "}"
+        }
+      ],
+      [
+        "k34",
+        {
+          "t": "string",
+          "v": ","
+        }
+      ],
+      [
+        "k35",
+        {
+          "t": "string",
+          "v": "0o17"
+        }
+      ],
+      [
+        "k36",
+        {
+          "t": "string",
+          "v": "017"
+        }
+      ],
+      [
+        "k37",
+        {
+          "t": "string",
+          "v": "0x1F"
+        }
+      ],
+      [
+        "k38",
+        {
+          "t": "string",
+          "v": "0b101"
+        }
+      ],
+      [
+        "k39",
+        {
+          "t": "string",
+          "v": "1e3"
+        }
+      ],
+      [
+        "k40",
+        {
+          "t": "string",
+          "v": "1_000"
+        }
+      ],
+      [
+        "k41",
+        {
+          "t": "string",
+          "v": "+1"
+        }
+      ],
+      [
+        "k42",
+        {
+          "t": "string",
+          "v": "-0"
+        }
+      ],
+      [
+        "k43",
+        {
+          "t": "string",
+          "v": ".5"
+        }
+      ],
+      [
+        "k44",
+        {
+          "t": "string",
+          "v": "1."
+        }
+      ],
+      [
+        "k45",
+        {
+          "t": "string",
+          "v": "-.inf"
+        }
+      ],
+      [
+        "k46",
+        {
+          "t": "string",
+          "v": ".NaN"
+        }
+      ],
+      [
+        "k47",
+        {
+          "t": "string",
+          "v": "+.INF"
+        }
+      ],
+      [
+        "k48",
+        {
+          "t": "string",
+          "v": "2001-12-14"
+        }
+      ],
+      [
+        "k49",
+        {
+          "t": "string",
+          "v": "2001-12-14t21:59:43.10-05:00"
+        }
+      ],
+      [
+        "k50",
+        {
+          "t": "string",
+          "v": "1:20"
+        }
+      ],
+      [
+        "k51",
+        {
+          "t": "string",
+          "v": "<<"
+        }
+      ],
+      [
+        "k52",
+        {
+          "t": "string",
+          "v": "="
+        }
+      ],
+      [
+        "k53",
+        {
+          "t": "string",
+          "v": "-"
+        }
+      ],
+      [
+        "k54",
+        {
+          "t": "string",
+          "v": "--"
+        }
+      ],
+      [
+        "k55",
+        {
+          "t": "string",
+          "v": "---"
+        }
+      ],
+      [
+        "k56",
+        {
+          "t": "string",
+          "v": "..."
+        }
+      ],
+      [
+        "k57",
+        {
+          "t": "string",
+          "v": "a\\b"
+        }
+      ],
+      [
+        "k58",
+        {
+          "t": "string",
+          "v": "tab\there"
+        }
+      ],
+      [
+        "k59",
+        {
+          "t": "string",
+          "v": "x:y"
+        }
+      ],
+      [
+        "k60",
+        {
+          "t": "string",
+          "v": "x: "
+        }
+      ],
+      [
+        "k61",
+        {
+          "t": "string",
+          "v": "'"
+        }
+      ],
+      [
+        "k62",
+        {
+          "t": "string",
+          "v": "\""
+        }
+      ],
+      [
+        "k63",
+        {
+          "t": "string",
+          "v": "it's"
+        }
+      ],
+      [
+        "k64",
+        {
+          "t": "string",
+          "v": "say \"hi\""
+        }
+      ]
+    ]
+  },
+  "value_error": null
+}

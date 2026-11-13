@@ -1,0 +1,313 @@
+{
+  "case": "27-19",
+  "input_b64": "IiI6CiAgICAtICdZKC0uL1s3fSAnCiAgICAtIHt9CjMjRSonJWMhNTc6IDMjRSonJWMhNTcK",
+  "source": {
+    "t": "map",
+    "v": [
+      [
+        "",
+        {
+          "t": "seq",
+          "v": [
+            {
+              "t": "string",
+              "v": "Y(-./[7} "
+            },
+            {
+              "t": "map",
+              "v": []
+            }
+          ]
+        }
+      ],
+      [
+        "3#E*'%c!57",
+        {
+          "t": "string",
+          "v": "3#E*'%c!57"
+        }
+      ]
+    ]
+  },
+  "node": {
+    "kind": "document",
+    "style": [],
+    "tag": "",
+    "value": "",
+    "anchor": "",
+    "alias": null,
+    "head": "",
+    "line_comment": "",
+    "foot": "",
+    "line": 1,
+    "column": 1,
+    "content": [
+      {
+        "kind": "mapping",
+        "style": [],
+        "tag": "!!map",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "sequence",
+            "style": [],
+            "tag": "!!seq",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 2,
+            "column": 5,
+            "content": [
+              {
+                "kind": "scalar",
+                "style": [
+                  "single"
+                ],
+                "tag": "!!str",
+                "value": "Y(-./[7} ",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 2,
+                "column": 7,
+                "content": []
+              },
+              {
+                "kind": "mapping",
+                "style": [
+                  "flow"
+                ],
+                "tag": "!!map",
+                "value": "",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 3,
+                "column": 7,
+                "content": []
+              }
+            ]
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "3#E*'%c!57",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 4,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "3#E*'%c!57",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 4,
+            "column": 13,
+            "content": []
+          }
+        ]
+      }
+    ]
+  },
+  "error": null,
+  "marshal_b64": "IiI6CiAgICAtICdZKC0uL1s3fSAnCiAgICAtIHt9CjMjRSonJWMhNTc6IDMjRSonJWMhNTcK",
+  "marshal_error": null,
+  "indent2_b64": "IiI6CiAgLSAnWSgtLi9bN30gJwogIC0ge30KMyNFKiclYyE1NzogMyNFKiclYyE1Nwo=",
+  "stream": {
+    "nodes": [
+      {
+        "kind": "document",
+        "style": [],
+        "tag": "",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "mapping",
+            "style": [],
+            "tag": "!!map",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": [
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 1,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "sequence",
+                "style": [],
+                "tag": "!!seq",
+                "value": "",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 2,
+                "column": 5,
+                "content": [
+                  {
+                    "kind": "scalar",
+                    "style": [
+                      "single"
+                    ],
+                    "tag": "!!str",
+                    "value": "Y(-./[7} ",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "",
+                    "line_comment": "",
+                    "foot": "",
+                    "line": 2,
+                    "column": 7,
+                    "content": []
+                  },
+                  {
+                    "kind": "mapping",
+                    "style": [
+                      "flow"
+                    ],
+                    "tag": "!!map",
+                    "value": "",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "",
+                    "line_comment": "",
+                    "foot": "",
+                    "line": 3,
+                    "column": 7,
+                    "content": []
+                  }
+                ]
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "3#E*'%c!57",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 4,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "3#E*'%c!57",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 4,
+                "column": 13,
+                "content": []
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "error": null,
+    "marshal_b64": "IiI6CiAgICAtICdZKC0uL1s3fSAnCiAgICAtIHt9CjMjRSonJWMhNTc6IDMjRSonJWMhNTcK"
+  },
+  "value": {
+    "t": "map",
+    "v": [
+      [
+        "",
+        {
+          "t": "seq",
+          "v": [
+            {
+              "t": "string",
+              "v": "Y(-./[7} "
+            },
+            {
+              "t": "map",
+              "v": []
+            }
+          ]
+        }
+      ],
+      [
+        "3#E*'%c!57",
+        {
+          "t": "string",
+          "v": "3#E*'%c!57"
+        }
+      ]
+    ]
+  },
+  "value_error": null
+}

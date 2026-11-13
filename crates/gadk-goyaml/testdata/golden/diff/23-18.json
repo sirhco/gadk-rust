@@ -1,0 +1,433 @@
+{
+  "case": "23-18",
+  "input_b64": "LSAiMV8wMDAiOgogICAgSDYlNyY6ICIubmFuIgotIC0gJH0qIE8KICAtICciJwotICddIHc5ICpHZiEnCg==",
+  "source": {
+    "t": "seq",
+    "v": [
+      {
+        "t": "map",
+        "v": [
+          [
+            "1_000",
+            {
+              "t": "map",
+              "v": [
+                [
+                  "H6%7&",
+                  {
+                    "t": "string",
+                    "v": ".nan"
+                  }
+                ]
+              ]
+            }
+          ]
+        ]
+      },
+      {
+        "t": "seq",
+        "v": [
+          {
+            "t": "string",
+            "v": "$}* O"
+          },
+          {
+            "t": "string",
+            "v": "\""
+          }
+        ]
+      },
+      {
+        "t": "string",
+        "v": "] w9 *Gf!"
+      }
+    ]
+  },
+  "node": {
+    "kind": "document",
+    "style": [],
+    "tag": "",
+    "value": "",
+    "anchor": "",
+    "alias": null,
+    "head": "",
+    "line_comment": "",
+    "foot": "",
+    "line": 1,
+    "column": 1,
+    "content": [
+      {
+        "kind": "sequence",
+        "style": [],
+        "tag": "!!seq",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "mapping",
+            "style": [],
+            "tag": "!!map",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 3,
+            "content": [
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "1_000",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 1,
+                "column": 3,
+                "content": []
+              },
+              {
+                "kind": "mapping",
+                "style": [],
+                "tag": "!!map",
+                "value": "",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 2,
+                "column": 5,
+                "content": [
+                  {
+                    "kind": "scalar",
+                    "style": [],
+                    "tag": "!!str",
+                    "value": "H6%7&",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "",
+                    "line_comment": "",
+                    "foot": "",
+                    "line": 2,
+                    "column": 5,
+                    "content": []
+                  },
+                  {
+                    "kind": "scalar",
+                    "style": [
+                      "double"
+                    ],
+                    "tag": "!!str",
+                    "value": ".nan",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "",
+                    "line_comment": "",
+                    "foot": "",
+                    "line": 2,
+                    "column": 12,
+                    "content": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "kind": "sequence",
+            "style": [],
+            "tag": "!!seq",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 3,
+            "column": 3,
+            "content": [
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "$}* O",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 3,
+                "column": 5,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "single"
+                ],
+                "tag": "!!str",
+                "value": "\"",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 4,
+                "column": 5,
+                "content": []
+              }
+            ]
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "single"
+            ],
+            "tag": "!!str",
+            "value": "] w9 *Gf!",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 5,
+            "column": 3,
+            "content": []
+          }
+        ]
+      }
+    ]
+  },
+  "error": null,
+  "marshal_b64": "LSAiMV8wMDAiOgogICAgSDYlNyY6ICIubmFuIgotIC0gJH0qIE8KICAtICciJwotICddIHc5ICpHZiEnCg==",
+  "marshal_error": null,
+  "indent2_b64": "LSAiMV8wMDAiOgogICAgSDYlNyY6ICIubmFuIgotIC0gJH0qIE8KICAtICciJwotICddIHc5ICpHZiEnCg==",
+  "stream": {
+    "nodes": [
+      {
+        "kind": "document",
+        "style": [],
+        "tag": "",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "sequence",
+            "style": [],
+            "tag": "!!seq",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": [
+              {
+                "kind": "mapping",
+                "style": [],
+                "tag": "!!map",
+                "value": "",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 1,
+                "column": 3,
+                "content": [
+                  {
+                    "kind": "scalar",
+                    "style": [
+                      "double"
+                    ],
+                    "tag": "!!str",
+                    "value": "1_000",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "",
+                    "line_comment": "",
+                    "foot": "",
+                    "line": 1,
+                    "column": 3,
+                    "content": []
+                  },
+                  {
+                    "kind": "mapping",
+                    "style": [],
+                    "tag": "!!map",
+                    "value": "",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "",
+                    "line_comment": "",
+                    "foot": "",
+                    "line": 2,
+                    "column": 5,
+                    "content": [
+                      {
+                        "kind": "scalar",
+                        "style": [],
+                        "tag": "!!str",
+                        "value": "H6%7&",
+                        "anchor": "",
+                        "alias": null,
+                        "head": "",
+                        "line_comment": "",
+                        "foot": "",
+                        "line": 2,
+                        "column": 5,
+                        "content": []
+                      },
+                      {
+                        "kind": "scalar",
+                        "style": [
+                          "double"
+                        ],
+                        "tag": "!!str",
+                        "value": ".nan",
+                        "anchor": "",
+                        "alias": null,
+                        "head": "",
+                        "line_comment": "",
+                        "foot": "",
+                        "line": 2,
+                        "column": 12,
+                        "content": []
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "kind": "sequence",
+                "style": [],
+                "tag": "!!seq",
+                "value": "",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 3,
+                "column": 3,
+                "content": [
+                  {
+                    "kind": "scalar",
+                    "style": [],
+                    "tag": "!!str",
+                    "value": "$}* O",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "",
+                    "line_comment": "",
+                    "foot": "",
+                    "line": 3,
+                    "column": 5,
+                    "content": []
+                  },
+                  {
+                    "kind": "scalar",
+                    "style": [
+                      "single"
+                    ],
+                    "tag": "!!str",
+                    "value": "\"",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "",
+                    "line_comment": "",
+                    "foot": "",
+                    "line": 4,
+                    "column": 5,
+                    "content": []
+                  }
+                ]
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "single"
+                ],
+                "tag": "!!str",
+                "value": "] w9 *Gf!",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 5,
+                "column": 3,
+                "content": []
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "error": null,
+    "marshal_b64": "LSAiMV8wMDAiOgogICAgSDYlNyY6ICIubmFuIgotIC0gJH0qIE8KICAtICciJwotICddIHc5ICpHZiEnCg=="
+  },
+  "value": {
+    "t": "seq",
+    "v": [
+      {
+        "t": "map",
+        "v": [
+          [
+            "1_000",
+            {
+              "t": "map",
+              "v": [
+                [
+                  "H6%7&",
+                  {
+                    "t": "string",
+                    "v": ".nan"
+                  }
+                ]
+              ]
+            }
+          ]
+        ]
+      },
+      {
+        "t": "seq",
+        "v": [
+          {
+            "t": "string",
+            "v": "$}* O"
+          },
+          {
+            "t": "string",
+            "v": "\""
+          }
+        ]
+      },
+      {
+        "t": "string",
+        "v": "] w9 *Gf!"
+      }
+    ]
+  },
+  "value_error": null
+}

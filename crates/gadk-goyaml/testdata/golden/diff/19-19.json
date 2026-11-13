@@ -1,0 +1,549 @@
+{
+  "case": "19-19",
+  "input_b64": "JyEjSyB7JzoKICAgIC0gLSBGZiduCiAgICAtIFtdCiAgICAtICIyMDAxLTEyLTE0Igo2MWlYNyZZKD5dczogJyBPJwoiMjAwMS0xMi0xNCI6CiAgICAiMjAwMS0xMi0xNCI6IFtdCg==",
+  "source": {
+    "t": "map",
+    "v": [
+      [
+        "!#K {",
+        {
+          "t": "seq",
+          "v": [
+            {
+              "t": "seq",
+              "v": [
+                {
+                  "t": "string",
+                  "v": "Ff'n"
+                }
+              ]
+            },
+            {
+              "t": "seq",
+              "v": []
+            },
+            {
+              "t": "string",
+              "v": "2001-12-14"
+            }
+          ]
+        }
+      ],
+      [
+        "2001-12-14",
+        {
+          "t": "map",
+          "v": [
+            [
+              "2001-12-14",
+              {
+                "t": "seq",
+                "v": []
+              }
+            ]
+          ]
+        }
+      ],
+      [
+        "61iX7&Y(>]s",
+        {
+          "t": "string",
+          "v": " O"
+        }
+      ]
+    ]
+  },
+  "node": {
+    "kind": "document",
+    "style": [],
+    "tag": "",
+    "value": "",
+    "anchor": "",
+    "alias": null,
+    "head": "",
+    "line_comment": "",
+    "foot": "",
+    "line": 1,
+    "column": 1,
+    "content": [
+      {
+        "kind": "mapping",
+        "style": [],
+        "tag": "!!map",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "scalar",
+            "style": [
+              "single"
+            ],
+            "tag": "!!str",
+            "value": "!#K {",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "sequence",
+            "style": [],
+            "tag": "!!seq",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 2,
+            "column": 5,
+            "content": [
+              {
+                "kind": "sequence",
+                "style": [],
+                "tag": "!!seq",
+                "value": "",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 2,
+                "column": 7,
+                "content": [
+                  {
+                    "kind": "scalar",
+                    "style": [],
+                    "tag": "!!str",
+                    "value": "Ff'n",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "",
+                    "line_comment": "",
+                    "foot": "",
+                    "line": 2,
+                    "column": 9,
+                    "content": []
+                  }
+                ]
+              },
+              {
+                "kind": "sequence",
+                "style": [
+                  "flow"
+                ],
+                "tag": "!!seq",
+                "value": "",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 3,
+                "column": 7,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "2001-12-14",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 4,
+                "column": 7,
+                "content": []
+              }
+            ]
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "61iX7&Y(>]s",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 5,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "single"
+            ],
+            "tag": "!!str",
+            "value": " O",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 5,
+            "column": 14,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "2001-12-14",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 6,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "mapping",
+            "style": [],
+            "tag": "!!map",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 7,
+            "column": 5,
+            "content": [
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "2001-12-14",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 7,
+                "column": 5,
+                "content": []
+              },
+              {
+                "kind": "sequence",
+                "style": [
+                  "flow"
+                ],
+                "tag": "!!seq",
+                "value": "",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 7,
+                "column": 19,
+                "content": []
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "error": null,
+  "marshal_b64": "JyEjSyB7JzoKICAgIC0gLSBGZiduCiAgICAtIFtdCiAgICAtICIyMDAxLTEyLTE0Igo2MWlYNyZZKD5dczogJyBPJwoiMjAwMS0xMi0xNCI6CiAgICAiMjAwMS0xMi0xNCI6IFtdCg==",
+  "marshal_error": null,
+  "indent2_b64": "JyEjSyB7JzoKICAtIC0gRmYnbgogIC0gW10KICAtICIyMDAxLTEyLTE0Igo2MWlYNyZZKD5dczogJyBPJwoiMjAwMS0xMi0xNCI6CiAgIjIwMDEtMTItMTQiOiBbXQo=",
+  "stream": {
+    "nodes": [
+      {
+        "kind": "document",
+        "style": [],
+        "tag": "",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "mapping",
+            "style": [],
+            "tag": "!!map",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": [
+              {
+                "kind": "scalar",
+                "style": [
+                  "single"
+                ],
+                "tag": "!!str",
+                "value": "!#K {",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 1,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "sequence",
+                "style": [],
+                "tag": "!!seq",
+                "value": "",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 2,
+                "column": 5,
+                "content": [
+                  {
+                    "kind": "sequence",
+                    "style": [],
+                    "tag": "!!seq",
+                    "value": "",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "",
+                    "line_comment": "",
+                    "foot": "",
+                    "line": 2,
+                    "column": 7,
+                    "content": [
+                      {
+                        "kind": "scalar",
+                        "style": [],
+                        "tag": "!!str",
+                        "value": "Ff'n",
+                        "anchor": "",
+                        "alias": null,
+                        "head": "",
+                        "line_comment": "",
+                        "foot": "",
+                        "line": 2,
+                        "column": 9,
+                        "content": []
+                      }
+                    ]
+                  },
+                  {
+                    "kind": "sequence",
+                    "style": [
+                      "flow"
+                    ],
+                    "tag": "!!seq",
+                    "value": "",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "",
+                    "line_comment": "",
+                    "foot": "",
+                    "line": 3,
+                    "column": 7,
+                    "content": []
+                  },
+                  {
+                    "kind": "scalar",
+                    "style": [
+                      "double"
+                    ],
+                    "tag": "!!str",
+                    "value": "2001-12-14",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "",
+                    "line_comment": "",
+                    "foot": "",
+                    "line": 4,
+                    "column": 7,
+                    "content": []
+                  }
+                ]
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "61iX7&Y(>]s",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 5,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "single"
+                ],
+                "tag": "!!str",
+                "value": " O",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 5,
+                "column": 14,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "2001-12-14",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 6,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "mapping",
+                "style": [],
+                "tag": "!!map",
+                "value": "",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 7,
+                "column": 5,
+                "content": [
+                  {
+                    "kind": "scalar",
+                    "style": [
+                      "double"
+                    ],
+                    "tag": "!!str",
+                    "value": "2001-12-14",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "",
+                    "line_comment": "",
+                    "foot": "",
+                    "line": 7,
+                    "column": 5,
+                    "content": []
+                  },
+                  {
+                    "kind": "sequence",
+                    "style": [
+                      "flow"
+                    ],
+                    "tag": "!!seq",
+                    "value": "",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "",
+                    "line_comment": "",
+                    "foot": "",
+                    "line": 7,
+                    "column": 19,
+                    "content": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "error": null,
+    "marshal_b64": "JyEjSyB7JzoKICAgIC0gLSBGZiduCiAgICAtIFtdCiAgICAtICIyMDAxLTEyLTE0Igo2MWlYNyZZKD5dczogJyBPJwoiMjAwMS0xMi0xNCI6CiAgICAiMjAwMS0xMi0xNCI6IFtdCg=="
+  },
+  "value": {
+    "t": "map",
+    "v": [
+      [
+        "!#K {",
+        {
+          "t": "seq",
+          "v": [
+            {
+              "t": "seq",
+              "v": [
+                {
+                  "t": "string",
+                  "v": "Ff'n"
+                }
+              ]
+            },
+            {
+              "t": "seq",
+              "v": []
+            },
+            {
+              "t": "string",
+              "v": "2001-12-14"
+            }
+          ]
+        }
+      ],
+      [
+        "2001-12-14",
+        {
+          "t": "map",
+          "v": [
+            [
+              "2001-12-14",
+              {
+                "t": "seq",
+                "v": []
+              }
+            ]
+          ]
+        }
+      ],
+      [
+        "61iX7&Y(>]s",
+        {
+          "t": "string",
+          "v": " O"
+        }
+      ]
+    ]
+  },
+  "value_error": null
+}

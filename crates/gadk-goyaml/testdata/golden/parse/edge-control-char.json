@@ -1,0 +1,16 @@
+{
+  "case": "edge-control-char",
+  "input_b64": "YTogAQo=",
+  "node": null,
+  "error": "yaml: control characters are not allowed",
+  "marshal_b64": null,
+  "marshal_error": null,
+  "indent2_b64": null,
+  "stream": {
+    "nodes": [],
+    "error": "yaml: control characters are not allowed",
+    "marshal_b64": null
+  },
+  "value": null,
+  "value_error": "yaml: control characters are not allowed"
+}

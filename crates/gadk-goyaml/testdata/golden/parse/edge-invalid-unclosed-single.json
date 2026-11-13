@@ -1,0 +1,16 @@
+{
+  "case": "edge-invalid-unclosed-single",
+  "input_b64": "YTogJ29wZW4K",
+  "node": null,
+  "error": "yaml: line 2: found unexpected end of stream",
+  "marshal_b64": null,
+  "marshal_error": null,
+  "indent2_b64": null,
+  "stream": {
+    "nodes": [],
+    "error": "yaml: line 2: found unexpected end of stream",
+    "marshal_b64": null
+  },
+  "value": null,
+  "value_error": "yaml: line 2: found unexpected end of stream"
+}

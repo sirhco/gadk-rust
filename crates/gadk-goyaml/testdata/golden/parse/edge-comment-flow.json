@@ -1,0 +1,410 @@
+{
+  "case": "edge-comment-flow",
+  "input_b64": "YTogWzEsICMgb25lCiAgMl0gIyBhZnRlcgpiOiB7eDogMSwgIyB4CiAgeTogMn0K",
+  "node": {
+    "kind": "document",
+    "style": [],
+    "tag": "",
+    "value": "",
+    "anchor": "",
+    "alias": null,
+    "head": "",
+    "line_comment": "",
+    "foot": "",
+    "line": 1,
+    "column": 1,
+    "content": [
+      {
+        "kind": "mapping",
+        "style": [],
+        "tag": "!!map",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "a",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "sequence",
+            "style": [
+              "flow"
+            ],
+            "tag": "!!seq",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "# after",
+            "foot": "",
+            "line": 1,
+            "column": 4,
+            "content": [
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!int",
+                "value": "1",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "# one",
+                "foot": "",
+                "line": 1,
+                "column": 5,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!int",
+                "value": "2",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 2,
+                "column": 3,
+                "content": []
+              }
+            ]
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "b",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 3,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "mapping",
+            "style": [
+              "flow"
+            ],
+            "tag": "!!map",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 3,
+            "column": 4,
+            "content": [
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "x",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 3,
+                "column": 5,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!int",
+                "value": "1",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "# x",
+                "foot": "",
+                "line": 3,
+                "column": 8,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "y",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 4,
+                "column": 3,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!int",
+                "value": "2",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 4,
+                "column": 6,
+                "content": []
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "error": null,
+  "marshal_b64": "YTogWzEsICMgb25lCiAgICAyXSAjIGFmdGVyCmI6IHt4OiAxLCAjIHgKICAgIHk6IDJ9Cg==",
+  "marshal_error": null,
+  "indent2_b64": "YTogWzEsICMgb25lCiAgMl0gIyBhZnRlcgpiOiB7eDogMSwgIyB4CiAgeTogMn0K",
+  "stream": {
+    "nodes": [
+      {
+        "kind": "document",
+        "style": [],
+        "tag": "",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "mapping",
+            "style": [],
+            "tag": "!!map",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": [
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "a",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 1,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "sequence",
+                "style": [
+                  "flow"
+                ],
+                "tag": "!!seq",
+                "value": "",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "# after",
+                "foot": "",
+                "line": 1,
+                "column": 4,
+                "content": [
+                  {
+                    "kind": "scalar",
+                    "style": [],
+                    "tag": "!!int",
+                    "value": "1",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "",
+                    "line_comment": "# one",
+                    "foot": "",
+                    "line": 1,
+                    "column": 5,
+                    "content": []
+                  },
+                  {
+                    "kind": "scalar",
+                    "style": [],
+                    "tag": "!!int",
+                    "value": "2",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "",
+                    "line_comment": "",
+                    "foot": "",
+                    "line": 2,
+                    "column": 3,
+                    "content": []
+                  }
+                ]
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "b",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 3,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "mapping",
+                "style": [
+                  "flow"
+                ],
+                "tag": "!!map",
+                "value": "",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 3,
+                "column": 4,
+                "content": [
+                  {
+                    "kind": "scalar",
+                    "style": [],
+                    "tag": "!!str",
+                    "value": "x",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "",
+                    "line_comment": "",
+                    "foot": "",
+                    "line": 3,
+                    "column": 5,
+                    "content": []
+                  },
+                  {
+                    "kind": "scalar",
+                    "style": [],
+                    "tag": "!!int",
+                    "value": "1",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "",
+                    "line_comment": "# x",
+                    "foot": "",
+                    "line": 3,
+                    "column": 8,
+                    "content": []
+                  },
+                  {
+                    "kind": "scalar",
+                    "style": [],
+                    "tag": "!!str",
+                    "value": "y",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "",
+                    "line_comment": "",
+                    "foot": "",
+                    "line": 4,
+                    "column": 3,
+                    "content": []
+                  },
+                  {
+                    "kind": "scalar",
+                    "style": [],
+                    "tag": "!!int",
+                    "value": "2",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "",
+                    "line_comment": "",
+                    "foot": "",
+                    "line": 4,
+                    "column": 6,
+                    "content": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "error": null,
+    "marshal_b64": "YTogWzEsICMgb25lCiAgICAyXSAjIGFmdGVyCmI6IHt4OiAxLCAjIHgKICAgIHk6IDJ9Cg=="
+  },
+  "value": {
+    "t": "map",
+    "v": [
+      [
+        "a",
+        {
+          "t": "seq",
+          "v": [
+            {
+              "t": "int",
+              "v": "1"
+            },
+            {
+              "t": "int",
+              "v": "2"
+            }
+          ]
+        }
+      ],
+      [
+        "b",
+        {
+          "t": "map",
+          "v": [
+            [
+              "x",
+              {
+                "t": "int",
+                "v": "1"
+              }
+            ],
+            [
+              "y",
+              {
+                "t": "int",
+                "v": "2"
+              }
+            ]
+          ]
+        }
+      ]
+    ]
+  },
+  "value_error": null
+}

@@ -1,0 +1,16 @@
+{
+  "case": "edge-plain-21",
+  "input_b64": "azogPyB4Cg==",
+  "node": null,
+  "error": "yaml: mapping keys are not allowed in this context",
+  "marshal_b64": null,
+  "marshal_error": null,
+  "indent2_b64": null,
+  "stream": {
+    "nodes": [],
+    "error": "yaml: mapping keys are not allowed in this context",
+    "marshal_b64": null
+  },
+  "value": null,
+  "value_error": "yaml: mapping keys are not allowed in this context"
+}

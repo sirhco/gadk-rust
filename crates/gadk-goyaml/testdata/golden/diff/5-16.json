@@ -1,0 +1,92 @@
+{
+  "case": "5-16",
+  "input_b64": "JycnJzoKICAgIC0gW10KICAgIC0gJ1snOiAibm8iCiAgICAgICJubyI6IE05cSV3NlQ5Cid9UUBuJzoKICAgIC0gTTlxJXc2VDkKIm51bGwiOgogICAgJzonOgogICAgICAgIC0gfDQtCiAgICAgICAgICAgMT4wLAogICAgICAgICAgMidYCiAgICAgICAgLSAibm8iCiAgICAgICAgLSAnJycnCg==",
+  "source": {
+    "t": "map",
+    "v": [
+      [
+        "'",
+        {
+          "t": "seq",
+          "v": [
+            {
+              "t": "seq",
+              "v": []
+            },
+            {
+              "t": "map",
+              "v": [
+                [
+                  "[",
+                  {
+                    "t": "string",
+                    "v": "no"
+                  }
+                ],
+                [
+                  "no",
+                  {
+                    "t": "string",
+                    "v": "M9q%w6T9"
+                  }
+                ]
+              ]
+            }
+          ]
+        }
+      ],
+      [
+        "null",
+        {
+          "t": "map",
+          "v": [
+            [
+              ":",
+              {
+                "t": "seq",
+                "v": [
+                  {
+                    "t": "string",
+                    "v": " 1>0,\n2'X"
+                  },
+                  {
+                    "t": "string",
+                    "v": "no"
+                  },
+                  {
+                    "t": "string",
+                    "v": "'"
+                  }
+                ]
+              }
+            ]
+          ]
+        }
+      ],
+      [
+        "}Q@n",
+        {
+          "t": "seq",
+          "v": [
+            {
+              "t": "string",
+              "v": "M9q%w6T9"
+            }
+          ]
+        }
+      ]
+    ]
+  },
+  "node": null,
+  "error": "yaml: line 8: did not find expected '-' indicator",
+  "marshal_b64": null,
+  "marshal_error": null,
+  "indent2_b64": null,
+  "stream": {
+    "nodes": [],
+    "error": "yaml: line 8: did not find expected '-' indicator",
+    "marshal_b64": null
+  },
+  "value": null,
+  "value_error": "yaml: line 8: did not find expected '-' indicator"
+}

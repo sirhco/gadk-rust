@@ -1,0 +1,16 @@
+{
+  "case": "edge-doc-end-only",
+  "input_b64": "Li4uCg==",
+  "node": null,
+  "error": "yaml: did not find expected node content",
+  "marshal_b64": null,
+  "marshal_error": null,
+  "indent2_b64": null,
+  "stream": {
+    "nodes": [],
+    "error": "yaml: did not find expected node content",
+    "marshal_b64": null
+  },
+  "value": null,
+  "value_error": "yaml: did not find expected node content"
+}

@@ -1,0 +1,144 @@
+{
+  "case": "node-nodeTests-044",
+  "input_b64": "IyBESDEKCiMgREgyCgojIEhBMQojIEhBMgotIGxhICMgSUEKIyBGQTEKIyBGQTIKCiMgSEIxCiMgSEIyCi0gbGIgIyBJQgojIEZCMQojIEZCMgoKIyBERjEKCiMgREYyCg==",
+  "node": {
+    "kind": "document",
+    "style": [],
+    "tag": "",
+    "value": "",
+    "anchor": "",
+    "alias": null,
+    "head": "# DH1\n\n# DH2",
+    "line_comment": "",
+    "foot": "# DF1\n\n# DF2",
+    "line": 7,
+    "column": 1,
+    "content": [
+      {
+        "kind": "sequence",
+        "style": [],
+        "tag": "!!seq",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 7,
+        "column": 1,
+        "content": [
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "la",
+            "anchor": "",
+            "alias": null,
+            "head": "# HA1\n# HA2",
+            "line_comment": "# IA",
+            "foot": "# FA1\n# FA2",
+            "line": 7,
+            "column": 3,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "lb",
+            "anchor": "",
+            "alias": null,
+            "head": "# HB1\n# HB2",
+            "line_comment": "# IB",
+            "foot": "# FB1\n# FB2",
+            "line": 13,
+            "column": 3,
+            "content": []
+          }
+        ]
+      }
+    ]
+  },
+  "error": null,
+  "marshal_b64": "IyBESDEKCiMgREgyCgojIEhBMQojIEhBMgotIGxhICMgSUEKIyBGQTEKIyBGQTIKCiMgSEIxCiMgSEIyCi0gbGIgIyBJQgojIEZCMQojIEZCMgoKIyBERjEKCiMgREYyCg==",
+  "marshal_error": null,
+  "indent2_b64": "IyBESDEKCiMgREgyCgojIEhBMQojIEhBMgotIGxhICMgSUEKIyBGQTEKIyBGQTIKCiMgSEIxCiMgSEIyCi0gbGIgIyBJQgojIEZCMQojIEZCMgoKIyBERjEKCiMgREYyCg==",
+  "stream": {
+    "nodes": [
+      {
+        "kind": "document",
+        "style": [],
+        "tag": "",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "# DH1\n\n# DH2",
+        "line_comment": "",
+        "foot": "# DF1\n\n# DF2",
+        "line": 7,
+        "column": 1,
+        "content": [
+          {
+            "kind": "sequence",
+            "style": [],
+            "tag": "!!seq",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 7,
+            "column": 1,
+            "content": [
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "la",
+                "anchor": "",
+                "alias": null,
+                "head": "# HA1\n# HA2",
+                "line_comment": "# IA",
+                "foot": "# FA1\n# FA2",
+                "line": 7,
+                "column": 3,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "lb",
+                "anchor": "",
+                "alias": null,
+                "head": "# HB1\n# HB2",
+                "line_comment": "# IB",
+                "foot": "# FB1\n# FB2",
+                "line": 13,
+                "column": 3,
+                "content": []
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "error": null,
+    "marshal_b64": "IyBESDEKCiMgREgyCgojIEhBMQojIEhBMgotIGxhICMgSUEKIyBGQTEKIyBGQTIKCiMgSEIxCiMgSEIyCi0gbGIgIyBJQgojIEZCMQojIEZCMgoKIyBERjEKCiMgREYyCg=="
+  },
+  "value": {
+    "t": "seq",
+    "v": [
+      {
+        "t": "string",
+        "v": "la"
+      },
+      {
+        "t": "string",
+        "v": "lb"
+      }
+    ]
+  },
+  "value_error": null
+}

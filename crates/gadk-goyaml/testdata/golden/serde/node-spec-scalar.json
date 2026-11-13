@@ -1,0 +1,111 @@
+{
+  "shape": "node",
+  "case": "spec-scalar",
+  "input_b64": "a2luZDogawpzcGVjOiAncXVvdGVkJwo=",
+  "decode_error": null,
+  "marshal_b64": "a2luZDogawpzcGVjOiAncXVvdGVkJwplZGdlczogW10K",
+  "marshal_error": null,
+  "node": {
+    "kind": "mapping",
+    "style": [],
+    "tag": "!!map",
+    "value": "",
+    "anchor": "",
+    "alias": null,
+    "head": "",
+    "line_comment": "",
+    "foot": "",
+    "line": 0,
+    "column": 0,
+    "content": [
+      {
+        "kind": "scalar",
+        "style": [],
+        "tag": "!!str",
+        "value": "kind",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 0,
+        "column": 0,
+        "content": []
+      },
+      {
+        "kind": "scalar",
+        "style": [],
+        "tag": "!!str",
+        "value": "k",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 0,
+        "column": 0,
+        "content": []
+      },
+      {
+        "kind": "scalar",
+        "style": [],
+        "tag": "!!str",
+        "value": "spec",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 0,
+        "column": 0,
+        "content": []
+      },
+      {
+        "kind": "scalar",
+        "style": [
+          "single"
+        ],
+        "tag": "!!str",
+        "value": "quoted",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 0,
+        "column": 0,
+        "content": []
+      },
+      {
+        "kind": "scalar",
+        "style": [],
+        "tag": "!!str",
+        "value": "edges",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 0,
+        "column": 0,
+        "content": []
+      },
+      {
+        "kind": "sequence",
+        "style": [
+          "flow"
+        ],
+        "tag": "!!seq",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 0,
+        "column": 0,
+        "content": []
+      }
+    ]
+  }
+}

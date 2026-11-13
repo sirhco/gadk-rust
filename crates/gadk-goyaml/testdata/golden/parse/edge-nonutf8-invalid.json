@@ -1,0 +1,16 @@
+{
+  "case": "edge-nonutf8-invalid",
+  "input_b64": "YTogwygK",
+  "node": null,
+  "error": "yaml: invalid trailing UTF-8 octet",
+  "marshal_b64": null,
+  "marshal_error": null,
+  "indent2_b64": null,
+  "stream": {
+    "nodes": [],
+    "error": "yaml: invalid trailing UTF-8 octet",
+    "marshal_b64": null
+  },
+  "value": null,
+  "value_error": "yaml: invalid trailing UTF-8 octet"
+}

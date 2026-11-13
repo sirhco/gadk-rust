@@ -1,0 +1,18 @@
+{
+  "case": "decode-unmarshalTests-000",
+  "input_b64": "",
+  "node": null,
+  "error": null,
+  "marshal_b64": "bnVsbAo=",
+  "marshal_error": null,
+  "indent2_b64": "bnVsbAo=",
+  "stream": {
+    "nodes": [],
+    "error": null,
+    "marshal_b64": null
+  },
+  "value": {
+    "t": "null"
+  },
+  "value_error": null
+}

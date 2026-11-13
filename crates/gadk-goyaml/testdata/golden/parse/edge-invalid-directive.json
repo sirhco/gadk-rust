@@ -1,0 +1,16 @@
+{
+  "case": "edge-invalid-directive",
+  "input_b64": "JUZPTyBiYXIKLS0tCmE6IDEK",
+  "node": null,
+  "error": "yaml: found unknown directive name",
+  "marshal_b64": null,
+  "marshal_error": null,
+  "indent2_b64": null,
+  "stream": {
+    "nodes": [],
+    "error": "yaml: found unknown directive name",
+    "marshal_b64": null
+  },
+  "value": null,
+  "value_error": "yaml: found unknown directive name"
+}

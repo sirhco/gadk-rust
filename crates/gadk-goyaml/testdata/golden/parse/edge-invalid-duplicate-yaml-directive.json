@@ -1,0 +1,16 @@
+{
+  "case": "edge-invalid-duplicate-yaml-directive",
+  "input_b64": "JVlBTUwgMS4xCiVZQU1MIDEuMQotLS0KYTogMQo=",
+  "node": null,
+  "error": "yaml: line 1: found duplicate %YAML directive",
+  "marshal_b64": null,
+  "marshal_error": null,
+  "indent2_b64": null,
+  "stream": {
+    "nodes": [],
+    "error": "yaml: line 1: found duplicate %YAML directive",
+    "marshal_b64": null
+  },
+  "value": null,
+  "value_error": "yaml: line 1: found duplicate %YAML directive"
+}

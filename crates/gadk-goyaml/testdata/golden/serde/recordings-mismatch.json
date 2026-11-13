@@ -1,0 +1,125 @@
+{
+  "shape": "recordings",
+  "case": "mismatch",
+  "input_b64": "cmVjb3JkaW5nczoKICAtIHVzZXJfbWVzc2FnZV9pbmRleDogeAogICAgYWdlbnRfbmFtZTogW2FdCg==",
+  "decode_error": "yaml: unmarshal errors:\n  line 2: cannot unmarshal !!str `x` into int64\n  line 3: cannot unmarshal !!seq into string",
+  "marshal_b64": "cmVjb3JkaW5nczoKICAgIC0gdXNlcl9tZXNzYWdlX2luZGV4OiAwCiAgICAgIGFnZW50X25hbWU6ICIiCg==",
+  "marshal_error": null,
+  "node": {
+    "kind": "mapping",
+    "style": [],
+    "tag": "!!map",
+    "value": "",
+    "anchor": "",
+    "alias": null,
+    "head": "",
+    "line_comment": "",
+    "foot": "",
+    "line": 0,
+    "column": 0,
+    "content": [
+      {
+        "kind": "scalar",
+        "style": [],
+        "tag": "!!str",
+        "value": "recordings",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 0,
+        "column": 0,
+        "content": []
+      },
+      {
+        "kind": "sequence",
+        "style": [],
+        "tag": "!!seq",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 0,
+        "column": 0,
+        "content": [
+          {
+            "kind": "mapping",
+            "style": [],
+            "tag": "!!map",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 0,
+            "column": 0,
+            "content": [
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "user_message_index",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 0,
+                "column": 0,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!int",
+                "value": "0",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 0,
+                "column": 0,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "agent_name",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 0,
+                "column": 0,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "double"
+                ],
+                "tag": "!!str",
+                "value": "",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 0,
+                "column": 0,
+                "content": []
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

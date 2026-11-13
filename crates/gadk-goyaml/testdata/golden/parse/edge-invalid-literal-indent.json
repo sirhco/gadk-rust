@@ -1,0 +1,16 @@
+{
+  "case": "edge-invalid-literal-indent",
+  "input_b64": "YTogfDAKICB4Cg==",
+  "node": null,
+  "error": "yaml: found an indentation indicator equal to 0",
+  "marshal_b64": null,
+  "marshal_error": null,
+  "indent2_b64": null,
+  "stream": {
+    "nodes": [],
+    "error": "yaml: found an indentation indicator equal to 0",
+    "marshal_b64": null
+  },
+  "value": null,
+  "value_error": "yaml: found an indentation indicator equal to 0"
+}

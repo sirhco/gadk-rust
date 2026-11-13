@@ -1,0 +1,5 @@
+a: | # on indicator
+  text
+# after scalar
+b: > # folded
+  more

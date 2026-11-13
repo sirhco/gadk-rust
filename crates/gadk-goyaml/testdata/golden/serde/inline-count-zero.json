@@ -1,0 +1,53 @@
+{
+  "shape": "inline",
+  "case": "count-zero",
+  "input_b64": "bmFtZTogbgpjb3VudDogMAo=",
+  "decode_error": null,
+  "marshal_b64": "bmFtZTogIm4iCg==",
+  "marshal_error": null,
+  "node": {
+    "kind": "mapping",
+    "style": [],
+    "tag": "!!map",
+    "value": "",
+    "anchor": "",
+    "alias": null,
+    "head": "",
+    "line_comment": "",
+    "foot": "",
+    "line": 0,
+    "column": 0,
+    "content": [
+      {
+        "kind": "scalar",
+        "style": [],
+        "tag": "!!str",
+        "value": "name",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 0,
+        "column": 0,
+        "content": []
+      },
+      {
+        "kind": "scalar",
+        "style": [
+          "double"
+        ],
+        "tag": "!!str",
+        "value": "n",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 0,
+        "column": 0,
+        "content": []
+      }
+    ]
+  }
+}

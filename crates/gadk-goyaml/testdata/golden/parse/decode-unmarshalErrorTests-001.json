@@ -1,0 +1,16 @@
+{
+  "case": "decode-unmarshalErrorTests-001",
+  "input_b64": "djogW0Es",
+  "node": null,
+  "error": "yaml: line 1: did not find expected node content",
+  "marshal_b64": null,
+  "marshal_error": null,
+  "indent2_b64": null,
+  "stream": {
+    "nodes": [],
+    "error": "yaml: line 1: did not find expected node content",
+    "marshal_b64": null
+  },
+  "value": null,
+  "value_error": "yaml: line 1: did not find expected node content"
+}

@@ -1,0 +1,16 @@
+{
+  "case": "edge-invalid-escape",
+  "input_b64": "YTogIlxxIgo=",
+  "node": null,
+  "error": "yaml: found unknown escape character",
+  "marshal_b64": null,
+  "marshal_error": null,
+  "indent2_b64": null,
+  "stream": {
+    "nodes": [],
+    "error": "yaml: found unknown escape character",
+    "marshal_b64": null
+  },
+  "value": null,
+  "value_error": "yaml: found unknown escape character"
+}

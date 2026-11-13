@@ -1,0 +1,16 @@
+{
+  "case": "decode-TestFuzzCrashers-cases-009",
+  "input_b64": "MDoKICAgIC0gIgowMDAiIg==",
+  "node": null,
+  "error": "yaml: line 3: found unexpected end of stream",
+  "marshal_b64": null,
+  "marshal_error": null,
+  "indent2_b64": null,
+  "stream": {
+    "nodes": [],
+    "error": "yaml: line 3: found unexpected end of stream",
+    "marshal_b64": null
+  },
+  "value": null,
+  "value_error": "yaml: line 3: found unexpected end of stream"
+}

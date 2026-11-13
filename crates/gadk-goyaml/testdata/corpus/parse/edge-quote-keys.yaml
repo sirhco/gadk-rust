@@ -1,0 +1,10 @@
+true: a
+'true': b
+1: c
+'1': d
+~: e
+"": f
+? |
+  multi
+  key
+: g

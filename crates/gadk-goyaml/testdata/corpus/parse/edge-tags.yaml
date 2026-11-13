@@ -1,0 +1,9 @@
+a: !!str 1
+b: !!int "2"
+c: !custom x
+d: !<tag:yaml.org,2002:str> y
+e: !!float 1
+f: !!null ''
+g: !!map {}
+h: !!seq []
+i: !local {k: v}

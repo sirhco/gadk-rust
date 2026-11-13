@@ -1,0 +1,244 @@
+{
+  "case": "node-nodeTests-031",
+  "input_b64": "YToKIyBITQotICMgSEIxCiAgIyBIQjIKICBiOiAjIElCCiAgICBjICMgSUMK",
+  "node": {
+    "kind": "document",
+    "style": [],
+    "tag": "",
+    "value": "",
+    "anchor": "",
+    "alias": null,
+    "head": "",
+    "line_comment": "",
+    "foot": "",
+    "line": 1,
+    "column": 1,
+    "content": [
+      {
+        "kind": "mapping",
+        "style": [],
+        "tag": "!!map",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "a",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "sequence",
+            "style": [],
+            "tag": "!!seq",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 3,
+            "column": 1,
+            "content": [
+              {
+                "kind": "mapping",
+                "style": [],
+                "tag": "!!map",
+                "value": "",
+                "anchor": "",
+                "alias": null,
+                "head": "# HM",
+                "line_comment": "",
+                "foot": "",
+                "line": 5,
+                "column": 3,
+                "content": [
+                  {
+                    "kind": "scalar",
+                    "style": [],
+                    "tag": "!!str",
+                    "value": "b",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "# HB1\n# HB2",
+                    "line_comment": "# IB",
+                    "foot": "",
+                    "line": 5,
+                    "column": 3,
+                    "content": []
+                  },
+                  {
+                    "kind": "scalar",
+                    "style": [],
+                    "tag": "!!str",
+                    "value": "c",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "",
+                    "line_comment": "# IC",
+                    "foot": "",
+                    "line": 6,
+                    "column": 5,
+                    "content": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "error": null,
+  "marshal_b64": "YToKICAgICMgSE0KICAgIC0gIyBIQjEKICAgICAgIyBIQjIKICAgICAgYjogYyAjIElDCg==",
+  "marshal_error": null,
+  "indent2_b64": "YToKICAjIEhNCiAgLSAjIEhCMQogICAgIyBIQjIKICAgIGI6IGMgIyBJQwo=",
+  "stream": {
+    "nodes": [
+      {
+        "kind": "document",
+        "style": [],
+        "tag": "",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "mapping",
+            "style": [],
+            "tag": "!!map",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": [
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "a",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 1,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "sequence",
+                "style": [],
+                "tag": "!!seq",
+                "value": "",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 3,
+                "column": 1,
+                "content": [
+                  {
+                    "kind": "mapping",
+                    "style": [],
+                    "tag": "!!map",
+                    "value": "",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "# HM",
+                    "line_comment": "",
+                    "foot": "",
+                    "line": 5,
+                    "column": 3,
+                    "content": [
+                      {
+                        "kind": "scalar",
+                        "style": [],
+                        "tag": "!!str",
+                        "value": "b",
+                        "anchor": "",
+                        "alias": null,
+                        "head": "# HB1\n# HB2",
+                        "line_comment": "# IB",
+                        "foot": "",
+                        "line": 5,
+                        "column": 3,
+                        "content": []
+                      },
+                      {
+                        "kind": "scalar",
+                        "style": [],
+                        "tag": "!!str",
+                        "value": "c",
+                        "anchor": "",
+                        "alias": null,
+                        "head": "",
+                        "line_comment": "# IC",
+                        "foot": "",
+                        "line": 6,
+                        "column": 5,
+                        "content": []
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "error": null,
+    "marshal_b64": "YToKICAgICMgSE0KICAgIC0gIyBIQjEKICAgICAgIyBIQjIKICAgICAgYjogYyAjIElDCg=="
+  },
+  "value": {
+    "t": "map",
+    "v": [
+      [
+        "a",
+        {
+          "t": "seq",
+          "v": [
+            {
+              "t": "map",
+              "v": [
+                [
+                  "b",
+                  {
+                    "t": "string",
+                    "v": "c"
+                  }
+                ]
+              ]
+            }
+          ]
+        }
+      ]
+    ]
+  },
+  "value_error": null
+}
