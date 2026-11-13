@@ -27,6 +27,7 @@ members = [
   "crates/gadk-cli",
   "crates/gadk-goyaml",
   "crates/gadk-configurable",
+  "crates/gadk-agentanalytics",
   "crates/gadk",
 ]
 
@@ -66,6 +67,7 @@ gadk-telemetry = { path = "crates/gadk-telemetry", version = "0.1.0" }
 gadk-cli = { path = "crates/gadk-cli", version = "0.1.0" }
 gadk-goyaml = { path = "crates/gadk-goyaml", version = "0.1.0" }
 gadk-configurable = { path = "crates/gadk-configurable", version = "0.1.0" }
+gadk-agentanalytics = { path = "crates/gadk-agentanalytics", version = "0.1.0" }
 tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
 tokio-util = "0.7.20"
 futures = "0.3.34"
@@ -120,6 +122,10 @@ prost = "0.14.5"
 clap = { version = "4.6.7", default-features = false, features = ["std", "help", "usage", "error-context"] }
 tar = "0.4.46"
 flate2 = "1.1.11"
+# 7b-1: Arrow schema + IPC stream encoding for gadk-agentanalytics (newest arrow-rs with MSRV <= 1.95).
+arrow-schema = { version = "=60.1", default-features = false }
+arrow-array = { version = "=60.1", default-features = false }
+arrow-ipc = { version = "=60.1", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

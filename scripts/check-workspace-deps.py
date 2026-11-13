@@ -72,6 +72,10 @@
   `gadk-platform`, `gadk-session` and `gadk-tools`; it is the eighth crate that may depend on
   `gadk-engine` (its tests use the engine's `testutil` feature), and nothing depends on it, the
   façade included.
+- 7b-1: `gadk-agentanalytics` (ADK-Go's `plugin/agentanalytics` foundations) depends on exactly
+  `gadk-genai`, `gadk-model` (REST transport, `gcp-auth`), `gadk-platform` and `gadk-session`
+  (the `user:` / `app:` / `temp:` key prefixes); it never depends on `gadk-engine`, and only the
+  façade depends on it (feature `agentanalytics`, added by 7b-1's integration task).
 """
 import pathlib, sys, tomllib
 
@@ -110,6 +114,7 @@ ALLOWED = {
     "gadk-configurable": {"gadk-agent", "gadk-engine", "gadk-genai", "gadk-model", "gadk-gemini",
                           "gadk-goyaml", "gadk-launcher", "gadk-mcp", "gadk-platform",
                           "gadk-session", "gadk-tools"},
+    "gadk-agentanalytics": {"gadk-genai", "gadk-model", "gadk-platform", "gadk-session"},
     "gadk": {"gadk-genai", "gadk-platform", "gadk-model", "gadk-session", "gadk-gemini",
              "gadk-agent", "gadk-engine", "gadk-tools", "gadk-auth", "gadk-mcp", "gadk-artifact",
              "gadk-memory", "gadk-anthropic", "gadk-openai", "gadk-session-database",
