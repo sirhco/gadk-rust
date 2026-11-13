@@ -15,6 +15,11 @@ façade never re-exports it.
   `unmarshal` / `marshal` / `from_node` / `from_node_partial` / `to_node` with `Options` key
   naming, `Encoder` / `Decoder`, `GoValue` (Go's `interface{}`), `InlineMap` (Go's `,inline`
   map).
+- A struct variant's keys are looked up as `Options::key_for(<variant name>, field)` on both
+  encode and decode. Untagged, internally tagged and adjacently tagged enums decode through
+  serde's `deserialize_any` (raw YAML keys, no `key_for`), so their struct variants round-trip
+  only when the field names already are Go-default keys (lowercase, no `_`) or the variant is in
+  `verbatim_structs`; prefer externally tagged enums.
 - Node trees, error texts and emitted bytes match yaml.v3 v3.0.1 except for the accepted
   divergences listed in `docs/parity/6c-1.md`, each annotated `// Divergence (ledger 6c-1)` in
   the source.

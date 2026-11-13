@@ -102,7 +102,7 @@ impl<'w> Encoder<'w> {
         if self.indent == 0 {
             self.indent = 4;
         }
-        // Out-of-range values (2..=9) become 2 in yaml_emitter_emit_stream_start, as in Go.
+        // Values outside 2..=9 become 2 in yaml_emitter_emit_stream_start, as in Go.
         self.emitter.best_indent = isize::try_from(self.indent).unwrap_or(isize::MAX);
         yaml_stream_start_event_initialize(&mut self.event, YamlEncoding::Utf8);
         self.emit()?;

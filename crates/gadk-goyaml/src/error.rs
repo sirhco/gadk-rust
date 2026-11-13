@@ -28,8 +28,9 @@ pub enum Error {
     Syntax(String),
     /// Go's `*yaml.TypeError`: the collected `line N: cannot unmarshal …` messages.
     Type(TypeError),
-    /// An I/O error surfaced as-is (Go turns reader and writer errors into `Syntax` texts:
-    /// `yaml: input error: …`, `yaml: write error: …`).
+    /// An I/O error, built only by `From<std::io::Error>`: the crate itself never returns it.
+    /// Reader and writer failures surface as `Error::Syntax` texts, as in Go
+    /// (`yaml: input error: …`, `yaml: write error: …`).
     Io(std::io::Error),
     /// A serde shape yaml.v3 has no form for (`#[serde(flatten)]`, maps of unknown length, an
     /// `INLINE_FIELD` that is not an `InlineMap`), or a Go panic text the port returns instead

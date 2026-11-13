@@ -19,7 +19,8 @@
 //!
 //! Go fills a value in place; serde builds it from visitor calls. Where Go leaves a target
 //! untouched after a type error, the deserializer hands the visitor the zero value of the
-//! entry point (`0`, `false`, `""`, an empty sequence or map) and records the error; Go's
+//! entry point (`0`, `false`, `""`, an empty map, an empty sequence for a slice, `len` zero
+//! elements for an array or tuple) and records the error; Go's
 //! `good` result travels in [`DecodeState::good`] so sequences and maps drop the entries Go
 //! drops. Go type names in `TypeError` texts come from the serde entry point (`int64`,
 //! `[]uint8`, the serde struct name, `[]interface {}`, `map[string]interface {}`).
@@ -146,7 +147,8 @@ impl DecodeState<'_> {
                 format!(" `{}`", n.value)
             }
         } else {
-            String::new()
+            // Go appends a `!!seq`/`!!map` node's value as is (`!!mapfoo` for `!!map foo`).
+            n.value.clone()
         };
         self.terrors.push(format!(
             "line {}: cannot unmarshal {}{} into {}",
@@ -557,8 +559,8 @@ impl Prim {
                 let v = match *resolved {
                     GoValue::Int(i) => i,
                     GoValue::Uint(u) => i64::try_from(u).ok()?,
-                    // Go's `int64(f)` of an out-of-range float is platform-defined; Rust
-                    // saturates, as Go does on arm64.
+                    // Divergence (ledger 6c-1): Go's `int64(f)` of an out-of-range float is
+                    // platform-defined; Rust saturates, as Go does on arm64.
                     GoValue::Float(f) if f <= i64::MAX as f64 => f as i64,
                     _ => return None,
                 };
@@ -569,6 +571,7 @@ impl Prim {
                 let v = match *resolved {
                     GoValue::Int(i) => u64::try_from(i).ok()?,
                     GoValue::Uint(u) => u,
+                    // Divergence (ledger 6c-1): as above, `uint64(f)` saturates (Go on arm64).
                     GoValue::Float(f) if f <= u64::MAX as f64 => f as u64,
                     _ => return None,
                 };
@@ -608,7 +611,9 @@ impl Prim {
             (Prim::Float(32), GoValue::Float(f)) => visitor.visit_f32(f as f32),
             (_, GoValue::Float(f)) => visitor.visit_f64(f),
             (_, GoValue::String(s)) => visitor.visit_string(s),
-            (_, other) => visitor.visit_string(format!("{other:?}")),
+            (_, other) => unreachable!(
+                "Prim::convert yields only bool, int, uint, float or string values, not {other:?}"
+            ),
         }
     }
 
@@ -948,6 +953,7 @@ impl<'a, 'o> NodeDe<'a, 'o> {
         &mut self,
         n: Option<NodeId>,
         name: &'static str,
+        variants: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value, Error> {
         let doc = self.doc;
@@ -965,17 +971,29 @@ impl<'a, 'o> NodeDe<'a, 'o> {
                 visitor.visit_enum(UnitVariant(go_string_of(&tag, &resolved, node)))
             }
             Kind::Mapping if node.content.len() == 2 => {
+                let terrors = self.d.terrors.len();
                 let Some(variant) = unmarshal_string(self.d, doc, node.content[0])? else {
+                    if self.d.terrors.len() == terrors {
+                        // A null key: Go's null into a string is "not good" with no type
+                        // error, so report serde's, as for a null enum scalar.
+                        return Err(de::Error::invalid_type(Unexpected::Unit, &visitor));
+                    }
                     return Err(Error::Type(TypeError {
                         errors: self.d.terrors.clone(),
                     }));
                 };
+                // A struct variant's fields are keyed under the variant's name, as on encode.
+                let struct_name = variants
+                    .iter()
+                    .copied()
+                    .find(|v| *v == variant)
+                    .unwrap_or(name);
                 let r = visitor.visit_enum(MapVariant {
                     d: &mut *self.d,
                     doc,
                     variant,
                     value: node.content[1],
-                    name,
+                    struct_name,
                 });
                 self.d.good = true;
                 r
@@ -1190,10 +1208,10 @@ impl<'de> Deserializer<'de> for NodeDe<'_, '_> {
     fn deserialize_enum<V: Visitor<'de>>(
         self,
         name: &'static str,
-        _variants: &'static [&'static str],
+        variants: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value, Error> {
-        self.run(|c, n| c.enumeration(n, name, visitor))
+        self.run(|c, n| c.enumeration(n, name, variants, visitor))
     }
 
     fn deserialize_identifier<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
@@ -1767,7 +1785,8 @@ struct MapVariant<'a, 'o> {
     doc: &'a Document,
     variant: String,
     value: NodeId,
-    name: &'static str,
+    /// The matched variant's name (the enum's when no variant matches; serde then fails).
+    struct_name: &'static str,
 }
 
 impl<'de, 'a, 'o> EnumAccess<'de> for MapVariant<'a, 'o> {
@@ -1784,7 +1803,7 @@ impl<'de, 'a, 'o> EnumAccess<'de> for MapVariant<'a, 'o> {
             v,
             VariantDe {
                 value: NodeDe::new(self.d, self.doc, self.value),
-                name: self.name,
+                struct_name: self.struct_name,
             },
         ))
     }
@@ -1793,8 +1812,9 @@ impl<'de, 'a, 'o> EnumAccess<'de> for MapVariant<'a, 'o> {
 /// The value of a `{variant: value}` enum.
 struct VariantDe<'a, 'o> {
     value: NodeDe<'a, 'o>,
-    /// The enum's name: a struct variant's fields are keyed under it ([`Options::key_for`]).
-    name: &'static str,
+    /// The variant's name: a struct variant's fields are keyed under it
+    /// ([`Options::key_for`]), as `serialize_struct_variant` keys them.
+    struct_name: &'static str,
 }
 
 impl<'de> VariantAccess<'de> for VariantDe<'_, '_> {
@@ -1817,7 +1837,8 @@ impl<'de> VariantAccess<'de> for VariantDe<'_, '_> {
         fields: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value, Error> {
-        self.value.deserialize_struct(self.name, fields, visitor)
+        self.value
+            .deserialize_struct(self.struct_name, fields, visitor)
     }
 }
 
@@ -2074,6 +2095,91 @@ mod tests {
         assert_eq!(
             err.to_string(),
             "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!seq into Shape"
+        );
+    }
+
+    #[derive(Debug, PartialEq, serde::Serialize, Deserialize)]
+    enum SvEnum {
+        Sv { my_field: i64 },
+    }
+
+    #[test]
+    fn struct_variant_keys_round_trip_under_the_variant_name() {
+        // Encode and decode both look a struct variant's keys up under the variant's name.
+        let v = SvEnum::Sv { my_field: 3 };
+        let mut verbatim = opts();
+        verbatim.verbatim_structs.insert("Sv");
+        let out = crate::marshal(&v, &verbatim).unwrap();
+        assert_eq!(
+            String::from_utf8(out.clone()).unwrap(),
+            "Sv:\n    my_field: 3\n"
+        );
+        assert_eq!(unmarshal::<SvEnum>(&out, &verbatim).unwrap(), v);
+
+        let mut keyed = opts();
+        keyed.field_keys.insert(("Sv", "my_field"), "mf");
+        let out = crate::marshal(&v, &keyed).unwrap();
+        assert_eq!(String::from_utf8(out.clone()).unwrap(), "Sv:\n    mf: 3\n");
+        assert_eq!(unmarshal::<SvEnum>(&out, &keyed).unwrap(), v);
+
+        // The enum's name is not a key namespace for its variants' fields.
+        let mut by_enum = opts();
+        by_enum.verbatim_structs.insert("SvEnum");
+        let out = crate::marshal(&v, &by_enum).unwrap();
+        assert_eq!(
+            String::from_utf8(out.clone()).unwrap(),
+            "Sv:\n    myfield: 3\n"
+        );
+        assert_eq!(unmarshal::<SvEnum>(&out, &by_enum).unwrap(), v);
+    }
+
+    #[test]
+    fn untagged_struct_variants_do_not_round_trip_non_default_keys() {
+        // Pinned limitation (ledger 6c-1, Not annotated): serde decodes an untagged enum
+        // through `deserialize_any` (raw YAML keys), while encode applies `key_for`.
+        #[derive(Debug, PartialEq, serde::Serialize, Deserialize)]
+        #[serde(untagged)]
+        enum U {
+            A { my_field: i64 },
+        }
+        let out = crate::marshal(&U::A { my_field: 1 }, &opts()).unwrap();
+        assert_eq!(String::from_utf8(out.clone()).unwrap(), "myfield: 1\n");
+        assert!(unmarshal::<U>(&out, &opts()).is_err());
+        assert_eq!(
+            unmarshal::<U>(b"my_field: 1\n", &opts()).unwrap(),
+            U::A { my_field: 1 }
+        );
+    }
+
+    #[test]
+    fn terror_keeps_the_raw_value_of_seq_and_map_tags() {
+        // Go: `cannot unmarshal !!mapfoo into int64` (value appended without backticks).
+        let err = unmarshal::<BTreeMap<String, i64>>(b"a: !!map foo\n", &opts()).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!mapfoo into int64"
+        );
+        let err = unmarshal::<BTreeMap<String, i64>>(b"a: !!seq bar\n", &opts()).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!seqbar into int64"
+        );
+    }
+
+    #[test]
+    fn null_variant_key_is_a_serde_invalid_type() {
+        // Go's null into a string position is "not good" with no type error (`d.null`), so a
+        // null variant key reports serde's error, as a null enum scalar does.
+        let err = unmarshal::<Shape>(b"{~: 1}", &opts()).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "invalid type: unit value, expected enum Shape"
+        );
+        // A variant key that records a type error keeps reporting it.
+        let err = unmarshal::<Shape>(b"{[1]: 1}", &opts()).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!seq into string"
         );
     }
 

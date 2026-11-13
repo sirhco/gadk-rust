@@ -20,7 +20,11 @@
 //! - [`unmarshal_node`] / [`marshal_node`]: Go's `yaml.Unmarshal(data, &node)` /
 //!   `yaml.Marshal(&node)` over the [`Document`] node arena.
 //! - [`unmarshal`] / [`marshal`] / [`from_node`] / [`to_node`]: serde values decoded and encoded
-//!   by yaml.v3's reflection rules; struct keys come from [`Options::key_for`].
+//!   by yaml.v3's reflection rules; struct keys come from [`Options::key_for`] (a struct
+//!   variant's under its variant name). Untagged, internally tagged and adjacently tagged enums
+//!   decode through serde's `deserialize_any` (raw YAML keys, no `key_for`), so their struct
+//!   variants round-trip only with field names that already are Go-default keys (lowercase, no
+//!   `_`) or with the variant in [`Options::verbatim_structs`]; prefer externally tagged enums.
 //! - [`Encoder`] / [`Decoder`]: multi-document streams (`SetIndent`, `Close`).
 //! - [`GoValue`]: what yaml.v3 decodes into `interface{}`; [`InlineMap`]: Go's `,inline` map.
 //!
