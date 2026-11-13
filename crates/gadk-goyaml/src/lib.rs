@@ -96,10 +96,15 @@ pub fn unmarshal_node(data: &[u8]) -> Result<Document, Error> {
     })
 }
 
-/// Go's `yaml.Marshal(&node)` for node `at` of `doc`.
-#[allow(unused_variables)] // Task 7 writes the body and removes this line.
+/// Go's `yaml.Marshal(&node)` for node `at` of `doc` (the zero node, `Document::default()`,
+/// marshals to `null\n` as in Go).
 pub fn marshal_node(doc: &Document, at: NodeId) -> Result<Vec<u8>, Error> {
-    todo!("Task 7")
+    // Go: yaml.go Marshal
+    let mut e = encode::new_encoder();
+    let result = e.marshal_doc_node(doc, at).and_then(|()| e.finish());
+    let out = std::mem::take(&mut e.emitter.output_buffer);
+    e.destroy();
+    result.map(|()| out)
 }
 
 /// Go's `yaml.Unmarshal(data, &v)` for a serde type.
@@ -143,24 +148,25 @@ pub fn from_node_partial<T: serde::de::DeserializeOwned + Default>(
 
 /// Go's `yaml.Encoder`: writes YAML documents to a stream, separated by `---`.
 pub struct Encoder<'w> {
-    #[allow(dead_code)] // Task 7 reads it and removes this line.
     encoder: encode::Encoder<'w>,
 }
 
 impl<'w> Encoder<'w> {
     /// Go's `yaml.NewEncoder(w)`. Pass `&mut writer` to keep using the writer after
     /// [`Encoder::close`].
-    #[allow(unused_variables)] // Task 7 writes the body and removes this line.
     pub fn new<W: std::io::Write + 'w>(w: W) -> Self {
-        todo!("Task 7")
+        // Go: yaml.go NewEncoder
+        Encoder {
+            encoder: encode::new_encoder_with_writer(Box::new(w)),
+        }
     }
 
     /// Go's `Encoder.SetIndent`. Go's negative-indent panic is unrepresentable; 0 means the
     /// default 4 (`encode.go:60-63`) and values outside 2..=9 fall back to 2 in the emitter
     /// (`apic.go` `yaml_emitter_set_indent`), as in Go.
-    #[allow(unused_variables)] // Task 7 writes the body and removes this line.
     pub fn set_indent(&mut self, spaces: usize) {
-        todo!("Task 7")
+        // Go: yaml.go SetIndent
+        self.encoder.indent = spaces;
     }
 
     /// Go's `Encoder.Encode(v)` for a serde value.
@@ -174,14 +180,16 @@ impl<'w> Encoder<'w> {
     }
 
     /// Go's `Encoder.Encode(&node)` for node `at` of `doc`.
-    #[allow(unused_variables)] // Task 7 writes the body and removes this line.
     pub fn encode_node(&mut self, doc: &Document, at: NodeId) -> Result<(), Error> {
-        todo!("Task 7")
+        // Go: yaml.go Encode
+        self.encoder.marshal_doc_node(doc, at)
     }
 
-    /// Go's `Encoder.Close`: writes any remaining data (no `...` terminator).
-    pub fn close(self) -> Result<(), Error> {
-        todo!("Task 7")
+    /// Go's `Encoder.Close`: writes any remaining data (no `...` terminator). Closing an
+    /// encoder that encoded nothing fails with Go's `yaml: expected STREAM-START`.
+    pub fn close(mut self) -> Result<(), Error> {
+        // Go: yaml.go Close
+        self.encoder.finish()
     }
 }
 

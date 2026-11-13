@@ -308,7 +308,6 @@ fn resolve_value(tag: &str, input: &str) -> (&'static str, GoValue) {
 
 /// Go: resolve.go `encodeBase64` — base64 broken into 70-character lines (each followed by a
 /// newline when there is more than one line). `s` is a Go string: any bytes.
-#[allow(dead_code)] // Task 7 (encode.rs stringv) calls it and removes this line.
 pub(crate) fn encode_base64(s: &[u8]) -> String {
     // Go: resolve.go encodeBase64
     const LINE_LEN: usize = 70;
@@ -414,7 +413,6 @@ pub(crate) fn parse_timestamp(s: &str) -> Option<DateTime<FixedOffset>> {
 
 /// Go: encode.go `isBase60Float` — YAML 1.1 base-60 notation, which `stringv` quotes on
 /// output (`^[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+(?:\.[0-9_]*)?$`).
-#[allow(dead_code)] // Task 7 (encode.rs stringv) calls it and removes this line.
 pub(crate) fn is_base60_float(s: &str) -> bool {
     // Go: encode.go isBase60Float
     // Fast path.
@@ -464,7 +462,6 @@ pub(crate) fn is_base60_float(s: &str) -> bool {
 
 /// Go: encode.go `isOldBool` — YAML 1.1 bool notation, which `stringv` quotes on output so
 /// the output stays valid for YAML 1.1 parsers.
-#[allow(dead_code)] // Task 7 (encode.rs stringv) calls it and removes this line.
 pub(crate) fn is_old_bool(s: &str) -> bool {
     // Go: encode.go isOldBool
     matches!(

@@ -108,9 +108,34 @@ pub(crate) fn failf(msg: impl fmt::Display) -> Error {
     Error::Syntax(format!("yaml: {msg}"))
 }
 
+/// The deepest collection nesting a recursive walk accepts (plan decision D7).
+///
+/// Parsing accepts yaml.v3's 10000 levels (the composer runs on an explicit stack), but every
+/// recursive walk — the node encoder, the serde `Serializer`/`Deserializer` and the `GoValue`
+/// decoder — stops past this many nested sequences/mappings instead of overflowing the
+/// thread's stack. 127 is the workspace-wide nesting policy (serde_json's limit).
+///
+/// Divergence (ledger 6c-1): Go's growable goroutine stacks let these walks go as deep as the
+/// scanner allows (10000).
+pub(crate) const MAX_WALK_DEPTH: usize = 127;
+
+/// The error a recursive walk returns when nesting exceeds [`MAX_WALK_DEPTH`]:
+/// `yaml: exceeded max depth of 127` (worded like the scanner's `exceeded max depth of 10000`).
+pub(crate) fn walk_depth_exceeded() -> Error {
+    failf(format_args!("exceeded max depth of {MAX_WALK_DEPTH}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn walk_depth_exceeded_text() {
+        assert_eq!(
+            walk_depth_exceeded().to_string(),
+            "yaml: exceeded max depth of 127"
+        );
+    }
 
     #[test]
     fn type_error_text_matches_go() {
