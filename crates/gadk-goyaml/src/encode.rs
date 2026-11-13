@@ -165,7 +165,6 @@ impl<'w> Encoder<'w> {
 
     /// Go: `(*encoder).mappingv` — MAPPING-START (flow if `self.flow`, which it resets),
     /// `f`, MAPPING-END.
-    #[allow(dead_code)] // Task 9 (ser.rs) calls it and removes this line.
     pub(crate) fn mappingv(
         &mut self,
         tag: &str,
@@ -178,7 +177,6 @@ impl<'w> Encoder<'w> {
     }
 
     /// The MAPPING-START half of [`Encoder::mappingv`] (serde's streaming `serialize_map`).
-    #[allow(dead_code)] // Task 9 (ser.rs) calls it and removes this line.
     pub(crate) fn mappingv_start(&mut self, tag: &str) -> Result<(), Error> {
         // Go: encode.go mappingv
         let implicit = tag.is_empty();
@@ -198,7 +196,6 @@ impl<'w> Encoder<'w> {
     }
 
     /// The MAPPING-END half of [`Encoder::mappingv`].
-    #[allow(dead_code)] // Task 9 (ser.rs) calls it and removes this line.
     pub(crate) fn mappingv_end(&mut self) -> Result<(), Error> {
         // Go: encode.go mappingv
         yaml_mapping_end_event_initialize(&mut self.event);
@@ -207,7 +204,6 @@ impl<'w> Encoder<'w> {
 
     /// The SEQUENCE-START half of Go's `(*encoder).slicev` (flow if `self.flow`, which it
     /// resets).
-    #[allow(dead_code)] // Task 9 (ser.rs) calls it and removes this line.
     pub(crate) fn slicev_start(&mut self, tag: &str) -> Result<(), Error> {
         // Go: encode.go slicev
         let implicit = tag.is_empty();
@@ -228,7 +224,6 @@ impl<'w> Encoder<'w> {
     }
 
     /// The SEQUENCE-END half of Go's `(*encoder).slicev`.
-    #[allow(dead_code)] // Task 9 (ser.rs) calls it and removes this line.
     pub(crate) fn slicev_end(&mut self) -> Result<(), Error> {
         // Go: encode.go slicev
         let ok = yaml_sequence_end_event_initialize(&mut self.event);
@@ -239,7 +234,6 @@ impl<'w> Encoder<'w> {
     /// Go: `(*encoder).stringv` — `s` is a Go string (any bytes): `!!binary` base64 when not
     /// UTF-8, else plain / literal / double-quoted by Go's rules. `tag` is a short tag (Go's
     /// `marshal` applies `shortTag` first) or empty.
-    #[allow(dead_code)] // Task 9 (ser.rs) calls it and removes this line.
     pub(crate) fn stringv(&mut self, tag: &str, s: &[u8]) -> Result<(), Error> {
         // Go: encode.go stringv
         let mut tag = tag;
@@ -292,7 +286,6 @@ impl<'w> Encoder<'w> {
     }
 
     /// Go: `(*encoder).boolv`.
-    #[allow(dead_code)] // Task 9 (ser.rs) calls it and removes this line.
     pub(crate) fn boolv(&mut self, tag: &str, b: bool) -> Result<(), Error> {
         // Go: encode.go boolv
         let s: &[u8] = if b { b"true" } else { b"false" };
@@ -300,7 +293,6 @@ impl<'w> Encoder<'w> {
     }
 
     /// Go: `(*encoder).intv`.
-    #[allow(dead_code)] // Task 9 (ser.rs) calls it and removes this line.
     pub(crate) fn intv(&mut self, tag: &str, i: i64) -> Result<(), Error> {
         // Go: encode.go intv
         let s = i.to_string();
@@ -317,7 +309,6 @@ impl<'w> Encoder<'w> {
     }
 
     /// Go: `(*encoder).uintv`.
-    #[allow(dead_code)] // Task 9 (ser.rs) calls it and removes this line.
     pub(crate) fn uintv(&mut self, tag: &str, u: u64) -> Result<(), Error> {
         // Go: encode.go uintv
         let s = u.to_string();
@@ -334,7 +325,6 @@ impl<'w> Encoder<'w> {
     }
 
     /// Go: `(*encoder).timev` — RFC3339Nano text.
-    #[allow(dead_code)] // Task 9 (ser.rs) calls it and removes this line.
     pub(crate) fn timev(&mut self, tag: &str, t: &DateTime<FixedOffset>) -> Result<(), Error> {
         // Go: encode.go timev
         let s = gadk_platform::go_format_rfc3339_nano(t);
@@ -352,7 +342,6 @@ impl<'w> Encoder<'w> {
 
     /// Go: `(*encoder).floatv` — `strconv.FormatFloat(f, 'g', -1, precision)` with
     /// `.inf`/`-.inf`/`.nan`; `precision` is 32 for `float32` (value passed widened) or 64.
-    #[allow(dead_code)] // Task 9 (ser.rs) calls it and removes this line.
     pub(crate) fn floatv(&mut self, tag: &str, f: f64, precision: u32) -> Result<(), Error> {
         // Go: encode.go floatv
         // Issue #352: When formatting, use the precision of the underlying value

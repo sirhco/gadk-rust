@@ -25,7 +25,7 @@
 use crate::value::GoValue;
 
 /// Go's `reflect.Kind` numbers (the order `keyList.Less` falls back to).
-#[allow(dead_code)] // Task 9 (ser.rs) builds keys of these kinds and removes this line.
+#[allow(dead_code)] // Go's whole reflect.Kind list: kinds no serde value or GoValue has stay unbuilt.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum ReflectKind {
     /// `reflect.Invalid`.
@@ -85,7 +85,6 @@ pub(crate) enum ReflectKind {
 }
 
 /// One map key as `keyList.Less` sees it (after `Elem()` through interfaces and pointers).
-#[allow(dead_code)] // Task 9 (ser.rs) builds these and removes this line.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum SortKey {
     /// A `bool` key.
@@ -118,7 +117,6 @@ impl SortKey {
     /// The `SortKey` of a `map[interface{}]interface{}` key holding `v` (`Null` → a nil
     /// interface, `Int` → `int`, `Uint` → `uint64`, `Float` → `float64`, `String`/`Bytes` →
     /// `string`, `Timestamp` → `time.Time`, `Seq` → slice, `Map`/`MapAny` → map).
-    #[allow(dead_code)] // Task 9 (ser.rs, GoValue::MapAny keys) calls it and removes this line.
     pub(crate) fn from_go_value(v: &GoValue) -> SortKey {
         match v {
             GoValue::Null => SortKey::Other(ReflectKind::Interface),
@@ -283,7 +281,6 @@ fn in_ranges(pairs: &[u32], r: char) -> bool {
 /// Go's `sort.Sort(keyList(keys))`: sorts `items` by [`key_list_less`] on `key(item)` with the
 /// exact algorithm of Go's `sort.Sort` (pdqsort), so orders of keys `Less` does not totally
 /// order match Go (and never trip Rust's total-order checks).
-#[allow(dead_code)] // Task 9 (ser.rs mapv / inline map) calls it and removes this line.
 pub(crate) fn sort_keys<T>(items: &mut [T], key: impl Fn(&T) -> &SortKey) {
     // Go: sorter.go sort.Sort(keyList)
     let n = items.len();

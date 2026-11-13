@@ -42,7 +42,6 @@ use crate::yamlh::{
 /// The serde newtype-struct name through which a [`Document`] crosses the serde boundary
 /// (the `serde_json::RawValue` technique): `ser.rs` and `de.rs` recognise it and hand the
 /// subtree over through a thread-local slot instead of serializing it.
-#[allow(dead_code)] // Until Tasks 8–9 use it; Task 9 removes this line.
 pub(crate) const DOCUMENT_MARKER: &str = "$gadk_goyaml::Document";
 
 /// A node handle inside a [`Document`] (Go: a `*Node`; equality is Go's pointer identity).
