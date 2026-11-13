@@ -20,7 +20,7 @@ mcp = ["dep:gadk-mcp"]
 gadk-agent = { workspace = true }
 gadk-auth = { workspace = true }
 gadk-platform = { workspace = true }
-gadk-a2a = { workspace = true, optional = true, default-features = false, features = ["client"] }
+gadk-a2a = { workspace = true, optional = true, features = ["client"] }
 gadk-mcp = { workspace = true, optional = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }

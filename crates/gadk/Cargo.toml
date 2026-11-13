@@ -70,7 +70,7 @@ gadk-openai = { workspace = true, optional = true }
 gadk-session-database = { workspace = true, optional = true }
 gadk-vertexai = { workspace = true, optional = true }
 gadk-server = { workspace = true, optional = true }
-gadk-a2a = { workspace = true, optional = true }
+gadk-a2a = { workspace = true, optional = true, features = ["server", "client"] }
 gadk-launcher = { workspace = true, optional = true }
 gadk-telemetry = { workspace = true, optional = true }
 gadk-agentregistry = { workspace = true, optional = true }

@@ -48,7 +48,7 @@ gadk-platform = { workspace = true }
 # Go's launcher always links telemetry (`InitAndSetGlobalOtelProviders`).
 gadk-telemetry = { workspace = true }
 gadk-server = { workspace = true, optional = true }
-gadk-a2a = { workspace = true, optional = true, features = ["server"] }
+gadk-a2a = { workspace = true, optional = true, features = ["server", "client"] }
 axum = { workspace = true, optional = true }
 hyper = { workspace = true, optional = true, features = ["server", "http1", "http2"] }
 hyper-util = { workspace = true, optional = true, features = ["server", "server-auto", "http1", "http2", "tokio", "service"] }
@@ -71,7 +71,7 @@ chrono = { workspace = true }
 [dev-dependencies]
 gadk-engine = { workspace = true, features = ["testutil"] }
 gadk-server = { workspace = true, features = ["testutil"] }
-gadk-a2a = { workspace = true, features = ["testutil"] }
+gadk-a2a = { workspace = true, features = ["server", "client", "testutil"] }
 tokio = { workspace = true, features = ["test-util"] }
 reqwest = { workspace = true }
 tempfile = { workspace = true }
