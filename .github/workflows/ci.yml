@@ -30,7 +30,7 @@ jobs:
         uses: EmbarkStudios/cargo-deny-action@v2
       - name: parity
         run: |
-          (cd adk-go && go mod download go.opentelemetry.io/contrib/detectors/gcp)
+          (cd adk-go && go mod download go.opentelemetry.io/contrib/detectors/gcp gopkg.in/yaml.v3)
           ADK_GO_DIR=adk-go python3 scripts/parity-check --ledger all
           ADK_GO_DIR=adk-go python3 scripts/parity_check_test.py
           python3 scripts/check-workspace-deps.py

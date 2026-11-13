@@ -49,6 +49,8 @@ pub(crate) fn yaml_emitter_flush(emitter: &mut YamlEmitter<'_>) -> bool {
     let result = write_handler(emitter, &buffer[..emitter.buffer_pos]);
     emitter.buffer = buffer;
     if let Err(err) = result {
+        // Divergence (ledger 6c-1): the text after `write error: ` is the `std::io::Error`'s
+        // Display: Go's `err.Error()` for a message-only error, Rust's text for an OS error.
         return yaml_emitter_set_writer_error(emitter, &format!("write error: {err}"));
     }
     emitter.buffer_pos = 0;

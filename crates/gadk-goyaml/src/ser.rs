@@ -233,8 +233,12 @@ pub(crate) fn marshal_doc<T: Serialize + ?Sized>(
     // Go: encode.go marshalDoc
     e.init()?;
     // Divergence (ledger 6c-1): the value is captured before its first event is emitted, so a
-    // failing value (inline-map conflict, flatten, depth) leaves no partial document behind in
-    // an Encoder's stream, where Go panics part-way through the document.
+    // value that fails while being captured (inline-map conflict, flatten, a serde value nested
+    // too deep) leaves no partial document behind in an Encoder's stream, where Go panics
+    // part-way through the document. A failure during the walk that follows (e.g. a `Document`
+    // field whose nodes nest too deep: its depth is counted only on the walk) comes after
+    // events were already emitted, so the stream keeps that partial document and the Encoder's
+    // later calls fail, as after Go's mid-document panic.
     let content = v.serialize(Capture { opts, depth: 0 })?;
     if let Content::Node(doc) = &content
         && doc[doc.root()].kind == Kind::Document

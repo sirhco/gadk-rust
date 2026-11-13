@@ -13,7 +13,7 @@
 // limitations under the License.
 
 //! Replays the probe's emit goldens: `marshal_b64`, `indent2_b64` and `stream.marshal_b64`
-//! from Documents built out of the node dumps (Task 7).
+//! from Documents built out of the node dumps.
 
 mod support;
 

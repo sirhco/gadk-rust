@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of yaml.v3 v3.0.1 `limit_test.go` (Task 10). Its `Benchmark*` functions and the
+//! Port of yaml.v3 v3.0.1 `limit_test.go`. Its `Benchmark*` functions and the
 //! `benchmark` helper are not ported (benchmarks are outside the ledger).
 
 use crate::error::walk_depth_exceeded;

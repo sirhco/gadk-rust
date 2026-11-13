@@ -33,8 +33,8 @@ use crate::yamlh::{
 };
 
 /// Go: `default_tag_directives` (parserc.go:1170) — the `!` and `!!` handles every document
-/// knows. Go declares it in parserc.go and the emitter uses it too; Task 6's parser can share
-/// this function.
+/// knows. Go declares it in parserc.go and the emitter uses it too; the parser shares this
+/// function.
 pub(crate) fn default_tag_directives() -> [YamlTagDirective; 2] {
     // Go: parserc.go default_tag_directives
     [
@@ -166,7 +166,6 @@ fn yaml_emitter_set_emitter_error(emitter: &mut YamlEmitter<'_>, problem: &str) 
 /// Emit an event. Go appends a copy of `*event` to the emitter's queue; the port may take the
 /// event's contents (`std::mem::take`): every caller re-initializes `event` before the next
 /// emit. Returns false on error (set on `emitter`).
-#[allow(dead_code)] // Until Task 7 calls it; Task 12 removes this line.
 pub(crate) fn yaml_emitter_emit(emitter: &mut YamlEmitter<'_>, event: &mut YamlEvent) -> bool {
     // Go: emitterc.go yaml_emitter_emit
     emitter.events.push(std::mem::take(event));

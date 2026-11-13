@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of yaml.v3 v3.0.1 `example_embedded_test.go` (Task 11).
+//! Port of yaml.v3 v3.0.1 `example_embedded_test.go`.
 //!
 //! An example showing how to unmarshal embedded structs from YAML. Go's `StructB` embeds
 //! `StructA` with `yaml:",inline"`; in Rust the inlined struct's fields are listed directly in

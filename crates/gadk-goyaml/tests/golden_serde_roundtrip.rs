@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Replays the probe's serde goldens as decode → encode round trips (Task 11).
+//! Replays the probe's serde goldens as decode → encode round trips.
 //!
 //! For every serde golden with an input, the probe ran `yaml.Unmarshal(in, &s)` into the Go
 //! shape, then `yaml.Marshal(s)` (`marshal_b64`) and `node.Encode(s)` (`node`) on whatever

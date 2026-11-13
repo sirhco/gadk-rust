@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of yaml.v3 v3.0.1 `decode_test.go` (Task 11).
+//! Port of yaml.v3 v3.0.1 `decode_test.go`.
 //!
 //! Go's reflection targets become small serde types: Go `int`/`uint` are `i64`/`u64`,
 //! `map[string]T` is `BTreeMap<String, T>`, `map[interface{}]T` is [`AnyMap`], `interface{}` is
@@ -1155,7 +1155,7 @@ fn test_decoder_read_error() {
 }
 
 #[test]
-fn test_unmarshal_nan() {
+fn test_unmarshal_na_n() {
     let value: BTreeMap<String, GoValue> =
         unmarshal(b"notanum: .NaN", &Options::default()).unwrap();
     assert!(matches!(value["notanum"], GoValue::Float(f) if f.is_nan()));

@@ -1048,7 +1048,8 @@ mod tests {
         assert_eq!(n, 77);
     }
 
-    /// For the shapes without `GoValue` / `Document` fields (whose `Serialize` is the codec's),
+    /// For the shapes without `GoValue` / `Document` fields (`golden_serde` checks those through
+    /// the codec; serde_json renders a `Document` as unit),
     /// the expected value serialized by serde_json has exactly the keys (incl. `omitempty`
     /// skips) and scalars of Go's `node.Encode(v)` for that golden.
     #[test]

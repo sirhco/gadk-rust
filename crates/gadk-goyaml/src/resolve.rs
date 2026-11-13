@@ -15,7 +15,7 @@
 
 //! Port of yaml.v3 v3.0.1 `resolve.go`: implicit tag resolution, short/long tags, `!!binary`
 //! base64 and timestamps. Also home to `encode.go`'s `isBase60Float` / `isOldBool` (the
-//! YAML 1.1 forms `stringv` quotes; plan Task 5) and the slices of Go's `strconv` /
+//! YAML 1.1 forms `stringv` quotes) and the slices of Go's `strconv` /
 //! `time.Parse` that `resolve` relies on (`ParseInt`, `ParseUint`, `ParseFloat`, the four
 //! `allowedTimestampFormats` layouts).
 

@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of yaml.v3 v3.0.1 `encode_test.go` (Task 11).
+//! Port of yaml.v3 v3.0.1 `encode_test.go`.
 //!
 //! Go values become serde values: Go `int`/`uint` are `i64`/`u64`, `map[string]T` is a
 //! `BTreeMap` (Go sorts map keys on encode), `interface{}` is [`GoValue`], `*T` is `Option<T>`,

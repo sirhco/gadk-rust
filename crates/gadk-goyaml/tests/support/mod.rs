@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Shared test support for the golden replays (plan Task 5): golden loaders (Appendix
-//! C.golden), NodeDump / ValueDump conversions and comparisons (`golden`), and the serde
+//! Shared test support for the golden replays: golden loaders (the format in
+//! `scripts/gen-go-goyaml/SCENARIO.md`), NodeDump / ValueDump conversions and comparisons (`golden`), and the serde
 //! shape mirrors with their `Options` and expected values (`shapes`).
 //!
 //! Every `tests/*.rs` target includes this module (`mod support;`) and uses a different part

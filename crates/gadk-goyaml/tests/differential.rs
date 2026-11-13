@@ -13,7 +13,7 @@
 // limitations under the License.
 
 //! Replays the seeded differential corpus (`testdata/golden/diff/`, 32 seeds x 20 cases):
-//! parse and emit (Task 11, spec R12).
+//! parse and emit (spec R12).
 //!
 //! Each golden holds a value the probe generated with Go's `math/rand` (`source`), Go's
 //! `yaml.Marshal` of it (the input), the node Go parses back (`node` / `error`), Go's
@@ -198,7 +198,7 @@ fn differential_replays_every_case() {
     );
     assert_eq!(parsed + parse_errors, 640);
     // yaml.v3 cannot re-parse five of its own outputs (literal blocks with an indentation
-    // indicator for text starting with a space; see the plan notes): the port reproduces that.
+    // indicator for text starting with a space; golden `diff/17-1`): the port reproduces that.
     assert_eq!(parse_errors, 5);
 }
 
