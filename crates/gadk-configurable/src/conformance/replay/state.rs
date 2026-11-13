@@ -15,20 +15,18 @@
 
 //! Go `internal/configurable/conformance/replayplugin/invocation_replay_state.go`: the
 //! per-invocation replay state, isolating concurrent runs. Go's `mu` + `cond` are a
-//! `parking_lot` `Mutex` + `Condvar` (waited on in `tokio::task::spawn_blocking`); the fields
-//! Go guards with `mu` are [`ReplayInner`].
-
-#![allow(dead_code, unused_variables, unused_imports, clippy::todo)]
+//! `std::sync` `Mutex` + `Condvar` (waited on inside `tokio::task::spawn_blocking`, so the
+//! runtime's worker threads never block); the fields Go guards with `mu` are [`ReplayInner`].
 
 use std::collections::HashMap;
-
-use parking_lot::{Condvar, Mutex};
+use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
 
 use crate::conformance::recording::Recordings;
 
 /// Go `invocationReplayState`.
 pub(crate) struct InvocationReplayState {
-    /// Go `testCasePath`.
+    /// Go `testCasePath` (read only by Go's unused `GetTestCasePath`).
+    #[allow(dead_code)]
     pub(crate) test_case_path: String,
     /// Go `userMessageIndex`.
     pub(crate) user_message_index: i64,
@@ -55,30 +53,84 @@ impl InvocationReplayState {
     /// Go `newInvocationReplayState`.
     pub(crate) fn new(test_case_path: String, user_message_index: i64, recs: Recordings) -> Self {
         // Go: invocation_replay_state.go newInvocationReplayState
-        todo!("Task 10")
+        InvocationReplayState {
+            test_case_path,
+            user_message_index,
+            recordings: recs,
+            mu: Mutex::new(ReplayInner::default()),
+            cond: Condvar::new(),
+        }
     }
 
-    /// Go `GetTestCasePath`.
+    /// Go `GetTestCasePath`. Unused by Go's plugin too.
+    #[allow(dead_code)]
     pub(crate) fn get_test_case_path(&self) -> &str {
         // Go: invocation_replay_state.go GetTestCasePath
-        todo!("Task 10")
+        &self.test_case_path
     }
 
-    /// Go `GetUserMessageIndex`.
+    /// Go `GetUserMessageIndex`. Unused by Go's plugin too.
+    #[allow(dead_code)]
     pub(crate) fn get_user_message_index(&self) -> i64 {
         // Go: invocation_replay_state.go GetUserMessageIndex
-        todo!("Task 10")
+        self.user_message_index
     }
 
-    /// Go `GetRecordings`.
+    /// Go `GetRecordings`. Unused by Go's plugin too.
+    #[allow(dead_code)]
     pub(crate) fn get_recordings(&self) -> &Recordings {
         // Go: invocation_replay_state.go GetRecordings
-        todo!("Task 10")
+        &self.recordings
     }
 
     /// Go `GetAgentReplayIndex`: `(index, found)`.
     pub(crate) fn get_agent_replay_index(&self, agent_name: &str) -> (i64, bool) {
         // Go: invocation_replay_state.go GetAgentReplayIndex
-        todo!("Task 10")
+        let inner = self.lock();
+        match inner.agent_replay_indices.get(agent_name) {
+            Some(v) => (*v, true),
+            None => (0, false),
+        }
+    }
+
+    /// Go `s.mu.Lock()`. A panic while holding the lock does not poison the state for the other
+    /// agents (Go's `sync.Mutex` has no poisoning).
+    pub(crate) fn lock(&self) -> MutexGuard<'_, ReplayInner> {
+        self.mu.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+    use crate::conformance::recording::Recording;
+
+    #[test]
+    fn new_state_starts_at_zero_with_no_indices() {
+        let recs = Recordings {
+            recordings: vec![Recording {
+                agent_name: "a".into(),
+                ..Default::default()
+            }],
+        };
+        let s = InvocationReplayState::new("case".into(), 2, recs.clone());
+        assert_eq!(s.get_test_case_path(), "case");
+        assert_eq!(s.get_user_message_index(), 2);
+        assert_eq!(s.get_recordings(), &recs);
+        let inner = s.lock();
+        assert_eq!(inner.cur_index, 0);
+        assert!(inner.agent_replay_indices.is_empty());
+        assert!(inner.consumed_recordings.is_empty());
+    }
+
+    #[test]
+    fn get_agent_replay_index_reports_presence() {
+        let s = InvocationReplayState::new(String::new(), 0, Recordings::default());
+        assert_eq!(s.get_agent_replay_index("a"), (0, false));
+        s.lock().agent_replay_indices.insert("a".into(), 0);
+        assert_eq!(s.get_agent_replay_index("a"), (0, true));
+        *s.lock().agent_replay_indices.get_mut("a").unwrap() += 3;
+        assert_eq!(s.get_agent_replay_index("a"), (3, true));
     }
 }
