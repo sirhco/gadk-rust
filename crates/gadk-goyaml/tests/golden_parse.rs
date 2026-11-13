@@ -149,20 +149,30 @@ fn golden_case_counts() {
     let goldens = all_goldens();
     let errors = goldens.iter().filter(|g| g.error.is_some()).count();
     let nodes = goldens.iter().filter(|g| g.node.is_some()).count();
-    let zero = goldens.len() - errors - nodes;
+    let zero = goldens
+        .iter()
+        .filter(|g| g.node.is_none() && g.error.is_none())
+        .count();
     let streams: usize = goldens.iter().map(|g| g.stream.nodes.len()).sum();
     let stream_errors = goldens.iter().filter(|g| g.stream.error.is_some()).count();
-    // Every golden is either a node, an error or Go's zero node; print the split so a probe
-    // rerun that changes it is visible in the test log.
+    // Every golden is either a node, an error or Go's zero node. Print the split and pin it,
+    // so a probe rerun that moves cases between categories fails here.
     println!(
         "{} goldens: {nodes} nodes, {errors} errors, {zero} zero nodes; \
          {streams} stream documents, {stream_errors} stream errors",
         goldens.len()
     );
+    assert_eq!(goldens.len(), PARSE_GOLDEN_COUNT + DIFF_GOLDEN_COUNT);
+    assert_eq!(nodes, 1179, "goldens with a node");
+    assert_eq!(errors, 81, "goldens with an error");
+    assert_eq!(zero, 5, "goldens with Go's zero node");
     assert_eq!(
         nodes + errors + zero,
-        PARSE_GOLDEN_COUNT + DIFF_GOLDEN_COUNT
+        goldens.len(),
+        "node and error are exclusive"
     );
+    assert_eq!(streams, 1188, "stream documents");
+    assert_eq!(stream_errors, 84, "stream errors");
 }
 
 #[test]
