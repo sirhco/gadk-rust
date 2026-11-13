@@ -343,6 +343,17 @@ impl std::fmt::Debug for Server {
     }
 }
 
+/// The agent of a compaction check's base runner config, which every check replaces. Go leaves
+/// that field nil; the loader's root is not used because a loader may have none (Go returns nil
+/// there, gadk's conformance loader panics).
+pub(crate) fn compaction_check_placeholder_agent()
+-> Result<Arc<dyn gadk_agent::Agent>, gadk_agent::AgentError> {
+    gadk_agent::new_agent(gadk_agent::AgentConfig {
+        name: "placeholder".into(),
+        ..Default::default()
+    })
+}
+
 /// Go `validateCompactionAgainstAgents`: [`compactionvalidate::against_agents`] with the
 /// server's services. The base config's agent is a placeholder each check replaces.
 ///
@@ -351,14 +362,7 @@ fn validate_compaction_against_agents(cfg: &ServerConfig) -> Result<(), ServerEr
     let Some(compaction) = cfg.compaction.as_ref() else {
         return Ok(());
     };
-    let agent = match &cfg.agent_loader {
-        Some(loader) => loader.root_agent(),
-        None => gadk_agent::new_agent(gadk_agent::AgentConfig {
-            name: "placeholder".into(),
-            ..Default::default()
-        })
-        .map_err(|e| ServerError(e.to_string()))?,
-    };
+    let agent = compaction_check_placeholder_agent().map_err(|e| ServerError(e.to_string()))?;
     let base = RunnerConfig {
         app_name: String::new(),
         agent,

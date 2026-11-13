@@ -34,8 +34,8 @@ use serde_json::json;
 use tokio::sync::{Semaphore, mpsc};
 use tower::ServiceExt;
 use triggers_support::{
-    CountingSummarizer, FailingSummarizer, Runs, build_pub_sub_request, fake_config, mock_agent,
-    post, pubsub_body, read,
+    CountingSummarizer, FailingSummarizer, NoRootLoader, Runs, build_pub_sub_request, fake_config,
+    mock_agent, post, pubsub_body, read,
 };
 
 struct HandlerCase {
@@ -272,6 +272,31 @@ async fn test_pub_sub_trigger_survives_a_compaction_failure() {
         1,
         "a NACKed delivery is retried and repeats work already done"
     );
+}
+
+/// The compaction check never asks the loader for its root agent (Go passes no agent): a loader
+/// with no agents is accepted and each delivery answers with the loader's not-found error.
+#[tokio::test]
+async fn test_pub_sub_controller_compaction_check_with_no_root_agent() {
+    let controller = PubSubController::new(ControllerConfig {
+        compaction: Some(CompactionConfig {
+            compaction_interval: 1,
+            summarizer: Some(Arc::new(FailingSummarizer)),
+            ..Default::default()
+        }),
+        agent_loader: Arc::new(NoRootLoader),
+        ..fake_config(mock_agent(vec![], Arc::new(Runs::default())))
+    })
+    .unwrap();
+
+    let (code, body) = read(
+        controller
+            .pub_sub_trigger_handler(build_pub_sub_request("Hello agent"))
+            .await,
+    )
+    .await;
+    assert_eq!(code, 500, "body: {body}");
+    assert!(body.contains("agent test-agent not found"), "body: {body}");
 }
 
 /// Go `TestPubSubTriggerActuallyRunsCompaction`.

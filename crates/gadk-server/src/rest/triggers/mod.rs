@@ -114,7 +114,7 @@ impl RetriableRunner {
     fn validate_compaction(&self) -> Result<(), AgentError> {
         let base = RunnerConfig {
             app_name: String::new(),
-            agent: self.cfg.agent_loader.root_agent(),
+            agent: crate::rest::compaction_check_placeholder_agent()?,
             session_service: self.cfg.session_service.clone(),
             artifact_service: self.cfg.artifact_service.clone(),
             memory_service: self.cfg.memory_service.clone(),

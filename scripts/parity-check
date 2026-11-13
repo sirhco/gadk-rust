@@ -28,7 +28,8 @@ them.
 
 A Go test is a `func TestXxx(` or (from 2b) a `func FuzzXxx(`; `FuzzXxx` ports as `fn fuzz_xxx`.
 
-Go test files are paths under ADK-Go (`--adk-go`, default `$ADK_GO_DIR`), except (from 7a) those
+Go test files are paths under ADK-Go (`--adk-go`, default `$ADK_GO_DIR`, else `adk-go` beside the
+main checkout, also from a git worktree), except (from 7a) those
 under `contrib/detectors/gcp/`: the OpenTelemetry contrib GCP detector module
 `go.opentelemetry.io/contrib/detectors/gcp@v1.47.0`, resolved under `$GCP_DETECTOR_DIR`, else
 under `$(go env GOMODCACHE)`; and (from 6c-1) those under `yaml.v3/`: the module
@@ -421,10 +422,25 @@ def count(go_dir, files):
 # ---------------------------------------------------------------- CLI
 
 
+def default_adk_go(repo):
+    """`adk-go` beside the main checkout: the parent of git's common dir, so a worktree (whose
+    own parent is e.g. `.claude/worktrees`) resolves to the same place; `repo`'s sibling when git
+    cannot say."""
+    try:
+        out = subprocess.run(["git", "-C", str(repo), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                             capture_output=True, text=True, check=True)
+        common = pathlib.Path(out.stdout.strip())
+        if common.name == ".git":
+            return common.parent.parent / "adk-go"
+    except (OSError, subprocess.CalledProcessError):
+        pass
+    return repo.parent / "adk-go"
+
+
 def main(argv=None):
     repo = pathlib.Path(__file__).resolve().parent.parent
     ap = argparse.ArgumentParser(prog="parity-check")
-    ap.add_argument("--adk-go", default=os.environ.get("ADK_GO_DIR", str(repo.parent / "adk-go")))
+    ap.add_argument("--adk-go", default=os.environ.get("ADK_GO_DIR") or str(default_adk_go(repo)))
     ap.add_argument("--ledger", choices=("1a", "1b", "1b-live", "1c", "2a", "2b", "2c", "3a", "3b", "4a", "4b", "4c", "5a", "5b", "5c", "6", "6b", "6c-1", "6c-2", "7a", "all"), default="all")
     ap.add_argument("--files", nargs="+", metavar="GO_TEST_FILE")
     ap.add_argument("--count", action="store_true")

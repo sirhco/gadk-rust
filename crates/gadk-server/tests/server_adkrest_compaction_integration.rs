@@ -260,3 +260,39 @@ fn test_rest_compaction_startup_rejects_a_config_it_cannot_serve() {
         "error {err:?} does not name the app the operator has to fix"
     );
 }
+
+/// A loader with no agents whose root panics, like gadk-configurable's conformance loader when
+/// every `root_agent.yaml` fails to load (Go returns a nil root there).
+struct NoRootLoader;
+
+impl gadk_agent::Loader for NoRootLoader {
+    fn list_agents(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    fn load_agent(
+        &self,
+        name: &str,
+    ) -> Result<Arc<dyn gadk_agent::Agent>, gadk_agent::LoaderError> {
+        Err(gadk_agent::LoaderError(format!("agent {name} not found")))
+    }
+
+    fn root_agent(&self) -> Arc<dyn gadk_agent::Agent> {
+        panic!("NoRootLoader has no root agent")
+    }
+}
+
+/// The startup compaction check never asks the loader for its root agent (Go passes no agent):
+/// a loader with no agents has nothing to check.
+#[test]
+fn test_compaction_startup_check_with_no_root_agent() {
+    let mut cfg = ServerConfig::new(Arc::new(InMemorySessionService::new()));
+    cfg.agent_loader = Some(Arc::new(NoRootLoader));
+    cfg.compaction = Some(CompactionConfig {
+        compaction_interval: 2,
+        ..Default::default()
+    });
+    if let Err(err) = Server::new(cfg) {
+        panic!("Server::new() = {err:?}, want Ok: there is no app to check");
+    }
+}
