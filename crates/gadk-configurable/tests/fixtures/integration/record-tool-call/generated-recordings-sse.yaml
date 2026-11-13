@@ -1,0 +1,117 @@
+recordings:
+    - user_message_index: 0
+      agent_name: root_agent
+      llm_recording:
+        llm_request:
+            model: mock
+            contents:
+                - parts:
+                    - text: Is a@b.co valid?
+                  role: user
+            config:
+                system_instruction: |-
+                    Use the tools.
+
+                    You are an agent. Your internal name is "root_agent".
+                tools:
+                    - function_declarations:
+                        - description: Checks if the provided string is a valid email format.
+                          name: validate_email
+                          parameters_json_schema:
+                            title: "validate_emailParams"
+                            type: object
+                            required:
+                                - email
+                            properties:
+                                email:
+                                    title: "Email"
+                                    type: string
+        llm_responses:
+            - content:
+                parts:
+                    - function_call:
+                        id: call-1
+                        args:
+                            email: a@b.co
+                        name: validate_email
+                role: model
+              partial: true
+              turncomplete: true
+              finish_reason: STOP
+            - content:
+                parts:
+                    - function_call:
+                        id: call-1
+                        args:
+                            email: a@b.co
+                        name: validate_email
+                role: model
+              finish_reason: STOP
+    - user_message_index: 0
+      agent_name: root_agent
+      tool_recording:
+        tool_call:
+            id: call-1
+            args:
+                email: a@b.co
+            name: validate_email
+        tool_response:
+            scheduling: ""
+            id: call-1
+            name: validate_email
+            response:
+                result: true
+    - user_message_index: 0
+      agent_name: root_agent
+      llm_recording:
+        llm_request:
+            model: mock
+            contents:
+                - parts:
+                    - text: Is a@b.co valid?
+                  role: user
+                - parts:
+                    - function_call:
+                        id: call-1
+                        args:
+                            email: a@b.co
+                        name: validate_email
+                  role: model
+                - parts:
+                    - function_response:
+                        id: call-1
+                        name: validate_email
+                        response:
+                            result: true
+                  role: user
+            config:
+                system_instruction: |-
+                    Use the tools.
+
+                    You are an agent. Your internal name is "root_agent".
+                tools:
+                    - function_declarations:
+                        - description: Checks if the provided string is a valid email format.
+                          name: validate_email
+                          parameters_json_schema:
+                            title: "validate_emailParams"
+                            type: object
+                            required:
+                                - email
+                            properties:
+                                email:
+                                    title: "Email"
+                                    type: string
+        llm_responses:
+            - content:
+                parts:
+                    - text: It is valid.
+                role: model
+              partial: true
+              turncomplete: true
+              finish_reason: STOP
+            - content:
+                parts:
+                    - text: It is valid.
+                role: model
+              finish_reason: STOP
