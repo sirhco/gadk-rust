@@ -13,7 +13,7 @@
 // limitations under the License.
 
 //! Replays the probe's `value` / `value_error` goldens: Go's `yaml.Unmarshal(in, &v)` with
-//! `var v interface{}` against `gadk_goyaml::unmarshal::<GoValue>` (Task 8), over every parse
+//! `var v interface{}` against `gadk_goyaml::unmarshal::<GoValue>`, over every parse
 //! and differential golden — including the alias-ratio limit cases (`alias-wWW-lLL`,
 //! `limit-*`) and the self-containing anchors (`anchor 'a' value contains itself`).
 
@@ -91,7 +91,7 @@ fn golden_value_matches_go() {
 
 #[test]
 fn golden_value_covers_aliases_and_limits() {
-    // The cases Task 8's alias accounting must reproduce, by error text.
+    // The cases the alias accounting must reproduce, by error text.
     let goldens = all_goldens();
     let count = |text: &str| {
         goldens

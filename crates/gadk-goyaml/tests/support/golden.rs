@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Golden loaders (plan Appendix C.golden): the probe's parse, differential and serde goldens
+//! Golden loaders (format: `scripts/gen-go-goyaml/SCENARIO.md`): the probe's parse, differential and serde goldens
 //! as Rust values; [`NodeDump`] ⇄ [`Document`] conversion and a comparison of a document
 //! against a dump that names the first differing path and field; [`ValueDump`] ⇄ [`GoValue`].
 
@@ -242,7 +242,7 @@ pub fn serde_goldens() -> Vec<SerdeGolden> {
 // Node dumps.
 // ---------------------------------------------------------------------------------------------
 
-/// The probe's dump of one `yaml.Node` and its content (Appendix C.golden "Node dump").
+/// The probe's dump of one `yaml.Node` and its content (SCENARIO.md "Node dump").
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NodeDump {
@@ -531,7 +531,7 @@ pub fn assert_node_eq(doc: &Document, at: NodeId, want: &NodeDump, context: &str
 // GoValue dumps.
 // ---------------------------------------------------------------------------------------------
 
-/// The probe's dump of a Go `interface{}` value (Appendix C.golden "GoValue dump"). Numbers,
+/// The probe's dump of a Go `interface{}` value (SCENARIO.md "Value dump"). Numbers,
 /// timestamps and bytes keep their golden text.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ValueDump {

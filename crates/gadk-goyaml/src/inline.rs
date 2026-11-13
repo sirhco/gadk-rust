@@ -141,13 +141,21 @@ mod tests {
     }
 
     #[test]
-    fn empty_map_through_other_formats() {
-        // Non-empty maps need GoValue's serde impls (Tasks 8 and 9).
+    fn maps_through_other_formats() {
+        // Outside gadk-goyaml an InlineMap is a plain map of GoValues.
         assert_eq!(
             serde_json::to_string(&InlineMap::new()).ok().as_deref(),
             Some("{}")
         );
         let back: InlineMap = serde_json::from_str("{}").expect("empty map");
         assert!(back.is_empty());
+        let m = InlineMap(vec![
+            ("a".into(), GoValue::Int(1)),
+            ("b".into(), GoValue::Null),
+        ]);
+        let json = serde_json::to_string(&m).expect("serialize");
+        assert_eq!(json, r#"{"a":1,"b":null}"#);
+        let back: InlineMap = serde_json::from_str(&json).expect("map");
+        assert_eq!(back, m);
     }
 }

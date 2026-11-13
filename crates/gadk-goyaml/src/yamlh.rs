@@ -31,9 +31,6 @@
 //! every nil check in yaml.v3 v3.0.1 is on a value that is never set empty). Go `int` positions,
 //! counts and marks are `usize`; Go `int`s that can be negative (indentation levels, widths,
 //! the emitter's line/column) are `isize`.
-// Until Tasks 3–7 consume these items; Task 12 narrows this to the items that stay unused
-// (yaml.v3 itself never reads the document/node types and several fields).
-#![allow(dead_code)]
 
 use std::collections::HashMap;
 use std::fmt;
@@ -82,10 +79,12 @@ pub(crate) enum YamlBreak {
     #[default]
     Any = 0,
     /// Use CR for line breaks (Mac style).
+    #[allow(dead_code)] // Go's emitter handles it; yaml.v3 never selects it.
     Cr = 1,
     /// Use LN for line breaks (Unix style).
     Ln = 2,
     /// Use CR LN for line breaks (DOS style).
+    #[allow(dead_code)] // Go's emitter handles it; yaml.v3 never selects it.
     Crln = 3,
 }
 
@@ -96,6 +95,7 @@ pub(crate) enum YamlErrorType {
     #[default]
     No = 0,
     /// Cannot allocate or reallocate a block of memory.
+    #[allow(dead_code)] // Go declares it; yaml.v3 never sets it.
     Memory = 1,
     /// Cannot read or decode the input stream.
     Reader = 2,
@@ -104,6 +104,7 @@ pub(crate) enum YamlErrorType {
     /// Cannot parse the input stream.
     Parser = 4,
     /// Cannot compose a YAML document.
+    #[allow(dead_code)] // Go declares it; yaml.v3 never sets it.
     Composer = 5,
     /// Cannot write to the output stream.
     Writer = 6,
@@ -430,30 +431,43 @@ impl YamlEvent {
 // Nodes
 
 /// The tag `!!null` with the only possible value: null.
+#[allow(dead_code)] // Go declares it; yaml.v3 never reads it (resolve.go has its own tags).
 pub(crate) const YAML_NULL_TAG: &str = "tag:yaml.org,2002:null";
 /// The tag `!!bool` with the values: true and false.
+#[allow(dead_code)] // Go declares it; yaml.v3 never reads it (resolve.go has its own tags).
 pub(crate) const YAML_BOOL_TAG: &str = "tag:yaml.org,2002:bool";
 /// The tag `!!str` for string values.
+#[allow(dead_code)] // Go declares it; yaml.v3 never reads it (resolve.go has its own tags).
 pub(crate) const YAML_STR_TAG: &str = "tag:yaml.org,2002:str";
 /// The tag `!!int` for integer values.
+#[allow(dead_code)] // Go declares it; yaml.v3 never reads it (resolve.go has its own tags).
 pub(crate) const YAML_INT_TAG: &str = "tag:yaml.org,2002:int";
 /// The tag `!!float` for float values.
+#[allow(dead_code)] // Go declares it; yaml.v3 never reads it (resolve.go has its own tags).
 pub(crate) const YAML_FLOAT_TAG: &str = "tag:yaml.org,2002:float";
 /// The tag `!!timestamp` for date and time values.
+#[allow(dead_code)] // Go declares it; yaml.v3 never reads it (resolve.go has its own tags).
 pub(crate) const YAML_TIMESTAMP_TAG: &str = "tag:yaml.org,2002:timestamp";
 /// The tag `!!seq` is used to denote sequences.
+#[allow(dead_code)] // Go declares it; yaml.v3 never reads it (resolve.go has its own tags).
 pub(crate) const YAML_SEQ_TAG: &str = "tag:yaml.org,2002:seq";
 /// The tag `!!map` is used to denote mapping.
+#[allow(dead_code)] // Go declares it; yaml.v3 never reads it (resolve.go has its own tags).
 pub(crate) const YAML_MAP_TAG: &str = "tag:yaml.org,2002:map";
 /// Not in original libyaml.
+#[allow(dead_code)] // Go declares it; yaml.v3 never reads it (resolve.go has its own tags).
 pub(crate) const YAML_BINARY_TAG: &str = "tag:yaml.org,2002:binary";
 /// Not in original libyaml.
+#[allow(dead_code)] // Go declares it; yaml.v3 never reads it (resolve.go has its own tags).
 pub(crate) const YAML_MERGE_TAG: &str = "tag:yaml.org,2002:merge";
 /// The default scalar tag is `!!str`.
+#[allow(dead_code)] // Go declares it; yaml.v3 never reads it (resolve.go has its own tags).
 pub(crate) const YAML_DEFAULT_SCALAR_TAG: &str = YAML_STR_TAG;
 /// The default sequence tag is `!!seq`.
+#[allow(dead_code)] // Go declares it; yaml.v3 never reads it (resolve.go has its own tags).
 pub(crate) const YAML_DEFAULT_SEQUENCE_TAG: &str = YAML_SEQ_TAG;
 /// The default mapping tag is `!!map`.
+#[allow(dead_code)] // Go declares it; yaml.v3 never reads it (resolve.go has its own tags).
 pub(crate) const YAML_DEFAULT_MAPPING_TAG: &str = YAML_MAP_TAG;
 
 /// Go: `yaml_node_type_t` — node types (libyaml's document API; unused by yaml.v3).
@@ -463,10 +477,13 @@ pub(crate) enum YamlNodeType {
     #[default]
     No = 0,
     /// A scalar node.
+    #[allow(dead_code)] // libyaml's document API; yaml.v3 never builds one.
     Scalar,
     /// A sequence node.
+    #[allow(dead_code)] // libyaml's document API; yaml.v3 never builds one.
     Sequence,
     /// A mapping node.
+    #[allow(dead_code)] // libyaml's document API; yaml.v3 never builds one.
     Mapping,
 }
 
@@ -597,8 +614,10 @@ pub(crate) enum YamlParserState {
     /// Expect a block node.
     BlockNode,
     /// Expect a block node or indentless sequence.
+    #[allow(dead_code)] // Go's parser handles it; yaml.v3 never enters it.
     BlockNodeOrIndentlessSequence,
     /// Expect a flow node.
+    #[allow(dead_code)] // Go's parser handles it; yaml.v3 never enters it.
     FlowNode,
     /// Expect the first entry of a block sequence.
     BlockSequenceFirstEntry,
@@ -797,8 +816,10 @@ pub(crate) struct YamlParser<'r> {
 
     // Dumper stuff
     /// The alias data.
+    #[allow(dead_code)] // Go declares it; yaml.v3 never reads it.
     pub(crate) aliases: Vec<YamlAliasData>,
     /// The currently parsed document.
+    #[allow(dead_code)] // Go declares it; yaml.v3 never reads it.
     pub(crate) document: Option<Box<YamlDocument>>,
 }
 
@@ -949,8 +970,10 @@ pub(crate) struct YamlEmitter<'w> {
     /// The current position of the buffer.
     pub(crate) buffer_pos: usize,
     /// The raw buffer.
+    #[allow(dead_code)] // Go declares it; yaml.v3 never reads it.
     pub(crate) raw_buffer: Vec<u8>,
     /// The current position of the raw buffer.
+    #[allow(dead_code)] // Go declares it; yaml.v3 never reads it.
     pub(crate) raw_buffer_pos: usize,
     /// The stream encoding.
     pub(crate) encoding: YamlEncoding,
@@ -1025,14 +1048,19 @@ pub(crate) struct YamlEmitter<'w> {
 
     // Dumper stuff
     /// If the stream was already opened?
+    #[allow(dead_code)] // Go declares it; yaml.v3 never reads it.
     pub(crate) opened: bool,
     /// If the stream was already closed?
+    #[allow(dead_code)] // Go declares it; yaml.v3 never reads it.
     pub(crate) closed: bool,
     /// The information associated with the document nodes.
+    #[allow(dead_code)] // Go declares it; yaml.v3 never reads it.
     pub(crate) anchors: Option<YamlEmitterAnchors>,
     /// The last assigned anchor id.
+    #[allow(dead_code)] // Go declares it; yaml.v3 never reads it.
     pub(crate) last_anchor_id: isize,
     /// The currently emitted document.
+    #[allow(dead_code)] // Go declares it; yaml.v3 never reads it.
     pub(crate) document: Option<Box<YamlDocument>>,
 }
 
@@ -1057,6 +1085,7 @@ pub(crate) const INITIAL_STACK_SIZE: usize = 16;
 /// The initial queue size.
 pub(crate) const INITIAL_QUEUE_SIZE: usize = 16;
 /// The initial string size.
+#[allow(dead_code)] // Go declares it; yaml.v3 never reads it.
 pub(crate) const INITIAL_STRING_SIZE: usize = 16;
 
 /// Check if the character at the specified position is an alphabetical character, a digit,
@@ -1182,6 +1211,7 @@ pub(crate) fn is_breakz(b: &[u8], i: usize) -> bool {
 }
 
 /// Check if the character is a line break, space, or NUL.
+#[allow(dead_code)] // Go declares it; yaml.v3 never calls it.
 pub(crate) fn is_spacez(b: &[u8], i: usize) -> bool {
     // Go: yamlprivateh.go is_spacez
     // is_space:

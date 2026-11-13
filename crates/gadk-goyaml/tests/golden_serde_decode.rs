@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Replays the probe's serde goldens on decode (Task 8): Go's `yaml.Unmarshal(in, &s)` error
+//! Replays the probe's serde goldens on decode: Go's `yaml.Unmarshal(in, &s)` error
 //! text (`decode_error`) against `gadk_goyaml::unmarshal`, and the value Go leaves in `s`
 //! (also after a `TypeError`) against `gadk_goyaml::from_node_partial`, compared with
 //! `ShapeValue::assert_same`.

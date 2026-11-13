@@ -102,7 +102,6 @@ impl fmt::Display for TypeError {
 impl std::error::Error for TypeError {}
 
 /// Go's `failf(format, args...)`: an [`Error::Syntax`] with the `yaml: ` prefix.
-#[allow(dead_code)] // Until Tasks 5–9 call it; Task 12 removes this line.
 pub(crate) fn failf(msg: impl fmt::Display) -> Error {
     // Go: yaml.go failf
     Error::Syntax(format!("yaml: {msg}"))

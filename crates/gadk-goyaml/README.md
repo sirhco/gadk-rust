@@ -2,7 +2,9 @@
 
 Internal crate (`publish = false`): a pure-Rust port of
 [`gopkg.in/yaml.v3`](https://github.com/go-yaml/yaml) v3.0.1, the YAML library ADK-Go pins, so
-gadk reads and writes YAML byte-for-byte as ADK-Go does (sub-project 6c-1).
+gadk reads and writes YAML byte-for-byte as ADK-Go does (sub-project 6c-1). No other gadk crate
+depends on it yet (6c-2's configurable agents and conformance plugins will), and the `gadk`
+façade never re-exports it.
 
 - One Rust module per Go file, Go's function names in snake_case and in Go's order:
   `yamlh.rs` (`yamlh.go` + `yamlprivateh.go`), `api.rs` (`apic.go`), `reader.rs`, `scanner.rs`,
@@ -10,11 +12,34 @@ gadk reads and writes YAML byte-for-byte as ADK-Go does (sub-project 6c-1).
   `sorter.rs`, `encode.rs`, `node.rs` (`Node` and the `decode.go` composer), `de.rs` / `value.rs`
   (`decode.go`), `ser.rs` (`encode.go`'s reflection path), `lib.rs` (`yaml.go`).
 - Public API: `unmarshal_node` / `marshal_node` over the `Document` node arena, serde
-  `unmarshal` / `marshal` / `from_node` / `to_node` with `Options` key naming, `Encoder` /
-  `Decoder`, `GoValue`, `InlineMap`.
-- Tests: unit tests per module, ports of yaml.v3's test files in `src/parity_tests/`
-  (ledger `docs/parity/6c-1.md`), and replays of the Go probe's goldens
-  (`scripts/gen-go-goyaml`, `testdata/golden/`) in `tests/`.
+  `unmarshal` / `marshal` / `from_node` / `from_node_partial` / `to_node` with `Options` key
+  naming, `Encoder` / `Decoder`, `GoValue` (Go's `interface{}`), `InlineMap` (Go's `,inline`
+  map).
+- Node trees, error texts and emitted bytes match yaml.v3 v3.0.1 except for the accepted
+  divergences listed in `docs/parity/6c-1.md`, each annotated `// Divergence (ledger 6c-1)` in
+  the source.
+
+## Nesting depth
+
+Parsing accepts yaml.v3's limit (`exceeded max depth of 10000`): the composer runs on an
+explicit stack. Every recursive walk — `marshal_node` / `Encoder::encode_node`, the serde
+`Serializer` and `Deserializer`, the `GoValue` decoder and encoder — stops past 127 nested
+collections (alias expansions count as a level on decode) with
+`yaml: exceeded max depth of 127` instead of overflowing the thread's stack. Go has no such
+limit below 10000; this is the workspace-wide 127-level nesting policy (serde_json's limit) and
+a ledgered divergence.
+
+## Tests and goldens
+
+- Unit tests per module, and ports of yaml.v3's test files in `src/parity_tests/` (ledger
+  `docs/parity/6c-1.md`, checked by `python3 scripts/parity-check --ledger 6c-1`).
+- `tests/` replays the goldens in `testdata/golden/` (parse, emit, `interface{}` values, serde
+  encode/decode/round trip, and the seeded differential corpus).
+- The goldens are written by the Go probe `scripts/gen-go-goyaml` (yaml.v3 v3.0.1); its
+  `SCENARIO.md` documents the corpus and the golden format. To regenerate them, run
+  `cd scripts/gen-go-goyaml && go run .` and update the counts in `scripts/check-fixtures.sh`
+  if cases were added. `scripts/check-fixtures.sh` asserts the counts and, when `go` is on
+  `PATH`, reruns the probe and requires identical output.
 
 ## License
 

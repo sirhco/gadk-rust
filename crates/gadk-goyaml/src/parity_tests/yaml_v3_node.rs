@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of yaml.v3 v3.0.1 `node_test.go` (Task 10).
+//! Port of yaml.v3 v3.0.1 `node_test.go`.
 //!
 //! Go's `yaml.Node` literals are [`N`] values: a static tree with Go's field values whose
 //! `alias` is the index path (through `content`, from the table node) of the alias target —

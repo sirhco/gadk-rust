@@ -3134,7 +3134,7 @@ mod tests {
         )
     }
 
-    /// decode.go `(*parser).fail`'s message (Task 6 owns the real one).
+    /// decode.go `(*parser).fail`'s message (the composer's is `node::Parser::fail`).
     fn decode_fail_text(parser: &YamlParser<'_>) -> String {
         let mut line = 0;
         if parser.context_mark.line != 0 {
@@ -3659,7 +3659,7 @@ mod tests {
     }
 
     /// Every parse/diff golden whose input fails in the scanner (or reader) records exactly that
-    /// error, formatted as decode.go's `fail` does (Task 6 checks the rest of the goldens).
+    /// error, formatted as decode.go's `fail` does (`tests/golden_parse.rs` checks the rest).
     #[test]
     fn golden_scanner_errors() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/golden");

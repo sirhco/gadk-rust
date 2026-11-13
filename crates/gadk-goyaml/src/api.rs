@@ -29,8 +29,6 @@
 //! caller passes a fresh copy). Go's string read handler reads from a borrowed slice
 //! (`YamlParser::input`); Go's string write handler appends to the encoder's `out` through a
 //! pointer, which is the emitter-owned `YamlEmitter::output_buffer` here.
-// Until Tasks 3–7 call these functions; Task 12 removes this line.
-#![allow(dead_code)]
 
 use std::io::{Read, Write};
 
@@ -104,6 +102,8 @@ pub(crate) fn yaml_reader_read_handler(
     };
     loop {
         match reader.read(buffer) {
+            // Divergence (ledger 6c-1): an `ErrorKind::Interrupted` read is retried (Rust-only;
+            // Go's `io.Reader` has no such error) instead of becoming `input error: …`.
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
             other => return other,
         }
@@ -132,6 +132,7 @@ pub(crate) fn yaml_parser_set_input_reader<'r>(parser: &mut YamlParser<'r>, r: B
 }
 
 /// Set the source encoding.
+#[allow(dead_code)] // Go declares it; yaml.v3 never calls it.
 pub(crate) fn yaml_parser_set_encoding(parser: &mut YamlParser<'_>, encoding: YamlEncoding) {
     // Go: apic.go yaml_parser_set_encoding
     if parser.encoding != YamlEncoding::Any {
@@ -205,6 +206,7 @@ pub(crate) fn yaml_emitter_set_output_writer<'w>(
 }
 
 /// Set the output encoding.
+#[allow(dead_code)] // Go declares it; yaml.v3 never calls it (encode.go sets emitter fields directly).
 pub(crate) fn yaml_emitter_set_encoding(emitter: &mut YamlEmitter<'_>, encoding: YamlEncoding) {
     // Go: apic.go yaml_emitter_set_encoding
     if emitter.encoding != YamlEncoding::Any {
@@ -214,12 +216,14 @@ pub(crate) fn yaml_emitter_set_encoding(emitter: &mut YamlEmitter<'_>, encoding:
 }
 
 /// Set the canonical output style.
+#[allow(dead_code)] // Go declares it; yaml.v3 never calls it (encode.go sets emitter fields directly).
 pub(crate) fn yaml_emitter_set_canonical(emitter: &mut YamlEmitter<'_>, canonical: bool) {
     // Go: apic.go yaml_emitter_set_canonical
     emitter.canonical = canonical;
 }
 
 /// Set the indentation increment (values outside 2..=9 become 2).
+#[allow(dead_code)] // Go declares it; yaml.v3 never calls it (encode.go sets emitter fields directly).
 pub(crate) fn yaml_emitter_set_indent(emitter: &mut YamlEmitter<'_>, indent: isize) {
     // Go: apic.go yaml_emitter_set_indent
     let indent = if !(2..=9).contains(&indent) {
@@ -231,6 +235,7 @@ pub(crate) fn yaml_emitter_set_indent(emitter: &mut YamlEmitter<'_>, indent: isi
 }
 
 /// Set the preferred line width (negative values become -1, "unlimited").
+#[allow(dead_code)] // Go declares it; yaml.v3 never calls it (encode.go sets emitter fields directly).
 pub(crate) fn yaml_emitter_set_width(emitter: &mut YamlEmitter<'_>, width: isize) {
     // Go: apic.go yaml_emitter_set_width
     let width = if width < 0 { -1 } else { width };
@@ -244,6 +249,7 @@ pub(crate) fn yaml_emitter_set_unicode(emitter: &mut YamlEmitter<'_>, unicode: b
 }
 
 /// Set the preferred line break character.
+#[allow(dead_code)] // Go declares it; yaml.v3 never calls it (encode.go sets emitter fields directly).
 pub(crate) fn yaml_emitter_set_break(emitter: &mut YamlEmitter<'_>, line_break: YamlBreak) {
     // Go: apic.go yaml_emitter_set_break
     emitter.line_break = line_break;

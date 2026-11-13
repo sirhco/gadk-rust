@@ -13,7 +13,7 @@
 // limitations under the License.
 
 //! Replays the probe's parse goldens (`testdata/golden/parse/`, `testdata/golden/diff/`):
-//! node trees, error texts and stream nodes (Task 6).
+//! node trees, error texts and stream nodes.
 
 mod support;
 

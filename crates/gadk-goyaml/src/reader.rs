@@ -123,10 +123,16 @@ fn yaml_parser_update_raw_buffer(parser: &mut YamlParser<'_>) -> bool {
     raw_buffer.truncate(len + size_read);
     parser.raw_buffer = raw_buffer;
     match result {
-        // Go: err == io.EOF (a handler returning 0 bytes is at the end of its input).
+        // Go: err == io.EOF.
+        // Divergence (ledger 6c-1): `Ok(0)` is end of input, per `std::io::Read`; Go's handler
+        // signals EOF with `io.EOF` and treats `(0, nil)` as "no data yet", reading again.
         Ok(0) => parser.eof = true,
         Ok(_) => {}
         Err(err) => {
+            // Divergence (ledger 6c-1): the text after `input error: ` is the `std::io::Error`'s
+            // Display: Go's `err.Error()` for a message-only error, Rust's text for an OS error.
+            // An `Interrupted` error that reaches here (a handler other than
+            // `yaml_reader_read_handler`, which retries it) is an input error too.
             let offset = parser.offset;
             return yaml_parser_set_reader_error(
                 parser,

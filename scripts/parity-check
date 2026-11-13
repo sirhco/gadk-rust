@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 # Copyright 2026 Chris Olson — Apache-2.0 (see LICENSE)
 """Checks the parity ledgers (docs/parity/1a.md, 1b.md, 1b-live.md, 1c.md, 2a.md, 2b.md, 2c.md, 3a.md,
-3b.md, 4a.md, 4b.md, 4c.md, 5a.md, 5b.md, 5c.md, 6.md, 6b.md, 7a.md)
+3b.md, 4a.md, 4b.md, 4c.md, 5a.md, 5b.md, 5c.md, 6.md, 6b.md, 6c-1.md, 7a.md)
 against ADK-Go.
 
 Usage:
-  parity-check [--adk-go DIR] [--ledger 1a|1b|1b-live|1c|2a|2b|2c|3a|3b|4a|4b|4c|5a|5b|5c|6|6b|7a|all] [--files GO_TEST_FILE ...] [--count] [--generate]
+  parity-check [--adk-go DIR] [--ledger 1a|1b|1b-live|1c|2a|2b|2c|3a|3b|4a|4b|4c|5a|5b|5c|6|6b|6c-1|7a|all] [--files GO_TEST_FILE ...] [--count] [--generate]
 
 Each ledger lists its in-scope Go test files in a `<!-- in-scope: ... -->` header block and
 (optionally) its deferred files in a `<!-- deferred: ... -->` block (`path: reason` per line).
-1a rows are hand-written and checked as before. 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a, 4b, 4c, 5a, 5b, 5c, 6, 6b and 7a rows are
+1a rows are hand-written and checked as before. 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a, 4b, 4c, 5a, 5b, 5c, 6, 6b, 6c-1 and 7a rows are
 generated from annotations in the Rust target files (see `scan_target`); `--generate` rewrites
 them, and a full `--ledger 1b` / `--ledger 1b-live` / `--ledger 1c` / `--ledger 2a` /
 `--ledger 2b` / `--ledger 2c` / `--ledger 3a` / `--ledger 3b` / `--ledger 4a` / `--ledger 4b` /
 `--ledger 4c` / `--ledger 5a` / `--ledger 5b` / `--ledger 5c` / `--ledger 6` / `--ledger 6b` /
-`--ledger 7a` check
+`--ledger 6c-1` / `--ledger 7a` check
 requires the
 ledger rows to
 equal the
@@ -31,31 +31,40 @@ A Go test is a `func TestXxx(` or (from 2b) a `func FuzzXxx(`; `FuzzXxx` ports a
 Go test files are paths under ADK-Go (`--adk-go`, default `$ADK_GO_DIR`), except (from 7a) those
 under `contrib/detectors/gcp/`: the OpenTelemetry contrib GCP detector module
 `go.opentelemetry.io/contrib/detectors/gcp@v1.47.0`, resolved under `$GCP_DETECTOR_DIR`, else
-under `$(go env GOMODCACHE)`.
+under `$(go env GOMODCACHE)`; and (from 6c-1) those under `yaml.v3/`: the module
+`gopkg.in/yaml.v3@v3.0.1`, resolved under `$GOYAML_DIR`, else under `$(go env GOMODCACHE)`.
+yaml.v3's tests are gocheck methods, so for `yaml.v3/` files only a Go test is also a
+`func (s *S) TestXxx(` method or a `func ExampleXxx(` (ports as `fn example_xxx`), and the
+target is `crates/gadk-goyaml/src/parity_tests/yaml_v3_<file>.rs` (`.` → `_`).
 """
 import argparse, functools, os, pathlib, re, subprocess, sys
 
 GO_TEST = re.compile(r"^func ((?:Test|Fuzz)\w+)\(", re.M)
+GOYAML_TEST = re.compile(r"^func (?:\(\w+ \*?\w+\) (Test\w+)|(Example\w+))\(", re.M)  # 6c-1: gocheck methods, examples
 TABLE_HEADER = "| Go file | Go test | status | Rust file | Rust fn / reason |"
 TABLE_SEP = "|---|---|---|---|---|"
-SKIP_RE = re.compile(r"^\s*//\s*parity:\s*skipped\s+((?:Test|Fuzz)\w*)\s*:(.*)$")
+SKIP_RE = re.compile(r"^\s*//\s*parity:\s*skipped\s+((?:Test|Fuzz|Example)\w*)\s*:(.*)$")
 ADAPTED_RE = re.compile(r"^\s*//\s*parity:\s*adapted\s*:(.*)$")
 ADAPTED_WINDOW = 3  # lines above the `fn` line searched for `// parity: adapted:`
-GENERATED_LEDGERS = ("1b", "1b-live", "1c", "2a", "2b", "2c", "3a", "3b", "4a", "4b", "4c", "5a", "5b", "5c", "6", "6b", "7a")  # ledgers whose rows come from annotations
+GENERATED_LEDGERS = ("1b", "1b-live", "1c", "2a", "2b", "2c", "3a", "3b", "4a", "4b", "4c", "5a", "5b", "5c", "6", "6b", "6c-1", "7a")  # ledgers whose rows come from annotations
 GCP_DETECTOR_PREFIX = "contrib/detectors/gcp/"  # 7a: Go files of the contrib GCP detector module
 GCP_DETECTOR_MODULE = "go.opentelemetry.io/contrib/detectors/gcp@v1.47.0"
+GOYAML_PREFIX = "yaml.v3/"  # 6c-1: Go files of gopkg.in/yaml.v3
+GOYAML_MODULE = "gopkg.in/yaml.v3@v3.0.1"
 
 
 def go_test_to_rust(name: str) -> str:
     """Spec § Parity tooling conversion rule. `TestFoo` -> `test_foo`; `FuzzFoo` -> `fuzz_foo` (2b);
-    any other prefix raises ValueError."""
+    `ExampleFoo` -> `example_foo` (6c-1; only yaml.v3's collector yields examples); any other
+    prefix raises ValueError."""
     if name.startswith("Test"):
-        prefix = "test_"
+        prefix, s = "test_", name[4:]
     elif name.startswith("Fuzz"):
-        prefix = "fuzz_"
+        prefix, s = "fuzz_", name[4:]
+    elif name.startswith("Example"):
+        prefix, s = "example_", name[7:]
     else:
         raise ValueError(name)
-    s = name[4:]
     words, cur = [], ""
     for i, ch in enumerate(s):
         if ch == "_":
@@ -94,24 +103,42 @@ def gcp_detector_dir():
     return pathlib.Path(cache) / GCP_DETECTOR_MODULE if cache else pathlib.Path(GCP_DETECTOR_MODULE)
 
 
+def goyaml_dir():
+    """The yaml.v3 module's directory (6c-1): `$GOYAML_DIR`, else
+    `$(go env GOMODCACHE)/gopkg.in/yaml.v3@v3.0.1`."""
+    d = os.environ.get("GOYAML_DIR")
+    if d:
+        return pathlib.Path(d)
+    cache = go_mod_cache()
+    return pathlib.Path(cache) / GOYAML_MODULE if cache else pathlib.Path(GOYAML_MODULE)
+
+
 def go_path(go_dir, go_file):
     """Where a ledgered Go file lives: under the contrib GCP detector module for
-    `contrib/detectors/gcp/<p>` (7a), else under ADK-Go (`go_dir`)."""
+    `contrib/detectors/gcp/<p>` (7a), under the yaml.v3 module for `yaml.v3/<p>` (6c-1), else
+    under ADK-Go (`go_dir`)."""
     if go_file.startswith(GCP_DETECTOR_PREFIX):
         return gcp_detector_dir() / go_file[len(GCP_DETECTOR_PREFIX):]
+    if go_file.startswith(GOYAML_PREFIX):
+        return goyaml_dir() / go_file[len(GOYAML_PREFIX):]
     return pathlib.Path(go_dir) / go_file
 
 
 def go_tests(go_dir, go_file):
-    """The `Test*` and `Fuzz*` function names of one Go test file, in source order."""
-    return GO_TEST.findall(go_path(go_dir, go_file).read_text())
+    """The `Test*` and `Fuzz*` function names of one Go test file, in source order; for a
+    `yaml.v3/` file (6c-1) its gocheck `Test*` methods and `Example*` functions instead."""
+    text = go_path(go_dir, go_file).read_text()
+    if go_file.startswith(GOYAML_PREFIX):
+        return [method or example for method, example in GOYAML_TEST.findall(text)]
+    return GO_TEST.findall(text)
 
 
 def target_name(go_file: str) -> str:
-    """`agent/llmagent/llmagent_test.go` -> `agent_llmagent_llmagent`."""
+    """`agent/llmagent/llmagent_test.go` -> `agent_llmagent_llmagent`; (6c-1)
+    `yaml.v3/decode_test.go` -> `yaml_v3_decode`."""
     if not go_file.endswith("_test.go"):
         raise ValueError(f"not a Go test file: {go_file}")
-    return go_file[: -len("_test.go")].replace("/", "_")
+    return go_file[: -len("_test.go")].replace("/", "_").replace(".", "_")
 
 
 # ---------------------------------------------------------------- ledger markdown
@@ -335,7 +362,7 @@ def check_header(go_dir, in_scope, deferred, label):
 def check_1b(go_dir, repo_dir, ledger, files=None, name="1b"):
     """Full check when `files` is None (rows must equal generated rows); else scan only `files`.
 
-    `name` is the ledger's CLI name (`1b`, `1b-live`, `1c`, `2a`, `2b`, `2c`, `3a`, `3b`, `4a`, `4b`, `4c`, `5a`, `5b`, `5c`, `6`, `6b` or `7a`), used
+    `name` is the ledger's CLI name (`1b`, `1b-live`, `1c`, `2a`, `2b`, `2c`, `3a`, `3b`, `4a`, `4b`, `4c`, `5a`, `5b`, `5c`, `6`, `6b`, `6c-1` or `7a`), used
     in messages."""
     in_scope, deferred = parse_header(ledger)
     errs = check_header(go_dir, in_scope, deferred, str(ledger))
@@ -398,7 +425,7 @@ def main(argv=None):
     repo = pathlib.Path(__file__).resolve().parent.parent
     ap = argparse.ArgumentParser(prog="parity-check")
     ap.add_argument("--adk-go", default=os.environ.get("ADK_GO_DIR", str(repo.parent / "adk-go")))
-    ap.add_argument("--ledger", choices=("1a", "1b", "1b-live", "1c", "2a", "2b", "2c", "3a", "3b", "4a", "4b", "4c", "5a", "5b", "5c", "6", "6b", "7a", "all"), default="all")
+    ap.add_argument("--ledger", choices=("1a", "1b", "1b-live", "1c", "2a", "2b", "2c", "3a", "3b", "4a", "4b", "4c", "5a", "5b", "5c", "6", "6b", "6c-1", "7a", "all"), default="all")
     ap.add_argument("--files", nargs="+", metavar="GO_TEST_FILE")
     ap.add_argument("--count", action="store_true")
     ap.add_argument("--generate", action="store_true")
@@ -423,13 +450,14 @@ def main(argv=None):
         "5c": repo / "docs/parity/5c.md",
         "6": repo / "docs/parity/6.md",
         "6b": repo / "docs/parity/6b.md",
+        "6c-1": repo / "docs/parity/6c-1.md",
         "7a": repo / "docs/parity/7a.md",
     }
 
     if (a.files or a.generate) and a.ledger not in GENERATED_LEDGERS:
-        ap.error("--files and --generate require --ledger 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a, 4b, 4c, 5a, 5b, 5c, 6, 6b or 7a")
+        ap.error("--files and --generate require --ledger 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a, 4b, 4c, 5a, 5b, 5c, 6, 6b, 6c-1 or 7a")
     if a.count and a.ledger == "all":
-        ap.error("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a, 4b, 4c, 5a, 5b, 5c, 6, 6b or 7a")
+        ap.error("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a, 4b, 4c, 5a, 5b, 5c, 6, 6b, 6c-1 or 7a")
     if a.generate and (a.files or a.count):
         ap.error("--generate cannot be combined with --files or --count")
 

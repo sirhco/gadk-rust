@@ -13,9 +13,9 @@
 // limitations under the License.
 
 //! Replays the probe's serde goldens for zero and hand-built values: `marshal_b64` and the
-//! `to_node` dump (Task 9). Each golden's Go value is [`ShapeValue::expected`] (the zero value
+//! `to_node` dump. Each golden's Go value is [`ShapeValue::expected`] (the zero value
 //! for `zero` cases, else the value Go's `yaml.Unmarshal` left in the shape), built by hand, so
-//! no decoding is involved; Task 11 replays the same goldens through decode → encode.
+//! no decoding is involved; `golden_serde_roundtrip` replays them through decode → encode.
 
 mod support;
 
