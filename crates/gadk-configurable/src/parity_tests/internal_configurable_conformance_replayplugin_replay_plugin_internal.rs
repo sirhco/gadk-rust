@@ -14,3 +14,54 @@
 // limitations under the License.
 
 //! Port of ADK-Go `internal/configurable/conformance/replayplugin/replay_plugin_internal_test.go` (Task 6).
+
+use pretty_assertions::assert_eq;
+
+use crate::conformance::replay::matching::normalize_description;
+
+#[test]
+fn test_normalize_description() {
+    let tests: [(&str, &str, &str); 9] = [
+        (
+            "Simple single line",
+            "Simple description",
+            "Simple description",
+        ),
+        (
+            "Single line with leading and trailing spaces",
+            "   Simple description   ",
+            "Simple description",
+        ),
+        (
+            "Multiple lines with indentation",
+            "  Line 1  \n  Line 2  ",
+            "Line 1\nLine 2",
+        ),
+        (
+            "Empty lines at start and end",
+            "\n\nLine 1\nLine 2\n\n",
+            "Line 1\nLine 2",
+        ),
+        (
+            "Whitespace-only lines at start and end",
+            "   \n  \nLine 1\nLine 2\n  \n   ",
+            "Line 1\nLine 2",
+        ),
+        (
+            "Empty lines in the middle are preserved",
+            "Line 1\n\nLine 2",
+            "Line 1\n\nLine 2",
+        ),
+        ("Empty input", "", ""),
+        ("Whitespace-only input", "    \n   \n  ", ""),
+        (
+            "Complex formatting with tabs and newlines",
+            "\t\n  Line 1 \t \n\tLine 2\n  \t\n",
+            "Line 1\nLine 2",
+        ),
+    ];
+    for (name, input, expected) in tests {
+        let actual = normalize_description(input);
+        assert_eq!(actual, expected, "{name}: normalizeDescription({input:?})");
+    }
+}
