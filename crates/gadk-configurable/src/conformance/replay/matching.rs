@@ -576,7 +576,7 @@ mod tests {
         verify_llm_request_match(exp, act, "agent", 2)
     }
 
-    /// `canonicalize.json` (Task 2's probe): Go `modifyString` and `canonicalizeJSONSubstrings`
+    /// `canonicalize.json` (the Go probe's): Go `modifyString` and `canonicalizeJSONSubstrings`
     /// of 40 inputs.
     #[test]
     fn canonicalize_fixture_matches_go() {

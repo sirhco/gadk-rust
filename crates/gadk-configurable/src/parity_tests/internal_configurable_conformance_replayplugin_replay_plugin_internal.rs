@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `internal/configurable/conformance/replayplugin/replay_plugin_internal_test.go` (Task 6).
+//! Port of ADK-Go `internal/configurable/conformance/replayplugin/replay_plugin_internal_test.go`.
 
 use pretty_assertions::assert_eq;
 

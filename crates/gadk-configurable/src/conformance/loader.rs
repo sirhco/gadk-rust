@@ -69,13 +69,14 @@ impl Loader for ConformanceAgentLoader {
     ///
     /// # Panics
     ///
-    /// On an empty loader. Divergence (ledger 6c-2): Go returns a nil `agent.Agent` there,
-    /// which its callers either reject (`runner.New`: `root agent is required`) or dereference
-    /// (a nil-pointer panic); gadk's `Loader::root_agent` returns an `Arc<dyn Agent>` and has
-    /// no nil, so the empty case panics at the call instead. `list_agents` / `load_agent` work
-    /// on an empty loader as in Go.
+    /// On an empty loader: Go returns a nil `agent.Agent` there, which its callers either
+    /// reject (`runner.New`: `root agent is required`) or dereference (a nil-pointer panic);
+    /// gadk's `Loader::root_agent` returns an `Arc<dyn Agent>` and has no nil, so the empty
+    /// case panics at the call instead. `list_agents` / `load_agent` work on an empty loader
+    /// as in Go.
     fn root_agent(&self) -> Arc<dyn Agent> {
         // Go: loader.go RootAgent
+        // Divergence (ledger 6c-2): an empty loader panics where Go returns a nil agent.
         match self.agents_names.first() {
             Some(name) => self.agent_map[name].clone(),
             #[allow(clippy::panic)] // Go returns nil; see the doc comment

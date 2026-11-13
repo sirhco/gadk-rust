@@ -2,9 +2,9 @@
 
 Internal crate (`publish = false`): a pure-Rust port of
 [`gopkg.in/yaml.v3`](https://github.com/go-yaml/yaml) v3.0.1, the YAML library ADK-Go pins, so
-gadk reads and writes YAML byte-for-byte as ADK-Go does (sub-project 6c-1). No other gadk crate
-depends on it yet (6c-2's configurable agents and conformance plugins will), and the `gadk`
-façade never re-exports it.
+gadk reads and writes YAML byte-for-byte as ADK-Go does (sub-project 6c-1). Its only dependent is
+the internal `gadk-configurable` (6c-2: configurable agents and the conformance plugins), and the
+`gadk` façade never re-exports it.
 
 - One Rust module per Go file, Go's function names in snake_case and in Go's order:
   `yamlh.rs` (`yamlh.go` + `yamlprivateh.go`), `api.rs` (`apic.go`), `reader.rs`, `scanner.rs`,

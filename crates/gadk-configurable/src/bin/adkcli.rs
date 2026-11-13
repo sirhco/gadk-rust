@@ -239,6 +239,8 @@ fn read_dir(path: &str) -> (Vec<DirEntry>, Option<ConfigError>) {
 }
 
 /// A failure while reading directory entries: Go's `readdirent` `*PathError`.
+/// Divergence (ledger 6c-2): Go's op name for a failed directory read after a successful open
+/// is platform-specific (only the `open` failure is verified byte-identical).
 fn read_dir_error(path: &str, e: &io::Error) -> ConfigError {
     ConfigError::path("readdirent", Path::new(path), e)
 }

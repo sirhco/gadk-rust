@@ -15,10 +15,10 @@
 //! Differential tests against the Go probe's recording corpus (`tests/fixtures/`, written by
 //! `scripts/gen-go-configurable`): Rust record bytes equal Go's, Rust replay decoding equals
 //! Go's expected values (or Go's decode error), record → replay round trips, and the type-path
-//! fixup table equals the probe's reflection-generated table (Task 5).
+//! fixup table equals the probe's reflection-generated table.
 //!
-//! The record pipeline here is the record plugin's `saveRecordings` (Task 9 wires it to the
-//! file system): read the existing file with `from_go_node_partial` (errors ignored), drop its
+//! The record pipeline here is the record plugin's `saveRecordings` (without the file
+//! system): read the existing file with `from_go_node_partial` (errors ignored), drop its
 //! recordings of the current user message, append the new ones, `to_go_node` →
 //! `clean_yaml_node` → `marshal_node`.
 

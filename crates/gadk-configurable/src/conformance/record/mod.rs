@@ -39,18 +39,18 @@ use gadk_agent::callback::{
 use gadk_agent::{AgentError, Context, InvocationContext, Plugin, PluginConfig, Tool, ToolError};
 use gadk_genai::Content;
 use gadk_model::{LlmRequest, LlmResponse, ModelError};
-use gadk_platform::{go_path_clean, go_path_join};
+use gadk_platform::go_path_join;
 use gadk_session::State;
 use parking_lot::Mutex;
 use serde_json::{Map, Value};
 
 use self::state::InvocationRecordState;
+use crate::check_within_base_dir;
 use crate::conformance::gonode::{from_go_node_partial, to_go_node};
 use crate::conformance::recording::{
     LlmRequestView, RecordedFunctionCall, RecordedFunctionResponse, Recordings,
 };
 use crate::govalue::json_map_to_go;
-use crate::{go_abs, go_io_error, go_is_abs};
 
 /// The session state key holding the record configuration.
 const RECORDINGS_CONFIG_KEY: &str = "_adk_recordings_config";
@@ -179,6 +179,9 @@ impl RecordPlugin {
 
         // Sanitize and clone the request (Go: to prevent YAML serialization panics caused by
         // HTTPOptions.ExtrasRequestProvider)
+        // Divergence (ledger 6c-2): the recording is a snapshot taken now; Go keeps a shallow
+        // copy sharing `Contents`/`Config` (and, in `afterModel`, the response pointer), so a
+        // later mutation before `afterRun` would show in Go's file (no known Go path does one).
         let sanitized_req = sanitize_llm_request(req);
 
         state.start_llm_recording(sanitized_req);
@@ -313,21 +316,8 @@ impl RecordPlugin {
             _ => return off(),
         };
 
-        let invalid = |e: String| AgentError::other(format!("invalid path format: {e}"));
-        let base_path =
-            go_abs(&self.allowed_base_dir).map_err(|e| invalid(go_io_error(&e).to_string()))?;
-        let requested_abs_path =
-            go_abs(Path::new(&case_dir)).map_err(|e| invalid(go_io_error(&e).to_string()))?;
-        let rel = go_filepath_rel(
-            &base_path.to_string_lossy(),
-            &requested_abs_path.to_string_lossy(),
-        )
-        .map_err(invalid)?;
-        if rel.starts_with("..") || go_is_abs(&rel) {
-            return Err(AgentError::other(
-                "record config error: 'dir' is not within the allowed base directory",
-            ));
-        }
+        check_within_base_dir(&self.allowed_base_dir, &case_dir, "record")
+            .map_err(AgentError::other)?;
 
         let msg_index = match config.get("user_message_index") {
             None | Some(Value::Null) => return off(),
@@ -462,71 +452,6 @@ pub(crate) fn sanitize_llm_request(req: &LlmRequest) -> LlmRequestView {
     // Go's shallow copy with `Tools = nil` and `Config.HTTPOptions = nil`: the recorded view
     // carries neither (gadk keeps `http_options` beside `config`).
     LlmRequestView::from(req)
-}
-
-/// Go `filepath.Rel` (Unix): `targ_path` relative to `base_path`, lexically; Go's
-/// `Rel: can't make %s relative to %s` when one is rooted and the other is not, or when the
-/// base has a `..` element the target does not.
-fn go_filepath_rel(base_path: &str, targ_path: &str) -> Result<String, String> {
-    // Go: path/filepath/path.go Rel
-    let cant = || {
-        Err(format!(
-            "Rel: can't make {targ_path} relative to {base_path}"
-        ))
-    };
-    let base = go_path_clean(base_path);
-    let targ = go_path_clean(targ_path);
-    if targ == base {
-        return Ok(".".to_owned());
-    }
-    let base = if base == "." { String::new() } else { base };
-    let (base, targ) = (base.as_bytes(), targ.as_bytes());
-
-    let base_slashed = base.first() == Some(&b'/');
-    let targ_slashed = targ.first() == Some(&b'/');
-    if base_slashed != targ_slashed {
-        return cant();
-    }
-    // Position base[b0..bi] and targ[t0..ti] at the first differing elements.
-    let (bl, tl) = (base.len(), targ.len());
-    let (mut b0, mut bi, mut t0, mut ti) = (0, 0, 0, 0);
-    loop {
-        while bi < bl && base[bi] != b'/' {
-            bi += 1;
-        }
-        while ti < tl && targ[ti] != b'/' {
-            ti += 1;
-        }
-        if targ[t0..ti] != base[b0..bi] {
-            break;
-        }
-        if bi < bl {
-            bi += 1;
-        }
-        if ti < tl {
-            ti += 1;
-        }
-        b0 = bi;
-        t0 = ti;
-    }
-    if &base[b0..bi] == b".." {
-        return cant();
-    }
-    let rest = String::from_utf8_lossy(&targ[t0..]);
-    if b0 != bl {
-        // Base elements left. Must go up before going down.
-        let seps = base[b0..bl].iter().filter(|&&c| c == b'/').count();
-        let mut buf = String::from("..");
-        for _ in 0..seps {
-            buf.push_str("/..");
-        }
-        if t0 != tl {
-            buf.push('/');
-            buf.push_str(&rest);
-        }
-        return Ok(go_path_clean(&buf));
-    }
-    Ok(rest.into_owned())
 }
 
 /// Go `os.WriteFile(name, data, perm)`: create (with `perm`, before the umask) or truncate,
@@ -823,63 +748,6 @@ mod tests {
             parse(&p, json!({"dir": "relative/case", "user_message_index": 1})),
             Err(OUTSIDE.to_owned())
         );
-    }
-
-    #[test]
-    fn go_filepath_rel_matches_go() {
-        // Go path/filepath/path_test.go reltests (Unix rows).
-        for (root, path, want) in [
-            ("a/b", "a/b", Ok(".")),
-            ("a/b/.", "a/b", Ok(".")),
-            ("a/b", "a/b/.", Ok(".")),
-            ("./a/b", "a/b", Ok(".")),
-            ("a/b", "./a/b", Ok(".")),
-            ("ab/cd", "ab/cde", Ok("../cde")),
-            ("ab/cd", "ab/c", Ok("../c")),
-            ("a/b", "a/b/c/d", Ok("c/d")),
-            ("a/b", "a/b/../c", Ok("../c")),
-            ("a/b/../c", "a/b", Ok("../b")),
-            ("a/b/c", "a/c/d", Ok("../../c/d")),
-            ("a/b", "c/d", Ok("../../c/d")),
-            ("a/b/c/d", "a/b", Ok("../..")),
-            ("a/b/c/d", "a/b/", Ok("../..")),
-            ("a/b/c/d/", "a/b", Ok("../..")),
-            ("a/b/c/d/", "a/b/", Ok("../..")),
-            ("../../a/b", "../../a/b/c/d", Ok("c/d")),
-            ("/a/b", "/a/b", Ok(".")),
-            ("/a/b/.", "/a/b", Ok(".")),
-            ("/a/b", "/a/b/.", Ok(".")),
-            ("/ab/cd", "/ab/cde", Ok("../cde")),
-            ("/ab/cd", "/ab/c", Ok("../c")),
-            ("/a/b", "/a/b/c/d", Ok("c/d")),
-            ("/a/b", "/a/b/../c", Ok("../c")),
-            ("/a/b/../c", "/a/b", Ok("../b")),
-            ("/a/b/c", "/a/c/d", Ok("../../c/d")),
-            ("/a/b", "/c/d", Ok("../../c/d")),
-            ("/a/b/c/d", "/a/b", Ok("../..")),
-            ("/a/b/c/d", "/a/b/", Ok("../..")),
-            ("/a/b/c/d/", "/a/b", Ok("../..")),
-            ("/a/b/c/d/", "/a/b/", Ok("../..")),
-            ("/../../a/b", "/../../a/b/c/d", Ok("c/d")),
-            (".", "a/b", Ok("a/b")),
-            (".", "..", Ok("..")),
-            // can't do purely lexically
-            ("..", ".", Err(())),
-            ("..", "a", Err(())),
-            ("../..", "..", Err(())),
-            ("a", "/a", Err(())),
-            ("/a", "a", Err(())),
-        ] {
-            let got = go_filepath_rel(root, path);
-            match want {
-                Ok(w) => assert_eq!(got.as_deref(), Ok(w), "Rel({root:?}, {path:?})"),
-                Err(()) => assert_eq!(
-                    got,
-                    Err(format!("Rel: can't make {path} relative to {root}")),
-                    "Rel({root:?}, {path:?})"
-                ),
-            }
-        }
     }
 
     #[test]

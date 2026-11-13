@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `internal/configurable/conformance/recordplugin/record_plugin_test.go` (Task 9).
+//! Port of ADK-Go `internal/configurable/conformance/recordplugin/record_plugin_test.go`.
 
 use std::any::Any;
 use std::collections::HashMap;
