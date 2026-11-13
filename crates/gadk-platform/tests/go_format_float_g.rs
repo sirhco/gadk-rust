@@ -85,6 +85,13 @@ fn go_format_float_g_named_cases() {
         (f64::from(0.7_f32), 32, "0.7"),
         (f64::from(f32::MAX), 32, "3.4028235e+38"),
         (f64::from(f32::from_bits(1)), 32, "1e-45"),
+        // Finite float64s that round to ±Inf as float32 (past f32::MAX + half an ulp).
+        (1e300, 32, "+Inf"),
+        (-1e300, 32, "-Inf"),
+        (3.402_823_6e38, 32, "+Inf"),
+        (-3.402_823_6e38, 32, "-Inf"),
+        // Above f32::MAX but below the halfway point: rounds down to f32::MAX.
+        (3.402_823_5e38, 32, "3.4028235e+38"),
         (f64::from_bits(1), 64, "5e-324"),
         (2.225_073_858_507_201e-308, 64, "2.225073858507201e-308"),
         // An exact decimal tie (…520.625): Go keeps the even digit.

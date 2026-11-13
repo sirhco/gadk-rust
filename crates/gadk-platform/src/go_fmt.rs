@@ -226,13 +226,15 @@ pub fn go_format_float_v(f: f64) -> String {
 /// and the digits from Rust's exact formatting at that count (ties to even), unless those digits
 /// do not round-trip (an asymmetric interval at a power of two), when the shortest ones stand.
 pub fn go_format_float_g(f: f64, bits: u32) -> String {
-    if f.is_nan() {
+    // FormatFloat(f, _, _, 32) first rounds f to float32, so a finite f64 past f32::MAX
+    // becomes ±Inf before the NaN/Inf checks.
+    let r = if bits == 32 { f64::from(f as f32) } else { f };
+    if r.is_nan() {
         return "NaN".to_owned();
     }
-    if f.is_infinite() {
-        return if f > 0.0 { "+Inf" } else { "-Inf" }.to_owned();
+    if r.is_infinite() {
+        return if r > 0.0 { "+Inf" } else { "-Inf" }.to_owned();
     }
-    // FormatFloat(f, _, _, 32) first rounds f to float32.
     let sci = if bits == 32 {
         shortest_sci(f as f32)
     } else {
