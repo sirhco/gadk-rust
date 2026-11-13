@@ -31,6 +31,7 @@ use chrono::{DateTime, FixedOffset, Timelike};
 use serde::Deserialize;
 use serde::de::{DeserializeOwned, Deserializer, MapAccess, Visitor};
 
+use super::{RowCount, corpus, gmap, int, s};
 use crate::{
     Decoder, Error, GoValue, InlineMap, Options, TypeError, from_node_partial, unmarshal,
     unmarshal_node,
@@ -50,25 +51,6 @@ use crate::{
 // parity: skipped TestUnmarshalerRetry: the Unmarshaler interface is a Non-Goal (spec Scope)
 // parity: skipped TestObsoleteUnmarshalerRetry: the obsoleteUnmarshaler interface is a Non-Goal (spec Scope)
 
-/// The probe's copy of a Go test input (`testdata/corpus/parse/<case>.yaml`).
-fn corpus(case: &str) -> Vec<u8> {
-    let path = format!(
-        "{}/testdata/corpus/parse/{case}.yaml",
-        env!("CARGO_MANIFEST_DIR")
-    );
-    std::fs::read(&path).unwrap_or_else(|e| panic!("{path}: {e}"))
-}
-
-/// Go's `string` inside an `interface{}`.
-fn s(v: &str) -> GoValue {
-    GoValue::String(v.to_string())
-}
-
-/// Go's `int` inside an `interface{}`.
-fn int(v: i64) -> GoValue {
-    GoValue::Int(v)
-}
-
 /// Go's `float64` inside an `interface{}`.
 fn float(v: f64) -> GoValue {
     GoValue::Float(v)
@@ -77,16 +59,6 @@ fn float(v: f64) -> GoValue {
 /// Go's `[]interface{}`.
 fn seq<const N: usize>(items: [GoValue; N]) -> GoValue {
     GoValue::Seq(items.into())
-}
-
-/// Go's `map[string]interface{}` inside an `interface{}`, entries in document order.
-fn gmap<const N: usize>(entries: [(&str, GoValue); N]) -> GoValue {
-    GoValue::Map(
-        entries
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), v))
-            .collect(),
-    )
 }
 
 /// Go's `map[string]T`.
@@ -1046,34 +1018,6 @@ fn partial<T: Target>(data: &[u8], opts: &Options, err: &TypeError) -> T {
     let (value, terr) = from_node_partial::<T>(&doc, doc.root(), opts).unwrap();
     assert_eq!(terr.as_ref(), Some(err));
     value
-}
-
-/// Checks that rows arrive in Go's order and that every row is either ported or skipped.
-#[derive(Default)]
-struct RowCount {
-    next: usize,
-    ported: usize,
-    skipped: Vec<usize>,
-}
-
-impl RowCount {
-    fn ported(&mut self, i: usize) {
-        assert_eq!(i, self.next, "row {i} out of order");
-        self.next += 1;
-        self.ported += 1;
-    }
-
-    fn skipped(&mut self, i: usize) {
-        assert_eq!(i, self.next, "row {i} out of order");
-        self.next += 1;
-        self.skipped.push(i);
-    }
-
-    fn finish(&self, total: usize, skipped: &[usize]) {
-        assert_eq!(self.next, total);
-        assert_eq!(self.skipped, skipped);
-        assert_eq!(self.ported + self.skipped.len(), total);
-    }
 }
 
 /// `TestUnmarshal`: `yaml.Unmarshal` of every row.

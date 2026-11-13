@@ -46,6 +46,11 @@ pub fn b64(s: &str) -> Vec<u8> {
         .unwrap_or_else(|e| panic!("invalid base64 in a golden: {e}"))
 }
 
+/// Shows bytes as text for failure messages.
+pub fn show(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
 // ---------------------------------------------------------------------------------------------
 // Golden files.
 // ---------------------------------------------------------------------------------------------

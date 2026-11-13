@@ -28,6 +28,7 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
+use super::{RowCount, corpus, gmap, int, s};
 use crate::{
     Document, Encoder, Error, GoValue, InlineMap, Kind, NodeData, Options, Style, marshal,
 };
@@ -35,35 +36,6 @@ use crate::{
 // parity: skipped TestMarshaler: the Marshaler interface is a Non-Goal (spec Scope)
 // parity: skipped TestMarshalerWholeDocument: the Marshaler interface is a Non-Goal (spec Scope)
 // parity: skipped TestMarshalerError: the Marshaler interface is a Non-Goal (spec Scope)
-
-/// The probe's copy of a Go test input or output (`testdata/corpus/parse/<case>.yaml`).
-fn corpus(case: &str) -> Vec<u8> {
-    let path = format!(
-        "{}/testdata/corpus/parse/{case}.yaml",
-        env!("CARGO_MANIFEST_DIR")
-    );
-    std::fs::read(&path).unwrap_or_else(|e| panic!("{path}: {e}"))
-}
-
-/// Go's `string` inside an `interface{}`.
-fn s(v: &str) -> GoValue {
-    GoValue::String(v.to_string())
-}
-
-/// Go's `int` inside an `interface{}`.
-fn int(v: i64) -> GoValue {
-    GoValue::Int(v)
-}
-
-/// Go's `map[string]interface{}` inside an `interface{}`.
-fn gmap<const N: usize>(entries: [(&str, GoValue); N]) -> GoValue {
-    GoValue::Map(
-        entries
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), v))
-            .collect(),
-    )
-}
 
 /// Go's `map[string]T`.
 fn m<V, const N: usize>(entries: [(&'static str, V); N]) -> BTreeMap<&'static str, V> {
@@ -592,38 +564,13 @@ const MARSHAL_TESTS_SKIPPED: [usize; 16] = [
     44, 46, 47, 50, 51, 52, 53, 54, 55, 63, 70, 71, 72, 73, 78, 79,
 ];
 
-/// Checks that rows arrive in Go's order and that every row is either ported or skipped; also
-/// checks each ported row's expected output against the probe's copy.
-#[derive(Default)]
-struct RowCount {
-    next: usize,
-    ported: usize,
-    skipped: Vec<usize>,
-}
-
-impl RowCount {
-    fn ported(&mut self, i: usize, data: &str) {
-        assert_eq!(i, self.next, "row {i} out of order");
-        assert_eq!(
-            data.as_bytes(),
-            corpus(&format!("encode-marshalTests-{i:03}")),
-            "row {i}: output differs from the probe corpus"
-        );
-        self.next += 1;
-        self.ported += 1;
-    }
-
-    fn skipped(&mut self, i: usize) {
-        assert_eq!(i, self.next, "row {i} out of order");
-        self.next += 1;
-        self.skipped.push(i);
-    }
-
-    fn finish(&self) {
-        assert_eq!(self.next, MARSHAL_TESTS);
-        assert_eq!(self.skipped, MARSHAL_TESTS_SKIPPED);
-        assert_eq!(self.ported + self.skipped.len(), MARSHAL_TESTS);
-    }
+/// Checks a ported `marshalTests` row's expected output against the probe's copy.
+fn check_marshal_corpus(i: usize, data: &str) {
+    assert_eq!(
+        data.as_bytes(),
+        corpus(&format!("encode-marshalTests-{i:03}")),
+        "row {i}: output differs from the probe corpus"
+    );
 }
 
 /// `TestMarshal`: `yaml.Marshal` of every row.
@@ -632,7 +579,8 @@ struct MarshalCheck(RowCount);
 
 impl MarshalRows for MarshalCheck {
     fn row<T: Serialize + ?Sized>(&mut self, i: usize, value: &T, data: &str, opts: &Options) {
-        self.0.ported(i, data);
+        self.0.ported(i);
+        check_marshal_corpus(i, data);
         let got = marshal(value, opts).unwrap_or_else(|e| panic!("row {i}: {e}"));
         assert_eq!(String::from_utf8_lossy(&got), data, "row {i}");
     }
@@ -647,7 +595,7 @@ impl MarshalRows for MarshalCheck {
 fn test_marshal() {
     let mut check = MarshalCheck::default();
     marshal_tests(&mut check);
-    check.0.finish();
+    check.0.finish(MARSHAL_TESTS, &MARSHAL_TESTS_SKIPPED);
 }
 
 /// `TestEncoderSingleDocument`: `Encoder.Encode` + `Close` of every row.
@@ -656,7 +604,8 @@ struct EncoderCheck(RowCount);
 
 impl MarshalRows for EncoderCheck {
     fn row<T: Serialize + ?Sized>(&mut self, i: usize, value: &T, data: &str, opts: &Options) {
-        self.0.ported(i, data);
+        self.0.ported(i);
+        check_marshal_corpus(i, data);
         let mut buf = Vec::new();
         let mut enc = Encoder::new(&mut buf);
         enc.encode(value, opts)
@@ -675,7 +624,7 @@ impl MarshalRows for EncoderCheck {
 fn test_encoder_single_document() {
     let mut check = EncoderCheck::default();
     marshal_tests(&mut check);
-    check.0.finish();
+    check.0.finish(MARSHAL_TESTS, &MARSHAL_TESTS_SKIPPED);
 }
 
 #[test]

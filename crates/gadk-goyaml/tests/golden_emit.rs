@@ -21,13 +21,8 @@ use gadk_goyaml::{Document, Encoder, marshal_node};
 
 use support::golden::{
     DIFF_GOLDEN_COUNT, PARSE_GOLDEN_COUNT, ParseGolden, dump_to_document, golden_paths,
-    read_parse_golden,
+    read_parse_golden, show,
 };
-
-/// Shows bytes as text for failure messages.
-fn show(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).into_owned()
-}
 
 /// The node Go's `yaml.Unmarshal(in, &node)` filled: the dumped document node, or the zero
 /// node (`node` null without an error: empty, whitespace-only and comment-only inputs).

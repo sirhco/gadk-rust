@@ -19,13 +19,8 @@
 
 mod support;
 
-use support::golden::{SERDE_GOLDEN_COUNT, SerdeGolden, compare_node, serde_goldens};
+use support::golden::{SERDE_GOLDEN_COUNT, SerdeGolden, compare_node, serde_goldens, show};
 use support::shapes::{SHAPES, ShapeValue, options};
-
-/// Shows bytes as text for failure messages.
-fn show(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).into_owned()
-}
 
 /// The Go value of a golden: the shape's zero value for `zero`, else the hand-built value.
 fn go_value(g: &SerdeGolden) -> ShapeValue {

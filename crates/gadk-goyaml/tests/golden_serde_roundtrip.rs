@@ -24,16 +24,11 @@
 mod support;
 
 use gadk_goyaml::unmarshal_node;
-use support::golden::{SERDE_GOLDEN_COUNT, SerdeGolden, compare_node, serde_goldens};
+use support::golden::{SERDE_GOLDEN_COUNT, SerdeGolden, compare_node, serde_goldens, show};
 use support::shapes::{SHAPES, ShapeValue, options};
 
 /// Serde goldens with an input (all but the eight `zero` cases, one per shape).
 const ROUND_TRIP_COUNT: usize = 69;
-
-/// Shows bytes as text for failure messages.
-fn show(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).into_owned()
-}
 
 /// What Go's shape holds after `yaml.Unmarshal(input, &s)`: the partly filled value next to a
 /// `TypeError`, or the zero value when the input does not parse. Returns the value and whether

@@ -29,7 +29,7 @@ use gadk_goyaml::{
     unmarshal_node,
 };
 use support::golden::{
-    DIFF_GOLDEN_COUNT, ParseGolden, ValueDump, compare_node, diff_goldens, value_from_dump,
+    DIFF_GOLDEN_COUNT, ParseGolden, ValueDump, compare_node, diff_goldens, show, value_from_dump,
     value_to_dump,
 };
 
@@ -37,11 +37,6 @@ use support::golden::{
 /// trees).
 const SEEDS: usize = 32;
 const CASES_PER_SEED: usize = 20;
-
-/// Shows bytes as text for failure messages.
-fn show(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).into_owned()
-}
 
 /// Compares bytes (or an error) with the golden's, naming `what` on mismatch.
 fn check_bytes(
@@ -151,7 +146,10 @@ fn check_value(g: &ParseGolden) -> Result<(), String> {
         (Err(e), want) => Err(format!("value error {:?}, want {want:?}", e.to_string())),
         (Ok(_), Some(want)) => Err(format!("value decoded, want error {want:?}")),
         (Ok(v), None) => {
-            let want = g.value.clone().unwrap_or(ValueDump::Null);
+            let want = g
+                .value
+                .clone()
+                .ok_or("golden has neither value nor value_error")?;
             let got = value_to_dump(&v);
             if got == want {
                 Ok(())
