@@ -143,6 +143,24 @@ impl Loader for EmptyLoader {
     }
 }
 
+/// A loader with no agents whose root panics, like gadk-configurable's conformance loader when
+/// every `root_agent.yaml` fails to load (Go returns a nil root there).
+pub struct NoRootLoader;
+
+impl Loader for NoRootLoader {
+    fn list_agents(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    fn load_agent(&self, name: &str) -> Result<Arc<dyn Agent>, LoaderError> {
+        Err(LoaderError(format!("agent {name} not found")))
+    }
+
+    fn root_agent(&self) -> Arc<dyn Agent> {
+        panic!("NoRootLoader has no root agent")
+    }
+}
+
 /// A POST to `target` with `body`, the `app_name` path variable `test-agent` (Go
 /// `mux.SetURLVars`) and the given headers.
 pub fn post(target: &str, headers: &[(&str, &str)], body: Vec<u8>) -> http::Request<Body> {

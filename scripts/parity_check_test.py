@@ -1639,8 +1639,8 @@ class RealTreeTest(unittest.TestCase):
             "session/compaction/llm_summarizer_test.go",
         ])
         self.assertEqual(deferred, {
-            # 5a: validate_test.go and compaction_integration_test.go moved to the 5a ledger.
-            "cmd/launcher/console/compaction_test.go": "launcher (sub-project 6)",
+            # 5a: validate_test.go and compaction_integration_test.go moved to the 5a ledger;
+            # 6: cmd/launcher/console/compaction_test.go moved to the 6 ledger.
             "session/vertexai/compaction_persistence_test.go": "Vertex AI session service (sub-project 4)",
         })
         self.assertEqual(pc.count(ADK_GO, in_scope), 190)
@@ -1879,6 +1879,32 @@ class RealTreeTest(unittest.TestCase):
         self.assertEqual(pc.count(ADK_GO, in_scope), 40)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "6b"), [])
 
+class DefaultAdkGoTest(unittest.TestCase):
+    def git(self, *args):
+        import subprocess
+        subprocess.run(["git", *args], check=True, capture_output=True)
+
+    def test_main_checkout_and_worktree_resolve_to_the_same_sibling(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = pathlib.Path(d).resolve()
+            main = root / "adk-rust"
+            main.mkdir()
+            self.git("-C", str(main), "init", "-q")
+            self.git("-C", str(main), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x")
+            wt = main / ".claude" / "worktrees" / "w"
+            self.git("-C", str(main), "worktree", "add", "-q", str(wt))
+            self.assertEqual(pc.default_adk_go(main), root / "adk-go")
+            self.assertEqual(pc.default_adk_go(wt), root / "adk-go")
+
+    def test_outside_git_falls_back_to_the_sibling(self):
+        with tempfile.TemporaryDirectory() as d:
+            repo = pathlib.Path(d).resolve() / "r"
+            repo.mkdir()
+            with mock.patch.dict(os.environ, {"GIT_CEILING_DIRECTORIES": d}):
+                self.assertEqual(pc.default_adk_go(repo), repo.parent / "adk-go")
+
+
 
 if __name__ == "__main__":
     unittest.main()
+
