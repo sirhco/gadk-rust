@@ -44,6 +44,15 @@ mod wire;
 
 use wire::{Replay, assert_request, client_for, load, scenario_names};
 
+/// Scenarios whose Go error is raised by the caller (`ensureTableAndSchema`,
+/// `bqViewRunner.RunViewDDL`), not by a client call: every call it made succeeded.
+const CALLER_ERROR_SCENARIOS: [&str; 4] = [
+    "incompatible_schema",
+    "view_dropped_client",
+    "view_non_view_materialized",
+    "view_non_view_table",
+];
+
 /// Every scenario of `tests/fixtures/wire` (SCENARIO.md), one test each.
 const SCENARIOS: [&str; 41] = [
     "additive_patch",
@@ -275,13 +284,25 @@ async fn replay(name: &str) {
 
     // A scenario Go ended with an error the last call returned carries that call's error text
     // (wrapped by ensureTableAndSchema's prefixes).
-    if let (Some(want), Some(Err(err))) = (fixture["result"]["error"].as_str(), &last) {
-        let want = want.replace("{{JOB_ID}}", &job_id);
-        let got = err.to_string();
-        assert!(
-            want.ends_with(&got),
-            "{name}: Go error {want:?} does not end with {got:?}"
-        );
+    match (fixture["result"]["error"].as_str(), &last) {
+        (Some(want), Some(Err(err))) => {
+            let want = want.replace("{{JOB_ID}}", &job_id);
+            let got = err.to_string();
+            assert!(
+                want.ends_with(&got),
+                "{name}: Go error {want:?} does not end with {got:?}"
+            );
+        }
+        // Go's error came from the caller's logic after its last call succeeded (a schema
+        // mismatch, a non-view table) or before any call (a dropped client);
+        // `tests/rest_schema_upgrade.rs` and `tests/rest_views.rs` run that logic over these
+        // scenarios and check the text.
+        (Some(_), Some(Ok(())) | None) if CALLER_ERROR_SCENARIOS.contains(&name) => {}
+        (Some(want), Some(Ok(()))) => {
+            panic!("{name}: Go ended with error {want:?}, the last Rust call succeeded")
+        }
+        (Some(want), None) => panic!("{name}: Go ended with error {want:?}, no Rust call ran"),
+        (None, _) => {}
     }
 }
 

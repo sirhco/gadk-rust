@@ -393,9 +393,18 @@ impl Error {
         }
     }
 
-    /// Wraps any error as [`Error::Other`].
+    /// Wraps any error as [`Error::Other`]; an [`Error`] is returned as is and a
+    /// [`ContextError`] as [`Error::Context`], so the tree walks of [`Error::find`] see them.
     pub fn other(err: impl Into<BoxError>) -> Error {
-        Error::Other(err.into())
+        let boxed: BoxError = err.into();
+        let boxed = match boxed.downcast::<Error>() {
+            Ok(inner) => return *inner,
+            Err(boxed) => boxed,
+        };
+        match boxed.downcast::<ContextError>() {
+            Ok(ctx) => Error::Context(*ctx),
+            Err(boxed) => Error::Other(boxed),
+        }
     }
 
     /// Go `errors.Is(err, context.Canceled)` / `errors.Is(err, context.DeadlineExceeded)`:
@@ -414,9 +423,18 @@ impl Error {
         match self {
             Error::Wrapped { source, .. } => source.find(pred),
             Error::Joined(errs) => errs.iter().find_map(|e| e.find(pred)),
-            Error::Other(boxed) => boxed
-                .downcast_ref::<Error>()
-                .and_then(|inner| inner.find(pred)),
+            // Go `errors.As` walks every `Unwrap`: follow the foreign `source()` chain to the
+            // first `Error`, whose own tree the recursion walks.
+            Error::Other(boxed) => {
+                let mut link: Option<&(dyn StdError + 'static)> = Some(boxed.as_ref());
+                while let Some(e) = link {
+                    if let Some(inner) = e.downcast_ref::<Error>() {
+                        return inner.find(pred);
+                    }
+                    link = e.source();
+                }
+                None
+            }
             _ => None,
         }
     }
@@ -649,6 +667,56 @@ mod tests {
         let both = Error::Joined(vec![api(500, "x"), grpc(Code::NotFound)]);
         assert!(!is_not_found_error(&both));
         assert!(!is_not_found_error(&Error::msg("Not found")));
+    }
+
+    /// A caller's error type whose `source()` is an [`Error`] (Go: a foreign error with an
+    /// `Unwrap() error`).
+    #[derive(Debug)]
+    struct Foreign(Error);
+
+    impl fmt::Display for Foreign {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "foreign: {}", self.0)
+        }
+    }
+
+    impl StdError for Foreign {
+        fn source(&self) -> Option<&(dyn StdError + 'static)> {
+            Some(&self.0)
+        }
+    }
+
+    #[test]
+    fn other_sees_boxed_context_and_foreign_source_chains() {
+        let canceled = Error::other(ContextError::Canceled);
+        assert!(canceled.is_context(ContextError::Canceled));
+        assert!(!canceled.is_context(ContextError::DeadlineExceeded));
+        assert_eq!(canceled.to_string(), "context canceled");
+
+        let inner = Error::other(Error::msg("inner"));
+        assert!(matches!(inner, Error::Message(_)), "{inner:?}");
+        assert_eq!(inner.to_string(), "inner");
+
+        let foreign = Error::other(Foreign(Error::wrap(
+            "w",
+            Error::Status {
+                code: Code::NotFound,
+                message: "gone".into(),
+            },
+        )));
+        assert_eq!(
+            foreign.to_string(),
+            "foreign: w: rpc error: code = NotFound desc = gone"
+        );
+        assert_eq!(status_code(&foreign), Code::NotFound);
+        assert!(has_error_code(&foreign, 404, Code::NotFound));
+        assert!(is_not_found_error(&foreign));
+
+        // Two foreign links deep, under a context error.
+        let deep = Error::other(Foreign(Error::other(Foreign(Error::from(
+            ContextError::DeadlineExceeded,
+        )))));
+        assert!(deep.is_context(ContextError::DeadlineExceeded));
     }
 
     #[test]

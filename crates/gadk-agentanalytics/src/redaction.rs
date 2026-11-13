@@ -1171,6 +1171,9 @@ pub(crate) fn redact_error_message(msg: &str) -> String {
             {
                 return b;
             }
+            // Unchanged values return the message as is. A failed `marshal` of changed values
+            // would also return it unredacted: Go parity (`json.Marshal` error falls through to
+            // `return msg`), and unreachable — a value decoded from JSON always re-encodes.
             return msg.to_owned();
         }
         // A malformed JSON document with a sensitive key pattern or a credential marker fails
@@ -1978,7 +1981,11 @@ pub(crate) fn apply_content_formatter(
     };
     let failed = || Value::String(FORMATTING_FAILED_PLACEHOLDER.to_owned());
     // Divergence (ledger 7b-1): Go's recover is silent; Rust's panic hook still reports the
-    // panic (by default on stderr) before catch_unwind returns.
+    // panic (by default on stderr) before catch_unwind returns, message included — which often
+    // carries payload data (`panic!("bad {v}")`, an `expect` on an `Err` holding the value), so
+    // it can reach stderr or an installed hook (Sentry, tracing-panic) unredacted. Under
+    // `panic = "abort"` catch_unwind catches nothing and the process aborts. Replacing the
+    // global hook around the call would race other threads, so it is left alone.
     match catch_unwind(AssertUnwindSafe(|| formatter(payload, event_type))) {
         Err(panic) => {
             if let Some(logger) = logger {

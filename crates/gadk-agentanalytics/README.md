@@ -33,7 +33,8 @@ Storage Write stream, Arrow batch processor and GCS offloader (7b-2) and the plu
   error texts and `%w` chains.
 
 Behavior, SQL, schemas, request bytes and error texts match ADK-Go except for the accepted
-divergences in `docs/parity/7b-1.md`, each annotated `// Divergence (ledger 7b-1)` in the source.
+divergences in `docs/parity/7b-1.md`, each annotated in the source with a `// Divergence` comment
+naming that ledger.
 
 ## Tests and goldens
 

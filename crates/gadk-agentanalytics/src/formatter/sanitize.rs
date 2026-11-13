@@ -159,6 +159,10 @@ impl San {
             San::F32(f) => go_json_float32(f)
                 .parse::<Number>()
                 .map_or(Value::Null, Value::Number),
+            // Divergence (ledger 7b-1): serde_json (no `arbitrary_precision`) holds an integer
+            // outside `i64` / `u64` (an `i128` / `u128`, or such a `json.Number`) as the nearest
+            // `f64`, so this `Value` form loses its low digits; Go keeps the `json.Number` text.
+            // `to_go_json` writes the text unchanged.
             San::Number(n) => n.parse::<Number>().map_or(Value::String(n), Value::Number),
             San::Str(s) => Value::String(s),
             San::List(items) => Value::Array(items.into_iter().map(San::into_value).collect()),

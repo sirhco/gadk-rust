@@ -604,6 +604,9 @@ fn decode<T: for<'de> Deserialize<'de>>(body: &[u8]) -> Result<T, Error> {
 
 /// Go `(*TableMetadata).toBQ()` for the fields [`TableMetadata`] has.
 fn table_resource(meta: &TableMetadata) -> Result<Map<String, Value>, Error> {
+    // Divergence (ledger 7b-1): Go tests `Schema != nil`; a `Vec` has no nil, so an empty
+    // schema counts as none (Go sends `"schema":{}` for a non-nil empty one and rejects it
+    // beside a view query).
     if !meta.schema.is_empty() && !meta.view_query.is_empty() {
         return Err(Error::msg(
             "bigquery: provide Schema or ViewQuery, not both",
@@ -740,6 +743,10 @@ fn table_metadata_from_reply(body: &[u8]) -> Result<TableMetadata, Error> {
     let time_partitioning = match reply.time_partitioning {
         None => None,
         Some(p) => {
+            // Divergence (ledger 7b-1): Go decodes `expirationMs` as a `,string` int64: a bare
+            // JSON number is an error there and accepted here (a non-u64 one as 0), and a
+            // negative string is a negative expiration there and a parse error here (a
+            // `Duration` cannot be negative).
             let ms = match &p.expiration_ms {
                 None | Some(Value::Null) => 0,
                 Some(Value::String(s)) => s.parse::<u64>().map_err(Error::other)?,
@@ -878,17 +885,22 @@ pub(crate) fn api_error_from_response(parts: &http::response::Parts, body: &[u8]
     if let Some(reply) = error_reply_from_body(body) {
         if reply.code != 0 {
             // Go keeps the body's `error.code` even when it differs from the HTTP status.
+            // Divergence (ledger 7b-1): Go's `Code` is an `int`; a body code outside `u16`
+            // (negative or above 65535) keeps the HTTP status here.
             err.code = u16::try_from(reply.code).unwrap_or(status);
         }
         err.message = reply.message;
         err.details = reply.details;
+        // Go decodes a `null` entry into a zero `ErrorItem` and keeps it.
         err.errors = reply
             .errors
             .into_iter()
-            .flatten()
-            .map(|i| ErrorItem {
-                reason: i.reason,
-                message: i.message,
+            .map(|i| {
+                let i = i.unwrap_or_default();
+                ErrorItem {
+                    reason: i.reason,
+                    message: i.message,
+                }
             })
             .collect();
     }
@@ -938,6 +950,10 @@ fn error_reply_from_body(body: &[u8]) -> Option<ErrorReplyBody> {
 /// or whose code is 500/502/503/504; a context deadline (Go's `Timeout()`); a transport failure
 /// that refused or reset the connection, timed out, or cut a body short.
 pub(crate) fn retryable_error(err: &Error, reasons: &[&str]) -> bool {
+    // Divergence (ledger 7b-1): Go also retries an error whose text is exactly
+    // `http2: stream closed` or `http2: client connection lost` (Go net/http's HTTP/2 texts);
+    // the gadk transport's HTTP/2 failures carry other texts and are retried only as a refused
+    // or reset connection or a timeout.
     match err {
         Error::Api(api) => {
             api.errors
@@ -951,7 +967,8 @@ pub(crate) fn retryable_error(err: &Error, reasons: &[&str]) -> bool {
             | RestError::DeadlineExceeded
             | RestError::DroppedBody { .. } => true,
             RestError::Transport(e) => connection_error(e),
-            RestError::Headers(_) => false,
+            // Go: a credential fetch's `*url.Error` is checked like any transport failure.
+            RestError::Headers(e) => connection_error(e.as_ref()),
         },
         Error::Wrapped { source, .. } => retryable_error(source, reasons),
         _ => false,
@@ -1410,6 +1427,51 @@ mod tests {
             },
             DEFAULT_RETRY_REASONS
         ));
+    }
+
+    /// Go decodes a `null` entry of `error.errors` into a zero `ErrorItem` and keeps it, so it
+    /// is the first reason the retry check reads and a line of "More details".
+    #[test]
+    fn api_error_keeps_null_error_items_as_zero_items() {
+        let body = br#"{"error":{"code":403,"message":"slow down","errors":[null,{"reason":"rateLimitExceeded","message":"m"}]}}"#;
+        let err = api_error_from_response(&parts(403), body);
+        assert_eq!(
+            err.errors,
+            vec![
+                ErrorItem::default(),
+                ErrorItem {
+                    reason: "rateLimitExceeded".into(),
+                    message: "m".into(),
+                },
+            ]
+        );
+        assert!(!retryable_error(
+            &Error::from(err.clone()),
+            DEFAULT_RETRY_REASONS
+        ));
+        assert_eq!(
+            err.to_string(),
+            "googleapi: Error 403: slow down\nMore details:\nReason: , Message: \nReason: rateLimitExceeded, Message: m\n"
+        );
+    }
+
+    /// Go retries a credential fetch that failed with a `*url.Error` refusing or resetting the
+    /// connection, like any other transport failure.
+    #[test]
+    fn retryable_headers_error_is_a_connection_error() {
+        let refused = || {
+            RestError::Headers(Box::new(std::io::Error::other(
+                "Post \"https://oauth2.googleapis.com/token\": dial tcp: connection refused",
+            )))
+        };
+        assert!(retryable_error(&Error::Rest(refused()), &[]));
+        let reset = RestError::Headers(Box::new(std::io::Error::from(
+            std::io::ErrorKind::ConnectionReset,
+        )));
+        assert!(retryable_error(&Error::Rest(reset), &[]));
+        let denied =
+            RestError::Headers(Box::new(std::io::Error::other("oauth2: \"invalid_grant\"")));
+        assert!(!retryable_error(&Error::Rest(denied), &[]));
     }
 
     #[test]

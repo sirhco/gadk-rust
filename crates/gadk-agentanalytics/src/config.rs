@@ -120,6 +120,12 @@ pub struct RetryConfig {
 /// Transforms or redacts an event payload before it is truncated and written to the `content`
 /// column (Go `ContentFormatter`). It must return a new value; an error (or a panic) replaces the
 /// content with `"[FORMATTER_FAILED]"`. The second argument is the event type.
+///
+/// Return `Err` rather than panic. A panic is caught only when the binary is built with
+/// `panic = "unwind"` (the default); under `panic = "abort"` it aborts the process. Even when
+/// caught, its message first reaches the process panic hook (stderr by default, or an installed
+/// hook such as Sentry or tracing-panic) unredacted, so a message holding payload data
+/// (`panic!("bad {v}")`, an `expect` on an `Err` that holds the value) leaks that data.
 pub type ContentFormatter = Arc<dyn Fn(&Value, &str) -> Result<Value, BoxError> + Send + Sync>;
 
 /// Cumulative event-drop and formatter-failure counts (Go `DropStats`; JSON field names as Go's
@@ -138,8 +144,9 @@ pub struct DropStats {
     pub total_drops: i64,
 }
 
-/// One payload to upload to Cloud Storage (Go `GCSUploadRequest`).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+/// One payload to upload to Cloud Storage (Go `GCSUploadRequest`). `Debug` writes the payload's
+/// length, never its bytes.
+#[derive(Clone, PartialEq, Eq, Default)]
 pub struct GcsUploadRequest {
     /// The object name within the bucket; it already includes [`Config::gcs_path_prefix`].
     pub path: String,
@@ -147,6 +154,16 @@ pub struct GcsUploadRequest {
     pub data: Bytes,
     /// The MIME type to set on the stored object.
     pub content_type: String,
+}
+
+impl fmt::Debug for GcsUploadRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GcsUploadRequest")
+            .field("path", &self.path)
+            .field("data", &format_args!("<{} bytes>", self.data.len()))
+            .field("content_type", &self.content_type)
+            .finish()
+    }
 }
 
 /// Uploads multimodal or oversized text payloads to Cloud Storage and returns the `gs://` URI of
@@ -584,6 +601,22 @@ mod tests {
         fn println(&self, args: fmt::Arguments<'_>) {
             self.0.lock().unwrap().push(format!("{args}\n"));
         }
+    }
+
+    #[test]
+    fn gcs_upload_request_debug_omits_payload() {
+        let req = GcsUploadRequest {
+            path: "prefix/obj".into(),
+            data: Bytes::from_static(b"SECRET-PAYLOAD"),
+            content_type: "text/plain".into(),
+        };
+        let text = format!("{req:?}");
+        assert!(!text.contains("SECRET-PAYLOAD"), "{text}");
+        assert!(!text.contains("83, 69, 67"), "{text}");
+        assert_eq!(
+            text,
+            r#"GcsUploadRequest { path: "prefix/obj", data: <14 bytes>, content_type: "text/plain" }"#
+        );
     }
 
     #[test]
