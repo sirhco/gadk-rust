@@ -72,6 +72,10 @@
   `gadk-platform`, `gadk-session` and `gadk-tools`; it is the eighth crate that may depend on
   `gadk-engine` (its tests use the engine's `testutil` feature), and nothing depends on it, the
   façade included.
+- 7b-1: `gadk-agentanalytics` (ADK-Go's `plugin/agentanalytics` foundations) depends on exactly
+  `gadk-genai`, `gadk-model` (REST transport, `gcp-auth`), `gadk-platform` and `gadk-session`
+  (the `user:` / `app:` / `temp:` key prefixes); it never depends on `gadk-engine`, and only the
+  façade depends on it, optionally (feature `agentanalytics`).
 """
 import pathlib, sys, tomllib
 
@@ -110,17 +114,18 @@ ALLOWED = {
     "gadk-configurable": {"gadk-agent", "gadk-engine", "gadk-genai", "gadk-model", "gadk-gemini",
                           "gadk-goyaml", "gadk-launcher", "gadk-mcp", "gadk-platform",
                           "gadk-session", "gadk-tools"},
+    "gadk-agentanalytics": {"gadk-genai", "gadk-model", "gadk-platform", "gadk-session"},
     "gadk": {"gadk-genai", "gadk-platform", "gadk-model", "gadk-session", "gadk-gemini",
              "gadk-agent", "gadk-engine", "gadk-tools", "gadk-auth", "gadk-mcp", "gadk-artifact",
              "gadk-memory", "gadk-anthropic", "gadk-openai", "gadk-session-database",
              "gadk-artifact-gcs", "gadk-vertexai", "gadk-server", "gadk-a2a", "gadk-launcher",
-             "gadk-agentregistry", "gadk-telemetry"},
+             "gadk-agentregistry", "gadk-telemetry", "gadk-agentanalytics"},
 }
 # (crate, dependency) normal edges that must be `optional = true`.
 OPTIONAL = {("gadk-engine", "gadk-gemini"), ("gadk-engine", "gadk-httprr"), ("gadk-a2a", "gadk-server"),
             ("gadk-launcher", "gadk-server"), ("gadk-launcher", "gadk-a2a"),
             ("gadk-agentregistry", "gadk-a2a"), ("gadk-agentregistry", "gadk-mcp"),
-            ("gadk", "gadk-telemetry")}
+            ("gadk", "gadk-telemetry"), ("gadk", "gadk-agentanalytics")}
 FACADE = "gadk"  # no crate may dev-depend on the façade
 ENGINE_DEPENDENTS = ("gadk", "gadk-tools", "gadk-server", "gadk-a2a", "gadk-launcher",
                      "gadk-agentregistry", "gadk-telemetry", "gadk-configurable")  # the only crates that may depend on gadk-engine

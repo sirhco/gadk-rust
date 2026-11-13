@@ -15,9 +15,12 @@
 
 //! A port of the parts of Go 1.27 `net/url` that gadk's crates reproduce byte for byte:
 //! `url.Parse` (its acceptance rules and error texts), `URL.Hostname`, `URL.Port`,
-//! `URL.EscapedPath`, `URL.JoinPath` and `URL.String`, and the path encoding (`escape`,
-//! `unescape` and `validEncoded` in `encodePath` mode). The WHATWG parser of the `url` crate
-//! accepts and rejects different inputs; these checks are Go's.
+//! `URL.EscapedPath`, `URL.EscapedFragment`, `URL.JoinPath` and `URL.String`, the `User`,
+//! `Path`/`RawPath`, `RawQuery` and `Fragment`/`RawFragment` fields, the path encoding
+//! (`escape`, `unescape` and `validEncoded` in `encodePath` mode), and `url.PathEscape`,
+//! `url.PathUnescape` and `url.QueryUnescape` (`url.QueryEscape` is
+//! [`go_query_escape`](crate::go_query_escape)). The WHATWG parser of the `url` crate accepts
+//! and rejects different inputs; these checks are Go's.
 
 use crate::go_fmt::go_quote;
 use crate::go_path::go_path_join;
@@ -29,8 +32,8 @@ pub struct Url {
     pub scheme: String,
     /// Go `Opaque`.
     pub opaque: String,
-    /// The authority as written (userinfo and host); `None` when the URL has none.
-    authority: Option<String>,
+    /// Go `User`.
+    user: Option<Userinfo>,
     /// Go `Host`: the unescaped `host[:port]`.
     pub host: String,
     /// Go `Path` (unescaped bytes).
@@ -43,8 +46,29 @@ pub struct Url {
     force_query: bool,
     /// Go `RawQuery`.
     raw_query: String,
-    /// The fragment as written.
-    fragment: String,
+    /// Go `Fragment` (unescaped bytes).
+    fragment: Vec<u8>,
+    /// Go `RawFragment`.
+    raw_fragment: String,
+}
+
+/// Go `*url.Userinfo`: the unescaped user name and password.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct Userinfo {
+    username: Vec<u8>,
+    password: Option<Vec<u8>>,
+}
+
+impl Userinfo {
+    /// Go `Userinfo.String()`.
+    fn to_go_string(&self) -> String {
+        let mut s = escape(&self.username, Mode::UserPassword);
+        if let Some(password) = &self.password {
+            s.push(':');
+            s.push_str(&escape(password, Mode::UserPassword));
+        }
+        s
+    }
 }
 
 /// Go `*url.Error` from `url.Parse`: `parse "<url>": <err>`.
@@ -66,9 +90,11 @@ impl std::error::Error for ParseError {}
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {
     Path,
+    PathSegment,
     Host,
     Zone,
     UserPassword,
+    QueryComponent,
     Fragment,
 }
 
@@ -83,11 +109,10 @@ pub fn parse(raw: &str) -> Result<Url, ParseError> {
         err,
     })?;
     if let Some(frag) = frag.filter(|f| !f.is_empty()) {
-        unescape(frag, Mode::Fragment).map_err(|err| ParseError {
+        url.set_fragment(frag).map_err(|err| ParseError {
             url: raw.to_owned(),
             err,
         })?;
-        url.fragment = frag.to_owned();
     }
     Ok(url)
 }
@@ -134,8 +159,9 @@ fn parse_no_fragment(raw: &str) -> Result<Url, String> {
             Some(i) => (&after[..i], &after[i..]),
             None => (after, ""),
         };
-        url.host = parse_authority(&url.scheme, authority)?;
-        url.authority = Some(authority.to_owned());
+        let (user, host) = parse_authority(&url.scheme, authority)?;
+        url.user = user;
+        url.host = host;
         path = p;
     } else if !url.scheme.is_empty() && rest.starts_with('/') {
         url.omit_host = true;
@@ -166,26 +192,28 @@ fn get_scheme(raw: &str) -> Result<(&str, &str), String> {
     Ok(("", raw))
 }
 
-/// Go `parseAuthority`: the unescaped host; the userinfo is validated and dropped.
-fn parse_authority(scheme: &str, authority: &str) -> Result<String, String> {
+/// Go `parseAuthority`: the userinfo and the unescaped host.
+fn parse_authority(scheme: &str, authority: &str) -> Result<(Option<Userinfo>, String), String> {
     let at = authority.rfind('@');
     let host = parse_host(scheme, at.map_or(authority, |i| &authority[i + 1..]))?;
-    if let Some(i) = at {
-        let userinfo = &authority[..i];
-        if !valid_userinfo(userinfo) {
-            return Err("net/url: invalid userinfo".into());
-        }
-        match userinfo.split_once(':') {
-            None => {
-                unescape(userinfo, Mode::UserPassword)?;
-            }
-            Some((user, password)) => {
-                unescape(user, Mode::UserPassword)?;
-                unescape(password, Mode::UserPassword)?;
-            }
-        }
+    let Some(i) = at else {
+        return Ok((None, host));
+    };
+    let userinfo = &authority[..i];
+    if !valid_userinfo(userinfo) {
+        return Err("net/url: invalid userinfo".into());
     }
-    Ok(host)
+    let user = match userinfo.split_once(':') {
+        None => Userinfo {
+            username: unescape(userinfo, Mode::UserPassword)?,
+            password: None,
+        },
+        Some((user, password)) => Userinfo {
+            username: unescape(user, Mode::UserPassword)?,
+            password: Some(unescape(password, Mode::UserPassword)?),
+        },
+    };
+    Ok((Some(user), host))
 }
 
 /// Go `parseHost` (with `urlstrictcolons=1`, Go 1.26+'s default).
@@ -306,6 +334,62 @@ impl Url {
         split_host_port(&self.host).1
     }
 
+    /// Go `u.User != nil`.
+    pub fn has_user(&self) -> bool {
+        self.user.is_some()
+    }
+
+    /// Go `RawQuery`.
+    pub fn raw_query(&self) -> &str {
+        &self.raw_query
+    }
+
+    /// Go `u.RawQuery = q`.
+    pub fn set_raw_query(&mut self, q: String) {
+        self.raw_query = q;
+    }
+
+    /// Go `u.Path, u.RawPath = path, raw_path` (field assignment, no validation).
+    pub fn set_path_fields(&mut self, path: Vec<u8>, raw_path: String) {
+        self.path = path;
+        self.raw_path = raw_path;
+    }
+
+    /// Go `Fragment` (unescaped bytes).
+    pub fn fragment(&self) -> &[u8] {
+        &self.fragment
+    }
+
+    /// Go `u.Fragment, u.RawFragment = fragment, raw_fragment` (field assignment, no
+    /// validation).
+    pub fn set_fragment_fields(&mut self, fragment: Vec<u8>, raw_fragment: String) {
+        self.fragment = fragment;
+        self.raw_fragment = raw_fragment;
+    }
+
+    /// Go `URL.setFragment`.
+    fn set_fragment(&mut self, f: &str) -> Result<(), String> {
+        let frag = unescape(f, Mode::Fragment)?;
+        self.raw_fragment = if escape(&frag, Mode::Fragment) == f {
+            String::new()
+        } else {
+            f.to_owned()
+        };
+        self.fragment = frag;
+        Ok(())
+    }
+
+    /// Go `URL.EscapedFragment()`.
+    pub fn escaped_fragment(&self) -> String {
+        if !self.raw_fragment.is_empty()
+            && valid_encoded(&self.raw_fragment, Mode::Fragment)
+            && unescape(&self.raw_fragment, Mode::Fragment).is_ok_and(|f| f == self.fragment)
+        {
+            return self.raw_fragment.clone();
+        }
+        escape(&self.fragment, Mode::Fragment)
+    }
+
     /// Go `URL.setPath`.
     fn set_path(&mut self, p: &str) -> Result<(), String> {
         let path = unescape(p, Mode::Path)?;
@@ -351,7 +435,7 @@ impl Url {
         Ok(url)
     }
 
-    /// Go `URL.String()`; the authority and the fragment are written as they were parsed.
+    /// Go `URL.String()`.
     pub fn to_go_string(&self) -> String {
         let mut buf = String::new();
         if !self.opaque.is_empty() {
@@ -363,14 +447,18 @@ impl Url {
                 buf.push_str(&self.scheme);
                 buf.push(':');
             }
-            let authority = self.authority.as_deref().unwrap_or_default();
-            if (!self.scheme.is_empty() || !authority.is_empty())
-                && !(self.omit_host && authority.is_empty())
+            let has_user = self.user.is_some();
+            if (!self.scheme.is_empty() || !self.host.is_empty() || has_user)
+                && !(self.omit_host && self.host.is_empty() && !has_user)
             {
-                if !authority.is_empty() || !self.path.is_empty() {
+                if !self.host.is_empty() || !self.path.is_empty() || has_user {
                     buf.push_str("//");
                 }
-                buf.push_str(authority);
+                if let Some(user) = &self.user {
+                    buf.push_str(&user.to_go_string());
+                    buf.push('@');
+                }
+                buf.push_str(&escape(self.host.as_bytes(), Mode::Host));
             }
             let path = self.escaped_path();
             if !path.is_empty() && !path.starts_with('/') && !self.host.is_empty() {
@@ -390,7 +478,7 @@ impl Url {
         }
         if !self.fragment.is_empty() {
             buf.push('#');
-            buf.push_str(&self.fragment);
+            buf.push_str(&self.escaped_fragment());
         }
         buf
     }
@@ -428,7 +516,9 @@ fn should_escape(c: u8, mode: Mode) -> bool {
         b'-' | b'_' | b'.' | b'~' => return false,
         b'$' | b'&' | b'+' | b',' | b'/' | b':' | b';' | b'=' | b'?' | b'@' => match mode {
             Mode::Path => return c == b'?',
+            Mode::PathSegment => return matches!(c, b'/' | b';' | b',' | b'?'),
             Mode::UserPassword => return matches!(c, b'@' | b'/' | b'?' | b':'),
+            Mode::QueryComponent => return true,
             Mode::Fragment => return false,
             Mode::Host | Mode::Zone => {}
         },
@@ -442,10 +532,23 @@ fn should_escape(c: u8, mode: Mode) -> bool {
 
 /// Go `escape(s, encodePath)`, upper-case hex.
 pub fn escape_path(s: &[u8]) -> String {
+    escape(s, Mode::Path)
+}
+
+/// Go `url.PathEscape(s)` (`escape(s, encodePathSegment)`): `/`, `;`, `,` and `?` are escaped
+/// too.
+pub fn path_escape(s: &[u8]) -> String {
+    escape(s, Mode::PathSegment)
+}
+
+/// Go `escape(s, mode)` for the modes without a space rule (every mode but
+/// `encodeQueryComponent`, which [`go_query_escape`](crate::go_query_escape) ports).
+fn escape(s: &[u8], mode: Mode) -> String {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    // Every byte from 0x80 up is escaped in every mode, so the result is ASCII.
     let mut out = String::with_capacity(s.len());
     for &c in s {
-        if should_escape(c, Mode::Path) {
+        if should_escape(c, mode) {
             out.push('%');
             out.push(char::from(HEX[usize::from(c >> 4)]));
             out.push(char::from(HEX[usize::from(c & 15)]));
@@ -458,6 +561,11 @@ pub fn escape_path(s: &[u8]) -> String {
 
 /// Go `validEncoded(s, encodePath)`: `s` holds no byte that escaping would change.
 pub fn valid_encoded_path(s: &str) -> bool {
+    valid_encoded(s, Mode::Path)
+}
+
+/// Go `validEncoded(s, mode)`.
+fn valid_encoded(s: &str, mode: Mode) -> bool {
     s.bytes().all(|c| {
         matches!(
             c,
@@ -476,7 +584,7 @@ pub fn valid_encoded_path(s: &str) -> bool {
                 | b'['
                 | b']'
                 | b'%'
-        ) || !should_escape(c, Mode::Path)
+        ) || !should_escape(c, mode)
     })
 }
 
@@ -508,6 +616,17 @@ pub fn unescape_path(s: &str) -> Result<Vec<u8>, String> {
     unescape(s, Mode::Path)
 }
 
+/// Go `url.PathUnescape(s)` (`unescape(s, encodePathSegment)`), with Go's `EscapeError` text.
+pub fn path_unescape(s: &str) -> Result<Vec<u8>, String> {
+    unescape(s, Mode::PathSegment)
+}
+
+/// Go `url.QueryUnescape(s)` (`unescape(s, encodeQueryComponent)`: `+` is a space), with Go's
+/// `EscapeError` text.
+pub fn query_unescape(s: &str) -> Result<Vec<u8>, String> {
+    unescape(s, Mode::QueryComponent)
+}
+
 /// Go `unescape(s, mode)`, with Go's `EscapeError` / `InvalidHostError` texts.
 fn unescape(s: &str, mode: Mode) -> Result<Vec<u8>, String> {
     let b = s.as_bytes();
@@ -532,6 +651,10 @@ fn unescape(s: &str, mode: Mode) -> Result<Vec<u8>, String> {
                 }
                 out.push(v);
                 i += 3;
+            }
+            b'+' if mode == Mode::QueryComponent => {
+                out.push(b' ');
+                i += 1;
             }
             c => {
                 if matches!(mode, Mode::Host | Mode::Zone) && c < 0x80 && should_escape(c, mode) {
@@ -684,6 +807,56 @@ mod tests {
         ] {
             assert_eq!(parse(raw).unwrap().hostname(), want, "Hostname({raw:?})");
         }
+    }
+
+    /// Go 1.26 `URL.String()` after `url.Parse`, including userinfo, escaped hosts and
+    /// fragments that Go re-escapes, and the `Fragment` / `RawFragment` fields.
+    #[test]
+    fn string_and_fragment_match_go() {
+        for (raw, want, frag, raw_frag) in [
+            ("http://u:p%40ss@h/x", "http://u:p%40ss@h/x", "", ""),
+            ("http://u@h", "http://u@h", "", ""),
+            (
+                "http://ex%C3%A4mple.com/",
+                "http://ex%C3%A4mple.com/",
+                "",
+                "",
+            ),
+            ("http://exämple.com/", "http://ex%C3%A4mple.com/", "", ""),
+            ("http://h/p#a%20b", "http://h/p#a%20b", "a b", ""),
+            ("http://h/p#a b", "http://h/p#a%20b", "a b", "a b"),
+            ("http://h/p#x=%2F", "http://h/p#x=%2F", "x=/", "x=%2F"),
+            ("http://h/p#\"q\"", "http://h/p#%22q%22", "\"q\"", "\"q\""),
+            ("/a?b#", "/a?b", "", ""),
+            ("http:///p", "http:///p", "", ""),
+        ] {
+            let u = parse(raw).unwrap();
+            assert_eq!(u.to_go_string(), want, "String({raw:?})");
+            assert_eq!(u.fragment(), frag.as_bytes(), "Fragment({raw:?})");
+            assert_eq!(u.raw_fragment, raw_frag, "RawFragment({raw:?})");
+        }
+        assert!(parse("http://u:p@h").unwrap().has_user());
+        assert!(!parse("http://h/@x").unwrap().has_user());
+    }
+
+    /// Go `url.PathEscape`, `url.PathUnescape` and `url.QueryUnescape`.
+    #[test]
+    fn segment_and_query_escaping_match_go() {
+        assert_eq!(
+            path_escape(b"a b/c;d,e?f:g@h&i=j+k$l[m]"),
+            "a%20b%2Fc%3Bd%2Ce%3Ff:g@h&i=j+k$l%5Bm%5D"
+        );
+        assert_eq!(path_escape("é".as_bytes()), "%C3%A9");
+        assert_eq!(path_unescape("a+b%2F"), Ok(b"a+b/".to_vec()));
+        assert_eq!(query_unescape("a+b%2F"), Ok(b"a b/".to_vec()));
+        assert_eq!(
+            query_unescape("%zz"),
+            Err("invalid URL escape \"%zz\"".into())
+        );
+        assert_eq!(
+            query_unescape("%4"),
+            Err("invalid URL escape \"%4\"".into())
+        );
     }
 
     /// Go `url.JoinPath(base, elem)` results.

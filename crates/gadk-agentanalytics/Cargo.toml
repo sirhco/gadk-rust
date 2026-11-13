@@ -1,0 +1,43 @@
+[package]
+name = "gadk-agentanalytics"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# Test hooks: the in-memory `MockTableOps`, `FakeViewRunner`, `FakeOffloader`, `RecordingLogger`
+# and the JSON helpers of `bigquery::fake`, plus gadk-model's fake HTTP server.
+testutil = ["gadk-model/test-util"]
+
+[dependencies]
+gadk-genai = { workspace = true }
+gadk-model = { workspace = true, features = ["gcp-auth"] }
+gadk-platform = { workspace = true }
+gadk-session = { workspace = true }
+google-cloud-auth = { workspace = true }
+arrow-schema = { workspace = true }
+arrow-array = { workspace = true }
+arrow-ipc = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+regex = { workspace = true }
+http = { workspace = true }
+bytes = { workspace = true }
+url = { workspace = true }
+chrono = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+gadk-agentanalytics = { path = ".", features = ["testutil"] }
+gadk-model = { workspace = true, features = ["test-util"] }
+tokio = { workspace = true, features = ["test-util"] }
+pretty_assertions = { workspace = true }

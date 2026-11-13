@@ -39,6 +39,11 @@
 # package, not part of gen-go-configurable: scripts/gen-go-configurable/overlay/
 # zz_t12probe_test.go.txt, whose header has the regeneration command) are counted and left out of
 # the rerun diff.
+# 7b-1: the agentanalytics probe (scripts/gen-go-agentanalytics: an overlay test run in a temp
+# copy of ADK-Go's plugin/agentanalytics) wrote exactly 68 fixtures under
+# crates/gadk-agentanalytics/tests/fixtures/ (arrow 9, config 3, formatter 8, redaction 2,
+# schema 3, views 2, wire 41); when go and ADK-Go are present, rerunning it into a temp dir
+# reproduces them (empty diff -r).
 set -euo pipefail
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 go="${ADK_GO_DIR:-$repo/../adk-go}"
@@ -269,11 +274,49 @@ else
   rm -rf "$configurable_tmp"
 fi
 
+agentanalytics="$repo/crates/gadk-agentanalytics/tests/fixtures"
+agentanalytics_counts=""
+agentanalytics_n=0
+for spec in arrow:9 config:3 formatter:8 redaction:2 schema:3 views:2 wire:41; do
+  dir="$agentanalytics/${spec%%:*}"
+  want="${spec#*:}"
+  got="$(find "$dir" -type f 2>/dev/null | wc -l | tr -d ' ' || true)"
+  if [ "$got" -ne "$want" ]; then
+    echo "expected $want agentanalytics fixtures under $dir, found $got" >&2
+    fail=1
+  fi
+  agentanalytics_counts="$agentanalytics_counts ${spec%%:*}=$got"
+  agentanalytics_n=$((agentanalytics_n + got))
+done
+agentanalytics_total="$(find "$agentanalytics" -type f 2>/dev/null | wc -l | tr -d ' ' || true)"
+if [ "$agentanalytics_total" -ne 68 ] || [ "$agentanalytics_n" -ne 68 ]; then
+  echo "expected 68 agentanalytics fixtures under $agentanalytics, found $agentanalytics_total" >&2
+  fail=1
+fi
+agentanalytics_status="not rerun"
+if ! command -v go >/dev/null 2>&1 || [ ! -d "$go/plugin/agentanalytics" ]; then
+  echo "skipping the gen-go-agentanalytics rerun: needs go and ADK-Go at $go (set ADK_GO_DIR)" >&2
+else
+  agentanalytics_tmp="$(mktemp -d)"
+  if ! ADK_GO_DIR="$(cd "$go" && pwd)" "$repo/scripts/gen-go-agentanalytics/run.sh" \
+    "$agentanalytics_tmp/fixtures" >/dev/null; then
+    echo "scripts/gen-go-agentanalytics failed" >&2
+    fail=1
+  elif ! diff -rq "$agentanalytics" "$agentanalytics_tmp/fixtures" >&2; then
+    echo "gen-go-agentanalytics output differs from the checked-in fixtures (rerun scripts/gen-go-agentanalytics/run.sh)" >&2
+    fail=1
+  else
+    agentanalytics_status="reproduced by the probe"
+  fi
+  rm -rf "$agentanalytics_tmp"
+fi
+
 if [ "$fail" -eq 0 ]; then
   echo "ok: $n fixtures and $schema_n telemetry goldens match ADK-Go; $wire_n wire fixtures;" \
     "$a2a_wire_n A2A wire fixtures; $webui_n web UI files; launcher fixtures$launcher_counts;" \
     "agentengine fixtures$agentengine_counts; encode_shapes.rs $shapes_status;" \
     "goyaml$goyaml_counts; float table $float_n rows; goyaml $goyaml_status;" \
-    "configurable$configurable_counts; canonicalize $canon_n rows; configurable $configurable_status"
+    "configurable$configurable_counts; canonicalize $canon_n rows; configurable $configurable_status;" \
+    "agentanalytics $agentanalytics_total fixtures$agentanalytics_counts; agentanalytics $agentanalytics_status"
 fi
 exit "$fail"

@@ -1,0 +1,15 @@
+{
+  "about": "referencesDeniedColumn(expr, newSet(denied...)) and stripSQLStringLiterals(expr).",
+  "cases": [
+    {"denied":["content"],"expr":"JSON_VALUE(attributes, '$.model') AS content","referencesDeniedColumn":false,"stripSQLStringLiterals":"JSON_VALUE(attributes, '') AS content"},
+    {"denied":["content"],"expr":"JSON_VALUE(attributes, '$.content')","referencesDeniedColumn":false,"stripSQLStringLiterals":"JSON_VALUE(attributes, '')"},
+    {"denied":["content"],"expr":"JSON_QUERY(attributes, '$.nested.content') AS x","referencesDeniedColumn":false,"stripSQLStringLiterals":"JSON_QUERY(attributes, '') AS x"},
+    {"denied":["content"],"expr":"content AS request_content","referencesDeniedColumn":true,"stripSQLStringLiterals":"content AS request_content"},
+    {"denied":["content"],"expr":"JSON_VALUE(content_parts, '$.x') AS y","referencesDeniedColumn":false,"stripSQLStringLiterals":"JSON_VALUE(content_parts, '') AS y"},
+    {"denied":["content_parts"],"expr":"JSON_VALUE(content_parts, '$.x') AS y","referencesDeniedColumn":true,"stripSQLStringLiterals":"JSON_VALUE(content_parts, '') AS y"},
+    {"denied":["attributes"],"expr":"JSON_VALUE(attributes, '$.a2a_metadata.\"a2a:task_id\"') AS a2a_task_id","referencesDeniedColumn":true,"stripSQLStringLiterals":"JSON_VALUE(attributes, '') AS a2a_task_id"},
+    {"denied":["latency_ms"],"expr":"CAST(JSON_VALUE(latency_ms, '$.total_ms') AS INT64) AS total_ms","referencesDeniedColumn":true,"stripSQLStringLiterals":"CAST(JSON_VALUE(latency_ms, '') AS INT64) AS total_ms"},
+    {"denied":["content"],"expr":"IF(REGEXP_CONTAINS(x, r'it\\'s content'), NULL, 1) AS z","referencesDeniedColumn":false,"stripSQLStringLiterals":"IF(REGEXP_CONTAINS(x, r''), NULL, 1) AS z"},
+    {"denied":["content"],"expr":"SAFE_DIVIDE(a,content) AS r","referencesDeniedColumn":true,"stripSQLStringLiterals":"SAFE_DIVIDE(a,content) AS r"}
+  ]
+}

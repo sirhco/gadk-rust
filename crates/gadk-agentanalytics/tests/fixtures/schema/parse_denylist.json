@@ -1,0 +1,13 @@
+{
+  "about": "parsePayloadColumnDenylist(input): denied (sorted set) or error text.",
+  "cases": [
+    {"denied":[],"error":null,"input":null},
+    {"denied":[],"error":null,"input":[]},
+    {"denied":["content"],"error":null,"input":["content"]},
+    {"denied":["content"],"error":null,"input":["content","content"]},
+    {"denied":null,"error":"unsupported PayloadColumnDenylist entry \"bogus\": allowed values are \"content\", \"content_parts\", \"attributes\" and \"latency_ms\"","input":["bogus"]},
+    {"denied":null,"error":"unsupported PayloadColumnDenylist entry \"Content\": allowed values are \"content\", \"content_parts\", \"attributes\" and \"latency_ms\"","input":["content","Content"]},
+    {"denied":null,"error":"unsupported PayloadColumnDenylist entry \"event_type\": allowed values are \"content\", \"content_parts\", \"attributes\" and \"latency_ms\"","input":["event_type"]},
+    {"denied":null,"error":"unsupported PayloadColumnDenylist entry \"\": allowed values are \"content\", \"content_parts\", \"attributes\" and \"latency_ms\"","input":[""]}
+  ]
+}
