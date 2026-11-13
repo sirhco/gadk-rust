@@ -598,11 +598,41 @@ pub(crate) fn go_abs(path: &Path) -> io::Result<PathBuf> {
     if go_is_abs(&p) {
         return Ok(PathBuf::from(go_path_clean(&p)));
     }
-    let cwd = std::env::current_dir()?;
+    let cwd = go_getwd()?;
     Ok(PathBuf::from(go_path_join(&[
         cwd.to_string_lossy().as_ref(),
         p.as_ref(),
     ])))
+}
+
+/// Go `os.Getwd` (Unix): `$PWD` when it is absolute and names the same file as `.` (Go's
+/// "clumsy but widespread kludge", so a working directory reached through a symlink keeps the
+/// spelling the shell gave it), otherwise the OS working directory (`getcwd`, symlinks
+/// resolved). `std::env::current_dir` is only the second half.
+pub fn go_getwd() -> io::Result<PathBuf> {
+    // Go: os/getwd.go Getwd
+    let dot = std::fs::metadata(".")?;
+    if let Some(dir) = std::env::var_os("PWD")
+        && dir.to_string_lossy().starts_with('/')
+        && let Ok(d) = std::fs::metadata(&dir)
+        && same_file(&dot, &d)
+    {
+        return Ok(PathBuf::from(dir));
+    }
+    std::env::current_dir()
+}
+
+/// Go `os.SameFile`: the same device and inode.
+#[cfg(unix)]
+fn same_file(a: &std::fs::Metadata, b: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    a.dev() == b.dev() && a.ino() == b.ino()
+}
+
+/// Non-Unix: `$PWD` is never trusted (Go's Windows `Getwd` asks the OS only).
+#[cfg(not(unix))]
+fn same_file(_: &std::fs::Metadata, _: &std::fs::Metadata) -> bool {
+    false
 }
 
 /// Go `filepath.EvalSymlinks` for an absolute path: the path with every symlink resolved, or
@@ -677,7 +707,7 @@ mod tests {
     /// `path` spelled relative to the current working directory (`../../…/path`), so tests
     /// exercise Go's `filepath.Abs` cwd join without changing the process-wide cwd.
     pub(crate) fn relative_to_cwd(path: &Path) -> String {
-        let cwd = std::env::current_dir().unwrap();
+        let cwd = go_getwd().unwrap();
         let ups = cwd.components().count() - 1;
         let rest = path.to_string_lossy();
         format!("{}{}", "../".repeat(ups), rest.trim_start_matches('/'))
@@ -897,9 +927,22 @@ mod tests {
             go_abs(Path::new("/a/./b/../c")).unwrap(),
             PathBuf::from("/a/c")
         );
-        let cwd = std::env::current_dir().unwrap();
+        let cwd = go_getwd().unwrap();
         assert_eq!(go_abs(Path::new("")).unwrap(), cwd);
         assert_eq!(go_abs(Path::new("x/../y")).unwrap(), cwd.join("y"));
+    }
+
+    /// `go_getwd` names the working directory: `$PWD` (when it is `.`) or `getcwd`. The `$PWD`
+    /// spelling through a symlink is covered end to end by `tests/adkcli.rs` (a child process
+    /// with its own environment).
+    #[test]
+    fn go_getwd_names_the_working_directory() {
+        let wd = go_getwd().unwrap();
+        assert!(wd.is_absolute());
+        assert_eq!(
+            std::fs::canonicalize(&wd).unwrap(),
+            std::fs::canonicalize(std::env::current_dir().unwrap()).unwrap()
+        );
     }
 
     #[tokio::test]
