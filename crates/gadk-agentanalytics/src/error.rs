@@ -424,12 +424,22 @@ impl Error {
             Error::Wrapped { source, .. } => source.find(pred),
             Error::Joined(errs) => errs.iter().find_map(|e| e.find(pred)),
             // Go `errors.As` walks every `Unwrap`: follow the foreign `source()` chain to the
-            // first `Error`, whose own tree the recursion walks.
+            // first `Error`, whose own tree the recursion walks. A bare `ContextError` link
+            // (Go `fmt.Errorf("…: %w", ctx.Err())`) is tested as the matching `Error::Context`.
             Error::Other(boxed) => {
+                static CANCELED: Error = Error::Context(ContextError::Canceled);
+                static DEADLINE_EXCEEDED: Error = Error::Context(ContextError::DeadlineExceeded);
                 let mut link: Option<&(dyn StdError + 'static)> = Some(boxed.as_ref());
                 while let Some(e) = link {
                     if let Some(inner) = e.downcast_ref::<Error>() {
                         return inner.find(pred);
+                    }
+                    if let Some(ctx) = e.downcast_ref::<ContextError>() {
+                        let as_error: &'static Error = match ctx {
+                            ContextError::Canceled => &CANCELED,
+                            ContextError::DeadlineExceeded => &DEADLINE_EXCEEDED,
+                        };
+                        return pred(as_error).then_some(as_error);
                     }
                     link = e.source();
                 }
@@ -717,6 +727,39 @@ mod tests {
             ContextError::DeadlineExceeded,
         )))));
         assert!(deep.is_context(ContextError::DeadlineExceeded));
+
+        for target in [ContextError::Canceled, ContextError::DeadlineExceeded] {
+            let other = match target {
+                ContextError::Canceled => ContextError::DeadlineExceeded,
+                ContextError::DeadlineExceeded => ContextError::Canceled,
+            };
+            // (i) A bare `ContextError` boxed straight into the variant.
+            let direct = Error::Other(Box::new(target));
+            assert!(direct.is_context(target), "{target:?}");
+            assert!(!direct.is_context(other), "{target:?}");
+            // (ii) A bare `ContextError` at the end of a foreign chain (Go
+            // `fmt.Errorf("…: %w", ctx.Err())`).
+            let chained = Error::other(RunnerErr(target));
+            assert_eq!(chained.to_string(), format!("runner: {target}"));
+            assert!(chained.is_context(target), "{target:?}");
+            assert!(!chained.is_context(other), "{target:?}");
+        }
+    }
+
+    /// A caller's error type whose `source()` is a bare [`ContextError`].
+    #[derive(Debug)]
+    struct RunnerErr(ContextError);
+
+    impl fmt::Display for RunnerErr {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "runner: {}", self.0)
+        }
+    }
+
+    impl StdError for RunnerErr {
+        fn source(&self) -> Option<&(dyn StdError + 'static)> {
+            Some(&self.0)
+        }
     }
 
     #[test]

@@ -811,6 +811,81 @@ mod tests {
         assert_eq!(runner.executed_names().len(), defs.len(), "views run");
     }
 
+    /// A caller's runner error whose `source()` is the bare `ContextError` (Go
+    /// `fmt.Errorf("run view: %w", ctx.Err())`) takes Go's canceled paths too.
+    #[tokio::test(start_paused = true)]
+    async fn runner_error_wrapping_bare_context_error_takes_go_canceled_paths() {
+        use std::collections::HashMap;
+
+        use crate::bigquery::fake::{FakeViewRunner, OnRun, RecordingLogger};
+
+        #[derive(Debug)]
+        struct RunnerErr(ContextError);
+
+        impl std::fmt::Display for RunnerErr {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "run view: {}", self.0)
+            }
+        }
+
+        impl std::error::Error for RunnerErr {
+            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                Some(&self.0)
+            }
+        }
+
+        let ctx = Context::background();
+        let none = Default::default();
+        let defs =
+            view_definitions_with_denied("test-project", "test_dataset", "test-table", "v", &none)
+                .unwrap();
+
+        // Canceled pass: Go `errors.Is(err, ctx.Err())` holds, so the text is not doubled.
+        let pass_ctx = ctx.with_cancel();
+        let cancel_ctx = pass_ctx.clone();
+        let on_run: OnRun = Arc::new(move |run_ctx: Context, _name: String| {
+            cancel_ctx.cancel();
+            Box::pin(async move {
+                let cause = run_ctx.err().unwrap_or(ContextError::DeadlineExceeded);
+                Err(Error::other(RunnerErr(cause)))
+            })
+        });
+        let runner = FakeViewRunner::new(HashMap::new(), Some(on_run));
+        let logger = RecordingLogger::default();
+        let err = sync_analytics_views(&pass_ctx, &runner, &defs, Some(&logger))
+            .await
+            .unwrap_err();
+        pass_ctx.cancel();
+        assert!(err.is_context(ContextError::Canceled), "{err}");
+        assert_eq!(
+            err.to_string(),
+            "view creation canceled during v_user_message_received: run view: context canceled"
+        );
+        assert_eq!(logger.to_string(), "", "canceled pass logged");
+        assert_eq!(runner.executed_names().len(), 1, "views run");
+
+        // Live pass: a failure per view, but Canceled errors are not logged per view.
+        let on_run: OnRun = Arc::new(|_ctx: Context, _name: String| {
+            Box::pin(async { Err(Error::other(RunnerErr(ContextError::Canceled))) })
+        });
+        let runner = FakeViewRunner::new(HashMap::new(), Some(on_run));
+        let logger = RecordingLogger::default();
+        let err = sync_analytics_views(&ctx, &runner, &defs, Some(&logger))
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().starts_with(
+                "failed to create view v_user_message_received: run view: context canceled"
+            ),
+            "{err}"
+        );
+        assert!(
+            !logger.contains("failed to create view"),
+            "Canceled error logged: {logger}"
+        );
+        assert_eq!(runner.executed_names().len(), defs.len(), "views run");
+    }
+
     #[test]
     fn runner_new_keeps_a_weak_client() {
         let runner = BigQueryViewRunner::new(Weak::new(), "p", "d");
