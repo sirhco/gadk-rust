@@ -212,7 +212,7 @@ class EdgeTest(unittest.TestCase):
         self.assertTrue(any("gadk-a2a -> gadk-tools is not allowed" in e for e in errs), errs)
 
     def test_facade_missing_a2a_edge_is_rejected(self):
-        self.edit("gadk", "gadk-a2a = { workspace = true, optional = true }\n", "")
+        self.edit("gadk", 'gadk-a2a = { workspace = true, optional = true, features = ["server", "client"] }\n', "")
         errs = cwd.check(self.repo)
         self.assertTrue(any("gadk -> gadk-a2a is missing" in e for e in errs), errs)
 
@@ -235,7 +235,7 @@ class EdgeTest(unittest.TestCase):
         self.assertTrue(any("gadk-launcher -> gadk-server must be optional = true" in e for e in errs), errs)
 
     def test_launcher_a2a_edge_must_be_optional(self):
-        self.edit("gadk-launcher", 'gadk-a2a = { workspace = true, optional = true, features = ["server"] }',
+        self.edit("gadk-launcher", 'gadk-a2a = { workspace = true, optional = true, features = ["server", "client"] }',
                   'gadk-a2a = { workspace = true, features = ["server"] }')
         errs = cwd.check(self.repo)
         self.assertTrue(any("gadk-launcher -> gadk-a2a must be optional = true" in e for e in errs), errs)
@@ -258,8 +258,8 @@ class EdgeTest(unittest.TestCase):
 
     def test_agentregistry_a2a_edge_must_be_optional(self):
         self.edit("gadk-agentregistry",
-                  'gadk-a2a = { workspace = true, optional = true, default-features = false, features = ["client"] }',
-                  'gadk-a2a = { workspace = true, default-features = false, features = ["client"] }')
+                  'gadk-a2a = { workspace = true, optional = true, features = ["client"] }',
+                  'gadk-a2a = { workspace = true, features = ["client"] }')
         errs = cwd.check(self.repo)
         self.assertTrue(any("gadk-agentregistry -> gadk-a2a must be optional = true" in e for e in errs), errs)
 
