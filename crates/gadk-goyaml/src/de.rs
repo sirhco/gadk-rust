@@ -27,6 +27,7 @@
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashSet;
+use std::marker::PhantomData;
 
 use base64::Engine as _;
 use base64::engine::DecodePaddingMode;
@@ -659,13 +660,9 @@ impl SeqWant {
     ) -> Result<V::Value, Error> {
         match self {
             SeqWant::Bytes => visitor.visit_byte_buf(Vec::new()),
-            SeqWant::Seq | SeqWant::Tuple(_) => visitor.visit_seq(SeqWalk {
-                d,
-                doc,
-                items: &[],
-                idx: 0,
-                skip_bad: false,
-            }),
+            // A Go array keeps its length: `len` zero elements.
+            SeqWant::Seq => visitor.visit_seq(SeqWalk::new(d, doc, &[], 0)),
+            SeqWant::Tuple(len) => visitor.visit_seq(SeqWalk::new(d, doc, &[], len)),
         }
     }
 }
@@ -834,13 +831,11 @@ impl<'a, 'o> NodeDe<'a, 'o> {
                         node.content.len()
                     )));
                 }
-                let r = visitor.visit_seq(SeqWalk {
-                    d: &mut *self.d,
-                    doc,
-                    items: &node.content,
-                    idx: 0,
-                    skip_bad: !matches!(want, SeqWant::Tuple(_)),
-                });
+                let len = match want {
+                    SeqWant::Tuple(len) => len,
+                    _ => 0,
+                };
+                let r = visitor.visit_seq(SeqWalk::new(&mut *self.d, doc, &node.content, len));
                 self.d.good = true;
                 r
             }
@@ -1212,14 +1207,52 @@ impl<'de> Deserializer<'de> for NodeDe<'_, '_> {
     }
 }
 
-/// The items of a sequence node as a serde sequence (Go's `sequence` loop): with
-/// `skip_bad`, `next_element` drops items whose decode was not good (Go appends only those).
+/// The items of a sequence node as a serde sequence (Go's `sequence` loop): `next_element`
+/// drops items whose decode was not good (Go stores only those, at index `j`, so a Go array's
+/// good elements move toward the front), then yields zero elements until `len` were yielded
+/// (a Go array's untouched tail; `len` is 0 for a slice).
 struct SeqWalk<'a, 'o> {
     d: &'a mut DecodeState<'o>,
     doc: &'a Document,
     items: &'a [NodeId],
     idx: usize,
-    skip_bad: bool,
+    len: usize,
+    yielded: usize,
+}
+
+impl<'a, 'o> SeqWalk<'a, 'o> {
+    fn new(d: &'a mut DecodeState<'o>, doc: &'a Document, items: &'a [NodeId], len: usize) -> Self {
+        SeqWalk {
+            d,
+            doc,
+            items,
+            idx: 0,
+            len,
+            yielded: 0,
+        }
+    }
+
+    /// The next zero element of a Go array's tail, decoded from the zero node without
+    /// counting a Go `unmarshal` call (Go never visits it).
+    fn zero_element<'de, T: DeserializeSeed<'de>>(
+        &mut self,
+        seed: T,
+    ) -> Result<Option<T::Value>, Error> {
+        if self.yielded >= self.len {
+            return Ok(None);
+        }
+        self.yielded += 1;
+        let zero = Document::default();
+        let r = seed.deserialize(NodeDe {
+            d: &mut *self.d,
+            doc: &zero,
+            n: zero.root(),
+            entered: true,
+            key: false,
+        });
+        self.d.good = false;
+        r.map(Some)
+    }
 }
 
 impl<'de> SeqAccess<'de> for SeqWalk<'_, '_> {
@@ -1230,27 +1263,29 @@ impl<'de> SeqAccess<'de> for SeqWalk<'_, '_> {
         seed: T,
     ) -> Result<Option<T::Value>, Error> {
         let Some(&n) = self.items.get(self.idx) else {
-            return Ok(None);
+            return self.zero_element(seed);
         };
         self.idx += 1;
+        self.yielded += 1;
         seed.deserialize(NodeDe::new(self.d, self.doc, n)).map(Some)
     }
 
     fn next_element<T: Deserialize<'de>>(&mut self) -> Result<Option<T>, Error> {
         loop {
             let Some(&n) = self.items.get(self.idx) else {
-                return Ok(None);
+                return self.zero_element(PhantomData);
             };
             self.idx += 1;
             let v = T::deserialize(NodeDe::new(self.d, self.doc, n))?;
-            if self.d.good || !self.skip_bad {
+            if self.d.good {
+                self.yielded += 1;
                 return Ok(Some(v));
             }
         }
     }
 
     fn size_hint(&self) -> Option<usize> {
-        Some(self.items.len() - self.idx)
+        Some((self.items.len() - self.idx).max(self.len.saturating_sub(self.yielded)))
     }
 }
 
@@ -1860,6 +1895,70 @@ mod tests {
             err.to_string(),
             "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `abcdefg...` into int64"
         );
+    }
+
+    #[derive(Debug, Default, Deserialize, PartialEq)]
+    #[serde(default)]
+    struct Fixed {
+        arr: [i64; 2],
+        tup: (i64, i64),
+        n: i64,
+    }
+
+    /// Go's array target: a null leaves it untouched (no error), a scalar is a type error,
+    /// and only good elements are stored, compacted toward the front (decode.go `sequence`'s
+    /// `j`). Go names the type `[2]int64` (ledgered: the port says `[]interface {}`).
+    #[test]
+    fn fixed_length_targets_take_null_mismatch_and_compact_like_go() {
+        let partial = |src: &str| {
+            let doc = unmarshal_node(src.as_bytes()).unwrap();
+            let (v, te) = from_node_partial::<Fixed>(&doc, doc.root(), &opts()).unwrap();
+            (v, te.map(|te| Error::Type(te).to_string()))
+        };
+        let want = |arr, tup| Fixed { arr, tup, n: 1 };
+
+        assert_eq!(
+            partial("arr: ~\ntup: ~\nn: 1\n"),
+            (want([0, 0], (0, 0)), None)
+        );
+        assert_eq!(
+            unmarshal::<Fixed>(b"arr: ~\ntup: ~\nn: 1\n", &opts()).unwrap(),
+            want([0, 0], (0, 0))
+        );
+        assert_eq!(
+            partial("arr: x\ntup: x\nn: 1\n"),
+            (
+                want([0, 0], (0, 0)),
+                Some(
+                    "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `x` into []interface {}\n  line 2: cannot unmarshal !!str `x` into []interface {}"
+                        .to_owned()
+                )
+            )
+        );
+        assert_eq!(
+            partial("arr: [x, 1]\ntup: [x, 1]\nn: 1\n"),
+            (
+                want([1, 0], (1, 0)),
+                Some(
+                    "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `x` into int64\n  line 2: cannot unmarshal !!str `x` into int64"
+                        .to_owned()
+                )
+            )
+        );
+        assert_eq!(
+            partial("arr: [1, ~]\ntup: [~, 1]\nn: 1\n"),
+            (want([1, 0], (1, 0)), None)
+        );
+        assert_eq!(unmarshal::<[i64; 2]>(b"~", &opts()).unwrap(), [0, 0]);
+        assert_eq!(
+            unmarshal::<[[i64; 2]; 2]>(b"[~, [x, 3]]", &opts())
+                .unwrap_err()
+                .to_string(),
+            "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `x` into int64"
+        );
+        let doc = unmarshal_node(b"[~, [x, 3]]").unwrap();
+        let (v, _) = from_node_partial::<[[i64; 2]; 2]>(&doc, doc.root(), &opts()).unwrap();
+        assert_eq!(v, [[3, 0], [0, 0]]);
     }
 
     #[derive(Debug, Deserialize, PartialEq)]
