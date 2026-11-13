@@ -1,0 +1,210 @@
+{
+  "case": "node-nodeTests-072",
+  "input_b64": "IyBESDEKCiMgTUgxCnsKICAjIEhBMQogIGthOiB2YSwKICAjIEZBMQoKICAjIEhCMQogIGtiOiB2YiwKICAjIEZCMQp9CiMgTUYxCgojIERGMQo=",
+  "node": {
+    "kind": "document",
+    "style": [],
+    "tag": "",
+    "value": "",
+    "anchor": "",
+    "alias": null,
+    "head": "# DH1",
+    "line_comment": "",
+    "foot": "# DF1",
+    "line": 4,
+    "column": 1,
+    "content": [
+      {
+        "kind": "mapping",
+        "style": [
+          "flow"
+        ],
+        "tag": "!!map",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "# MH1",
+        "line_comment": "",
+        "foot": "# MF1",
+        "line": 4,
+        "column": 1,
+        "content": [
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "ka",
+            "anchor": "",
+            "alias": null,
+            "head": "# HA1",
+            "line_comment": "",
+            "foot": "# FA1",
+            "line": 6,
+            "column": 3,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "va",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 6,
+            "column": 7,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "kb",
+            "anchor": "",
+            "alias": null,
+            "head": "# HB1",
+            "line_comment": "",
+            "foot": "# FB1",
+            "line": 10,
+            "column": 3,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "vb",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 10,
+            "column": 7,
+            "content": []
+          }
+        ]
+      }
+    ]
+  },
+  "error": null,
+  "marshal_b64": "IyBESDEKCiMgTUgxCnsKICAgICMgSEExCiAgICBrYTogdmEsCiAgICAjIEZBMQoKICAgICMgSEIxCiAgICBrYjogdmIsCiAgICAjIEZCMQp9CiMgTUYxCgojIERGMQo=",
+  "marshal_error": null,
+  "indent2_b64": "IyBESDEKCiMgTUgxCnsKICAjIEhBMQogIGthOiB2YSwKICAjIEZBMQoKICAjIEhCMQogIGtiOiB2YiwKICAjIEZCMQp9CiMgTUYxCgojIERGMQo=",
+  "stream": {
+    "nodes": [
+      {
+        "kind": "document",
+        "style": [],
+        "tag": "",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "# DH1",
+        "line_comment": "",
+        "foot": "# DF1",
+        "line": 4,
+        "column": 1,
+        "content": [
+          {
+            "kind": "mapping",
+            "style": [
+              "flow"
+            ],
+            "tag": "!!map",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "# MH1",
+            "line_comment": "",
+            "foot": "# MF1",
+            "line": 4,
+            "column": 1,
+            "content": [
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "ka",
+                "anchor": "",
+                "alias": null,
+                "head": "# HA1",
+                "line_comment": "",
+                "foot": "# FA1",
+                "line": 6,
+                "column": 3,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "va",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 6,
+                "column": 7,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "kb",
+                "anchor": "",
+                "alias": null,
+                "head": "# HB1",
+                "line_comment": "",
+                "foot": "# FB1",
+                "line": 10,
+                "column": 3,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "vb",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 10,
+                "column": 7,
+                "content": []
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "error": null,
+    "marshal_b64": "IyBESDEKCiMgTUgxCnsKICAgICMgSEExCiAgICBrYTogdmEsCiAgICAjIEZBMQoKICAgICMgSEIxCiAgICBrYjogdmIsCiAgICAjIEZCMQp9CiMgTUYxCgojIERGMQo="
+  },
+  "value": {
+    "t": "map",
+    "v": [
+      [
+        "ka",
+        {
+          "t": "string",
+          "v": "va"
+        }
+      ],
+      [
+        "kb",
+        {
+          "t": "string",
+          "v": "vb"
+        }
+      ]
+    ]
+  },
+  "value_error": null
+}

@@ -1,0 +1,265 @@
+{
+  "case": "edge-alias-in-seq",
+  "input_b64": "LSAmYSB4Ci0gKmEKLSBbKmEsICphXQo=",
+  "node": {
+    "kind": "document",
+    "style": [],
+    "tag": "",
+    "value": "",
+    "anchor": "",
+    "alias": null,
+    "head": "",
+    "line_comment": "",
+    "foot": "",
+    "line": 1,
+    "column": 1,
+    "content": [
+      {
+        "kind": "sequence",
+        "style": [],
+        "tag": "!!seq",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "x",
+            "anchor": "a",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 3,
+            "content": []
+          },
+          {
+            "kind": "alias",
+            "style": [],
+            "tag": "",
+            "value": "a",
+            "anchor": "",
+            "alias": [
+              0,
+              0
+            ],
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 2,
+            "column": 3,
+            "content": []
+          },
+          {
+            "kind": "sequence",
+            "style": [
+              "flow"
+            ],
+            "tag": "!!seq",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 3,
+            "column": 3,
+            "content": [
+              {
+                "kind": "alias",
+                "style": [],
+                "tag": "",
+                "value": "a",
+                "anchor": "",
+                "alias": [
+                  0,
+                  0
+                ],
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 3,
+                "column": 4,
+                "content": []
+              },
+              {
+                "kind": "alias",
+                "style": [],
+                "tag": "",
+                "value": "a",
+                "anchor": "",
+                "alias": [
+                  0,
+                  0
+                ],
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 3,
+                "column": 8,
+                "content": []
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "error": null,
+  "marshal_b64": "LSAmYSB4Ci0gKmEKLSBbKmEsICphXQo=",
+  "marshal_error": null,
+  "indent2_b64": "LSAmYSB4Ci0gKmEKLSBbKmEsICphXQo=",
+  "stream": {
+    "nodes": [
+      {
+        "kind": "document",
+        "style": [],
+        "tag": "",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "sequence",
+            "style": [],
+            "tag": "!!seq",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": [
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "x",
+                "anchor": "a",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 1,
+                "column": 3,
+                "content": []
+              },
+              {
+                "kind": "alias",
+                "style": [],
+                "tag": "",
+                "value": "a",
+                "anchor": "",
+                "alias": [
+                  0,
+                  0
+                ],
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 2,
+                "column": 3,
+                "content": []
+              },
+              {
+                "kind": "sequence",
+                "style": [
+                  "flow"
+                ],
+                "tag": "!!seq",
+                "value": "",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 3,
+                "column": 3,
+                "content": [
+                  {
+                    "kind": "alias",
+                    "style": [],
+                    "tag": "",
+                    "value": "a",
+                    "anchor": "",
+                    "alias": [
+                      0,
+                      0
+                    ],
+                    "head": "",
+                    "line_comment": "",
+                    "foot": "",
+                    "line": 3,
+                    "column": 4,
+                    "content": []
+                  },
+                  {
+                    "kind": "alias",
+                    "style": [],
+                    "tag": "",
+                    "value": "a",
+                    "anchor": "",
+                    "alias": [
+                      0,
+                      0
+                    ],
+                    "head": "",
+                    "line_comment": "",
+                    "foot": "",
+                    "line": 3,
+                    "column": 8,
+                    "content": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "error": null,
+    "marshal_b64": "LSAmYSB4Ci0gKmEKLSBbKmEsICphXQo="
+  },
+  "value": {
+    "t": "seq",
+    "v": [
+      {
+        "t": "string",
+        "v": "x"
+      },
+      {
+        "t": "string",
+        "v": "x"
+      },
+      {
+        "t": "seq",
+        "v": [
+          {
+            "t": "string",
+            "v": "x"
+          },
+          {
+            "t": "string",
+            "v": "x"
+          }
+        ]
+      }
+    ]
+  },
+  "value_error": null
+}

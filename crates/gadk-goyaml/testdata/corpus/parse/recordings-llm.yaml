@@ -1,0 +1,92 @@
+recordings:
+  - user_message_index: 0
+    agent_name: root_agent
+    llm_recording:
+      llm_request:
+        model: gemini-2.5-flash
+        contents:
+          - role: user
+            parts:
+              - text: "What's the weather in Paris?"
+        config:
+          system_instruction:
+            role: user
+            parts:
+              - text: |-
+                  You are a helpful weather assistant.
+                  Answer in one sentence.
+          tools:
+            - function_declarations:
+                - name: get_weather
+                  description: Returns the weather for a city.
+                  parameters:
+                    type: OBJECT
+                    properties:
+                      city:
+                        type: STRING
+                        description: "The city name, e.g. \"Paris\"."
+                    required:
+                      - city
+          labels: {}
+      llm_responses:
+        - content:
+            role: model
+            parts:
+              - function_call:
+                  id: adk-0001
+                  name: get_weather
+                  args:
+                    city: Paris
+                thought_signature: "SGVsbG8="
+          usage_metadata:
+            prompt_token_count: 42
+            candidates_token_count: 7
+            total_token_count: 49
+  - user_message_index: 0
+    agent_name: root_agent
+    tool_recording:
+      tool_call:
+        id: adk-0001
+        name: get_weather
+        args:
+          city: Paris
+      tool_response:
+        id: adk-0001
+        name: get_weather
+        response:
+          result: "sunny, 21°C"
+          ok: true
+          count: 0
+  - user_message_index: 0
+    agent_name: root_agent
+    llm_recording:
+      llm_request:
+        model: gemini-2.5-flash
+        contents:
+          - role: user
+            parts:
+              - text: "What's the weather in Paris?"
+          - role: model
+            parts:
+              - function_call:
+                  id: adk-0001
+                  name: get_weather
+                  args:
+                    city: Paris
+          - role: user
+            parts:
+              - function_response:
+                  id: adk-0001
+                  name: get_weather
+                  response:
+                    result: "sunny, 21°C"
+        config:
+          temperature: 0.7
+          top_p: 0.95
+          max_output_tokens: 1024
+      llm_responses:
+        - content:
+            role: model
+            parts:
+              - text: It is sunny and 21°C in Paris.
+          finish_reason: STOP

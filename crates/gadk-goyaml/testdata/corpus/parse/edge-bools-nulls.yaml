@@ -1,0 +1,10 @@
+a: true
+b: True
+c: TRUE
+d: false
+e: ~
+f: null
+g: NULL
+h:
+i: yes
+j: Off

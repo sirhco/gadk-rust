@@ -1,0 +1,214 @@
+{
+  "case": "edge-comment-block-scalar",
+  "input_b64": "YTogfCAjIG9uIGluZGljYXRvcgogIHRleHQKIyBhZnRlciBzY2FsYXIKYjogPiAjIGZvbGRlZAogIG1vcmUK",
+  "node": {
+    "kind": "document",
+    "style": [],
+    "tag": "",
+    "value": "",
+    "anchor": "",
+    "alias": null,
+    "head": "",
+    "line_comment": "",
+    "foot": "",
+    "line": 1,
+    "column": 1,
+    "content": [
+      {
+        "kind": "mapping",
+        "style": [],
+        "tag": "!!map",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "a",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "literal"
+            ],
+            "tag": "!!str",
+            "value": "text\n",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "# on indicator",
+            "foot": "",
+            "line": 1,
+            "column": 4,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "b",
+            "anchor": "",
+            "alias": null,
+            "head": "# after scalar",
+            "line_comment": "",
+            "foot": "",
+            "line": 4,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "folded"
+            ],
+            "tag": "!!str",
+            "value": "more\n",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "# folded",
+            "foot": "",
+            "line": 4,
+            "column": 4,
+            "content": []
+          }
+        ]
+      }
+    ]
+  },
+  "error": null,
+  "marshal_b64": "YTogfCAjIG9uIGluZGljYXRvcgogICAgdGV4dAojIGFmdGVyIHNjYWxhcgpiOiA+ICMgZm9sZGVkCiAgICBtb3JlCgo=",
+  "marshal_error": null,
+  "indent2_b64": "YTogfCAjIG9uIGluZGljYXRvcgogIHRleHQKIyBhZnRlciBzY2FsYXIKYjogPiAjIGZvbGRlZAogIG1vcmUKCg==",
+  "stream": {
+    "nodes": [
+      {
+        "kind": "document",
+        "style": [],
+        "tag": "",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "mapping",
+            "style": [],
+            "tag": "!!map",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": [
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "a",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 1,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "literal"
+                ],
+                "tag": "!!str",
+                "value": "text\n",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "# on indicator",
+                "foot": "",
+                "line": 1,
+                "column": 4,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "b",
+                "anchor": "",
+                "alias": null,
+                "head": "# after scalar",
+                "line_comment": "",
+                "foot": "",
+                "line": 4,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "folded"
+                ],
+                "tag": "!!str",
+                "value": "more\n",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "# folded",
+                "foot": "",
+                "line": 4,
+                "column": 4,
+                "content": []
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "error": null,
+    "marshal_b64": "YTogfCAjIG9uIGluZGljYXRvcgogICAgdGV4dAojIGFmdGVyIHNjYWxhcgpiOiA+ICMgZm9sZGVkCiAgICBtb3JlCgo="
+  },
+  "value": {
+    "t": "map",
+    "v": [
+      [
+        "a",
+        {
+          "t": "string",
+          "v": "text\n"
+        }
+      ],
+      [
+        "b",
+        {
+          "t": "string",
+          "v": "more\n"
+        }
+      ]
+    ]
+  },
+  "value_error": null
+}

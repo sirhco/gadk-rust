@@ -1,0 +1,1397 @@
+{
+  "case": "edge-block-deep",
+  "input_b64": "azA6CiAgazE6CiAgICBrMjoKICAgICAgazM6CiAgICAgICAgazQ6CiAgICAgICAgICBrNToKICAgICAgICAgICAgazY6CiAgICAgICAgICAgICAgazc6CiAgICAgICAgICAgICAgICBrODoKICAgICAgICAgICAgICAgICAgazk6CiAgICAgICAgICAgICAgICAgICAgazEwOgogICAgICAgICAgICAgICAgICAgICAgazExOgogICAgICAgICAgICAgICAgICAgICAgICBrMTI6CiAgICAgICAgICAgICAgICAgICAgICAgICAgazEzOgogICAgICAgICAgICAgICAgICAgICAgICAgICAgazE0OgogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBrMTU6CiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgazE2OgogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgazE3OgogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBrMTg6CiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgazE5OgogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgbGVhZgo=",
+  "node": {
+    "kind": "document",
+    "style": [],
+    "tag": "",
+    "value": "",
+    "anchor": "",
+    "alias": null,
+    "head": "",
+    "line_comment": "",
+    "foot": "",
+    "line": 1,
+    "column": 1,
+    "content": [
+      {
+        "kind": "mapping",
+        "style": [],
+        "tag": "!!map",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "k0",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "mapping",
+            "style": [],
+            "tag": "!!map",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 2,
+            "column": 3,
+            "content": [
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k1",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 2,
+                "column": 3,
+                "content": []
+              },
+              {
+                "kind": "mapping",
+                "style": [],
+                "tag": "!!map",
+                "value": "",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 3,
+                "column": 5,
+                "content": [
+                  {
+                    "kind": "scalar",
+                    "style": [],
+                    "tag": "!!str",
+                    "value": "k2",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "",
+                    "line_comment": "",
+                    "foot": "",
+                    "line": 3,
+                    "column": 5,
+                    "content": []
+                  },
+                  {
+                    "kind": "mapping",
+                    "style": [],
+                    "tag": "!!map",
+                    "value": "",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "",
+                    "line_comment": "",
+                    "foot": "",
+                    "line": 4,
+                    "column": 7,
+                    "content": [
+                      {
+                        "kind": "scalar",
+                        "style": [],
+                        "tag": "!!str",
+                        "value": "k3",
+                        "anchor": "",
+                        "alias": null,
+                        "head": "",
+                        "line_comment": "",
+                        "foot": "",
+                        "line": 4,
+                        "column": 7,
+                        "content": []
+                      },
+                      {
+                        "kind": "mapping",
+                        "style": [],
+                        "tag": "!!map",
+                        "value": "",
+                        "anchor": "",
+                        "alias": null,
+                        "head": "",
+                        "line_comment": "",
+                        "foot": "",
+                        "line": 5,
+                        "column": 9,
+                        "content": [
+                          {
+                            "kind": "scalar",
+                            "style": [],
+                            "tag": "!!str",
+                            "value": "k4",
+                            "anchor": "",
+                            "alias": null,
+                            "head": "",
+                            "line_comment": "",
+                            "foot": "",
+                            "line": 5,
+                            "column": 9,
+                            "content": []
+                          },
+                          {
+                            "kind": "mapping",
+                            "style": [],
+                            "tag": "!!map",
+                            "value": "",
+                            "anchor": "",
+                            "alias": null,
+                            "head": "",
+                            "line_comment": "",
+                            "foot": "",
+                            "line": 6,
+                            "column": 11,
+                            "content": [
+                              {
+                                "kind": "scalar",
+                                "style": [],
+                                "tag": "!!str",
+                                "value": "k5",
+                                "anchor": "",
+                                "alias": null,
+                                "head": "",
+                                "line_comment": "",
+                                "foot": "",
+                                "line": 6,
+                                "column": 11,
+                                "content": []
+                              },
+                              {
+                                "kind": "mapping",
+                                "style": [],
+                                "tag": "!!map",
+                                "value": "",
+                                "anchor": "",
+                                "alias": null,
+                                "head": "",
+                                "line_comment": "",
+                                "foot": "",
+                                "line": 7,
+                                "column": 13,
+                                "content": [
+                                  {
+                                    "kind": "scalar",
+                                    "style": [],
+                                    "tag": "!!str",
+                                    "value": "k6",
+                                    "anchor": "",
+                                    "alias": null,
+                                    "head": "",
+                                    "line_comment": "",
+                                    "foot": "",
+                                    "line": 7,
+                                    "column": 13,
+                                    "content": []
+                                  },
+                                  {
+                                    "kind": "mapping",
+                                    "style": [],
+                                    "tag": "!!map",
+                                    "value": "",
+                                    "anchor": "",
+                                    "alias": null,
+                                    "head": "",
+                                    "line_comment": "",
+                                    "foot": "",
+                                    "line": 8,
+                                    "column": 15,
+                                    "content": [
+                                      {
+                                        "kind": "scalar",
+                                        "style": [],
+                                        "tag": "!!str",
+                                        "value": "k7",
+                                        "anchor": "",
+                                        "alias": null,
+                                        "head": "",
+                                        "line_comment": "",
+                                        "foot": "",
+                                        "line": 8,
+                                        "column": 15,
+                                        "content": []
+                                      },
+                                      {
+                                        "kind": "mapping",
+                                        "style": [],
+                                        "tag": "!!map",
+                                        "value": "",
+                                        "anchor": "",
+                                        "alias": null,
+                                        "head": "",
+                                        "line_comment": "",
+                                        "foot": "",
+                                        "line": 9,
+                                        "column": 17,
+                                        "content": [
+                                          {
+                                            "kind": "scalar",
+                                            "style": [],
+                                            "tag": "!!str",
+                                            "value": "k8",
+                                            "anchor": "",
+                                            "alias": null,
+                                            "head": "",
+                                            "line_comment": "",
+                                            "foot": "",
+                                            "line": 9,
+                                            "column": 17,
+                                            "content": []
+                                          },
+                                          {
+                                            "kind": "mapping",
+                                            "style": [],
+                                            "tag": "!!map",
+                                            "value": "",
+                                            "anchor": "",
+                                            "alias": null,
+                                            "head": "",
+                                            "line_comment": "",
+                                            "foot": "",
+                                            "line": 10,
+                                            "column": 19,
+                                            "content": [
+                                              {
+                                                "kind": "scalar",
+                                                "style": [],
+                                                "tag": "!!str",
+                                                "value": "k9",
+                                                "anchor": "",
+                                                "alias": null,
+                                                "head": "",
+                                                "line_comment": "",
+                                                "foot": "",
+                                                "line": 10,
+                                                "column": 19,
+                                                "content": []
+                                              },
+                                              {
+                                                "kind": "mapping",
+                                                "style": [],
+                                                "tag": "!!map",
+                                                "value": "",
+                                                "anchor": "",
+                                                "alias": null,
+                                                "head": "",
+                                                "line_comment": "",
+                                                "foot": "",
+                                                "line": 11,
+                                                "column": 21,
+                                                "content": [
+                                                  {
+                                                    "kind": "scalar",
+                                                    "style": [],
+                                                    "tag": "!!str",
+                                                    "value": "k10",
+                                                    "anchor": "",
+                                                    "alias": null,
+                                                    "head": "",
+                                                    "line_comment": "",
+                                                    "foot": "",
+                                                    "line": 11,
+                                                    "column": 21,
+                                                    "content": []
+                                                  },
+                                                  {
+                                                    "kind": "mapping",
+                                                    "style": [],
+                                                    "tag": "!!map",
+                                                    "value": "",
+                                                    "anchor": "",
+                                                    "alias": null,
+                                                    "head": "",
+                                                    "line_comment": "",
+                                                    "foot": "",
+                                                    "line": 12,
+                                                    "column": 23,
+                                                    "content": [
+                                                      {
+                                                        "kind": "scalar",
+                                                        "style": [],
+                                                        "tag": "!!str",
+                                                        "value": "k11",
+                                                        "anchor": "",
+                                                        "alias": null,
+                                                        "head": "",
+                                                        "line_comment": "",
+                                                        "foot": "",
+                                                        "line": 12,
+                                                        "column": 23,
+                                                        "content": []
+                                                      },
+                                                      {
+                                                        "kind": "mapping",
+                                                        "style": [],
+                                                        "tag": "!!map",
+                                                        "value": "",
+                                                        "anchor": "",
+                                                        "alias": null,
+                                                        "head": "",
+                                                        "line_comment": "",
+                                                        "foot": "",
+                                                        "line": 13,
+                                                        "column": 25,
+                                                        "content": [
+                                                          {
+                                                            "kind": "scalar",
+                                                            "style": [],
+                                                            "tag": "!!str",
+                                                            "value": "k12",
+                                                            "anchor": "",
+                                                            "alias": null,
+                                                            "head": "",
+                                                            "line_comment": "",
+                                                            "foot": "",
+                                                            "line": 13,
+                                                            "column": 25,
+                                                            "content": []
+                                                          },
+                                                          {
+                                                            "kind": "mapping",
+                                                            "style": [],
+                                                            "tag": "!!map",
+                                                            "value": "",
+                                                            "anchor": "",
+                                                            "alias": null,
+                                                            "head": "",
+                                                            "line_comment": "",
+                                                            "foot": "",
+                                                            "line": 14,
+                                                            "column": 27,
+                                                            "content": [
+                                                              {
+                                                                "kind": "scalar",
+                                                                "style": [],
+                                                                "tag": "!!str",
+                                                                "value": "k13",
+                                                                "anchor": "",
+                                                                "alias": null,
+                                                                "head": "",
+                                                                "line_comment": "",
+                                                                "foot": "",
+                                                                "line": 14,
+                                                                "column": 27,
+                                                                "content": []
+                                                              },
+                                                              {
+                                                                "kind": "mapping",
+                                                                "style": [],
+                                                                "tag": "!!map",
+                                                                "value": "",
+                                                                "anchor": "",
+                                                                "alias": null,
+                                                                "head": "",
+                                                                "line_comment": "",
+                                                                "foot": "",
+                                                                "line": 15,
+                                                                "column": 29,
+                                                                "content": [
+                                                                  {
+                                                                    "kind": "scalar",
+                                                                    "style": [],
+                                                                    "tag": "!!str",
+                                                                    "value": "k14",
+                                                                    "anchor": "",
+                                                                    "alias": null,
+                                                                    "head": "",
+                                                                    "line_comment": "",
+                                                                    "foot": "",
+                                                                    "line": 15,
+                                                                    "column": 29,
+                                                                    "content": []
+                                                                  },
+                                                                  {
+                                                                    "kind": "mapping",
+                                                                    "style": [],
+                                                                    "tag": "!!map",
+                                                                    "value": "",
+                                                                    "anchor": "",
+                                                                    "alias": null,
+                                                                    "head": "",
+                                                                    "line_comment": "",
+                                                                    "foot": "",
+                                                                    "line": 16,
+                                                                    "column": 31,
+                                                                    "content": [
+                                                                      {
+                                                                        "kind": "scalar",
+                                                                        "style": [],
+                                                                        "tag": "!!str",
+                                                                        "value": "k15",
+                                                                        "anchor": "",
+                                                                        "alias": null,
+                                                                        "head": "",
+                                                                        "line_comment": "",
+                                                                        "foot": "",
+                                                                        "line": 16,
+                                                                        "column": 31,
+                                                                        "content": []
+                                                                      },
+                                                                      {
+                                                                        "kind": "mapping",
+                                                                        "style": [],
+                                                                        "tag": "!!map",
+                                                                        "value": "",
+                                                                        "anchor": "",
+                                                                        "alias": null,
+                                                                        "head": "",
+                                                                        "line_comment": "",
+                                                                        "foot": "",
+                                                                        "line": 17,
+                                                                        "column": 33,
+                                                                        "content": [
+                                                                          {
+                                                                            "kind": "scalar",
+                                                                            "style": [],
+                                                                            "tag": "!!str",
+                                                                            "value": "k16",
+                                                                            "anchor": "",
+                                                                            "alias": null,
+                                                                            "head": "",
+                                                                            "line_comment": "",
+                                                                            "foot": "",
+                                                                            "line": 17,
+                                                                            "column": 33,
+                                                                            "content": []
+                                                                          },
+                                                                          {
+                                                                            "kind": "mapping",
+                                                                            "style": [],
+                                                                            "tag": "!!map",
+                                                                            "value": "",
+                                                                            "anchor": "",
+                                                                            "alias": null,
+                                                                            "head": "",
+                                                                            "line_comment": "",
+                                                                            "foot": "",
+                                                                            "line": 18,
+                                                                            "column": 35,
+                                                                            "content": [
+                                                                              {
+                                                                                "kind": "scalar",
+                                                                                "style": [],
+                                                                                "tag": "!!str",
+                                                                                "value": "k17",
+                                                                                "anchor": "",
+                                                                                "alias": null,
+                                                                                "head": "",
+                                                                                "line_comment": "",
+                                                                                "foot": "",
+                                                                                "line": 18,
+                                                                                "column": 35,
+                                                                                "content": []
+                                                                              },
+                                                                              {
+                                                                                "kind": "mapping",
+                                                                                "style": [],
+                                                                                "tag": "!!map",
+                                                                                "value": "",
+                                                                                "anchor": "",
+                                                                                "alias": null,
+                                                                                "head": "",
+                                                                                "line_comment": "",
+                                                                                "foot": "",
+                                                                                "line": 19,
+                                                                                "column": 37,
+                                                                                "content": [
+                                                                                  {
+                                                                                    "kind": "scalar",
+                                                                                    "style": [],
+                                                                                    "tag": "!!str",
+                                                                                    "value": "k18",
+                                                                                    "anchor": "",
+                                                                                    "alias": null,
+                                                                                    "head": "",
+                                                                                    "line_comment": "",
+                                                                                    "foot": "",
+                                                                                    "line": 19,
+                                                                                    "column": 37,
+                                                                                    "content": []
+                                                                                  },
+                                                                                  {
+                                                                                    "kind": "mapping",
+                                                                                    "style": [],
+                                                                                    "tag": "!!map",
+                                                                                    "value": "",
+                                                                                    "anchor": "",
+                                                                                    "alias": null,
+                                                                                    "head": "",
+                                                                                    "line_comment": "",
+                                                                                    "foot": "",
+                                                                                    "line": 20,
+                                                                                    "column": 39,
+                                                                                    "content": [
+                                                                                      {
+                                                                                        "kind": "scalar",
+                                                                                        "style": [],
+                                                                                        "tag": "!!str",
+                                                                                        "value": "k19",
+                                                                                        "anchor": "",
+                                                                                        "alias": null,
+                                                                                        "head": "",
+                                                                                        "line_comment": "",
+                                                                                        "foot": "",
+                                                                                        "line": 20,
+                                                                                        "column": 39,
+                                                                                        "content": []
+                                                                                      },
+                                                                                      {
+                                                                                        "kind": "scalar",
+                                                                                        "style": [],
+                                                                                        "tag": "!!str",
+                                                                                        "value": "leaf",
+                                                                                        "anchor": "",
+                                                                                        "alias": null,
+                                                                                        "head": "",
+                                                                                        "line_comment": "",
+                                                                                        "foot": "",
+                                                                                        "line": 21,
+                                                                                        "column": 41,
+                                                                                        "content": []
+                                                                                      }
+                                                                                    ]
+                                                                                  }
+                                                                                ]
+                                                                              }
+                                                                            ]
+                                                                          }
+                                                                        ]
+                                                                      }
+                                                                    ]
+                                                                  }
+                                                                ]
+                                                              }
+                                                            ]
+                                                          }
+                                                        ]
+                                                      }
+                                                    ]
+                                                  }
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "error": null,
+  "marshal_b64": "azA6CiAgICBrMToKICAgICAgICBrMjoKICAgICAgICAgICAgazM6CiAgICAgICAgICAgICAgICBrNDoKICAgICAgICAgICAgICAgICAgICBrNToKICAgICAgICAgICAgICAgICAgICAgICAgazY6CiAgICAgICAgICAgICAgICAgICAgICAgICAgICBrNzoKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBrODoKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgazk6CiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBrMTA6CiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgazExOgogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBrMTI6CiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBrMTM6CiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgazE0OgogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBrMTU6CiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBrMTY6CiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgazE3OgogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBrMTg6CiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBrMTk6IGxlYWYK",
+  "marshal_error": null,
+  "indent2_b64": "azA6CiAgazE6CiAgICBrMjoKICAgICAgazM6CiAgICAgICAgazQ6CiAgICAgICAgICBrNToKICAgICAgICAgICAgazY6CiAgICAgICAgICAgICAgazc6CiAgICAgICAgICAgICAgICBrODoKICAgICAgICAgICAgICAgICAgazk6CiAgICAgICAgICAgICAgICAgICAgazEwOgogICAgICAgICAgICAgICAgICAgICAgazExOgogICAgICAgICAgICAgICAgICAgICAgICBrMTI6CiAgICAgICAgICAgICAgICAgICAgICAgICAgazEzOgogICAgICAgICAgICAgICAgICAgICAgICAgICAgazE0OgogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBrMTU6CiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgazE2OgogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgazE3OgogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBrMTg6CiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgazE5OiBsZWFmCg==",
+  "stream": {
+    "nodes": [
+      {
+        "kind": "document",
+        "style": [],
+        "tag": "",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "mapping",
+            "style": [],
+            "tag": "!!map",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": [
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "k0",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 1,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "mapping",
+                "style": [],
+                "tag": "!!map",
+                "value": "",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 2,
+                "column": 3,
+                "content": [
+                  {
+                    "kind": "scalar",
+                    "style": [],
+                    "tag": "!!str",
+                    "value": "k1",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "",
+                    "line_comment": "",
+                    "foot": "",
+                    "line": 2,
+                    "column": 3,
+                    "content": []
+                  },
+                  {
+                    "kind": "mapping",
+                    "style": [],
+                    "tag": "!!map",
+                    "value": "",
+                    "anchor": "",
+                    "alias": null,
+                    "head": "",
+                    "line_comment": "",
+                    "foot": "",
+                    "line": 3,
+                    "column": 5,
+                    "content": [
+                      {
+                        "kind": "scalar",
+                        "style": [],
+                        "tag": "!!str",
+                        "value": "k2",
+                        "anchor": "",
+                        "alias": null,
+                        "head": "",
+                        "line_comment": "",
+                        "foot": "",
+                        "line": 3,
+                        "column": 5,
+                        "content": []
+                      },
+                      {
+                        "kind": "mapping",
+                        "style": [],
+                        "tag": "!!map",
+                        "value": "",
+                        "anchor": "",
+                        "alias": null,
+                        "head": "",
+                        "line_comment": "",
+                        "foot": "",
+                        "line": 4,
+                        "column": 7,
+                        "content": [
+                          {
+                            "kind": "scalar",
+                            "style": [],
+                            "tag": "!!str",
+                            "value": "k3",
+                            "anchor": "",
+                            "alias": null,
+                            "head": "",
+                            "line_comment": "",
+                            "foot": "",
+                            "line": 4,
+                            "column": 7,
+                            "content": []
+                          },
+                          {
+                            "kind": "mapping",
+                            "style": [],
+                            "tag": "!!map",
+                            "value": "",
+                            "anchor": "",
+                            "alias": null,
+                            "head": "",
+                            "line_comment": "",
+                            "foot": "",
+                            "line": 5,
+                            "column": 9,
+                            "content": [
+                              {
+                                "kind": "scalar",
+                                "style": [],
+                                "tag": "!!str",
+                                "value": "k4",
+                                "anchor": "",
+                                "alias": null,
+                                "head": "",
+                                "line_comment": "",
+                                "foot": "",
+                                "line": 5,
+                                "column": 9,
+                                "content": []
+                              },
+                              {
+                                "kind": "mapping",
+                                "style": [],
+                                "tag": "!!map",
+                                "value": "",
+                                "anchor": "",
+                                "alias": null,
+                                "head": "",
+                                "line_comment": "",
+                                "foot": "",
+                                "line": 6,
+                                "column": 11,
+                                "content": [
+                                  {
+                                    "kind": "scalar",
+                                    "style": [],
+                                    "tag": "!!str",
+                                    "value": "k5",
+                                    "anchor": "",
+                                    "alias": null,
+                                    "head": "",
+                                    "line_comment": "",
+                                    "foot": "",
+                                    "line": 6,
+                                    "column": 11,
+                                    "content": []
+                                  },
+                                  {
+                                    "kind": "mapping",
+                                    "style": [],
+                                    "tag": "!!map",
+                                    "value": "",
+                                    "anchor": "",
+                                    "alias": null,
+                                    "head": "",
+                                    "line_comment": "",
+                                    "foot": "",
+                                    "line": 7,
+                                    "column": 13,
+                                    "content": [
+                                      {
+                                        "kind": "scalar",
+                                        "style": [],
+                                        "tag": "!!str",
+                                        "value": "k6",
+                                        "anchor": "",
+                                        "alias": null,
+                                        "head": "",
+                                        "line_comment": "",
+                                        "foot": "",
+                                        "line": 7,
+                                        "column": 13,
+                                        "content": []
+                                      },
+                                      {
+                                        "kind": "mapping",
+                                        "style": [],
+                                        "tag": "!!map",
+                                        "value": "",
+                                        "anchor": "",
+                                        "alias": null,
+                                        "head": "",
+                                        "line_comment": "",
+                                        "foot": "",
+                                        "line": 8,
+                                        "column": 15,
+                                        "content": [
+                                          {
+                                            "kind": "scalar",
+                                            "style": [],
+                                            "tag": "!!str",
+                                            "value": "k7",
+                                            "anchor": "",
+                                            "alias": null,
+                                            "head": "",
+                                            "line_comment": "",
+                                            "foot": "",
+                                            "line": 8,
+                                            "column": 15,
+                                            "content": []
+                                          },
+                                          {
+                                            "kind": "mapping",
+                                            "style": [],
+                                            "tag": "!!map",
+                                            "value": "",
+                                            "anchor": "",
+                                            "alias": null,
+                                            "head": "",
+                                            "line_comment": "",
+                                            "foot": "",
+                                            "line": 9,
+                                            "column": 17,
+                                            "content": [
+                                              {
+                                                "kind": "scalar",
+                                                "style": [],
+                                                "tag": "!!str",
+                                                "value": "k8",
+                                                "anchor": "",
+                                                "alias": null,
+                                                "head": "",
+                                                "line_comment": "",
+                                                "foot": "",
+                                                "line": 9,
+                                                "column": 17,
+                                                "content": []
+                                              },
+                                              {
+                                                "kind": "mapping",
+                                                "style": [],
+                                                "tag": "!!map",
+                                                "value": "",
+                                                "anchor": "",
+                                                "alias": null,
+                                                "head": "",
+                                                "line_comment": "",
+                                                "foot": "",
+                                                "line": 10,
+                                                "column": 19,
+                                                "content": [
+                                                  {
+                                                    "kind": "scalar",
+                                                    "style": [],
+                                                    "tag": "!!str",
+                                                    "value": "k9",
+                                                    "anchor": "",
+                                                    "alias": null,
+                                                    "head": "",
+                                                    "line_comment": "",
+                                                    "foot": "",
+                                                    "line": 10,
+                                                    "column": 19,
+                                                    "content": []
+                                                  },
+                                                  {
+                                                    "kind": "mapping",
+                                                    "style": [],
+                                                    "tag": "!!map",
+                                                    "value": "",
+                                                    "anchor": "",
+                                                    "alias": null,
+                                                    "head": "",
+                                                    "line_comment": "",
+                                                    "foot": "",
+                                                    "line": 11,
+                                                    "column": 21,
+                                                    "content": [
+                                                      {
+                                                        "kind": "scalar",
+                                                        "style": [],
+                                                        "tag": "!!str",
+                                                        "value": "k10",
+                                                        "anchor": "",
+                                                        "alias": null,
+                                                        "head": "",
+                                                        "line_comment": "",
+                                                        "foot": "",
+                                                        "line": 11,
+                                                        "column": 21,
+                                                        "content": []
+                                                      },
+                                                      {
+                                                        "kind": "mapping",
+                                                        "style": [],
+                                                        "tag": "!!map",
+                                                        "value": "",
+                                                        "anchor": "",
+                                                        "alias": null,
+                                                        "head": "",
+                                                        "line_comment": "",
+                                                        "foot": "",
+                                                        "line": 12,
+                                                        "column": 23,
+                                                        "content": [
+                                                          {
+                                                            "kind": "scalar",
+                                                            "style": [],
+                                                            "tag": "!!str",
+                                                            "value": "k11",
+                                                            "anchor": "",
+                                                            "alias": null,
+                                                            "head": "",
+                                                            "line_comment": "",
+                                                            "foot": "",
+                                                            "line": 12,
+                                                            "column": 23,
+                                                            "content": []
+                                                          },
+                                                          {
+                                                            "kind": "mapping",
+                                                            "style": [],
+                                                            "tag": "!!map",
+                                                            "value": "",
+                                                            "anchor": "",
+                                                            "alias": null,
+                                                            "head": "",
+                                                            "line_comment": "",
+                                                            "foot": "",
+                                                            "line": 13,
+                                                            "column": 25,
+                                                            "content": [
+                                                              {
+                                                                "kind": "scalar",
+                                                                "style": [],
+                                                                "tag": "!!str",
+                                                                "value": "k12",
+                                                                "anchor": "",
+                                                                "alias": null,
+                                                                "head": "",
+                                                                "line_comment": "",
+                                                                "foot": "",
+                                                                "line": 13,
+                                                                "column": 25,
+                                                                "content": []
+                                                              },
+                                                              {
+                                                                "kind": "mapping",
+                                                                "style": [],
+                                                                "tag": "!!map",
+                                                                "value": "",
+                                                                "anchor": "",
+                                                                "alias": null,
+                                                                "head": "",
+                                                                "line_comment": "",
+                                                                "foot": "",
+                                                                "line": 14,
+                                                                "column": 27,
+                                                                "content": [
+                                                                  {
+                                                                    "kind": "scalar",
+                                                                    "style": [],
+                                                                    "tag": "!!str",
+                                                                    "value": "k13",
+                                                                    "anchor": "",
+                                                                    "alias": null,
+                                                                    "head": "",
+                                                                    "line_comment": "",
+                                                                    "foot": "",
+                                                                    "line": 14,
+                                                                    "column": 27,
+                                                                    "content": []
+                                                                  },
+                                                                  {
+                                                                    "kind": "mapping",
+                                                                    "style": [],
+                                                                    "tag": "!!map",
+                                                                    "value": "",
+                                                                    "anchor": "",
+                                                                    "alias": null,
+                                                                    "head": "",
+                                                                    "line_comment": "",
+                                                                    "foot": "",
+                                                                    "line": 15,
+                                                                    "column": 29,
+                                                                    "content": [
+                                                                      {
+                                                                        "kind": "scalar",
+                                                                        "style": [],
+                                                                        "tag": "!!str",
+                                                                        "value": "k14",
+                                                                        "anchor": "",
+                                                                        "alias": null,
+                                                                        "head": "",
+                                                                        "line_comment": "",
+                                                                        "foot": "",
+                                                                        "line": 15,
+                                                                        "column": 29,
+                                                                        "content": []
+                                                                      },
+                                                                      {
+                                                                        "kind": "mapping",
+                                                                        "style": [],
+                                                                        "tag": "!!map",
+                                                                        "value": "",
+                                                                        "anchor": "",
+                                                                        "alias": null,
+                                                                        "head": "",
+                                                                        "line_comment": "",
+                                                                        "foot": "",
+                                                                        "line": 16,
+                                                                        "column": 31,
+                                                                        "content": [
+                                                                          {
+                                                                            "kind": "scalar",
+                                                                            "style": [],
+                                                                            "tag": "!!str",
+                                                                            "value": "k15",
+                                                                            "anchor": "",
+                                                                            "alias": null,
+                                                                            "head": "",
+                                                                            "line_comment": "",
+                                                                            "foot": "",
+                                                                            "line": 16,
+                                                                            "column": 31,
+                                                                            "content": []
+                                                                          },
+                                                                          {
+                                                                            "kind": "mapping",
+                                                                            "style": [],
+                                                                            "tag": "!!map",
+                                                                            "value": "",
+                                                                            "anchor": "",
+                                                                            "alias": null,
+                                                                            "head": "",
+                                                                            "line_comment": "",
+                                                                            "foot": "",
+                                                                            "line": 17,
+                                                                            "column": 33,
+                                                                            "content": [
+                                                                              {
+                                                                                "kind": "scalar",
+                                                                                "style": [],
+                                                                                "tag": "!!str",
+                                                                                "value": "k16",
+                                                                                "anchor": "",
+                                                                                "alias": null,
+                                                                                "head": "",
+                                                                                "line_comment": "",
+                                                                                "foot": "",
+                                                                                "line": 17,
+                                                                                "column": 33,
+                                                                                "content": []
+                                                                              },
+                                                                              {
+                                                                                "kind": "mapping",
+                                                                                "style": [],
+                                                                                "tag": "!!map",
+                                                                                "value": "",
+                                                                                "anchor": "",
+                                                                                "alias": null,
+                                                                                "head": "",
+                                                                                "line_comment": "",
+                                                                                "foot": "",
+                                                                                "line": 18,
+                                                                                "column": 35,
+                                                                                "content": [
+                                                                                  {
+                                                                                    "kind": "scalar",
+                                                                                    "style": [],
+                                                                                    "tag": "!!str",
+                                                                                    "value": "k17",
+                                                                                    "anchor": "",
+                                                                                    "alias": null,
+                                                                                    "head": "",
+                                                                                    "line_comment": "",
+                                                                                    "foot": "",
+                                                                                    "line": 18,
+                                                                                    "column": 35,
+                                                                                    "content": []
+                                                                                  },
+                                                                                  {
+                                                                                    "kind": "mapping",
+                                                                                    "style": [],
+                                                                                    "tag": "!!map",
+                                                                                    "value": "",
+                                                                                    "anchor": "",
+                                                                                    "alias": null,
+                                                                                    "head": "",
+                                                                                    "line_comment": "",
+                                                                                    "foot": "",
+                                                                                    "line": 19,
+                                                                                    "column": 37,
+                                                                                    "content": [
+                                                                                      {
+                                                                                        "kind": "scalar",
+                                                                                        "style": [],
+                                                                                        "tag": "!!str",
+                                                                                        "value": "k18",
+                                                                                        "anchor": "",
+                                                                                        "alias": null,
+                                                                                        "head": "",
+                                                                                        "line_comment": "",
+                                                                                        "foot": "",
+                                                                                        "line": 19,
+                                                                                        "column": 37,
+                                                                                        "content": []
+                                                                                      },
+                                                                                      {
+                                                                                        "kind": "mapping",
+                                                                                        "style": [],
+                                                                                        "tag": "!!map",
+                                                                                        "value": "",
+                                                                                        "anchor": "",
+                                                                                        "alias": null,
+                                                                                        "head": "",
+                                                                                        "line_comment": "",
+                                                                                        "foot": "",
+                                                                                        "line": 20,
+                                                                                        "column": 39,
+                                                                                        "content": [
+                                                                                          {
+                                                                                            "kind": "scalar",
+                                                                                            "style": [],
+                                                                                            "tag": "!!str",
+                                                                                            "value": "k19",
+                                                                                            "anchor": "",
+                                                                                            "alias": null,
+                                                                                            "head": "",
+                                                                                            "line_comment": "",
+                                                                                            "foot": "",
+                                                                                            "line": 20,
+                                                                                            "column": 39,
+                                                                                            "content": []
+                                                                                          },
+                                                                                          {
+                                                                                            "kind": "scalar",
+                                                                                            "style": [],
+                                                                                            "tag": "!!str",
+                                                                                            "value": "leaf",
+                                                                                            "anchor": "",
+                                                                                            "alias": null,
+                                                                                            "head": "",
+                                                                                            "line_comment": "",
+                                                                                            "foot": "",
+                                                                                            "line": 21,
+                                                                                            "column": 41,
+                                                                                            "content": []
+                                                                                          }
+                                                                                        ]
+                                                                                      }
+                                                                                    ]
+                                                                                  }
+                                                                                ]
+                                                                              }
+                                                                            ]
+                                                                          }
+                                                                        ]
+                                                                      }
+                                                                    ]
+                                                                  }
+                                                                ]
+                                                              }
+                                                            ]
+                                                          }
+                                                        ]
+                                                      }
+                                                    ]
+                                                  }
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "error": null,
+    "marshal_b64": "azA6CiAgICBrMToKICAgICAgICBrMjoKICAgICAgICAgICAgazM6CiAgICAgICAgICAgICAgICBrNDoKICAgICAgICAgICAgICAgICAgICBrNToKICAgICAgICAgICAgICAgICAgICAgICAgazY6CiAgICAgICAgICAgICAgICAgICAgICAgICAgICBrNzoKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBrODoKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgazk6CiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBrMTA6CiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgazExOgogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBrMTI6CiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBrMTM6CiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgazE0OgogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBrMTU6CiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBrMTY6CiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgazE3OgogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBrMTg6CiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBrMTk6IGxlYWYK"
+  },
+  "value": {
+    "t": "map",
+    "v": [
+      [
+        "k0",
+        {
+          "t": "map",
+          "v": [
+            [
+              "k1",
+              {
+                "t": "map",
+                "v": [
+                  [
+                    "k2",
+                    {
+                      "t": "map",
+                      "v": [
+                        [
+                          "k3",
+                          {
+                            "t": "map",
+                            "v": [
+                              [
+                                "k4",
+                                {
+                                  "t": "map",
+                                  "v": [
+                                    [
+                                      "k5",
+                                      {
+                                        "t": "map",
+                                        "v": [
+                                          [
+                                            "k6",
+                                            {
+                                              "t": "map",
+                                              "v": [
+                                                [
+                                                  "k7",
+                                                  {
+                                                    "t": "map",
+                                                    "v": [
+                                                      [
+                                                        "k8",
+                                                        {
+                                                          "t": "map",
+                                                          "v": [
+                                                            [
+                                                              "k9",
+                                                              {
+                                                                "t": "map",
+                                                                "v": [
+                                                                  [
+                                                                    "k10",
+                                                                    {
+                                                                      "t": "map",
+                                                                      "v": [
+                                                                        [
+                                                                          "k11",
+                                                                          {
+                                                                            "t": "map",
+                                                                            "v": [
+                                                                              [
+                                                                                "k12",
+                                                                                {
+                                                                                  "t": "map",
+                                                                                  "v": [
+                                                                                    [
+                                                                                      "k13",
+                                                                                      {
+                                                                                        "t": "map",
+                                                                                        "v": [
+                                                                                          [
+                                                                                            "k14",
+                                                                                            {
+                                                                                              "t": "map",
+                                                                                              "v": [
+                                                                                                [
+                                                                                                  "k15",
+                                                                                                  {
+                                                                                                    "t": "map",
+                                                                                                    "v": [
+                                                                                                      [
+                                                                                                        "k16",
+                                                                                                        {
+                                                                                                          "t": "map",
+                                                                                                          "v": [
+                                                                                                            [
+                                                                                                              "k17",
+                                                                                                              {
+                                                                                                                "t": "map",
+                                                                                                                "v": [
+                                                                                                                  [
+                                                                                                                    "k18",
+                                                                                                                    {
+                                                                                                                      "t": "map",
+                                                                                                                      "v": [
+                                                                                                                        [
+                                                                                                                          "k19",
+                                                                                                                          {
+                                                                                                                            "t": "string",
+                                                                                                                            "v": "leaf"
+                                                                                                                          }
+                                                                                                                        ]
+                                                                                                                      ]
+                                                                                                                    }
+                                                                                                                  ]
+                                                                                                                ]
+                                                                                                              }
+                                                                                                            ]
+                                                                                                          ]
+                                                                                                        }
+                                                                                                      ]
+                                                                                                    ]
+                                                                                                  }
+                                                                                                ]
+                                                                                              ]
+                                                                                            }
+                                                                                          ]
+                                                                                        ]
+                                                                                      }
+                                                                                    ]
+                                                                                  ]
+                                                                                }
+                                                                              ]
+                                                                            ]
+                                                                          }
+                                                                        ]
+                                                                      ]
+                                                                    }
+                                                                  ]
+                                                                ]
+                                                              }
+                                                            ]
+                                                          ]
+                                                        }
+                                                      ]
+                                                    ]
+                                                  }
+                                                ]
+                                              ]
+                                            }
+                                          ]
+                                        ]
+                                      }
+                                    ]
+                                  ]
+                                }
+                              ]
+                            ]
+                          }
+                        ]
+                      ]
+                    }
+                  ]
+                ]
+              }
+            ]
+          ]
+        }
+      ]
+    ]
+  },
+  "value_error": null
+}

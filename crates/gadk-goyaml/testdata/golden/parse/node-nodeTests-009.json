@@ -1,0 +1,81 @@
+{
+  "case": "node-nodeTests-009",
+  "input_b64": "IXRhZzpzb21ldGhpbmcgMTIzCg==",
+  "node": {
+    "kind": "document",
+    "style": [],
+    "tag": "",
+    "value": "",
+    "anchor": "",
+    "alias": null,
+    "head": "",
+    "line_comment": "",
+    "foot": "",
+    "line": 1,
+    "column": 1,
+    "content": [
+      {
+        "kind": "scalar",
+        "style": [
+          "tagged"
+        ],
+        "tag": "!tag:something",
+        "value": "123",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": []
+      }
+    ]
+  },
+  "error": null,
+  "marshal_b64": "IXRhZzpzb21ldGhpbmcgMTIzCg==",
+  "marshal_error": null,
+  "indent2_b64": "IXRhZzpzb21ldGhpbmcgMTIzCg==",
+  "stream": {
+    "nodes": [
+      {
+        "kind": "document",
+        "style": [],
+        "tag": "",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "scalar",
+            "style": [
+              "tagged"
+            ],
+            "tag": "!tag:something",
+            "value": "123",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": []
+          }
+        ]
+      }
+    ],
+    "error": null,
+    "marshal_b64": "IXRhZzpzb21ldGhpbmcgMTIzCg=="
+  },
+  "value": {
+    "t": "string",
+    "v": "123"
+  },
+  "value_error": null
+}

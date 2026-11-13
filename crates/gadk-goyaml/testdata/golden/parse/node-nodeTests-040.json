@@ -1,0 +1,77 @@
+{
+  "case": "node-nodeTests-040",
+  "input_b64": "IyBPbmUKIyBUd28KdHJ1ZSAjIFRocmVlCiMgRm91cgojIEZpdmUK",
+  "node": {
+    "kind": "document",
+    "style": [],
+    "tag": "",
+    "value": "",
+    "anchor": "",
+    "alias": null,
+    "head": "",
+    "line_comment": "",
+    "foot": "",
+    "line": 3,
+    "column": 1,
+    "content": [
+      {
+        "kind": "scalar",
+        "style": [],
+        "tag": "!!bool",
+        "value": "true",
+        "anchor": "",
+        "alias": null,
+        "head": "# One\n# Two",
+        "line_comment": "# Three",
+        "foot": "# Four\n# Five",
+        "line": 3,
+        "column": 1,
+        "content": []
+      }
+    ]
+  },
+  "error": null,
+  "marshal_b64": "IyBPbmUKIyBUd28KdHJ1ZSAjIFRocmVlCiMgRm91cgojIEZpdmUK",
+  "marshal_error": null,
+  "indent2_b64": "IyBPbmUKIyBUd28KdHJ1ZSAjIFRocmVlCiMgRm91cgojIEZpdmUK",
+  "stream": {
+    "nodes": [
+      {
+        "kind": "document",
+        "style": [],
+        "tag": "",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 3,
+        "column": 1,
+        "content": [
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!bool",
+            "value": "true",
+            "anchor": "",
+            "alias": null,
+            "head": "# One\n# Two",
+            "line_comment": "# Three",
+            "foot": "# Four\n# Five",
+            "line": 3,
+            "column": 1,
+            "content": []
+          }
+        ]
+      }
+    ],
+    "error": null,
+    "marshal_b64": "IyBPbmUKIyBUd28KdHJ1ZSAjIFRocmVlCiMgRm91cgojIEZpdmUK"
+  },
+  "value": {
+    "t": "bool",
+    "v": true
+  },
+  "value_error": null
+}

@@ -1,1 +1,3 @@
 *.httprr binary
+# gadk-goyaml parse corpus: byte-exact inputs (CRLF, CR-only, UTF-16, non-UTF-8 cases).
+crates/gadk-goyaml/testdata/corpus/parse/*.yaml binary

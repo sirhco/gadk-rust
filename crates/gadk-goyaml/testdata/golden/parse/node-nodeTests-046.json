@@ -1,0 +1,176 @@
+{
+  "case": "node-nodeTests-046",
+  "input_b64": "LSBsYSAjIElBCi0gbGIgIyBJQgotIGxjICMgSUMK",
+  "node": {
+    "kind": "document",
+    "style": [],
+    "tag": "",
+    "value": "",
+    "anchor": "",
+    "alias": null,
+    "head": "",
+    "line_comment": "",
+    "foot": "",
+    "line": 1,
+    "column": 1,
+    "content": [
+      {
+        "kind": "sequence",
+        "style": [],
+        "tag": "!!seq",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "la",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "# IA",
+            "foot": "",
+            "line": 1,
+            "column": 3,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "lb",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "# IB",
+            "foot": "",
+            "line": 2,
+            "column": 3,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "lc",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "# IC",
+            "foot": "",
+            "line": 3,
+            "column": 3,
+            "content": []
+          }
+        ]
+      }
+    ]
+  },
+  "error": null,
+  "marshal_b64": "LSBsYSAjIElBCi0gbGIgIyBJQgotIGxjICMgSUMK",
+  "marshal_error": null,
+  "indent2_b64": "LSBsYSAjIElBCi0gbGIgIyBJQgotIGxjICMgSUMK",
+  "stream": {
+    "nodes": [
+      {
+        "kind": "document",
+        "style": [],
+        "tag": "",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "sequence",
+            "style": [],
+            "tag": "!!seq",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": [
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "la",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "# IA",
+                "foot": "",
+                "line": 1,
+                "column": 3,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "lb",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "# IB",
+                "foot": "",
+                "line": 2,
+                "column": 3,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "lc",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "# IC",
+                "foot": "",
+                "line": 3,
+                "column": 3,
+                "content": []
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "error": null,
+    "marshal_b64": "LSBsYSAjIElBCi0gbGIgIyBJQgotIGxjICMgSUMK"
+  },
+  "value": {
+    "t": "seq",
+    "v": [
+      {
+        "t": "string",
+        "v": "la"
+      },
+      {
+        "t": "string",
+        "v": "lb"
+      },
+      {
+        "t": "string",
+        "v": "lc"
+      }
+    ]
+  },
+  "value_error": null
+}

@@ -1,0 +1,77 @@
+{
+  "case": "decode-unmarshalTests-168",
+  "input_b64": "LS0tCmhlbGxvCi4uLgp9bm90IHlhbWw=",
+  "node": {
+    "kind": "document",
+    "style": [],
+    "tag": "",
+    "value": "",
+    "anchor": "",
+    "alias": null,
+    "head": "",
+    "line_comment": "",
+    "foot": "",
+    "line": 1,
+    "column": 1,
+    "content": [
+      {
+        "kind": "scalar",
+        "style": [],
+        "tag": "!!str",
+        "value": "hello",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 2,
+        "column": 1,
+        "content": []
+      }
+    ]
+  },
+  "error": null,
+  "marshal_b64": "aGVsbG8K",
+  "marshal_error": null,
+  "indent2_b64": "aGVsbG8K",
+  "stream": {
+    "nodes": [
+      {
+        "kind": "document",
+        "style": [],
+        "tag": "",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "hello",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 2,
+            "column": 1,
+            "content": []
+          }
+        ]
+      }
+    ],
+    "error": "yaml: line 3: did not find expected <document start>",
+    "marshal_b64": "aGVsbG8K"
+  },
+  "value": {
+    "t": "string",
+    "v": "hello"
+  },
+  "value_error": null
+}

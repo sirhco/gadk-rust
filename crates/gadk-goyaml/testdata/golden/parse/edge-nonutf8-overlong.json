@@ -1,0 +1,16 @@
+{
+  "case": "edge-nonutf8-overlong",
+  "input_b64": "YTogwK8K",
+  "node": null,
+  "error": "yaml: invalid length of a UTF-8 sequence",
+  "marshal_b64": null,
+  "marshal_error": null,
+  "indent2_b64": null,
+  "stream": {
+    "nodes": [],
+    "error": "yaml: invalid length of a UTF-8 sequence",
+    "marshal_b64": null
+  },
+  "value": null,
+  "value_error": "yaml: invalid length of a UTF-8 sequence"
+}

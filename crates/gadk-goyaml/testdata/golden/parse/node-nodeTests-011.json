@@ -1,0 +1,83 @@
+{
+  "case": "node-nodeTests-011",
+  "input_b64": "IXRhZzpzb21ldGhpbmcge30K",
+  "node": {
+    "kind": "document",
+    "style": [],
+    "tag": "",
+    "value": "",
+    "anchor": "",
+    "alias": null,
+    "head": "",
+    "line_comment": "",
+    "foot": "",
+    "line": 1,
+    "column": 1,
+    "content": [
+      {
+        "kind": "mapping",
+        "style": [
+          "tagged",
+          "flow"
+        ],
+        "tag": "!tag:something",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": []
+      }
+    ]
+  },
+  "error": null,
+  "marshal_b64": "IXRhZzpzb21ldGhpbmcge30K",
+  "marshal_error": null,
+  "indent2_b64": "IXRhZzpzb21ldGhpbmcge30K",
+  "stream": {
+    "nodes": [
+      {
+        "kind": "document",
+        "style": [],
+        "tag": "",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "mapping",
+            "style": [
+              "tagged",
+              "flow"
+            ],
+            "tag": "!tag:something",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": []
+          }
+        ]
+      }
+    ],
+    "error": null,
+    "marshal_b64": "IXRhZzpzb21ldGhpbmcge30K"
+  },
+  "value": {
+    "t": "map",
+    "v": []
+  },
+  "value_error": null
+}

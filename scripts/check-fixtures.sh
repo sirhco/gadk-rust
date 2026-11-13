@@ -23,6 +23,11 @@
 # crates/gadk-launcher/testdata/agentengine/ (declared deltas, *.deltas.json, not counted); when
 # go and ADK-Go are present, its --shapes generator reproduces
 # crates/gadk-server/src/agentengine/encode_shapes.rs byte for byte.
+# 6c-1: the yaml.v3 probe (scripts/gen-go-goyaml) wrote exactly 625 parse inputs under
+# crates/gadk-goyaml/testdata/corpus/parse/ and 625 parse, 640 diff and 77 serde goldens under
+# crates/gadk-goyaml/testdata/golden/{parse,diff,serde}/ (1342 goldens), and, counted separately,
+# the 3729-row strconv.FormatFloat table crates/gadk-platform/tests/testdata/go_format_float_g.json;
+# when go is present, rerunning the probe into a temp dir reproduces all of them (empty diff -r).
 set -euo pipefail
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 go="${ADK_GO_DIR:-$repo/../adk-go}"
@@ -154,9 +159,52 @@ else
   rm -rf "$shapes_tmp"
 fi
 
+goyaml="$repo/crates/gadk-goyaml/testdata"
+float_table="$repo/crates/gadk-platform/tests/testdata/go_format_float_g.json"
+goyaml_counts=""
+for spec in corpus/parse:yaml:625 golden/parse:json:625 golden/diff:json:640 golden/serde:json:77; do
+  rest="${spec#*:}"
+  dir="$goyaml/${spec%%:*}"
+  want="${rest#*:}"
+  got="$(find "$dir" -type f -name "*.${rest%%:*}" | wc -l | tr -d ' ')"
+  if [ "$got" -ne "$want" ]; then
+    echo "expected $want goyaml files under $dir, found $got" >&2
+    fail=1
+  fi
+  goyaml_counts="$goyaml_counts ${spec%%:*}=$got"
+done
+float_want=3729
+float_n="$(grep -c '"bits":' "$float_table" || true)"
+if [ "$float_n" -ne "$float_want" ]; then
+  echo "expected $float_want rows in $float_table, found $float_n" >&2
+  fail=1
+fi
+goyaml_status="not rerun"
+if ! command -v go >/dev/null 2>&1; then
+  echo "skipping the gen-go-goyaml rerun: go is not on PATH" >&2
+else
+  goyaml_tmp="$(mktemp -d)"
+  mkdir -p "$goyaml_tmp/corpus"
+  cp "$goyaml/corpus/differential.json" "$goyaml_tmp/corpus/"
+  if ! (cd "$repo/scripts/gen-go-goyaml" &&
+    go run . -testdata "$goyaml_tmp" -float "$goyaml_tmp/go_format_float_g.json" >/dev/null); then
+    echo "scripts/gen-go-goyaml failed" >&2
+    fail=1
+  elif ! diff -r "$goyaml/corpus" "$goyaml_tmp/corpus" >&2 ||
+    ! diff -r "$goyaml/golden" "$goyaml_tmp/golden" >&2 ||
+    ! diff "$float_table" "$goyaml_tmp/go_format_float_g.json" >&2; then
+    echo "gen-go-goyaml output differs from the checked-in corpus/goldens (rerun the probe)" >&2
+    fail=1
+  else
+    goyaml_status="reproduced by the probe"
+  fi
+  rm -rf "$goyaml_tmp"
+fi
+
 if [ "$fail" -eq 0 ]; then
   echo "ok: $n fixtures and $schema_n telemetry goldens match ADK-Go; $wire_n wire fixtures;" \
     "$a2a_wire_n A2A wire fixtures; $webui_n web UI files; launcher fixtures$launcher_counts;" \
-    "agentengine fixtures$agentengine_counts; encode_shapes.rs $shapes_status"
+    "agentengine fixtures$agentengine_counts; encode_shapes.rs $shapes_status;" \
+    "goyaml$goyaml_counts; float table $float_n rows; goyaml $goyaml_status"
 fi
 exit "$fail"

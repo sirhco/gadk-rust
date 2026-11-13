@@ -1,0 +1,27 @@
+
+mergeouter1: &mergeouter1
+    d: 40
+    e: 50
+
+mergeouter2: &mergeouter2
+    e: 5
+    f: 6
+    g: 70
+
+mergeinner1: &mergeinner1
+    <<: *mergeouter1
+    inner:
+        a: 1
+        b: 2
+
+mergeinner2: &mergeinner2
+    <<: *mergeouter2
+    inner:
+        a: -1
+        b: -2
+
+outer:
+    <<: [*mergeinner1, *mergeinner2]
+    f: 60
+    inner:
+        a: 10

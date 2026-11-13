@@ -1,0 +1,8 @@
+a: | # IA
+  str
+b: >- # IB
+  str
+c: # IC
+  - str
+d: # ID
+  str:

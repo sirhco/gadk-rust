@@ -1,0 +1,584 @@
+{
+  "case": "edge-timestamps",
+  "input_b64": "YTogMjAwMS0xMi0xNApiOiAyMDAxLTEyLTE0dDIxOjU5OjQzLjEwLTA1OjAwCmM6IDIwMDEtMTItMTQgMjE6NTk6NDMuMTAgLTUKZDogMjAwMS0xMi0xNVQwMjo1OTo0My4xWgplOiAyMDAxLTEyLTE1IDI6NTk6NDMuMTAKZjogMjAwMi0xMi0xNFQyMTo1OTo0My4xMjM0NTY3ODkrMDg6MDAKZzogMjAwMS0xLTEKaDogMjAwMS0xMi0xNFQyMTo1OQo=",
+  "node": {
+    "kind": "document",
+    "style": [],
+    "tag": "",
+    "value": "",
+    "anchor": "",
+    "alias": null,
+    "head": "",
+    "line_comment": "",
+    "foot": "",
+    "line": 1,
+    "column": 1,
+    "content": [
+      {
+        "kind": "mapping",
+        "style": [],
+        "tag": "!!map",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "a",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!timestamp",
+            "value": "2001-12-14",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 4,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "b",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 2,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!timestamp",
+            "value": "2001-12-14t21:59:43.10-05:00",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 2,
+            "column": 4,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "c",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 3,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "2001-12-14 21:59:43.10 -5",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 3,
+            "column": 4,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "d",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 4,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!timestamp",
+            "value": "2001-12-15T02:59:43.1Z",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 4,
+            "column": 4,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "e",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 5,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!timestamp",
+            "value": "2001-12-15 2:59:43.10",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 5,
+            "column": 4,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "f",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 6,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!timestamp",
+            "value": "2002-12-14T21:59:43.123456789+08:00",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 6,
+            "column": 4,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "g",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 7,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!timestamp",
+            "value": "2001-1-1",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 7,
+            "column": 4,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "h",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 8,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "2001-12-14T21:59",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 8,
+            "column": 4,
+            "content": []
+          }
+        ]
+      }
+    ]
+  },
+  "error": null,
+  "marshal_b64": "YTogMjAwMS0xMi0xNApiOiAyMDAxLTEyLTE0dDIxOjU5OjQzLjEwLTA1OjAwCmM6IDIwMDEtMTItMTQgMjE6NTk6NDMuMTAgLTUKZDogMjAwMS0xMi0xNVQwMjo1OTo0My4xWgplOiAyMDAxLTEyLTE1IDI6NTk6NDMuMTAKZjogMjAwMi0xMi0xNFQyMTo1OTo0My4xMjM0NTY3ODkrMDg6MDAKZzogMjAwMS0xLTEKaDogMjAwMS0xMi0xNFQyMTo1OQo=",
+  "marshal_error": null,
+  "indent2_b64": "YTogMjAwMS0xMi0xNApiOiAyMDAxLTEyLTE0dDIxOjU5OjQzLjEwLTA1OjAwCmM6IDIwMDEtMTItMTQgMjE6NTk6NDMuMTAgLTUKZDogMjAwMS0xMi0xNVQwMjo1OTo0My4xWgplOiAyMDAxLTEyLTE1IDI6NTk6NDMuMTAKZjogMjAwMi0xMi0xNFQyMTo1OTo0My4xMjM0NTY3ODkrMDg6MDAKZzogMjAwMS0xLTEKaDogMjAwMS0xMi0xNFQyMTo1OQo=",
+  "stream": {
+    "nodes": [
+      {
+        "kind": "document",
+        "style": [],
+        "tag": "",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "mapping",
+            "style": [],
+            "tag": "!!map",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": [
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "a",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 1,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!timestamp",
+                "value": "2001-12-14",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 1,
+                "column": 4,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "b",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 2,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!timestamp",
+                "value": "2001-12-14t21:59:43.10-05:00",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 2,
+                "column": 4,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "c",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 3,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "2001-12-14 21:59:43.10 -5",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 3,
+                "column": 4,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "d",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 4,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!timestamp",
+                "value": "2001-12-15T02:59:43.1Z",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 4,
+                "column": 4,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "e",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 5,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!timestamp",
+                "value": "2001-12-15 2:59:43.10",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 5,
+                "column": 4,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "f",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 6,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!timestamp",
+                "value": "2002-12-14T21:59:43.123456789+08:00",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 6,
+                "column": 4,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "g",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 7,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!timestamp",
+                "value": "2001-1-1",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 7,
+                "column": 4,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "h",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 8,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "2001-12-14T21:59",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 8,
+                "column": 4,
+                "content": []
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "error": null,
+    "marshal_b64": "YTogMjAwMS0xMi0xNApiOiAyMDAxLTEyLTE0dDIxOjU5OjQzLjEwLTA1OjAwCmM6IDIwMDEtMTItMTQgMjE6NTk6NDMuMTAgLTUKZDogMjAwMS0xMi0xNVQwMjo1OTo0My4xWgplOiAyMDAxLTEyLTE1IDI6NTk6NDMuMTAKZjogMjAwMi0xMi0xNFQyMTo1OTo0My4xMjM0NTY3ODkrMDg6MDAKZzogMjAwMS0xLTEKaDogMjAwMS0xMi0xNFQyMTo1OQo="
+  },
+  "value": {
+    "t": "map",
+    "v": [
+      [
+        "a",
+        {
+          "t": "timestamp",
+          "v": "2001-12-14T00:00:00Z"
+        }
+      ],
+      [
+        "b",
+        {
+          "t": "timestamp",
+          "v": "2001-12-14T21:59:43.1-05:00"
+        }
+      ],
+      [
+        "c",
+        {
+          "t": "string",
+          "v": "2001-12-14 21:59:43.10 -5"
+        }
+      ],
+      [
+        "d",
+        {
+          "t": "timestamp",
+          "v": "2001-12-15T02:59:43.1Z"
+        }
+      ],
+      [
+        "e",
+        {
+          "t": "timestamp",
+          "v": "2001-12-15T02:59:43.1Z"
+        }
+      ],
+      [
+        "f",
+        {
+          "t": "timestamp",
+          "v": "2002-12-14T21:59:43.123456789+08:00"
+        }
+      ],
+      [
+        "g",
+        {
+          "t": "timestamp",
+          "v": "2001-01-01T00:00:00Z"
+        }
+      ],
+      [
+        "h",
+        {
+          "t": "string",
+          "v": "2001-12-14T21:59"
+        }
+      ]
+    ]
+  },
+  "value_error": null
+}

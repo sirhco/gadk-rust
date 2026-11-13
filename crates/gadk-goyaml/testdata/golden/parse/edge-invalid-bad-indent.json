@@ -1,0 +1,16 @@
+{
+  "case": "edge-invalid-bad-indent",
+  "input_b64": "YToKICBiOiAxCiBjOiAyCg==",
+  "node": null,
+  "error": "yaml: line 2: did not find expected key",
+  "marshal_b64": null,
+  "marshal_error": null,
+  "indent2_b64": null,
+  "stream": {
+    "nodes": [],
+    "error": "yaml: line 2: did not find expected key",
+    "marshal_b64": null
+  },
+  "value": null,
+  "value_error": "yaml: line 2: did not find expected key"
+}

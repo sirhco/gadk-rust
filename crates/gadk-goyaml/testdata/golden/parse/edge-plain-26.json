@@ -1,0 +1,16 @@
+{
+  "case": "edge-plain-26",
+  "input_b64": "azogJXAK",
+  "node": null,
+  "error": "yaml: found character that cannot start any token",
+  "marshal_b64": null,
+  "marshal_error": null,
+  "indent2_b64": null,
+  "stream": {
+    "nodes": [],
+    "error": "yaml: found character that cannot start any token",
+    "marshal_b64": null
+  },
+  "value": null,
+  "value_error": "yaml: found character that cannot start any token"
+}

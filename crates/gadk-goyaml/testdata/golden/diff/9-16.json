@@ -1,0 +1,76 @@
+{
+  "case": "9-16",
+  "input_b64": "JywyZzUnOgogICAgLSBbXQogICAgLSAtIDdXNTdbCiAgICAgIC0gfDQtCiAgICAgICAgflwxIX1DCiAgICAgIC0gIlx0fS5PIgogICAgLSAiXHR9Lk8iOiA3VzU3WwogICAgICAiLTEiOiArdlY2IgonfEA/JzogJ3s4KScK",
+  "source": {
+    "t": "map",
+    "v": [
+      [
+        ",2g5",
+        {
+          "t": "seq",
+          "v": [
+            {
+              "t": "seq",
+              "v": []
+            },
+            {
+              "t": "seq",
+              "v": [
+                {
+                  "t": "string",
+                  "v": "7W57["
+                },
+                {
+                  "t": "string",
+                  "v": "\n~\\1!}C"
+                },
+                {
+                  "t": "string",
+                  "v": "\t}.O"
+                }
+              ]
+            },
+            {
+              "t": "map",
+              "v": [
+                [
+                  "\t}.O",
+                  {
+                    "t": "string",
+                    "v": "7W57["
+                  }
+                ],
+                [
+                  "-1",
+                  {
+                    "t": "string",
+                    "v": "+vV6\""
+                  }
+                ]
+              ]
+            }
+          ]
+        }
+      ],
+      [
+        "|@?",
+        {
+          "t": "string",
+          "v": "{8)"
+        }
+      ]
+    ]
+  },
+  "node": null,
+  "error": "yaml: line 2: did not find expected '-' indicator",
+  "marshal_b64": null,
+  "marshal_error": null,
+  "indent2_b64": null,
+  "stream": {
+    "nodes": [],
+    "error": "yaml: line 2: did not find expected '-' indicator",
+    "marshal_b64": null
+  },
+  "value": null,
+  "value_error": "yaml: line 2: did not find expected '-' indicator"
+}

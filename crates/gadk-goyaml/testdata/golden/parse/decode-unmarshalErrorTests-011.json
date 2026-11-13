@@ -1,0 +1,16 @@
+{
+  "case": "decode-unmarshalErrorTests-011",
+  "input_b64": "JVRBRyAhJTc5ISB0YWc6eWFtbC5vcmcsMjAwMjoKLS0tCnY6ICElNzkhaW50ICcxJw==",
+  "node": null,
+  "error": "yaml: did not find expected whitespace",
+  "marshal_b64": null,
+  "marshal_error": null,
+  "indent2_b64": null,
+  "stream": {
+    "nodes": [],
+    "error": "yaml: did not find expected whitespace",
+    "marshal_b64": null
+  },
+  "value": null,
+  "value_error": "yaml: did not find expected whitespace"
+}

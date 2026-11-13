@@ -1,0 +1,25 @@
+{
+  "case": "23-19",
+  "input_b64": "LSB8NC0KICAueDozCg==",
+  "source": {
+    "t": "seq",
+    "v": [
+      {
+        "t": "string",
+        "v": "\n.x:3"
+      }
+    ]
+  },
+  "node": null,
+  "error": "yaml: line 1: did not find expected '-' indicator",
+  "marshal_b64": null,
+  "marshal_error": null,
+  "indent2_b64": null,
+  "stream": {
+    "nodes": [],
+    "error": "yaml: line 1: did not find expected '-' indicator",
+    "marshal_b64": null
+  },
+  "value": null,
+  "value_error": "yaml: line 1: did not find expected '-' indicator"
+}

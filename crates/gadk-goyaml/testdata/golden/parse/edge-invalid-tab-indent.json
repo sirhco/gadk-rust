@@ -1,0 +1,16 @@
+{
+  "case": "edge-invalid-tab-indent",
+  "input_b64": "YToKCWI6IDEK",
+  "node": null,
+  "error": "yaml: line 2: found character that cannot start any token",
+  "marshal_b64": null,
+  "marshal_error": null,
+  "indent2_b64": null,
+  "stream": {
+    "nodes": [],
+    "error": "yaml: line 2: found character that cannot start any token",
+    "marshal_b64": null
+  },
+  "value": null,
+  "value_error": "yaml: line 2: found character that cannot start any token"
+}

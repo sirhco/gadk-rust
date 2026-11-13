@@ -1,0 +1,344 @@
+{
+  "case": "decode-unmarshalTests-167",
+  "input_b64": "Rmlyc3Qgb2NjdXJyZW5jZTogJmFuY2hvciBGb28KU2Vjb25kIG9jY3VycmVuY2U6ICphbmNob3IKT3ZlcnJpZGUgYW5jaG9yOiAmYW5jaG9yIEJhcgpSZXVzZSBhbmNob3I6ICphbmNob3IK",
+  "node": {
+    "kind": "document",
+    "style": [],
+    "tag": "",
+    "value": "",
+    "anchor": "",
+    "alias": null,
+    "head": "",
+    "line_comment": "",
+    "foot": "",
+    "line": 1,
+    "column": 1,
+    "content": [
+      {
+        "kind": "mapping",
+        "style": [],
+        "tag": "!!map",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "First occurrence",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "Foo",
+            "anchor": "anchor",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 19,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "Second occurrence",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 2,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "alias",
+            "style": [],
+            "tag": "",
+            "value": "anchor",
+            "anchor": "",
+            "alias": [
+              0,
+              1
+            ],
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 2,
+            "column": 20,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "Override anchor",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 3,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "Bar",
+            "anchor": "anchor",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 3,
+            "column": 18,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "Reuse anchor",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 4,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "alias",
+            "style": [],
+            "tag": "",
+            "value": "anchor",
+            "anchor": "",
+            "alias": [
+              0,
+              5
+            ],
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 4,
+            "column": 15,
+            "content": []
+          }
+        ]
+      }
+    ]
+  },
+  "error": null,
+  "marshal_b64": "Rmlyc3Qgb2NjdXJyZW5jZTogJmFuY2hvciBGb28KU2Vjb25kIG9jY3VycmVuY2U6ICphbmNob3IKT3ZlcnJpZGUgYW5jaG9yOiAmYW5jaG9yIEJhcgpSZXVzZSBhbmNob3I6ICphbmNob3IK",
+  "marshal_error": null,
+  "indent2_b64": "Rmlyc3Qgb2NjdXJyZW5jZTogJmFuY2hvciBGb28KU2Vjb25kIG9jY3VycmVuY2U6ICphbmNob3IKT3ZlcnJpZGUgYW5jaG9yOiAmYW5jaG9yIEJhcgpSZXVzZSBhbmNob3I6ICphbmNob3IK",
+  "stream": {
+    "nodes": [
+      {
+        "kind": "document",
+        "style": [],
+        "tag": "",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "mapping",
+            "style": [],
+            "tag": "!!map",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": [
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "First occurrence",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 1,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "Foo",
+                "anchor": "anchor",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 1,
+                "column": 19,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "Second occurrence",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 2,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "alias",
+                "style": [],
+                "tag": "",
+                "value": "anchor",
+                "anchor": "",
+                "alias": [
+                  0,
+                  1
+                ],
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 2,
+                "column": 20,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "Override anchor",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 3,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "Bar",
+                "anchor": "anchor",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 3,
+                "column": 18,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "Reuse anchor",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 4,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "alias",
+                "style": [],
+                "tag": "",
+                "value": "anchor",
+                "anchor": "",
+                "alias": [
+                  0,
+                  5
+                ],
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 4,
+                "column": 15,
+                "content": []
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "error": null,
+    "marshal_b64": "Rmlyc3Qgb2NjdXJyZW5jZTogJmFuY2hvciBGb28KU2Vjb25kIG9jY3VycmVuY2U6ICphbmNob3IKT3ZlcnJpZGUgYW5jaG9yOiAmYW5jaG9yIEJhcgpSZXVzZSBhbmNob3I6ICphbmNob3IK"
+  },
+  "value": {
+    "t": "map",
+    "v": [
+      [
+        "First occurrence",
+        {
+          "t": "string",
+          "v": "Foo"
+        }
+      ],
+      [
+        "Override anchor",
+        {
+          "t": "string",
+          "v": "Bar"
+        }
+      ],
+      [
+        "Reuse anchor",
+        {
+          "t": "string",
+          "v": "Bar"
+        }
+      ],
+      [
+        "Second occurrence",
+        {
+          "t": "string",
+          "v": "Foo"
+        }
+      ]
+    ]
+  },
+  "value_error": null
+}
