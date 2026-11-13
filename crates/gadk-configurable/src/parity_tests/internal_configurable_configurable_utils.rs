@@ -87,10 +87,7 @@ async fn test_resolve_agent_reference_allows_paths_inside_agent_dir() {
     }
 }
 
-// Needs Task 4's McpToolset factory and `Registry::new`'s built-in tools: un-ignore after the
-// batch-2 merge.
 #[tokio::test]
-#[ignore = "needs Task 4 builtin_tools (batch-2 merge)"]
 async fn test_resolve_tool_reference_mcp_toolset_non_string_args() {
     fn new_args(server_args: Vec<GoValue>, tool_filter: Vec<GoValue>) -> GoMap {
         let server_params = GoValue::Map(vec![

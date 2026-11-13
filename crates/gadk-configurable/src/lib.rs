@@ -802,9 +802,7 @@ mod tests {
         assert!(g.node_functions.is_empty() && g.nodes.is_empty());
     }
 
-    // Needs Task 4's `builtin_tool_factories` body: un-ignore after the batch-2 merge.
     #[test]
-    #[ignore = "needs Task 4 builtin_tools (batch-2 merge)"]
     fn new_registers_go_init_set() {
         let r = Registry::new();
         let g = r.inner.read();
