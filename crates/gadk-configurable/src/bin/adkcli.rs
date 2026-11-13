@@ -36,7 +36,7 @@ use gadk_launcher::universal::UniversalLauncher;
 use gadk_launcher::web::triggers::{eventarc, pubsub};
 use gadk_launcher::web::{a2a, api, webui};
 use gadk_launcher::{CancellationToken, Config, Error, Launcher, SubLauncher};
-use gadk_platform::{go_path_join, go_quote};
+use gadk_platform::{go_path_base, go_path_dir, go_path_join, go_quote};
 
 /// The file name the walk collects.
 const ROOT_AGENT_YAML: &str = "root_agent.yaml";
@@ -119,7 +119,7 @@ async fn main() {
         };
         println!("✅ Agent loaded successfully: {}", my_agent.name());
 
-        let folder_name = go_base(&go_dir(config_path));
+        let folder_name = go_path_base(&go_path_dir(config_path));
         println!("✅ Agent folder name: {folder_name}");
 
         if agents_map.contains_key(&folder_name) {
@@ -176,7 +176,7 @@ fn walk_dir(root: &str, f: &mut dyn FnMut(&str, Result<&DirEntry, ConfigError>))
         Err(e) => f(root, Err(ConfigError::path("lstat", Path::new(root), &e))),
         Ok(info) => {
             let d = DirEntry {
-                name: go_base(root),
+                name: go_path_base(root),
                 is_dir: info.is_dir(),
             };
             walk(root, &d, f);
@@ -241,28 +241,6 @@ fn read_dir(path: &str) -> (Vec<DirEntry>, Option<ConfigError>) {
 /// A failure while reading directory entries: Go's `readdirent` `*PathError`.
 fn read_dir_error(path: &str, e: &io::Error) -> ConfigError {
     ConfigError::path("readdirent", Path::new(path), e)
-}
-
-/// Go `filepath.Dir` (Unix): everything up to the last `/`, cleaned (`.` without a `/`).
-fn go_dir(path: &str) -> String {
-    let end = path.rfind('/').map_or(0, |i| i + 1);
-    gadk_platform::go_path_clean(&path[..end])
-}
-
-/// Go `filepath.Base` (Unix): the last element, trailing slashes removed; `.` for an empty path,
-/// `/` for a path of slashes.
-fn go_base(path: &str) -> String {
-    if path.is_empty() {
-        return ".".to_owned();
-    }
-    let trimmed = path.trim_end_matches('/');
-    if trimmed.is_empty() {
-        return "/".to_owned();
-    }
-    match trimmed.rfind('/') {
-        Some(i) => trimmed[i + 1..].to_owned(),
-        None => trimmed.to_owned(),
-    }
 }
 
 /// Go's `full.NewLauncher()` with the console replaced by [`NilRootConsole`]: the launcher
@@ -374,27 +352,6 @@ mod tests {
             err.to_string(),
             "invalid streaming_mode: x. Should be (none|sse)"
         );
-    }
-
-    #[test]
-    fn go_dir_and_base_match_go() {
-        // Go filepath.Dir / filepath.Base (Unix) rows.
-        for (p, dir, base) in [
-            ("/a/b/root_agent.yaml", "/a/b", "root_agent.yaml"),
-            ("/root_agent.yaml", "/", "root_agent.yaml"),
-            ("/a/b", "/a", "b"),
-            ("/a/b/", "/a/b", "b"),
-            ("a", ".", "a"),
-            ("", ".", "."),
-            ("/", "/", "/"),
-            ("//", "/", "/"),
-        ] {
-            assert_eq!(go_dir(p), dir, "Dir({p:?})");
-            assert_eq!(go_base(p), base, "Base({p:?})");
-        }
-        // The folder name: Base(Dir(path)).
-        assert_eq!(go_base(&go_dir("/w/x/dup/root_agent.yaml")), "dup");
-        assert_eq!(go_base(&go_dir("/root_agent.yaml")), "/");
     }
 
     /// Records every callback of a walk: `path` or `path!error`.

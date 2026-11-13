@@ -28,7 +28,7 @@ use gadk_engine::workflow::{
     WorkflowOptions, chain, function_node,
 };
 use gadk_goyaml::{Document, Kind};
-use gadk_platform::{go_path_join, go_quote, go_sprint_value};
+use gadk_platform::{go_path_dir, go_path_join, go_quote, go_sprint_value};
 use gadk_session::Event;
 use parking_lot::Mutex;
 use serde_json::Value;
@@ -38,8 +38,8 @@ use crate::config::{
     WorkflowYamlConfig,
 };
 use crate::{
-    ConfigError, LoadCtx, NodeFn, NodeOutput, Registry, StrNodeFn, go_abs, go_dir, go_io_error,
-    go_is_abs, read_file,
+    ConfigError, LoadCtx, NodeFn, NodeOutput, Registry, StrNodeFn, go_abs, go_io_error, go_is_abs,
+    read_file,
 };
 
 impl Registry {
@@ -227,7 +227,7 @@ pub(crate) async fn resolve_node_like(
             node_ref.to_owned()
         } else {
             let parent = parent_path.to_string_lossy();
-            go_path_join(&[go_dir(&parent).as_str(), node_ref])
+            go_path_join(&[go_path_dir(&parent).as_str(), node_ref])
         };
         let abs_path = go_abs(Path::new(&target_path))
             .map_err(|e| ConfigError::wrap("failed to resolve absolute path", go_io_error(&e)))?;

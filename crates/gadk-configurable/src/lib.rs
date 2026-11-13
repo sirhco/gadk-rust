@@ -54,7 +54,7 @@ use gadk_agent::{
 use gadk_engine::workflow::Node;
 use gadk_genai::Content;
 use gadk_platform::env::{EnvProvider, ProcessEnv};
-use gadk_platform::{go_path_clean, go_path_join, go_quote};
+use gadk_platform::{go_path_clean, go_path_dir, go_path_join, go_quote};
 use gadk_session::Event;
 use parking_lot::{Mutex, RwLock};
 use serde_json::Value;
@@ -533,7 +533,7 @@ impl Registry {
             }
 
             let parent = parent_path.to_string_lossy();
-            let target_path = go_path_join(&[go_dir(&parent).as_str(), ref_path]);
+            let target_path = go_path_join(&[go_path_dir(&parent).as_str(), ref_path]);
 
             let abs_path = go_abs(Path::new(&target_path)).map_err(|e| {
                 ConfigError::wrap("failed to resolve absolute path", go_io_error(&e))
@@ -542,7 +542,7 @@ impl Registry {
             // Prevent path traversal outside the parent agent's directory. Both sides are
             // made absolute before comparing, and symlinks are resolved where the paths
             // exist, so a symlink inside the agent directory cannot be used to escape it.
-            let mut parent_dir = go_abs(Path::new(&go_dir(&parent))).map_err(|e| {
+            let mut parent_dir = go_abs(Path::new(&go_path_dir(&parent))).map_err(|e| {
                 ConfigError::wrap("failed to resolve agent directory", go_io_error(&e))
             })?;
             if let Some(resolved) = eval_symlinks(&parent_dir) {
@@ -582,12 +582,6 @@ impl Registry {
 /// Go `filepath.IsAbs` (Unix): a path starting with `/`.
 pub(crate) fn go_is_abs(path: &str) -> bool {
     path.starts_with('/')
-}
-
-/// Go `filepath.Dir` (Unix): everything up to the last `/`, cleaned; `.` without a `/`.
-pub(crate) fn go_dir(path: &str) -> String {
-    let end = path.rfind('/').map_or(0, |i| i + 1);
-    go_path_clean(&path[..end])
 }
 
 /// Go `filepath.Abs` (Unix): an absolute path cleaned, a relative one joined to the working
@@ -917,11 +911,6 @@ mod tests {
 
     #[test]
     fn go_path_helpers_match_go_filepath() {
-        assert_eq!(go_dir("/a/b/root_agent.yaml"), "/a/b");
-        assert_eq!(go_dir("root_agent.yaml"), ".");
-        assert_eq!(go_dir("/root_agent.yaml"), "/");
-        assert_eq!(go_dir("a//b/../c/x.yaml"), "a/c");
-        assert_eq!(go_dir("/a/b/"), "/a/b");
         assert!(go_is_abs("/x") && !go_is_abs("x") && !go_is_abs("./x"));
         assert_eq!(
             go_abs(Path::new("/a/./b/../c")).unwrap(),
