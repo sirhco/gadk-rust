@@ -107,10 +107,23 @@ pub fn marshal_node(doc: &Document, at: NodeId) -> Result<Vec<u8>, Error> {
     result.map(|()| out)
 }
 
-/// Go's `yaml.Unmarshal(data, &v)` for a serde type.
-#[allow(unused_variables)] // Task 8 writes the body and removes this line.
+/// Go's `yaml.Unmarshal(data, &v)` for a serde type: the first document decoded by yaml.v3's
+/// rules (an empty stream decodes the zero node, i.e. as null). Type errors are collected and
+/// returned together as [`Error::Type`] (Go also returns the partly decoded value; see
+/// [`from_node_partial`]).
 pub fn unmarshal<T: serde::de::DeserializeOwned>(data: &[u8], opts: &Options) -> Result<T, Error> {
-    todo!("Task 8")
+    // Go: yaml.go unmarshal
+    let mut p = node::new_parser(data);
+    let parsed = p.parse();
+    p.destroy();
+    match parsed? {
+        Some(n) => de::from_node(&p.arena, n, opts),
+        // Go leaves `out` untouched; serde builds the value from the zero node (null).
+        None => {
+            let zero = Document::default();
+            de::from_node(&zero, zero.root(), opts)
+        }
+    }
 }
 
 /// Go's `yaml.Marshal(v)` for a serde value.
@@ -126,24 +139,26 @@ pub fn to_node<T: serde::Serialize + ?Sized>(v: &T, opts: &Options) -> Result<Do
     todo!("Task 9")
 }
 
-/// Go's `node.Decode(&v)` for node `at` of `doc`.
-#[allow(unused_variables)] // Task 8 writes the body and removes this line.
+/// Go's `node.Decode(&v)` for node `at` of `doc`: [`Error::Type`] when type errors were
+/// collected.
 pub fn from_node<T: serde::de::DeserializeOwned>(
     doc: &Document,
     at: NodeId,
     opts: &Options,
 ) -> Result<T, Error> {
-    todo!("Task 8")
+    // Go: yaml.go (*Node).Decode
+    de::from_node(doc, at, opts)
 }
 
-/// Go's `node.Decode(&v)` keeping Go's partly decoded value next to its `*TypeError`.
-#[allow(unused_variables)] // Task 8 writes the body and removes this line.
+/// Go's `node.Decode(&v)` keeping Go's partly decoded value next to its `*TypeError`
+/// (`T::default()` when the type error left serde no value, e.g. for an enum).
 pub fn from_node_partial<T: serde::de::DeserializeOwned + Default>(
     doc: &Document,
     at: NodeId,
     opts: &Options,
 ) -> Result<(T, Option<TypeError>), Error> {
-    todo!("Task 8")
+    // Go: yaml.go (*Node).Decode
+    de::from_node_partial(doc, at, opts)
 }
 
 /// Go's `yaml.Encoder`: writes YAML documents to a stream, separated by `---`.
@@ -214,13 +229,17 @@ impl<'r> Decoder<'r> {
         Ok(self.parser.parse()?.map(|n| self.parser.arena.subtree(n)))
     }
 
-    /// Go's `Decoder.Decode(&v)` for a serde type; `None` is Go's `io.EOF`.
-    #[allow(unused_variables)] // Task 8 writes the body and removes this line.
+    /// Go's `Decoder.Decode(&v)` for a serde type; `None` is Go's `io.EOF`. Each call decodes
+    /// with fresh decoder state; anchors persist across the stream's documents.
     pub fn decode<T: serde::de::DeserializeOwned>(
         &mut self,
         opts: &Options,
     ) -> Result<Option<T>, Error> {
-        todo!("Task 8")
+        // Go: yaml.go (*Decoder).Decode
+        match self.parser.parse()? {
+            Some(n) => de::from_node(&self.parser.arena, n, opts).map(Some),
+            None => Ok(None),
+        }
     }
 }
 
