@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `internal/configurable/conformance/replayplugin/yaml_utils_test.go` (Task 6).
+//! Port of ADK-Go `internal/configurable/conformance/replayplugin/yaml_utils_test.go`.
 
 use gadk_goyaml::{marshal_node, unmarshal_node};
 use pretty_assertions::assert_eq;

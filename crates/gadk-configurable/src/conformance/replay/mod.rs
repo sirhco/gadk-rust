@@ -36,7 +36,7 @@ use gadk_agent::{
 use gadk_engine::tool::AgentTool;
 use gadk_genai::Content;
 use gadk_model::{LlmRequest, LlmResponse};
-use gadk_platform::{go_path_clean, go_path_join, go_quote};
+use gadk_platform::{go_path_join, go_quote};
 use gadk_session::State;
 use parking_lot::Mutex;
 use serde_json::{Map, Value};
@@ -49,7 +49,7 @@ use crate::conformance::recording::{
 };
 use crate::error::ConfigError;
 use crate::govalue::go_map_to_json;
-use crate::{go_abs, go_is_abs, read_file};
+use crate::{check_within_base_dir, read_file};
 
 /// The session state key holding the replay configuration (`dir`, `user_message_index`).
 const REPLAY_CONFIG_KEY: &str = "_adk_replay_config";
@@ -198,6 +198,8 @@ impl ReplayPlugin {
         let Some(response) = recording.tool_response.and_then(|r| r.response) else {
             return Ok(None);
         };
+        // Divergence (ledger 6c-2): a recorded value JSON cannot hold (see `go_map_to_json`) is
+        // an error; Go hands its `map[string]any` back as is.
         go_map_to_json(&response)
             .map(Some)
             .map_err(AgentError::other)
@@ -239,22 +241,10 @@ impl ReplayPlugin {
         }
     }
 
-    /// Go's base-directory check shared by `isReplayModeOn` and `loadInvocationState`:
-    /// `filepath.Abs` of both, `filepath.Rel`, rejecting a `..`-prefixed or absolute result.
-    /// Returns `filepath.Abs(caseDir)`.
+    /// Go's base-directory check shared by `isReplayModeOn` and `loadInvocationState`
+    /// ([`check_within_base_dir`]). Returns `filepath.Abs(caseDir)`.
     fn check_within_base_dir(&self, case_dir: &str) -> Result<String, ConfigError> {
-        let invalid = |e: String| ConfigError::msg(format!("invalid path format: {e}"));
-        let base_path = go_abs(&self.allowed_base_dir).map_err(|e| invalid(e.to_string()))?;
-        let requested_abs_path = go_abs(Path::new(case_dir)).map_err(|e| invalid(e.to_string()))?;
-        let base_path = base_path.to_string_lossy().into_owned();
-        let requested_abs_path = requested_abs_path.to_string_lossy().into_owned();
-        let rel = go_filepath_rel(&base_path, &requested_abs_path).map_err(invalid)?;
-        if rel.starts_with("..") || go_is_abs(&rel) {
-            return Err(ConfigError::msg(
-                "replay config error: 'dir' is not within the allowed base directory",
-            ));
-        }
-        Ok(requested_abs_path)
+        check_within_base_dir(&self.allowed_base_dir, case_dir, "replay").map_err(ConfigError::msg)
     }
 
     /// Go `getInvocationState`: `replay state not initialized. ensure before_run created it`.
@@ -561,68 +551,6 @@ pub(crate) fn get_next_tool_recording_for_agent(
     )))
 }
 
-/// Go `filepath.Rel` (Unix): `targpath` relative to `basepath`, lexically; `Rel: can't make
-/// <targ> relative to <base>` when one is rooted and the other is not, or when `basepath` has a
-/// `..` element that `targpath` does not share.
-pub(crate) fn go_filepath_rel(basepath: &str, targpath: &str) -> Result<String, String> {
-    let base_clean = go_path_clean(basepath);
-    let targ_clean = go_path_clean(targpath);
-    if targ_clean == base_clean {
-        return Ok(".".to_owned());
-    }
-    let base: &[u8] = if base_clean == "." {
-        b""
-    } else {
-        base_clean.as_bytes()
-    };
-    let targ = targ_clean.as_bytes();
-    let cant = || format!("Rel: can't make {targpath} relative to {basepath}");
-    let base_slashed = base.first() == Some(&b'/');
-    let targ_slashed = targ.first() == Some(&b'/');
-    if base_slashed != targ_slashed {
-        return Err(cant());
-    }
-    // Position base[b0..bi] and targ[t0..ti] at the first differing elements.
-    let (bl, tl) = (base.len(), targ.len());
-    let (mut b0, mut bi, mut t0, mut ti) = (0, 0, 0, 0);
-    loop {
-        while bi < bl && base[bi] != b'/' {
-            bi += 1;
-        }
-        while ti < tl && targ[ti] != b'/' {
-            ti += 1;
-        }
-        if targ[t0..ti] != base[b0..bi] {
-            break;
-        }
-        if bi < bl {
-            bi += 1;
-        }
-        if ti < tl {
-            ti += 1;
-        }
-        b0 = bi;
-        t0 = ti;
-    }
-    if &base[b0..bi] == b".." {
-        return Err(cant());
-    }
-    if b0 != bl {
-        // Base elements left. Must go up before going down.
-        let seps = base[b0..bl].iter().filter(|&&c| c == b'/').count();
-        let mut buf = String::from("..");
-        for _ in 0..seps {
-            buf.push_str("/..");
-        }
-        if t0 != tl {
-            buf.push('/');
-            buf.push_str(&String::from_utf8_lossy(&targ[t0..]));
-        }
-        return Ok(buf);
-    }
-    Ok(String::from_utf8_lossy(&targ[t0..]).into_owned())
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
@@ -751,35 +679,6 @@ mod tests {
 
     fn args(p: &str) -> Map<String, Value> {
         json!({ "p": p }).as_object().unwrap().clone()
-    }
-
-    #[test]
-    fn go_filepath_rel_matches_go() {
-        let cases: [(&str, &str, Result<&str, ()>); 13] = [
-            ("/a/b", "/a/b", Ok(".")),
-            ("/a/b", "/a/b/c", Ok("c")),
-            ("/a/b", "/a", Ok("..")),
-            ("/a/b", "/a/c/d", Ok("../c/d")),
-            ("/a/b/c", "/x", Ok("../../../x")),
-            ("/", "/a/b", Ok("a/b")),
-            ("/a", "/", Ok("..")),
-            ("/a/b/", "/a/b/c/./d/../e", Ok("c/e")),
-            ("/ab", "/abc", Ok("../abc")),
-            ("a", "a/b", Ok("b")),
-            (".", "a/b", Ok("a/b")),
-            ("/a", "b", Err(())),
-            ("../a", "b", Err(())),
-        ];
-        for (base, targ, want) in cases {
-            let got = go_filepath_rel(base, targ);
-            match want {
-                Ok(w) => assert_eq!(got.as_deref(), Ok(w), "Rel({base:?}, {targ:?})"),
-                Err(()) => assert_eq!(
-                    got,
-                    Err(format!("Rel: can't make {targ} relative to {base}")),
-                ),
-            }
-        }
     }
 
     #[test]

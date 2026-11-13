@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `internal/configurable/conformance/recordplugin/yaml_clean_test.go` (Task 7).
+//! Port of ADK-Go `internal/configurable/conformance/recordplugin/yaml_clean_test.go`.
 
 use gadk_goyaml::{marshal_node, unmarshal_node};
 use pretty_assertions::assert_eq;
@@ -449,7 +449,7 @@ parameters:
     type: OBJECT
 ";
 
-// parity: adapted: gadk has no Go-shaped yaml encoding of a bare genai.FunctionDeclaration (T5's gonode encodes only the recording roots), so the node is Go's node.Encode(decl) output re-read with unmarshal_node (node.Encode re-parses its own text; the mapping is the document's content); Go only logs the result, the port asserts the logged text
+// parity: adapted: gadk has no Go-shaped yaml encoding of a bare genai.FunctionDeclaration (conformance::gonode encodes only the recording roots), so the node is Go's node.Encode(decl) output re-read with unmarshal_node (node.Encode re-parses its own text; the mapping is the document's content); Go only logs the result, the port asserts the logged text
 #[test]
 fn test_function_declaration_title_injection() {
     // Go: yaml_clean_test.go TestFunctionDeclarationTitleInjection

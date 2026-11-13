@@ -844,7 +844,7 @@ class ThreeBTest(unittest.TestCase):
         err = io.StringIO()
         with contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
             pc.main(["--adk-go", str(self.go), "--repo", str(self.repo), "--ledger", "all", "--count"])
-        self.assertIn("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a, 4b, 4c, 5a, 5b, 5c, 6, 6b, 6c-1 or 7a", err.getvalue())
+        self.assertIn("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a, 4b, 4c, 5a, 5b, 5c, 6, 6b, 6c-1, 6c-2 or 7a", err.getvalue())
 
 
 LEDGER_4A = (
@@ -1846,6 +1846,27 @@ class RealTreeTest(unittest.TestCase):
         self.assertEqual(pc.count(ADK_GO, in_scope), 47)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "6c-1"), [])
         self.assertEqual([len(pc.go_tests(ADK_GO, f)) for f in in_scope], [29, 11, 1, 1, 5, 0])
+
+    def test_6c_2_count_is_19(self):
+        in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/6c-2.md")
+        self.assertEqual(in_scope, [
+            "internal/configurable/configurable_utils_test.go",
+            "internal/configurable/configurable_workflow_test.go",
+            "internal/configurable/conformance/recordplugin/record_plugin_test.go",
+            "internal/configurable/conformance/recordplugin/yaml_clean_test.go",
+            "internal/configurable/conformance/replayplugin/replay_plugin_internal_test.go",
+            "internal/configurable/conformance/replayplugin/replay_plugin_test.go",
+            "internal/configurable/conformance/replayplugin/yaml_utils_test.go",
+        ])
+        self.assertEqual(deferred, {})
+        self.assertEqual(pc.count(ADK_GO, in_scope), 19)
+        self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "6c-2"), [])
+        self.assertEqual([len(pc.go_tests(ADK_GO, f)) for f in in_scope], [4, 7, 1, 2, 1, 2, 2])
+        self.assertEqual(
+            pc.target_name("internal/configurable/conformance/recordplugin/yaml_clean_test.go"),
+            "internal_configurable_conformance_recordplugin_yaml_clean",
+        )
+        self.assertIn("6c-2", pc.GENERATED_LEDGERS)
 
     def test_6b_count_is_40(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/6b.md")

@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `internal/configurable/conformance/replayplugin/replay_plugin_test.go` (Task 10).
+//! Port of ADK-Go `internal/configurable/conformance/replayplugin/replay_plugin_test.go`.
 //!
 //! Go's `MockState` / `MockSession` are ported as test types; Go's `MockInvocationContext`,
 //! `MockCallbackContext` and `MockToolContext` are gadk's concrete contexts built with

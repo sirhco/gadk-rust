@@ -17,8 +17,7 @@
 //! as `args` or `response`) and its class: Go `[]byte` (an `!!int` sequence), a non-pointer
 //! `TextMarshaler` (`civil.Date`), `time.Duration` / `time.Time`, `genai.Schema` titles, and
 //! `*jsonschema.Schema` values. The table equals the probe's reflection-generated fixture
-//! (`tests/recordings_differential.rs`). Task 5 owns this file; nothing outside `gonode` uses
-//! its items directly.
+//! (`tests/recordings_differential.rs`). Nothing outside `gonode` uses its items directly.
 //!
 //! The tables themselves ([`SHAPES`], [`FIXUPS`], [`JSONSCHEMA_FIELDS`], [`ROOTS`]) are
 //! generated from the probe's `fixups.json` into [`super::shapes`]. This file holds their
@@ -455,11 +454,17 @@ impl Builder {
         match f.category {
             Category::Bytes => self.bytes_node(v),
             Category::Duration => self.duration_node(v),
+            // Divergence (ledger 6c-2): gadk stores `DateTime<Utc>`, so a non-UTC `time.Time`
+            // encodes with `Z` where Go keeps the source offset (the same instant).
             Category::Time => match v.as_str().and_then(gadk_platform::go_parse_rfc3339) {
                 Some(t) => self.leaf(&GoValue::Timestamp(t.fixed_offset())),
                 None => self.zero(Zero::Time),
             },
             Category::TextMarshaler => self.date_node(v),
+            // Divergence (ledger 6c-2): Go re-encodes a schema decoded from a recording (a
+            // yaml-keyed `map[string]any`) as is; gadk holds `serde_json::Value` for both that
+            // and a live `*jsonschema.Schema`, and always reshapes (reachable only through the
+            // merge path re-reading a file with Go-default keys).
             Category::Iface if fixup_class(owner, f.key) == Some(FixupClass::JsonSchema) => {
                 if v.is_null() {
                     return Ok(self.null());
@@ -866,6 +871,10 @@ impl Inverse<'_> {
     /// Go `[]byte`: yaml.v3 decodes a sequence element by element into `uint8` (a failing
     /// element is dropped with a type error, a null one silently) and rejects any non-null
     /// scalar or mapping (`cannot unmarshal !!str `x` into []uint8`).
+    ///
+    /// Divergence (ledger 6c-2): an alias at a `[]byte`, `civil.Date` or `time.Time` position
+    /// is not followed by the inverse fixups (yaml.v3 decodes its target); Go-written files
+    /// contain no aliases.
     fn bytes(&mut self, v: NodeId) {
         match self.doc[v].kind {
             Kind::Sequence => {

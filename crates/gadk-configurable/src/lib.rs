@@ -599,6 +599,97 @@ pub(crate) fn go_abs(path: &Path) -> io::Result<PathBuf> {
     ])))
 }
 
+/// Go `filepath.Rel` (Unix): `targpath` relative to `basepath`, lexically; `Rel: can't make
+/// <targ> relative to <base>` when one is rooted and the other is not, or when `basepath` has a
+/// `..` element that `targpath` does not share.
+pub(crate) fn go_filepath_rel(basepath: &str, targpath: &str) -> Result<String, String> {
+    // Go: path/filepath/path.go Rel
+    let base_clean = go_path_clean(basepath);
+    let targ_clean = go_path_clean(targpath);
+    if targ_clean == base_clean {
+        return Ok(".".to_owned());
+    }
+    let base: &[u8] = if base_clean == "." {
+        b""
+    } else {
+        base_clean.as_bytes()
+    };
+    let targ = targ_clean.as_bytes();
+    let cant = || format!("Rel: can't make {targpath} relative to {basepath}");
+    let base_slashed = base.first() == Some(&b'/');
+    let targ_slashed = targ.first() == Some(&b'/');
+    if base_slashed != targ_slashed {
+        return Err(cant());
+    }
+    // Position base[b0..bi] and targ[t0..ti] at the first differing elements.
+    let (bl, tl) = (base.len(), targ.len());
+    let (mut b0, mut bi, mut t0, mut ti) = (0, 0, 0, 0);
+    loop {
+        while bi < bl && base[bi] != b'/' {
+            bi += 1;
+        }
+        while ti < tl && targ[ti] != b'/' {
+            ti += 1;
+        }
+        if targ[t0..ti] != base[b0..bi] {
+            break;
+        }
+        if bi < bl {
+            bi += 1;
+        }
+        if ti < tl {
+            ti += 1;
+        }
+        b0 = bi;
+        t0 = ti;
+    }
+    if &base[b0..bi] == b".." {
+        return Err(cant());
+    }
+    if b0 != bl {
+        // Base elements left. Must go up before going down.
+        let seps = base[b0..bl].iter().filter(|&&c| c == b'/').count();
+        let mut buf = String::from("..");
+        for _ in 0..seps {
+            buf.push_str("/..");
+        }
+        if t0 != tl {
+            buf.push('/');
+            buf.push_str(&String::from_utf8_lossy(&targ[t0..]));
+        }
+        return Ok(buf);
+    }
+    Ok(String::from_utf8_lossy(&targ[t0..]).into_owned())
+}
+
+/// The conformance plugins' base-directory check (Go record_plugin.go `parseRecordConfig` and
+/// replay_plugin.go `isReplayModeOn` / `loadInvocationState` repeat it inline): `filepath.Abs`
+/// of the allowed base and of `case_dir`, `filepath.Rel` between them, and a `..`-prefixed or
+/// absolute result rejected with `<plugin> config error: 'dir' is not within the allowed base
+/// directory`; an `Abs`/`Rel` failure is `invalid path format: %v`. Returns
+/// `filepath.Abs(case_dir)`.
+pub(crate) fn check_within_base_dir(
+    allowed_base_dir: &Path,
+    case_dir: &str,
+    plugin: &str,
+) -> Result<String, String> {
+    let invalid = |e: String| format!("invalid path format: {e}");
+    // Divergence (ledger 6c-2): a failed `os.Getwd` inside `filepath.Abs` prints the bare errno
+    // text; Go's error may carry an op prefix (only when the working directory is gone).
+    let base_path = go_abs(allowed_base_dir).map_err(|e| invalid(go_io_error(&e).to_string()))?;
+    let requested_abs_path =
+        go_abs(Path::new(case_dir)).map_err(|e| invalid(go_io_error(&e).to_string()))?;
+    let base_path = base_path.to_string_lossy().into_owned();
+    let requested_abs_path = requested_abs_path.to_string_lossy().into_owned();
+    let rel = go_filepath_rel(&base_path, &requested_abs_path).map_err(invalid)?;
+    if rel.starts_with("..") || go_is_abs(&rel) {
+        return Err(format!(
+            "{plugin} config error: 'dir' is not within the allowed base directory"
+        ));
+    }
+    Ok(requested_abs_path)
+}
+
 /// Go `os.Getwd` (Unix): `$PWD` when it is absolute and names the same file as `.` (Go's
 /// "clumsy but widespread kludge", so a working directory reached through a symlink keeps the
 /// spelling the shell gave it), otherwise the OS working directory (`getcwd`, symlinks
@@ -718,7 +809,7 @@ mod tests {
     }
 
     /// Go `init()`'s agent classes with a hermetic environment (no built-in tools: those are
-    /// Task 4's).
+    /// `builtin_tools`').
     pub(crate) fn test_registry() -> Registry {
         let r = Registry::with_agent_classes();
         r.set_env(fake_key_env());
@@ -919,6 +1010,75 @@ mod tests {
         let cwd = go_getwd().unwrap();
         assert_eq!(go_abs(Path::new("")).unwrap(), cwd);
         assert_eq!(go_abs(Path::new("x/../y")).unwrap(), cwd.join("y"));
+    }
+
+    #[test]
+    fn go_filepath_rel_matches_go() {
+        // Go path/filepath/path_test.go reltests (Unix rows).
+        for (root, path, want) in [
+            ("a/b", "a/b", Ok(".")),
+            ("a/b/.", "a/b", Ok(".")),
+            ("a/b", "a/b/.", Ok(".")),
+            ("./a/b", "a/b", Ok(".")),
+            ("a/b", "./a/b", Ok(".")),
+            ("ab/cd", "ab/cde", Ok("../cde")),
+            ("ab/cd", "ab/c", Ok("../c")),
+            ("a/b", "a/b/c/d", Ok("c/d")),
+            ("a/b", "a/b/../c", Ok("../c")),
+            ("a/b/../c", "a/b", Ok("../b")),
+            ("a/b/c", "a/c/d", Ok("../../c/d")),
+            ("a/b", "c/d", Ok("../../c/d")),
+            ("a/b/c/d", "a/b", Ok("../..")),
+            ("a/b/c/d", "a/b/", Ok("../..")),
+            ("a/b/c/d/", "a/b", Ok("../..")),
+            ("a/b/c/d/", "a/b/", Ok("../..")),
+            ("../../a/b", "../../a/b/c/d", Ok("c/d")),
+            ("/a/b", "/a/b", Ok(".")),
+            ("/a/b/.", "/a/b", Ok(".")),
+            ("/a/b", "/a/b/.", Ok(".")),
+            ("/ab/cd", "/ab/cde", Ok("../cde")),
+            ("/ab/cd", "/ab/c", Ok("../c")),
+            ("/a/b", "/a/b/c/d", Ok("c/d")),
+            ("/a/b", "/a/b/../c", Ok("../c")),
+            ("/a/b/../c", "/a/b", Ok("../b")),
+            ("/a/b/c", "/a/c/d", Ok("../../c/d")),
+            ("/a/b", "/c/d", Ok("../../c/d")),
+            ("/a/b/c/d", "/a/b", Ok("../..")),
+            ("/a/b/c/d", "/a/b/", Ok("../..")),
+            ("/a/b/c/d/", "/a/b", Ok("../..")),
+            ("/a/b/c/d/", "/a/b/", Ok("../..")),
+            ("/../../a/b", "/../../a/b/c/d", Ok("c/d")),
+            (".", "a/b", Ok("a/b")),
+            (".", "..", Ok("..")),
+            // can't do purely lexically
+            ("..", ".", Err(())),
+            ("..", "a", Err(())),
+            ("../..", "..", Err(())),
+            ("a", "/a", Err(())),
+            ("/a", "a", Err(())),
+            // Rows beyond Go's table.
+            ("/a/b", "/a/b/c", Ok("c")),
+            ("/a/b", "/a", Ok("..")),
+            ("/a/b", "/a/c/d", Ok("../c/d")),
+            ("/a/b/c", "/x", Ok("../../../x")),
+            ("/", "/a/b", Ok("a/b")),
+            ("/a", "/", Ok("..")),
+            ("/a/b/", "/a/b/c/./d/../e", Ok("c/e")),
+            ("/ab", "/abc", Ok("../abc")),
+            ("a", "a/b", Ok("b")),
+            ("/a", "b", Err(())),
+            ("../a", "b", Err(())),
+        ] {
+            let got = go_filepath_rel(root, path);
+            match want {
+                Ok(w) => assert_eq!(got.as_deref(), Ok(w), "Rel({root:?}, {path:?})"),
+                Err(()) => assert_eq!(
+                    got,
+                    Err(format!("Rel: can't make {path} relative to {root}")),
+                    "Rel({root:?}, {path:?})"
+                ),
+            }
+        }
     }
 
     /// `go_getwd` names the working directory: `$PWD` (when it is `.`) or `getcwd`. The `$PWD`

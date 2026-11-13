@@ -74,6 +74,10 @@ pub fn from_go_node(doc: &Document, at: NodeId) -> Result<Recordings, gadk_goyam
 /// As [`from_go_node`], keeping Go's partly decoded value next to the `*yaml.TypeError` (the
 /// record plugin's merge path ignores the error and keeps the value, as Go's
 /// `_ = yaml.Unmarshal(data, &existingRecordings)` does).
+///
+/// Divergence (ledger 6c-2): a `civil.Date` `UnmarshalText` failure returns `Err` with no
+/// value; yaml.v3 aborts but leaves what it filled so far, which the merge path would keep
+/// (reachable only with Go-default keys: Go-written files snake-case `citation_metadata`).
 pub fn from_go_node_partial(
     doc: &Document,
     at: NodeId,

@@ -17,7 +17,7 @@
 //! as Go; `LlmRequestView` always emits `model`, `contents`, `config` and `tools` (nil as
 //! `null`, the nil map as `{}`); the recorded function call/response emit every Go field. Below
 //! the roots, gadk serde types go through gadk-goyaml with default `Options` (Go's lowercased
-//! keys). Task 5 owns this file; nothing outside `gonode` uses its items directly.
+//! keys). Nothing outside `gonode` uses its items directly.
 //!
 //! Encoding builds the nodes directly ([`encode_recordings`]): the recording types by their
 //! yaml tags, the roots below them (`model.LLMRequest`, `model.LLMResponse`,
@@ -372,6 +372,8 @@ struct RecordingDe {
 #[serde(rename = "recording.LLMRecording", default)]
 struct LlmRecordingDe {
     llm_request: Option<LlmRequestDe>,
+    // Divergence (ledger 6c-2): Go's `[]*model.LLMResponse` can hold a nil element
+    // (`llm_responses: [null]`); gadk's `Vec<LlmResponse>` cannot represent it.
     llm_responses: Vec<LlmResponse>,
 }
 

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 //! The `adkcli` binary end to end: stdout lines and exit codes, and a REST-mode replay of a
-//! Go-generated case (Task 12).
+//! Go-generated case.
 //!
 //! The expected stdout/stderr texts were captured once from ADK-Go's own binary
 //! (`go build ./cmd/internal/adkcli` at `docs/parity/ADK_GO_COMMIT`) run over the same trees

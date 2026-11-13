@@ -14,7 +14,7 @@
 
 //! The record and replay plugins under a runner with a scripted mock model and tools: the
 //! written recordings file, replayed responses, parallel-agent synchronization and Go's error
-//! texts (Task 12).
+//! texts.
 //!
 //! The goldens under `tests/fixtures/integration/record-tool-call/` were written by ADK-Go
 //! itself (`docs/parity/ADK_GO_COMMIT`): a `go test -overlay` probe in package

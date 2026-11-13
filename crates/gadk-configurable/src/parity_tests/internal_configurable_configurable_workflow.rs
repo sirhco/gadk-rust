@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `internal/configurable/configurable_workflow_test.go` (Task 8).
+//! Port of ADK-Go `internal/configurable/configurable_workflow_test.go`.
 
 use std::any::Any;
 use std::future::Future;

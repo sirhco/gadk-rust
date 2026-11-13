@@ -34,7 +34,9 @@
 # canonicalize.json; when go and ADK-Go are present, rerunning the probe into a temp dir reproduces
 # all of them (empty diff -r) and every declaration the probe vendors from ADK-Go's internal/
 # packages is byte-identical to ADK-Go's (the probe's -vendored adk and -vendored probe outputs
-# match).
+# match). The 2 Go-written integration goldens under
+# crates/gadk-configurable/tests/fixtures/integration/ (an overlay probe in ADK-Go's conformance
+# package, not part of gen-go-configurable) are counted and left out of the rerun diff.
 set -euo pipefail
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 go="${ADK_GO_DIR:-$repo/../adk-go}"
@@ -219,6 +221,12 @@ for spec in input.json:44 replay.json:44 'generated-recordings*.yaml':44 existin
   fi
   configurable_counts="$configurable_counts ${spec%:*}=$got"
 done
+integration_n="$(find "$configurable/integration" -type f -name 'generated-recordings*.yaml' 2>/dev/null | wc -l | tr -d ' ' || true)"
+if [ "$integration_n" -ne 2 ]; then
+  echo "expected 2 generated-recordings*.yaml files under $configurable/integration, found $integration_n" >&2
+  fail=1
+fi
+configurable_counts="$configurable_counts integration=$integration_n"
 if [ ! -f "$configurable/fixups.json" ]; then
   echo "missing $configurable/fixups.json" >&2
   fail=1
@@ -242,7 +250,7 @@ else
     go run -modfile="$configurable_tmp/go.mod" . -fixtures "$configurable_tmp/fixtures" >/dev/null); then
     echo "scripts/gen-go-configurable failed" >&2
     fail=1
-  elif ! diff -r "$configurable" "$configurable_tmp/fixtures" >&2; then
+  elif ! diff -r -x integration "$configurable" "$configurable_tmp/fixtures" >&2; then
     echo "gen-go-configurable output differs from the checked-in fixtures (rerun the probe)" >&2
     fail=1
   elif ! (cd "$repo/scripts/gen-go-configurable" &&

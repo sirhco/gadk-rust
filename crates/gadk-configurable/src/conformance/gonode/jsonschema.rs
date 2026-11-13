@@ -16,8 +16,7 @@
 //! `*jsonschema.Schema`, jsonschema-go v0.4.3) into the yaml.v3 reflection of jsonschema-go's
 //! `Schema` struct: Go field keys (`$ref` → `ref`, `$defs` → `defs`, …), Go field order, Go's
 //! emitted zero fields, sorted `properties`, `default` as a `[]byte` sequence, and the boolean
-//! schema `false` as `{not: {}}`. Task 5 owns this file; nothing outside `gonode` uses its
-//! items directly.
+//! schema `false` as `{not: {}}`. Nothing outside `gonode` uses its items directly.
 //!
 //! [`reshape`] ports jsonschema-go's `(*Schema).UnmarshalJSON` field assignment: it returns an
 //! object keyed by the `Schema` fields' YAML keys, which the [`super::fixups::Builder`] then
@@ -38,8 +37,8 @@ use super::fixups::JSONSCHEMA_FIELDS;
 ///   `DependencySchemas`.
 /// - `default` (`json.RawMessage`) holds the value's Go `json.Marshal` bytes, as the base64
 ///   string gadk uses for a `[]byte` (the builder's `Bytes` class turns it into the `!!int`
-///   sequence). Go keeps the source text; the probe's sources are Go-marshaled, i.e. compact
-///   with sorted keys.
+///   sequence). Divergence (ledger 6c-2): Go keeps the source text, so the bytes are equal
+///   only for a Go-marshaled (compact, sorted-key, HTML-escaped) source, as the probe's are.
 /// - Every other keyword of a field is copied under that field's key; keywords of no field go
 ///   to `Extra`.
 pub fn reshape(v: &Value) -> Map<String, Value> {
