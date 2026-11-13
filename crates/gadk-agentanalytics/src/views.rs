@@ -25,8 +25,8 @@ use gadk_platform::go_quote;
 
 use crate::bigquery::BigQueryClient;
 use crate::config::{Config, DEFAULT_VIEW_PREFIX, Logger};
-use crate::context::Context;
-use crate::error::Error;
+use crate::context::{Context, ContextError};
+use crate::error::{Code, Error, is_conflict_error, status_code};
 use crate::event_types::{
     EVENT_A2A_INTERACTION, EVENT_AGENT_COMPLETED, EVENT_AGENT_ERROR, EVENT_AGENT_RESPONSE,
     EVENT_AGENT_STARTING, EVENT_AGENT_STATE_CHECKPOINT, EVENT_AGENT_TRANSFER,
@@ -37,6 +37,7 @@ use crate::event_types::{
     EVENT_TOOL_PAUSED, EVENT_TOOL_STARTING, EVENT_USER_MESSAGE_RECEIVED,
 };
 use crate::redaction::parse_payload_column_denylist;
+use crate::schema_upgrade::VIEW_TABLE_TYPE;
 
 /// Go `viewDDLTimeout`: each view's DDL gets its own deadline under the pass's context.
 pub(crate) const VIEW_DDL_TIMEOUT: Duration = Duration::from_secs(30);
@@ -583,9 +584,54 @@ impl ViewRunner for BigQueryViewRunner {
     /// alone; an existing table of another type is refused (`cannot replace existing BigQuery
     /// <TYPE> "<view>" with a view`); otherwise a `CREATE OR REPLACE VIEW` query job runs and is
     /// awaited, and its error returned.
-    #[allow(unused_variables, clippy::todo)] // Task 9 removes this with the body
     async fn run_view_ddl(&self, ctx: &Context, view_name: &str, query: &str) -> Result<(), Error> {
-        todo!("Task 9")
+        let Some(client) = self.client.upgrade() else {
+            return Err(Error::msg(
+                "agentanalytics: BigQuery client is not configured for view creation",
+            ));
+        };
+        if !self.dataset_id.is_empty()
+            && !view_name.is_empty()
+            && let Some((_, select_body)) = query.split_once(" AS\n")
+        {
+            // Go `client.Dataset(datasetID)` is the client's project.
+            let project_id = if self.project_id.is_empty() {
+                client.project_id()
+            } else {
+                self.project_id.as_str()
+            };
+            // A failed read is left for the job to decide (Go ignores the error).
+            if let Ok(md) = client
+                .get_table(ctx, project_id, &self.dataset_id, view_name)
+                .await
+            {
+                // CREATE OR REPLACE VIEW cannot replace a table that is not a view, so
+                // say so instead of running a job that must fail. An empty type is left
+                // for the job to decide.
+                if !md.table_type.is_empty() && md.table_type != VIEW_TABLE_TYPE {
+                    return Err(Error::msg(format!(
+                        "cannot replace existing BigQuery {} {} with a view",
+                        md.table_type,
+                        go_quote(view_name)
+                    )));
+                }
+                // Go `strings.TrimSpace` = `str::trim` (both Unicode White_Space).
+                if md.table_type == VIEW_TABLE_TYPE && md.view_query.trim() == select_body.trim() {
+                    return Ok(());
+                }
+            }
+        }
+        // Ending ctx stops the request or the wait; a job BigQuery already accepted is not
+        // canceled on the server.
+        let job = client.insert_query_job(ctx, query).await?;
+        let status = match &job.last_status {
+            Some(status) if status.done() => status.clone(),
+            _ => client.wait_job(ctx, &job).await?,
+        };
+        match status.err() {
+            Some(err) => Err(err),
+            None => Ok(()),
+        }
     }
 }
 
@@ -593,14 +639,90 @@ impl ViewRunner for BigQueryViewRunner {
 /// [`VIEW_DDL_TIMEOUT`]); a conflict counts as created; stops when `ctx` ends; joins the errors.
 /// `logf` (Go's non-nil `logf`, a non-default logger) gets each failure that is not a
 /// cancellation and the pass summary.
-#[allow(unused_variables, clippy::todo)] // Task 9 removes this with the body
 pub async fn sync_analytics_views(
     ctx: &Context,
     runner: &dyn ViewRunner,
     defs: &[ViewDefinition],
     logf: Option<&dyn Logger>,
 ) -> Result<(), Error> {
-    todo!("Task 9")
+    let mut errs = Vec::new();
+    let mut created = 0usize;
+    let mut failed = 0usize;
+    for (i, def) in defs.iter().enumerate() {
+        if let Some(err) = ctx.err() {
+            let skipped: Vec<&str> = defs[i..].iter().map(|d| d.name.as_str()).collect();
+            errs.push(Error::wrap_text(
+                format!(
+                    "view creation canceled before {} (skipped: {}): {err}",
+                    def.name,
+                    skipped.join(", ")
+                ),
+                Error::Context(err),
+            ));
+            break;
+        }
+        let ddl_ctx = ctx.with_timeout(VIEW_DDL_TIMEOUT);
+        let result = runner.run_view_ddl(&ddl_ctx, &def.name, &def.query).await;
+        ddl_ctx.cancel();
+        let err = match result {
+            Ok(()) => {
+                created += 1;
+                continue;
+            }
+            Err(err) if is_conflict_error(&err) => {
+                created += 1;
+                continue;
+            }
+            Err(err) => err,
+        };
+        // Once ctx is done, the error ends the pass whatever it says: a deadline is not a
+        // Canceled error, and a transport need not wrap ctx's error. A per-view timeout
+        // leaves ctx alive and is a failure.
+        if let Some(parent_err) = ctx.err() {
+            if err.is_context(parent_err) {
+                errs.push(Error::wrap(
+                    format_args!("view creation canceled during {}", def.name),
+                    err,
+                ));
+            } else {
+                errs.push(Error::wrap_text(
+                    format!(
+                        "view creation canceled during {}: {parent_err} ({err})",
+                        def.name
+                    ),
+                    Error::Context(parent_err),
+                ));
+            }
+            break;
+        }
+        failed += 1;
+        if let Some(logf) = logf
+            && !err.is_context(ContextError::Canceled)
+            && status_code(&err) != Code::Canceled
+        {
+            logf.printf(format_args!(
+                "agentanalytics: failed to create view {}: {err}",
+                def.name
+            ));
+        }
+        errs.push(Error::wrap(
+            format_args!("failed to create view {}", def.name),
+            err,
+        ));
+    }
+    if let Some(logf) = logf
+        && ctx.err() != Some(ContextError::Canceled)
+        && failed > 0
+    {
+        logf.printf(format_args!(
+            "agentanalytics: view creation finished: {created} created, {failed} failed of {}; call SyncViews to retry",
+            defs.len()
+        ));
+    }
+    match Error::join(errs) {
+        Some(err) => Err(err),
+        None => Ok(()),
+    }
 }
 
 #[cfg(test)]
