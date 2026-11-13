@@ -85,9 +85,15 @@ impl Options {
 
 /// Go's `yaml.Unmarshal(data, &node)`: the document node of the first document (the zero node
 /// for an empty stream).
-#[allow(unused_variables)] // Task 6 writes the body and removes this line.
 pub fn unmarshal_node(data: &[u8]) -> Result<Document, Error> {
-    todo!("Task 6")
+    // Go: yaml.go unmarshal (out = *Node: `d.unmarshal` copies the document node)
+    let mut p = node::new_parser(data);
+    let parsed = p.parse();
+    p.destroy();
+    Ok(match parsed? {
+        Some(n) => p.arena.subtree(n),
+        None => Document::default(),
+    })
 }
 
 /// Go's `yaml.Marshal(&node)` for node `at` of `doc`.
@@ -181,21 +187,23 @@ impl<'w> Encoder<'w> {
 
 /// Go's `yaml.Decoder`: reads the documents of a stream one by one.
 pub struct Decoder<'r> {
-    #[allow(dead_code)] // Task 6 reads it and removes this line.
     parser: node::Parser<'r>,
 }
 
 impl<'r> Decoder<'r> {
     /// Go's `yaml.NewDecoder(r)`. The decoder buffers and may read beyond the documents
     /// requested.
-    #[allow(unused_variables)] // Task 6 writes the body and removes this line.
     pub fn new<R: std::io::Read + 'r>(r: R) -> Self {
-        todo!("Task 6")
+        // Go: yaml.go NewDecoder
+        Decoder {
+            parser: node::new_parser_from_reader(r),
+        }
     }
 
     /// Go's `Decoder.Decode(&node)`: the next document node; `None` is Go's `io.EOF`.
     pub fn decode_node(&mut self) -> Result<Option<Document>, Error> {
-        todo!("Task 6")
+        // Go: yaml.go (*Decoder).Decode (out = *Node: `d.unmarshal` copies the document node)
+        Ok(self.parser.parse()?.map(|n| self.parser.arena.subtree(n)))
     }
 
     /// Go's `Decoder.Decode(&v)` for a serde type; `None` is Go's `io.EOF`.

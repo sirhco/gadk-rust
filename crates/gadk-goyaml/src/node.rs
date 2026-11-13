@@ -20,20 +20,29 @@
 //!
 //! Go's `*Node` graph may share nodes (an alias points at its anchored node) and may contain
 //! cycles; here identity is `NodeId` equality and an alias is `alias: Some(id)`.
-// Composer bodies are Task 6's; Task 6 removes this line.
-#![allow(dead_code, unused_variables, unused_imports, clippy::todo)]
 
 use std::collections::HashMap;
 use std::io::Read;
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, Index, IndexMut};
 
-use crate::error::Error;
-use crate::resolve::{MAP_TAG, NULL_TAG, SEQ_TAG, STR_TAG, long_tag, resolve, short_tag};
-use crate::yamlh::{YamlEvent, YamlEventType, YamlParser};
+use crate::api::{
+    yaml_event_delete, yaml_parser_delete, yaml_parser_initialize, yaml_parser_set_input_reader,
+    yaml_parser_set_input_string,
+};
+use crate::error::{Error, failf};
+use crate::parser::yaml_parser_parse;
+use crate::resolve::{
+    MAP_TAG, MERGE_TAG, NULL_TAG, SEQ_TAG, STR_TAG, long_tag, resolve, short_tag,
+};
+use crate::yamlh::{
+    YamlErrorType, YamlEvent, YamlEventType, YamlMappingStyle, YamlParser, YamlScalarStyle,
+    YamlSequenceStyle, YamlStyle,
+};
 
 /// The serde newtype-struct name through which a [`Document`] crosses the serde boundary
 /// (the `serde_json::RawValue` technique): `ser.rs` and `de.rs` recognise it and hand the
 /// subtree over through a thread-local slot instead of serializing it.
+#[allow(dead_code)] // Until Tasks 8–9 use it; Task 9 removes this line.
 pub(crate) const DOCUMENT_MARKER: &str = "$gadk_goyaml::Document";
 
 /// A node handle inside a [`Document`] (Go: a `*Node`; equality is Go's pointer identity).
@@ -395,7 +404,8 @@ pub(crate) struct Parser<'r> {
     pub(crate) parser: YamlParser<'r>,
     /// The current event (`YamlEventType::No` when consumed).
     pub(crate) event: YamlEvent,
-    /// Go's `doc`: the document node being parsed.
+    /// Go's `doc`: the document node being parsed (set like Go; nothing reads it).
+    #[allow(dead_code)] // Go's `parser.doc` is written but never read.
     pub(crate) doc: Option<NodeId>,
     /// Holds every node built so far.
     pub(crate) arena: Document,
@@ -407,60 +417,201 @@ pub(crate) struct Parser<'r> {
     pub(crate) textless: bool,
 }
 
+/// A collection the composer has opened and not yet closed: the explicit-stack form of Go's
+/// recursive `document` / `sequence` / `mapping` calls (see [`Parser::compose`]).
+pub(crate) enum Frame {
+    /// A document node awaiting its single child.
+    Document(NodeId),
+    /// A sequence node.
+    Sequence(NodeId),
+    /// A mapping node; `key` is the key of the pair whose value is being parsed.
+    Mapping {
+        n: NodeId,
+        block: bool,
+        key: Option<NodeId>,
+    },
+}
+
+/// Go's `string(b)` for event bytes. The reader only lets valid UTF-8 through and the scanner
+/// writes escapes as UTF-8, so this is lossless except for a tag URI whose `%`-escapes pass
+/// the scanner's octet checks without being UTF-8 (e.g. an encoded surrogate).
+// Divergence (ledger 6c-1): such a tag keeps Go's raw bytes in a Go string; here the
+// invalid sequences become U+FFFD.
+fn go_string(b: &[u8]) -> String {
+    String::from_utf8_lossy(b).into_owned()
+}
+
+/// A parser around an initialized libyaml parser (Go's `p := parser{}` +
+/// `yaml_parser_initialize`).
+fn new_parser_state<'r>() -> Parser<'r> {
+    let mut p = Parser {
+        parser: YamlParser::default(),
+        event: YamlEvent::default(),
+        doc: None,
+        arena: Document {
+            nodes: Vec::new(),
+            root: NodeId(0),
+        },
+        anchors: HashMap::new(),
+        done_init: false,
+        textless: false,
+    };
+    if !yaml_parser_initialize(&mut p.parser) {
+        panic!("failed to initialize YAML emitter");
+    }
+    p
+}
+
 /// Go: decode.go `newParser` (empty input is parsed as `"\n"`).
 pub(crate) fn new_parser(b: &[u8]) -> Parser<'_> {
     // Go: decode.go newParser
-    todo!("Task 6")
+    let mut p = new_parser_state();
+    let b: &[u8] = if b.is_empty() { b"\n" } else { b };
+    yaml_parser_set_input_string(&mut p.parser, b);
+    p
 }
 
 /// Go: decode.go `newParserFromReader`.
 pub(crate) fn new_parser_from_reader<'r, R: Read + 'r>(r: R) -> Parser<'r> {
     // Go: decode.go newParserFromReader
-    todo!("Task 6")
+    let mut p = new_parser_state();
+    yaml_parser_set_input_reader(&mut p.parser, Box::new(r));
+    p
 }
 
 impl<'r> Parser<'r> {
     /// Go: `(*parser).init`.
     pub(crate) fn init(&mut self) -> Result<(), Error> {
         // Go: decode.go init
-        todo!("Task 6")
+        if self.done_init {
+            return Ok(());
+        }
+        self.anchors = HashMap::new();
+        self.expect(YamlEventType::StreamStart)?;
+        self.done_init = true;
+        Ok(())
     }
 
     /// Go: `(*parser).destroy`.
     pub(crate) fn destroy(&mut self) {
         // Go: decode.go destroy
-        todo!("Task 6")
+        if self.event.typ != YamlEventType::No {
+            yaml_event_delete(&mut self.event);
+        }
+        yaml_parser_delete(&mut self.parser);
     }
 
     /// Go: `(*parser).expect` — consume an event of type `e`.
     pub(crate) fn expect(&mut self, e: YamlEventType) -> Result<(), Error> {
         // Go: decode.go expect
-        todo!("Task 6")
+        if self.event.typ == YamlEventType::No
+            && !yaml_parser_parse(&mut self.parser, &mut self.event)
+        {
+            return Err(self.fail());
+        }
+        if self.event.typ == YamlEventType::StreamEnd {
+            return Err(failf(
+                "attempted to go past the end of stream; corrupted value?",
+            ));
+        }
+        if self.event.typ != e {
+            self.parser.problem = format!("expected {} event but got {}", e, self.event.typ);
+            return Err(self.fail());
+        }
+        yaml_event_delete(&mut self.event);
+        self.event.typ = YamlEventType::No;
+        Ok(())
     }
 
     /// Go: `(*parser).peek` — the next event's type, parsing it into `event` if needed.
     pub(crate) fn peek(&mut self) -> Result<YamlEventType, Error> {
         // Go: decode.go peek
-        todo!("Task 6")
+        if self.event.typ != YamlEventType::No {
+            return Ok(self.event.typ);
+        }
+        // It's curious choice from the underlying API to generally return a
+        // positive result on success, but on this case return true in an error
+        // scenario. This was the source of bugs in the past (issue #666).
+        if !yaml_parser_parse(&mut self.parser, &mut self.event)
+            || self.parser.error != YamlErrorType::No
+        {
+            return Err(self.fail());
+        }
+        Ok(self.event.typ)
     }
 
     /// Go: `(*parser).fail` — the error for the libyaml parser's current problem
     /// (`yaml: line N: …`).
     pub(crate) fn fail(&self) -> Error {
         // Go: decode.go fail
-        todo!("Task 6")
+        let mut line = 0;
+        if self.parser.context_mark.line != 0 {
+            line = self.parser.context_mark.line;
+            // Scanner errors don't iterate line before returning error
+            if self.parser.error == YamlErrorType::Scanner {
+                line += 1;
+            }
+        } else if self.parser.problem_mark.line != 0 {
+            line = self.parser.problem_mark.line;
+            // Scanner errors don't iterate line before returning error
+            if self.parser.error == YamlErrorType::Scanner {
+                line += 1;
+            }
+        }
+        let where_ = if line != 0 {
+            format!("line {line}: ")
+        } else {
+            String::new()
+        };
+        let msg = if !self.parser.problem.is_empty() {
+            self.parser.problem.as_str()
+        } else {
+            "unknown problem parsing YAML content"
+        };
+        failf(format_args!("{where_}{msg}"))
     }
 
     /// Go: `(*parser).anchor` — record `anchor` (empty = Go's nil) for node `n`.
     pub(crate) fn anchor(&mut self, n: NodeId, anchor: Vec<u8>) {
         // Go: decode.go anchor
-        todo!("Task 6")
+        // Go: `anchor != nil`; an ANCHOR token's value is never empty.
+        if !anchor.is_empty() {
+            let name = go_string(&anchor);
+            self.arena[n].anchor = name.clone();
+            self.anchors.insert(name, n);
+        }
     }
 
     /// Go: `(*parser).parse` — the next node, `None` at the end of the stream.
     pub(crate) fn parse(&mut self) -> Result<Option<NodeId>, Error> {
         // Go: decode.go parse
-        todo!("Task 6")
+        self.init()?;
+        match self.peek()? {
+            YamlEventType::Scalar => self.scalar().map(Some),
+            YamlEventType::Alias => self.alias().map(Some),
+            YamlEventType::MappingStart => {
+                let frame = self.mapping()?;
+                self.compose(frame).map(Some)
+            }
+            YamlEventType::SequenceStart => {
+                let frame = self.sequence()?;
+                self.compose(frame).map(Some)
+            }
+            YamlEventType::DocumentStart => {
+                let frame = self.document()?;
+                self.compose(frame).map(Some)
+            }
+            YamlEventType::StreamEnd => {
+                // Happens when attempting to decode an empty buffer.
+                Ok(None)
+            }
+            YamlEventType::TailComment => {
+                panic!("internal error: unexpected tail comment event (please report)")
+            }
+            other => {
+                panic!("internal error: attempted to parse unknown event (please report): {other}")
+            }
+        }
     }
 
     /// Go: `(*parser).node` — a new node from the current event.
@@ -472,43 +623,256 @@ impl<'r> Parser<'r> {
         value: &str,
     ) -> Result<NodeId, Error> {
         // Go: decode.go node
-        todo!("Task 6")
+        let mut style = Style::empty();
+        let tag = if !tag.is_empty() && tag != "!" {
+            style = Style::TAGGED;
+            short_tag(tag)
+        } else if !default_tag.is_empty() {
+            default_tag.to_string()
+        } else if kind == Kind::Scalar {
+            resolve("", value)?.0
+        } else {
+            tag.to_string()
+        };
+        let mut n = NodeData {
+            kind,
+            tag,
+            value: value.to_string(),
+            style,
+            ..NodeData::default()
+        };
+        if !self.textless {
+            n.line = self.event.start_mark.line + 1;
+            n.column = self.event.start_mark.column + 1;
+            n.head_comment = go_string(&self.event.head_comment);
+            n.line_comment = go_string(&self.event.line_comment);
+            n.foot_comment = go_string(&self.event.foot_comment);
+        }
+        Ok(self.arena.push(n))
     }
 
-    /// Go: `(*parser).parseChild` — parse a node and append it to `parent`'s content.
-    pub(crate) fn parse_child(&mut self, parent: NodeId) -> Result<NodeId, Error> {
-        // Go: decode.go parseChild
-        todo!("Task 6")
+    /// Go's recursion `document`/`sequence`/`mapping` → `parseChild` → `parse` → …, run with an
+    /// explicit stack of open collections starting at `first`; returns `first`'s node once its
+    /// end event is consumed. Go's goroutine stacks grow; a Rust thread's does not, and the
+    /// scanner lets collections nest 10000 deep before `exceeded max depth of 10000`.
+    pub(crate) fn compose(&mut self, first: Frame) -> Result<NodeId, Error> {
+        let mut stack = vec![first];
+        let mut child = None;
+        loop {
+            let Some(top) = stack.last_mut() else {
+                panic!("composer stack underflow");
+            };
+            if let Some(done) = self.resume(top, child.take())? {
+                stack.pop();
+                if stack.is_empty() {
+                    return Ok(done);
+                }
+                child = Some(done);
+                continue;
+            }
+            // Go: `parseChild` → `parse` (init is done; `parse` re-checks it).
+            match self.peek()? {
+                YamlEventType::Scalar => child = Some(self.scalar()?),
+                YamlEventType::Alias => child = Some(self.alias()?),
+                YamlEventType::MappingStart => stack.push(self.mapping()?),
+                YamlEventType::SequenceStart => stack.push(self.sequence()?),
+                YamlEventType::DocumentStart => stack.push(self.document()?),
+                // Go appends a nil child when `parse` meets STREAM-END; the event grammar puts
+                // a node (or an empty scalar) wherever a child is parsed, so it cannot happen.
+                YamlEventType::StreamEnd => {
+                    panic!("internal error: missing child node (please report)")
+                }
+                YamlEventType::TailComment => {
+                    panic!("internal error: unexpected tail comment event (please report)")
+                }
+                other => panic!(
+                    "internal error: attempted to parse unknown event (please report): {other}"
+                ),
+            }
+        }
     }
 
-    /// Go: `(*parser).document`.
-    pub(crate) fn document(&mut self) -> Result<NodeId, Error> {
+    /// The rest of Go's `document` / `sequence` / `mapping` bodies after their start event:
+    /// `child` is the node just parsed for `frame` (Go's `parseChild` result, appended here),
+    /// `None` right after the collection opened. Returns the collection's node once its end
+    /// event is consumed, `None` when it needs its next child.
+    pub(crate) fn resume(
+        &mut self,
+        frame: &mut Frame,
+        child: Option<NodeId>,
+    ) -> Result<Option<NodeId>, Error> {
+        match frame {
+            Frame::Document(n) => {
+                // Go: decode.go document
+                let n = *n;
+                let Some(child) = child else {
+                    return Ok(None); // p.parseChild(n)
+                };
+                self.arena[n].content.push(child);
+                if self.peek()? == YamlEventType::DocumentEnd {
+                    self.arena[n].foot_comment = go_string(&self.event.foot_comment);
+                }
+                self.expect(YamlEventType::DocumentEnd)?;
+                Ok(Some(n))
+            }
+            Frame::Sequence(n) => {
+                // Go: decode.go sequence
+                let n = *n;
+                if let Some(child) = child {
+                    self.arena[n].content.push(child);
+                }
+                if self.peek()? != YamlEventType::SequenceEnd {
+                    return Ok(None); // p.parseChild(n)
+                }
+                self.arena[n].line_comment = go_string(&self.event.line_comment);
+                self.arena[n].foot_comment = go_string(&self.event.foot_comment);
+                self.expect(YamlEventType::SequenceEnd)?;
+                Ok(Some(n))
+            }
+            Frame::Mapping { n, block, key } => {
+                // Go: decode.go mapping
+                let (n, block) = (*n, *block);
+                if let Some(child) = child {
+                    self.arena[n].content.push(child);
+                    match key.take() {
+                        None => {
+                            let k = child; // k := p.parseChild(n)
+                            if block && !self.arena[k].foot_comment.is_empty() {
+                                // Must be a foot comment for the prior value when being dedented.
+                                let content = &self.arena[n].content;
+                                if content.len() > 2 {
+                                    let prior = content[content.len() - 3];
+                                    self.arena[prior].foot_comment =
+                                        self.arena[k].foot_comment.clone();
+                                    self.arena[k].foot_comment = String::new();
+                                }
+                            }
+                            *key = Some(k);
+                            return Ok(None); // v := p.parseChild(n)
+                        }
+                        Some(k) => {
+                            let v = child;
+                            if self.arena[k].foot_comment.is_empty()
+                                && !self.arena[v].foot_comment.is_empty()
+                            {
+                                self.arena[k].foot_comment =
+                                    std::mem::take(&mut self.arena[v].foot_comment);
+                            }
+                            if self.peek()? == YamlEventType::TailComment {
+                                if self.arena[k].foot_comment.is_empty() {
+                                    self.arena[k].foot_comment =
+                                        go_string(&self.event.foot_comment);
+                                }
+                                self.expect(YamlEventType::TailComment)?;
+                            }
+                        }
+                    }
+                }
+                if self.peek()? != YamlEventType::MappingEnd {
+                    return Ok(None); // k := p.parseChild(n)
+                }
+                self.arena[n].line_comment = go_string(&self.event.line_comment);
+                self.arena[n].foot_comment = go_string(&self.event.foot_comment);
+                let node = &self.arena[n];
+                if !node.style.intersects(Style::FLOW)
+                    && !node.foot_comment.is_empty()
+                    && node.content.len() > 1
+                {
+                    let prior = node.content[node.content.len() - 2];
+                    self.arena[prior].foot_comment =
+                        std::mem::take(&mut self.arena[n].foot_comment);
+                }
+                self.expect(YamlEventType::MappingEnd)?;
+                Ok(Some(n))
+            }
+        }
+    }
+
+    /// Go: `(*parser).document` up to its `parseChild` (the rest is in [`Parser::resume`]).
+    pub(crate) fn document(&mut self) -> Result<Frame, Error> {
         // Go: decode.go document
-        todo!("Task 6")
+        let n = self.node(Kind::Document, "", "", "")?;
+        self.doc = Some(n);
+        self.expect(YamlEventType::DocumentStart)?;
+        Ok(Frame::Document(n))
     }
 
     /// Go: `(*parser).alias`.
     pub(crate) fn alias(&mut self) -> Result<NodeId, Error> {
         // Go: decode.go alias
-        todo!("Task 6")
+        let value = go_string(&self.event.anchor);
+        let n = self.node(Kind::Alias, "", "", &value)?;
+        let target = self.anchors.get(&value).copied();
+        self.arena[n].alias = target;
+        if target.is_none() {
+            return Err(failf(format_args!("unknown anchor '{value}' referenced")));
+        }
+        self.expect(YamlEventType::Alias)?;
+        Ok(n)
     }
 
     /// Go: `(*parser).scalar`.
     pub(crate) fn scalar(&mut self) -> Result<NodeId, Error> {
         // Go: decode.go scalar
-        todo!("Task 6")
+        let parsed_style = self.event.scalar_style() as YamlStyle;
+        let node_style = if parsed_style & YamlScalarStyle::DoubleQuoted as YamlStyle != 0 {
+            Style::DOUBLE_QUOTED
+        } else if parsed_style & YamlScalarStyle::SingleQuoted as YamlStyle != 0 {
+            Style::SINGLE_QUOTED
+        } else if parsed_style & YamlScalarStyle::Literal as YamlStyle != 0 {
+            Style::LITERAL
+        } else if parsed_style & YamlScalarStyle::Folded as YamlStyle != 0 {
+            Style::FOLDED
+        } else {
+            Style::empty()
+        };
+        let node_value = go_string(&self.event.value);
+        let node_tag = go_string(&self.event.tag);
+        let default_tag = if node_style.is_empty() {
+            if node_value == "<<" { MERGE_TAG } else { "" }
+        } else {
+            STR_TAG
+        };
+        let n = self.node(Kind::Scalar, default_tag, &node_tag, &node_value)?;
+        self.arena[n].style |= node_style;
+        let anchor = std::mem::take(&mut self.event.anchor);
+        self.anchor(n, anchor);
+        self.expect(YamlEventType::Scalar)?;
+        Ok(n)
     }
 
-    /// Go: `(*parser).sequence`.
-    pub(crate) fn sequence(&mut self) -> Result<NodeId, Error> {
+    /// Go: `(*parser).sequence` up to its child loop (the rest is in [`Parser::resume`]).
+    pub(crate) fn sequence(&mut self) -> Result<Frame, Error> {
         // Go: decode.go sequence
-        todo!("Task 6")
+        let tag = go_string(&self.event.tag);
+        let n = self.node(Kind::Sequence, SEQ_TAG, &tag, "")?;
+        if self.event.sequence_style() as YamlStyle & YamlSequenceStyle::Flow as YamlStyle != 0 {
+            self.arena[n].style |= Style::FLOW;
+        }
+        let anchor = std::mem::take(&mut self.event.anchor);
+        self.anchor(n, anchor);
+        self.expect(YamlEventType::SequenceStart)?;
+        Ok(Frame::Sequence(n))
     }
 
-    /// Go: `(*parser).mapping`.
-    pub(crate) fn mapping(&mut self) -> Result<NodeId, Error> {
+    /// Go: `(*parser).mapping` up to its pair loop (the rest is in [`Parser::resume`]).
+    pub(crate) fn mapping(&mut self) -> Result<Frame, Error> {
         // Go: decode.go mapping
-        todo!("Task 6")
+        let tag = go_string(&self.event.tag);
+        let n = self.node(Kind::Mapping, MAP_TAG, &tag, "")?;
+        let mut block = true;
+        if self.event.mapping_style() as YamlStyle & YamlMappingStyle::Flow as YamlStyle != 0 {
+            block = false;
+            self.arena[n].style |= Style::FLOW;
+        }
+        let anchor = std::mem::take(&mut self.event.anchor);
+        self.anchor(n, anchor);
+        self.expect(YamlEventType::MappingStart)?;
+        Ok(Frame::Mapping {
+            n,
+            block,
+            key: None,
+        })
     }
 }
 
@@ -718,5 +1082,263 @@ mod tests {
         let c = cyc.subtree(r);
         assert_eq!(c.len(), 2);
         assert_eq!(c[c[c.root()].content[0]].alias, Some(c.root()));
+    }
+
+    /// Go-style dump of the tree at `id`: kind value tag style anchor line:col comments, one
+    /// node per line, children indented, aliases as `-> <target value/anchor>`.
+    fn tree(doc: &Document, id: NodeId) -> String {
+        fn walk(doc: &Document, id: NodeId, depth: usize, out: &mut String) {
+            let n = &doc[id];
+            out.push_str(&format!(
+                "{}{} {:?} tag={:?} style={} anchor={:?} {}:{}",
+                "  ".repeat(depth),
+                n.kind.bits(),
+                n.value,
+                n.tag,
+                n.style.bits(),
+                n.anchor,
+                n.line,
+                n.column
+            ));
+            for (k, c) in [
+                ("h", &n.head_comment),
+                ("l", &n.line_comment),
+                ("f", &n.foot_comment),
+            ] {
+                if !c.is_empty() {
+                    out.push_str(&format!(" {k}={c:?}"));
+                }
+            }
+            if let Some(a) = n.alias {
+                out.push_str(&format!(" -> {:?}", doc[a].anchor));
+            }
+            out.push('\n');
+            for &c in &n.content {
+                walk(doc, c, depth + 1, out);
+            }
+        }
+        let mut out = String::new();
+        walk(doc, id, 0, &mut out);
+        out
+    }
+
+    fn parsed(input: &str, textless: bool) -> Result<String, String> {
+        let mut p = new_parser(input.as_bytes());
+        p.textless = textless;
+        match p.parse() {
+            Ok(Some(n)) => Ok(tree(&p.arena, n)),
+            Ok(None) => Ok(String::new()),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    /// A reader that hands out `0` and then fails (Go: an `io.Reader` returning an error).
+    struct Failing(&'static [u8]);
+
+    impl Read for Failing {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            if self.0.is_empty() {
+                return Err(std::io::Error::other("boom"));
+            }
+            let n = self.0.len().min(buf.len());
+            buf[..n].copy_from_slice(&self.0[..n]);
+            self.0 = &self.0[n..];
+            Ok(n)
+        }
+    }
+
+    // The non-textless trees below were printed by yaml.v3 v3.0.1 (`yaml.Unmarshal` into a
+    // `Node`); the textless ones follow decode.go (`Node.Encode` cannot re-parse comments).
+    const COMMENTED: &str = "a: [1, 2] # line\nb: {c: 3} # map\n# foot\n";
+
+    #[test]
+    fn composes_nodes_with_positions_and_comments() {
+        assert_eq!(
+            parsed(COMMENTED, false).unwrap(),
+            "1 \"\" tag=\"\" style=0 anchor=\"\" 1:1\n\
+             \x20 4 \"\" tag=\"!!map\" style=0 anchor=\"\" 1:1\n\
+             \x20   8 \"a\" tag=\"!!str\" style=0 anchor=\"\" 1:1\n\
+             \x20   2 \"\" tag=\"!!seq\" style=32 anchor=\"\" 1:4 l=\"# line\"\n\
+             \x20     8 \"1\" tag=\"!!int\" style=0 anchor=\"\" 1:5\n\
+             \x20     8 \"2\" tag=\"!!int\" style=0 anchor=\"\" 1:8\n\
+             \x20   8 \"b\" tag=\"!!str\" style=0 anchor=\"\" 2:1 f=\"# foot\"\n\
+             \x20   4 \"\" tag=\"!!map\" style=32 anchor=\"\" 2:4 l=\"# map\"\n\
+             \x20     8 \"c\" tag=\"!!str\" style=0 anchor=\"\" 2:5\n\
+             \x20     8 \"3\" tag=\"!!int\" style=0 anchor=\"\" 2:8\n"
+        );
+        assert_eq!(
+            parsed("# head\n\n# doc\nk: v # line\n# foot\n", false).unwrap(),
+            "1 \"\" tag=\"\" style=0 anchor=\"\" 4:1 h=\"# head\"\n\
+             \x20 4 \"\" tag=\"!!map\" style=0 anchor=\"\" 4:1\n\
+             \x20   8 \"k\" tag=\"!!str\" style=0 anchor=\"\" 4:1 h=\"# doc\" f=\"# foot\"\n\
+             \x20   8 \"v\" tag=\"!!str\" style=0 anchor=\"\" 4:4 l=\"# line\"\n"
+        );
+    }
+
+    #[test]
+    fn textless_drops_positions_and_node_comments_only() {
+        // Go's `node` skips line/column and the event comments; `sequence`/`mapping` still
+        // copy their end events' line/foot comments, and foot comments still move.
+        assert_eq!(
+            parsed(COMMENTED, true).unwrap(),
+            "1 \"\" tag=\"\" style=0 anchor=\"\" 0:0\n\
+             \x20 4 \"\" tag=\"!!map\" style=0 anchor=\"\" 0:0\n\
+             \x20   8 \"a\" tag=\"!!str\" style=0 anchor=\"\" 0:0\n\
+             \x20   2 \"\" tag=\"!!seq\" style=32 anchor=\"\" 0:0 l=\"# line\"\n\
+             \x20     8 \"1\" tag=\"!!int\" style=0 anchor=\"\" 0:0\n\
+             \x20     8 \"2\" tag=\"!!int\" style=0 anchor=\"\" 0:0\n\
+             \x20   8 \"b\" tag=\"!!str\" style=0 anchor=\"\" 0:0 f=\"# foot\"\n\
+             \x20   4 \"\" tag=\"!!map\" style=32 anchor=\"\" 0:0 l=\"# map\"\n\
+             \x20     8 \"c\" tag=\"!!str\" style=0 anchor=\"\" 0:0\n\
+             \x20     8 \"3\" tag=\"!!int\" style=0 anchor=\"\" 0:0\n"
+        );
+        assert_eq!(
+            parsed("# head\n\n# doc\nk: v # line\n", true).unwrap(),
+            "1 \"\" tag=\"\" style=0 anchor=\"\" 0:0\n\
+             \x20 4 \"\" tag=\"!!map\" style=0 anchor=\"\" 0:0\n\
+             \x20   8 \"k\" tag=\"!!str\" style=0 anchor=\"\" 0:0\n\
+             \x20   8 \"v\" tag=\"!!str\" style=0 anchor=\"\" 0:0\n"
+        );
+    }
+
+    #[test]
+    fn tags_styles_and_merge_keys() {
+        assert_eq!(
+            parsed("<<: {a: 1}\n'<<': !!str 2\n! c: !x d\n", false).unwrap(),
+            "1 \"\" tag=\"\" style=0 anchor=\"\" 1:1\n\
+             \x20 4 \"\" tag=\"!!map\" style=0 anchor=\"\" 1:1\n\
+             \x20   8 \"<<\" tag=\"!!merge\" style=0 anchor=\"\" 1:1\n\
+             \x20   4 \"\" tag=\"!!map\" style=32 anchor=\"\" 1:5\n\
+             \x20     8 \"a\" tag=\"!!str\" style=0 anchor=\"\" 1:6\n\
+             \x20     8 \"1\" tag=\"!!int\" style=0 anchor=\"\" 1:9\n\
+             \x20   8 \"<<\" tag=\"!!str\" style=4 anchor=\"\" 2:1\n\
+             \x20   8 \"2\" tag=\"!!str\" style=1 anchor=\"\" 2:7\n\
+             \x20   8 \"c\" tag=\"!!str\" style=0 anchor=\"\" 3:1\n\
+             \x20   8 \"d\" tag=\"!x\" style=1 anchor=\"\" 3:6\n"
+        );
+    }
+
+    #[test]
+    fn anchors_and_aliases() {
+        // The anchor is registered before the collection's children: an alias to an
+        // enclosing node composes (a cycle), as in Go.
+        let mut p = new_parser(b"&a [*a, &b x, *b]\n");
+        let doc = p.parse().unwrap().unwrap();
+        let arena = &p.arena;
+        let seq = arena[doc].content[0];
+        let items = &arena[seq].content;
+        assert_eq!(arena[items[0]].alias, Some(seq));
+        assert_eq!(arena[items[0]].value, "a");
+        assert_eq!(arena[items[2]].alias, Some(items[1]));
+        assert_eq!(p.anchors.len(), 2);
+
+        assert_eq!(
+            parsed("a: *nope\n", false).unwrap_err(),
+            "yaml: unknown anchor 'nope' referenced"
+        );
+    }
+
+    #[test]
+    fn empty_input_and_end_of_stream() {
+        // Go parses empty input as "\n": no document, `parse` returns nil.
+        for input in ["", "\n", "# only a comment\n"] {
+            let mut p = new_parser(input.as_bytes());
+            assert_eq!(p.parse().unwrap(), None, "{input:?}");
+            assert_eq!(p.parse().unwrap(), None, "{input:?}");
+        }
+        let mut p = new_parser(b"a\n--- b\n");
+        assert!(p.parse().unwrap().is_some());
+        assert!(p.parse().unwrap().is_some());
+        assert_eq!(p.parse().unwrap(), None);
+        assert_eq!(p.parse().unwrap(), None);
+    }
+
+    #[test]
+    fn anchors_persist_across_documents() {
+        let mut p = new_parser(b"a: &x 1\n---\nb: *x\n");
+        let first = p.parse().unwrap().unwrap();
+        let second = p.parse().unwrap().unwrap();
+        let target = p.arena[p.arena[first].content[0]].content[1];
+        let alias = p.arena[p.arena[second].content[0]].content[1];
+        assert_eq!(p.arena[alias].alias, Some(target));
+        assert_eq!((p.arena[second].line, p.arena[second].column), (2, 1));
+    }
+
+    #[test]
+    fn expect_and_fail_messages() {
+        let mut p = new_parser(b"a\n");
+        p.init().unwrap();
+        assert_eq!(
+            p.expect(YamlEventType::Scalar).unwrap_err().to_string(),
+            "yaml: expected scalar event but got document start"
+        );
+        let mut p = new_parser(b"a\n");
+        while p.parse().unwrap().is_some() {}
+        assert_eq!(
+            p.expect(YamlEventType::Scalar).unwrap_err().to_string(),
+            "yaml: attempted to go past the end of stream; corrupted value?"
+        );
+
+        let mut p = new_parser(b"a\n");
+        assert_eq!(
+            p.fail().to_string(),
+            "yaml: unknown problem parsing YAML content"
+        );
+        p.parser.problem = "boom".into();
+        p.parser.problem_mark.line = 2;
+        assert_eq!(p.fail().to_string(), "yaml: line 2: boom");
+        // The context mark wins; scanner errors count lines from 0.
+        p.parser.context_mark.line = 4;
+        assert_eq!(p.fail().to_string(), "yaml: line 4: boom");
+        p.parser.error = YamlErrorType::Scanner;
+        assert_eq!(p.fail().to_string(), "yaml: line 5: boom");
+        p.parser.context_mark.line = 0;
+        assert_eq!(p.fail().to_string(), "yaml: line 3: boom");
+    }
+
+    #[test]
+    fn reader_errors_fail_the_parse() {
+        // yaml.v3 issue #666: a reader error met while the scanner looks ahead for comments
+        // leaves `parser.error` set although the parse call succeeded; `peek` checks it.
+        for input in [&b"a: 1 #"[..], b"a: 1\n", b"a: 1\n# c", b"- a\n", b""] {
+            let mut p = new_parser_from_reader(Failing(input));
+            assert_eq!(
+                p.parse().unwrap_err().to_string(),
+                "yaml: input error: boom",
+                "{:?}",
+                String::from_utf8_lossy(input)
+            );
+        }
+    }
+
+    #[test]
+    fn deep_nesting_does_not_overflow_the_stack() {
+        // The scanner allows 10000 levels; the composer keeps them on the heap.
+        let input = "- ".repeat(9_999) + "x\n";
+        let mut p = new_parser(input.as_bytes());
+        let doc = p.parse().unwrap().unwrap();
+        let mut depth = 0;
+        let mut id = p.arena[doc].content[0];
+        while let Some(&child) = p.arena[id].content.first() {
+            depth += 1;
+            id = child;
+        }
+        assert_eq!((depth, p.arena[id].value.as_str()), (9_999, "x"));
+
+        let input = "[".repeat(10_001);
+        assert_eq!(
+            parsed(&input, false).unwrap_err(),
+            "yaml: exceeded max depth of 10000"
+        );
+    }
+
+    #[test]
+    fn destroy_resets_the_libyaml_parser() {
+        let mut p = new_parser(b"a\n");
+        p.init().unwrap();
+        p.peek().unwrap();
+        p.destroy();
+        assert_eq!(p.event.typ, YamlEventType::No);
+        assert!(p.parser.read_handler.is_none());
     }
 }
