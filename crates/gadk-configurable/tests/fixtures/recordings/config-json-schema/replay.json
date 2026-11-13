@@ -1,0 +1,162 @@
+{
+  "error": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "root_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "Hi"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "config": {
+            "tools": [
+              {
+                "functionDeclarations": [
+                  {
+                    "description": "Books a trip.",
+                    "name": "book_trip",
+                    "parametersJsonSchema": {
+                      "defs": {
+                        "Leg": {
+                          "properties": {
+                            "from": {
+                              "type": "string"
+                            },
+                            "to": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "from",
+                            "to"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "properties": {
+                        "budget": {
+                          "multipleof": 0.01,
+                          "title": "Budget",
+                          "type": "number"
+                        },
+                        "class": {
+                          "default": [
+                            34,
+                            101,
+                            99,
+                            111,
+                            110,
+                            111,
+                            109,
+                            121,
+                            34
+                          ],
+                          "enum": [
+                            "economy",
+                            "business"
+                          ],
+                          "title": "Class",
+                          "type": "string"
+                        },
+                        "flex": {
+                          "anyof": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "const": 3
+                            }
+                          ],
+                          "title": "Flex"
+                        },
+                        "legs": {
+                          "items": {
+                            "ref": "#/$defs/Leg"
+                          },
+                          "minitems": 1,
+                          "title": "Legs",
+                          "type": "array"
+                        },
+                        "note": {
+                          "description": "Optional note.",
+                          "title": "Note",
+                          "types": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "passengers": {
+                          "default": [
+                            49
+                          ],
+                          "maximum": 9,
+                          "minimum": 1,
+                          "title": "Passengers",
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "legs"
+                      ],
+                      "schema": "https://json-schema.org/draft/2020-12/schema",
+                      "title": "book_tripParams",
+                      "type": "object"
+                    }
+                  },
+                  {
+                    "name": "true_schema",
+                    "parametersJsonSchema": {
+                      "title": "true_schemaParams"
+                    }
+                  },
+                  {
+                    "name": "empty_schema",
+                    "parametersJsonSchema": {
+                      "title": "empty_schemaParams"
+                    }
+                  },
+                  {
+                    "name": "false_props",
+                    "parametersJsonSchema": {
+                      "properties": {
+                        "x": {
+                          "title": "X"
+                        },
+                        "y": {
+                          "title": "Y"
+                        }
+                      },
+                      "title": "false_propsParams",
+                      "type": "object"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "OK"
+                }
+              ],
+              "role": "model"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

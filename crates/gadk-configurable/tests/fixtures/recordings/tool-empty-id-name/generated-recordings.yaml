@@ -1,0 +1,25 @@
+recordings:
+    - user_message_index: 0
+      agent_name: root_agent
+      tool_recording:
+        tool_call:
+            id: ""
+            args: {}
+            name: ""
+        tool_response:
+            scheduling: ""
+            id: ""
+            name: ""
+            response: {}
+    - user_message_index: 0
+      agent_name: root_agent
+      tool_recording:
+        tool_call:
+            id: ""
+            args: {}
+            name: ""
+        tool_response:
+            scheduling: ""
+            id: ""
+            name: ""
+            response: {}

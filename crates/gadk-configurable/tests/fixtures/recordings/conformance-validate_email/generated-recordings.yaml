@@ -1,0 +1,29 @@
+recordings:
+    - user_message_index: 0
+      agent_name: tools_agent
+      llm_recording:
+        llm_request:
+            model: gemini-2.5-flash
+            contents:
+                - parts:
+                    - text: Hi
+                  role: user
+            config:
+                tools:
+                    - function_declarations:
+                        - description: Checks if the provided string is a valid email format.
+                          name: validate_email
+                          parameters_json_schema:
+                            title: "validate_emailParams"
+                            type: object
+                            required:
+                                - email
+                            properties:
+                                email:
+                                    title: "Email"
+                                    type: string
+        llm_responses:
+            - content:
+                parts:
+                    - text: done
+                role: model

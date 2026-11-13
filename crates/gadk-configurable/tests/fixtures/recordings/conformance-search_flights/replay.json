@@ -1,0 +1,112 @@
+{
+  "error": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "tools_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "Hi"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "config": {
+            "tools": [
+              {
+                "functionDeclarations": [
+                  {
+                    "description": "Search for flights based on trip details and preferences.\n\nThis function demonstrates advanced parameter handling:\n- Pydantic models as parameters (trip, preferences)\n- Optional/nullable parameters (preferences, return_date, preferred_airline)\n- Default values (cabin_class, max_stops, flexible_dates)\n\nArgs:\n  trip: Core trip information including origin, destination, and dates.\n  preferences: Optional flight preferences. If not provided, uses defaults.\n\nReturns:\n  A dictionary containing search results and parameters received.\n",
+                    "name": "search_flights",
+                    "parametersJsonSchema": {
+                      "properties": {
+                        "preferences": {
+                          "properties": {
+                            "cabinclass": {
+                              "type": "string"
+                            },
+                            "flexibledates": {
+                              "type": "boolean"
+                            },
+                            "maxstops": {
+                              "type": "integer"
+                            },
+                            "preferredairline": {
+                              "types": [
+                                "null",
+                                "string"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "cabin_class",
+                            "max_stops",
+                            "preferred_airline",
+                            "flexible_dates"
+                          ],
+                          "title": "Preferences",
+                          "types": [
+                            "null",
+                            "object"
+                          ]
+                        },
+                        "trip": {
+                          "properties": {
+                            "departuredate": {
+                              "type": "string"
+                            },
+                            "destination": {
+                              "type": "string"
+                            },
+                            "origin": {
+                              "type": "string"
+                            },
+                            "returndate": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "origin",
+                            "destination",
+                            "departure_date",
+                            "return_date"
+                          ],
+                          "title": "Trip",
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "trip",
+                        "preferences"
+                      ],
+                      "title": "search_flightsParams",
+                      "type": "object"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "done"
+                }
+              ],
+              "role": "model"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

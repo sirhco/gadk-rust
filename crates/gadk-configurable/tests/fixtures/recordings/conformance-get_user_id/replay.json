@@ -1,0 +1,61 @@
+{
+  "error": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "tools_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "Hi"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "config": {
+            "tools": [
+              {
+                "functionDeclarations": [
+                  {
+                    "description": "Retrieves a user ID based on their email.",
+                    "name": "get_user_id",
+                    "parametersJsonSchema": {
+                      "properties": {
+                        "email": {
+                          "title": "Email",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "email"
+                      ],
+                      "title": "get_user_idParams",
+                      "type": "object"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "done"
+                }
+              ],
+              "role": "model"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

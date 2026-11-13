@@ -1,0 +1,21 @@
+recordings:
+    - user_message_index: 0
+      agent_name: root_agent
+      llm_recording:
+        llm_request:
+            model: gemini-2.5-flash
+            contents:
+                - parts:
+                    - text: Hi
+                  role: user
+            config:
+                tools:
+                    - google_search: {}
+                    - {}
+                    - retrieval: {}
+                    - {}
+        llm_responses:
+            - content:
+                parts:
+                    - text: OK
+                role: model

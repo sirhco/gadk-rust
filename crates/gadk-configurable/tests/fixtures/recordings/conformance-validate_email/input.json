@@ -1,0 +1,66 @@
+{
+  "case": "conformance-validate_email",
+  "streaming_mode": "none",
+  "user_message_index": 0,
+  "existing": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "tools_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "Hi"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "config": {
+            "tools": [
+              {
+                "functionDeclarations": [
+                  {
+                    "description": "Checks if the provided string is a valid email format.",
+                    "name": "validate_email",
+                    "parametersJsonSchema": {
+                      "type": "object",
+                      "properties": {
+                        "email": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "email"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "responseJsonSchema": {
+                      "type": "boolean"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "done"
+                }
+              ],
+              "role": "model"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

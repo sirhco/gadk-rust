@@ -1,0 +1,260 @@
+{
+  "error": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "tools_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "Hi"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "config": {
+            "systemInstruction": {
+              "parts": [
+                {
+                  "text": "Use the tools.\n\nYou are an agent. Your internal name is \"tools_agent\"."
+                }
+              ],
+              "role": "user"
+            },
+            "tools": [
+              {
+                "functionDeclarations": [
+                  {
+                    "description": "Checks if the provided string is a valid email format.",
+                    "name": "validate_email",
+                    "parametersJsonSchema": {
+                      "properties": {
+                        "email": {
+                          "title": "Email",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "email"
+                      ],
+                      "title": "validate_emailParams",
+                      "type": "object"
+                    }
+                  },
+                  {
+                    "description": "Retrieves a user ID based on their email.",
+                    "name": "get_user_id",
+                    "parametersJsonSchema": {
+                      "properties": {
+                        "email": {
+                          "title": "Email",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "email"
+                      ],
+                      "title": "get_user_idParams",
+                      "type": "object"
+                    }
+                  },
+                  {
+                    "description": "Creates a booking for a user.\n\nArgs:\n  user_id: The unique identifier for the user.\n  is_confirmed: Whether the booking is confirmed.\n  details: Any additional details for the booking.\n\nReturns:\n  A dictionary containing the booking information and the types of the\n  received arguments.",
+                    "name": "create_booking",
+                    "parametersJsonSchema": {
+                      "properties": {
+                        "details": {
+                          "title": "Details",
+                          "type": "string"
+                        },
+                        "isconfirmed": {
+                          "title": "Is Confirmed",
+                          "type": "boolean"
+                        },
+                        "userid": {
+                          "title": "User Id",
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "user_id",
+                        "is_confirmed",
+                        "details"
+                      ],
+                      "title": "create_bookingParams",
+                      "type": "object"
+                    }
+                  },
+                  {
+                    "description": "Search for flights based on trip details and preferences.\n\nThis function demonstrates advanced parameter handling:\n- Pydantic models as parameters (trip, preferences)\n- Optional/nullable parameters (preferences, return_date, preferred_airline)\n- Default values (cabin_class, max_stops, flexible_dates)\n\nArgs:\n  trip: Core trip information including origin, destination, and dates.\n  preferences: Optional flight preferences. If not provided, uses defaults.\n\nReturns:\n  A dictionary containing search results and parameters received.\n",
+                    "name": "search_flights",
+                    "parametersJsonSchema": {
+                      "properties": {
+                        "preferences": {
+                          "properties": {
+                            "cabinclass": {
+                              "type": "string"
+                            },
+                            "flexibledates": {
+                              "type": "boolean"
+                            },
+                            "maxstops": {
+                              "type": "integer"
+                            },
+                            "preferredairline": {
+                              "types": [
+                                "null",
+                                "string"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "cabin_class",
+                            "max_stops",
+                            "preferred_airline",
+                            "flexible_dates"
+                          ],
+                          "title": "Preferences",
+                          "types": [
+                            "null",
+                            "object"
+                          ]
+                        },
+                        "trip": {
+                          "properties": {
+                            "departuredate": {
+                              "type": "string"
+                            },
+                            "destination": {
+                              "type": "string"
+                            },
+                            "origin": {
+                              "type": "string"
+                            },
+                            "returndate": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "origin",
+                            "destination",
+                            "departure_date",
+                            "return_date"
+                          ],
+                          "title": "Trip",
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "trip",
+                        "preferences"
+                      ],
+                      "title": "search_flightsParams",
+                      "type": "object"
+                    }
+                  },
+                  {
+                    "description": "Calculate total trip cost with various optional charges.\n\nThis function demonstrates:\n- Mix of required and optional parameters\n- Default values for common cases\n- Nullable parameter that affects calculation logic\n\nArgs:\n  base_fare: Base ticket price per passenger.\n  num_passengers: Number of passengers (default: 1).\n  insurance: Whether to add travel insurance (default: False).\n  baggage_count: Number of checked bags per passenger, or None for carry-on\n    only.\n\nReturns:\n  A dictionary with cost breakdown.\n",
+                    "name": "calculate_trip_cost",
+                    "parametersJsonSchema": {
+                      "properties": {
+                        "baggagecount": {
+                          "title": "Baggage Count",
+                          "types": [
+                            "null",
+                            "integer"
+                          ]
+                        },
+                        "basefare": {
+                          "title": "Base Fare",
+                          "type": "number"
+                        },
+                        "insurance": {
+                          "title": "Insurance",
+                          "type": "boolean"
+                        },
+                        "numpassengers": {
+                          "title": "Num Passengers",
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "base_fare",
+                        "num_passengers",
+                        "insurance",
+                        "baggage_count"
+                      ],
+                      "title": "calculate_trip_costParams",
+                      "type": "object"
+                    }
+                  },
+                  {
+                    "description": "Reimburse the amount of money to the employee.",
+                    "name": "reimburse",
+                    "parametersJsonSchema": {
+                      "properties": {
+                        "amount": {
+                          "title": "Amount",
+                          "type": "number"
+                        },
+                        "purpose": {
+                          "title": "Purpose",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "purpose",
+                        "amount"
+                      ],
+                      "title": "reimburseParams",
+                      "type": "object"
+                    }
+                  },
+                  {
+                    "description": "Ask for approval for the reimbursement.\n\nNOTE: This is a long-running operation. Do not call this tool again if it has already returned some intermediate or pending status.",
+                    "name": "ask_for_approval",
+                    "parametersJsonSchema": {
+                      "properties": {
+                        "amount": {
+                          "title": "Amount",
+                          "type": "number"
+                        },
+                        "purpose": {
+                          "title": "Purpose",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "purpose",
+                        "amount"
+                      ],
+                      "title": "ask_for_approvalParams",
+                      "type": "object"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "done"
+                }
+              ],
+              "role": "model"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

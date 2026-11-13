@@ -1,0 +1,82 @@
+{
+  "error": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "root_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "Hi"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "config": {
+            "temperature": 0.7,
+            "topP": 0.95,
+            "topK": 40,
+            "candidateCount": 1,
+            "maxOutputTokens": 1024,
+            "stopSequences": [
+              "END",
+              ""
+            ],
+            "responseLogprobs": true,
+            "seed": 42,
+            "responseMimeType": "application/json",
+            "responseSchema": {
+              "properties": {
+                "answer": {
+                  "type": "STRING"
+                }
+              },
+              "type": "OBJECT"
+            },
+            "safetySettings": [
+              {
+                "category": "HARM_CATEGORY_HARASSMENT",
+                "threshold": "BLOCK_ONLY_HIGH"
+              }
+            ],
+            "toolConfig": {
+              "functionCallingConfig": {
+                "allowedFunctionNames": [
+                  "f"
+                ],
+                "mode": "ANY"
+              }
+            },
+            "labels": {
+              "team": "adk",
+              "zero": "0"
+            },
+            "responseModalities": [
+              "TEXT"
+            ],
+            "thinkingConfig": {
+              "includeThoughts": true
+            }
+          }
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "{\"answer\": \"hi\"}"
+                }
+              ],
+              "role": "model"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

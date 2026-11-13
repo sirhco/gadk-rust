@@ -1,0 +1,136 @@
+{
+  "case": "system-instruction",
+  "streaming_mode": "none",
+  "user_message_index": 0,
+  "existing": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "root_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "Hi"
+                }
+              ]
+            }
+          ],
+          "config": {
+            "systemInstruction": {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "You are a helpful agent.\nAnswer briefly.\n"
+                },
+                {
+                  "text": "second part"
+                }
+              ]
+            }
+          }
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "role": "model",
+              "parts": [
+                {
+                  "text": "OK"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "user_message_index": 0,
+      "agent_name": "single_line",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "Hi"
+                }
+              ]
+            }
+          ],
+          "config": {
+            "systemInstruction": {
+              "parts": [
+                {
+                  "text": "One line: with a colon"
+                }
+              ]
+            }
+          }
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "role": "model",
+              "parts": [
+                {
+                  "text": "OK"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "user_message_index": 0,
+      "agent_name": "no_text",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "Hi"
+                }
+              ]
+            }
+          ],
+          "config": {
+            "systemInstruction": {
+              "role": "user",
+              "parts": [
+                {
+                  "inlineData": {
+                    "mimeType": "text/plain",
+                    "data": "aGk="
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "role": "model",
+              "parts": [
+                {
+                  "text": "OK"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

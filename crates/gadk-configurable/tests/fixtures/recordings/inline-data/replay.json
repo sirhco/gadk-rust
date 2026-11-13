@@ -1,0 +1,54 @@
+{
+  "error": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "root_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "What is this?"
+                },
+                {
+                  "inlineData": {
+                    "data": "aGVsbG8=",
+                    "displayName": "hello.png",
+                    "mimeType": "image/png"
+                  }
+                },
+                {
+                  "inlineData": {
+                    "mimeType": "application/octet-stream"
+                  }
+                },
+                {
+                  "fileData": {
+                    "fileUri": "gs://bucket/file.pdf",
+                    "mimeType": "application/pdf"
+                  }
+                }
+              ],
+              "role": "user"
+            }
+          ]
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "A greeting."
+                }
+              ],
+              "role": "model"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

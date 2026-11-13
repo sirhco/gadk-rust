@@ -1,0 +1,26 @@
+recordings:
+    - user_message_index: 0
+      agent_name: root_agent
+      llm_recording:
+        llm_request:
+            model: gemini-2.5-flash
+            contents:
+                - parts:
+                    - text: Hi
+                  role: user
+                - parts:
+                    - text: thinking
+                      thought: true
+                      thought_signature: "c2lnbmF0dXJl"
+                    - function_call:
+                        args:
+                            a: 1
+                        name: f
+                      thought_signature: "AAEC/w=="
+                  role: model
+        llm_responses:
+            - content:
+                parts:
+                    - text: done
+                      thought_signature: "eA=="
+                role: model

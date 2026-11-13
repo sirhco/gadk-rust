@@ -1,0 +1,90 @@
+{
+  "case": "config-fields",
+  "streaming_mode": "none",
+  "user_message_index": 0,
+  "existing": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "root_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "Hi"
+                }
+              ]
+            }
+          ],
+          "config": {
+            "temperature": 0.7,
+            "topP": 0.95,
+            "topK": 40,
+            "candidateCount": 1,
+            "maxOutputTokens": 1024,
+            "stopSequences": [
+              "END",
+              ""
+            ],
+            "responseLogprobs": true,
+            "logprobs": 0,
+            "presencePenalty": 0,
+            "seed": 42,
+            "responseMimeType": "application/json",
+            "responseSchema": {
+              "type": "OBJECT",
+              "properties": {
+                "answer": {
+                  "type": "STRING"
+                }
+              }
+            },
+            "safetySettings": [
+              {
+                "category": "HARM_CATEGORY_HARASSMENT",
+                "threshold": "BLOCK_ONLY_HIGH"
+              }
+            ],
+            "toolConfig": {
+              "functionCallingConfig": {
+                "mode": "ANY",
+                "allowedFunctionNames": [
+                  "f"
+                ]
+              }
+            },
+            "labels": {
+              "team": "adk",
+              "empty": "",
+              "zero": "0"
+            },
+            "responseModalities": [
+              "TEXT"
+            ],
+            "thinkingConfig": {
+              "includeThoughts": true,
+              "thinkingBudget": 0
+            },
+            "enableEnhancedCivicAnswers": false
+          }
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "role": "model",
+              "parts": [
+                {
+                  "text": "{\"answer\": \"hi\"}"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

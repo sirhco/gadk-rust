@@ -1,0 +1,71 @@
+{
+  "case": "conformance-reimburse",
+  "streaming_mode": "none",
+  "user_message_index": 0,
+  "existing": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "tools_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "Hi"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "config": {
+            "tools": [
+              {
+                "functionDeclarations": [
+                  {
+                    "description": "Reimburse the amount of money to the employee.",
+                    "name": "reimburse",
+                    "parametersJsonSchema": {
+                      "type": "object",
+                      "properties": {
+                        "purpose": {
+                          "type": "string"
+                        },
+                        "amount": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "purpose",
+                        "amount"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "responseJsonSchema": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "done"
+                }
+              ],
+              "role": "model"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

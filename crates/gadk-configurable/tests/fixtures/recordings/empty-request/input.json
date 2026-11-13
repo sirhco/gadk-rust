@@ -1,0 +1,17 @@
+{
+  "case": "empty-request",
+  "streaming_mode": "none",
+  "user_message_index": 0,
+  "existing": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "",
+      "llm_recording": {
+        "llm_request": {
+          "model": ""
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+recordings:
+    - user_message_index: 1
+      agent_name: root_agent
+      llm_recording:
+        llm_request:
+            model: gemini-2.5-flash
+            contents:
+                - parts:
+                    - text: Thanks
+                  role: user
+        llm_responses:
+            - content:
+                parts:
+                    - text: You are welcome.
+                role: model
+    - user_message_index: 0
+      agent_name: root_agent
+      llm_recording:
+        llm_request:
+            model: gemini-2.5-flash
+            contents:
+                - parts:
+                    - text: Redo
+                  role: user
+        llm_responses:
+            - content:
+                parts:
+                    - text: Redone.
+                role: model

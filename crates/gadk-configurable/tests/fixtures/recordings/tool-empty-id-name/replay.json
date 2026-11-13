@@ -1,0 +1,21 @@
+{
+  "error": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "root_agent",
+      "tool_recording": {
+        "tool_call": {},
+        "tool_response": {}
+      }
+    },
+    {
+      "user_message_index": 0,
+      "agent_name": "root_agent",
+      "tool_recording": {
+        "tool_call": {},
+        "tool_response": {}
+      }
+    }
+  ]
+}

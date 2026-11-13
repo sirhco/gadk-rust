@@ -1,0 +1,30 @@
+recordings:
+    - user_message_index: 0
+      agent_name: root_agent
+      llm_recording:
+        llm_request:
+            model: gemini-2.5-flash
+            contents:
+                - parts:
+                    - text: Hi
+                  role: user
+        llm_responses:
+            - content:
+                parts:
+                    - text: Hello
+                role: model
+              usage_metadata:
+                cachedcontenttokencount: 2
+                candidates_token_count: 5
+                candidatestokensdetails:
+                    - modality: TEXT
+                      token_count: 5
+                prompt_token_count: 10
+                prompt_tokens_details:
+                    - modality: TEXT
+                      token_count: 10
+                    - modality: IMAGE
+                tool_use_prompt_token_count: 3
+                total_token_count: 15
+                traffic_type: ON_DEMAND
+              model_version: gemini-2.5-flash-001

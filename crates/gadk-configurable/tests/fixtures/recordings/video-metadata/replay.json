@@ -1,0 +1,63 @@
+{
+  "error": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "root_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "parts": [
+                {
+                  "fileData": {
+                    "fileUri": "gs://b/v.mp4",
+                    "mimeType": "video/mp4"
+                  },
+                  "videoMetadata": {
+                    "endOffset": "66s",
+                    "startOffset": "5s",
+                    "fps": 2
+                  }
+                },
+                {
+                  "fileData": {
+                    "fileUri": "gs://b/w.mp4",
+                    "mimeType": "video/mp4"
+                  },
+                  "videoMetadata": {
+                    "fps": 1
+                  }
+                },
+                {
+                  "fileData": {
+                    "fileUri": "gs://b/x.mp4",
+                    "mimeType": "video/mp4"
+                  },
+                  "videoMetadata": {
+                    "endOffset": "10s",
+                    "startOffset": "0s"
+                  }
+                }
+              ],
+              "role": "user"
+            }
+          ]
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "A video."
+                }
+              ],
+              "role": "model"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

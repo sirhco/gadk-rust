@@ -1,0 +1,28 @@
+{
+  "case": "merge-go-key-existing",
+  "streaming_mode": "none",
+  "user_message_index": 2,
+  "existing": "existing.yaml",
+  "recordings": [
+    {
+      "user_message_index": 2,
+      "agent_name": "root_agent",
+      "tool_recording": {
+        "tool_call": {
+          "id": "c",
+          "name": "t",
+          "args": {
+            "y": 2
+          }
+        },
+        "tool_response": {
+          "id": "c",
+          "name": "t",
+          "response": {
+            "r": 2
+          }
+        }
+      }
+    }
+  ]
+}

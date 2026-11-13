@@ -1,0 +1,53 @@
+{
+  "case": "google-search-time-range",
+  "streaming_mode": "none",
+  "user_message_index": 0,
+  "existing": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "root_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "Hi"
+                }
+              ]
+            }
+          ],
+          "config": {
+            "tools": [
+              {
+                "googleSearch": {
+                  "timeRangeFilter": {
+                    "startTime": "2024-01-02T03:04:05.123456789Z"
+                  },
+                  "excludeDomains": [
+                    "example.com"
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "role": "model",
+              "parts": [
+                {
+                  "text": "OK"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

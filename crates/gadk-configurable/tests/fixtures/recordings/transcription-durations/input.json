@@ -1,0 +1,47 @@
+{
+  "case": "transcription-durations",
+  "streaming_mode": "none",
+  "user_message_index": 0,
+  "existing": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "root_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "Hi"
+                }
+              ]
+            }
+          ]
+        },
+        "llm_responses": [
+          {
+            "inputTranscription": {
+              "text": "hello"
+            },
+            "outputTranscription": {
+              "text": "hi there",
+              "finished": true,
+              "startOffset": "1.5s",
+              "endOffset": "90s"
+            }
+          },
+          {
+            "outputTranscription": {
+              "text": "x",
+              "startOffset": "0s",
+              "endOffset": "3600s"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+recordings:
+    - user_message_index: 0
+      agent_name: root_agent
+      llm_recording:
+        llm_request:
+            model: gemini-2.5-flash
+            contents:
+                - parts:
+                    - text: Hi
+                  role: user
+            config:
+                tools:
+                    - google_search:
+                        excludedomains:
+                            - example.com
+                        timerangefilter:
+                            endtime: 0001-01-01T00:00:00Z
+                            starttime: 2024-01-02T03:04:05.123456789Z
+        llm_responses:
+            - content:
+                parts:
+                    - text: OK
+                role: model

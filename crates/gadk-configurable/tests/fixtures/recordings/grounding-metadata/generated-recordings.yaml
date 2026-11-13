@@ -1,0 +1,44 @@
+recordings:
+    - user_message_index: 0
+      agent_name: root_agent
+      llm_recording:
+        llm_request:
+            model: gemini-2.5-flash
+            contents:
+                - parts:
+                    - text: Hi
+                  role: user
+        llm_responses:
+            - content:
+                parts:
+                    - text: Paris is the capital.
+                role: model
+              grounding_metadata:
+                grounding_chunks:
+                    - web:
+                        domain: example.com
+                        title: Paris
+                        uri: https://example.com/paris
+                    - {}
+                grounding_supports:
+                    - confidencescores:
+                        - 0.9
+                        - 0.1
+                        - 0
+                      grounding_chunk_indices:
+                        - 0
+                        - 1
+                      segment:
+                        end_index: 21
+                        text: Paris is the capital.
+                retrieval_metadata:
+                    googlesearchdynamicretrievalscore: 0.25
+                search_entry_point:
+                    rendered_content: <div>search</div>
+                    sdkblob:
+                        - 1
+                        - 2
+                        - 3
+                web_search_queries:
+                    - capital of france
+                google_maps_widget_context_token: tok
