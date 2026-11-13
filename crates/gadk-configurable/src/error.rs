@@ -125,25 +125,8 @@ impl From<gadk_goyaml::Error> for ConfigError {
     }
 }
 
-/// Go's `syscall.Errno.Error()` text for `err`: the C library's message for the OS error code
-/// with its first letter lowercased (Go's errno tables are generated from the same messages,
-/// e.g. `no such file or directory`, `permission denied`, `is a directory`); an error without
-/// an OS code keeps its own text.
-pub fn go_errno_text(err: &io::Error) -> String {
-    let Some(code) = err.raw_os_error() else {
-        return err.to_string();
-    };
-    let text = io::Error::from_raw_os_error(code).to_string();
-    let text = match text.rfind(" (os error ") {
-        Some(i) => &text[..i],
-        None => text.as_str(),
-    };
-    let mut chars = text.chars();
-    match chars.next() {
-        Some(first) => first.to_lowercase().chain(chars).collect(),
-        None => String::new(),
-    }
-}
+/// Go's `syscall.Errno.Error()` text (shared with `gadk-a2a`; see [`gadk_platform::go_errno_text`]).
+pub use gadk_platform::go_errno_text;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -197,23 +180,6 @@ mod tests {
         );
         assert!(err.is_not_exist());
         assert!(!ConfigError::msg("x").is_not_exist());
-    }
-
-    #[test]
-    fn errno_text_is_lowercased_strerror() {
-        assert_eq!(
-            go_errno_text(&io::Error::from_raw_os_error(2)),
-            "no such file or directory"
-        );
-        assert_eq!(
-            go_errno_text(&io::Error::from_raw_os_error(13)),
-            "permission denied"
-        );
-        assert_eq!(
-            go_errno_text(&io::Error::from_raw_os_error(21)),
-            "is a directory"
-        );
-        assert_eq!(go_errno_text(&io::Error::other("custom")), "custom");
     }
 
     #[test]

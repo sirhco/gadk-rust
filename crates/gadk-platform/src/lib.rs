@@ -37,7 +37,7 @@ mod uuid;
 
 pub use exec::{TaskRunner, TokioTaskRunner};
 pub use futures::future::BoxFuture;
-pub use go_err::GoWrapped;
+pub use go_err::{GoWrapped, go_errno_text};
 pub use go_fmt::{
     go_format_float_g, go_format_float_v, go_query_escape, go_quote, go_quote_bytes,
     go_sprint_value, go_to_lower, go_to_upper, go_type_name,
