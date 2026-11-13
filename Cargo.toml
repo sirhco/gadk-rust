@@ -25,6 +25,7 @@ members = [
   "crates/gadk-agentregistry",
   "crates/gadk-telemetry",
   "crates/gadk-cli",
+  "crates/gadk-goyaml",
   "crates/gadk",
 ]
 
@@ -60,6 +61,7 @@ gadk-launcher = { path = "crates/gadk-launcher", version = "0.1.0" }
 gadk-agentregistry = { path = "crates/gadk-agentregistry", version = "0.1.0" }
 gadk-telemetry = { path = "crates/gadk-telemetry", version = "0.1.0" }
 gadk-cli = { path = "crates/gadk-cli", version = "0.1.0" }
+gadk-goyaml = { path = "crates/gadk-goyaml", version = "0.1.0" }
 tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
 tokio-util = "0.7.20"
 futures = "0.3.34"

@@ -4,7 +4,7 @@
 
 - Every member dependency entry is `{ workspace = true [, optional/features] }` (a self
   path dev-dependency `{ path = ".", features = [...] }` is allowed).
-- Package metadata is inherited.
+- Package metadata is inherited (except LICENSE_OVERRIDES' `license`).
 - Normal gadk-* dependencies of each crate equal ALLOWED[crate] exactly; OPTIONAL edges are
   `optional = true`.
 - A gadk-* dev-dependency is the crate itself or a crate that does not (transitively, via
@@ -59,6 +59,9 @@
 - 6b: `gadk-cli` (the `gadk` deploy binary) depends on exactly `gadk-platform`, `gadk-vertexai`
   (the Reasoning Engine client), `gadk-server` (feature `agentengine`, the class methods) and
   `gadk-model` (Go JSON); nothing depends on it. It has no direct `gadk-engine` edge.
+- 6c-1: `gadk-goyaml` depends on exactly `gadk-platform`; nothing depends on it. Its
+  `package.license` is `Apache-2.0 AND MIT` (LICENSE_OVERRIDES: the yaml.v3 port keeps
+  libyaml's MIT license for the libyaml-derived files) instead of the inherited one.
 """
 import pathlib, sys, tomllib
 
@@ -93,6 +96,7 @@ ALLOWED = {
     "gadk-agentregistry": {"gadk-agent", "gadk-auth", "gadk-platform", "gadk-a2a", "gadk-mcp"},
     "gadk-telemetry": {"gadk-engine", "gadk-model", "gadk-platform"},
     "gadk-cli": {"gadk-platform", "gadk-vertexai", "gadk-server", "gadk-model"},
+    "gadk-goyaml": {"gadk-platform"},
     "gadk": {"gadk-genai", "gadk-platform", "gadk-model", "gadk-session", "gadk-gemini",
              "gadk-agent", "gadk-engine", "gadk-tools", "gadk-auth", "gadk-mcp", "gadk-artifact",
              "gadk-memory", "gadk-anthropic", "gadk-openai", "gadk-session-database",
@@ -109,6 +113,7 @@ ENGINE_DEPENDENTS = ("gadk", "gadk-tools", "gadk-server", "gadk-a2a", "gadk-laun
                      "gadk-agentregistry", "gadk-telemetry")  # the only crates that may depend on gadk-engine
 TOOLS_DEPENDENT = "gadk"  # the only crate that may depend on gadk-tools
 OPENAI_DEPENDENT = "gadk"  # the only crate that may depend on gadk-openai (3b)
+LICENSE_OVERRIDES = {"gadk-goyaml": "Apache-2.0 AND MIT"}  # 6c-1: libyaml-derived files stay MIT
 
 
 def reaches(src, dst, seen=None):
@@ -140,6 +145,10 @@ def check(repo):
                 if not (isinstance(spec, dict) and spec.get("workspace") is True and "version" not in spec):
                     errs.append(f"{rel}: [{table}] {dep} must be {{ workspace = true }}")
         for key in ("version", "edition", "rust-version", "license", "repository"):
+            if key == "license" and name in LICENSE_OVERRIDES:
+                if data["package"].get(key) != LICENSE_OVERRIDES[name]:
+                    errs.append(f"{rel}: package.license must be {LICENSE_OVERRIDES[name]!r}")
+                continue
             if data["package"].get(key) != {"workspace": True}:
                 errs.append(f"{rel}: package.{key} must be inherited")
         if name not in ALLOWED:

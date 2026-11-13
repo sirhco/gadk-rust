@@ -1463,6 +1463,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "gadk-goyaml"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "chrono",
+ "gadk-platform",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "gadk-httprr"
 version = "0.1.0"
 dependencies = [
