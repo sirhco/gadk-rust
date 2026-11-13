@@ -94,7 +94,7 @@ pub fn from_go_node_partial(
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use crate::conformance::recording::{LlmRecording, Recording, ToolRecording};
+    use crate::conformance::recording::{LlmRecording, LlmRequestView, Recording, ToolRecording};
 
     fn marshal(recs: &Recordings) -> String {
         let doc = to_go_node(recs).unwrap();
@@ -150,5 +150,82 @@ mod tests {
         assert_eq!(recs.recordings[0].agent_name, "a");
         assert_eq!(recs.recordings[0].user_message_index, 0);
         assert_eq!(terr.unwrap().errors.len(), 1);
+    }
+
+    /// A recordings document whose response schema nests `{items: …}` `n` times (flow style,
+    /// within the parser's 10000 levels); the schema's mapping is the 6th collection.
+    fn deep_schema_doc(n: usize) -> Document {
+        let data = format!(
+            "recordings:\n  - user_message_index: 0\n    agent_name: a\n    llm_recording:\n      llm_request:\n        config:\n          responseschema: {}{{}}{}\n",
+            "{items: ".repeat(n),
+            "}".repeat(n)
+        );
+        gadk_goyaml::unmarshal_node(data.as_bytes()).unwrap()
+    }
+
+    // Plan decision D7: the inverse fixups' walk over recursive Go types (genai.Schema) is
+    // capped like gadk-goyaml's walks, so a deep file fails instead of overflowing the stack.
+    #[test]
+    fn deep_recordings_fail_to_decode_instead_of_overflowing() {
+        for n in [200, 10_000 - 10] {
+            let doc = deep_schema_doc(n);
+            let err = from_go_node_partial(&doc, doc.root()).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                "yaml: exceeded max depth of 127",
+                "n = {n}"
+            );
+        }
+        // 127 collections in all (6 above the innermost schema's 121) still decode.
+        let doc = deep_schema_doc(120);
+        let recs = from_go_node(&doc, doc.root()).unwrap();
+        let mut schema = recs.recordings[0]
+            .llm_recording
+            .as_ref()
+            .and_then(|l| l.llm_request.as_ref())
+            .and_then(|r| r.config.as_ref())
+            .and_then(|c| c.response_schema.as_ref());
+        let mut depth = 0;
+        while let Some(s) = schema {
+            depth += 1;
+            schema = s.items.as_deref();
+        }
+        assert_eq!(depth, 121);
+        let doc = deep_schema_doc(121);
+        let err = from_go_node(&doc, doc.root()).unwrap_err();
+        assert_eq!(err.to_string(), "yaml: exceeded max depth of 127");
+    }
+
+    // Plan decision D7: the builder's walk over recursive Go types is capped the same way.
+    #[test]
+    fn deep_recordings_fail_to_encode() {
+        let deep = |n: usize| {
+            let mut schema = gadk_genai::Schema::default();
+            for _ in 0..n {
+                schema = gadk_genai::Schema {
+                    items: Some(Box::new(schema)),
+                    ..Default::default()
+                };
+            }
+            Recordings {
+                recordings: vec![Recording {
+                    agent_name: "a".into(),
+                    llm_recording: Some(LlmRecording {
+                        llm_request: Some(LlmRequestView {
+                            config: Some(gadk_genai::GenerateContentConfig {
+                                response_schema: Some(schema),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }],
+            }
+        };
+        let err = to_go_node(&deep(200)).unwrap_err();
+        assert_eq!(err.to_string(), "yaml: exceeded max depth of 127");
+        assert!(to_go_node(&deep(20)).is_ok());
     }
 }

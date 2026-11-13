@@ -255,6 +255,36 @@ pub fn fixup_class(owner: &str, key: &str) -> Option<FixupClass> {
         .map(|f| f.class)
 }
 
+/// The deepest collection nesting the builder's and the inverse fixups' recursive walks over
+/// recursive Go types (`genai.Schema`, `jsonschema.Schema`) accept: gadk-goyaml's walk limit
+/// (plan decision D7, the workspace-wide 127).
+///
+/// Divergence (ledger 6c-2): Go's growable goroutine stacks let `node.Encode` and
+/// `node.Decode` go as deep as the data (and yaml.v3's parser, 10000) allow; gadk fails with
+/// gadk-goyaml's `yaml: exceeded max depth of 127` instead of overflowing the thread's stack.
+const MAX_WALK_DEPTH: usize = 127;
+
+/// gadk-goyaml's walk-depth error text (`yaml: exceeded max depth of 127`).
+fn walk_depth_exceeded() -> gadk_goyaml::Error {
+    gadk_goyaml::Error::Syntax(format!("yaml: exceeded max depth of {MAX_WALK_DEPTH}"))
+}
+
+/// Runs `f` one collection deeper (`depth` counts the enclosing collections), failing past
+/// [`MAX_WALK_DEPTH`] as gadk-goyaml's walks do.
+fn nested<S, T>(
+    s: &mut S,
+    depth: fn(&mut S) -> &mut usize,
+    f: impl FnOnce(&mut S) -> Result<T, gadk_goyaml::Error>,
+) -> Result<T, gadk_goyaml::Error> {
+    if *depth(s) >= MAX_WALK_DEPTH {
+        return Err(walk_depth_exceeded());
+    }
+    *depth(s) += 1;
+    let r = f(s);
+    *depth(s) -= 1;
+    r
+}
+
 /// The Go type name of jsonschema-go's `Schema` (the `JsonSchema` root).
 pub const JSONSCHEMA_TYPE: &str = "jsonschema.Schema";
 
@@ -274,6 +304,9 @@ pub(crate) struct Builder {
     pub(crate) doc: Document,
     /// gadk serde keys no shape field consumed (`<go type>.<json key>`), for the tests.
     pub(crate) unmapped: Vec<String>,
+    /// The struct/slice/map nesting of the walk (below the hand-built roots, so never more
+    /// than the encoded document's).
+    depth: usize,
 }
 
 impl Builder {
@@ -281,7 +314,12 @@ impl Builder {
         Builder {
             doc: Document::default(),
             unmapped: Vec::new(),
+            depth: 0,
         }
+    }
+
+    fn depth(&mut self) -> &mut usize {
+        &mut self.depth
     }
 
     fn push(&mut self, kind: Kind, tag: &str, style: Style, value: &str) -> NodeId {
@@ -362,6 +400,16 @@ impl Builder {
     /// The mapping of struct type `go_type` from its gadk JSON object (`None` = every field
     /// zero): every Go field in Go order, absent ones as Go's zero node.
     pub(crate) fn struct_node(
+        &mut self,
+        go_type: &str,
+        obj: Option<&Map<String, Value>>,
+        keys: Keys,
+    ) -> Result<NodeId, gadk_goyaml::Error> {
+        nested(self, Self::depth, |b| b.struct_fields(go_type, obj, keys))
+    }
+
+    /// [`Self::struct_node`] one level down.
+    fn struct_fields(
         &mut self,
         go_type: &str,
         obj: Option<&Map<String, Value>>,
@@ -452,28 +500,32 @@ impl Builder {
                     self.elem_node(inner, elem, v)
                 };
             };
-            let mut content = Vec::with_capacity(items.len());
-            for item in items {
-                content.push(self.elem_node(inner, elem, item)?);
-            }
-            return Ok(self.sequence(content));
+            return nested(self, Self::depth, |b| {
+                let mut content = Vec::with_capacity(items.len());
+                for item in items {
+                    content.push(b.elem_node(inner, elem, item)?);
+                }
+                Ok(b.sequence(content))
+            });
         }
         if let Some(inner) = t.strip_prefix("map[string]") {
             let Value::Object(m) = v else {
                 return self.zero(Zero::EmptyMap);
             };
             let order = go_key_order(m.keys().map(String::as_str))?;
-            let mut content = Vec::with_capacity(m.len() * 2);
-            for k in order {
-                let key = self.key(&k)?;
-                let val = match m.get(&k) {
-                    Some(item) => self.elem_node(inner, elem, item)?,
-                    None => self.null(),
-                };
-                content.push(key);
-                content.push(val);
-            }
-            return Ok(self.mapping(content));
+            return nested(self, Self::depth, |b| {
+                let mut content = Vec::with_capacity(m.len() * 2);
+                for k in order {
+                    let key = b.key(&k)?;
+                    let val = match m.get(&k) {
+                        Some(item) => b.elem_node(inner, elem, item)?,
+                        None => b.null(),
+                    };
+                    content.push(key);
+                    content.push(val);
+                }
+                Ok(b.mapping(content))
+            });
         }
         // A (pointer to a) struct.
         if v.is_null() {
@@ -629,6 +681,7 @@ pub(crate) fn invert(
     let mut inv = Inverse {
         doc,
         errors: Vec::new(),
+        depth: 0,
     };
     let mut root = at;
     if inv.doc[root].kind == Kind::Document {
@@ -649,11 +702,15 @@ pub(crate) fn invert(
                     let Some(&(_, ty)) = ROOT_TYPES.iter().find(|(name, _)| *name == rk) else {
                         continue;
                     };
+                    // Enclosing collections: the root mapping, `recordings`, the recording and
+                    // its `llm_recording` / `tool_recording` (+ the `llm_responses` sequence).
                     if rk == "llm_responses" {
+                        inv.depth = 5;
                         for item in inv.items(rv) {
                             inv.walk_struct(ty, item)?;
                         }
                     } else {
+                        inv.depth = 4;
                         inv.walk_struct(ty, rv)?;
                     }
                 }
@@ -666,9 +723,16 @@ pub(crate) fn invert(
 struct Inverse<'a> {
     doc: &'a mut Document,
     errors: Vec<(usize, String)>,
+    /// The collections enclosing the node being walked (as gadk-goyaml's decoder counts them:
+    /// mappings and sequences, the document node not included).
+    depth: usize,
 }
 
 impl Inverse<'_> {
+    fn depth(&mut self) -> &mut usize {
+        &mut self.depth
+    }
+
     /// The `(key, value)` pairs of mapping `m` whose scalar key is one of `keys` (all scalar
     /// keys when `keys` is empty), in document order.
     fn pairs(&self, m: NodeId, keys: &[&str]) -> Vec<(String, NodeId)> {
@@ -703,6 +767,14 @@ impl Inverse<'_> {
         let Some(s) = shape(go_type) else {
             return Ok(());
         };
+        if self.doc[m].kind != Kind::Mapping {
+            return Ok(());
+        }
+        nested(self, Self::depth, |inv| inv.walk_fields(s, m))
+    }
+
+    /// [`Self::walk_struct`] one level down.
+    fn walk_fields(&mut self, s: &Shape, m: NodeId) -> Result<(), gadk_goyaml::Error> {
         for (k, v) in self.pairs(m, &[]) {
             let Some(f) = s.fields.iter().find(|f| f.key == k) else {
                 continue;
@@ -730,16 +802,26 @@ impl Inverse<'_> {
     ) -> Result<(), gadk_goyaml::Error> {
         let t = go_type.trim_start_matches('*');
         if let Some(inner) = t.strip_prefix("[]") {
-            for item in self.items(v) {
-                self.walk_elem(inner, elem, item)?;
+            if self.doc[v].kind != Kind::Sequence {
+                return Ok(());
             }
-            return Ok(());
+            return nested(self, Self::depth, |inv| {
+                for item in inv.items(v) {
+                    inv.walk_elem(inner, elem, item)?;
+                }
+                Ok(())
+            });
         }
         if let Some(inner) = t.strip_prefix("map[string]") {
-            for (_, item) in self.pairs(v, &[]) {
-                self.walk_elem(inner, elem, item)?;
+            if self.doc[v].kind != Kind::Mapping {
+                return Ok(());
             }
-            return Ok(());
+            return nested(self, Self::depth, |inv| {
+                for (_, item) in inv.pairs(v, &[]) {
+                    inv.walk_elem(inner, elem, item)?;
+                }
+                Ok(())
+            });
         }
         self.walk_struct(elem, v)
     }
