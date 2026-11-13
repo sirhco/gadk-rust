@@ -22,8 +22,6 @@
 //! [`TableMetadata`] / [`TableMetadataUpdate`] are the parts of Go's `bigquery.TableMetadata` /
 //! `bigquery.TableMetadataToUpdate` the package reads or writes.
 
-#![allow(dead_code, unused_variables, unused_imports, clippy::todo)]
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
@@ -124,7 +122,58 @@ pub async fn ensure_table_and_schema(
     config: &Config,
     denied: &BTreeSet<String>,
 ) -> Result<(), Error> {
-    todo!("Task 8")
+    let desired = project_events_schema(denied);
+    let md = match table.metadata(ctx).await {
+        Ok(md) => md,
+        Err(err) => {
+            if !is_not_found_error(&err) {
+                return Err(metadata_error(config, err));
+            }
+            config.logf(format_args!(
+                "Table {} not found. Creating it...",
+                config.table_name
+            ));
+            let meta = TableMetadata {
+                schema: desired.clone(),
+                // Partition by DAY on timestamp for parity with adk-python and adk-java.
+                time_partitioning: Some(TimePartitioning {
+                    field: TIMESTAMP_FIELD.to_owned(),
+                    partition_type: DAY_PARTITIONING_TYPE.to_owned(),
+                    ..TimePartitioning::default()
+                }),
+                clustering: Some(Clustering {
+                    fields: config.clustering_fields.clone(),
+                }),
+                labels: BTreeMap::from([(
+                    SCHEMA_VERSION_KEY.to_owned(),
+                    SCHEMA_VERSION.to_owned(),
+                )]),
+                ..TableMetadata::default()
+            };
+            return match table.create(ctx, &meta).await {
+                Ok(()) => Ok(()),
+                Err(create_err) if is_conflict_error(&create_err) => {
+                    if config.disable_schema_upgrade {
+                        return Ok(());
+                    }
+                    let md = table
+                        .metadata(ctx)
+                        .await
+                        .map_err(|err| metadata_error(config, err))?;
+                    maybe_upgrade_schema(ctx, table, md, config, &desired).await
+                }
+                Err(create_err) => Err(Error::wrap(
+                    format!("failed to create BigQuery table {}", config.table_name),
+                    create_err,
+                )),
+            };
+        }
+    };
+
+    if config.disable_schema_upgrade {
+        return Ok(());
+    }
+    maybe_upgrade_schema(ctx, table, md, config, &desired).await
 }
 
 /// Go `maybeUpgradeSchema`: adds the missing columns of `desired` with an etag-guarded update
@@ -137,7 +186,64 @@ pub async fn maybe_upgrade_schema(
     config: &Config,
     desired: &[FieldSchema],
 ) -> Result<(), Error> {
-    todo!("Task 8")
+    let mut md = md;
+    let mut attempt = 0;
+    loop {
+        if attempt > 0 {
+            md = table
+                .metadata(ctx)
+                .await
+                .map_err(|err| metadata_error(config, err))?;
+        }
+
+        let (updated_schema, schema_changed) =
+            upgrade_table_schema(&md.schema, desired).map_err(|err| {
+                Error::wrap(
+                    format!("incompatible BigQuery table {} schema", config.table_name),
+                    Error::SchemaMismatch(err),
+                )
+            })?;
+        if !schema_changed {
+            // Intentionally skip a label-only update when all columns already match so
+            // startup remains read-only on up-to-date tables.
+            return Ok(());
+        }
+
+        let mut update = TableMetadataUpdate {
+            schema: Some(updated_schema),
+            ..TableMetadataUpdate::default()
+        };
+        update.set_label(SCHEMA_VERSION_KEY, SCHEMA_VERSION);
+
+        match table.update(ctx, &update, &md.etag).await {
+            Ok(_) => return Ok(()),
+            Err(err)
+                if is_precondition_failed_error(&err) && attempt < MAX_PRECONDITION_RETRIES =>
+            {
+                attempt += 1;
+            }
+            Err(err) => {
+                return Err(Error::wrap(
+                    format!(
+                        "failed to upgrade BigQuery table {} schema",
+                        config.table_name
+                    ),
+                    err,
+                ));
+            }
+        }
+    }
+}
+
+/// Go `fmt.Errorf("failed to get BigQuery table %s metadata: %w", config.TableName, err)`.
+fn metadata_error(config: &Config, err: Error) -> Error {
+    Error::wrap(
+        format!(
+            "failed to get BigQuery table {} metadata",
+            config.table_name
+        ),
+        err,
+    )
 }
 
 #[cfg(test)]
