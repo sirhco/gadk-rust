@@ -1,0 +1,38 @@
+recordings:
+  - user_message_index: 0
+    agent_name: a
+    llm_recording:
+      llm_request:
+        model: m
+        contents:
+          - role: user
+            parts:
+              - text: hi
+              - functioncall:
+                  name: f
+                  args: {x: 1}
+                thoughtsignature: [1, 2]
+        config:
+          systeminstruction:
+            parts:
+              - text: sys
+          temperature: 0.5
+      llm_responses:
+        - content:
+            role: model
+            parts:
+              - text: ok
+          usagemetadata:
+            totaltokencount: 3
+          finishreason: STOP
+  - user_message_index: 1
+    agent_name: b
+    tool_recording:
+      tool_call:
+        name: t
+        args: {}
+      tool_response:
+        name: t
+        response: {r: 1}
+  - user_message_index: 2
+    agent_name: dropped

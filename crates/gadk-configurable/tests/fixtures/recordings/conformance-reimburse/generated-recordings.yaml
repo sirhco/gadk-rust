@@ -1,0 +1,33 @@
+recordings:
+    - user_message_index: 0
+      agent_name: tools_agent
+      llm_recording:
+        llm_request:
+            model: gemini-2.5-flash
+            contents:
+                - parts:
+                    - text: Hi
+                  role: user
+            config:
+                tools:
+                    - function_declarations:
+                        - description: Reimburse the amount of money to the employee.
+                          name: reimburse
+                          parameters_json_schema:
+                            title: "reimburseParams"
+                            type: object
+                            required:
+                                - purpose
+                                - amount
+                            properties:
+                                amount:
+                                    title: "Amount"
+                                    type: number
+                                purpose:
+                                    title: "Purpose"
+                                    type: string
+        llm_responses:
+            - content:
+                parts:
+                    - text: done
+                role: model

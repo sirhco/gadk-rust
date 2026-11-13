@@ -1,0 +1,34 @@
+recordings:
+    - user_message_index: 0
+      agent_name: root_agent
+      llm_recording:
+        llm_request:
+            model: gemini-2.5-flash
+            contents:
+                - parts:
+                    - file_data:
+                        fileuri: gs://b/v.mp4
+                        mimetype: video/mp4
+                      video_metadata:
+                        endoffset: 1m5.5s
+                        fps: 2
+                        startoffset: 5s
+                    - file_data:
+                        fileuri: gs://b/w.mp4
+                        mimetype: video/mp4
+                      video_metadata:
+                        endoffset: 0s
+                        fps: 1
+                        startoffset: 0s
+                    - file_data:
+                        fileuri: gs://b/x.mp4
+                        mimetype: video/mp4
+                      video_metadata:
+                        endoffset: 10s
+                        startoffset: 0s
+                  role: user
+        llm_responses:
+            - content:
+                parts:
+                    - text: A video.
+                role: model

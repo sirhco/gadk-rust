@@ -1,0 +1,24 @@
+recordings:
+    - user_message_index: 0
+      agent_name: root_agent
+      llm_recording:
+        llm_request:
+            model: gemini-2.5-flash
+            contents:
+                - parts:
+                    - text: Hi
+                  role: user
+        llm_responses:
+            - content:
+                parts:
+                    - executable_code:
+                        code: print(1)
+                        language: PYTHON
+                    - code_execution_result:
+                        outcome: OUTCOME_OK
+                        output: |
+                            1
+                    - text: "1"
+                      part_metadata:
+                        k: v
+                role: model

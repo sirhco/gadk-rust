@@ -1,0 +1,78 @@
+recordings:
+    - user_message_index: 0
+      agent_name: tools_agent
+      llm_recording:
+        llm_request:
+            model: gemini-2.5-flash
+            contents:
+                - parts:
+                    - text: Hi
+                  role: user
+            config:
+                tools:
+                    - function_declarations:
+                        - description: |
+                            Search for flights based on trip details and preferences.
+
+                            This function demonstrates advanced parameter handling:
+                            - Pydantic models as parameters (trip, preferences)
+                            - Optional/nullable parameters (preferences, return_date, preferred_airline)
+                            - Default values (cabin_class, max_stops, flexible_dates)
+
+                            Args:
+                              trip: Core trip information including origin, destination, and dates.
+                              preferences: Optional flight preferences. If not provided, uses defaults.
+
+                            Returns:
+                              A dictionary containing search results and parameters received.
+                          name: search_flights
+                          parameters_json_schema:
+                            title: "search_flightsParams"
+                            type: object
+                            required:
+                                - trip
+                                - preferences
+                            properties:
+                                preferences:
+                                    title: "Preferences"
+                                    types:
+                                        - "null"
+                                        - object
+                                    required:
+                                        - cabin_class
+                                        - max_stops
+                                        - preferred_airline
+                                        - flexible_dates
+                                    properties:
+                                        cabin_class:
+                                            type: string
+                                        flexible_dates:
+                                            type: boolean
+                                        max_stops:
+                                            type: integer
+                                        preferred_airline:
+                                            types:
+                                                - "null"
+                                                - string
+                                trip:
+                                    title: "Trip"
+                                    type: object
+                                    required:
+                                        - origin
+                                        - destination
+                                        - departure_date
+                                        - return_date
+                                    properties:
+                                        departure_date:
+                                            type: string
+                                        destination:
+                                            type: string
+                                        origin:
+                                            type: string
+                                        return_date:
+                                            type: string
+        llm_responses:
+            - content:
+                parts:
+                    - text: done
+                role: model

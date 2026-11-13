@@ -1,0 +1,197 @@
+{
+  "case": "mixed-sequence",
+  "streaming_mode": "none",
+  "user_message_index": 0,
+  "existing": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "root_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "Weather?"
+                }
+              ]
+            }
+          ],
+          "config": {
+            "systemInstruction": {
+              "parts": [
+                {
+                  "text": "Use tools."
+                }
+              ]
+            },
+            "tools": [
+              {
+                "functionDeclarations": [
+                  {
+                    "name": "get_weather",
+                    "description": "Gets weather.",
+                    "parameters": {
+                      "type": "OBJECT",
+                      "properties": {
+                        "city": {
+                          "type": "STRING"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "role": "model",
+              "parts": [
+                {
+                  "functionCall": {
+                    "id": "adk-1",
+                    "name": "get_weather",
+                    "args": {
+                      "city": "Paris"
+                    }
+                  }
+                }
+              ]
+            },
+            "usageMetadata": {
+              "promptTokenCount": 7,
+              "totalTokenCount": 9,
+              "candidatesTokenCount": 2
+            }
+          }
+        ]
+      }
+    },
+    {
+      "user_message_index": 0,
+      "agent_name": "root_agent",
+      "tool_recording": {
+        "tool_call": {
+          "id": "adk-1",
+          "name": "get_weather",
+          "args": {
+            "city": "Paris"
+          }
+        },
+        "tool_response": {
+          "id": "adk-1",
+          "name": "get_weather",
+          "response": {
+            "temp": 21
+          }
+        }
+      }
+    },
+    {
+      "user_message_index": 0,
+      "agent_name": "root_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "Weather?"
+                }
+              ]
+            },
+            {
+              "role": "model",
+              "parts": [
+                {
+                  "functionCall": {
+                    "id": "adk-1",
+                    "name": "get_weather",
+                    "args": {
+                      "city": "Paris"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "functionResponse": {
+                    "id": "adk-1",
+                    "name": "get_weather",
+                    "response": {
+                      "temp": 21
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "config": {
+            "systemInstruction": {
+              "parts": [
+                {
+                  "text": "Use tools."
+                }
+              ]
+            }
+          }
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "role": "model",
+              "parts": [
+                {
+                  "text": "21 degrees."
+                }
+              ]
+            },
+            "finishReason": "STOP"
+          }
+        ]
+      }
+    },
+    {
+      "user_message_index": 0,
+      "agent_name": "helper_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "Weather?"
+                }
+              ]
+            }
+          ]
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "role": "model",
+              "parts": [
+                {
+                  "text": "Delegated."
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

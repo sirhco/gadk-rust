@@ -1,0 +1,64 @@
+{
+  "case": "usage-metadata",
+  "streaming_mode": "none",
+  "user_message_index": 0,
+  "existing": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "root_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "Hi"
+                }
+              ]
+            }
+          ]
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "role": "model",
+              "parts": [
+                {
+                  "text": "Hello"
+                }
+              ]
+            },
+            "usageMetadata": {
+              "promptTokenCount": 10,
+              "candidatesTokenCount": 5,
+              "totalTokenCount": 15,
+              "thoughtsTokenCount": 0,
+              "cachedContentTokenCount": 2,
+              "toolUsePromptTokenCount": 3,
+              "promptTokensDetails": [
+                {
+                  "modality": "TEXT",
+                  "tokenCount": 10
+                },
+                {
+                  "modality": "IMAGE"
+                }
+              ],
+              "candidatesTokensDetails": [
+                {
+                  "modality": "TEXT",
+                  "tokenCount": 5
+                }
+              ],
+              "trafficType": "ON_DEMAND"
+            },
+            "modelVersion": "gemini-2.5-flash-001"
+          }
+        ]
+      }
+    }
+  ]
+}

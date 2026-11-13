@@ -1,0 +1,29 @@
+recordings:
+    - user_message_index: 0
+      agent_name: tools_agent
+      llm_recording:
+        llm_request:
+            model: gemini-2.5-flash
+            contents:
+                - parts:
+                    - text: Hi
+                  role: user
+            config:
+                tools:
+                    - function_declarations:
+                        - description: Retrieves a user ID based on their email.
+                          name: get_user_id
+                          parameters_json_schema:
+                            title: "get_user_idParams"
+                            type: object
+                            required:
+                                - email
+                            properties:
+                                email:
+                                    title: "Email"
+                                    type: string
+        llm_responses:
+            - content:
+                parts:
+                    - text: done
+                role: model

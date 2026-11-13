@@ -1,0 +1,51 @@
+{
+  "case": "sanitize-http-options",
+  "streaming_mode": "none",
+  "user_message_index": 0,
+  "existing": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "root_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "Hi"
+                }
+              ]
+            }
+          ],
+          "config": {
+            "httpOptions": {
+              "baseUrl": "https://example.com",
+              "apiVersion": "v1",
+              "headers": {
+                "X-A": [
+                  "b"
+                ]
+              }
+            },
+            "temperature": 0.5
+          }
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "role": "model",
+              "parts": [
+                {
+                  "text": "OK"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

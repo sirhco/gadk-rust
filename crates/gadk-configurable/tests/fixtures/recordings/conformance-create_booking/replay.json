@@ -1,0 +1,71 @@
+{
+  "error": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "tools_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "Hi"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "config": {
+            "tools": [
+              {
+                "functionDeclarations": [
+                  {
+                    "description": "Creates a booking for a user.\n\nArgs:\n  user_id: The unique identifier for the user.\n  is_confirmed: Whether the booking is confirmed.\n  details: Any additional details for the booking.\n\nReturns:\n  A dictionary containing the booking information and the types of the\n  received arguments.",
+                    "name": "create_booking",
+                    "parametersJsonSchema": {
+                      "properties": {
+                        "details": {
+                          "title": "Details",
+                          "type": "string"
+                        },
+                        "isconfirmed": {
+                          "title": "Is Confirmed",
+                          "type": "boolean"
+                        },
+                        "userid": {
+                          "title": "User Id",
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "user_id",
+                        "is_confirmed",
+                        "details"
+                      ],
+                      "title": "create_bookingParams",
+                      "type": "object"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "done"
+                }
+              ],
+              "role": "model"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

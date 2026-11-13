@@ -1,0 +1,82 @@
+{
+  "case": "grounding-metadata",
+  "streaming_mode": "none",
+  "user_message_index": 0,
+  "existing": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "root_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "Hi"
+                }
+              ]
+            }
+          ]
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "role": "model",
+              "parts": [
+                {
+                  "text": "Paris is the capital."
+                }
+              ]
+            },
+            "groundingMetadata": {
+              "groundingChunks": [
+                {
+                  "web": {
+                    "uri": "https://example.com/paris",
+                    "title": "Paris",
+                    "domain": "example.com"
+                  }
+                },
+                {
+                  "web": {}
+                }
+              ],
+              "groundingSupports": [
+                {
+                  "segment": {
+                    "startIndex": 0,
+                    "endIndex": 21,
+                    "text": "Paris is the capital."
+                  },
+                  "groundingChunkIndices": [
+                    0,
+                    1
+                  ],
+                  "confidenceScores": [
+                    0.9,
+                    0.1,
+                    0
+                  ]
+                }
+              ],
+              "retrievalMetadata": {
+                "googleSearchDynamicRetrievalScore": 0.25
+              },
+              "searchEntryPoint": {
+                "renderedContent": "<div>search</div>",
+                "sdkBlob": "AQID"
+              },
+              "webSearchQueries": [
+                "capital of france"
+              ],
+              "googleMapsWidgetContextToken": "tok"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,97 @@
+{
+  "case": "function-response",
+  "streaming_mode": "none",
+  "user_message_index": 0,
+  "existing": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "root_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "Hi"
+                }
+              ]
+            },
+            {
+              "role": "model",
+              "parts": [
+                {
+                  "functionCall": {
+                    "id": "adk-1",
+                    "name": "get_weather",
+                    "args": {
+                      "city": "Paris"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "functionResponse": {
+                    "id": "adk-1",
+                    "name": "get_weather",
+                    "response": {
+                      "temp": 21.5,
+                      "ok": false,
+                      "unit": "",
+                      "count": 0,
+                      "tags": [],
+                      "meta": {}
+                    }
+                  }
+                },
+                {
+                  "functionResponse": {
+                    "name": "noop",
+                    "response": {}
+                  }
+                },
+                {
+                  "functionResponse": {
+                    "id": "adk-3",
+                    "name": "image",
+                    "response": {
+                      "result": "see part"
+                    },
+                    "willContinue": false,
+                    "scheduling": "SILENT",
+                    "parts": [
+                      {
+                        "inlineData": {
+                          "mimeType": "image/png",
+                          "data": "iVBORw0K"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "role": "model",
+              "parts": [
+                {
+                  "text": "It is 21.5C."
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

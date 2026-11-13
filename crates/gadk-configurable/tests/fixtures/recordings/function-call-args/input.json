@@ -1,0 +1,78 @@
+{
+  "case": "function-call-args",
+  "streaming_mode": "none",
+  "user_message_index": 0,
+  "existing": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "root_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "Weather in Paris?"
+                }
+              ]
+            }
+          ]
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "role": "model",
+              "parts": [
+                {
+                  "functionCall": {
+                    "id": "adk-1",
+                    "name": "get_weather",
+                    "args": {
+                      "city": "Paris",
+                      "days": 3,
+                      "ratio": 1.5,
+                      "big": 12345678901,
+                      "flag": false,
+                      "on": true,
+                      "zero": 0,
+                      "empty": "",
+                      "nothing": null,
+                      "list": [],
+                      "items": [
+                        1,
+                        "two",
+                        3.25,
+                        null,
+                        {
+                          "k": "v"
+                        }
+                      ],
+                      "obj": {},
+                      "nested": {
+                        "a": {
+                          "b": [
+                            0,
+                            false,
+                            ""
+                          ]
+                        }
+                      },
+                      "text_multi": "line1\nline2",
+                      "quoted": "yes",
+                      "num_str": "42",
+                      "colon": "a: b"
+                    }
+                  }
+                }
+              ]
+            },
+            "finishReason": "STOP"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+recordings:
+    - user_message_index: 0
+      agent_name: root_agent
+      llm_recording:
+        llm_request:
+            model: gemini-2.5-flash
+            contents:
+                - parts:
+                    - text: Hi
+                  role: user
+        llm_responses:
+            - content:
+                parts:
+                    - text: Quoted.
+                role: model
+              citation_metadata:
+                citations:
+                    - end_index: 7
+                      license: mit
+                      publicationdate: "2024-01-02"
+                      title: A
+                      uri: https://example.com/a
+                    - end_index: 3
+                      publicationdate: 0000-00-00
+                      start_index: 1
+                      uri: https://example.com/b

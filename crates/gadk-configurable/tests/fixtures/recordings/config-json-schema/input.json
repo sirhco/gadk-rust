@@ -1,0 +1,151 @@
+{
+  "case": "config-json-schema",
+  "streaming_mode": "none",
+  "user_message_index": 0,
+  "existing": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "root_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "Hi"
+                }
+              ]
+            }
+          ],
+          "config": {
+            "tools": [
+              {
+                "functionDeclarations": [
+                  {
+                    "name": "book_trip",
+                    "description": "Books a trip.",
+                    "parametersJsonSchema": {
+                      "$schema": "https://json-schema.org/draft/2020-12/schema",
+                      "$defs": {
+                        "Leg": {
+                          "type": "object",
+                          "properties": {
+                            "from": {
+                              "type": "string"
+                            },
+                            "to": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "from",
+                            "to"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "type": "object",
+                      "properties": {
+                        "legs": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/$defs/Leg"
+                          },
+                          "minItems": 1
+                        },
+                        "class": {
+                          "type": "string",
+                          "enum": [
+                            "economy",
+                            "business"
+                          ],
+                          "default": "economy"
+                        },
+                        "passengers": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9,
+                          "default": 1
+                        },
+                        "note": {
+                          "type": [
+                            "null",
+                            "string"
+                          ],
+                          "description": "Optional note."
+                        },
+                        "flex": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "const": 3
+                            }
+                          ]
+                        },
+                        "budget": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "multipleOf": 0.01
+                        }
+                      },
+                      "required": [
+                        "legs"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "responseJsonSchema": {
+                      "type": "object",
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "name": "true_schema",
+                    "parametersJsonSchema": true
+                  },
+                  {
+                    "name": "empty_schema",
+                    "parametersJsonSchema": {}
+                  },
+                  {
+                    "name": "false_props",
+                    "parametersJsonSchema": {
+                      "type": "object",
+                      "properties": {
+                        "x": false,
+                        "y": true
+                      }
+                    }
+                  }
+                ]
+              }
+            ],
+            "responseJsonSchema": {
+              "type": "object"
+            }
+          }
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "role": "model",
+              "parts": [
+                {
+                  "text": "OK"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

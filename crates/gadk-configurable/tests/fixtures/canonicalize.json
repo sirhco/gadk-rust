@@ -1,0 +1,202 @@
+[
+  {
+    "input": "",
+    "modify": "",
+    "output": ""
+  },
+  {
+    "input": "no json here",
+    "modify": "no json here",
+    "output": "no json here"
+  },
+  {
+    "input": "{\"b\": 1, \"a\": 2}",
+    "modify": "{\"b\": 1, \"a\": 2}",
+    "output": "{\"a\":2,\"b\":1}"
+  },
+  {
+    "input": "  {\"a\" : [ ] }  ",
+    "modify": "  {\"a\" : [ ] }  ",
+    "output": "  {\"a\":[]}  "
+  },
+  {
+    "input": "[1, 2, 3]",
+    "modify": "[1, 2, 3]",
+    "output": "[1,2,3]"
+  },
+  {
+    "input": "text {} and []",
+    "modify": "text {} and []",
+    "output": "text {} and []"
+  },
+  {
+    "input": "prefix {\"z\": [1, 2], \"a\": {\"y\": 1, \"x\": 2}} suffix",
+    "modify": "prefix {\"z\": [1, 2], \"a\": {\"y\": 1, \"x\": 2}} suffix",
+    "output": "prefix {\"a\":{\"x\":2,\"y\":1},\"z\":[1,2]} suffix"
+  },
+  {
+    "input": "{\"a\": 1} and {\"b\": 2}",
+    "modify": "{\"a\": 1} and {\"b\": 2}",
+    "output": "{\"a\": 1} and {\"b\": 2}"
+  },
+  {
+    "input": "{\"a\": 1} and [2]",
+    "modify": "{\"a\": 1} and [2]",
+    "output": "{\"a\": 1} and [2]"
+  },
+  {
+    "input": "{\"a\":\n 1}",
+    "modify": "{\"a\":\n 1}",
+    "output": "{\"a\":\n 1}"
+  },
+  {
+    "input": "line one {\"b\": 1, \"a\": 2}\nline two {\"d\": 1, \"c\": 2}",
+    "modify": "line one {\"b\": 1, \"a\": 2}\nline two {\"d\": 1, \"c\": 2}",
+    "output": "line one {\"a\":2,\"b\":1}\nline two {\"c\":2,\"d\":1}"
+  },
+  {
+    "input": "{not json}",
+    "modify": "{not json}",
+    "output": "{not json}"
+  },
+  {
+    "input": "{\"a\": NaN}",
+    "modify": "{\"a\": NaN}",
+    "output": "{\"a\": NaN}"
+  },
+  {
+    "input": "{\"dup\": 1, \"dup\": 2}",
+    "modify": "{\"dup\": 1, \"dup\": 2}",
+    "output": "{\"dup\":2}"
+  },
+  {
+    "input": "{\"n\": 1.0, \"big\": 12345678901234567890, \"e\": 1e3, \"neg\": -0.0, \"small\": 1e-7, \"f\": 0.1}",
+    "modify": "{\"n\": 1.0, \"big\": 12345678901234567890, \"e\": 1e3, \"neg\": -0.0, \"small\": 1e-7, \"f\": 0.1}",
+    "output": "{\"big\":12345678901234567000,\"e\":1000,\"f\":0.1,\"n\":1,\"neg\":-0,\"small\":1e-7}"
+  },
+  {
+    "input": "{\"html\": \"<b>&</b>\"}",
+    "modify": "{\"html\": \"<b>&</b>\"}",
+    "output": "{\"html\":\"\\u003cb\\u003e\\u0026\\u003c/b\\u003e\"}"
+  },
+  {
+    "input": "{\"line\": \"a\u2028b\", \"ctl\": \"\\u0001\", \"esc\": \"\\/\"}",
+    "modify": "{\"line\": \"a\u2028b\", \"ctl\": \"\\u0001\", \"esc\": \"\\/\"}",
+    "output": "{\"ctl\":\"\\u0001\",\"esc\":\"/\",\"line\":\"a\\u2028b\"}"
+  },
+  {
+    "input": "unicode {\"é\": \"ü\", \"emoji\": \"😀\", \"cjk\": \"漢字\"}",
+    "modify": "unicode {\"é\": \"ü\", \"emoji\": \"😀\", \"cjk\": \"漢字\"}",
+    "output": "unicode {\"cjk\":\"漢字\",\"emoji\":\"😀\",\"é\":\"ü\"}"
+  },
+  {
+    "input": "{\"a\": \"it's\"}",
+    "modify": "{\"a\": \"it's\"}",
+    "output": "{\"a\":\"it's\"}"
+  },
+  {
+    "input": "parameters: {'a': 'x', 'b': None, 'c': True, 'd': False}",
+    "modify": "parameters: {\"a\":\"x\",\"b\":null,\"c\":true,\"d\":false}",
+    "output": "parameters: {\"a\":\"x\",\"b\":null,\"c\":true,\"d\":false}"
+  },
+  {
+    "input": "result: [True, False, None]",
+    "modify": "result: [true,false,null]",
+    "output": "result: [true,false,null]"
+  },
+  {
+    "input": "Parameters: {'k': 1}",
+    "modify": "Parameters: {\"k\":1}",
+    "output": "Parameters: {\"k\":1}"
+  },
+  {
+    "input": "RESULT:   {'a': 'b'}",
+    "modify": "RESULT: {\"a\":\"b\"}",
+    "output": "RESULT: {\"a\":\"b\"}"
+  },
+  {
+    "input": "result: {\"x\": null}",
+    "modify": "result: {\"x\":null}",
+    "output": "result: {\"x\":null}"
+  },
+  {
+    "input": "parameters:{\"b\":2,\"a\":1}",
+    "modify": "parameters: {\"a\":1,\"b\":2}",
+    "output": "parameters: {\"a\":1,\"b\":2}"
+  },
+  {
+    "input": "parameters: {'a': 1} result: {'b': 2}",
+    "modify": "parameters: {'a': 1} result: {'b': 2}",
+    "output": "parameters: {'a': 1} result: {'b': 2}"
+  },
+  {
+    "input": "parameters: not json {'a': 1}",
+    "modify": "parameters: not json {'a': 1}",
+    "output": "parameters: not json {\"a\":1}"
+  },
+  {
+    "input": "parameters: {'a': 'O'Malley'}",
+    "modify": "parameters: {'a': 'O'Malley'}",
+    "output": "parameters: {'a': 'O'Malley'}"
+  },
+  {
+    "input": "O'Malley said {'a': 'b'}",
+    "modify": "O'Malley said {'a': 'b'}",
+    "output": "O'Malley said {\"a\":\"b\"}"
+  },
+  {
+    "input": "TrueValue None_x {\"a\": True, \"b\": None}",
+    "modify": "TrueValue None_x {\"a\": True, \"b\": None}",
+    "output": "TrueValue None_x {\"a\":true,\"b\":null}"
+  },
+  {
+    "input": "{'k': 'éTrue', 'm': 'ÄNone', 'n': 'éNone'}",
+    "modify": "{'k': 'éTrue', 'm': 'ÄNone', 'n': 'éNone'}",
+    "output": "{\"k\":\"étrue\",\"m\":\"Änull\",\"n\":\"énull\"}"
+  },
+  {
+    "input": "{\"k\": \"xTrue\", \"m\": \"_None\", \"n\": \"True_\"}",
+    "modify": "{\"k\": \"xTrue\", \"m\": \"_None\", \"n\": \"True_\"}",
+    "output": "{\"k\":\"xTrue\",\"m\":\"_None\",\"n\":\"True_\"}"
+  },
+  {
+    "input": "parameters: {'a': 1}",
+    "modify": "parameters: {'a': 1}",
+    "output": "parameters: {\"a\":1}"
+  },
+  {
+    "input": "parameters:\t{'a': 1}",
+    "modify": "parameters: {\"a\":1}",
+    "output": "parameters: {\"a\":1}"
+  },
+  {
+    "input": "{'nested': {'list': [{'x': None}, True]}, 'num': 1.50}",
+    "modify": "{'nested': {'list': [{'x': None}, True]}, 'num': 1.50}",
+    "output": "{\"nested\":{\"list\":[{\"x\":null},true]},\"num\":1.5}"
+  },
+  {
+    "input": "For context: [agent] called tool `get_weather` with parameters: {'city': 'Paris', 'days': 3}",
+    "modify": "For context: [agent] called tool `get_weather` with parameters: {\"city\":\"Paris\",\"days\":3}",
+    "output": "For context: [agent] called tool `get_weather` with parameters: {\"city\":\"Paris\",\"days\":3}"
+  },
+  {
+    "input": "For context: [agent] `get_weather` tool returned result: {'temp': 21.5, 'ok': True}",
+    "modify": "For context: [agent] `get_weather` tool returned result: {\"ok\":true,\"temp\":21.5}",
+    "output": "For context: [agent] `get_weather` tool returned result: {\"ok\":true,\"temp\":21.5}"
+  },
+  {
+    "input": "{\"a\": \"\\ud83d\\ude00\", \"b\": \"\\u00e9\"}",
+    "modify": "{\"a\": \"\\ud83d\\ude00\", \"b\": \"\\u00e9\"}",
+    "output": "{\"a\":\"😀\",\"b\":\"é\"}"
+  },
+  {
+    "input": "{\"a\": \"x\"}}",
+    "modify": "{\"a\": \"x\"}}",
+    "output": "{\"a\": \"x\"}}"
+  },
+  {
+    "input": "[[{\"a\": 1}]]",
+    "modify": "[[{\"a\": 1}]]",
+    "output": "[[{\"a\":1}]]"
+  }
+]

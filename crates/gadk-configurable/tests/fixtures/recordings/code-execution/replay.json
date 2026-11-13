@@ -1,0 +1,51 @@
+{
+  "error": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "root_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "Hi"
+                }
+              ],
+              "role": "user"
+            }
+          ]
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "executableCode": {
+                    "code": "print(1)",
+                    "language": "PYTHON"
+                  }
+                },
+                {
+                  "codeExecutionResult": {
+                    "outcome": "OUTCOME_OK",
+                    "output": "1\n"
+                  }
+                },
+                {
+                  "text": "1",
+                  "partMetadata": {
+                    "k": "v"
+                  }
+                }
+              ],
+              "role": "model"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

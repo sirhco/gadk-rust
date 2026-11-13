@@ -1,0 +1,125 @@
+{
+  "case": "config-function-schema",
+  "streaming_mode": "none",
+  "user_message_index": 0,
+  "existing": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "root_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "Hi"
+                }
+              ]
+            }
+          ],
+          "config": {
+            "tools": [
+              {
+                "functionDeclarations": [
+                  {
+                    "name": "lookup_order",
+                    "description": "Looks up an order.",
+                    "parameters": {
+                      "type": "OBJECT",
+                      "properties": {
+                        "order_id": {
+                          "type": "STRING",
+                          "description": "The order id."
+                        },
+                        "include_items": {
+                          "type": "BOOLEAN"
+                        },
+                        "filters": {
+                          "type": "OBJECT",
+                          "properties": {
+                            "min_total": {
+                              "type": "NUMBER",
+                              "minimum": 0
+                            },
+                            "status": {
+                              "type": "STRING",
+                              "enum": [
+                                "open",
+                                "closed"
+                              ]
+                            }
+                          }
+                        },
+                        "tags": {
+                          "type": "ARRAY",
+                          "items": {
+                            "type": "STRING"
+                          },
+                          "maxItems": 5
+                        },
+                        "titled": {
+                          "type": "STRING",
+                          "title": "Kept Title"
+                        }
+                      },
+                      "required": [
+                        "order_id"
+                      ],
+                      "propertyOrdering": [
+                        "order_id",
+                        "include_items"
+                      ]
+                    },
+                    "response": {
+                      "type": "OBJECT",
+                      "properties": {
+                        "status": {
+                          "type": "STRING"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "name": "no_params",
+                    "description": "Takes nothing."
+                  },
+                  {
+                    "name": "titled_params",
+                    "parameters": {
+                      "type": "OBJECT",
+                      "title": "Explicit",
+                      "nullable": true,
+                      "properties": {
+                        "x": {
+                          "type": "INTEGER",
+                          "format": "int32",
+                          "default": 3,
+                          "example": 4
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "role": "model",
+              "parts": [
+                {
+                  "text": "OK"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,94 @@
+{
+  "error": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "a",
+      "llm_recording": {
+        "llm_request": {
+          "model": "m",
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "hi"
+                },
+                {
+                  "functionCall": {
+                    "args": {
+                      "x": 1
+                    },
+                    "name": "f"
+                  }
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "config": {
+            "systemInstruction": {
+              "parts": [
+                {
+                  "text": "sys"
+                }
+              ],
+              "role": "user"
+            },
+            "temperature": 0.5
+          }
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "ok"
+                }
+              ],
+              "role": "model"
+            },
+            "usageMetadata": {
+              "totalTokenCount": 3
+            },
+            "finishReason": "STOP"
+          }
+        ]
+      }
+    },
+    {
+      "user_message_index": 1,
+      "agent_name": "b",
+      "tool_recording": {
+        "tool_call": {
+          "name": "t"
+        },
+        "tool_response": {
+          "name": "t",
+          "response": {
+            "r": 1
+          }
+        }
+      }
+    },
+    {
+      "user_message_index": 2,
+      "agent_name": "root_agent",
+      "tool_recording": {
+        "tool_call": {
+          "id": "c",
+          "args": {
+            "y": 2
+          },
+          "name": "t"
+        },
+        "tool_response": {
+          "id": "c",
+          "name": "t",
+          "response": {
+            "r": 2
+          }
+        }
+      }
+    }
+  ]
+}

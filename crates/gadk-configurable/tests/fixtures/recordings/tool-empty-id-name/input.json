@@ -1,0 +1,28 @@
+{
+  "case": "tool-empty-id-name",
+  "streaming_mode": "none",
+  "user_message_index": 0,
+  "existing": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "root_agent",
+      "tool_recording": {
+        "tool_call": {},
+        "tool_response": {}
+      }
+    },
+    {
+      "user_message_index": 0,
+      "agent_name": "root_agent",
+      "tool_recording": {
+        "tool_call": {
+          "args": {}
+        },
+        "tool_response": {
+          "response": {}
+        }
+      }
+    }
+  ]
+}
