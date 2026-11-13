@@ -34,7 +34,7 @@ use crate::api::{
     yaml_stream_start_event_initialize,
 };
 use crate::emitter::yaml_emitter_emit;
-use crate::error::{Error, failf};
+use crate::error::{Error, MAX_WALK_DEPTH, failf, walk_depth_exceeded};
 use crate::node::{Document, Kind, NodeData, NodeId, Style};
 use crate::resolve::{
     BINARY_TAG, MAP_TAG, SEQ_TAG, STR_TAG, encode_base64, is_base60_float, is_old_bool, long_tag,
@@ -56,6 +56,8 @@ pub(crate) struct Encoder<'w> {
     pub(crate) indent: usize,
     /// Whether `init` ran (the STREAM-START event was emitted).
     pub(crate) done_init: bool,
+    /// Current collection nesting of the recursive walk (plan decision D7; no Go field).
+    pub(crate) depth: usize,
 }
 
 /// An encoder around an initialized emitter (Go's `&encoder{}` + `yaml_emitter_initialize`).
@@ -66,6 +68,7 @@ fn blank_encoder<'w>() -> Encoder<'w> {
         flow: false,
         indent: 0,
         done_init: false,
+        depth: 0,
     };
     yaml_emitter_initialize(&mut e.emitter);
     e
@@ -432,6 +435,24 @@ impl<'w> Encoder<'w> {
         tail: &str,
     ) -> Result<(), Error> {
         // Go: encode.go node
+        // Divergence (ledger 6c-1): plan decision D7 — collections nested deeper than
+        // MAX_WALK_DEPTH fail instead of overflowing the stack (Go has no limit here).
+        let nests = matches!(node.kind, Kind::Sequence | Kind::Mapping);
+        if nests {
+            if self.depth >= MAX_WALK_DEPTH {
+                return Err(walk_depth_exceeded());
+            }
+            self.depth += 1;
+        }
+        let result = self.node_unguarded(doc, node, tail);
+        if nests {
+            self.depth -= 1;
+        }
+        result
+    }
+
+    /// The body of Go's `(*encoder).node`; [`Encoder::node`] wraps it with the D7 depth guard.
+    fn node_unguarded(&mut self, doc: &Document, node: &NodeData, tail: &str) -> Result<(), Error> {
         // Zero nodes behave as nil.
         if node.kind == Kind::Zero && node.is_zero() {
             return self.nilv();
@@ -968,5 +989,26 @@ mod tests {
         // finish clears open_ended, so no `...` follows a root plain scalar.
         let doc = Document::new(scalar("", "plain", Style::empty()));
         assert_eq!(marshal_node(&doc, doc.root()).unwrap(), "plain\n");
+    }
+
+    #[test]
+    fn walk_depth_is_capped_at_127_nested_collections() {
+        // Plan decision D7: 127 nested flow sequences encode, 128 fail (Go has no limit).
+        let ok = format!("{}{}", "[".repeat(127), "]".repeat(127));
+        let doc = crate::unmarshal_node(ok.as_bytes()).unwrap();
+        assert_eq!(marshal_node(&doc, doc.root()).unwrap(), format!("{ok}\n"));
+
+        let deep = format!("{}{}", "[".repeat(128), "]".repeat(128));
+        let doc = crate::unmarshal_node(deep.as_bytes()).unwrap();
+        let err = marshal_node(&doc, doc.root()).unwrap_err();
+        assert_eq!(err.to_string(), "yaml: exceeded max depth of 127");
+
+        let deep_block = (0..128).fold(String::from("x\n"), |inner, _| {
+            let indented: String = inner.lines().map(|l| format!("  {l}\n")).collect();
+            format!("k:\n{indented}")
+        });
+        let doc = crate::unmarshal_node(deep_block.as_bytes()).unwrap();
+        let err = marshal_node(&doc, doc.root()).unwrap_err();
+        assert_eq!(err.to_string(), "yaml: exceeded max depth of 127");
     }
 }
