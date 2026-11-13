@@ -1,0 +1,65 @@
+{
+  "call": {
+    "config": "DefaultConfig() with ProjectID \"test-project\" and a recording Logger",
+    "denied": [],
+    "fn": "ensureTableAndSchema(ctx, bqTableAdapter{client.DatasetInProject(cfg.ProjectID, cfg.DatasetID).Table(cfg.TableName)}, cfg, newSet(denied...))"
+  },
+  "client": {
+    "endpoint": "<server>/bigquery/v2/",
+    "options": "option.WithEndpoint(server+\"/bigquery/v2/\"), option.WithoutAuthentication()",
+    "project": "test-project"
+  },
+  "description": "tables.get 403 fails closed.",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/bigquery/v2/projects/test-project/datasets/agent_analytics/tables/agent_events",
+        "raw_query": "alt=json&prettyPrint=false",
+        "query": {
+          "alt": [
+            "json"
+          ],
+          "prettyPrint": [
+            "false"
+          ]
+        },
+        "headers": {
+          "Accept-Encoding": [
+            "gzip"
+          ]
+        },
+        "body": null,
+        "body_text": ""
+      },
+      "response": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "errors": [
+              {
+                "domain": "global",
+                "message": "Access Denied: Table test-project:agent_analytics.agent_events: Permission bigquery.tables.get denied",
+                "reason": "accessDenied"
+              }
+            ],
+            "message": "Access Denied: Table test-project:agent_analytics.agent_events: Permission bigquery.tables.get denied",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    }
+  ],
+  "job_id": null,
+  "logs": [],
+  "name": "get_permission_denied",
+  "result": {
+    "error": "failed to get BigQuery table agent_events metadata: googleapi: Error 403: Access Denied: Table test-project:agent_analytics.agent_events: Permission bigquery.tables.get denied, accessDenied",
+    "error_type": [
+      "*fmt.wrapError",
+      "*googleapi.Error",
+      "*apierror.APIError"
+    ]
+  }
+}

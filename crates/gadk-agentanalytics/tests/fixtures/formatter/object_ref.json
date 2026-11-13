@@ -1,0 +1,8 @@
+{
+  "about": "objectRef(uri, details, authorizer).",
+  "cases": [
+    {"authorizer":"","details":"{}","objectRef":{"details":"{}","uri":"gs://b/o"},"uri":"gs://b/o"},
+    {"authorizer":"us.conn","details":"{}","objectRef":{"authorizer":"us.conn","details":"{}","uri":"gs://b/o"},"uri":"gs://b/o"},
+    {"authorizer":"c","details":"{\"gcs_metadata\":{\"content_type\":\"text/plain\"}}","objectRef":{"authorizer":"c","details":"{\"gcs_metadata\":{\"content_type\":\"text/plain\"}}","uri":"gs://b/o"},"uri":"gs://b/o"}
+  ]
+}

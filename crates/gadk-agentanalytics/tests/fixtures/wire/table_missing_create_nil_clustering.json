@@ -1,0 +1,259 @@
+{
+  "call": {
+    "config": "DefaultConfig() with ProjectID \"test-project\" and a recording Logger, ClusteringFields nil",
+    "denied": [],
+    "fn": "ensureTableAndSchema(ctx, bqTableAdapter{client.DatasetInProject(cfg.ProjectID, cfg.DatasetID).Table(cfg.TableName)}, cfg, newSet(denied...))"
+  },
+  "client": {
+    "endpoint": "<server>/bigquery/v2/",
+    "options": "option.WithEndpoint(server+\"/bigquery/v2/\"), option.WithoutAuthentication()",
+    "project": "test-project"
+  },
+  "description": "Create with ClusteringFields nil.",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/bigquery/v2/projects/test-project/datasets/agent_analytics/tables/agent_events",
+        "raw_query": "alt=json&prettyPrint=false",
+        "query": {
+          "alt": [
+            "json"
+          ],
+          "prettyPrint": [
+            "false"
+          ]
+        },
+        "headers": {
+          "Accept-Encoding": [
+            "gzip"
+          ]
+        },
+        "body": null,
+        "body_text": ""
+      },
+      "response": {
+        "status": 404,
+        "body": {
+          "error": {
+            "code": 404,
+            "errors": [
+              {
+                "domain": "global",
+                "message": "Not found: Table test-project:agent_analytics.agent_events",
+                "reason": "notFound"
+              }
+            ],
+            "message": "Not found: Table test-project:agent_analytics.agent_events",
+            "status": "NOT_FOUND"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/bigquery/v2/projects/test-project/datasets/agent_analytics/tables",
+        "raw_query": "alt=json&prettyPrint=false",
+        "query": {
+          "alt": [
+            "json"
+          ],
+          "prettyPrint": [
+            "false"
+          ]
+        },
+        "headers": {
+          "Accept-Encoding": [
+            "gzip"
+          ],
+          "Content-Length": [
+            "4785"
+          ],
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "body": {
+          "clustering": {},
+          "labels": {
+            "adk_schema_version": "2"
+          },
+          "schema": {
+            "fields": [
+              {
+                "description": "The UTC timestamp when the event occurred. Used for ordering events within a session.",
+                "mode": "REQUIRED",
+                "name": "timestamp",
+                "type": "TIMESTAMP"
+              },
+              {
+                "description": "A unique identifier assigned before enqueue. Storage Write API retries preserve this value so duplicate rows can be identified reliably.",
+                "name": "event_id",
+                "type": "STRING"
+              },
+              {
+                "description": "The category of the event (e.g., 'LLM_REQUEST', 'TOOL_CALL', 'AGENT_RESPONSE'). Helps in filtering specific types of interactions.",
+                "name": "event_type",
+                "type": "STRING"
+              },
+              {
+                "description": "The name of the agent that generated this event. Useful for multi-agent systems.",
+                "name": "agent",
+                "type": "STRING"
+              },
+              {
+                "description": "A unique identifier for the entire conversation session. Used to group all events belonging to a single user interaction.",
+                "name": "session_id",
+                "type": "STRING"
+              },
+              {
+                "description": "A unique identifier for a single turn or execution within a session. Groups related events like LLM request and response.",
+                "name": "invocation_id",
+                "type": "STRING"
+              },
+              {
+                "description": "The identifier of the end-user participating in the session, if available.",
+                "name": "user_id",
+                "type": "STRING"
+              },
+              {
+                "description": "OpenTelemetry trace ID for distributed tracing across services.",
+                "name": "trace_id",
+                "type": "STRING"
+              },
+              {
+                "description": "Unique identifier for this specific operation or span within the trace (invocation, agent run, model call, or tool call). When EnableOTelCorrelation is set, raw ambient OpenTelemetry span IDs are also written to attributes.otel.span_id.",
+                "name": "span_id",
+                "type": "STRING"
+              },
+              {
+                "description": "Identifier of the parent span in the execution tree, establishing causality and hierarchy across invocations, agent runs, model calls, and tool calls.",
+                "name": "parent_span_id",
+                "type": "STRING"
+              },
+              {
+                "description": "The primary payload of the event, stored as a JSON string. The structure depends on the event_type (e.g., prompt text for LLM_REQUEST, tool output for TOOL_RESPONSE).",
+                "name": "content",
+                "type": "JSON"
+              },
+              {
+                "description": "For multi-modal events, contains a list of content parts (text, images, etc.).",
+                "fields": [
+                  {
+                    "description": "The MIME type of the content part (e.g., 'text/plain', 'image/png').",
+                    "name": "mime_type",
+                    "type": "STRING"
+                  },
+                  {
+                    "description": "The URI of the content part if stored externally (e.g., GCS bucket path).",
+                    "name": "uri",
+                    "type": "STRING"
+                  },
+                  {
+                    "description": "The ObjectRef of the content part if stored externally.",
+                    "fields": [
+                      {
+                        "description": "The URI of the object.",
+                        "name": "uri",
+                        "type": "STRING"
+                      },
+                      {
+                        "description": "The version of the object.",
+                        "name": "version",
+                        "type": "STRING"
+                      },
+                      {
+                        "description": "The authorizer for the object.",
+                        "name": "authorizer",
+                        "type": "STRING"
+                      },
+                      {
+                        "description": "Additional details about the object.",
+                        "name": "details",
+                        "type": "JSON"
+                      }
+                    ],
+                    "name": "object_ref",
+                    "type": "RECORD"
+                  },
+                  {
+                    "description": "The raw text content if the part is text-based.",
+                    "name": "text",
+                    "type": "STRING"
+                  },
+                  {
+                    "description": "The zero-based index of this part within the content.",
+                    "name": "part_index",
+                    "type": "INTEGER"
+                  },
+                  {
+                    "description": "Additional metadata for this content part as a JSON object (serialized to string).",
+                    "name": "part_attributes",
+                    "type": "STRING"
+                  },
+                  {
+                    "description": "Indicates how the content part is stored (e.g., 'INLINE', 'GCS_REFERENCE', 'EXTERNAL_URI').",
+                    "name": "storage_mode",
+                    "type": "STRING"
+                  }
+                ],
+                "mode": "REPEATED",
+                "name": "content_parts",
+                "type": "RECORD"
+              },
+              {
+                "description": "A JSON object containing arbitrary key-value pairs for additional event metadata. Includes enrichment fields like 'root_agent_name' (turn orchestration), 'model' (request model), 'model_version' (response version), and 'usage_metadata' (detailed token counts). May also carry 'otel' (best-effort ambient Cloud Trace span/trace ids) and 'custom_metadata' (allowlisted event.custom_metadata keys).",
+                "name": "attributes",
+                "type": "JSON"
+              },
+              {
+                "description": "A JSON object containing latency measurements, such as 'total_ms' and 'time_to_first_token_ms'.",
+                "name": "latency_ms",
+                "type": "JSON"
+              },
+              {
+                "description": "The outcome of the event, typically 'OK' or 'ERROR'.",
+                "name": "status",
+                "type": "STRING"
+              },
+              {
+                "description": "Diagnostic message for errors and model termination details; may be populated on rows whose status is 'OK', such as LLM_RESPONSE rows and rows whose content_formatter failed.",
+                "name": "error_message",
+                "type": "STRING"
+              },
+              {
+                "description": "Boolean flag indicating if the content or metadata payload was truncated because it exceeded the maximum allowed size. Set when 'content', captured 'custom_metadata', or A2A metadata is truncated; redaction of sensitive keys does not set this flag.",
+                "name": "is_truncated",
+                "type": "BOOLEAN"
+              }
+            ]
+          },
+          "tableReference": {
+            "datasetId": "agent_analytics",
+            "projectId": "test-project",
+            "tableId": "agent_events"
+          },
+          "timePartitioning": {
+            "field": "timestamp",
+            "type": "DAY"
+          }
+        },
+        "body_text": "{\"clustering\":{},\"labels\":{\"adk_schema_version\":\"2\"},\"schema\":{\"fields\":[{\"description\":\"The UTC timestamp when the event occurred. Used for ordering events within a session.\",\"mode\":\"REQUIRED\",\"name\":\"timestamp\",\"type\":\"TIMESTAMP\"},{\"description\":\"A unique identifier assigned before enqueue. Storage Write API retries preserve this value so duplicate rows can be identified reliably.\",\"name\":\"event_id\",\"type\":\"STRING\"},{\"description\":\"The category of the event (e.g., 'LLM_REQUEST', 'TOOL_CALL', 'AGENT_RESPONSE'). Helps in filtering specific types of interactions.\",\"name\":\"event_type\",\"type\":\"STRING\"},{\"description\":\"The name of the agent that generated this event. Useful for multi-agent systems.\",\"name\":\"agent\",\"type\":\"STRING\"},{\"description\":\"A unique identifier for the entire conversation session. Used to group all events belonging to a single user interaction.\",\"name\":\"session_id\",\"type\":\"STRING\"},{\"description\":\"A unique identifier for a single turn or execution within a session. Groups related events like LLM request and response.\",\"name\":\"invocation_id\",\"type\":\"STRING\"},{\"description\":\"The identifier of the end-user participating in the session, if available.\",\"name\":\"user_id\",\"type\":\"STRING\"},{\"description\":\"OpenTelemetry trace ID for distributed tracing across services.\",\"name\":\"trace_id\",\"type\":\"STRING\"},{\"description\":\"Unique identifier for this specific operation or span within the trace (invocation, agent run, model call, or tool call). When EnableOTelCorrelation is set, raw ambient OpenTelemetry span IDs are also written to attributes.otel.span_id.\",\"name\":\"span_id\",\"type\":\"STRING\"},{\"description\":\"Identifier of the parent span in the execution tree, establishing causality and hierarchy across invocations, agent runs, model calls, and tool calls.\",\"name\":\"parent_span_id\",\"type\":\"STRING\"},{\"description\":\"The primary payload of the event, stored as a JSON string. The structure depends on the event_type (e.g., prompt text for LLM_REQUEST, tool output for TOOL_RESPONSE).\",\"name\":\"content\",\"type\":\"JSON\"},{\"description\":\"For multi-modal events, contains a list of content parts (text, images, etc.).\",\"fields\":[{\"description\":\"The MIME type of the content part (e.g., 'text/plain', 'image/png').\",\"name\":\"mime_type\",\"type\":\"STRING\"},{\"description\":\"The URI of the content part if stored externally (e.g., GCS bucket path).\",\"name\":\"uri\",\"type\":\"STRING\"},{\"description\":\"The ObjectRef of the content part if stored externally.\",\"fields\":[{\"description\":\"The URI of the object.\",\"name\":\"uri\",\"type\":\"STRING\"},{\"description\":\"The version of the object.\",\"name\":\"version\",\"type\":\"STRING\"},{\"description\":\"The authorizer for the object.\",\"name\":\"authorizer\",\"type\":\"STRING\"},{\"description\":\"Additional details about the object.\",\"name\":\"details\",\"type\":\"JSON\"}],\"name\":\"object_ref\",\"type\":\"RECORD\"},{\"description\":\"The raw text content if the part is text-based.\",\"name\":\"text\",\"type\":\"STRING\"},{\"description\":\"The zero-based index of this part within the content.\",\"name\":\"part_index\",\"type\":\"INTEGER\"},{\"description\":\"Additional metadata for this content part as a JSON object (serialized to string).\",\"name\":\"part_attributes\",\"type\":\"STRING\"},{\"description\":\"Indicates how the content part is stored (e.g., 'INLINE', 'GCS_REFERENCE', 'EXTERNAL_URI').\",\"name\":\"storage_mode\",\"type\":\"STRING\"}],\"mode\":\"REPEATED\",\"name\":\"content_parts\",\"type\":\"RECORD\"},{\"description\":\"A JSON object containing arbitrary key-value pairs for additional event metadata. Includes enrichment fields like 'root_agent_name' (turn orchestration), 'model' (request model), 'model_version' (response version), and 'usage_metadata' (detailed token counts). May also carry 'otel' (best-effort ambient Cloud Trace span/trace ids) and 'custom_metadata' (allowlisted event.custom_metadata keys).\",\"name\":\"attributes\",\"type\":\"JSON\"},{\"description\":\"A JSON object containing latency measurements, such as 'total_ms' and 'time_to_first_token_ms'.\",\"name\":\"latency_ms\",\"type\":\"JSON\"},{\"description\":\"The outcome of the event, typically 'OK' or 'ERROR'.\",\"name\":\"status\",\"type\":\"STRING\"},{\"description\":\"Diagnostic message for errors and model termination details; may be populated on rows whose status is 'OK', such as LLM_RESPONSE rows and rows whose content_formatter failed.\",\"name\":\"error_message\",\"type\":\"STRING\"},{\"description\":\"Boolean flag indicating if the content or metadata payload was truncated because it exceeded the maximum allowed size. Set when 'content', captured 'custom_metadata', or A2A metadata is truncated; redaction of sensitive keys does not set this flag.\",\"name\":\"is_truncated\",\"type\":\"BOOLEAN\"}]},\"tableReference\":{\"datasetId\":\"agent_analytics\",\"projectId\":\"test-project\",\"tableId\":\"agent_events\"},\"timePartitioning\":{\"field\":\"timestamp\",\"type\":\"DAY\"}}\n"
+      },
+      "response": {
+        "status": 200,
+        "body": {}
+      }
+    }
+  ],
+  "job_id": null,
+  "logs": [
+    "Table agent_events not found. Creating it..."
+  ],
+  "name": "table_missing_create_nil_clustering",
+  "result": {
+    "error": null,
+    "error_type": null
+  }
+}
