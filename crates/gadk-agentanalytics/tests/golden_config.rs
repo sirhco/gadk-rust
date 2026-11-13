@@ -16,7 +16,7 @@
 //! Golden test of `Config::default()` (ADK-Go `plugin/agentanalytics/config.go`
 //! `DefaultConfig()`, spec R1) against the probe's `config/default_config.json` projection.
 //! `apply_defaults` and the derived accessors are crate-internal; their goldens over
-//! `config/apply_defaults.json` are the `schema::golden_apply_defaults` unit tests
+//! `config/apply_defaults.json` are the `config::golden_apply_defaults` unit tests
 //! (`tests/support/golden_apply_defaults.rs`).
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]

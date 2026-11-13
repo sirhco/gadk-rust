@@ -24,10 +24,14 @@
 //! ([`events_schema`]), `ArrowSchema` ([`arrow_schema`]), `SerializedArrowSchema`
 //! ([`serialized_arrow_schema`]), `Config.ViewDefinitions` ([`Config::view_definitions`]),
 //! `FormatContentParts` ([`format_content_parts`]) and `SmartTruncate` ([`smart_truncate`]).
+//! Table creation and schema upgrade are [`ensure_table_and_schema`] over [`TableOps`]; view
+//! creation is [`sync_analytics_views`] over a [`BigQueryViewRunner`].
+//!
+//! The `gadk` façade re-exports this crate as `gadk::agentanalytics` (feature `agentanalytics`).
+//! Feature `testutil` adds the in-memory fakes of `bigquery::fake`. Behavior matches ADK-Go
+//! except for the divergences listed in `docs/parity/7b-1.md`, each annotated where it lives.
 
 #![forbid(unsafe_code)]
-// Task 10 removes this once every crate-internal item has its consumer.
-#![allow(dead_code)]
 
 pub mod bigquery;
 pub mod config;
@@ -38,7 +42,11 @@ pub mod schema;
 pub mod schema_upgrade;
 pub mod views;
 
+// The plugin-side entry points of `formatter` and `redaction` are consumed by 7b-2 (batch
+// processor, GCS offloader) and 7b-3 (events, plugin); until then only tests reach them.
+#[allow(dead_code)]
 pub(crate) mod formatter;
+#[allow(dead_code)]
 pub(crate) mod redaction;
 
 #[cfg(test)]

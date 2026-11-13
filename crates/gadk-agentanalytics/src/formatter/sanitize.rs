@@ -30,6 +30,9 @@
 //! variant, `json.RawMessage` serde_json's `RawValue`, `json.Number` a newtype named
 //! [`JSON_NUMBER_TOKEN`]. Types with a custom `MarshalJSON` in Go serialize to that JSON in
 //! gadk already (e.g. `time.Time` ↔ chrono), so they are walked as the value they produce.
+//! Divergence (ledger 7b-1): such a value costs one node of the budget here; Go takes a node for
+//! the value, then walks the decoded `MarshalJSON` result (another node), so the two differ only
+//! when the node budget runs out on exactly that value.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -615,8 +618,8 @@ impl<'s> Serializer for Walker<'s> {
         }
     }
 
-    /// Divergence (ledger 7b-1): Go has no enum variants with data; sanitized as serde_json
-    /// writes them, `{"variant": value}`.
+    /// Divergence (ledger 7b-1): Go has no enum variants with data; newtype, tuple and struct
+    /// variants are sanitized as serde_json writes them, `{"variant": value}`.
     fn serialize_newtype_variant<T: Serialize + ?Sized>(
         self,
         _name: &'static str,
@@ -645,7 +648,7 @@ impl<'s> Serializer for Walker<'s> {
         Ok(self.compound(Kind::Seq))
     }
 
-    /// Divergence (ledger 7b-1): sanitized as `{"variant": [..]}` (serde_json's form).
+    /// Sanitized as `{"variant": [..]}` (serde_json's form; see `serialize_newtype_variant`).
     fn serialize_tuple_variant(
         self,
         _name: &'static str,
@@ -671,7 +674,7 @@ impl<'s> Serializer for Walker<'s> {
         Ok(self.compound(Kind::Struct(name)))
     }
 
-    /// Divergence (ledger 7b-1): sanitized as `{"variant": {..}}` (serde_json's form).
+    /// Sanitized as `{"variant": {..}}` (serde_json's form; see `serialize_newtype_variant`).
     fn serialize_struct_variant(
         self,
         _name: &'static str,
@@ -883,6 +886,10 @@ impl Compound<'_> {
 
     /// Go `marshaled` for a `json.RawMessage`: the text decoded with `UseNumber`, then walked at
     /// the same depth.
+    ///
+    /// Divergence (ledger 7b-1): the text is decoded by `redaction`'s Go `decodeJSONValue` port,
+    /// which stops past 100 levels, so a `RawValue` nested deeper is `[UNSUPPORTED_OBJECT]`; Go's
+    /// `json.Decoder` accepts up to 10000 levels and the walk then writes `[MAX_DEPTH_EXCEEDED]`.
     fn finish_raw(self) -> Out {
         let Some(text) = self.raw else {
             return San::placeholder(UNSUPPORTED_OBJ_PLACEHOLDER);

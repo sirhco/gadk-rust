@@ -331,8 +331,7 @@ struct TestStruct {
     exported_string_no_tag: String,
 }
 
-// parity: adapted: Go values become serde values with the same JSON (testStruct via serde
-// renames, `map[int]string` a `BTreeMap<i64, _>`, `[1]string` an array).
+// parity: adapted: Go values become serde values with the same JSON (testStruct via serde renames, `map[int]string` a `BTreeMap<i64, _>`, `[1]string` an array).
 #[test]
 fn test_smart_truncate() {
     let cases: Vec<(&str, Box<dyn erased::Ser>, i64, &str, bool)> = vec![
@@ -583,8 +582,7 @@ struct GoNamed {
     Name: String,
 }
 
-// parity: adapted: Go structs are serde structs with the same field names; the map with a
-// `[]byte` value is a map of GoAny values.
+// parity: adapted: Go structs are serde structs with the same field names; the map with a `[]byte` value is a map of GoAny values.
 #[test]
 fn test_smart_truncate_redacts_sensitive_keys() {
     let bytes_map = BTreeMap::from([
@@ -788,8 +786,7 @@ struct ShadowedOuter {
     y: String,
 }
 
-// parity: adapted: serde has no struct embedding; the promoted field set Go's encoding/json
-// writes is a plain serde struct and the want is Go's json.Marshal output.
+// parity: adapted: serde has no struct embedding; the promoted field set Go's encoding/json writes is a plain serde struct and the want is Go's json.Marshal output.
 #[test]
 fn test_walk_struct_omit_empty_shadows_embedded_field() {
     let v = ShadowedOuter {
@@ -819,8 +816,7 @@ struct PromotedPtrOuter {
     extra: String,
 }
 
-// parity: adapted: the embedded pointer is `#[serde(flatten)] Option<_>`; the wants are Go's
-// json.Marshal output.
+// parity: adapted: the embedded pointer is `#[serde(flatten)] Option<_>`; the wants are Go's json.Marshal output.
 #[test]
 fn test_walk_struct_promotes_embedded_pointer_to_unexported_struct() {
     let cases = [
@@ -1227,8 +1223,7 @@ fn test_parts_collector_truncated_flag() {
     }
 }
 
-// parity: adapted: a Rust Content cannot hold Go's nil *Part, so the first (nil) part of Go's
-// message is left out and the indexes of the others shift down by one.
+// parity: adapted: a Rust Content cannot hold Go's nil *Part, so the first (nil) part of Go's message is left out and the indexes of the others shift down by one.
 #[test]
 fn test_format_content_parts_empty_parts() {
     let c = content(vec![Part::default(), text_part(""), Part::default()]);
@@ -1574,8 +1569,7 @@ fn test_parts_collector_file_data_object_refs() {
     }
 }
 
-// parity: adapted: Go's nil *Part in the third message is a default Part (still one entry, so
-// every slot and part index matches Go's).
+// parity: adapted: Go's nil *Part in the third message is a default Part (still one entry, so every slot and part index matches Go's).
 #[test]
 fn test_parts_collector_slots_and_ordinals() {
     let png = |b: u8| inline_part("image/png", &[b]);
@@ -1633,8 +1627,7 @@ fn test_parts_collector_slots_and_ordinals() {
     }
 }
 
-// parity: adapted: Rust `Bytes` are immutable, so the caller cannot change the queued bytes in
-// place; the test changes the message after collecting and checks the queue kept its data.
+// parity: adapted: Rust `Bytes` are immutable, so the caller cannot change the queued bytes in place; the test changes the message after collecting and checks the queue kept its data.
 #[test]
 fn test_parts_collector_queued_data_is_a_copy() {
     let mut part = inline_part("image/png", &[1, 2, 3]);

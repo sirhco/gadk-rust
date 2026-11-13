@@ -394,8 +394,10 @@ fn trim_bom_and_space(s: &str) -> &str {
     s.trim_matches(|r: char| is_space(r) || r == '\u{feff}')
 }
 
-/// The largest char boundary of `s` at or below `i` (Go slices bytes; a cut inside a rune
-/// leaves invalid UTF-8 there, which a Rust `&str` cannot hold).
+/// The largest char boundary of `s` at or below `i`. Divergence (ledger 7b-1): Go slices bytes
+/// (`s[:maxInspectableJSONTextBytes]`, `loc[0]+1`), and a cut inside a rune leaves invalid UTF-8
+/// there, which a Rust `&str` cannot hold; the cut is rounded to a char boundary instead (no
+/// probe corpus input reaches it).
 fn floor_boundary(s: &str, mut i: usize) -> usize {
     if i >= s.len() {
         return s.len();
@@ -2858,8 +2860,8 @@ mod tests {
         }
     }
 
-    /// Every entry point over every corpus input (`SmartTruncate100` is the formatter's,
-    /// Task 7).
+    /// Every entry point over every corpus input (`SmartTruncate100` is checked by
+    /// `tests/golden_formatter.rs`).
     #[test]
     fn golden_text_corpus_matches_go() {
         let corpus = fixture("redaction/text_corpus.json");

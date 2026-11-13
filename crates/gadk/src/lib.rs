@@ -24,6 +24,12 @@
 #[cfg(feature = "a2a")]
 pub use gadk_a2a as a2a;
 pub use gadk_agent as agent;
+/// The BigQuery Agent Analytics foundations, as ADK-Go's `plugin/agentanalytics`: configuration,
+/// the events table's BigQuery and Arrow schemas, table creation and additive schema upgrade,
+/// the analytics views, the content formatter and a BigQuery REST admin client (feature
+/// `agentanalytics`, not on by default; re-export of `gadk-agentanalytics`).
+#[cfg(feature = "agentanalytics")]
+pub use gadk_agentanalytics as agentanalytics;
 /// The Agent Engine server and launcher: serve an agent with the Vertex AI Agent Engine
 /// reasoning-engine API (`/reasoning_engine`, `/stream_reasoning_engine`), wire-compatible with
 /// ADK-Go's `server/agentengine` and `cmd/launcher/agentengine` (feature `agentengine`, not on by

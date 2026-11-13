@@ -220,8 +220,8 @@ fn serialized_arrow_schema_decodes_like_go_bytes() {
     assert!(rust_bytes.ends_with(&EOS));
     assert_eq!(decode_stream(&rust_bytes), decode_stream(&go_bytes));
     assert_eq!(decode_stream(&rust_bytes), arrow_schema());
-    // Divergence (ledger 7b-1): arrow-rs and arrow-go lay out the schema flatbuffer
-    // differently (1864 vs 1880 bytes), so the bytes are not compared (R3 compares decoded
+    // Pins `serialize_arrow_schema`'s ledgered divergence (7b-1): arrow-rs and arrow-go lay out
+    // the schema flatbuffer differently (1864 vs 1880 bytes), so the bytes are not compared (R3 compares decoded
     // schemas).
     assert_eq!((rust_bytes.len(), go_bytes.len()), (1864, 1880));
     assert_ne!(rust_bytes, go_bytes);

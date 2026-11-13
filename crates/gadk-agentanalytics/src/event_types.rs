@@ -82,6 +82,7 @@ pub const EVENT_NODE_OUTPUT: &str = "NODE_OUTPUT";
 pub const EVENT_NODE_ERROR: &str = "NODE_ERROR";
 
 /// Go `newSet(items...)`: the items as a set (Go `map[string]struct{}`).
+#[allow(dead_code)] // consumer: 7b-3 (plugin event filters)
 pub(crate) fn new_set<S: AsRef<str>>(items: &[S]) -> BTreeSet<String> {
     items.iter().map(|s| s.as_ref().to_owned()).collect()
 }

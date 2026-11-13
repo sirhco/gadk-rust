@@ -75,7 +75,7 @@
 - 7b-1: `gadk-agentanalytics` (ADK-Go's `plugin/agentanalytics` foundations) depends on exactly
   `gadk-genai`, `gadk-model` (REST transport, `gcp-auth`), `gadk-platform` and `gadk-session`
   (the `user:` / `app:` / `temp:` key prefixes); it never depends on `gadk-engine`, and only the
-  façade depends on it (feature `agentanalytics`, added by 7b-1's integration task).
+  façade depends on it, optionally (feature `agentanalytics`).
 """
 import pathlib, sys, tomllib
 
@@ -119,13 +119,13 @@ ALLOWED = {
              "gadk-agent", "gadk-engine", "gadk-tools", "gadk-auth", "gadk-mcp", "gadk-artifact",
              "gadk-memory", "gadk-anthropic", "gadk-openai", "gadk-session-database",
              "gadk-artifact-gcs", "gadk-vertexai", "gadk-server", "gadk-a2a", "gadk-launcher",
-             "gadk-agentregistry", "gadk-telemetry"},
+             "gadk-agentregistry", "gadk-telemetry", "gadk-agentanalytics"},
 }
 # (crate, dependency) normal edges that must be `optional = true`.
 OPTIONAL = {("gadk-engine", "gadk-gemini"), ("gadk-engine", "gadk-httprr"), ("gadk-a2a", "gadk-server"),
             ("gadk-launcher", "gadk-server"), ("gadk-launcher", "gadk-a2a"),
             ("gadk-agentregistry", "gadk-a2a"), ("gadk-agentregistry", "gadk-mcp"),
-            ("gadk", "gadk-telemetry")}
+            ("gadk", "gadk-telemetry"), ("gadk", "gadk-agentanalytics")}
 FACADE = "gadk"  # no crate may dev-depend on the façade
 ENGINE_DEPENDENTS = ("gadk", "gadk-tools", "gadk-server", "gadk-a2a", "gadk-launcher",
                      "gadk-agentregistry", "gadk-telemetry", "gadk-configurable")  # the only crates that may depend on gadk-engine

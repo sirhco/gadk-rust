@@ -49,6 +49,10 @@ telemetry = ["dep:gadk-telemetry"]
 # The Agent Registry client (gadk-agentregistry: registered A2A agents and MCP servers); not in
 # `default`.
 agentregistry = ["dep:gadk-agentregistry"]
+# The BigQuery Agent Analytics foundations (gadk-agentanalytics: configuration, events schema,
+# table creation and schema upgrade, analytics views, content formatter and redaction, BigQuery
+# REST admin client); not in `default`.
+agentanalytics = ["dep:gadk-agentanalytics"]
 
 [dependencies]
 gadk-genai = { workspace = true }
@@ -74,6 +78,7 @@ gadk-a2a = { workspace = true, optional = true, features = ["server", "client"] 
 gadk-launcher = { workspace = true, optional = true }
 gadk-telemetry = { workspace = true, optional = true }
 gadk-agentregistry = { workspace = true, optional = true }
+gadk-agentanalytics = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
@@ -224,3 +229,7 @@ required-features = ["agentregistry"]
 [[test]]
 name = "facade_telemetry"
 required-features = ["telemetry"]
+
+[[test]]
+name = "facade_agentanalytics"
+required-features = ["agentanalytics"]
