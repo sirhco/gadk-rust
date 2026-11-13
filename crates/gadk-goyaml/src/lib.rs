@@ -127,16 +127,30 @@ pub fn unmarshal<T: serde::de::DeserializeOwned>(data: &[u8], opts: &Options) ->
 }
 
 /// Go's `yaml.Marshal(v)` for a serde value.
-#[allow(unused_variables)] // Task 9 writes the body and removes this line.
 pub fn marshal<T: serde::Serialize + ?Sized>(v: &T, opts: &Options) -> Result<Vec<u8>, Error> {
-    todo!("Task 9")
+    // Go: yaml.go Marshal
+    let mut e = encode::new_encoder();
+    let result = ser::marshal_doc(&mut e, v, opts).and_then(|()| e.finish());
+    let out = std::mem::take(&mut e.emitter.output_buffer);
+    e.destroy();
+    result.map(|()| out)
 }
 
 /// Go's `node.Encode(v)`: `marshal`, then a `textless` re-parse; returns the document's first
 /// content node as its own [`Document`].
-#[allow(unused_variables)] // Task 9 writes the body and removes this line.
 pub fn to_node<T: serde::Serialize + ?Sized>(v: &T, opts: &Options) -> Result<Document, Error> {
-    todo!("Task 9")
+    // Go: yaml.go (*Node).Encode
+    let out = marshal(v, opts)?;
+    let mut p = node::new_parser(&out);
+    p.textless = true;
+    let parsed = p.parse();
+    p.destroy();
+    // `marshal` always writes one document, so the parse yields a document node with one
+    // child (Go: `*n = *doc.Content[0]`).
+    Ok(parsed?
+        .and_then(|doc| p.arena[doc].content.first().copied())
+        .map(|first| p.arena.subtree(first))
+        .unwrap_or_default())
 }
 
 /// Go's `node.Decode(&v)` for node `at` of `doc`: [`Error::Type`] when type errors were
@@ -185,13 +199,13 @@ impl<'w> Encoder<'w> {
     }
 
     /// Go's `Encoder.Encode(v)` for a serde value.
-    #[allow(unused_variables)] // Task 9 writes the body and removes this line.
     pub fn encode<T: serde::Serialize + ?Sized>(
         &mut self,
         v: &T,
         opts: &Options,
     ) -> Result<(), Error> {
-        todo!("Task 9")
+        // Go: yaml.go (*Encoder).Encode
+        ser::marshal_doc(&mut self.encoder, v, opts)
     }
 
     /// Go's `Encoder.Encode(&node)` for node `at` of `doc`.
