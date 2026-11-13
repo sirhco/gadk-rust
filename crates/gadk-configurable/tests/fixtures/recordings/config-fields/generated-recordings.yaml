@@ -1,0 +1,47 @@
+recordings:
+    - user_message_index: 0
+      agent_name: root_agent
+      llm_recording:
+        llm_request:
+            model: gemini-2.5-flash
+            contents:
+                - parts:
+                    - text: Hi
+                  role: user
+            config:
+                temperature: 0.7
+                topp: 0.95
+                topk: 40
+                candidate_count: 1
+                max_output_tokens: 1024
+                stop_sequences:
+                    - END
+                    - ""
+                response_logprobs: true
+                seed: 42
+                response_mime_type: application/json
+                response_schema:
+                    properties:
+                        answer:
+                            type: STRING
+                    type: OBJECT
+                safety_settings:
+                    - category: HARM_CATEGORY_HARASSMENT
+                      threshold: BLOCK_ONLY_HIGH
+                tool_config:
+                    functioncallingconfig:
+                        allowedfunctionnames:
+                            - f
+                        mode: ANY
+                labels:
+                    team: adk
+                    zero: "0"
+                response_modalities:
+                    - TEXT
+                thinking_config:
+                    includethoughts: true
+        llm_responses:
+            - content:
+                parts:
+                    - text: '{"answer": "hi"}'
+                role: model

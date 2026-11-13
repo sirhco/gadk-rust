@@ -28,6 +28,17 @@
 # crates/gadk-goyaml/testdata/golden/{parse,diff,serde}/ (1342 goldens), and, counted separately,
 # the 3729-row strconv.FormatFloat table crates/gadk-platform/tests/testdata/go_format_float_g.json;
 # when go is present, rerunning the probe into a temp dir reproduces all of them (empty diff -r).
+# 6c-2: the configurable probe (scripts/gen-go-configurable) wrote exactly 44 recording cases under
+# crates/gadk-configurable/tests/fixtures/recordings/<case>/ (44 input.json, 44 replay.json, 44
+# generated-recordings[-sse].yaml, 6 existing.yaml), fixups.json and the 40-row
+# canonicalize.json; when go and ADK-Go are present, rerunning the probe into a temp dir reproduces
+# all of them (empty diff -r) and every declaration the probe vendors from ADK-Go's internal/
+# packages is byte-identical to ADK-Go's (the probe's -vendored adk and -vendored probe outputs
+# match). The 2 Go-written integration goldens under
+# crates/gadk-configurable/tests/fixtures/integration/ (an overlay probe in ADK-Go's conformance
+# package, not part of gen-go-configurable: scripts/gen-go-configurable/overlay/
+# zz_t12probe_test.go.txt, whose header has the regeneration command) are counted and left out of
+# the rerun diff.
 set -euo pipefail
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 go="${ADK_GO_DIR:-$repo/../adk-go}"
@@ -201,10 +212,68 @@ else
   rm -rf "$goyaml_tmp"
 fi
 
+configurable="$repo/crates/gadk-configurable/tests/fixtures"
+configurable_counts=""
+for spec in input.json:44 replay.json:44 'generated-recordings*.yaml':44 existing.yaml:6; do
+  want="${spec##*:}"
+  got="$(find "$configurable/recordings" -type f -name "${spec%:*}" 2>/dev/null | wc -l | tr -d ' ' || true)"
+  if [ "$got" -ne "$want" ]; then
+    echo "expected $want ${spec%:*} files under $configurable/recordings, found $got" >&2
+    fail=1
+  fi
+  configurable_counts="$configurable_counts ${spec%:*}=$got"
+done
+integration_n="$(find "$configurable/integration" -type f -name 'generated-recordings*.yaml' 2>/dev/null | wc -l | tr -d ' ' || true)"
+if [ "$integration_n" -ne 2 ]; then
+  echo "expected 2 generated-recordings*.yaml files under $configurable/integration, found $integration_n" >&2
+  fail=1
+fi
+configurable_counts="$configurable_counts integration=$integration_n"
+if [ ! -f "$configurable/fixups.json" ]; then
+  echo "missing $configurable/fixups.json" >&2
+  fail=1
+fi
+canon_want=40
+canon_n="$(grep -c '"input":' "$configurable/canonicalize.json" 2>/dev/null || true)"
+canon_n="${canon_n:-0}"
+if [ "$canon_n" -ne "$canon_want" ]; then
+  echo "expected $canon_want rows in $configurable/canonicalize.json, found $canon_n" >&2
+  fail=1
+fi
+configurable_status="not rerun"
+if ! command -v go >/dev/null 2>&1 || [ ! -d "$go/internal/configurable/conformance" ]; then
+  echo "skipping the gen-go-configurable rerun and vendored-code check: needs go and ADK-Go at $go (set ADK_GO_DIR)" >&2
+else
+  go_abs="$(cd "$go" && pwd)"
+  configurable_tmp="$(mktemp -d)"
+  sed "s#=> ../../../adk-go#=> $go_abs#" "$repo/scripts/gen-go-configurable/go.mod" >"$configurable_tmp/go.mod"
+  cp "$repo/scripts/gen-go-configurable/go.sum" "$configurable_tmp/go.sum"
+  if ! (cd "$repo/scripts/gen-go-configurable" &&
+    go run -modfile="$configurable_tmp/go.mod" . -fixtures "$configurable_tmp/fixtures" >/dev/null); then
+    echo "scripts/gen-go-configurable failed" >&2
+    fail=1
+  elif ! diff -r -x integration "$configurable" "$configurable_tmp/fixtures" >&2; then
+    echo "gen-go-configurable output differs from the checked-in fixtures (rerun the probe)" >&2
+    fail=1
+  elif ! (cd "$repo/scripts/gen-go-configurable" &&
+    ADK_GO_DIR="$go_abs" go run -modfile="$configurable_tmp/go.mod" . -vendored adk >"$configurable_tmp/adk.txt" &&
+    go run -modfile="$configurable_tmp/go.mod" . -vendored probe >"$configurable_tmp/probe.txt"); then
+    echo "scripts/gen-go-configurable -vendored failed" >&2
+    fail=1
+  elif ! diff -u "$configurable_tmp/adk.txt" "$configurable_tmp/probe.txt" >&2; then
+    echo "scripts/gen-go-configurable's vendored declarations differ from ADK-Go's (recopy them)" >&2
+    fail=1
+  else
+    configurable_status="reproduced by the probe, vendored code matches ADK-Go"
+  fi
+  rm -rf "$configurable_tmp"
+fi
+
 if [ "$fail" -eq 0 ]; then
   echo "ok: $n fixtures and $schema_n telemetry goldens match ADK-Go; $wire_n wire fixtures;" \
     "$a2a_wire_n A2A wire fixtures; $webui_n web UI files; launcher fixtures$launcher_counts;" \
     "agentengine fixtures$agentengine_counts; encode_shapes.rs $shapes_status;" \
-    "goyaml$goyaml_counts; float table $float_n rows; goyaml $goyaml_status"
+    "goyaml$goyaml_counts; float table $float_n rows; goyaml $goyaml_status;" \
+    "configurable$configurable_counts; canonicalize $canon_n rows; configurable $configurable_status"
 fi
 exit "$fail"

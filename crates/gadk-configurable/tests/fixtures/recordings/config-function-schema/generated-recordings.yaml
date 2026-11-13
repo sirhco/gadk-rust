@@ -1,0 +1,81 @@
+recordings:
+    - user_message_index: 0
+      agent_name: root_agent
+      llm_recording:
+        llm_request:
+            model: gemini-2.5-flash
+            contents:
+                - parts:
+                    - text: Hi
+                  role: user
+            config:
+                tools:
+                    - function_declarations:
+                        - description: Looks up an order.
+                          name: lookup_order
+                          parameters:
+                            properties:
+                                filters:
+                                    properties:
+                                        min_total:
+                                            type: NUMBER
+                                        status:
+                                            enum:
+                                                - open
+                                                - closed
+                                            type: STRING
+                                    title: "Filters"
+                                    type: OBJECT
+                                include_items:
+                                    title: "Include Items"
+                                    type: BOOLEAN
+                                order_id:
+                                    description: The order id.
+                                    title: "Order Id"
+                                    type: STRING
+                                tags:
+                                    items:
+                                        type: STRING
+                                    maxitems: 5
+                                    title: "Tags"
+                                    type: ARRAY
+                                titled:
+                                    title: Kept Title
+                                    type: STRING
+                            required:
+                                - order_id
+                            title: "lookup_orderParams"
+                            type: OBJECT
+                          response:
+                            description: ""
+                            format: ""
+                            pattern: ""
+                            properties:
+                                status:
+                                    description: ""
+                                    format: ""
+                                    pattern: ""
+                                    properties: {}
+                                    title: ""
+                                    type: STRING
+                            title: ""
+                            type: OBJECT
+                        - description: Takes nothing.
+                          name: no_params
+                        - name: titled_params
+                          parameters:
+                            nullable: true
+                            properties:
+                                x:
+                                    default: 3
+                                    example: 4
+                                    format: int32
+                                    title: "X"
+                                    type: INTEGER
+                            title: Explicit
+                            type: OBJECT
+        llm_responses:
+            - content:
+                parts:
+                    - text: OK
+                role: model

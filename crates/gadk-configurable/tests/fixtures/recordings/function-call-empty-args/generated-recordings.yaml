@@ -1,0 +1,21 @@
+recordings:
+    - user_message_index: 0
+      agent_name: root_agent
+      llm_recording:
+        llm_request:
+            model: gemini-2.5-flash
+            contents:
+                - parts:
+                    - text: Hi
+                  role: user
+        llm_responses:
+            - content:
+                parts:
+                    - function_call:
+                        args: {}
+                        name: get_time
+                    - function_call:
+                        id: adk-2
+                        args: {}
+                        name: get_date
+                role: model

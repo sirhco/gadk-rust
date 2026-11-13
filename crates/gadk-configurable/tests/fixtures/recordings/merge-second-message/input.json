@@ -1,0 +1,39 @@
+{
+  "case": "merge-second-message",
+  "streaming_mode": "none",
+  "user_message_index": 1,
+  "existing": "existing.yaml",
+  "recordings": [
+    {
+      "user_message_index": 1,
+      "agent_name": "root_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "Thanks"
+                }
+              ]
+            }
+          ]
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "role": "model",
+              "parts": [
+                {
+                  "text": "You are welcome."
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

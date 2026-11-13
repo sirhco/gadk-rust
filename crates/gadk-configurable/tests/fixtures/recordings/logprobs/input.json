@@ -1,0 +1,68 @@
+{
+  "case": "logprobs",
+  "streaming_mode": "none",
+  "user_message_index": 0,
+  "existing": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "root_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "Hi"
+                }
+              ]
+            }
+          ]
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "role": "model",
+              "parts": [
+                {
+                  "text": "Hi"
+                }
+              ]
+            },
+            "avgLogprobs": -0.123456789,
+            "logprobsResult": {
+              "chosenCandidates": [
+                {
+                  "token": "Hi",
+                  "tokenId": 17,
+                  "logProbability": -0.1
+                },
+                {
+                  "token": "!",
+                  "logProbability": 0
+                }
+              ],
+              "topCandidates": [
+                {
+                  "candidates": [
+                    {
+                      "token": "Hi",
+                      "logProbability": -0.1
+                    },
+                    {
+                      "token": "Hey",
+                      "logProbability": -2.3025851
+                    }
+                  ]
+                }
+              ],
+              "logProbabilitySum": -0.33333334
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

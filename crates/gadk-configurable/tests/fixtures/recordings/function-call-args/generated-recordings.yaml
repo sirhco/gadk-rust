@@ -1,0 +1,46 @@
+recordings:
+    - user_message_index: 0
+      agent_name: root_agent
+      llm_recording:
+        llm_request:
+            model: gemini-2.5-flash
+            contents:
+                - parts:
+                    - text: Weather in Paris?
+                  role: user
+        llm_responses:
+            - content:
+                parts:
+                    - function_call:
+                        id: adk-1
+                        args:
+                            big: 1.2345678901e+10
+                            city: Paris
+                            colon: 'a: b'
+                            days: 3
+                            empty: ""
+                            flag: false
+                            items:
+                                - 1
+                                - two
+                                - 3.25
+                                - null
+                                - k: v
+                            nested:
+                                a:
+                                    b:
+                                        - 0
+                                        - false
+                                        - ""
+                            num_str: "42"
+                            obj: {}
+                            "on": true
+                            quoted: "yes"
+                            ratio: 1.5
+                            text_multi: |-
+                                line1
+                                line2
+                            zero: 0
+                        name: get_weather
+                role: model
+              finish_reason: STOP

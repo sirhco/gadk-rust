@@ -1,0 +1,62 @@
+recordings:
+    - user_message_index: 0
+      agent_name: root_agent
+      llm_recording:
+        llm_request:
+            model: gemini-2.5-flash
+            contents:
+                - parts:
+                    - text: Hi
+                  role: user
+            config:
+                system_instruction: |
+                    Route the user to the right agent.
+
+                    You are an agent. Your internal name is "root_agent". The description about you is "Routes requests.".
+
+
+                    You have a list of other agents to transfer to:
+
+
+                    Agent name: billing_agent
+                    Agent description: Handles billing questions.
+
+
+                    Agent name: support_agent
+                    Agent description: Handles technical support.
+
+
+                    If you are the best to answer the question according to your description,
+                    you can answer it.
+
+                    If another agent is better for answering the question according to its
+                    description, call `transfer_to_agent` function to transfer the question to that
+                    agent. When transferring, do not generate any text other than the function
+                    call.
+
+                    **NOTE**: the only available agents for `transfer_to_agent` function are
+                    `billing_agent`, `support_agent`.
+                tools:
+                    - function_declarations:
+                        - description: |-
+                            Transfer the question to another agent.
+                            This tool hands off control to another agent when it's more suitable to answer the user's question according to the agent's description.
+                          name: transfer_to_agent
+                          parameters:
+                            properties:
+                                agent_name:
+                                    description: the agent name to transfer to
+                                    enum:
+                                        - billing_agent
+                                        - support_agent
+                                    title: "Agent Name"
+                                    type: STRING
+                            required:
+                                - agent_name
+                            title: "transfer_to_agentParams"
+                            type: OBJECT
+        llm_responses:
+            - content:
+                parts:
+                    - text: done
+                role: model

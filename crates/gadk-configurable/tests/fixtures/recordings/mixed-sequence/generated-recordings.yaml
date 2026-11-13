@@ -1,0 +1,95 @@
+recordings:
+    - user_message_index: 0
+      agent_name: root_agent
+      llm_recording:
+        llm_request:
+            model: gemini-2.5-flash
+            contents:
+                - parts:
+                    - text: Weather?
+                  role: user
+            config:
+                system_instruction: Use tools.
+                tools:
+                    - function_declarations:
+                        - description: Gets weather.
+                          name: get_weather
+                          parameters:
+                            properties:
+                                city:
+                                    title: "City"
+                                    type: STRING
+                            title: "get_weatherParams"
+                            type: OBJECT
+        llm_responses:
+            - content:
+                parts:
+                    - function_call:
+                        id: adk-1
+                        args:
+                            city: Paris
+                        name: get_weather
+                role: model
+              usage_metadata:
+                candidates_token_count: 2
+                prompt_token_count: 7
+                total_token_count: 9
+    - user_message_index: 0
+      agent_name: root_agent
+      tool_recording:
+        tool_call:
+            id: adk-1
+            args:
+                city: Paris
+            name: get_weather
+        tool_response:
+            scheduling: ""
+            id: adk-1
+            name: get_weather
+            response:
+                temp: 21
+    - user_message_index: 0
+      agent_name: root_agent
+      llm_recording:
+        llm_request:
+            model: gemini-2.5-flash
+            contents:
+                - parts:
+                    - text: Weather?
+                  role: user
+                - parts:
+                    - function_call:
+                        id: adk-1
+                        args:
+                            city: Paris
+                        name: get_weather
+                  role: model
+                - parts:
+                    - function_response:
+                        id: adk-1
+                        name: get_weather
+                        response:
+                            temp: 21
+                  role: user
+            config:
+                system_instruction: Use tools.
+        llm_responses:
+            - content:
+                parts:
+                    - text: 21 degrees.
+                role: model
+              finish_reason: STOP
+    - user_message_index: 0
+      agent_name: helper_agent
+      llm_recording:
+        llm_request:
+            model: gemini-2.5-flash
+            contents:
+                - parts:
+                    - text: Weather?
+                  role: user
+        llm_responses:
+            - content:
+                parts:
+                    - text: Delegated.
+                role: model

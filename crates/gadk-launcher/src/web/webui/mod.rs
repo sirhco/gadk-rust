@@ -34,7 +34,7 @@ use std::sync::{Arc, Mutex};
 use axum::body::Body;
 use bytes::Bytes;
 use gadk_platform::go_flag::{Flag, FlagSet};
-use gadk_platform::{go_path_clean, go_path_join, go_url};
+use gadk_platform::{go_path_base, go_path_clean, go_path_join, go_url};
 use gadk_server::mux::{Request, Response, handler, html_escape, http_error, not_found, redirect};
 use gadk_server::rest::encode_json_response;
 use http::header::{
@@ -411,10 +411,10 @@ fn serve_file(req: &Request, url: &ReqUrl, name: &str) -> Response {
     // Redirect to the canonical path: / at the end of a directory URL, none after a file.
     match entry {
         Entry::Dir if !url.path.ends_with('/') => {
-            return local_redirect(url, &format!("{}/", path_base(&url.path)));
+            return local_redirect(url, &format!("{}/", go_path_base(&url.path)));
         }
         Entry::File(_) if url.path.ends_with('/') => {
-            let base = path_base(&url.path);
+            let base = go_path_base(&url.path);
             if base == "/" || base == "." {
                 return serve_error(
                     &HeaderMap::new(),
@@ -427,7 +427,7 @@ fn serve_file(req: &Request, url: &ReqUrl, name: &str) -> Response {
         _ => {}
     }
     match entry {
-        Entry::File(bytes) => serve_content(req, &path_base(name), Bytes::from_static(bytes)),
+        Entry::File(bytes) => serve_content(req, &go_path_base(name), Bytes::from_static(bytes)),
         // A directory reaches here only with an index.html (noListingFS), which is served.
         Entry::Dir => {
             let index = format!("{}/{INDEX_FILE}", name.strip_suffix('/').unwrap_or(name));
@@ -880,21 +880,6 @@ fn path_ext(p: &str) -> &str {
         }
     }
     ""
-}
-
-/// Go `path.Base`.
-fn path_base(p: &str) -> String {
-    if p.is_empty() {
-        return ".".to_owned();
-    }
-    let trimmed = p.trim_end_matches('/');
-    if trimmed.is_empty() {
-        return "/".to_owned();
-    }
-    match trimmed.rfind('/') {
-        Some(i) => trimmed[i + 1..].to_owned(),
-        None => trimmed.to_owned(),
-    }
 }
 
 fn lock<T: ?Sized>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -1369,9 +1354,6 @@ mod tests {
         assert_eq!(path_ext("a/b.c/d"), "");
         assert_eq!(path_ext("a/b.tar.gz"), ".gz");
         assert_eq!(path_ext("."), ".");
-        assert_eq!(path_base(""), ".");
-        assert_eq!(path_base("///"), "/");
-        assert_eq!(path_base("/a/b//"), "b");
         assert_eq!(scan_etag(b" W/\"a\" ,x"), (&b"W/\"a\""[..], &b" ,x"[..]));
         assert_eq!(scan_etag(b"\"a b\""), (&b""[..], &b""[..]));
         assert_eq!(scan_etag(b"\"a"), (&b""[..], &b""[..]));

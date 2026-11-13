@@ -1,0 +1,76 @@
+{
+  "error": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "root_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "Hi"
+                }
+              ],
+              "role": "user"
+            }
+          ]
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "Paris is the capital."
+                }
+              ],
+              "role": "model"
+            },
+            "groundingMetadata": {
+              "groundingChunks": [
+                {
+                  "web": {
+                    "domain": "example.com",
+                    "title": "Paris",
+                    "uri": "https://example.com/paris"
+                  }
+                },
+                {}
+              ],
+              "groundingSupports": [
+                {
+                  "confidenceScores": [
+                    0.9,
+                    0.1,
+                    0
+                  ],
+                  "groundingChunkIndices": [
+                    0,
+                    1
+                  ],
+                  "segment": {
+                    "endIndex": 21,
+                    "text": "Paris is the capital."
+                  }
+                }
+              ],
+              "retrievalMetadata": {
+                "googleSearchDynamicRetrievalScore": 0.25
+              },
+              "searchEntryPoint": {
+                "renderedContent": "<div>search</div>",
+                "sdkBlob": "AQID"
+              },
+              "webSearchQueries": [
+                "capital of france"
+              ],
+              "googleMapsWidgetContextToken": "tok"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "error": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "tools_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "Hi"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "config": {
+            "tools": [
+              {
+                "functionDeclarations": [
+                  {
+                    "description": "Ask for approval for the reimbursement.\n\nNOTE: This is a long-running operation. Do not call this tool again if it has already returned some intermediate or pending status.",
+                    "name": "ask_for_approval",
+                    "parametersJsonSchema": {
+                      "properties": {
+                        "amount": {
+                          "title": "Amount",
+                          "type": "number"
+                        },
+                        "purpose": {
+                          "title": "Purpose",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "purpose",
+                        "amount"
+                      ],
+                      "title": "ask_for_approvalParams",
+                      "type": "object"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "done"
+                }
+              ],
+              "role": "model"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

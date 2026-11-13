@@ -33,7 +33,7 @@ class EdgeTest(unittest.TestCase):
     def test_agent_dev_dependency_on_engine_is_rejected(self):
         self.edit("gadk-agent", "[dev-dependencies]\n", "[dev-dependencies]\ngadk-engine = { workspace = true }\n")
         errs = cwd.check(self.repo)
-        self.assertTrue(any("only gadk, gadk-tools, gadk-server, gadk-a2a, gadk-launcher, gadk-agentregistry and gadk-telemetry may depend on gadk-engine" in e for e in errs), errs)
+        self.assertTrue(any("only gadk, gadk-tools, gadk-server, gadk-a2a, gadk-launcher, gadk-agentregistry, gadk-telemetry and gadk-configurable may depend on gadk-engine" in e for e in errs), errs)
 
     def test_tools_dev_dependency_on_engine_is_allowed(self):
         text = (self.repo / "crates/gadk-tools/Cargo.toml").read_text()
@@ -86,9 +86,9 @@ class EdgeTest(unittest.TestCase):
 
     def test_mcp_edges_are_exactly_agent_auth_genai_platform(self):
         self.assertEqual(cwd.ALLOWED["gadk-mcp"], {"gadk-agent", "gadk-auth", "gadk-genai", "gadk-platform"})
-        # 5c: the registry's `mcp` feature builds MCP toolsets.
+        # 5c: the registry's `mcp` feature builds MCP toolsets; 6c-2: the `McpToolset` factory.
         self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-mcp" in deps],
-                         ["gadk-agentregistry", "gadk"])
+                         ["gadk-agentregistry", "gadk-configurable", "gadk"])
         self.assertIn("gadk-platform", cwd.ALLOWED["gadk-gemini"])
 
     def test_mcp_normal_dependency_on_engine_is_rejected(self):
@@ -221,7 +221,9 @@ class EdgeTest(unittest.TestCase):
                          {"gadk-agent", "gadk-engine", "gadk-session", "gadk-artifact", "gadk-memory",
                           "gadk-genai", "gadk-model", "gadk-platform", "gadk-server", "gadk-a2a",
                       "gadk-telemetry"})
-        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-launcher" in deps], ["gadk"])
+        # 6c-2: `adkcli` runs the full launcher.
+        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-launcher" in deps],
+                         ["gadk-configurable", "gadk"])
         self.assertIn("gadk-launcher", cwd.ENGINE_DEPENDENTS)
         self.assertIn(("gadk-launcher", "gadk-server"), cwd.OPTIONAL)
         self.assertIn(("gadk-launcher", "gadk-a2a"), cwd.OPTIONAL)
@@ -335,8 +337,9 @@ class EdgeTest(unittest.TestCase):
 
     def test_goyaml_edges_are_exactly_platform(self):
         self.assertEqual(cwd.ALLOWED["gadk-goyaml"], {"gadk-platform"})
-        # 6c-1: nothing depends on the yaml.v3 port, the façade included.
-        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-goyaml" in deps], [])
+        # 6c-1: the façade never depends on the yaml.v3 port; 6c-2: gadk-configurable does.
+        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-goyaml" in deps],
+                         ["gadk-configurable"])
         self.assertNotIn("gadk-goyaml", cwd.ENGINE_DEPENDENTS)
 
     def test_goyaml_normal_dependency_on_genai_is_rejected(self):
@@ -359,6 +362,37 @@ class EdgeTest(unittest.TestCase):
         self.edit("gadk-cli", "license.workspace = true", 'license = "Apache-2.0 AND MIT"')
         errs = cwd.check(self.repo)
         self.assertTrue(any("gadk-cli/Cargo.toml: package.license must be inherited" in e for e in errs), errs)
+
+    def test_configurable_edges_are_exactly_its_port_dependencies(self):
+        self.assertEqual(cwd.ALLOWED["gadk-configurable"],
+                         {"gadk-agent", "gadk-engine", "gadk-genai", "gadk-model", "gadk-gemini",
+                          "gadk-goyaml", "gadk-launcher", "gadk-mcp", "gadk-platform",
+                          "gadk-session", "gadk-tools"})
+        # 6c-2: nothing depends on it, the façade included; its tests use the engine's testutil.
+        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-configurable" in deps], [])
+        self.assertIn("gadk-configurable", cwd.ENGINE_DEPENDENTS)
+        self.assertNotIn("gadk-configurable", cwd.LICENSE_OVERRIDES)
+
+    def test_configurable_dev_dependency_on_engine_is_allowed(self):
+        text = (self.repo / "crates/gadk-configurable/Cargo.toml").read_text()
+        dev = text.split("[dev-dependencies]\n", 1)[1]
+        self.assertIn('gadk-engine = { workspace = true, features = ["testutil"] }', dev)
+        self.assertEqual(cwd.check(self.repo), [])
+
+    def test_configurable_missing_goyaml_edge_is_rejected(self):
+        self.edit("gadk-configurable", "gadk-goyaml = { workspace = true }\n", "")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-configurable -> gadk-goyaml is missing" in e for e in errs), errs)
+
+    def test_configurable_normal_dependency_on_server_is_rejected(self):
+        self.edit("gadk-configurable", "[dependencies]\n", "[dependencies]\ngadk-server = { workspace = true }\n")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-configurable -> gadk-server is not allowed" in e for e in errs), errs)
+
+    def test_facade_dependency_on_configurable_is_rejected(self):
+        self.edit("gadk", "[dependencies]\n", "[dependencies]\ngadk-configurable = { workspace = true }\n")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk -> gadk-configurable is not allowed" in e for e in errs), errs)
 
     def test_model_edges_are_unchanged_by_gcp_auth(self):
         self.assertEqual(cwd.ALLOWED["gadk-model"], {"gadk-genai"})

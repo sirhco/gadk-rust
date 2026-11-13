@@ -1,0 +1,118 @@
+{
+  "error": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "root_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "Hi"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "config": {
+            "systemInstruction": {
+              "parts": [
+                {
+                  "text": "You are a helpful agent.\nAnswer briefly.\n"
+                }
+              ],
+              "role": "user"
+            }
+          }
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "OK"
+                }
+              ],
+              "role": "model"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "user_message_index": 0,
+      "agent_name": "single_line",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "Hi"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "config": {
+            "systemInstruction": {
+              "parts": [
+                {
+                  "text": "One line: with a colon"
+                }
+              ],
+              "role": "user"
+            }
+          }
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "OK"
+                }
+              ],
+              "role": "model"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "user_message_index": 0,
+      "agent_name": "no_text",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "Hi"
+                }
+              ],
+              "role": "user"
+            }
+          ]
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "OK"
+                }
+              ],
+              "role": "model"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

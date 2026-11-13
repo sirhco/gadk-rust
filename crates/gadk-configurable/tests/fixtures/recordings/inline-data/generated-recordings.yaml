@@ -1,0 +1,29 @@
+recordings:
+    - user_message_index: 0
+      agent_name: root_agent
+      llm_recording:
+        llm_request:
+            model: gemini-2.5-flash
+            contents:
+                - parts:
+                    - text: What is this?
+                    - inline_data:
+                        data:
+                            - 104
+                            - 101
+                            - 108
+                            - 108
+                            - 111
+                        displayname: hello.png
+                        mimetype: image/png
+                    - inline_data:
+                        mimetype: application/octet-stream
+                    - file_data:
+                        fileuri: gs://bucket/file.pdf
+                        mimetype: application/pdf
+                  role: user
+        llm_responses:
+            - content:
+                parts:
+                    - text: A greeting.
+                role: model

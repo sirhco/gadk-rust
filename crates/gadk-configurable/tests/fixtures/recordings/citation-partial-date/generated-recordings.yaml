@@ -1,0 +1,19 @@
+recordings:
+    - user_message_index: 0
+      agent_name: root_agent
+      llm_recording:
+        llm_request:
+            model: gemini-2.5-flash
+            contents:
+                - parts:
+                    - text: Hi
+                  role: user
+        llm_responses:
+            - content:
+                parts:
+                    - text: Quoted.
+                role: model
+              citation_metadata:
+                citations:
+                    - publicationdate: 2024-00-00
+                      uri: https://example.com/a

@@ -1,0 +1,45 @@
+[package]
+name = "gadk-configurable"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+# Internal (6c-2): ADK-Go's `internal/configurable`, its conformance plugins and `adkcli`.
+publish = false
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "adkcli"
+path = "src/bin/adkcli.rs"
+
+[dependencies]
+gadk-agent = { workspace = true }
+gadk-engine = { workspace = true }
+gadk-genai = { workspace = true }
+gadk-model = { workspace = true }
+gadk-gemini = { workspace = true }
+gadk-goyaml = { workspace = true }
+gadk-launcher = { workspace = true }
+gadk-mcp = { workspace = true }
+gadk-platform = { workspace = true }
+gadk-session = { workspace = true }
+gadk-tools = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+schemars = { workspace = true }
+regex = { workspace = true }
+base64 = { workspace = true }
+parking_lot = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+gadk-engine = { workspace = true, features = ["testutil"] }
+tokio = { workspace = true, features = ["test-util"] }
+tempfile = { workspace = true }
+pretty_assertions = { workspace = true }
+reqwest = { workspace = true }

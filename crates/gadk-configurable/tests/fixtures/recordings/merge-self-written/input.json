@@ -1,0 +1,7 @@
+{
+  "case": "merge-self-written",
+  "streaming_mode": "none",
+  "user_message_index": 1,
+  "existing": "existing.yaml",
+  "recordings": []
+}

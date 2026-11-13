@@ -1,0 +1,119 @@
+{
+  "case": "conformance-search_flights",
+  "streaming_mode": "none",
+  "user_message_index": 0,
+  "existing": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "tools_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "Hi"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "config": {
+            "tools": [
+              {
+                "functionDeclarations": [
+                  {
+                    "description": "Search for flights based on trip details and preferences.\n\nThis function demonstrates advanced parameter handling:\n- Pydantic models as parameters (trip, preferences)\n- Optional/nullable parameters (preferences, return_date, preferred_airline)\n- Default values (cabin_class, max_stops, flexible_dates)\n\nArgs:\n  trip: Core trip information including origin, destination, and dates.\n  preferences: Optional flight preferences. If not provided, uses defaults.\n\nReturns:\n  A dictionary containing search results and parameters received.\n",
+                    "name": "search_flights",
+                    "parametersJsonSchema": {
+                      "type": "object",
+                      "properties": {
+                        "trip": {
+                          "type": "object",
+                          "properties": {
+                            "origin": {
+                              "type": "string"
+                            },
+                            "destination": {
+                              "type": "string"
+                            },
+                            "departure_date": {
+                              "type": "string"
+                            },
+                            "return_date": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "origin",
+                            "destination",
+                            "departure_date",
+                            "return_date"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "preferences": {
+                          "type": [
+                            "null",
+                            "object"
+                          ],
+                          "properties": {
+                            "cabin_class": {
+                              "type": "string"
+                            },
+                            "max_stops": {
+                              "type": "integer"
+                            },
+                            "preferred_airline": {
+                              "type": [
+                                "null",
+                                "string"
+                              ]
+                            },
+                            "flexible_dates": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "cabin_class",
+                            "max_stops",
+                            "preferred_airline",
+                            "flexible_dates"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "trip",
+                        "preferences"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "responseJsonSchema": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "done"
+                }
+              ],
+              "role": "model"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

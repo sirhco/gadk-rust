@@ -1,0 +1,164 @@
+{
+  "error": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "root_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "Weather?"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "config": {
+            "tools": [
+              {}
+            ]
+          }
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "parts": [
+                {}
+              ],
+              "role": "model"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "user_message_index": 0,
+      "agent_name": "root_agent",
+      "tool_recording": {
+        "tool_call": {
+          "id": "adk-1",
+          "args": {
+            "city": "Paris"
+          },
+          "name": "get_weather"
+        },
+        "tool_response": {
+          "id": "adk-1",
+          "name": "get_weather",
+          "response": {
+            "temp": 21
+          }
+        }
+      }
+    },
+    {
+      "user_message_index": 0,
+      "agent_name": "root_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "Weather?"
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "parts": [
+                {}
+              ],
+              "role": "model"
+            },
+            {
+              "parts": [
+                {}
+              ],
+              "role": "user"
+            }
+          ]
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "21 degrees."
+                }
+              ],
+              "role": "model"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "user_message_index": 0,
+      "agent_name": "helper_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "Weather?"
+                }
+              ],
+              "role": "user"
+            }
+          ]
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "Delegated."
+                }
+              ],
+              "role": "model"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "user_message_index": 1,
+      "agent_name": "root_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "Thanks"
+                }
+              ],
+              "role": "user"
+            }
+          ]
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "You are welcome."
+                }
+              ],
+              "role": "model"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+recordings:
+    - user_message_index: 0
+      agent_name: root_agent
+      llm_recording:
+        llm_request:
+            model: gemini-2.5-flash
+            contents:
+                - parts:
+                    - text: Hi
+                  role: user
+        llm_responses:
+            - content:
+                parts:
+                    - text: Hi
+                role: model
+              logprobs_result:
+                chosencandidates:
+                    - logprobability: -0.1
+                      token: Hi
+                      tokenid: 17
+                    - token: '!'
+                topcandidates:
+                    - candidates:
+                        - logprobability: -0.1
+                          token: Hi
+                        - logprobability: -2.3025851
+                          token: Hey
+                logprobabilitysum: -0.33333334
+              avg_logprobs: -0.123456789

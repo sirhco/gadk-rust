@@ -1,0 +1,105 @@
+// Copyright 2026 Chris Olson
+// Portions derived from ADK-Go (https://github.com/google/adk-go), Copyright 2026 Google LLC.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// T12 overlay probe: writes the gadk-configurable integration goldens
+// (crates/gadk-configurable/tests/fixtures/integration/record-tool-call/*.yaml) with ADK-Go
+// itself at docs/parity/ADK_GO_COMMIT. Not a file of this module (hence the .txt suffix): it is
+// mapped into ADK-Go's internal/configurable/conformance package with `go test -overlay`, and
+// ADK-Go's tree is not modified. Regenerate (from the repo root, ADK-Go at $ADK_GO_DIR):
+//
+//	R=$PWD S=$(mktemp -d) && echo '{"Replace":{"'$ADK_GO_DIR'/internal/configurable/conformance/zz_t12probe_test.go":"'$R'/scripts/gen-go-configurable/overlay/zz_t12probe_test.go.txt"}}' >$S/overlay.json && (cd $ADK_GO_DIR && T12_OUT=$S/out go test -count=1 -overlay $S/overlay.json -run TestT12Probe ./internal/configurable/conformance/) && cp $S/out/record-tool-call/*.yaml crates/gadk-configurable/tests/fixtures/integration/record-tool-call/
+//
+// tests/plugins_integration.rs runs the same scenario through gadk and compares the bytes.
+
+package conformance
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"google.golang.org/genai"
+
+	"google.golang.org/adk/v2/agent"
+	"google.golang.org/adk/v2/agent/llmagent"
+	"google.golang.org/adk/v2/internal/configurable/conformance/recordplugin"
+	"google.golang.org/adk/v2/internal/testutil"
+	"google.golang.org/adk/v2/plugin"
+	"google.golang.org/adk/v2/runner"
+	"google.golang.org/adk/v2/session"
+	"google.golang.org/adk/v2/tool"
+	"google.golang.org/adk/v2/tool/functiontool"
+)
+
+// T12 probe: records an LlmAgent with the validate_email tool and a mock model
+// under the public runner with the record plugin, once per streaming mode.
+func TestT12Probe(t *testing.T) {
+	out := os.Getenv("T12_OUT")
+	if out == "" {
+		t.Skip("T12_OUT not set")
+	}
+	for _, mode := range []string{"none", "sse"} {
+		validateEmailTool, err := functiontool.New(functiontool.Config{
+			Name:        "validate_email",
+			Description: "Checks if the provided string is a valid email format.",
+		}, validateEmail)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mock := &testutil.MockModel{Responses: []*genai.Content{
+			{Role: "model", Parts: []*genai.Part{{FunctionCall: &genai.FunctionCall{ID: "call-1", Name: "validate_email", Args: map[string]any{"email": "a@b.co"}}}}},
+			genai.NewContentFromText("It is valid.", genai.RoleModel),
+		}}
+		a, err := llmagent.New(llmagent.Config{
+			Name: "root_agent", Model: mock, Instruction: "Use the tools.",
+			Tools: []tool.Tool{validateEmailTool},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		caseDir := filepath.Join(out, "record-tool-call")
+		if err := os.MkdirAll(caseDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		svc := session.InMemoryService()
+		ctx := context.Background()
+		if _, err := svc.Create(ctx, &session.CreateRequest{
+			AppName: "app", UserID: "user", SessionID: "s1",
+			State: map[string]any{"_adk_recordings_config": map[string]any{
+				"dir": caseDir, "user_message_index": 0, "streaming_mode": mode,
+			}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		r, err := runner.New(runner.Config{
+			AppName: "app", Agent: a, SessionService: svc,
+			PluginConfig: runner.PluginConfig{Plugins: []*plugin.Plugin{recordplugin.MustNew(out)}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg := agent.RunConfig{}
+		if mode == "sse" {
+			cfg.StreamingMode = agent.StreamingModeSSE
+		}
+		for ev, err := range r.Run(ctx, "user", "s1", genai.NewContentFromText("Is a@b.co valid?", genai.RoleUser), cfg) {
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("%s event: author=%s partial=%v content=%+v", mode, ev.Author, ev.Partial, ev.Content)
+		}
+	}
+}

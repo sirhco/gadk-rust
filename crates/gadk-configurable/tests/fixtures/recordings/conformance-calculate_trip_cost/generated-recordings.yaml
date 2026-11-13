@@ -1,0 +1,59 @@
+recordings:
+    - user_message_index: 0
+      agent_name: tools_agent
+      llm_recording:
+        llm_request:
+            model: gemini-2.5-flash
+            contents:
+                - parts:
+                    - text: Hi
+                  role: user
+            config:
+                tools:
+                    - function_declarations:
+                        - description: |
+                            Calculate total trip cost with various optional charges.
+
+                            This function demonstrates:
+                            - Mix of required and optional parameters
+                            - Default values for common cases
+                            - Nullable parameter that affects calculation logic
+
+                            Args:
+                              base_fare: Base ticket price per passenger.
+                              num_passengers: Number of passengers (default: 1).
+                              insurance: Whether to add travel insurance (default: False).
+                              baggage_count: Number of checked bags per passenger, or None for carry-on
+                                only.
+
+                            Returns:
+                              A dictionary with cost breakdown.
+                          name: calculate_trip_cost
+                          parameters_json_schema:
+                            title: "calculate_trip_costParams"
+                            type: object
+                            required:
+                                - base_fare
+                                - num_passengers
+                                - insurance
+                                - baggage_count
+                            properties:
+                                baggage_count:
+                                    title: "Baggage Count"
+                                    types:
+                                        - "null"
+                                        - integer
+                                base_fare:
+                                    title: "Base Fare"
+                                    type: number
+                                insurance:
+                                    title: "Insurance"
+                                    type: boolean
+                                num_passengers:
+                                    title: "Num Passengers"
+                                    type: integer
+        llm_responses:
+            - content:
+                parts:
+                    - text: done
+                role: model

@@ -1,0 +1,16 @@
+recordings:
+    - user_message_index: 0
+      agent_name: root_agent
+      llm_recording:
+        llm_request:
+            model: gemini-2.5-flash
+            contents:
+                - parts:
+                    - text: Hi
+                  role: user
+        llm_responses:
+            - interrupted: true
+              session_resumption_handle: h1
+              error_code: MAX_TOKENS
+              error_message: too long
+              finish_reason: MAX_TOKENS

@@ -1,0 +1,13 @@
+recordings:
+  - user_message_index: 0
+    agent_name: a
+    llm_recording:
+      llm_request:
+        model: m
+        config:
+          temperature: hot
+      llm_responses:
+        - content:
+            parts: not-a-list
+  - user_message_index: oops
+    agent_name: b

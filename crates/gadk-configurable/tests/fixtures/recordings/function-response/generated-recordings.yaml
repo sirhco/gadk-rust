@@ -1,0 +1,52 @@
+recordings:
+    - user_message_index: 0
+      agent_name: root_agent
+      llm_recording:
+        llm_request:
+            model: gemini-2.5-flash
+            contents:
+                - parts:
+                    - text: Hi
+                  role: user
+                - parts:
+                    - function_call:
+                        id: adk-1
+                        args:
+                            city: Paris
+                        name: get_weather
+                  role: model
+                - parts:
+                    - function_response:
+                        id: adk-1
+                        name: get_weather
+                        response:
+                            count: 0
+                            meta: {}
+                            ok: false
+                            temp: 21.5
+                            unit: ""
+                    - function_response:
+                        name: noop
+                        response: {}
+                    - function_response:
+                        scheduling: SILENT
+                        parts:
+                            - inline_data:
+                                mimetype: image/png
+                                data:
+                                    - 137
+                                    - 80
+                                    - 78
+                                    - 71
+                                    - 13
+                                    - 10
+                        id: adk-3
+                        name: image
+                        response:
+                            result: see part
+                  role: user
+        llm_responses:
+            - content:
+                parts:
+                    - text: It is 21.5C.
+                role: model

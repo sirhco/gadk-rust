@@ -1,0 +1,53 @@
+recordings:
+    - user_message_index: 0
+      agent_name: a
+      llm_recording:
+        llm_request:
+            model: m
+            contents:
+                - parts:
+                    - text: hi
+                    - function_call:
+                        args:
+                            x: 1
+                        name: f
+                      thought_signature: "AQI="
+                  role: user
+            config:
+                system_instruction: sys
+                temperature: 0.5
+        llm_responses:
+            - content:
+                parts:
+                    - text: ok
+                role: model
+              usage_metadata:
+                total_token_count: 3
+              finish_reason: STOP
+    - user_message_index: 1
+      agent_name: b
+      tool_recording:
+        tool_call:
+            id: ""
+            args: {}
+            name: t
+        tool_response:
+            scheduling: ""
+            id: ""
+            name: t
+            response:
+                r: 1
+    - user_message_index: 2
+      agent_name: root_agent
+      tool_recording:
+        tool_call:
+            id: c
+            args:
+                "y": 2
+            name: t
+        tool_response:
+            scheduling: ""
+            id: c
+            name: t
+            response:
+                r: 2

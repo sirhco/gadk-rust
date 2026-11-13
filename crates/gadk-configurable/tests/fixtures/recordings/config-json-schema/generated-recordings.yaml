@@ -1,0 +1,97 @@
+recordings:
+    - user_message_index: 0
+      agent_name: root_agent
+      llm_recording:
+        llm_request:
+            model: gemini-2.5-flash
+            contents:
+                - parts:
+                    - text: Hi
+                  role: user
+            config:
+                tools:
+                    - function_declarations:
+                        - description: Books a trip.
+                          name: book_trip
+                          parameters_json_schema:
+                            schema: https://json-schema.org/draft/2020-12/schema
+                            defs:
+                                Leg:
+                                    type: object
+                                    required:
+                                        - from
+                                        - to
+                                    properties:
+                                        from:
+                                            type: string
+                                        to:
+                                            type: string
+                            title: "book_tripParams"
+                            type: object
+                            required:
+                                - legs
+                            properties:
+                                budget:
+                                    title: "Budget"
+                                    type: number
+                                    multipleof: 0.01
+                                class:
+                                    title: "Class"
+                                    default:
+                                        - 34
+                                        - 101
+                                        - 99
+                                        - 111
+                                        - 110
+                                        - 111
+                                        - 109
+                                        - 121
+                                        - 34
+                                    type: string
+                                    enum:
+                                        - economy
+                                        - business
+                                flex:
+                                    title: "Flex"
+                                    anyof:
+                                        - type: boolean
+                                        - const: 3
+                                legs:
+                                    title: "Legs"
+                                    type: array
+                                    items:
+                                        ref: '#/$defs/Leg'
+                                    minitems: 1
+                                note:
+                                    title: "Note"
+                                    description: Optional note.
+                                    types:
+                                        - "null"
+                                        - string
+                                passengers:
+                                    title: "Passengers"
+                                    default:
+                                        - 49
+                                    type: integer
+                                    minimum: 1
+                                    maximum: 9
+                        - name: true_schema
+                          parameters_json_schema:
+                            title: "true_schemaParams"
+                        - name: empty_schema
+                          parameters_json_schema:
+                            title: "empty_schemaParams"
+                        - name: false_props
+                          parameters_json_schema:
+                            title: "false_propsParams"
+                            type: object
+                            properties:
+                                x:
+                                    title: "X"
+                                "y":
+                                    title: "Y"
+        llm_responses:
+            - content:
+                parts:
+                    - text: OK
+                role: model

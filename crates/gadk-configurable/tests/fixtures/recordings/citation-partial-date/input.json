@@ -1,0 +1,49 @@
+{
+  "case": "citation-partial-date",
+  "streaming_mode": "none",
+  "user_message_index": 0,
+  "existing": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "root_agent",
+      "llm_recording": {
+        "llm_request": {
+          "model": "gemini-2.5-flash",
+          "contents": [
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "Hi"
+                }
+              ]
+            }
+          ]
+        },
+        "llm_responses": [
+          {
+            "content": {
+              "role": "model",
+              "parts": [
+                {
+                  "text": "Quoted."
+                }
+              ]
+            },
+            "citationMetadata": {
+              "citations": [
+                {
+                  "uri": "https://example.com/a",
+                  "publicationDate": {
+                    "year": 2024
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

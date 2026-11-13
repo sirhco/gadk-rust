@@ -1,0 +1,71 @@
+{
+  "error": null,
+  "recordings": [
+    {
+      "user_message_index": 0,
+      "agent_name": "root_agent",
+      "tool_recording": {
+        "tool_call": {
+          "id": "adk-7",
+          "args": {
+            "city": "Paris",
+            "days": 3,
+            "empty": "",
+            "metric": true,
+            "nested": {
+              "e": "",
+              "z": 0
+            },
+            "obj": {},
+            "off": false,
+            "ratio": 0.5,
+            "zero": 0
+          },
+          "name": "get_weather"
+        },
+        "tool_response": {
+          "willContinue": false,
+          "scheduling": "SILENT",
+          "id": "adk-7",
+          "name": "get_weather",
+          "response": {
+            "ok": false,
+            "result": {
+              "count": 0
+            },
+            "temp": 21.5
+          }
+        }
+      }
+    },
+    {
+      "user_message_index": 0,
+      "agent_name": "root_agent",
+      "tool_recording": {
+        "tool_call": {
+          "id": "adk-8",
+          "name": "long_op",
+          "partialArgs": [
+            {
+              "jsonPath": "$.a",
+              "stringValue": "x"
+            }
+          ],
+          "willContinue": true
+        },
+        "tool_response": {
+          "parts": [
+            {
+              "inlineData": {
+                "mimeType": "text/plain",
+                "data": "aGk="
+              }
+            }
+          ],
+          "id": "adk-8",
+          "name": "long_op"
+        }
+      }
+    }
+  ]
+}
