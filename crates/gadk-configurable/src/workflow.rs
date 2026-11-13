@@ -38,8 +38,7 @@ use crate::config::{
     WorkflowYamlConfig,
 };
 use crate::{
-    ConfigError, LoadCtx, NodeFn, NodeOutput, Registry, StrNodeFn, go_abs, go_io_error, go_is_abs,
-    read_file,
+    ConfigError, LoadCtx, NodeFn, NodeOutput, Registry, StrNodeFn, go_abs, go_is_abs, read_file,
 };
 
 impl Registry {
@@ -230,7 +229,7 @@ pub(crate) async fn resolve_node_like(
             go_path_join(&[go_path_dir(&parent).as_str(), node_ref])
         };
         let abs_path = go_abs(Path::new(&target_path))
-            .map_err(|e| ConfigError::wrap("failed to resolve absolute path", go_io_error(&e)))?;
+            .map_err(|e| ConfigError::wrap("failed to resolve absolute path", e))?;
         (abs_path.to_string_lossy().into_owned(), abs_path)
     } else {
         (node_ref.to_owned(), PathBuf::new())

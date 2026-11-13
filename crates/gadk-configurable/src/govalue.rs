@@ -21,6 +21,7 @@
 //!   a `float64`), i.e. what Go's `map[string]any` holds for a JSON-decoded value;
 //! - [`go_sprint`] / [`go_type_name`]: Go's `%v` and `%T` of a yaml-decoded value.
 
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Datelike, FixedOffset, Timelike};
@@ -143,20 +144,72 @@ pub fn go_sprint(v: &GoValue) -> String {
             )
         }
         GoValue::MapAny(entries) => {
-            let mut sorted: Vec<(String, String)> = entries
-                .iter()
-                .map(|(k, v)| (go_sprint(k), go_sprint(v)))
-                .collect();
-            sorted.sort();
+            let mut sorted: Vec<&(GoValue, GoValue)> = entries.iter().collect();
+            sorted.sort_by(|a, b| go_fmtsort_interface_cmp(&a.0, &b.0));
             format!(
                 "map[{}]",
                 sorted
                     .iter()
-                    .map(|(k, v)| format!("{k}:{v}"))
+                    .map(|(k, v)| format!("{}:{}", go_sprint(k), go_sprint(v)))
                     .collect::<Vec<_>>()
                     .join(" ")
             )
         }
+    }
+}
+
+/// Go `internal/fmtsort`'s order of two `interface{}` map keys: nil first, then by dynamic
+/// type, then by value within a type (numbers numerically with NaN first, strings bytewise,
+/// `false` before `true`, `time.Time` by its `wall` then `ext` fields).
+///
+/// Go orders the types by their `*rtype` addresses, an artifact of the linker; the order
+/// here — `string`, `uint64`, `int`, `float64`, `bool`, `time.Time` — is the one observed in
+/// Go's `adkcli` (and a standalone yaml.v3 program) at `docs/parity/ADK_GO_COMMIT`. Keys that
+/// cannot occur in a yaml.v3 map (sequences, maps) sort last.
+fn go_fmtsort_interface_cmp(a: &GoValue, b: &GoValue) -> Ordering {
+    // Go: internal/fmtsort/sort.go compare (reflect.Interface)
+    fn type_rank(v: &GoValue) -> u8 {
+        match v {
+            GoValue::Null => 0,
+            GoValue::String(_) | GoValue::Bytes(_) => 1,
+            GoValue::Uint(_) => 2,
+            GoValue::Int(_) => 3,
+            GoValue::Float(_) => 4,
+            GoValue::Bool(_) => 5,
+            GoValue::Timestamp(_) => 6,
+            GoValue::Seq(_) | GoValue::Map(_) | GoValue::MapAny(_) => 7,
+        }
+    }
+    fn str_bytes(v: &GoValue) -> &[u8] {
+        match v {
+            GoValue::String(s) => s.as_bytes(),
+            GoValue::Bytes(b) => b,
+            _ => &[],
+        }
+    }
+    let by_type = type_rank(a).cmp(&type_rank(b));
+    if by_type != Ordering::Equal {
+        return by_type;
+    }
+    match (a, b) {
+        (GoValue::Uint(x), GoValue::Uint(y)) => x.cmp(y),
+        (GoValue::Int(x), GoValue::Int(y)) => x.cmp(y),
+        // Go `cmp.Compare`: NaN before every other value, -0 equal to 0.
+        (GoValue::Float(x), GoValue::Float(y)) => match (x.is_nan(), y.is_nan()) {
+            (true, true) => Ordering::Equal,
+            (true, false) => Ordering::Less,
+            (false, true) => Ordering::Greater,
+            (false, false) => x.partial_cmp(y).unwrap_or(Ordering::Equal),
+        },
+        (GoValue::Bool(x), GoValue::Bool(y)) => x.cmp(y),
+        // `wall` holds the nanoseconds (no monotonic reading), `ext` the seconds.
+        // Divergence (ledger 6c-2): two timestamp keys at the same instant tie and keep document
+        // order; Go then compares their `*Location` pointers (UTC's nil first, others by address).
+        (GoValue::Timestamp(x), GoValue::Timestamp(y)) => x
+            .timestamp_subsec_nanos()
+            .cmp(&y.timestamp_subsec_nanos())
+            .then(x.timestamp().cmp(&y.timestamp())),
+        _ => str_bytes(a).cmp(str_bytes(b)),
     }
 }
 
@@ -280,6 +333,22 @@ mod tests {
             *json!({"a": 1.0, "b": [1.5, "x"], "c": {"d": null}})
                 .as_object()
                 .unwrap()
+        );
+    }
+
+    /// Go's `fmt.Sprint` of the yaml.v3-decoded mapping (captured from Go's `adkcli` as the
+    /// McpToolset `server_params.args[0]` error, at `docs/parity/ADK_GO_COMMIT`): nil, then
+    /// strings, uint64, int (numeric: 9 before 10), float64 (NaN, -Inf first), bool, time.Time.
+    #[test]
+    fn go_sprint_orders_interface_keys_like_fmtsort() {
+        let v: GoValue = gadk_goyaml::unmarshal(
+            b"{10: a, 9: b, x: c, -1: d, 2.5: e, true: f, false: g, ~: h, 18446744073709551615: i, B: j, 1.0e+1: k, .nan: l, 2001-12-14: m, -.inf: n, 2001-12-14T01:02:03Z: o}",
+            &gadk_goyaml::Options::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            go_sprint(&v),
+            "map[<nil>:h B:j x:c 18446744073709551615:i -1:d 9:b 10:a NaN:l -Inf:n 2.5:e 10:k false:g true:f 2001-12-14 00:00:00 +0000 UTC:m 2001-12-14 01:02:03 +0000 UTC:o]"
         );
     }
 

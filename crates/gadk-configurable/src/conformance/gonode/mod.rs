@@ -156,6 +156,35 @@ mod tests {
         assert_eq!(terr.unwrap().errors.len(), 1);
     }
 
+    /// Go `yaml.Unmarshal` into `recording.Recordings` (probe at `docs/parity/ADK_GO_COMMIT`):
+    /// an invalid `!!binary` scalar aborts with yaml.v3's error at a `[]byte` position (also as
+    /// an element of a `[]byte` sequence) and at a `civil.Date` one, despite the earlier type
+    /// error; a valid one at a `[]byte` position is a type error.
+    #[test]
+    fn invalid_binary_aborts_like_yaml_v3() {
+        let head = "recordings:\n  - user_message_index: oops\n    agent_name: a\n    llm_recording:\n      llm_responses:\n";
+        for tail in [
+            "        - content:\n            parts:\n              - inlinedata:\n                  data: !!binary '@@@'\n",
+            "        - content:\n            parts:\n              - inlinedata:\n                  data: [1, !!binary '@@@']\n",
+            "        - citationmetadata:\n            citations:\n              - publicationdate: !!binary '@@@'\n",
+        ] {
+            let doc = gadk_goyaml::unmarshal_node(format!("{head}{tail}").as_bytes()).unwrap();
+            let err = from_go_node_partial(&doc, doc.root()).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                "yaml: !!binary value contains invalid base64 data",
+                "{tail}"
+            );
+        }
+        let ok = "recordings:\n  - user_message_index: 0\n    agent_name: a\n    llm_recording:\n      llm_responses:\n        - content:\n            parts:\n              - inlinedata:\n                  data: !!binary aGk=\n";
+        let doc = gadk_goyaml::unmarshal_node(ok.as_bytes()).unwrap();
+        let (_, terr) = from_go_node_partial(&doc, doc.root()).unwrap();
+        assert_eq!(
+            terr.unwrap().to_string(),
+            "yaml: unmarshal errors:\n  line 9: cannot unmarshal !!binary `aGk=` into []uint8"
+        );
+    }
+
     /// A recordings document whose response schema nests `{items: …}` `n` times (flow style,
     /// within the parser's 10000 levels); the schema's mapping is the 6th collection.
     fn deep_schema_doc(n: usize) -> Document {

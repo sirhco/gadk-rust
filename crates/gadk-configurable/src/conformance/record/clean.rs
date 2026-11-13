@@ -226,8 +226,8 @@ enum Frame {
 /// int sequence → base64, schema title injection, pruning outside tool args.
 pub fn clean_yaml_node(doc: &mut Document, node: NodeId, in_tool_args: bool) {
     // Go: record_plugin.go cleanYAMLNode
-    // Divergence (ledger 6c-2): Go recurses; this walks an explicit stack (same visiting and
-    // mutation order) so arbitrarily deep input cannot overflow the thread's stack.
+    // Go recurses; this walks an explicit stack (same visiting and mutation order, no depth
+    // cap) so arbitrarily deep input cannot overflow the thread's stack. Output is identical.
     let mut stack = Vec::new();
     enter_node(doc, &mut stack, node, in_tool_args);
     while let Some(frame) = stack.last_mut() {

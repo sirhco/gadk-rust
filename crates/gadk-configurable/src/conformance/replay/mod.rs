@@ -490,8 +490,10 @@ pub(crate) async fn get_next_recording_for_agent(
         }
         // FIXME (Go): remove this sleep, move curIndex++ and state cond.Broadcast() to onEvent
         // callback. This sleep is here to make the replay deterministic, but it's not ideal.
+        // Go's `time.Sleep` of a negative duration returns at once.
         std::thread::sleep(
-            Duration::from_millis(10).saturating_mul(u32::try_from(index).unwrap_or(u32::MAX)),
+            Duration::from_millis(10)
+                .saturating_mul(u32::try_from(index.max(0)).unwrap_or(u32::MAX)),
         );
 
         *inner.agent_replay_indices.entry(agent).or_default() += 1;

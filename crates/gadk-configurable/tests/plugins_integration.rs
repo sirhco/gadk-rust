@@ -18,7 +18,8 @@
 //!
 //! The goldens under `tests/fixtures/integration/record-tool-call/` were written by ADK-Go
 //! itself (`docs/parity/ADK_GO_COMMIT`): a `go test -overlay` probe in package
-//! `internal/configurable/conformance` ran `llmagent` `root_agent` (instruction
+//! `internal/configurable/conformance` (`scripts/gen-go-configurable/overlay/zz_t12probe_test.go.txt`,
+//! whose header has the regeneration command) ran `llmagent` `root_agent` (instruction
 //! `Use the tools.`, the conformance `validate_email` tool, `testutil.MockModel` answering a
 //! `validate_email` call with id `call-1` and then `It is valid.`) under the public runner with
 //! `recordplugin.MustNew(base)`, the session state holding `_adk_recordings_config` =

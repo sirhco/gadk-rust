@@ -419,9 +419,8 @@ impl Registry {
     ) -> BoxFuture<'a, Result<Arc<dyn Agent>, ConfigError>> {
         // Go: configurable_utils.go FromConfig
         async move {
-            let abs_path = go_abs(config_path).map_err(|e| {
-                ConfigError::wrap("failed to resolve absolute path", go_io_error(&e))
-            })?;
+            let abs_path = go_abs(config_path)
+                .map_err(|e| ConfigError::wrap("failed to resolve absolute path", e))?;
 
             // 1. Read the file (Go os.ReadFile: `open` then `read` *PathErrors).
             let data = match read_file(&abs_path) {
@@ -535,16 +534,14 @@ impl Registry {
             let parent = parent_path.to_string_lossy();
             let target_path = go_path_join(&[go_path_dir(&parent).as_str(), ref_path]);
 
-            let abs_path = go_abs(Path::new(&target_path)).map_err(|e| {
-                ConfigError::wrap("failed to resolve absolute path", go_io_error(&e))
-            })?;
+            let abs_path = go_abs(Path::new(&target_path))
+                .map_err(|e| ConfigError::wrap("failed to resolve absolute path", e))?;
 
             // Prevent path traversal outside the parent agent's directory. Both sides are
             // made absolute before comparing, and symlinks are resolved where the paths
             // exist, so a symlink inside the agent directory cannot be used to escape it.
-            let mut parent_dir = go_abs(Path::new(&go_path_dir(&parent))).map_err(|e| {
-                ConfigError::wrap("failed to resolve agent directory", go_io_error(&e))
-            })?;
+            let mut parent_dir = go_abs(Path::new(&go_path_dir(&parent)))
+                .map_err(|e| ConfigError::wrap("failed to resolve agent directory", e))?;
             if let Some(resolved) = eval_symlinks(&parent_dir) {
                 parent_dir = resolved;
             }
@@ -587,7 +584,7 @@ pub(crate) fn go_is_abs(path: &str) -> bool {
 /// Go `filepath.Abs` (Unix): an absolute path cleaned, a relative one joined to the working
 /// directory (`os.Getwd`, its only error) and cleaned. Lexical: `..` is resolved without
 /// following symlinks, unlike `std::fs::canonicalize`.
-pub(crate) fn go_abs(path: &Path) -> io::Result<PathBuf> {
+pub(crate) fn go_abs(path: &Path) -> Result<PathBuf, ConfigError> {
     let p = path.to_string_lossy();
     if go_is_abs(&p) {
         return Ok(PathBuf::from(go_path_clean(&p)));
@@ -674,11 +671,8 @@ pub(crate) fn check_within_base_dir(
     plugin: &str,
 ) -> Result<String, String> {
     let invalid = |e: String| format!("invalid path format: {e}");
-    // Divergence (ledger 6c-2): a failed `os.Getwd` inside `filepath.Abs` prints the bare errno
-    // text; Go's error may carry an op prefix (only when the working directory is gone).
-    let base_path = go_abs(allowed_base_dir).map_err(|e| invalid(go_io_error(&e).to_string()))?;
-    let requested_abs_path =
-        go_abs(Path::new(case_dir)).map_err(|e| invalid(go_io_error(&e).to_string()))?;
+    let base_path = go_abs(allowed_base_dir).map_err(|e| invalid(e.to_string()))?;
+    let requested_abs_path = go_abs(Path::new(case_dir)).map_err(|e| invalid(e.to_string()))?;
     let base_path = base_path.to_string_lossy().into_owned();
     let requested_abs_path = requested_abs_path.to_string_lossy().into_owned();
     let rel = go_filepath_rel(&base_path, &requested_abs_path).map_err(invalid)?;
@@ -694,17 +688,53 @@ pub(crate) fn check_within_base_dir(
 /// "clumsy but widespread kludge", so a working directory reached through a symlink keeps the
 /// spelling the shell gave it), otherwise the OS working directory (`getcwd`, symlinks
 /// resolved). `std::env::current_dir` is only the second half.
-pub fn go_getwd() -> io::Result<PathBuf> {
+///
+/// Errors print like Go's: a failed `stat` of `.` (only checked when `$PWD` is absolute) is
+/// the `*fs.PathError` `stat .: <errno>`, a failed `getcwd` is `os.NewSyscallError`'s
+/// `getwd: <errno>` (`getwd: no such file or directory` once the directory is deleted).
+pub fn go_getwd() -> Result<PathBuf, ConfigError> {
     // Go: os/getwd.go Getwd
-    let dot = std::fs::metadata(".")?;
+    let stat_dot =
+        || std::fs::metadata(".").map_err(|e| ConfigError::path("stat", Path::new("."), &e));
+    // Clumsy but widespread kludge:
+    // if $PWD is set and matches ".", use it.
+    let mut dot = None;
     if let Some(dir) = std::env::var_os("PWD")
         && dir.to_string_lossy().starts_with('/')
-        && let Ok(d) = std::fs::metadata(&dir)
-        && same_file(&dot, &d)
     {
-        return Ok(PathBuf::from(dir));
+        let d0 = stat_dot()?;
+        if let Ok(d) = std::fs::metadata(&dir)
+            && same_file(&d0, &d)
+        {
+            return Ok(PathBuf::from(dir));
+        }
+        dot = Some(d0);
     }
-    std::env::current_dir()
+
+    // If the operating system provides a Getwd call, use it.
+    let err = match std::env::current_dir() {
+        Ok(dir) => return Ok(dir),
+        Err(e) => e,
+    };
+    let getwd_err = ConfigError::msg(format!("getwd: {}", error::go_errno_text(&err)));
+    // Go retries only ENAMETOOLONG, EINVAL, ERANGE and ENOMEM (ERANGE is 34 on Linux and the
+    // BSDs; std maps it to no `ErrorKind`).
+    let retry = matches!(
+        err.kind(),
+        io::ErrorKind::InvalidFilename | io::ErrorKind::InvalidInput | io::ErrorKind::OutOfMemory
+    ) || err.raw_os_error() == Some(34);
+    if !retry {
+        return Err(getwd_err);
+    }
+    // We're trying to find our way back to ".".
+    if dot.is_none() {
+        stat_dot()?;
+    }
+    // Divergence (ledger 6c-2): `getcwd` is Rust std's (a 512-byte buffer grown on ERANGE, Go
+    // passes 1024 bytes), so where libc answers by buffer size (macOS, for an unlinked or
+    // unsearchable working directory) the error, or Go's success, can differ; and Go's
+    // walk-up fallback after a retryable `getcwd` error is not ported (gadk reports the error).
+    Err(getwd_err)
 }
 
 /// Go `os.SameFile`: the same device and inode.
@@ -734,11 +764,6 @@ pub(crate) fn read_file(path: &Path) -> Result<Vec<u8>, ConfigError> {
     file.read_to_end(&mut data)
         .map_err(|e| ConfigError::path("read", path, &e))?;
     Ok(data)
-}
-
-/// A bare OS error as Go prints a `syscall.Errno` (`os.Getwd`'s error).
-pub(crate) fn go_io_error(err: &io::Error) -> ConfigError {
-    ConfigError::msg(error::go_errno_text(err))
 }
 
 #[cfg(test)]
@@ -808,8 +833,8 @@ mod tests {
         ))
     }
 
-    /// Go `init()`'s agent classes with a hermetic environment (no built-in tools: those are
-    /// `builtin_tools`').
+    /// Go `init()`'s agent classes with a hermetic environment (no built-in tools: those are in
+    /// `builtin_tools`).
     pub(crate) fn test_registry() -> Registry {
         let r = Registry::with_agent_classes();
         r.set_env(fake_key_env());

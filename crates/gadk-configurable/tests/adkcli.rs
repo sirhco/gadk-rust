@@ -114,9 +114,11 @@ fn chmod(path: &Path, mode: u32) {
 }
 
 /// Go capture (tree A, `adkcli console`): lexical walk order (`B_upper` before `a_broken`),
-/// a walk error reported and skipped, a directory named `root_agent.yaml` ignored, a failing
-/// config logged and skipped, a duplicate folder name logged and skipped, then the console's
-/// EOF exit; the working directory printed as `$PWD` spells it (through the symlink).
+/// a directory named `root_agent.yaml` ignored, a failing config logged and skipped, a
+/// duplicate folder name logged and skipped, then the console's EOF exit; the working directory
+/// printed as `$PWD` spells it (through the symlink). The capture's mode-000 `locked` directory
+/// (its walk-error line) is checked by [`unreadable_directory_is_reported_and_skipped_like_go`],
+/// which root cannot run.
 #[test]
 fn stdout_lines_walk_errors_failures_and_duplicates_match_go() {
     let (_tmp, t, root) = symlinked_tree("treeA");
@@ -134,23 +136,11 @@ fn stdout_lines_walk_errors_failures_and_duplicates_match_go() {
         &t.join("B_upper/root_agent.yaml"),
         "agent_class: SequentialAgent\nname: upper\n",
     );
-    write(
-        &t.join("locked/inner/root_agent.yaml"),
-        "agent_class: SequentialAgent\nname: hidden\n",
-    );
     std::fs::create_dir_all(t.join("z/root_agent.yaml")).unwrap();
-    chmod(&t.join("locked"), 0o000);
-    let locked_readable = std::fs::read_dir(t.join("locked")).is_ok();
     let out = adkcli(Path::new(&root), &root, &["console"]);
-    chmod(&t.join("locked"), 0o755);
-    if locked_readable {
-        eprintln!("skipped: a mode-000 directory is readable (running as root)");
-        return;
-    }
 
     let want_stdout = "\
 🔍 Scanning for 'root_agent.yaml' in: {root}
-Warning: skipping \"{root}/locked\" due to error: open {root}/locked: permission denied
 🚀 Found 5 agent config(s)
 ➡️  Loading agent from: {root}/B_upper/root_agent.yaml
 ✅ Agent loaded successfully: upper
@@ -179,6 +169,108 @@ EOF detected, exiting...
     assert_eq!(stdout(&out), want_stdout);
     assert_eq!(mask_log_prefix(&out.stderr), want_stderr);
     assert_eq!(out.status.code(), Some(0));
+}
+
+/// Go capture (`adkcli console` over a mode-000 `locked` directory holding a config next to a
+/// loadable one; Go's tree A capture has the same `Warning` line): the walk error is printed
+/// and the directory's contents are skipped. Skipped when running as root (a mode-000
+/// directory is readable).
+#[test]
+fn unreadable_directory_is_reported_and_skipped_like_go() {
+    let (_tmp, t, root) = symlinked_tree("treeL");
+    write(
+        &t.join("B_upper/root_agent.yaml"),
+        "agent_class: SequentialAgent\nname: upper\n",
+    );
+    write(
+        &t.join("locked/inner/root_agent.yaml"),
+        "agent_class: SequentialAgent\nname: hidden\n",
+    );
+    chmod(&t.join("locked"), 0o000);
+    let locked_readable = std::fs::read_dir(t.join("locked")).is_ok();
+    let out = adkcli(Path::new(&root), &root, &["console"]);
+    chmod(&t.join("locked"), 0o755);
+    if locked_readable {
+        eprintln!("skipped: a mode-000 directory is readable (running as root)");
+        return;
+    }
+
+    let want_stdout = "\
+🔍 Scanning for 'root_agent.yaml' in: {root}
+Warning: skipping \"{root}/locked\" due to error: open {root}/locked: permission denied
+🚀 Found 1 agent config(s)
+➡️  Loading agent from: {root}/B_upper/root_agent.yaml
+✅ Agent loaded successfully: upper
+✅ Agent folder name: B_upper
+
+
+User ->\x20
+EOF detected, exiting...
+"
+    .replace("{root}", &root);
+    assert_eq!(stdout(&out), want_stdout);
+    assert_eq!(mask_log_prefix(&out.stderr), "");
+    assert_eq!(out.status.code(), Some(0));
+}
+
+/// Go capture (`$PWD` absolute, working directory made mode 000 after `cd`): `os.Getwd`'s
+/// `stat .` fails, and adkcli `log.Fatalf`s `Error getting current directory: stat .:
+/// permission denied` (exit 1, nothing on stdout). Skipped when running as root.
+#[test]
+fn unstatable_working_directory_fails_like_go() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = std::fs::canonicalize(tmp.path()).unwrap().join("wd");
+    std::fs::create_dir(&dir).unwrap();
+    let d = dir.to_string_lossy().into_owned();
+    let out = Command::new("/bin/sh")
+        .arg("-c")
+        .arg(r#"cd "$1" && chmod 000 . && PWD="$1" exec "$2""#)
+        .arg("sh")
+        .arg(&d)
+        .arg(env!("CARGO_BIN_EXE_adkcli"))
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    let readable = std::fs::read_dir(&dir).is_ok();
+    chmod(&dir, 0o755);
+    if readable {
+        eprintln!("skipped: a mode-000 directory is readable (running as root)");
+        return;
+    }
+    assert_eq!(stdout(&out), "");
+    assert_eq!(
+        mask_log_prefix(&out.stderr),
+        log_line("Error getting current directory: stat .: permission denied")
+    );
+    assert_eq!(out.status.code(), Some(1));
+}
+
+/// Linux: a deleted working directory makes `getcwd` fail with ENOENT, and Go's adkcli
+/// prints `Error getting current directory: getwd: no such file or directory` (Go
+/// `os.NewSyscallError("getwd", err)`). (macOS's libc still resolves a deleted directory for
+/// Go's 1024-byte buffer; see the `go_getwd` divergence.)
+#[cfg(target_os = "linux")]
+#[test]
+fn deleted_working_directory_fails_like_go() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("gone");
+    std::fs::create_dir(&dir).unwrap();
+    let d = dir.to_string_lossy().into_owned();
+    let out = Command::new("/bin/sh")
+        .arg("-c")
+        .arg(r#"cd "$1" && rmdir "$1" && PWD="$1" exec "$2""#)
+        .arg("sh")
+        .arg(&d)
+        .arg(env!("CARGO_BIN_EXE_adkcli"))
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(stdout(&out), "");
+    assert_eq!(
+        mask_log_prefix(&out.stderr),
+        log_line("Error getting current directory: getwd: no such file or directory")
+    );
+    assert_eq!(out.status.code(), Some(1));
 }
 
 /// Go capture (tree B): no `root_agent.yaml` file (a directory of that name does not count) →

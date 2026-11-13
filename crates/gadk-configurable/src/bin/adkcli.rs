@@ -47,21 +47,30 @@ fn fatal(log: &Logger, msg: &str) -> ! {
     std::process::exit(1)
 }
 
-#[tokio::main]
-async fn main() {
+/// Go's `main` returning ends the process with any goroutine still blocked (a replay waiter
+/// whose turn never comes, see `conformance::replay`); a tokio runtime's drop would wait for
+/// such a blocking task forever, so the runtime is built by hand and shut down without waiting.
+fn main() {
+    let rt = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(rt) => rt,
+        Err(e) => fatal(&Logger::stderr(), &format!("Error starting runtime: {e}")),
+    };
+    rt.block_on(run());
+    rt.shutdown_background();
+}
+
+/// The body of Go's `main`.
+async fn run() {
     // Go: cmd/internal/adkcli/main.go main
     let log = Logger::stderr();
 
     // 1. Get the Current Working Directory (where the user typed 'adk')
     let cwd = match go_getwd() {
         Ok(cwd) => cwd.to_string_lossy().into_owned(),
-        Err(e) => fatal(
-            &log,
-            &format!(
-                "Error getting current directory: {}",
-                gadk_configurable::error::go_errno_text(&e)
-            ),
-        ),
+        Err(e) => fatal(&log, &format!("Error getting current directory: {e}")),
     };
 
     // Go registers on its package globals; gadk's registry is a value (one per process here).

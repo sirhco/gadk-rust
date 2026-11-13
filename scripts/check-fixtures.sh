@@ -36,7 +36,9 @@
 # packages is byte-identical to ADK-Go's (the probe's -vendored adk and -vendored probe outputs
 # match). The 2 Go-written integration goldens under
 # crates/gadk-configurable/tests/fixtures/integration/ (an overlay probe in ADK-Go's conformance
-# package, not part of gen-go-configurable) are counted and left out of the rerun diff.
+# package, not part of gen-go-configurable: scripts/gen-go-configurable/overlay/
+# zz_t12probe_test.go.txt, whose header has the regeneration command) are counted and left out of
+# the rerun diff.
 set -euo pipefail
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 go="${ADK_GO_DIR:-$repo/../adk-go}"

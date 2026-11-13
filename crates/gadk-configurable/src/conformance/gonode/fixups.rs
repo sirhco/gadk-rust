@@ -785,7 +785,7 @@ impl Inverse<'_> {
                 continue;
             };
             match f.category {
-                Category::Bytes => self.bytes(v),
+                Category::Bytes => self.bytes(v)?,
                 Category::TextMarshaler => self.date(v)?,
                 Category::Time => self.time(v),
                 Category::Ptr | Category::Slice | Category::Map | Category::Struct
@@ -870,34 +870,50 @@ impl Inverse<'_> {
 
     /// Go `[]byte`: yaml.v3 decodes a sequence element by element into `uint8` (a failing
     /// element is dropped with a type error, a null one silently) and rejects any non-null
-    /// scalar or mapping (`cannot unmarshal !!str `x` into []uint8`).
+    /// scalar or mapping (`cannot unmarshal !!str `x` into []uint8`). A `!!binary` scalar with
+    /// invalid base64 aborts the decode first (yaml.v3's `scalar` resolves before the target
+    /// type matters), as does any hard failure inside the sequence.
     ///
     /// Divergence (ledger 6c-2): an alias at a `[]byte`, `civil.Date` or `time.Time` position
     /// is not followed by the inverse fixups (yaml.v3 decodes its target); Go-written files
     /// contain no aliases.
-    fn bytes(&mut self, v: NodeId) {
+    fn bytes(&mut self, v: NodeId) -> Result<(), gadk_goyaml::Error> {
         match self.doc[v].kind {
             Kind::Sequence => {
-                let decoded =
-                    gadk_goyaml::from_node_partial::<Vec<u8>>(self.doc, v, &Options::default());
-                let bytes = match decoded {
-                    Ok((bytes, terr)) => {
-                        for e in terr.map(|t| t.errors).unwrap_or_default() {
-                            self.errors.push((error_line(&e), e));
-                        }
-                        bytes
-                    }
-                    Err(_) => Vec::new(),
-                };
+                let (bytes, terr) =
+                    gadk_goyaml::from_node_partial::<Vec<u8>>(self.doc, v, &Options::default())?;
+                for e in terr.map(|t| t.errors).unwrap_or_default() {
+                    self.errors.push((error_line(&e), e));
+                }
                 self.set_str(v, &STANDARD.encode(bytes));
             }
             Kind::Scalar if self.doc.short_tag(v) == "!!null" => {}
             Kind::Scalar | Kind::Mapping => {
+                if self.doc[v].kind == Kind::Scalar {
+                    self.binary_data(v)?;
+                }
                 self.terror(v, "[]uint8");
                 self.set_null(v);
             }
             _ => {}
         }
+        Ok(())
+    }
+
+    /// The head of yaml.v3's `scalar` for a `!!binary` scalar: its base64-decoded data (Go's
+    /// `base64.StdEncoding.DecodeString`, line breaks ignored), or the aborting
+    /// `yaml: !!binary value contains invalid base64 data`. `None` for any other scalar.
+    fn binary_data(&self, v: NodeId) -> Result<Option<Vec<u8>>, gadk_goyaml::Error> {
+        if self.doc.short_tag(v) != "!!binary" {
+            return Ok(None);
+        }
+        Ok(Some(
+            match gadk_goyaml::from_node::<GoValue>(self.doc, v, &Options::default())? {
+                GoValue::String(s) => s.into_bytes(),
+                GoValue::Bytes(b) => b,
+                _ => Vec::new(),
+            },
+        ))
     }
 
     /// `civil.Date.UnmarshalText` of a scalar (yaml.v3 hands a TextUnmarshaler the node's
@@ -906,13 +922,9 @@ impl Inverse<'_> {
         match self.doc[v].kind {
             Kind::Scalar if self.doc.short_tag(v) == "!!null" => Ok(()),
             Kind::Scalar => {
-                let text = if self.doc.short_tag(v) == "!!binary" {
-                    let raw = STANDARD
-                        .decode(self.doc[v].value.as_bytes())
-                        .unwrap_or_default();
-                    String::from_utf8_lossy(&raw).into_owned()
-                } else {
-                    self.doc[v].value.clone()
+                let text = match self.binary_data(v)? {
+                    Some(raw) => String::from_utf8_lossy(&raw).into_owned(),
+                    None => self.doc[v].value.clone(),
                 };
                 let (year, month, day) =
                     parse_civil_date(&text).map_err(gadk_goyaml::Error::Custom)?;

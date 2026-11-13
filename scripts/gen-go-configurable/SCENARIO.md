@@ -294,3 +294,11 @@ Authored in `corpus.go` (`authoredCases`, 35, in this order; `streaming_mode` `n
 
 Captured cases' `input.json` is the JSON of the captured (sanitized) Go request; the probe records
 both the JSON-rebuilt value and the captured value and requires identical bytes.
+
+## Integration goldens (overlay probe)
+
+`crates/gadk-configurable/tests/fixtures/integration/record-tool-call/*.yaml` are not written by
+this program: `overlay/zz_t12probe_test.go.txt` is mapped into ADK-Go's
+`internal/configurable/conformance` package with `go test -overlay` (ADK-Go's tree is not
+modified) and runs the record plugin under the public runner; its header has the one-line
+regeneration command. `scripts/check-fixtures.sh` only counts those two files.

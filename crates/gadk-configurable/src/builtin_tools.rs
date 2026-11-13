@@ -256,6 +256,10 @@ fn decode_examples(normalized: &GoValue) -> Result<Vec<Example>, ConfigError> {
     // Divergence (ledger 6c-2): decoding uses gadk-genai's serde, so keys match exactly (Go's
     // encoding/json also accepts case-insensitive keys) and a type error has serde_json's text
     // instead of Go's `json: cannot unmarshal …`.
+    // Divergence (ledger 6c-2): an explicit null for a non-pointer field inside an example's
+    // content (`role: ~`, `parts: ~`, a part's `text: ~`) is a no-op in Go's encoding/json but
+    // a serde type error here (nulls are not stripped: free-form maps such as
+    // `FunctionCall.args` keep them).
     let decoded: Vec<Option<ExampleJson>> =
         serde_json::from_value(json).map_err(|e| wrap(ConfigError::other(e)))?;
     // Divergence (ledger 6c-2): a null example or null output element is Go's nil pointer, which
