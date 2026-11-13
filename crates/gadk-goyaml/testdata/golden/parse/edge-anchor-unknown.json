@@ -1,0 +1,16 @@
+{
+  "case": "edge-anchor-unknown",
+  "input_b64": "YTogKm5vcGUK",
+  "node": null,
+  "error": "yaml: unknown anchor 'nope' referenced",
+  "marshal_b64": null,
+  "marshal_error": null,
+  "indent2_b64": null,
+  "stream": {
+    "nodes": [],
+    "error": "yaml: unknown anchor 'nope' referenced",
+    "marshal_b64": null
+  },
+  "value": null,
+  "value_error": "yaml: unknown anchor 'nope' referenced"
+}

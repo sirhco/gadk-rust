@@ -1,0 +1,16 @@
+{
+  "case": "decode-unmarshalErrorTests-012",
+  "input_b64": "YToKICAxOgpiCiAgMjo=",
+  "node": null,
+  "error": "yaml: line 3: could not find expected ':'",
+  "marshal_b64": null,
+  "marshal_error": null,
+  "indent2_b64": null,
+  "stream": {
+    "nodes": [],
+    "error": "yaml: line 3: could not find expected ':'",
+    "marshal_b64": null
+  },
+  "value": null,
+  "value_error": "yaml: line 3: could not find expected ':'"
+}

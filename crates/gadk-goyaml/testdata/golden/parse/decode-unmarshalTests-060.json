@@ -1,0 +1,147 @@
+{
+  "case": "decode-unmarshalTests-060",
+  "input_b64": "c2NhbGFyOiA+ICMgQ29tbWVudAoKIGZvbGRlZAogbGluZQogCiBuZXh0CiBsaW5lCiAgKiBvbmUKICAqIHR3bwoKIGxhc3QKIGxpbmUKCg==",
+  "node": {
+    "kind": "document",
+    "style": [],
+    "tag": "",
+    "value": "",
+    "anchor": "",
+    "alias": null,
+    "head": "",
+    "line_comment": "",
+    "foot": "",
+    "line": 1,
+    "column": 1,
+    "content": [
+      {
+        "kind": "mapping",
+        "style": [],
+        "tag": "!!map",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "scalar",
+            "style": [],
+            "tag": "!!str",
+            "value": "scalar",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": []
+          },
+          {
+            "kind": "scalar",
+            "style": [
+              "folded"
+            ],
+            "tag": "!!str",
+            "value": "\nfolded line\nnext line\n * one\n * two\n\nlast line\n",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "# Comment",
+            "foot": "",
+            "line": 1,
+            "column": 9,
+            "content": []
+          }
+        ]
+      }
+    ]
+  },
+  "error": null,
+  "marshal_b64": "c2NhbGFyOiA+NCAjIENvbW1lbnQKCiAgICBmb2xkZWQgbGluZQoKICAgIG5leHQgbGluZQoKICAgICAqIG9uZQogICAgICogdHdvCgogICAgbGFzdCBsaW5lCgo=",
+  "marshal_error": null,
+  "indent2_b64": "c2NhbGFyOiA+MiAjIENvbW1lbnQKCiAgZm9sZGVkIGxpbmUKCiAgbmV4dCBsaW5lCgogICAqIG9uZQogICAqIHR3bwoKICBsYXN0IGxpbmUKCg==",
+  "stream": {
+    "nodes": [
+      {
+        "kind": "document",
+        "style": [],
+        "tag": "",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "mapping",
+            "style": [],
+            "tag": "!!map",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": [
+              {
+                "kind": "scalar",
+                "style": [],
+                "tag": "!!str",
+                "value": "scalar",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "",
+                "foot": "",
+                "line": 1,
+                "column": 1,
+                "content": []
+              },
+              {
+                "kind": "scalar",
+                "style": [
+                  "folded"
+                ],
+                "tag": "!!str",
+                "value": "\nfolded line\nnext line\n * one\n * two\n\nlast line\n",
+                "anchor": "",
+                "alias": null,
+                "head": "",
+                "line_comment": "# Comment",
+                "foot": "",
+                "line": 1,
+                "column": 9,
+                "content": []
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "error": null,
+    "marshal_b64": "c2NhbGFyOiA+NCAjIENvbW1lbnQKCiAgICBmb2xkZWQgbGluZQoKICAgIG5leHQgbGluZQoKICAgICAqIG9uZQogICAgICogdHdvCgogICAgbGFzdCBsaW5lCgo="
+  },
+  "value": {
+    "t": "map",
+    "v": [
+      [
+        "scalar",
+        {
+          "t": "string",
+          "v": "\nfolded line\nnext line\n * one\n * two\n\nlast line\n"
+        }
+      ]
+    ]
+  },
+  "value_error": null
+}

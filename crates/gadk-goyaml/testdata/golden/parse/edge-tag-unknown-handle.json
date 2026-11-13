@@ -1,0 +1,16 @@
+{
+  "case": "edge-tag-unknown-handle",
+  "input_b64": "YTogIXgheSB6Cg==",
+  "node": null,
+  "error": "yaml: found undefined tag handle",
+  "marshal_b64": null,
+  "marshal_error": null,
+  "indent2_b64": null,
+  "stream": {
+    "nodes": [],
+    "error": "yaml: found undefined tag handle",
+    "marshal_b64": null
+  },
+  "value": null,
+  "value_error": "yaml: found undefined tag handle"
+}

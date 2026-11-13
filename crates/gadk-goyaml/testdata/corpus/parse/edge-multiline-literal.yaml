@@ -1,0 +1,15 @@
+a: |
+  one
+  two
+
+b: |-
+  one
+  two
+
+c: |+
+  one
+  two
+
+d: |2
+    indented
+  base

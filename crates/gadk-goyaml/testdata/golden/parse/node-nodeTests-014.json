@@ -1,0 +1,83 @@
+{
+  "case": "node-nodeTests-014",
+  "input_b64": "IXRhZzpzb21ldGhpbmcgW10K",
+  "node": {
+    "kind": "document",
+    "style": [],
+    "tag": "",
+    "value": "",
+    "anchor": "",
+    "alias": null,
+    "head": "",
+    "line_comment": "",
+    "foot": "",
+    "line": 1,
+    "column": 1,
+    "content": [
+      {
+        "kind": "sequence",
+        "style": [
+          "tagged",
+          "flow"
+        ],
+        "tag": "!tag:something",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": []
+      }
+    ]
+  },
+  "error": null,
+  "marshal_b64": "IXRhZzpzb21ldGhpbmcgW10K",
+  "marshal_error": null,
+  "indent2_b64": "IXRhZzpzb21ldGhpbmcgW10K",
+  "stream": {
+    "nodes": [
+      {
+        "kind": "document",
+        "style": [],
+        "tag": "",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "sequence",
+            "style": [
+              "tagged",
+              "flow"
+            ],
+            "tag": "!tag:something",
+            "value": "",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 1,
+            "column": 1,
+            "content": []
+          }
+        ]
+      }
+    ],
+    "error": null,
+    "marshal_b64": "IXRhZzpzb21ldGhpbmcgW10K"
+  },
+  "value": {
+    "t": "seq",
+    "v": []
+  },
+  "value_error": null
+}

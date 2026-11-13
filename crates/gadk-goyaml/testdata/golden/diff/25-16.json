@@ -1,0 +1,86 @@
+{
+  "case": "25-16",
+  "input_b64": "LSAoOiB8NC0KICAgIDI3JwogICd9PyVbY3slKnAnOgogICAgLSAzKzp7CiAgICAtICJcdH1gfCc1IgogIEU6CiAgICAnJls0KmcmYUsjXXsnOiBFCi0gLSBbXQogIC0gLSAiXHR9YHwnNSIKICAgIC0gIjEuNSIK",
+  "source": {
+    "t": "seq",
+    "v": [
+      {
+        "t": "map",
+        "v": [
+          [
+            "(",
+            {
+              "t": "string",
+              "v": "\n27'"
+            }
+          ],
+          [
+            "E",
+            {
+              "t": "map",
+              "v": [
+                [
+                  "&[4*g&aK#]{",
+                  {
+                    "t": "string",
+                    "v": "E"
+                  }
+                ]
+              ]
+            }
+          ],
+          [
+            "}?%[c{%*p",
+            {
+              "t": "seq",
+              "v": [
+                {
+                  "t": "string",
+                  "v": "3+:{"
+                },
+                {
+                  "t": "string",
+                  "v": "\t}`|'5"
+                }
+              ]
+            }
+          ]
+        ]
+      },
+      {
+        "t": "seq",
+        "v": [
+          {
+            "t": "seq",
+            "v": []
+          },
+          {
+            "t": "seq",
+            "v": [
+              {
+                "t": "string",
+                "v": "\t}`|'5"
+              },
+              {
+                "t": "string",
+                "v": "1.5"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "node": null,
+  "error": "yaml: line 1: did not find expected key",
+  "marshal_b64": null,
+  "marshal_error": null,
+  "indent2_b64": null,
+  "stream": {
+    "nodes": [],
+    "error": "yaml: line 1: did not find expected key",
+    "marshal_b64": null
+  },
+  "value": null,
+  "value_error": "yaml: line 1: did not find expected key"
+}

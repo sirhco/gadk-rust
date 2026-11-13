@@ -1,0 +1,16 @@
+{
+  "case": "edge-nonutf8-surrogate",
+  "input_b64": "YTog7aCACg==",
+  "node": null,
+  "error": "yaml: invalid Unicode character",
+  "marshal_b64": null,
+  "marshal_error": null,
+  "indent2_b64": null,
+  "stream": {
+    "nodes": [],
+    "error": "yaml: invalid Unicode character",
+    "marshal_b64": null
+  },
+  "value": null,
+  "value_error": "yaml: invalid Unicode character"
+}

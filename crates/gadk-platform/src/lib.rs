@@ -15,8 +15,8 @@
 
 //! gadk-platform: overridable time, UUID and task-execution seams (port of ADK-Go platform/),
 //! the ADK tracking header value, the injectable environment ([`env`](mod@env)), Go's
-//! `strconv.Quote` ([`go_quote`]), `strings.ToLower`/`ToUpper` ([`go_to_lower`],
-//! [`go_to_upper`]), `url.QueryEscape` ([`go_query_escape`]), `fmt` `%v` of a JSON-decoded value
+//! `strconv.Quote` ([`go_quote`]), `strconv.FormatFloat(f, 'g', -1, bits)` ([`go_format_float_g`]),
+//! `strings.ToLower`/`ToUpper` ([`go_to_lower`], [`go_to_upper`]), `url.QueryEscape` ([`go_query_escape`]), `fmt` `%v` of a JSON-decoded value
 //! ([`go_sprint_value`]), `time.Parse(time.RFC3339, …)` ([`go_parse_rfc3339`]), `path.Clean`/`path.Join`
 //! ([`go_path_clean`], [`go_path_join`]), the parts of `net/url` gadk reproduces ([`go_url`]),
 //! Go's `fmt.Errorf("…: %w", err)` wrapping ([`GoWrapped`]), `time.Duration` ([`GoDuration`],
@@ -39,8 +39,8 @@ pub use exec::{TaskRunner, TokioTaskRunner};
 pub use futures::future::BoxFuture;
 pub use go_err::GoWrapped;
 pub use go_fmt::{
-    go_format_float_v, go_query_escape, go_quote, go_quote_bytes, go_sprint_value, go_to_lower,
-    go_to_upper, go_type_name,
+    go_format_float_g, go_format_float_v, go_query_escape, go_quote, go_quote_bytes,
+    go_sprint_value, go_to_lower, go_to_upper, go_type_name,
 };
 pub use go_path::{go_path_clean, go_path_join};
 pub use go_time::{

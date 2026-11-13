@@ -1,0 +1,16 @@
+{
+  "case": "decode-TestFuzzCrashers-cases-001",
+  "input_b64": "ICAwOiBbCl0gMA==",
+  "node": null,
+  "error": "yaml: line 1: did not find expected key",
+  "marshal_b64": null,
+  "marshal_error": null,
+  "indent2_b64": null,
+  "stream": {
+    "nodes": [],
+    "error": "yaml: line 1: did not find expected key",
+    "marshal_b64": null
+  },
+  "value": null,
+  "value_error": "yaml: line 1: did not find expected key"
+}

@@ -1,0 +1,83 @@
+{
+  "case": "decode-unmarshalTests-128",
+  "input_b64": "JVlBTUwgMS4xCi0tLSAhIXN0cgoiR2VuZXJpYyBsaW5lIGJyZWFrIChubyBnbHlwaClcblwKIEdlbmVyaWMgbGluZSBicmVhayAoZ2x5cGhlZClcblwKIExpbmUgc2VwYXJhdG9yXHUyMDI4XAogUGFyYWdyYXBoIHNlcGFyYXRvclx1MjAyOSIK",
+  "node": {
+    "kind": "document",
+    "style": [],
+    "tag": "",
+    "value": "",
+    "anchor": "",
+    "alias": null,
+    "head": "",
+    "line_comment": "",
+    "foot": "",
+    "line": 1,
+    "column": 1,
+    "content": [
+      {
+        "kind": "scalar",
+        "style": [
+          "tagged",
+          "double"
+        ],
+        "tag": "!!str",
+        "value": "Generic line break (no glyph)\nGeneric line break (glyphed)\nLine separator\u2028Paragraph separator\u2029",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 2,
+        "column": 5,
+        "content": []
+      }
+    ]
+  },
+  "error": null,
+  "marshal_b64": "ISFzdHIgIkdlbmVyaWMgbGluZSBicmVhayAobm8gZ2x5cGgpXG5HZW5lcmljIGxpbmUgYnJlYWsgKGdseXBoZWQpXG5MaW5lIHNlcGFyYXRvclxMUGFyYWdyYXBoIHNlcGFyYXRvclxQIgo=",
+  "marshal_error": null,
+  "indent2_b64": "ISFzdHIgIkdlbmVyaWMgbGluZSBicmVhayAobm8gZ2x5cGgpXG5HZW5lcmljIGxpbmUgYnJlYWsgKGdseXBoZWQpXG5MaW5lIHNlcGFyYXRvclxMUGFyYWdyYXBoIHNlcGFyYXRvclxQIgo=",
+  "stream": {
+    "nodes": [
+      {
+        "kind": "document",
+        "style": [],
+        "tag": "",
+        "value": "",
+        "anchor": "",
+        "alias": null,
+        "head": "",
+        "line_comment": "",
+        "foot": "",
+        "line": 1,
+        "column": 1,
+        "content": [
+          {
+            "kind": "scalar",
+            "style": [
+              "tagged",
+              "double"
+            ],
+            "tag": "!!str",
+            "value": "Generic line break (no glyph)\nGeneric line break (glyphed)\nLine separator\u2028Paragraph separator\u2029",
+            "anchor": "",
+            "alias": null,
+            "head": "",
+            "line_comment": "",
+            "foot": "",
+            "line": 2,
+            "column": 5,
+            "content": []
+          }
+        ]
+      }
+    ],
+    "error": null,
+    "marshal_b64": "ISFzdHIgIkdlbmVyaWMgbGluZSBicmVhayAobm8gZ2x5cGgpXG5HZW5lcmljIGxpbmUgYnJlYWsgKGdseXBoZWQpXG5MaW5lIHNlcGFyYXRvclxMUGFyYWdyYXBoIHNlcGFyYXRvclxQIgo="
+  },
+  "value": {
+    "t": "string",
+    "v": "Generic line break (no glyph)\nGeneric line break (glyphed)\nLine separator\u2028Paragraph separator\u2029"
+  },
+  "value_error": null
+}

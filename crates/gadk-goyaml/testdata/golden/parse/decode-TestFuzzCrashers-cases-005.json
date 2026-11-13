@@ -1,0 +1,16 @@
+{
+  "case": "decode-TestFuzzCrashers-cases-005",
+  "input_b64": "ICAgIC0gIgowMDAiMA==",
+  "node": null,
+  "error": "yaml: line 1: did not find expected '-' indicator",
+  "marshal_b64": null,
+  "marshal_error": null,
+  "indent2_b64": null,
+  "stream": {
+    "nodes": [],
+    "error": "yaml: line 1: did not find expected '-' indicator",
+    "marshal_b64": null
+  },
+  "value": null,
+  "value_error": "yaml: line 1: did not find expected '-' indicator"
+}

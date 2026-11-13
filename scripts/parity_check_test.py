@@ -28,12 +28,14 @@ class ConvTest(unittest.TestCase):
             "TestSamplePNG1x1_DecodesAsValidPNG": "test_sample_png1x1_decodes_as_valid_png",
             "TestNewModel_VertexAndModelNames": "test_new_model_vertex_and_model_names",
             "TestExecutableCodeAndURISchemePrivacy": "test_executable_code_and_uri_scheme_privacy",
+            "ExampleUnmarshal_embedded": "example_unmarshal_embedded",
+            "TestUnmarshalNaN": "test_unmarshal_na_n",
         }
         for go, rust in cases.items():
             self.assertEqual(pc.go_test_to_rust(go), rust, go)
 
     def test_other_prefixes_raise(self):
-        for name in ("BenchmarkFoo", "ExampleFoo", "testFoo", "fuzzFoo"):
+        for name in ("BenchmarkFoo", "testFoo", "fuzzFoo", "exampleFoo"):
             with self.assertRaises(ValueError, msg=name):
                 pc.go_test_to_rust(name)
 
@@ -48,6 +50,7 @@ class ConvTest(unittest.TestCase):
     def test_target_name(self):
         self.assertEqual(pc.target_name("agent/llmagent/llmagent_test.go"), "agent_llmagent_llmagent")
         self.assertEqual(pc.target_name("internal/utils/utils_test.go"), "internal_utils_utils")
+        self.assertEqual(pc.target_name("yaml.v3/example_embedded_test.go"), "yaml_v3_example_embedded")
 
 
 class CheckTest(unittest.TestCase):
@@ -841,7 +844,7 @@ class ThreeBTest(unittest.TestCase):
         err = io.StringIO()
         with contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
             pc.main(["--adk-go", str(self.go), "--repo", str(self.repo), "--ledger", "all", "--count"])
-        self.assertIn("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a, 4b, 4c, 5a, 5b, 5c, 6, 6b or 7a", err.getvalue())
+        self.assertIn("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a, 4b, 4c, 5a, 5b, 5c, 6, 6b, 6c-1 or 7a", err.getvalue())
 
 
 LEDGER_4A = (
@@ -1385,6 +1388,109 @@ class SevenATest(unittest.TestCase):
         ])
 
 
+LEDGER_6C_1 = (
+    "# Parity ledger — sub-project 6c-1\n\n"
+    "<!-- in-scope:\nyaml.v3/decode_test.go\nyaml.v3/example_embedded_test.go\nyaml.v3/suite_test.go\n-->\n\n"
+    + pc.TABLE_HEADER + "\n" + pc.TABLE_SEP + "\n"
+)
+
+YAML_DECODE_TARGET = "crates/gadk-goyaml/src/parity_tests/yaml_v3_decode.rs"
+YAML_EXAMPLE_TARGET = "crates/gadk-goyaml/src/parity_tests/yaml_v3_example_embedded.rs"
+
+
+class SixC1Test(unittest.TestCase):
+    """6c-1: yaml.v3's gocheck methods and examples, resolved under `$GOYAML_DIR` (a package-level
+    gocheck hook and benchmarks are not tests)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        d = pathlib.Path(self._tmp.name)
+        self.go, self.goyaml, self.repo = d / "go", d / "yaml", d / "repo"
+        self.go.mkdir()
+        for f, body in (
+            ("decode_test.go",
+             "func (s *S) TestUnmarshal(c *C) {}\nfunc (s S) TestUnmarshalNaN(c *C) {}\n"
+             "func (s *S) TestUnmarshalerRetry(c *C) {}\nfunc (s *S) BenchmarkDecode(c *C) {}\n"
+             "func (s *S) helper(c *C) {}\nfunc TestNotGocheck(t *testing.T) {}\n"),
+            ("example_embedded_test.go", "func ExampleUnmarshal_embedded() {}\nfunc BenchmarkX(b *testing.B) {}\n"),
+            ("suite_test.go", "func Test(t *testing.T) { TestingT(t) }\n"),
+        ):
+            (self.goyaml / f).parent.mkdir(parents=True, exist_ok=True)
+            (self.goyaml / f).write_text("package yaml_test\n" + body)
+        (self.repo / YAML_DECODE_TARGET).parent.mkdir(parents=True)
+        (self.repo / YAML_DECODE_TARGET).write_text(
+            "// parity: skipped TestUnmarshalerRetry: the Unmarshaler interface is a Non-Goal\n"
+            "// parity: adapted: serde values\n#[test]\nfn test_unmarshal() {}\n"
+            "#[test]\nfn test_unmarshal_na_n() {}\n")
+        (self.repo / YAML_EXAMPLE_TARGET).write_text(
+            "// parity: adapted: the inlined struct is listed\n#[test]\nfn example_unmarshal_embedded() {}\n")
+        (self.repo / "docs/parity").mkdir(parents=True)
+        self.ledger = self.repo / "docs/parity/6c-1.md"
+        self.ledger.write_text(LEDGER_6C_1)
+        env = mock.patch.dict(os.environ, {"GOYAML_DIR": str(self.goyaml)})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def run_cli(self, *args):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = pc.main(["--adk-go", str(self.go), "--repo", str(self.repo), *args])
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_ledger_6c_1_is_registered(self):
+        self.assertIn("6c-1", pc.GENERATED_LEDGERS)
+        self.assertEqual(self.run_cli("--ledger", "6c-1", "--count"), (0, "4\n", ""))
+
+    def test_yaml_files_resolve_under_the_module(self):
+        self.assertEqual(pc.go_path(self.go, "yaml.v3/decode_test.go"), self.goyaml / "decode_test.go")
+        self.assertEqual(pc.target_name("yaml.v3/decode_test.go"), "yaml_v3_decode")
+
+    def test_the_module_cache_is_the_default_root(self):
+        with mock.patch.dict(os.environ, {"GOYAML_DIR": ""}), \
+                mock.patch.object(pc, "go_mod_cache", return_value="/cache"):
+            self.assertEqual(pc.goyaml_dir(), pathlib.Path("/cache/gopkg.in/yaml.v3@v3.0.1"))
+
+    def test_the_yaml_collector_finds_gocheck_methods_and_examples_only(self):
+        self.assertEqual(pc.go_tests(self.go, "yaml.v3/decode_test.go"),
+                         ["TestUnmarshal", "TestUnmarshalNaN", "TestUnmarshalerRetry"])
+        self.assertEqual(pc.go_tests(self.go, "yaml.v3/example_embedded_test.go"),
+                         ["ExampleUnmarshal_embedded"])
+        self.assertEqual(pc.go_tests(self.go, "yaml.v3/suite_test.go"), [])
+
+    def test_other_files_keep_the_package_level_collector(self):
+        (self.go / "x").mkdir()
+        (self.go / "x/x_test.go").write_text(
+            "package x\nfunc (s *S) TestMethod(c *C) {}\nfunc ExampleX() {}\nfunc TestPlain(t *testing.T) {}\n")
+        self.assertEqual(pc.go_tests(self.go, "x/x_test.go"), ["TestPlain"])
+
+    def test_an_example_skip_annotation_is_accepted(self):
+        (self.repo / YAML_EXAMPLE_TARGET).write_text(
+            "// parity: skipped ExampleUnmarshal_embedded: printed output only\n")
+        self.assertEqual(self.run_cli("--ledger", "6c-1", "--generate")[0], 0)
+        self.assertIn(
+            "| yaml.v3/example_embedded_test.go | ExampleUnmarshal_embedded | skipped | "
+            + YAML_EXAMPLE_TARGET + " | printed output only |",
+            self.ledger.read_text().splitlines())
+
+    def test_targets_generate_and_check(self):
+        self.assertEqual(self.run_cli("--ledger", "6c-1", "--generate")[0], 0)
+        self.assertEqual(self.run_cli("--ledger", "6c-1"), (0, "", ""))
+        rows = self.ledger.read_text().splitlines()[-4:]
+        self.assertEqual(rows, [
+            "| yaml.v3/decode_test.go | TestUnmarshal | ported (adapted: serde values) | "
+            + YAML_DECODE_TARGET + " | test_unmarshal |",
+            "| yaml.v3/decode_test.go | TestUnmarshalNaN | ported | " + YAML_DECODE_TARGET
+            + " | test_unmarshal_na_n |",
+            "| yaml.v3/decode_test.go | TestUnmarshalerRetry | skipped | " + YAML_DECODE_TARGET
+            + " | the Unmarshaler interface is a Non-Goal |",
+            "| yaml.v3/example_embedded_test.go | ExampleUnmarshal_embedded | ported (adapted: the inlined"
+            " struct is listed) | " + YAML_EXAMPLE_TARGET + " | example_unmarshal_embedded |",
+        ])
+
+
 LEDGER_5C = (
     "# Parity ledger — sub-project 5c\n\n"
     "<!-- in-scope:\nagentregistry/resolve_test.go\nserver/agentengine/handler_test.go\n-->\n\n"
@@ -1725,6 +1831,21 @@ class RealTreeTest(unittest.TestCase):
         self.assertEqual(deferred, {})
         self.assertEqual(pc.count(ADK_GO, in_scope), 90)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "6"), [])
+
+    def test_6c_1_count_is_47(self):
+        in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/6c-1.md")
+        self.assertEqual(in_scope, [
+            "yaml.v3/decode_test.go",
+            "yaml.v3/encode_test.go",
+            "yaml.v3/example_embedded_test.go",
+            "yaml.v3/limit_test.go",
+            "yaml.v3/node_test.go",
+            "yaml.v3/suite_test.go",
+        ])
+        self.assertEqual(deferred, {})
+        self.assertEqual(pc.count(ADK_GO, in_scope), 47)
+        self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "6c-1"), [])
+        self.assertEqual([len(pc.go_tests(ADK_GO, f)) for f in in_scope], [29, 11, 1, 1, 5, 0])
 
     def test_6b_count_is_40(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/6b.md")

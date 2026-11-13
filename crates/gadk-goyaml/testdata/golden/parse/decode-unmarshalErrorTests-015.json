@@ -1,0 +1,16 @@
+{
+  "case": "decode-unmarshalErrorTests-015",
+  "input_b64": "MDogWzohMDAg7w==",
+  "node": null,
+  "error": "yaml: incomplete UTF-8 octet sequence",
+  "marshal_b64": null,
+  "marshal_error": null,
+  "indent2_b64": null,
+  "stream": {
+    "nodes": [],
+    "error": "yaml: incomplete UTF-8 octet sequence",
+    "marshal_b64": null
+  },
+  "value": null,
+  "value_error": "yaml: incomplete UTF-8 octet sequence"
+}

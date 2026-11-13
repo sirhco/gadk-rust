@@ -333,6 +333,33 @@ class EdgeTest(unittest.TestCase):
         errs = cwd.check(self.repo)
         self.assertTrue(any("gadk-cli -> gadk-server is missing" in e for e in errs), errs)
 
+    def test_goyaml_edges_are_exactly_platform(self):
+        self.assertEqual(cwd.ALLOWED["gadk-goyaml"], {"gadk-platform"})
+        # 6c-1: nothing depends on the yaml.v3 port, the façade included.
+        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-goyaml" in deps], [])
+        self.assertNotIn("gadk-goyaml", cwd.ENGINE_DEPENDENTS)
+
+    def test_goyaml_normal_dependency_on_genai_is_rejected(self):
+        self.edit("gadk-goyaml", "[dependencies]\n", "[dependencies]\ngadk-genai = { workspace = true }\n")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-goyaml -> gadk-genai is not allowed" in e for e in errs), errs)
+
+    def test_goyaml_missing_platform_edge_is_rejected(self):
+        self.edit("gadk-goyaml", "gadk-platform = { workspace = true }\n", "")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-goyaml -> gadk-platform is missing" in e for e in errs), errs)
+
+    def test_goyaml_license_must_be_apache_and_mit(self):
+        self.assertEqual(cwd.LICENSE_OVERRIDES, {"gadk-goyaml": "Apache-2.0 AND MIT"})
+        self.edit("gadk-goyaml", 'license = "Apache-2.0 AND MIT"', "license.workspace = true")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("package.license must be 'Apache-2.0 AND MIT'" in e for e in errs), errs)
+
+    def test_license_override_is_only_for_goyaml(self):
+        self.edit("gadk-cli", "license.workspace = true", 'license = "Apache-2.0 AND MIT"')
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-cli/Cargo.toml: package.license must be inherited" in e for e in errs), errs)
+
     def test_model_edges_are_unchanged_by_gcp_auth(self):
         self.assertEqual(cwd.ALLOWED["gadk-model"], {"gadk-genai"})
 

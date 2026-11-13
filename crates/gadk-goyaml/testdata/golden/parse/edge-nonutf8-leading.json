@@ -1,0 +1,16 @@
+{
+  "case": "edge-nonutf8-leading",
+  "input_b64": "YToggAo=",
+  "node": null,
+  "error": "yaml: invalid leading UTF-8 octet",
+  "marshal_b64": null,
+  "marshal_error": null,
+  "indent2_b64": null,
+  "stream": {
+    "nodes": [],
+    "error": "yaml: invalid leading UTF-8 octet",
+    "marshal_b64": null
+  },
+  "value": null,
+  "value_error": "yaml: invalid leading UTF-8 octet"
+}
