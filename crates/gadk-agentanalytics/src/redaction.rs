@@ -1518,7 +1518,7 @@ fn is_base64_byte(c: u8) -> bool {
 /// multiple of 4, or a character outside the alphabet, such as the U+017F or U+212A that the
 /// pattern's `(?i)` admits). Non-zero trailing bits are accepted, as Go's non-strict decoder
 /// does.
-fn decode_std_base64(s: &str) -> Option<Vec<u8>> {
+pub(crate) fn decode_std_base64(s: &str) -> Option<Vec<u8>> {
     let b = s.as_bytes();
     if b.is_empty() || !b.len().is_multiple_of(4) {
         return None;
@@ -1705,7 +1705,7 @@ fn nested_key_name(name: &str, at: usize, line_start: bool) -> (NestedKeyKind, u
 /// Go `nestedPairEnd(s, pair, open)`: where the text redacted with a value that only ends in a
 /// key name ends — at the end of the value of the pair that the key name starts, following
 /// chains of such pairs.
-fn nested_pair_end(s: &str, mut pair: usize, open: usize) -> usize {
+pub(crate) fn nested_pair_end(s: &str, mut pair: usize, open: usize) -> usize {
     loop {
         let Some(loc) = submatch_index(&TEXT_KEY_VAL_TOKEN_AT_RE, &s[pair..]) else {
             // Not reached: nests_sensitive_key has read a delimiter and a value after the name.
@@ -2079,7 +2079,7 @@ impl CustomMetadataFilter {
 /// A value Go's `decodeJSONValue` builds (`map[string]any`, `[]any`, `string`, `json.Number`,
 /// `bool`, `nil`), or one `redactJSONValue` receives from a caller.
 #[derive(Debug, Clone, PartialEq)]
-enum JVal {
+pub(crate) enum JVal {
     Null,
     Bool(bool),
     Num(JNum),
@@ -2091,7 +2091,7 @@ enum JVal {
 /// A JSON number: Go's `json.Number` (the literal text, written back as is) or a caller's
 /// `serde_json::Number`.
 #[derive(Debug, Clone, PartialEq)]
-enum JNum {
+pub(crate) enum JNum {
     Text(String),
     Value(Number),
 }
@@ -2283,14 +2283,14 @@ fn go_json_unmarshal_string(s: &str) -> Option<String> {
 
 /// How [`unmarshal_json_strict_with_budget`] failed: Go's `budgetExceeded`, or another error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DecodeFail {
+pub(crate) enum DecodeFail {
     Budget,
     Syntax,
 }
 
 /// Go `unmarshalJSONStrictWithBudget(b, budget)`: the decoded value and whether an object held
 /// a duplicate key (the last value wins).
-fn unmarshal_json_strict_with_budget(
+pub(crate) fn unmarshal_json_strict_with_budget(
     s: &str,
     budget: &mut NodeBudget,
 ) -> Result<(JVal, bool), DecodeFail> {
