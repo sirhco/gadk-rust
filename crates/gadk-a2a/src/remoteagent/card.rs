@@ -241,12 +241,9 @@ struct PathError {
 
 impl std::fmt::Display for PathError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Go's `syscall.Errno` texts are the C library's, lower-cased and without the code.
-        let text = self.err.to_string();
-        let text = match (self.err.raw_os_error(), text.rfind(" (os error ")) {
-            (Some(_), Some(i)) => &text[..i],
-            _ => text.as_str(),
-        };
+        // Go's `syscall.Errno` texts are the C library's, lower-cased and without the code; a
+        // non-OS error's text is lower-cased too (the OS text already is, so this is a no-op).
+        let text = gadk_platform::go_errno_text(&self.err);
         let mut chars = text.chars();
         let text = match chars.next() {
             Some(first) => first.to_lowercase().chain(chars).collect::<String>(),

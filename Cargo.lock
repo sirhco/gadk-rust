@@ -1384,6 +1384,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "gadk-configurable"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "chrono",
+ "futures",
+ "gadk-agent",
+ "gadk-engine",
+ "gadk-gemini",
+ "gadk-genai",
+ "gadk-goyaml",
+ "gadk-launcher",
+ "gadk-mcp",
+ "gadk-model",
+ "gadk-platform",
+ "gadk-session",
+ "gadk-tools",
+ "parking_lot 0.13.0",
+ "pretty_assertions",
+ "regex",
+ "reqwest",
+ "schemars 1.2.3",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "gadk-engine"
 version = "0.1.0"
 dependencies = [

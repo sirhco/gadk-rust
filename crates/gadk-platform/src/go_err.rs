@@ -13,10 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go's `%w` error wrapping ([`GoWrapped`]), shared by the gadk crates that reproduce Go's
-//! error chains.
+//! Go's `%w` error wrapping ([`GoWrapped`]) and `syscall.Errno` texts ([`go_errno_text`]),
+//! shared by the gadk crates that reproduce Go's error chains.
 
 use std::error::Error as StdError;
+use std::io;
 
 /// Go `fmt.Errorf("{prefix}: %w", source)`: displays `{prefix}: {source}` and keeps `source`
 /// as its `source()`, so `errors.Is` / `errors.As` style walks of the chain find the cause.
@@ -51,11 +52,32 @@ impl StdError for GoWrapped {
     }
 }
 
+/// Go's `syscall.Errno.Error()` text for `err`: the C library's message for the OS error code
+/// with its first letter lowercased (Go's errno tables are generated from the same messages,
+/// e.g. `no such file or directory`, `permission denied`, `is a directory`); an error without
+/// an OS code keeps its own text.
+pub fn go_errno_text(err: &io::Error) -> String {
+    let Some(code) = err.raw_os_error() else {
+        return err.to_string();
+    };
+    let text = io::Error::from_raw_os_error(code).to_string();
+    let text = match text.rfind(" (os error ") {
+        Some(i) => &text[..i],
+        None => text.as_str(),
+    };
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => first.to_lowercase().chain(chars).collect(),
+        None => String::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::error::Error as StdError;
+    use std::io;
 
-    use super::GoWrapped;
+    use super::{GoWrapped, go_errno_text};
 
     #[derive(Debug)]
     struct Cause;
@@ -94,5 +116,22 @@ mod tests {
     fn is_send_sync_static() {
         fn assert_bounds<T: StdError + Send + Sync + 'static>() {}
         assert_bounds::<GoWrapped>();
+    }
+
+    #[test]
+    fn errno_text_is_lowercased_strerror() {
+        assert_eq!(
+            go_errno_text(&io::Error::from_raw_os_error(2)),
+            "no such file or directory"
+        );
+        assert_eq!(
+            go_errno_text(&io::Error::from_raw_os_error(13)),
+            "permission denied"
+        );
+        assert_eq!(
+            go_errno_text(&io::Error::from_raw_os_error(21)),
+            "is a directory"
+        );
+        assert_eq!(go_errno_text(&io::Error::other("custom")), "custom");
     }
 }
