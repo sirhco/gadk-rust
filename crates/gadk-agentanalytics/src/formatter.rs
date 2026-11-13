@@ -19,20 +19,37 @@
 //! directly), plus `pendingUpload`, `objectRef`, `uploadFailedText` and `textUploadContentType`
 //! from `gcs_offloader.go`.
 //!
-//! Task 7 may move bodies into `src/formatter/*.rs` submodules; every item keeps its
-//! `crate::formatter::` path (re-export from here).
-
-#![allow(dead_code, unused_variables, unused_imports, clippy::todo)]
+//! The bodies live in submodules, re-exported here so every item keeps its
+//! `crate::formatter::` path: `sanitize` (`SmartTruncate` and the sanitizing serializer),
+//! `parts` (`content_parts`, `normalizeFunctionResponse`) and `summary` (content summaries).
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use gadk_genai::{Blob, Content, FileData, FunctionResponse, Part};
 use serde::{Serialize, Serializer};
 use serde_json::{Map, Value};
 
-use crate::error::Error;
+#[cfg(test)]
+mod golden_tests;
+mod parts;
+mod sanitize;
+mod summary;
+
+pub use parts::format_content_parts;
+// The crate-internal entry points are consumed by 7b-2 / 7b-3 (batch processor, plugin).
+#[allow(unused_imports)]
+pub(crate) use parts::{
+    format_content_parts_with, format_part_attributes, normalize_function_response, or_unknown,
+    sanitize_and_truncate_text,
+};
+pub use sanitize::smart_truncate;
+#[allow(unused_imports)]
+pub(crate) use sanitize::{
+    JSON_NUMBER_TOKEN, is_json_number, sanitize_value, smart_truncate_with, truncate_string,
+};
+#[allow(unused_imports)]
+pub(crate) use summary::{content_summary, format_response_content};
 
 /// Go `truncationSuffix`.
 pub(crate) const TRUNCATION_SUFFIX: &str = "...[TRUNCATED]";
@@ -196,104 +213,6 @@ pub(crate) fn object_ref(uri: &str, details: &str, authorizer: &str) -> Map<Stri
     obj
 }
 
-/// Go `FormatContentParts(content, maxLength)`: the `content_parts` of `content` with redaction
-/// on (`max_length` < 0: no limit).
-pub fn format_content_parts(content: Option<&Content>, max_length: i64) -> Vec<Map<String, Value>> {
-    todo!("Task 7")
-}
-
-/// Go `formatContentParts(content, maxLength, redact)`: also reports whether any part lost
-/// content to truncation or URI redaction.
-pub(crate) fn format_content_parts_with(
-    content: Option<&Content>,
-    max_length: i64,
-    redact: bool,
-) -> (Vec<Map<String, Value>>, bool) {
-    todo!("Task 7")
-}
-
-/// Go `SmartTruncate(obj, maxLength)`: `obj` as sanitized, truncated JSON (redaction on) and
-/// whether anything was truncated or replaced.
-pub fn smart_truncate<T: Serialize + ?Sized>(
-    obj: &T,
-    max_length: i64,
-) -> Result<(Vec<u8>, bool), Error> {
-    todo!("Task 7")
-}
-
-/// Go `smartTruncate(obj, maxLength, redact)`.
-pub(crate) fn smart_truncate_with<T: Serialize + ?Sized>(
-    obj: &T,
-    max_length: i64,
-    redact: bool,
-) -> Result<(Vec<u8>, bool), Error> {
-    todo!("Task 7")
-}
-
-/// Go `sanitizeValue(obj, maxLength, redact)`: the sanitized, truncated value (depth limit
-/// [`MAX_SANITIZE_DEPTH`], node budget [`MAX_SANITIZE_NODES`]) and whether anything was lost.
-pub(crate) fn sanitize_value<T: Serialize + ?Sized>(
-    obj: &T,
-    max_length: i64,
-    redact: bool,
-) -> (Value, bool) {
-    todo!("Task 7")
-}
-
-/// Go `truncateString(s, maxLength)`: at most `max_length` chars plus [`TRUNCATION_SUFFIX`]
-/// (negative: no limit).
-pub(crate) fn truncate_string(s: &str, max_length: i64) -> (String, bool) {
-    todo!("Task 7")
-}
-
-/// Go `sanitizeAndTruncateText(raw, maxLength, redact)`.
-pub(crate) fn sanitize_and_truncate_text(
-    raw: &str,
-    max_length: i64,
-    redact: bool,
-) -> (String, bool) {
-    todo!("Task 7")
-}
-
-/// Go `formatPartAttributes(v, maxLength, redact)`: [`smart_truncate_with`] as a string,
-/// `"\"[UNSUPPORTED_OBJECT]\""` on error.
-pub(crate) fn format_part_attributes<T: Serialize + ?Sized>(
-    v: &T,
-    max_length: i64,
-    redact: bool,
-) -> (String, bool) {
-    todo!("Task 7")
-}
-
-/// Go `contentSummary(content, maxLength, redact)`.
-pub(crate) fn content_summary(
-    content: Option<&Content>,
-    max_length: i64,
-    redact: bool,
-) -> (String, bool) {
-    todo!("Task 7")
-}
-
-/// Go `formatResponseContent(content, maxLength, redact)`.
-pub(crate) fn format_response_content(
-    content: Option<&Content>,
-    max_length: i64,
-    redact: bool,
-) -> (String, bool) {
-    todo!("Task 7")
-}
-
-/// Go `orUnknown(s)`: `"unknown"` for an empty string.
-pub(crate) fn or_unknown(s: &str) -> &str {
-    todo!("Task 7")
-}
-
-/// Go `normalizeFunctionResponse(r)`: the SDK-owned fields of `r` and its media parts under
-/// adk-python's snake_case names; inline data stays bytes ([`GoAny::Bytes`]).
-pub(crate) fn normalize_function_response(r: &FunctionResponse) -> BTreeMap<String, GoAny> {
-    todo!("Task 7")
-}
-
 /// Go `partsOptions`.
 #[derive(Clone, Default)]
 pub(crate) struct PartsOptions {
@@ -348,21 +267,6 @@ impl PartsCollector {
             ..PartsCollector::default()
         }
     }
-
-    /// Go `reserve(n)`: `(reserved, ok)`.
-    pub(crate) fn reserve(&self, n: i64) -> (i64, bool) {
-        todo!("Task 7")
-    }
-
-    /// Go `hasPendingText()`.
-    pub(crate) fn has_pending_text(&self) -> bool {
-        todo!("Task 7")
-    }
-
-    /// Go `addContent(content, contentOrd)`: appends the parts of `content`.
-    pub(crate) fn add_content(&mut self, content: Option<&Content>, content_ord: usize) {
-        todo!("Task 7")
-    }
 }
 
 /// Go `summaryPiece`.
@@ -386,33 +290,6 @@ pub(crate) struct MessageSummary {
     pub(crate) pieces: Vec<SummaryPiece>,
 }
 
-impl MessageSummary {
-    /// Go `newMessageSummary(content, contentOrd, maxLength, redact)`.
-    pub(crate) fn new(
-        content: Option<&Content>,
-        content_ord: usize,
-        max_length: i64,
-        redact: bool,
-    ) -> MessageSummary {
-        todo!("Task 7")
-    }
-
-    /// Go `newResponseMessageSummary(content, contentOrd, maxLength, redact)`.
-    pub(crate) fn new_response(
-        content: Option<&Content>,
-        content_ord: usize,
-        max_length: i64,
-        redact: bool,
-    ) -> MessageSummary {
-        todo!("Task 7")
-    }
-
-    /// Go `render(maxLength)`.
-    pub(crate) fn render(&self, max_length: i64) -> (String, bool) {
-        todo!("Task 7")
-    }
-}
-
 /// Go `contentSummaryBuilder`: rebuilds a row's `content` summary once its uploads resolve.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct ContentSummaryBuilder {
@@ -426,39 +303,6 @@ pub(crate) struct ContentSummaryBuilder {
     pub(crate) needs_rebuild: bool,
     pub(crate) usage: Option<Map<String, Value>>,
     pub(crate) messages: Vec<MessageSummary>,
-}
-
-impl ContentSummaryBuilder {
-    /// Go `omitTextFromSummary(contentOrd, partIdx)`.
-    pub(crate) fn omit_text_from_summary(&mut self, content_ord: usize, part_idx: usize) {
-        todo!("Task 7")
-    }
-
-    /// Go `retainInlineSummary(contentOrd, partIdx, fallbackText, fallbackTruncated)`.
-    pub(crate) fn retain_inline_summary(
-        &mut self,
-        content_ord: usize,
-        part_idx: usize,
-        fallback_text: &str,
-        fallback_truncated: bool,
-    ) {
-        todo!("Task 7")
-    }
-
-    /// Go `hasFailedUploadTruncated()`.
-    pub(crate) fn has_failed_upload_truncated(&self) -> bool {
-        todo!("Task 7")
-    }
-
-    /// Go `buildContent()`.
-    pub(crate) fn build_content(&self) -> (Map<String, Value>, bool) {
-        todo!("Task 7")
-    }
-
-    /// Go `applyToRow(row)`: rewrites `content` and `is_truncated` of `row` when needed.
-    pub(crate) fn apply_to_row(&self, row: &mut Map<String, Value>) {
-        todo!("Task 7")
-    }
 }
 
 #[cfg(test)]
