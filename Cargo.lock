@@ -1376,7 +1376,10 @@ dependencies = [
  "base64 0.23.1",
  "bytes",
  "chrono",
+ "futures",
+ "gadk-agent",
  "gadk-agentanalytics",
+ "gadk-engine",
  "gadk-genai",
  "gadk-model",
  "gadk-platform",
@@ -1384,12 +1387,14 @@ dependencies = [
  "google-cloud-auth",
  "http",
  "hyper-util",
+ "parking_lot 0.13.0",
  "pretty_assertions",
  "prost",
  "rand 0.10.3",
  "regex",
  "serde",
  "serde_json",
+ "sha2 0.11.1",
  "thiserror",
  "tokio",
  "tokio-util",
@@ -1398,6 +1403,7 @@ dependencies = [
  "tower",
  "tracing",
  "url",
+ "uuid",
 ]
 
 [[package]]
