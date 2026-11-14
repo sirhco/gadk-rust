@@ -32,8 +32,8 @@ use prost::Message as _;
 use tokio_util::sync::CancellationToken;
 
 use super::support::{
-    HookOffloader, ScriptedServer, decode_arrow_rows, exactly_once_test_config, image_content,
-    inject_stream, new_error_classification_processor,
+    HookOffloader, HookRecordingLogger, ScriptedServer, decode_arrow_rows,
+    exactly_once_test_config, image_content, inject_stream, new_error_classification_processor,
     new_error_classification_processor_for_client, processor, push_queue, qrow, queued_row,
     reserve_with, status,
 };
@@ -2024,4 +2024,138 @@ async fn test_batch_processor_deferred_retry_skips_confirmed_split_prefix() {
         release.cancel();
         bp.close().await;
     }
+}
+
+// Rust-only (no Go counterpart; review fix of Task 10): Go's deferred
+// dropDeferredUploadsQuietly(batch) covers the whole of writeRunEndBatchLocked, so when the
+// Logger panics on the "pending retry" line of requeueDeferredUploads, the deferred upload of the
+// confirmed row ev-0 is still released. The setup is the "estimated_split" case of
+// test_batch_processor_deferred_retry_skips_confirmed_split_prefix.
+#[tokio::test(start_paused = true)]
+async fn run_end_requeue_log_panic_releases_the_confirmed_rows_deferred_uploads() {
+    let srv = ScriptedServer::new(Vec::new(), |_, _| Ok(AppendRowsResponse::default()), None);
+    {
+        let delivered = Arc::clone(&srv.delivered);
+        srv.server
+            .on_append_rows(Arc::new(move |mut stream: AppendRowsServerStream| {
+                let delivered = Arc::clone(&delivered);
+                Box::pin(async move {
+                    while let Some(req) = stream.recv().await? {
+                        let attempt = {
+                            let mut log = delivered.lock().unwrap();
+                            log.push((
+                                req.write_stream.clone(),
+                                req.offset.map_or(-1, |o| o.value),
+                            ));
+                            log.len()
+                        };
+                        if attempt == 2 {
+                            // The request of ev-1 outlasts the run-end budget.
+                            tokio::time::sleep(Duration::from_secs(30)).await;
+                            return Err(status(Code::Unavailable, "scripted: not committed"));
+                        }
+                        stream.send(AppendRowsResponse::default()).await?;
+                    }
+                    Ok(())
+                })
+            }));
+    }
+
+    // ev-0's first upload holds the only slot for 400ms and succeeds; ev-0's second upload and
+    // ev-1's upload are cut short by the deadline and deferred.
+    let off = Arc::new(HookOffloader::with_hook(Arc::new(
+        move |ctx: Context, req: GcsUploadRequest| {
+            Box::pin(async move {
+                if req.path.contains("_ev-0_") && req.path.contains("_c0_") {
+                    tokio::select! {
+                        () = tokio::time::sleep(Duration::from_millis(400)) => return Ok(()),
+                        () = ctx.done() => {}
+                    }
+                } else {
+                    ctx.done().await;
+                }
+                Err(Error::Context(
+                    ctx.err().unwrap_or(crate::context::ContextError::Canceled),
+                ))
+            })
+        },
+    )));
+    let logger = HookRecordingLogger {
+        inner: Arc::new(RecordingLogger::default()),
+        before_record: Box::new(|msg| {
+            if msg.contains("pending retry") {
+                panic!("logger boom: {msg}");
+            }
+        }),
+    };
+    let mut cfg = exactly_once_test_config();
+    cfg.batch_flush_intv = Duration::from_secs(3600);
+    cfg.shutdown_timeout = Duration::from_secs(2);
+    cfg.retry_config.max_retries = 0;
+    cfg.gcs_offloader = Some(Arc::clone(&off) as Arc<dyn GcsContentOffloader>);
+    cfg.gcs_max_concurrent_uploads = 1;
+    cfg.logger = Some(Arc::new(logger) as Arc<dyn Logger>);
+    let bp = processor(
+        &Context::background(),
+        Some(srv.server.client().unwrap()),
+        "",
+        cfg,
+    )
+    .await;
+    bp.set_max_append_bytes(1);
+
+    // ev-0 has a 3-byte and a 5-byte upload, ev-1 a 7-byte upload.
+    let opts = PartsOptions {
+        max_len: 1000,
+        offload: true,
+        inline_limit: 10,
+        reserve_bytes: reserve_with(&bp),
+        ..PartsOptions::default()
+    };
+    for (i, id) in ["ev-0", "ev-1"].into_iter().enumerate() {
+        let mut row = if i == 0 {
+            queued_row(
+                &opts,
+                &[image_content(&[1, 2, 3]), image_content(&[4, 5, 6, 7, 8])],
+            )
+        } else {
+            queued_row(&opts, &[image_content(&[1, 2, 3, 4, 5, 6, 7])])
+        };
+        row.row
+            .insert("event_type".to_owned(), "LLM_REQUEST".into());
+        row.row.insert("event_id".to_owned(), id.into());
+        push_queue(&bp, row);
+    }
+
+    let panicked = crate::offload::uploads::catch_unwind_future(bp.flush_run_end())
+        .await
+        .err()
+        .map(|p| {
+            p.downcast_ref::<String>()
+                .cloned()
+                .unwrap_or_else(|| "non-string panic".to_owned())
+        });
+    assert!(
+        panicked
+            .as_deref()
+            .is_some_and(|s| s.contains("pending retry")),
+        "flushRunEnd panicked with {panicked:?}, want the panic of the requeue log line"
+    );
+    let got_kept: Vec<String> = bp
+        .flush_mu
+        .lock()
+        .await
+        .deferred_batch
+        .iter()
+        .map(|r| event_id(&r.row))
+        .collect();
+    assert_eq!(got_kept, vec!["ev-1".to_owned()], "deferredBatch event_ids");
+    // ev-0's deferred 5-byte reservation is released; ev-1's requeued 7 bytes stay reserved.
+    assert_eq!(
+        bp.pending_upload_bytes.load(Ordering::SeqCst),
+        7,
+        "pendingUploadBytes after the requeue log line panicked"
+    );
+
+    bp.close().await;
 }
