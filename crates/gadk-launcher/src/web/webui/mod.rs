@@ -26,7 +26,6 @@
 //! `If-Modified-Since`/`If-Unmodified-Since` never apply; no `ETag` is set either.
 
 mod assets;
-mod mime;
 
 use std::hash::{BuildHasher, Hasher};
 use std::sync::{Arc, Mutex};
@@ -34,6 +33,7 @@ use std::sync::{Arc, Mutex};
 use axum::body::Body;
 use bytes::Bytes;
 use gadk_platform::go_flag::{Flag, FlagSet};
+use gadk_platform::go_mime as mime;
 use gadk_platform::{go_path_base, go_path_clean, go_path_join, go_url};
 use gadk_server::mux::{Request, Response, handler, html_escape, http_error, not_found, redirect};
 use gadk_server::rest::encode_json_response;

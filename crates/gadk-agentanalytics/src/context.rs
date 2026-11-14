@@ -57,6 +57,9 @@ impl std::error::Error for ContextError {}
 /// grpc-go `metadata.MD`: lowercase keys, each with its values in order.
 pub type Metadata = BTreeMap<String, Vec<String>>;
 
+/// When a context ended, why, and its cause.
+type Ended = (Instant, ContextError, Arc<Error>);
+
 /// The function of [`Context::after_func`], taken by whoever starts it first.
 type AfterFuncSlot = Arc<Mutex<Option<Box<dyn FnOnce() + Send>>>>;
 
@@ -64,14 +67,16 @@ struct Inner {
     parent: Option<Context>,
     /// The effective deadline: the earlier of this context's own and its parent's.
     deadline: Option<Instant>,
+    /// This context's own deadline (Go's timer of `WithDeadline`), if it set one.
+    own_deadline: Option<Instant>,
     /// Cancelled when this context ends (a child token of the parent's).
     token: CancellationToken,
     /// The cause recorded when this context's own deadline ends it (Go `WithTimeoutCause`);
     /// `None` records `DeadlineExceeded`.
     timeout_cause: Option<Arc<Error>>,
-    /// The first reason this context ended and its cause (Go `context.Cause`); never changes
-    /// once set.
-    ended: OnceLock<(ContextError, Arc<Error>)>,
+    /// The first reason this context ended and its cause (Go `context.Cause`), with the instant
+    /// it ended at; never changes once set.
+    ended: OnceLock<Ended>,
     /// grpc-go's outgoing metadata, copied into every derived context.
     outgoing: Option<Arc<Metadata>>,
 }
@@ -112,6 +117,7 @@ impl Context {
             inner: Arc::new(Inner {
                 parent: None,
                 deadline: None,
+                own_deadline: None,
                 token: CancellationToken::new(),
                 timeout_cause: None,
                 ended: OnceLock::new(),
@@ -126,6 +132,7 @@ impl Context {
         timeout_cause: Option<Arc<Error>>,
         outgoing: Option<Arc<Metadata>>,
     ) -> Context {
+        let own_deadline = deadline;
         let deadline = match (self.inner.deadline, deadline) {
             (Some(a), Some(b)) => Some(a.min(b)),
             (a, b) => a.or(b),
@@ -134,6 +141,7 @@ impl Context {
             inner: Arc::new(Inner {
                 parent: Some(self.clone()),
                 deadline,
+                own_deadline,
                 token: self.inner.token.child_token(),
                 timeout_cause,
                 ended: OnceLock::new(),
@@ -176,6 +184,7 @@ impl Context {
             inner: Arc::new(Inner {
                 parent: None,
                 deadline: None,
+                own_deadline: None,
                 token: CancellationToken::new(),
                 timeout_cause: None,
                 ended: OnceLock::new(),
@@ -216,8 +225,9 @@ impl Context {
     /// Go `cancel()` of `WithCancel` / `WithTimeout` / `WithDeadline`: ends this context and its
     /// children with `Canceled`, unless it has already ended (then its error stays).
     pub fn cancel(&self) {
-        if self.err().is_none() {
+        if self.ended().is_none() {
             let _ = self.inner.ended.set((
+                Instant::now(),
                 ContextError::Canceled,
                 Arc::new(Error::Context(ContextError::Canceled)),
             ));
@@ -230,22 +240,32 @@ impl Context {
         self.inner.deadline
     }
 
-    /// Records why this context ended, if it has: the parent's error and cause, else its own
-    /// deadline's.
-    fn ended(&self) -> Option<&(ContextError, Arc<Error>)> {
+    /// Why this context ended, if it has, latched as of the instant it ended (Go fixes `Err` and
+    /// `Cause` when the timer fires or the cancel happens): the earliest of the parent's end, this
+    /// context's own deadline, and its own cancel (which [`cancel`](Self::cancel) latches at
+    /// once). A deadline is the instant it passed, so a context whose own timeout passed before a
+    /// later end of its parent keeps its own cause however late it is first asked; on a tie the
+    /// parent's end wins (its deadline is the child's effective one).
+    fn ended(&self) -> Option<&Ended> {
         if let Some(ended) = self.inner.ended.get() {
             return Some(ended);
         }
-        let ended = match self.inner.parent.as_ref().and_then(Context::ended) {
-            Some((err, cause)) => (*err, Arc::clone(cause)),
-            None => {
-                self.inner.deadline.filter(|at| Instant::now() >= *at)?;
+        let parent = self.inner.parent.as_ref().and_then(Context::ended);
+        let own = self
+            .inner
+            .own_deadline
+            .filter(|at| Instant::now() >= *at)
+            .filter(|at| parent.is_none_or(|(ended_at, _, _)| at < ended_at));
+        let ended = match (parent, own) {
+            (_, Some(at)) => {
                 let cause =
                     self.inner.timeout_cause.clone().unwrap_or_else(|| {
                         Arc::new(Error::Context(ContextError::DeadlineExceeded))
                     });
-                (ContextError::DeadlineExceeded, cause)
+                (at, ContextError::DeadlineExceeded, cause)
             }
+            (Some((at, err, cause)), None) => (*at, *err, Arc::clone(cause)),
+            (None, None) => return None,
         };
         let _ = self.inner.ended.set(ended);
         self.inner.token.cancel();
@@ -254,7 +274,7 @@ impl Context {
 
     /// Go `ctx.Err()`: `None` while the context is live.
     pub fn err(&self) -> Option<ContextError> {
-        self.ended().map(|(err, _)| *err)
+        self.ended().map(|(_, err, _)| *err)
     }
 
     /// Go `context.Cause(ctx)`: `None` while the context is live; once it ended, the cause given
@@ -263,7 +283,7 @@ impl Context {
     /// [`err`](Self::err). The same `Arc` is returned every time (compare with
     /// [`Arc::ptr_eq`]).
     pub fn cause(&self) -> Option<Arc<Error>> {
-        self.ended().map(|(_, cause)| Arc::clone(cause))
+        self.ended().map(|(_, _, cause)| Arc::clone(cause))
     }
 
     /// Go `<-ctx.Done()`: resolves once the context has ended.
@@ -549,6 +569,53 @@ mod tests {
         assert_eq!(first.to_string(), "context deadline exceeded");
         plain.cancel();
         assert!(Arc::ptr_eq(&first, &plain.cause().unwrap()));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_end_is_latched_at_the_instant_it_happened_not_when_first_asked() {
+        let cause = Arc::new(Error::msg(
+            "batch upload timeout: context deadline exceeded",
+        ));
+        // The child's own timeout (10ms) passes before the parent's deadline (50ms); nobody asks
+        // until both passed: the child reports its own cause, the parent its own.
+        let parent = Context::background().with_timeout(Duration::from_millis(50));
+        let child = parent.with_timeout_cause(Duration::from_millis(10), cause.clone());
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let parent_cause = parent.cause().unwrap();
+        assert!(parent_cause.is_context(ContextError::DeadlineExceeded));
+        assert_eq!(child.err(), Some(ContextError::DeadlineExceeded));
+        assert!(Arc::ptr_eq(&child.cause().unwrap(), &cause));
+        // Same when the parent is canceled after the child's timeout passed unobserved.
+        let parent = Context::background().with_cancel();
+        let child = parent.with_timeout_cause(Duration::from_millis(10), cause.clone());
+        tokio::time::advance(Duration::from_millis(20)).await;
+        parent.cancel();
+        assert_eq!(child.err(), Some(ContextError::DeadlineExceeded));
+        assert!(Arc::ptr_eq(&child.cause().unwrap(), &cause));
+        // A grandchild of the child ends with the child's cause too.
+        let parent = Context::background().with_timeout(Duration::from_millis(50));
+        let child = parent.with_timeout_cause(Duration::from_millis(10), cause.clone());
+        let grandchild = child.with_cancel();
+        tokio::time::advance(Duration::from_millis(60)).await;
+        assert!(Arc::ptr_eq(&grandchild.cause().unwrap(), &cause));
+        // The parent canceled before the child's own timeout: the parent's cause, even when
+        // first asked after the child's deadline passed.
+        let parent = Context::background().with_cancel();
+        let child = parent.with_timeout_cause(Duration::from_millis(30), cause.clone());
+        tokio::time::advance(Duration::from_millis(5)).await;
+        parent.cancel();
+        tokio::time::advance(Duration::from_millis(60)).await;
+        assert_eq!(child.err(), Some(ContextError::Canceled));
+        assert!(Arc::ptr_eq(
+            &child.cause().unwrap(),
+            &parent.cause().unwrap()
+        ));
+        // The child's own cancel after its timeout passed unobserved keeps the timeout.
+        let ctx =
+            Context::background().with_timeout_cause(Duration::from_millis(10), cause.clone());
+        tokio::time::advance(Duration::from_millis(20)).await;
+        ctx.cancel();
+        assert!(Arc::ptr_eq(&ctx.cause().unwrap(), &cause));
     }
 
     fn counter() -> (

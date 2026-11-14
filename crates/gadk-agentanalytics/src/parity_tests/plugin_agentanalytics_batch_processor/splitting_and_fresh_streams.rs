@@ -2026,10 +2026,9 @@ async fn test_batch_processor_deferred_retry_skips_confirmed_split_prefix() {
     }
 }
 
-// Rust-only (no Go counterpart; review fix of Task 10): Go's deferred
-// dropDeferredUploadsQuietly(batch) covers the whole of writeRunEndBatchLocked, so when the
-// Logger panics on the "pending retry" line of requeueDeferredUploads, the deferred upload of the
-// confirmed row ev-0 is still released. The setup is the "estimated_split" case of
+// Rust-only (no Go counterpart): Go's deferred dropDeferredUploadsQuietly(batch) covers the
+// whole of writeRunEndBatchLocked, so when the Logger panics on the "pending retry" line of
+// requeueDeferredUploads, the deferred upload of the confirmed row ev-0 is still released. The setup is the "estimated_split" case of
 // test_batch_processor_deferred_retry_skips_confirmed_split_prefix.
 #[tokio::test(start_paused = true)]
 async fn run_end_requeue_log_panic_releases_the_confirmed_rows_deferred_uploads() {

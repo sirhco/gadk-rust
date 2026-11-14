@@ -37,7 +37,7 @@ use crate::context::Context;
 use crate::error::Error;
 
 #[path = "config_projection.rs"]
-mod config_projection;
+pub(crate) mod config_projection;
 
 use config_projection::{build, normalize, project};
 

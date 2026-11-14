@@ -47,6 +47,7 @@ use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
 use crate::config::ClientOptions;
 use crate::context::{Context, ContextError, Metadata};
 use crate::error::{Code, Error, status_code};
+use crate::gax::{Backoff, Pauses};
 use crate::storagepb::big_query_write_client::BigQueryWriteClient;
 use crate::storagepb::{
     AppendRowsRequest, AppendRowsResponse, CreateWriteStreamRequest, FinalizeWriteStreamRequest,
@@ -76,18 +77,6 @@ const MAX_MESSAGE_SIZE: usize = i32::MAX as usize;
 
 /// grpc-go `ErrClientConnClosing`'s message (code `Canceled`).
 const CONN_CLOSING: &str = "grpc: the client connection is closing";
-
-/// gax `Backoff`: the pause before retry *n* is `1 + rand(cur)` ns (jittered), then
-/// `cur = min(cur * multiplier, max)`.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct Backoff {
-    /// gax `Initial`.
-    pub(crate) initial: Duration,
-    /// gax `Max`.
-    pub(crate) max: Duration,
-    /// gax `Multiplier`.
-    pub(crate) multiplier: f64,
-}
 
 /// gax `OnCodes(codes, backoff)`: the retryer of one RPC.
 #[derive(Debug, Clone, PartialEq)]
@@ -165,44 +154,6 @@ impl Default for WriteCallOptions {
     }
 }
 
-/// The running state of a gax `Backoff` (its unexported `cur`).
-#[derive(Debug, Clone, Copy)]
-struct Pauses {
-    backoff: Backoff,
-    cur: Duration,
-}
-
-impl Pauses {
-    /// A fresh backoff with gax's defaults for zero settings (`Initial` 1s, `Max` 30s,
-    /// `Multiplier` < 1 → 2).
-    fn new(mut backoff: Backoff) -> Pauses {
-        if backoff.initial.is_zero() {
-            backoff.initial = Duration::from_secs(1);
-        }
-        if backoff.max.is_zero() {
-            backoff.max = Duration::from_secs(30);
-        }
-        if backoff.multiplier < 1.0 {
-            backoff.multiplier = 2.0;
-        }
-        Pauses {
-            backoff,
-            cur: backoff.initial,
-        }
-    }
-
-    /// gax `Backoff.Pause()`: `1 + rand(cur)` ns, `rand(n)` uniform in `[0, n)`.
-    fn next(&mut self, rand: impl FnOnce(u64) -> u64) -> Duration {
-        let cur = u64::try_from(self.cur.as_nanos())
-            .unwrap_or(u64::MAX)
-            .max(1);
-        let pause = Duration::from_nanos(1 + rand(cur));
-        let grown = Duration::from_nanos((cur as f64 * self.backoff.multiplier) as u64);
-        self.cur = grown.min(self.backoff.max);
-        pause
-    }
-}
-
 /// grpc-go's status of a context error (`status.FromContextError`): `Canceled` / `DeadlineExceeded`
 /// with the context error's text.
 fn context_status(err: ContextError) -> Error {
@@ -257,7 +208,7 @@ where
         if !matches!(err, Error::Status { .. }) || !codes.contains(&status_code(&err)) {
             return Err(err);
         }
-        let pause = pauses.next(|n| rand::random_range(0..n));
+        let pause = pauses.pause();
         tokio::select! {
             biased;
             () = ctx.done() => {
@@ -872,28 +823,6 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
-
-    #[test]
-    fn pauses_follow_gax_backoff() {
-        let mut p = Pauses::new(Backoff {
-            initial: Duration::from_millis(100),
-            max: Duration::from_millis(200),
-            multiplier: 1.3,
-        });
-        // rand(n) = n - 1: the largest pause, cur itself.
-        assert_eq!(p.next(|n| n - 1), Duration::from_millis(100));
-        assert_eq!(p.next(|n| n - 1), Duration::from_millis(130));
-        assert_eq!(p.next(|n| n - 1), Duration::from_millis(169));
-        assert_eq!(p.next(|n| n - 1), Duration::from_millis(200));
-        assert_eq!(p.next(|_| 0), Duration::from_nanos(1));
-        let mut zero = Pauses::new(Backoff {
-            initial: Duration::ZERO,
-            max: Duration::ZERO,
-            multiplier: 0.5,
-        });
-        assert_eq!(zero.next(|n| n - 1), Duration::from_secs(1));
-        assert_eq!(zero.next(|n| n - 1), Duration::from_secs(2));
-    }
 
     /// gax retries an AppendRows open that fails with `Unavailable` (here refused by a stream
     /// interceptor, as Go tests' `grpc.WithStreamInterceptor` can), pausing within the

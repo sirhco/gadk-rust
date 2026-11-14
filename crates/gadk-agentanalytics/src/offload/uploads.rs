@@ -26,12 +26,11 @@ use std::any::Any;
 use std::future::Future;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::pin::Pin;
-use std::sync::{Arc, LazyLock, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::task::Poll;
 use std::time::Duration;
 
 use chrono::{DateTime, NaiveDate, Utc};
-use regex::Regex;
 use serde_json::json;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
@@ -49,13 +48,11 @@ use crate::config::{
 use crate::context::{Context, ContextError};
 use crate::error::Error;
 use crate::formatter::{
-    BINARY_DATA_PLACEHOLDER, CIRCULAR_REF_PLACEHOLDER, INLINE_DATA_TEXT, MAX_DEPTH_PLACEHOLDER,
-    PendingUpload, SANITIZE_BUDGET_PLACEHOLDER, STORAGE_MODE_GCS_REFERENCE,
-    UNSUPPORTED_KEY_PLACEHOLDER, UNSUPPORTED_OBJ_PLACEHOLDER, UPLOAD_FAILED_TEXT, object_ref,
+    INLINE_DATA_TEXT, PendingUpload, STORAGE_MODE_GCS_REFERENCE, UPLOAD_FAILED_TEXT, object_ref,
 };
 use crate::redaction::{
-    COLUMN_CONTENT_PARTS, FORMATTING_FAILED_PLACEHOLDER, REDACTED_SENSITIVE_TEXT_PLACEHOLDER,
-    REDACTED_URI_PLACEHOLDER, REDACTED_VALUE, UNPARSEABLE_JSON_PLACEHOLDER, redact_error_message,
+    COLUMN_CONTENT_PARTS, URI_TOKEN_RE, panic_type_name, redact_error_message,
+    trim_trailing_punctuation,
 };
 use crate::row::{
     DeferredRowUploads, DeferredUpload, QueuedRow, Row, RowExt, RowValue, SharedSummaryBuilder,
@@ -253,16 +250,6 @@ impl BatchProcessor {
         let now = Instant::now();
         let timeout_cause = Arc::new(UploadSentinel::BatchUploadTimeout.error());
         let upload_ctx = ctx.with_timeout_cause(upload_timeout, Arc::clone(&timeout_cause));
-        // Go records the cause when the context ends; gadk's Context records it when it is
-        // first observed after that, so a watcher observes it as it ends (else an upload that
-        // returns after the caller's later deadline would see the caller's cause).
-        let watcher = {
-            let upload_ctx = upload_ctx.clone();
-            tokio::spawn(async move {
-                upload_ctx.done().await;
-                let _ = upload_ctx.err();
-            })
-        };
         // An upload that the deadline ends is a stall if it had been running for at least three
         // quarters of the time that the batch has for its uploads, which ends at the earlier
         // of the batch's own timeout and the deadline of ctx. The time that it waited for a
@@ -363,7 +350,6 @@ impl BatchProcessor {
             *lock(&self.upload_cooldown_until) = None;
         }
         upload_ctx.cancel();
-        watcher.abort();
         UploadsOutcome {
             own_timeout_expired,
             paused,
@@ -568,18 +554,6 @@ impl BatchProcessor {
         )
     }
 
-    /// Go `upload(ctx, offloader, t)`: calls the offloader unless `ctx` has ended; a panic is
-    /// caught as Go's `offloaderPanicError`.
-    pub(crate) async fn upload(
-        &self,
-        ctx: &Context,
-        offloader: &Arc<dyn GcsContentOffloader>,
-        path: &str,
-        pending: &PendingUpload,
-    ) -> UploadResult {
-        upload_payload(ctx, offloader, path, pending).await
-    }
-
     /// Go `applyUpload(t, deferred)` on the task's row (`row` is `batch[t.row].row`): a
     /// successful upload (no error and a `gs://` URI) turns the entry into a
     /// `GCS_REFERENCE` with its `object_ref` (a text keeps a [`text_preview`] and leaves the
@@ -664,8 +638,9 @@ impl BatchProcessor {
     }
 }
 
-/// Go's `upload` body, shared by [`BatchProcessor::upload`] and the spawned upload tasks
-/// (which cannot borrow the processor).
+/// Go `upload(ctx, offloader, t)`: calls the offloader unless `ctx` has ended; a panic is
+/// caught as Go's `offloaderPanicError`. A free function, as the spawned upload tasks cannot
+/// borrow the processor.
 async fn upload_payload(
     ctx: &Context,
     offloader: &Arc<dyn GcsContentOffloader>,
@@ -731,15 +706,6 @@ impl<F: Future> Future for CatchUnwind<F> {
 /// Wraps `fut` in [`CatchUnwind`].
 pub(crate) fn catch_unwind_future<F: Future>(fut: F) -> CatchUnwind<F> {
     CatchUnwind(Box::pin(fut))
-}
-
-/// Go `%T` of a panic value. A copy of the private `redaction::panic_type_name` (7b-1).
-fn panic_type_name(payload: &(dyn Any + Send)) -> &'static str {
-    if payload.is::<&str>() || payload.is::<String>() {
-        "string"
-    } else {
-        "unknown"
-    }
 }
 
 /// A `std::sync::Mutex` lock that ignores poisoning (a panicking Logger may poison a summary
@@ -981,62 +947,22 @@ fn go_error_type(err: &Error) -> &'static str {
     }
 }
 
-/// Go `uriTokenRe` (`[a-zA-Z][a-zA-Z0-9+.-]*://[^\s"'<>]+`, Go's ASCII `\s`). A copy of the
-/// private `redaction::URI_TOKEN_RE` (7b-1).
-static URI_TOKEN_RE: LazyLock<Option<Regex>> =
-    LazyLock::new(|| Regex::new(r#"[a-zA-Z][a-zA-Z0-9+.-]*://[^\t\n\x0C\r "'<>]+"#).ok());
-
-/// Go `isKnownSentinel(s)`. A copy of the private `redaction::is_known_sentinel` (7b-1).
-fn is_known_sentinel(s: &str) -> bool {
-    [
-        REDACTED_VALUE,
-        REDACTED_URI_PLACEHOLDER,
-        REDACTED_SENSITIVE_TEXT_PLACEHOLDER,
-        FORMATTING_FAILED_PLACEHOLDER,
-        UNPARSEABLE_JSON_PLACEHOLDER,
-        INLINE_DATA_TEXT,
-        BINARY_DATA_PLACEHOLDER,
-        CIRCULAR_REF_PLACEHOLDER,
-        MAX_DEPTH_PLACEHOLDER,
-        SANITIZE_BUDGET_PLACEHOLDER,
-        UNSUPPORTED_KEY_PLACEHOLDER,
-        UNSUPPORTED_OBJ_PLACEHOLDER,
-    ]
-    .contains(&s)
-}
-
-/// Go `trimTrailingPunctuation(s)`. A copy of the private
-/// `redaction::trim_trailing_punctuation` (7b-1).
-fn trim_trailing_punctuation(s: &str) -> &str {
-    let trimmed = s.trim_end_matches(|c: char| ".,;:)]}".contains(c));
-    let with_bracket = &s[..(trimmed.len() + 1).min(s.len())];
-    if with_bracket.ends_with(']')
-        && let Some(open) = trimmed.rfind('[')
-        && is_known_sentinel(&with_bracket[open..])
-    {
-        return with_bracket;
-    }
-    trimmed
-}
-
 /// Go `stripURIQueries(msg)`: the URIs in `msg` without their query strings and fragments.
 pub(crate) fn strip_uri_queries(msg: &str) -> String {
     if !msg.contains("://") {
         return msg.to_owned();
     }
-    let Some(re) = URI_TOKEN_RE.as_ref() else {
-        return msg.to_owned();
-    };
-    re.replace_all(msg, |caps: &regex::Captures<'_>| {
-        let token = caps.get(0).map_or("", |m| m.as_str());
-        let mut trimmed = trim_trailing_punctuation(token);
-        let suffix = &token[trimmed.len()..];
-        if let Some(i) = trimmed.find(['?', '#']) {
-            trimmed = &trimmed[..i];
-        }
-        format!("{trimmed}{suffix}")
-    })
-    .into_owned()
+    URI_TOKEN_RE
+        .replace_all(msg, |caps: &regex::Captures<'_>| {
+            let token = caps.get(0).map_or("", |m| m.as_str());
+            let mut trimmed = trim_trailing_punctuation(token);
+            let suffix = &token[trimmed.len()..];
+            if let Some(i) = trimmed.find(['?', '#']) {
+                trimmed = &trimmed[..i];
+            }
+            format!("{trimmed}{suffix}")
+        })
+        .into_owned()
 }
 
 #[cfg(test)]

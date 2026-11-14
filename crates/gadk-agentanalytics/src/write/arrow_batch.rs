@@ -279,7 +279,8 @@ fn unexpected_type(field: &Field) -> Error {
 /// out differently (same length except for an empty batch: 8 bytes shorter), and a validity
 /// bitmap is `ceil(rows / 8)` bytes where arrow-go writes its builder's allocation (4 or 64
 /// bytes for small batches), so a message is at most 63 bytes per NULL-bearing column shorter
-/// than Go's — the serialized request size Task 8 compares with the 9 MiB limit follows.
+/// than Go's — the serialized request size the stream writer compares with the 9 MiB limit
+/// follows.
 pub fn serialize_record(record: &RecordBatch, logger: Option<&dyn Logger>) -> Option<Vec<u8>> {
     // arrow-go `ipc.GetRecordBatchPayload` pads each body buffer to 8 bytes (arrow-rs's
     // default is 64); metadata version V5 as arrow-go.

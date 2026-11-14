@@ -33,7 +33,6 @@ use gadk_model::rest::{
     CallTimeout, RequestHeaders, RestError, RestReply, RestTransport, RetryAfterRule, RetryPolicy,
 };
 use gadk_model::{HttpClient, ReqwestClient};
-use gadk_platform::Platform;
 use gadk_platform::env::{EnvProvider, ProcessEnv};
 use google_cloud_auth::credentials::Credentials;
 use http::header::{CONTENT_TYPE, IF_MATCH, USER_AGENT};
@@ -44,6 +43,7 @@ use serde_json::{Map, Value, json};
 use crate::config::ClientOptions;
 use crate::context::{Context, ContextError};
 use crate::error::{BigQueryError, Error};
+use crate::gax::{Backoff, Pauses, random_id, sleep, wrapped_call_err};
 use crate::schema::{Schema, TableSchema};
 use crate::schema_upgrade::{
     Clustering, DAY_PARTITIONING_TYPE, TableMetadata, TableMetadataOps, TableMetadataUpdate,
@@ -359,7 +359,7 @@ impl BigQueryClient {
         }
         // Go `internal.Retry(ctx, gax.Backoff{}, …)` stopping at the first error, so a pause
         // cut short by `ctx` returns the bare context error.
-        let mut backoff = Backoff::new(Duration::ZERO, Duration::ZERO, 0.0);
+        let mut backoff = Pauses::new(Backoff::default());
         loop {
             let status = self.job_status(ctx, &job.reference, &mut last).await?;
             if status.done() {
@@ -384,7 +384,11 @@ impl BigQueryClient {
                 ("maxResults", "0"),
             ],
         );
-        let mut backoff = Backoff::new(Duration::from_millis(50), Duration::from_secs(60), 1.3);
+        let mut backoff = Pauses::new(Backoff {
+            initial: Duration::from_millis(50),
+            max: Duration::from_secs(60),
+            multiplier: 1.3,
+        });
         let url = url.as_str();
         retry(ctx, &mut backoff, move || async move {
             match self.call(ctx, Method::GET, url, None, None).await {
@@ -570,20 +574,6 @@ fn escape(s: &str) -> String {
 /// Go `url.QueryEscape`: like [`escape`], with a space as `+`.
 fn query_escape(s: &str) -> String {
     escape(s).replace("%20", "+")
-}
-
-/// Go `randomID()`: 16 random bytes as 32 lower-case hex digits (from a random v4 UUID, whose
-/// version and variant digits are fixed — the ID keeps Go's shape).
-fn random_id() -> String {
-    // Divergence (ledger 7b-1): Go draws all 128 bits from `crypto/rand`; a v4 UUID fixes 6 of
-    // them. The ID's shape (`^[0-9a-f]{32}$`) is Go's.
-    Platform::default().new_uuid().replace('-', "")
-}
-
-/// A random `u64` for backoff jitter.
-fn random_u64() -> u64 {
-    let id = random_id();
-    u64::from_str_radix(id.get(..16).unwrap_or("0"), 16).unwrap_or(0)
 }
 
 /// The JSON request body Go's client sends (`json.NewEncoder(...).Encode`: trailing newline).
@@ -925,53 +915,12 @@ fn connection_error(err: &(dyn std::error::Error + 'static)) -> bool {
     false
 }
 
-/// gax-go `Backoff`: each pause is uniform in `[1ns, cur]`, then `cur` grows by `multiplier`
-/// up to `max`. Zero values take gax's defaults (1 s, 30 s, ×2).
-#[derive(Debug, Clone)]
-struct Backoff {
-    initial: Duration,
-    max: Duration,
-    multiplier: f64,
-    cur: Duration,
-}
-
-impl Backoff {
-    fn new(initial: Duration, max: Duration, multiplier: f64) -> Backoff {
-        Backoff {
-            initial,
-            max,
-            multiplier,
-            cur: Duration::ZERO,
-        }
-    }
-
-    /// Go `runWithRetryExplicit`'s backoff (the BigQuery SLA suggestion).
-    fn bigquery() -> Backoff {
-        Backoff::new(Duration::from_secs(1), Duration::from_secs(32), 2.0)
-    }
-
-    /// Go `Backoff.Pause()`.
-    fn pause(&mut self) -> Duration {
-        if self.initial.is_zero() {
-            self.initial = Duration::from_secs(1);
-        }
-        if self.cur.is_zero() {
-            self.cur = self.initial;
-        }
-        if self.max.is_zero() {
-            self.max = Duration::from_secs(30);
-        }
-        if self.multiplier < 1.0 {
-            self.multiplier = 2.0;
-        }
-        let cur_ns = u64::try_from(self.cur.as_nanos())
-            .unwrap_or(u64::MAX)
-            .max(1);
-        let d = Duration::from_nanos(1 + random_u64() % cur_ns);
-        self.cur = self.cur.mul_f64(self.multiplier).min(self.max);
-        d
-    }
-}
+/// Go `runWithRetryExplicit`'s backoff (the BigQuery SLA suggestion): 1 s → 32 s, ×2.
+const BIGQUERY_BACKOFF: Backoff = Backoff {
+    initial: Duration::from_secs(1),
+    max: Duration::from_secs(32),
+    multiplier: 2.0,
+};
 
 /// What one turn of [`retry`] decided (Go's `(stop bool, err error)`).
 enum Step<T> {
@@ -985,7 +934,7 @@ enum Step<T> {
 /// per `backoff` under `ctx`. When `ctx` ends during a pause the result is the context error,
 /// or Go's `wrappedCallErr` (`retry failed with <ctx err>; last error: <err>`) when a turn
 /// failed with an error other than a bare context error.
-async fn retry<T, F, Fut>(ctx: &Context, backoff: &mut Backoff, mut f: F) -> Result<T, Error>
+async fn retry<T, F, Fut>(ctx: &Context, backoff: &mut Pauses, mut f: F) -> Result<T, Error>
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = Step<T>>,
@@ -1011,32 +960,14 @@ where
     }
 }
 
-/// gax-go `Sleep(ctx, d)`: waits `d`, or fails with the context error once `ctx` ends.
-async fn sleep(ctx: &Context, d: Duration) -> Result<(), Error> {
-    ctx.run(async {
-        tokio::time::sleep(d).await;
-        Ok(())
-    })
-    .await
-}
-
-/// Go `wrappedCallErr{ctxErr, wrappedErr}`: its text, and both errors in its tree (Go's `Is`
-/// matches either; `Unwrap` returns the call's error).
-fn wrapped_call_err(ctx_err: Error, last: Error) -> Error {
-    Error::wrap_text(
-        format!("retry failed with {ctx_err}; last error: {last}"),
-        Error::Joined(vec![ctx_err, last]),
-    )
-}
-
 /// Go `runWithRetryExplicit(ctx, call, allowedReasons)`: `call` until it succeeds or fails with
-/// an error [`retryable_error`] rejects, with [`Backoff::bigquery`].
+/// an error [`retryable_error`] rejects, with [`BIGQUERY_BACKOFF`].
 async fn run_with_retry<T, F, Fut>(ctx: &Context, reasons: &[&str], mut call: F) -> Result<T, Error>
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<T, Error>>,
 {
-    let mut backoff = Backoff::bigquery();
+    let mut backoff = Pauses::new(BIGQUERY_BACKOFF);
     retry(ctx, &mut backoff, || {
         let fut = call();
         async move {
@@ -1405,27 +1336,10 @@ mod tests {
     }
 
     #[test]
-    fn backoff_pauses_like_gax() {
-        let mut b = Backoff::bigquery();
-        let mut caps = Vec::new();
-        for _ in 0..8 {
-            let cap = if b.cur.is_zero() { b.initial } else { b.cur };
-            let p = b.pause();
-            assert!(p >= Duration::from_nanos(1) && p <= cap, "{p:?} > {cap:?}");
-            caps.push(cap.as_secs());
-        }
+    fn bigquery_backoff_pauses_like_gax() {
+        let mut b = Pauses::new(BIGQUERY_BACKOFF);
+        let caps: Vec<u64> = (0..8).map(|_| b.next(|n| n - 1).as_secs()).collect();
         assert_eq!(caps, [1, 2, 4, 8, 16, 32, 32, 32]);
-        let mut d = Backoff::new(Duration::ZERO, Duration::ZERO, 0.0);
-        d.pause();
-        assert_eq!(
-            (d.initial, d.max, d.multiplier, d.cur),
-            (
-                Duration::from_secs(1),
-                Duration::from_secs(30),
-                2.0,
-                Duration::from_secs(2)
-            )
-        );
     }
 
     #[tokio::test(start_paused = true)]
@@ -1591,20 +1505,6 @@ mod tests {
                 fields: vec!["a".into()]
             })
         );
-    }
-
-    #[test]
-    fn random_ids_have_gos_shape() {
-        let a = random_id();
-        let b = random_id();
-        assert_ne!(a, b);
-        for id in [a, b] {
-            assert_eq!(id.len(), 32);
-            assert!(
-                id.bytes().all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f')),
-                "{id}"
-            );
-        }
     }
 
     #[test]
