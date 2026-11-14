@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Part of the port of ADK-Go `plugin/agentanalytics/late_callbacks_test.go` (owner: Task 11): the
+//! Part of the port of ADK-Go `plugin/agentanalytics/late_callbacks_test.go`: the
 //! 13 Go tests from `TestTraceManager_LateOperationsKeepTheirSpans` to
 //! `TestTraceManager_FullOpenCompletedCacheStaysBounded` in the Go file's order that need no runner
 //! (the exact list is in the 7b-3a plan's contracts, Appendix A).
@@ -33,6 +33,7 @@ use std::time::Duration;
 use chrono::{TimeZone, Utc};
 use gadk_engine::telemetry::d6::SpanIds;
 
+use crate::parity_tests::plugin_agentanalytics_bigquery_agent_analytics_plugin::support::tracked_invocations;
 use crate::trace::testkit::ManualClock;
 use crate::trace::{CallbackCtx, Identity, RowSpan, SWEEP_INTERVAL, TraceManager};
 
@@ -43,13 +44,6 @@ fn id(inv: &str, agent: &str) -> Identity {
         agent_name: agent.into(),
         ..Identity::default()
     }
-}
-
-/// Go `trackedInvocations(tm)`: the IDs of the invocations tracked as active, sorted.
-fn tracked_invocations(tm: &TraceManager) -> Vec<String> {
-    let mut ids: Vec<String> = tm.mu.lock().invocations.keys().cloned().collect();
-    ids.sort();
-    ids
 }
 
 /// The three late-operation kinds of Go's `for _, kind := range []string{"agent", "model",

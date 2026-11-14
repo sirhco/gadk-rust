@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Part of the port of ADK-Go `plugin/agentanalytics/trace_manager_test.go` (owner: Task 12): the
+//! Part of the port of ADK-Go `plugin/agentanalytics/trace_manager_test.go`: the
 //! 30 Go tests from `TestTraceManager_ConcurrentSiblingToolsRace` to
 //! `TestTraceManager_ConcurrentInvocations` in the Go file's order that need no runner (the exact
 //! list is in the 7b-3a plan's contracts, Appendix A).
@@ -36,7 +36,8 @@ use gadk_session::{Event, NodeInfo};
 use serde_json::{Map, Value, json};
 
 use super::direct_support::{
-    MockRun, SpanCounts, fake_tool, first_token_timed, open_spans, tracked_invocations,
+    MockRun, SpanCounts, fake_tool, first_token_timed, open_spans, text_content as text,
+    tracked_invocations,
 };
 use crate::batch_processor::BatchProcessor;
 use crate::event_types::{
@@ -45,6 +46,7 @@ use crate::event_types::{
     EVENT_LLM_RESPONSE, EVENT_TOOL_COMPLETED, EVENT_TOOL_ERROR, EVENT_TOOL_STARTING,
     EVENT_USER_MESSAGE_RECEIVED,
 };
+use crate::parity_tests::plugin_agentanalytics_bigquery_agent_analytics_plugin::support::check_json_at;
 use crate::parity_tests::plugin_agentanalytics_bigquery_agent_analytics_plugin::support::{
     MockCtx, TracePlace, check_json, default_config, event_types, json_column, json_object_column,
     lookup, must_latency, new_clocked_plugin, new_test_plugin_with_config, only_row_of_type,
@@ -74,11 +76,6 @@ fn is_trace_id(s: &str) -> bool {
     s.len() == 32 && s.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f'))
 }
 
-/// Go `textContent(role, text)`.
-fn text(role: &str, s: &str) -> Content {
-    Content::from_text(s, role)
-}
-
 /// Go `identity{invocationID: inv, agentName: agent, branch: branch}`.
 fn id_of(inv: &str, agent: &str, branch: &str) -> Identity {
     Identity {
@@ -86,14 +83,6 @@ fn id_of(inv: &str, agent: &str, branch: &str) -> Identity {
         agent_name: agent.into(),
         branch: branch.into(),
         ..Identity::default()
-    }
-}
-
-/// Go `checkJSONAt(t, obj, want, path...)`.
-fn check_json_at(obj: &Value, want: &str, path: &[&str]) {
-    let got = lookup(obj, path).unwrap_or_else(|| panic!("no value at {path:?} in {obj}"));
-    if let Err(e) = check_json(&path.join("."), got, want) {
-        panic!("{e}");
     }
 }
 

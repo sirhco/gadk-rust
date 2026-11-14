@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Part of the port of ADK-Go `plugin/agentanalytics/bigquery_agent_analytics_plugin_test.go`
-//! (owner: Task 10): the 13 Go tests from `TestValueEndingInKeyName` to the end of the Go file
+//! Part of the port of ADK-Go `plugin/agentanalytics/bigquery_agent_analytics_plugin_test.go`:
+//! the 13 Go tests from `TestValueEndingInKeyName` to the end of the Go file
 //! (`TestNewBigQueryAgentAnalyticsPluginWithConfig_BQClientLifecycle`), in the Go file's order.
 
 use std::fmt;

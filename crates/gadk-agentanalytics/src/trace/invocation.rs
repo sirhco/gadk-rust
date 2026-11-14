@@ -32,8 +32,6 @@
 //! read-only queries (which may still update span records) are `InvocationState` methods. Go's
 //! `int` indexes into `agentStack` are `usize`; Go's `-1` is `None`.
 
-#![allow(dead_code)] // Consumers: Tasks 8-9 (Task 15 sweeps the allow).
-
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, OnceLock};

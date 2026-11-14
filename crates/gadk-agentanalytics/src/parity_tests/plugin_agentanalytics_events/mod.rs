@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `plugin/agentanalytics/events_test.go` (ledger `docs/parity/7b-3a.md`; owner:
-//! Task 11): 18 Go tests, split into [`direct`] (tests that call the plugin's callbacks and helpers
+//! Port of ADK-Go `plugin/agentanalytics/events_test.go` (ledger `docs/parity/7b-3a.md`): 18
+//! Go tests, split into [`direct`] (tests that call the plugin's callbacks and helpers
 //! directly) and [`runner`] (tests that run agents through a gadk `Runner`). Go's load-memory tool
 //! is a fake tool reporting `ToolOriginKind::Local` (gadk-tools is a `gadk`-only dependency;
 //! adapted).
@@ -35,7 +35,7 @@ use std::sync::Arc;
 
 use gadk_agent::{
     Agent, AgentConfig, AgentError, AgentState, AgentType, ReadonlyContext, Tool, ToolError,
-    ToolOriginKind, Toolset,
+    Toolset,
 };
 use gadk_engine::llm::LlmAgentConfig;
 use gadk_engine::tool::function::{FunctionTool, FunctionToolConfig};
@@ -43,17 +43,9 @@ use gadk_genai::Content;
 use gadk_session::Event;
 use serde_json::{Map, Value};
 
-use crate::event_types::{EVENT_INVOCATION_COMPLETED, EVENT_INVOCATION_ERROR};
 use crate::parity_tests::plugin_agentanalytics_bigquery_agent_analytics_plugin::support::{
-    MockCtx, TestPlugin, agent_error_counts, check_json as try_check_json, event_types, lookup,
-    only_row_of_type, rows_of_type, str_col,
+    FakeTool, MockCtx, TestPlugin, check_json as try_check_json, check_json_at, text_content,
 };
-use crate::row::Row;
-
-/// Go `textContent(role, text)`.
-pub(in crate::parity_tests) fn text_content(role: &str, text: &str) -> Content {
-    Content::from_text(text, role)
-}
 
 /// The JSON object `v` (Go's `map[string]any` literals).
 fn obj(v: Value) -> Map<String, Value> {
@@ -67,71 +59,6 @@ fn obj(v: Value) -> Map<String, Value> {
 fn check_json(name: &str, got: &Value, want: &str) {
     if let Err(diff) = try_check_json(name, got, want) {
         panic!("{diff}");
-    }
-}
-
-/// Go `checkJSONAt(t, obj, want, path...)`.
-fn check_json_at(obj: &Value, want: &str, path: &[&str]) {
-    let name = path.join(".");
-    let got = lookup(obj, path).unwrap_or_else(|| panic!("{name} is missing; got {obj}"));
-    check_json(&name, got, want);
-}
-
-/// Go `requireInvocationCompletedOK(t, rows)`.
-pub(in crate::parity_tests) fn require_invocation_completed_ok(rows: &[Row]) {
-    assert!(
-        rows_of_type(rows, EVENT_INVOCATION_ERROR).is_empty(),
-        "got INVOCATION_ERROR, want INVOCATION_COMPLETED; event types: {:?}",
-        event_types(rows)
-    );
-    let inv_row = only_row_of_type(rows, EVENT_INVOCATION_COMPLETED);
-    assert_eq!(
-        str_col(&inv_row, "status"),
-        "OK",
-        "INVOCATION_COMPLETED status"
-    );
-    assert!(
-        agent_error_counts(rows).is_empty(),
-        "AGENT_ERROR rows per agent: {:?}",
-        agent_error_counts(rows)
-    );
-}
-
-/// Go `fakeTool` (`arrow_test_helper_test.go`): a tool with a name, a description and a
-/// long-running flag; `origin` is its declared kind (Go's `fakeTool` has none: `Unknown`).
-#[derive(Default)]
-struct FakeTool {
-    name: String,
-    description: String,
-    long_running: bool,
-    origin: ToolOriginKind,
-}
-
-impl FakeTool {
-    /// Go `&fakeTool{name: name}`.
-    fn named(name: &str) -> Arc<dyn Tool> {
-        Arc::new(FakeTool {
-            name: name.into(),
-            ..FakeTool::default()
-        })
-    }
-}
-
-impl Tool for FakeTool {
-    fn name(&self) -> &str {
-        &self.name
-    }
-    fn description(&self) -> &str {
-        &self.description
-    }
-    fn is_long_running(&self) -> bool {
-        self.long_running
-    }
-    fn origin_kind(&self) -> ToolOriginKind {
-        self.origin
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }
 

@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Part of the port of ADK-Go `plugin/agentanalytics/events_test.go` (owner: Task 11): the 14 Go
+//! Part of the port of ADK-Go `plugin/agentanalytics/events_test.go`: the 14 Go
 //! tests from `TestSessionEvents_EmitRichLifecycleTypes` to
 //! `TestSensitiveKeys_StandardRedactionInCompactionAndA2A` in the Go file's order that need no
 //! runner (the exact list is in the 7b-3a plan's contracts, Appendix A).

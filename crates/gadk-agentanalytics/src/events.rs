@@ -25,9 +25,7 @@
 //! `Tool::origin_agents` (a transfer tool's supported agents); an A2A agent is one whose
 //! `agent_state().agent_type` is `AgentType::RemoteAgent`. Go's package / type-name heuristics
 //! for user tools (names containing "skill" / "toolbox") are not reproduced: user tools report
-//! their own origin. Divergence (ledger 7b-3a).
-
-#![allow(dead_code)] // consumers: Task 9 (plugin callbacks).
+//! their own origin (the divergence is annotated in [`tool_origin_of`]).
 
 use std::collections::HashSet;
 use std::panic::{AssertUnwindSafe, catch_unwind};

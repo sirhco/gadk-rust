@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Part of the port of ADK-Go `plugin/agentanalytics/trace_manager_test.go` (owner: Task 12): the
+//! Part of the port of ADK-Go `plugin/agentanalytics/trace_manager_test.go`: the
 //! 27 Go tests from `TestTraceManager_PurgedActivationLatencyFromLastActivity` to
 //! `TestTraceManager_ToolSpanAcrossAfterRun` in the Go file's order that need no runner (the exact
 //! list is in the 7b-3a plan's contracts, Appendix A).
@@ -24,14 +24,14 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use gadk_agent::{Agent, Context, Mode, Plugin, Tool, ToolError};
-use gadk_genai::Content;
 use gadk_model::{LlmRequest, LlmResponse, ModelError};
 use gadk_session::{Event, NodeInfo};
 use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
 
 use super::direct_support::{
-    MockRun, SpanCounts, context_running, fake_tool, invocation_of, open_spans, set_agent_span,
+    MockRun, SpanCounts, bg, context_running, err, fake_tool, invocation_of, open_spans,
+    set_agent_span, text_content as text,
 };
 use crate::context::ContextError;
 use crate::error::Error;
@@ -57,11 +57,6 @@ use crate::trace::{
 // File-local helpers
 // ---------------------------------------------------------------------------------------------
 
-/// Go `context.Background()`.
-fn bg() -> CallbackCtx {
-    CallbackCtx::background()
-}
-
 /// Go `context.WithCancel(parent)`: a context with a child token of `parent`'s (or a new
 /// token), and the token that cancels it.
 fn with_cancel(parent: Option<&CancellationToken>) -> (CallbackCtx, CancellationToken) {
@@ -81,11 +76,6 @@ fn with_cancel_cause(
 /// Go `t.Context()`: a context that the test could cancel, live while it runs.
 fn test_ctx() -> CallbackCtx {
     with_cancel(None).0
-}
-
-/// Go `errors.New(text)`.
-fn err(text: &str) -> TraceError {
-    Arc::new(Error::Message(text.into()))
 }
 
 /// Go `context.Canceled`.
@@ -220,11 +210,6 @@ fn new_event(inv: &str, author: &str) -> Event {
     let mut ev = Event::new(&gadk_platform::Platform::default(), inv);
     ev.author = author.into();
     ev
-}
-
-/// Go `textContent(role, text)`.
-fn text(role: &str, t: &str) -> Content {
-    Content::from_text(t, role)
 }
 
 // Go's `p.XxxCallback()(…)` with `errs.add` / `errs.check`: each callback must succeed.

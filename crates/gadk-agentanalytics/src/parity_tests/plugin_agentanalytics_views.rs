@@ -44,7 +44,7 @@ use crate::views::{
     ViewRunner, contains_identifier_token, references_denied_column, sync_analytics_views,
     view_definitions_with_denied,
 };
-// Task 10 (fork E): the plugin's view lifecycle.
+// The plugin's view lifecycle.
 use std::sync::atomic::AtomicBool;
 
 use gadk_model::rest::test_util::ScriptedClient;
@@ -3859,7 +3859,7 @@ async fn test_new_big_query_agent_analytics_plugin_resolves_project_for_table_an
 // ---------------------------------------------------------------------------------------------
 // Helpers of views_test.go.
 
-// --- Task 10 (fork D) helpers ---
+// --- Helpers ---
 
 /// Go `declaredTool` (a `fakeTool` with a function declaration, arrow_test_helper_test.go).
 struct DeclaredTool {
@@ -4342,7 +4342,7 @@ fn eval_helpers_follow_go() {
     assert!(parse_bigquery_timestamp_string("2025-10-09T08:53:20.1234567Z").is_err());
 }
 
-// --- Task 10 (fork E) helpers ---
+// --- Helpers of the plugin's view lifecycle ---
 
 /// A BigQuery client whose requests go to `http` (Go `bq.NewClient(ctx, "test-project",
 /// option.WithHTTPClient(&http.Client{Transport: &mockTransport{…}}))`).

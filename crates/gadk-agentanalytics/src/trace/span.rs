@@ -25,8 +25,6 @@
 //! may be alive at once; never lock a record whose guard is already alive (compare with
 //! [`SpanRef::ptr_eq`] first — `parking_lot` mutexes are not reentrant).
 
-#![allow(dead_code)] // Consumers: Tasks 8-9 (Task 15 sweeps the allow).
-
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -371,6 +369,7 @@ impl SpanRecord {
 }
 
 /// Go `(p *spanRecord).joinsOnceReturned(c)` (attribution).
+#[allow(dead_code)] // consumer: 7b-3b (goroutine attribution)
 pub(crate) fn joins_once_returned(p: &SpanRef, c: &SpanRef) -> bool {
     let (p, c) = (p.lock(), c.lock());
     joins_once_returned_records(&p, &c)
@@ -389,6 +388,7 @@ pub(crate) fn joins_once_returned_records(p: &SpanRecord, c: &SpanRecord) -> boo
 
 /// Go `(p *spanRecord).joins(c, reported)` (attribution; with zero goroutine information only
 /// the `completed` / `runDone` and parallel-branch fallbacks apply).
+#[allow(dead_code)] // consumer: 7b-3b (goroutine attribution)
 pub(crate) fn joins(p: &SpanRef, c: &SpanRef, reported: bool) -> bool {
     let (p, c) = (p.lock(), c.lock());
     joins_records(&p, &c, reported)

@@ -49,9 +49,10 @@ telemetry = ["dep:gadk-telemetry"]
 # The Agent Registry client (gadk-agentregistry: registered A2A agents and MCP servers); not in
 # `default`.
 agentregistry = ["dep:gadk-agentregistry"]
-# The BigQuery Agent Analytics foundations (gadk-agentanalytics: configuration, events schema,
-# table creation and schema upgrade, analytics views, content formatter and redaction, BigQuery
-# REST admin client); not in `default`.
+# The BigQuery Agent Analytics plugin (gadk-agentanalytics: the plugin and its configuration,
+# events schema, table creation and schema upgrade, analytics views, content formatter and
+# redaction, BigQuery REST admin client, Storage Write client, batch processor, GCS offloader);
+# not in `default`.
 agentanalytics = ["dep:gadk-agentanalytics"]
 
 [dependencies]

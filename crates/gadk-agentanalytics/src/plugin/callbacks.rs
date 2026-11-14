@@ -886,8 +886,9 @@ pub(crate) fn trace_error_of_model(err: &ModelError) -> TraceError {
     trace_error_of(err)
 }
 
-/// As [`trace_error_of_model`] for a tool error.
-#[allow(dead_code)] // Consumers: the trace-manager ports (Go tests record tool errors directly).
+/// As [`trace_error_of_model`] for a tool error (the trace-manager tests record tool errors
+/// directly, as Go's do; the callbacks record none).
+#[cfg(test)]
 pub(crate) fn trace_error_of_tool(err: &ToolError) -> TraceError {
     trace_error_of(err)
 }

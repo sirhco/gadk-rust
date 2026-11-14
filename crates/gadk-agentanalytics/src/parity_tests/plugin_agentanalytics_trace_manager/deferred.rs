@@ -14,8 +14,8 @@
 // limitations under the License.
 
 //! The 97 Go tests of ADK-Go `plugin/agentanalytics/trace_manager_test.go` deferred to 7b-3b
-//! (goroutine attribution; spec R10) (owner: Task 13): one `// parity: skipped TestX: deferred to
-//! 7b-3b (goroutine attribution)` line each, and any test Task 13 reclassifies with its reason.
+//! (goroutine attribution; spec R10): one `// parity: skipped TestX: deferred to
+//! 7b-3b (goroutine attribution)` line each, and the tests reclassified while porting, with their reason.
 
 // parity: skipped TestTraceManager_RunnerConcurrentWorkflowRunNodeSameAgent: deferred to 7b-3b (goroutine attribution)
 // parity: skipped TestRunner_AfterToolShortCircuit_EarlyStopDoesNotFail: deferred to 7b-3b (goroutine attribution)

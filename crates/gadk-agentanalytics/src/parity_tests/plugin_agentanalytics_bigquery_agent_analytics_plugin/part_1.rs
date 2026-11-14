@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Part of the port of ADK-Go `plugin/agentanalytics/bigquery_agent_analytics_plugin_test.go`
-//! (owner: Task 10): the 30 Go tests from `TestNewBigQueryAgentAnalyticsPlugin_Disabled` to
+//! Part of the port of ADK-Go `plugin/agentanalytics/bigquery_agent_analytics_plugin_test.go`:
+//! the 30 Go tests from `TestNewBigQueryAgentAnalyticsPlugin_Disabled` to
 //! `TestToolFailure_WritesErrorRows` in the Go file's order (the exact list is in the 7b-3a plan's
 //! contracts, Appendix A).
 //!
@@ -34,8 +34,7 @@ use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use chrono::Utc;
-use gadk_agent::{AgentError, ContextDelta, InvocationContext, Tool, ToolError};
-use gadk_engine::telemetry::d6::SpanIds;
+use gadk_agent::{AgentError, Tool, ToolError};
 use gadk_genai::{
     Blob, CodeExecutionResult, Content, ExecutableCode, FileData, FinishReason, FunctionCall,
     FunctionResponse, GenerateContentConfig, GenerateContentResponseUsageMetadata, Part,
@@ -49,11 +48,10 @@ use serde_json::{Map, Value, json};
 
 use super::helpers::{CallbackErrors, FakeTool, check_json_at, fake_tool, parts_of, text_content};
 use super::support::{
-    MockCtx, TestPlugin, check_json, event_types, json_column, json_object_column, lookup,
-    new_test_plugin_with_config, only_row_of_type, plugin_of, setup_test_plugin, test_config,
+    Mc, SpanPlugin, TestPlugin, check_json, event_types, json_column, json_object_column, lookup,
+    new_test_plugin_with_config, only_row_of_type, setup_test_plugin, span_ids, test_config,
     until_event_type, until_invocation_end,
 };
-use crate::batch_processor::BatchProcessor;
 use crate::bigquery::BigQueryClient;
 use crate::bigquery::fake::RecordingLogger;
 use crate::config::{ClientOptions, Config, ContentFormatter};
@@ -61,7 +59,7 @@ use crate::context::Context;
 use crate::event_types::*;
 use crate::plugin::callbacks::has_generated_content;
 use crate::plugin::{
-    AnalyticsPlugin, PLUGIN_NAME, new_bigquery_agent_analytics_plugin_with_clients,
+    AnalyticsPlugin, new_bigquery_agent_analytics_plugin_with_clients,
     new_bigquery_agent_analytics_plugin_with_config,
 };
 use crate::redaction::{
@@ -71,7 +69,6 @@ use crate::redaction::{
 use crate::row::{Row, RowValue};
 use crate::schema::{FIELD_TYPE_STRING, arrow_schema, events_schema};
 use crate::testutil::fake_write_server::FakeWriteServer;
-use crate::trace::{CallbackCtx, TraceManager};
 
 // ---------------------------------------------------------------------------------------------
 // File-local helpers (Go's test helpers of this file)
@@ -93,41 +90,6 @@ fn text_part(text: &str, index: i64) -> Row {
         ("part_index".to_owned(), RowValue::Int(index)),
         ("storage_mode".to_owned(), RowValue::Str("INLINE".into())),
     ])
-}
-
-/// Go's one `mCtx` handed to every callback: the ADK contexts of a [`MockCtx`], built once.
-/// The callback context derives from the invocation context by a path / function-call delta
-/// only, so both share one agent, session and activation, as Go's single `mCtx` (a context
-/// built per call would be a new activation, which the trace manager keys calls by).
-struct Mc {
-    inv: InvocationContext,
-    ctx: gadk_agent::Context,
-}
-
-impl Mc {
-    fn new(m: &MockCtx) -> Mc {
-        let inv = m.invocation();
-        let ctx = inv.clone().into_context();
-        let ctx = if m.function_call_id.is_empty() {
-            ctx
-        } else {
-            ctx.with_delta(ContextDelta {
-                function_call_id: Some(m.function_call_id.clone()),
-                ..ContextDelta::default()
-            })
-        };
-        Mc { inv, ctx }
-    }
-
-    /// Go's `mCtx` passed to an invocation callback.
-    fn invocation(&self) -> InvocationContext {
-        self.inv.clone()
-    }
-
-    /// Go's `mCtx` passed to an agent / model / tool callback.
-    fn context(&self) -> gadk_agent::Context {
-        self.ctx.clone()
-    }
 }
 
 /// Go `checkJSON(t, name, got, want)`.
@@ -179,81 +141,6 @@ async fn after_run(tp: &TestPlugin, ctx: &Mc) {
     (tp.plugin.after_run_callback().unwrap())(ctx.invocation()).await;
 }
 
-/// The plugin of Go's in-span cases: the production callback bodies over a processor that
-/// writes to a [`FakeWriteServer`], as `newTestPluginWithConfig` builds it, called with a
-/// [`CallbackCtx`] that carries Go's ambient span context.
-struct SpanPlugin {
-    ap: Arc<AnalyticsPlugin>,
-    tp: TestPlugin,
-}
-
-impl SpanPlugin {
-    async fn new(mutate: impl FnOnce(&mut Config)) -> SpanPlugin {
-        let mut config = test_config();
-        mutate(&mut config);
-        let config = config.apply_defaults();
-        let server = FakeWriteServer::new();
-        let stream = format!(
-            "projects/{}/datasets/{}/tables/{}/streams/_default",
-            config.project_id, config.dataset_id, config.table_name
-        );
-        let processor = BatchProcessor::new(
-            &Context::background(),
-            Some(server.client().expect("write client")),
-            &stream,
-            config.clone(),
-        )
-        .await
-        .expect("batch processor");
-        processor.start();
-        let ap = Arc::new(AnalyticsPlugin {
-            custom_metadata: CustomMetadataFilter::new(&config.custom_metadata_allowlist),
-            config,
-            processor: Some(processor),
-            traces: Some(Arc::new(TraceManager::new())),
-            ..AnalyticsPlugin::default()
-        });
-        let tp = TestPlugin {
-            plugin: plugin_of(PLUGIN_NAME, &ap),
-            server,
-            ctx: MockCtx::new(),
-        };
-        SpanPlugin { ap, tp }
-    }
-
-    /// Go's `mCtx` with `trace.ContextWithSpanContext(ctx, sc)` when `sc` is set.
-    fn ctx(&self, sc: Option<SpanIds>) -> CallbackCtx {
-        let ctx = CallbackCtx::from_invocation(&self.tp.ctx.invocation());
-        match sc {
-            Some(sc) => ctx.with_span(sc),
-            None => ctx,
-        }
-    }
-
-    /// Go's `OnUserMessageCallback` then `AfterRunCallback` (with its run-end flush).
-    async fn user_message_then_after_run(&self, sc: Option<SpanIds>, msg: &Content) {
-        let ctx = self.ctx(sc);
-        self.ap.on_user_message(&ctx, msg);
-        self.ap.after_run(&ctx);
-        self.ap.processor.as_ref().unwrap().flush_run_end().await;
-    }
-}
-
-/// Go `trace.TraceIDFromHex` / `SpanIDFromHex` of a span context.
-fn span_ids(trace_hex: &str, span_hex: &str) -> SpanIds {
-    fn bytes<const N: usize>(hex: &str) -> [u8; N] {
-        let mut out = [0u8; N];
-        for (i, b) in out.iter_mut().enumerate() {
-            *b = u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).expect("hex");
-        }
-        out
-    }
-    SpanIds {
-        trace_id: bytes(trace_hex),
-        span_id: bytes(span_hex),
-    }
-}
-
 // ---------------------------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------------------------
@@ -299,7 +186,7 @@ async fn test_new_big_query_agent_analytics_plugin_enabled() {
 #[tokio::test]
 async fn test_on_user_message_callback_appends_to_writer() {
     let tp = setup_test_plugin().await;
-    let m = Mc::new(&tp.ctx.clone());
+    let m = Mc::of(&tp.ctx.clone());
     let user_msg_cb = tp
         .plugin
         .on_user_message_callback()
@@ -325,7 +212,7 @@ async fn test_on_user_message_callback_appends_to_writer() {
 #[tokio::test]
 async fn test_before_run_callback_appends_to_writer() {
     let tp = setup_test_plugin().await;
-    let m = Mc::new(&tp.ctx.clone());
+    let m = Mc::of(&tp.ctx.clone());
     let before_run_cb = tp
         .plugin
         .before_run_callback()
@@ -346,7 +233,7 @@ async fn test_before_run_callback_appends_to_writer() {
 #[tokio::test]
 async fn test_on_event_callback_appends_to_writer() {
     let tp = setup_test_plugin().await;
-    let m = Mc::new(&tp.ctx.clone());
+    let m = Mc::of(&tp.ctx.clone());
     let event_cb = tp
         .plugin
         .on_event_callback()
@@ -378,7 +265,7 @@ async fn test_on_event_callback_appends_to_writer() {
 #[tokio::test]
 async fn test_on_model_error_callback_appends_to_writer() {
     let tp = setup_test_plugin().await;
-    let m = Mc::new(&tp.ctx.clone());
+    let m = Mc::of(&tp.ctx.clone());
     let model_error_cb = tp
         .plugin
         .on_model_error_callback()
@@ -404,7 +291,7 @@ async fn test_on_model_error_callback_appends_to_writer() {
 async fn test_after_model_callback_partial_chunks_do_not_each_log_usage() {
     async fn run(chunks: Vec<LlmResponse>) -> usize {
         let tp = setup_test_plugin().await;
-        let m = Mc::new(&tp.ctx.clone());
+        let m = Mc::of(&tp.ctx.clone());
         for c in chunks {
             after_model(&tp, &m, c, None)
                 .await
@@ -802,7 +689,7 @@ async fn test_callbacks_write_rows() {
         .as_object()
         .unwrap()
         .clone();
-    let m = Mc::new(&m);
+    let m = Mc::of(&m);
 
     let lookup_tool: Arc<dyn Tool> = Arc::new(FakeTool {
         name: "lookup".into(),
@@ -1221,7 +1108,7 @@ async fn test_attributes_optional_sections() {
             let tp = new_test_plugin_with_config(mutate).await;
             let mut m = tp.ctx.clone();
             m.app_name = "test-app".into();
-            let m = Mc::new(&m);
+            let m = Mc::of(&m);
             (tp.plugin.on_user_message_callback().unwrap())(m.invocation(), msg)
                 .await
                 .unwrap_or_else(|e| panic!("{name}: OnUserMessageCallback error: {e}"));
@@ -1289,7 +1176,7 @@ async fn test_sensitive_key_redaction() {
             .as_object()
             .unwrap()
             .clone();
-        let m = Mc::new(&m);
+        let m = Mc::of(&m);
         let args = json!({
             "api_key": "sk-live",
             "query": "weather",
@@ -1387,7 +1274,7 @@ async fn test_sensitive_key_redaction_go_names_and_state_prefixes() {
         .as_object()
         .unwrap()
         .clone();
-    let m = Mc::new(&m);
+    let m = Mc::of(&m);
     let args = json!({"accessToken": SECRET, "x-goog-api-key": SECRET, "tokenCount": 3})
         .as_object()
         .unwrap()
@@ -1449,7 +1336,7 @@ async fn test_credentials_envelope_is_redacted_whole() {
         })
     };
     let tp = setup_test_plugin().await;
-    let m = Mc::new(&tp.ctx.clone());
+    let m = Mc::of(&tp.ctx.clone());
     let args = json!({"role": "reader", "credential": envelope()})
         .as_object()
         .unwrap()
@@ -1507,7 +1394,7 @@ async fn test_credentials_envelope_is_redacted_whole() {
 #[tokio::test]
 async fn test_tool_args_unloggable_values_keep_the_row() {
     let tp = setup_test_plugin().await;
-    let m = Mc::new(&tp.ctx.clone());
+    let m = Mc::of(&tp.ctx.clone());
     let args = json!({"big": 9_007_199_254_740_993_i64, "name": "loop"})
         .as_object()
         .unwrap()
@@ -1644,7 +1531,7 @@ async fn test_content_formatter() {
             }
         })
         .await;
-        let m = Mc::new(&tp.ctx.clone());
+        let m = Mc::of(&tp.ctx.clone());
         let got_msg = (tp.plugin.on_user_message_callback().unwrap())(
             m.invocation(),
             text_content("user", "hello"),
@@ -1735,7 +1622,7 @@ async fn test_content_formatter_preserves_existing_error_message() {
         c.content_formatter = Some(Arc::new(|_, _| Err("formatter secret".into())));
     })
     .await;
-    let m = Mc::new(&tp.ctx.clone());
+    let m = Mc::of(&tp.ctx.clone());
     after_model(
         &tp,
         &m,
@@ -1836,7 +1723,7 @@ async fn test_event_filtering_denylist_overrides_allowlist() {
         c.event_denylist = vec![EVENT_LLM_REQUEST.into()];
     })
     .await;
-    let m = Mc::new(&tp.ctx.clone());
+    let m = Mc::of(&tp.ctx.clone());
     let p = &tp.plugin;
     let mut errs = CallbackErrors::default();
     errs.add(
@@ -2025,7 +1912,7 @@ async fn test_payload_columns() {
             mutate(c);
         })
         .await;
-        let m = Mc::new(&tp.ctx.clone());
+        let m = Mc::of(&tp.ctx.clone());
         (tp.plugin.on_user_message_callback().unwrap())(
             m.invocation(),
             text_content("user", "hello"),
@@ -2098,7 +1985,7 @@ async fn test_custom_metadata_allowlist() {
             c.custom_metadata_allowlist = allowlist.iter().map(|s| (*s).to_owned()).collect();
         })
         .await;
-        let m = Mc::new(&tp.ctx.clone());
+        let m = Mc::of(&tp.ctx.clone());
         let md = json!({"a2a:task_id": "task-1", "private": "p"})
             .as_object()
             .unwrap()
@@ -2167,7 +2054,7 @@ async fn test_flush_on_run_end() {
             c.disable_flush_on_run_end = disable;
         })
         .await;
-        let m = Mc::new(&tp.ctx.clone());
+        let m = Mc::of(&tp.ctx.clone());
         (tp.plugin.on_user_message_callback().unwrap())(
             m.invocation(),
             text_content("user", "hello"),
@@ -2207,7 +2094,7 @@ async fn test_final_response_tool_names() {
     .await;
     let mut m = tp.ctx.clone();
     m.function_call_id = "call-7".into();
-    let m = Mc::new(&m);
+    let m = Mc::of(&m);
     let final_tool = fake_tool("final_answer");
     let answer = json!({"answer": "42"}).as_object().unwrap().clone();
     let p = &tp.plugin;
@@ -2269,7 +2156,7 @@ async fn test_tool_failure_writes_error_rows() {
     let tp = setup_test_plugin().await;
     let mut m = tp.ctx.clone();
     m.function_call_id = "call-1".into();
-    let m = Mc::new(&m);
+    let m = Mc::of(&m);
     let lookup_tool = fake_tool("lookup");
     let args = json!({"query": "weather"}).as_object().unwrap().clone();
     let tool_err = Arc::new(ToolError::Execution("lookup failed".into()));

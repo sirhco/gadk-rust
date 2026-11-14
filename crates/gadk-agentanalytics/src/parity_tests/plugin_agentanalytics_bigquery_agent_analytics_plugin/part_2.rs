@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Part of the port of ADK-Go `plugin/agentanalytics/bigquery_agent_analytics_plugin_test.go`
-//! (owner: Task 10): the 18 Go tests from `TestToolConfirmationRequired_CompletesCall` to
+//! Part of the port of ADK-Go `plugin/agentanalytics/bigquery_agent_analytics_plugin_test.go`:
+//! the 18 Go tests from `TestToolConfirmationRequired_CompletesCall` to
 //! `TestCredentialShapesNeverReachARow` in the Go file's order (the exact list is in the 7b-3a
 //! plan's contracts, Appendix A; the rest of the file is in `part_3`).
 //!

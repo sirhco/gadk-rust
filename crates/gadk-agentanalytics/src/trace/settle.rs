@@ -31,8 +31,6 @@
 //! are zero, so the attribution bodies are ported whole and take their zero-information
 //! branches (an activation without goroutine information counts as over, Go `:3913`).
 
-#![allow(dead_code)] // Consumers: Task 9 (Task 15 sweeps the allow).
-
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -1436,8 +1434,7 @@ impl InvocationTrace {
         }
     }
 
-    /// Go `retireLateSettledLocked`. The early return for live traces (Go's first statement)
-    /// is written by Task 4 so that Task 5's `pop_llm_span` works before Task 8.
+    /// Go `retireLateSettledLocked` (a live trace returns at once, Go's first statement).
     pub(crate) fn retire_late_settled_locked(&self, st: &mut InvocationState) {
         if !st.is_late || st.agent_stack.len() <= 1 {
             return;

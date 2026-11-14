@@ -43,11 +43,12 @@ use crate::event_types::{
 use crate::formatter::{PartsOptions, UPLOAD_FAILED_TEXT};
 use crate::offload::MEDIA_OFFLOADED_TEXT;
 use crate::parity_tests::plugin_agentanalytics_bigquery_agent_analytics_plugin::support::{
-    decode_arrow_rows, event_types, new_test_plugin_with_config, only_row_of_type, until_event_type,
+    Mc, SpanPlugin, decode_arrow_rows, event_types, new_test_plugin_with_config, only_row_of_type,
+    span_ids, until_event_type,
 };
 use crate::parity_tests::plugin_agentanalytics_gcs_offloader::add_content::probe_row_with_options;
 use crate::parity_tests::plugin_agentanalytics_gcs_offloader::plugin_level::{
-    Mc, SpanPlugin, content_parts_of, on_user_message, span_ids,
+    content_parts_of, on_user_message,
 };
 use crate::row::{QueuedRow, RowExt, RowValue};
 use crate::storagepb::{AppendRowsRequest, AppendRowsResponse};

@@ -458,37 +458,31 @@ impl Config {
     }
 
     /// Go `logMultiModalContent()`.
-    #[allow(dead_code)] // consumer: 7b-3 (events, plugin)
     pub(crate) fn log_multi_modal_content(&self) -> bool {
         self.log_multi_modal_content && !self.disable_multi_modal_content
     }
 
     /// Go `logSessionMetadata()`.
-    #[allow(dead_code)] // consumer: 7b-3 (events, plugin)
     pub(crate) fn log_session_metadata(&self) -> bool {
         !self.disable_session_metadata
     }
 
     /// Go `redactSensitiveKeys()`.
-    #[allow(dead_code)] // consumer: 7b-3 (events, plugin)
     pub(crate) fn redact_sensitive_keys(&self) -> bool {
         !self.disable_sensitive_key_redaction
     }
 
     /// Go `flushOnRunEnd()`.
-    #[allow(dead_code)] // consumer: 7b-3 (events, plugin)
     pub(crate) fn flush_on_run_end(&self) -> bool {
         !self.disable_flush_on_run_end
     }
 
     /// Go `createViews()`.
-    #[allow(dead_code)] // consumer: 7b-3 (events, plugin)
     pub(crate) fn create_views(&self) -> bool {
         !self.disable_create_views
     }
 
     /// Go `maxContentLength()`: the text truncation limit; -1 means no limit.
-    #[allow(dead_code)] // consumer: 7b-3 (events, plugin)
     pub(crate) fn max_content_length(&self) -> i64 {
         if self.capture_full_message_content {
             -1
@@ -507,7 +501,6 @@ impl Config {
     /// Go `viewLogf()`: the logger when the caller set a non-default one, else `None` (no logger,
     /// or Go's `log.Default()`), so background view creation never writes to the process-wide
     /// standard logger.
-    #[allow(dead_code)] // consumer: 7b-3 (events, plugin)
     pub(crate) fn view_logf(&self) -> Option<Arc<dyn Logger>> {
         self.logger
             .as_ref()

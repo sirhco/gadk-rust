@@ -28,9 +28,6 @@
 //! `map[string]string` labels, metadata structs) are their sanitized JSON trees here
 //! ([`go_value`]), so the JSON written for them is Go's (a `float32` keeps its 32-bit text).
 
-#![allow(dead_code)] // consumers: Tasks 6 and 9 (events.rs, plugin callbacks).
-
-use std::fmt::Write as _;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -413,8 +410,14 @@ impl AnalyticsPlugin {
             && let Some(span) = span.filter(SpanIds::is_valid)
         {
             let mut otel = Map::new();
-            otel.insert("span_id".to_owned(), Value::from(hex(&span.span_id)));
-            otel.insert("trace_id".to_owned(), Value::from(hex(&span.trace_id)));
+            otel.insert(
+                "span_id".to_owned(),
+                Value::from(crate::trace::hex(&span.span_id)),
+            );
+            otel.insert(
+                "trace_id".to_owned(),
+                Value::from(crate::trace::hex(&span.trace_id)),
+            );
             attrs.insert("otel".to_owned(), Value::Object(otel));
         }
         let meta_trunc = false;
@@ -729,6 +732,7 @@ pub(crate) fn tool_declarations(req: &LlmRequest) -> Vec<Map<String, Value>> {
 /// text summary of each request message and the summary of the system instruction, as
 /// adk-python builds them; `parts` (if any) collects the `content_parts` of the messages, then
 /// those of the system instruction.
+#[cfg(test)]
 pub(crate) fn llm_request_content(
     req: &LlmRequest,
     max_len: i64,
@@ -1031,15 +1035,6 @@ fn latency_object(l: Latency) -> Map<String, Value> {
         m.insert("time_to_first_token_ms".to_owned(), Value::from(ttft));
     }
     m
-}
-
-/// Lowercase hex of `bytes` (Go `TraceID.String()` / `SpanID.String()`).
-fn hex(bytes: &[u8]) -> String {
-    let mut s = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        let _ = write!(s, "{b:02x}");
-    }
-    s
 }
 
 /// Go `isNil(d.content)` for a payload: only a JSON `null` is nil.

@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Helpers of the direct trace-manager test ports (owner: Task 12).
+//! Helpers of the direct trace-manager test ports.
 //!
 //! Go → gadk: `spanCounts` / `openSpans` = [`SpanCounts`] / [`open_spans`];
 //! `trackedInvocations` = [`tracked_invocations`]; `setAgentSpan` = [`set_agent_span`];
@@ -31,13 +31,19 @@
 
 use std::sync::Arc;
 
-use gadk_agent::{Agent, Context, ContextDelta, InvocationContext, Tool};
+use gadk_agent::{Agent, Context, ContextDelta, InvocationContext};
 
+use crate::error::Error;
 use crate::parity_tests::plugin_agentanalytics_bigquery_agent_analytics_plugin::support::{
     ClockedPlugin, MockCtx,
 };
+pub(crate) use crate::parity_tests::plugin_agentanalytics_bigquery_agent_analytics_plugin::support::{
+    fake_tool, text_content, tracked_invocations,
+};
 use crate::plugin::rows::identity_of;
-use crate::trace::{CallbackCtx, InvocationTrace, SpanRecord, TraceManager, llm_key};
+use crate::trace::{
+    CallbackCtx, InvocationTrace, SpanRecord, TraceError, TraceManager, llm_key,
+};
 
 /// Go `spanCounts`: the spans an invocation tracks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -58,6 +64,16 @@ pub(crate) fn invocation_of(tm: &TraceManager, invocation_id: &str) -> Arc<Invoc
         .unwrap_or_else(|| panic!("invocation {invocation_id:?} is not tracked"))
 }
 
+/// Go `context.Background()`.
+pub(crate) fn bg() -> CallbackCtx {
+    CallbackCtx::background()
+}
+
+/// Go `errors.New(text)` as the trace manager keeps errors.
+pub(crate) fn err(text: &str) -> TraceError {
+    Arc::new(Error::msg(text))
+}
+
 /// Go `openSpans(t, tm, invocationID)`: the running agents (without the invocation span), model
 /// calls and tool calls, and the tool calls that `OnToolErrorCallback` ended.
 pub(crate) fn open_spans(tm: &TraceManager, invocation_id: &str) -> SpanCounts {
@@ -69,13 +85,6 @@ pub(crate) fn open_spans(tm: &TraceManager, invocation_id: &str) -> SpanCounts {
         tools: st.tool_spans.len(),
         errored_tools: st.completed_tools.len(),
     }
-}
-
-/// Go `trackedInvocations(tm)`: the sorted IDs of the tracked invocations.
-pub(crate) fn tracked_invocations(tm: &TraceManager) -> Vec<String> {
-    let mut ids: Vec<String> = tm.mu.lock().invocations.keys().cloned().collect();
-    ids.sort();
-    ids
 }
 
 /// Go `setAgentSpan(t, tm, invocationID, name, set)`: applies `set` to the open agent spans
@@ -162,31 +171,4 @@ pub(crate) fn first_token_timed(c: &ClockedPlugin, ctx: &CallbackCtx) -> bool {
         .get(&ctx.call_key(&llm_key(&id)))
         .unwrap_or_else(|| panic!("no model call is running"));
     rec.lock().first_token.is_some()
-}
-
-/// Go `fakeTool` (`bigquery_agent_analytics_plugin_test.go`): a tool with a name and a
-/// description only.
-pub(crate) struct FakeTool {
-    pub(crate) name: String,
-    pub(crate) description: String,
-}
-
-impl Tool for FakeTool {
-    fn name(&self) -> &str {
-        &self.name
-    }
-    fn description(&self) -> &str {
-        &self.description
-    }
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-}
-
-/// Go `&fakeTool{name: name}`.
-pub(crate) fn fake_tool(name: &str) -> Arc<dyn Tool> {
-    Arc::new(FakeTool {
-        name: name.to_owned(),
-        description: String::new(),
-    })
 }

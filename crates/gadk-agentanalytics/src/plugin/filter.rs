@@ -22,8 +22,6 @@
 //! around the span and row-building body (R7): a panic drops the row, counts one append-failure
 //! drop and logs `agentanalytics: dropped <type> event: recovered panic of type <T>`.
 
-#![allow(dead_code)] // consumers: Tasks 6 and 9 (events.rs, plugin callbacks).
-
 use std::any::Any;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 

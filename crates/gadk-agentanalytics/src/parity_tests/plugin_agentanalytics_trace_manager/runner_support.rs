@@ -13,15 +13,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Helpers of the runner-level trace-manager test ports (owner: Task 13), over Task 9's
+//! Helpers of the runner-level trace-manager test ports, over the shared
 //! [`support`](crate::parity_tests::plugin_agentanalytics_bigquery_agent_analytics_plugin::support):
 //! Go's `scriptedLLM` / `failingLLM` = [`scripted_llm`] / [`failing_llm`] (gadk-engine
 //! `MockModel` renamed), `textContent` = [`text_content`], the transfer / function-call responses,
 //! `requireInvocationCompletedOK`, `checkJSONAt`, the ID patterns, and [`RowCursor`]: Go's
 //! `collectRows` reads a channel, so each call returns only the rows received since the previous
-//! one; the cursor keeps that position over Task 9's cumulative [`TestPlugin::rows`].
+//! one; the cursor keeps that position over the cumulative [`TestPlugin::rows`].
 
-#![allow(dead_code)] // Consumers: runner_1, runner_2.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::sync::Arc;
@@ -40,10 +39,11 @@ use gadk_model::{LlmRequest, LlmResponse, ModelError};
 use regex::Regex;
 use serde_json::{Map, Value};
 
-use crate::event_types::{EVENT_INVOCATION_COMPLETED, EVENT_INVOCATION_ERROR};
+pub(crate) use crate::parity_tests::plugin_agentanalytics_bigquery_agent_analytics_plugin::support::{
+    check_json_at, text_content,
+};
 use crate::parity_tests::plugin_agentanalytics_bigquery_agent_analytics_plugin::support::{
-    TestPlugin, TracePlace, agent_error_counts, check_json, event_types, json_object_column,
-    lookup, place_of, rows_of_type, str_col,
+    TestPlugin, TracePlace, event_types, json_object_column, place_of, rows_of_type, str_col,
 };
 use crate::row::Row;
 
@@ -55,11 +55,6 @@ pub(crate) fn event_id_pattern() -> Regex {
 /// Go `spanIDPattern`.
 pub(crate) fn span_id_pattern() -> Regex {
     Regex::new("^[0-9a-f]{16}$").unwrap()
-}
-
-/// Go `textContent(role, text)`.
-pub(crate) fn text_content(role: &str, text: &str) -> Content {
-    Content::from_text(text, role)
 }
 
 /// Go `&model.LLMResponse{Content: textContent("model", text), TurnComplete: true}`.
@@ -189,15 +184,6 @@ pub(crate) fn answering_before_agent(content: Content) -> BeforeAgentCallback {
     )
 }
 
-/// Go `checkJSONAt(t, obj, want, path...)`.
-pub(crate) fn check_json_at(obj: &Value, want: &str, path: &[&str]) {
-    let name = path.join(".");
-    let got = lookup(obj, path).unwrap_or_else(|| panic!("{name} is missing; got {obj}"));
-    if let Err(e) = check_json(&name, got, want) {
-        panic!("{e}");
-    }
-}
-
 /// `checkJSONAt(t, jsonObjectColumn(t, row, columnAttributes), want, path...)`.
 pub(crate) fn check_attr(row: &Row, want: &str, path: &[&str]) {
     check_json_at(&json_object_column(row, "attributes"), want, path);
@@ -214,35 +200,6 @@ pub(crate) fn agent_rows_of_type(rows: &[Row], event_type: &str, agent: &str) ->
         .into_iter()
         .filter(|r| agent_of(r) == agent)
         .collect()
-}
-
-/// Go `requireInvocationCompletedOK(t, rows)`.
-pub(crate) fn require_invocation_completed_ok(rows: &[Row]) {
-    let errs = rows_of_type(rows, EVENT_INVOCATION_ERROR);
-    assert!(
-        errs.is_empty(),
-        "got {} INVOCATION_ERROR rows, want 0; event types: {:?}",
-        errs.len(),
-        event_types(rows)
-    );
-    let completed = rows_of_type(rows, EVENT_INVOCATION_COMPLETED);
-    assert_eq!(
-        completed.len(),
-        1,
-        "got {} INVOCATION_COMPLETED rows, want 1; event types: {:?}",
-        completed.len(),
-        event_types(rows)
-    );
-    assert_eq!(
-        str_col(&completed[0], "status"),
-        "OK",
-        "INVOCATION_COMPLETED status"
-    );
-    assert!(
-        agent_error_counts(rows).is_empty(),
-        "AGENT_ERROR rows per agent = {:?}, want none",
-        agent_error_counts(rows)
-    );
 }
 
 /// Go's per-call `collectRows`: the position in the server's rows up to which a previous
@@ -284,11 +241,6 @@ impl RowCursor {
         self.seen = total;
         fresh
     }
-}
-
-/// An empty JSON object.
-pub(crate) fn obj() -> Map<String, Value> {
-    Map::new()
 }
 
 /// Go `runner.New(runner.Config{AppName: app, Agent: root, SessionService: sessions,

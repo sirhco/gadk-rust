@@ -22,15 +22,13 @@
 //! parent module's `FakeStorage`, reached by the plugin's own Cloud Storage client through a
 //! [`RecordingTransport`].
 
-use std::any::Any;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use bytes::Bytes;
-use gadk_agent::{AgentError, InvocationContext, Tool};
-use gadk_engine::telemetry::d6::SpanIds;
+use gadk_agent::AgentError;
 use gadk_genai::{
     Blob, Content, FileData, FunctionCall, FunctionResponse, GenerateContentConfig,
     GenerateContentResponseUsageMetadata, Part,
@@ -44,11 +42,11 @@ use super::super::plugin_agentanalytics_batch_processor::support::{
     Delayed, HookOffloader, delayed_server, image_content, requests, row_count,
 };
 use super::super::plugin_agentanalytics_bigquery_agent_analytics_plugin::support::{
-    MockCtx, TestPlugin, check_json, json_object_column, lookup, new_test_plugin_with_config,
-    only_row_of_type, plugin_of, rows_of_type, test_bq_client, test_config, until_event_type,
+    Mc, MockCtx, SpanPlugin, TestPlugin, check_json, fake_tool, json_object_column, lookup,
+    new_test_plugin_with_config, only_row_of_type, rows_of_type, span_ids, test_bq_client,
+    until_event_type,
 };
 use super::{FakeStorage, as_log, as_off, hooked, wait_done};
-use crate::batch_processor::BatchProcessor;
 use crate::bigquery::fake::RecordingLogger;
 use crate::config::{ClientOptions, Config, ContentFormatter};
 use crate::context::Context;
@@ -60,32 +58,15 @@ use crate::event_types::{
 use crate::formatter::{TEXT_UPLOAD_CONTENT_TYPE, UPLOAD_FAILED_TEXT};
 use crate::offload::OwnedUploadError;
 use crate::offload::uploads::safe_upload_error_summary;
-use crate::plugin::{AnalyticsPlugin, new_bigquery_agent_analytics_plugin_with_clients};
-use crate::redaction::{CustomMetadataFilter, REDACTED_VALUE, UNPARSEABLE_JSON_PLACEHOLDER};
+use crate::plugin::new_bigquery_agent_analytics_plugin_with_clients;
+use crate::redaction::{REDACTED_VALUE, UNPARSEABLE_JSON_PLACEHOLDER};
 use crate::row::{Row, RowExt, RowValue};
 use crate::storagepb::append_rows_request;
 use crate::testutil::fake_write_server::FakeWriteServer;
-use crate::trace::{CallbackCtx, TraceManager};
-use crate::validate::validate_config;
 
 // ---------------------------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------------------------
-
-/// Go's `mCtx` of one test: the invocation context and the callback context made from it once,
-/// so every callback of the test sees the same activation (Go's one `mockInvocationContext`).
-pub(crate) struct Mc {
-    pub(crate) inv: InvocationContext,
-    pub(crate) ctx: gadk_agent::Context,
-}
-
-impl Mc {
-    pub(crate) fn of(m: &MockCtx) -> Mc {
-        let inv = m.invocation();
-        let ctx = inv.clone().into_context();
-        Mc { inv, ctx }
-    }
-}
 
 /// Go `p.BeforeModelCallback()(mCtx, req)`, which must not fail.
 pub(crate) async fn before_model(tp: &TestPlugin, mc: &Mc, req: LlmRequest) {
@@ -229,93 +210,6 @@ fn request(contents: Vec<Content>) -> LlmRequest {
     LlmRequest {
         contents,
         ..LlmRequest::default()
-    }
-}
-
-/// Go `fakeTool{name}`.
-struct FakeTool(&'static str);
-
-impl Tool for FakeTool {
-    fn name(&self) -> &str {
-        self.0
-    }
-    fn description(&self) -> &str {
-        ""
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-/// The plugin of Go's tests that put a span context in `mCtx.ctx`: the production callback
-/// bodies over a processor that writes to a [`FakeWriteServer`], assembled as
-/// `newTestPluginWithConfig` builds it, and called with a [`CallbackCtx`] that carries the
-/// span.
-pub(crate) struct SpanPlugin {
-    pub(crate) ap: Arc<AnalyticsPlugin>,
-    pub(crate) tp: TestPlugin,
-}
-
-impl SpanPlugin {
-    pub(crate) async fn new(mutate: impl FnOnce(&mut Config)) -> SpanPlugin {
-        let mut config = test_config();
-        mutate(&mut config);
-        let config = config.apply_defaults();
-        let denied = validate_config(&config).expect("validateConfig");
-        let server = FakeWriteServer::new();
-        let stream = format!(
-            "projects/{}/datasets/{}/tables/{}/streams/_default",
-            config.project_id, config.dataset_id, config.table_name
-        );
-        let processor = BatchProcessor::new(
-            &Context::background(),
-            Some(server.client().expect("write client")),
-            &stream,
-            config.clone(),
-        )
-        .await
-        .expect("batch processor");
-        processor.start();
-        let ap = Arc::new(AnalyticsPlugin {
-            custom_metadata: CustomMetadataFilter::new(&config.custom_metadata_allowlist),
-            config,
-            denied_columns: denied,
-            processor: Some(processor),
-            traces: Some(Arc::new(TraceManager::new())),
-            ..AnalyticsPlugin::default()
-        });
-        let tp = TestPlugin {
-            plugin: plugin_of("bigquery_agent_analytics", &ap),
-            server,
-            ctx: MockCtx::new(),
-        };
-        SpanPlugin { ap, tp }
-    }
-
-    /// Go's `mCtx` (`m`) with `trace.ContextWithSpanContext(ctx, sc)`.
-    pub(crate) fn ctx(m: &MockCtx, sc: SpanIds) -> CallbackCtx {
-        CallbackCtx::from_invocation(&m.invocation()).with_span(sc)
-    }
-
-    /// Go's `AfterRunCallback` (with its run-end flush).
-    pub(crate) async fn after_run(&self, ctx: &CallbackCtx) {
-        self.ap.after_run(ctx);
-        self.ap.processor.as_ref().unwrap().flush_run_end().await;
-    }
-}
-
-/// Go `withSpan(ctx, traceID, spanID)`'s span context.
-pub(crate) fn span_ids(trace_hex: &str, span_hex: &str) -> SpanIds {
-    fn bytes<const N: usize>(hex: &str) -> [u8; N] {
-        let mut out = [0u8; N];
-        for (i, b) in out.iter_mut().enumerate() {
-            *b = u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).expect("hex");
-        }
-        out
-    }
-    SpanIds {
-        trace_id: bytes(trace_hex),
-        span_id: bytes(span_hex),
     }
 }
 
@@ -869,13 +763,9 @@ async fn test_gcs_offloading_caller_changes_its_messages_while_rows_are_written(
     ]);
     let mut args: Map<String, Value> = json!({"q": "pristine"}).as_object().unwrap().clone();
     before_model(&tp, &mc, req.clone()).await;
-    (tp.plugin.before_tool_callback().unwrap())(
-        mc.ctx.clone(),
-        Arc::new(FakeTool("lookup")) as Arc<dyn Tool>,
-        args.clone(),
-    )
-    .await
-    .unwrap_or_else(|e| panic!("callback error: {e}"));
+    (tp.plugin.before_tool_callback().unwrap())(mc.ctx.clone(), fake_tool("lookup"), args.clone())
+        .await
+        .unwrap_or_else(|e| panic!("callback error: {e}"));
 
     // The callbacks have returned, so the caller is free to change its messages. Its changes
     // never stop until the rows are written.
