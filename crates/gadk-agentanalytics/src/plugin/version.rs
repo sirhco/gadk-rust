@@ -17,13 +17,26 @@
 //! (`adkVersion`, `adkVersionFromBuildInfo`, `adkModulePath`). Go reads the linked ADK module's
 //! version from the build info; gadk writes its own crate version. Divergence (ledger 7b-3a).
 
-#![allow(dead_code, unused_variables)] // Task 7 implements the bodies.
-
 /// Go `adkModulePath` (kept for the ported build-info test's table).
+#[allow(dead_code)] // consumer: Task 10 (the ported TestADKVersionFromBuildInfo).
 pub(crate) const ADK_MODULE_PATH: &str = "google.golang.org/adk/v2";
 
 /// Go `adkVersion()`: the `adk_version` written in `attributes` (gadk-agentanalytics'
 /// `CARGO_PKG_VERSION`).
 pub(crate) fn adk_version() -> &'static str {
-    todo!("Task 7")
+    // Go reads the linked ADK module's version from `debug.ReadBuildInfo` (empty for a
+    // development build); every gadk crate shares the workspace version, so this is gadk's.
+    env!("CARGO_PKG_VERSION")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn adk_version_is_the_crate_version() {
+        assert_eq!(adk_version(), env!("CARGO_PKG_VERSION"));
+        assert!(!adk_version().is_empty());
+        assert!(!adk_version().starts_with('v'));
+    }
 }
