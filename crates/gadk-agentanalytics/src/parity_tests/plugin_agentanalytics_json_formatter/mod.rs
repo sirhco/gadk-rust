@@ -1928,4 +1928,59 @@ fn test_content_summary_part_with_text_and_file_data_precedence() {
     );
 }
 
-// parity: skipped TestContentSummary_ContentDeniedFailedUploadTruncatedPinsIsTruncated: deferred to 7b-3 (needs buildLLMRequestContent)
+#[test]
+fn test_content_summary_content_denied_failed_upload_truncated_pins_is_truncated() {
+    let req = gadk_model::LlmRequest {
+        contents: vec![Content {
+            role: "user".into(),
+            parts: vec![Part::from_text("x".repeat(50))],
+        }],
+        ..gadk_model::LlmRequest::default()
+    };
+    let mut parts = PartsCollector::new(PartsOptions {
+        max_len: 10,
+        offload: true,
+        inline_limit: 5,
+        reserve_bytes: Some(Arc::new(|_| true)),
+        ..PartsOptions::default()
+    });
+    let (_, _, builder) =
+        crate::plugin::rows::build_llm_request_content(&req, 10, false, true, Some(&mut parts));
+    let Some(mut builder) = builder else {
+        panic!("builder is nil");
+    };
+    assert_eq!(
+        parts.pending.len(),
+        1,
+        "pending len = {}, want 1",
+        parts.pending.len()
+    );
+    let u = &parts.pending[0];
+    assert!(u.fallback_truncated, "fallbackTruncated = false, want true");
+
+    let mut row = Map::new();
+    row.insert(
+        "event_type".into(),
+        json!(crate::event_types::EVENT_LLM_REQUEST),
+    );
+    builder.retain_inline_summary(
+        u.content_ord,
+        u.part_idx,
+        "xxxxxxxxxx[TRUNCATED]",
+        u.fallback_truncated,
+    );
+    builder.apply_to_row(&mut row);
+
+    assert!(
+        !row.contains_key(crate::redaction::COLUMN_CONTENT),
+        "row[{:?}] is set, want omitted when contentDenied is true",
+        crate::redaction::COLUMN_CONTENT
+    );
+    assert!(
+        row.get("is_truncated")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        "row[is_truncated] = {:?}, want true (pinned by hasFailedUploadTruncated)",
+        row.get("is_truncated")
+    );
+}
