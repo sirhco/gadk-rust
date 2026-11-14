@@ -245,14 +245,6 @@ fn test_gcs_metadata_details() {
     assert_eq!(decoded["gcs_metadata"]["size"], 5);
 }
 
-// parity: skipped TestAddContent_QueuedPayloadsAreCopies: deferred to 7b-3 (needs newAddContentPlugin and addContent)
-// parity: skipped TestAddContent_QueuesOnlyWhenOffloading: deferred to 7b-3 (needs newAddContentPlugin and addContent)
-// parity: skipped TestLLMRequestContent_ContentOrdinals: deferred to 7b-3 (needs llmRequestContent)
-// parity: skipped TestLLMRequestContent_Redaction: deferred to 7b-3 (needs llmRequestContent)
-// parity: skipped TestGCSOffloading_CloseReportsTheCloseErrors: deferred to 7b-3 (needs the plugin constructors and Close)
-// parity: skipped TestAddContent_PartAttributesFollowTheRedactionSetting: deferred to 7b-3 (needs newAddContentPlugin and addContent)
-// parity: skipped TestAddContent_TruncatedPartsMarkTheRow: deferred to 7b-3 (needs newAddContentPlugin and addContent)
-
 #[tokio::test(start_paused = true)]
 async fn test_resolve_uploads_default_concurrency_is_eight() {
     const WANT: usize = 8;
@@ -294,8 +286,6 @@ async fn test_resolve_uploads_default_concurrency_is_eight() {
     assert_eq!(off.max_concurrent(), WANT, "uploads at the same time");
     assert_eq!(off.uploads().len(), contents.len(), "uploads made");
 }
-
-// parity: skipped TestAddContent_DefaultInlineLimitIs32KiB: deferred to 7b-3 (needs newAddContentPlugin and addContent)
 
 // TestApplyDefaults_GCSLimits pins the documented defaults of the limits of the offloading, and
 // which values select them: any value that is not positive does.
@@ -375,15 +365,3 @@ fn test_apply_defaults_gcs_limits() {
         "DefaultConfig: GCSMaxPendingUploadBytes"
     );
 }
-
-// parity: skipped TestGCSOffloading_RedactsSensitiveJSONBeforeUpload: deferred to 7b-3 (needs offloadingPlugin and the plugin callbacks)
-// parity: skipped TestGCSOffloading_OmitsOffloadedTextFromContentSummary: deferred to 7b-3 (needs offloadingPlugin and the plugin callbacks)
-// parity: skipped TestGCSOffloading_SkipsClientWhenContentPartsDisabled: deferred to 7b-3 (needs the plugin constructors)
-// parity: skipped TestGCSOffloading_GCSClientOptionsOverridesClientOptions: deferred to 7b-3 (needs the plugin constructors)
-// parity: skipped TestGCSOffloading_PendingUploadBytesCap: deferred to 7b-3 (needs newAddContentPlugin and addContent)
-// parity: skipped TestGCSOffloading_AfterRunFlushCapsUploadDeadline: deferred to 7b-3 (needs offloadingPlugin and AfterRunCallback)
-// parity: skipped TestGCSOffloading_RunEndsStopWaitingOnceStorageTimesOut: deferred to 7b-3 (needs offloadingPlugin and AfterRunCallback)
-// parity: skipped TestGCSOffloading_CloseDuringStorageStallKeepsRows: deferred to 7b-3 (needs offloadingPlugin and the plugin's Close)
-// parity: skipped TestGCSOffloading_FailedUploadPreservesJSONPrefixInSummary: deferred to 7b-3 (needs offloadingPlugin and the plugin callbacks)
-// parity: skipped TestGCSOffloading_PreservesBracketLedProse: deferred to 7b-3 (needs offloadingPlugin and the plugin callbacks)
-// parity: skipped TestGCSOffloading_BuiltInOffloaderErrorPreservesScrubbedDetail: deferred to 7b-3 (needs the plugin constructors and callbacks)

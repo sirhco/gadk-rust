@@ -1,0 +1,294 @@
+{
+  "about": "LLM agent failing_agent (model mock: error \"model failure 404\")",
+  "app_name": "test-app",
+  "config": {
+    "CustomMetadataAllowlist": null,
+    "DatasetID": "test_dataset",
+    "ProjectID": "test-project",
+    "TableName": "test-table"
+  },
+  "rows": [
+    {
+      "agent": "failing_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "user",
+          "event_id": "event-1",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "failing_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "content": {
+        "text_summary": "Hello?"
+      },
+      "content_parts": [
+        {
+          "mime_type": "text/plain",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "Hello?"
+        }
+      ],
+      "event_id": "event-1",
+      "event_type": "USER_MESSAGE_RECEIVED",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "session_id": "session-1",
+      "span_id": "span-1",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "failing_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "failing_agent",
+          "event_id": "event-2",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "failing_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "event_id": "event-2",
+      "event_type": "INVOCATION_STARTING",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "session_id": "session-1",
+      "span_id": "span-1",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "failing_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "failing_agent",
+          "event_id": "event-3",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "model": "mock",
+        "root_agent_name": "failing_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "event_id": "event-3",
+      "event_type": "AGENT_STARTING",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-1",
+      "session_id": "session-1",
+      "span_id": "span-2",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "failing_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "failing_agent",
+          "event_id": "event-4",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "model": "mock",
+        "root_agent_name": "failing_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "content": {
+        "prompt": [
+          {
+            "content": "Hello?",
+            "role": "user"
+          }
+        ],
+        "system_prompt": "You are an agent. Your internal name is \"failing_agent\"."
+      },
+      "content_parts": [
+        {
+          "mime_type": "text/plain",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "Hello?"
+        },
+        {
+          "mime_type": "text/plain",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "You are an agent. Your internal name is \"failing_agent\"."
+        }
+      ],
+      "event_id": "event-4",
+      "event_type": "LLM_REQUEST",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-2",
+      "session_id": "session-1",
+      "span_id": "span-3",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "failing_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "failing_agent",
+          "event_id": "event-5",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "model": "mock",
+        "root_agent_name": "failing_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "error_message": "model failure 404",
+      "event_id": "event-5",
+      "event_type": "LLM_ERROR",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "latency_ms": {
+        "total_ms": "<ms>"
+      },
+      "parent_span_id": "span-2",
+      "session_id": "session-1",
+      "span_id": "span-3",
+      "status": "ERROR",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "failing_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "failing_agent",
+          "event_id": "event-6",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "failing_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "content": {
+        "error_traceback": "model failure 404"
+      },
+      "error_message": "model failure 404",
+      "event_id": "event-6",
+      "event_type": "AGENT_ERROR",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "latency_ms": {
+        "total_ms": "<ms>"
+      },
+      "parent_span_id": "span-1",
+      "session_id": "session-1",
+      "span_id": "span-2",
+      "status": "ERROR",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "failing_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "failing_agent",
+          "event_id": "event-7",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "failing_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "content": {
+        "error_traceback": "model failure 404"
+      },
+      "error_message": "model failure 404",
+      "event_id": "event-7",
+      "event_type": "INVOCATION_ERROR",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "latency_ms": {
+        "total_ms": "<ms>"
+      },
+      "session_id": "session-1",
+      "span_id": "span-1",
+      "status": "ERROR",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    }
+  ],
+  "scenario": "model_error",
+  "session_id": "session-1",
+  "turns": [
+    "Hello?"
+  ],
+  "user_id": "user-1"
+}

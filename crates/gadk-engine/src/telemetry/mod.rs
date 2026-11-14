@@ -56,6 +56,24 @@ use attrs::SpanError;
 /// collects them (gadk-server's debug store) filters on it.
 pub const LOG_TARGET: &str = "gadk_engine::telemetry::log";
 
+/// The [`SpanIds`](d6::SpanIds) of the nearest enclosing span (the current span first, then its
+/// ancestors) that carries them in its `tracing` registry extensions — the IDs gadk-telemetry's
+/// bridge leaves on every ADK span it exports. The analytics plugin reads them where Go reads
+/// `trace.SpanContextFromContext(ctx)`. `None` outside any span, when no enclosing span carries
+/// IDs (no bridge installed), or under a subscriber that is not a `tracing_subscriber::Registry`
+/// stack (as `gadk_agent::agent::telemetry::in_workflow_scope`).
+pub fn current_span_ids() -> Option<d6::SpanIds> {
+    let id = tracing::Span::current().id()?;
+    tracing::dispatcher::get_default(|d| {
+        use tracing_subscriber::registry::LookupSpan;
+        let registry = d.downcast_ref::<tracing_subscriber::Registry>()?;
+        registry
+            .span(&id)?
+            .scope()
+            .find_map(|s| s.extensions().get::<d6::SpanIds>().copied())
+    })
+}
+
 /// Port of Go startInvokeAgentSpan. Engine-internal: agents' own spans come from
 /// `CustomAgent::run` (gadk-agent), and engine code never wraps `Agent::run` in another one, so
 /// only the span unit tests use it.
@@ -818,5 +836,87 @@ mod tests {
                 "logs": []
             }})
         );
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod span_ids_tests {
+    use tracing::span::{Attributes, Id};
+    use tracing_subscriber::layer::{Context, Layer, SubscriberExt};
+    use tracing_subscriber::registry::LookupSpan;
+
+    use super::current_span_ids;
+    use super::d6::SpanIds;
+
+    /// Leaves [`SpanIds`] on every span named `with_ids`, the way gadk-telemetry's bridge does
+    /// on the spans it exports; the span ID's last byte counts the spans it tagged.
+    #[derive(Default)]
+    struct Tagger(std::sync::atomic::AtomicU8);
+
+    impl<S> Layer<S> for Tagger
+    where
+        S: tracing::Subscriber + for<'a> LookupSpan<'a>,
+    {
+        fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, ctx: Context<'_, S>) {
+            if attrs.metadata().name() != "with_ids" {
+                return;
+            }
+            let n = self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            if let Some(span) = ctx.span(id) {
+                span.extensions_mut().insert(ids(n));
+            }
+        }
+    }
+
+    fn ids(n: u8) -> SpanIds {
+        SpanIds {
+            trace_id: [7; 16],
+            span_id: [0, 0, 0, 0, 0, 0, 0, n],
+        }
+    }
+
+    fn with_tagger(f: impl FnOnce()) {
+        let sub = tracing_subscriber::registry().with(Tagger::default());
+        tracing::subscriber::with_default(sub, f);
+    }
+
+    #[test]
+    fn none_outside_any_span_and_without_ids() {
+        with_tagger(|| {
+            assert_eq!(current_span_ids(), None);
+            let _plain = tracing::info_span!("plain").entered();
+            assert_eq!(current_span_ids(), None);
+        });
+    }
+
+    #[test]
+    fn the_nearest_enclosing_span_with_ids_wins() {
+        with_tagger(|| {
+            let outer = tracing::info_span!("with_ids").entered();
+            assert_eq!(current_span_ids(), Some(ids(1)));
+            let plain = tracing::info_span!("plain").entered();
+            assert_eq!(
+                current_span_ids(),
+                Some(ids(1)),
+                "an untagged child inherits"
+            );
+            let inner = tracing::info_span!("with_ids").entered();
+            assert_eq!(current_span_ids(), Some(ids(2)));
+            drop(inner);
+            assert_eq!(current_span_ids(), Some(ids(1)));
+            drop(plain);
+            drop(outer);
+            assert_eq!(current_span_ids(), None);
+        });
+    }
+
+    #[test]
+    fn none_under_a_subscriber_without_a_registry() {
+        let sub = tracing::subscriber::NoSubscriber::default();
+        tracing::subscriber::with_default(sub, || {
+            let _span = tracing::info_span!("with_ids").entered();
+            assert_eq!(current_span_ids(), None);
+        });
     }
 }

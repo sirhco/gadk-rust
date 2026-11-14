@@ -24,6 +24,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+mod plugin_level;
 mod rotation_and_close;
 mod run_end_flushes;
 mod splitting_and_fresh_streams;
@@ -238,8 +239,6 @@ async fn test_batch_processor_queue_full() {
 
     assert_eq!(queue_len(&bp), 1, "Expected queue size 1");
 }
-
-// parity: skipped TestBatchProcessor_QueueFullPanickingLoggerDoesNotDeadlockClose: deferred to 7b-3 (drives the plugin's OnUserMessageCallback through newTestPluginWithConfig)
 
 #[tokio::test(start_paused = true)]
 async fn test_batch_processor_content_parts_edge_cases() {

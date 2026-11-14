@@ -31,6 +31,7 @@ use serde_json::{Map, Value};
 use tokio_util::sync::CancellationToken;
 
 use crate::agent::Agent;
+use crate::context::activation::ActivationId;
 use crate::context::readonly::ContextInner;
 use crate::mode::BoundModes;
 use crate::scheduler::DynamicSubScheduler;
@@ -110,11 +111,14 @@ impl ContextInner {
             || d.bound_modes.is_some();
         let mut n = self.clone();
         if forks_invocation {
-            // Go WithICDelta copies the invocationContext struct, endInvocation included.
-            n.ended = Arc::new(AtomicBool::new(self.ended.load(Ordering::SeqCst)));
+            // Go WithICDelta copies the invocationContext struct, endInvocation included; a fresh
+            // invocation (Go NewInvocationContext) starts not ended. Each new flag is a new
+            // activation.
+            let ended = !d.fresh_invocation && self.ended.load(Ordering::SeqCst);
+            n.ended = Arc::new(AtomicBool::new(ended));
+            n.activation = ActivationId::next();
         }
         if d.fresh_invocation {
-            n.ended = Arc::new(AtomicBool::new(false));
             n.isolation_scope = String::new();
             n.function_call_id = String::new();
             n.tool_confirmation = None;

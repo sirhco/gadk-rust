@@ -1,10 +1,47 @@
 # gadk-agentanalytics
 
-A port of ADK-Go's `plugin/agentanalytics` (the BigQuery Agent Analytics plugin) without the
-plugin itself: the foundations (sub-project 7b-1) and the transports (7b-2) — the BigQuery
-Storage Write client and stream writer, the Arrow batch processor and the GCS content
-offloader. The plugin, its events and trace manager (7b-3) build on it. Re-exported by the
-`gadk` façade as `gadk::agentanalytics` (feature `agentanalytics`, not in `default`).
+A port of ADK-Go's `plugin/agentanalytics`, the BigQuery Agent Analytics plugin: the plugin, its
+session-event signal rows and its trace manager (sub-project 7b-3a), on the foundations (7b-1)
+and the transports (7b-2) — the BigQuery Storage Write client and stream writer, the Arrow batch
+processor and the GCS content offloader. Re-exported by the `gadk` façade as
+`gadk::agentanalytics` (feature `agentanalytics`, not in `default`).
+
+```rust,ignore
+use gadk_agentanalytics::{Config, Context, new_bigquery_agent_analytics_plugin_with_config};
+
+let config = Config {
+    project_id: "my-project".into(),
+    dataset_id: "agent_analytics".into(),
+    ..Config::default()
+};
+let plugin = new_bigquery_agent_analytics_plugin_with_config(&Context::background(), config).await?;
+// Add `plugin` to the runner's plugins (first, before plugins that replace events or
+// responses); the runner's plugin manager closes it, draining the queued rows.
+```
+
+- `plugin` — `new_bigquery_agent_analytics_plugin` (Go `NewBigQueryAgentAnalyticsPlugin`:
+  project, dataset, table and the default config), `…_with_config` (a whole `Config`; a disabled
+  config gives Go's disabled plugin, which only closes) and `…_with_clients` (a caller's
+  `BigQueryClient` for table setup and views and a `WriteClient` for the rows) return a
+  `gadk_agent::Plugin` with Go's 12 callbacks and close. Construction validates the config with
+  Go's texts, creates or upgrades the table and starts the analytics views in the background.
+  `as_bigquery_agent_analytics_plugin` recovers a constructed plugin's helpers
+  (`BigQueryAgentAnalyticsPlugin::drop_stats`, `sync_views`) from the plugin's state slot.
+  Every callback builds its rows synchronously, before any `.await`, and never fails a run: a
+  panic while building a row is recovered and counted as a dropped row. Close stops the views,
+  drains the batch processor on a task of its own (a plugin-manager close timeout cannot lose
+  rows) and closes the owned offloader and the write client, once. Rows: identity, trace and span
+  IDs, `attributes` with the ADK envelope and the OpenTelemetry section of the enclosing ADK
+  span, content inline or offloaded to GCS, custom and session metadata, the state snapshot; the
+  event allow / deny lists and denied columns filter them.
+- The crate-internal `events` (Go `events.go`: tool origins from `Tool::origin_kind` /
+  `unwrap` / `origin_agent(s)`, A2A detection, and the `STATE_DELTA`, `AGENT_TRANSFER`,
+  `EVENT_COMPACTION`, `AGENT_STATE_CHECKPOINT`, HITL / pause, `A2A_INTERACTION`, `NODE_ERROR`,
+  `NODE_OUTPUT`, `AGENT_RESPONSE` and user-message signal rows) and `trace` (Go
+  `trace_manager.go`: invocation, agent, model and tool spans keyed by
+  `gadk_agent::ActivationId`, the completed-run LRU with eviction and late callbacks, errors,
+  retirement, settling, task mode — without Go's goroutine attribution of workflow nodes and
+  parallel branches, which is sub-project 7b-3b).
 
 - `config` — `Config` with every field and default of Go's `Config` (`Config::default()` is
   `DefaultConfig()`, `Config::zero()` Go's `Config{}`), `ClientOptions` (Go's
@@ -28,7 +65,7 @@ offloader. The plugin, its events and trace manager (7b-3) build on it. Re-expor
   content formatter, whose sanitizer is a serde `Serializer` reproducing Go's reflection walk
   (depth and node budgets, Go's JSON text), with Go's sensitive-key, URI and credential
   redaction. The crate-internal parts collector, content summaries and redaction entry points
-  are for 7b-2 / 7b-3.
+  serve the batch processor and the plugin's rows.
 - `row` — `Row` (a `BTreeMap<String, RowValue>` with a closed `RowValue` enum, Go's
   `map[string]any` rows) and `QueuedRow` (a row with its typed side-channel data: content-parts
   summary builders and pending uploads).
@@ -52,19 +89,27 @@ offloader. The plugin, its events and trace manager (7b-3) build on it. Re-expor
   (`ApiError` is `gadk_model::rest::googleapi`'s).
 - Feature `testutil`: `bigquery::fake` (in-memory table ops, view runner, offloader and logger),
   `testutil::fake_write_server` (an in-process tonic BigQuery Write server over an in-memory
-  duplex connector) and the probe's row specs (`testutil::row_from_spec`).
+  duplex connector), `testutil::arrow_rows` (decodes the rows of an AppendRows request) and the
+  probe's row specs (`testutil::row_from_spec`).
+
+Upgrade note: 7b-3a adds the public field `gadk_agent::PluginConfig::state` (the state slot
+`as_bigquery_agent_analytics_plugin` reads), so a full `PluginConfig { .. }` literal without
+`..PluginConfig::default()` now needs `state: None`.
 
 Behavior, SQL, schemas, request bytes and error texts match ADK-Go except for the accepted
-divergences in `docs/parity/7b-1.md` and `docs/parity/7b-2.md`, each annotated in the source with
-a `// Divergence` comment naming its ledger.
+divergences in `docs/parity/7b-1.md`, `docs/parity/7b-2.md` and `docs/parity/7b-3a.md`, each
+annotated in the source with a `// Divergence` comment naming its ledger.
 
 ## Tests and goldens
 
 - Unit tests per module and ports of `json_formatter_test.go`, `schema_upgrade_test.go` and
   `views_test.go` (55 Go tests) in `src/parity_tests/` (ledger `docs/parity/7b-1.md`, checked by
   `python3 scripts/parity-check --ledger 7b-1`), and of `batch_processor_test.go` and
-  `gcs_offloader_test.go` (171 Go tests: 129 ported, 42 deferred to 7b-3; ledger
-  `docs/parity/7b-2.md`, `--ledger 7b-2`).
+  `gcs_offloader_test.go` (171 Go tests, all ported — 42 of them in 7b-3a; ledger
+  `docs/parity/7b-2.md`, `--ledger 7b-2`), and of `bigquery_agent_analytics_plugin_test.go`,
+  `events_test.go`, `late_callbacks_test.go` and `trace_manager_test.go` (338 Go tests: 239
+  ported, 99 trace-manager tests deferred to 7b-3b; ledger `docs/parity/7b-3a.md`,
+  `--ledger 7b-3a`).
 - `tests/golden_*.rs` compare the config projection, the BigQuery and Arrow schemas (decoded IPC
   streams), the view SQL and the formatter and redaction corpus with ADK-Go's outputs;
   `tests/rest_wire.rs`, `tests/rest_schema_upgrade.rs` and `tests/rest_views.rs` replay the REST
@@ -72,7 +117,9 @@ a `// Divergence` comment naming its ledger.
   `tests/golden_record_batch.rs` and `tests/golden_append_rows.rs` compare Arrow record batches,
   size estimates and AppendRows requests, `tests/gapic_write.rs` the gapic client's metadata,
   retries and timeouts over the fake write server, and `tests/rest_gcs_offloader.rs` replays the
-  GCS uploads (multipart, resumable, 412, retries, errors).
+  GCS uploads (multipart, resumable, 412, retries, errors); `tests/golden_plugin_rows.rs` runs
+  the probe's scripted runner scenarios through a gadk `Runner` with the plugin and compares
+  every row with the rows ADK-Go's plugin wrote.
 - The fixtures in `tests/fixtures/` are written by the Go probe `scripts/gen-go-agentanalytics`
   (an overlay test in a temporary copy of ADK-Go's `plugin/agentanalytics`; its `SCENARIO.md`
   documents the corpus and formats). Regenerate with `scripts/gen-go-agentanalytics/run.sh`

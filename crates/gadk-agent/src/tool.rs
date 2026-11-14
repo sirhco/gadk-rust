@@ -24,6 +24,7 @@ use gadk_genai::FunctionDeclaration;
 use gadk_model::LlmRequest;
 use serde_json::{Map, Value};
 
+use crate::agent::Agent;
 use crate::context::{Context, ReadonlyContext};
 use crate::error::ToolError;
 
@@ -74,8 +75,58 @@ pub trait Tool: Send + Sync + 'static {
     fn wrapper_key(&self) -> Option<&str> {
         None
     }
+    /// The tool this one wraps, for a confirmation or delegating wrapper (Go's analytics plugin
+    /// reaches it through an `Unwrap() tool.Tool` method or the wrapper's inner field,
+    /// `plugin/agentanalytics/events.go` `unwrapToolValue`). `None` for a tool that wraps nothing.
+    fn unwrap(&self) -> Option<Arc<dyn Tool>> {
+        None
+    }
+    /// The kind of tool this is, for analytics (Go classifies a tool by its package and type
+    /// name, `events.go` `toolOriginOf`/`classifyADKToolType`; gadk tools declare it). A wrapper
+    /// keeps the default and is classified through [`unwrap`](Tool::unwrap).
+    fn origin_kind(&self) -> ToolOriginKind {
+        ToolOriginKind::Unknown
+    }
+    /// The agent a [`ToolOriginKind::SubAgent`] tool runs (Go reads the tool's `agent` field,
+    /// `events.go` `subAgentOrA2A`, to tell a sub-agent from a remote A2A agent).
+    fn origin_agent(&self) -> Option<Arc<dyn Agent>> {
+        None
+    }
+    /// Every agent the tool can hand a call to, in order, for analytics (Go's analytics plugin
+    /// reads them from the tool's agent fields by reflection, `events.go` `findAgentA2AByName`,
+    /// e.g. a transfer tool's `supportedAgents`). Defaults to
+    /// [`origin_agent`](Tool::origin_agent) as a list of at most one.
+    fn origin_agents(&self) -> Vec<Arc<dyn Agent>> {
+        self.origin_agent().into_iter().collect()
+    }
     /// Downcasting support.
     fn as_any(&self) -> &dyn Any;
+}
+
+/// What kind of tool a [`Tool`] is (Go's `toolOrigin*` constants, `plugin/agentanalytics/events.go`
+/// :39-49, as `classifyADKToolType` :152-187 assigns them). Go's `TRANSFER_A2A` and `A2A` are not
+/// kinds: the plugin derives them from [`ToolOriginKind::TransferAgent`] and
+/// [`ToolOriginKind::SubAgent`] by looking at the target agent.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+#[non_exhaustive]
+pub enum ToolOriginKind {
+    /// `toolOriginUnknown` (`"UNKNOWN"`): the tool does not say (the default).
+    #[default]
+    Unknown,
+    /// `toolOriginLocal` (`"LOCAL"`): a function tool or the load-memory tool.
+    Local,
+    /// `toolOriginMCP` (`"MCP"`): a tool of an MCP toolset.
+    Mcp,
+    /// `toolOriginTransferAgent` (`"TRANSFER_AGENT"`; `"TRANSFER_A2A"` when the target is a remote
+    /// A2A agent): the transfer-to-agent tool.
+    TransferAgent,
+    /// `toolOriginSubAgent` (`"SUB_AGENT"`; `"A2A"` when [`Tool::origin_agent`] is a remote A2A
+    /// agent, Go `subAgentOrA2A`): an agent tool, task-agent tool or single-turn tool.
+    SubAgent,
+    /// `toolOriginSkill` (`"SKILL"`): a skill tool.
+    Skill,
+    /// `toolOriginToolbox` (`"TOOLBOX"`): a toolbox tool.
+    Toolbox,
 }
 
 /// A tool that runs to completion (Go `toolinternal.FunctionTool.Run`).

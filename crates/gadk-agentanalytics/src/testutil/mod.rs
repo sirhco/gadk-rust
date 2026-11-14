@@ -21,6 +21,7 @@ use serde_json::Value;
 
 use crate::row::{Row, RowValue};
 
+pub mod arrow_rows;
 pub mod fake_write_server;
 
 /// The [`Row`] of a probe row spec: an object of value specs, or `null` (Go's nil map, an

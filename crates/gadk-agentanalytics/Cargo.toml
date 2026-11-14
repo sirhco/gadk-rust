@@ -22,6 +22,8 @@ testutil = [
 ]
 
 [dependencies]
+gadk-agent = { workspace = true }
+gadk-engine = { workspace = true }
 gadk-genai = { workspace = true }
 gadk-model = { workspace = true, features = ["gcp-auth"] }
 gadk-platform = { workspace = true }
@@ -47,12 +49,20 @@ prost = { workspace = true }
 tonic = { workspace = true, features = ["codegen", "channel", "tls-aws-lc", "tls-native-roots"] }
 tonic-prost = { workspace = true }
 rand = { workspace = true }
+# The plugin's trace manager (7b-3a): synchronous locks, the `traceIDFor` SHA-256 seed, random
+# trace / span / event IDs, and the plugin callbacks' boxed futures.
+parking_lot = { workspace = true }
+sha2 = { workspace = true }
+uuid = { workspace = true }
+futures = { workspace = true }
 # The in-memory duplex connector of `testutil::fake_write_server`.
 hyper-util = { workspace = true, optional = true, features = ["tokio"] }
 tower = { workspace = true, optional = true, features = ["util"] }
 
 [dev-dependencies]
 gadk-agentanalytics = { path = ".", features = ["testutil"] }
+# Scripted models and runners for the plugin's runner-level tests (7b-3a).
+gadk-engine = { workspace = true, features = ["testutil"] }
 gadk-model = { workspace = true, features = ["test-util"] }
 tokio = { workspace = true, features = ["test-util"] }
 pretty_assertions = { workspace = true }

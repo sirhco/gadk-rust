@@ -1,0 +1,732 @@
+{
+  "about": "LLM agent coordinator (model mock: call transfer_to_agent{agent_name:helper} id call-transfer-1) with sub-agent LLM agent helper (model mock: text)",
+  "app_name": "test-app",
+  "config": {
+    "CustomMetadataAllowlist": null,
+    "DatasetID": "test_dataset",
+    "ProjectID": "test-project",
+    "TableName": "test-table"
+  },
+  "rows": [
+    {
+      "agent": "coordinator",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "user",
+          "event_id": "event-1",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "coordinator",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "content": {
+        "text_summary": "I need help."
+      },
+      "content_parts": [
+        {
+          "mime_type": "text/plain",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "I need help."
+        }
+      ],
+      "event_id": "event-1",
+      "event_type": "USER_MESSAGE_RECEIVED",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "session_id": "session-1",
+      "span_id": "span-1",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "coordinator",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "coordinator",
+          "event_id": "event-2",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "coordinator",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "event_id": "event-2",
+      "event_type": "INVOCATION_STARTING",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "session_id": "session-1",
+      "span_id": "span-1",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "coordinator",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "coordinator",
+          "event_id": "event-3",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "agent_description": "Routes requests.",
+        "model": "mock",
+        "root_agent_name": "coordinator",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "sub_agents": [
+          "helper"
+        ]
+      },
+      "event_id": "event-3",
+      "event_type": "AGENT_STARTING",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-1",
+      "session_id": "session-1",
+      "span_id": "span-2",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "coordinator",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "coordinator",
+          "event_id": "event-4",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "model": "mock",
+        "root_agent_name": "coordinator",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "tools": [
+          {
+            "description": "Transfer the question to another agent.\nThis tool hands off control to another agent when it's more suitable to answer the user's question according to the agent's description.",
+            "name": "transfer_to_agent",
+            "parameters": {
+              "properties": {
+                "agent_name": {
+                  "description": "the agent name to transfer to",
+                  "enum": [
+                    "helper"
+                  ],
+                  "type": "STRING"
+                }
+              },
+              "required": [
+                "agent_name"
+              ],
+              "type": "OBJECT"
+            }
+          }
+        ]
+      },
+      "content": {
+        "prompt": [
+          {
+            "content": "I need help.",
+            "role": "user"
+          }
+        ],
+        "system_prompt": "You are an agent. Your internal name is \"coordinator\". The description about you is \"Routes requests.\".\n\n\nYou have a list of other agents to transfer to:\n\n\nAgent name: helper\nAgent description: Helps with anything.\n\n\nIf you are the best to answer the question according to your description,\nyou can answer it.\n\nIf another agent is better for answering the question according to its\ndescription, call `transfer_to_agent` function to transfer the question to that\nagent. When transferring, do not generate any text other than the function\ncall.\n\n**NOTE**: the only available agents for `transfer_to_agent` function are\n`helper`.\n"
+      },
+      "content_parts": [
+        {
+          "mime_type": "text/plain",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "I need help."
+        },
+        {
+          "mime_type": "text/plain",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "You are an agent. Your internal name is \"coordinator\". The description about you is \"Routes requests.\".\n\n\nYou have a list of other agents to transfer to:\n\n\nAgent name: helper\nAgent description: Helps with anything.\n\n\nIf you are the best to answer the question according to your description,\nyou can answer it.\n\nIf another agent is better for answering the question according to its\ndescription, call `transfer_to_agent` function to transfer the question to that\nagent. When transferring, do not generate any text other than the function\ncall.\n\n**NOTE**: the only available agents for `transfer_to_agent` function are\n`helper`.\n"
+        }
+      ],
+      "event_id": "event-4",
+      "event_type": "LLM_REQUEST",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-2",
+      "session_id": "session-1",
+      "span_id": "span-3",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "coordinator",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "coordinator",
+          "event_id": "event-5",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "cache_type": "none",
+        "interrupted": false,
+        "partial": false,
+        "root_agent_name": "coordinator",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "turn_complete": false
+      },
+      "content": {
+        "response": "call: transfer_to_agent"
+      },
+      "content_parts": [
+        {
+          "mime_type": "application/json",
+          "part_attributes": "{\"function_call\":{\"args\":{\"agent_name\":\"helper\"},\"id\":\"call-transfer-1\",\"name\":\"transfer_to_agent\"},\"function_name\":\"transfer_to_agent\"}",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "Function: transfer_to_agent"
+        }
+      ],
+      "event_id": "event-5",
+      "event_type": "LLM_RESPONSE",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "latency_ms": {
+        "time_to_first_token_ms": "<ms>",
+        "total_ms": "<ms>"
+      },
+      "parent_span_id": "span-2",
+      "session_id": "session-1",
+      "span_id": "span-3",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "coordinator",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "coordinator",
+          "event_id": "event-6",
+          "function_call_id": "call-transfer-1",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "is_long_running": false,
+        "root_agent_name": "coordinator",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "tool_description": "Transfer the question to another agent.\nThis tool hands off control to another agent when it's more suitable to answer the user's question according to the agent's description."
+      },
+      "content": {
+        "args": {
+          "agent_name": "helper"
+        },
+        "tool": "transfer_to_agent",
+        "tool_origin": "TRANSFER_AGENT"
+      },
+      "event_id": "event-6",
+      "event_type": "TOOL_STARTING",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-2",
+      "session_id": "session-1",
+      "span_id": "span-4",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "coordinator",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "coordinator",
+          "event_id": "event-7",
+          "function_call_id": "call-transfer-1",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "coordinator",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "content": {
+        "result": {},
+        "tool": "transfer_to_agent",
+        "tool_origin": "TRANSFER_AGENT"
+      },
+      "event_id": "event-7",
+      "event_type": "TOOL_COMPLETED",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "latency_ms": {
+        "total_ms": "<ms>"
+      },
+      "parent_span_id": "span-2",
+      "session_id": "session-1",
+      "span_id": "span-4",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "coordinator",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "coordinator",
+          "event_id": "event-8",
+          "invocation_id": "invocation-1",
+          "node": {
+            "parent_run_id": null,
+            "path": "coordinator",
+            "run_id": ""
+          },
+          "schema_version": "1",
+          "session_id": "session-1",
+          "source_event_id": "source-event-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "coordinator",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "content": {
+        "from_agent": "coordinator",
+        "to_agent": "helper"
+      },
+      "event_id": "event-8",
+      "event_type": "AGENT_TRANSFER",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-1",
+      "session_id": "session-1",
+      "span_id": "span-2",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "helper",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "helper",
+          "event_id": "event-9",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "agent_description": "Helps with anything.",
+        "model": "mock",
+        "root_agent_name": "coordinator",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "event_id": "event-9",
+      "event_type": "AGENT_STARTING",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-2",
+      "session_id": "session-1",
+      "span_id": "span-5",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "helper",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "helper",
+          "event_id": "event-10",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "model": "mock",
+        "root_agent_name": "coordinator",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "tools": [
+          {
+            "description": "Transfer the question to another agent.\nThis tool hands off control to another agent when it's more suitable to answer the user's question according to the agent's description.",
+            "name": "transfer_to_agent",
+            "parameters": {
+              "properties": {
+                "agent_name": {
+                  "description": "the agent name to transfer to",
+                  "enum": [
+                    "coordinator"
+                  ],
+                  "type": "STRING"
+                }
+              },
+              "required": [
+                "agent_name"
+              ],
+              "type": "OBJECT"
+            }
+          }
+        ]
+      },
+      "content": {
+        "prompt": [
+          {
+            "content": "I need help.",
+            "role": "user"
+          },
+          {
+            "content": "For context: | [coordinator] called tool `transfer_to_agent` with parameters: {\"agent_name\":\"helper\"}",
+            "role": "user"
+          },
+          {
+            "content": "For context: | [coordinator] `transfer_to_agent` tool returned result: {}",
+            "role": "user"
+          }
+        ],
+        "system_prompt": "You are an agent. Your internal name is \"helper\". The description about you is \"Helps with anything.\".\n\n\nYou have a list of other agents to transfer to:\n\n\nAgent name: coordinator\nAgent description: Routes requests.\n\n\nIf you are the best to answer the question according to your description,\nyou can answer it.\n\nIf another agent is better for answering the question according to its\ndescription, call `transfer_to_agent` function to transfer the question to that\nagent. When transferring, do not generate any text other than the function\ncall.\n\n**NOTE**: the only available agents for `transfer_to_agent` function are\n`coordinator`.\n\nIf neither you nor the other agents are best for the question, transfer to your parent agent coordinator.\n"
+      },
+      "content_parts": [
+        {
+          "mime_type": "text/plain",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "I need help."
+        },
+        {
+          "mime_type": "text/plain",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "For context:"
+        },
+        {
+          "mime_type": "text/plain",
+          "part_index": 1,
+          "storage_mode": "INLINE",
+          "text": "[coordinator] called tool `transfer_to_agent` with parameters: {\"agent_name\":\"helper\"}"
+        },
+        {
+          "mime_type": "text/plain",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "For context:"
+        },
+        {
+          "mime_type": "text/plain",
+          "part_index": 1,
+          "storage_mode": "INLINE",
+          "text": "[coordinator] `transfer_to_agent` tool returned result: {}"
+        },
+        {
+          "mime_type": "text/plain",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "You are an agent. Your internal name is \"helper\". The description about you is \"Helps with anything.\".\n\n\nYou have a list of other agents to transfer to:\n\n\nAgent name: coordinator\nAgent description: Routes requests.\n\n\nIf you are the best to answer the question according to your description,\nyou can answer it.\n\nIf another agent is better for answering the question according to its\ndescription, call `transfer_to_agent` function to transfer the question to that\nagent. When transferring, do not generate any text other than the function\ncall.\n\n**NOTE**: the only available agents for `transfer_to_agent` function are\n`coordinator`.\n\nIf neither you nor the other agents are best for the question, transfer to your parent agent coordinator.\n"
+        }
+      ],
+      "event_id": "event-10",
+      "event_type": "LLM_REQUEST",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-5",
+      "session_id": "session-1",
+      "span_id": "span-6",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "helper",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "helper",
+          "event_id": "event-11",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "cache_type": "none",
+        "interrupted": false,
+        "partial": false,
+        "root_agent_name": "coordinator",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "turn_complete": false
+      },
+      "content": {
+        "response": "text: 'Helper here, how can I help?'"
+      },
+      "content_parts": [
+        {
+          "mime_type": "text/plain",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "Helper here, how can I help?"
+        }
+      ],
+      "event_id": "event-11",
+      "event_type": "LLM_RESPONSE",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "latency_ms": {
+        "time_to_first_token_ms": "<ms>",
+        "total_ms": "<ms>"
+      },
+      "parent_span_id": "span-5",
+      "session_id": "session-1",
+      "span_id": "span-6",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "coordinator",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "helper",
+          "event_id": "event-12",
+          "invocation_id": "invocation-1",
+          "node": {
+            "parent_run_id": null,
+            "path": "coordinator",
+            "run_id": ""
+          },
+          "schema_version": "1",
+          "session_id": "session-1",
+          "source_event_id": "source-event-2",
+          "user_id": "user-1"
+        },
+        "event_author": "helper",
+        "root_agent_name": "coordinator",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "source_event_author": "helper",
+        "source_event_id": "source-event-2"
+      },
+      "content": {
+        "response": "text: 'Helper here, how can I help?'"
+      },
+      "content_parts": [
+        {
+          "mime_type": "text/plain",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "Helper here, how can I help?"
+        }
+      ],
+      "event_id": "event-12",
+      "event_type": "AGENT_RESPONSE",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-2",
+      "session_id": "session-1",
+      "span_id": "span-5",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "helper",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "helper",
+          "event_id": "event-13",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "coordinator",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "event_id": "event-13",
+      "event_type": "AGENT_COMPLETED",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "latency_ms": {
+        "total_ms": "<ms>"
+      },
+      "parent_span_id": "span-2",
+      "session_id": "session-1",
+      "span_id": "span-5",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "coordinator",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "coordinator",
+          "event_id": "event-14",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "coordinator",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "event_id": "event-14",
+      "event_type": "AGENT_COMPLETED",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "latency_ms": {
+        "total_ms": "<ms>"
+      },
+      "parent_span_id": "span-1",
+      "session_id": "session-1",
+      "span_id": "span-2",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "coordinator",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "coordinator",
+          "event_id": "event-15",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "coordinator",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "event_id": "event-15",
+      "event_type": "INVOCATION_COMPLETED",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "latency_ms": {
+        "total_ms": "<ms>"
+      },
+      "session_id": "session-1",
+      "span_id": "span-1",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    }
+  ],
+  "scenario": "transfer",
+  "session_id": "session-1",
+  "turns": [
+    "I need help."
+  ],
+  "user_id": "user-1"
+}

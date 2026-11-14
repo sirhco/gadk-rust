@@ -1,0 +1,551 @@
+// Copyright 2026 Chris Olson
+// Portions derived from ADK-Go (https://github.com/google/adk-go), Copyright 2026 Google LLC.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// 7b-3a overlay probe extension: the plugin row goldens of gadk-agentanalytics. Each scenario
+// runs ADK-Go's real plugin (newTestPluginWithConfig: NewBigQueryAgentAnalyticsPluginWithClients
+// over a mocked BigQuery REST client and a fake BigQuery Storage Write server) under an ADK
+// runner with scripted models, function tools and custom agents, closes the plugin, decodes the
+// rows of every AppendRows request the fake server received (decodeArrowRows) and writes them,
+// normalized, to plugin/<scenario>.json. Installed by scripts/gen-go-agentanalytics/run.sh as
+// zz_probe_7b3a_test.go next to zz_probe_test.go, whose TestGenerateFixtures calls gen7b3a. See
+// scripts/gen-go-agentanalytics/SCENARIO.md ("7b-3a plugin row goldens") for the scenarios, the
+// format and the normalization rules. Every identifier starts with zz; nothing random reaches a
+// fixture (IDs, timestamps, latencies and the ADK version are replaced by placeholders).
+
+package agentanalytics
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"iter"
+	"regexp"
+	"sort"
+	"sync"
+	"time"
+
+	"google.golang.org/genai"
+
+	"google.golang.org/adk/v2/agent"
+	"google.golang.org/adk/v2/agent/llmagent"
+	"google.golang.org/adk/v2/model"
+	baseplugin "google.golang.org/adk/v2/plugin"
+	"google.golang.org/adk/v2/runner"
+	"google.golang.org/adk/v2/session"
+	"google.golang.org/adk/v2/tool"
+	"google.golang.org/adk/v2/tool/functiontool"
+)
+
+// zzScriptedModel is gadk_engine::testutil::MockModel::new: every call yields exactly the next
+// queued item (a response or an error), or the error "no data" once the queue is empty. Its name
+// is "mock", MockModel's.
+type zzScriptedModel struct {
+	mu    sync.Mutex
+	items []zzModelItem
+}
+
+type zzModelItem struct {
+	resp *model.LLMResponse
+	err  error
+}
+
+func (m *zzScriptedModel) Name() string { return "mock" }
+
+func (m *zzScriptedModel) GenerateContent(context.Context, *model.LLMRequest, bool) iter.Seq2[*model.LLMResponse, error] {
+	return func(yield func(*model.LLMResponse, error) bool) {
+		m.mu.Lock()
+		if len(m.items) == 0 {
+			m.mu.Unlock()
+			yield(nil, errors.New("no data"))
+			return
+		}
+		it := m.items[0]
+		m.items = m.items[1:]
+		m.mu.Unlock()
+		yield(it.resp, it.err)
+	}
+}
+
+func zzText(text string) zzModelItem {
+	return zzModelItem{resp: &model.LLMResponse{Content: genai.NewContentFromText(text, genai.RoleModel)}}
+}
+
+func zzCall(id, name string, args map[string]any) zzModelItem {
+	return zzModelItem{resp: &model.LLMResponse{Content: &genai.Content{
+		Role:  genai.RoleModel,
+		Parts: []*genai.Part{{FunctionCall: &genai.FunctionCall{ID: id, Name: name, Args: args}}},
+	}}}
+}
+
+// zzScenario is one scripted run: the root agent and the user message (text) of each turn, all
+// on session "session-1" of user "user-1" in app "test-app". customMetadataAllowlist is the
+// plugin's Config.CustomMetadataAllowlist (nil: the default).
+type zzScenario struct {
+	name                    string
+	about                   string
+	customMetadataAllowlist []string
+	root                    func() agent.Agent
+	turns                   []string
+}
+
+// zzMust returns v, or panics with err (a scenario that cannot be built is a probe bug).
+func zzMust[T any](v T, err error) T {
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
+
+func zzScenarios() []zzScenario {
+	return []zzScenario{
+		{
+			name: "tool_call",
+			about: "LLM agent weather_agent (model mock: call get_weather{city:Paris} id call-weather-1, then text) " +
+				"with function tool get_weather (sets state last_city=Paris, returns {forecast:sunny})",
+			root: func() agent.Agent {
+				type args struct {
+					City string `json:"city"`
+				}
+				type result struct {
+					Forecast string `json:"forecast"`
+				}
+				getWeather := zzMust(functiontool.New(functiontool.Config{
+					Name:        "get_weather",
+					Description: "Returns the weather forecast for a city.",
+				}, func(ctx agent.Context, a args) (result, error) {
+					ctx.Actions().StateDelta["last_city"] = a.City
+					return result{Forecast: "sunny"}, nil
+				}))
+				return zzMust(llmagent.New(llmagent.Config{
+					Name:        "weather_agent",
+					Description: "Answers weather questions.",
+					Instruction: "Answer weather questions with the get_weather tool.",
+					Model: &zzScriptedModel{items: []zzModelItem{
+						zzCall("call-weather-1", "get_weather", map[string]any{"city": "Paris"}),
+						zzText("It is sunny in Paris."),
+					}},
+					Tools: []tool.Tool{getWeather},
+				}))
+			},
+			turns: []string{"What is the weather in Paris?"},
+		},
+		{
+			name: "tool_error",
+			about: "LLM agent calc_agent (model mock: call divide{a:1,b:0} id call-divide-1, then text) " +
+				"with function tool divide that fails with \"division by zero\"",
+			root: func() agent.Agent {
+				type args struct {
+					A int `json:"a"`
+					B int `json:"b"`
+				}
+				type result struct {
+					Quotient int `json:"quotient"`
+				}
+				divide := zzMust(functiontool.New(functiontool.Config{
+					Name:        "divide",
+					Description: "Divides a by b.",
+				}, func(_ agent.Context, a args) (result, error) {
+					if a.B == 0 {
+						return result{}, errors.New("division by zero")
+					}
+					return result{Quotient: a.A / a.B}, nil
+				}))
+				return zzMust(llmagent.New(llmagent.Config{
+					Name: "calc_agent",
+					Model: &zzScriptedModel{items: []zzModelItem{
+						zzCall("call-divide-1", "divide", map[string]any{"a": 1, "b": 0}),
+						zzText("Cannot divide by zero."),
+					}},
+					Tools: []tool.Tool{divide},
+				}))
+			},
+			turns: []string{"Divide 1 by 0."},
+		},
+		{
+			name: "transfer",
+			about: "LLM agent coordinator (model mock: call transfer_to_agent{agent_name:helper} id call-transfer-1) " +
+				"with sub-agent LLM agent helper (model mock: text)",
+			root: func() agent.Agent {
+				helper := zzMust(llmagent.New(llmagent.Config{
+					Name:        "helper",
+					Description: "Helps with anything.",
+					Model:       &zzScriptedModel{items: []zzModelItem{zzText("Helper here, how can I help?")}},
+				}))
+				return zzMust(llmagent.New(llmagent.Config{
+					Name:        "coordinator",
+					Description: "Routes requests.",
+					Model: &zzScriptedModel{items: []zzModelItem{
+						zzCall("call-transfer-1", "transfer_to_agent", map[string]any{"agent_name": "helper"}),
+					}},
+					SubAgents: []agent.Agent{helper},
+				}))
+			},
+			turns: []string{"I need help."},
+		},
+		{
+			name:  "model_error",
+			about: "LLM agent failing_agent (model mock: error \"model failure 404\")",
+			root: func() agent.Agent {
+				return zzMust(llmagent.New(llmagent.Config{
+					Name:  "failing_agent",
+					Model: &zzScriptedModel{items: []zzModelItem{{err: errors.New("model failure 404")}}},
+				}))
+			},
+			turns: []string{"Hello?"},
+		},
+		{
+			name: "confirmation",
+			about: "LLM agent bank_agent (model mock: call transfer_funds{amount:100} id call-funds-1) " +
+				"with function tool transfer_funds that requires confirmation; one turn (the run pauses)",
+			root: func() agent.Agent {
+				type args struct {
+					Amount int `json:"amount"`
+				}
+				type result struct {
+					Status string `json:"status"`
+				}
+				transferFunds := zzMust(functiontool.New(functiontool.Config{
+					Name:                "transfer_funds",
+					Description:         "Transfers funds.",
+					RequireConfirmation: true,
+				}, func(_ agent.Context, a args) (result, error) {
+					return result{Status: "done"}, nil
+				}))
+				return zzMust(llmagent.New(llmagent.Config{
+					Name: "bank_agent",
+					Model: &zzScriptedModel{items: []zzModelItem{
+						zzCall("call-funds-1", "transfer_funds", map[string]any{"amount": 100}),
+					}},
+					Tools: []tool.Tool{transferFunds},
+				}))
+			},
+			turns: []string{"Send 100 to Bob."},
+		},
+		{
+			name:                    "session_signals",
+			customMetadataAllowlist: []string{"adk_agent_state", "end_of_agent"},
+			about: "custom agent signal_agent yielding scripted events (see SCENARIO.md) that carry the session " +
+				"signals: compaction, agent state checkpoint, HITL requests and completions, A2A metadata, " +
+				"workflow-node output and error, and a final text response",
+			root: func() agent.Agent {
+				return zzMust(agent.New(agent.Config{
+					Name:        "signal_agent",
+					Description: "Emits session signals.",
+					Run:         zzSignalEvents,
+				}))
+			},
+			turns: []string{"Emit the signals."},
+		},
+	}
+}
+
+// zzSignalEvents yields the events of the session_signals scenario, in order.
+func zzSignalEvents(ctx agent.InvocationContext) iter.Seq2[*session.Event, error] {
+	return func(yield func(*session.Event, error) bool) {
+		ts := func(sec int) time.Time { return time.Date(2026, 1, 2, 3, 4, sec, 0, time.UTC) }
+		events := []func(ev *session.Event){
+			// 1. EVENT_COMPACTION (typed EventActions.Compaction).
+			func(ev *session.Event) {
+				ev.Actions.Compaction = &session.EventCompaction{
+					StartTimestamp:   ts(5),
+					EndTimestamp:     ts(6),
+					CompactedContent: genai.NewContentFromText("Summary of earlier turns.", genai.RoleModel),
+				}
+			},
+			// 2. AGENT_STATE_CHECKPOINT and STATE_DELTA.
+			func(ev *session.Event) {
+				ev.CustomMetadata = map[string]any{"adk_agent_state": map[string]any{"step": 1}, "end_of_agent": false}
+				ev.Actions.StateDelta = map[string]any{"progress": "half", "temp:scratch": "x"}
+			},
+			// 3. HITL_CREDENTIAL_REQUEST and TOOL_PAUSED (long-running credential request).
+			func(ev *session.Event) {
+				ev.Content = &genai.Content{Role: genai.RoleModel, Parts: []*genai.Part{{FunctionCall: &genai.FunctionCall{
+					ID: "cred-1", Name: "adk_request_credential", Args: map[string]any{"auth_scheme": "oauth2"},
+				}}}}
+				ev.LongRunningToolIDs = []string{"cred-1"}
+			},
+			// 4. HITL_CONFIRMATION_REQUEST and HITL_INPUT_REQUEST (not long-running).
+			func(ev *session.Event) {
+				ev.Content = &genai.Content{Role: genai.RoleModel, Parts: []*genai.Part{
+					{FunctionCall: &genai.FunctionCall{ID: "confirm-1", Name: "adk_request_confirmation", Args: map[string]any{"hint": "Approve?"}}},
+					{FunctionCall: &genai.FunctionCall{ID: "input-1", Name: "adk_request_input", Args: map[string]any{"message": "Your name?"}}},
+				}}
+			},
+			// 5. The three HITL_*_REQUEST_COMPLETED rows.
+			func(ev *session.Event) {
+				ev.Content = &genai.Content{Role: genai.RoleUser, Parts: []*genai.Part{
+					{FunctionResponse: &genai.FunctionResponse{ID: "cred-1", Name: "adk_request_credential", Response: map[string]any{"token": "granted"}}},
+					{FunctionResponse: &genai.FunctionResponse{ID: "confirm-1", Name: "adk_request_confirmation", Response: map[string]any{"confirmed": true}}},
+					{FunctionResponse: &genai.FunctionResponse{ID: "input-1", Name: "adk_request_input", Response: map[string]any{"name": "Ada"}}},
+				}}
+			},
+			// 6. A2A_INTERACTION.
+			func(ev *session.Event) {
+				ev.CustomMetadata = map[string]any{
+					"a2a:request":  map[string]any{"method": "message/send"},
+					"a2a:response": map[string]any{"status": "completed"},
+				}
+			},
+			// 7. NODE_ERROR and NODE_OUTPUT.
+			func(ev *session.Event) {
+				ev.NodeInfo = &session.NodeInfo{Path: "signal_agent/step@1"}
+				ev.ErrorCode = "STEP_FAILED"
+				ev.ErrorMessage = "step failed"
+				ev.Output = map[string]any{"result": 42}
+			},
+			// 8. AGENT_RESPONSE.
+			func(ev *session.Event) {
+				ev.Content = genai.NewContentFromText("All signals sent.", genai.RoleModel)
+			},
+		}
+		for _, fill := range events {
+			ev := session.NewEvent(ctx, ctx.InvocationID())
+			ev.Author = ctx.Agent().Name()
+			ev.Branch = ctx.Branch()
+			fill(ev)
+			if !yield(ev, nil) {
+				return
+			}
+		}
+	}
+}
+
+// zzADKVersion is the ADK version the probe's rows report. A test binary's build info has none
+// for the replaced ADK module, so adkVersion is pinned for the 7b-3a scenarios (and restored):
+// attributes.adk.adk_version is then present, as in a released binary, and normalized.
+const zzADKVersion = "2.0.0-probe"
+
+// gen7b3a writes plugin/<scenario>.json for every scenario.
+func (p *zzProbe) gen7b3a() {
+	saved := adkVersion
+	adkVersion = func() string { return zzADKVersion }
+	defer func() { adkVersion = saved }()
+	for _, sc := range zzScenarios() {
+		rows := p.zzRunScenario(sc)
+		config := map[string]any{
+			"ProjectID":               "test-project",
+			"DatasetID":               "test_dataset",
+			"TableName":               "test-table",
+			"CustomMetadataAllowlist": sc.customMetadataAllowlist,
+		}
+		p.writeJSON("plugin/"+sc.name+".json", map[string]any{
+			"about":      sc.about,
+			"scenario":   sc.name,
+			"app_name":   "test-app",
+			"user_id":    "user-1",
+			"session_id": "session-1",
+			"config":     config,
+			"turns":      sc.turns,
+			"rows":       zzNormalizeRows(rows),
+		})
+	}
+}
+
+// zzRunScenario runs sc through an ADK runner with the analytics plugin and returns the rows the
+// fake write server received, in order.
+func (p *zzProbe) zzRunScenario(sc zzScenario) []map[string]any {
+	t := p.t
+	t.Helper()
+	plug, requests, _ := newTestPluginWithConfig(t, func(c *Config) {
+		c.CustomMetadataAllowlist = sc.customMetadataAllowlist
+	})
+	r, err := runner.New(runner.Config{
+		AppName:           "test-app",
+		Agent:             sc.root(),
+		SessionService:    session.InMemoryService(),
+		AutoCreateSession: true,
+		PluginConfig:      runner.PluginConfig{Plugins: []*baseplugin.Plugin{plug}},
+	})
+	if err != nil {
+		t.Fatalf("%s: runner.New: %v", sc.name, err)
+	}
+	for _, msg := range sc.turns {
+		for _, err := range r.Run(context.Background(), "user-1", "session-1", genai.NewContentFromText(msg, genai.RoleUser), agent.RunConfig{}) {
+			_ = err // error paths are part of the scenarios; the rows record them
+		}
+	}
+	if err := plug.Close(); err != nil {
+		t.Fatalf("%s: Close: %v", sc.name, err)
+	}
+	var rows []map[string]any
+	for {
+		select {
+		case req := <-requests:
+			rows = append(rows, decodeArrowRows(t, req)...)
+			continue
+		default:
+		}
+		break
+	}
+	if len(rows) == 0 {
+		t.Fatalf("%s: no rows", sc.name)
+	}
+	return rows
+}
+
+// zzNormalizeRows returns the rows as JSON values with the volatile fields replaced; see
+// SCENARIO.md ("Normalization") for the rules, which this implements.
+func zzNormalizeRows(rows []map[string]any) []any {
+	n := &zzNormalizer{ids: map[string]map[string]string{}}
+	out := make([]any, 0, len(rows))
+	for _, row := range rows {
+		r := zzRowJSON(row)
+		out = append(out, n.value(r, nil))
+	}
+	return out
+}
+
+// zzADKCallID matches the function call IDs ADK generates ("adk-" and a random UUID).
+var zzADKCallID = regexp.MustCompile(`^adk-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// zzIDKinds maps the object keys whose string values are volatile IDs to their placeholder
+// prefix.
+var zzIDKinds = map[string]string{
+	"event_id":        "event",
+	"source_event_id": "source-event",
+	"invocation_id":   "invocation",
+	"span_id":         "span",
+	"parent_span_id":  "span",
+	"trace_id":        "trace",
+}
+
+// zzNormalizer numbers the volatile IDs of one scenario, per kind, in order of first
+// appearance.
+type zzNormalizer struct {
+	ids map[string]map[string]string // kind -> real value -> placeholder
+}
+
+func (n *zzNormalizer) placeholder(kind, real string) string {
+	m := n.ids[kind]
+	if m == nil {
+		m = map[string]string{}
+		n.ids[kind] = m
+	}
+	if ph, ok := m[real]; ok {
+		return ph
+	}
+	ph := fmt.Sprintf("%s-%d", kind, len(m)+1)
+	m[real] = ph
+	return ph
+}
+
+// value normalizes v, found under the object keys path (nil for a row), visiting object keys
+// in sorted order and array elements in order.
+func (n *zzNormalizer) value(v any, path []string) any {
+	switch x := v.(type) {
+	case map[string]any:
+		keys := make([]string, 0, len(x))
+		for k := range x {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		out := make(map[string]any, len(x))
+		for _, k := range keys {
+			out[k] = n.field(k, x[k], append(append([]string(nil), path...), k))
+		}
+		return out
+	case []any:
+		out := make([]any, len(x))
+		for i, e := range x {
+			out[i] = n.value(e, path)
+		}
+		return out
+	case string:
+		if zzADKCallID.MatchString(x) {
+			return n.placeholder("adk-call", x)
+		}
+		return x
+	default:
+		return v
+	}
+}
+
+// field normalizes the value v of the object key k at path.
+func (n *zzNormalizer) field(k string, v any, path []string) any {
+	if len(path) == 1 && k == "timestamp" {
+		return "<timestamp>"
+	}
+	if k == "adk_version" {
+		return "<adk_version>"
+	}
+	if path[0] == "latency_ms" {
+		if _, ok := v.(json.Number); ok {
+			return "<ms>"
+		}
+	}
+	if kind, ok := zzIDKinds[k]; ok {
+		if s, ok := v.(string); ok && s != "" {
+			return n.placeholder(kind, s)
+		}
+	}
+	return n.value(v, path)
+}
+
+// zzRowJSON converts one decoded row into plain JSON values: timestamps as RFC 3339 text, the
+// JSON columns (content, attributes, latency_ms, content_parts[].object_ref.details) parsed.
+func zzRowJSON(row map[string]any) map[string]any {
+	out := map[string]any{}
+	for k, v := range row {
+		switch k {
+		case "content", "attributes", "latency_ms":
+			out[k] = zzParseJSON(v)
+		case "content_parts":
+			var parts []any
+			for _, part := range v.([]map[string]any) {
+				pm := map[string]any{}
+				for pk, pv := range part {
+					if pk == "object_ref" {
+						ref := map[string]any{}
+						for rk, rv := range pv.(map[string]any) {
+							if rk == "details" {
+								ref[rk] = zzParseJSON(rv)
+							} else {
+								ref[rk] = rv
+							}
+						}
+						pm[pk] = ref
+					} else {
+						pm[pk] = pv
+					}
+				}
+				parts = append(parts, pm)
+			}
+			out[k] = parts
+		default:
+			if ts, ok := v.(time.Time); ok {
+				out[k] = ts.UTC().Format(time.RFC3339Nano)
+			} else {
+				out[k] = v
+			}
+		}
+	}
+	return out
+}
+
+func zzParseJSON(v any) any {
+	s, ok := v.(string)
+	if !ok {
+		return v
+	}
+	dec := json.NewDecoder(bytes.NewReader([]byte(s)))
+	dec.UseNumber()
+	var x any
+	if err := dec.Decode(&x); err != nil {
+		return map[string]any{"invalid_json": s}
+	}
+	return x
+}

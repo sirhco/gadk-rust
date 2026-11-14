@@ -389,7 +389,7 @@ impl RunnerInner {
 
             // Agent path (runner.go:644-794): the root agent runs directly.
             let token = CancellationToken::new();
-            let _cancel_on_drop = token.clone().drop_guard();
+            let cancel_on_drop = token.clone().drop_guard();
             let ictx = this.new_invocation_context(
                 &stored,
                 this.root_agent.clone(),
@@ -413,11 +413,12 @@ impl RunnerInner {
             };
             let ictx = ctx.as_invocation().clone();
             let mut guard = compaction::InvocationGuard::new(this.clone(), stored.clone(), ictx.clone());
+            guard.cancel_on_drop(cancel_on_drop);
             guard.defer_after_run();
             let mut early = false;
             'run: {
                 match this.run_before_run_callback(&ictx).await {
-                    Err(e) => { guard.mark_failed(); yield Err(e); early = true; break 'run; }
+                    Err(e) => { guard.mark_failed(); guard.at_yield(true); yield Err(e); guard.at_yield(false); early = true; break 'run; }
                     Ok(Some(ev)) => { guard.at_yield(true); yield Ok(ev); guard.at_yield(false); early = true; break 'run; }
                     Ok(None) => {}
                 }
@@ -430,7 +431,9 @@ impl RunnerInner {
                             // nothing after this can reach a model (adk-python parity).
                             let stop = is_llm_calls_limit(&e);
                             guard.mark_failed();
+                            guard.at_yield(true);
                             yield Err(e);
+                            guard.at_yield(false);
                             if stop {
                                 early = true;
                                 break 'run;
@@ -440,8 +443,8 @@ impl RunnerInner {
                     };
                     match this.process_event(&ictx, &*stored, event).await {
                         Processed::Event(ev) => { guard.at_yield(true); yield Ok(*ev); guard.at_yield(false); }
-                        Processed::PluginError(e) => { guard.mark_failed(); yield Err(e); }
-                        Processed::AppendError(e) => { guard.mark_failed(); yield Err(e); early = true; break 'run; }
+                        Processed::PluginError(e) => { guard.mark_failed(); guard.at_yield(true); yield Err(e); guard.at_yield(false); }
+                        Processed::AppendError(e) => { guard.mark_failed(); guard.at_yield(true); yield Err(e); guard.at_yield(false); early = true; break 'run; }
                     }
                 }
             }
@@ -451,7 +454,9 @@ impl RunnerInner {
                 // Compact once every event of the invocation is persisted; the consumer
                 // drained the stream, so a failure can still be reported.
                 if let Some(e) = guard.compact_inline().await {
+                    guard.at_yield(true);
                     yield Err(e);
+                    guard.at_yield(false);
                 }
                 guard.finish().await;
             }

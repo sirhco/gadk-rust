@@ -18,7 +18,11 @@
 //! R11: `gadk::agentanalytics` (feature `agentanalytics`, not on by default) is
 //! `gadk_agentanalytics`.
 
-use gadk::agentanalytics::{BigQueryClient, Config, Error, events_schema};
+use gadk::agentanalytics::{
+    BigQueryAgentAnalyticsPlugin, BigQueryClient, Config, Error,
+    as_bigquery_agent_analytics_plugin, events_schema,
+    new_bigquery_agent_analytics_plugin_with_config,
+};
 use pretty_assertions::assert_eq;
 
 /// Compiles only if each façade path names the `gadk_agentanalytics` item.
@@ -28,6 +32,33 @@ fn facade_agentanalytics_paths_are_gadk_agentanalytics() {
     same::<Config>(None, None::<&gadk_agentanalytics::Config>);
     same::<Error>(None, None::<&gadk_agentanalytics::Error>);
     same::<BigQueryClient>(None, None::<&gadk_agentanalytics::BigQueryClient>);
+    same::<BigQueryAgentAnalyticsPlugin>(
+        None,
+        None::<&gadk_agentanalytics::BigQueryAgentAnalyticsPlugin>,
+    );
+}
+
+/// The plugin through the façade: a disabled config builds Go's disabled plugin (a
+/// `gadk::agent::Plugin` with only `close`), whose helpers report zero drops.
+#[tokio::test]
+async fn facade_agentanalytics_disabled_plugin() {
+    let config = Config {
+        enabled: false,
+        ..Config::default()
+    };
+    let plugin: gadk::agent::Plugin = new_bigquery_agent_analytics_plugin_with_config(
+        &gadk::agentanalytics::Context::background(),
+        config,
+    )
+    .await
+    .unwrap();
+    assert_eq!(plugin.name(), "bigquery_agent_analytics");
+    let helpers = as_bigquery_agent_analytics_plugin(&plugin).unwrap();
+    assert_eq!(
+        helpers.drop_stats(),
+        gadk::agentanalytics::DropStats::default()
+    );
+    plugin.close().unwrap()().await.unwrap();
 }
 
 /// `Config::default()` is Go's `DefaultConfig()` through the façade, and its view definitions

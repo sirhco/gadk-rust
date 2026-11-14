@@ -20,7 +20,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use gadk_agent::{Agent, Context, RunnableTool, Tool, ToolError};
+use gadk_agent::{Agent, Context, RunnableTool, Tool, ToolError, ToolOriginKind};
 use gadk_genai::{FunctionDeclaration, Schema, Type};
 use gadk_model::is_gemini_api_variant;
 use serde_json::{Map, Value, json};
@@ -116,6 +116,16 @@ impl Tool for TaskAgentTool {
     /// standard tool-execution pipeline.
     fn defers_response(&self) -> bool {
         true
+    }
+
+    /// Go classifies `workflowinternal.TaskAgentTool` as `SUB_AGENT` (`A2A` when its agent is remote).
+    fn origin_kind(&self) -> ToolOriginKind {
+        ToolOriginKind::SubAgent
+    }
+
+    /// The wrapped agent (Go `subAgentOrA2A` reads the tool's `agent` field).
+    fn origin_agent(&self) -> Option<Arc<dyn Agent>> {
+        Some(self.agent.clone())
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -246,5 +256,24 @@ mod tests {
                 .response_json_schema,
             Some(json!({"type": "OBJECT"}))
         );
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod origin_tests {
+    use super::*;
+    use crate::llm::config::LlmAgentConfig;
+
+    #[test]
+    fn task_agent_tool_is_a_sub_agent_tool_of_its_agent() {
+        let agent = crate::llm::agent::new(LlmAgentConfig {
+            name: "child".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        let t = TaskAgentTool::new(agent.clone());
+        assert_eq!(t.origin_kind(), ToolOriginKind::SubAgent);
+        assert!(Arc::ptr_eq(&t.origin_agent().unwrap(), &agent));
     }
 }

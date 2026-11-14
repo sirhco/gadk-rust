@@ -20,10 +20,11 @@
 //! `FakeWriteServer`; time is tokio's paused clock (Go's sleeps, timeouts and `synctest` bubbles
 //! advance it), except for the four `newGCSOffloader` tests, which talk HTTP to a local server.
 //! Go's `panicValue(f)` is [`panic_value`] (a future whose panic is caught) or
-//! [`panic_value_sync`]. The tests that need the plugin (`addContent`, `buildRow`,
-//! `writeEvent`, the plugin constructors) are deferred to 7b-3. The tests are split by the Go
-//! file's order: this file (the offloader, object paths and the first `resolveUploads` tests),
-//! [`helpers`], [`deadlines`], [`deferred`].
+//! [`panic_value_sync`]. The tests are split by the Go file's order: this file (the offloader,
+//! object paths and the first `resolveUploads` tests), [`helpers`], [`deadlines`],
+//! [`deferred`]; the tests that need the plugin (ported in 7b-3a) are in [`add_content`]
+//! (`addContent`, `writeEvent`, `llmRequestContent`, `probeRow`) and [`plugin_level`] (the
+//! plugin's constructors, callbacks and Close).
 
 #![allow(
     clippy::unwrap_used,
@@ -32,9 +33,11 @@
     clippy::field_reassign_with_default
 )] // Go's `cfg := DefaultConfig(); cfg.X = …` reads as written
 
+pub(super) mod add_content;
 mod deadlines;
 mod deferred;
 mod helpers;
+pub(super) mod plugin_level;
 
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -1319,19 +1322,3 @@ fn test_batch_processor_object_path() {
         "objectPath() = {got:?}, want today's date between p/ and {rest}"
     );
 }
-
-// parity: skipped TestGCSOffloading_HybridInlineAndGCSReference: deferred to 7b-3 (needs offloadingPlugin and the plugin callbacks)
-// parity: skipped TestGCSOffloading_WithoutAnOffloaderEverythingStaysInline: deferred to 7b-3 (needs setupTestPluginWithConfig and the plugin callbacks)
-// parity: skipped TestGCSOffloading_ContentFormatterRunsBeforeTheUpload: deferred to 7b-3 (needs offloadingPlugin and the plugin callbacks)
-// parity: skipped TestGCSOffloading_UploadFailureKeepsThePartsInline: deferred to 7b-3 (needs offloadingPlugin and the plugin callbacks)
-// parity: skipped TestGCSOffloading_FailedUploadOfCutTextKeepsTheCut: deferred to 7b-3 (needs offloadingPlugin and the plugin callbacks)
-// parity: skipped TestGCSOffloading_TextCutByMaxContentLenIsOffloadedInFull: deferred to 7b-3 (needs offloadingPlugin and the plugin callbacks)
-// parity: skipped TestGCSOffloading_RowsWithoutContentUploadNothing: deferred to 7b-3 (needs offloadingPlugin and the plugin callbacks)
-// parity: skipped TestGCSOffloading_PanickingOffloaderLosesNoRows: deferred to 7b-3 (needs offloadingPlugin and the plugin callbacks)
-// parity: skipped TestGCSOffloading_ObjectNamesTellTheMessagesApart: deferred to 7b-3 (needs offloadingPlugin and the plugin callbacks)
-// parity: skipped TestGCSOffloading_CallerChangesItsMessagesWhileRowsAreWritten: deferred to 7b-3 (needs offloadingPlugin and the plugin callbacks)
-// parity: skipped TestGCSOffloading_ManyCallersAndFlushes: deferred to 7b-3 (needs offloadingPlugin and the plugin callbacks)
-// parity: skipped TestGCSOffloading_BucketNameBuildsAnOffloader: deferred to 7b-3 (needs the plugin constructors)
-// parity: skipped TestGCSOffloading_ClosesTheOwnedOffloaderAfterTheProcessor: deferred to 7b-3 (needs the plugin constructors)
-// parity: skipped TestGCSOffloading_SuppliedOffloaderWinsAndIsNotClosed: deferred to 7b-3 (needs the plugin constructors)
-// parity: skipped TestGCSOffloading_OffloaderCreationFailureClosesTheWriteClient: deferred to 7b-3 (needs NewBigQueryAgentAnalyticsPluginWithClients)

@@ -1,0 +1,836 @@
+{
+  "about": "custom agent signal_agent yielding scripted events (see SCENARIO.md) that carry the session signals: compaction, agent state checkpoint, HITL requests and completions, A2A metadata, workflow-node output and error, and a final text response",
+  "app_name": "test-app",
+  "config": {
+    "CustomMetadataAllowlist": [
+      "adk_agent_state",
+      "end_of_agent"
+    ],
+    "DatasetID": "test_dataset",
+    "ProjectID": "test-project",
+    "TableName": "test-table"
+  },
+  "rows": [
+    {
+      "agent": "signal_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "user",
+          "event_id": "event-1",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "signal_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "content": {
+        "text_summary": "Emit the signals."
+      },
+      "content_parts": [
+        {
+          "mime_type": "text/plain",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "Emit the signals."
+        }
+      ],
+      "event_id": "event-1",
+      "event_type": "USER_MESSAGE_RECEIVED",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "session_id": "session-1",
+      "span_id": "span-1",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "signal_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "signal_agent",
+          "event_id": "event-2",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "signal_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "event_id": "event-2",
+      "event_type": "INVOCATION_STARTING",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "session_id": "session-1",
+      "span_id": "span-1",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "signal_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "signal_agent",
+          "event_id": "event-3",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "agent_description": "Emits session signals.",
+        "root_agent_name": "signal_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "event_id": "event-3",
+      "event_type": "AGENT_STARTING",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-1",
+      "session_id": "session-1",
+      "span_id": "span-2",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "signal_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "signal_agent",
+          "event_id": "event-4",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "source_event_id": "source-event-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "signal_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "content": {
+        "compacted_content": "text: 'Summary of earlier turns.'",
+        "end_timestamp": 1767323046,
+        "start_timestamp": 1767323045
+      },
+      "event_id": "event-4",
+      "event_type": "EVENT_COMPACTION",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-1",
+      "session_id": "session-1",
+      "span_id": "span-2",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "signal_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "signal_agent",
+          "event_id": "event-5",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "source_event_id": "source-event-2",
+          "user_id": "user-1"
+        },
+        "custom_metadata": {
+          "adk_agent_state": {
+            "step": 1
+          },
+          "end_of_agent": false
+        },
+        "root_agent_name": "signal_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "state_delta": {
+          "progress": "half"
+        }
+      },
+      "event_id": "event-5",
+      "event_type": "STATE_DELTA",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-1",
+      "session_id": "session-1",
+      "span_id": "span-2",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "signal_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "signal_agent",
+          "event_id": "event-6",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "source_event_id": "source-event-2",
+          "user_id": "user-1"
+        },
+        "custom_metadata": {
+          "adk_agent_state": {
+            "step": 1
+          },
+          "end_of_agent": false
+        },
+        "root_agent_name": "signal_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "content": {
+        "agent_state": {
+          "step": 1
+        },
+        "end_of_agent": false
+      },
+      "event_id": "event-6",
+      "event_type": "AGENT_STATE_CHECKPOINT",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-1",
+      "session_id": "session-1",
+      "span_id": "span-2",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "signal_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "signal_agent",
+          "event_id": "event-7",
+          "function_call_id": "cred-1",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "source_event_id": "source-event-3",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "signal_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "state": {
+            "progress": "half",
+            "temp:scratch": "[REDACTED]"
+          },
+          "user_id": "user-1"
+        }
+      },
+      "content": {
+        "args": {
+          "auth_scheme": "oauth2"
+        },
+        "tool": "adk_request_credential",
+        "tool_id": "cred-1"
+      },
+      "event_id": "event-7",
+      "event_type": "HITL_CREDENTIAL_REQUEST",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-1",
+      "session_id": "session-1",
+      "span_id": "span-2",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "signal_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "signal_agent",
+          "event_id": "event-8",
+          "function_call_id": "cred-1",
+          "invocation_id": "invocation-1",
+          "pause_kind": "hitl_credential",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "source_event_id": "source-event-3",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "signal_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "state": {
+            "progress": "half",
+            "temp:scratch": "[REDACTED]"
+          },
+          "user_id": "user-1"
+        }
+      },
+      "content": {
+        "args": {
+          "auth_scheme": "oauth2"
+        },
+        "tool": "adk_request_credential",
+        "tool_id": "cred-1"
+      },
+      "event_id": "event-8",
+      "event_type": "TOOL_PAUSED",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-1",
+      "session_id": "session-1",
+      "span_id": "span-2",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "signal_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "signal_agent",
+          "event_id": "event-9",
+          "function_call_id": "confirm-1",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "source_event_id": "source-event-4",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "signal_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "state": {
+            "progress": "half",
+            "temp:scratch": "[REDACTED]"
+          },
+          "user_id": "user-1"
+        }
+      },
+      "content": {
+        "args": {
+          "hint": "Approve?"
+        },
+        "tool": "adk_request_confirmation",
+        "tool_id": "confirm-1"
+      },
+      "event_id": "event-9",
+      "event_type": "HITL_CONFIRMATION_REQUEST",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-1",
+      "session_id": "session-1",
+      "span_id": "span-2",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "signal_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "signal_agent",
+          "event_id": "event-10",
+          "function_call_id": "input-1",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "source_event_id": "source-event-4",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "signal_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "state": {
+            "progress": "half",
+            "temp:scratch": "[REDACTED]"
+          },
+          "user_id": "user-1"
+        }
+      },
+      "content": {
+        "args": {
+          "message": "Your name?"
+        },
+        "tool": "adk_request_input",
+        "tool_id": "input-1"
+      },
+      "event_id": "event-10",
+      "event_type": "HITL_INPUT_REQUEST",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-1",
+      "session_id": "session-1",
+      "span_id": "span-2",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "signal_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "signal_agent",
+          "event_id": "event-11",
+          "function_call_id": "cred-1",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "source_event_id": "source-event-5",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "signal_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "state": {
+            "progress": "half",
+            "temp:scratch": "[REDACTED]"
+          },
+          "user_id": "user-1"
+        }
+      },
+      "content": {
+        "result": {
+          "token": "[REDACTED]"
+        },
+        "tool": "adk_request_credential",
+        "tool_id": "cred-1"
+      },
+      "event_id": "event-11",
+      "event_type": "HITL_CREDENTIAL_REQUEST_COMPLETED",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-1",
+      "session_id": "session-1",
+      "span_id": "span-2",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "signal_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "signal_agent",
+          "event_id": "event-12",
+          "function_call_id": "confirm-1",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "source_event_id": "source-event-5",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "signal_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "state": {
+            "progress": "half",
+            "temp:scratch": "[REDACTED]"
+          },
+          "user_id": "user-1"
+        }
+      },
+      "content": {
+        "result": {
+          "confirmed": true
+        },
+        "tool": "adk_request_confirmation",
+        "tool_id": "confirm-1"
+      },
+      "event_id": "event-12",
+      "event_type": "HITL_CONFIRMATION_REQUEST_COMPLETED",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-1",
+      "session_id": "session-1",
+      "span_id": "span-2",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "signal_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "signal_agent",
+          "event_id": "event-13",
+          "function_call_id": "input-1",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "source_event_id": "source-event-5",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "signal_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "state": {
+            "progress": "half",
+            "temp:scratch": "[REDACTED]"
+          },
+          "user_id": "user-1"
+        }
+      },
+      "content": {
+        "result": {
+          "name": "Ada"
+        },
+        "tool": "adk_request_input",
+        "tool_id": "input-1"
+      },
+      "event_id": "event-13",
+      "event_type": "HITL_INPUT_REQUEST_COMPLETED",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-1",
+      "session_id": "session-1",
+      "span_id": "span-2",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "signal_agent",
+      "attributes": {
+        "a2a_metadata": {
+          "a2a:request": {
+            "method": "message/send"
+          },
+          "a2a:response": {
+            "status": "completed"
+          }
+        },
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "signal_agent",
+          "event_id": "event-14",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "source_event_id": "source-event-6",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "signal_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "state": {
+            "progress": "half",
+            "temp:scratch": "[REDACTED]"
+          },
+          "user_id": "user-1"
+        }
+      },
+      "content": {
+        "status": "completed"
+      },
+      "event_id": "event-14",
+      "event_type": "A2A_INTERACTION",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-1",
+      "session_id": "session-1",
+      "span_id": "span-2",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "signal_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "signal_agent",
+          "event_id": "event-15",
+          "invocation_id": "invocation-1",
+          "node": {
+            "parent_run_id": null,
+            "path": "signal_agent/step@1",
+            "run_id": "1"
+          },
+          "schema_version": "1",
+          "session_id": "session-1",
+          "source_event_id": "source-event-7",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "signal_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "state": {
+            "progress": "half",
+            "temp:scratch": "[REDACTED]"
+          },
+          "user_id": "user-1"
+        }
+      },
+      "content": {
+        "error_code": "STEP_FAILED",
+        "node_path": "signal_agent/step@1"
+      },
+      "error_message": "step failed",
+      "event_id": "event-15",
+      "event_type": "NODE_ERROR",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-1",
+      "session_id": "session-1",
+      "span_id": "span-2",
+      "status": "ERROR",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "signal_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "signal_agent",
+          "event_id": "event-16",
+          "invocation_id": "invocation-1",
+          "node": {
+            "parent_run_id": null,
+            "path": "signal_agent/step@1",
+            "run_id": "1"
+          },
+          "schema_version": "1",
+          "session_id": "session-1",
+          "source_event_id": "source-event-7",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "signal_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "state": {
+            "progress": "half",
+            "temp:scratch": "[REDACTED]"
+          },
+          "user_id": "user-1"
+        }
+      },
+      "content": {
+        "result": 42
+      },
+      "event_id": "event-16",
+      "event_type": "NODE_OUTPUT",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-1",
+      "session_id": "session-1",
+      "span_id": "span-2",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "signal_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "signal_agent",
+          "event_id": "event-17",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "source_event_id": "source-event-8",
+          "user_id": "user-1"
+        },
+        "event_author": "signal_agent",
+        "root_agent_name": "signal_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "state": {
+            "progress": "half",
+            "temp:scratch": "[REDACTED]"
+          },
+          "user_id": "user-1"
+        },
+        "source_event_author": "signal_agent",
+        "source_event_id": "source-event-8"
+      },
+      "content": {
+        "response": "text: 'All signals sent.'"
+      },
+      "content_parts": [
+        {
+          "mime_type": "text/plain",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "All signals sent."
+        }
+      ],
+      "event_id": "event-17",
+      "event_type": "AGENT_RESPONSE",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-1",
+      "session_id": "session-1",
+      "span_id": "span-2",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "signal_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "signal_agent",
+          "event_id": "event-18",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "signal_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "state": {
+            "progress": "half",
+            "temp:scratch": "[REDACTED]"
+          },
+          "user_id": "user-1"
+        }
+      },
+      "event_id": "event-18",
+      "event_type": "AGENT_COMPLETED",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "latency_ms": {
+        "total_ms": "<ms>"
+      },
+      "parent_span_id": "span-1",
+      "session_id": "session-1",
+      "span_id": "span-2",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "signal_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "signal_agent",
+          "event_id": "event-19",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "signal_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "state": {
+            "progress": "half",
+            "temp:scratch": "[REDACTED]"
+          },
+          "user_id": "user-1"
+        }
+      },
+      "event_id": "event-19",
+      "event_type": "INVOCATION_COMPLETED",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "latency_ms": {
+        "total_ms": "<ms>"
+      },
+      "session_id": "session-1",
+      "span_id": "span-1",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    }
+  ],
+  "scenario": "session_signals",
+  "session_id": "session-1",
+  "turns": [
+    "Emit the signals."
+  ],
+  "user_id": "user-1"
+}

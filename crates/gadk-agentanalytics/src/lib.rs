@@ -13,30 +13,52 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! gadk-agentanalytics (sub-projects 7b-1 and 7b-2): a port of ADK-Go's `plugin/agentanalytics`
-//! (the BigQuery Agent Analytics plugin) without the plugin itself. 7b-1: configuration
-//! ([`Config`]), the events table's BigQuery and Arrow schemas, table creation and additive
-//! schema upgrade, the per-event-type analytics views, the content formatter and redaction, and
-//! a BigQuery REST admin client. 7b-2: rows ([`row`]), the generated BigQuery Storage Write API
-//! ([`storagepb`]), the gapic write client, Arrow record batches and the stream writer
-//! ([`write`]), the [`BatchProcessor`] ([`batch_processor`]) and the GCS content offloader with
-//! its upload orchestration ([`offload`]). The plugin, events and trace manager (7b-3) build on
-//! it.
+//! gadk-agentanalytics (sub-projects 7b-1, 7b-2 and 7b-3a): a port of ADK-Go's
+//! `plugin/agentanalytics`, the BigQuery Agent Analytics plugin.
 //!
-//! Exported Go entry points: `DefaultConfig` ([`Config::default`]), `EventsSchema`
-//! ([`events_schema`]), `ArrowSchema` ([`arrow_schema`]), `SerializedArrowSchema`
-//! ([`serialized_arrow_schema`]), `Config.ViewDefinitions` ([`Config::view_definitions`]),
-//! `FormatContentParts` ([`format_content_parts`]) and `SmartTruncate` ([`smart_truncate`]).
-//! Table creation and schema upgrade are [`ensure_table_and_schema`] over [`TableOps`]; view
-//! creation is [`sync_analytics_views`] over a [`BigQueryViewRunner`]. The plugin's unexported
-//! transports are public here for 7b-3's constructors: [`WriteClient`] (Go's gapic
+//! The plugin ([`plugin`], 7b-3a) is a [`gadk_agent::Plugin`]: add it to a runner's plugin list
+//! and every user message, invocation, agent, model call, tool call and session event becomes a
+//! row of the BigQuery events table, written through the BigQuery Storage Write API.
+//! [`new_bigquery_agent_analytics_plugin`] (Go `NewBigQueryAgentAnalyticsPlugin`) takes a
+//! project, dataset and table with the default [`Config`];
+//! [`new_bigquery_agent_analytics_plugin_with_config`] a whole [`Config`] (a disabled config
+//! gives Go's disabled plugin, which only closes); and
+//! [`new_bigquery_agent_analytics_plugin_with_clients`] caller-made clients (a
+//! [`BigQueryClient`] for table setup and views, a [`WriteClient`] for the rows). Construction
+//! validates the config with Go's texts, creates or upgrades the table and starts the views in
+//! the background. [`as_bigquery_agent_analytics_plugin`] recovers a constructed plugin's helpers
+//! ([`BigQueryAgentAnalyticsPlugin::drop_stats`],
+//! [`BigQueryAgentAnalyticsPlugin::sync_views`]); the plugin's `close` (run by the runner's
+//! plugin manager) stops the views, drains the batch processor on a task of its own and closes
+//! the clients, once. Callbacks never fail a run: a panic while building a row is recovered and
+//! counted as a dropped row. Rows carry trace and span IDs from the crate's trace manager (Go's
+//! `trace_manager.go` without goroutine attribution: workflow-node and parallel-branch
+//! attribution is 7b-3b) and the session-event signal rows of Go's `events.go`.
+//!
+//! The foundations (7b-1): configuration ([`Config`]), the events table's BigQuery and Arrow
+//! schemas, table creation and additive schema upgrade, the per-event-type analytics views, the
+//! content formatter and redaction, and a BigQuery REST admin client. The transports (7b-2): rows
+//! ([`row`]), the generated BigQuery Storage Write API ([`storagepb`]), the gapic write client,
+//! Arrow record batches and the stream writer ([`write`]), the [`BatchProcessor`]
+//! ([`batch_processor`]) and the GCS content offloader with its upload orchestration
+//! ([`offload`]).
+//!
+//! Exported Go entry points: the plugin constructors above, `AsBigQueryAgentAnalyticsPlugin`,
+//! `DefaultConfig` ([`Config::default`]), `EventsSchema` ([`events_schema`]), `ArrowSchema`
+//! ([`arrow_schema`]), `SerializedArrowSchema` ([`serialized_arrow_schema`]),
+//! `Config.ViewDefinitions` ([`Config::view_definitions`]), `FormatContentParts`
+//! ([`format_content_parts`]), `SmartTruncate` ([`smart_truncate`]) and the `Event*` row types
+//! ([`event_types`]). Table creation and schema upgrade are [`ensure_table_and_schema`] over
+//! [`TableOps`]; view creation is [`sync_analytics_views`] over a [`BigQueryViewRunner`]. The
+//! plugin's unexported transports are public here: [`WriteClient`] (Go's gapic
 //! `BigQueryWriteClient`), [`BatchProcessor`] and [`GcsOffloader`].
 //!
 //! The `gadk` façade re-exports this crate as `gadk::agentanalytics` (feature `agentanalytics`).
 //! Feature `testutil` adds the in-memory fakes of `bigquery::fake`, the in-process BigQuery
-//! Write server `testutil::fake_write_server` and the probe's row specs. Behavior matches
-//! ADK-Go except for the divergences listed in `docs/parity/7b-1.md` and `docs/parity/7b-2.md`,
-//! each annotated where it lives.
+//! Write server `testutil::fake_write_server`, the Arrow row decoder `testutil::arrow_rows` and
+//! the probe's row specs. Behavior matches ADK-Go except for the divergences listed in
+//! `docs/parity/7b-1.md`, `docs/parity/7b-2.md` and `docs/parity/7b-3a.md`, each annotated where
+//! it lives.
 
 #![forbid(unsafe_code)]
 
@@ -47,6 +69,7 @@ pub mod context;
 pub mod error;
 pub mod event_types;
 pub mod offload;
+pub mod plugin;
 pub mod row;
 pub mod schema;
 pub mod schema_upgrade;
@@ -55,18 +78,15 @@ pub mod views;
 pub mod write;
 
 pub(crate) mod crc32c;
+pub(crate) mod events;
 pub(crate) mod gax;
+pub(crate) mod trace;
 pub(crate) mod validate;
 
 #[cfg(any(test, feature = "testutil"))]
 pub mod testutil;
 
-// The plugin-side entry points of `formatter` and `redaction` (content summaries, value
-// sanitizing, `apply_content_formatter`, the custom-metadata filter) are consumed by 7b-3
-// (events, plugin); until then only tests reach them.
-#[allow(dead_code)]
 pub(crate) mod formatter;
-#[allow(dead_code)]
 pub(crate) mod redaction;
 
 #[cfg(test)]
@@ -84,6 +104,11 @@ pub use error::{ApiError, BigQueryError, BoxError, Code, Error, ErrorItem};
 pub use event_types::*;
 pub use formatter::{format_content_parts, smart_truncate};
 pub use offload::gcs::GcsOffloader;
+pub use plugin::{
+    BigQueryAgentAnalyticsPlugin, as_bigquery_agent_analytics_plugin,
+    new_bigquery_agent_analytics_plugin, new_bigquery_agent_analytics_plugin_with_clients,
+    new_bigquery_agent_analytics_plugin_with_config,
+};
 pub use row::{QueuedRow, Row, RowExt, RowValue};
 pub use schema::{
     FieldSchema, Schema, SchemaMismatchError, TableSchema, arrow_schema, events_schema,

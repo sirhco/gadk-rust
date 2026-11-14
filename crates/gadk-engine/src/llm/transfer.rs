@@ -23,6 +23,7 @@ use futures::future::BoxFuture;
 use gadk_agent::tool_util::append_instructions;
 use gadk_agent::{
     Agent, AgentError, Context, InvocationContext, Mode, RunnableTool, Tool, ToolError,
+    ToolOriginKind,
 };
 use gadk_genai::{FunctionDeclaration, Schema, Tool as GenaiTool, Type};
 use gadk_model::LlmRequest;
@@ -240,6 +241,12 @@ impl Tool for TransferToAgentTool {
         })
     }
 
+    /// Go's `supportedAgents` field, which the analytics plugin reads by reflection
+    /// (`plugin/agentanalytics/events.go` `findAgentA2AByName`).
+    fn origin_agents(&self) -> Vec<Arc<dyn Agent>> {
+        self.supported_agents.clone()
+    }
+
     /// Port of agent_transfer.go:165 ProcessRequest (= appendTools). The flow never calls it
     /// (the processor appends the tool itself, and toolPreprocess walks only the agent's tools);
     /// it is ported so TestAgentTransfer_ProcessRequest is a straight port. The error text is
@@ -251,6 +258,12 @@ impl Tool for TransferToAgentTool {
 
     fn as_runnable(&self) -> Option<&dyn RunnableTool> {
         Some(self)
+    }
+
+    /// Go classifies `llminternal.TransferToAgentTool` as `TRANSFER_AGENT`; the analytics plugin
+    /// turns it into `TRANSFER_A2A` from the called target agent, so no agent is reported here.
+    fn origin_kind(&self) -> ToolOriginKind {
+        ToolOriginKind::TransferAgent
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -386,6 +399,20 @@ mod tests {
             instructions: String::new(),
             supported_agents: targets,
         }
+    }
+
+    #[test]
+    fn transfer_tool_is_a_transfer_agent_tool() {
+        let t: Arc<dyn Tool> = Arc::new(tool(vec![llm("x", "", Mode::Unset, vec![])]));
+        assert_eq!(t.origin_kind(), ToolOriginKind::TransferAgent);
+        assert!(t.origin_agent().is_none());
+        assert!(t.unwrap().is_none());
+        let names: Vec<String> = t
+            .origin_agents()
+            .iter()
+            .map(|a| a.name().to_owned())
+            .collect();
+        assert_eq!(names, ["x"]);
     }
 
     #[test]

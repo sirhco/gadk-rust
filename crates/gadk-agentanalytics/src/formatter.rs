@@ -37,19 +37,16 @@ mod sanitize;
 mod summary;
 
 pub use parts::format_content_parts;
-// Crate-internal entry points; those still unused are consumed by 7b-3 (events, plugin).
-#[allow(unused_imports)] // consumer: 7b-3 (events, plugin)
-pub(crate) use parts::{
-    format_content_parts_with, format_part_attributes, normalize_function_response, or_unknown,
-    sanitize_and_truncate_text,
-};
+pub(crate) use parts::{format_content_parts_with, sanitize_and_truncate_text};
+#[cfg(test)]
+pub(crate) use parts::{format_part_attributes, normalize_function_response};
+#[cfg(test)]
+pub(crate) use sanitize::JSON_NUMBER_TOKEN;
 pub use sanitize::smart_truncate;
-#[allow(unused_imports)] // consumer: 7b-3 (events, plugin)
-pub(crate) use sanitize::{
-    JSON_NUMBER_TOKEN, is_json_number, sanitize_value, smart_truncate_with, truncate_string,
-};
-#[allow(unused_imports)] // consumer: 7b-3 (events, plugin)
-pub(crate) use summary::{content_summary, format_response_content};
+pub(crate) use sanitize::{sanitize_value, smart_truncate_with, truncate_string};
+#[cfg(test)]
+pub(crate) use summary::content_summary;
+pub(crate) use summary::format_response_content;
 
 /// Go `truncationSuffix`.
 pub(crate) const TRUNCATION_SUFFIX: &str = "...[TRUNCATED]";

@@ -176,6 +176,12 @@ impl Tool for ConfirmationTool {
         self.streaming.then_some(self as &dyn StreamingTool)
     }
 
+    /// Go's analytics plugin unwraps `confirmationTool` through its inner field
+    /// (`plugin/agentanalytics/events.go` `unwrapToolValue`).
+    fn unwrap(&self) -> Option<Arc<dyn Tool>> {
+        Some(self.inner.clone())
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -268,4 +274,91 @@ fn confirm_call(
     )?;
     ctx.update_actions(|a| a.skip_summarization = true);
     Err(ToolError::ConfirmationRequired)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use std::any::Any;
+    use std::sync::Arc;
+
+    use async_trait::async_trait;
+    use serde_json::{Map, Value};
+
+    use super::with_confirmation;
+    use crate::context::{Context, ReadonlyContext};
+    use crate::error::ToolError;
+    use crate::tool::{RunnableTool, Tool, ToolOriginKind, Toolset};
+
+    /// A runnable tool reporting `Local`.
+    struct Local;
+
+    #[async_trait]
+    impl Tool for Local {
+        fn name(&self) -> &str {
+            "local"
+        }
+        fn description(&self) -> &str {
+            ""
+        }
+        fn as_runnable(&self) -> Option<&dyn RunnableTool> {
+            Some(self)
+        }
+        fn origin_kind(&self) -> ToolOriginKind {
+            ToolOriginKind::Local
+        }
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+
+    #[async_trait]
+    impl RunnableTool for Local {
+        async fn run(&self, _ctx: Context, _args: Value) -> Result<Map<String, Value>, ToolError> {
+            Ok(Map::new())
+        }
+    }
+
+    struct One(Arc<dyn Tool>);
+
+    #[async_trait]
+    impl Toolset for One {
+        fn name(&self) -> &str {
+            "one"
+        }
+        async fn tools(&self, _ctx: &ReadonlyContext) -> Result<Vec<Arc<dyn Tool>>, ToolError> {
+            Ok(vec![self.0.clone()])
+        }
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+
+    #[test]
+    fn origin_defaults() {
+        let t = Local;
+        assert!(t.unwrap().is_none());
+        assert!(t.origin_agent().is_none());
+        assert!(t.origin_agents().is_empty());
+        assert_eq!(t.origin_kind(), ToolOriginKind::Local);
+        assert_eq!(ToolOriginKind::default(), ToolOriginKind::Unknown);
+    }
+
+    #[tokio::test]
+    async fn confirmation_wrapper_unwraps_to_the_inner_tool() {
+        let inner: Arc<dyn Tool> = Arc::new(Local);
+        let ts = with_confirmation(Arc::new(One(inner.clone())), true, None);
+        let ctx = Context::builder().build();
+        let wrapped = ts.tools(ctx.as_readonly()).await.unwrap().remove(0);
+        assert!(!Arc::ptr_eq(&wrapped, &inner), "the tool is wrapped");
+        assert_eq!(
+            wrapped.origin_kind(),
+            ToolOriginKind::Unknown,
+            "the wrapper does not forward its origin; consumers unwrap"
+        );
+        let unwrapped = wrapped.unwrap().expect("wrapper unwraps");
+        assert!(Arc::ptr_eq(&unwrapped, &inner));
+        assert_eq!(unwrapped.origin_kind(), ToolOriginKind::Local);
+        assert!(unwrapped.unwrap().is_none());
+    }
 }

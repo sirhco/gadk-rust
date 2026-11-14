@@ -364,3 +364,110 @@ async fn runner_rejects_non_chat_root(#[case] mode: Mode, #[case] want: Option<&
         None => assert!(items.iter().all(|i| i.is_ok())),
     }
 }
+
+/// How a consumer stops reading a run before it ends.
+#[derive(Clone, Copy, Debug)]
+enum Stop {
+    /// Drops the stream right after an event (Go: `break` at a yield).
+    AtEvent,
+    /// Drops the stream right after an error (Go: `break` at a yield).
+    AtError,
+    /// Drops the stream while the agent is suspended in an await (Go: the caller cancels).
+    MidAwait,
+}
+
+/// Go runner.go `defer pluginManager.RunAfterRunCallback(ctx)` runs on the caller's context: a
+/// consumer that stops at a yield leaves it live, so the after-run callbacks see an uncancelled
+/// invocation token (cancelled only once they return); a drop inside an await is Go's caller
+/// cancelling, which the callbacks see.
+#[rstest]
+#[case::agent_path_event("custom", Stop::AtEvent, false)]
+#[case::agent_path_error("custom", Stop::AtError, false)]
+#[case::agent_path_mid_await("custom", Stop::MidAwait, true)]
+#[case::node_path_event("llm", Stop::AtEvent, false)]
+#[case::node_path_error("llm", Stop::AtError, false)]
+#[tokio::test]
+async fn after_run_on_consumer_drop_sees_go_context(
+    #[case] kind: &str,
+    #[case] stop: Stop,
+    #[case] want_cancelled: bool,
+) {
+    let root = if kind == "custom" {
+        gadk_agent::new_agent(AgentConfig {
+            name: "a".into(),
+            run: Some(Arc::new(move |ctx: InvocationContext| -> EventStream {
+                let mut ev = Event::new(ctx.platform(), ctx.invocation_id());
+                ev.response.content = Some(Content::from_text("one", ROLE_MODEL));
+                Box::pin(async_stream::stream! {
+                    match stop {
+                        Stop::AtError => yield Err(gadk_agent::AgentError::other("boom")),
+                        _ => yield Ok(ev),
+                    }
+                    std::future::pending::<()>().await;
+                })
+            })),
+            ..Default::default()
+        })
+        .unwrap()
+    } else {
+        let response = match stop {
+            Stop::AtError => Err(gadk_model::ModelError::Other("boom".into())),
+            _ => text("one"),
+        };
+        let model: Arc<dyn Llm> = MockModel::new(vec![response]);
+        llm_agent::new(LlmAgentConfig {
+            name: "a".into(),
+            model: Some(model),
+            ..Default::default()
+        })
+        .unwrap()
+    };
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let probe = Plugin::new(gadk_agent::PluginConfig {
+        name: "probe".into(),
+        after_run_callback: Some(Arc::new(move |ctx: InvocationContext| {
+            let token = ctx.cancellation_token().clone();
+            let _ = tx.send((token.is_cancelled(), token));
+            Box::pin(async {})
+        })),
+        ..Default::default()
+    });
+    let runner = Runner::new(RunnerConfig {
+        app_name: "app".into(),
+        agent: root,
+        session_service: Arc::new(InMemorySessionService::new()),
+        artifact_service: None,
+        memory_service: None,
+        plugin_config: PluginConfig {
+            plugins: vec![probe],
+            close_timeout: Duration::from_secs(1),
+        },
+        auto_create_session: true,
+        platform: Platform::default(),
+        compaction: None,
+    })
+    .unwrap();
+    let mut stream = runner.run(
+        "u",
+        "s",
+        Some(Content::from_text("hi", ROLE_USER)),
+        RunConfig::default(),
+        RunOptions::default(),
+    );
+    let first = stream.next().await.expect("the run yields an item");
+    assert_eq!(first.is_err(), matches!(stop, Stop::AtError), "{first:?}");
+    if matches!(stop, Stop::MidAwait) {
+        // Resume the stream into the agent's pending await, then abandon it there.
+        let pending = tokio::time::timeout(Duration::from_millis(50), stream.next()).await;
+        assert!(pending.is_err(), "the agent never ends: {pending:?}");
+    }
+    drop(stream);
+    let (cancelled, token) = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+        .await
+        .expect("after-run callbacks ran")
+        .expect("after-run callbacks ran");
+    assert_eq!(cancelled, want_cancelled, "token cancelled in after-run");
+    tokio::time::timeout(Duration::from_secs(5), token.cancelled())
+        .await
+        .expect("the invocation token is cancelled once the after-run callbacks return");
+}

@@ -31,6 +31,7 @@ use crate::redaction::COLUMN_CONTENT;
 /// `content.text_summary` — the text parts, each truncated, and descriptions of function
 /// responses and code parts, joined by `" | "` and truncated again. Function calls and inline
 /// or file data are left out.
+#[cfg(test)]
 pub(crate) fn content_summary(
     content: Option<&Content>,
     max_length: i64,

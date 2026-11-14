@@ -114,7 +114,8 @@ ALLOWED = {
     "gadk-configurable": {"gadk-agent", "gadk-engine", "gadk-genai", "gadk-model", "gadk-gemini",
                           "gadk-goyaml", "gadk-launcher", "gadk-mcp", "gadk-platform",
                           "gadk-session", "gadk-tools"},
-    "gadk-agentanalytics": {"gadk-genai", "gadk-model", "gadk-platform", "gadk-session"},
+    "gadk-agentanalytics": {"gadk-agent", "gadk-engine", "gadk-genai", "gadk-model", "gadk-platform",
+                            "gadk-session"},
     "gadk": {"gadk-genai", "gadk-platform", "gadk-model", "gadk-session", "gadk-gemini",
              "gadk-agent", "gadk-engine", "gadk-tools", "gadk-auth", "gadk-mcp", "gadk-artifact",
              "gadk-memory", "gadk-anthropic", "gadk-openai", "gadk-session-database",
@@ -128,7 +129,8 @@ OPTIONAL = {("gadk-engine", "gadk-gemini"), ("gadk-engine", "gadk-httprr"), ("ga
             ("gadk", "gadk-telemetry"), ("gadk", "gadk-agentanalytics")}
 FACADE = "gadk"  # no crate may dev-depend on the façade
 ENGINE_DEPENDENTS = ("gadk", "gadk-tools", "gadk-server", "gadk-a2a", "gadk-launcher",
-                     "gadk-agentregistry", "gadk-telemetry", "gadk-configurable")  # the only crates that may depend on gadk-engine
+                     "gadk-agentregistry", "gadk-telemetry", "gadk-configurable",
+                     "gadk-agentanalytics")  # the only crates that may depend on gadk-engine
 TOOLS_DEPENDENT = "gadk"  # the only crate that may depend on gadk-tools
 OPENAI_DEPENDENT = "gadk"  # the only crate that may depend on gadk-openai (3b)
 LICENSE_OVERRIDES = {"gadk-goyaml": "Apache-2.0 AND MIT"}  # 6c-1: libyaml-derived files stay MIT
@@ -185,7 +187,7 @@ def check(repo):
             if d == name:
                 continue
             if d == "gadk-engine" and name not in ENGINE_DEPENDENTS:
-                errs.append(f"{rel}: only gadk, gadk-tools, gadk-server, gadk-a2a, gadk-launcher, gadk-agentregistry, gadk-telemetry and gadk-configurable may depend on gadk-engine (dev-dependency)")
+                errs.append(f"{rel}: only gadk, gadk-tools, gadk-server, gadk-a2a, gadk-launcher, gadk-agentregistry, gadk-telemetry, gadk-configurable and gadk-agentanalytics may depend on gadk-engine (dev-dependency)")
             elif d == "gadk-tools" and name != TOOLS_DEPENDENT:
                 errs.append(f"{rel}: only {TOOLS_DEPENDENT} may depend on gadk-tools (dev-dependency)")
             elif d == "gadk-openai" and name != OPENAI_DEPENDENT:

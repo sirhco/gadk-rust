@@ -40,6 +40,14 @@ pub fn agent_tools(agent: &dyn Agent) -> Option<Vec<Arc<dyn Tool>>> {
     state::reveal(agent).map(|s| s.tools())
 }
 
+/// The configuration an LLM agent was built from (Go `llminternal.Reveal(agent)`, whose fields
+/// the analytics plugin reads); `None` for any other agent. Engine-installed additions (task
+/// tools, the appended instruction suffix) are not in it: see [`agent_tools`] and
+/// [`agent_instructions`].
+pub fn llm_agent_config(agent: &dyn Agent) -> Option<&LlmAgentConfig> {
+    state::reveal(agent).map(|s| &s.cfg)
+}
+
 /// The instructions of an LLM agent (Go `llminternal.Reveal(agent).{Instruction,
 /// GlobalInstruction}`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -94,6 +102,36 @@ mod tests {
         })
         .unwrap();
         assert!(agent_tools(&*seq).is_none());
+    }
+
+    #[test]
+    fn llm_agent_config_returns_an_llm_agents_config_and_none_otherwise() {
+        let llm = agent::new(LlmAgentConfig {
+            name: "llm".into(),
+            description: "Answers.".into(),
+            instruction: "You answer questions.".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        let cfg = llm_agent_config(&*llm).unwrap();
+        assert_eq!(
+            (
+                cfg.name.as_str(),
+                cfg.description.as_str(),
+                cfg.instruction.as_str()
+            ),
+            ("llm", "Answers.", "You answer questions.")
+        );
+
+        let seq = sequential_agent::new(SequentialAgentConfig {
+            agent: AgentConfig {
+                name: "seq".into(),
+                sub_agents: vec![llm],
+                ..Default::default()
+            },
+        })
+        .unwrap();
+        assert!(llm_agent_config(&*seq).is_none());
     }
 
     #[test]

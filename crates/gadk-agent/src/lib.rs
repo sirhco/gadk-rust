@@ -43,7 +43,7 @@ pub use agent::{
 };
 pub use callback::*;
 pub use context::{
-    CancelGuard, Context, ContextBuilder, ContextDelta, Identity, InvocationContext,
+    ActivationId, CancelGuard, Context, ContextBuilder, ContextDelta, Identity, InvocationContext,
     ReadonlyContext,
 };
 pub use error::{AgentError, EventStream, SharedToolError, ToolError};
@@ -59,7 +59,9 @@ pub use run_config::{RunConfig, StreamingMode, run_limits};
 pub use scheduler::DynamicSubScheduler;
 pub use services::{ArtifactBacking, Artifacts, Memory};
 pub use state::{AgentState, AgentType};
-pub use tool::{ConfirmationProvider, RunnableTool, StreamingTool, Tool, ToolPredicate, Toolset};
+pub use tool::{
+    ConfirmationProvider, RunnableTool, StreamingTool, Tool, ToolOriginKind, ToolPredicate, Toolset,
+};
 pub use tool_util::{
     REQUEST_CONFIRMATION_FUNCTION_CALL_NAME, append_instructions, original_call_from, pack_tool,
     tool_from_request,
