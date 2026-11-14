@@ -339,6 +339,7 @@ mod tests {
         let t = Local;
         assert!(t.unwrap().is_none());
         assert!(t.origin_agent().is_none());
+        assert!(t.origin_agents().is_empty());
         assert_eq!(t.origin_kind(), ToolOriginKind::Local);
         assert_eq!(ToolOriginKind::default(), ToolOriginKind::Unknown);
     }

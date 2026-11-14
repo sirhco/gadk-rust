@@ -37,14 +37,14 @@ use gadk_platform::env::{EnvProvider, ProcessEnv};
 use google_cloud_auth::credentials::Credentials;
 use http::header::{CONTENT_TYPE, IF_MATCH, USER_AGENT};
 use http::{HeaderMap, HeaderValue, Method, Uri};
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
 use crate::config::ClientOptions;
 use crate::context::{Context, ContextError};
 use crate::error::{BigQueryError, Error};
 use crate::gax::{Backoff, Pauses, random_id, sleep, wrapped_call_err};
-use crate::schema::{Schema, TableSchema};
+use crate::schema::{Schema, TableSchema, nullable};
 use crate::schema_upgrade::{
     Clustering, DAY_PARTITIONING_TYPE, TableMetadata, TableMetadataOps, TableMetadataUpdate,
     TimePartitioning,
@@ -679,15 +679,6 @@ fn time_partitioning_value(p: &TimePartitioning) -> Value {
         m.insert("requirePartitionFilter".to_owned(), json!(true));
     }
     Value::Object(m)
-}
-
-/// A JSON `null` (or a missing field) as the type's zero value, as Go's decoder leaves it.
-fn nullable<'de, D, T>(d: D) -> Result<T, D::Error>
-where
-    D: Deserializer<'de>,
-    T: Deserialize<'de> + Default,
-{
-    Ok(Option::<T>::deserialize(d)?.unwrap_or_default())
 }
 
 /// The `tables` resource fields Go's `bqToTableMetadata` keeps that [`TableMetadata`] has.

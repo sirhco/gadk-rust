@@ -106,12 +106,26 @@ pub struct FieldSchema {
     pub timestamp_precision: i64,
 }
 
-/// A REST `TableSchema` (`{"fields": [...]}`).
+/// A REST `TableSchema` (`{"fields": [...]}`); `"fields": null` reads as no fields (Go's nil
+/// slice).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TableSchema {
     /// The fields.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub fields: Schema,
+}
+
+/// A JSON `null` (or a missing field) as the type's zero value, as Go's decoder leaves it.
+pub(crate) fn nullable<'de, D, T>(d: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    Ok(Option::<T>::deserialize(d)?.unwrap_or_default())
 }
 
 /// Go's `json:",string"` int64 encoding of the REST client: a JSON string; reads a string or a
@@ -207,6 +221,7 @@ struct WireField {
     collation: String,
     default_value_expression: String,
     description: String,
+    #[serde(deserialize_with = "nullable")]
     fields: Vec<FieldSchema>,
     #[serde(with = "int64_string")]
     max_length: i64,
@@ -1043,5 +1058,16 @@ mod tests {
         assert_eq!(merged.len(), 17);
         assert!(!merged[0].required);
         assert!(merged[11].repeated);
+    }
+
+    #[test]
+    fn null_fields_read_as_no_fields_like_go() {
+        let got: TableSchema = serde_json::from_value(json!({"fields": null})).unwrap();
+        assert_eq!(got, TableSchema::default());
+        let got: TableSchema = serde_json::from_value(json!({
+            "fields": [{"name": "r", "type": "RECORD", "fields": null}]
+        }))
+        .unwrap();
+        assert_eq!(got.fields, vec![field("r", "RECORD")]);
     }
 }

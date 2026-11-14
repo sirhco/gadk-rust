@@ -25,7 +25,7 @@ use futures::FutureExt;
 use gadk_agent::{Agent, AgentError, ContextDelta, InvocationContext, go_quote};
 use gadk_session::compaction::{CompactionError, Config, LlmSummarizer, LlmSummarizerConfig};
 use gadk_session::{Event, Session, SessionService};
-use tokio_util::sync::CancellationToken;
+use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::Instrument;
 
 use super::RunnerInner;
@@ -307,6 +307,13 @@ async fn repair_after_append(
 ///   re-derived with a fresh cancellation token (Go's `break` leaves the caller's context
 ///   uncancelled), inside the span that was current when the guard was made. Errors are logged.
 ///
+/// The guard also owns the invocation token's cancel-on-drop ([`InvocationGuard::cancel_on_drop`]).
+/// A drop inside an await cancels it at once (Go's caller cancelled its context, and the
+/// after-run callbacks see that). A drop at a yield (Go's `break`, after which the deferred
+/// `RunAfterRunCallback` runs on the caller's still-live context) cancels it only once the
+/// spawned after-run callbacks return, so they, and every span record holding the token, see
+/// a live context, as in Go.
+///
 /// Compaction is skipped once the invocation yielded an error ([`InvocationGuard::mark_failed`]),
 /// and when the stream is dropped while suspended inside an await rather than at a yield
 /// ([`InvocationGuard::at_yield`]).
@@ -322,6 +329,8 @@ pub(crate) struct InvocationGuard {
     yielding: bool,
     after_run_pending: bool,
     compaction_pending: bool,
+    /// Cancels the invocation token when dropped (see [`InvocationGuard::cancel_on_drop`]).
+    cancel_on_drop: Option<DropGuard>,
     span: tracing::Span,
 }
 
@@ -340,8 +349,15 @@ impl InvocationGuard {
             yielding: false,
             after_run_pending: false,
             compaction_pending: true,
+            cancel_on_drop: None,
             span: tracing::Span::current(),
         }
+    }
+
+    /// Hands the invocation token's cancel-on-drop to the guard, which cancels it when the
+    /// guard is dropped, after the after-run callbacks when the stream was dropped at a yield.
+    pub(crate) fn cancel_on_drop(&mut self, guard: DropGuard) {
+        self.cancel_on_drop = Some(guard);
     }
 
     /// Go's `defer pluginManager.RunAfterRunCallback(ctx)`.
@@ -354,9 +370,10 @@ impl InvocationGuard {
         self.failed = true;
     }
 
-    /// Brackets every `yield` of an event: `true` immediately before it, `false` immediately
-    /// after the stream resumes. A consumer can only stop early at a yield (Go's `break`, after
-    /// which the deferred compaction runs on the caller's still-live context). A stream dropped
+    /// Brackets every `yield` (of an event or an error): `true` immediately before it, `false`
+    /// immediately after the stream resumes. A consumer can only stop early at a yield (Go's
+    /// `break`, after which the deferred after-run callbacks and compaction run on the caller's
+    /// still-live context; an error yield has already skipped compaction). A stream dropped
     /// anywhere else was dropped inside an await (a pending model call or append), which is
     /// Go's cancelled context: the model call returns `ctx.Err()` and sets `invocationFailed`,
     /// or `compactAfterInvocation`'s `ctx.Err() != nil` check (runner.go) declines. So `Drop`
@@ -415,12 +432,21 @@ impl Drop for InvocationGuard {
         let Ok(handle) = tokio::runtime::Handle::try_current() else {
             return;
         };
+        // At a yield the token outlives the after-run callbacks (the task drops the guard after
+        // them, or when it is itself dropped unrun); inside an await the field's drop (after
+        // this body) cancels it before the spawned task runs.
+        let cancel_later = if self.yielding {
+            self.cancel_on_drop.take()
+        } else {
+            None
+        };
         let (inner, stored, ctx) = (self.inner.clone(), self.stored.clone(), self.ctx.clone());
         handle.spawn(
             async move {
                 if after_run {
                     inner.plugin_manager.run_after_run(ctx.clone()).await;
                 }
+                drop(cancel_later);
                 if compact {
                     let fresh = ctx.with_delta(ContextDelta {
                         cancellation_token: Some(CancellationToken::new()),

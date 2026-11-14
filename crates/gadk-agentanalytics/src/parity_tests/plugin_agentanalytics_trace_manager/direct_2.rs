@@ -1028,7 +1028,6 @@ impl gadk_agent::Agent for BrokenAgent {
 
 // parity: adapted: Go's `deltaContext` cases whose `WithICDelta` returns nil or panics have no gadk equivalent (an ADK context always has its invocation context); `contextRunning(nil)` is a context built without an agent (the builder's default agent, not named "sequence").
 #[test]
-#[ignore = "plan defect (trace/mod.rs, Task 5): CallbackCtx::running_agent_children does not recover a panicking Agent::sub_agents as Go runningAgentChildren does (orZero -> zero agentChildren); the \"sub-agents cannot be read\" case panics, every other case passes"]
 fn test_running_agent_children() {
     use super::direct_support::context_running;
     use crate::parity_tests::plugin_agentanalytics_bigquery_agent_analytics_plugin::support::new_test_agent;

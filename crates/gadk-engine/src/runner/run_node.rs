@@ -147,7 +147,7 @@ pub(super) fn run_node(
         };
 
         let token = CancellationToken::new();
-        let _cancel_on_drop = token.clone().drop_guard();
+        let cancel_on_drop = token.clone().drop_guard();
         // The user content is the workflow's seed input.
         let ictx = inner.new_invocation_context(&stored, agent_to_run.clone(), msg.clone(), &cfg, &token, true);
         // Go runner.go:610 binds the ROOT agent's placement on the context handed to runNode.
@@ -176,6 +176,7 @@ pub(super) fn run_node(
         // deferred after-run callbacks after it.
         let ictx = ctx.as_invocation().clone();
         let mut guard = InvocationGuard::new(inner.clone(), stored.clone(), ictx.clone());
+        guard.cancel_on_drop(cancel_on_drop);
         if opts.yield_user_message && let Some(ev) = user_event {
             guard.at_yield(true);
             yield Ok(ev);
@@ -187,7 +188,7 @@ pub(super) fn run_node(
         let mut early = false;
         'run: {
             match inner.run_before_run_callback(&ictx).await {
-                Err(e) => { guard.mark_failed(); yield Err(e); early = true; break 'run; }
+                Err(e) => { guard.mark_failed(); guard.at_yield(true); yield Err(e); guard.at_yield(false); early = true; break 'run; }
                 Ok(Some(ev)) => { guard.at_yield(true); yield Ok(ev); guard.at_yield(false); early = true; break 'run; }
                 Ok(None) => {}
             }
@@ -198,7 +199,9 @@ pub(super) fn run_node(
                 Ok(s) => s,
                 Err(e) => {
                     guard.mark_failed();
+                    guard.at_yield(true);
                     yield Err(wrap("failed to reconstruct workflow run state", e));
+                    guard.at_yield(false);
                     early = true;
                     break 'run;
                 }
@@ -214,7 +217,7 @@ pub(super) fn run_node(
             while let Some(item) = events.next().await {
                 let mut event = match item {
                     Ok(ev) => ev,
-                    Err(e) => { guard.mark_failed(); yield Err(e); continue; }
+                    Err(e) => { guard.mark_failed(); guard.at_yield(true); yield Err(e); guard.at_yield(false); continue; }
                 };
                 // Engine control events have no author; a later find_agent_to_run would warn
                 // about the empty author.
@@ -223,8 +226,8 @@ pub(super) fn run_node(
                 }
                 match inner.process_event(&ictx, &*stored, event).await {
                     Processed::Event(ev) => { guard.at_yield(true); yield Ok(*ev); guard.at_yield(false); }
-                    Processed::PluginError(e) => { guard.mark_failed(); yield Err(e); }
-                    Processed::AppendError(e) => { guard.mark_failed(); yield Err(e); early = true; break 'run; }
+                    Processed::PluginError(e) => { guard.mark_failed(); guard.at_yield(true); yield Err(e); guard.at_yield(false); }
+                    Processed::AppendError(e) => { guard.mark_failed(); guard.at_yield(true); yield Err(e); guard.at_yield(false); early = true; break 'run; }
                 }
             }
         }
@@ -234,7 +237,9 @@ pub(super) fn run_node(
             // Compact once every event of the invocation is persisted; the consumer drained the
             // stream, so a failure can still be reported.
             if let Some(e) = guard.compact_inline().await {
+                guard.at_yield(true);
                 yield Err(e);
+                guard.at_yield(false);
             }
             guard.finish().await;
         }

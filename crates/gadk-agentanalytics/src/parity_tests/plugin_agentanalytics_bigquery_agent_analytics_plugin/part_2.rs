@@ -891,7 +891,6 @@ fn to_json_fields(schema: &BqSchema, omit: &str, override_type: &[(&str, &str)])
 
 // parity: adapted: Go's mockTransport is a ScriptedClient (its state in atomics / mutexes); the gRPC write server is a FakeWriteServer
 #[tokio::test]
-#[ignore = "port bug in crate::schema::TableSchema (7b-1/7b-2): Deserialize rejects the REST `\"fields\": null` of a table with an empty schema (`invalid type: null, expected a sequence`), which Go decodes as a nil slice; case 2 fails construction with `failed to get BigQuery table test-table metadata`, the other 6 cases pass"]
 async fn test_new_big_query_agent_analytics_plugin_upgrades_existing_schema() {
     struct Case {
         name: &'static str,

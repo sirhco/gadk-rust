@@ -862,7 +862,6 @@ async fn test_runner_sequential_sibling_shortcut_then_child_fails_emits_error_on
 }
 
 #[tokio::test]
-#[ignore = "plan defect (gadk-engine runner): dropping the run stream at a yield (Go break) cancels the invocation token (runner/mod.rs and run_node.rs _cancel_on_drop) before the spawned after-run callback runs, so the plugin reports context canceled where Go leaves the context live; passes with those guards disabled"]
 async fn test_runner_cached_before_model_callback_response_emits_invocation_completed_ok() {
     let tp = setup_test_plugin().await;
     let bot = llm_agent(LlmAgentConfig {
@@ -901,7 +900,6 @@ async fn test_runner_cached_before_model_callback_response_emits_invocation_comp
 }
 
 #[tokio::test]
-#[ignore = "plan defect (gadk-engine runner): dropping the run stream at a yield (Go break) cancels the invocation token (runner/mod.rs and run_node.rs _cancel_on_drop) before the spawned after-run callback runs, so the plugin reports context canceled where Go leaves the context live; passes with those guards disabled"]
 async fn test_runner_custom_agent_output_event_emits_invocation_completed_ok() {
     let tp = setup_test_plugin().await;
     let custom_bot = custom_agent("custom_bot", vec![], |ctx| {
@@ -998,7 +996,6 @@ async fn test_runner_prior_plugin_before_model_callback_error_emits_agent_error_
 }
 
 #[tokio::test]
-#[ignore = "plan defect (gadk-engine runner): dropping the run stream at a yield (Go break) cancels the invocation token (runner/mod.rs and run_node.rs _cancel_on_drop) before the spawned after-run callback runs, so the plugin reports context canceled where Go leaves the context live; passes with those guards disabled"]
 async fn test_runner_after_agent_callback_error() {
     let tp = setup_test_plugin().await;
     let bot = llm_agent(LlmAgentConfig {
@@ -1145,7 +1142,6 @@ async fn test_runner_sse_streaming_model_call_end_keeps_request_span_and_latency
 }
 
 #[tokio::test]
-#[ignore = "plan defect (gadk-engine runner): dropping the run stream at a yield (Go break) cancels the invocation token (runner/mod.rs and run_node.rs _cancel_on_drop) before the spawned after-run callback runs, so the plugin reports context canceled where Go leaves the context live; passes with those guards disabled"]
 async fn test_runner_sub_agent_cached_before_model_callback_response_emits_invocation_completed_ok()
 {
     let new_sub = || {
@@ -1229,7 +1225,6 @@ async fn test_runner_shared_same_agent_root() {
 }
 
 #[tokio::test]
-#[ignore = "plan defect (gadk-engine runner): dropping the run stream at a yield (Go break) cancels the invocation token (runner/mod.rs and run_node.rs _cancel_on_drop) before the spawned after-run callback runs, so the plugin reports context canceled where Go leaves the context live; passes with those guards disabled"]
 async fn test_runner_custom_parent_swallows_short_circuited_child_emits_invocation_completed_ok() {
     type Respond = fn(&mut gadk_session::Event);
     type IsFinal = fn(&gadk_session::Event) -> bool;
@@ -1293,7 +1288,6 @@ async fn test_runner_custom_parent_swallows_short_circuited_child_emits_invocati
 }
 
 #[tokio::test]
-#[ignore = "plan defect (gadk-engine runner): dropping the run stream at a yield (Go break) cancels the invocation token (runner/mod.rs and run_node.rs _cancel_on_drop) before the spawned after-run callback runs, so the plugin reports context canceled where Go leaves the context live; passes with those guards disabled"]
 async fn test_runner_sequential_sibling_shortcut_then_custom_child_fails_blames_only_failing_child()
 {
     let tp = setup_test_plugin().await;

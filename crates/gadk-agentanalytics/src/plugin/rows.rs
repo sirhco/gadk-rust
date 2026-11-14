@@ -237,12 +237,18 @@ impl AnalyticsPlugin {
 
         let max_len = self.config.max_content_length();
         let redact = self.config.redact_sensitive_keys();
-        let mut parts = (!parts_denied && self.config.log_multi_modal_content())
-            .then(|| self.new_parts_collector(max_len));
+        // Go's `defer func() { row[rawPartsKey] = parts.pending }()`: the guard moves the
+        // queued uploads onto the row however this returns, a panic included, so the caller's
+        // guard releases their reserved bytes.
+        let mut g = PendingPartsGuard {
+            parts: (!parts_denied && self.config.log_multi_modal_content())
+                .then(|| self.new_parts_collector(max_len)),
+            row,
+        };
         // Go's type switch: `(content, content_truncated, pre_formatted, builder)`.
         let (content, content_truncated, pre_formatted, builder) = match payload {
             Payload::Content(c) => {
-                if let Some(parts) = parts.as_mut() {
+                if let Some(parts) = g.parts.as_mut() {
                     parts.add_content(Some(c), 0);
                 }
                 let mut b = ContentSummaryBuilder {
@@ -252,7 +258,7 @@ impl AnalyticsPlugin {
                     messages: vec![MessageSummary::new(Some(c), 0, max_len, redact)],
                     ..ContentSummaryBuilder::default()
                 };
-                if let Some(parts) = parts.as_ref() {
+                if let Some(parts) = g.parts.as_ref() {
                     omit_pending_text(&mut b, parts);
                 }
                 let (built, t) = b.build_content();
@@ -260,8 +266,13 @@ impl AnalyticsPlugin {
                 (Some(Value::Object(built)), t, true, Some(b))
             }
             Payload::LlmRequest(req) => {
-                let (built, t, b) =
-                    build_llm_request_content(req, max_len, redact, content_denied, parts.as_mut());
+                let (built, t, b) = build_llm_request_content(
+                    req,
+                    max_len,
+                    redact,
+                    content_denied,
+                    g.parts.as_mut(),
+                );
                 (built.map(Value::Object), t, true, b)
             }
             Payload::LlmResponse(res) => {
@@ -270,12 +281,12 @@ impl AnalyticsPlugin {
                     max_len,
                     redact,
                     content_denied,
-                    parts.as_mut(),
+                    g.parts.as_mut(),
                 );
                 (built.map(Value::Object), t, true, b)
             }
             Payload::Json(v) => {
-                if let Some(parts) = parts.as_mut()
+                if let Some(parts) = g.parts.as_mut()
                     && !d.parts.is_empty()
                     && self.config.content_formatter.is_none()
                 {
@@ -292,12 +303,13 @@ impl AnalyticsPlugin {
             if pre_formatted {
                 match go_json_text(&content) {
                     Some(text) => {
-                        row.row
+                        g.row
+                            .row
                             .insert(COLUMN_CONTENT.to_owned(), RowValue::Str(text));
                         truncated = content_truncated;
                     }
                     None => {
-                        row.row.insert(
+                        g.row.row.insert(
                             COLUMN_CONTENT.to_owned(),
                             RowValue::Str(go_quote(UNSUPPORTED_OBJ_PLACEHOLDER)),
                         );
@@ -306,28 +318,26 @@ impl AnalyticsPlugin {
                 }
             } else {
                 let (s, t) = self.json_column(&content);
-                row.row.insert(COLUMN_CONTENT.to_owned(), RowValue::Str(s));
+                g.row
+                    .row
+                    .insert(COLUMN_CONTENT.to_owned(), RowValue::Str(s));
                 truncated = t || content_truncated;
             }
         }
-        if let Some(mut parts) = parts {
-            if !parts.parts.is_empty() {
-                row.row.insert(
-                    COLUMN_CONTENT_PARTS.to_owned(),
-                    RowValue::Parts(parts.parts.iter().map(from_json_map).collect()),
-                );
-                truncated = truncated || parts.truncated;
-                if !parts.pending.is_empty()
-                    && let Some(mut b) = builder
-                    && parts.has_pending_text()
-                {
-                    b.other_truncated = parts.non_upload_truncated;
-                    row.summary_builder = Some(Arc::new(Mutex::new(b)));
-                }
-            }
-            // Go's deferred `row[rawPartsKey] = parts.pending`.
-            if !parts.pending.is_empty() {
-                row.raw_parts = std::mem::take(&mut parts.pending);
+        if let Some(parts) = g.parts.as_ref()
+            && !parts.parts.is_empty()
+        {
+            g.row.row.insert(
+                COLUMN_CONTENT_PARTS.to_owned(),
+                RowValue::Parts(parts.parts.iter().map(from_json_map).collect()),
+            );
+            truncated = truncated || parts.truncated;
+            if !parts.pending.is_empty()
+                && let Some(mut b) = builder
+                && parts.has_pending_text()
+            {
+                b.other_truncated = parts.non_upload_truncated;
+                g.row.summary_builder = Some(Arc::new(Mutex::new(b)));
             }
         }
         truncated
@@ -842,6 +852,23 @@ pub(crate) fn build_llm_response_content(
         return (None, false, None);
     }
     (Some(content), truncated, Some(b))
+}
+
+/// Go `addContent`'s deferred `row[rawPartsKey] = parts.pending`: on drop (a normal return or
+/// an unwind) moves the collector's queued uploads onto the row.
+struct PendingPartsGuard<'a> {
+    row: &'a mut QueuedRow,
+    parts: Option<PartsCollector>,
+}
+
+impl Drop for PendingPartsGuard<'_> {
+    fn drop(&mut self) {
+        if let Some(parts) = self.parts.as_mut()
+            && !parts.pending.is_empty()
+        {
+            self.row.raw_parts = std::mem::take(&mut parts.pending);
+        }
+    }
 }
 
 /// Go's loop over `parts.pending` after collecting: the text of every queued text upload

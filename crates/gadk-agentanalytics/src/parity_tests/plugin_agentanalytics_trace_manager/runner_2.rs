@@ -44,7 +44,6 @@ fn never_sent() -> Arc<dyn gadk_model::Llm> {
 }
 
 #[tokio::test]
-#[ignore = "plan defect (gadk-engine runner): dropping the run stream at a yield (Go break) cancels the invocation token (runner/mod.rs and run_node.rs _cancel_on_drop) before the spawned after-run callback runs, so the plugin reports context canceled where Go leaves the context live; passes with those guards disabled"]
 async fn test_runner_prior_plugin_answers_only_child_emits_invocation_completed_ok() {
     for (name, drain) in [
         ("consumer stops at the answer of the child", false),
@@ -96,7 +95,6 @@ async fn test_runner_prior_plugin_answers_only_child_emits_invocation_completed_
 }
 
 #[tokio::test]
-#[ignore = "plan defect (gadk-engine runner): dropping the run stream at a yield (Go break) cancels the invocation token (runner/mod.rs and run_node.rs _cancel_on_drop) before the spawned after-run callback runs, so the plugin reports context canceled where Go leaves the context live; passes with those guards disabled"]
 async fn test_runner_recovered_model_error_with_skipped_after_model_emits_invocation_completed_ok()
 {
     let tp = setup_test_plugin().await;
@@ -149,7 +147,6 @@ async fn test_runner_recovered_model_error_with_skipped_after_model_emits_invoca
 }
 
 #[tokio::test]
-#[ignore = "plan defect (gadk-engine runner): dropping the run stream at a yield (Go break) cancels the invocation token (runner/mod.rs and run_node.rs _cancel_on_drop) before the spawned after-run callback runs, so the plugin reports context canceled where Go leaves the context live; passes with those guards disabled"]
 async fn test_runner_event_replacing_plugin_after_analytics_emits_invocation_completed_ok() {
     let tp = setup_test_plugin().await;
     let replacer = plugin_named(
@@ -245,7 +242,6 @@ async fn run_sub_agent_failure(
 }
 
 #[tokio::test]
-#[ignore = "plan defect (gadk-engine runner): dropping the run stream at a yield (Go break) cancels the invocation token (runner/mod.rs and run_node.rs _cancel_on_drop) before the spawned after-run callback runs, so the plugin reports context canceled where Go leaves the context live; passes with those guards disabled"]
 async fn test_runner_sub_agent_fails_after_parent_produced_content_emits_invocation_completed_ok() {
     let child_err = "child failure";
     let (rows, got_err) = run_sub_agent_failure(child_err, true).await;
@@ -1074,7 +1070,6 @@ async fn test_runner_model_canceled_own_request_after_partial_emits_error_termin
 }
 
 #[tokio::test]
-#[ignore = "plan defect (gadk-engine runner): dropping the run stream at a yield (Go break) cancels the invocation token (runner/mod.rs and run_node.rs _cancel_on_drop) before the spawned after-run callback runs, so the plugin reports context canceled where Go leaves the context live; passes with those guards disabled"]
 async fn test_runner_progress_event_without_content() {
     let new_pinger = |name: &str| {
         custom_agent(name, vec![], |ctx| {
@@ -1377,88 +1372,7 @@ async fn test_runner_non_task_mode_finish_task_tool() {
     }
 }
 
-#[tokio::test]
-#[ignore = "plan defect: gadk-engine keeps run_llm_agent_as_node (Go llmagent.RunLLMAgentAsNode, exported) crate-private, and Agent::run of a task-mode agent never ends (LlmCallsLimitExceeded); with the function made public the test still fails: the task runs' callback contexts carry path \"\" (the promoted node path does not reach Context::path), so both runs match the finish_task call ID and the response ends the other run's span"]
-async fn test_runner_finish_task_with_reused_call_id_ends_the_run_on_the_event_path() {
-    let tp = setup_test_plugin().await;
-    // Go finishTaskLLM: every request answers a finish_task call "call-finish-1".
-    let task = llm_agent(LlmAgentConfig {
-        name: "task".into(),
-        mode: gadk_agent::Mode::Task,
-        model: Some(fn_llm("finish-task-model", |_, _| {
-            futures::stream::iter([calls(vec![function_call_part_id(
-                "call-finish-1",
-                "finish_task",
-                json!({"result": "task finished"}),
-            )])])
-            .boxed()
-        })),
-        ..Default::default()
-    });
-    let paths = ["left/task@1", "right/task@1"];
-    let run_task = task.clone();
-    let root = custom_agent("root", vec![], move |ctx| {
-        let task = run_task.clone();
-        async_stream_of(async move {
-            let mut out = Vec::new();
-            let mut held = Vec::new();
-            for path in paths {
-                let node_ctx = ctx.with_delta(gadk_agent::ContextDelta {
-                    path: Some(path.into()),
-                    user_content: Some(Some(text_content("user", "do the task"))),
-                    ..Default::default()
-                });
-                // Go `llmagent.RunLLMAgentAsNode(task, nodeCtx, "do the task")`: crate-private in
-                // gadk-engine (`llm::node_wrapper::run_llm_agent_as_node`); `Agent::run` does not
-                // run the task-mode loop, and `workflow::AgentNode::run` resets the node path.
-                let mut events = task.run(node_ctx);
-                while let Some(item) = events.next().await {
-                    let mut ev = match item {
-                        Ok(ev) => ev,
-                        Err(e) => {
-                            out.push(Err(e));
-                            return out;
-                        }
-                    };
-                    ev.node_info.get_or_insert_with(Default::default).path = path.into();
-                    if crate::plugin::callbacks::has_task_completed_response(
-                        ev.response.content.as_ref(),
-                    ) {
-                        held.push(Ok(ev));
-                        continue;
-                    }
-                    out.push(Ok(ev));
-                }
-            }
-            out.extend(held);
-            out
-        })
-    });
-    let r = new_test_runner(root, vec![tp.plugin.clone()]);
-    let (_, errs) = run_turn(&r, "u1", "s1", "go", RunConfig::default()).await;
-    assert!(errs.is_empty(), "runner.Run error: {errs:?}");
-    let rows = RowCursor::default()
-        .collect(&tp, until_invocation_end)
-        .await;
-    require_invocation_completed_ok(&rows);
-    let starts = agent_rows_of_type(&rows, EVENT_AGENT_STARTING, "task");
-    let ends = agent_rows_of_type(&rows, EVENT_AGENT_COMPLETED, "task");
-    assert!(
-        starts.len() == paths.len() && ends.len() == paths.len(),
-        "task rows: {} AGENT_STARTING and {} AGENT_COMPLETED, want {} of each; event types: {:?}",
-        starts.len(),
-        ends.len(),
-        paths.len(),
-        event_types(&rows)
-    );
-    for (i, path) in paths.iter().enumerate() {
-        assert_eq!(
-            place_of(&ends[i]).span,
-            place_of(&starts[i]).span,
-            "AGENT_COMPLETED row {i}, for the finish_task response on {path}: the span of the run on that path"
-        );
-    }
-}
+// parity: skipped TestRunner_FinishTaskWithReusedCallIDEndsTheRunOnTheEventPath: deferred to 7b-3b (workflow node run: run_llm_agent_as_node is crate-private and node paths are reset)
 
 // parity: adapted: Go's `context.WithCancelCause(ctx)` + `cancel(runErr)` is a child cancellation
 // token cancelled on the first error (a gadk token carries no cause; spec R3).
