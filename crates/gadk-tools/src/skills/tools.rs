@@ -23,7 +23,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use gadk_agent::{Context, Tool, ToolError, go_quote};
+use gadk_agent::{Context, Tool, ToolError, ToolOriginKind, go_quote};
 use gadk_engine::tool::{FunctionTool, FunctionToolConfig};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -77,6 +77,8 @@ pub(crate) fn list_skills(source: Arc<dyn Source>) -> Result<Arc<dyn Tool>, Tool
     let cfg = FunctionToolConfig {
         input_schema: Some(list_skills_input_schema()),
         output_schema: Some(list_skills_output_schema()),
+        // Go classifies a function tool over `skilltool` argument types as `SKILL`.
+        origin: ToolOriginKind::Skill,
         ..FunctionToolConfig::new(LIST_SKILLS_NAME, LIST_SKILLS_DESCRIPTION)
     };
     FunctionTool::new(cfg, move |_ctx: Context, _args: ListSkillsArgs| {
@@ -205,6 +207,8 @@ pub(crate) fn load_skill(source: Arc<dyn Source>) -> Result<Arc<dyn Tool>, ToolE
     let cfg = FunctionToolConfig {
         input_schema: Some(load_skill_input_schema()),
         output_schema: Some(load_skill_output_schema()),
+        // Go classifies a function tool over `skilltool` argument types as `SKILL`.
+        origin: ToolOriginKind::Skill,
         ..FunctionToolConfig::new(LOAD_SKILL_NAME, LOAD_SKILL_DESCRIPTION)
     };
     FunctionTool::new(cfg, move |_ctx: Context, args: LoadSkillArgs| {
@@ -300,6 +304,8 @@ pub(crate) fn load_skill_resource(source: Arc<dyn Source>) -> Result<Arc<dyn Too
     let cfg = FunctionToolConfig {
         input_schema: Some(load_skill_resource_input_schema()),
         output_schema: Some(load_skill_resource_output_schema()),
+        // Go classifies a function tool over `skilltool` argument types as `SKILL`.
+        origin: ToolOriginKind::Skill,
         ..FunctionToolConfig::new(LOAD_SKILL_RESOURCE_NAME, LOAD_SKILL_RESOURCE_DESCRIPTION)
     };
     FunctionTool::new(cfg, move |_ctx: Context, args: LoadSkillResourceArgs| {
@@ -350,4 +356,24 @@ async fn run_load_skill_resource(
         path: args.resource_path.clone(),
         content: go_lossy_utf8(&content),
     })
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod origin_tests {
+    use super::*;
+    use crate::skills::skill::{FileSystemSource, MemFs};
+
+    #[test]
+    fn skill_tools_are_skill_tools() {
+        let source: Arc<dyn Source> = Arc::new(FileSystemSource::new(Arc::new(MemFs::default())));
+        for t in [
+            list_skills(source.clone()).unwrap(),
+            load_skill(source.clone()).unwrap(),
+            load_skill_resource(source).unwrap(),
+        ] {
+            assert_eq!(t.origin_kind(), ToolOriginKind::Skill, "{}", t.name());
+            assert!(t.origin_agent().is_none());
+        }
+    }
 }

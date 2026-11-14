@@ -22,6 +22,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use gadk_agent::{
     Agent, AgentError, Context, RunConfig, RunnableTool, StreamingMode, Tool, ToolError,
+    ToolOriginKind,
 };
 use gadk_genai::{Content, FunctionDeclaration, ROLE_USER};
 use gadk_session::{CreateRequest, InMemorySessionService, SessionService};
@@ -127,6 +128,16 @@ impl Tool for AgentTool {
     /// final answer, so it is still shown to the user.
     fn display_result_on_skip_summarization(&self) -> bool {
         true
+    }
+
+    /// Go classifies a `tool/agenttool` tool as `SUB_AGENT` (`A2A` when its agent is remote).
+    fn origin_kind(&self) -> ToolOriginKind {
+        ToolOriginKind::SubAgent
+    }
+
+    /// The wrapped agent (Go `subAgentOrA2A` reads the tool's `agent` field).
+    fn origin_agent(&self) -> Option<Arc<dyn Agent>> {
+        Some(self.agent.clone())
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -351,5 +362,25 @@ mod tests {
                 .expect("child user message");
             assert_eq!(user.parts[0].text, want, "request {request}");
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod origin_tests {
+    use super::*;
+    use crate::llm::{LlmAgentConfig, agent as llm_agent};
+
+    #[test]
+    fn agent_tool_is_a_sub_agent_tool_of_its_agent() {
+        let agent = llm_agent::new(LlmAgentConfig {
+            name: "child".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        let t = AgentTool::new(agent.clone(), None);
+        assert_eq!(t.origin_kind(), ToolOriginKind::SubAgent);
+        assert!(Arc::ptr_eq(&t.origin_agent().unwrap(), &agent));
+        assert!(t.unwrap().is_none());
     }
 }

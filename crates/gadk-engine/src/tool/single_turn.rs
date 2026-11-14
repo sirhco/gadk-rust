@@ -20,7 +20,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use gadk_agent::{Agent, AgentError, Context, RunnableTool, Tool, ToolError};
+use gadk_agent::{Agent, AgentError, Context, RunnableTool, Tool, ToolError, ToolOriginKind};
 use gadk_genai::{FunctionDeclaration, Schema, Type};
 use serde_json::{Map, Value};
 
@@ -109,6 +109,16 @@ impl Tool for SingleTurnTool {
 
     fn as_runnable(&self) -> Option<&dyn RunnableTool> {
         Some(self)
+    }
+
+    /// Go classifies `workflowinternal.SingleTurnTool` as `SUB_AGENT` (`A2A` when its agent is remote).
+    fn origin_kind(&self) -> ToolOriginKind {
+        ToolOriginKind::SubAgent
+    }
+
+    /// The wrapped agent (Go `subAgentOrA2A` reads the tool's `agent` field).
+    fn origin_agent(&self) -> Option<Arc<dyn Agent>> {
+        Some(self.agent.clone())
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -276,5 +286,24 @@ mod tests {
             e.starts_with("argument validation failed for agent helper: ") && e.contains("request"),
             "{e}"
         );
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod origin_tests {
+    use super::*;
+    use crate::llm::config::LlmAgentConfig;
+
+    #[test]
+    fn single_turn_tool_is_a_sub_agent_tool_of_its_agent() {
+        let agent = crate::llm::agent::new(LlmAgentConfig {
+            name: "child".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        let t = SingleTurnTool::new(agent.clone());
+        assert_eq!(t.origin_kind(), ToolOriginKind::SubAgent);
+        assert!(Arc::ptr_eq(&t.origin_agent().unwrap(), &agent));
     }
 }
