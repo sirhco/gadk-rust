@@ -25,7 +25,7 @@
 //! may be alive at once; never lock a record whose guard is already alive (compare with
 //! [`SpanRef::ptr_eq`] first — `parking_lot` mutexes are not reentrant).
 
-#![allow(dead_code, unused_variables)] // Task 5 implements the bodies.
+#![allow(dead_code)] // Consumers: Tasks 8-9 (Task 15 sweeps the allow).
 
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -37,6 +37,15 @@ use parking_lot::{Mutex, MutexGuard};
 use tokio_util::sync::CancellationToken;
 
 use super::TraceError;
+use crate::context::ContextError;
+use crate::error::Error;
+
+/// Go `schedulerCreator`: the spawn site of the goroutine (task) on which a workflow agent's
+/// scheduler runs a node. Goroutine attribution is 7b-3b: no record carries an origin yet, so
+/// [`GoroutineOrigin::started_by`] never matches it in 7b-3a.
+pub(crate) const SCHEDULER_CREATOR: &str = "gadk_engine::workflow::scheduler::start_node";
+/// Go `errgroupCreator`: the spawn site of a ParallelAgent's branch (7b-3b, as above).
+pub(crate) const ERRGROUP_CREATOR: &str = "gadk_engine::agents::parallel_agent::branch";
 
 /// Go `spanKind`: the kind of operation a span covers. `None` is Go's zero value, which no
 /// record that the manager makes has.
@@ -97,7 +106,16 @@ impl CancelSource {
     /// The Go closure `canceledFunc` returns: `(false, None)` while live; `(true, None)` when
     /// cancelled with Go's `context.Canceled` cause; `(false, Some(cause))` otherwise.
     pub(crate) fn check(&self) -> (bool, Option<TraceError>) {
-        todo!("Task 5")
+        if !self.token.is_cancelled() {
+            return (false, None);
+        }
+        match &self.cause {
+            None => (true, None),
+            Some(cause) if matches!(**cause, Error::Context(ContextError::Canceled)) => {
+                (true, None)
+            }
+            Some(cause) => (false, Some(cause.clone())),
+        }
     }
 }
 
@@ -229,6 +247,12 @@ impl SpanRef {
     pub(crate) fn is(&self, other: Option<&SpanRef>) -> bool {
         other.is_some_and(|o| self.ptr_eq(o))
     }
+
+    /// Whether `rec` is this record (Go `p == rec` where only the locked record is at hand):
+    /// compares addresses without locking, so it is safe while `rec`'s guard is alive.
+    pub(crate) fn is_record(&self, rec: &SpanRecord) -> bool {
+        std::ptr::eq(self.0.data_ptr().cast_const(), rec)
+    }
 }
 
 impl PartialEq for SpanRef {
@@ -254,62 +278,420 @@ impl std::fmt::Debug for SpanRef {
 impl SpanRecord {
     /// Go `firstRetiredCause`: the first non-nil retired cause.
     pub(crate) fn first_retired_cause(&self) -> Option<TraceError> {
-        todo!("Task 5")
+        self.retired_causes.iter().find_map(|c| c.err.clone())
     }
 
-    /// Go `clearRetiredCauseFor(name, branch, path)`.
+    /// Go `clearRetiredCauseFor(name, branch, path)`: drops the swallowable causes that
+    /// activations of `name` on `branch` (and on `path`; an empty path on either side matches
+    /// any) retired with.
     pub(crate) fn clear_retired_cause_for(&mut self, name: &str, branch: &str, path: &str) {
-        todo!("Task 5")
+        self.retired_causes.retain(|c| {
+            !(c.swallowable_by_self
+                && c.name == name
+                && c.branch == branch
+                && (path.is_empty() || c.path.is_empty() || c.path == path))
+        });
     }
 
     /// Go `dropContexts`: drops `canceled`, `ended`, `activation`, `parent` and
     /// `retired_causes`.
     pub(crate) fn drop_contexts(&mut self) {
-        todo!("Task 5")
+        self.canceled = None;
+        self.ended = None;
+        self.activation = None;
+        self.parent = None;
+        self.retired_causes = Vec::new();
     }
 
     /// Go `isActivationOf(ctx)`: an agent span whose activation is `activation` (non-nil).
     pub(crate) fn is_activation_of(&self, activation: Option<ActivationId>) -> bool {
-        todo!("Task 5")
+        self.kind == SpanKind::Agent && self.activation.is_some() && self.activation == activation
     }
 
     /// Go `endedWithRun(runner)`: false whenever the parent's `goroutine_id` is 0, i.e.
-    /// always in 7b-3a (the body is ported whole).
+    /// always in 7b-3a (the body is ported whole). Locks the records above `self` one pair at
+    /// a time (never `self`, whose guard the caller holds).
     pub(crate) fn ended_with_run(&self, runner: &str) -> bool {
-        todo!("Task 5")
+        let Some(mut a_ref) = self.parent.clone() else {
+            return false;
+        };
+        {
+            let a = a_ref.lock();
+            if !self.own_activation
+                || a.kind != SpanKind::Agent
+                || a.activation.is_none()
+                || a.goroutine_id == 0
+            {
+                return false;
+            }
+            if a.run_done {
+                return true;
+            }
+        }
+        loop {
+            let Some(p_ref) = a_ref.lock().parent.clone() else {
+                return false;
+            };
+            {
+                let a = a_ref.lock();
+                let p = p_ref.lock();
+                if p.kind == SpanKind::Invocation {
+                    return a.name == runner && a.activation.is_some() && a.goroutine_id != 0;
+                }
+                if p.kind != SpanKind::Agent
+                    || a.goroutine_id == 0
+                    || (a.goroutine_id != p.goroutine_id && !joins_once_returned_records(&p, &a))
+                {
+                    return false;
+                }
+            }
+            a_ref = p_ref;
+        }
     }
 
     /// Go `isNodeAgentOf(w)` (attribution; false with zero goroutine information).
     pub(crate) fn is_node_agent_of(&self, w: &SpanRecord) -> bool {
-        todo!("Task 5")
+        if !w.is_workflow
+            || !self.parent.as_ref().is_some_and(|p| p.is_record(w))
+            || self.attempt != AttemptSite::Node
+            || !self.origin.started_by(SCHEDULER_CREATOR, Some(w))
+        {
+            return false;
+        }
+        let node = match self.path.rfind('/') {
+            Some(i) => &self.path[i + 1..],
+            None => self.path.as_str(),
+        };
+        let node = match node.rfind('@') {
+            Some(at) => &node[..at],
+            None => node,
+        };
+        node == self.name
     }
 }
 
 /// Go `(p *spanRecord).joinsOnceReturned(c)` (attribution).
 pub(crate) fn joins_once_returned(p: &SpanRef, c: &SpanRef) -> bool {
-    todo!("Task 5")
+    let (p, c) = (p.lock(), c.lock());
+    joins_once_returned_records(&p, &c)
+}
+
+/// [`joins_once_returned`] over locked records.
+pub(crate) fn joins_once_returned_records(p: &SpanRecord, c: &SpanRecord) -> bool {
+    joins_records(p, c, false)
+        || (p.is_parallel
+            && p.goroutine_id != 0
+            && c.origin.started_by(ERRGROUP_CREATOR, Some(p))
+            && p.children.contains(&c.name)
+            && c.branch == parallel_branch(p, &c.name))
+        || (p.is_workflow && c.attempt == AttemptSite::Worker)
 }
 
 /// Go `(p *spanRecord).joins(c, reported)` (attribution; with zero goroutine information only
 /// the `completed` / `runDone` and parallel-branch fallbacks apply).
 pub(crate) fn joins(p: &SpanRef, c: &SpanRef, reported: bool) -> bool {
-    todo!("Task 5")
+    let (p, c) = (p.lock(), c.lock());
+    joins_records(&p, &c, reported)
+}
+
+/// [`joins`] over locked records.
+pub(crate) fn joins_records(p: &SpanRecord, c: &SpanRecord, reported: bool) -> bool {
+    if !p.propagates_child_error || p.goroutine_id == 0 || c.goroutine_id == 0 {
+        return false;
+    }
+    if c.goroutine_id == p.goroutine_id {
+        return true;
+    }
+    if p.is_workflow {
+        return c.origin.started_by(SCHEDULER_CREATOR, Some(p));
+    }
+    if p.is_parallel {
+        return c.origin.started_by(ERRGROUP_CREATOR, Some(p))
+            && p.children.contains(&c.name)
+            && c.branch == parallel_branch(p, &c.name)
+            && (p.completed || (reported && p.node_run_ended));
+    }
+    false
 }
 
 impl GoroutineOrigin {
     /// Go `startedBy(creator, p)`: false when `p` is `None` or has no goroutine.
     pub(crate) fn started_by(&self, creator: &str, p: Option<&SpanRecord>) -> bool {
-        todo!("Task 5")
+        p.is_some_and(|p| {
+            p.goroutine_id != 0 && self.parent == p.goroutine_id && self.creator == creator
+        })
     }
 }
 
 /// Go `parallelBranch(a, childName)`: the branch of a ParallelAgent `a`'s branch running
 /// `child_name`.
 pub(crate) fn parallel_branch(a: &SpanRecord, child_name: &str) -> String {
-    todo!("Task 5")
+    if a.branch.is_empty() {
+        format!("{}.{child_name}", a.name)
+    } else {
+        format!("{}.{}.{child_name}", a.branch, a.name)
+    }
 }
 
 /// Go `latencyOf(rec, end)`.
 pub(crate) fn latency_of(rec: &SpanRecord, end: DateTime<Utc>) -> Latency {
-    todo!("Task 5")
+    Latency {
+        total_ms: (end - rec.start).num_milliseconds(),
+        time_to_first_token_ms: rec.first_token.map(|t| (t - rec.start).num_milliseconds()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+    use chrono::{Duration, TimeZone};
+
+    use super::super::testkit::{adk_ctx, custom};
+    use super::*;
+
+    fn t0() -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap()
+    }
+
+    fn err(text: &str) -> TraceError {
+        Arc::new(Error::Context(if text == "canceled" {
+            ContextError::Canceled
+        } else {
+            ContextError::DeadlineExceeded
+        }))
+    }
+
+    #[test]
+    fn cancel_source_reports_how_the_context_ended() {
+        let token = CancellationToken::new();
+        let live = CancelSource {
+            token: token.clone(),
+            cause: Some(err("deadline")),
+        };
+        assert!(matches!(live.check(), (false, None)));
+        token.cancel();
+        let (canceled, cause) = live.check();
+        assert!(!canceled);
+        assert!(cause.unwrap().is_context(ContextError::DeadlineExceeded));
+        let explicit = CancelSource {
+            token: token.clone(),
+            cause: Some(err("canceled")),
+        };
+        assert!(matches!(explicit.check(), (true, None)));
+        let bare = CancelSource { token, cause: None };
+        assert!(matches!(bare.check(), (true, None)));
+    }
+
+    #[test]
+    fn retired_causes_first_and_cleared_for_an_activation() {
+        let cause =
+            |name: &str, path: &str, swallowable: bool, e: Option<TraceError>| RetiredCause {
+                err: e,
+                name: name.into(),
+                branch: "b".into(),
+                path: path.into(),
+                swallowable_by_self: swallowable,
+            };
+        let first = err("deadline");
+        let mut rec = SpanRecord {
+            retired_causes: vec![
+                cause("a", "p", true, None),
+                cause("a", "p", true, Some(first.clone())),
+                cause("a", "", true, Some(err("deadline"))),
+                cause("a", "q", true, Some(err("deadline"))),
+                cause("a", "p", false, Some(err("deadline"))),
+                cause("z", "p", true, Some(err("deadline"))),
+            ],
+            ..SpanRecord::default()
+        };
+        assert!(Arc::ptr_eq(&rec.first_retired_cause().unwrap(), &first));
+        rec.clear_retired_cause_for("a", "b", "p");
+        let left: Vec<(&str, &str, bool)> = rec
+            .retired_causes
+            .iter()
+            .map(|c| (c.name.as_str(), c.path.as_str(), c.swallowable_by_self))
+            .collect();
+        assert_eq!(
+            left,
+            vec![("a", "q", true), ("a", "p", false), ("z", "p", true)]
+        );
+        rec.clear_retired_cause_for("a", "b", "");
+        assert_eq!(rec.retired_causes.len(), 2);
+        assert!(SpanRecord::default().first_retired_cause().is_none());
+    }
+
+    #[test]
+    fn drop_contexts_forgets_the_run() {
+        let adk = adk_ctx(&custom("a", vec![]), "inv", None);
+        let mut rec = SpanRecord {
+            canceled: Some(CancelSource {
+                token: CancellationToken::new(),
+                cause: None,
+            }),
+            ended: Some(adk.clone()),
+            activation: Some(adk.activation_id()),
+            parent: Some(SpanRef::default()),
+            retired_causes: vec![RetiredCause::default()],
+            ..SpanRecord::default()
+        };
+        rec.drop_contexts();
+        assert!(rec.canceled.is_none() && rec.ended.is_none() && rec.activation.is_none());
+        assert!(rec.parent.is_none() && rec.retired_causes.is_empty());
+    }
+
+    #[test]
+    fn is_activation_of_needs_an_agent_span_and_a_key() {
+        let act = adk_ctx(&custom("a", vec![]), "inv", None).activation_id();
+        let other = adk_ctx(&custom("a", vec![]), "inv", None).activation_id();
+        let rec = SpanRecord {
+            kind: SpanKind::Agent,
+            activation: Some(act),
+            ..SpanRecord::default()
+        };
+        assert!(rec.is_activation_of(Some(act)));
+        assert!(!rec.is_activation_of(Some(other)));
+        assert!(!rec.is_activation_of(None));
+        let call = SpanRecord {
+            kind: SpanKind::Llm,
+            activation: Some(act),
+            ..SpanRecord::default()
+        };
+        assert!(!call.is_activation_of(Some(act)));
+        assert!(
+            !SpanRecord {
+                kind: SpanKind::Agent,
+                ..SpanRecord::default()
+            }
+            .is_activation_of(None)
+        );
+    }
+
+    #[test]
+    fn latency_has_a_first_token_only_when_one_arrived() {
+        let mut rec = SpanRecord {
+            start: t0(),
+            ..SpanRecord::default()
+        };
+        let end = t0() + Duration::milliseconds(1500);
+        assert_eq!(
+            latency_of(&rec, end),
+            Latency {
+                total_ms: 1500,
+                time_to_first_token_ms: None
+            }
+        );
+        rec.first_token = Some(t0() + Duration::milliseconds(250));
+        assert_eq!(latency_of(&rec, end).time_to_first_token_ms, Some(250));
+    }
+
+    #[test]
+    fn parallel_branch_names() {
+        let mut a = SpanRecord {
+            name: "par".into(),
+            ..SpanRecord::default()
+        };
+        assert_eq!(parallel_branch(&a, "x"), "par.x");
+        a.branch = "root".into();
+        assert_eq!(parallel_branch(&a, "x"), "root.par.x");
+    }
+
+    #[test]
+    fn started_by_needs_the_parent_goroutine_and_creator() {
+        let origin = GoroutineOrigin {
+            creator: SCHEDULER_CREATOR.into(),
+            parent: 7,
+        };
+        let p = SpanRecord {
+            goroutine_id: 7,
+            ..SpanRecord::default()
+        };
+        assert!(origin.started_by(SCHEDULER_CREATOR, Some(&p)));
+        assert!(!origin.started_by(ERRGROUP_CREATOR, Some(&p)));
+        assert!(!origin.started_by(SCHEDULER_CREATOR, None));
+        assert!(!GoroutineOrigin::default().started_by("", Some(&SpanRecord::default())));
+    }
+
+    /// With zero goroutine information (7b-3a) no activation joins another and no open call
+    /// ends with the run.
+    #[test]
+    fn attribution_is_false_without_goroutines() {
+        let act = adk_ctx(&custom("root", vec![]), "inv", None).activation_id();
+        let inv = SpanRef::new(SpanRecord {
+            kind: SpanKind::Invocation,
+            ..SpanRecord::default()
+        });
+        let agent = SpanRef::new(SpanRecord {
+            kind: SpanKind::Agent,
+            name: "root".into(),
+            activation: Some(act),
+            parent: Some(inv.clone()),
+            propagates_child_error: true,
+            is_parallel: true,
+            completed: true,
+            ..SpanRecord::default()
+        });
+        let child = SpanRef::new(SpanRecord {
+            kind: SpanKind::Agent,
+            parent: Some(agent.clone()),
+            ..SpanRecord::default()
+        });
+        assert!(!joins(&agent, &child, true));
+        assert!(!joins_once_returned(&agent, &child));
+        let call = SpanRecord {
+            kind: SpanKind::Llm,
+            parent: Some(agent.clone()),
+            own_activation: true,
+            ..SpanRecord::default()
+        };
+        assert!(!call.ended_with_run("root"));
+        assert!(!child.lock().is_node_agent_of(&agent.lock()));
+    }
+
+    /// The ported bodies, driven with goroutine information set by hand (as 7b-3b will).
+    #[test]
+    fn attribution_bodies_with_goroutines() {
+        let act = adk_ctx(&custom("root", vec![]), "inv", None).activation_id();
+        let inv = SpanRef::new(SpanRecord {
+            kind: SpanKind::Invocation,
+            ..SpanRecord::default()
+        });
+        let root = SpanRef::new(SpanRecord {
+            kind: SpanKind::Agent,
+            name: "root".into(),
+            activation: Some(act),
+            goroutine_id: 1,
+            parent: Some(inv.clone()),
+            propagates_child_error: true,
+            is_workflow: true,
+            ..SpanRecord::default()
+        });
+        let node = SpanRef::new(SpanRecord {
+            kind: SpanKind::Agent,
+            name: "node".into(),
+            path: "wf/node@1".into(),
+            activation: Some(act),
+            goroutine_id: 2,
+            origin: GoroutineOrigin {
+                creator: SCHEDULER_CREATOR.into(),
+                parent: 1,
+            },
+            attempt: AttemptSite::Node,
+            parent: Some(root.clone()),
+            ..SpanRecord::default()
+        });
+        assert!(joins(&root, &node, false));
+        assert!(joins_once_returned(&root, &node));
+        assert!(node.lock().is_node_agent_of(&root.lock()));
+        let call = SpanRecord {
+            kind: SpanKind::Tool,
+            parent: Some(node.clone()),
+            own_activation: true,
+            ..SpanRecord::default()
+        };
+        assert!(call.ended_with_run("root"));
+        assert!(!call.ended_with_run("other"));
+        node.lock().run_done = true;
+        assert!(call.ended_with_run("other"));
+    }
 }
