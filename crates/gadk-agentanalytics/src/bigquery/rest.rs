@@ -16,7 +16,8 @@
 //! [`BigQueryClient`]: the subset of `cloud.google.com/go/bigquery` (v1.79.0) that ADK-Go's
 //! `plugin/agentanalytics` uses, over gadk's REST transport (`gadk_model::rest`): table
 //! metadata get / insert / patch (with `If-Match`), query jobs (`jobs.insert`, then Go's
-//! `Job.Wait` polling), and the `googleapi.CheckResponse` error mapping ([`ApiError`]).
+//! `Job.Wait` polling), and the `googleapi.CheckResponse` error mapping
+//! ([`gadk_model::rest::googleapi::check_response`]'s [`ApiError`](crate::error::ApiError)).
 //! [`TableOps`] is Go's `bqTableAdapter` (one table's [`TableMetadataOps`]).
 
 use std::collections::BTreeMap;
@@ -27,6 +28,7 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use gadk_model::gcp_auth::{adc_credentials, credential_headers};
+use gadk_model::rest::googleapi::check_response;
 use gadk_model::rest::{
     CallTimeout, RequestHeaders, RestError, RestReply, RestTransport, RetryAfterRule, RetryPolicy,
 };
@@ -41,7 +43,7 @@ use serde_json::{Map, Value, json};
 
 use crate::config::ClientOptions;
 use crate::context::{Context, ContextError};
-use crate::error::{ApiError, BigQueryError, Error, ErrorItem};
+use crate::error::{BigQueryError, Error};
 use crate::schema::{Schema, TableSchema};
 use crate::schema_upgrade::{
     Clustering, DAY_PARTITIONING_TYPE, TableMetadata, TableMetadataOps, TableMetadataUpdate,
@@ -448,7 +450,7 @@ impl BigQueryClient {
     }
 
     /// One request (Go `call.Do()`), cancelled when `ctx` ends: a 2xx response's body, else
-    /// Go `googleapi.CheckResponse`'s [`ApiError`].
+    /// Go `googleapi.CheckResponse`'s [`ApiError`](crate::error::ApiError).
     async fn call(
         &self,
         ctx: &Context,
@@ -481,10 +483,9 @@ impl BigQueryClient {
             if parts.status == http::StatusCode::NO_CONTENT {
                 // Go `gensupport.DecodeResponse` leaves the zero value for a 204.
                 Ok(Bytes::from_static(b"{}"))
-            } else if parts.status.is_success() {
-                Ok(body)
             } else {
-                Err(Error::from(api_error_from_response(&parts, &body)))
+                check_response(&parts, &body).map_err(Error::Api)?;
+                Ok(body)
             }
         })
         .await
@@ -871,81 +872,6 @@ fn job_status(status: Option<JobStatusReply>) -> Result<Option<JobStatus>, Error
     }))
 }
 
-/// Go `googleapi.CheckResponse` for a response with status ≥ 300: the [`ApiError`] Go builds
-/// from the JSON error body (`error.code` / `message` / `errors` / `details`), the raw body and
-/// the headers.
-pub(crate) fn api_error_from_response(parts: &http::response::Parts, body: &[u8]) -> ApiError {
-    let status = parts.status.as_u16();
-    let mut err = ApiError {
-        code: status,
-        body: String::from_utf8_lossy(body).into_owned(),
-        header: parts.headers.clone(),
-        ..ApiError::default()
-    };
-    if let Some(reply) = error_reply_from_body(body) {
-        if reply.code != 0 {
-            // Go keeps the body's `error.code` even when it differs from the HTTP status.
-            // Divergence (ledger 7b-1): Go's `Code` is an `int`; a body code outside `u16`
-            // (negative or above 65535) keeps the HTTP status here.
-            err.code = u16::try_from(reply.code).unwrap_or(status);
-        }
-        err.message = reply.message;
-        err.details = reply.details;
-        // Go decodes a `null` entry into a zero `ErrorItem` and keeps it.
-        err.errors = reply
-            .errors
-            .into_iter()
-            .map(|i| {
-                let i = i.unwrap_or_default();
-                ErrorItem {
-                    reason: i.reason,
-                    message: i.message,
-                }
-            })
-            .collect();
-    }
-    err
-}
-
-#[derive(Deserialize)]
-struct ErrorReply {
-    error: Option<ErrorReplyBody>,
-}
-
-#[derive(Deserialize)]
-struct ErrorReplyBody {
-    #[serde(default, deserialize_with = "nullable")]
-    code: i64,
-    #[serde(default, deserialize_with = "nullable")]
-    message: String,
-    #[serde(default, deserialize_with = "nullable")]
-    details: Vec<Value>,
-    #[serde(default, deserialize_with = "nullable")]
-    errors: Vec<Option<ErrorItemReply>>,
-}
-
-#[derive(Default, Deserialize)]
-#[serde(default)]
-struct ErrorItemReply {
-    #[serde(deserialize_with = "nullable")]
-    reason: String,
-    #[serde(deserialize_with = "nullable")]
-    message: String,
-}
-
-/// Go `errorReplyFromBody`: a JSON object `{"error": …}`, or the first element of a JSON array
-/// of them; `None` when the body is neither or has no `error`.
-fn error_reply_from_body(body: &[u8]) -> Option<ErrorReplyBody> {
-    if body.first() == Some(&b'[') {
-        let mut replies: Vec<ErrorReply> = serde_json::from_slice(body).ok()?;
-        if replies.is_empty() {
-            return None;
-        }
-        return replies.swap_remove(0).error;
-    }
-    serde_json::from_slice::<ErrorReply>(body).ok()?.error
-}
-
 /// Go `retryableError(err, allowedReasons)`: a Google API error whose first reason is allowed
 /// or whose code is 500/502/503/504; a context deadline (Go's `Timeout()`); a transport failure
 /// that refused or reset the connection, timed out, or cut a body short.
@@ -1196,12 +1122,16 @@ mod tests {
 
     use std::collections::HashMap;
 
+    use gadk_model::rest::googleapi::api_error_from_response;
     use gadk_model::rest::test_util::{FakeResponse, ScriptedClient, bearer_credentials};
     use gadk_platform::env::MapEnv;
     use pretty_assertions::assert_eq;
 
     use super::*;
-    use crate::error::{Code, is_conflict_error, is_not_found_error, is_precondition_failed_error};
+    use crate::error::{
+        ApiError, Code, ErrorItem, is_conflict_error, is_not_found_error,
+        is_precondition_failed_error,
+    };
 
     fn parts(status: u16) -> http::response::Parts {
         let (mut parts, ()) = http::Response::new(()).into_parts();

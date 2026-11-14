@@ -22,10 +22,13 @@
 //!   (every status ≥ 400, and a non-streaming 2xx), or a streaming 2xx with its live body.
 //! - Failures are a provider-neutral [`RestError`]; each provider maps it to its own error
 //!   type and text.
+//! - [`googleapi`]: Go's `*googleapi.Error` ([`googleapi::ApiError`]) and
+//!   `googleapi.CheckResponse` ([`googleapi::check_response`]) for the Google REST clients.
 //! - Feature `test-util` adds [`test_util`]: a scripted in-process `HttpClient` and a
 //!   127.0.0.1 fake server.
 
 mod error;
+pub mod googleapi;
 mod policy;
 #[cfg(feature = "test-util")]
 pub mod test_util;

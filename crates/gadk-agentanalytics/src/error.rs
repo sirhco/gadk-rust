@@ -16,16 +16,16 @@
 //! [`Error`]: the crate's error type, carrying Go's error texts and Go's `%w` / `errors.Join`
 //! chains, plus the Go error classifiers the package uses: `hasErrorCode`, `isNotFoundError`,
 //! `isConflictError` and `isPreconditionFailedError` (from `plugin/agentanalytics/schema_upgrade.go`),
-//! `status.Code` (grpc-go), and the texts of `googleapi.Error`, `bigquery.Error` and grpc-go's
-//! status errors.
+//! `status.Code` (grpc-go), and the texts of `bigquery.Error` and grpc-go's status errors.
+//! [`ApiError`] / [`ErrorItem`] (Go `*googleapi.Error`) are `gadk_model::rest::googleapi`'s,
+//! re-exported here.
 
 use std::error::Error as StdError;
 use std::fmt;
 
 use gadk_model::rest::RestError;
+pub use gadk_model::rest::googleapi::{ApiError, ErrorItem};
 use gadk_platform::go_quote;
-use http::HeaderMap;
-use serde_json::Value;
 
 use crate::context::ContextError;
 use crate::schema::SchemaMismatchError;
@@ -144,135 +144,6 @@ impl fmt::Display for Code {
             Code::Unauthenticated => "Unauthenticated",
         })
     }
-}
-
-/// One entry of a Google API error's `errors` list (Go `googleapi.ErrorItem`).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ErrorItem {
-    /// `reason`, e.g. `notFound`.
-    pub reason: String,
-    /// `message`.
-    pub message: String,
-}
-
-/// A Google API HTTP error (Go `*googleapi.Error`, built by `googleapi.CheckResponse` from a
-/// response with status ≥ 300). `Display` is Go's `Error()`.
-#[derive(Debug, Clone, Default)]
-pub struct ApiError {
-    /// The HTTP status code.
-    pub code: u16,
-    /// The JSON error body's `error.message`.
-    pub message: String,
-    /// The JSON error body's `error.details`.
-    pub details: Vec<Value>,
-    /// The raw response body.
-    pub body: String,
-    /// The response headers.
-    pub header: HeaderMap,
-    /// The JSON error body's `error.errors`.
-    pub errors: Vec<ErrorItem>,
-}
-
-impl fmt::Display for ApiError {
-    /// Go `(*googleapi.Error).Error()`.
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.errors.is_empty() && self.message.is_empty() {
-            return write!(
-                f,
-                "googleapi: got HTTP response code {} with body: {}",
-                self.code, self.body
-            );
-        }
-        let mut buf = format!("googleapi: Error {}: ", self.code);
-        buf.push_str(&self.message);
-        if !self.details.is_empty()
-            && let Ok(compact) = gadk_model::to_go_json(&self.details)
-        {
-            // Go `json.NewEncoder` + `SetIndent("", "  ")` + `Encode` (trailing newline).
-            buf.push_str("\nDetails:");
-            buf.push('\n');
-            buf.push_str(&go_json_indent(&compact));
-            buf.push('\n');
-        }
-        if self.errors.is_empty() {
-            return f.write_str(buf.trim());
-        }
-        if self.errors.len() == 1 && self.errors[0].message == self.message {
-            buf.push_str(", ");
-            buf.push_str(&self.errors[0].reason);
-            return f.write_str(&buf);
-        }
-        buf.push_str("\nMore details:\n");
-        for e in &self.errors {
-            buf.push_str(&format!("Reason: {}, Message: {}\n", e.reason, e.message));
-        }
-        f.write_str(&buf)
-    }
-}
-
-/// Go `json.Indent(dst, compact, "", "  ")` over compact Go JSON (`to_go_json` output).
-fn go_json_indent(compact: &[u8]) -> String {
-    let text = String::from_utf8_lossy(compact);
-    let mut out = String::with_capacity(text.len() * 2);
-    let mut depth = 0usize;
-    let mut in_string = false;
-    let mut escaped = false;
-    let mut need_indent = false;
-    let newline = |out: &mut String, depth: usize| {
-        out.push('\n');
-        for _ in 0..depth {
-            out.push_str("  ");
-        }
-    };
-    for c in text.chars() {
-        if in_string {
-            out.push(c);
-            if escaped {
-                escaped = false;
-            } else if c == '\\' {
-                escaped = true;
-            } else if c == '"' {
-                in_string = false;
-            }
-            continue;
-        }
-        match c {
-            '{' | '[' => {
-                if need_indent {
-                    newline(&mut out, depth);
-                }
-                out.push(c);
-                depth += 1;
-                need_indent = true;
-            }
-            '}' | ']' => {
-                depth = depth.saturating_sub(1);
-                if need_indent {
-                    // An empty object or array stays `{}` / `[]`.
-                    need_indent = false;
-                } else {
-                    newline(&mut out, depth);
-                }
-                out.push(c);
-            }
-            ',' => {
-                out.push(c);
-                newline(&mut out, depth);
-            }
-            ':' => out.push_str(": "),
-            _ => {
-                if need_indent {
-                    newline(&mut out, depth);
-                    need_indent = false;
-                }
-                if c == '"' {
-                    in_string = true;
-                }
-                out.push(c);
-            }
-        }
-    }
-    out
 }
 
 /// A BigQuery job error (Go `*bigquery.Error`, from a job status's `errorResult` / `errors`).
