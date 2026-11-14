@@ -844,7 +844,7 @@ class ThreeBTest(unittest.TestCase):
         err = io.StringIO()
         with contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
             pc.main(["--adk-go", str(self.go), "--repo", str(self.repo), "--ledger", "all", "--count"])
-        self.assertIn("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a, 4b, 4c, 5a, 5b, 5c, 6, 6b, 6c-1, 6c-2, 7a or 7b-1", err.getvalue())
+        self.assertIn("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a, 4b, 4c, 5a, 5b, 5c, 6, 6b, 6c-1, 6c-2, 7a, 7b-1 or 7b-2", err.getvalue())
 
 
 LEDGER_4A = (
@@ -1899,6 +1899,51 @@ class RealTreeTest(unittest.TestCase):
             "crates/gadk-agentanalytics/src/parity_tests/plugin_agentanalytics_json_formatter/mod.rs", []))
         self.assertIn("7b-1", pc.GENERATED_LEDGERS)
         self.assertEqual(pc.check_1b(ADK_GO, HERE.parent, HERE.parent / "docs/parity/7b-1.md", name="7b-1"), [])
+
+    def test_7b_2_count_is_171(self):
+        in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/7b-2.md")
+        self.assertEqual(in_scope, [
+            "plugin/agentanalytics/batch_processor_test.go",
+            "plugin/agentanalytics/gcs_offloader_test.go",
+        ])
+        self.assertEqual(sorted(deferred), [
+            "plugin/agentanalytics/arrow_test_helper_test.go",
+            "plugin/agentanalytics/bigquery_agent_analytics_plugin_test.go",
+            "plugin/agentanalytics/events_test.go",
+            "plugin/agentanalytics/late_callbacks_test.go",
+            "plugin/agentanalytics/norace_test.go",
+            "plugin/agentanalytics/race_test.go",
+            "plugin/agentanalytics/trace_manager_test.go",
+        ])
+        self.assertEqual(pc.count(ADK_GO, in_scope), 171)
+        self.assertEqual([len(pc.go_tests(ADK_GO, f)) for f in in_scope], [75, 96])
+        self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "7b-2"), [])
+        # 7b-1's in-scope files are ledgered there, not here: the two ledgers' in-scope lists
+        # are disjoint, and with 7b-2's deferred block they name every agentanalytics test
+        # file exactly once.
+        in_scope_7b1, _ = pc.parse_header(HERE.parent / "docs/parity/7b-1.md")
+        go_files = sorted("plugin/agentanalytics/" + f.name
+                          for f in (ADK_GO / "plugin/agentanalytics").glob("*_test.go"))
+        named = in_scope_7b1 + in_scope + list(deferred)
+        self.assertEqual(sorted(named), go_files)
+        self.assertEqual(len(named), len(set(named)))
+        # Both targets are module directories.
+        for f, target in [
+            ("plugin/agentanalytics/batch_processor_test.go",
+             "crates/gadk-agentanalytics/src/parity_tests/plugin_agentanalytics_batch_processor/mod.rs"),
+            ("plugin/agentanalytics/gcs_offloader_test.go",
+             "crates/gadk-agentanalytics/src/parity_tests/plugin_agentanalytics_gcs_offloader/mod.rs"),
+        ]:
+            self.assertEqual(pc.find_target(HERE.parent, f), (target, []))
+        # 129 in scope (ported or adapted) + 42 deferred to 7b-3.
+        rows = pc.parse_rows(HERE.parent / "docs/parity/7b-2.md")
+        self.assertEqual(len(rows), 171)
+        self.assertEqual(sum(r[2].startswith("ported") for r in rows), 129)
+        skipped = [r for r in rows if r[2] == "skipped"]
+        self.assertEqual(len(skipped), 42)
+        self.assertTrue(all(r[4].startswith("deferred to 7b-3 (") for r in skipped))
+        self.assertIn("7b-2", pc.GENERATED_LEDGERS)
+        self.assertEqual(pc.check_1b(ADK_GO, HERE.parent, HERE.parent / "docs/parity/7b-2.md", name="7b-2"), [])
 
     def test_6b_count_is_40(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/6b.md")

@@ -13,8 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go's built-in MIME table (`mime.builtinTypes`) and `http.DetectContentType` for the web UI
-//! (Task 10).
+//! Go's built-in MIME table (`mime.builtinTypes`) and `http.DetectContentType`, shared by the
+//! launcher's web UI (`http.ServeContent`) and the agentanalytics GCS offloader (the storage
+//! client's `gensupport` content sniffing).
 //!
 //! `http.ServeContent` types a file by `mime.TypeByExtension(filepath.Ext(name))` and, when that is
 //! empty, by sniffing its first 512 bytes. Go's table is the built-in one augmented by the
@@ -102,7 +103,7 @@ const BUILTIN_TYPES: &[(&str, &str)] = &[
 
 /// Go `mime.TypeByExtension(ext)` over the built-in table: `ext` (with its leading dot) looked up
 /// as given, then lower-cased; `""` when unknown.
-pub(super) fn type_by_extension(ext: &str) -> &'static str {
+pub fn type_by_extension(ext: &str) -> &'static str {
     let find = |e: &str| {
         BUILTIN_TYPES
             .binary_search_by(|(k, _)| (*k).cmp(e))
@@ -115,11 +116,11 @@ pub(super) fn type_by_extension(ext: &str) -> &'static str {
 }
 
 /// Go `internal.SniffLen`: the sniffer reads at most this many bytes.
-pub(super) const SNIFF_LEN: usize = 512;
+pub const SNIFF_LEN: usize = 512;
 
 /// Go `http.DetectContentType` (`net/http/internal/sniff.go`): the WHATWG MIME sniffing
 /// algorithm over the first [`SNIFF_LEN`] bytes, `application/octet-stream` when nothing matches.
-pub(super) fn detect_content_type(data: &[u8]) -> &'static str {
+pub fn detect_content_type(data: &[u8]) -> &'static str {
     let data = &data[..data.len().min(SNIFF_LEN)];
     let first_non_ws = data.iter().position(|&b| !is_ws(b)).unwrap_or(data.len());
     SNIFF_SIGNATURES
@@ -343,8 +344,6 @@ fn mp4(data: &[u8]) -> Option<&'static str> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
-    use pretty_assertions::assert_eq;
-
     use super::*;
 
     #[test]

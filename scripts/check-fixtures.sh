@@ -45,6 +45,11 @@
 # schema 3, views 2, wire 41; 7b-2: append_rows 12, config +1, gapic 3, gcs 12, helpers 11,
 # record_batch 27); when go and ADK-Go are present, rerunning it into a temp dir reproduces them
 # (empty diff -r).
+# 7b-2: the generated crates/gadk-agentanalytics/src/storagepb/google.*.rs are what
+# scripts/gen-storagepb/run.sh writes from the vendored protos (empty diff -r into a temp dir,
+# the hand-written mod.rs aside). The generator builds with its own Cargo.lock into
+# $GEN_STORAGEPB_TARGET_DIR (default: target/gen-storagepb in the repo); the check is skipped with
+# a note when cargo is missing or the generator's crates cannot be fetched (offline).
 set -euo pipefail
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 go="${ADK_GO_DIR:-$repo/../adk-go}"
@@ -313,12 +318,35 @@ else
   rm -rf "$agentanalytics_tmp"
 fi
 
+storagepb="$repo/crates/gadk-agentanalytics/src/storagepb"
+storagepb_status="not regenerated"
+storagepb_manifest="$repo/scripts/gen-storagepb/Cargo.toml"
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "skipping the storagepb drift check: cargo is not on PATH" >&2
+elif ! cargo fetch --quiet --locked --manifest-path "$storagepb_manifest" >/dev/null 2>&1; then
+  echo "skipping the storagepb drift check: cannot fetch scripts/gen-storagepb's crates (offline?)" >&2
+else
+  storagepb_tmp="$(mktemp -d)"
+  if ! GEN_STORAGEPB_TARGET_DIR="${GEN_STORAGEPB_TARGET_DIR:-$repo/target/gen-storagepb}" \
+    "$repo/scripts/gen-storagepb/run.sh" "$storagepb_tmp/out" >/dev/null; then
+    echo "scripts/gen-storagepb failed" >&2
+    fail=1
+  elif ! diff -rq -x mod.rs "$storagepb_tmp/out" "$storagepb" >&2; then
+    echo "generated storagepb differs from the checked-in code (rerun scripts/gen-storagepb/run.sh)" >&2
+    fail=1
+  else
+    storagepb_status="regenerated identically"
+  fi
+  rm -rf "$storagepb_tmp"
+fi
+
 if [ "$fail" -eq 0 ]; then
   echo "ok: $n fixtures and $schema_n telemetry goldens match ADK-Go; $wire_n wire fixtures;" \
     "$a2a_wire_n A2A wire fixtures; $webui_n web UI files; launcher fixtures$launcher_counts;" \
     "agentengine fixtures$agentengine_counts; encode_shapes.rs $shapes_status;" \
     "goyaml$goyaml_counts; float table $float_n rows; goyaml $goyaml_status;" \
     "configurable$configurable_counts; canonicalize $canon_n rows; configurable $configurable_status;" \
-    "agentanalytics $agentanalytics_total fixtures$agentanalytics_counts; agentanalytics $agentanalytics_status"
+    "agentanalytics $agentanalytics_total fixtures$agentanalytics_counts; agentanalytics $agentanalytics_status;" \
+    "storagepb $storagepb_status"
 fi
 exit "$fail"

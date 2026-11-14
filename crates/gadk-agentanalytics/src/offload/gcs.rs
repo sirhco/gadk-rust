@@ -47,6 +47,7 @@ use crate::config::{ClientOptions, GcsContentOffloader, GcsUploadRequest};
 use crate::context::{Context, ContextError};
 use crate::crc32c;
 use crate::error::Error;
+use crate::gax::{Backoff, Pauses, random_id, sleep, wrapped_call_err};
 use crate::offload::{DEFAULT_UPLOAD_CHUNK_SIZE, OwnedUploadError};
 
 /// The OAuth scopes Go's `storage.NewClient` requests (`ScopeFullControl` and
@@ -66,7 +67,11 @@ pub(crate) const CHUNK_RETRY_DEADLINE: Duration = Duration::from_secs(32);
 
 /// Go gensupport's default backoff, `gax.Backoff{Initial: 100 * time.Millisecond}` (gax's
 /// defaults: max 30 s, multiplier 2).
-const RETRY_INITIAL_BACKOFF: Duration = Duration::from_millis(100);
+const RETRY_BACKOFF: Backoff = Backoff {
+    initial: Duration::from_millis(100),
+    max: Duration::ZERO,
+    multiplier: 0.0,
+};
 
 /// One attempt per request: the retries are gensupport's loops in this module.
 const SINGLE_ATTEMPT: RetryPolicy = RetryPolicy {
@@ -212,7 +217,7 @@ impl GcsOffloader {
             return Err(Error::Context(err));
         }
         let data = &req.data;
-        let media_type = media_type(&req.content_type);
+        let media_type = media_type(&req.content_type, data);
         // Go `UploadContent`: `ChunkSize = len(Data) + 1` below googleapi.DefaultUploadChunkSize
         // (the data fits one chunk: a multipart upload), else the writer's default chunk size
         // (a resumable upload).
@@ -303,7 +308,7 @@ impl GcsOffloader {
         headers: HeaderMap,
     ) -> Result<(http::response::Parts, Bytes), Error> {
         let invocation_id = Platform::default().new_uuid();
-        let mut backoff = Backoff::new(RETRY_INITIAL_BACKOFF);
+        let mut backoff = Pauses::new(RETRY_BACKOFF);
         let mut attempts: u32 = 1;
         let mut pause = Duration::ZERO;
         let mut last_err: Option<Error> = None;
@@ -484,7 +489,7 @@ impl ResumableUpload<'_> {
         done: bool,
     ) -> (Last, u32) {
         let deadline = Instant::now() + CHUNK_RETRY_DEADLINE;
-        let mut backoff = Backoff::new(RETRY_INITIAL_BACKOFF);
+        let mut backoff = Pauses::new(RETRY_BACKOFF);
         let invocation_id = Platform::default().new_uuid();
         let mut attempts: u32 = 1;
         let mut pause = Duration::ZERO;
@@ -710,77 +715,22 @@ fn client_version_tokens() -> String {
     gadk_platform::tracking_header()
 }
 
-/// Go `wrappedCallErr{ctxErr, wrappedErr}`: `retry failed with <ctx err>; last error: <err>`,
-/// both errors in its tree (Go's `Is` matches either; `Unwrap` returns the call's error).
-fn wrapped_call_err(ctx_err: Error, last: Error) -> Error {
-    Error::wrap_text(
-        format!("retry failed with {ctx_err}; last error: {last}"),
-        Error::Joined(vec![ctx_err, last]),
-    )
-}
-
-/// gax-go `Sleep(ctx, d)`: waits `d`, or fails with the context error once `ctx` ends.
-async fn sleep(ctx: &Context, d: Duration) -> Result<(), Error> {
-    ctx.run(async {
-        tokio::time::sleep(d).await;
-        Ok(())
-    })
-    .await
-}
-
-/// gax-go `Backoff` with gax's defaults for `Max` (30 s) and `Multiplier` (2): each pause is
-/// uniform in `[1ns, cur]`, then `cur` doubles up to the maximum.
-#[derive(Debug, Clone)]
-struct Backoff {
-    cur: Duration,
-}
-
-impl Backoff {
-    const MAX: Duration = Duration::from_secs(30);
-
-    fn new(initial: Duration) -> Backoff {
-        Backoff { cur: initial }
-    }
-
-    /// Go `Backoff.Pause()`.
-    fn pause(&mut self) -> Duration {
-        let cur_ns = u64::try_from(self.cur.as_nanos())
-            .unwrap_or(u64::MAX)
-            .max(1);
-        let d = Duration::from_nanos(1 + random_u64() % cur_ns);
-        self.cur = (self.cur * 2).min(Self::MAX);
-        d
-    }
-}
-
-/// 32 random lower-case hex digits (a random v4 UUID without its dashes).
-fn random_hex32() -> String {
-    Platform::default().new_uuid().replace('-', "")
-}
-
-/// A random `u64` for backoff jitter.
-fn random_u64() -> u64 {
-    u64::from_str_radix(random_hex32().get(..16).unwrap_or("0"), 16).unwrap_or(0)
-}
-
 /// Go `multipart.Writer`'s random boundary: 60 lower-case hex digits.
 fn multipart_boundary() -> String {
     // Divergence (ledger 7b-2): Go draws the boundary's 30 bytes from `crypto/rand`; two v4
     // UUIDs fix 12 of their bits. The boundary's shape (`^[0-9a-f]{60}$`) is Go's.
-    let mut boundary = random_hex32();
-    boundary.push_str(&random_hex32());
+    let mut boundary = random_id();
+    boundary.push_str(&random_id());
     boundary.truncate(60);
     boundary
 }
 
-/// The content type of the payload (Go gensupport `MediaInfo.mType`).
-fn media_type(content_type: &str) -> &str {
+/// The content type of the payload (Go gensupport `MediaInfo.mType`): the given one, else
+/// sniffed from the payload's first 512 bytes (`gax.DetermineContentType`,
+/// `http.DetectContentType`). The object metadata carries no `contentType` either way.
+fn media_type<'a>(content_type: &'a str, data: &[u8]) -> &'a str {
     if content_type.is_empty() {
-        // Divergence (ledger 7b-2): for an empty content type Go sniffs one from the payload
-        // (`gax.DetermineContentType`, `http.DetectContentType`); gadk sends
-        // `application/octet-stream`, the sniffer's answer for unrecognised bytes. The object
-        // metadata carries no `contentType` either way.
-        "application/octet-stream"
+        gadk_platform::go_mime::detect_content_type(data)
     } else {
         content_type
     }
@@ -959,15 +909,15 @@ mod tests {
     }
 
     #[test]
-    fn backoff_pauses_like_gax() {
-        let mut b = Backoff::new(RETRY_INITIAL_BACKOFF);
-        let mut cap = RETRY_INITIAL_BACKOFF;
-        for _ in 0..12 {
-            let d = b.pause();
-            assert!(d >= Duration::from_nanos(1) && d <= cap, "{d:?} > {cap:?}");
-            cap = (cap * 2).min(Duration::from_secs(30));
-        }
-        assert_eq!(b.cur, Duration::from_secs(30));
+    fn backoff_is_gensupports() {
+        let mut b = Pauses::new(RETRY_BACKOFF);
+        let caps: Vec<u128> = (0..12).map(|_| b.next(|n| n - 1).as_millis()).collect();
+        assert_eq!(
+            caps,
+            [
+                100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600, 30000, 30000, 30000
+            ]
+        );
     }
 
     #[test]
@@ -984,6 +934,15 @@ mod tests {
                 .bytes()
                 .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
         );
+    }
+
+    #[test]
+    fn an_empty_content_type_is_sniffed_like_go() {
+        assert_eq!(media_type("image/png", b"GIF89a"), "image/png");
+        assert_eq!(media_type("", b"GIF89a..."), "image/gif");
+        assert_eq!(media_type("", b"{\"a\":1}"), "text/plain; charset=utf-8");
+        assert_eq!(media_type("", &[0, 1, 2, 3]), "application/octet-stream");
+        assert_eq!(media_type("", b""), "text/plain; charset=utf-8");
     }
 
     #[test]

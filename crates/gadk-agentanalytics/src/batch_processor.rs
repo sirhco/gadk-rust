@@ -145,10 +145,8 @@ pub struct BatchProcessor {
     /// Go `closed`.
     pub(crate) closed: AtomicBool,
     /// Go `uploadTimeout` (test override of `gcs_upload_timeout`), in ns; 0 = unset.
-    #[allow(dead_code)] // consumer: Task 10 (offload::uploads)
     pub(crate) upload_timeout: AtomicU64,
     /// Go `uploadCooldownUntil`: uploads are paused until this instant; `None` = not paused.
-    #[allow(dead_code)] // consumer: Task 10 (offload::uploads)
     pub(crate) upload_cooldown_until: Mutex<Option<Instant>>,
     /// Go `pendingUploadBytes`.
     pub(crate) pending_upload_bytes: AtomicI64,
@@ -256,7 +254,6 @@ impl BatchProcessor {
     /// an unstarted stream writer on the empty stream name, background contexts and zero
     /// counters.
     #[cfg(test)]
-    #[allow(dead_code)] // consumer: Task 10 (gcs_offloader_test.go ports)
     pub(crate) fn bare(config: Config, queue_capacity: usize) -> BatchProcessor {
         let base_ctx = Context::background();
         let upload_ctx = base_ctx.with_cancel();
@@ -1075,20 +1072,19 @@ impl BatchProcessor {
     }
 
     /// Test override of Go's `uploadTimeout`.
-    #[allow(dead_code)] // tests (Go sets the field); consumer: Task 10 tests
+    #[cfg_attr(not(test), allow(dead_code))] // tests (Go sets the field)
     pub(crate) fn set_upload_timeout(&self, timeout: Duration) {
         let ns = u64::try_from(timeout.as_nanos()).unwrap_or(u64::MAX);
         self.upload_timeout.store(ns, Ordering::SeqCst);
     }
 
     /// Go's `cmp.Or(b.uploadTimeout, …)` first operand: the override, or zero.
-    #[allow(dead_code)] // consumer: Task 10 (offload::uploads)
     pub(crate) fn upload_timeout_override(&self) -> Duration {
         Duration::from_nanos(self.upload_timeout.load(Ordering::SeqCst))
     }
 
     /// Test override of Go's `maxPendingUploadBytes`.
-    #[allow(dead_code)] // tests (Go sets the field); consumer: Task 10 tests
+    #[cfg_attr(not(test), allow(dead_code))] // tests (Go sets the field)
     pub(crate) fn set_max_pending_upload_bytes(&self, n: i64) {
         self.max_pending_upload_bytes.store(n, Ordering::SeqCst);
     }

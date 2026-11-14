@@ -22,8 +22,6 @@
 //! `gcsUploadTimeout` and `defaultMaxPendingUploadBytes` are 7b-1's (`crate::formatter`,
 //! `crate::config`).
 
-#![allow(dead_code)] // consumers: Task 7 (gcs), Task 10 (uploads)
-
 pub mod gcs;
 pub(crate) mod uploads;
 

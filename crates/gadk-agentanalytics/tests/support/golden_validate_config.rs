@@ -26,19 +26,10 @@ use std::path::PathBuf;
 use pretty_assertions::assert_eq;
 use serde_json::{Value, json};
 
-// The names `config_projection` expects in scope of the including module.
-use crate::config::{
-    ClientOptions, Config, GcsContentOffloader, GcsUploadRequest, Logger, RetryConfig, StdLogger,
-};
-use crate::context::Context;
+use crate::config::golden_apply_defaults::config_projection;
+use crate::config::{Config, RetryConfig};
 use crate::error::Error;
 use crate::validate::validate_config;
-
-// The projection helper is also compiled into `config::golden_apply_defaults`, whose module is
-// private to `config`; a second copy keeps 7b-1's files untouched.
-#[allow(clippy::duplicate_mod)]
-#[path = "config_projection.rs"]
-mod config_projection;
 
 fn outcome(r: Result<BTreeSet<String>, Error>) -> Value {
     match r {

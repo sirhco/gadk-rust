@@ -354,7 +354,7 @@ fn requests_from_rust_batches_decode_like_gos() {
         assert_eq!(rust_schema, go_schema, "{name}: writer schema");
         assert_eq!(rust_batch, go_batch, "{name}: record batch");
         // arrow-rs's record batch message is never longer than arrow-go's (ledgered by
-        // Task 6); its schema stream may be longer or shorter (ledgered by 7b-1).
+        // 7b-2); its schema stream may be longer or shorter (ledgered by 7b-1).
         let (rust_schema_bytes, rust_batch_bytes) = arrow_payload(&req);
         let (go_schema_bytes, go_batch_bytes) = arrow_payload(&go_req);
         assert!(rust_batch_bytes.len() <= go_batch_bytes.len(), "{name}");

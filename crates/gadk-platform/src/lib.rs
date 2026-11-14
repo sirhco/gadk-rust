@@ -20,7 +20,8 @@
 //! ([`go_sprint_value`]), `time.Parse(time.RFC3339, …)` ([`go_parse_rfc3339`]),
 //! `path.Clean`/`path.Join`/`path.Dir`/`path.Base` ([`go_path_clean`], [`go_path_join`],
 //! [`go_path_dir`], [`go_path_base`]), the parts of `net/url` gadk reproduces ([`go_url`]),
-//! Go's `fmt.Errorf("…: %w", err)` wrapping ([`GoWrapped`]), `time.Duration` ([`GoDuration`],
+//! Go's `fmt.Errorf("…: %w", err)` wrapping ([`GoWrapped`]), Go's built-in MIME table and
+//! `http.DetectContentType` ([`go_mime`]), `time.Duration` ([`GoDuration`],
 //! [`go_parse_duration`], [`go_format_duration`]) and the parts of Go's `flag` package the
 //! launcher uses ([`go_flag`]).
 
@@ -29,6 +30,7 @@ mod exec;
 mod go_err;
 pub mod go_flag;
 mod go_fmt;
+pub mod go_mime;
 mod go_path;
 mod go_time;
 pub mod go_url;

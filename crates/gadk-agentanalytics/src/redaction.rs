@@ -325,7 +325,7 @@ fn must_compile(name: &str) -> Regex {
         .expect("valid redaction regex")
 }
 
-static URI_TOKEN_RE: LazyLock<Regex> = LazyLock::new(|| must_compile("uriTokenRe"));
+pub(crate) static URI_TOKEN_RE: LazyLock<Regex> = LazyLock::new(|| must_compile("uriTokenRe"));
 static AUTH_HEADER_RE: LazyLock<Regex> = LazyLock::new(|| must_compile("authHeaderRe"));
 /// Go `bearerTokenRe`: a bearer token (RFC 6750) never holds quotes, `)` or `]`, so the bare
 /// value stops there.
@@ -721,7 +721,7 @@ fn redact_uri_component(s: &str) -> (String, bool) {
 }
 
 /// Go `isKnownSentinel(s)`: `s` is one of the placeholders the formatter and redaction write.
-fn is_known_sentinel(s: &str) -> bool {
+pub(crate) fn is_known_sentinel(s: &str) -> bool {
     matches!(
         s,
         REDACTED_VALUE
@@ -1400,7 +1400,7 @@ fn scrub_error_tokens(msg: &str) -> String {
 
 /// Go `trimTrailingPunctuation(s)`: `s` without the punctuation that may follow a URI or a
 /// value in text; a `]` that closes a redaction placeholder is kept.
-fn trim_trailing_punctuation(s: &str) -> &str {
+pub(crate) fn trim_trailing_punctuation(s: &str) -> &str {
     let trimmed = s.trim_end_matches(|c: char| ".,;:)]}".contains(c));
     let with_bracket = &s[..(trimmed.len() + 1).min(s.len())];
     if with_bracket.ends_with(']')
@@ -1952,7 +1952,7 @@ fn has_any_credential_marker(s: &str) -> bool {
 
 /// The panic value's Go `%T` as far as Rust can tell: a `&str` or `String` payload (Go
 /// `panic("...")`) is `string`.
-fn panic_type_name(payload: &(dyn std::any::Any + Send)) -> &'static str {
+pub(crate) fn panic_type_name(payload: &(dyn std::any::Any + Send)) -> &'static str {
     if payload.is::<&str>() || payload.is::<String>() {
         "string"
     } else {

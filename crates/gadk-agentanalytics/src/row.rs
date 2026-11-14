@@ -311,7 +311,6 @@ impl From<Row> for QueuedRow {
 }
 
 /// Go `deferredUpload`: a failed upload kept for a retry of its batch.
-#[allow(dead_code)] // consumer: Task 10 (offload::uploads)
 #[derive(Debug, Clone, Default)]
 pub(crate) struct DeferredUpload {
     /// Go `upload`.
@@ -324,7 +323,6 @@ pub(crate) struct DeferredUpload {
 
 /// Go `deferredRowUploads`: the deferred uploads of a row, and what requeuing them needs to put
 /// the row back in the form it was queued in.
-#[allow(dead_code)] // consumer: Task 10 (offload::uploads)
 #[derive(Debug, Clone, Default)]
 pub(crate) struct DeferredRowUploads {
     /// Go `pending`.
@@ -402,7 +400,6 @@ pub fn to_json_map(row: &Row) -> Map<String, Value> {
 /// Go `builder.applyToRow(row)` on a [`Row`]: runs the 7b-1
 /// [`ContentSummaryBuilder::apply_to_row`] on a JSON map and copies the columns it writes
 /// (`content`, `is_truncated`) into `row`. `apply_to_row` only writes, so the map starts empty.
-#[allow(dead_code)] // consumer: Task 10 (offload::uploads)
 pub(crate) fn apply_summary_to_row(builder: &ContentSummaryBuilder, row: &mut Row) {
     let mut written = Map::new();
     builder.apply_to_row(&mut written);
