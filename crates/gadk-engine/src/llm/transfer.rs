@@ -241,6 +241,12 @@ impl Tool for TransferToAgentTool {
         })
     }
 
+    /// Go's `supportedAgents` field, which the analytics plugin reads by reflection
+    /// (`plugin/agentanalytics/events.go` `findAgentA2AByName`).
+    fn origin_agents(&self) -> Vec<Arc<dyn Agent>> {
+        self.supported_agents.clone()
+    }
+
     /// Port of agent_transfer.go:165 ProcessRequest (= appendTools). The flow never calls it
     /// (the processor appends the tool itself, and toolPreprocess walks only the agent's tools);
     /// it is ported so TestAgentTransfer_ProcessRequest is a straight port. The error text is
@@ -401,6 +407,12 @@ mod tests {
         assert_eq!(t.origin_kind(), ToolOriginKind::TransferAgent);
         assert!(t.origin_agent().is_none());
         assert!(t.unwrap().is_none());
+        let names: Vec<String> = t
+            .origin_agents()
+            .iter()
+            .map(|a| a.name().to_owned())
+            .collect();
+        assert_eq!(names, ["x"]);
     }
 
     #[test]

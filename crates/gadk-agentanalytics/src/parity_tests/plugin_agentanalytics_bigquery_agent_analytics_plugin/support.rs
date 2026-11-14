@@ -130,10 +130,12 @@ impl Session for MockSession {
 
 /// Go `mockInvocationContext`: the identity a direct callback test hands the plugin. Build the
 /// ADK contexts with [`invocation`](Self::invocation) (invocation callbacks) and
-/// [`context`](Self::context) (agent / model / tool callbacks); every context built from one
-/// `MockCtx` shares its agent, session and cancellation token, so they belong to one
-/// invocation as Go's shared `mCtx` does. Go's `state` nil = an empty state (a gadk session
-/// always has one).
+/// [`context`](Self::context) (agent / model / tool callbacks). One `MockCtx` is one Go `mCtx`,
+/// one activation: the first call builds the invocation context (agent, session, activation)
+/// and later calls, on it or on its clones (e.g. [`with_function_call`](Self::with_function_call)),
+/// reuse it; a struct-update copy that changes an identity field gets (and keeps) a context of
+/// its own. A `MockCtx` built from `MockCtx::default()` / `new()` / `named()` starts a new
+/// activation, as each Go `&mockInvocationContext{…}` does. Go's `state` nil = an empty state (a gadk session always has one).
 #[derive(Clone)]
 pub(crate) struct MockCtx {
     pub(crate) agent_name: String,
@@ -150,6 +152,17 @@ pub(crate) struct MockCtx {
     /// The agent of the contexts (a custom agent named `agent_name` unless set), e.g. a
     /// runner-tree agent for tests that look agents up by name.
     pub(crate) agent: Option<Arc<dyn Agent>>,
+    /// The invocation context built for each set of identity fields (see the type docs).
+    pub(crate) activation: Arc<parking_lot::Mutex<Vec<(MockKey, InvocationContext)>>>,
+}
+
+/// The [`MockCtx`] fields its invocation context is built from (all but `function_call_id`).
+#[derive(Clone, PartialEq)]
+pub(crate) struct MockKey {
+    fields: [String; 7],
+    state: Map<String, Value>,
+    /// The address of `MockCtx::agent` (compared, never dereferenced).
+    agent: Option<usize>,
 }
 
 impl Default for MockCtx {
@@ -166,6 +179,7 @@ impl Default for MockCtx {
             state: Map::new(),
             cancel: CancellationToken::new(),
             agent: None,
+            activation: Arc::default(),
         }
     }
 }
@@ -211,8 +225,39 @@ impl MockCtx {
         })
     }
 
-    /// The invocation context (Go's `mCtx` passed to an invocation callback).
+    fn key(&self) -> MockKey {
+        MockKey {
+            fields: [
+                self.agent_name.clone(),
+                self.session_id.clone(),
+                self.invocation_id.clone(),
+                self.user_id.clone(),
+                self.app_name.clone(),
+                self.branch.clone(),
+                self.path.clone(),
+            ],
+            state: self.state.clone(),
+            agent: self
+                .agent
+                .as_ref()
+                .map(|a| Arc::as_ptr(a).cast::<()>() as usize),
+        }
+    }
+
+    /// The invocation context (Go's `mCtx` passed to an invocation callback): built once per
+    /// activation (see the type docs).
     pub(crate) fn invocation(&self) -> InvocationContext {
+        let key = self.key();
+        let mut built = self.activation.lock();
+        if let Some((_, ictx)) = built.iter().find(|(k, _)| *k == key) {
+            return ictx.clone();
+        }
+        let ictx = self.build_invocation();
+        built.push((key, ictx.clone()));
+        ictx
+    }
+
+    fn build_invocation(&self) -> InvocationContext {
         let session = MockSession {
             id: self.session_id.clone(),
             app_name: self.app_name.clone(),
@@ -606,4 +651,25 @@ pub(crate) fn agent_error_counts(rows: &[Row]) -> BTreeMap<String, usize> {
         *counts.entry(str_col(&row, "agent")).or_insert(0) += 1;
     }
     counts
+}
+
+#[test]
+fn mock_ctx_is_one_activation() {
+    let m = MockCtx::new();
+    let id = m.context().activation_id();
+    assert_eq!(m.invocation().activation_id(), id);
+    assert_eq!(m.with_function_call("c1").context().activation_id(), id);
+    assert_eq!(
+        m.with_function_call("c1").context().function_call_id(),
+        "c1"
+    );
+    let other = MockCtx {
+        invocation_id: "inv-2".into(),
+        ..m.clone()
+    };
+    let other_id = other.context().activation_id();
+    assert_ne!(other_id, id);
+    assert_eq!(m.context().activation_id(), id);
+    assert_eq!(other.context().activation_id(), other_id);
+    assert_ne!(MockCtx::new().context().activation_id(), id);
 }

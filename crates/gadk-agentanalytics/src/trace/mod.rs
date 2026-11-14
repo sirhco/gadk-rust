@@ -37,6 +37,7 @@ pub(crate) mod manager;
 pub(crate) mod settle;
 pub(crate) mod span;
 
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -262,7 +263,8 @@ impl CallbackCtx {
 
     /// Go `runningAgentChildren(ctx, name)`: the sub-agents of the context's agent if it is
     /// named `name`, else the zero value. `name()` and `sub_agents()` are agent code, so no
-    /// lock may be held by the caller.
+    /// lock may be held by the caller. A panicking agent yields the zero value (Go's `orZero`),
+    /// and a panicking agent type reads as "" (Go's inner `orZero`).
     pub(crate) fn running_agent_children(&self, name: &str) -> AgentChildren {
         let Some(adk) = self.adk.as_ref() else {
             return AgentChildren::default();
@@ -270,26 +272,30 @@ impl CallbackCtx {
         if name.is_empty() {
             return AgentChildren::default();
         }
-        let a = adk.agent();
-        if a.name() != name {
-            return AgentChildren::default();
-        }
-        let cfg = llm_agent_config(&*a);
-        let ag_type = invocation::agent_type_of(&*a);
-        AgentChildren {
-            parent: name.to_string(),
-            non_llm: cfg.is_none(),
-            propagates_child_error: invocation::is_built_in_workflow_agent(&*a),
-            is_parallel: ag_type == "ParallelAgent",
-            is_workflow: ag_type == "WorkflowAgent",
-            task_mode: cfg.is_some_and(|c| c.mode == gadk_agent::Mode::Task),
-            names: a
-                .sub_agents()
-                .iter()
-                .map(|sub| sub.name().to_string())
-                .filter(|n| !n.is_empty())
-                .collect(),
-        }
+        catch_unwind(AssertUnwindSafe(|| {
+            let a = adk.agent();
+            if a.name() != name {
+                return AgentChildren::default();
+            }
+            let cfg = llm_agent_config(&*a);
+            let ag_type = catch_unwind(AssertUnwindSafe(|| invocation::agent_type_of(&*a)))
+                .unwrap_or_default();
+            AgentChildren {
+                parent: name.to_string(),
+                non_llm: cfg.is_none(),
+                propagates_child_error: invocation::is_built_in_workflow_agent(&*a),
+                is_parallel: ag_type == "ParallelAgent",
+                is_workflow: ag_type == "WorkflowAgent",
+                task_mode: cfg.is_some_and(|c| c.mode == gadk_agent::Mode::Task),
+                names: a
+                    .sub_agents()
+                    .iter()
+                    .map(|sub| sub.name().to_string())
+                    .filter(|n| !n.is_empty())
+                    .collect(),
+            }
+        }))
+        .unwrap_or_default()
     }
 
     /// Go `callKey(ctx, key)`: `key` prefixed with the activation (`"<id>\x00<key>"`), or

@@ -381,6 +381,9 @@ mod origin_tests {
         let t = AgentTool::new(agent.clone(), None);
         assert_eq!(t.origin_kind(), ToolOriginKind::SubAgent);
         assert!(Arc::ptr_eq(&t.origin_agent().unwrap(), &agent));
+        let agents = t.origin_agents();
+        assert_eq!(agents.len(), 1);
+        assert!(Arc::ptr_eq(&agents[0], &agent));
         assert!(t.unwrap().is_none());
     }
 }

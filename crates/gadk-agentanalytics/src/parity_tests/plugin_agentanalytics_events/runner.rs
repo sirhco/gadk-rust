@@ -203,9 +203,8 @@ fn final_text(text: &str) -> LlmResponse {
 
 // Go's type-name and package cases (`classifyADKToolType`) are tools declaring each kind, the
 // load-memory tool a fake `Local` tool, the generic-type-name case a plain function tool;
-// gadk has no nil tool (Go's nil case is dropped) and no log output to check; gadk's
-// transfer tool exposes no agents, so its target is found only through the trace manager or
-// the context's agent tree.
+// gadk has no nil tool (Go's nil case is dropped) and no log output to check; Go's reflection
+// over the transfer tool's supportedAgents is gadk's `Tool::origin_agents`.
 // parity: adapted: classification is each tool's declared `origin_kind` (R1(b))
 #[tokio::test]
 async fn test_resolve_tool_origin() {
@@ -456,14 +455,11 @@ async fn test_resolve_tool_origin() {
             TOOL_ORIGIN_TRANSFER_A2A,
         ),
         (
-            // Go reads the ADK tool's supportedAgents (findAgentA2AByName); gadk's transfer
-            // tool exposes no agents (`origin_agent` is None), and neither the trace manager
-            // nor this context's agent knows the target, so the call stays TRANSFER_AGENT.
             "ADK TransferToAgentTool with supportedAgents resolves A2A via tool struct when traces is empty",
             Some(&ctx_without_traces),
             Arc::clone(&real_transfer_tool),
             agent_args("remote_specialist"),
-            TOOL_ORIGIN_TRANSFER_AGENT,
+            TOOL_ORIGIN_TRANSFER_A2A,
         ),
         (
             "loadmemorytool.New() is LOCAL",

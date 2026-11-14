@@ -769,7 +769,6 @@ impl Logger for PanicOnBudgetLogger {
 }
 
 #[test]
-#[ignore = "plan defect (plugin/rows.rs, Task 7): AnalyticsPlugin::add_content attaches parts.pending to the row only on a normal return; Go's deferred `row[rawPartsKey] = parts.pending` also runs when the budget-warning Printf panics, so buildRow's guard releases part 0's 60 reserved bytes (gadk leaks them: pendingUploadBytes stays 60)"]
 fn test_gcs_offloading_build_row_panic_releases_reserved_bytes() {
     let logger = Arc::new(PanicOnBudgetLogger::default());
     let off = fake_offloader();

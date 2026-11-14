@@ -21,7 +21,8 @@
 //!
 //! Go's reflection over tool and agent values is gadk's typed accessors (R1): a tool's wrappers
 //! are peeled with `Tool::unwrap` (at most [`MAX_UNWRAP_HOPS`] hops), its origin is
-//! `Tool::origin_kind` and its agent `Tool::origin_agent`; an A2A agent is one whose
+//! `Tool::origin_kind`, its agent `Tool::origin_agent` and every agent it can hand a call to
+//! `Tool::origin_agents` (a transfer tool's supported agents); an A2A agent is one whose
 //! `agent_state().agent_type` is `AgentType::RemoteAgent`. Go's package / type-name heuristics
 //! for user tools (names containing "skill" / "toolbox") are not reproduced: user tools report
 //! their own origin. Divergence (ledger 7b-3a).
@@ -204,24 +205,28 @@ pub(crate) fn is_remote_a2a_agent(a: &dyn Agent) -> bool {
 }
 
 /// Go `findAgentA2AByName(v, targetName, …)`: `(found, is_a2a)` for the agent named
-/// `target_name` reachable from the tool's `origin_agent()` tree.
+/// `target_name` reachable from the unwrapped tool's agents.
 ///
-/// Go walks the unwrapped tool's agent fields (`agent`, `supportedAgents`, …); a gadk tool
-/// exposes its agent through `origin_agent()` only (the transfer tool exposes none, so its
-/// target is found by `AnalyticsPlugin::resolve_tool_origin` through the trace manager's
-/// `agent_named`, which knows the same tree).
-// Divergence (ledger 7b-3a): Go reflects over the tool's `supportedAgents` / `SubAgents` / `RootAgent` fields; gadk searches only the `origin_agent()` tree because tools expose their agent through the typed accessor (R1).
+/// Go walks the unwrapped tool's agent fields (`agent`, `supportedAgents`, …) by reflection; a
+/// gadk tool exposes them through `Tool::origin_agents()` (an agent tool's agent, the transfer
+/// tool's supported agents), searched in order: the agent itself by name, then its tree
+/// (`find_agent`). A panicking `name()`/`find_agent()` reads as no match (Go's `orZero`).
+// Divergence (ledger 7b-3a): Go reflects over the unwrapped tool's `agent` / `supportedAgents` / `SubAgents` / `RootAgent` fields; gadk searches the agents the tool exposes through the typed accessor `Tool::origin_agents()` (R1), so a tool that does not override it is searched through `origin_agent()` only.
 pub(crate) fn find_agent_a2a_by_name(t: &Arc<dyn Tool>, target_name: &str) -> (bool, bool) {
-    let Some(agent) = unwrap_tool(t).and_then(|u| u.origin_agent()) else {
+    let Some(u) = unwrap_tool(t) else {
         return (false, false);
     };
-    if agent.name().trim() == target_name {
-        return (true, is_remote_a2a_agent(agent.as_ref()));
+    for agent in u.origin_agents() {
+        let name = catch_unwind(AssertUnwindSafe(|| agent.name().trim() == target_name));
+        if name.unwrap_or(false) {
+            return (true, is_remote_a2a_agent(agent.as_ref()));
+        }
+        let found = catch_unwind(AssertUnwindSafe(|| agent.find_agent(target_name)));
+        if let Ok(Some(found)) = found {
+            return (true, is_remote_a2a_agent(found.as_ref()));
+        }
     }
-    match agent.find_agent(target_name) {
-        Some(found) => (true, is_remote_a2a_agent(found.as_ref())),
-        None => (false, false),
-    }
+    (false, false)
 }
 
 /// Go `resolveToolOriginForCall(ctx, t, args)`: `tool_origin_of`, else TRANSFER_AGENT for a
@@ -1377,6 +1382,38 @@ mod tests {
             find_agent_a2a_by_name(&wrapped(no_agent, MAX_UNWRAP_HOPS), "remote"),
             (false, false)
         );
+    }
+
+    /// Go's `supportedAgents` slice: each agent in order, by name, then through its tree.
+    #[test]
+    fn find_agent_a2a_by_name_searches_every_tool_agent() {
+        struct Targets(Vec<Arc<dyn Agent>>);
+        impl Tool for Targets {
+            fn name(&self) -> &str {
+                "transfer_to_agent"
+            }
+            fn description(&self) -> &str {
+                ""
+            }
+            fn origin_kind(&self) -> ToolOriginKind {
+                ToolOriginKind::TransferAgent
+            }
+            fn origin_agents(&self) -> Vec<Arc<dyn Agent>> {
+                self.0.clone()
+            }
+            fn as_any(&self) -> &dyn Any {
+                self
+            }
+        }
+        let t: Arc<dyn Tool> = Arc::new(Targets(vec![
+            local("helper", Vec::new()),
+            remote("remote"),
+            local("parent", vec![remote("deep")]),
+        ]));
+        assert_eq!(find_agent_a2a_by_name(&t, "helper"), (true, false));
+        assert_eq!(find_agent_a2a_by_name(&t, "remote"), (true, true));
+        assert_eq!(find_agent_a2a_by_name(&t, "deep"), (true, true));
+        assert_eq!(find_agent_a2a_by_name(&t, "missing"), (false, false));
     }
 
     #[test]

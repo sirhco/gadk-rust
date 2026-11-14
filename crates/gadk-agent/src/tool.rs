@@ -92,6 +92,13 @@ pub trait Tool: Send + Sync + 'static {
     fn origin_agent(&self) -> Option<Arc<dyn Agent>> {
         None
     }
+    /// Every agent the tool can hand a call to, in order, for analytics (Go's analytics plugin
+    /// reads them from the tool's agent fields by reflection, `events.go` `findAgentA2AByName`,
+    /// e.g. a transfer tool's `supportedAgents`). Defaults to
+    /// [`origin_agent`](Tool::origin_agent) as a list of at most one.
+    fn origin_agents(&self) -> Vec<Arc<dyn Agent>> {
+        self.origin_agent().into_iter().collect()
+    }
     /// Downcasting support.
     fn as_any(&self) -> &dyn Any;
 }
