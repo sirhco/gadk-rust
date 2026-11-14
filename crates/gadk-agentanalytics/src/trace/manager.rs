@@ -261,6 +261,7 @@ impl TraceManager {
                         &mut st.next_generation,
                         &id.invocation_id,
                     );
+                    compact_completion_order(&mut st.completion_order, &st.completed);
                     if reserve_span {
                         late.pending_spans.fetch_add(1, Ordering::SeqCst);
                     }
@@ -477,6 +478,7 @@ impl TraceManager {
             completed.ended_models = with_calls(completed.ended_models.take(), ended_models);
             completed.ended_tools = with_calls(completed.ended_tools.take(), ended_tools);
         }
+        compact_completion_order(&mut st.completion_order, &st.completed);
         let limit = self.max_tracked.max(64);
         self.prune_waiting_locked(st, limit, limit / 2);
         self.prune_completed_locked(st, limit, &|c| !c.has_pending_or_open_late_spans());
@@ -1177,23 +1179,24 @@ impl Drop for Reservation {
 
 /// Go `completionOrder.PushBack` / `MoveToBack`: a new back entry for `id`; the returned
 /// generation goes to its `CompletedTrace::generation` (earlier entries of `id` go stale).
-/// Stale entries are compacted once they outnumber the live ones.
+/// The caller stores the generation, then calls [`compact_completion_order`].
 fn push_completion(order: &mut VecDeque<(String, u64)>, next: &mut u64, id: &str) -> u64 {
     let generation = *next;
     *next += 1;
     order.push_back((id.to_string(), generation));
-    if order.len() > 2 * MAX_TRACKED_INVOCATIONS {
-        let mut latest: HashMap<&str, u64> = HashMap::new();
-        for (id, g) in order.iter() {
-            latest.insert(id.as_str(), *g);
-        }
-        let keep: HashSet<(String, u64)> = latest
-            .into_iter()
-            .map(|(id, g)| (id.to_string(), g))
-            .collect();
-        order.retain(|e| keep.contains(e));
-    }
     generation
+}
+
+/// Drops the stale completion-order entries once they outnumber the live ones: only the
+/// entries whose ID is still completed with that generation stay (Go's list holds exactly
+/// the completed runs, removing a run's element when the run is deleted, e.g. on a resume).
+fn compact_completion_order(
+    order: &mut VecDeque<(String, u64)>,
+    completed: &HashMap<String, CompletedTrace>,
+) {
+    if order.len() > 2 * MAX_TRACKED_INVOCATIONS {
+        order.retain(|(id, g)| completed.get(id).map(|c| c.generation) == Some(*g));
+    }
 }
 
 /// Go `withCalls(calls, more)`: `calls` with `more` added; `None` if both are empty.
@@ -1590,6 +1593,46 @@ mod tests {
             tm.agent_named(&CallbackCtx::background(), &ident("x", "a", "", ""))
                 .is_none()
         );
+    }
+
+    /// A completed run whose ID starts again (a HITL resume) leaves the completion order
+    /// (Go removes its list element); the queue stays bounded however many such runs there
+    /// are, and the live entries keep their generations, so pruning still finds them.
+    #[test]
+    fn completion_order_stays_bounded_with_resumed_runs() {
+        let clock = ManualClock::new();
+        let mut tm = manager(&clock);
+        tm.max_tracked = 64;
+        let r = run("x");
+        let complete = |id: &str| {
+            let inv = Arc::new(InvocationTrace::new_with_span(None, "", clock.now()));
+            let mut st = tm.mu.lock();
+            tm.remember_completed_locked(&mut st, id, "root", &inv);
+        };
+        for i in 0..2 * MAX_TRACKED_INVOCATIONS + 10 {
+            let id = format!("resumed-{i}");
+            complete(&id);
+            tm.lookup_invocation(&r.root_ctx, &ident(&id, "root", "root", ""), true, false);
+            tm.mu.lock().invocations.remove(&id);
+        }
+        for j in 0..3 {
+            complete(&format!("live-{j}"));
+        }
+        let mut st = tm.mu.lock();
+        assert_eq!(st.completed.len(), 3);
+        assert!(
+            st.completion_order.len() <= 2 * MAX_TRACKED_INVOCATIONS + 1,
+            "completion order grew to {}",
+            st.completion_order.len()
+        );
+        for (id, c) in &st.completed {
+            assert!(
+                st.completion_order.contains(&(id.clone(), c.generation)),
+                "live entry {id} lost its generation"
+            );
+        }
+        tm.prune_completed_locked(&mut st, 1, &|_| true);
+        assert_eq!(st.completed.keys().collect::<Vec<_>>(), vec!["live-2"]);
     }
 
     #[test]

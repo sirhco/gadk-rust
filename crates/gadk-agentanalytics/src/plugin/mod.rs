@@ -341,6 +341,12 @@ impl PluginState {
         };
         let state = Arc::clone(self);
         tokio::spawn(async move {
+            // Ends the pass however the task ends, a panic in the pass included.
+            let pass_end = ViewPassEnd {
+                state: Arc::clone(&state),
+                views_ctx: views_ctx.clone(),
+                done,
+            };
             // The pass keeps the client alive (the runner refers to it weakly).
             let _client = client;
             if let Ok(permit) = state.acquire_view_gate(&views_ctx).await {
@@ -354,15 +360,7 @@ impl PluginState {
                 }
                 drop(permit);
             }
-            views_ctx.cancel();
-            // The pass forgets its context once it ends, before anyone waiting on `done` goes
-            // on.
-            {
-                let mut views = state.views.lock();
-                views.views_cancel = None;
-                views.async_views_done = None;
-            }
-            done.cancel();
+            drop(pass_end);
         });
     }
 
@@ -410,6 +408,28 @@ impl PluginState {
         }
         // Wait for a SyncViews pass holding the gate to return.
         drop(Arc::clone(&self.view_gate).acquire_owned().await);
+    }
+}
+
+/// The end of an async view pass (Go's deferred `cancel()`, field resets and
+/// `close(done)`), run on drop so that a panicking pass also ends: otherwise close would wait
+/// on `done` forever and never drain the queued rows (Go crashes on such a panic).
+struct ViewPassEnd {
+    state: Arc<PluginState>,
+    views_ctx: Context,
+    done: CancellationToken,
+}
+
+impl Drop for ViewPassEnd {
+    fn drop(&mut self) {
+        self.views_ctx.cancel();
+        // The pass forgets its context once it ends, before anyone waiting on `done` goes on.
+        {
+            let mut views = self.state.views.lock();
+            views.views_cancel = None;
+            views.async_views_done = None;
+        }
+        self.done.cancel();
     }
 }
 
@@ -1096,6 +1116,62 @@ mod tests {
         (p.close().unwrap())().await.unwrap();
         let bq = as_bigquery_agent_analytics_plugin(&p).unwrap();
         assert_eq!(bq.drop_stats(), DropStats::default());
+    }
+
+    // A panic in the startup view pass still releases the pass (Go would crash instead):
+    // close does not wait on it forever and delivers the queued rows.
+    #[tokio::test]
+    async fn a_panic_in_the_startup_view_pass_does_not_block_close() {
+        use crate::bigquery::fake::{FakeViewRunner, OnRun};
+        use crate::parity_tests::plugin_agentanalytics_bigquery_agent_analytics_plugin::support::new_test_plugin_with_config;
+
+        let tp = new_test_plugin_with_config(|c| {
+            c.disable_create_views = true;
+            c.batch_flush_intv = Duration::from_secs(3600);
+            c.disable_flush_on_run_end = true;
+        })
+        .await;
+        let bq = as_bigquery_agent_analytics_plugin(&tp.plugin).unwrap();
+        let entered = tokio_util::sync::CancellationToken::new();
+        let on_run: OnRun = {
+            let entered = entered.clone();
+            Arc::new(move |_, _| {
+                let entered = entered.clone();
+                Box::pin(async move {
+                    entered.cancel();
+                    panic!("view pass panicked");
+                })
+            })
+        };
+        bq.state.views.lock().runner = Some(Arc::new(FakeViewRunner::new(
+            std::collections::HashMap::new(),
+            Some(on_run),
+        )));
+        let defs = crate::views::view_definitions_with_denied(
+            "test-project",
+            "test_dataset",
+            "test-table",
+            "v",
+            &Default::default(),
+        )
+        .unwrap();
+        bq.state
+            .start_async_view_creation(&Context::background(), defs, None, None);
+        tokio::time::timeout(Duration::from_secs(5), entered.cancelled())
+            .await
+            .expect("the view pass ran");
+
+        (tp.plugin.before_run_callback().unwrap())(tp.ctx.invocation())
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), tp.close())
+            .await
+            .expect("close waited on the panicked view pass")
+            .unwrap();
+        assert_eq!(event_types(&tp.rows()), vec![EVENT_INVOCATION_STARTING]);
+        let views = bq.state.views.lock();
+        assert!(views.views_cancel.is_none());
+        assert!(views.async_views_done.is_none());
     }
 
     struct PanickingTool;

@@ -385,6 +385,7 @@ enum Stop {
 #[case::agent_path_error("custom", Stop::AtError, false)]
 #[case::agent_path_mid_await("custom", Stop::MidAwait, true)]
 #[case::node_path_event("llm", Stop::AtEvent, false)]
+#[case::node_path_error("llm", Stop::AtError, false)]
 #[tokio::test]
 async fn after_run_on_consumer_drop_sees_go_context(
     #[case] kind: &str,
@@ -409,7 +410,11 @@ async fn after_run_on_consumer_drop_sees_go_context(
         })
         .unwrap()
     } else {
-        let model: Arc<dyn Llm> = MockModel::new(vec![text("one")]);
+        let response = match stop {
+            Stop::AtError => Err(gadk_model::ModelError::Other("boom".into())),
+            _ => text("one"),
+        };
+        let model: Arc<dyn Llm> = MockModel::new(vec![response]);
         llm_agent::new(LlmAgentConfig {
             name: "a".into(),
             model: Some(model),

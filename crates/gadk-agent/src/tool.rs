@@ -108,6 +108,7 @@ pub trait Tool: Send + Sync + 'static {
 /// kinds: the plugin derives them from [`ToolOriginKind::TransferAgent`] and
 /// [`ToolOriginKind::SubAgent`] by looking at the target agent.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+#[non_exhaustive]
 pub enum ToolOriginKind {
     /// `toolOriginUnknown` (`"UNKNOWN"`): the tool does not say (the default).
     #[default]

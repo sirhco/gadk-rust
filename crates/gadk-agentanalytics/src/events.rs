@@ -186,6 +186,8 @@ pub(crate) fn tool_origin_of(t: &Arc<dyn Tool>) -> &'static str {
         ToolOriginKind::SubAgent => sub_agent_or_a2a(u.origin_agent().as_ref()),
         ToolOriginKind::Skill => TOOL_ORIGIN_SKILL,
         ToolOriginKind::Toolbox => TOOL_ORIGIN_TOOLBOX,
+        // A kind added to the non-exhaustive enum later is reported like an undeclared one.
+        _ => TOOL_ORIGIN_UNKNOWN,
     }
 }
 

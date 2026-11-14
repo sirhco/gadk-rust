@@ -92,6 +92,10 @@ let plugin = new_bigquery_agent_analytics_plugin_with_config(&Context::backgroun
   duplex connector), `testutil::arrow_rows` (decodes the rows of an AppendRows request) and the
   probe's row specs (`testutil::row_from_spec`).
 
+Upgrade note: 7b-3a adds the public field `gadk_agent::PluginConfig::state` (the state slot
+`as_bigquery_agent_analytics_plugin` reads), so a full `PluginConfig { .. }` literal without
+`..PluginConfig::default()` now needs `state: None`.
+
 Behavior, SQL, schemas, request bytes and error texts match ADK-Go except for the accepted
 divergences in `docs/parity/7b-1.md`, `docs/parity/7b-2.md` and `docs/parity/7b-3a.md`, each
 annotated in the source with a `// Divergence` comment naming its ledger.
