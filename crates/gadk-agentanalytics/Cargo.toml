@@ -11,8 +11,9 @@ workspace = true
 
 [features]
 # Test hooks: the in-memory `MockTableOps`, `FakeViewRunner`, `FakeOffloader`, `RecordingLogger`
-# and the JSON helpers of `bigquery::fake`, plus gadk-model's fake HTTP server.
-testutil = ["gadk-model/test-util"]
+# and the JSON helpers of `bigquery::fake`, plus gadk-model's fake HTTP server and the tonic
+# server (`storagepb` BigQueryWrite server for the in-process fake write server).
+testutil = ["gadk-model/test-util", "tonic/server", "tonic/router"]
 
 [dependencies]
 gadk-genai = { workspace = true }
@@ -35,6 +36,9 @@ tokio-util = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
 tracing = { workspace = true }
+prost = { workspace = true }
+tonic = { workspace = true, features = ["codegen", "channel", "tls-aws-lc", "tls-native-roots"] }
+tonic-prost = { workspace = true }
 
 [dev-dependencies]
 gadk-agentanalytics = { path = ".", features = ["testutil"] }
