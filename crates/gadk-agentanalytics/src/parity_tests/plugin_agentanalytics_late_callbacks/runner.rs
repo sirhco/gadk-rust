@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Part of the port of ADK-Go `plugin/agentanalytics/late_callbacks_test.go` (owner: Task 11): the
+//! Part of the port of ADK-Go `plugin/agentanalytics/late_callbacks_test.go`: the
 //! 1 Go tests from `TestRunner_AfterRunEventKeepsInvocationSpan` to
 //! `TestRunner_AfterRunEventKeepsInvocationSpan` in the Go file's order that run a gadk `Runner`
 //! (the exact list is in the 7b-3a plan's contracts, Appendix A).
@@ -31,11 +31,9 @@ use gadk_session::Event;
 
 use crate::event_types::{EVENT_AGENT_RESPONSE, EVENT_INVOCATION_COMPLETED};
 use crate::parity_tests::plugin_agentanalytics_bigquery_agent_analytics_plugin::support::{
-    json_object_column, new_test_runner, only_row_of_type, place_of, rows_of_type, run_turn,
-    setup_test_plugin, until_invocation_end,
-};
-use crate::parity_tests::plugin_agentanalytics_events::{
-    require_invocation_completed_ok, text_content,
+    json_object_column, new_test_runner, only_row_of_type, place_of,
+    require_invocation_completed_ok, rows_of_type, run_turn, setup_test_plugin, text_content,
+    until_invocation_end,
 };
 
 #[tokio::test]

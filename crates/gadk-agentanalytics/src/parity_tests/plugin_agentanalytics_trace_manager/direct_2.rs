@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Part of the port of ADK-Go `plugin/agentanalytics/trace_manager_test.go` (owner: Task 12): the
+//! Part of the port of ADK-Go `plugin/agentanalytics/trace_manager_test.go`: the
 //! 28 Go tests from `TestTraceManager_ConcurrentRunnerTreeAndCapacityEviction` to
 //! `TestTraceManager_PopTaskAgentSpan_IgnoresUnrelatedAncestor` in the Go file's order that need no
 //! runner (the exact list is in the 7b-3a plan's contracts, Appendix A).
@@ -31,8 +31,7 @@ use gadk_model::LlmResponse;
 use gadk_session::Event;
 use tokio_util::sync::CancellationToken;
 
-use super::direct_support::{MockRun, SpanCounts, open_spans};
-use crate::error::Error;
+use super::direct_support::{MockRun, SpanCounts, bg, err, open_spans};
 use crate::event_types::{EVENT_AGENT_ERROR, EVENT_INVOCATION_COMPLETED, EVENT_INVOCATION_ERROR};
 use crate::parity_tests::plugin_agentanalytics_bigquery_agent_analytics_plugin::support::{
     agent_error_counts, only_row_of_type, rows_of_type, setup_test_plugin, until_invocation_end,
@@ -42,16 +41,6 @@ use crate::trace::testkit::{ManualClock, ident, llm, sequential};
 use crate::trace::{
     CallbackCtx, Identity, TraceError, TraceManager, UnclosedAgentSpan, llm_key, tool_key,
 };
-
-/// Go `errors.New(text)` as the trace manager keeps errors.
-fn err(text: &str) -> TraceError {
-    Arc::new(Error::Message(text.to_owned()))
-}
-
-/// Go `context.Background()`.
-fn bg() -> CallbackCtx {
-    CallbackCtx::background()
-}
 
 /// Go `trace.ContextWithSpanContext(context.Background(), sc)` of hex IDs.
 fn span_ctx(trace_hex: &str, span_hex: &str) -> CallbackCtx {

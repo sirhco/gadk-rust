@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `plugin/agentanalytics/late_callbacks_test.go` (ledger `docs/parity/7b-3a.md`;
-//! owner: Task 11): 14 Go tests, split into [`direct`] (13 tests of a trace manager made with
+//! Port of ADK-Go `plugin/agentanalytics/late_callbacks_test.go` (ledger `docs/parity/7b-3a.md`):
+//! 14 Go tests, split into [`direct`] (13 tests of a trace manager made with
 //! `TraceManager::new`) and [`runner`] (1 runner-level test).
 
 mod direct;

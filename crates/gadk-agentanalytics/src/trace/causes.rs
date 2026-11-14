@@ -27,8 +27,6 @@
 //! Go's bare `context.DeadlineExceeded` (agent timeout) is not distinguishable in gadk
 //! (ledgered); the errgroup cause is 7b-3b.
 
-#![allow(dead_code)] // Consumers: Task 9 (Task 15 sweeps the allow).
-
 use std::error::Error as StdError;
 use std::fmt;
 
@@ -40,22 +38,26 @@ use crate::error::Error;
 
 impl SpanRef {
     /// Go `wasCanceled`.
+    #[cfg(test)]
     pub(crate) fn was_canceled(&self) -> bool {
         self.lock().was_canceled()
     }
 
     /// Go `failureCause`.
+    #[cfg(test)]
     pub(crate) fn failure_cause(&self) -> Option<TraceError> {
         self.lock().failure_cause()
     }
 
     /// Go `rawContextFailureCause`.
+    #[cfg(test)]
     pub(crate) fn raw_context_failure_cause(&self) -> Option<TraceError> {
         self.lock().raw_context_failure_cause()
     }
 
     /// Go `isParallelBranch` (with zero goroutine information: the branch differs from the
     /// parent's, Go `:4982-4984`).
+    #[cfg(test)]
     pub(crate) fn is_parallel_branch(&self) -> bool {
         self.lock().is_parallel_branch()
     }
@@ -76,6 +78,7 @@ impl SpanRef {
     }
 
     /// Go `collateralFailureCause`: `(cause, collateral)`.
+    #[cfg(test)]
     pub(crate) fn collateral_failure_cause(&self) -> (Option<TraceError>, bool) {
         self.lock().collateral_failure_cause()
     }

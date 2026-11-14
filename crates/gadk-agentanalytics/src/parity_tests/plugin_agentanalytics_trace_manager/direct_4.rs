@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Part of the port of ADK-Go `plugin/agentanalytics/trace_manager_test.go` (owner: Task 12): the
+//! Part of the port of ADK-Go `plugin/agentanalytics/trace_manager_test.go`: the
 //! 21 Go tests from `TestLateShortcutAgentRetained` to `TestLateFailureCauseKeepsActivation` in the
 //! Go file's order that need no runner (the exact list is in the 7b-3a plan's contracts, Appendix
 //! A).
@@ -39,8 +39,7 @@ use parking_lot::Mutex;
 use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
 
-use super::direct_support::{MockRun, invocation_of, open_spans};
-use crate::error::Error;
+use super::direct_support::{MockRun, bg, err, invocation_of, open_spans};
 use crate::event_types::EVENT_AGENT_COMPLETED;
 use crate::parity_tests::plugin_agentanalytics_bigquery_agent_analytics_plugin::support::{
     event_types, rows_of_type, setup_test_plugin, until_invocation_end,
@@ -51,16 +50,6 @@ use crate::trace::{
     CallbackCtx, Clock, Identity, InvocationState, InvocationTrace, RecordedError, RetiredCause,
     RowSpan, SpanKind, SpanRecord, SpanRef, TraceError, TraceManager, llm_key, tool_key,
 };
-
-/// Go `context.Background()`.
-fn bg() -> CallbackCtx {
-    CallbackCtx::background()
-}
-
-/// Go `errors.New(text)`.
-fn err(text: &str) -> TraceError {
-    Arc::new(Error::msg(text))
-}
 
 /// Go `&endedContext{Context: ctx, end: true}`: a context whose `Ended` reports true, as for an
 /// activation that a `BeforeAgentCallback` answered. The ADK context runs an agent of its own

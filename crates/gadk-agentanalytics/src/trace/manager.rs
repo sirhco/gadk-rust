@@ -29,8 +29,6 @@
 //! longer completed, are skipped and dropped — the same order as Go's list (not observable, so
 //! not ledgered; spec R9).
 
-#![allow(dead_code)] // Consumers: Tasks 6-9 (Task 15 sweeps the allow).
-
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -1020,8 +1018,7 @@ impl TraceManager {
     }
 
     /// Go `popLLMSpan(ctx, id, responded)`: the place of `LLM_RESPONSE` / `LLM_ERROR` (calls
-    /// `retire_late_settled_locked` of [`super::settle`], whose live-trace early return Task 4
-    /// wrote). With `responded`, a call that streamed nothing gets a time to first token equal
+    /// `retire_late_settled_locked` of [`super::settle`], which returns at once for a live trace). With `responded`, a call that streamed nothing gets a time to first token equal
     /// to its latency; a call OnModelErrorCallback ended reuses its span without latency; an
     /// unknown call gets a span of its own.
     pub(crate) fn pop_llm_span(

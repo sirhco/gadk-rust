@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Part of the port of ADK-Go `plugin/agentanalytics/trace_manager_test.go` (owner: Task 13): the
+//! Part of the port of ADK-Go `plugin/agentanalytics/trace_manager_test.go`: the
 //! 21 Go tests from `TestTraceManager_Runner` to
 //! `TestRunner_SequentialSiblingShortcutThenCustomChildFails_BlamesOnlyFailingChild` in the Go
 //! file's order that run a gadk `Runner` (the exact list is in the 7b-3a plan's contracts, Appendix

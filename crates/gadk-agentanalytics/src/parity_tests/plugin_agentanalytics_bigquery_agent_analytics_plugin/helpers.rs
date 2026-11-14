@@ -15,23 +15,14 @@
 
 //! Go test helpers of `bigquery_agent_analytics_plugin_test.go` (and the `fakeTool` of
 //! `arrow_test_helper_test.go`) that [`part_1`](super::part_1), [`part_2`](super::part_2) and
-//! [`part_3`](super::part_3) share (owner: Task 10). The helpers shared by every 7b-3a port are
+//! [`part_3`](super::part_3) share. The helpers shared by every 7b-3a port are
 //! in [`support`](super::support).
 
-use std::sync::Arc;
+use gadk_agent::AgentError;
 
-use gadk_agent::{AgentError, Tool};
-use gadk_genai::{Content, FunctionDeclaration};
-use serde_json::Value;
-
-use super::support::{check_json, lookup};
+pub(super) use super::support::{FakeTool, check_json_at, fake_tool, text_content};
 use crate::redaction::COLUMN_CONTENT_PARTS;
 use crate::row::{Row, RowValue};
-
-/// Go `textContent(role, text)`.
-pub(super) fn text_content(role: &str, text: &str) -> Content {
-    Content::from_text(text, role)
-}
 
 /// Go `callbackErrors`: the errors returned by plugin callbacks.
 #[derive(Default)]
@@ -50,53 +41,6 @@ impl CallbackErrors {
     pub(super) fn check(&self) {
         assert!(self.0.is_empty(), "callback error: {}", self.0.join("\n"));
     }
-}
-
-/// Go `fakeTool` / `declaredTool` (`arrow_test_helper_test.go`): a tool for callback tests.
-#[derive(Default)]
-pub(super) struct FakeTool {
-    pub(super) name: String,
-    pub(super) description: String,
-    pub(super) long_running: bool,
-    /// The description panics (a tool whose metadata is unavailable).
-    pub(super) panic_on_description: bool,
-    /// Go `declaredTool.Declaration()` (a `fakeTool` has none).
-    pub(super) decl: Option<FunctionDeclaration>,
-}
-
-impl Tool for FakeTool {
-    fn name(&self) -> &str {
-        &self.name
-    }
-    fn description(&self) -> &str {
-        assert!(!self.panic_on_description, "tool description unavailable");
-        &self.description
-    }
-    fn is_long_running(&self) -> bool {
-        self.long_running
-    }
-    fn declaration(&self) -> Option<FunctionDeclaration> {
-        self.decl.clone()
-    }
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-}
-
-/// Go `&fakeTool{name: name}`.
-pub(super) fn fake_tool(name: &str) -> Arc<dyn Tool> {
-    Arc::new(FakeTool {
-        name: name.into(),
-        ..FakeTool::default()
-    })
-}
-
-/// Go `checkJSONAt(t, obj, want, path...)`.
-#[track_caller]
-pub(super) fn check_json_at(obj: &Value, want: &str, path: &[&str]) {
-    let name = path.join(".");
-    let got = lookup(obj, path).unwrap_or_else(|| panic!("{name} is missing; got {obj}"));
-    check_json(&name, got, want).unwrap_or_else(|e| panic!("{e}"));
 }
 
 /// The `content_parts` of `row` (Go `row["content_parts"].([]map[string]any)`), empty when

@@ -14,13 +14,13 @@
 // limitations under the License.
 
 //! Port of ADK-Go `plugin/agentanalytics/trace_manager_test.go` (ledger `docs/parity/7b-3a.md`):
-//! 245 Go tests. Task 12 owns the tests that need no runner (direct trace-manager and
-//! plugin-callback tests): [`direct_1`] … [`direct_4`], with their helpers in [`direct_support`].
-//! Task 13 owns the runner-level tests, [`runner_1`] and [`runner_2`], with their helpers in
-//! [`runner_support`], and [`deferred`]: the `// parity: skipped TestX: deferred to 7b-3b
-//! (goroutine attribution)` annotations of the 97 tests that need goroutine attribution (spec R10).
-//! Each file holds a fixed set of Go tests (Appendix A); this file is fixed (neither task edits
-//! it).
+//! 245 Go tests. The tests that need no runner (direct trace-manager and plugin-callback tests)
+//! are in [`direct_1`] … [`direct_4`], with their helpers in [`direct_support`]; the
+//! runner-level tests in [`runner_1`] and [`runner_2`], with their helpers in
+//! [`runner_support`]; and [`deferred`] holds the `// parity: skipped TestX: deferred to 7b-3b
+//! (goroutine attribution)` annotations of the 97 tests of spec R10 that need goroutine
+//! attribution (two more deferred tests are annotated where their Go neighbours are ported:
+//! `direct_4.rs`, `runner_2.rs`).
 
 mod deferred;
 mod direct_1;

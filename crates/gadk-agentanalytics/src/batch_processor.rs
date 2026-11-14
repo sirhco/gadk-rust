@@ -151,7 +151,6 @@ pub struct BatchProcessor {
     /// Go `pendingUploadBytes`.
     pub(crate) pending_upload_bytes: AtomicI64,
     /// Go `maxPendingUploadBytes` (test override of `gcs_max_pending_upload_bytes`); 0 = unset.
-    #[allow(dead_code)] // consumer: 7b-3 (try_reserve_upload_bytes)
     pub(crate) max_pending_upload_bytes: AtomicI64,
     /// Go `uploadBudgetWarned`.
     pub(crate) upload_budget_warned: AtomicBool,
@@ -495,7 +494,6 @@ impl BatchProcessor {
     }
 
     /// The shared drop counters (Go's `counters`, held by the plugin registry).
-    #[allow(dead_code)] // consumer: 7b-3 (plugin registry)
     pub(crate) fn counters(&self) -> Arc<DropCounters> {
         Arc::clone(&self.counters)
     }
@@ -511,7 +509,6 @@ impl BatchProcessor {
 
     /// Go `tryReserveUploadBytes(n)`: reserves `n` bytes of the pending-upload budget
     /// (override, `gcs_max_pending_upload_bytes`, or 256 MiB), warning once per exhaustion.
-    #[allow(dead_code)] // consumer: 7b-3 (PartsOptions.reserve_bytes)
     pub(crate) fn try_reserve_upload_bytes(&self, n: i64) -> bool {
         if n <= 0 {
             return true;
@@ -632,7 +629,6 @@ impl BatchProcessor {
     }
 
     /// Go `recordFormatterFailureDrop()`.
-    #[allow(dead_code)] // consumer: 7b-3 (formatter failures)
     pub(crate) fn record_formatter_failure_drop(&self) {
         self.counters
             .formatter_failure_drops

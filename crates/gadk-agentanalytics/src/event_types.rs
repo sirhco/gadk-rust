@@ -14,10 +14,9 @@
 // limitations under the License.
 
 //! The event types written to the `event_type` column and `newSet`, from ADK-Go
-//! `plugin/agentanalytics/bigquery_agent_analytics_plugin.go` (the rest of that file is 7b-3).
+//! `plugin/agentanalytics/bigquery_agent_analytics_plugin.go` (the rest of that file is
+//! [`crate::plugin`]).
 //! The names match adk-python, so rows from either language can be queried together.
-
-use std::collections::BTreeSet;
 
 /// A user message reached the runner.
 pub const EVENT_USER_MESSAGE_RECEIVED: &str = "USER_MESSAGE_RECEIVED";
@@ -82,8 +81,8 @@ pub const EVENT_NODE_OUTPUT: &str = "NODE_OUTPUT";
 pub const EVENT_NODE_ERROR: &str = "NODE_ERROR";
 
 /// Go `newSet(items...)`: the items as a set (Go `map[string]struct{}`).
-#[allow(dead_code)] // consumer: 7b-3 (plugin event filters)
-pub(crate) fn new_set<S: AsRef<str>>(items: &[S]) -> BTreeSet<String> {
+#[cfg(test)]
+pub(crate) fn new_set<S: AsRef<str>>(items: &[S]) -> std::collections::BTreeSet<String> {
     items.iter().map(|s| s.as_ref().to_owned()).collect()
 }
 

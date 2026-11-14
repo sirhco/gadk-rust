@@ -18,7 +18,7 @@
 //! version from the build info; gadk writes its own crate version. Divergence (ledger 7b-3a).
 
 /// Go `adkModulePath` (kept for the ported build-info test's table).
-#[allow(dead_code)] // consumer: Task 10 (the ported TestADKVersionFromBuildInfo).
+#[cfg(test)]
 pub(crate) const ADK_MODULE_PATH: &str = "google.golang.org/adk/v2";
 
 /// Go `adkVersion()`: the `adk_version` written in `attributes` (gadk-agentanalytics'

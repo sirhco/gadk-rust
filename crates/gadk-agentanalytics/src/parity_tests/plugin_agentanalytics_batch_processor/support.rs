@@ -100,7 +100,6 @@ pub(crate) fn decode_arrow_rows(req: &AppendRowsRequest) -> Vec<Row> {
 }
 
 /// Go `arrowWriterSchemaColumns(t, req)`.
-#[allow(dead_code)] // consumer: 7b-3 (the plugin-level gcs_offloader_test.go ports)
 pub(crate) fn arrow_writer_schema_columns(req: &AppendRowsRequest) -> Vec<String> {
     crate::testutil::arrow_rows::arrow_writer_schema_columns(req).unwrap_or_else(|e| panic!("{e}"))
 }
@@ -124,7 +123,6 @@ pub(crate) fn rows_of_type(rows: &[Row], event_type: &str) -> Vec<Row> {
 }
 
 /// Go `onlyRowOfType(t, rows, eventType)`.
-#[allow(dead_code)] // consumer: 7b-3 (the plugin-level gcs_offloader_test.go ports)
 pub(crate) fn only_row_of_type(rows: &[Row], event_type: &str) -> Row {
     let matches = rows_of_type(rows, event_type);
     assert_eq!(
@@ -179,25 +177,10 @@ pub(crate) async fn collect_rows(
 }
 
 /// Go `untilEventType(eventType)`.
-#[allow(dead_code)] // consumer: 7b-3 (the plugin-level gcs_offloader_test.go ports)
 pub(crate) fn until_event_type(event_type: &str) -> impl Fn(&[Row]) -> bool + '_ {
     move |rows| {
         rows.iter()
             .any(|r| r.get("event_type") == Some(&RowValue::from(event_type)))
-    }
-}
-
-/// Go `expectNoRequest(t, ch, d)`.
-#[allow(dead_code)] // consumer: 7b-3 (the plugin-level gcs_offloader_test.go ports)
-pub(crate) async fn expect_no_request(
-    rx: &mut mpsc::UnboundedReceiver<AppendRowsRequest>,
-    d: Duration,
-) {
-    if let Ok(Some(req)) = tokio::time::timeout(d, rx.recv()).await {
-        panic!(
-            "unexpected AppendRowsRequest with event types {:?}",
-            event_types(&decode_arrow_rows(&req))
-        );
     }
 }
 
@@ -592,7 +575,7 @@ pub(crate) type OnFinalize = Arc<
 
 /// Go `scriptedCommittedStreamServer`: `CreateWriteStream` names streams from `stream_names`
 /// (then `committed-<n>`), `FinalizeWriteStream` records and runs `on_finalize`, AppendRows is
-/// T8's [`scripted`] (`on_append(attempt, req)`).
+/// [`scripted`] (`on_append(attempt, req)`).
 pub(crate) struct ScriptedServer {
     /// The fake (Go's `createReqs` = `create_calls()`, `finalizeReqs` / `finalizeMetadata` =
     /// `finalize_calls()`).
@@ -775,7 +758,6 @@ impl HookOffloader {
     }
 
     /// Go `byPath()`.
-    #[allow(dead_code)] // consumer: 7b-3 (the plugin-level gcs_offloader_test.go ports)
     pub(crate) fn by_path(&self) -> BTreeMap<String, UploadAttempt> {
         self.uploads()
             .into_iter()
@@ -784,7 +766,6 @@ impl HookOffloader {
     }
 
     /// Go `closeCount()`.
-    #[allow(dead_code)] // consumer: 7b-3 (the plugin-level gcs_offloader_test.go ports)
     pub(crate) fn close_count(&self) -> usize {
         self.state.lock().unwrap().closes
     }

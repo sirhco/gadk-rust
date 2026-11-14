@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Part of the port of ADK-Go `plugin/agentanalytics/events_test.go` (owner: Task 11): the 4 Go
+//! Part of the port of ADK-Go `plugin/agentanalytics/events_test.go`: the 4 Go
 //! tests from `TestResolveToolOrigin` to `TestAgentTool_SkipSummarizationLogsFinalAgentResponse` in
 //! the Go file's order that run a gadk `Runner` (the exact list is in the 7b-3a plan's contracts,
 //! Appendix A).
@@ -38,7 +38,7 @@ use serde_json::{Map, Value, json};
 
 use super::{
     FakeTool, check_json, confirmed, function_tool, llm, local_agent, obj, remote_agent,
-    require_invocation_completed_ok, text_content,
+    text_content,
 };
 use crate::event_types::{
     EVENT_AGENT_RESPONSE, EVENT_AGENT_STARTING, EVENT_STATE_DELTA, EVENT_TOOL_PAUSED,
@@ -49,6 +49,7 @@ use crate::events::{
     TOOL_ORIGIN_TOOLBOX, TOOL_ORIGIN_TRANSFER_A2A, TOOL_ORIGIN_TRANSFER_AGENT, TOOL_ORIGIN_UNKNOWN,
     tool_origin_of,
 };
+use crate::parity_tests::plugin_agentanalytics_bigquery_agent_analytics_plugin::support::require_invocation_completed_ok;
 use crate::parity_tests::plugin_agentanalytics_bigquery_agent_analytics_plugin::support::{
     MockCtx, event_types, function_call_id_of, json_object_column, lookup, new_test_runner,
     only_row_of_type, rows_of_type, run_turn, setup_test_plugin, until_invocation_end,

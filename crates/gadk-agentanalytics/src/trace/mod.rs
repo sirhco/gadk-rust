@@ -29,8 +29,6 @@
 //! in. Go's goroutine attribution fields exist on [`span::SpanRecord`] and stay zero (7b-3b).
 //! Locks are `parking_lot` and never held across an `.await` (no method here is async).
 
-#![allow(dead_code)] // Consumers: Tasks 6-9 (Task 15 sweeps the allow).
-
 pub(crate) mod causes;
 pub(crate) mod invocation;
 pub(crate) mod manager;
@@ -51,17 +49,15 @@ use tokio_util::sync::CancellationToken;
 use crate::context::ContextError;
 use crate::error::Error;
 
-// The crate-level names of the trace types (`crate::trace::SpanRef`, …), for Tasks 6-13.
-#[allow(unused_imports)]
-pub(crate) use invocation::{
-    AgentChildren, AgentEdge, InvocationState, InvocationTrace, RecordedError, RootAgentInput,
-};
-#[allow(unused_imports)]
-pub(crate) use manager::{CompletedTrace, EvictedTrace, ManagerState, TraceManager};
-#[allow(unused_imports)]
-pub(crate) use span::{
-    AttemptSite, CancelSource, GoroutineOrigin, Latency, NodeRunKey, RetiredCause, RowSpan,
-    SpanKind, SpanRecord, SpanRef, UnclosedAgentSpan,
+// The crate-level names of the trace types (`crate::trace::SpanRef`, …); the second group only
+// the tests name.
+pub(crate) use invocation::AgentChildren;
+pub(crate) use manager::TraceManager;
+pub(crate) use span::{CancelSource, Latency, RowSpan, SpanRef, UnclosedAgentSpan};
+#[cfg(test)]
+pub(crate) use {
+    invocation::{InvocationState, InvocationTrace, RecordedError},
+    span::{RetiredCause, SpanKind, SpanRecord},
 };
 
 /// Go `maxTrackedInvocations`: the number of invocations whose spans are tracked at once.
@@ -85,8 +81,6 @@ pub(crate) const WORKFLOW_NODE_CANCEL_OUTCOME: &str = "cancelled";
 
 /// Go `noFrame` (`^uint64(0)`): no activation ran on the current goroutine since a frame.
 pub(crate) const NO_FRAME: u64 = u64::MAX;
-/// Go `maxActivationKeyDepth`: kept for parity; gadk's activation id needs no chain walk.
-pub(crate) const MAX_ACTIVATION_KEY_DEPTH: usize = 8;
 
 /// Go `error` as the trace manager keeps it (recorded errors, failure causes): shared, compared
 /// by kind (`Error::is_context`) or text. Go's `context.Canceled` is
@@ -163,6 +157,7 @@ pub(crate) struct CallbackCtx {
 
 impl CallbackCtx {
     /// Go `context.Background()`: no ADK context, never cancelled, no span.
+    #[cfg(test)]
     pub(crate) fn background() -> CallbackCtx {
         CallbackCtx::default()
     }
@@ -170,6 +165,12 @@ impl CallbackCtx {
     /// The context of an agent, model or tool callback: `adk` = a clone of `ctx`, `cancel` =
     /// its cancellation token, `span` = `gadk_engine::telemetry::current_span_ids()` (the
     /// nearest enclosing ADK span; R1(d)).
+    ///
+    /// Divergence (ledger 7b-3a): Go reads whatever OpenTelemetry span the caller's
+    /// `context.Context` carries, so rows of a run started under a caller's own span join that
+    /// trace (`attributes.otel`, the adopted trace ID); gadk reads only spans gadk-telemetry's
+    /// bridge marks as ADK spans, and the bridge starts a new trace under a non-ADK span, so a
+    /// caller's span is never inherited.
     pub(crate) fn from_context(ctx: &gadk_agent::Context) -> CallbackCtx {
         CallbackCtx {
             adk: Some(ctx.clone()),
@@ -186,6 +187,7 @@ impl CallbackCtx {
     }
 
     /// Go `context.WithCancel(ctx)` in tests: `cancel` = `token`.
+    #[cfg(test)]
     pub(crate) fn with_cancel(mut self, token: CancellationToken) -> CallbackCtx {
         self.cancel = Some(token);
         self
@@ -193,12 +195,14 @@ impl CallbackCtx {
 
     /// Go `context.WithCancelCause(ctx)` in tests: the cause [`cancel`](Self::cancel) ends
     /// with.
+    #[cfg(test)]
     pub(crate) fn with_cancel_cause(mut self, cause: TraceError) -> CallbackCtx {
         self.cancel_cause = Some(cause);
         self
     }
 
     /// Go `trace.ContextWithSpanContext(ctx, sc)` in tests.
+    #[cfg(test)]
     pub(crate) fn with_span(mut self, span: SpanIds) -> CallbackCtx {
         self.span = Some(span);
         self

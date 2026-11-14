@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The Go test helpers shared by the 7b-3a ports (owner: Task 9): ADK contexts for direct callback
+//! The Go test helpers shared by the 7b-3a ports: ADK contexts for direct callback
 //! tests (Go `mockInvocationContext`), the plugin over the in-process `FakeWriteServer` with its
 //! decoded rows (Go `fakeBigQueryWriteServer`), the row-capturing plugins, and scripted models /
 //! agents for runner-level tests.
@@ -32,17 +32,18 @@
 //! check_json}`; `eventTypes` / `rowsOfType` / `onlyRowOfType` are re-exported from the
 //! batch-processor support.
 
-#![allow(dead_code)] // Consumers: Tasks 10-13 (the 7b-3a ports).
-
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
-use gadk_agent::{Agent, AgentError, ContextDelta, InvocationContext, Plugin, RunConfig};
+use gadk_agent::{
+    Agent, AgentError, ContextDelta, InvocationContext, Plugin, RunConfig, Tool, ToolOriginKind,
+};
+use gadk_engine::telemetry::d6::SpanIds;
 use gadk_engine::{RunOptions, Runner, RunnerConfig};
-use gadk_genai::Content;
+use gadk_genai::{Content, FunctionDeclaration};
 use gadk_model::rest::test_util::{FakeResponse, ScriptedClient};
 use gadk_session::{Event, InMemorySessionService, Session, SessionError, State};
 use serde_json::{Map, Value};
@@ -53,18 +54,20 @@ use crate::bigquery::BigQueryClient;
 use crate::config::{ClientOptions, Config};
 use crate::context::Context;
 use crate::plugin::callbacks::callbacks_config;
-use crate::plugin::{AnalyticsPlugin, new_bigquery_agent_analytics_plugin_with_clients};
+use crate::plugin::{
+    AnalyticsPlugin, PLUGIN_NAME, new_bigquery_agent_analytics_plugin_with_clients,
+};
+use crate::redaction::CustomMetadataFilter;
 use crate::row::{Row, RowValue};
 use crate::testutil::fake_write_server::FakeWriteServer;
-use crate::trace::TraceManager;
 use crate::trace::testkit::ManualClock;
+use crate::trace::{CallbackCtx, TraceManager};
+use crate::validate::validate_config;
 
-#[allow(unused_imports)] // Consumers: Tasks 10-13.
 pub(crate) use crate::bigquery::fake::check_json;
 pub(crate) use crate::bigquery::fake::lookup;
-#[allow(unused_imports)] // `only_row_of_type`: consumers Tasks 10-13.
 pub(crate) use crate::parity_tests::plugin_agentanalytics_batch_processor::support::{
-    decode_arrow_rows, event_types, only_row_of_type, rows_of_type,
+    decode_arrow_rows, event_types, only_row_of_type, rows_of_type, until_event_type,
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -406,11 +409,6 @@ impl TestPlugin {
     }
 }
 
-/// Go `untilEventType(eventType)`.
-pub(crate) fn until_event_type(event_type: &str) -> impl Fn(&[Row]) -> bool + '_ {
-    move |rows| !rows_of_type(rows, event_type).is_empty()
-}
-
 /// Go `untilInvocationEnd`.
 pub(crate) fn until_invocation_end(rows: &[Row]) -> bool {
     !rows_of_type(rows, crate::event_types::EVENT_INVOCATION_COMPLETED).is_empty()
@@ -474,6 +472,7 @@ pub(crate) fn take_rows(processor: Option<&Arc<BatchProcessor>>) -> Vec<Row> {
 
 /// Go `newTraceOnlyPlugin(t, tm)`: the production callbacks over `tm`, writing no rows
 /// (every event type is filtered out).
+#[allow(dead_code)] // consumer: 7b-3b (deferred trace_manager_test.go ports)
 pub(crate) fn new_trace_only_plugin(tm: Arc<TraceManager>) -> Plugin {
     let mut config = default_config();
     config.disable_flush_on_run_end = true;
@@ -488,6 +487,7 @@ pub(crate) fn new_trace_only_plugin(tm: Arc<TraceManager>) -> Plugin {
 
 /// Go `newQueuedRowsPlugin(t, tm)`: the production callbacks over `tm`, whose rows wait in a
 /// processor that never starts; take them with [`take_rows`] on the returned processor.
+#[allow(dead_code)] // consumer: 7b-3b (deferred trace_manager_test.go ports)
 pub(crate) async fn new_queued_rows_plugin(tm: Arc<TraceManager>) -> (Plugin, Arc<BatchProcessor>) {
     let mut config = default_config();
     config.disable_flush_on_run_end = true;
@@ -651,6 +651,223 @@ pub(crate) fn agent_error_counts(rows: &[Row]) -> BTreeMap<String, usize> {
         *counts.entry(str_col(&row, "agent")).or_insert(0) += 1;
     }
     counts
+}
+
+// ---------------------------------------------------------------------------------------------
+// Helpers shared by the four 7b-3a port directories and the 7b-2 plugin-level ports
+// ---------------------------------------------------------------------------------------------
+
+/// Go `textContent(role, text)`.
+pub(crate) fn text_content(role: &str, text: &str) -> Content {
+    Content::from_text(text, role)
+}
+
+/// Go `checkJSONAt(t, obj, want, path...)`.
+#[track_caller]
+pub(crate) fn check_json_at(obj: &Value, want: &str, path: &[&str]) {
+    let name = path.join(".");
+    let got = lookup(obj, path).unwrap_or_else(|| panic!("{name} is missing; got {obj}"));
+    check_json(&name, got, want).unwrap_or_else(|e| panic!("{e}"));
+}
+
+/// Go `requireInvocationCompletedOK(t, rows)`.
+#[track_caller]
+pub(crate) fn require_invocation_completed_ok(rows: &[Row]) {
+    let errs = rows_of_type(rows, crate::event_types::EVENT_INVOCATION_ERROR);
+    assert!(
+        errs.is_empty(),
+        "got {} INVOCATION_ERROR rows, want 0; event types: {:?}",
+        errs.len(),
+        event_types(rows)
+    );
+    let completed = rows_of_type(rows, crate::event_types::EVENT_INVOCATION_COMPLETED);
+    assert_eq!(
+        completed.len(),
+        1,
+        "got {} INVOCATION_COMPLETED rows, want 1; event types: {:?}",
+        completed.len(),
+        event_types(rows)
+    );
+    assert_eq!(
+        str_col(&completed[0], "status"),
+        "OK",
+        "INVOCATION_COMPLETED status"
+    );
+    assert!(
+        agent_error_counts(rows).is_empty(),
+        "AGENT_ERROR rows per agent = {:?}, want none",
+        agent_error_counts(rows)
+    );
+}
+
+/// Go `fakeTool` / `declaredTool` (`arrow_test_helper_test.go`): a tool for callback tests.
+/// `origin` is its declared kind (Go's `fakeTool` has none: `Unknown`).
+#[derive(Default)]
+pub(crate) struct FakeTool {
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) long_running: bool,
+    /// The description panics (a tool whose metadata is unavailable).
+    pub(crate) panic_on_description: bool,
+    /// Go `declaredTool.Declaration()` (a `fakeTool` has none).
+    pub(crate) decl: Option<FunctionDeclaration>,
+    pub(crate) origin: ToolOriginKind,
+}
+
+impl FakeTool {
+    /// Go `&fakeTool{name: name}`.
+    pub(crate) fn named(name: &str) -> Arc<dyn Tool> {
+        fake_tool(name)
+    }
+}
+
+impl Tool for FakeTool {
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn description(&self) -> &str {
+        assert!(!self.panic_on_description, "tool description unavailable");
+        &self.description
+    }
+    fn is_long_running(&self) -> bool {
+        self.long_running
+    }
+    fn declaration(&self) -> Option<FunctionDeclaration> {
+        self.decl.clone()
+    }
+    fn origin_kind(&self) -> ToolOriginKind {
+        self.origin
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+/// Go `&fakeTool{name: name}`.
+pub(crate) fn fake_tool(name: &str) -> Arc<dyn Tool> {
+    Arc::new(FakeTool {
+        name: name.into(),
+        ..FakeTool::default()
+    })
+}
+
+/// Go `trackedInvocations(tm)`: the sorted IDs of the tracked invocations.
+pub(crate) fn tracked_invocations(tm: &TraceManager) -> Vec<String> {
+    let mut ids: Vec<String> = tm.mu.lock().invocations.keys().cloned().collect();
+    ids.sort();
+    ids
+}
+
+/// Go's one `mCtx` handed to every callback of a test: the invocation context of a
+/// [`MockCtx`] and the callback context made from it, built once, so every callback sees one
+/// activation (the trace manager keys calls by activation).
+pub(crate) struct Mc {
+    pub(crate) inv: InvocationContext,
+    pub(crate) ctx: gadk_agent::Context,
+}
+
+impl Mc {
+    /// The contexts of `m` (a function call ID makes the callback context a tool context).
+    pub(crate) fn of(m: &MockCtx) -> Mc {
+        Mc {
+            inv: m.invocation(),
+            ctx: m.context(),
+        }
+    }
+
+    /// Go's `mCtx` passed to an invocation callback.
+    pub(crate) fn invocation(&self) -> InvocationContext {
+        self.inv.clone()
+    }
+
+    /// Go's `mCtx` passed to an agent / model / tool callback.
+    pub(crate) fn context(&self) -> gadk_agent::Context {
+        self.ctx.clone()
+    }
+}
+
+/// The plugin of Go's tests that put a span context in `mCtx.ctx`: the production callback
+/// bodies over a processor that writes to a [`FakeWriteServer`], assembled as `new_plugin`
+/// builds it (defaults, `validateConfig`'s denied columns, a started processor, a trace manager,
+/// the custom-metadata filter), and called with a [`CallbackCtx`] that carries the span (gadk
+/// reads the ambient span from the tracing subscriber, which these tests do not install).
+pub(crate) struct SpanPlugin {
+    pub(crate) ap: Arc<AnalyticsPlugin>,
+    pub(crate) tp: TestPlugin,
+}
+
+impl SpanPlugin {
+    pub(crate) async fn new(mutate: impl FnOnce(&mut Config)) -> SpanPlugin {
+        let mut config = test_config();
+        mutate(&mut config);
+        let config = config.apply_defaults();
+        let denied = validate_config(&config).expect("validateConfig");
+        let server = FakeWriteServer::new();
+        let stream = format!(
+            "projects/{}/datasets/{}/tables/{}/streams/_default",
+            config.project_id, config.dataset_id, config.table_name
+        );
+        let processor = BatchProcessor::new(
+            &Context::background(),
+            Some(server.client().expect("write client")),
+            &stream,
+            config.clone(),
+        )
+        .await
+        .expect("batch processor");
+        processor.start();
+        let ap = Arc::new(AnalyticsPlugin {
+            custom_metadata: CustomMetadataFilter::new(&config.custom_metadata_allowlist),
+            config,
+            denied_columns: denied,
+            processor: Some(processor),
+            traces: Some(Arc::new(TraceManager::new())),
+            ..AnalyticsPlugin::default()
+        });
+        let tp = TestPlugin {
+            plugin: plugin_of(PLUGIN_NAME, &ap),
+            server,
+            ctx: MockCtx::new(),
+        };
+        SpanPlugin { ap, tp }
+    }
+
+    /// Go's `mCtx` (`m`) with `trace.ContextWithSpanContext(ctx, sc)`.
+    pub(crate) fn ctx(m: &MockCtx, sc: SpanIds) -> CallbackCtx {
+        CallbackCtx::from_invocation(&m.invocation()).with_span(sc)
+    }
+
+    /// Go's `AfterRunCallback` (with its run-end flush).
+    pub(crate) async fn after_run(&self, ctx: &CallbackCtx) {
+        self.ap.after_run(ctx);
+        self.ap.processor.as_ref().unwrap().flush_run_end().await;
+    }
+
+    /// Go's `OnUserMessageCallback` then `AfterRunCallback` (with its run-end flush), with the
+    /// span `sc` in the test's `mCtx` when set.
+    pub(crate) async fn user_message_then_after_run(&self, sc: Option<SpanIds>, msg: &Content) {
+        let ctx = match sc {
+            Some(sc) => SpanPlugin::ctx(&self.tp.ctx, sc),
+            None => CallbackCtx::from_invocation(&self.tp.ctx.invocation()),
+        };
+        self.ap.on_user_message(&ctx, msg);
+        self.after_run(&ctx).await;
+    }
+}
+
+/// Go `trace.TraceIDFromHex` / `SpanIDFromHex` of a span context (Go `withSpan`).
+pub(crate) fn span_ids(trace_hex: &str, span_hex: &str) -> SpanIds {
+    fn bytes<const N: usize>(hex: &str) -> [u8; N] {
+        let mut out = [0u8; N];
+        for (i, b) in out.iter_mut().enumerate() {
+            *b = u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).expect("hex");
+        }
+        out
+    }
+    SpanIds {
+        trace_id: bytes(trace_hex),
+        span_id: bytes(span_hex),
+    }
 }
 
 #[test]
