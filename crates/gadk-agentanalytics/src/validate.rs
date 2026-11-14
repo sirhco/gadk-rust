@@ -1,0 +1,117 @@
+// Copyright 2026 Chris Olson
+// Portions derived from ADK-Go (https://github.com/google/adk-go), Copyright 2026 Google LLC.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! Port of ADK-Go `plugin/agentanalytics/bigquery_agent_analytics_plugin.go`'s
+//! `validateConfig` (with `columnAttributes`, `redaction.go`): the settings check that
+//! `NewBatchProcessor` (and the plugin constructors) run after `applyDefaults`.
+
+use std::collections::BTreeSet;
+
+use gadk_platform::{GoDuration, go_format_float_v, go_quote};
+
+use crate::config::{Config, RetryConfig};
+use crate::error::Error;
+use crate::redaction::{COLUMN_ATTRIBUTES, parse_payload_column_denylist};
+use crate::views::is_valid_identifier;
+
+/// Go `validateConfig(c)`: rejects settings that cannot take effect and returns the
+/// `PayloadColumnDenylist` as a set. The first failing check wins, in Go's order.
+///
+/// Go also rejects a negative `BatchFlushIntv` / `ShutdownTimeout` / `RetryConfig.InitialDelay`;
+/// a Rust [`Duration`](std::time::Duration) cannot be negative (7b-1's ledgered divergence), so
+/// only the zero cases exist here.
+///
+/// # Errors
+///
+/// Go's texts, all starting `invalid config: `.
+pub(crate) fn validate_config(c: &Config) -> Result<BTreeSet<String>, Error> {
+    let r = &c.retry_config;
+    if c.batch_size < 1 || c.queue_max_size < 1 {
+        return Err(Error::msg(
+            "invalid config: BatchSize and QueueMaxSize must be >= 1",
+        ));
+    }
+    if c.batch_flush_intv.is_zero() || c.shutdown_timeout.is_zero() {
+        return Err(Error::msg(
+            "invalid config: BatchFlushIntv and ShutdownTimeout must be > 0",
+        ));
+    }
+    if c.max_content_len == 0 || c.max_content_len < -1 {
+        return Err(Error::msg(
+            "invalid config: MaxContentLen must be -1 or >= 1",
+        ));
+    }
+    if r.max_retries < 0 || r.multiplier < 1.0 || r.max_delay < r.initial_delay {
+        return Err(Error::msg(format!(
+            "invalid config: invalid RetryConfig: needs MaxRetries >= 0, InitialDelay >= 0, \
+             Multiplier >= 1 and MaxDelay >= InitialDelay, got {}",
+            retry_config_plus_v(r)
+        )));
+    }
+    let denied = parse_payload_column_denylist(&c.payload_column_denylist)
+        .map_err(|e| Error::wrap("invalid config", e))?;
+    if denied.contains(COLUMN_ATTRIBUTES) && !c.custom_metadata_allowlist.is_empty() {
+        return Err(Error::msg(
+            "invalid config: CustomMetadataAllowlist cannot be used when PayloadColumnDenylist \
+             contains \"attributes\"",
+        ));
+    }
+    if !c.view_prefix.is_empty() && !is_valid_identifier(&c.view_prefix) {
+        return Err(Error::msg(format!(
+            "invalid config: invalid ViewPrefix {}",
+            go_quote(&c.view_prefix)
+        )));
+    }
+    Ok(denied)
+}
+
+/// Go `fmt.Sprintf("%+v", retryConfig)`: `{MaxRetries:3 InitialDelay:100ms MaxDelay:10s
+/// Multiplier:2}`.
+fn retry_config_plus_v(r: &RetryConfig) -> String {
+    format!(
+        "{{MaxRetries:{} InitialDelay:{} MaxDelay:{} Multiplier:{}}}",
+        r.max_retries,
+        GoDuration::from_std(r.initial_delay),
+        GoDuration::from_std(r.max_delay),
+        go_format_float_v(r.multiplier)
+    )
+}
+
+// The R8 golden (`config/validate_config.json`) builds configs with the shared projection helper,
+// so it lives under `tests/support/` beside it (as 7b-1's `golden_apply_defaults`).
+#[cfg(test)]
+#[path = "../tests/support/golden_validate_config.rs"]
+mod golden_validate_config;
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+
+    #[test]
+    fn retry_config_text_is_gos_plus_v() {
+        let r = RetryConfig {
+            max_retries: 1,
+            initial_delay: std::time::Duration::from_nanos(5_400_001_500_000),
+            max_delay: std::time::Duration::ZERO,
+            multiplier: 2.25,
+        };
+        assert_eq!(
+            retry_config_plus_v(&r),
+            "{MaxRetries:1 InitialDelay:1h30m0.0015s MaxDelay:0s Multiplier:2.25}"
+        );
+    }
+}

@@ -33,15 +33,28 @@
 
 #![forbid(unsafe_code)]
 
+pub mod batch_processor;
 pub mod bigquery;
 pub mod config;
 pub mod context;
 pub mod error;
 pub mod event_types;
+pub mod offload;
+pub mod row;
 pub mod schema;
 pub mod schema_upgrade;
 pub mod storagepb;
 pub mod views;
+pub mod write;
+
+// Consumed by later 7b-2 tasks (offload::gcs, batch_processor); until then only tests reach them.
+#[allow(dead_code)]
+pub(crate) mod crc32c;
+#[allow(dead_code)]
+pub(crate) mod validate;
+
+#[cfg(any(test, feature = "testutil"))]
+pub mod testutil;
 
 // The plugin-side entry points of `formatter` and `redaction` are consumed by 7b-2 (batch
 // processor, GCS offloader) and 7b-3 (events, plugin); until then only tests reach them.
@@ -54,15 +67,18 @@ pub(crate) mod redaction;
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod parity_tests;
 
+pub use batch_processor::BatchProcessor;
 pub use bigquery::{BigQueryClient, TableOps};
 pub use config::{
     ClientOptions, Config, ContentFormatter, DropStats, GcsContentOffloader, GcsUploadRequest,
     Logger, RetryConfig, SCHEMA_VERSION, StdLogger,
 };
-pub use context::{Context, ContextError};
+pub use context::{AfterFunc, Context, ContextError, Metadata};
 pub use error::{ApiError, BigQueryError, BoxError, Code, Error, ErrorItem};
 pub use event_types::*;
 pub use formatter::{format_content_parts, smart_truncate};
+pub use offload::gcs::GcsOffloader;
+pub use row::{QueuedRow, Row, RowExt, RowValue};
 pub use schema::{
     FieldSchema, Schema, SchemaMismatchError, TableSchema, arrow_schema, events_schema,
     project_arrow_schema, project_events_schema, serialized_arrow_schema, upgrade_table_schema,
@@ -72,3 +88,4 @@ pub use schema_upgrade::{
     maybe_upgrade_schema,
 };
 pub use views::{BigQueryViewRunner, ViewDefinition, ViewRunner, sync_analytics_views};
+pub use write::gapic::WriteClient;
