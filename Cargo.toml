@@ -126,6 +126,10 @@ flate2 = "1.1.11"
 arrow-schema = { version = "=60.1", default-features = false }
 arrow-array = { version = "=60.1", default-features = false }
 arrow-ipc = { version = "=60.1", default-features = false }
+# 7b-2: gRPC client (and, under gadk-agentanalytics' `testutil`, server) for the generated
+# BigQuery Storage Write `storagepb` (scripts/gen-storagepb); same versions as a2a-pb's.
+tonic = { version = "=0.14.9", default-features = false }
+tonic-prost = { version = "=0.14.9", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

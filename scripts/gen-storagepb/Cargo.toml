@@ -1,0 +1,19 @@
+# Copyright 2026 Chris Olson — Apache-2.0 (see LICENSE)
+# Regeneration project for crates/gadk-agentanalytics/src/storagepb (run.sh). Not a workspace
+# member: the empty [workspace] table makes it its own workspace root, so the codegen crates
+# below never enter the main workspace's dependency graph.
+[package]
+name = "gen-storagepb"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.95"
+license = "Apache-2.0"
+publish = false
+
+[workspace]
+
+[dependencies]
+# Pinned: the generated text depends on the generator versions (README).
+tonic-prost-build = { version = "=0.14.9", default-features = false, features = ["cleanup-markdown"] }
+prost-build = { version = "=0.14.5" }
+protoc-bin-vendored = { version = "=3.3.0" }

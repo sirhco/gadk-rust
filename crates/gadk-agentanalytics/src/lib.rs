@@ -40,6 +40,7 @@ pub mod error;
 pub mod event_types;
 pub mod schema;
 pub mod schema_upgrade;
+pub mod storagepb;
 pub mod views;
 
 // The plugin-side entry points of `formatter` and `redaction` are consumed by 7b-2 (batch

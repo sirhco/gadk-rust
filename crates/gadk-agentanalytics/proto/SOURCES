@@ -1,0 +1,25 @@
+# Vendored protos for crates/gadk-agentanalytics/src/storagepb (scripts/gen-storagepb).
+# googleapis commit 3614450147d75067801a8da2ae59abb55b82cc30 (2026-07-13, the last googleapis
+# commit before cloud.google.com/go/bigquery v1.79.0; google/cloud/bigquery/storage/v1 matches its
+# storagepb). protocolbuffers/protobuf tag v36.2, commit 2c74169b34066ceb8ddb6b882fcb3fb32d737a55
+# (the protoc version of protoc-bin-vendored 3.3.0).
+# Files are byte-identical to their source. Columns: sha256, path, source URL.
+e79ea741cb605a65e78ca322174764a4af9fde1962c1631e12b84c4934ba9a6c google/api/annotations.proto https://raw.githubusercontent.com/googleapis/googleapis/3614450147d75067801a8da2ae59abb55b82cc30/google/api/annotations.proto
+5e9fc117290fe7d3472791543c979bec7cf4497f3fe6ffaf9de9ae99cc4f1804 google/api/client.proto https://raw.githubusercontent.com/googleapis/googleapis/3614450147d75067801a8da2ae59abb55b82cc30/google/api/client.proto
+bb7ed77725c95f751ec2c47cd92359d0137c39383b8a62aef41bab7aa7478da5 google/api/field_behavior.proto https://raw.githubusercontent.com/googleapis/googleapis/3614450147d75067801a8da2ae59abb55b82cc30/google/api/field_behavior.proto
+ead99129aa15dd5f6233942030c72eec33bc0d7b1c7c260dc143293ef66c5b78 google/api/http.proto https://raw.githubusercontent.com/googleapis/googleapis/3614450147d75067801a8da2ae59abb55b82cc30/google/api/http.proto
+68e22c9821227b4e84c7029569fce1055c21e6ccab991e0986bc75f12ef4dd82 google/api/launch_stage.proto https://raw.githubusercontent.com/googleapis/googleapis/3614450147d75067801a8da2ae59abb55b82cc30/google/api/launch_stage.proto
+815d51eada4341bf01672b474b5ec0abbea190e8df9f4aa26a0c96dbdad2993b google/api/resource.proto https://raw.githubusercontent.com/googleapis/googleapis/3614450147d75067801a8da2ae59abb55b82cc30/google/api/resource.proto
+776e2e17338f1b834f4a0614d26536482cea49aefbfaa7109f18df0684103d80 google/cloud/bigquery/storage/v1/arrow.proto https://raw.githubusercontent.com/googleapis/googleapis/3614450147d75067801a8da2ae59abb55b82cc30/google/cloud/bigquery/storage/v1/arrow.proto
+74f4203d07bfe9aaed51088b1e5a3d0a0444497dbda44c2ddfd62a73f02ead12 google/cloud/bigquery/storage/v1/avro.proto https://raw.githubusercontent.com/googleapis/googleapis/3614450147d75067801a8da2ae59abb55b82cc30/google/cloud/bigquery/storage/v1/avro.proto
+c04784b7ea70cdbdb5477842291020fd8dc4f5e3e9cd6048aee57c692dff0b9a google/cloud/bigquery/storage/v1/protobuf.proto https://raw.githubusercontent.com/googleapis/googleapis/3614450147d75067801a8da2ae59abb55b82cc30/google/cloud/bigquery/storage/v1/protobuf.proto
+f273b281802e32e997326fd5515bfeeae8eb4c8302bea07cffcde2ab88f118d6 google/cloud/bigquery/storage/v1/storage.proto https://raw.githubusercontent.com/googleapis/googleapis/3614450147d75067801a8da2ae59abb55b82cc30/google/cloud/bigquery/storage/v1/storage.proto
+42ff5756711c5a7fd0021def31aad2c7537cbc65f22c026a8223d972bf01eb29 google/cloud/bigquery/storage/v1/stream.proto https://raw.githubusercontent.com/googleapis/googleapis/3614450147d75067801a8da2ae59abb55b82cc30/google/cloud/bigquery/storage/v1/stream.proto
+88c8da28210f427686664000c92c6af467b396a57df4571d16404c3a1ab93a5c google/cloud/bigquery/storage/v1/table.proto https://raw.githubusercontent.com/googleapis/googleapis/3614450147d75067801a8da2ae59abb55b82cc30/google/cloud/bigquery/storage/v1/table.proto
+8e56f61e3078e9232d39ce1b1bab28613783af8191f93a910c3617933f87a179 google/protobuf/any.proto https://raw.githubusercontent.com/protocolbuffers/protobuf/2c74169b34066ceb8ddb6b882fcb3fb32d737a55/src/google/protobuf/any.proto
+c96db5406336ebcc82523c1dfb122721986a1f43c4aaed45a4a4ad6996efacc2 google/protobuf/descriptor.proto https://raw.githubusercontent.com/protocolbuffers/protobuf/2c74169b34066ceb8ddb6b882fcb3fb32d737a55/src/google/protobuf/descriptor.proto
+a3f7301ff2956ec2e30c2241ece07197e4a86c752348d5607224819d4921c9fe google/protobuf/duration.proto https://raw.githubusercontent.com/protocolbuffers/protobuf/2c74169b34066ceb8ddb6b882fcb3fb32d737a55/src/google/protobuf/duration.proto
+fa6c44dca2c90a2aaf3a1e4776cef2e9177f70fba365f236269f0f41ac166c96 google/protobuf/timestamp.proto https://raw.githubusercontent.com/protocolbuffers/protobuf/2c74169b34066ceb8ddb6b882fcb3fb32d737a55/src/google/protobuf/timestamp.proto
+6878dc7534cf9805eee56345cdc38b5e9ca39dece246710c663c7007a67fef49 google/protobuf/wrappers.proto https://raw.githubusercontent.com/protocolbuffers/protobuf/2c74169b34066ceb8ddb6b882fcb3fb32d737a55/src/google/protobuf/wrappers.proto
+f5bfd262e6705c7ae73f32e0ad8ee20ce8c0a2578df8c4f76ebf76b572f295ed google/rpc/status.proto https://raw.githubusercontent.com/googleapis/googleapis/3614450147d75067801a8da2ae59abb55b82cc30/google/rpc/status.proto
+6e5e117324afd944dcf67f36cf329843bc1a92229a8cd9bb573d7a83130fea7d google/protobuf/LICENSE https://raw.githubusercontent.com/protocolbuffers/protobuf/2c74169b34066ceb8ddb6b882fcb3fb32d737a55/LICENSE
