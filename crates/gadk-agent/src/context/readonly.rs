@@ -29,6 +29,7 @@ use serde_json::{Map, Value};
 use tokio_util::sync::CancellationToken;
 
 use crate::agent::Agent;
+use crate::context::activation::ActivationId;
 use crate::context::identity::Identity;
 use crate::mode::BoundModes;
 use crate::parent_map::ParentMap;
@@ -67,6 +68,8 @@ pub(crate) struct ContextInner {
     pub(crate) isolation_scope: String,
     pub(crate) user_content: Option<Arc<Content>>,
     pub(crate) ended: Arc<AtomicBool>,
+    /// The identity of `ended`: replaced together with it, never without it.
+    pub(crate) activation: ActivationId,
     pub(crate) cancellation_token: CancellationToken,
     pub(crate) bound_modes: BoundModes,
     /// Go `InvocationContextParams.LiveSessionResumptionHandle`. One slot per invocation, shared by

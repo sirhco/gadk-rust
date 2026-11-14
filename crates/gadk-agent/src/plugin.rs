@@ -15,6 +15,7 @@
 
 //! Plugins (port of Go `plugin/plugin.go`).
 
+use std::any::Any;
 use std::sync::Arc;
 
 use futures::FutureExt;
@@ -56,6 +57,10 @@ pub struct PluginConfig {
     pub on_tool_error_callback: Option<OnToolErrorCallback>,
     /// Go `CloseFunc`: called when the plugin manager closes.
     pub close: Option<CloseFn>,
+    /// Typed plugin state, read back with [`Plugin::state`] (Go keeps it in the closure's
+    /// receiver and recovers it with a type assertion, e.g. `plugin/agentanalytics`
+    /// `AsBigQueryAgentAnalyticsPlugin`).
+    pub state: Option<Arc<dyn Any + Send + Sync>>,
 }
 
 /// Go `plugin.Plugin`.
@@ -144,6 +149,12 @@ impl Plugin {
     pub fn close(&self) -> Option<CloseFn> {
         self.cfg.close.clone()
     }
+
+    /// The plugin's [`PluginConfig::state`] when it is a `T`; `None` without state or for another
+    /// type.
+    pub fn state<T: Any + Send + Sync>(&self) -> Option<Arc<T>> {
+        self.cfg.state.clone()?.downcast::<T>().ok()
+    }
 }
 
 impl std::fmt::Debug for Plugin {
@@ -151,5 +162,36 @@ impl std::fmt::Debug for Plugin {
         f.debug_struct("Plugin")
             .field("name", &self.cfg.name)
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::{Plugin, PluginConfig};
+
+    #[derive(Debug, PartialEq)]
+    struct Stats(u32);
+
+    #[test]
+    fn state_downcasts_to_its_own_type_only() {
+        let stats = Arc::new(Stats(7));
+        let p = Plugin::new(PluginConfig {
+            name: "p".into(),
+            state: Some(stats.clone()),
+            ..Default::default()
+        });
+        let got = p.state::<Stats>().expect("typed state");
+        assert!(Arc::ptr_eq(&got, &stats));
+        assert_eq!(p.clone().state::<Stats>(), Some(stats));
+        assert!(p.state::<String>().is_none(), "another type");
+    }
+
+    #[test]
+    fn no_state_is_none() {
+        let p = Plugin::new(PluginConfig::default());
+        assert!(p.state::<Stats>().is_none());
     }
 }

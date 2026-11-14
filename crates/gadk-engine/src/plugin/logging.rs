@@ -174,6 +174,7 @@ pub fn logging_plugin() -> Plugin {
         after_tool_callback: Some(after_tool),
         on_tool_error_callback: Some(on_tool_error),
         close: None,
+        state: None,
     })
 }
 

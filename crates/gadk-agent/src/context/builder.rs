@@ -27,6 +27,7 @@ use serde_json::{Map, Value};
 use tokio_util::sync::CancellationToken;
 
 use crate::agent::{Agent, AgentConfig, CustomAgent};
+use crate::context::activation::ActivationId;
 use crate::context::context::Context;
 use crate::context::invocation::InvocationContext;
 use crate::context::readonly::{ContextInner, Shared};
@@ -223,6 +224,7 @@ impl ContextBuilder {
             isolation_scope: self.isolation_scope.unwrap_or_default(),
             user_content: self.user_content.map(Arc::new),
             ended: Arc::new(AtomicBool::new(false)),
+            activation: ActivationId::next(),
             cancellation_token: self.cancellation_token.unwrap_or_default(),
             bound_modes: BoundModes::default(),
             live_handle: Arc::new(parking_lot::Mutex::new(String::new())),
