@@ -210,6 +210,7 @@ pub(crate) fn is_remote_a2a_agent(a: &dyn Agent) -> bool {
 /// exposes its agent through `origin_agent()` only (the transfer tool exposes none, so its
 /// target is found by `AnalyticsPlugin::resolve_tool_origin` through the trace manager's
 /// `agent_named`, which knows the same tree).
+// Divergence (ledger 7b-3a): Go reflects over the tool's `supportedAgents` / `SubAgents` / `RootAgent` fields; gadk searches only the `origin_agent()` tree because tools expose their agent through the typed accessor (R1).
 pub(crate) fn find_agent_a2a_by_name(t: &Arc<dyn Tool>, target_name: &str) -> (bool, bool) {
     let Some(agent) = unwrap_tool(t).and_then(|u| u.origin_agent()) else {
         return (false, false);
@@ -733,6 +734,7 @@ impl AnalyticsPlugin {
         {
             id.path = ni.path.clone();
         }
+        // Divergence (ledger 7b-3a): Go dereferences its trace manager unconditionally (a nil manager panics into recoverCallback); gadk uses RowSpan::default() when the plugin has no trace manager.
         let span = self
             .traces
             .as_ref()
