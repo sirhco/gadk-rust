@@ -15,6 +15,7 @@
 
 //! The three context types (port of ADK-Go `agent/context.go` and `internal/context`).
 
+pub mod activation;
 pub mod builder;
 #[allow(clippy::module_inception)]
 pub mod context;
@@ -25,6 +26,8 @@ pub mod readonly;
 
 // Glob re-exports of every child (the crate imports through `crate::context::*`). The allows
 // keep children that export nothing warning-free.
+#[allow(unused_imports)]
+pub use activation::*;
 #[allow(unused_imports)]
 pub use builder::*;
 #[allow(unused_imports)]

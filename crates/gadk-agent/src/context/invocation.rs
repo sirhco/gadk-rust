@@ -30,6 +30,7 @@ use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
 use crate::agent::Agent;
+use crate::context::activation::ActivationId;
 use crate::context::builder::ContextBuilder;
 use crate::context::context::Context;
 use crate::context::delta::ContextDelta;
@@ -118,6 +119,12 @@ impl InvocationContext {
     /// Whether the invocation has ended.
     pub fn ended(&self) -> bool {
         self.inner().ended.load(Ordering::SeqCst)
+    }
+
+    /// The identity of this context's end flag (see [`ActivationId`]): equal for every callback
+    /// and tool context of one agent run, distinct across runs and forks, never reused.
+    pub fn activation_id(&self) -> ActivationId {
+        self.inner().activation
     }
 
     /// Go `commonContext.ResumedInput`: this context's resume input for `interrupt_id`.
