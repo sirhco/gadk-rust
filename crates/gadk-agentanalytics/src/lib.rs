@@ -47,6 +47,7 @@ pub mod context;
 pub mod error;
 pub mod event_types;
 pub mod offload;
+pub mod plugin;
 pub mod row;
 pub mod schema;
 pub mod schema_upgrade;
@@ -55,7 +56,9 @@ pub mod views;
 pub mod write;
 
 pub(crate) mod crc32c;
+pub(crate) mod events;
 pub(crate) mod gax;
+pub(crate) mod trace;
 pub(crate) mod validate;
 
 #[cfg(any(test, feature = "testutil"))]
@@ -84,6 +87,11 @@ pub use error::{ApiError, BigQueryError, BoxError, Code, Error, ErrorItem};
 pub use event_types::*;
 pub use formatter::{format_content_parts, smart_truncate};
 pub use offload::gcs::GcsOffloader;
+pub use plugin::{
+    BigQueryAgentAnalyticsPlugin, as_bigquery_agent_analytics_plugin,
+    new_bigquery_agent_analytics_plugin, new_bigquery_agent_analytics_plugin_with_clients,
+    new_bigquery_agent_analytics_plugin_with_config,
+};
 pub use row::{QueuedRow, Row, RowExt, RowValue};
 pub use schema::{
     FieldSchema, Schema, SchemaMismatchError, TableSchema, arrow_schema, events_schema,

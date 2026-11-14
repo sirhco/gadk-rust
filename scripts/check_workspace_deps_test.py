@@ -33,7 +33,7 @@ class EdgeTest(unittest.TestCase):
     def test_agent_dev_dependency_on_engine_is_rejected(self):
         self.edit("gadk-agent", "[dev-dependencies]\n", "[dev-dependencies]\ngadk-engine = { workspace = true }\n")
         errs = cwd.check(self.repo)
-        self.assertTrue(any("only gadk, gadk-tools, gadk-server, gadk-a2a, gadk-launcher, gadk-agentregistry, gadk-telemetry and gadk-configurable may depend on gadk-engine" in e for e in errs), errs)
+        self.assertTrue(any("only gadk, gadk-tools, gadk-server, gadk-a2a, gadk-launcher, gadk-agentregistry, gadk-telemetry, gadk-configurable and gadk-agentanalytics may depend on gadk-engine" in e for e in errs), errs)
 
     def test_tools_dev_dependency_on_engine_is_allowed(self):
         text = (self.repo / "crates/gadk-tools/Cargo.toml").read_text()
@@ -394,19 +394,37 @@ class EdgeTest(unittest.TestCase):
         errs = cwd.check(self.repo)
         self.assertTrue(any("gadk -> gadk-configurable is not allowed" in e for e in errs), errs)
 
-    def test_agentanalytics_edges_are_exactly_genai_model_platform_session(self):
+    def test_agentanalytics_edges_are_exactly_agent_engine_genai_model_platform_session(self):
         self.assertEqual(cwd.ALLOWED["gadk-agentanalytics"],
-                         {"gadk-genai", "gadk-model", "gadk-platform", "gadk-session"})
+                         {"gadk-agent", "gadk-engine", "gadk-genai", "gadk-model", "gadk-platform",
+                          "gadk-session"})
         # 7b-1: only the façade depends on it, optionally (feature `agentanalytics`).
         self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-agentanalytics" in deps], ["gadk"])
         self.assertIn(("gadk", "gadk-agentanalytics"), cwd.OPTIONAL)
-        self.assertNotIn("gadk-agentanalytics", cwd.ENGINE_DEPENDENTS)
+        # 7b-3a: the plugin reads the engine's LLM agent config and ADK span IDs.
+        self.assertIn("gadk-agentanalytics", cwd.ENGINE_DEPENDENTS)
         self.assertNotIn("gadk-agentanalytics", cwd.LICENSE_OVERRIDES)
 
-    def test_agentanalytics_normal_dependency_on_engine_is_rejected(self):
-        self.edit("gadk-agentanalytics", "[dependencies]\n", "[dependencies]\ngadk-engine = { workspace = true }\n")
+    def test_agentanalytics_missing_engine_edge_is_rejected(self):
+        self.edit("gadk-agentanalytics", "gadk-engine = { workspace = true }\n", "")
         errs = cwd.check(self.repo)
-        self.assertTrue(any("gadk-agentanalytics -> gadk-engine is not allowed" in e for e in errs), errs)
+        self.assertTrue(any("gadk-agentanalytics -> gadk-engine is missing" in e for e in errs), errs)
+
+    def test_agentanalytics_missing_agent_edge_is_rejected(self):
+        self.edit("gadk-agentanalytics", "gadk-agent = { workspace = true }\n", "")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-agentanalytics -> gadk-agent is missing" in e for e in errs), errs)
+
+    def test_agentanalytics_dev_dependency_on_engine_is_allowed(self):
+        text = (self.repo / "crates/gadk-agentanalytics/Cargo.toml").read_text()
+        dev = text.split("[dev-dependencies]\n", 1)[1]
+        self.assertIn('gadk-engine = { workspace = true, features = ["testutil"] }', dev)
+        self.assertEqual(cwd.check(self.repo), [])
+
+    def test_agentanalytics_normal_dependency_on_tools_is_rejected(self):
+        self.edit("gadk-agentanalytics", "[dependencies]\n", "[dependencies]\ngadk-tools = { workspace = true }\n")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-agentanalytics -> gadk-tools is not allowed" in e for e in errs), errs)
 
     def test_facade_agentanalytics_edge_must_be_optional(self):
         self.edit("gadk", "gadk-agentanalytics = { workspace = true, optional = true }\n",
