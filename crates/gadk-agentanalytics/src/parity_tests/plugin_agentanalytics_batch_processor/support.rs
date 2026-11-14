@@ -229,7 +229,7 @@ pub(crate) fn arrow_value(arr: &dyn Array, i: usize) -> Option<RowValue> {
 }
 
 /// Go `arrowWriterSchemaColumns(t, req)`.
-#[allow(dead_code)] // consumer: Task 10 (gcs_offloader_test.go ports)
+#[allow(dead_code)] // consumer: 7b-3 (the plugin-level gcs_offloader_test.go ports)
 pub(crate) fn arrow_writer_schema_columns(req: &AppendRowsRequest) -> Vec<String> {
     let data = arrow_rows(req);
     let schema = writer_schema(
@@ -253,7 +253,6 @@ pub(crate) fn event_types(rows: &[Row]) -> Vec<String> {
 }
 
 /// Go `rowsOfType(rows, eventType)`.
-#[allow(dead_code)] // consumer: Task 10 (gcs_offloader_test.go ports)
 pub(crate) fn rows_of_type(rows: &[Row], event_type: &str) -> Vec<Row> {
     rows.iter()
         .filter(|r| r.get("event_type") == Some(&RowValue::from(event_type)))
@@ -262,7 +261,7 @@ pub(crate) fn rows_of_type(rows: &[Row], event_type: &str) -> Vec<Row> {
 }
 
 /// Go `onlyRowOfType(t, rows, eventType)`.
-#[allow(dead_code)] // consumer: Task 10 (gcs_offloader_test.go ports)
+#[allow(dead_code)] // consumer: 7b-3 (the plugin-level gcs_offloader_test.go ports)
 pub(crate) fn only_row_of_type(rows: &[Row], event_type: &str) -> Row {
     let matches = rows_of_type(rows, event_type);
     assert_eq!(
@@ -317,7 +316,7 @@ pub(crate) async fn collect_rows(
 }
 
 /// Go `untilEventType(eventType)`.
-#[allow(dead_code)] // consumer: Task 10 (gcs_offloader_test.go ports)
+#[allow(dead_code)] // consumer: 7b-3 (the plugin-level gcs_offloader_test.go ports)
 pub(crate) fn until_event_type(event_type: &str) -> impl Fn(&[Row]) -> bool + '_ {
     move |rows| {
         rows.iter()
@@ -326,7 +325,7 @@ pub(crate) fn until_event_type(event_type: &str) -> impl Fn(&[Row]) -> bool + '_
 }
 
 /// Go `expectNoRequest(t, ch, d)`.
-#[allow(dead_code)] // consumer: Task 10 (gcs_offloader_test.go ports)
+#[allow(dead_code)] // consumer: 7b-3 (the plugin-level gcs_offloader_test.go ports)
 pub(crate) async fn expect_no_request(
     rx: &mut mpsc::UnboundedReceiver<AppendRowsRequest>,
     d: Duration,
@@ -856,7 +855,6 @@ impl Logger for HookRecordingLogger {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct UploadAttempt {
     pub(crate) path: String,
-    #[allow(dead_code)] // consumer: Task 10 (gcs_offloader_test.go ports)
     pub(crate) content_type: String,
     pub(crate) data: Bytes,
     /// Go `HasDeadline` / `Remaining`.
@@ -897,6 +895,15 @@ impl HookOffloader {
         }
     }
 
+    /// Go `&fakeOffloader{hook: hook, uri: uri}`.
+    pub(crate) fn new(hook: Option<OffloadHook>, uri: Option<UriFn>) -> HookOffloader {
+        HookOffloader {
+            hook,
+            uri,
+            ..HookOffloader::default()
+        }
+    }
+
     /// Go `uploads()`: the calls so far, ordered by path.
     pub(crate) fn uploads(&self) -> Vec<UploadAttempt> {
         let mut out = self.state.lock().unwrap().calls.clone();
@@ -905,7 +912,7 @@ impl HookOffloader {
     }
 
     /// Go `byPath()`.
-    #[allow(dead_code)] // consumer: Task 10 (gcs_offloader_test.go ports)
+    #[allow(dead_code)] // consumer: 7b-3 (the plugin-level gcs_offloader_test.go ports)
     pub(crate) fn by_path(&self) -> BTreeMap<String, UploadAttempt> {
         self.uploads()
             .into_iter()
@@ -914,13 +921,12 @@ impl HookOffloader {
     }
 
     /// Go `closeCount()`.
-    #[allow(dead_code)] // consumer: Task 10 (gcs_offloader_test.go ports)
+    #[allow(dead_code)] // consumer: 7b-3 (the plugin-level gcs_offloader_test.go ports)
     pub(crate) fn close_count(&self) -> usize {
         self.state.lock().unwrap().closes
     }
 
     /// Go `maxConcurrent()`.
-    #[allow(dead_code)] // consumer: Task 10 (gcs_offloader_test.go ports)
     pub(crate) fn max_concurrent(&self) -> usize {
         self.state.lock().unwrap().max_in_flight
     }

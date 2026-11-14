@@ -688,31 +688,53 @@ impl BatchProcessor {
         // A deferred batch is counted in DropStats only if a later flush drops it, so that a
         // batch that the next flush writes is not reported as dropped, and one that fails
         // again is not counted twice.
-        let (confirmed, result) = self.try_append_batch(flush_ctx, &batch).await;
-        if let Err(err) = result {
-            if flush_ctx.err().is_some() && !retry && confirmed < batch.len() {
-                // Kept before requeue_deferred_uploads logs, so that a panicking Logger
-                // cannot lose the rows. Resending the confirmed rows would write them twice
-                // under exactly-once delivery, so only the rest is retried.
-                state.deferred_batch = batch.split_off(confirmed);
-                self.requeue_deferred_uploads(&mut state.deferred_batch);
-                self.clear_deferred_uploads(&mut batch);
-                // Go's deferred dropDeferredUploadsQuietly(batch).
+        // Go's deferred dropDeferredUploadsQuietly(batch) also runs when the function panics (a
+        // Logger that panics on the "BigQuery response" line of the write, on the "pending
+        // retry" lines of requeue_deferred_uploads or on the write's error line): the
+        // reservations of the batch's deferred uploads are released before the panic goes on.
+        let appended =
+            crate::offload::uploads::catch_unwind_future(self.try_append_batch(flush_ctx, &batch))
+                .await;
+        let (confirmed, result) = match appended {
+            Ok(appended) => appended,
+            Err(panic) => {
                 self.drop_deferred_uploads_quietly(&mut batch);
-                self.drop_deferred_uploads_quietly(&mut state.deferred_batch);
-                return true;
+                std::panic::resume_unwind(panic);
             }
-            let unconfirmed = &mut batch[confirmed..];
-            self.record_append_failure_drop(count(unconfirmed.len()));
-            self.release_batch_uploads(unconfirmed);
-            self.config.logf(format_args!(
-                "ERROR: Failed to write batch to BigQuery: {err}"
-            ));
-        }
-        self.clear_deferred_uploads(&mut batch);
+        };
+        // The rows of Go's batch that this function keeps in state.deferred_batch (Go's
+        // deferred drop covers them through the shared slice).
+        let mut kept = false;
+        let settled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            if let Err(err) = result {
+                if flush_ctx.err().is_some() && !retry && confirmed < batch.len() {
+                    // Kept before requeue_deferred_uploads logs, so that a panicking Logger
+                    // cannot lose the rows. Resending the confirmed rows would write them twice
+                    // under exactly-once delivery, so only the rest is retried.
+                    state.deferred_batch = batch.split_off(confirmed);
+                    kept = true;
+                    self.requeue_deferred_uploads(&mut state.deferred_batch);
+                    self.clear_deferred_uploads(&mut batch);
+                    return;
+                }
+                let unconfirmed = &mut batch[confirmed..];
+                self.record_append_failure_drop(count(unconfirmed.len()));
+                self.release_batch_uploads(unconfirmed);
+                self.config.logf(format_args!(
+                    "ERROR: Failed to write batch to BigQuery: {err}"
+                ));
+            }
+            self.clear_deferred_uploads(&mut batch);
+        }));
         // Go's deferred dropDeferredUploadsQuietly(batch).
         self.drop_deferred_uploads_quietly(&mut batch);
-        false
+        if kept {
+            self.drop_deferred_uploads_quietly(&mut state.deferred_batch);
+        }
+        if let Err(panic) = settled {
+            std::panic::resume_unwind(panic);
+        }
+        kept
     }
 
     /// Go `flushAndWaitForInflightBatch()`: what is left of the write budget.
