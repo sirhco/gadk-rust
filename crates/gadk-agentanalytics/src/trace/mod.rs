@@ -29,7 +29,7 @@
 //! in. Go's goroutine attribution fields exist on [`span::SpanRecord`] and stay zero (7b-3b).
 //! Locks are `parking_lot` and never held across an `.await` (no method here is async).
 
-#![allow(dead_code, unused_variables)] // Task 5 implements the bodies; consumers: Tasks 6-9.
+#![allow(dead_code)] // Consumers: Tasks 6-9 (Task 15 sweeps the allow).
 
 pub(crate) mod causes;
 pub(crate) mod invocation;
@@ -42,10 +42,12 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use gadk_agent::{ActivationId, Agent, InvocationContext, ParentMap};
+use gadk_engine::llm::llm_agent_config;
 use gadk_engine::telemetry::d6::SpanIds;
 use gadk_session::ReadonlyState;
 use tokio_util::sync::CancellationToken;
 
+use crate::context::ContextError;
 use crate::error::Error;
 
 // The crate-level names of the trace types (`crate::trace::SpanRef`, …), for Tasks 6-13.
@@ -168,13 +170,18 @@ impl CallbackCtx {
     /// its cancellation token, `span` = `gadk_engine::telemetry::current_span_ids()` (the
     /// nearest enclosing ADK span; R1(d)).
     pub(crate) fn from_context(ctx: &gadk_agent::Context) -> CallbackCtx {
-        todo!("Task 5")
+        CallbackCtx {
+            adk: Some(ctx.clone()),
+            cancel: Some(ctx.cancellation_token().clone()),
+            cancel_cause: None,
+            span: gadk_engine::telemetry::current_span_ids(),
+        }
     }
 
     /// The context of an invocation callback (user message, run, event): as
     /// [`from_context`](Self::from_context) over `ctx.clone().into_context()`.
     pub(crate) fn from_invocation(ctx: &InvocationContext) -> CallbackCtx {
-        todo!("Task 5")
+        CallbackCtx::from_context(&ctx.clone().into_context())
     }
 
     /// Go `context.WithCancel(ctx)` in tests: `cancel` = `token`.
@@ -198,81 +205,416 @@ impl CallbackCtx {
 
     /// Go `ambientSpanContext(ctx)`: the span, if valid.
     pub(crate) fn ambient_span_context(&self) -> Option<SpanIds> {
-        todo!("Task 5")
+        self.span.filter(SpanIds::is_valid)
     }
 
     /// Go `ambientTraceID(ctx)`: the span's trace ID as 32 lowercase hex digits, or "".
     pub(crate) fn ambient_trace_id(&self) -> String {
-        todo!("Task 5")
+        self.ambient_span_context()
+            .map(|sc| hex(&sc.trace_id))
+            .unwrap_or_default()
     }
 
     /// Go `activationKey(ctx)`: the activation of the ADK context (R1(a)), or `None`.
     pub(crate) fn activation_key(&self) -> Option<ActivationId> {
-        todo!("Task 5")
+        self.adk.as_ref().map(|c| c.activation_id())
     }
 
     /// Go `endedFunc(ctx)`: the ADK context whose `ended()` a span record reads later, or
     /// `None` for a plain context.
     pub(crate) fn ended_func(&self) -> Option<gadk_agent::Context> {
-        todo!("Task 5")
+        self.adk.clone()
     }
 
     /// Go `canceledFunc(ctx)`: what a span record reads later to tell how its context ended,
-    /// or `None` when the context cannot be cancelled.
+    /// or `None` when the context cannot be cancelled (Go's closure over a context that never
+    /// ends reports `(false, nil)` forever, as `None` does).
     pub(crate) fn canceled_func(&self) -> Option<CancelSource> {
-        todo!("Task 5")
+        self.cancel.as_ref().map(|token| CancelSource {
+            token: token.clone(),
+            cause: self.cancel_cause.clone(),
+        })
     }
 
     /// Go `invocationEnded(ctx)`: the ADK context's `ended()`; false for a plain context.
     pub(crate) fn invocation_ended(&self) -> bool {
-        todo!("Task 5")
+        self.adk.as_ref().is_some_and(|c| c.ended())
     }
 
     /// Go `ctx.Err() != nil` / `context.Cause(ctx)` for the run's own end (e.g. `afterRun`):
     /// `None` while live, else Go's `context.Canceled` or the test cause.
     pub(crate) fn err(&self) -> Option<TraceError> {
-        todo!("Task 5")
+        let token = self.cancel.as_ref()?;
+        if !token.is_cancelled() {
+            return None;
+        }
+        Some(
+            self.cancel_cause
+                .clone()
+                .unwrap_or_else(|| Arc::new(Error::Context(ContextError::Canceled))),
+        )
     }
 
     /// Go `contextParentMap(ctx)`: the parent map the runner attached to the context.
     pub(crate) fn parent_map(&self) -> Option<Arc<ParentMap>> {
-        todo!("Task 5")
+        self.adk.as_ref().and_then(|c| c.parent_map())
     }
 
     /// Go `runningAgentChildren(ctx, name)`: the sub-agents of the context's agent if it is
-    /// named `name`, else the zero value.
+    /// named `name`, else the zero value. `name()` and `sub_agents()` are agent code, so no
+    /// lock may be held by the caller.
     pub(crate) fn running_agent_children(&self, name: &str) -> AgentChildren {
-        todo!("Task 5")
+        let Some(adk) = self.adk.as_ref() else {
+            return AgentChildren::default();
+        };
+        if name.is_empty() {
+            return AgentChildren::default();
+        }
+        let a = adk.agent();
+        if a.name() != name {
+            return AgentChildren::default();
+        }
+        let cfg = llm_agent_config(&*a);
+        let ag_type = invocation::agent_type_of(&*a);
+        AgentChildren {
+            parent: name.to_string(),
+            non_llm: cfg.is_none(),
+            propagates_child_error: invocation::is_built_in_workflow_agent(&*a),
+            is_parallel: ag_type == "ParallelAgent",
+            is_workflow: ag_type == "WorkflowAgent",
+            task_mode: cfg.is_some_and(|c| c.mode == gadk_agent::Mode::Task),
+            names: a
+                .sub_agents()
+                .iter()
+                .map(|sub| sub.name().to_string())
+                .filter(|n| !n.is_empty())
+                .collect(),
+        }
     }
 
     /// Go `callKey(ctx, key)`: `key` prefixed with the activation (`"<id>\x00<key>"`), or
     /// `key` itself when the context shows none.
     pub(crate) fn call_key(&self, key: &str) -> String {
-        todo!("Task 5")
+        match self.activation_key() {
+            Some(act) => format!("{}\x00{key}", act.get()),
+            None => key.to_string(),
+        }
     }
 }
 
 /// Go `llmKey(id)`: `path \x00 agentName \x00 branch`.
 pub(crate) fn llm_key(id: &Identity) -> String {
-    todo!("Task 5")
+    format!("{}\x00{}\x00{}", id.path, id.agent_name, id.branch)
 }
 
-/// Go `toolKey(id, functionCallID, toolName)`.
+/// Go `toolKey(id, functionCallID, toolName)`: the function call ID scoped to the activation
+/// (`path \x00 agentName \x00 branch \x00 call`), or the tool name without an ID.
 pub(crate) fn tool_key(id: &Identity, function_call_id: &str, tool_name: &str) -> String {
-    todo!("Task 5")
+    let call = if function_call_id.is_empty() {
+        tool_name
+    } else {
+        function_call_id
+    };
+    format!(
+        "{}\x00{}\x00{}\x00{call}",
+        id.path, id.agent_name, id.branch
+    )
 }
 
 /// Go `toolKeyCall(key)`: what follows the last NUL of `key`.
 pub(crate) fn tool_key_call(key: &str) -> &str {
-    todo!("Task 5")
+    match key.rfind('\0') {
+        Some(i) => &key[i + 1..],
+        None => key,
+    }
 }
 
 /// Go `newTraceID()`: 32 random lowercase hex digits (a v4 UUID's bytes).
 pub(crate) fn new_trace_id() -> String {
-    todo!("Task 5")
+    hex(uuid::Uuid::new_v4().as_bytes())
 }
 
 /// Go `newSpanID()`: 16 random lowercase hex digits (the first 8 bytes of a v4 UUID).
 pub(crate) fn new_span_id() -> String {
-    todo!("Task 5")
+    hex(&uuid::Uuid::new_v4().as_bytes()[..8])
+}
+
+/// Go `hex.EncodeToString`: lowercase hex digits of `bytes`.
+pub(crate) fn hex(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        let _ = write!(out, "{b:02x}");
+    }
+    out
+}
+
+/// Builders shared by the trace manager's unit tests: agents, ADK contexts and a manual clock.
+#[cfg(test)]
+pub(crate) mod testkit {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+    use std::sync::Arc;
+
+    use chrono::{DateTime, Duration, TimeZone, Utc};
+    use gadk_agent::{Agent, AgentConfig, Mode, ParentMap};
+    use gadk_engine::llm::LlmAgentConfig;
+    use gadk_engine::{llm_agent, parallel_agent, sequential_agent};
+    use parking_lot::Mutex;
+
+    use super::{Clock, Identity};
+
+    /// A custom agent named `name` with `subs`.
+    pub(crate) fn custom(name: &str, subs: Vec<Arc<dyn Agent>>) -> Arc<dyn Agent> {
+        gadk_agent::new_agent(AgentConfig {
+            name: name.into(),
+            sub_agents: subs,
+            ..Default::default()
+        })
+        .unwrap()
+    }
+
+    /// A sequential agent named `name` with `subs`.
+    pub(crate) fn sequential(name: &str, subs: Vec<Arc<dyn Agent>>) -> Arc<dyn Agent> {
+        sequential_agent::new(sequential_agent::SequentialAgentConfig {
+            agent: AgentConfig {
+                name: name.into(),
+                sub_agents: subs,
+                ..Default::default()
+            },
+        })
+        .unwrap()
+    }
+
+    /// A parallel agent named `name` with `subs`.
+    pub(crate) fn parallel(name: &str, subs: Vec<Arc<dyn Agent>>) -> Arc<dyn Agent> {
+        parallel_agent::new(parallel_agent::ParallelAgentConfig {
+            agent: AgentConfig {
+                name: name.into(),
+                sub_agents: subs,
+                ..Default::default()
+            },
+        })
+        .unwrap()
+    }
+
+    /// An LLM agent named `name` with `subs` in `mode`.
+    pub(crate) fn llm(name: &str, subs: Vec<Arc<dyn Agent>>, mode: Mode) -> Arc<dyn Agent> {
+        llm_agent::new(LlmAgentConfig {
+            name: name.into(),
+            sub_agents: subs,
+            mode,
+            ..Default::default()
+        })
+        .unwrap()
+    }
+
+    /// An ADK context of `agent` in invocation `inv`, with the parent map of `root` if given.
+    pub(crate) fn adk_ctx(
+        agent: &Arc<dyn Agent>,
+        inv: &str,
+        root: Option<&Arc<dyn Agent>>,
+    ) -> gadk_agent::Context {
+        let mut b = gadk_agent::Context::builder()
+            .agent(agent.clone())
+            .invocation_id(inv);
+        if let Some(root) = root {
+            b = b.parent_map(Arc::new(ParentMap::new(root).unwrap()));
+        }
+        b.build()
+    }
+
+    /// The identity of `agent` on `branch` and `path` in invocation `inv`.
+    pub(crate) fn ident(inv: &str, agent: &str, branch: &str, path: &str) -> Identity {
+        Identity {
+            agent_name: agent.into(),
+            invocation_id: inv.into(),
+            branch: branch.into(),
+            path: path.into(),
+            ..Identity::default()
+        }
+    }
+
+    /// A manual clock starting at 2026-01-01T00:00:00Z.
+    #[derive(Clone)]
+    pub(crate) struct ManualClock(Arc<Mutex<DateTime<Utc>>>);
+
+    impl ManualClock {
+        pub(crate) fn new() -> ManualClock {
+            ManualClock(Arc::new(Mutex::new(
+                Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            )))
+        }
+
+        /// Moves the clock forward by `ms` milliseconds.
+        pub(crate) fn advance_ms(&self, ms: i64) {
+            *self.0.lock() += Duration::milliseconds(ms);
+        }
+
+        pub(crate) fn now(&self) -> DateTime<Utc> {
+            *self.0.lock()
+        }
+
+        pub(crate) fn clock(&self) -> Clock {
+            let c = self.0.clone();
+            Arc::new(move || *c.lock())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+    use super::testkit::*;
+    use super::*;
+
+    #[test]
+    fn keys_scope_calls_to_the_activation() {
+        let id = ident("inv", "agent", "root.agent", "wf/node@1");
+        assert_eq!(llm_key(&id), "wf/node@1\x00agent\x00root.agent");
+        assert_eq!(
+            tool_key(&id, "call_0", "lookup"),
+            "wf/node@1\x00agent\x00root.agent\x00call_0"
+        );
+        assert_eq!(
+            tool_key(&id, "", "lookup"),
+            "wf/node@1\x00agent\x00root.agent\x00lookup"
+        );
+        assert_eq!(tool_key_call(&tool_key(&id, "call_0", "lookup")), "call_0");
+        assert_eq!(tool_key_call("plain"), "plain");
+    }
+
+    #[test]
+    fn new_ids_are_random_lowercase_hex() {
+        let (t1, t2, s1) = (new_trace_id(), new_trace_id(), new_span_id());
+        assert_eq!(t1.len(), 32);
+        assert_eq!(s1.len(), 16);
+        assert_ne!(t1, t2);
+        for id in [&t1, &s1] {
+            assert!(
+                id.chars()
+                    .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+            );
+        }
+        assert_eq!(hex(&[0x00, 0xab, 0x7f]), "00ab7f");
+    }
+
+    #[test]
+    fn background_context_shows_nothing() {
+        let ctx = CallbackCtx::background();
+        assert_eq!(ctx.activation_key(), None);
+        assert_eq!(ctx.call_key("k"), "k");
+        assert!(ctx.err().is_none());
+        assert!(!ctx.invocation_ended());
+        assert!(ctx.canceled_func().is_none());
+        assert!(ctx.ended_func().is_none());
+        assert!(ctx.parent_map().is_none());
+        assert_eq!(ctx.running_agent_children("a"), AgentChildren::default());
+        assert_eq!(ctx.ambient_trace_id(), "");
+    }
+
+    #[test]
+    fn cancellation_reports_canceled_or_the_cause() {
+        let token = CancellationToken::new();
+        let ctx = CallbackCtx::background().with_cancel(token.clone());
+        assert!(ctx.err().is_none());
+        assert!(!ctx.canceled_func().unwrap().check().0);
+        token.cancel();
+        let err = ctx.err().unwrap();
+        assert!(matches!(*err, Error::Context(ContextError::Canceled)));
+        let (canceled, cause) = ctx.canceled_func().unwrap().check();
+        assert!(canceled);
+        assert!(cause.is_none());
+
+        let token = CancellationToken::new();
+        let cause: TraceError = Arc::new(Error::Context(ContextError::DeadlineExceeded));
+        let ctx = CallbackCtx::background()
+            .with_cancel(token.clone())
+            .with_cancel_cause(cause.clone());
+        token.cancel();
+        assert!(Arc::ptr_eq(&ctx.err().unwrap(), &cause));
+        let (canceled, got) = ctx.canceled_func().unwrap().check();
+        assert!(!canceled);
+        assert!(Arc::ptr_eq(&got.unwrap(), &cause));
+    }
+
+    #[test]
+    fn ambient_span_needs_a_valid_span() {
+        let sc = SpanIds {
+            trace_id: [0xab; 16],
+            span_id: [0x01; 8],
+        };
+        let ctx = CallbackCtx::background().with_span(sc);
+        assert_eq!(ctx.ambient_trace_id(), "ab".repeat(16));
+        assert_eq!(ctx.ambient_span_context(), Some(sc));
+        let ctx = CallbackCtx::background().with_span(SpanIds::default());
+        assert_eq!(ctx.ambient_trace_id(), "");
+        assert_eq!(ctx.ambient_span_context(), None);
+    }
+
+    #[test]
+    fn adk_context_gives_activation_end_cancellation_and_parent_map() {
+        let child = custom("child", vec![]);
+        let root = sequential("root", vec![child.clone()]);
+        let adk = adk_ctx(&child, "inv", Some(&root));
+        let ctx = CallbackCtx::from_context(&adk);
+        assert_eq!(ctx.activation_key(), Some(adk.activation_id()));
+        assert_eq!(
+            ctx.call_key("k"),
+            format!("{}\x00k", adk.activation_id().get())
+        );
+        assert!(ctx.parent_map().unwrap().parent("child").is_some());
+        assert!(!ctx.invocation_ended());
+        adk.end_invocation();
+        assert!(ctx.invocation_ended());
+        assert!(ctx.ended_func().unwrap().ended());
+        assert!(ctx.err().is_none());
+        adk.cancellation_token().cancel();
+        assert!(ctx.err().is_some());
+
+        let ictx = adk.as_invocation().clone();
+        let ctx = CallbackCtx::from_invocation(&ictx);
+        assert_eq!(ctx.activation_key(), Some(adk.activation_id()));
+    }
+
+    #[test]
+    fn running_agent_children_reads_the_agent_kind() {
+        let (a, b) = (custom("a", vec![]), custom("b", vec![]));
+        let seq = sequential("seq", vec![a.clone(), b.clone()]);
+        let ctx = CallbackCtx::from_context(&adk_ctx(&seq, "inv", None));
+        let got = ctx.running_agent_children("seq");
+        assert_eq!(
+            got,
+            AgentChildren {
+                parent: "seq".into(),
+                non_llm: true,
+                propagates_child_error: true,
+                is_parallel: false,
+                is_workflow: false,
+                task_mode: false,
+                names: vec!["a".into(), "b".into()],
+            }
+        );
+        assert_eq!(
+            ctx.running_agent_children("other"),
+            AgentChildren::default()
+        );
+        assert_eq!(ctx.running_agent_children(""), AgentChildren::default());
+
+        let par = parallel("par", vec![custom("x", vec![])]);
+        let got =
+            CallbackCtx::from_context(&adk_ctx(&par, "inv", None)).running_agent_children("par");
+        assert!(got.is_parallel && got.non_llm && got.propagates_child_error);
+
+        let task = llm("task", vec![], gadk_agent::Mode::Task);
+        let got =
+            CallbackCtx::from_context(&adk_ctx(&task, "inv", None)).running_agent_children("task");
+        assert!(got.task_mode && !got.non_llm && !got.propagates_child_error);
+
+        let plain = custom("plain", vec![]);
+        let got = CallbackCtx::from_context(&adk_ctx(&plain, "inv", None))
+            .running_agent_children("plain");
+        assert!(got.non_llm && !got.propagates_child_error && !got.task_mode);
+    }
 }
