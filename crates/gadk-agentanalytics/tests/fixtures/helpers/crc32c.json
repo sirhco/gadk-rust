@@ -1,0 +1,16 @@
+{
+  "about": "crc32.Checksum(data, crc32.MakeTable(crc32.Castagnoli)) (crc32c as uint32 and hex) and base64_be = std base64 of its 4 big-endian bytes (the crc32c field of the Cloud Storage object metadata). data is data_base64, or data_pattern \"i % 251\" (byte i = i mod 251) of len bytes.",
+  "cases": [
+    {"base64_be":"AAAAAA==","crc32c":0,"data_base64":"","hex":"00000000","len":0,"name":"empty"},
+    {"base64_be":"wdBDMA==","crc32c":3251651376,"data_base64":"YQ==","hex":"c1d04330","len":1,"name":"a"},
+    {"base64_be":"Nks/tw==","crc32c":910901175,"data_base64":"YWJj","hex":"364b3fb7","len":3,"name":"abc"},
+    {"base64_be":"4waSgw==","crc32c":3808858755,"data_base64":"MTIzNDU2Nzg5","hex":"e3069283","len":9,"name":"check_123456789"},
+    {"base64_be":"ipE2qg==","crc32c":2324772522,"data_base64":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","hex":"8a9136aa","len":32,"name":"zeros_32"},
+    {"base64_be":"YqirQw==","crc32c":1655221059,"data_base64":"//////////////////////////////////////////8=","hex":"62a8ab43","len":32,"name":"ones_32"},
+    {"base64_be":"Rt15Tg==","crc32c":1188919630,"data_base64":"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=","hex":"46dd794e","len":32,"name":"ascending_32"},
+    {"base64_be":"hBjRrQ==","crc32c":2216219053,"data_base64":"iVBORwABAg==","hex":"8418d1ad","len":7,"name":"png_7"},
+    {"base64_be":"ZZ2ZFQ==","crc32c":1704827157,"data_base64":"aMOpbGxvLCBvZmZsb2FkZWQgdGV4dCDinJM=","hex":"659d9915","len":26,"name":"utf8_text"},
+    {"base64_be":"3D4AcQ==","crc32c":3695050865,"data_pattern":"i % 251","hex":"dc3e0071","len":1048576,"name":"pattern_1mib"},
+    {"base64_be":"NDC+Ow==","crc32c":875609659,"data_pattern":"i % 251","hex":"3430be3b","len":16777216,"name":"pattern_16mib"}
+  ]
+}

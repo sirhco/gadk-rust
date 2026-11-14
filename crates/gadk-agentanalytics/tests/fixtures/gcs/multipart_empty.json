@@ -1,0 +1,109 @@
+{
+  "call": {
+    "content_type": "application/octet-stream",
+    "data": {
+      "base64": "",
+      "crc32c": 0,
+      "crc32c_base64": "AAAAAA==",
+      "len": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "path": "e/empty.bin"
+  },
+  "client": {
+    "bucket": "test-bucket",
+    "endpoint": "{{SERVER}}/storage/v1/",
+    "options": "option.WithEndpoint(server+\"/storage/v1/\"), option.WithoutAuthentication()"
+  },
+  "description": "an empty payload: still one multipart upload (ChunkSize 1)",
+  "exchanges": [
+    {
+      "request": {
+        "body": {
+          "boundary_len": 60,
+          "len": 381,
+          "multipart": [
+            {
+              "headers": {
+                "Content-Type": [
+                  "application/json"
+                ]
+              },
+              "json": {
+                "bucket": "test-bucket",
+                "contentType": "application/octet-stream",
+                "crc32c": "AAAAAA==",
+                "name": "e/empty.bin"
+              },
+              "len": 107,
+              "sha256": "991809cfcdac197c31dea1539f038a0f0ef54cdd496e78e400707b54736a39a6",
+              "text": "{\"bucket\":\"test-bucket\",\"contentType\":\"application/octet-stream\",\"crc32c\":\"AAAAAA==\",\"name\":\"e/empty.bin\"}\n"
+            },
+            {
+              "headers": {
+                "Content-Type": [
+                  "application/octet-stream"
+                ]
+              },
+              "len": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          ]
+        },
+        "headers": {
+          "Accept-Encoding": [
+            "gzip"
+          ],
+          "Content-Type": [
+            "multipart/related; boundary={{BOUNDARY}}"
+          ],
+          "X-Goog-Api-Client": [
+            "gccl-invocation-id/{{IDEMPOTENCY_TOKEN_1}} gccl-attempt-count/1 gl-go/{{GO_VERSION}} gccl/1.69.0"
+          ],
+          "X-Goog-Gcs-Idempotency-Token": [
+            "{{IDEMPOTENCY_TOKEN_1}}"
+          ]
+        },
+        "method": "POST",
+        "path": "/upload/storage/v1/b/test-bucket/o",
+        "query": {
+          "alt": [
+            "json"
+          ],
+          "ifGenerationMatch": [
+            "0"
+          ],
+          "name": [
+            "e/empty.bin"
+          ],
+          "prettyPrint": [
+            "false"
+          ],
+          "projection": [
+            "full"
+          ],
+          "uploadType": [
+            "multipart"
+          ]
+        },
+        "raw_query": "alt=json&ifGenerationMatch=0&name=e%2Fempty.bin&prettyPrint=false&projection=full&uploadType=multipart"
+      },
+      "response": {
+        "body": "{\"bucket\":\"test-bucket\",\"contentType\":\"application/octet-stream\",\"generation\":\"1\",\"kind\":\"storage#object\",\"name\":\"e/empty.bin\",\"size\":\"0\"}",
+        "headers": {},
+        "status": 200
+      }
+    }
+  ],
+  "name": "multipart_empty",
+  "result": {
+    "close_error": null,
+    "error": null,
+    "error_type": null,
+    "googleapi_code": null,
+    "is_owned_upload_error": false,
+    "is_precondition_failed": false,
+    "safe_upload_error_summary": null,
+    "uri": "gs://test-bucket/e/empty.bin"
+  }
+}

@@ -16,7 +16,8 @@
 //! [`BigQueryClient`]: the subset of `cloud.google.com/go/bigquery` (v1.79.0) that ADK-Go's
 //! `plugin/agentanalytics` uses, over gadk's REST transport (`gadk_model::rest`): table
 //! metadata get / insert / patch (with `If-Match`), query jobs (`jobs.insert`, then Go's
-//! `Job.Wait` polling), and the `googleapi.CheckResponse` error mapping ([`ApiError`]).
+//! `Job.Wait` polling), and the `googleapi.CheckResponse` error mapping
+//! ([`gadk_model::rest::googleapi::check_response`]'s [`ApiError`](crate::error::ApiError)).
 //! [`TableOps`] is Go's `bqTableAdapter` (one table's [`TableMetadataOps`]).
 
 use std::collections::BTreeMap;
@@ -27,11 +28,11 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use gadk_model::gcp_auth::{adc_credentials, credential_headers};
+use gadk_model::rest::googleapi::check_response;
 use gadk_model::rest::{
     CallTimeout, RequestHeaders, RestError, RestReply, RestTransport, RetryAfterRule, RetryPolicy,
 };
 use gadk_model::{HttpClient, ReqwestClient};
-use gadk_platform::Platform;
 use gadk_platform::env::{EnvProvider, ProcessEnv};
 use google_cloud_auth::credentials::Credentials;
 use http::header::{CONTENT_TYPE, IF_MATCH, USER_AGENT};
@@ -41,7 +42,8 @@ use serde_json::{Map, Value, json};
 
 use crate::config::ClientOptions;
 use crate::context::{Context, ContextError};
-use crate::error::{ApiError, BigQueryError, Error, ErrorItem};
+use crate::error::{BigQueryError, Error};
+use crate::gax::{Backoff, Pauses, random_id, sleep, wrapped_call_err};
 use crate::schema::{Schema, TableSchema};
 use crate::schema_upgrade::{
     Clustering, DAY_PARTITIONING_TYPE, TableMetadata, TableMetadataOps, TableMetadataUpdate,
@@ -160,8 +162,9 @@ impl BigQueryClient {
     /// base path, e.g. `http://127.0.0.1:9050/bigquery/v2/`; a bare `host[:port]` replaces the
     /// host of the default `https://bigquery.googleapis.com/bigquery/v2/`), else the default.
     /// They carry [`ClientOptions::credentials`], no credentials when
-    /// [`ClientOptions::without_authentication`], else Application Default Credentials with
-    /// the `bigquery` scope.
+    /// [`ClientOptions::without_authentication`] or [`ClientOptions::http_client`] is set (Go
+    /// uses a `WithHTTPClient` client as is), else Application Default Credentials with the
+    /// `bigquery` scope.
     ///
     /// # Errors
     ///
@@ -188,7 +191,10 @@ impl BigQueryClient {
                  credentials",
             )));
         }
-        let credentials = if options.without_authentication {
+        // Go `htransport.NewClient` (via `bq.NewService`): a caller-supplied
+        // `option.WithHTTPClient` is used as is, with no credential lookup and no
+        // authentication.
+        let credentials = if options.without_authentication || options.http_client.is_some() {
             None
         } else if let Some(credentials) = &options.credentials {
             Some(credentials.clone())
@@ -357,7 +363,7 @@ impl BigQueryClient {
         }
         // Go `internal.Retry(ctx, gax.Backoff{}, …)` stopping at the first error, so a pause
         // cut short by `ctx` returns the bare context error.
-        let mut backoff = Backoff::new(Duration::ZERO, Duration::ZERO, 0.0);
+        let mut backoff = Pauses::new(Backoff::default());
         loop {
             let status = self.job_status(ctx, &job.reference, &mut last).await?;
             if status.done() {
@@ -382,7 +388,11 @@ impl BigQueryClient {
                 ("maxResults", "0"),
             ],
         );
-        let mut backoff = Backoff::new(Duration::from_millis(50), Duration::from_secs(60), 1.3);
+        let mut backoff = Pauses::new(Backoff {
+            initial: Duration::from_millis(50),
+            max: Duration::from_secs(60),
+            multiplier: 1.3,
+        });
         let url = url.as_str();
         retry(ctx, &mut backoff, move || async move {
             match self.call(ctx, Method::GET, url, None, None).await {
@@ -448,7 +458,7 @@ impl BigQueryClient {
     }
 
     /// One request (Go `call.Do()`), cancelled when `ctx` ends: a 2xx response's body, else
-    /// Go `googleapi.CheckResponse`'s [`ApiError`].
+    /// Go `googleapi.CheckResponse`'s [`ApiError`](crate::error::ApiError).
     async fn call(
         &self,
         ctx: &Context,
@@ -481,10 +491,9 @@ impl BigQueryClient {
             if parts.status == http::StatusCode::NO_CONTENT {
                 // Go `gensupport.DecodeResponse` leaves the zero value for a 204.
                 Ok(Bytes::from_static(b"{}"))
-            } else if parts.status.is_success() {
-                Ok(body)
             } else {
-                Err(Error::from(api_error_from_response(&parts, &body)))
+                check_response(&parts, &body).map_err(Error::Api)?;
+                Ok(body)
             }
         })
         .await
@@ -569,20 +578,6 @@ fn escape(s: &str) -> String {
 /// Go `url.QueryEscape`: like [`escape`], with a space as `+`.
 fn query_escape(s: &str) -> String {
     escape(s).replace("%20", "+")
-}
-
-/// Go `randomID()`: 16 random bytes as 32 lower-case hex digits (from a random v4 UUID, whose
-/// version and variant digits are fixed — the ID keeps Go's shape).
-fn random_id() -> String {
-    // Divergence (ledger 7b-1): Go draws all 128 bits from `crypto/rand`; a v4 UUID fixes 6 of
-    // them. The ID's shape (`^[0-9a-f]{32}$`) is Go's.
-    Platform::default().new_uuid().replace('-', "")
-}
-
-/// A random `u64` for backoff jitter.
-fn random_u64() -> u64 {
-    let id = random_id();
-    u64::from_str_radix(id.get(..16).unwrap_or("0"), 16).unwrap_or(0)
 }
 
 /// The JSON request body Go's client sends (`json.NewEncoder(...).Encode`: trailing newline).
@@ -871,81 +866,6 @@ fn job_status(status: Option<JobStatusReply>) -> Result<Option<JobStatus>, Error
     }))
 }
 
-/// Go `googleapi.CheckResponse` for a response with status ≥ 300: the [`ApiError`] Go builds
-/// from the JSON error body (`error.code` / `message` / `errors` / `details`), the raw body and
-/// the headers.
-pub(crate) fn api_error_from_response(parts: &http::response::Parts, body: &[u8]) -> ApiError {
-    let status = parts.status.as_u16();
-    let mut err = ApiError {
-        code: status,
-        body: String::from_utf8_lossy(body).into_owned(),
-        header: parts.headers.clone(),
-        ..ApiError::default()
-    };
-    if let Some(reply) = error_reply_from_body(body) {
-        if reply.code != 0 {
-            // Go keeps the body's `error.code` even when it differs from the HTTP status.
-            // Divergence (ledger 7b-1): Go's `Code` is an `int`; a body code outside `u16`
-            // (negative or above 65535) keeps the HTTP status here.
-            err.code = u16::try_from(reply.code).unwrap_or(status);
-        }
-        err.message = reply.message;
-        err.details = reply.details;
-        // Go decodes a `null` entry into a zero `ErrorItem` and keeps it.
-        err.errors = reply
-            .errors
-            .into_iter()
-            .map(|i| {
-                let i = i.unwrap_or_default();
-                ErrorItem {
-                    reason: i.reason,
-                    message: i.message,
-                }
-            })
-            .collect();
-    }
-    err
-}
-
-#[derive(Deserialize)]
-struct ErrorReply {
-    error: Option<ErrorReplyBody>,
-}
-
-#[derive(Deserialize)]
-struct ErrorReplyBody {
-    #[serde(default, deserialize_with = "nullable")]
-    code: i64,
-    #[serde(default, deserialize_with = "nullable")]
-    message: String,
-    #[serde(default, deserialize_with = "nullable")]
-    details: Vec<Value>,
-    #[serde(default, deserialize_with = "nullable")]
-    errors: Vec<Option<ErrorItemReply>>,
-}
-
-#[derive(Default, Deserialize)]
-#[serde(default)]
-struct ErrorItemReply {
-    #[serde(deserialize_with = "nullable")]
-    reason: String,
-    #[serde(deserialize_with = "nullable")]
-    message: String,
-}
-
-/// Go `errorReplyFromBody`: a JSON object `{"error": …}`, or the first element of a JSON array
-/// of them; `None` when the body is neither or has no `error`.
-fn error_reply_from_body(body: &[u8]) -> Option<ErrorReplyBody> {
-    if body.first() == Some(&b'[') {
-        let mut replies: Vec<ErrorReply> = serde_json::from_slice(body).ok()?;
-        if replies.is_empty() {
-            return None;
-        }
-        return replies.swap_remove(0).error;
-    }
-    serde_json::from_slice::<ErrorReply>(body).ok()?.error
-}
-
 /// Go `retryableError(err, allowedReasons)`: a Google API error whose first reason is allowed
 /// or whose code is 500/502/503/504; a context deadline (Go's `Timeout()`); a transport failure
 /// that refused or reset the connection, timed out, or cut a body short.
@@ -999,53 +919,12 @@ fn connection_error(err: &(dyn std::error::Error + 'static)) -> bool {
     false
 }
 
-/// gax-go `Backoff`: each pause is uniform in `[1ns, cur]`, then `cur` grows by `multiplier`
-/// up to `max`. Zero values take gax's defaults (1 s, 30 s, ×2).
-#[derive(Debug, Clone)]
-struct Backoff {
-    initial: Duration,
-    max: Duration,
-    multiplier: f64,
-    cur: Duration,
-}
-
-impl Backoff {
-    fn new(initial: Duration, max: Duration, multiplier: f64) -> Backoff {
-        Backoff {
-            initial,
-            max,
-            multiplier,
-            cur: Duration::ZERO,
-        }
-    }
-
-    /// Go `runWithRetryExplicit`'s backoff (the BigQuery SLA suggestion).
-    fn bigquery() -> Backoff {
-        Backoff::new(Duration::from_secs(1), Duration::from_secs(32), 2.0)
-    }
-
-    /// Go `Backoff.Pause()`.
-    fn pause(&mut self) -> Duration {
-        if self.initial.is_zero() {
-            self.initial = Duration::from_secs(1);
-        }
-        if self.cur.is_zero() {
-            self.cur = self.initial;
-        }
-        if self.max.is_zero() {
-            self.max = Duration::from_secs(30);
-        }
-        if self.multiplier < 1.0 {
-            self.multiplier = 2.0;
-        }
-        let cur_ns = u64::try_from(self.cur.as_nanos())
-            .unwrap_or(u64::MAX)
-            .max(1);
-        let d = Duration::from_nanos(1 + random_u64() % cur_ns);
-        self.cur = self.cur.mul_f64(self.multiplier).min(self.max);
-        d
-    }
-}
+/// Go `runWithRetryExplicit`'s backoff (the BigQuery SLA suggestion): 1 s → 32 s, ×2.
+const BIGQUERY_BACKOFF: Backoff = Backoff {
+    initial: Duration::from_secs(1),
+    max: Duration::from_secs(32),
+    multiplier: 2.0,
+};
 
 /// What one turn of [`retry`] decided (Go's `(stop bool, err error)`).
 enum Step<T> {
@@ -1059,7 +938,7 @@ enum Step<T> {
 /// per `backoff` under `ctx`. When `ctx` ends during a pause the result is the context error,
 /// or Go's `wrappedCallErr` (`retry failed with <ctx err>; last error: <err>`) when a turn
 /// failed with an error other than a bare context error.
-async fn retry<T, F, Fut>(ctx: &Context, backoff: &mut Backoff, mut f: F) -> Result<T, Error>
+async fn retry<T, F, Fut>(ctx: &Context, backoff: &mut Pauses, mut f: F) -> Result<T, Error>
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = Step<T>>,
@@ -1085,32 +964,14 @@ where
     }
 }
 
-/// gax-go `Sleep(ctx, d)`: waits `d`, or fails with the context error once `ctx` ends.
-async fn sleep(ctx: &Context, d: Duration) -> Result<(), Error> {
-    ctx.run(async {
-        tokio::time::sleep(d).await;
-        Ok(())
-    })
-    .await
-}
-
-/// Go `wrappedCallErr{ctxErr, wrappedErr}`: its text, and both errors in its tree (Go's `Is`
-/// matches either; `Unwrap` returns the call's error).
-fn wrapped_call_err(ctx_err: Error, last: Error) -> Error {
-    Error::wrap_text(
-        format!("retry failed with {ctx_err}; last error: {last}"),
-        Error::Joined(vec![ctx_err, last]),
-    )
-}
-
 /// Go `runWithRetryExplicit(ctx, call, allowedReasons)`: `call` until it succeeds or fails with
-/// an error [`retryable_error`] rejects, with [`Backoff::bigquery`].
+/// an error [`retryable_error`] rejects, with [`BIGQUERY_BACKOFF`].
 async fn run_with_retry<T, F, Fut>(ctx: &Context, reasons: &[&str], mut call: F) -> Result<T, Error>
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<T, Error>>,
 {
-    let mut backoff = Backoff::bigquery();
+    let mut backoff = Pauses::new(BIGQUERY_BACKOFF);
     retry(ctx, &mut backoff, || {
         let fut = call();
         async move {
@@ -1196,12 +1057,16 @@ mod tests {
 
     use std::collections::HashMap;
 
+    use gadk_model::rest::googleapi::api_error_from_response;
     use gadk_model::rest::test_util::{FakeResponse, ScriptedClient, bearer_credentials};
     use gadk_platform::env::MapEnv;
     use pretty_assertions::assert_eq;
 
     use super::*;
-    use crate::error::{Code, is_conflict_error, is_not_found_error, is_precondition_failed_error};
+    use crate::error::{
+        ApiError, Code, ErrorItem, is_conflict_error, is_not_found_error,
+        is_precondition_failed_error,
+    };
 
     fn parts(status: u16) -> http::response::Parts {
         let (mut parts, ()) = http::Response::new(()).into_parts();
@@ -1308,6 +1173,36 @@ mod tests {
                 .starts_with("bigquery: constructing client: "),
             "{err}"
         );
+    }
+
+    /// Go `htransport.NewClient`: a `WithHTTPClient` client is used as is, so construction
+    /// needs no Application Default Credentials and requests carry no `Authorization`, even
+    /// with credentials given.
+    #[tokio::test]
+    async fn a_caller_http_client_skips_credentials() {
+        let env = MapEnv(HashMap::from([(
+            "GOOGLE_APPLICATION_CREDENTIALS".to_owned(),
+            "/nonexistent/gadk-agentanalytics-adc.json".to_owned(),
+        )]));
+        for credentials in [None, Some(bearer_credentials("t"))] {
+            let http = ScriptedClient::json(r#"{"tableReference":{"tableId":"t"}}"#);
+            let options = ClientOptions {
+                credentials,
+                http_client: Some(http.clone()),
+                endpoint: Some("http://bq.test/bigquery/v2/".into()),
+                ..ClientOptions::default()
+            };
+            let client = BigQueryClient::new_with_env("p", &options, &env).unwrap();
+            client
+                .get_table(&Context::background(), "p", "d", "t")
+                .await
+                .unwrap();
+            assert!(
+                !http.last_request().headers.contains_key("authorization"),
+                "{:?}",
+                http.last_request().headers
+            );
+        }
     }
 
     #[test]
@@ -1475,27 +1370,10 @@ mod tests {
     }
 
     #[test]
-    fn backoff_pauses_like_gax() {
-        let mut b = Backoff::bigquery();
-        let mut caps = Vec::new();
-        for _ in 0..8 {
-            let cap = if b.cur.is_zero() { b.initial } else { b.cur };
-            let p = b.pause();
-            assert!(p >= Duration::from_nanos(1) && p <= cap, "{p:?} > {cap:?}");
-            caps.push(cap.as_secs());
-        }
+    fn bigquery_backoff_pauses_like_gax() {
+        let mut b = Pauses::new(BIGQUERY_BACKOFF);
+        let caps: Vec<u64> = (0..8).map(|_| b.next(|n| n - 1).as_secs()).collect();
         assert_eq!(caps, [1, 2, 4, 8, 16, 32, 32, 32]);
-        let mut d = Backoff::new(Duration::ZERO, Duration::ZERO, 0.0);
-        d.pause();
-        assert_eq!(
-            (d.initial, d.max, d.multiplier, d.cur),
-            (
-                Duration::from_secs(1),
-                Duration::from_secs(30),
-                2.0,
-                Duration::from_secs(2)
-            )
-        );
     }
 
     #[tokio::test(start_paused = true)]
@@ -1661,20 +1539,6 @@ mod tests {
                 fields: vec!["a".into()]
             })
         );
-    }
-
-    #[test]
-    fn random_ids_have_gos_shape() {
-        let a = random_id();
-        let b = random_id();
-        assert_ne!(a, b);
-        for id in [a, b] {
-            assert_eq!(id.len(), 32);
-            assert!(
-                id.bytes().all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f')),
-                "{id}"
-            );
-        }
     }
 
     #[test]

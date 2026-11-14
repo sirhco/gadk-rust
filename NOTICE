@@ -15,3 +15,13 @@ crates/gadk-launcher/webui/distr is the prebuilt ADK web UI bundle
 under the Apache License, Version 2.0, vendored byte for byte from
 ADK-Go's cmd/launcher/web/webui/distr. Its minified JavaScript bundles
 third-party libraries under their own licenses.
+
+crates/gadk-agentanalytics/proto vendors, byte for byte, protocol
+buffer definitions from googleapis (https://github.com/googleapis/googleapis),
+Copyright Google LLC, licensed under the Apache License, Version 2.0,
+and the Protocol Buffers well-known types from
+https://github.com/protocolbuffers/protobuf, Copyright 2008 Google Inc.,
+licensed under the BSD 3-Clause License (see
+crates/gadk-agentanalytics/proto/google/protobuf/LICENSE). The Rust code
+in crates/gadk-agentanalytics/src/storagepb/google.*.rs is generated
+from them by scripts/gen-storagepb.

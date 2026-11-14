@@ -1,0 +1,10 @@
+{
+  "about": "gcsMetadataDetails(content_type, size) = details (json.Marshal: keys sorted, HTML characters escaped as \\u003c \\u003e \\u0026, U+2028 as \\u2028).",
+  "cases": [
+    {"content_type":"image/png","details":"{\"gcs_metadata\":{\"content_type\":\"image/png\",\"size\":7}}","size":7},
+    {"content_type":"text/plain; charset=utf-8","details":"{\"gcs_metadata\":{\"content_type\":\"text/plain; charset=utf-8\",\"size\":0}}","size":0},
+    {"content_type":"","details":"{\"gcs_metadata\":{\"content_type\":\"\",\"size\":16777216}}","size":16777216},
+    {"content_type":"text/<x>&\"y\"","details":"{\"gcs_metadata\":{\"content_type\":\"text/\\u003cx\\u003e\\u0026\\\"y\\\"\",\"size\":1}}","size":1},
+    {"content_type":"application/x\u2028y","details":"{\"gcs_metadata\":{\"content_type\":\"application/x\\u2028y\",\"size\":-1}}","size":-1}
+  ]
+}

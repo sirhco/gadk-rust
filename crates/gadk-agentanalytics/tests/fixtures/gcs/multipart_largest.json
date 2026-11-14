@@ -1,0 +1,109 @@
+{
+  "call": {
+    "content_type": "application/octet-stream",
+    "data": {
+      "crc32c": 2465941707,
+      "crc32c_base64": "kvtIyw==",
+      "len": 16777215,
+      "pattern": "i % 251",
+      "sha256": "e0cc70fe951629a089dcf5a8bc4958b3eeecd0911f2cba83b47fa6e1055a10aa"
+    },
+    "path": "big/2026-03-04/t/s_e_c0_p0.bin"
+  },
+  "client": {
+    "bucket": "test-bucket",
+    "endpoint": "{{SERVER}}/storage/v1/",
+    "options": "option.WithEndpoint(server+\"/storage/v1/\"), option.WithoutAuthentication()"
+  },
+  "description": "16 MiB - 1 bytes: the largest multipart upload (ChunkSize 16 MiB)",
+  "exchanges": [
+    {
+      "request": {
+        "body": {
+          "boundary_len": 60,
+          "len": 16777615,
+          "multipart": [
+            {
+              "headers": {
+                "Content-Type": [
+                  "application/json"
+                ]
+              },
+              "json": {
+                "bucket": "test-bucket",
+                "contentType": "application/octet-stream",
+                "crc32c": "kvtIyw==",
+                "name": "big/2026-03-04/t/s_e_c0_p0.bin"
+              },
+              "len": 126,
+              "sha256": "cbc258699e43a813f7cacdf9fd14f3d11b80adac4223a42546f084e75f3f7e45",
+              "text": "{\"bucket\":\"test-bucket\",\"contentType\":\"application/octet-stream\",\"crc32c\":\"kvtIyw==\",\"name\":\"big/2026-03-04/t/s_e_c0_p0.bin\"}\n"
+            },
+            {
+              "headers": {
+                "Content-Type": [
+                  "application/octet-stream"
+                ]
+              },
+              "len": 16777215,
+              "sha256": "e0cc70fe951629a089dcf5a8bc4958b3eeecd0911f2cba83b47fa6e1055a10aa"
+            }
+          ]
+        },
+        "headers": {
+          "Accept-Encoding": [
+            "gzip"
+          ],
+          "Content-Type": [
+            "multipart/related; boundary={{BOUNDARY}}"
+          ],
+          "X-Goog-Api-Client": [
+            "gccl-invocation-id/{{IDEMPOTENCY_TOKEN_1}} gccl-attempt-count/1 gl-go/{{GO_VERSION}} gccl/1.69.0"
+          ],
+          "X-Goog-Gcs-Idempotency-Token": [
+            "{{IDEMPOTENCY_TOKEN_1}}"
+          ]
+        },
+        "method": "POST",
+        "path": "/upload/storage/v1/b/test-bucket/o",
+        "query": {
+          "alt": [
+            "json"
+          ],
+          "ifGenerationMatch": [
+            "0"
+          ],
+          "name": [
+            "big/2026-03-04/t/s_e_c0_p0.bin"
+          ],
+          "prettyPrint": [
+            "false"
+          ],
+          "projection": [
+            "full"
+          ],
+          "uploadType": [
+            "multipart"
+          ]
+        },
+        "raw_query": "alt=json&ifGenerationMatch=0&name=big%2F2026-03-04%2Ft%2Fs_e_c0_p0.bin&prettyPrint=false&projection=full&uploadType=multipart"
+      },
+      "response": {
+        "body": "{\"bucket\":\"test-bucket\",\"contentType\":\"application/octet-stream\",\"generation\":\"1\",\"kind\":\"storage#object\",\"name\":\"big/2026-03-04/t/s_e_c0_p0.bin\",\"size\":\"16777215\"}",
+        "headers": {},
+        "status": 200
+      }
+    }
+  ],
+  "name": "multipart_largest",
+  "result": {
+    "close_error": null,
+    "error": null,
+    "error_type": null,
+    "googleapi_code": null,
+    "is_owned_upload_error": false,
+    "is_precondition_failed": false,
+    "safe_upload_error_summary": null,
+    "uri": "gs://test-bucket/big/2026-03-04/t/s_e_c0_p0.bin"
+  }
+}

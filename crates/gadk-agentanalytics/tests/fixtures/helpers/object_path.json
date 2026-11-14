@@ -1,0 +1,10 @@
+{
+  "about": "bp.objectPath(row, pendingUpload{contentOrd, partIdx, mimeType}) on a BatchProcessor with Config{GCSPathPrefix: gcs_path_prefix}; row is a row spec. Rows without a time.Time timestamp (which use time.Now) are not probed.",
+  "cases": [
+    {"gcs_path_prefix":"agent-logs","name":"all_ids","path":"agent-logs/2026-03-04/t1/s1_e1_c0_p1.png","row":{"event_id":{"t":"str","v":"e1"},"span_id":{"t":"str","v":"s1"},"timestamp":{"t":"ts","v":"2026-03-04T05:06:07Z"},"trace_id":{"t":"str","v":"t1"}},"upload":{"content_ord":0,"mime_type":"image/png","part_idx":1}},
+    {"gcs_path_prefix":"","name":"no_prefix_text","path":"2026-03-05/t1/s1_e1_c2_p0.txt","row":{"event_id":{"t":"str","v":"e1"},"span_id":{"t":"str","v":"s1"},"timestamp":{"t":"ts","v":"2026-03-04T23:30:00-05:00"},"trace_id":{"t":"str","v":"t1"}},"upload":{"content_ord":2,"mime_type":"text/plain; charset=utf-8","part_idx":0}},
+    {"gcs_path_prefix":"/p/","name":"missing_ids","path":"p/2026-03-04/no_trace/no_span_no_event_c0_p0.bin","row":{"timestamp":{"t":"ts","v":"2026-03-04T05:06:07Z"}},"upload":{"content_ord":0,"mime_type":"application/x-zz-unknown","part_idx":0}},
+    {"gcs_path_prefix":"p","name":"wrong_typed_ids","path":"p/2026-03-04/no_trace/no_span_no_event_c1_p1.mp4","row":{"event_id":{"t":"null"},"span_id":{"t":"bool","v":true},"timestamp":{"t":"ts","v":"2026-03-04T05:06:07Z"},"trace_id":{"t":"int64","v":1}},"upload":{"content_ord":1,"mime_type":"video/mp4","part_idx":1}},
+    {"gcs_path_prefix":"p","name":"unsafe_ids","path":"p/2026-03-04/.._x/no_span_a_b_c0_p3.jpg","row":{"event_id":{"t":"str","v":"a b"},"span_id":{"t":"str","v":".."},"timestamp":{"t":"ts","v":"2026-03-04T05:06:07Z"},"trace_id":{"t":"str","v":"../x"}},"upload":{"content_ord":0,"mime_type":"IMAGE/JPEG","part_idx":3}}
+  ]
+}

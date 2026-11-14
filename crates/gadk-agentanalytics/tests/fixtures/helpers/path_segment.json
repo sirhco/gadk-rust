@@ -1,0 +1,19 @@
+{
+  "about": "pathSegment(id, fallback) = result (each rune that is not [A-Za-z0-9._-] becomes one '_').",
+  "cases": [
+    {"fallback":"fb","id":"abc","result":"abc"},
+    {"fallback":"fb","id":"","result":"fb"},
+    {"fallback":"fb","id":".","result":"fb"},
+    {"fallback":"fb","id":"..","result":"fb"},
+    {"fallback":"fb","id":"...","result":"fb"},
+    {"fallback":"fb","id":".a.","result":".a."},
+    {"fallback":"fb","id":"a/b","result":"a_b"},
+    {"fallback":"fb","id":"a b\tc","result":"a_b_c"},
+    {"fallback":"fb","id":"ü","result":"_"},
+    {"fallback":"fb","id":"🤖x","result":"_x"},
+    {"fallback":"fb","id":"A-Z_0.9","result":"A-Z_0.9"},
+    {"fallback":"fb","id":"%2F","result":"_2F"},
+    {"fallback":"fb","id":"\u0000","result":"_"},
+    {"fallback":"","id":"","result":""}
+  ]
+}

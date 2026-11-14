@@ -96,6 +96,7 @@ func TestGenerateFixtures(t *testing.T) {
 	p.genNormalizeFunctionResponse()
 	p.genRedaction()
 	p.genWire()
+	p.gen7b2() // zz_probe_7b2_test.go
 	sort.Strings(p.files)
 	t.Logf("wrote %d fixture files to %s", len(p.files), out)
 	fmt.Printf("wrote %d fixture files\n", len(p.files))

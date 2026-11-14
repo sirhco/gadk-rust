@@ -2,19 +2,19 @@
 # Copyright 2026 Chris Olson — Apache-2.0 (see LICENSE)
 """Checks the parity ledgers (docs/parity/1a.md, 1b.md, 1b-live.md, 1c.md, 2a.md, 2b.md, 2c.md, 3a.md,
 3b.md, 4a.md, 4b.md, 4c.md, 5a.md, 5b.md, 5c.md, 6.md, 6b.md, 6c-1.md, 6c-2.md, 7a.md,
-7b-1.md) against ADK-Go.
+7b-1.md, 7b-2.md) against ADK-Go.
 
 Usage:
-  parity-check [--adk-go DIR] [--ledger 1a|1b|1b-live|1c|2a|2b|2c|3a|3b|4a|4b|4c|5a|5b|5c|6|6b|6c-1|6c-2|7a|7b-1|all] [--files GO_TEST_FILE ...] [--count] [--generate]
+  parity-check [--adk-go DIR] [--ledger 1a|1b|1b-live|1c|2a|2b|2c|3a|3b|4a|4b|4c|5a|5b|5c|6|6b|6c-1|6c-2|7a|7b-1|7b-2|all] [--files GO_TEST_FILE ...] [--count] [--generate]
 
 Each ledger lists its in-scope Go test files in a `<!-- in-scope: ... -->` header block and
 (optionally) its deferred files in a `<!-- deferred: ... -->` block (`path: reason` per line).
-1a rows are hand-written and checked as before. 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a, 4b, 4c, 5a, 5b, 5c, 6, 6b, 6c-1, 6c-2, 7a and 7b-1 rows are
+1a rows are hand-written and checked as before. 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a, 4b, 4c, 5a, 5b, 5c, 6, 6b, 6c-1, 6c-2, 7a, 7b-1 and 7b-2 rows are
 generated from annotations in the Rust target files (see `scan_target`); `--generate` rewrites
 them, and a full `--ledger 1b` / `--ledger 1b-live` / `--ledger 1c` / `--ledger 2a` /
 `--ledger 2b` / `--ledger 2c` / `--ledger 3a` / `--ledger 3b` / `--ledger 4a` / `--ledger 4b` /
 `--ledger 4c` / `--ledger 5a` / `--ledger 5b` / `--ledger 5c` / `--ledger 6` / `--ledger 6b` /
-`--ledger 6c-1` / `--ledger 6c-2` / `--ledger 7a` / `--ledger 7b-1` check
+`--ledger 6c-1` / `--ledger 6c-2` / `--ledger 7a` / `--ledger 7b-1` / `--ledger 7b-2` check
 requires the
 ledger rows to
 equal the
@@ -47,7 +47,7 @@ TABLE_SEP = "|---|---|---|---|---|"
 SKIP_RE = re.compile(r"^\s*//\s*parity:\s*skipped\s+((?:Test|Fuzz|Example)\w*)\s*:(.*)$")
 ADAPTED_RE = re.compile(r"^\s*//\s*parity:\s*adapted\s*:(.*)$")
 ADAPTED_WINDOW = 3  # lines above the `fn` line searched for `// parity: adapted:`
-GENERATED_LEDGERS = ("1b", "1b-live", "1c", "2a", "2b", "2c", "3a", "3b", "4a", "4b", "4c", "5a", "5b", "5c", "6", "6b", "6c-1", "6c-2", "7a", "7b-1")  # ledgers whose rows come from annotations
+GENERATED_LEDGERS = ("1b", "1b-live", "1c", "2a", "2b", "2c", "3a", "3b", "4a", "4b", "4c", "5a", "5b", "5c", "6", "6b", "6c-1", "6c-2", "7a", "7b-1", "7b-2")  # ledgers whose rows come from annotations
 GCP_DETECTOR_PREFIX = "contrib/detectors/gcp/"  # 7a: Go files of the contrib GCP detector module
 GCP_DETECTOR_MODULE = "go.opentelemetry.io/contrib/detectors/gcp@v1.47.0"
 GOYAML_PREFIX = "yaml.v3/"  # 6c-1: Go files of gopkg.in/yaml.v3
@@ -363,7 +363,7 @@ def check_header(go_dir, in_scope, deferred, label):
 def check_1b(go_dir, repo_dir, ledger, files=None, name="1b"):
     """Full check when `files` is None (rows must equal generated rows); else scan only `files`.
 
-    `name` is the ledger's CLI name (`1b`, `1b-live`, `1c`, `2a`, `2b`, `2c`, `3a`, `3b`, `4a`, `4b`, `4c`, `5a`, `5b`, `5c`, `6`, `6b`, `6c-1`, `6c-2`, `7a` or `7b-1`), used
+    `name` is the ledger's CLI name (`1b`, `1b-live`, `1c`, `2a`, `2b`, `2c`, `3a`, `3b`, `4a`, `4b`, `4c`, `5a`, `5b`, `5c`, `6`, `6b`, `6c-1`, `6c-2`, `7a`, `7b-1` or `7b-2`), used
     in messages."""
     in_scope, deferred = parse_header(ledger)
     errs = check_header(go_dir, in_scope, deferred, str(ledger))
@@ -441,7 +441,7 @@ def main(argv=None):
     repo = pathlib.Path(__file__).resolve().parent.parent
     ap = argparse.ArgumentParser(prog="parity-check")
     ap.add_argument("--adk-go", default=os.environ.get("ADK_GO_DIR") or str(default_adk_go(repo)))
-    ap.add_argument("--ledger", choices=("1a", "1b", "1b-live", "1c", "2a", "2b", "2c", "3a", "3b", "4a", "4b", "4c", "5a", "5b", "5c", "6", "6b", "6c-1", "6c-2", "7a", "7b-1", "all"), default="all")
+    ap.add_argument("--ledger", choices=("1a", "1b", "1b-live", "1c", "2a", "2b", "2c", "3a", "3b", "4a", "4b", "4c", "5a", "5b", "5c", "6", "6b", "6c-1", "6c-2", "7a", "7b-1", "7b-2", "all"), default="all")
     ap.add_argument("--files", nargs="+", metavar="GO_TEST_FILE")
     ap.add_argument("--count", action="store_true")
     ap.add_argument("--generate", action="store_true")
@@ -470,12 +470,13 @@ def main(argv=None):
         "6c-2": repo / "docs/parity/6c-2.md",
         "7a": repo / "docs/parity/7a.md",
         "7b-1": repo / "docs/parity/7b-1.md",
+        "7b-2": repo / "docs/parity/7b-2.md",
     }
 
     if (a.files or a.generate) and a.ledger not in GENERATED_LEDGERS:
-        ap.error("--files and --generate require --ledger 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a, 4b, 4c, 5a, 5b, 5c, 6, 6b, 6c-1, 6c-2, 7a or 7b-1")
+        ap.error("--files and --generate require --ledger 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a, 4b, 4c, 5a, 5b, 5c, 6, 6b, 6c-1, 6c-2, 7a, 7b-1 or 7b-2")
     if a.count and a.ledger == "all":
-        ap.error("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a, 4b, 4c, 5a, 5b, 5c, 6, 6b, 6c-1, 6c-2, 7a or 7b-1")
+        ap.error("--count requires --ledger 1a, 1b, 1b-live, 1c, 2a, 2b, 2c, 3a, 3b, 4a, 4b, 4c, 5a, 5b, 5c, 6, 6b, 6c-1, 6c-2, 7a, 7b-1 or 7b-2")
     if a.generate and (a.files or a.count):
         ap.error("--generate cannot be combined with --files or --count")
 

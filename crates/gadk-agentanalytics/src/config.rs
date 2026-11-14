@@ -190,7 +190,9 @@ pub struct ClientOptions {
     pub credentials: Option<Credentials>,
     /// Go `option.WithoutAuthentication`.
     pub without_authentication: bool,
-    /// Go `option.WithHTTPClient`; `None` builds a reqwest client.
+    /// Go `option.WithHTTPClient`; `None` builds a reqwest client. As Go's
+    /// `htransport.NewClient`, the REST clients use it as is: no Application Default
+    /// Credentials lookup and no authentication headers.
     pub http_client: Option<Arc<dyn HttpClient>>,
     /// Go `option.WithEndpoint`.
     pub endpoint: Option<String>,
@@ -929,7 +931,8 @@ mod tests {
 
 // The crate-internal half of the R1 config golden (`tests/golden_config.rs` is the public half):
 // `Config::apply_defaults` and its accessors are `pub(crate)`, so their fixture test is compiled
-// into the unit tests. It lives under `tests/support/` with the shared projection helper.
+// into the unit tests. It lives under `tests/support/` with the shared projection helper, which
+// `validate`'s golden reuses from here.
 #[cfg(test)]
 #[path = "../tests/support/golden_apply_defaults.rs"]
-mod golden_apply_defaults;
+pub(crate) mod golden_apply_defaults;
