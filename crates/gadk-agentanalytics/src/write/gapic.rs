@@ -241,6 +241,10 @@ where
         .as_ref()
         .map(|r| (r.codes.as_slice(), Pauses::new(r.backoff)));
     loop {
+        // Divergence (ledger 7b-2): gax `Invoke` wraps each failed attempt's error with
+        // `apierror.FromError`, whose `Error()` text appends the status details (ErrorInfo,
+        // DebugInfo, …) after `rpc error: code = … desc = …`. gadk's status text carries the code
+        // and message only: the google.rpc error-details protos are not generated.
         let err = match attempt(ctx.clone()).await {
             Ok(v) => return Ok(v),
             Err(err) => err,
