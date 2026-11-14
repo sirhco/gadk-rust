@@ -1,0 +1,661 @@
+{
+  "about": "LLM agent weather_agent (model mock: call get_weather{city:Paris} id call-weather-1, then text) with function tool get_weather (sets state last_city=Paris, returns {forecast:sunny})",
+  "app_name": "test-app",
+  "config": {
+    "CustomMetadataAllowlist": null,
+    "DatasetID": "test_dataset",
+    "ProjectID": "test-project",
+    "TableName": "test-table"
+  },
+  "rows": [
+    {
+      "agent": "weather_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "user",
+          "event_id": "event-1",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "weather_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "content": {
+        "text_summary": "What is the weather in Paris?"
+      },
+      "content_parts": [
+        {
+          "mime_type": "text/plain",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "What is the weather in Paris?"
+        }
+      ],
+      "event_id": "event-1",
+      "event_type": "USER_MESSAGE_RECEIVED",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "session_id": "session-1",
+      "span_id": "span-1",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "weather_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "weather_agent",
+          "event_id": "event-2",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "weather_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "event_id": "event-2",
+      "event_type": "INVOCATION_STARTING",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "session_id": "session-1",
+      "span_id": "span-1",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "weather_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "weather_agent",
+          "event_id": "event-3",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "agent_description": "Answers weather questions.",
+        "model": "mock",
+        "root_agent_name": "weather_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "content": "Answer weather questions with the get_weather tool.",
+      "event_id": "event-3",
+      "event_type": "AGENT_STARTING",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-1",
+      "session_id": "session-1",
+      "span_id": "span-2",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "weather_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "weather_agent",
+          "event_id": "event-4",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "model": "mock",
+        "root_agent_name": "weather_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "tools": [
+          {
+            "description": "Returns the weather forecast for a city.",
+            "name": "get_weather",
+            "parameters": {
+              "additionalProperties": false,
+              "properties": {
+                "city": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "city"
+              ],
+              "type": "object"
+            }
+          }
+        ]
+      },
+      "content": {
+        "prompt": [
+          {
+            "content": "What is the weather in Paris?",
+            "role": "user"
+          }
+        ],
+        "system_prompt": "Answer weather questions with the get_weather tool.\n\nYou are an agent. Your internal name is \"weather_agent\". The description about you is \"Answers weather questions.\"."
+      },
+      "content_parts": [
+        {
+          "mime_type": "text/plain",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "What is the weather in Paris?"
+        },
+        {
+          "mime_type": "text/plain",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "Answer weather questions with the get_weather tool.\n\nYou are an agent. Your internal name is \"weather_agent\". The description about you is \"Answers weather questions.\"."
+        }
+      ],
+      "event_id": "event-4",
+      "event_type": "LLM_REQUEST",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-2",
+      "session_id": "session-1",
+      "span_id": "span-3",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "weather_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "weather_agent",
+          "event_id": "event-5",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "cache_type": "none",
+        "interrupted": false,
+        "partial": false,
+        "root_agent_name": "weather_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "turn_complete": false
+      },
+      "content": {
+        "response": "call: get_weather"
+      },
+      "content_parts": [
+        {
+          "mime_type": "application/json",
+          "part_attributes": "{\"function_call\":{\"args\":{\"city\":\"Paris\"},\"id\":\"call-weather-1\",\"name\":\"get_weather\"},\"function_name\":\"get_weather\"}",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "Function: get_weather"
+        }
+      ],
+      "event_id": "event-5",
+      "event_type": "LLM_RESPONSE",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "latency_ms": {
+        "time_to_first_token_ms": "<ms>",
+        "total_ms": "<ms>"
+      },
+      "parent_span_id": "span-2",
+      "session_id": "session-1",
+      "span_id": "span-3",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "weather_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "weather_agent",
+          "event_id": "event-6",
+          "function_call_id": "call-weather-1",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "is_long_running": false,
+        "root_agent_name": "weather_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "tool_description": "Returns the weather forecast for a city."
+      },
+      "content": {
+        "args": {
+          "city": "Paris"
+        },
+        "tool": "get_weather",
+        "tool_origin": "LOCAL"
+      },
+      "event_id": "event-6",
+      "event_type": "TOOL_STARTING",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-2",
+      "session_id": "session-1",
+      "span_id": "span-4",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "weather_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "weather_agent",
+          "event_id": "event-7",
+          "function_call_id": "call-weather-1",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "weather_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "content": {
+        "result": {
+          "forecast": "sunny"
+        },
+        "tool": "get_weather",
+        "tool_origin": "LOCAL"
+      },
+      "event_id": "event-7",
+      "event_type": "TOOL_COMPLETED",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "latency_ms": {
+        "total_ms": "<ms>"
+      },
+      "parent_span_id": "span-2",
+      "session_id": "session-1",
+      "span_id": "span-4",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "weather_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "weather_agent",
+          "event_id": "event-8",
+          "invocation_id": "invocation-1",
+          "node": {
+            "parent_run_id": null,
+            "path": "weather_agent",
+            "run_id": ""
+          },
+          "schema_version": "1",
+          "session_id": "session-1",
+          "source_event_id": "source-event-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "weather_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "state_delta": {
+          "last_city": "Paris"
+        }
+      },
+      "event_id": "event-8",
+      "event_type": "STATE_DELTA",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-1",
+      "session_id": "session-1",
+      "span_id": "span-2",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "weather_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "weather_agent",
+          "event_id": "event-9",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "model": "mock",
+        "root_agent_name": "weather_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "state": {
+            "last_city": "Paris"
+          },
+          "user_id": "user-1"
+        },
+        "tools": [
+          {
+            "description": "Returns the weather forecast for a city.",
+            "name": "get_weather",
+            "parameters": {
+              "additionalProperties": false,
+              "properties": {
+                "city": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "city"
+              ],
+              "type": "object"
+            }
+          }
+        ]
+      },
+      "content": {
+        "prompt": [
+          {
+            "content": "What is the weather in Paris?",
+            "role": "user"
+          },
+          {
+            "content": "",
+            "role": "model"
+          },
+          {
+            "content": "Function response: get_weather",
+            "role": "user"
+          }
+        ],
+        "system_prompt": "Answer weather questions with the get_weather tool.\n\nYou are an agent. Your internal name is \"weather_agent\". The description about you is \"Answers weather questions.\"."
+      },
+      "content_parts": [
+        {
+          "mime_type": "text/plain",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "What is the weather in Paris?"
+        },
+        {
+          "mime_type": "application/json",
+          "part_attributes": "{\"function_call\":{\"args\":{\"city\":\"Paris\"},\"id\":\"call-weather-1\",\"name\":\"get_weather\"},\"function_name\":\"get_weather\"}",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "Function: get_weather"
+        },
+        {
+          "mime_type": "application/json",
+          "part_attributes": "{\"function_response\":{\"id\":\"call-weather-1\",\"name\":\"get_weather\",\"response\":{\"forecast\":\"sunny\"}}}",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "Function response: get_weather"
+        },
+        {
+          "mime_type": "text/plain",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "Answer weather questions with the get_weather tool.\n\nYou are an agent. Your internal name is \"weather_agent\". The description about you is \"Answers weather questions.\"."
+        }
+      ],
+      "event_id": "event-9",
+      "event_type": "LLM_REQUEST",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-2",
+      "session_id": "session-1",
+      "span_id": "span-5",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "weather_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "weather_agent",
+          "event_id": "event-10",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "cache_type": "none",
+        "interrupted": false,
+        "partial": false,
+        "root_agent_name": "weather_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "state": {
+            "last_city": "Paris"
+          },
+          "user_id": "user-1"
+        },
+        "turn_complete": false
+      },
+      "content": {
+        "response": "text: 'It is sunny in Paris.'"
+      },
+      "content_parts": [
+        {
+          "mime_type": "text/plain",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "It is sunny in Paris."
+        }
+      ],
+      "event_id": "event-10",
+      "event_type": "LLM_RESPONSE",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "latency_ms": {
+        "time_to_first_token_ms": "<ms>",
+        "total_ms": "<ms>"
+      },
+      "parent_span_id": "span-2",
+      "session_id": "session-1",
+      "span_id": "span-5",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "weather_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "weather_agent",
+          "event_id": "event-11",
+          "invocation_id": "invocation-1",
+          "node": {
+            "parent_run_id": null,
+            "path": "weather_agent",
+            "run_id": ""
+          },
+          "schema_version": "1",
+          "session_id": "session-1",
+          "source_event_id": "source-event-2",
+          "user_id": "user-1"
+        },
+        "event_author": "weather_agent",
+        "root_agent_name": "weather_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "state": {
+            "last_city": "Paris"
+          },
+          "user_id": "user-1"
+        },
+        "source_event_author": "weather_agent",
+        "source_event_id": "source-event-2"
+      },
+      "content": {
+        "response": "text: 'It is sunny in Paris.'"
+      },
+      "content_parts": [
+        {
+          "mime_type": "text/plain",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "It is sunny in Paris."
+        }
+      ],
+      "event_id": "event-11",
+      "event_type": "AGENT_RESPONSE",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-1",
+      "session_id": "session-1",
+      "span_id": "span-2",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "weather_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "weather_agent",
+          "event_id": "event-12",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "weather_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "state": {
+            "last_city": "Paris"
+          },
+          "user_id": "user-1"
+        }
+      },
+      "event_id": "event-12",
+      "event_type": "AGENT_COMPLETED",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "latency_ms": {
+        "total_ms": "<ms>"
+      },
+      "parent_span_id": "span-1",
+      "session_id": "session-1",
+      "span_id": "span-2",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "weather_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "weather_agent",
+          "event_id": "event-13",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "weather_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "state": {
+            "last_city": "Paris"
+          },
+          "user_id": "user-1"
+        }
+      },
+      "event_id": "event-13",
+      "event_type": "INVOCATION_COMPLETED",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "latency_ms": {
+        "total_ms": "<ms>"
+      },
+      "session_id": "session-1",
+      "span_id": "span-1",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    }
+  ],
+  "scenario": "tool_call",
+  "session_id": "session-1",
+  "turns": [
+    "What is the weather in Paris?"
+  ],
+  "user_id": "user-1"
+}

@@ -1,0 +1,519 @@
+{
+  "about": "LLM agent bank_agent (model mock: call transfer_funds{amount:100} id call-funds-1) with function tool transfer_funds that requires confirmation; one turn (the run pauses)",
+  "app_name": "test-app",
+  "config": {
+    "CustomMetadataAllowlist": null,
+    "DatasetID": "test_dataset",
+    "ProjectID": "test-project",
+    "TableName": "test-table"
+  },
+  "rows": [
+    {
+      "agent": "bank_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "user",
+          "event_id": "event-1",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "bank_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "content": {
+        "text_summary": "Send 100 to Bob."
+      },
+      "content_parts": [
+        {
+          "mime_type": "text/plain",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "Send 100 to Bob."
+        }
+      ],
+      "event_id": "event-1",
+      "event_type": "USER_MESSAGE_RECEIVED",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "session_id": "session-1",
+      "span_id": "span-1",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "bank_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "bank_agent",
+          "event_id": "event-2",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "bank_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "event_id": "event-2",
+      "event_type": "INVOCATION_STARTING",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "session_id": "session-1",
+      "span_id": "span-1",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "bank_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "bank_agent",
+          "event_id": "event-3",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "model": "mock",
+        "root_agent_name": "bank_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "event_id": "event-3",
+      "event_type": "AGENT_STARTING",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-1",
+      "session_id": "session-1",
+      "span_id": "span-2",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "bank_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "bank_agent",
+          "event_id": "event-4",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "model": "mock",
+        "root_agent_name": "bank_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "tools": [
+          {
+            "description": "Transfers funds.",
+            "name": "transfer_funds",
+            "parameters": {
+              "additionalProperties": false,
+              "properties": {
+                "amount": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "amount"
+              ],
+              "type": "object"
+            }
+          }
+        ]
+      },
+      "content": {
+        "prompt": [
+          {
+            "content": "Send 100 to Bob.",
+            "role": "user"
+          }
+        ],
+        "system_prompt": "You are an agent. Your internal name is \"bank_agent\"."
+      },
+      "content_parts": [
+        {
+          "mime_type": "text/plain",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "Send 100 to Bob."
+        },
+        {
+          "mime_type": "text/plain",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "You are an agent. Your internal name is \"bank_agent\"."
+        }
+      ],
+      "event_id": "event-4",
+      "event_type": "LLM_REQUEST",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-2",
+      "session_id": "session-1",
+      "span_id": "span-3",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "bank_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "bank_agent",
+          "event_id": "event-5",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "cache_type": "none",
+        "interrupted": false,
+        "partial": false,
+        "root_agent_name": "bank_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "turn_complete": false
+      },
+      "content": {
+        "response": "call: transfer_funds"
+      },
+      "content_parts": [
+        {
+          "mime_type": "application/json",
+          "part_attributes": "{\"function_call\":{\"args\":{\"amount\":100},\"id\":\"call-funds-1\",\"name\":\"transfer_funds\"},\"function_name\":\"transfer_funds\"}",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "Function: transfer_funds"
+        }
+      ],
+      "event_id": "event-5",
+      "event_type": "LLM_RESPONSE",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "latency_ms": {
+        "time_to_first_token_ms": "<ms>",
+        "total_ms": "<ms>"
+      },
+      "parent_span_id": "span-2",
+      "session_id": "session-1",
+      "span_id": "span-3",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "bank_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "bank_agent",
+          "event_id": "event-6",
+          "function_call_id": "call-funds-1",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "is_long_running": false,
+        "root_agent_name": "bank_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "tool_description": "Transfers funds."
+      },
+      "content": {
+        "args": {
+          "amount": 100
+        },
+        "tool": "transfer_funds",
+        "tool_origin": "LOCAL"
+      },
+      "event_id": "event-6",
+      "event_type": "TOOL_STARTING",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-2",
+      "session_id": "session-1",
+      "span_id": "span-4",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "bank_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "bank_agent",
+          "event_id": "event-7",
+          "function_call_id": "call-funds-1",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "bank_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "content": {
+        "result": {
+          "error": "error tool \"transfer_funds\" requires confirmation, please approve or reject"
+        },
+        "tool": "transfer_funds",
+        "tool_origin": "LOCAL"
+      },
+      "event_id": "event-7",
+      "event_type": "TOOL_COMPLETED",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "latency_ms": {
+        "total_ms": "<ms>"
+      },
+      "parent_span_id": "span-2",
+      "session_id": "session-1",
+      "span_id": "span-4",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "bank_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "bank_agent",
+          "event_id": "event-8",
+          "function_call_id": "adk-call-1",
+          "invocation_id": "invocation-1",
+          "node": {
+            "parent_run_id": null,
+            "path": "bank_agent",
+            "run_id": ""
+          },
+          "schema_version": "1",
+          "session_id": "session-1",
+          "source_event_id": "source-event-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "bank_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "content": {
+        "args": {
+          "originalFunctionCall": {
+            "args": {
+              "amount": 100
+            },
+            "id": "call-funds-1",
+            "name": "transfer_funds"
+          },
+          "toolConfirmation": {
+            "confirmed": false,
+            "hint": "Please approve or reject the tool call transfer_funds() by responding with a FunctionResponse with an expected ToolConfirmation payload.",
+            "payload": null
+          }
+        },
+        "tool": "adk_request_confirmation",
+        "tool_id": "adk-call-1"
+      },
+      "event_id": "event-8",
+      "event_type": "HITL_CONFIRMATION_REQUEST",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-1",
+      "session_id": "session-1",
+      "span_id": "span-2",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "bank_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "bank_agent",
+          "event_id": "event-9",
+          "function_call_id": "adk-call-1",
+          "invocation_id": "invocation-1",
+          "node": {
+            "parent_run_id": null,
+            "path": "bank_agent",
+            "run_id": ""
+          },
+          "pause_kind": "hitl_confirmation",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "source_event_id": "source-event-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "bank_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "content": {
+        "args": {
+          "originalFunctionCall": {
+            "args": {
+              "amount": 100
+            },
+            "id": "call-funds-1",
+            "name": "transfer_funds"
+          },
+          "toolConfirmation": {
+            "confirmed": false,
+            "hint": "Please approve or reject the tool call transfer_funds() by responding with a FunctionResponse with an expected ToolConfirmation payload.",
+            "payload": null
+          }
+        },
+        "tool": "adk_request_confirmation",
+        "tool_id": "adk-call-1"
+      },
+      "event_id": "event-9",
+      "event_type": "TOOL_PAUSED",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-1",
+      "session_id": "session-1",
+      "span_id": "span-2",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "bank_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "bank_agent",
+          "event_id": "event-10",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "bank_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "event_id": "event-10",
+      "event_type": "AGENT_COMPLETED",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "latency_ms": {
+        "total_ms": "<ms>"
+      },
+      "parent_span_id": "span-1",
+      "session_id": "session-1",
+      "span_id": "span-2",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "bank_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "bank_agent",
+          "event_id": "event-11",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "bank_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "event_id": "event-11",
+      "event_type": "INVOCATION_COMPLETED",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "latency_ms": {
+        "total_ms": "<ms>"
+      },
+      "session_id": "session-1",
+      "span_id": "span-1",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    }
+  ],
+  "scenario": "confirmation",
+  "session_id": "session-1",
+  "turns": [
+    "Send 100 to Bob."
+  ],
+  "user_id": "user-1"
+}

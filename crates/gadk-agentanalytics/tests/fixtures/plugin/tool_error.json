@@ -1,0 +1,614 @@
+{
+  "about": "LLM agent calc_agent (model mock: call divide{a:1,b:0} id call-divide-1, then text) with function tool divide that fails with \"division by zero\"",
+  "app_name": "test-app",
+  "config": {
+    "CustomMetadataAllowlist": null,
+    "DatasetID": "test_dataset",
+    "ProjectID": "test-project",
+    "TableName": "test-table"
+  },
+  "rows": [
+    {
+      "agent": "calc_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "user",
+          "event_id": "event-1",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "calc_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "content": {
+        "text_summary": "Divide 1 by 0."
+      },
+      "content_parts": [
+        {
+          "mime_type": "text/plain",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "Divide 1 by 0."
+        }
+      ],
+      "event_id": "event-1",
+      "event_type": "USER_MESSAGE_RECEIVED",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "session_id": "session-1",
+      "span_id": "span-1",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "calc_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "calc_agent",
+          "event_id": "event-2",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "calc_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "event_id": "event-2",
+      "event_type": "INVOCATION_STARTING",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "session_id": "session-1",
+      "span_id": "span-1",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "calc_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "calc_agent",
+          "event_id": "event-3",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "model": "mock",
+        "root_agent_name": "calc_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "event_id": "event-3",
+      "event_type": "AGENT_STARTING",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-1",
+      "session_id": "session-1",
+      "span_id": "span-2",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "calc_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "calc_agent",
+          "event_id": "event-4",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "model": "mock",
+        "root_agent_name": "calc_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "tools": [
+          {
+            "description": "Divides a by b.",
+            "name": "divide",
+            "parameters": {
+              "additionalProperties": false,
+              "properties": {
+                "a": {
+                  "type": "integer"
+                },
+                "b": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "a",
+                "b"
+              ],
+              "type": "object"
+            }
+          }
+        ]
+      },
+      "content": {
+        "prompt": [
+          {
+            "content": "Divide 1 by 0.",
+            "role": "user"
+          }
+        ],
+        "system_prompt": "You are an agent. Your internal name is \"calc_agent\"."
+      },
+      "content_parts": [
+        {
+          "mime_type": "text/plain",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "Divide 1 by 0."
+        },
+        {
+          "mime_type": "text/plain",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "You are an agent. Your internal name is \"calc_agent\"."
+        }
+      ],
+      "event_id": "event-4",
+      "event_type": "LLM_REQUEST",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-2",
+      "session_id": "session-1",
+      "span_id": "span-3",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "calc_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "calc_agent",
+          "event_id": "event-5",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "cache_type": "none",
+        "interrupted": false,
+        "partial": false,
+        "root_agent_name": "calc_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "turn_complete": false
+      },
+      "content": {
+        "response": "call: divide"
+      },
+      "content_parts": [
+        {
+          "mime_type": "application/json",
+          "part_attributes": "{\"function_call\":{\"args\":{\"a\":1,\"b\":0},\"id\":\"call-divide-1\",\"name\":\"divide\"},\"function_name\":\"divide\"}",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "Function: divide"
+        }
+      ],
+      "event_id": "event-5",
+      "event_type": "LLM_RESPONSE",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "latency_ms": {
+        "time_to_first_token_ms": "<ms>",
+        "total_ms": "<ms>"
+      },
+      "parent_span_id": "span-2",
+      "session_id": "session-1",
+      "span_id": "span-3",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "calc_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "calc_agent",
+          "event_id": "event-6",
+          "function_call_id": "call-divide-1",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "is_long_running": false,
+        "root_agent_name": "calc_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "tool_description": "Divides a by b."
+      },
+      "content": {
+        "args": {
+          "a": 1,
+          "b": 0
+        },
+        "tool": "divide",
+        "tool_origin": "LOCAL"
+      },
+      "event_id": "event-6",
+      "event_type": "TOOL_STARTING",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-2",
+      "session_id": "session-1",
+      "span_id": "span-4",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "calc_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "calc_agent",
+          "event_id": "event-7",
+          "function_call_id": "call-divide-1",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "calc_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "content": {
+        "args": {
+          "a": 1,
+          "b": 0
+        },
+        "tool": "divide",
+        "tool_origin": "LOCAL"
+      },
+      "error_message": "division by zero",
+      "event_id": "event-7",
+      "event_type": "TOOL_ERROR",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "latency_ms": {
+        "total_ms": "<ms>"
+      },
+      "parent_span_id": "span-2",
+      "session_id": "session-1",
+      "span_id": "span-4",
+      "status": "ERROR",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "calc_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "calc_agent",
+          "event_id": "event-8",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "model": "mock",
+        "root_agent_name": "calc_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "tools": [
+          {
+            "description": "Divides a by b.",
+            "name": "divide",
+            "parameters": {
+              "additionalProperties": false,
+              "properties": {
+                "a": {
+                  "type": "integer"
+                },
+                "b": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "a",
+                "b"
+              ],
+              "type": "object"
+            }
+          }
+        ]
+      },
+      "content": {
+        "prompt": [
+          {
+            "content": "Divide 1 by 0.",
+            "role": "user"
+          },
+          {
+            "content": "",
+            "role": "model"
+          },
+          {
+            "content": "Function response: divide",
+            "role": "user"
+          }
+        ],
+        "system_prompt": "You are an agent. Your internal name is \"calc_agent\"."
+      },
+      "content_parts": [
+        {
+          "mime_type": "text/plain",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "Divide 1 by 0."
+        },
+        {
+          "mime_type": "application/json",
+          "part_attributes": "{\"function_call\":{\"args\":{\"a\":1,\"b\":0},\"id\":\"call-divide-1\",\"name\":\"divide\"},\"function_name\":\"divide\"}",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "Function: divide"
+        },
+        {
+          "mime_type": "application/json",
+          "part_attributes": "{\"function_response\":{\"id\":\"call-divide-1\",\"name\":\"divide\",\"response\":{\"error\":\"division by zero\"}}}",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "Function response: divide"
+        },
+        {
+          "mime_type": "text/plain",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "You are an agent. Your internal name is \"calc_agent\"."
+        }
+      ],
+      "event_id": "event-8",
+      "event_type": "LLM_REQUEST",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-2",
+      "session_id": "session-1",
+      "span_id": "span-5",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "calc_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "calc_agent",
+          "event_id": "event-9",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "cache_type": "none",
+        "interrupted": false,
+        "partial": false,
+        "root_agent_name": "calc_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "turn_complete": false
+      },
+      "content": {
+        "response": "text: 'Cannot divide by zero.'"
+      },
+      "content_parts": [
+        {
+          "mime_type": "text/plain",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "Cannot divide by zero."
+        }
+      ],
+      "event_id": "event-9",
+      "event_type": "LLM_RESPONSE",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "latency_ms": {
+        "time_to_first_token_ms": "<ms>",
+        "total_ms": "<ms>"
+      },
+      "parent_span_id": "span-2",
+      "session_id": "session-1",
+      "span_id": "span-5",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "calc_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "calc_agent",
+          "event_id": "event-10",
+          "invocation_id": "invocation-1",
+          "node": {
+            "parent_run_id": null,
+            "path": "calc_agent",
+            "run_id": ""
+          },
+          "schema_version": "1",
+          "session_id": "session-1",
+          "source_event_id": "source-event-1",
+          "user_id": "user-1"
+        },
+        "event_author": "calc_agent",
+        "root_agent_name": "calc_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "source_event_author": "calc_agent",
+        "source_event_id": "source-event-1"
+      },
+      "content": {
+        "response": "text: 'Cannot divide by zero.'"
+      },
+      "content_parts": [
+        {
+          "mime_type": "text/plain",
+          "part_index": 0,
+          "storage_mode": "INLINE",
+          "text": "Cannot divide by zero."
+        }
+      ],
+      "event_id": "event-10",
+      "event_type": "AGENT_RESPONSE",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "parent_span_id": "span-1",
+      "session_id": "session-1",
+      "span_id": "span-2",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "calc_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "calc_agent",
+          "event_id": "event-11",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "calc_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "event_id": "event-11",
+      "event_type": "AGENT_COMPLETED",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "latency_ms": {
+        "total_ms": "<ms>"
+      },
+      "parent_span_id": "span-1",
+      "session_id": "session-1",
+      "span_id": "span-2",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    },
+    {
+      "agent": "calc_agent",
+      "attributes": {
+        "adk": {
+          "adk_version": "<adk_version>",
+          "app_name": "test-app",
+          "author": "calc_agent",
+          "event_id": "event-12",
+          "invocation_id": "invocation-1",
+          "schema_version": "1",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        },
+        "root_agent_name": "calc_agent",
+        "session_metadata": {
+          "app_name": "test-app",
+          "session_id": "session-1",
+          "user_id": "user-1"
+        }
+      },
+      "event_id": "event-12",
+      "event_type": "INVOCATION_COMPLETED",
+      "invocation_id": "invocation-1",
+      "is_truncated": false,
+      "latency_ms": {
+        "total_ms": "<ms>"
+      },
+      "session_id": "session-1",
+      "span_id": "span-1",
+      "status": "OK",
+      "timestamp": "<timestamp>",
+      "trace_id": "trace-1",
+      "user_id": "user-1"
+    }
+  ],
+  "scenario": "tool_error",
+  "session_id": "session-1",
+  "turns": [
+    "Divide 1 by 0."
+  ],
+  "user_id": "user-1"
+}

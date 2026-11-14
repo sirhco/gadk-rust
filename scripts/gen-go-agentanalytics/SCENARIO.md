@@ -7,15 +7,18 @@ SQL, the content formatter and redaction outputs over a corpus, and the BigQuery
 `cloud.google.com/go/bigquery` v1.79.0 client sends for table creation, schema upgrade and view DDL.
 Sub-project 7b-2 (transports): Arrow record batches, AppendRows requests, the gapic BigQuery Write
 client's per-RPC metadata and retries, the Cloud Storage offloader's requests, `validateConfig`,
-CRC32C and the pure helpers of `gcs_offloader.go` (see "7b-2 fixture formats" below).
+CRC32C and the pure helpers of `gcs_offloader.go` (see "7b-2 fixture formats" below). Sub-project
+7b-3a (plugin): the rows ADK-Go's plugin writes for scripted runner scenarios (see "7b-3a plugin row
+goldens" below).
 
 It is an overlay test, not a Go module: `run.sh` copies ADK-Go's `plugin/agentanalytics/*.go` into a
 temp dir, installs `module.go.mod` / `module.go.sum` as its `go.mod` / `go.sum` (ADK-Go's
 `plugin/agentanalytics/go.mod` plus `replace google.golang.org/adk/v2 => ../../../adk-go`, rewritten to
 the absolute ADK-Go path, then `go mod tidy` under go1.26.10), adds `overlay/zz_probe_test.go.txt` as
-`zz_probe_test.go` and `overlay/zz_probe_7b2_test.go.txt` (the 7b-2 generators, called from
-`TestGenerateFixtures`) as `zz_probe_7b2_test.go` (package `agentanalytics`, so unexported functions
-are callable), and runs
+`zz_probe_test.go`, `overlay/zz_probe_7b2_test.go.txt` (the 7b-2 generators, called from
+`TestGenerateFixtures`) as `zz_probe_7b2_test.go` and `overlay/zz_probe_7b3a_test.go.txt` (the 7b-3a
+plugin scenarios, likewise) as `zz_probe_7b3a_test.go` (package `agentanalytics`, so unexported
+functions and the package's own test helpers are callable), and runs
 `go test -run '^TestGenerateFixtures$'` with `AGENTANALYTICS_PROBE_OUT` set. ADK-Go is not modified.
 
 Regenerate (from the repo root):
@@ -25,17 +28,18 @@ scripts/gen-go-agentanalytics/run.sh            # writes crates/gadk-agentanalyt
 scripts/gen-go-agentanalytics/run.sh OUT_DIR    # writes OUT_DIR instead (replaced as a whole)
 ```
 
-It prints `wrote 134 fixture files`. ADK-Go is `$ADK_GO_DIR`, else `adk-go` beside the main checkout
+It prints `wrote 140 fixture files`. ADK-Go is `$ADK_GO_DIR`, else `adk-go` beside the main checkout
 (the parent of git's common dir, so it works from a git worktree), else `../adk-go`. The Go toolchain
 is `$GADK_PROBE_GOTOOLCHAIN` (default `go1.26.10`, fetched by the go command's `GOTOOLCHAIN` support
 on first use); the outputs are byte-identical under go1.26.10 and go1.27.2. No clock reading and no
 randomness reaches a fixture (BigQuery job IDs are replaced by `{{JOB_ID}}`; the 7b-2 captures
 template multipart boundaries, idempotency tokens, the test server's address and the Go version, and
 record server-side deadlines rounded to whole seconds and retries by attempt count, never their
-random pauses), and no Go map iteration order decides an output, so `scripts/check-fixtures.sh`
+random pauses; the 7b-3a rows replace IDs, timestamps, latencies and the ADK version by
+placeholders), and no Go map iteration order decides an output, so `scripts/check-fixtures.sh`
 reruns it into a temp dir and requires an empty `diff -r`, and asserts the per-directory file counts
 (append_rows 12, arrow 9, config 4, formatter 8, gapic 3, gcs 12, helpers 11, record_batch 27,
-redaction 2, schema 3, views 2, wire 41; 134 in all). The 7b-2 GCS captures upload four payloads of
+plugin 6, redaction 2, schema 3, views 2, wire 41; 140 in all). The 7b-2 GCS captures upload four payloads of
 about 16 MiB to a local test server and wait out the storage client's real (random, at most a few
 seconds in all) retry pauses, so a run takes a few seconds.
 
@@ -494,3 +498,124 @@ the struct with `%+v` (`{MaxRetries:-1 InitialDelay:100ms MaxDelay:10s Multiplie
 - `object_path.json` — cases `{name, gcs_path_prefix, row, upload: {content_ord, part_idx,
   mime_type}, path}`: `bp.objectPath(row, pendingUpload{...})` on a processor with `Config{GCSPathPrefix:
   gcs_path_prefix}`; every row has a `ts` timestamp (a row without one uses `time.Now()`).
+
+## 7b-3a plugin row goldens
+
+`overlay/zz_probe_7b3a_test.go.txt` (`gen7b3a`) runs ADK-Go's real plugin under an ADK runner and
+records the rows it writes, one file per scenario under `plugin/`. `tests/golden_plugin_rows.rs`
+runs the same scenarios through a gadk `Runner` and compares its rows, normalized by the same
+rules, with these files.
+
+### How a scenario runs (Go)
+
+- Plugin: `newTestPluginWithConfig` of `bigquery_agent_analytics_plugin_test.go`, i.e.
+  `NewBigQueryAgentAnalyticsPluginWithClients` over `DefaultConfig()` with `Enabled = true`,
+  `ProjectID "test-project"`, `DatasetID "test_dataset"`, `TableName "test-table"` (plus the
+  scenario's `CustomMetadataAllowlist`), a BigQuery REST client whose transport answers every
+  request `200 {}` (table creation succeeds), and a write client connected to the package's fake
+  BigQuery Storage Write server, which records every `AppendRowsRequest`.
+- `adkVersion` is pinned to `"2.0.0-probe"` while the scenarios run (a test binary has no version
+  for the replaced ADK module, and the key would be missing), so `attributes.adk.adk_version` is
+  present; it is normalized away.
+- Runner: `runner.New` with `AppName "test-app"`, the scenario's root agent,
+  `session.InMemoryService()`, `AutoCreateSession: true` and the plugin. Each turn is
+  `r.Run(ctx, "user-1", "session-1", genai.NewContentFromText(<turn>, "user"), agent.RunConfig{})`,
+  iterated to the end; errors yielded by the run are ignored (the error paths are part of the
+  scenarios).
+- After the last turn the plugin is closed (`Close` flushes the queue), and the rows of every
+  recorded `AppendRowsRequest` are decoded in order with the package's `decodeArrowRows`: a column
+  that is NULL is left out of the row, and so is an empty `content_parts` list.
+- Scripted model: `zzScriptedModel`, named `"mock"`, whose every `GenerateContent` call yields
+  exactly the next queued item (one response, or one error) and the error `"no data"` once the
+  queue is empty: `gadk_engine::testutil::MockModel::new(vec![...])`. A text item is
+  `LLMResponse{Content: genai.NewContentFromText(text, "model")}`; a call item is
+  `LLMResponse{Content: {Role "model", Parts [{FunctionCall {ID, Name, Args}}]}}`; no other response
+  field is set.
+
+### Scenarios
+
+| file | root agent | script | rows | row types |
+|---|---|---|---|---|
+| `tool_call.json` | LLM agent `weather_agent` (description "Answers weather questions.", instruction "Answer weather questions with the get_weather tool.") | model: call `get_weather {"city":"Paris"}` id `call-weather-1`; text "It is sunny in Paris." Function tool `get_weather` ("Returns the weather forecast for a city.", args `{city string}`) sets state delta `last_city = <city>` and returns `{"forecast":"sunny"}` | 13 | USER_MESSAGE_RECEIVED, INVOCATION_STARTING, AGENT_STARTING, LLM_REQUEST, LLM_RESPONSE, TOOL_STARTING, TOOL_COMPLETED, STATE_DELTA, LLM_REQUEST, LLM_RESPONSE, AGENT_RESPONSE, AGENT_COMPLETED, INVOCATION_COMPLETED |
+| `tool_error.json` | LLM agent `calc_agent` | model: call `divide {"a":1,"b":0}` id `call-divide-1`; text "Cannot divide by zero." Function tool `divide` ("Divides a by b.", args `{a int, b int}`, result `{quotient int}`) fails with `division by zero` when b is 0 | 12 | USER_MESSAGE_RECEIVED, INVOCATION_STARTING, AGENT_STARTING, LLM_REQUEST, LLM_RESPONSE, TOOL_STARTING, TOOL_ERROR, LLM_REQUEST, LLM_RESPONSE, AGENT_RESPONSE, AGENT_COMPLETED, INVOCATION_COMPLETED |
+| `transfer.json` | LLM agent `coordinator` ("Routes requests.") with sub-agent LLM agent `helper` ("Helps with anything.") | coordinator model: call `transfer_to_agent {"agent_name":"helper"}` id `call-transfer-1`; helper model: text "Helper here, how can I help?" | 15 | USER_MESSAGE_RECEIVED, INVOCATION_STARTING, AGENT_STARTING, LLM_REQUEST, LLM_RESPONSE, TOOL_STARTING, TOOL_COMPLETED, AGENT_TRANSFER, AGENT_STARTING, LLM_REQUEST, LLM_RESPONSE, AGENT_RESPONSE, AGENT_COMPLETED, AGENT_COMPLETED, INVOCATION_COMPLETED |
+| `model_error.json` | LLM agent `failing_agent` | model: error `model failure 404` | 7 | USER_MESSAGE_RECEIVED, INVOCATION_STARTING, AGENT_STARTING, LLM_REQUEST, LLM_ERROR, AGENT_ERROR, INVOCATION_ERROR |
+| `confirmation.json` | LLM agent `bank_agent` | model: call `transfer_funds {"amount":100}` id `call-funds-1`. Function tool `transfer_funds` ("Transfers funds.", args `{amount int}`, result `{status string}`, returns `{"status":"done"}`) with `RequireConfirmation: true`; the run pauses on ADK's `adk_request_confirmation` call (one turn) | 11 | USER_MESSAGE_RECEIVED, INVOCATION_STARTING, AGENT_STARTING, LLM_REQUEST, LLM_RESPONSE, TOOL_STARTING, TOOL_COMPLETED, HITL_CONFIRMATION_REQUEST, TOOL_PAUSED, AGENT_COMPLETED, INVOCATION_COMPLETED |
+| `session_signals.json` | custom agent `signal_agent` ("Emits session signals.") yielding the 8 events below; `CustomMetadataAllowlist ["adk_agent_state","end_of_agent"]` | — | 19 | USER_MESSAGE_RECEIVED, INVOCATION_STARTING, AGENT_STARTING, EVENT_COMPACTION, STATE_DELTA, AGENT_STATE_CHECKPOINT, HITL_CREDENTIAL_REQUEST, TOOL_PAUSED, HITL_CONFIRMATION_REQUEST, HITL_INPUT_REQUEST, HITL_CREDENTIAL_REQUEST_COMPLETED, HITL_CONFIRMATION_REQUEST_COMPLETED, HITL_INPUT_REQUEST_COMPLETED, A2A_INTERACTION, NODE_ERROR, NODE_OUTPUT, AGENT_RESPONSE, AGENT_COMPLETED, INVOCATION_COMPLETED |
+
+Every scenario is one turn; the user messages are "What is the weather in Paris?", "Divide 1 by
+0.", "I need help.", "Hello?", "Send 100 to Bob." and "Emit the signals.". Each fixture's `turns`
+holds them. Tool argument and result structs are serialized with the JSON names shown (lower-case).
+
+The `session_signals` events are each `session.NewEvent(ctx, invocationID)` with `Author
+"signal_agent"` and the invocation's branch (empty), and then:
+
+1. `Actions.Compaction = {StartTimestamp 2026-01-02T03:04:05Z, EndTimestamp 2026-01-02T03:04:06Z,
+   CompactedContent: text "Summary of earlier turns." role "model"}`.
+2. `CustomMetadata = {"adk_agent_state": {"step": 1}, "end_of_agent": false}`, `Actions.StateDelta =
+   {"progress": "half", "temp:scratch": "x"}`.
+3. Content role "model", one part `FunctionCall{ID "cred-1", Name "adk_request_credential", Args
+   {"auth_scheme": "oauth2"}}`; `LongRunningToolIDs ["cred-1"]`.
+4. Content role "model", parts `FunctionCall{ID "confirm-1", Name "adk_request_confirmation", Args
+   {"hint": "Approve?"}}` and `FunctionCall{ID "input-1", Name "adk_request_input", Args {"message":
+   "Your name?"}}` (not long-running).
+5. Content role "user", parts `FunctionResponse{ID "cred-1", Name "adk_request_credential", Response
+   {"token": "granted"}}`, `FunctionResponse{ID "confirm-1", Name "adk_request_confirmation",
+   Response {"confirmed": true}}`, `FunctionResponse{ID "input-1", Name "adk_request_input", Response
+   {"name": "Ada"}}`.
+6. `CustomMetadata = {"a2a:request": {"method": "message/send"}, "a2a:response": {"status":
+   "completed"}}`.
+7. `NodeInfo = {Path "signal_agent/step@1"}`, `ErrorCode "STEP_FAILED"`, `ErrorMessage "step
+   failed"`, `Output {"result": 42}`.
+8. Content `genai.NewContentFromText("All signals sent.", "model")`.
+
+Together the six files hold every row type constant of `bigquery_agent_analytics_plugin.go:54-94`
+(28; the legacy `"EVENT"` alias is a filter name, never a row type). No scenario uses a workflow
+agent, `ParallelAgent` or a parallel worker (their attribution is 7b-3b).
+
+### File format
+
+Document file, 2-space indented, keys sorted, trailing newline:
+
+```
+{"about": <prose>, "app_name": "test-app", "config": {"CustomMetadataAllowlist": [..] | null,
+ "DatasetID": "test_dataset", "ProjectID": "test-project", "TableName": "test-table"},
+ "rows": [<row>, ...], "scenario": <file stem>, "session_id": "session-1",
+ "turns": [<user text>, ...], "user_id": "user-1"}
+```
+
+`rows` are in the order the fake write server received them (= the order the plugin appended
+them). A row is the decoded Arrow row as a JSON object: string columns are strings, `is_truncated`
+a boolean, `content_parts` an array of objects (`part_index` an integer), and the JSON-typed columns
+`content`, `attributes`, `latency_ms` (and `content_parts[].object_ref.details`) are parsed JSON
+values, numbers kept as written by Go (`json.Number`), not their JSON text. `part_attributes` is a
+STRING column and stays text. `timestamp` is normalized (below). Columns that are NULL are absent.
+
+### Normalization
+
+Applied to each row, after the conversion above, by `zzNormalizeRows` (Go) and identically by the
+golden test (Rust) to its own rows. One numbering state per scenario file: for each kind, the
+distinct real values are numbered from 1 in order of first appearance, walking the rows in order
+and, inside a row, depth-first with object keys in byte-wise sorted order and array elements in
+order. Rules, by object key (at any depth unless stated):
+
+| key | replacement |
+|---|---|
+| `timestamp` (top-level column only) | `"<timestamp>"` |
+| `adk_version` | `"<adk_version>"` |
+| any key inside the top-level `latency_ms` object whose value is a number | `"<ms>"` |
+| `event_id` | `"event-N"` (the row's `event_id` column and `attributes.adk.event_id` are the same value, so they get the same N) |
+| `source_event_id` | `"source-event-N"` (session event IDs) |
+| `invocation_id` | `"invocation-N"` |
+| `span_id`, `parent_span_id` | `"span-N"` (one numbering for both, so parent links stay checkable) |
+| `trace_id` | `"trace-N"` |
+
+Only non-empty string values of the ID keys are replaced. Besides, every string value anywhere
+(not an object key) that matches `^adk-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`
+(a function call ID ADK generated, such as the `adk_request_confirmation` call) becomes
+`"adk-call-N"`. Kept as is: `session_id` (`"session-1"`, fixed by the run), `user_id`, scripted
+function call IDs (`call-*`, `cred-1`, ...), and everything else, including the compaction
+`start_timestamp`/`end_timestamp` epoch seconds (fixed by the scenario).
+
+Numbers: Go writes `float64` values without a fractional part as integers (the compaction epoch
+seconds `1767323045`); compare numbers by value (`f64`), not by JSON spelling.
