@@ -39,12 +39,12 @@
 # package, not part of gen-go-configurable: scripts/gen-go-configurable/overlay/
 # zz_t12probe_test.go.txt, whose header has the regeneration command) are counted and left out of
 # the rerun diff.
-# 7b-1/7b-2: the agentanalytics probe (scripts/gen-go-agentanalytics: an overlay test run in a
-# temp copy of ADK-Go's plugin/agentanalytics) wrote exactly 134 fixtures under
+# 7b-1/7b-2/7b-3a: the agentanalytics probe (scripts/gen-go-agentanalytics: an overlay test run in
+# a temp copy of ADK-Go's plugin/agentanalytics) wrote exactly 140 fixtures under
 # crates/gadk-agentanalytics/tests/fixtures/ (7b-1: arrow 9, config 3, formatter 8, redaction 2,
 # schema 3, views 2, wire 41; 7b-2: append_rows 12, config +1, gapic 3, gcs 12, helpers 11,
-# record_batch 27); when go and ADK-Go are present, rerunning it into a temp dir reproduces them
-# (empty diff -r).
+# record_batch 27; 7b-3a: plugin 6); when go and ADK-Go are present, rerunning it into a temp dir
+# reproduces them (empty diff -r).
 # 7b-2: the generated crates/gadk-agentanalytics/src/storagepb/google.*.rs are what
 # scripts/gen-storagepb/run.sh writes from the vendored protos (empty diff -r into a temp dir,
 # the hand-written mod.rs aside). The generator builds with its own Cargo.lock into
@@ -283,8 +283,8 @@ fi
 agentanalytics="$repo/crates/gadk-agentanalytics/tests/fixtures"
 agentanalytics_counts=""
 agentanalytics_n=0
-for spec in append_rows:12 arrow:9 config:4 formatter:8 gapic:3 gcs:12 helpers:11 record_batch:27 \
-  redaction:2 schema:3 views:2 wire:41; do
+for spec in append_rows:12 arrow:9 config:4 formatter:8 gapic:3 gcs:12 helpers:11 plugin:6 \
+  record_batch:27 redaction:2 schema:3 views:2 wire:41; do
   dir="$agentanalytics/${spec%%:*}"
   want="${spec#*:}"
   got="$(find "$dir" -type f 2>/dev/null | wc -l | tr -d ' ' || true)"
@@ -296,8 +296,8 @@ for spec in append_rows:12 arrow:9 config:4 formatter:8 gapic:3 gcs:12 helpers:1
   agentanalytics_n=$((agentanalytics_n + got))
 done
 agentanalytics_total="$(find "$agentanalytics" -type f 2>/dev/null | wc -l | tr -d ' ' || true)"
-if [ "$agentanalytics_total" -ne 134 ] || [ "$agentanalytics_n" -ne 134 ]; then
-  echo "expected 134 agentanalytics fixtures under $agentanalytics, found $agentanalytics_total" >&2
+if [ "$agentanalytics_total" -ne 140 ] || [ "$agentanalytics_n" -ne 140 ]; then
+  echo "expected 140 agentanalytics fixtures under $agentanalytics, found $agentanalytics_total" >&2
   fail=1
 fi
 agentanalytics_status="not rerun"
