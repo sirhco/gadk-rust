@@ -100,7 +100,6 @@ fn part_is(p: &Row, storage_mode: &str, text: &str) -> bool {
 }
 
 #[tokio::test(start_paused = true)]
-#[ignore = "needs Task 10"]
 async fn test_batch_processor_flush_run_end_stalled_upload_pauses_later_batches() {
     type Rows = fn(&PartsOptions) -> Vec<QueuedRow>;
     let cases: [(&str, Rows); 2] = [
@@ -210,7 +209,6 @@ async fn test_batch_processor_flush_run_end_stalled_upload_pauses_later_batches(
 }
 
 #[tokio::test(start_paused = true)]
-#[ignore = "needs Task 10"]
 async fn test_batch_processor_flush_run_end_deferred_retry_prioritizes_big_query_write() {
     const ROW_COUNT: usize = 12;
     const RETRY_LOG: &str = "pending retry on next flush";
@@ -336,7 +334,6 @@ async fn test_batch_processor_flush_run_end_deferred_retry_prioritizes_big_query
 // parity: skipped TestBatchProcessor_FlushRunEndDeferredRetryDoesNotPauseHealthyUploads: deferred to 7b-3 (its long-text row comes from probeRowWithOptions, which builds the row's content summary with buildLLMRequestContent)
 
 #[tokio::test(start_paused = true)]
-#[ignore = "needs Task 10"]
 async fn test_batch_processor_non_deferrable_flushes_do_not_defer_cut_short_uploads() {
     const INLINE_LOG: &str = "keeping the part inline";
     const RETRY_LOG: &str = "pending retry";
@@ -515,7 +512,6 @@ async fn test_batch_processor_non_deferrable_flushes_do_not_defer_cut_short_uplo
 }
 
 #[tokio::test(start_paused = true)]
-#[ignore = "needs Task 10"]
 async fn test_batch_processor_flush_run_end_failing_uploads_pause_later_batches() {
     const BATCHES: usize = 3;
     const UPLOADS: usize = 12;

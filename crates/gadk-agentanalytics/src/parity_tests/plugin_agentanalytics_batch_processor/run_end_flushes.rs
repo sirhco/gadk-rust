@@ -148,7 +148,6 @@ fn nanos(d: Duration) -> i64 {
 // ---------------------------------------------------------------------------------------------
 
 #[tokio::test(start_paused = true)]
-#[ignore = "needs Task 10"]
 async fn test_batch_processor_close_preserves_inflight_and_queued_batches_under_stalled_uploads() {
     close_cancels_inflight_stalled_upload().await;
     close_caps_upload_deadline_to_half_shutdown_timeout().await;
@@ -980,7 +979,6 @@ async fn test_batch_processor_flush_run_end_bounded_re_deferral() {
 }
 
 #[tokio::test(start_paused = true)]
-#[ignore = "needs Task 10"]
 async fn test_batch_processor_background_flush_retries_deferred_batch() {
     let server = FakeWriteServer::new();
     let (tx, mut rx) = requests();
@@ -1146,7 +1144,6 @@ struct CutShortCase {
 }
 
 #[tokio::test(start_paused = true)]
-#[ignore = "needs Task 10"]
 async fn test_batch_processor_flush_run_end_deferred_batch_retries_cut_short_uploads() {
     let cases = [
         // The second batch starts with about 1990ms of the 2s budget left, so its uploads get
@@ -1357,7 +1354,6 @@ async fn cut_short_case(tc: &CutShortCase) {
 
 // parity: adapted: the queued row is moved into the queue, so Go's check that the written row no longer holds deferred uploads is left out (pendingUploadBytes and the log cover their release)
 #[tokio::test(start_paused = true)]
-#[ignore = "needs Task 10"]
 async fn test_batch_processor_flush_run_end_succeeded_write_releases_cut_short_upload_bytes() {
     let server = FakeWriteServer::new();
     let (tx, mut rx) = requests();

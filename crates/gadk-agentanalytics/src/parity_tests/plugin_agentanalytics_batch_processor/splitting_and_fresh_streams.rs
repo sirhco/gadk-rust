@@ -1792,7 +1792,6 @@ async fn test_batch_processor_split_batch_shares_exactly_once_rotation_budget() 
 }
 
 #[tokio::test(start_paused = true)]
-#[ignore = "needs Task 10"]
 async fn test_batch_processor_deferred_retry_skips_confirmed_split_prefix() {
     #[derive(Clone, Copy)]
     enum Setup {

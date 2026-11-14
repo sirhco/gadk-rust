@@ -688,7 +688,19 @@ impl BatchProcessor {
         // A deferred batch is counted in DropStats only if a later flush drops it, so that a
         // batch that the next flush writes is not reported as dropped, and one that fails
         // again is not counted twice.
-        let (confirmed, result) = self.try_append_batch(flush_ctx, &batch).await;
+        // Go's deferred dropDeferredUploadsQuietly(batch) also runs when the write panics (a
+        // Logger that panics on the "BigQuery response" line): the reservations of the batch's
+        // deferred uploads are released before the panic goes on.
+        let appended =
+            crate::offload::uploads::catch_unwind_future(self.try_append_batch(flush_ctx, &batch))
+                .await;
+        let (confirmed, result) = match appended {
+            Ok(appended) => appended,
+            Err(panic) => {
+                self.drop_deferred_uploads_quietly(&mut batch);
+                std::panic::resume_unwind(panic);
+            }
+        };
         if let Err(err) = result {
             if flush_ctx.err().is_some() && !retry && confirmed < batch.len() {
                 // Kept before requeue_deferred_uploads logs, so that a panicking Logger
