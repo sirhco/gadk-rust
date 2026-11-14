@@ -686,6 +686,38 @@ async fn an_empty_success_body_is_a_decode_error() {
     );
 }
 
+/// Go `htransport.NewClient`: a `WithHTTPClient` client is used as is, so construction
+/// needs no Application Default Credentials and requests carry no `Authorization`, even
+/// with credentials given.
+#[tokio::test]
+async fn a_caller_http_client_skips_credentials() {
+    let env = MapEnv(
+        [(
+            "GOOGLE_APPLICATION_CREDENTIALS".to_owned(),
+            "/nonexistent/gadk-agentanalytics-adc.json".to_owned(),
+        )]
+        .into(),
+    );
+    for credentials in [None, Some(bearer_credentials("t"))] {
+        let client = ScriptedClient::json(r#"{"bucket":"b","name":"p/o.bin"}"#);
+        let options = ClientOptions {
+            credentials,
+            endpoint: Some("http://fake/storage/v1/".into()),
+            http_client: Some(client.clone()),
+            ..ClientOptions::default()
+        };
+        let o = GcsOffloader::new_with_env("b", &options, &env).unwrap();
+        o.upload_content(&Context::background(), request(Bytes::from_static(b"abc")))
+            .await
+            .unwrap();
+        assert!(
+            !client.last_request().headers.contains_key("authorization"),
+            "{:?}",
+            client.last_request().headers
+        );
+    }
+}
+
 #[test]
 fn client_options_follow_storage_new_client() {
     let mut env = MapEnv(Default::default());

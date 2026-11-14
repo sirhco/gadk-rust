@@ -190,7 +190,9 @@ pub struct ClientOptions {
     pub credentials: Option<Credentials>,
     /// Go `option.WithoutAuthentication`.
     pub without_authentication: bool,
-    /// Go `option.WithHTTPClient`; `None` builds a reqwest client.
+    /// Go `option.WithHTTPClient`; `None` builds a reqwest client. As Go's
+    /// `htransport.NewClient`, the REST clients use it as is: no Application Default
+    /// Credentials lookup and no authentication headers.
     pub http_client: Option<Arc<dyn HttpClient>>,
     /// Go `option.WithEndpoint`.
     pub endpoint: Option<String>,

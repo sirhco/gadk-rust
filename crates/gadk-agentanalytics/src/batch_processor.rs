@@ -368,6 +368,9 @@ impl BatchProcessor {
 
     /// Go `flushRunEnd()`: drains and writes the queue under one `shutdown_timeout` budget,
     /// with Go's upload shares, deferral and cooldown rules.
+    ///
+    /// Not cancellation-safe: callers must run it to completion. Dropping the future mid-await
+    /// loses the rows it already drained from the queue without counting them as dropped.
     pub async fn flush_run_end(&self) {
         let Ok(mut state) = self.flush_mu.try_lock() else {
             return;
@@ -429,6 +432,11 @@ impl BatchProcessor {
     /// flushes, waits for the ticker and the in-flight batch, drains the queue (uploads within
     /// half a `shutdown_timeout`, writes within one), closes the stream and finalizes streams
     /// as Go does.
+    ///
+    /// Not cancellation-safe: callers must run it to completion. Dropping the future mid-await
+    /// loses the rows it already drained without counting them, and (unlike Go's `sync.Once`,
+    /// which never reruns) a later `close` reruns the body after the first call was dropped or
+    /// panicked (`OnceCell::get_or_init`).
     pub async fn close(&self) {
         self.close_once
             .get_or_init(|| async {
@@ -532,7 +540,12 @@ impl BatchProcessor {
             }
             if self
                 .pending_upload_bytes
-                .compare_exchange(cur, cur + n, Ordering::SeqCst, Ordering::SeqCst)
+                .compare_exchange(
+                    cur,
+                    cur.saturating_add(n),
+                    Ordering::SeqCst,
+                    Ordering::SeqCst,
+                )
                 .is_ok()
             {
                 self.upload_budget_warned.store(false, Ordering::SeqCst);

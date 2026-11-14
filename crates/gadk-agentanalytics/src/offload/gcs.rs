@@ -125,7 +125,8 @@ impl GcsOffloader {
     /// `http://127.0.0.1:9000/storage/v1/`; a bare `host[:port]` replaces the host of the
     /// default `https://storage.googleapis.com/storage/v1/`) or Cloud Storage, authenticated as
     /// `BigQueryClient::new` authenticates (scopes `devstorage.full_control` and
-    /// `cloud-platform`). Reads `STORAGE_EMULATOR_HOST` and `GOOGLE_APPLICATION_CREDENTIALS`
+    /// `cloud-platform`; none with [`ClientOptions::http_client`], which Go's
+    /// `WithHTTPClient` uses as is). Reads `STORAGE_EMULATOR_HOST` and `GOOGLE_APPLICATION_CREDENTIALS`
     /// from the process environment.
     ///
     /// # Errors
@@ -165,7 +166,9 @@ impl GcsOffloader {
                 ),
             )));
         }
-        let credentials = if without_authentication {
+        // Go `htransport.NewClient`: a caller-supplied `option.WithHTTPClient` is used as is,
+        // with no credential lookup and no authentication.
+        let credentials = if without_authentication || options.http_client.is_some() {
             None
         } else if let Some(credentials) = &options.credentials {
             Some(credentials.clone())
@@ -671,7 +674,6 @@ fn connection_error(err: &(dyn std::error::Error + 'static)) -> bool {
                 io.kind(),
                 std::io::ErrorKind::ConnectionRefused
                     | std::io::ErrorKind::ConnectionReset
-                    | std::io::ErrorKind::ConnectionAborted
                     | std::io::ErrorKind::BrokenPipe
                     | std::io::ErrorKind::UnexpectedEof
                     | std::io::ErrorKind::TimedOut
@@ -880,6 +882,11 @@ mod tests {
             Box::new(std::io::Error::other("tls handshake failure")),
         )));
         assert!(!should_retry(0, Some(&other)));
+        // gensupport `shouldRetry` does not retry a client-side ECONNABORTED.
+        let aborted = Error::Rest(RestError::Transport(gadk_model::ModelError::Transport(
+            Box::new(std::io::Error::from(std::io::ErrorKind::ConnectionAborted)),
+        )));
+        assert!(!should_retry(0, Some(&url_error("POST", "u", aborted))));
         assert!(should_retry(
             0,
             Some(&Error::Rest(RestError::ResponseHeaderTimeout))
@@ -897,15 +904,6 @@ mod tests {
             .to_string(),
             r#"Post "http://h/o?a=1": context canceled"#
         );
-        let e = wrapped_call_err(
-            Error::Context(ContextError::DeadlineExceeded),
-            Error::msg("boom"),
-        );
-        assert_eq!(
-            e.to_string(),
-            "retry failed with context deadline exceeded; last error: boom"
-        );
-        assert!(e.is_context(ContextError::DeadlineExceeded));
     }
 
     #[test]

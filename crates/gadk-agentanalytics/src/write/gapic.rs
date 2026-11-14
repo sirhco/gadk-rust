@@ -68,8 +68,9 @@ pub(crate) const DEFAULT_AUTH_SCOPES: [&str; 3] = [
 /// gax's `x-goog-api-client` key (merged into one value, the client's replacing a caller's).
 const API_CLIENT_KEY: &str = "x-goog-api-client";
 
-/// The routing header key of the generated client.
-const REQUEST_PARAMS_KEY: &str = "x-goog-request-params";
+/// The routing header key of the generated client (also the AppendRows routing header the
+/// stream writer adds).
+pub(crate) const REQUEST_PARAMS_KEY: &str = "x-goog-request-params";
 
 /// Go `math.MaxInt32`: grpc-go's default send limit and the gapic client's
 /// `MaxCallRecvMsgSize`.

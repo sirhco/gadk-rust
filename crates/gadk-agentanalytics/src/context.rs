@@ -361,6 +361,8 @@ impl AfterFunc {
     /// Go `stop()`: `true` if it kept `f` from running, `false` if `f` has started (or the
     /// context has ended, which starts it — here on the calling thread when the watcher task
     /// has not taken it yet) or `stop` was already called. It does not wait for `f`.
+    ///
+    /// Because `f` may run inline here, `f` must not block or take locks the caller holds.
     pub fn stop(&self) -> bool {
         let take = || {
             self.slot

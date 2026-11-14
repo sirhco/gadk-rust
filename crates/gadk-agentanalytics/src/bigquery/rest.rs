@@ -162,8 +162,9 @@ impl BigQueryClient {
     /// base path, e.g. `http://127.0.0.1:9050/bigquery/v2/`; a bare `host[:port]` replaces the
     /// host of the default `https://bigquery.googleapis.com/bigquery/v2/`), else the default.
     /// They carry [`ClientOptions::credentials`], no credentials when
-    /// [`ClientOptions::without_authentication`], else Application Default Credentials with
-    /// the `bigquery` scope.
+    /// [`ClientOptions::without_authentication`] or [`ClientOptions::http_client`] is set (Go
+    /// uses a `WithHTTPClient` client as is), else Application Default Credentials with the
+    /// `bigquery` scope.
     ///
     /// # Errors
     ///
@@ -190,7 +191,10 @@ impl BigQueryClient {
                  credentials",
             )));
         }
-        let credentials = if options.without_authentication {
+        // Go `htransport.NewClient` (via `bq.NewService`): a caller-supplied
+        // `option.WithHTTPClient` is used as is, with no credential lookup and no
+        // authentication.
+        let credentials = if options.without_authentication || options.http_client.is_some() {
             None
         } else if let Some(credentials) = &options.credentials {
             Some(credentials.clone())
@@ -1169,6 +1173,36 @@ mod tests {
                 .starts_with("bigquery: constructing client: "),
             "{err}"
         );
+    }
+
+    /// Go `htransport.NewClient`: a `WithHTTPClient` client is used as is, so construction
+    /// needs no Application Default Credentials and requests carry no `Authorization`, even
+    /// with credentials given.
+    #[tokio::test]
+    async fn a_caller_http_client_skips_credentials() {
+        let env = MapEnv(HashMap::from([(
+            "GOOGLE_APPLICATION_CREDENTIALS".to_owned(),
+            "/nonexistent/gadk-agentanalytics-adc.json".to_owned(),
+        )]));
+        for credentials in [None, Some(bearer_credentials("t"))] {
+            let http = ScriptedClient::json(r#"{"tableReference":{"tableId":"t"}}"#);
+            let options = ClientOptions {
+                credentials,
+                http_client: Some(http.clone()),
+                endpoint: Some("http://bq.test/bigquery/v2/".into()),
+                ..ClientOptions::default()
+            };
+            let client = BigQueryClient::new_with_env("p", &options, &env).unwrap();
+            client
+                .get_table(&Context::background(), "p", "d", "t")
+                .await
+                .unwrap();
+            assert!(
+                !http.last_request().headers.contains_key("authorization"),
+                "{:?}",
+                http.last_request().headers
+            );
+        }
     }
 
     #[test]

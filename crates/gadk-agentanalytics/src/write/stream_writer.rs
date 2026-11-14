@@ -40,7 +40,7 @@ use crate::storagepb::{
     FinalizeWriteStreamRequest, WriteStream, write_stream,
 };
 use crate::write::arrow_batch::serialize_record;
-use crate::write::gapic::WriteClient;
+use crate::write::gapic::{REQUEST_PARAMS_KEY, WriteClient};
 use crate::write::{AppendRowsClient, code_from_rpc, is_eof};
 
 /// Go `streamWriterTraceIDPrefix`, gadk's own (Go: `google-adk-bq-logger-go`).
@@ -51,9 +51,6 @@ pub const STREAM_WRITER_TRACE_ID_PREFIX: &str = "gadk-bq-logger-rust";
 /// Go `defaultRotateTimeout`: bounds `CreateWriteStream` of a rotation and the finalization of
 /// a retired stream.
 pub(crate) const DEFAULT_ROTATE_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// The metadata key of the AppendRows routing header.
-const REQUEST_PARAMS_KEY: &str = "x-goog-request-params";
 
 /// Go `streamWriterTraceID` (a `sync.OnceValue`).
 static TRACE_ID: LazyLock<String> =
