@@ -331,8 +331,6 @@ async fn test_batch_processor_flush_run_end_deferred_retry_prioritizes_big_query
     bp.close().await;
 }
 
-// parity: skipped TestBatchProcessor_FlushRunEndDeferredRetryDoesNotPauseHealthyUploads: deferred to 7b-3 (its long-text row comes from probeRowWithOptions, which builds the row's content summary with buildLLMRequestContent)
-
 #[tokio::test(start_paused = true)]
 async fn test_batch_processor_non_deferrable_flushes_do_not_defer_cut_short_uploads() {
     const INLINE_LOG: &str = "keeping the part inline";
@@ -865,8 +863,6 @@ fn test_stream_writer_trace_id() {
         "streamWriterTraceID()"
     );
 }
-
-// parity: skipped TestBatchProcessor_AppendRowsRequestTraceID: deferred to 7b-3 (its second sub-test drives the plugin through setupTestPlugin, OnUserMessageCallback and AfterRunCallback)
 
 #[tokio::test(start_paused = true)]
 async fn test_stream_writer_permanent_status_fails_fast() {

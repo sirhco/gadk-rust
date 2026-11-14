@@ -915,9 +915,6 @@ impl std::error::Error for SharedError {
     }
 }
 
-// parity: skipped TestGCSOffloading_ConfigurablePendingUploadBytesCap: deferred to 7b-3 (needs newAddContentPlugin and addContent)
-// parity: skipped TestGCSOffloading_BuildRowPanicReleasesReservedBytes: deferred to 7b-3 (needs newAddContentPlugin and writeEvent)
-
 /// A fakeOffloader hook: succeeds after `d` unless `ctx` ends first.
 async fn after_or_done(ctx: Context, d: Duration) -> Result<(), Error> {
     tokio::select! {
@@ -1334,9 +1331,6 @@ async fn test_gcs_offloading_flush_run_end_batch_after_empty_batch_pauses_stalle
     bp.close().await;
 }
 
-// parity: skipped TestGCSOffloading_DeferredTextRetryTruncationFlag: deferred to 7b-3 (needs probeRow, which needs buildLLMRequestContent)
-// parity: skipped TestGCSOffloading_BinaryOnlyDeferralKeepsFailedTextSummary: deferred to 7b-3 (needs probeRow, which needs buildLLMRequestContent)
-
 #[tokio::test(start_paused = true)]
 async fn test_resolve_uploads_partial_outage_brownout_pauses_uploads() {
     let call_num = Arc::new(AtomicI32::new(0));
@@ -1427,5 +1421,3 @@ async fn test_resolve_uploads_concurrency_limited_brownout_pauses_uploads() {
         "uploadCooldownUntil = 0 after concurrency-limited stall, want cooldown armed"
     );
 }
-
-// parity: skipped TestGCSOffloading_FailedMultiAttributeUploadTruncatedFlag: deferred to 7b-3 (needs probeRow, which needs buildLLMRequestContent)
