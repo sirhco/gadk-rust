@@ -20,8 +20,6 @@
 //! streams, exactly-once offsets (`handleExactlyOnceError`), `newAppendRowsRequestLocked` /
 //! `serializedRequestSize`, `createCommittedWriteStream` and `streamWriterTraceID[ForVersion]`.
 
-#![allow(dead_code)] // consumer: Task 9 (batch_processor)
-
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
