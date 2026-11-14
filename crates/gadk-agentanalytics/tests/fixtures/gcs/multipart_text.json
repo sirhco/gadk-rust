@@ -1,0 +1,109 @@
+{
+  "call": {
+    "content_type": "text/plain; charset=utf-8",
+    "data": {
+      "base64": "aMOpbGxvLCBvZmZsb2FkZWQgdGV4dCDinJM=",
+      "crc32c": 1704827157,
+      "crc32c_base64": "ZZ2ZFQ==",
+      "len": 26,
+      "sha256": "51b5844a54f962da48971ae83d1d005b70df1d61ed0518059c8b02566c009c7f"
+    },
+    "path": "logs/2026-03-04/trace/span_evt_c0_p1.txt"
+  },
+  "client": {
+    "bucket": "test-bucket",
+    "endpoint": "{{SERVER}}/storage/v1/",
+    "options": "option.WithEndpoint(server+\"/storage/v1/\"), option.WithoutAuthentication()"
+  },
+  "description": "a UTF-8 text payload with the text upload content type",
+  "exchanges": [
+    {
+      "request": {
+        "body": {
+          "boundary_len": 60,
+          "len": 438,
+          "multipart": [
+            {
+              "headers": {
+                "Content-Type": [
+                  "application/json"
+                ]
+              },
+              "json": {
+                "bucket": "test-bucket",
+                "contentType": "text/plain; charset=utf-8",
+                "crc32c": "ZZ2ZFQ==",
+                "name": "logs/2026-03-04/trace/span_evt_c0_p1.txt"
+              },
+              "len": 137,
+              "sha256": "f8941b0a33ac2036b835af40cd09c23b736475611673571e9185527154e07396",
+              "text": "{\"bucket\":\"test-bucket\",\"contentType\":\"text/plain; charset=utf-8\",\"crc32c\":\"ZZ2ZFQ==\",\"name\":\"logs/2026-03-04/trace/span_evt_c0_p1.txt\"}\n"
+            },
+            {
+              "headers": {
+                "Content-Type": [
+                  "text/plain; charset=utf-8"
+                ]
+              },
+              "len": 26,
+              "sha256": "51b5844a54f962da48971ae83d1d005b70df1d61ed0518059c8b02566c009c7f"
+            }
+          ]
+        },
+        "headers": {
+          "Accept-Encoding": [
+            "gzip"
+          ],
+          "Content-Type": [
+            "multipart/related; boundary={{BOUNDARY}}"
+          ],
+          "X-Goog-Api-Client": [
+            "gccl-invocation-id/{{IDEMPOTENCY_TOKEN_1}} gccl-attempt-count/1 gl-go/{{GO_VERSION}} gccl/1.69.0"
+          ],
+          "X-Goog-Gcs-Idempotency-Token": [
+            "{{IDEMPOTENCY_TOKEN_1}}"
+          ]
+        },
+        "method": "POST",
+        "path": "/upload/storage/v1/b/test-bucket/o",
+        "query": {
+          "alt": [
+            "json"
+          ],
+          "ifGenerationMatch": [
+            "0"
+          ],
+          "name": [
+            "logs/2026-03-04/trace/span_evt_c0_p1.txt"
+          ],
+          "prettyPrint": [
+            "false"
+          ],
+          "projection": [
+            "full"
+          ],
+          "uploadType": [
+            "multipart"
+          ]
+        },
+        "raw_query": "alt=json&ifGenerationMatch=0&name=logs%2F2026-03-04%2Ftrace%2Fspan_evt_c0_p1.txt&prettyPrint=false&projection=full&uploadType=multipart"
+      },
+      "response": {
+        "body": "{\"bucket\":\"test-bucket\",\"contentType\":\"text/plain; charset=utf-8\",\"generation\":\"1\",\"kind\":\"storage#object\",\"name\":\"logs/2026-03-04/trace/span_evt_c0_p1.txt\",\"size\":\"26\"}",
+        "headers": {},
+        "status": 200
+      }
+    }
+  ],
+  "name": "multipart_text",
+  "result": {
+    "close_error": null,
+    "error": null,
+    "error_type": null,
+    "googleapi_code": null,
+    "is_owned_upload_error": false,
+    "is_precondition_failed": false,
+    "safe_upload_error_summary": null,
+    "uri": "gs://test-bucket/logs/2026-03-04/trace/span_evt_c0_p1.txt"
+  }
+}

@@ -1,16 +1,21 @@
 # gen-go-agentanalytics scenario
 
 `scripts/gen-go-agentanalytics` records what ADK-Go's `plugin/agentanalytics` (at
-`docs/parity/ADK_GO_COMMIT`) computes and sends, as fixtures for `gadk-agentanalytics` (sub-project
-7b-1, spec R1–R9): the `Config` defaults, the BigQuery and Arrow events schemas, the analytics view
+`docs/parity/ADK_GO_COMMIT`) computes and sends, as fixtures for `gadk-agentanalytics`. Sub-project
+7b-1 (spec R1–R9): the `Config` defaults, the BigQuery and Arrow events schemas, the analytics view
 SQL, the content formatter and redaction outputs over a corpus, and the BigQuery REST requests the
 `cloud.google.com/go/bigquery` v1.79.0 client sends for table creation, schema upgrade and view DDL.
+Sub-project 7b-2 (transports): Arrow record batches, AppendRows requests, the gapic BigQuery Write
+client's per-RPC metadata and retries, the Cloud Storage offloader's requests, `validateConfig`,
+CRC32C and the pure helpers of `gcs_offloader.go` (see "7b-2 fixture formats" below).
 
 It is an overlay test, not a Go module: `run.sh` copies ADK-Go's `plugin/agentanalytics/*.go` into a
 temp dir, installs `module.go.mod` / `module.go.sum` as its `go.mod` / `go.sum` (ADK-Go's
 `plugin/agentanalytics/go.mod` plus `replace google.golang.org/adk/v2 => ../../../adk-go`, rewritten to
 the absolute ADK-Go path, then `go mod tidy` under go1.26.10), adds `overlay/zz_probe_test.go.txt` as
-`zz_probe_test.go` (package `agentanalytics`, so unexported functions are callable), and runs
+`zz_probe_test.go` and `overlay/zz_probe_7b2_test.go.txt` (the 7b-2 generators, called from
+`TestGenerateFixtures`) as `zz_probe_7b2_test.go` (package `agentanalytics`, so unexported functions
+are callable), and runs
 `go test -run '^TestGenerateFixtures$'` with `AGENTANALYTICS_PROBE_OUT` set. ADK-Go is not modified.
 
 Regenerate (from the repo root):
@@ -20,14 +25,19 @@ scripts/gen-go-agentanalytics/run.sh            # writes crates/gadk-agentanalyt
 scripts/gen-go-agentanalytics/run.sh OUT_DIR    # writes OUT_DIR instead (replaced as a whole)
 ```
 
-It prints `wrote 68 fixture files`. ADK-Go is `$ADK_GO_DIR`, else `adk-go` beside the main checkout
+It prints `wrote 134 fixture files`. ADK-Go is `$ADK_GO_DIR`, else `adk-go` beside the main checkout
 (the parent of git's common dir, so it works from a git worktree), else `../adk-go`. The Go toolchain
 is `$GADK_PROBE_GOTOOLCHAIN` (default `go1.26.10`, fetched by the go command's `GOTOOLCHAIN` support
-on first use); the outputs are byte-identical under go1.26.10 and go1.27.2. The run uses no clock,
-no randomness reaches a fixture (BigQuery job IDs are replaced by `{{JOB_ID}}`), and no Go map
-iteration order decides an output, so `scripts/check-fixtures.sh` reruns it into a temp dir and
-requires an empty `diff -r`, and asserts the per-directory file counts (arrow 9, config 3,
-formatter 8, redaction 2, schema 3, views 2, wire 41; 68 in all).
+on first use); the outputs are byte-identical under go1.26.10 and go1.27.2. No clock reading and no
+randomness reaches a fixture (BigQuery job IDs are replaced by `{{JOB_ID}}`; the 7b-2 captures
+template multipart boundaries, idempotency tokens, the test server's address and the Go version, and
+record server-side deadlines rounded to whole seconds and retries by attempt count, never their
+random pauses), and no Go map iteration order decides an output, so `scripts/check-fixtures.sh`
+reruns it into a temp dir and requires an empty `diff -r`, and asserts the per-directory file counts
+(append_rows 12, arrow 9, config 4, formatter 8, gapic 3, gcs 12, helpers 11, record_batch 27,
+redaction 2, schema 3, views 2, wire 41; 134 in all). The 7b-2 GCS captures upload four payloads of
+about 16 MiB to a local test server and wait out the storage client's real (random, at most a few
+seconds in all) retry pauses, so a run takes a few seconds.
 
 To refresh `module.go.mod` / `module.go.sum` after `ADK_GO_COMMIT` moves: copy ADK-Go's
 `plugin/agentanalytics` into a temp dir, `go mod edit -replace google.golang.org/adk/v2=<abs ADK-Go>`,
@@ -260,3 +270,227 @@ empty), `maybe_upgrade_direct`; views — `view_identical_no_job`, `view_non_vie
 `jobs.insert` with the same job ID: `distinct_ids` 1), `view_no_dataset_skips_get`, `view_query_without_as_newline`,
 `view_runner_project_differs_from_client` (`tables.get` under the runner's project, `jobs.insert`
 under the client's), `view_runner_empty_project_uses_client`, `view_dropped_client`.
+
+## 7b-2 fixture formats
+
+Same conventions as above (case files / document files, `encoding/json` without HTML escaping,
+`error` = Go `err.Error()` or `null`, durations in nanoseconds unless a key says otherwise).
+`sha256` values are lowercase hex of the named bytes. Every `*_file` / `file` path is relative to
+`crates/gadk-agentanalytics/tests/fixtures/` (`file` within its own directory).
+
+### Row specs
+
+A Go row is a `map[string]any`; a fixture writes it as a **row spec**: a JSON object mapping each
+key to a **value spec** `{"t": tag, "v": value}`, or `null` for a nil map (equivalent to an empty
+row: every lookup misses). The probe builds the Go value from the spec it writes (the spec is
+round-tripped through JSON first), so the spec is exactly what Go encoded. Tags, the Go value, and
+the Rust `RowValue` (spec R1) to build:
+
+| tag | `v` | Go value | Rust `RowValue` |
+|---|---|---|---|
+| `str` | string | `string` | `Str(v)` |
+| `ts` | RFC 3339 text (any offset, up to 9 fraction digits) | `time.Time` (`time.Parse(time.RFC3339Nano, v)`) | `Timestamp(DateTime<Utc>)` of the same instant |
+| `bool` | bool | `bool` | `Bool(v)` |
+| `int64` | integer | `int64` | `Int(v)` |
+| `int` | integer | `int` | `Int(v)` (Go reads `int` and `int64` alike wherever it accepts either) |
+| `float64` | number literal | `float64` | `Float(v)` |
+| `null` | (absent) | `nil` (the key is present, its value nil) | `Null` |
+| `parts` | array of row specs or `null` | `[]map[string]any` (`null` element = nil map) | `Parts(Vec<Row>)` (`null` element = empty `Row`) |
+| `map` | object of value specs | `map[string]any` | `Map(Row)` |
+| `int32` | integer | `int32` | `Other(..)` |
+| `any_list` | array of value specs | `[]any` | `Other(..)` |
+| `str_map` | object of strings | `map[string]string` | `Other(..)` |
+| `bytes` | std base64 | `[]byte` | `Other(..)` |
+
+Every `Other` value is a type Go's type assertions reject everywhere (a scalar column → NULL,
+`content_parts` → empty list, `object_ref` → NULL struct, `part_index` → NULL, estimates → 0).
+
+### record_batch/
+
+- `corpus.json` — cases `{name, about, denied, schema_file, rows, file, byte_len, sha256, num_rows,
+  null_counts, decoded}`. Go: `bp := NewBatchProcessor(ctx, nil, "", Config{PayloadColumnDenylist:
+  denied})` (so `bp.arrowSchema = projectArrowSchema(...)`, whose serialized bytes are
+  `schema_file`: `arrow/events.arrows` or `arrow/projected_<denylist>.arrows`), `rec :=
+  bp.buildRecordBatch(rows)`, `serializeRecord(rec, nil)` → `record_batch/<file>` (`<name>.batch`).
+  `file` holds only the record batch IPC message (`ipc.GetRecordBatchPayload` + `WritePayload`:
+  continuation marker, metadata length, flatbuffer `Message`, body; no schema, no end-of-stream
+  marker). To decode it, read the IPC stream `schema_file[..len-8] ++ file ++ ff ff ff ff 00 00 00
+  00`; the probe does exactly that and checks the decoded record equals the built one.
+  `decoded` lists the decoded rows: one object per row with **every** column of the schema (sorted
+  keys): `null` for NULL, strings, bools, `timestamp` as int64 microseconds since the epoch (Go
+  `UnixMicro`: floor, so `1969-12-31T23:59:59.9999995Z` is `-1`), `content_parts` as an array of
+  objects with all 7 part fields, `object_ref` as `null` or an object with all 4 fields.
+  `null_counts` = `[[column, NullN], ...]` in schema order. Compare by decoding (arrow-rs and
+  arrow-go bytes differ, as in 7b-1); `byte_len`/`sha256` document Go's bytes. Cases: `all_columns`,
+  `empty_batch` (0 rows), `empty_row`, `nil_row`, `explicit_nil_values`, `wrong_typed_scalars`,
+  `content_parts_missing`, `content_parts_wrong_type` (5 rows), `content_parts_empty`,
+  `part_index_types` (`int64` 9007199254740993, `float64` 2.9 → 2, -2.9 → -2, 1e3 → 1000, `int`,
+  negative, then `int32`/`str`/`bool`/`null`/absent → NULL), `part_fields_wrong_type`,
+  `nested_object_ref`, `nil_part`, `unknown_and_side_channel_keys`, `timestamps` (6 rows incl.
+  year 1 and 9999), `strings_unicode_and_empty`, `booleans` (3 rows), `multi_row` (3 rows), and
+  `projected_<denylist>` for `content`, `content_parts`, `attributes`, `latency_ms`,
+  `attributes_latency_ms`, `all` (the `all_columns` row). Note `empty_row` / `nil_row` /
+  `explicit_nil_values` / `wrong_typed_scalars`: Go writes a NULL into the non-nullable `timestamp`
+  field (arrow-go allows it; the IPC validity bitmap carries it).
+- `estimate_row_bytes.json` — cases `{name, row, bytes}`: `estimateRowBytes(row)` (`row` a row spec;
+  `null` = nil map).
+- `split_batch.json` — cases `{name, rows, estimates, limit, chunk_lens}`:
+  `splitBatchByEstimatedBytes(rows, limit)` returns consecutive chunks of lengths `chunk_lens` (an
+  empty batch returns one empty chunk: `[0]`); `estimates[i] = estimateRowBytes(rows[i])`.
+
+### append_rows/
+
+- `requests.json` — cases `{name, about, stream_name, exactly_once, stream_offset, denied,
+  writer_schema_file, batch_file, num_rows, trace_id, offset, file, byte_len, sha256,
+  serialized_request_size, protojson}`. Go: `sw := newStreamWriter(ctx, nil, stream_name,
+  <writer_schema_file bytes>, Config{ExactlyOnceDelivery: exactly_once})`,
+  `sw.streamOffset.Store(stream_offset)`, `req := sw.newAppendRowsRequestLocked(<batch_file bytes or
+  nil when batch_file is null>, num_rows)`; `append_rows/<file>` (`<name>.pb`) = `proto.Marshal(req)`
+  (identical to the deterministic encoding; fields in field-number order), `byte_len` its length,
+  `serialized_request_size` = `sw.serializedRequestSize(...)` (= `proto.Size(req)` = `byte_len`).
+  `offset` = `req.Offset.Value` or `null` when unset (exactly-once only; offset 0 is a present,
+  empty `Int64Value`). `trace_id` is the probe binary's `streamWriterTraceID()`
+  (`google-adk-bq-logger-go`, see `trace_ids.json`): to compare a Rust request (whose trace id is
+  gadk's), set its `trace_id` to this value first, then compare bytes and size. `protojson` =
+  `protojson.Marshal(req)` decoded and re-encoded with sorted keys (bytes std base64, int64 as
+  strings; empty `write_stream` and zero `row_count` omitted). Cases: `default_stream`,
+  `named_stream`, `empty_stream_name`, `multi_row`, `empty_batch`, `nil_batch_bytes`,
+  `projected_schema`, `exactly_once_offset_0`, `exactly_once_offset_42`, `exactly_once_offset_large`.
+- `trace_ids.json` — `{about, cases: [{version, trace_id}], probe_adk_version, probe_trace_id}`:
+  `streamWriterTraceIDForVersion(version)`; the probe's test binary has no ADK module version in its
+  build info, so `probe_adk_version` is `""` and `probe_trace_id` the bare prefix.
+
+### gapic/
+
+The real `bqstorage.BigQueryWriteClient` (bigquery v1.79.0, `option.WithGRPCConn` to a grpc-go
+server on `127.0.0.1:0` serving a recording `BigQueryWrite` fake).
+
+- `call_options.json` — `{about, <RPC>: {timeout_ns, retry: {codes, initial_ns, max_ns,
+  multiplier} | null}}` for the six RPCs: `defaultBigQueryWriteCallOptions()` as read from a new
+  client's `CallOptions` (gax settings resolved; the `OnCodes` retryer's codes and `Backoff` read by
+  reflection). `timeout_ns` 0 = none. gax applies the timeout only when the call context has no
+  deadline, and pauses `1 + rand(cur)` ns before each retry, then `cur = min(cur*multiplier, max)`.
+- `metadata.json` — cases `{name, about, calls, result}`: `calls` = every RPC the server saw, in
+  order: `{rpc, metadata, timeout_s, request | requests}`. `metadata` = the incoming metadata
+  (`metadata.FromIncomingContext`) with sorted keys and value lists in order, `:authority` left
+  out, `gl-go/<version>` in `x-goog-api-client` written `gl-go/{{GO_VERSION}}`; it includes grpc-go's
+  own `content-type`, `grpc-accept-encoding` and `user-agent` (transport-specific: compare
+  `x-goog-request-params`, `x-goog-api-client`'s presence and the caller keys). `timeout_s` = the
+  server-side deadline's remaining time rounded to whole seconds, `null` without a deadline.
+  `request` = protojson of the unary request; AppendRows has `requests` = `[{write_stream,
+  trace_id, offset, row_count}]`. `result = {value, error}`: the created stream name, or the
+  response as protojson. Cases: `create_write_stream` (caller metadata `x-test-caller:
+  preserve-me`, 1200 s), `create_write_stream_escaped_parent`, `create_write_stream_caller_deadline`
+  (30 s caller deadline wins), `create_write_stream_caller_request_params` (the caller's
+  `x-goog-request-params` value first, then the client's), `create_write_stream_caller_api_client`
+  (a caller `x-goog-api-client` in outgoing metadata is replaced by the client's),
+  `finalize_write_stream` (600 s), `finalize_write_stream_escaped_name`, and `append_rows_*` through
+  `streamWriter.append` (no timeout; `x-goog-request-params: write_stream=<url.QueryEscape(name)>`
+  only for a non-empty stream name, plus the constructor context's metadata): `named_stream`,
+  `default_stream`, `escaped_stream`, `empty_stream_name`, `exactly_once` (offset 0).
+- `retry.json` — cases `{rpc, script, attempts, status, [open_status, send]}`: the server answers
+  call *i* with `script[i]` (`OK` = success, otherwise `status.Errorf(code, "zz scripted <Code>")`);
+  the probe keeps the default retry codes and timeouts but sets the backoff to 1 ms (pauses are
+  random; only `attempts` = calls the server saw and the final `status` = `{code, message, error}`
+  or `null` are recorded). CreateWriteStream runs through `createCommittedWriteStream` (so `error`
+  carries `failed to create committed write stream: ` and `message` is the wrapped text),
+  FinalizeWriteStream through the client, each with `[code, code, OK]` for Unavailable,
+  DeadlineExceeded, ResourceExhausted (retried: 3 attempts, success), Internal, Aborted, Unknown,
+  PermissionDenied, NotFound, InvalidArgument (1 attempt, error). AppendRows with `[code]` for
+  Unavailable, ResourceExhausted, Internal: `open_status` (`client.AppendRows(ctx)`) is `null`
+  because grpc-go's `NewStream` does not wait for the server, `status` is the first `Recv` error,
+  `send` = `{is_eof, error}` of a `Send` after that `Recv`.
+
+### gcs/
+
+One document per scenario, `gcs/<name>.json`: `newGCSOffloader(ctx, "test-bucket",
+option.WithEndpoint(server+"/storage/v1/"), option.WithoutAuthentication())` (cloud.google.com/go/
+storage v1.69.0, `STORAGE_EMULATOR_HOST` empty), one `UploadContent(ctx, GCSUploadRequest{Path,
+Data, ContentType})`, then `Close()`, against an `httptest` server answering each request in order.
+
+```
+{
+  "name", "description",
+  "client": {"bucket", "endpoint": "{{SERVER}}/storage/v1/", "options"},
+  "call": {"path", "content_type",
+           "data": {"len", "sha256", "crc32c" (uint32), "crc32c_base64" (std base64 of the
+                    big-endian bytes), "base64" | ("pattern": "i % 251", byte i = i mod 251)}},
+  "exchanges": [{"request": GReq, "response": {"status", "headers": {k: v}, "body": text}}],
+  "result": {"uri", "error", "error_type" (Go %T chain), "is_owned_upload_error", "googleapi_code",
+             "is_precondition_failed", "safe_upload_error_summary", "close_error"}
+}
+GReq = {method, path, raw_query, query: {k: [v]}, headers: {Canonical-Key: [v]}, body: GBody}
+GBody = {len, multipart: [{headers, len, sha256, text?, json?}], boundary_len}   // multipart/related
+      | {len, sha256, text?, json?}                                             // otherwise
+```
+
+- Templating: `{{SERVER}}` = the server's `http://127.0.0.1:<port>`; `{{BOUNDARY}}` = the random
+  multipart boundary (60 hex chars, `boundary_len`); `{{IDEMPOTENCY_TOKEN_n}}` = the n-th distinct
+  `X-Goog-Gcs-Idempotency-Token` (a random UUID; the storage client also sends it as
+  `gccl-invocation-id/…` in `X-Goog-Api-Client`); `gl-go/{{GO_VERSION}}`. `User-Agent` and
+  `Authorization` are not recorded; `Accept-Encoding: gzip` and `Content-Length` come from Go's
+  `net/http`.
+- Multipart parts: `text`/`json` (sorted keys) for the `application/json` metadata part — Go's
+  metadata JSON is `{"bucket","contentType","crc32c","name"}` in that order plus a trailing newline;
+  the media part by `len` + `sha256`. Other bodies: `text`/`json` when the body is JSON under
+  64 KiB, else only `len` + `sha256`.
+- Resumable uploads: the initiation `POST …/o?alt=json&ifGenerationMatch=0&name=…&prettyPrint=false
+  &projection=full&uploadType=resumable` (metadata JSON body without `crc32c`,
+  `X-Upload-Content-Type`) is answered `200` with `Location: {{SERVER}}/upload/storage/v1/b/
+  test-bucket/o?uploadType=resumable&upload_id=zz-upload-1`; each chunk is a `POST` to that
+  location with `Content-Range: bytes a-b/*` (non-final), `bytes a-b/total` or `bytes */total`
+  (an empty final chunk) and `X-Guploader-No-308: yes`; the final chunk carries `X-Goog-Hash:
+  crc32c=<base64>`. The fake answers a non-final chunk `200` with `X-Http-Status-Code-Override: 308`
+  and `Range: bytes=0-<received-1>` (what Cloud Storage does for `X-Guploader-No-308`), the final
+  chunk with the object resource. Each chunk gets a new idempotency token; a resent chunk keeps it
+  and increments `gccl-attempt-count`.
+- Error responses are Google JSON errors `{"error":{"code","message","errors":[{"message",
+  "domain":"global","reason"}]}}`.
+
+Scenarios (12): `multipart_small` (7 bytes `image/png`), `multipart_text` (UTF-8 text, `text/plain;
+charset=utf-8`), `multipart_empty` (0 bytes), `multipart_largest` (16 MiB − 1: still multipart),
+`resumable_exact_16mib` (one 16 MiB chunk `bytes 0-16777215/*` then an empty final chunk `bytes
+*/16777216`), `resumable_over_16mib` (16 MiB chunk then a 1-byte final chunk),
+`resumable_chunk_503_retried` (the first chunk answered 503 once, resent), `precondition_412`
+(success, `gs://` URI), `retry_503` (503 then 200: 2 attempts), `retry_429_then_500` (3 attempts),
+`error_403`, `error_400` (owned upload errors, 1 attempt).
+
+### config/validate_config.json
+
+Cases `{name, input, result, with_defaults}`: `input` is a Config projection (as in
+`apply_defaults.json`); `result` = `validateConfig(input)` and `with_defaults` =
+`validateConfig(applyDefaults(input))`, each `{denied, error}` with `denied` the
+PayloadColumnDenylist set sorted (`[]` when empty, `null` on error). The RetryConfig error formats
+the struct with `%+v` (`{MaxRetries:-1 InitialDelay:100ms MaxDelay:10s Multiplier:2}`: Go
+`time.Duration.String()` and `%v` floats).
+
+### helpers/
+
+- `constants.json` — document: the 7b-2 constants (`maxAppendRequestBytes`,
+  `maxSerializedAppendRequestBytes`, `perRowOverheadBytes`, `perContentPartOverheadBytes`, the three
+  `projected*` field lists, `defaultRotateTimeout_ns`, `streamWriterTraceIDPrefix`,
+  `gcsUploadTimeout_ns`, `mediaOffloadedText`, `uploadFailedText`, `textPreviewRunes`,
+  `textPreviewSuffix`, `textUploadContentType`, `missingTraceID`/`missingSpanID`/`missingEventID`,
+  `fallbackExtension`, `defaultMaxPendingUploadBytes`, `mimeExtensions` as sorted `[type, ext]`
+  pairs, the texts of `errInvalidGCSURI` / `errUploadCooldown` / `errBatchUploadTimeout`,
+  `googleapiDefaultUploadChunkSize`).
+- `crc32c.json` — cases `{name, len, crc32c, hex, base64_be, data_base64 | data_pattern}`:
+  `crc32.Checksum(data, crc32.MakeTable(crc32.Castagnoli))`; `base64_be` = std base64 of the 4
+  big-endian bytes (the `crc32c` metadata field / `X-Goog-Hash` value). Inputs over 64 bytes are
+  `data_pattern` `i % 251` of `len` bytes (1 MiB, 16 MiB).
+- `gcs_object_path.json` — cases `{args: {prefix, ts, trace_id, span_id, event_id, content_ord,
+  part_idx, ext}, path}`: `gcsObjectPath(...)`, `ts` RFC 3339.
+- `path_segment.json` — cases `{id, fallback, result}`.
+- `extension_for_mime.json` — cases `{mime_type, ext}`; only inputs answered by `mimeExtensions` or
+  the `.bin` fallback (other types consult the host's MIME tables through `mime.ExtensionsByType`).
+- `is_safe_extension.json` — cases `{ext, safe}`.
+- `text_preview.json` — cases `{name, text, preview}` (valid UTF-8 inputs only).
+- `gcs_metadata_details.json` — cases `{content_type, size, details}` (`details` is Go
+  `json.Marshal` text: HTML characters and U+2028/U+2029 escaped).
+- `strip_uri_queries.json` — cases `{input, output}`.
+- `safe_upload_error_summary.json` — cases `{name, go, error_text, summary}`: `go` is the Go
+  expression of the error, `error_text` its `Error()`; the `error type %T` summaries name Go types
+  (a Rust port maps its own error kinds to these classes).
+- `object_path.json` — cases `{name, gcs_path_prefix, row, upload: {content_ord, part_idx,
+  mime_type}, path}`: `bp.objectPath(row, pendingUpload{...})` on a processor with `Config{GCSPathPrefix:
+  gcs_path_prefix}`; every row has a `ts` timestamp (a row without one uses `time.Now()`).

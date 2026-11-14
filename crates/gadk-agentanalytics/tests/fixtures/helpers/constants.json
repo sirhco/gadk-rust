@@ -1,0 +1,99 @@
+{
+  "about": "batch_processor.go / gcs_offloader.go constants used by the 7b-2 transports; durations in *_ns.",
+  "defaultMaxPendingUploadBytes": 268435456,
+  "defaultRotateTimeout_ns": 30000000000,
+  "errBatchUploadTimeout": "batch upload timeout: context deadline exceeded",
+  "errInvalidGCSURI": "offloader returned a URI that is not a gs:// URI",
+  "errUploadCooldown": "upload skipped during timeout cooldown",
+  "fallbackExtension": ".bin",
+  "gcsUploadTimeout_ns": 10000000000,
+  "googleapiDefaultUploadChunkSize": 16777216,
+  "maxAppendRequestBytes": 8388608,
+  "maxSerializedAppendRequestBytes": 9437184,
+  "mediaOffloadedText": "[MEDIA OFFLOADED]",
+  "mimeExtensions": [
+    [
+      "application/json",
+      ".json"
+    ],
+    [
+      "application/pdf",
+      ".pdf"
+    ],
+    [
+      "audio/mpeg",
+      ".mp3"
+    ],
+    [
+      "audio/wav",
+      ".wav"
+    ],
+    [
+      "image/gif",
+      ".gif"
+    ],
+    [
+      "image/jpeg",
+      ".jpg"
+    ],
+    [
+      "image/png",
+      ".png"
+    ],
+    [
+      "image/webp",
+      ".webp"
+    ],
+    [
+      "text/plain",
+      ".txt"
+    ],
+    [
+      "video/mp4",
+      ".mp4"
+    ],
+    [
+      "video/webm",
+      ".webm"
+    ]
+  ],
+  "missingEventID": "no_event",
+  "missingSpanID": "no_span",
+  "missingTraceID": "no_trace",
+  "perContentPartOverheadBytes": 64,
+  "perRowOverheadBytes": 256,
+  "projectedContentPartStringFields": [
+    "mime_type",
+    "uri",
+    "text",
+    "part_attributes",
+    "storage_mode"
+  ],
+  "projectedObjectRefStringFields": [
+    "uri",
+    "version",
+    "authorizer",
+    "details"
+  ],
+  "projectedRowStringColumns": [
+    "event_id",
+    "event_type",
+    "agent",
+    "session_id",
+    "invocation_id",
+    "user_id",
+    "trace_id",
+    "span_id",
+    "parent_span_id",
+    "status",
+    "error_message",
+    "content",
+    "attributes",
+    "latency_ms"
+  ],
+  "streamWriterTraceIDPrefix": "google-adk-bq-logger-go",
+  "textPreviewRunes": 200,
+  "textPreviewSuffix": "... [OFFLOADED]",
+  "textUploadContentType": "text/plain; charset=utf-8",
+  "uploadFailedText": "[UPLOAD FAILED]"
+}

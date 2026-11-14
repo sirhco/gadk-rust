@@ -1,0 +1,196 @@
+{
+  "call": {
+    "content_type": "application/octet-stream",
+    "data": {
+      "crc32c": 875609659,
+      "crc32c_base64": "NDC+Ow==",
+      "len": 16777216,
+      "pattern": "i % 251",
+      "sha256": "287507f403176f1f5b22b9a4d9cb49f7d7f88ac19e406b5ae87ce109564846bd"
+    },
+    "path": "big/2026-03-04/t/s_e_c0_p0.bin"
+  },
+  "client": {
+    "bucket": "test-bucket",
+    "endpoint": "{{SERVER}}/storage/v1/",
+    "options": "option.WithEndpoint(server+\"/storage/v1/\"), option.WithoutAuthentication()"
+  },
+  "description": "exactly 16 MiB (googleapi.DefaultUploadChunkSize): a resumable upload in 16 MiB chunks",
+  "exchanges": [
+    {
+      "request": {
+        "body": {
+          "json": {
+            "bucket": "test-bucket",
+            "contentType": "application/octet-stream",
+            "name": "big/2026-03-04/t/s_e_c0_p0.bin"
+          },
+          "len": 106,
+          "sha256": "8f23a894990426a64afe5bee48beacae4a5f9f1d7bb3c7d87eaf84b8c6359afd",
+          "text": "{\"bucket\":\"test-bucket\",\"contentType\":\"application/octet-stream\",\"name\":\"big/2026-03-04/t/s_e_c0_p0.bin\"}\n"
+        },
+        "headers": {
+          "Accept-Encoding": [
+            "gzip"
+          ],
+          "Content-Length": [
+            "106"
+          ],
+          "Content-Type": [
+            "application/json"
+          ],
+          "X-Goog-Api-Client": [
+            "gccl-invocation-id/{{IDEMPOTENCY_TOKEN_1}} gccl-attempt-count/1 gl-go/{{GO_VERSION}} gccl/1.69.0"
+          ],
+          "X-Goog-Gcs-Idempotency-Token": [
+            "{{IDEMPOTENCY_TOKEN_1}}"
+          ],
+          "X-Upload-Content-Type": [
+            "application/octet-stream"
+          ]
+        },
+        "method": "POST",
+        "path": "/upload/storage/v1/b/test-bucket/o",
+        "query": {
+          "alt": [
+            "json"
+          ],
+          "ifGenerationMatch": [
+            "0"
+          ],
+          "name": [
+            "big/2026-03-04/t/s_e_c0_p0.bin"
+          ],
+          "prettyPrint": [
+            "false"
+          ],
+          "projection": [
+            "full"
+          ],
+          "uploadType": [
+            "resumable"
+          ]
+        },
+        "raw_query": "alt=json&ifGenerationMatch=0&name=big%2F2026-03-04%2Ft%2Fs_e_c0_p0.bin&prettyPrint=false&projection=full&uploadType=resumable"
+      },
+      "response": {
+        "body": "",
+        "headers": {
+          "Location": "{{SERVER}}/upload/storage/v1/b/test-bucket/o?uploadType=resumable&upload_id=zz-upload-1"
+        },
+        "status": 200
+      }
+    },
+    {
+      "request": {
+        "body": {
+          "len": 16777216,
+          "sha256": "287507f403176f1f5b22b9a4d9cb49f7d7f88ac19e406b5ae87ce109564846bd"
+        },
+        "headers": {
+          "Accept-Encoding": [
+            "gzip"
+          ],
+          "Content-Length": [
+            "16777216"
+          ],
+          "Content-Range": [
+            "bytes 0-16777215/*"
+          ],
+          "Content-Type": [
+            "application/octet-stream"
+          ],
+          "X-Goog-Api-Client": [
+            "gl-go/{{GO_VERSION}} gdcl/0.304.0 gccl-invocation-id/{{IDEMPOTENCY_TOKEN_2}} gccl-attempt-count/1"
+          ],
+          "X-Goog-Gcs-Idempotency-Token": [
+            "{{IDEMPOTENCY_TOKEN_2}}"
+          ],
+          "X-Guploader-No-308": [
+            "yes"
+          ]
+        },
+        "method": "POST",
+        "path": "/upload/storage/v1/b/test-bucket/o",
+        "query": {
+          "uploadType": [
+            "resumable"
+          ],
+          "upload_id": [
+            "zz-upload-1"
+          ]
+        },
+        "raw_query": "uploadType=resumable&upload_id=zz-upload-1"
+      },
+      "response": {
+        "body": "",
+        "headers": {
+          "Range": "bytes=0-16777215",
+          "X-Http-Status-Code-Override": "308"
+        },
+        "status": 200
+      }
+    },
+    {
+      "request": {
+        "body": {
+          "len": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "headers": {
+          "Accept-Encoding": [
+            "gzip"
+          ],
+          "Content-Length": [
+            "0"
+          ],
+          "Content-Range": [
+            "bytes */16777216"
+          ],
+          "Content-Type": [
+            "application/octet-stream"
+          ],
+          "X-Goog-Api-Client": [
+            "gl-go/{{GO_VERSION}} gdcl/0.304.0 gccl-invocation-id/{{IDEMPOTENCY_TOKEN_3}} gccl-attempt-count/1"
+          ],
+          "X-Goog-Gcs-Idempotency-Token": [
+            "{{IDEMPOTENCY_TOKEN_3}}"
+          ],
+          "X-Goog-Hash": [
+            "crc32c=NDC+Ow=="
+          ],
+          "X-Guploader-No-308": [
+            "yes"
+          ]
+        },
+        "method": "POST",
+        "path": "/upload/storage/v1/b/test-bucket/o",
+        "query": {
+          "uploadType": [
+            "resumable"
+          ],
+          "upload_id": [
+            "zz-upload-1"
+          ]
+        },
+        "raw_query": "uploadType=resumable&upload_id=zz-upload-1"
+      },
+      "response": {
+        "body": "{\"bucket\":\"test-bucket\",\"contentType\":\"application/octet-stream\",\"generation\":\"1\",\"kind\":\"storage#object\",\"name\":\"big/2026-03-04/t/s_e_c0_p0.bin\",\"size\":\"16777216\"}",
+        "headers": {},
+        "status": 200
+      }
+    }
+  ],
+  "name": "resumable_exact_16mib",
+  "result": {
+    "close_error": null,
+    "error": null,
+    "error_type": null,
+    "googleapi_code": null,
+    "is_owned_upload_error": false,
+    "is_precondition_failed": false,
+    "safe_upload_error_summary": null,
+    "uri": "gs://test-bucket/big/2026-03-04/t/s_e_c0_p0.bin"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "about": "stripURIQueries(input) = output.",
+  "cases": [
+    {"input":"no uri here","output":"no uri here"},
+    {"input":"Post \"https://storage.googleapis.com/upload/storage/v1/b/bkt/o?alt=json&name=x\": dial tcp: refused","output":"Post \"https://storage.googleapis.com/upload/storage/v1/b/bkt/o\": dial tcp: refused"},
+    {"input":"see https://example.com/a#frag, then http://x.y/z?q=1.","output":"see https://example.com/a, then http://x.y/z."},
+    {"input":"(https://h/p?x=1)","output":"(https://h/p)"},
+    {"input":"[https://h/p?x=1]","output":"[https://h/p]"},
+    {"input":"gs://bucket/obj?generation=1 and s3://b/k#f","output":"gs://bucket/obj and s3://b/k"},
+    {"input":"https://h/p?x=[REDACTED]","output":"https://h/p"},
+    {"input":"mailto:a@b?subject=x","output":"mailto:a@b?subject=x"},
+    {"input":"https://h/p?q=1;","output":"https://h/p;"},
+    {"input":"tokens ://broken and ftp://h/f?x","output":"tokens ://broken and ftp://h/f"}
+  ]
+}
