@@ -25,17 +25,10 @@
 //! [`FakeWriteServer`]; Go's `requests` channels are unbounded mpsc channels.
 
 use std::collections::BTreeMap;
-use std::io::Cursor;
 use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use arrow_array::cast::AsArray;
-use arrow_array::types::{Int64Type, TimestampMicrosecondType};
-use arrow_array::{Array, RecordBatch};
-use arrow_ipc::reader::StreamReader;
-use arrow_ipc::writer::StreamWriter as IpcStreamWriter;
-use arrow_schema::{DataType, FieldRef, Schema};
 use bytes::Bytes;
 use chrono::{DateTime, TimeZone, Utc};
 use gadk_genai::{Blob, Content, Part};
@@ -56,9 +49,6 @@ use crate::storagepb::{
 };
 use crate::testutil::fake_write_server::{AppendRowsServerStream, FakeWriteServer, UnaryCall};
 use crate::write::stream_writer::tests::{MockStream, scripted};
-
-/// The end-of-stream marker of the Arrow IPC stream format (Go `arrowEOS`).
-pub(crate) const ARROW_EOS: [u8; 8] = [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0];
 
 /// The table `scripted_committed_stream_server` names its streams after.
 pub(crate) const TEST_PARENT: &str = "projects/test-proj/datasets/test-ds/tables/agent_events";
@@ -103,143 +93,16 @@ pub(crate) fn utc(y: i32, m: u32, d: u32, h: u32, min: u32, s: u32, ns: u32) -> 
 // Arrow decoding (arrow_test_helper_test.go)
 // ---------------------------------------------------------------------------------------------
 
-/// `schema` with every top-level field nullable: arrow-rs's IPC reader rejects a NULL in a
-/// non-nullable field, and Go writes NULL `timestamp`s for rows without one.
-fn relaxed(schema: &Schema) -> Schema {
-    let fields: Vec<FieldRef> = schema
-        .fields()
-        .iter()
-        .map(|f| Arc::new(f.as_ref().clone().with_nullable(true)))
-        .collect();
-    Schema::new_with_metadata(fields, schema.metadata().clone())
-}
-
-/// The schema of a serialized writer schema (an IPC stream with or without its end marker).
-fn writer_schema(serialized: &[u8]) -> Schema {
-    let mut stream = serialized
-        .strip_suffix(&ARROW_EOS)
-        .unwrap_or(serialized)
-        .to_vec();
-    stream.extend_from_slice(&ARROW_EOS);
-    let reader = StreamReader::try_new(Cursor::new(stream), None).expect("ipc schema stream");
-    reader.schema().as_ref().clone()
-}
-
-/// The Arrow parts of `req` (Go `req.GetArrowRows()`).
-fn arrow_rows(req: &AppendRowsRequest) -> &append_rows_request::ArrowData {
-    match &req.rows {
-        Some(append_rows_request::Rows::ArrowRows(data)) => data,
-        _ => panic!("AppendRowsRequest carries no Arrow rows"),
-    }
-}
-
-/// The record batch of `req` decoded under its writer schema (made nullable, see
-/// [`relaxed`]).
-pub(crate) fn decode_record_batches(req: &AppendRowsRequest) -> Vec<RecordBatch> {
-    let data = arrow_rows(req);
-    let schema = writer_schema(
-        &data
-            .writer_schema
-            .as_ref()
-            .map(|s| s.serialized_schema.clone())
-            .unwrap_or_default(),
-    );
-    let mut writer = IpcStreamWriter::try_new(Vec::new(), &relaxed(&schema)).expect("writer");
-    writer.finish().expect("finish");
-    let mut stream = writer.into_inner().expect("into_inner");
-    stream.truncate(stream.len() - ARROW_EOS.len());
-    if let Some(rows) = &data.rows {
-        stream.extend_from_slice(&rows.serialized_record_batch);
-    }
-    stream.extend_from_slice(&ARROW_EOS);
-    StreamReader::try_new(Cursor::new(stream), None)
-        .expect("ipc stream")
-        .collect::<Result<Vec<_>, _>>()
-        .expect("reading the Arrow stream")
-}
-
-/// Go `decodeArrowRows(t, req)`: the rows of `req` as BigQuery reads them; NULLs and empty
-/// `content_parts` lists are left out. Strings are `Str`, booleans `Bool`, int64 `Int`,
-/// timestamps `Timestamp`, lists `Parts`, structs `Map`.
+/// Go `decodeArrowRows(t, req)` ([`crate::testutil::arrow_rows::decode_arrow_rows`], shared
+/// with the integration tests); panics when the request does not decode.
 pub(crate) fn decode_arrow_rows(req: &AppendRowsRequest) -> Vec<Row> {
-    let mut rows = Vec::new();
-    for rec in decode_record_batches(req) {
-        for i in 0..rec.num_rows() {
-            let mut row = Row::new();
-            for (f, col) in rec.schema().fields().iter().zip(rec.columns()) {
-                if let Some(v) = arrow_value(col.as_ref(), i) {
-                    row.insert(f.name().clone(), v);
-                }
-            }
-            rows.push(row);
-        }
-    }
-    #[allow(deprecated)]
-    let row_count = arrow_rows(req).rows.as_ref().map_or(0, |r| r.row_count);
-    assert_eq!(
-        i64::try_from(rows.len()).unwrap(),
-        row_count,
-        "decoded rows vs RowCount"
-    );
-    rows
-}
-
-/// Go `arrowValue(t, arr, i)`: `None` for NULLs and empty lists.
-pub(crate) fn arrow_value(arr: &dyn Array, i: usize) -> Option<RowValue> {
-    if arr.is_null(i) {
-        return None;
-    }
-    Some(match arr.data_type() {
-        DataType::Utf8 => RowValue::Str(arr.as_string::<i32>().value(i).to_owned()),
-        DataType::Boolean => RowValue::Bool(arr.as_boolean().value(i)),
-        DataType::Int64 => RowValue::Int(arr.as_primitive::<Int64Type>().value(i)),
-        DataType::Timestamp(_, _) => {
-            let us = arr.as_primitive::<TimestampMicrosecondType>().value(i);
-            RowValue::Timestamp(DateTime::from_timestamp_micros(us).expect("timestamp in range"))
-        }
-        DataType::List(_) => {
-            let list = arr.as_list::<i32>();
-            let offsets = list.value_offsets();
-            let (start, end) = (offsets[i] as usize, offsets[i + 1] as usize);
-            if start == end {
-                return None;
-            }
-            let values = list.values();
-            RowValue::Parts(
-                (start..end)
-                    .map(|k| match arrow_value(values.as_ref(), k) {
-                        Some(RowValue::Map(m)) => m,
-                        _ => Row::new(),
-                    })
-                    .collect(),
-            )
-        }
-        DataType::Struct(fields) => {
-            let s = arr.as_struct();
-            let mut m = Row::new();
-            for (f, col) in fields.iter().zip(s.columns()) {
-                if let Some(v) = arrow_value(col.as_ref(), i) {
-                    m.insert(f.name().clone(), v);
-                }
-            }
-            RowValue::Map(m)
-        }
-        other => panic!("unexpected Arrow type {other}"),
-    })
+    crate::testutil::arrow_rows::decode_arrow_rows(req).unwrap_or_else(|e| panic!("{e}"))
 }
 
 /// Go `arrowWriterSchemaColumns(t, req)`.
 #[allow(dead_code)] // consumer: 7b-3 (the plugin-level gcs_offloader_test.go ports)
 pub(crate) fn arrow_writer_schema_columns(req: &AppendRowsRequest) -> Vec<String> {
-    let data = arrow_rows(req);
-    let schema = writer_schema(
-        &data
-            .writer_schema
-            .as_ref()
-            .map(|s| s.serialized_schema.clone())
-            .unwrap_or_default(),
-    );
-    schema.fields().iter().map(|f| f.name().clone()).collect()
+    crate::testutil::arrow_rows::arrow_writer_schema_columns(req).unwrap_or_else(|e| panic!("{e}"))
 }
 
 /// Go `eventTypes(rows)`.

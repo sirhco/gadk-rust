@@ -22,7 +22,7 @@
 //! holding `fn test_<snake of TestName>` (`go_test_to_rust`).
 
 mod plugin_agentanalytics_batch_processor;
-mod plugin_agentanalytics_bigquery_agent_analytics_plugin;
+pub(crate) mod plugin_agentanalytics_bigquery_agent_analytics_plugin;
 mod plugin_agentanalytics_events;
 mod plugin_agentanalytics_gcs_offloader;
 mod plugin_agentanalytics_json_formatter;
