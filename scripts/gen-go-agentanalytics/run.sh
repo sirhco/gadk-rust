@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Copyright 2026 Chris Olson — Apache-2.0 (see LICENSE)
-# Regenerates the gadk-agentanalytics fixtures with ADK-Go's plugin/agentanalytics (7b-1).
+# Regenerates the gadk-agentanalytics fixtures with ADK-Go's plugin/agentanalytics (7b-1, 7b-2).
 #
 # Usage: scripts/gen-go-agentanalytics/run.sh [OUT_DIR]
 #   OUT_DIR defaults to crates/gadk-agentanalytics/tests/fixtures; it is replaced as a whole
@@ -12,7 +12,8 @@
 # The probe is an overlay test: ADK-Go's plugin/agentanalytics is copied into a temp dir, its
 # go.mod/go.sum are replaced by module.go.mod/module.go.sum (ADK-Go's module file plus
 # `replace google.golang.org/adk/v2 => <ADK-Go checkout>`, tidied under go1.26.10), and
-# overlay/zz_probe_test.go.txt is added as zz_probe_test.go. ADK-Go is never modified.
+# overlay/zz_probe_test.go.txt and overlay/zz_probe_7b2_test.go.txt are added as zz_probe_test.go
+# and zz_probe_7b2_test.go. ADK-Go is never modified.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 repo="$(cd "$here/../.." && pwd)"
@@ -39,6 +40,7 @@ cp "$go_abs"/plugin/agentanalytics/*.go "$pkg/"
 sed "s#=> ../../../adk-go#=> $go_abs#" "$here/module.go.mod" >"$pkg/go.mod"
 cp "$here/module.go.sum" "$pkg/go.sum"
 cp "$here/overlay/zz_probe_test.go.txt" "$pkg/zz_probe_test.go"
+cp "$here/overlay/zz_probe_7b2_test.go.txt" "$pkg/zz_probe_7b2_test.go"
 mkdir -p "$tmp/out"
 (cd "$pkg" && TZ=UTC GOTOOLCHAIN="$toolchain" GOFLAGS=-mod=readonly AGENTANALYTICS_PROBE_OUT="$tmp/out" \
   go test -v -count=1 -run '^TestGenerateFixtures$' .) >"$tmp/log" 2>&1 || {

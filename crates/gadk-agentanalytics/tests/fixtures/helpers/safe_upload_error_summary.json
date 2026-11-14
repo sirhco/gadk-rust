@@ -1,0 +1,21 @@
+{
+  "about": "safeUploadErrorSummary(err) = summary for the Go error built by go (error_text = err.Error()). The \"error type %T\" summaries name Go types; a Rust port maps its own error kinds to these classes.",
+  "cases": [
+    {"error_text":"context deadline exceeded","go":"context.DeadlineExceeded","name":"deadline","summary":"context deadline exceeded"},
+    {"error_text":"upload: context deadline exceeded","go":"fmt.Errorf(\"upload: %w\", context.DeadlineExceeded)","name":"deadline_wrapped","summary":"context deadline exceeded"},
+    {"error_text":"batch upload timeout: context deadline exceeded","go":"errBatchUploadTimeout","name":"batch_upload_timeout","summary":"context deadline exceeded"},
+    {"error_text":"context canceled","go":"context.Canceled","name":"canceled","summary":"context canceled"},
+    {"error_text":"offloader returned a URI that is not a gs:// URI","go":"errInvalidGCSURI","name":"invalid_gcs_uri","summary":"offloader returned a URI that is not a gs:// URI"},
+    {"error_text":"upload skipped during timeout cooldown","go":"errUploadCooldown","name":"upload_cooldown","summary":"upload skipped during timeout cooldown"},
+    {"error_text":"offloader panicked (string)","go":"offloaderPanicError{valueType: \"string\"}","name":"panic","summary":"offloader panicked (string)"},
+    {"error_text":"x: offloader panicked (*errors.errorString)","go":"fmt.Errorf(\"x: %w\", offloaderPanicError{valueType: \"*errors.errorString\"})","name":"panic_wrapped","summary":"offloader panicked (*errors.errorString)"},
+    {"error_text":"failed to write the Cloud Storage object: googleapi: Error 403: forbidden https://storage.googleapis.com/b/o?token=abc","go":"ownedUploadError{err: fmt.Errorf(\"failed to write the Cloud Storage object: %w\", &googleapi.Error{Code: 403, Message: \"forbidden https://storage.googleapis.com/b/o?token=abc\"})}","name":"owned_api_error","summary":"failed to write the Cloud Storage object: googleapi: Error 403: forbidden https://storage.googleapis.com/b/o"},
+    {"error_text":"failed to write the Cloud Storage object: Authorization: Bearer ya29.secret-token at https://h/p?sig=1","go":"ownedUploadError{err: errors.New(\"failed to write the Cloud Storage object: Authorization: Bearer ya29.secret-token at https://h/p?sig=1\")}","name":"owned_bearer","summary":"failed to write the Cloud Storage object: Authorization: [REDACTED]"},
+    {"error_text":"failed to write the Cloud Storage object: context deadline exceeded","go":"ownedUploadError{err: fmt.Errorf(\"failed to write the Cloud Storage object: %w\", context.DeadlineExceeded)}","name":"owned_deadline","summary":"context deadline exceeded"},
+    {"error_text":"googleapi: got HTTP response code 503 with body: ","go":"&googleapi.Error{Code: 503}","name":"api_error","summary":"HTTP 503"},
+    {"error_text":"custom: googleapi: Error 429: secret","go":"fmt.Errorf(\"custom: %w\", &googleapi.Error{Code: 429, Message: \"secret\"})","name":"api_error_wrapped","summary":"HTTP 429"},
+    {"error_text":"secret detail","go":"errors.New(\"secret detail\")","name":"plain_error","summary":"error type *errors.errorString"},
+    {"error_text":"secret: x","go":"fmt.Errorf(\"secret: %w\", errors.New(\"x\"))","name":"wrapped_plain_error","summary":"error type *fmt.wrapError"},
+    {"error_text":"custom secret","go":"zzCustomErr{} (a value type named zzCustomErr in package agentanalytics)","name":"custom_type","summary":"error type agentanalytics.zzCustomErr"}
+  ]
+}

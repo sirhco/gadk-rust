@@ -1,0 +1,20 @@
+{
+  "about": "isSafeExtension(ext) = safe (a dot then 1..16 ASCII letters or digits).",
+  "cases": [
+    {"ext":".png","safe":true},
+    {"ext":".PNG","safe":true},
+    {"ext":".a","safe":true},
+    {"ext":".","safe":false},
+    {"ext":"","safe":false},
+    {"ext":"png","safe":false},
+    {"ext":".tar.gz","safe":false},
+    {"ext":".a-b","safe":false},
+    {"ext":".a_b","safe":false},
+    {"ext":".ü","safe":false},
+    {"ext":".1234567890123456","safe":true},
+    {"ext":".12345678901234567","safe":false},
+    {"ext":"..","safe":false},
+    {"ext":".x/y","safe":false},
+    {"ext":".mp4","safe":true}
+  ]
+}

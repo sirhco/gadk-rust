@@ -1,0 +1,26 @@
+{
+  "about": "extensionForMIME(mime_type) = ext. Only inputs answered by mimeExtensions or by the .bin fallback are probed: other types go through Go's mime.ExtensionsByType, whose answer depends on the host's MIME tables.",
+  "cases": [
+    {"ext":".json","mime_type":"application/json"},
+    {"ext":".pdf","mime_type":"application/pdf"},
+    {"ext":".mp3","mime_type":"audio/mpeg"},
+    {"ext":".wav","mime_type":"audio/wav"},
+    {"ext":".gif","mime_type":"image/gif"},
+    {"ext":".jpg","mime_type":"image/jpeg"},
+    {"ext":".png","mime_type":"image/png"},
+    {"ext":".webp","mime_type":"image/webp"},
+    {"ext":".txt","mime_type":"text/plain"},
+    {"ext":".mp4","mime_type":"video/mp4"},
+    {"ext":".webm","mime_type":"video/webm"},
+    {"ext":".png","mime_type":"IMAGE/PNG"},
+    {"ext":".jpg","mime_type":" image/jpeg "},
+    {"ext":".txt","mime_type":"text/plain; charset=utf-8"},
+    {"ext":".txt","mime_type":"text/plain;charset=UTF-8"},
+    {"ext":".png","mime_type":"Image/Png ; q=1"},
+    {"ext":".bin","mime_type":""},
+    {"ext":".bin","mime_type":";"},
+    {"ext":".bin","mime_type":"application/x-zz-unknown"},
+    {"ext":".bin","mime_type":"zz/zz"},
+    {"ext":".bin","mime_type":"not a mime type"}
+  ]
+}

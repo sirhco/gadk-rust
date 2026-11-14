@@ -1,0 +1,114 @@
+{
+  "call": {
+    "content_type": "text/plain",
+    "data": {
+      "base64": "UEFZTE9BRC1NQVJLRVI=",
+      "crc32c": 2018747206,
+      "crc32c_base64": "eFOjRg==",
+      "len": 14,
+      "sha256": "ca68de7f9779238cb4be949a0e1f138f6253c0005cba72aa672311725597ff26"
+    },
+    "path": "p.txt"
+  },
+  "client": {
+    "bucket": "test-bucket",
+    "endpoint": "{{SERVER}}/storage/v1/",
+    "options": "option.WithEndpoint(server+\"/storage/v1/\"), option.WithoutAuthentication()"
+  },
+  "description": "400 badRequest: not retried",
+  "exchanges": [
+    {
+      "request": {
+        "body": {
+          "boundary_len": 60,
+          "len": 361,
+          "multipart": [
+            {
+              "headers": {
+                "Content-Type": [
+                  "application/json"
+                ]
+              },
+              "json": {
+                "bucket": "test-bucket",
+                "contentType": "text/plain",
+                "crc32c": "eFOjRg==",
+                "name": "p.txt"
+              },
+              "len": 87,
+              "sha256": "708070a90f0e4bc2e2c86a46aee3b79026bc25dd6bf62dfaa5381f4633e8da17",
+              "text": "{\"bucket\":\"test-bucket\",\"contentType\":\"text/plain\",\"crc32c\":\"eFOjRg==\",\"name\":\"p.txt\"}\n"
+            },
+            {
+              "headers": {
+                "Content-Type": [
+                  "text/plain"
+                ]
+              },
+              "len": 14,
+              "sha256": "ca68de7f9779238cb4be949a0e1f138f6253c0005cba72aa672311725597ff26"
+            }
+          ]
+        },
+        "headers": {
+          "Accept-Encoding": [
+            "gzip"
+          ],
+          "Content-Type": [
+            "multipart/related; boundary={{BOUNDARY}}"
+          ],
+          "X-Goog-Api-Client": [
+            "gccl-invocation-id/{{IDEMPOTENCY_TOKEN_1}} gccl-attempt-count/1 gl-go/{{GO_VERSION}} gccl/1.69.0"
+          ],
+          "X-Goog-Gcs-Idempotency-Token": [
+            "{{IDEMPOTENCY_TOKEN_1}}"
+          ]
+        },
+        "method": "POST",
+        "path": "/upload/storage/v1/b/test-bucket/o",
+        "query": {
+          "alt": [
+            "json"
+          ],
+          "ifGenerationMatch": [
+            "0"
+          ],
+          "name": [
+            "p.txt"
+          ],
+          "prettyPrint": [
+            "false"
+          ],
+          "projection": [
+            "full"
+          ],
+          "uploadType": [
+            "multipart"
+          ]
+        },
+        "raw_query": "alt=json&ifGenerationMatch=0&name=p.txt&prettyPrint=false&projection=full&uploadType=multipart"
+      },
+      "response": {
+        "body": "{\"error\":{\"code\":400,\"message\":\"badRequest\",\"errors\":[{\"message\":\"badRequest\",\"domain\":\"global\",\"reason\":\"badRequest\"}]}}",
+        "headers": {},
+        "status": 400
+      }
+    }
+  ],
+  "name": "error_400",
+  "result": {
+    "close_error": null,
+    "error": "failed to write the Cloud Storage object: googleapi: Error 400: badRequest, badRequest",
+    "error_type": [
+      "agentanalytics.ownedUploadError",
+      "*fmt.wrapError",
+      "*googleapi.Error",
+      "*apierror.APIError"
+    ],
+    "googleapi_code": 400,
+    "is_owned_upload_error": true,
+    "is_precondition_failed": false,
+    "safe_upload_error_summary": "failed to write the Cloud Storage object: googleapi: Error 400: badRequest, badRequest",
+    "uri": ""
+  }
+}
