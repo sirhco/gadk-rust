@@ -22,7 +22,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use gadk_agent::{Context, RunnableTool, Tool, ToolError};
+use gadk_agent::{Context, RunnableTool, Tool, ToolError, ToolOriginKind};
 use gadk_genai::FunctionDeclaration;
 use serde_json::{Map, Value};
 
@@ -38,7 +38,7 @@ pub(crate) const LONG_RUNNING_NOTE: &str = "NOTE: This is a long-running operati
 ///
 /// Go's `RequireConfirmationProvider` is the typed `provider` argument of
 /// [`FunctionTool::with_confirmation_provider`] / `StreamingFunctionTool::with_confirmation_provider`.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct FunctionToolConfig {
     /// The tool name.
     pub name: String,
@@ -52,6 +52,27 @@ pub struct FunctionToolConfig {
     pub is_long_running: bool,
     /// Whether every call requires a Human-in-the-Loop confirmation.
     pub require_confirmation: bool,
+    /// What [`Tool::origin_kind`] reports for the built tool (default [`ToolOriginKind::Local`],
+    /// as Go's analytics plugin classifies a `functiontool` tool, `plugin/agentanalytics/events.go`
+    /// `classifyADKToolType`). Go tells a skill tool apart by its argument types' package; gadk's
+    /// skill tools set [`ToolOriginKind::Skill`] here instead.
+    pub origin: ToolOriginKind,
+}
+
+impl Default for FunctionToolConfig {
+    /// Every field at its zero value except [`origin`](FunctionToolConfig::origin), which is
+    /// [`ToolOriginKind::Local`].
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            description: String::new(),
+            input_schema: None,
+            output_schema: None,
+            is_long_running: false,
+            require_confirmation: false,
+            origin: ToolOriginKind::Local,
+        }
+    }
 }
 
 impl FunctionToolConfig {
@@ -311,6 +332,11 @@ impl Tool for FunctionTool {
         Some(self)
     }
 
+    /// [`FunctionToolConfig::origin`] (default [`ToolOriginKind::Local`]).
+    fn origin_kind(&self) -> ToolOriginKind {
+        self.cfg.origin
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -330,5 +356,43 @@ impl RunnableTool for FunctionTool {
                 panic_message(&*payload)
             ))),
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod origin_tests {
+    use super::*;
+
+    #[derive(serde::Deserialize, schemars::JsonSchema)]
+    struct NoArgs {}
+
+    fn tool(cfg: FunctionToolConfig) -> Arc<dyn Tool> {
+        FunctionTool::new(cfg, |_ctx: Context, _args: NoArgs| async {
+            Ok::<_, ToolError>(String::new())
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn config_origin_defaults_to_local() {
+        assert_eq!(
+            FunctionToolConfig::new("t", "").origin,
+            ToolOriginKind::Local
+        );
+        assert_eq!(FunctionToolConfig::default().origin, ToolOriginKind::Local);
+    }
+
+    #[test]
+    fn function_tool_reports_its_configured_origin() {
+        let local = tool(FunctionToolConfig::new("t", ""));
+        assert_eq!(local.origin_kind(), ToolOriginKind::Local);
+        assert!(local.origin_agent().is_none());
+        assert!(local.unwrap().is_none());
+        let skill = tool(FunctionToolConfig {
+            origin: ToolOriginKind::Skill,
+            ..FunctionToolConfig::new("t", "")
+        });
+        assert_eq!(skill.origin_kind(), ToolOriginKind::Skill);
     }
 }

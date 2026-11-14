@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use gadk_agent::Context;
 use gadk_agent::ToolError;
-use gadk_agent::tool::{ConfirmationProvider, RunnableTool, Tool};
+use gadk_agent::tool::{ConfirmationProvider, RunnableTool, Tool, ToolOriginKind};
 use gadk_genai::FunctionDeclaration;
 use rmcp::model::{CallToolRequestParams, MetaObject, RequestMetaObject};
 use serde_json::{Map, Value};
@@ -136,6 +136,11 @@ impl Tool for McpTool {
 
     fn as_runnable(&self) -> Option<&dyn RunnableTool> {
         Some(self)
+    }
+
+    /// Go classifies a `tool/mcptoolset` tool as `MCP`.
+    fn origin_kind(&self) -> ToolOriginKind {
+        ToolOriginKind::Mcp
     }
 
     fn as_any(&self) -> &dyn Any {

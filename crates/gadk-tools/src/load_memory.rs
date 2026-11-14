@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use gadk_agent::tool_util::append_instructions;
-use gadk_agent::{Context, RunnableTool, Tool, ToolError};
+use gadk_agent::{Context, RunnableTool, Tool, ToolError, ToolOriginKind};
 use gadk_genai::{FunctionDeclaration, Schema, Type};
 use gadk_memory::MemoryEntry;
 use gadk_model::LlmRequest;
@@ -89,6 +89,11 @@ impl Tool for LoadMemoryTool {
 
     fn as_runnable(&self) -> Option<&dyn RunnableTool> {
         Some(self)
+    }
+
+    /// Go classifies a `tool/loadmemorytool` tool as `LOCAL`.
+    fn origin_kind(&self) -> ToolOriginKind {
+        ToolOriginKind::Local
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -177,6 +182,13 @@ mod tests {
     use chrono::{TimeZone, Timelike, Utc};
     use gadk_genai::Content;
     use serde_json::json;
+
+    #[test]
+    fn load_memory_tool_is_a_local_tool() {
+        let t = new();
+        assert_eq!(t.origin_kind(), ToolOriginKind::Local);
+        assert!(t.origin_agent().is_none());
+    }
 
     #[test]
     fn go_json_entry_zero_value_matches_go() {

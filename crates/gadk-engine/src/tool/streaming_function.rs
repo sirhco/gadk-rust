@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use futures::stream::BoxStream;
 use futures::{StreamExt, future, stream};
-use gadk_agent::{Context, StreamingTool, Tool, ToolError};
+use gadk_agent::{Context, StreamingTool, Tool, ToolError, ToolOriginKind};
 use gadk_genai::FunctionDeclaration;
 use serde_json::Value;
 
@@ -142,6 +142,12 @@ impl Tool for StreamingFunctionTool {
         Some(self)
     }
 
+    /// [`FunctionToolConfig::origin`] (default [`ToolOriginKind::Local`]: Go's streaming function
+    /// tool is a `functiontool` type too).
+    fn origin_kind(&self) -> ToolOriginKind {
+        self.cfg.origin
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -179,5 +185,33 @@ impl StreamingTool for StreamingFunctionTool {
                 ))),
             })
             .boxed()
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod origin_tests {
+    use super::*;
+
+    #[derive(serde::Deserialize, schemars::JsonSchema)]
+    struct NoArgs {}
+
+    fn tool(cfg: FunctionToolConfig) -> Arc<dyn Tool> {
+        StreamingFunctionTool::new(cfg, |_ctx: Context, _args: NoArgs| {
+            stream::empty::<Result<String, ToolError>>()
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn streaming_function_tool_reports_its_configured_origin() {
+        let local = tool(FunctionToolConfig::new("s", ""));
+        assert_eq!(local.origin_kind(), ToolOriginKind::Local);
+        assert!(local.origin_agent().is_none());
+        let skill = tool(FunctionToolConfig {
+            origin: ToolOriginKind::Skill,
+            ..FunctionToolConfig::new("s", "")
+        });
+        assert_eq!(skill.origin_kind(), ToolOriginKind::Skill);
     }
 }

@@ -22,7 +22,7 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use gadk_agent::tool::{ConfirmationProvider, RunnableTool, Tool};
+use gadk_agent::tool::{ConfirmationProvider, RunnableTool, Tool, ToolOriginKind};
 use gadk_agent::{Context, ContextDelta, ToolError};
 use gadk_auth::AuthContext;
 use gadk_session::ToolConfirmation;
@@ -160,6 +160,15 @@ fn counting_metadata(
 
 fn meta_map(v: Value) -> Map<String, Value> {
     v.as_object().unwrap().clone()
+}
+
+// The analytics origin: Go classifies a `tool/mcptoolset` tool as `MCP`.
+#[test]
+fn mcp_tool_is_an_mcp_tool() {
+    let t = mcp_tool(FakeClient::answering(vec![]));
+    assert_eq!(t.origin_kind(), ToolOriginKind::Mcp);
+    assert!(t.origin_agent().is_none());
+    assert!(t.unwrap().is_none());
 }
 
 // R3: name, description and the declaration with the schemas passed through unchanged.
