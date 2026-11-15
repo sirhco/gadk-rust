@@ -20,4 +20,5 @@
 //! Each module's owning task fills it.
 
 mod artifact_artifact_key;
+mod artifact_artifact_util;
 mod artifact_request_validation;

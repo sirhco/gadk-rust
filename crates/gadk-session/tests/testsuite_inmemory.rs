@@ -26,6 +26,7 @@ async fn test_in_memory_service() {
     run(
         SuiteOptions {
             supports_user_provided_session_id: true,
+            checks_requested_auth_configs: true,
             ..Default::default()
         },
         || async { Arc::new(InMemorySessionService::new()) as Arc<dyn SessionService> },

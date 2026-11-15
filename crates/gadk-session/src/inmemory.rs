@@ -28,9 +28,12 @@ use crate::error::SessionError;
 use crate::event::{Event, zero_time};
 use crate::service::{
     CreateRequest, DeleteRequest, GetRequest, KEY_PREFIX_APP, KEY_PREFIX_USER, ListRequest,
-    Session, SessionService, State,
+    Session, SessionService, State, compare_by_last_update,
 };
-use crate::state_util::{extract_state_deltas, merge_states, require, trim_temp_delta_state};
+use crate::state_util::{
+    check_requested_auth_configs, extract_state_deltas, merge_states, require,
+    trim_temp_delta_state,
+};
 
 type StateMap = Map<String, Value>;
 /// `(app_name, user_id, session_id)`, ordered like Go's `ordered.Encode` key.
@@ -230,12 +233,14 @@ impl SessionService for InMemorySessionService {
             let start = events.len().saturating_sub(req.num_recent_events);
             events = &events[start..];
         }
-        if let Some(after) = req.after.filter(|t| *t != zero_time()) {
-            // Events are sorted by timestamp: keep from the first one not before `after`.
-            let first = events.partition_point(|e| e.timestamp < after);
-            events = &events[first..];
-        }
-        let events = events.to_vec();
+        // Test every event rather than searching for a cut point: events are kept in append
+        // order, which need not be timestamp order (Go #2089).
+        let after = req.after.filter(|t| *t != zero_time());
+        let events: Vec<Event> = events
+            .iter()
+            .filter(|e| after.is_none_or(|after| e.timestamp >= after))
+            .cloned()
+            .collect();
         let updated_at = stored.updated_at;
         drop(inner);
 
@@ -248,7 +253,7 @@ impl SessionService for InMemorySessionService {
         require(&[("app_name", &req.app_name)])?;
 
         let inner = self.inner.read();
-        let sessions = inner
+        let mut sessions: Vec<Arc<dyn Session>> = inner
             .sessions
             .iter()
             .filter(|((app, user, _), _)| {
@@ -264,6 +269,8 @@ impl SessionService for InMemorySessionService {
                 )) as Arc<dyn Session>
             })
             .collect();
+        drop(inner);
+        sessions.sort_by(|a, b| compare_by_last_update(a.as_ref(), b.as_ref()));
         Ok(sessions)
     }
 
@@ -287,6 +294,10 @@ impl SessionService for InMemorySessionService {
         if event.response.partial {
             return Ok(());
         }
+        // A backend that persists events could not read this request back, so this one
+        // refuses it too.
+        check_requested_auth_configs(&event.actions.requested_auth_configs)
+            .map_err(|e| SessionError::Backend(format!("cannot append event: {e}").into()))?;
         // Give the event an identity if it arrived without one, the same way a missing
         // session ID is filled in on create.
         if event.id.is_empty() {

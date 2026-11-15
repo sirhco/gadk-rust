@@ -525,8 +525,27 @@ fn transfer_model(script: Vec<&'static str>) -> Arc<dyn gadk_model::Llm> {
     })
 }
 
-#[tokio::test]
-async fn test_runner_transfer_back_to_running_parent_closes_every_span() {
+// The transfer chain polls each target's stream inline (Go ranges over the nested iterator), so
+// the deepest case nests six LLM steps: about 2 MiB of stack in a debug build, over libtest's
+// default thread stack. Run it on a thread with room.
+#[test]
+fn test_runner_transfer_back_to_running_parent_closes_every_span() {
+    let run = std::thread::Builder::new()
+        .stack_size(8 << 20)
+        .spawn(|| {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(transfer_back_to_running_parent_closes_every_span())
+        })
+        .unwrap();
+    if let Err(panic) = run.join() {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+async fn transfer_back_to_running_parent_closes_every_span() {
     let cases: Vec<(&str, Vec<&'static str>, Vec<&'static str>)> = vec![
         ("parent", vec!["planner"], vec![]),
         ("peer", vec!["second"], vec!["first"]),

@@ -25,6 +25,9 @@ use gadk_platform::Platform;
 use parking_lot::RwLock;
 use serde_json::{Map, Value};
 
+use crate::artifact_util::{
+    is_artifact_ref, parse_artifact_uri, validate_artifact_reference_scope,
+};
 use crate::service::{
     ArtifactError, ArtifactService, ArtifactVersion, DeleteRequest, GetArtifactVersionRequest,
     GetArtifactVersionResponse, ListRequest, ListResponse, LoadRequest, LoadResponse, SaveRequest,
@@ -180,6 +183,87 @@ fn find<'a>(
         .map(|(k, v)| (k.version(), v))
 }
 
+/// The named artifact a [`resolve`] hop looks up, in the caller's scope (never the storage
+/// key).
+struct Scope<'a> {
+    app_name: &'a str,
+    user_id: &'a str,
+    session_id: &'a str,
+    file_name: &'a str,
+    version: i64,
+}
+
+/// Port of Go maxArtifactRefDepth: reference hops [`resolve`] follows (adk-python's
+/// `_MAX_ARTIFACT_REFERENCE_DEPTH`).
+const MAX_ARTIFACT_REF_DEPTH: i32 = 5;
+
+/// Go's `errors.New("invalid artifact reference URI")`.
+fn invalid_reference_uri() -> ArtifactError {
+    ArtifactError::InvalidRequest("invalid artifact reference URI".into())
+}
+
+/// Go's `fmt.Errorf("invalid artifact reference: %w", err)`.
+fn invalid_reference(err: String) -> ArtifactError {
+    ArtifactError::InvalidRequest(format!("invalid artifact reference: {err}"))
+}
+
+/// Port of Go inMemoryService.resolve: the entry Load reports for the named artifact,
+/// following artifact references. Each hop re-validates scope, so a reference can never escape
+/// the app/user/session it was saved under; at most [`MAX_ARTIFACT_REF_DEPTH`] reference hops
+/// are followed (the requested artifact does not count), which bounds cycles.
+fn resolve<'a>(
+    artifacts: &'a BTreeMap<ArtifactKey, ArtifactEntry>,
+    start: Scope<'_>,
+) -> Result<&'a ArtifactEntry, ArtifactError> {
+    let mut remaining_depth = MAX_ARTIFACT_REF_DEPTH;
+    let (mut app, mut user, mut session, mut file, mut version) = (
+        start.app_name.to_owned(),
+        start.user_id.to_owned(),
+        start.session_id.to_owned(),
+        start.file_name.to_owned(),
+        start.version,
+    );
+    loop {
+        // User-scoped artifacts are stored under the shared user key, but the scope check
+        // below must use the caller's scope, never the storage key; keep the two distinct.
+        let lookup_session = storage_session(&session, &file);
+        let entry = if version > 0 {
+            get(artifacts, &app, &user, lookup_session, &file, version)
+        } else {
+            // pick the latest version
+            find(artifacts, &app, &user, lookup_session, &file).map(|(_, e)| e)
+        };
+        let entry = entry.ok_or(ArtifactError::NotFound)?;
+        if !is_artifact_ref(Some(&entry.part)) {
+            return Ok(entry);
+        }
+        let uri = entry
+            .part
+            .file_data
+            .as_ref()
+            .map_or("", |f| f.file_uri.as_str());
+        // Do not echo the URI: it carries app, user, session, and file identifiers.
+        let parsed = parse_artifact_uri(uri).ok_or_else(invalid_reference_uri)?;
+        validate_artifact_reference_scope(&app, &user, &session, &parsed)
+            .map_err(invalid_reference)?;
+        remaining_depth -= 1;
+        if remaining_depth < 0 {
+            return Err(ArtifactError::InvalidRequest(format!(
+                "artifact reference resolution exceeded maximum depth of {MAX_ARTIFACT_REF_DEPTH}"
+            )));
+        }
+        // Follow the reference: the next hop is validated against the session it just
+        // followed, as adk-python resolves each hop against the URI it reached.
+        (app, user, session, file, version) = (
+            parsed.app_name,
+            parsed.user_id,
+            parsed.session_id,
+            parsed.file_name,
+            parsed.version,
+        );
+    }
+}
+
 /// Port of Go inMemoryService.get.
 fn get<'a>(
     artifacts: &'a BTreeMap<ArtifactKey, ArtifactEntry>,
@@ -196,7 +280,29 @@ fn get<'a>(
 impl ArtifactService for InMemoryArtifactService {
     /// Port of Go inMemoryService.Save.
     async fn save(&self, req: SaveRequest) -> Result<SaveResponse, ArtifactError> {
-        req.validate().map_err(validation_failed)?;
+        // Allow artifact reference parts, which carry neither text nor inline data and are
+        // only understood by this service; the scope check below re-validates that a
+        // reference stays within the caller's app/user/session.
+        req.validate_with(true).map_err(validation_failed)?;
+        if is_artifact_ref(req.part.as_ref()) {
+            let uri = req
+                .part
+                .as_ref()
+                .and_then(|p| p.file_data.as_ref())
+                .map_or("", |f| f.file_uri.as_str());
+            // Do not echo the URI: it carries app, user, session, and file identifiers,
+            // which are caller data.
+            let parsed = parse_artifact_uri(uri).ok_or_else(invalid_reference_uri)?;
+            // Check the caller's session before the user-scope rewrite, so the scope is
+            // validated against the caller, matching Load's per-hop rule.
+            validate_artifact_reference_scope(
+                &req.app_name,
+                &req.user_id,
+                &req.session_id,
+                &parsed,
+            )
+            .map_err(invalid_reference)?;
+        }
         let session_id = storage_session(&req.session_id, &req.file_name);
         let custom_metadata: Map<String, Value> = req
             .custom_metadata
@@ -242,32 +348,20 @@ impl ArtifactService for InMemoryArtifactService {
         })
     }
 
-    /// Port of Go inMemoryService.Load.
+    /// Port of Go inMemoryService.Load: follows `artifact://` references.
     async fn load(&self, req: LoadRequest) -> Result<LoadResponse, ArtifactError> {
         req.validate().map_err(validation_failed)?;
-        let session_id = storage_session(&req.session_id, &req.file_name);
         let artifacts = self.artifacts.read();
-        let entry = if req.version > 0 {
-            get(
-                &artifacts,
-                &req.app_name,
-                &req.user_id,
-                session_id,
-                &req.file_name,
-                req.version,
-            )
-        } else {
-            // pick the latest version
-            find(
-                &artifacts,
-                &req.app_name,
-                &req.user_id,
-                session_id,
-                &req.file_name,
-            )
-            .map(|(_, e)| e)
-        };
-        let entry = entry.ok_or(ArtifactError::NotFound)?;
+        let entry = resolve(
+            &artifacts,
+            Scope {
+                app_name: &req.app_name,
+                user_id: &req.user_id,
+                session_id: &req.session_id,
+                file_name: &req.file_name,
+                version: req.version,
+            },
+        )?;
         Ok(LoadResponse {
             part: Some(entry.part.clone()),
         })
@@ -387,11 +481,14 @@ impl ArtifactService for InMemoryArtifactService {
                 "memory://apps/{app}/users/{user}/sessions/{session}/artifacts/{file}/versions/{version}"
             )
         };
-        let mime_type = entry
-            .part
-            .inline_data
-            .as_ref()
-            .map_or_else(|| "text/plain".to_owned(), |b| b.mime_type.clone());
+        // Report the media type the same way adk-python's in-memory service does: inline data
+        // carries its own, text is text/plain, and a reference has no media type until it is
+        // loaded.
+        let mime_type = match &entry.part.inline_data {
+            Some(b) => b.mime_type.clone(),
+            None if !entry.part.text.is_empty() => "text/plain".to_owned(),
+            None => String::new(),
+        };
         Ok(GetArtifactVersionResponse {
             artifact_version: Some(ArtifactVersion {
                 version,

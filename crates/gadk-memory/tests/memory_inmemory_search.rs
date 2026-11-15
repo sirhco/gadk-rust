@@ -19,7 +19,9 @@
 
 use chrono::{DateTime, Utc};
 use gadk_genai::{Content, Part, ROLE_MODEL, ROLE_USER};
-use gadk_memory::{InMemoryMemoryService, MemoryService, SearchRequest};
+use gadk_memory::{
+    AddEventsRequest, InMemoryMemoryService, MemoryService, SearchRequest, add_events_to_memory,
+};
 use gadk_session::{Event, Session, SessionError, State, zero_time};
 use serde_json::Value;
 
@@ -328,4 +330,179 @@ async fn test_in_memory_service_search_memory_skips_thought_parts() {
         got[0].content,
         Some(Content::from_parts(vec![visible], ROLE_MODEL))
     );
+}
+
+/// Go addEvents (memory/inmemory_test.go): adds `events` to the bucket `session_id` of ("app",
+/// "user").
+async fn add_events(s: &InMemoryMemoryService, session_id: &str, events: Vec<Event>) {
+    add_events_to_memory(
+        s,
+        AddEventsRequest {
+            app_name: "app".into(),
+            user_id: "user".into(),
+            session_id: session_id.into(),
+            events,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap_or_else(|e| panic!("AddEventsToMemory({session_id:?}) error = {e}"));
+}
+
+#[tokio::test]
+async fn test_in_memory_service_search_memory_preserves_blob_parts_and_skips_thoughts_in_added_events()
+ {
+    let s = InMemoryMemoryService::new();
+    let mut ev = Event {
+        id: "mixed".into(),
+        ..Default::default()
+    };
+    ev.response.content = Some(Content::from_parts(
+        vec![
+            Part::from_bytes(b"abc".to_vec().into(), "text/plain"),
+            Part {
+                text: "secretplan".into(),
+                thought: true,
+                ..Default::default()
+            },
+            Part::from_text("hello world"),
+        ],
+        ROLE_MODEL,
+    ));
+    add_events(&s, "s1", vec![ev]).await;
+
+    assert!(
+        search(&s, "secretplan").await.is_empty(),
+        "SearchMemory(\"secretplan\") matched thought text"
+    );
+
+    let got = search(&s, "hello").await;
+    assert_eq!(got.len(), 1, "SearchMemory(\"hello\") entries");
+    let want = vec![
+        Part::from_bytes(b"abc".to_vec().into(), "text/plain"),
+        Part::from_text("hello world"),
+    ];
+    assert_eq!(
+        got[0].content.as_ref().unwrap().parts,
+        want,
+        "SearchMemory() parts mismatch"
+    );
+}
+
+#[tokio::test]
+async fn test_in_memory_service_search_memory_tokenization_nfc_and_script_splitting() {
+    let nfd_japanese: String = {
+        use unicode_normalization::UnicodeNormalization;
+        "プログラミングを学ぶ".nfd().collect()
+    };
+    let cases: [(&str, &str, &str, usize); 14] = [
+        (
+            "embedded Latin word",
+            "私はPythonでADKを使っています",
+            "Python",
+            1,
+        ),
+        (
+            "embedded Latin word lowercase query",
+            "私はPythonでADKを使っています",
+            "adk",
+            1,
+        ),
+        (
+            "embedded underscore word",
+            "私はmy_var_nameとcafé_1を使う",
+            "my_var_name",
+            1,
+        ),
+        (
+            "embedded accented word",
+            "私はmy_var_nameとcafé_1を使う",
+            "café_1",
+            1,
+        ),
+        ("query is not split", "Python", "私はPython", 0),
+        (
+            "ordinal indicators are not Latin",
+            "私はªPythonºを使う",
+            "Python",
+            1,
+        ),
+        (
+            "NFD event NFC query",
+            "私はCafe\u{301}でADKを使っています",
+            "Café",
+            1,
+        ),
+        (
+            "NFD event NFC lowercase query",
+            "私はCafe\u{301}でADKを使っています",
+            "café",
+            1,
+        ),
+        (
+            "NFD event other word",
+            "私はCafe\u{301}でADKを使っています",
+            "Ruby",
+            0,
+        ),
+        ("NFC event NFD query", "Meet at the Café", "Cafe\u{301}", 1),
+        ("NFD Japanese event", &nfd_japanese, "プログラミング", 1),
+        (
+            "NFD Korean event",
+            "\u{110c}\u{1166} \u{110b}\u{1175}\u{1105}\u{1173}\u{11b7}\u{110b}\u{1173}\u{11ab} \u{1106}\u{1175}\u{11ab}\u{1109}\u{116e}\u{110b}\u{1175}\u{11b8}\u{1102}\u{1175}\u{1103}\u{1161}",
+            "민수입니다",
+            1,
+        ),
+        (
+            "Devanagari prefix",
+            "\u{939}\u{93f}\u{928}\u{94d}\u{926}\u{940}",
+            "\u{939}",
+            1,
+        ),
+        (
+            "uncomposed combining mark separates words",
+            "q\u{301}",
+            "q",
+            1,
+        ),
+    ];
+    for (name, text, query, want) in cases {
+        let s = InMemoryMemoryService::new();
+        add_events(&s, "s1", vec![memory_text_event("event", &[text])]).await;
+        assert_eq!(
+            search(&s, query).await.len(),
+            want,
+            "{name}: SearchMemory() entries"
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_in_memory_service_search_memory_full_unicode_lowercasing() {
+    let cases: [(&str, &str, &str, usize); 5] = [
+        ("final sigma", "οδος", "ΟΔΟΣ", 1),
+        (
+            "final sigma in event text matched as substring",
+            "私はΟΔΟΣ",
+            "οδος",
+            1,
+        ),
+        ("dotted capital I", "İstanbul", "istanbul", 0),
+        (
+            "dotted capital I splits a run in CJK text",
+            "私はİstanbulに",
+            "stanbul",
+            1,
+        ),
+        ("Kelvin sign lowercases to ASCII", "kiwi", "\u{212a}", 0),
+    ];
+    for (name, text, query, want) in cases {
+        let s = InMemoryMemoryService::new();
+        add_events(&s, "s1", vec![memory_text_event("event", &[text])]).await;
+        assert_eq!(
+            search(&s, query).await.len(),
+            want,
+            "{name}: SearchMemory() entries"
+        );
+    }
 }

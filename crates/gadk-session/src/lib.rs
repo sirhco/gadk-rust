@@ -20,6 +20,7 @@ mod error;
 mod event;
 mod inmemory;
 mod legacy;
+mod requested_auth;
 mod service;
 pub mod state_util;
 mod tool_confirmation;
@@ -40,6 +41,6 @@ pub use event::{
 pub use inmemory::InMemorySessionService;
 pub use service::{
     CreateRequest, DeleteRequest, GetRequest, KEY_PREFIX_APP, KEY_PREFIX_TEMP, KEY_PREFIX_USER,
-    ListRequest, ReadonlyState, Session, SessionService, State,
+    ListRequest, ReadonlyState, Session, SessionService, State, compare_by_last_update,
 };
 pub use tool_confirmation::ToolConfirmation;

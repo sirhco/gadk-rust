@@ -427,3 +427,36 @@ fn test_event_actions_json_delta_map_encoding() {
         );
     }
 }
+
+// TestEventJSONEncodesRequestedAuthConfigsAsGiven pins that encoding an event does not check its
+// credential requests, so serialization does not fail on such an event for every caller that
+// encodes one. Session services check a request when the event is appended instead; the
+// session testsuite pins that for every backend.
+#[test]
+fn test_event_json_encodes_requested_auth_configs_as_given() {
+    // toolauth::Config's decoder refuses this config: its scheme has no type.
+    let mut event = Event {
+        id: "e".into(),
+        author: "a".into(),
+        ..Default::default()
+    };
+    event.actions.requested_auth_configs = BTreeMap::from([(
+        "call-1".into(),
+        toolauth::Config {
+            credential_key: "k".into(),
+            ..Default::default()
+        },
+    )]);
+
+    let b = serde_json::to_vec(&event).expect("Marshal() failed");
+
+    let wire: Value = serde_json::from_slice(&b).expect("Unmarshal() failed");
+    let want = json!({"call-1": {
+        "authScheme": {"type": ""},
+        "credentialKey": "k",
+    }});
+    assert_eq!(
+        wire["actions"]["requestedAuthConfigs"], want,
+        "actions.requestedAuthConfigs mismatch"
+    );
+}

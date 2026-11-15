@@ -158,7 +158,6 @@ fn test_is_final_response_nil_parts() {
     }
 }
 
-#[ignore = "8a bug: Event::is_final_response does not treat a complete (non-partial) error event without function calls as final (Go #2285 d9ecb345)"]
 #[test]
 fn test_is_final_response_error_event() {
     let cases: [(&str, &str, bool, Vec<Part>, bool); 6] = [

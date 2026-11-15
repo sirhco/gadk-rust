@@ -73,6 +73,41 @@ async fn fetch_user_state(
     )
 }
 
+/// Go `lockStateRow` for the app row: insert an empty row if absent (on conflict do nothing) so
+/// the locked read that follows (`for_update`) finds a row to lock.
+async fn lock_app_state_row(
+    tx: &mut Tx,
+    app_name: &str,
+    now: DateTime<Utc>,
+) -> Result<(), SessionError> {
+    let empty = AppStateRow {
+        app_name: app_name.to_string(),
+        state: "{}".to_string(),
+        update_time: now,
+    };
+    tx.insert_app_state_if_absent(&empty)
+        .await
+        .map_err(|e| wrap("failed to lock app state", e))
+}
+
+/// Go `lockStateRow` for the user row (see [`lock_app_state_row`]).
+async fn lock_user_state_row(
+    tx: &mut Tx,
+    app_name: &str,
+    user_id: &str,
+    now: DateTime<Utc>,
+) -> Result<(), SessionError> {
+    let empty = UserStateRow {
+        app_name: app_name.to_string(),
+        user_id: user_id.to_string(),
+        state: "{}".to_string(),
+        update_time: now,
+    };
+    tx.insert_user_state_if_absent(&empty)
+        .await
+        .map_err(|e| wrap("failed to lock user state", e))
+}
+
 /// Go `fetchAllAppStorageUserState`: every user's state for the app, by user ID.
 async fn fetch_all_user_states(
     tx: &mut Tx,
@@ -174,12 +209,21 @@ impl SessionService for DatabaseSessionService {
             .begin_write(self.log.clone())
             .await
             .map_err(errors::raw)?;
-        let mut app_state = fetch_app_state(&mut tx, &req.app_name, false)
+        // Lock the shared rows this session's state changes, app before user, for the same
+        // reasons and in the same order as `apply_event` (Go #1930).
+        if !app_delta.is_empty() {
+            lock_app_state_row(&mut tx, &req.app_name, now).await?;
+        }
+        let mut app_state = fetch_app_state(&mut tx, &req.app_name, !app_delta.is_empty())
             .await
             .map_err(|e| wrap("error on create session", e))?;
-        let mut user_state = fetch_user_state(&mut tx, &req.app_name, &req.user_id, false)
-            .await
-            .map_err(|e| wrap("error on create session", e))?;
+        if !user_delta.is_empty() {
+            lock_user_state_row(&mut tx, &req.app_name, &req.user_id, now).await?;
+        }
+        let mut user_state =
+            fetch_user_state(&mut tx, &req.app_name, &req.user_id, !user_delta.is_empty())
+                .await
+                .map_err(|e| wrap("error on create session", e))?;
         let app = Scope::App {
             app_name: &req.app_name,
         };
@@ -270,10 +314,19 @@ impl SessionService for DatabaseSessionService {
             .begin_read(self.log.clone())
             .await
             .map_err(errors::raw)?;
-        let rows = tx
+        let mut rows = tx
             .list_sessions(&req.app_name, user_filter)
             .await
             .map_err(|e| wrap("database error while fetching session", e))?;
+        // Sort here rather than with ORDER BY: SQLite stores update_time as RFC 3339 text with
+        // the value's own offset, so it would compare text, not instants, for rows written in
+        // different zones. Same order as `gadk_session::compare_by_last_update` (Go #1919).
+        rows.sort_by(|a, b| {
+            a.update_time
+                .cmp(&b.update_time)
+                .then_with(|| a.user_id.cmp(&b.user_id))
+                .then_with(|| a.id.cmp(&b.id))
+        });
         let app_state = fetch_app_state(&mut tx, &req.app_name, false)
             .await
             .map_err(|e| wrap("error on list sessions", e))?;
@@ -324,6 +377,11 @@ impl SessionService for DatabaseSessionService {
             .begin_write(self.log.clone())
             .await
             .map_err(errors::raw)?;
+        // Delete the events explicitly instead of relying on the ON DELETE CASCADE foreign key:
+        // SQLite enforces foreign keys only when the connection enables them (Go #1774).
+        tx.delete_session_events(&req.app_name, &req.user_id, &req.session_id)
+            .await
+            .map_err(|e| wrap("database error during session events deletion", e))?;
         tx.delete_session(&req.app_name, &req.user_id, &req.session_id)
             .await
             .map_err(|e| wrap("database error during session deletion", e))?;
@@ -339,6 +397,12 @@ impl SessionService for DatabaseSessionService {
         if event.response.partial {
             return Ok(());
         }
+        // A stored request that does not decode would fail every later read of the session.
+        // Checked before the local session takes the event.
+        gadk_session::state_util::check_requested_auth_configs(
+            &event.actions.requested_auth_configs,
+        )
+        .map_err(|e| errors::message(format!("cannot append event: {e}")))?;
         // Give the event an identity if it arrived without one, as the in-memory service does.
         if event.id.is_empty() {
             event.id = self.platform.new_uuid();
@@ -394,26 +458,11 @@ impl DatabaseSessionService {
 
         // Lock and read the app row before touching the user row: Create writes app then user.
         if !app_delta.is_empty() {
-            let empty = AppStateRow {
-                app_name: app_name.to_string(),
-                state: "{}".to_string(),
-                update_time: event.timestamp,
-            };
-            tx.insert_app_state_if_absent(&empty)
-                .await
-                .map_err(|e| wrap("failed to lock app state", e))?;
+            lock_app_state_row(&mut tx, app_name, event.timestamp).await?;
         }
         let mut app_state = fetch_app_state(&mut tx, app_name, !app_delta.is_empty()).await?;
         if !user_delta.is_empty() {
-            let empty = UserStateRow {
-                app_name: app_name.to_string(),
-                user_id: user_id.to_string(),
-                state: "{}".to_string(),
-                update_time: event.timestamp,
-            };
-            tx.insert_user_state_if_absent(&empty)
-                .await
-                .map_err(|e| wrap("failed to lock user state", e))?;
+            lock_user_state_row(&mut tx, app_name, user_id, event.timestamp).await?;
         }
         let mut user_state =
             fetch_user_state(&mut tx, app_name, user_id, !user_delta.is_empty()).await?;

@@ -508,6 +508,48 @@ async fn test_in_memory_service_append_event_copies_compaction() {
     );
 }
 
+// TestInMemoryService_AppendEvent_CopiesRequestedAuthConfigs pins that a write to the map the
+// caller passed in does not reach the stored event.
+#[tokio::test]
+async fn test_in_memory_service_append_event_copies_requested_auth_configs() {
+    let service = InMemorySessionService::new();
+    let sess = create(&service, "app", "user").await;
+    let api_key = gadk_session::toolauth::Scheme {
+        r#type: gadk_session::toolauth::SchemeType::API_KEY,
+        r#in: "header".into(),
+        name: "X-Key".into(),
+        ..Default::default()
+    };
+    let config = |key: &str| gadk_session::toolauth::Config {
+        auth_scheme: api_key.clone(),
+        credential_key: key.into(),
+        ..Default::default()
+    };
+    let mut event = Event {
+        id: "e1".into(),
+        author: "agent".into(),
+        ..Default::default()
+    };
+    event.actions.requested_auth_configs = BTreeMap::from([("call-1".into(), config("k1"))]);
+    service
+        .append_event(sess.as_ref(), &mut event)
+        .await
+        .unwrap();
+
+    event
+        .actions
+        .requested_auth_configs
+        .insert("call-2".into(), config("k2"));
+
+    let got = get(&service, sess.as_ref()).await;
+    let stored = &got.events()[0].actions.requested_auth_configs;
+    assert!(
+        !stored.contains_key("call-2") && stored.len() == 1,
+        "stored RequestedAuthConfigs has {} entries, want only call-1: the caller's write reached the stored event",
+        stored.len()
+    );
+}
+
 type ActionWrite = fn(&mut Event);
 
 // In Go this guards a fatal concurrent map read/write: `Session.Events` hands out the live
@@ -818,7 +860,6 @@ async fn create_with_id(svc: &InMemorySessionService, user: &str, id: &str) -> A
 }
 
 // parity: adapted: Go injects the create time per call via ctx; gadk uses one service Platform whose clock the test moves
-#[ignore = "8a bug: InMemorySessionService::list returns sessions in (app, user, id) key order, not by last update time ascending (Go #1919 8be7e250)"]
 #[tokio::test]
 async fn test_in_memory_service_list_ordered_by_last_update_time() {
     let (svc, clock) = clocked();
@@ -855,7 +896,6 @@ async fn test_in_memory_service_list_ordered_by_last_update_time() {
 // TestInMemoryService_Get_AfterWithOutOfOrderTimestamps checks the After filter when events were
 // not appended in timestamp order. An event carries the time it was created, or one its producer
 // set, not the time it was appended.
-#[ignore = "8a bug: InMemorySessionService::get binary-searches `after` (partition_point) over events kept in append order, so out-of-order timestamps drop events at or after After or keep ones before it (Go #2089 10395f01)"]
 #[tokio::test]
 async fn test_in_memory_service_get_after_with_out_of_order_timestamps() {
     let svc = InMemorySessionService::new();
@@ -909,7 +949,6 @@ async fn test_in_memory_service_get_after_with_out_of_order_timestamps() {
 // comparator directly because List scans a map ordered by (app, user, session), so ties already
 // arrive in tie-break order there; that holds for gadk's BTreeMap too.
 // parity: adapted: gadk has no compareByLastUpdate; the order is checked through List across users, with the create times set on the service's moved clock
-#[ignore = "8a bug: InMemorySessionService::list does not order by last update time, then user ID, then session ID (Go #1919 8be7e250)"]
 #[tokio::test]
 async fn test_compare_by_last_update() {
     let (svc, clock) = clocked();

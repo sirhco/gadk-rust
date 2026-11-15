@@ -186,7 +186,7 @@ impl Config {
     }
 
     /// Go `Config.UnmarshalJSON`: `decodeModel(data, …, "Config", "authScheme")`.
-    fn decode(raw: &RawValue) -> Result<Config, String> {
+    pub(crate) fn decode(raw: &RawValue) -> Result<Config, String> {
         let mut d = decode_object(raw, "Config", CONFIG_ALIASES, true, &["authScheme"])?;
         let auth_scheme = d
             .take::<Scheme>("authScheme", "Config", "toolauth.Scheme")?

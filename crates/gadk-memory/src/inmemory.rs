@@ -20,15 +20,27 @@ use std::collections::{HashMap, HashSet};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use gadk_genai::Content;
-use gadk_session::{Session, zero_time};
+use gadk_session::{Event, Session, zero_time};
 use parking_lot::RwLock;
 use serde_json::{Map, Value};
+use unicode_normalization::UnicodeNormalization;
 use unicode_properties::{GeneralCategoryGroup, UnicodeGeneralCategory};
 
-use crate::service::{MemoryEntry, MemoryError, MemoryService, SearchRequest, SearchResponse};
+use crate::service::{
+    AddEventsRequest, EventAdder, MemoryEntry, MemoryError, MemoryService, SearchRequest,
+    SearchResponse,
+};
 
 /// Port of Go maxSearchResults.
 const MAX_SEARCH_RESULTS: usize = 10;
+
+/// Port of Go sessionKey: a session bucket within a user scope. The default bucket, for events
+/// added with no session ID, never equals the key of a session, even one whose ID is `""`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum SessionKey {
+    Default,
+    Id(String),
+}
 
 /// Port of Go value: one stored event.
 struct StoredValue {
@@ -47,14 +59,42 @@ struct StoredValue {
 /// Port of Go userMemories.
 #[derive(Default)]
 struct UserMemories {
-    sessions: HashMap<String, Vec<StoredValue>>,
-    session_order: Vec<String>,
+    sessions: HashMap<SessionKey, Vec<StoredValue>>,
+    session_order: Vec<SessionKey>,
+}
+
+impl UserMemories {
+    /// Port of Go ensureUserBucket's bucket half: creates bucket `key` if absent. A new bucket
+    /// takes the next position in the session order even when nothing is stored in it, as in
+    /// Python's dict, and replacing a bucket keeps its position.
+    fn ensure_bucket(&mut self, key: &SessionKey) -> &mut Vec<StoredValue> {
+        if !self.sessions.contains_key(key) {
+            self.session_order.push(key.clone());
+        }
+        self.sessions.entry(key.clone()).or_default()
+    }
 }
 
 /// Port of Go inMemoryService: an in-memory implementation of [`MemoryService`]. Thread-safe.
 ///
 /// Searches return at most ten entries, ranked by the number of distinct query words they
 /// match. Ties follow session insertion order, then event order.
+///
+/// It also implements [`EventAdder`]: [`EventAdder::add_events`] appends to the bucket of
+/// `req.session_id` and keeps the first stored event of each non-empty event ID in that
+/// bucket; [`MemoryService::add_session_to_memory`] replaces the bucket of the session.
+///
+/// Both add methods skip events whose content is `None` or holds no part; such an event does
+/// not reserve its ID. Thought parts are left out of both matching and the returned content.
+/// An event with parts but no searchable text, such as a blob-only or thought-only event, is
+/// stored and reserves its ID, but no search returns it.
+///
+/// A query and the stored text are split into words: runs of letters, numbers and
+/// underscores, taken after Unicode NFC normalization and lowercased with full Unicode case
+/// mapping. An event matches a query word when it has that word. A query word with non-ASCII
+/// characters also matches anywhere inside the event's text, and a stored word that mixes Latin
+/// and other scripts, such as the Python in 私はPythonを使う, also yields each single-script
+/// run as a word. A query with no words returns no entries.
 pub struct InMemoryMemoryService {
     /// Keyed by `(app_name, user_id)`.
     store: RwLock<HashMap<(String, String), UserMemories>>,
@@ -81,67 +121,64 @@ impl std::fmt::Debug for InMemoryMemoryService {
     }
 }
 
+/// Port of Go buildValue: the stored form of `event`, or `None` for an event that has no
+/// content or no part, which is neither stored nor reserves its ID. An event with parts but no
+/// searchable words, such as a blob-only event, is stored so that its ID blocks later
+/// duplicates; search skips it.
+fn build_value(event: Event) -> Option<StoredValue> {
+    let content = event.response.content.filter(|c| !c.parts.is_empty())?;
+
+    // Thought parts are the model's reasoning, not conversation, so they are neither searched
+    // nor returned (adk-python v2.12.0 does both; this keeps internal reasoning out of memory
+    // results).
+    let mut texts = Vec::new();
+    let mut visible_parts = Vec::new();
+    for part in content.parts {
+        if part.thought {
+            continue;
+        }
+        if !part.text.is_empty() {
+            texts.push(part.text.clone());
+        }
+        visible_parts.push(part);
+    }
+    let text = texts.join(" ");
+
+    Some(StoredValue {
+        id: event.id,
+        content: Content {
+            parts: visible_parts,
+            role: content.role,
+        },
+        author: event.author,
+        timestamp: (event.timestamp != zero_time()).then_some(event.timestamp),
+        custom_metadata: event.response.custom_metadata,
+        words: extract_searchable_words(&text),
+        text_lower: text.nfc().collect::<String>().to_lowercase(),
+    })
+}
+
 #[async_trait]
 impl MemoryService for InMemoryMemoryService {
     /// Port of Go inMemoryService.AddSessionToMemory.
     async fn add_session_to_memory(&self, session: &dyn Session) -> Result<(), MemoryError> {
-        let mut values = Vec::new();
-
-        for event in session.events() {
-            let Some(content) = event.response.content else {
-                continue;
-            };
-
-            // Thought parts are the model's reasoning, not conversation, so they are neither
-            // searched nor returned, as in adk-python.
-            let mut words = HashSet::new();
-            let mut texts = Vec::new();
-            let mut visible_parts = Vec::new();
-            for part in content.parts {
-                if part.thought {
-                    continue;
-                }
-                if !part.text.is_empty() {
-                    words.extend(extract_words(&part.text));
-                    texts.push(part.text.clone());
-                }
-                visible_parts.push(part);
-            }
-
-            if words.is_empty() {
-                continue;
-            }
-
-            values.push(StoredValue {
-                id: event.id,
-                content: Content {
-                    parts: visible_parts,
-                    ..content
-                },
-                author: event.author,
-                timestamp: (event.timestamp != zero_time()).then_some(event.timestamp),
-                custom_metadata: event.response.custom_metadata,
-                words,
-                text_lower: texts.join(" ").to_lowercase(),
-            });
-        }
+        let values: Vec<StoredValue> = session
+            .events()
+            .into_iter()
+            .filter_map(build_value)
+            .collect();
 
         let key = (session.app_name().to_owned(), session.user_id().to_owned());
+        let bucket = SessionKey::Id(session.id().to_owned());
         let mut store = self.store.write();
-        let memories = store.entry(key).or_default();
-        let sid = session.id().to_owned();
-        // Replacing a session must preserve its position, as in Python's dict.
-        if !memories.sessions.contains_key(&sid) {
-            memories.session_order.push(sid.clone());
-        }
-        memories.sessions.insert(sid, values);
+        *store.entry(key).or_default().ensure_bucket(&bucket) = values;
         Ok(())
     }
 
     /// Port of Go inMemoryService.SearchMemory.
     async fn search_memory(&self, req: SearchRequest) -> Result<SearchResponse, MemoryError> {
         // A true value allows substring matching for that non-ASCII query word.
-        let query_words: HashMap<String, bool> = extract_words(&req.query)
+        let query_words: HashMap<String, bool> = extract_words_lower(&req.query)
             .into_iter()
             .map(|w| {
                 let non_ascii = !w.is_ascii();
@@ -160,11 +197,14 @@ impl MemoryService for InMemoryMemoryService {
         };
 
         let mut scored: Vec<(usize, MemoryEntry)> = Vec::new();
-        for sid in &memories.session_order {
-            let Some(values) = memories.sessions.get(sid) else {
+        for key in &memories.session_order {
+            let Some(values) = memories.sessions.get(key) else {
                 continue;
             };
             for v in values {
+                if v.words.is_empty() {
+                    continue;
+                }
                 let score = query_words
                     .iter()
                     .filter(|(word, allow_substring)| {
@@ -198,24 +238,82 @@ impl MemoryService for InMemoryMemoryService {
             memories: scored.into_iter().map(|(_, entry)| entry).collect(),
         })
     }
+
+    fn as_event_adder(&self) -> Option<&dyn EventAdder> {
+        Some(self)
+    }
 }
 
-/// Port of Go extractWords: the set of lowercased words in `text`.
+#[async_trait]
+impl EventAdder for InMemoryMemoryService {
+    /// Port of Go inMemoryService.AddEventsToMemory: appends to the bucket of `req.session_id`
+    /// (the default bucket when it is empty), skipping an event whose non-empty ID the bucket
+    /// already holds. `req.custom_metadata` is ignored.
+    async fn add_events(&self, req: AddEventsRequest) -> Result<(), MemoryError> {
+        let values: Vec<StoredValue> = req.events.into_iter().filter_map(build_value).collect();
+        let bucket = if req.session_id.is_empty() {
+            SessionKey::Default
+        } else {
+            SessionKey::Id(req.session_id)
+        };
+
+        let mut store = self.store.write();
+        let existing = store
+            .entry((req.app_name, req.user_id))
+            .or_default()
+            .ensure_bucket(&bucket);
+        let mut existing_ids: HashSet<String> = existing
+            .iter()
+            .filter(|e| !e.id.is_empty())
+            .map(|e| e.id.clone())
+            .collect();
+        for value in values {
+            if !value.id.is_empty() && !existing_ids.insert(value.id.clone()) {
+                continue;
+            }
+            existing.push(value);
+        }
+        Ok(())
+    }
+}
+
+/// Port of Go extractWordsLower: the lowercased `\w+` tokens of the NFC form of `text`, as
+/// adk-python's `_extract_words_lower` does. Combining marks are not word characters, so after
+/// NFC a mark that composes nowhere separates words.
 ///
-/// `to_lowercase` differs from Go's `strings.ToLower` only for special-casing chars such as
-/// the final sigma, which Rust lowercases context-sensitively.
-fn extract_words(text: &str) -> HashSet<String> {
-    text.split(|c: char| !is_word_char(c))
-        // A mark with no letter or number before it, such as the emoji variation selector
-        // U+FE0F, does not belong to a word.
-        .map(|piece| piece.trim_start_matches(is_mark))
+/// `to_lowercase` is full Unicode case mapping, as Go's `cases.Lower(language.Und)`.
+fn extract_words_lower(text: &str) -> HashSet<String> {
+    let nfc: String = text.nfc().collect();
+    nfc.split(|c: char| !is_word_char(c))
         .filter(|piece| !piece.is_empty())
         .map(str::to_lowercase)
         .collect()
 }
 
-/// Port of Go extractWords' split predicate: unicode.IsLetter || unicode.IsNumber ||
-/// unicode.IsMark || '_'.
+/// Port of Go extractSearchableWords: the words an event can be matched on, the tokens of
+/// [`extract_words_lower`] plus, for each non-ASCII token, its runs of Latin and of non-Latin
+/// characters. Japanese and Chinese are written without spaces, so in 私はPythonを使う the run
+/// `python` becomes a word of its own.
+fn extract_searchable_words(text: &str) -> HashSet<String> {
+    let mut words = extract_words_lower(text);
+    let mut runs = Vec::new();
+    for word in words.iter().filter(|w| !w.is_ascii()) {
+        let (mut start, mut run_latin) = (0, false);
+        for (i, c) in word.char_indices() {
+            let latin = is_latin(c);
+            if i > 0 && latin != run_latin {
+                runs.push(word[start..i].to_owned());
+                start = i;
+            }
+            run_latin = latin;
+        }
+        runs.push(word[start..].to_owned());
+    }
+    words.extend(runs);
+    words
+}
+
+/// Port of Go extractWordsLower's split predicate: unicode.IsLetter || unicode.IsNumber || '_'.
 ///
 /// The Unicode version of `unicode-properties` may differ from Go's `unicode` tables for newly
 /// assigned code points only.
@@ -223,13 +321,16 @@ fn is_word_char(c: char) -> bool {
     c == '_'
         || matches!(
             c.general_category_group(),
-            GeneralCategoryGroup::Letter
-                | GeneralCategoryGroup::Number
-                | GeneralCategoryGroup::Mark
+            GeneralCategoryGroup::Letter | GeneralCategoryGroup::Number
         )
 }
 
-/// Go unicode.IsMark (general category M = Mn | Mc | Me).
-fn is_mark(c: char) -> bool {
-    c.general_category_group() == GeneralCategoryGroup::Mark
+/// Port of Go isLatin: whether `c` belongs to a Latin run, as adk-python's `_is_latin` does:
+/// an ASCII word character, or a character whose Unicode name starts with `LATIN`. The name rule
+/// leaves out ª and º, which Unicode's Latin script includes.
+fn is_latin(c: char) -> bool {
+    if c.is_ascii() {
+        return c.is_ascii_alphanumeric() || c == '_';
+    }
+    unicode_names2::name(c).is_some_and(|name| name.to_string().starts_with("LATIN"))
 }
