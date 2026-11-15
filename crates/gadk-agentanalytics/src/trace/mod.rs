@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `plugin/agentanalytics/trace_manager.go` without the goroutine attribution of
-//! workflow nodes and parallel branches (sub-project 7b-3b): the trace manager places every row
+//! Port of ADK-Go `plugin/agentanalytics/trace_manager.go`: the trace manager places every row
 //! of an invocation in a trace — trace and span IDs, parent spans, latencies — and infers from
 //! the callbacks it sees which agent activations failed.
 //!
@@ -26,8 +25,9 @@
 //!
 //! Go's `context.Context` arguments are [`CallbackCtx`]: the callback's ADK context (`None` for
 //! Go's plain contexts in direct trace-manager tests), its cancellation and the ADK span it runs
-//! in. Go's goroutine attribution fields exist on [`span::SpanRecord`] and stay zero (7b-3b).
-//! Locks are `parking_lot` and never held across an `.await` (no method here is async).
+//! in. Go's goroutine attribution (`currentGoroutine`) reads the callback's fiber
+//! (`gadk_agent::fiber`; [`settle`]'s `current_goroutine`). Locks are `parking_lot` and never
+//! held across an `.await` (no method here is async).
 
 pub(crate) mod causes;
 pub(crate) mod invocation;
@@ -44,8 +44,10 @@ use gadk_agent::{ActivationId, Agent, InvocationContext, ParentMap};
 use gadk_engine::llm::llm_agent_config;
 use gadk_engine::telemetry::d6::SpanIds;
 use gadk_session::ReadonlyState;
+#[cfg(test)]
 use tokio_util::sync::CancellationToken;
 
+#[cfg(test)]
 use crate::context::ContextError;
 use crate::error::Error;
 
@@ -144,13 +146,9 @@ pub(crate) struct CallbackCtx {
     /// The callback's ADK context; `None` for Go's plain `context.Background()` (direct
     /// trace-manager tests), which shows no activation, no `Ended` and no agent.
     pub(crate) adk: Option<gadk_agent::Context>,
-    /// The context's cancellation (Go `ctx.Err`): the ADK context's token, or a test's own.
-    pub(crate) cancel: Option<CancellationToken>,
-    /// Go `context.Cause(ctx)` when `cancel` is cancelled; `None` means Go's
-    /// `context.Canceled`. Divergence (ledger 7b-3a): ADK contexts carry no cause in gadk
-    /// (`CancellationToken`), so it is always `None` for them; only tests set it (Go
-    /// `context.WithCancelCause`).
-    pub(crate) cancel_cause: Option<TraceError>,
+    /// The context's cancellation (Go `ctx.Err` / `context.Cause(ctx)`): the ADK context's
+    /// token and cause (read when asked), or a test's token and cause.
+    pub(crate) cancel: Option<CancelSource>,
     /// Go `trace.SpanContextFromContext(ctx)`: the ADK span the callback runs in.
     pub(crate) span: Option<SpanIds>,
 }
@@ -174,8 +172,7 @@ impl CallbackCtx {
     pub(crate) fn from_context(ctx: &gadk_agent::Context) -> CallbackCtx {
         CallbackCtx {
             adk: Some(ctx.clone()),
-            cancel: Some(ctx.cancellation_token().clone()),
-            cancel_cause: None,
+            cancel: Some(CancelSource::of_context(ctx)),
             span: gadk_engine::telemetry::current_span_ids(),
         }
     }
@@ -186,18 +183,21 @@ impl CallbackCtx {
         CallbackCtx::from_context(&ctx.clone().into_context())
     }
 
-    /// Go `context.WithCancel(ctx)` in tests: `cancel` = `token`.
+    /// Go `context.WithCancel(ctx)` in tests: `cancel` = `token` (cause Go `context.Canceled`).
     #[cfg(test)]
     pub(crate) fn with_cancel(mut self, token: CancellationToken) -> CallbackCtx {
-        self.cancel = Some(token);
+        self.cancel = Some(CancelSource::of_token(token, None));
         self
     }
 
-    /// Go `context.WithCancelCause(ctx)` in tests: the cause [`cancel`](Self::cancel) ends
-    /// with.
+    /// Go `context.WithCancelCause(ctx)` in tests: the cause the token set by
+    /// [`with_cancel`](Self::with_cancel) ends with.
     #[cfg(test)]
     pub(crate) fn with_cancel_cause(mut self, cause: TraceError) -> CallbackCtx {
-        self.cancel_cause = Some(cause);
+        if let Some(c) = self.cancel.as_mut() {
+            c.cause = Some(cause);
+            c.adk = None;
+        }
         self
     }
 
@@ -235,10 +235,7 @@ impl CallbackCtx {
     /// or `None` when the context cannot be cancelled (Go's closure over a context that never
     /// ends reports `(false, nil)` forever, as `None` does).
     pub(crate) fn canceled_func(&self) -> Option<CancelSource> {
-        self.cancel.as_ref().map(|token| CancelSource {
-            token: token.clone(),
-            cause: self.cancel_cause.clone(),
-        })
+        self.cancel.clone()
     }
 
     /// Go `invocationEnded(ctx)`: the ADK context's `ended()`; false for a plain context.
@@ -247,17 +244,10 @@ impl CallbackCtx {
     }
 
     /// Go `ctx.Err() != nil` / `context.Cause(ctx)` for the run's own end (e.g. `afterRun`):
-    /// `None` while live, else Go's `context.Canceled` or the test cause.
+    /// `None` while live, else the cause read now (the ADK context's `cause()` or the test
+    /// cause; Go's `context.Canceled` without one).
     pub(crate) fn err(&self) -> Option<TraceError> {
-        let token = self.cancel.as_ref()?;
-        if !token.is_cancelled() {
-            return None;
-        }
-        Some(
-            self.cancel_cause
-                .clone()
-                .unwrap_or_else(|| Arc::new(Error::Context(ContextError::Canceled))),
-        )
+        self.cancel.as_ref()?.cause()
     }
 
     /// Go `contextParentMap(ctx)`: the parent map the runner attached to the context.
@@ -586,6 +576,35 @@ mod tests {
         let ictx = adk.as_invocation().clone();
         let ctx = CallbackCtx::from_invocation(&ictx);
         assert_eq!(ctx.activation_key(), Some(adk.activation_id()));
+    }
+
+    /// The ADK context's cause is read when asked (R9): a scope cancelled with an `Error` or
+    /// `DeadlineExceeded` after the callback context was made reports that cause.
+    #[test]
+    fn adk_context_cause_is_read_lazily() {
+        let base = adk_ctx(&custom("a", vec![]), "inv", None);
+        let (child, _guard) = base.with_agent_cancel();
+        let ctx = CallbackCtx::from_context(&child);
+        let src = ctx.canceled_func().unwrap();
+        assert!(ctx.err().is_none());
+        let boom: Arc<dyn std::error::Error + Send + Sync> =
+            Arc::new(std::io::Error::other("boom"));
+        child.cancel_with_cause(gadk_agent::CancelCause::Error(boom));
+        assert_eq!(ctx.err().unwrap().to_string(), "boom");
+        let (canceled, cause) = src.check();
+        assert!(!canceled);
+        assert_eq!(cause.unwrap().to_string(), "boom");
+
+        let (child, _guard) = base.with_agent_timeout(std::time::Duration::ZERO);
+        let ctx = CallbackCtx::from_context(&child);
+        assert!(
+            ctx.err()
+                .unwrap()
+                .is_context(ContextError::DeadlineExceeded)
+        );
+        let (canceled, cause) = ctx.canceled_func().unwrap().check();
+        assert!(!canceled);
+        assert!(cause.unwrap().is_context(ContextError::DeadlineExceeded));
     }
 
     #[test]

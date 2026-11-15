@@ -15,8 +15,8 @@
 
 //! Agent ends, responses, errors, retirement and settling, from ADK-Go
 //! `plugin/agentanalytics/trace_manager.go`: `popDelegatingAgentSpan`, `popAgentSpan`,
-//! `endRestartedNodeRuns` and `recordNodeCompletion` (attribution: no-ops with zero goroutine
-//! information), `inWorkflowNodeSubtreeLocked`, `reconcileConcurrentResponseOnPopLocked`,
+//! `endRestartedNodeRuns` and `recordNodeCompletion` (attribution: node attempts started by a
+//! workflow agent's scheduler), `inWorkflowNodeSubtreeLocked`, `reconcileConcurrentResponseOnPopLocked`,
 //! `popTaskAgentSpan`, `finishedTaskLocked`, `noteTaskFinished`, `retireAgentLocked`,
 //! `failuresLocked`, `reportedOverLocked`, `purgeActivationLocked`, `endToolRunsLocked`,
 //! `markToolRunsDoneLocked` (attribution), `completeResponse`,
@@ -26,15 +26,17 @@
 //! `settleFinishedLocked`, `retireLateSettledLocked`, `launcherOpenLocked`,
 //! `hasCanceledByStopUnderLocked`, and `popToolSpan`.
 //!
-//! Goroutine attribution is 7b-3b: Go's `currentGoroutineID()` / `currentGoroutine()` read zero
-//! here ([`current_goroutine_id`]), and every record's `goroutine_id`, `origin` and `attempt`
-//! are zero, so the attribution bodies are ported whole and take their zero-information
-//! branches (an activation without goroutine information counts as over, Go `:3913`).
+//! Goroutine attribution: Go's `currentGoroutineID()` / `currentGoroutine()` read the
+//! callback's fiber ([`current_goroutine_id`], [`current_goroutine`]); a record made from a
+//! context that shows no activation keeps zero attribution, and the bodies take Go's
+//! zero-information branches for it (an activation without goroutine information counts as
+//! over, Go `:3913`).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use gadk_agent::fiber::{self, SCHEDULER_CREATOR};
 use gadk_platform::go_quote;
 
 use super::causes::{error_is, is_canceled, wrap_with_cause};
@@ -44,7 +46,7 @@ use super::invocation::{
 };
 use super::manager::TraceManager;
 use super::span::{
-    AttemptSite, JoinView, NodeRunKey, RetiredCause, RowSpan, SCHEDULER_CREATOR, SpanKind,
+    AttemptSite, GoroutineOrigin, JoinView, NodeRunKey, RetiredCause, RowSpan, SpanKind,
     SpanRecord, SpanRef, UnclosedAgentSpan, joins_records, latency_of, parallel_branch,
 };
 use super::{CallbackCtx, Identity, NO_FRAME, TraceError, llm_key, tool_key_call};
@@ -52,9 +54,23 @@ use crate::context::ContextError;
 use crate::error::Error;
 use crate::plugin::USER_AUTHOR;
 
-/// Go `currentGoroutineID()`: zero until 7b-3b attributes runs to tasks.
-fn current_goroutine_id() -> u64 {
-    0
+/// Go `currentGoroutineID()`: the id of the fiber the caller runs on
+/// (`gadk_agent::fiber::current().id`; 0 outside any task and fiber).
+pub(crate) fn current_goroutine_id() -> u64 {
+    fiber::current().id
+}
+
+/// Go `currentGoroutine()` as its callers read it: only when the callback's context shows an
+/// activation (Go `endedFunc(ctx) != nil`), the current fiber's id, its origin and the attempt
+/// site the engine claimed for this agent run (`gadk_agent::fiber::current_attempt`); zero
+/// otherwise.
+// Divergence (ledger 7b-3a): Go parses the goroutine's id, creator function and frame shape out of runtime.Stack; gadk reads fiber ids set by the engine where Go starts goroutines, its creators are gadk_agent::fiber constants, and the attempt site is the engine's per-fiber slot rather than a stack-frame match.
+pub(crate) fn current_goroutine(ctx: &CallbackCtx) -> (u64, GoroutineOrigin, AttemptSite) {
+    if ctx.adk.is_none() {
+        return (0, GoroutineOrigin::default(), AttemptSite::None);
+    }
+    let f = fiber::current();
+    (f.id, f.origin, AttemptSite::from(fiber::current_attempt()))
 }
 
 /// Go `ctx.Err()`: `context.Canceled` once the callback's token is cancelled (Go's `Err`
@@ -62,7 +78,7 @@ fn current_goroutine_id() -> u64 {
 fn ctx_err(ctx: &CallbackCtx) -> Option<TraceError> {
     ctx.cancel
         .as_ref()
-        .filter(|t| t.is_cancelled())
+        .filter(|c| c.token.is_cancelled())
         .map(|_| Arc::new(Error::Context(ContextError::Canceled)))
 }
 
@@ -114,10 +130,9 @@ impl TraceManager {
             {
                 st.touch_agent_activity_locked(p, now);
             }
-            // As in push_agent_span, the runs that started on this goroutine before are over
-            // only if its trace shows a node attempt (Go `currentGoroutine()`, 7b-3b: none).
-            let attempt = AttemptSite::None;
-            let since = if ended.is_some() && attempt != AttemptSite::None {
+            // As in push_agent_span, which runs in the same callback, the runs that started on
+            // this goroutine before are over only if it shows a node attempt.
+            let since = if ended.is_some() && current_goroutine(ctx).2 != AttemptSite::None {
                 0
             } else {
                 NO_FRAME
@@ -175,8 +190,8 @@ impl TraceManager {
         span
     }
 
-    /// Go `endRestartedNodeRuns(ctx, id)` (attribution: nothing is restarted with zero
-    /// goroutine information, so it returns no spans).
+    /// Go `endRestartedNodeRuns(ctx, id)` (attribution: only node attempts that the workflow's
+    /// scheduler started again are purged).
     pub(crate) fn end_restarted_node_runs(
         &self,
         ctx: &CallbackCtx,
@@ -212,7 +227,8 @@ impl TraceManager {
                 r.kind == SpanKind::Agent
                     && r.parent.as_ref().is_some_and(|p| p.ptr_eq(&w))
                     && r.started_again
-                    && r.origin.started_by(SCHEDULER_CREATOR, Some(&w.lock()))
+                    && r.origin
+                        .started_by(SCHEDULER_CREATOR, w.lock().goroutine_id)
             };
             if !restarted {
                 continue;
@@ -227,8 +243,8 @@ impl TraceManager {
         purged
     }
 
-    /// Go `recordNodeCompletion(ctx, id, workflowName, path, branch, failed)` (attribution: no
-    /// activation is a node agent with zero goroutine information).
+    /// Go `recordNodeCompletion(ctx, id, workflowName, path, branch, failed)` (attribution: only
+    /// a node agent the workflow's scheduler started is attributed).
     pub(crate) fn record_node_completion(
         &self,
         ctx: &CallbackCtx,
@@ -652,7 +668,7 @@ impl TraceManager {
         let mut primary_err = primary_err;
         if primary_err.is_none() && !ctx.invocation_ended() {
             // Go settles the runner root's subtree when AfterRun runs on the goroutine that
-            // started it (`currentGoroutineID()`, zero until 7b-3b).
+            // started it (`currentGoroutineID()`).
             let goid = current_goroutine_id();
             if goid != 0 && st.agent_stack[1].lock().goroutine_id == goid {
                 inv.settle_ended_in_subtree_locked(st, 1, true, 0);
@@ -1842,7 +1858,7 @@ mod tests {
     use gadk_agent::Mode;
     use tokio_util::sync::CancellationToken;
 
-    use super::super::span::{CancelSource, GoroutineOrigin};
+    use super::super::span::CancelSource;
     use super::super::testkit::{ManualClock, adk_ctx, custom, ident, llm, sequential};
     use super::super::{llm_key, tool_key};
     use super::*;
@@ -2358,10 +2374,7 @@ mod tests {
                 r.seq = seq;
                 r.run_done = true;
                 r.context_ended = settled;
-                r.canceled = Some(CancelSource {
-                    token: CancellationToken::new(),
-                    cause: None,
-                });
+                r.canceled = Some(CancelSource::of_token(CancellationToken::new(), None));
             }
             rec
         };
@@ -2440,7 +2453,7 @@ mod tests {
                 g.attempt = AttemptSite::Node;
                 g.activation = Some(activation);
                 g.origin = GoroutineOrigin {
-                    creator: SCHEDULER_CREATOR.into(),
+                    creator: SCHEDULER_CREATOR,
                     parent: 1,
                 };
             }
@@ -2513,7 +2526,7 @@ mod tests {
                 g.attempt = AttemptSite::Node;
                 g.activation = Some(activation);
                 g.origin = GoroutineOrigin {
-                    creator: SCHEDULER_CREATOR.into(),
+                    creator: SCHEDULER_CREATOR,
                     parent: 1,
                 };
             }
@@ -2584,5 +2597,79 @@ mod tests {
         // It joins itself, has not run, and is the subtree's root.
         assert!(!settles);
         a.lock().parent = None;
+    }
+
+    /// R9: Go `currentGoroutineID()` is the fiber the caller runs on, and `currentGoroutine()`
+    /// (read only for a context that shows an activation) its id, origin and the attempt site
+    /// the engine claimed for the agent run.
+    #[tokio::test]
+    async fn current_goroutine_reads_the_callback_fiber() {
+        assert_eq!(
+            current_goroutine_id(),
+            0,
+            "a #[tokio::test] body has no fiber"
+        );
+        let adk = adk_ctx(&custom("a", vec![]), "inv", None);
+        let root = fiber::Fiber::root();
+        let root_id = root.id;
+        root.scope(async move {
+            assert_eq!(current_goroutine_id(), root_id);
+            assert_eq!(
+                current_goroutine(&CallbackCtx::background()),
+                (0, GoroutineOrigin::default(), AttemptSite::None)
+            );
+            assert_eq!(
+                current_goroutine(&CallbackCtx::from_context(&adk)),
+                (root_id, GoroutineOrigin::default(), AttemptSite::None)
+            );
+            let child = fiber::spawn_child(SCHEDULER_CREATOR);
+            let child_id = child.id;
+            child
+                .scope(async move {
+                    let (id, origin, attempt) = current_goroutine(&CallbackCtx::from_context(&adk));
+                    assert_eq!(id, child_id);
+                    assert!(origin.started_by(SCHEDULER_CREATOR, root_id));
+                    assert_eq!(attempt, AttemptSite::None);
+                })
+                .await;
+        })
+        .await;
+    }
+
+    /// R9: the attempt site the engine marks for a node attempt reaches the before-agent
+    /// callbacks of the run that claims it, and only those.
+    #[tokio::test]
+    async fn current_goroutine_sees_the_claimed_attempt() {
+        use futures::{FutureExt, StreamExt};
+        use gadk_agent::callback::BeforeAgentCallback;
+
+        type Seen = Arc<parking_lot::Mutex<Vec<(u64, AttemptSite)>>>;
+        let seen = Seen::default();
+        let record: BeforeAgentCallback = {
+            let seen = seen.clone();
+            Arc::new(move |ctx| {
+                let (id, _, attempt) = current_goroutine(&CallbackCtx::from_context(&ctx));
+                seen.lock().push((id, attempt));
+                async { Ok(None) }.boxed()
+            })
+        };
+        let agent = gadk_agent::new_agent(gadk_agent::AgentConfig {
+            name: "node_agent".into(),
+            before_agent_callbacks: vec![record],
+            ..Default::default()
+        })
+        .unwrap();
+        let ctx = adk_ctx(&agent, "inv", None);
+        let f = fiber::Fiber::root();
+        let id = f.id;
+        f.scope(fiber::with_attempt(fiber::AttemptSite::Worker, async {
+            let _: Vec<_> = agent.run(ctx.as_invocation().clone()).collect().await;
+            let _: Vec<_> = agent.run(ctx.as_invocation().clone()).collect().await;
+        }))
+        .await;
+        assert_eq!(
+            *seen.lock(),
+            vec![(id, AttemptSite::Worker), (id, AttemptSite::None)]
+        );
     }
 }

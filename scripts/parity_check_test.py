@@ -2001,11 +2001,12 @@ class RealTreeTest(unittest.TestCase):
         self.assertEqual(len(skipped), 99)
         self.assertTrue(all(r[0] == "plugin/agentanalytics/trace_manager_test.go" for r in skipped))
         self.assertTrue(all(r[4].startswith("deferred to 7b-3b (") for r in skipped))
-        self.assertEqual(
-            sorted(r[1] for r in skipped
-                   if not r[3].endswith("plugin_agentanalytics_trace_manager/deferred.rs")),
-            ["TestLateReviewShortcutUnderInvocationSpan",
-             "TestRunner_FinishTaskWithReusedCallIDEndsTheRunOnTheEventPath"])
+        # 7b-3b: each deferred row sits in its group's attr_*.rs file (deferred.rs is gone).
+        self.assertTrue(all(
+            r[3].rsplit("/", 2)[1:] in (["plugin_agentanalytics_trace_manager", f"attr_{g}.rs"]
+                                        for g in ("fiber", "direct", "live", "workflow_1",
+                                                  "workflow_2", "parallel", "spawns"))
+            for r in skipped))
         self.assertIn("7b-3a", pc.GENERATED_LEDGERS)
         self.assertEqual(pc.check_1b(ADK_GO, HERE.parent, HERE.parent / "docs/parity/7b-3a.md", name="7b-3a"), [])
 

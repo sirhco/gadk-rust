@@ -37,15 +37,14 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use chrono::{DateTime, Utc};
+use gadk_agent::fiber::SCHEDULER_CREATOR;
 use gadk_agent::{ActivationId, Agent, ParentMap};
 use gadk_engine::llm::llm_agent_config;
 use gadk_engine::telemetry::d6::SpanIds;
 use parking_lot::{Mutex, MutexGuard, RwLock};
 
 use super::manager::EvictedTrace;
-use super::span::{
-    GoroutineOrigin, Latency, RowSpan, SCHEDULER_CREATOR, SpanKind, SpanRecord, SpanRef,
-};
+use super::span::{GoroutineOrigin, Latency, RowSpan, SpanKind, SpanRecord, SpanRef};
 use super::{AgentKey, CallbackCtx, Identity, TraceError, hex, new_span_id, new_trace_id};
 
 /// Go `recordedError`: an unrecovered error of an invocation and the span ID of the agent
@@ -575,8 +574,10 @@ impl InvocationState {
                             || other.path != id.path
                             || other.goroutine_id == goid
                             || !parent.is_workflow
-                            || !origin.started_by(SCHEDULER_CREATOR, Some(&parent))
-                            || !other.origin.started_by(SCHEDULER_CREATOR, Some(&parent))
+                            || !origin.started_by(SCHEDULER_CREATOR, parent.goroutine_id)
+                            || !other
+                                .origin
+                                .started_by(SCHEDULER_CREATOR, parent.goroutine_id)
                     }
                 }
             };

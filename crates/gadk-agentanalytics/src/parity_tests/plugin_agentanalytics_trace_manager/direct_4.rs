@@ -39,7 +39,7 @@ use parking_lot::Mutex;
 use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
 
-use super::direct_support::{MockRun, bg, err, invocation_of, open_spans};
+use super::direct_support::{MockRun, bg, ended_ctx, err, invocation_of, open_spans};
 use crate::event_types::EVENT_AGENT_COMPLETED;
 use crate::parity_tests::plugin_agentanalytics_bigquery_agent_analytics_plugin::support::{
     event_types, rows_of_type, setup_test_plugin, until_invocation_end,
@@ -50,21 +50,6 @@ use crate::trace::{
     CallbackCtx, Clock, Identity, InvocationState, InvocationTrace, RecordedError, RetiredCause,
     RowSpan, SpanKind, SpanRecord, SpanRef, TraceError, TraceManager, llm_key, tool_key,
 };
-
-/// Go `&endedContext{Context: ctx, end: true}`: a context whose `Ended` reports true, as for an
-/// activation that a `BeforeAgentCallback` answered. The ADK context runs an agent of its own
-/// name, so it reads as no running agent's (Go's `endedContext` shows none), and it cannot be
-/// cancelled, as Go's `context.Background()` it wraps.
-fn ended_ctx() -> CallbackCtx {
-    let adk = gadk_agent::Context::builder()
-        .agent(custom("ended-context", vec![]))
-        .build();
-    adk.end_invocation();
-    CallbackCtx {
-        adk: Some(adk),
-        ..CallbackCtx::default()
-    }
-}
 
 /// Go `context.WithCancelCause(ctx)`: the context and its cancel function's token; cancel it
 /// with `token.cancel()` (the cause is `cause`).
@@ -1558,7 +1543,6 @@ fn test_late_review_tool_run_failed_grandchild() {
     }
 }
 
-// parity: skipped TestLateReviewShortcutUnderInvocationSpan: deferred to 7b-3b (goroutine attribution): Go's pushAgentSpan reads the goroutine of a context with Ended (currentGoroutine), and only popToolSpan's markToolRunsDoneLocked, which marks the runs started on the tool callback's goroutine after the call, makes the shortcut sub-agent's run done so that retireLateSettledLocked retires it; with zero attribution it stays on the late stack
 // parity: adapted: Go's endedContext is an ADK context whose invocation ended (`ended_ctx`)
 #[test]
 fn test_late_failure_cause_keeps_activation() {

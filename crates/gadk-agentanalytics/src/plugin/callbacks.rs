@@ -895,8 +895,9 @@ pub(crate) fn trace_error_of_tool(err: &ToolError) -> TraceError {
 
 /// The error's text as a [`TraceError`]; a cancellation or deadline in its chain (gadk's
 /// `AgentError::Cancelled` / `DeadlineExceeded`, a [`ContextError`]) becomes Go's
-/// `context.Canceled` / `context.DeadlineExceeded` in the error's tree.
-fn trace_error_of(err: &(dyn StdError + 'static)) -> TraceError {
+/// `context.Canceled` / `context.DeadlineExceeded` in the error's tree. Also maps a context's
+/// `CancelCause::Error` (`crate::trace::span::trace_error_of_cause`).
+pub(crate) fn trace_error_of(err: &(dyn StdError + 'static)) -> TraceError {
     let text = err.to_string();
     let mut found = None;
     let mut link: Option<&(dyn StdError + 'static)> = Some(err);
