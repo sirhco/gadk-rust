@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! gadk-agentanalytics (sub-projects 7b-1, 7b-2 and 7b-3a): a port of ADK-Go's
+//! gadk-agentanalytics (sub-projects 7b-1, 7b-2, 7b-3a and 7b-3b): a port of ADK-Go's
 //! `plugin/agentanalytics`, the BigQuery Agent Analytics plugin.
 //!
 //! The plugin ([`plugin`], 7b-3a) is a [`gadk_agent::Plugin`]: add it to a runner's plugin list
@@ -32,8 +32,9 @@
 //! plugin manager) stops the views, drains the batch processor on a task of its own and closes
 //! the clients, once. Callbacks never fail a run: a panic while building a row is recovered and
 //! counted as a dropped row. Rows carry trace and span IDs from the crate's trace manager (Go's
-//! `trace_manager.go` without goroutine attribution: workflow-node and parallel-branch
-//! attribution is 7b-3b) and the session-event signal rows of Go's `events.go`.
+//! `trace_manager.go`, with its goroutine attribution of workflow nodes, parallel branches and
+//! worker items read from the callback's `gadk_agent::fiber` (7b-3b)) and the session-event
+//! signal rows of Go's `events.go`.
 //!
 //! The foundations (7b-1): configuration ([`Config`]), the events table's BigQuery and Arrow
 //! schemas, table creation and additive schema upgrade, the per-event-type analytics views, the

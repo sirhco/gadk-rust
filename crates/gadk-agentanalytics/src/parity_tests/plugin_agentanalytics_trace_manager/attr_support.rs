@@ -34,13 +34,31 @@
 //!   `partialThenWaitLLM` = [`partial_then_wait_llm`], `gatedLLM` = [`gated_llm`];
 //! - builders: `newParallelAgent` = [`new_parallel_agent`], `workflowagent.New` =
 //!   [`workflow_agent`], `workflow.NewAgentNode(a, workflow.NodeConfig{})` = [`agent_node`],
-//!   `workflow.Start` = [`start`], `workflow.Chain` = `gadk_engine::workflow::chain`.
+//!   `workflow.Start` = [`start`], `workflow.Chain` = `gadk_engine::workflow::chain`,
+//!   `workflow.Edge{From, To}` = [`edge`]; Go's cached child (a custom agent whose
+//!   BeforeAgentCallback closes a channel and answers) = [`cached_child`] /
+//!   [`closing_before_agent`]; `runUnjoinedLateChild` = [`run_unjoined_late_child`];
+//! - small Go idioms: `select { case <-ch: …; case <-time.After(10 * time.Second): … }` =
+//!   [`within`] (real time; never fires in a passing run), `defer close(ch)` = [`CloseOnDrop`],
+//!   `ctx.Err()` = [`ctx_err`], `map[string]any{key: value}` tool results = [`tool_result`], an
+//!   event with model text on the context's branch = [`content_event`], `errSiblingFailed` =
+//!   [`ERR_SIBLING_FAILED`].
+//!
+//! Runner-level helpers several groups share with the 7b-3a ports (`newCacheHitAgent`,
+//! `requireCompletedWithHandledAgentError`, `requireChildStartedAfterPartialStop`, SSE run
+//! config) are in [`runner_support`](super::runner_support); the late-state helpers
+//! (`lateReviewTrace` / `lateReviewStack` / `lateReviewAgent` / `checkLateRecordDropped`) in
+//! [`direct_support`](super::direct_support). Each group's file keeps its own Go-iterator helper
+//! (`seq` / `go_iter` / `generator` / `yielding`): they differ in whether a `yield` may come from
+//! another task and in what a stopped reader does to the body, which the file's tests rely on.
 //!
 //! Go's models read their request's `ctx`; gadk's `Llm::generate_content` has none. A Go model
 //! that waits with `<-ctx.Done()` (then `yield(nil, ctx.Err())` or returns) is a stream that stays
-//! pending after its earlier items ([`then_wait_for_cancel`]): the LLM flow ends the call itself
-//! when the agent's context is cancelled (`AgentError::Cancelled`, "context canceled"), without
-//! the model-error callbacks Go runs for the model's `ctx.Err()` (see the T9 notes).
+//! pending after its earlier items ([`then_wait_for_cancel`]): when the agent's context ends,
+//! the LLM flow ends the call itself and, as Go's flow does for the model's `ctx.Err()`, runs the
+//! on-model-error callbacks with `context canceled` (`context deadline exceeded` on a deadline),
+//! so the plugin writes Go's `LLM_ERROR` row; a model item that is already ready is still
+//! yielded first.
 //! Go's `requireADK*` capability probes are dropped: gadk-engine has those behaviours.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -52,16 +70,24 @@ use std::time::Duration;
 use futures::StreamExt;
 use futures::stream::BoxStream;
 use gadk_agent::fiber::{self, Fiber};
-use gadk_agent::{Agent, AgentConfig, AgentError, InvocationContext};
+use gadk_agent::{
+    AfterAgentCallback, Agent, AgentConfig, AgentError, BeforeAgentCallback, CancelCause, Context,
+    InvocationContext, RunConfig,
+};
 use gadk_engine::workflow::{AgentNode, Edge, Node, NodeConfig, START};
 use gadk_genai::{Content, FunctionCall, Part};
 use gadk_model::{LlmResponse, ModelError};
 use gadk_session::Event;
-use serde_json::json;
+use serde_json::{Map, Value, json};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use super::runner_support::{final_text, fn_llm, partial_text};
+use super::runner_support::{RowCursor, final_text, fn_llm, new_event, partial_text};
+use crate::event_types::EVENT_AGENT_ERROR;
+use crate::parity_tests::plugin_agentanalytics_bigquery_agent_analytics_plugin::support::{
+    agent_error_counts, new_test_runner, require_invocation_completed_ok, rows_of_type, run_turn,
+    setup_test_plugin, text_content, until_invocation_end,
+};
 
 /// Runs `fut` as Go runs a test body: on a goroutine of its own (a new root fiber), so
 /// [`goroutine_id`] and the trace manager's `current_goroutine_id()` are non-zero in it.
@@ -373,6 +399,167 @@ pub(crate) fn agent_node(a: Arc<dyn Agent>) -> Arc<dyn Node> {
 /// Go `workflow.Start`.
 pub(crate) fn start() -> Arc<dyn Node> {
     START.clone()
+}
+
+/// Go's `time.After(10 * time.Second)` bound on the tests' waits.
+pub(crate) const TEN_SECONDS: Duration = Duration::from_secs(10);
+
+/// Go `select { case <-ch: return true; case <-time.After(10 * time.Second): return false }`:
+/// whether `gate` closed within 10 s.
+pub(crate) async fn within(gate: &Gate) -> bool {
+    tokio::time::timeout(TEN_SECONDS, gate.wait()).await.is_ok()
+}
+
+/// Closes its gate when dropped (Go `defer close(ch)` / `defer once.Do(func() { close(ch) })`).
+pub(crate) struct CloseOnDrop(pub(crate) Gate);
+
+impl Drop for CloseOnDrop {
+    fn drop(&mut self) {
+        self.0.close();
+    }
+}
+
+/// Go `ctx.Err()` of an ended agent context: `context.DeadlineExceeded` on a deadline, else
+/// `context.Canceled` (an errgroup cause still reads `context canceled`).
+pub(crate) fn ctx_err(ctx: &InvocationContext) -> AgentError {
+    match ctx.cause() {
+        Some(CancelCause::DeadlineExceeded) => AgentError::DeadlineExceeded,
+        _ => AgentError::Cancelled,
+    }
+}
+
+/// An unconditional edge (Go `workflow.Edge{From: from, To: to}`).
+pub(crate) fn edge(from: &Arc<dyn Node>, to: &Arc<dyn Node>) -> Edge {
+    Edge {
+        from: from.clone(),
+        to: to.clone(),
+        route: None,
+    }
+}
+
+/// Go `map[string]any{key: value}` as a tool result.
+pub(crate) fn tool_result(key: &str, value: Value) -> Map<String, Value> {
+    let mut m = Map::new();
+    m.insert(key.into(), value);
+    m
+}
+
+/// Go `errSiblingFailed`.
+pub(crate) const ERR_SIBLING_FAILED: &str = "guardrail rejected the request";
+
+/// An event of `author` on `ctx`'s branch with model text `text` (Go
+/// `ev := session.NewEvent(ctx, ctx.InvocationID()); ev.Author = author; ev.Branch =
+/// ctx.Branch(); ev.Content = textContent("model", text)`).
+pub(crate) fn content_event(ctx: &InvocationContext, author: &str, text: &str) -> Event {
+    let mut ev = new_event(ctx);
+    ev.author = author.into();
+    ev.branch = ctx.branch();
+    ev.response.content = Some(text_content("model", text));
+    ev
+}
+
+/// A Go `BeforeAgentCallback` that closes `entered` and answers `text`.
+pub(crate) fn closing_before_agent(entered: Gate, text: &'static str) -> BeforeAgentCallback {
+    Arc::new(move |_ctx: Context| {
+        let entered = entered.clone();
+        Box::pin(async move {
+            entered.close();
+            Ok(Some(text_content("model", text)))
+        })
+    })
+}
+
+/// Go's cached child: `agent.New(agent.Config{Name: name, BeforeAgentCallbacks: {close(entered);
+/// return textContent("model", text), nil}, Run: <yields nothing>})`.
+pub(crate) fn cached_child(name: &str, text: &'static str, entered: Gate) -> Arc<dyn Agent> {
+    gadk_agent::new_agent(AgentConfig {
+        name: name.into(),
+        before_agent_callbacks: vec![closing_before_agent(entered, text)],
+        run: Some(Arc::new(|_| futures::stream::empty().boxed())),
+        ..Default::default()
+    })
+    .expect("cached child")
+}
+
+/// Go `runUnjoinedLateChild(t, build)`: runs the composite agent that `build` makes over a
+/// custom sub-agent, launcher, which starts cached_child on a goroutine of its own and returns
+/// without waiting for it. cached_child starts only once launcher's span has ended, so it runs
+/// right under the composite agent, on launcher's branch, and its BeforeAgentCallback answers
+/// for it, so agent.Run ends its InvocationContext on that goroutine, which then waits until the
+/// composite agent's AfterAgentCallback has run.
+pub(crate) async fn run_unjoined_late_child(
+    build: impl FnOnce(Arc<dyn Agent>, AfterAgentCallback) -> Arc<dyn Agent>,
+) {
+    let tp = setup_test_plugin().await;
+    let entered = Gate::new();
+    let launcher_done = Gate::new();
+    let parent_done = Gate::new();
+    let child_done = Gate::new();
+    let child = cached_child("cached_child", "cached", entered.clone());
+    let launcher = gadk_agent::new_agent(AgentConfig {
+        name: "launcher".into(),
+        run: Some(Arc::new({
+            let (launcher_done, parent_done, child_done) = (
+                launcher_done.clone(),
+                parent_done.clone(),
+                child_done.clone(),
+            );
+            move |ctx: InvocationContext| {
+                let (child, launcher_done, parent_done, child_done) = (
+                    child.clone(),
+                    launcher_done.clone(),
+                    parent_done.clone(),
+                    child_done.clone(),
+                );
+                let child_ctx = ctx.clone();
+                go(async move {
+                    let _done = CloseOnDrop(child_done);
+                    if !within(&launcher_done).await {
+                        return;
+                    }
+                    let mut events = child.run(child_ctx);
+                    while events.next().await.is_some() {
+                        let _ = within(&parent_done).await;
+                    }
+                });
+                futures::stream::iter([Ok(content_event(&ctx, "launcher", "launched"))]).boxed()
+            }
+        })),
+        after_agent_callbacks: vec![Arc::new(move |_ctx: Context| {
+            let (launcher_done, entered) = (launcher_done.clone(), entered.clone());
+            Box::pin(async move {
+                launcher_done.close();
+                let _ = within(&entered).await;
+                Ok(None)
+            })
+        })],
+        ..Default::default()
+    })
+    .expect("launcher");
+    let root = build(
+        launcher,
+        Arc::new(move |_ctx: Context| {
+            let parent_done = parent_done.clone();
+            Box::pin(async move {
+                parent_done.close();
+                Ok(None)
+            })
+        }),
+    );
+    let r = new_test_runner(root, vec![tp.plugin.clone()]);
+    let (_, errs) = run_turn(&r, "u1", "s1", "go", RunConfig::default()).await;
+    assert!(errs.is_empty(), "runner.Run error: {errs:?}");
+    assert!(within(&child_done).await, "cached_child did not exit");
+    let rows = RowCursor::default()
+        .collect(&tp, until_invocation_end)
+        .await;
+    require_invocation_completed_ok(&rows);
+    assert_eq!(
+        rows_of_type(&rows, EVENT_AGENT_ERROR).len(),
+        0,
+        "AGENT_ERROR rows; counts: {:?}",
+        agent_error_counts(&rows)
+    );
 }
 
 #[cfg(test)]

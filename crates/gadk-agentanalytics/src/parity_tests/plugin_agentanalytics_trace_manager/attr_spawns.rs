@@ -24,8 +24,8 @@
 //!   on the consumer's goroutine), and [`Yield::call`] hands an item to the consumer from any
 //!   task and returns once the consumer asks for the next item (`true`) or dropped the stream
 //!   (`false`), as Go's `yield` returns;
-//! - `time.After(10 * time.Second)` fail-safes = [`within`] (real time: the tests write rows to a
-//!   fake BigQuery server);
+//! - `time.After(10 * time.Second)` fail-safes = [`within`](super::attr_support::within) (real
+//!   time: the tests write rows to a fake BigQuery server);
 //! - `ctx.WithICDelta(&agent.InvocationContextDelta{Branch: &b})` = [`on_branch`];
 //!   `agent.PromoteWithDelta(ctx, &agent.CommonContextDelta{Path: &p}).WithICDelta(nil)` = the
 //!   tool context with the path delta, as an `InvocationContext` ([`promoted`]).
@@ -40,18 +40,20 @@ use chrono::Utc;
 use futures::StreamExt;
 use futures::future::BoxFuture;
 use gadk_agent::{
-    AfterAgentCallback, AfterToolCallback, Agent, AgentConfig, AgentError, BeforeAgentCallback,
-    CancelCause, Context, ContextDelta, EventStream, InvocationContext, RunConfig, StreamingMode,
-    ToolError,
+    AfterAgentCallback, AfterToolCallback, Agent, AgentConfig, AgentError, CancelCause, Context,
+    ContextDelta, EventStream, InvocationContext, RunConfig, StreamingMode, ToolError,
 };
 use gadk_engine::llm::LlmAgentConfig;
 use gadk_genai::{Content, FunctionResponse, Part};
 use gadk_model::ModelError;
 use gadk_session::Event;
-use serde_json::{Map, Value, json};
+use serde_json::json;
 use tokio::sync::{mpsc, oneshot};
 
-use super::attr_support::{Gate, blocking_llm, gated_llm, go, goroutine_id, partial_then_wait_llm};
+use super::attr_support::{
+    CloseOnDrop, Gate, blocking_llm, cached_child, content_event, gated_llm, go, goroutine_id,
+    partial_then_wait_llm, run_unjoined_late_child, tool_result, within,
+};
 use super::runner_support::*;
 use crate::event_types::*;
 use crate::parity_tests::plugin_agentanalytics_bigquery_agent_analytics_plugin::support::*;
@@ -135,23 +137,6 @@ where
     .boxed()
 }
 
-/// Go `select { case <-ch: …; case <-time.After(10 * time.Second): … }`: whether `gate` closed
-/// within 10 s.
-async fn within(gate: &Gate) -> bool {
-    tokio::time::timeout(Duration::from_secs(10), gate.wait())
-        .await
-        .is_ok()
-}
-
-/// Closes its gate when dropped (Go `defer close(ch)` / `defer once.Do(func() { close(ch) })`).
-struct CloseOnDrop(Gate);
-
-impl Drop for CloseOnDrop {
-    fn drop(&mut self) {
-        self.0.close();
-    }
-}
-
 /// Go `for range events {}`: reads `events` to the end.
 async fn drain(mut events: EventStream) {
     while events.next().await.is_some() {}
@@ -160,17 +145,6 @@ async fn drain(mut events: EventStream) {
 /// `agent.New(cfg)`.
 fn new_agent(cfg: AgentConfig) -> Arc<dyn Agent> {
     gadk_agent::new_agent(cfg).expect("agent")
-}
-
-/// An event of `author` on `ctx`'s branch with model text `text` (Go
-/// `ev := session.NewEvent(ctx, ctx.InvocationID()); ev.Author = author; ev.Branch =
-/// ctx.Branch(); ev.Content = textContent("model", text)`).
-fn content_event(ctx: &InvocationContext, author: &str, text: &str) -> Event {
-    let mut ev = new_event(ctx);
-    ev.author = author.into();
-    ev.branch = ctx.branch();
-    ev.response.content = Some(text_content("model", text));
-    ev
 }
 
 /// Go `ctx.WithICDelta(&agent.InvocationContextDelta{Branch: &branch})`.
@@ -198,28 +172,6 @@ fn sub_path(ctx: &Context, leaf: &str) -> String {
         p if p.is_empty() => leaf.to_owned(),
         p => format!("{p}/{leaf}"),
     }
-}
-
-/// A Go `BeforeAgentCallback` that closes `entered` and answers `text`.
-fn closing_before_agent(entered: Gate, text: &'static str) -> BeforeAgentCallback {
-    Arc::new(move |_ctx: Context| {
-        let entered = entered.clone();
-        Box::pin(async move {
-            entered.close();
-            Ok(Some(text_content("model", text)))
-        })
-    })
-}
-
-/// Go's cached child: `agent.New(agent.Config{Name: name, BeforeAgentCallbacks: {close(entered);
-/// return textContent("model", text), nil}, Run: <yields nothing>})`.
-fn cached_child(name: &str, text: &'static str, entered: Gate) -> Arc<dyn Agent> {
-    new_agent(AgentConfig {
-        name: name.into(),
-        before_agent_callbacks: vec![closing_before_agent(entered, text)],
-        run: Some(Arc::new(|_| futures::stream::empty().boxed())),
-        ..Default::default()
-    })
 }
 
 /// Go's `sibling`: answers "sibling answer", then (if `then` is some) closes the first gate and
@@ -1344,86 +1296,6 @@ async fn test_concurrency_race_custom_parent_returns_before_unjoined_child_ends_
     }
 }
 
-/// Go `runUnjoinedLateChild(t, build)`: runs the composite agent that `build` makes over a
-/// custom sub-agent, launcher, which starts cached_child on a goroutine of its own and returns
-/// without waiting for it. cached_child starts only once launcher's span has ended, so it runs
-/// right under the composite agent, on launcher's branch, and its BeforeAgentCallback answers
-/// for it, so agent.Run ends its InvocationContext on that goroutine, which then waits until the
-/// composite agent's AfterAgentCallback has run.
-async fn run_unjoined_late_child(
-    build: impl FnOnce(Arc<dyn Agent>, AfterAgentCallback) -> Arc<dyn Agent>,
-) {
-    let tp = setup_test_plugin().await;
-    let entered = Gate::new();
-    let launcher_done = Gate::new();
-    let parent_done = Gate::new();
-    let child_done = Gate::new();
-    let child = cached_child("cached_child", "cached", entered.clone());
-    let launcher = new_agent(AgentConfig {
-        name: "launcher".into(),
-        run: Some(Arc::new({
-            let (launcher_done, parent_done, child_done) = (
-                launcher_done.clone(),
-                parent_done.clone(),
-                child_done.clone(),
-            );
-            move |ctx: InvocationContext| {
-                let (child, launcher_done, parent_done, child_done) = (
-                    child.clone(),
-                    launcher_done.clone(),
-                    parent_done.clone(),
-                    child_done.clone(),
-                );
-                let child_ctx = ctx.clone();
-                go(async move {
-                    let _done = CloseOnDrop(child_done);
-                    if !within(&launcher_done).await {
-                        return;
-                    }
-                    let mut events = child.run(child_ctx);
-                    while events.next().await.is_some() {
-                        let _ = within(&parent_done).await;
-                    }
-                });
-                futures::stream::iter([Ok(content_event(&ctx, "launcher", "launched"))]).boxed()
-            }
-        })),
-        after_agent_callbacks: vec![Arc::new(move |_ctx: Context| {
-            let (launcher_done, entered) = (launcher_done.clone(), entered.clone());
-            Box::pin(async move {
-                launcher_done.close();
-                let _ = within(&entered).await;
-                Ok(None)
-            })
-        })],
-        ..Default::default()
-    });
-    let root = build(
-        launcher,
-        Arc::new(move |_ctx: Context| {
-            let parent_done = parent_done.clone();
-            Box::pin(async move {
-                parent_done.close();
-                Ok(None)
-            })
-        }),
-    );
-    let r = new_test_runner(root, vec![tp.plugin.clone()]);
-    let (_, errs) = run_turn(&r, "u1", "s1", "go", RunConfig::default()).await;
-    assert!(errs.is_empty(), "runner.Run error: {errs:?}");
-    assert!(within(&child_done).await, "cached_child did not exit");
-    let rows = RowCursor::default()
-        .collect(&tp, until_invocation_end)
-        .await;
-    require_invocation_completed_ok(&rows);
-    assert_eq!(
-        rows_of_type(&rows, EVENT_AGENT_ERROR).len(),
-        0,
-        "AGENT_ERROR rows; counts: {:?}",
-        agent_error_counts(&rows)
-    );
-}
-
 #[tokio::test]
 async fn test_concurrency_race_sequential_agent_unjoined_late_child() {
     run_unjoined_late_child(|sub, after| {
@@ -1460,13 +1332,6 @@ fn after_tool(
             Ok(None)
         })
     })
-}
-
-/// Go `map[string]any{key: value}` as a tool result.
-fn tool_result(key: &str, value: Value) -> Map<String, Value> {
-    let mut m = Map::new();
-    m.insert(key.into(), value);
-    m
 }
 
 #[tokio::test]
@@ -1963,6 +1828,13 @@ async fn test_repro_unjoined_call_started_after_launcher_returned_moves_to_late(
 
 /// Go `clockReadBy(name)`: whether the trace-manager method that reads the clock in the caller
 /// (the innermost `TraceManager` method on the stack) is `name`.
+///
+/// Go's `runtime.Callers` always names its frames; a `std::backtrace::Backtrace` names them only
+/// when the test binary keeps its symbols (the default `test` profile; not with
+/// `strip = "symbols"`), which [`require_symbolized_backtraces`] checks up front so such a build
+/// fails with that reason instead of a clock hook that never matches. An optimized test build
+/// may also inline `push_agent_span` into its caller; its frame is then named only from debug
+/// info (keep `debug` on when testing with `--release`).
 fn clock_read_by(name: &str) -> bool {
     let trace = std::backtrace::Backtrace::force_capture().to_string();
     trace
@@ -1971,11 +1843,24 @@ fn clock_read_by(name: &str) -> bool {
         .is_some_and(|method| method.split("::").next() == Some(name))
 }
 
+/// Fails the test unless `std::backtrace` names this binary's frames (what [`clock_read_by`]
+/// relies on).
+#[inline(never)]
+fn require_symbolized_backtraces() {
+    let trace = std::backtrace::Backtrace::force_capture().to_string();
+    assert!(
+        trace.contains("require_symbolized_backtraces"),
+        "clockReadBy's port reads function names from std::backtrace::Backtrace: build the tests \
+         with symbols (no `strip = \"symbols\"`)"
+    );
+}
+
 // parity: adapted: Go's clock hook blocks the child's goroutine; here the hook blocks the
 // worker thread of the child's task (a multi-threaded runtime keeps the run going), and
 // `clockReadBy`'s `runtime.Callers` is a `std::backtrace::Backtrace` of the hook's caller.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_runner_agent_starting_across_after_run_starts_in_late_state() {
+    require_symbolized_backtraces();
     let mut tm = TraceManager::new();
     let child_goroutine = Arc::new(AtomicU64::new(0));
     let held = Gate::new();

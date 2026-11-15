@@ -29,7 +29,9 @@ use std::time::Duration;
 use futures::StreamExt;
 use futures::future::BoxFuture;
 use futures::stream::BoxStream;
-use gadk_agent::{Agent, AgentError, BeforeAgentCallback, Context, Tool, ToolError};
+use gadk_agent::{
+    Agent, AgentError, BeforeAgentCallback, Context, RunConfig, StreamingMode, Tool, ToolError,
+};
 use gadk_engine::llm::LlmAgentConfig;
 use gadk_engine::llm_agent;
 use gadk_engine::testutil::MockModel;
@@ -42,8 +44,12 @@ use serde_json::{Map, Value};
 pub(crate) use crate::parity_tests::plugin_agentanalytics_bigquery_agent_analytics_plugin::support::{
     check_json_at, text_content,
 };
+use crate::event_types::{
+    EVENT_AGENT_ERROR, EVENT_AGENT_STARTING, EVENT_INVOCATION_COMPLETED, EVENT_INVOCATION_ERROR,
+};
 use crate::parity_tests::plugin_agentanalytics_bigquery_agent_analytics_plugin::support::{
-    TestPlugin, TracePlace, event_types, json_object_column, place_of, rows_of_type, str_col,
+    TestPlugin, TracePlace, event_types, json_object_column, must_latency, only_row_of_type,
+    place_of, require_invocation_completed_ok, rows_of_type, str_col,
 };
 use crate::row::Row;
 
@@ -578,4 +584,88 @@ pub(crate) fn drain_then(
         }
         after(&ctx)
     })
+}
+
+/// A model answering "never sent" once (the model of an agent that its callbacks answer).
+pub(crate) fn never_sent() -> Arc<dyn gadk_model::Llm> {
+    scripted_llm(vec![Ok(LlmResponse {
+        content: Some(text_content("model", "never sent")),
+        ..Default::default()
+    })])
+}
+
+/// Go `newCacheHitAgent(t)`: an LLM agent `cached` that its BeforeAgentCallback answers.
+pub(crate) fn new_cache_hit_agent() -> Arc<dyn Agent> {
+    llm_agent(LlmAgentConfig {
+        name: "cached".into(),
+        model: Some(never_sent()),
+        before_agent_callbacks: vec![answering_before_agent(text_content("model", "cache hit"))],
+        ..Default::default()
+    })
+}
+
+/// `RunConfig{StreamingMode: StreamingModeSSE}`.
+pub(crate) fn sse() -> RunConfig {
+    RunConfig {
+        streaming_mode: StreamingMode::Sse,
+        ..Default::default()
+    }
+}
+
+/// Go `requireCompletedWithHandledAgentError(t, rows, agentName, wantErr)`.
+pub(crate) fn require_completed_with_handled_agent_error(
+    rows: &[Row],
+    agent_name: &str,
+    want_err: &str,
+) {
+    assert!(
+        rows_of_type(rows, EVENT_INVOCATION_ERROR).is_empty(),
+        "got INVOCATION_ERROR, want INVOCATION_COMPLETED; event types: {:?}",
+        event_types(rows)
+    );
+    let inv_row = only_row_of_type(rows, EVENT_INVOCATION_COMPLETED);
+    assert_eq!(
+        str_col(&inv_row, "status"),
+        "OK",
+        "INVOCATION_COMPLETED status"
+    );
+    let err_row = only_row_of_type(rows, EVENT_AGENT_ERROR);
+    assert_eq!(str_col(&err_row, "agent"), agent_name, "AGENT_ERROR agent");
+    let start = rows_of_type(rows, EVENT_AGENT_STARTING)
+        .into_iter()
+        .find(|r| str_col(r, "agent") == agent_name)
+        .unwrap_or_else(|| {
+            panic!(
+                "no AGENT_STARTING row of {agent_name:?}; event types: {:?}",
+                event_types(rows)
+            )
+        });
+    assert_eq!(place_of(&err_row), place_of(&start), "AGENT_ERROR place");
+    must_latency(&err_row);
+    let msg = str_col(&err_row, "error_message");
+    assert!(
+        msg.contains(want_err),
+        "AGENT_ERROR error_message = {msg:?}, want it to contain {want_err:?}"
+    );
+}
+
+/// Go `requireChildStartedAfterPartialStop(t, attempt)`: some attempt (at most 20) completes
+/// the invocation and starts `child`.
+pub(crate) async fn require_child_started_after_partial_stop<F, Fut>(attempt: F)
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = Vec<Row>>,
+{
+    const MAX_ATTEMPTS: usize = 20;
+    for _ in 0..MAX_ATTEMPTS {
+        let rows = attempt().await;
+        require_invocation_completed_ok(&rows);
+        if rows_of_type(&rows, EVENT_AGENT_STARTING)
+            .iter()
+            .any(|r| agent_of(r) == "child")
+        {
+            return;
+        }
+    }
+    panic!("child never started after partial stop across {MAX_ATTEMPTS} attempts");
 }

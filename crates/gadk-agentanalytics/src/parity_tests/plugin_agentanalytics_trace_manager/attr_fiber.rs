@@ -35,26 +35,17 @@ use gadk_agent::fiber::{
 };
 use gadk_agent::{Agent, AgentConfig, AgentError, BeforeAgentCallback, Context, InvocationContext};
 use gadk_engine::llm::LlmAgentConfig;
-use gadk_engine::workflow::{Edge, JoinNode, Node, NodeConfig, ParallelWorker, function_node};
+use gadk_engine::workflow::{JoinNode, Node, NodeConfig, ParallelWorker, function_node};
 use parking_lot::Mutex;
 use serde_json::Value;
 
-use super::attr_support::{agent_node, go, on_test_goroutine, start};
+use super::attr_support::{agent_node, edge, go, on_test_goroutine, start};
 use super::runner_support::{
     app_runner, final_text, llm_agent, new_event, run_until_error, scripted_llm, text_content,
 };
 
 /// The bit of a fallback fiber id (a tokio task id, `gadk_agent::fiber::current`).
 const FALLBACK_BIT: u64 = 1 << 63;
-
-/// An unconditional edge (Go `workflow.Edge{From, To}`).
-fn edge(from: &Arc<dyn Node>, to: &Arc<dyn Node>) -> Edge {
-    Edge {
-        from: from.clone(),
-        to: to.clone(),
-        route: None,
-    }
-}
 
 /// A before-agent callback that runs `f` with the agent's name (Go's `record` callbacks).
 fn recording(f: impl Fn(&str) + Send + Sync + 'static) -> BeforeAgentCallback {

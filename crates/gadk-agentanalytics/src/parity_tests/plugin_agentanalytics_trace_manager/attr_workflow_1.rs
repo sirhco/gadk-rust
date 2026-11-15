@@ -36,8 +36,8 @@ use std::time::Duration;
 use futures::future::BoxFuture;
 use futures::{FutureExt, Stream, StreamExt};
 use gadk_agent::{
-    AfterAgentCallback, Agent, AgentConfig, AgentError, BeforeAgentCallback, CancelCause,
-    InvocationContext, RunConfig, StreamingMode,
+    AfterAgentCallback, Agent, AgentConfig, AgentError, BeforeAgentCallback, InvocationContext,
+    RunConfig, StreamingMode,
 };
 use gadk_engine::llm::LlmAgentConfig;
 use gadk_engine::workflow::{
@@ -53,8 +53,9 @@ use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
 
 use super::attr_support::{
-    Gate, agent_node, blocking_llm, flaky_on_first_pass_llm, gated_flaky_llm, go,
-    new_parallel_agent, start, then_wait_for_cancel, wait_then_stream_partial_llm, workflow_agent,
+    CloseOnDrop, ERR_SIBLING_FAILED, Gate, agent_node, blocking_llm, ctx_err,
+    flaky_on_first_pass_llm, gated_flaky_llm, go, new_parallel_agent, start, then_wait_for_cancel,
+    wait_then_stream_partial_llm, workflow_agent,
 };
 use super::runner_support::*;
 use crate::event_types::*;
@@ -132,14 +133,6 @@ where
         slot,
     }
     .boxed()
-}
-
-/// Go `ctx.Err()` of an ended invocation context.
-fn ctx_err(ctx: &InvocationContext) -> AgentError {
-    match ctx.cause() {
-        Some(CancelCause::DeadlineExceeded) => AgentError::DeadlineExceeded,
-        _ => AgentError::Cancelled,
-    }
 }
 
 /// Go `errors.Is(err, target)` for a target known by its text: `err` or an error it wraps reads
@@ -242,76 +235,6 @@ fn fan_out_workflow(name: &str, nodes: Vec<Arc<dyn Node>>) -> Arc<dyn Agent> {
             })
             .collect(),
     )
-}
-
-/// Go `&scriptedLLM{responses: []*model.LLMResponse{{Content: textContent("model", "never
-/// sent")}}}`.
-fn never_sent() -> Arc<dyn gadk_model::Llm> {
-    scripted_llm(vec![model_text("never sent")])
-}
-
-/// Go `newCacheHitAgent(t)` (also private in `runner_2`).
-fn new_cache_hit_agent() -> Arc<dyn Agent> {
-    llm_agent(LlmAgentConfig {
-        name: "cached".into(),
-        model: Some(never_sent()),
-        before_agent_callbacks: vec![answering("cache hit")],
-        ..Default::default()
-    })
-}
-
-/// Go `requireCompletedWithHandledAgentError(t, rows, agentName, wantErr)` (also private in
-/// `direct_3`).
-fn require_completed_with_handled_agent_error(rows: &[Row], agent_name: &str, want_err: &str) {
-    assert!(
-        rows_of_type(rows, EVENT_INVOCATION_ERROR).is_empty(),
-        "got INVOCATION_ERROR, want INVOCATION_COMPLETED; event types: {:?}",
-        event_types(rows)
-    );
-    let inv_row = only_row_of_type(rows, EVENT_INVOCATION_COMPLETED);
-    assert_eq!(
-        str_col(&inv_row, "status"),
-        "OK",
-        "INVOCATION_COMPLETED status"
-    );
-    let err_row = only_row_of_type(rows, EVENT_AGENT_ERROR);
-    assert_eq!(str_col(&err_row, "agent"), agent_name, "AGENT_ERROR agent");
-    let start = rows_of_type(rows, EVENT_AGENT_STARTING)
-        .into_iter()
-        .find(|r| str_col(r, "agent") == agent_name)
-        .unwrap_or_else(|| {
-            panic!(
-                "no AGENT_STARTING row of {agent_name:?}; event types: {:?}",
-                event_types(rows)
-            )
-        });
-    assert_eq!(place_of(&err_row), place_of(&start), "AGENT_ERROR place");
-    must_latency(&err_row);
-    assert_eq!(
-        str_col(&err_row, "error_message"),
-        want_err,
-        "AGENT_ERROR error_message"
-    );
-}
-
-/// Go `requireChildStartedAfterPartialStop(t, attempt)`.
-async fn require_child_started_after_partial_stop<F, Fut>(attempt: F)
-where
-    F: Fn() -> Fut,
-    Fut: Future<Output = Vec<Row>>,
-{
-    const MAX_ATTEMPTS: usize = 20;
-    for _ in 0..MAX_ATTEMPTS {
-        let rows = attempt().await;
-        require_invocation_completed_ok(&rows);
-        if rows_of_type(&rows, EVENT_AGENT_STARTING)
-            .iter()
-            .any(|r| agent_of(r) == "child")
-        {
-            return;
-        }
-    }
-    panic!("child never started after partial stop across {MAX_ATTEMPTS} attempts");
 }
 
 /// Go `streamingPartialThenBlockLLM{chunkText, finalText}` (model name
@@ -418,9 +341,6 @@ fn new_branch_a(child_started: Gate, done: Gate, with_event: bool) -> Arc<dyn Ag
         })
     })
 }
-
-/// Go `errSiblingFailed`.
-const ERR_SIBLING_FAILED: &str = "guardrail rejected the request";
 
 // ---------------------------------------------------------------------------------------------
 // Ports
@@ -2180,14 +2100,6 @@ async fn test_concurrency_race_concurrent_same_agent_on_same_branch_and_path() {
 #[tokio::test]
 async fn test_runner_workflow_agent_with_after_agent_callback_drained_after_branch_error_emits_invocation_error()
  {
-    /// Go `defer close(answered)`.
-    struct CloseOnDrop(Gate);
-    impl Drop for CloseOnDrop {
-        fn drop(&mut self) {
-            self.0.close();
-        }
-    }
-
     for wrap_in_seq in [false, true] {
         let name = if wrap_in_seq {
             "sequential root with AfterAgentCallback wrapping parallel"

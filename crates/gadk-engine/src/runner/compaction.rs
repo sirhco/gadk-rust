@@ -448,6 +448,10 @@ async fn wait_teardowns(ctx: &InvocationContext) {
     }
 }
 
+// Divergence (ledger 7b-3a): a consumer that stops early unwinds Go's iterator on its own
+// goroutine (teardown, `RunAfterRunCallback`, compaction) before its `break` returns; a dropped
+// Rust stream cannot block its dropper, so this runs that work on a spawned task re-entering the
+// consumer's fiber, which may overlap whatever the consumer does next.
 impl Drop for InvocationGuard {
     fn drop(&mut self) {
         let after_run = std::mem::take(&mut self.after_run_pending);

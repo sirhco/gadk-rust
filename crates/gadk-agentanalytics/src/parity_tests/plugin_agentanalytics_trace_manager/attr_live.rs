@@ -25,14 +25,13 @@
 //! `LiveSession::close`; `ctx.WithICDelta(nil)` (Go returns the context itself) = the
 //! context's invocation context (`ctx.as_invocation().clone()`), whose run forks its own
 //! activation as Go's `agent.Run` does. Go's `select { case <-ch: case <-time.After(10 *
-//! time.Second): }` = [`wait_or_timeout`].
+//! time.Second): }` = [`within`](super::attr_support::within).
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::time::Duration;
 
 use futures::StreamExt;
 use futures::future::BoxFuture;
@@ -47,11 +46,13 @@ use gadk_engine::testutil::live::{go_live_test_llm, model_turn, tool_call};
 use gadk_genai::Content;
 use gadk_model::LlmResponse;
 use gadk_session::Event;
-use serde_json::{Map, Value, json};
+use serde_json::json;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use super::attr_support::{Gate, blocking_llm, gated_llm, go, on_test_goroutine};
+use super::attr_support::{
+    Gate, TEN_SECONDS, blocking_llm, gated_llm, go, on_test_goroutine, tool_result, within,
+};
 use super::direct_support::bg;
 use super::runner_support::{
     agent_rows_of_type, custom_agent, final_text, function_tool, llm_agent, new_event,
@@ -65,21 +66,6 @@ use crate::parity_tests::plugin_agentanalytics_bigquery_agent_analytics_plugin::
 };
 use crate::row::Row;
 use crate::trace::{Identity, TraceManager};
-
-/// Go's 10 s bound on every wait of these tests.
-const WAIT: Duration = Duration::from_secs(10);
-
-/// Go `select { case <-gate: return true; case <-time.After(10 * time.Second): return false }`.
-async fn wait_or_timeout(gate: &Gate) -> bool {
-    tokio::time::timeout(WAIT, gate.wait()).await.is_ok()
-}
-
-/// Go `map[string]any{key: value}` as a tool result.
-fn tool_result(key: &str, value: Value) -> Map<String, Value> {
-    let mut m = Map::new();
-    m.insert(key.into(), value);
-    m
-}
 
 /// A tool-execution error of Go's text (Go `return nil, errors.New(text)` from a function tool).
 fn tool_error(text: &str) -> ToolError {
@@ -121,7 +107,7 @@ async fn run_live(r: &Runner) -> (Arc<dyn LiveSession>, EventStream) {
 /// liveSess.Close() }()`.
 fn close_after(gate: Gate, live_sess: Arc<dyn LiveSession>) -> tokio::task::JoinHandle<()> {
     go(async move {
-        wait_or_timeout(&gate).await;
+        within(&gate).await;
         let _ = live_sess.close().await;
     })
 }
@@ -130,7 +116,7 @@ fn close_after(gate: Gate, live_sess: Arc<dyn LiveSession>) -> tokio::task::Join
 /// (bounded, so that a stream that never ends fails the test instead of hanging it).
 async fn drain_live(mut events: EventStream) {
     let mut errs = Vec::new();
-    let drained = tokio::time::timeout(WAIT, async {
+    let drained = tokio::time::timeout(TEN_SECONDS, async {
         while let Some(item) = events.next().await {
             if let Err(err) = item {
                 errs.push(err.to_string());
@@ -237,7 +223,7 @@ async fn test_trace_manager_live_tool_cached_child_stop_race() {
                                 });
                         let (answered, held_too_long) = (answered.clone(), held_too_long.clone());
                         Box::pin(async move {
-                            if calls_tool && !wait_or_timeout(&answered).await {
+                            if calls_tool && !within(&answered).await {
                                 held_too_long.store(true, Ordering::SeqCst);
                             }
                             Ok(None)
@@ -258,10 +244,7 @@ async fn test_trace_manager_live_tool_cached_child_stop_race() {
         // invocation's terminal row.
         let rows = tp.collect_rows(until_invocation_end).await;
         release.close();
-        assert!(
-            wait_or_timeout(&tool_done).await,
-            "run_child did not return"
-        );
+        assert!(within(&tool_done).await, "run_child did not return");
         stopped.await.unwrap();
         assert!(
             !held_too_long.load(Ordering::SeqCst),
@@ -354,7 +337,7 @@ async fn test_concurrency_race_concurrent_same_agent_with_promoted_sub_node_path
                     move |ic: InvocationContext| {
                         let cached_answered = cached_answered.clone();
                         futures::stream::once(async move {
-                            if !wait_or_timeout(&cached_answered).await {
+                            if !within(&cached_answered).await {
                                 return Err(AgentError::other("cached run did not answer"));
                             }
                             Ok(text_event(&ic, "child", "child answer"))
@@ -384,7 +367,7 @@ async fn test_concurrency_race_concurrent_same_agent_with_promoted_sub_node_path
                             first_entered.clone(),
                         );
                         async move {
-                            if !cached_first && !wait_or_timeout(&first_entered).await {
+                            if !cached_first && !within(&first_entered).await {
                                 let err = AgentError::other("first run never entered");
                                 let _ = tx
                                     .send(Item {
@@ -411,7 +394,7 @@ async fn test_concurrency_race_concurrent_same_agent_with_promoted_sub_node_path
                     let answering = go({
                         let (ctx, tx) = (promoted.as_invocation().clone(), tx.clone());
                         async move {
-                            if cached_first && !wait_or_timeout(&first_entered).await {
+                            if cached_first && !within(&first_entered).await {
                                 let err = AgentError::other("first run never entered");
                                 let _ = tx
                                     .send(Item {
@@ -526,7 +509,7 @@ async fn test_concurrency_race_live_tool_concurrent_same_child_with_promoted_pat
                                     return;
                                 }
                                 if let Some(wait) = &wait {
-                                    wait_or_timeout(wait).await;
+                                    within(wait).await;
                                 }
                             }
                         }
@@ -534,7 +517,7 @@ async fn test_concurrency_race_live_tool_concurrent_same_child_with_promoted_pat
                     let first = go(run(Some(second_entered)));
                     let second_run = run(None);
                     let second = go(async move {
-                        if !wait_or_timeout(&entered).await {
+                        if !within(&entered).await {
                             return;
                         }
                         second_run.await;
@@ -595,11 +578,11 @@ async fn test_concurrency_race_live_tool_returns_before_unjoined_cached_child() 
                     go(async move {
                         let mut events = helper.run(run_ctx);
                         while events.next().await.is_some() {
-                            wait_or_timeout(&tool_done).await;
+                            within(&tool_done).await;
                         }
                         helper_done.close();
                     });
-                    if !wait_or_timeout(&entered).await {
+                    if !within(&entered).await {
                         return Err(tool_error("helper never entered its BeforeAgentCallback"));
                     }
                     Ok(tool_result("started", json!(true)))
@@ -619,10 +602,7 @@ async fn test_concurrency_race_live_tool_returns_before_unjoined_cached_child() 
         let _closer = close_after(tool_done.clone(), live_sess);
         drain_live(events).await;
         let rows = tp.collect_rows(until_invocation_end).await;
-        assert!(
-            wait_or_timeout(&helper_done).await,
-            "helper run never finished"
-        );
+        assert!(within(&helper_done).await, "helper run never finished");
         require_invocation_completed_ok(&rows);
         assert_eq!(
             rows_of_type(&rows, EVENT_AGENT_ERROR).len(),
@@ -769,7 +749,7 @@ async fn test_runner_live_tool_sub_agent_call_moves_to_late_state() {
                         helper.run(run_ctx).for_each(|_| async {}).await;
                         helper_done.close();
                     });
-                    if !wait_or_timeout(&entered).await {
+                    if !within(&entered).await {
                         return Err(tool_error("helper never started its model call"));
                     }
                     Ok(tool_result("started", json!(true)))
@@ -799,10 +779,7 @@ async fn test_runner_live_tool_sub_agent_call_moves_to_late_state() {
             (st.completed.len(), moved)
         };
         release.close();
-        assert!(
-            wait_or_timeout(&helper_done).await,
-            "helper run never finished"
-        );
+        assert!(within(&helper_done).await, "helper run never finished");
         assert!(
             runs == 1 && moved == 1,
             "completed runs = {runs}, open model calls moved to the late state = {moved}, want \
@@ -860,7 +837,7 @@ async fn test_runner_live_tool_returns_before_helper_model_call_ends_keeps_helpe
                 move || {
                     let helper_done = helper_done.clone();
                     async move {
-                        if wait_or_timeout(&helper_done).await {
+                        if within(&helper_done).await {
                             Ok(())
                         } else {
                             Err(AgentError::other("helper never returned"))
@@ -890,7 +867,7 @@ async fn test_runner_live_tool_returns_before_helper_model_call_ends_keeps_helpe
                                 helper.run(run_ctx).for_each(|_| async {}).await;
                                 helper_done.close();
                             });
-                            let started = tokio::time::timeout(WAIT, async {
+                            let started = tokio::time::timeout(TEN_SECONDS, async {
                                 entered.lock().await.recv().await
                             })
                             .await;

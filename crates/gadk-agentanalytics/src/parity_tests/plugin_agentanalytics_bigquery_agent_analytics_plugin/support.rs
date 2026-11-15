@@ -472,7 +472,6 @@ pub(crate) fn take_rows(processor: Option<&Arc<BatchProcessor>>) -> Vec<Row> {
 
 /// Go `newTraceOnlyPlugin(t, tm)`: the production callbacks over `tm`, writing no rows
 /// (every event type is filtered out).
-#[allow(dead_code)] // consumer: 7b-3b (deferred trace_manager_test.go ports)
 pub(crate) fn new_trace_only_plugin(tm: Arc<TraceManager>) -> Plugin {
     let mut config = default_config();
     config.disable_flush_on_run_end = true;
@@ -487,7 +486,6 @@ pub(crate) fn new_trace_only_plugin(tm: Arc<TraceManager>) -> Plugin {
 
 /// Go `newQueuedRowsPlugin(t, tm)`: the production callbacks over `tm`, whose rows wait in a
 /// processor that never starts; take them with [`take_rows`] on the returned processor.
-#[allow(dead_code)] // consumer: 7b-3b (deferred trace_manager_test.go ports)
 pub(crate) async fn new_queued_rows_plugin(tm: Arc<TraceManager>) -> (Plugin, Arc<BatchProcessor>) {
     let mut config = default_config();
     config.disable_flush_on_run_end = true;

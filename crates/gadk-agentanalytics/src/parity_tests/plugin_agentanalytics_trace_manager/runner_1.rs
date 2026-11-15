@@ -757,14 +757,6 @@ fn answering_before_model(text: &'static str) -> gadk_agent::BeforeModelCallback
     })
 }
 
-/// A model answering "never sent" once.
-fn never_sent() -> Arc<dyn gadk_model::Llm> {
-    scripted_llm(vec![Ok(gadk_model::LlmResponse {
-        content: Some(text_content("model", "never sent")),
-        ..Default::default()
-    })])
-}
-
 #[tokio::test]
 async fn test_runner_before_model_callback_error_emits_agent_error_and_invocation_error() {
     let tp = setup_test_plugin().await;

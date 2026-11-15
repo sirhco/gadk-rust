@@ -1,7 +1,8 @@
 # gadk-agentanalytics
 
 A port of ADK-Go's `plugin/agentanalytics`, the BigQuery Agent Analytics plugin: the plugin, its
-session-event signal rows and its trace manager (sub-project 7b-3a), on the foundations (7b-1)
+session-event signal rows and its trace manager (sub-project 7b-3a) with Go's goroutine
+attribution (7b-3b), on the foundations (7b-1)
 and the transports (7b-2) — the BigQuery Storage Write client and stream writer, the Arrow batch
 processor and the GCS content offloader. Re-exported by the `gadk` façade as
 `gadk::agentanalytics` (feature `agentanalytics`, not in `default`).
@@ -40,8 +41,11 @@ let plugin = new_bigquery_agent_analytics_plugin_with_config(&Context::backgroun
   `NODE_OUTPUT`, `AGENT_RESPONSE` and user-message signal rows) and `trace` (Go
   `trace_manager.go`: invocation, agent, model and tool spans keyed by
   `gadk_agent::ActivationId`, the completed-run LRU with eviction and late callbacks, errors,
-  retirement, settling, task mode — without Go's goroutine attribution of workflow nodes and
-  parallel branches, which is sub-project 7b-3b).
+  retirement, settling, task mode, and Go's goroutine attribution of workflow nodes, parallel
+  branches and worker items (7b-3b): the trace manager reads the callback's
+  `gadk_agent::fiber` — id, spawn origin and attempt site, set by gadk-engine where Go starts
+  those goroutines — and an ADK context's cancel cause (`gadk_agent::CancelCause`) when it
+  needs it).
 
 - `config` — `Config` with every field and default of Go's `Config` (`Config::default()` is
   `DefaultConfig()`, `Config::zero()` Go's `Config{}`), `ClientOptions` (Go's
@@ -107,9 +111,9 @@ annotated in the source with a `// Divergence` comment naming its ledger.
   `python3 scripts/parity-check --ledger 7b-1`), and of `batch_processor_test.go` and
   `gcs_offloader_test.go` (171 Go tests, all ported — 42 of them in 7b-3a; ledger
   `docs/parity/7b-2.md`, `--ledger 7b-2`), and of `bigquery_agent_analytics_plugin_test.go`,
-  `events_test.go`, `late_callbacks_test.go` and `trace_manager_test.go` (338 Go tests: 239
-  ported, 99 trace-manager tests deferred to 7b-3b; ledger `docs/parity/7b-3a.md`,
-  `--ledger 7b-3a`).
+  `events_test.go`, `late_callbacks_test.go` and `trace_manager_test.go` (338 Go tests, all
+  ported — the 99 trace-manager tests that need goroutine attribution in 7b-3b, in the
+  `attr_*` files; ledger `docs/parity/7b-3a.md`, `--ledger 7b-3a`).
 - `tests/golden_*.rs` compare the config projection, the BigQuery and Arrow schemas (decoded IPC
   streams), the view SQL and the formatter and redaction corpus with ADK-Go's outputs;
   `tests/rest_wire.rs`, `tests/rest_schema_upgrade.rs` and `tests/rest_views.rs` replay the REST
