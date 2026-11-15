@@ -509,8 +509,10 @@ impl std::error::Error for SharedModelError {
 }
 
 /// Go `ctx.Err()` of an ended context: `context.DeadlineExceeded` when its deadline passed,
-/// else `context.Canceled` (also for a `WithCancelCause` context, whatever its cause).
-fn context_err(ctx: &InvocationContext) -> AgentError {
+/// else `context.Canceled` (also for a `WithCancelCause` context, whatever its cause). Shared by
+/// the LLM flow (Go base_flow.go: the model yields `ctx.Err()`) and the parallel worker (Go
+/// parallel_worker.go `reportFailure(ctx.Err())`).
+pub(crate) fn context_err(ctx: &InvocationContext) -> AgentError {
     match ctx.cause() {
         Some(CancelCause::DeadlineExceeded) => AgentError::DeadlineExceeded,
         _ => AgentError::Cancelled,
