@@ -15,6 +15,7 @@
 
 //! gadk-artifact: artifact storage service (port of ADK-Go artifact/).
 
+mod artifact_util;
 pub mod inmemory;
 pub mod service;
 #[cfg(feature = "testsuite")]
