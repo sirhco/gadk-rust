@@ -32,6 +32,7 @@ use tokio_util::sync::CancellationToken;
 use crate::agent::Agent;
 use crate::context::activation::ActivationId;
 use crate::context::builder::ContextBuilder;
+use crate::context::cancel::CancelCause;
 use crate::context::context::Context;
 use crate::context::delta::ContextDelta;
 use crate::context::readonly::{ContextInner, ReadonlyContext};
@@ -138,7 +139,23 @@ impl InvocationContext {
 
     /// The cancellation token (Go's embedded `context.Context` cancellation).
     pub fn cancellation_token(&self) -> &CancellationToken {
-        &self.inner().cancellation_token
+        &self.inner().cancel_scope.token
+    }
+
+    /// Go `cancel(cause)` of a `context.WithCancelCause` context: cancels this context's own
+    /// cancel scope with `cause`, unless it is already cancelled (first cause wins). Contexts
+    /// sharing the scope (every delta but a raw `cancellation_token`, and contexts derived by
+    /// [`Context::with_agent_cancel`](crate::Context::with_agent_cancel) from it) are cancelled
+    /// with it.
+    pub fn cancel_with_cause(&self, cause: CancelCause) {
+        self.inner().cancel_scope.cancel_with_cause(cause);
+    }
+
+    /// Go `context.Cause`: `None` while the cancellation token is live; else the cause recorded
+    /// by the nearest cancelled scope walking outward from this context's own (a scope cancelled
+    /// only by its parent defers to it), else `Canceled` (e.g. a raw `token.cancel()`).
+    pub fn cause(&self) -> Option<CancelCause> {
+        self.inner().cancel_scope.cause()
     }
 
     /// The platform (time, UUIDs, task runner).
