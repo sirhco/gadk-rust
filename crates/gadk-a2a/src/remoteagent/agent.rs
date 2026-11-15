@@ -556,13 +556,12 @@ impl RunGuard {
 impl GuardState {
     async fn run(self) {
         if let Some(cleanup) = self.cleanup {
-            // Go: the cause is the last yielded error, else the context's cancellation cause.
+            // Go `a2a_agent.go:572`: the cause is the last yielded error, else the context's
+            // cancellation cause (`context.Cause(ctx)`: canceled, deadline exceeded, or the
+            // shared cause error).
             let cause = match cleanup.last_err {
                 Some(text) => Some(Error::msg(text)),
-                None if self.ctx.cancellation_token().is_cancelled() => {
-                    Some(Error::Agent(AgentError::Cancelled))
-                }
-                None => None,
+                None => self.ctx.cause().map(|c| Error::Agent(c.to_agent_error())),
             };
             cleanup_remote_task(
                 cleanup.id,
@@ -900,6 +899,78 @@ mod tests {
         assert!(matches!(calls[0], FakeCall::Stream(_)), "{calls:?}");
         assert!(matches!(calls[1], FakeCall::Cancel(_)), "{calls:?}");
         assert!(matches!(calls[2], FakeCall::Destroy), "{calls:?}");
+    }
+
+    /// Go `a2a_agent.go:572`: an abandoned run with no yielded error hands the cleanup callback
+    /// the invocation context's cancel cause — the deadline, or the very error the context was
+    /// cancelled with (the same `Arc`), not a fixed `context canceled`.
+    #[tokio::test]
+    async fn an_abandoned_run_hands_the_context_cause_to_the_cleanup_callback() {
+        #[derive(Debug)]
+        struct Boom;
+        impl std::fmt::Display for Boom {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("group failed")
+            }
+        }
+        impl std::error::Error for Boom {}
+
+        let boom: Arc<dyn std::error::Error + Send + Sync> = Arc::new(Boom);
+        let cases = [
+            (gadk_agent::CancelCause::Canceled, "context canceled"),
+            (
+                gadk_agent::CancelCause::DeadlineExceeded,
+                "context deadline exceeded",
+            ),
+            (
+                gadk_agent::CancelCause::Error(Arc::clone(&boom)),
+                "group failed",
+            ),
+        ];
+        for (cause, want) in cases {
+            let fake = Arc::new(
+                FakeA2AClient::new()
+                    .with_stream(vec![Ok(working_update()), Ok(working_update())])
+                    .with_cancel(Ok(task(a2a::TaskState::Canceled))),
+            );
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(Option<String>, bool)>();
+            let boom_cb = Arc::clone(&boom);
+            let callback: A2ARemoteTaskCleanupCallback =
+                Arc::new(move |_card, _client, _task, cause| {
+                    let text = cause.map(ToString::to_string);
+                    let shared = matches!(
+                        cause,
+                        Some(Error::Agent(AgentError::Other(e)))
+                            if e.downcast_ref::<gadk_agent::SharedCauseError>()
+                                .is_some_and(|s| Arc::ptr_eq(&s.0, &boom_cb))
+                    );
+                    let _ = tx.send((text, shared));
+                    Box::pin(async {})
+                });
+            let agent = new_a2a(A2AConfig {
+                name: "remote".into(),
+                agent_card: Some(card()),
+                client_provider: Some(Arc::new(FakeClientProvider::new(Arc::clone(&fake)))),
+                remote_task_cleanup_callback: Some(callback),
+                ..Default::default()
+            })
+            .unwrap();
+            let ctx = context(&agent, StreamingMode::Sse);
+            let mut stream = agent.run(ctx.clone());
+            assert!(stream.next().await.unwrap().unwrap().response.partial);
+            ctx.cancel_with_cause(cause.clone());
+            drop(stream);
+            let (text, shared) = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(text.as_deref(), Some(want), "{cause:?}");
+            assert_eq!(
+                shared,
+                matches!(cause, gadk_agent::CancelCause::Error(_)),
+                "{cause:?}"
+            );
+        }
     }
 
     /// Records, per client call (and per stream poll), whether an auth scope was in effect.
