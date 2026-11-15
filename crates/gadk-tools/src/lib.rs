@@ -26,7 +26,7 @@ pub mod load_memory;
 pub mod preload_memory;
 pub(crate) mod ranksearch;
 pub mod skills;
-pub mod toolauth;
+pub use gadk_session::toolauth;
 pub mod toolsearch;
 
 #[cfg(test)]

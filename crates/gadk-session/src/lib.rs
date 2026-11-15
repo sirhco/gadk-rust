@@ -23,6 +23,7 @@ mod legacy;
 mod service;
 pub mod state_util;
 mod tool_confirmation;
+pub mod toolauth;
 
 /// Reusable conformance suite for [`SessionService`] implementations.
 #[cfg(feature = "testsuite")]
