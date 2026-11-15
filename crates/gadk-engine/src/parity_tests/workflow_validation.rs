@@ -84,7 +84,6 @@ fn test_start_node_present() {
 
 // Go TestStartNodePresent's "empty edges" case (6522e5b4), split out so the passing cases above
 // keep running while gadk still rejects it.
-#[ignore = "8a bug: validate_start_node_present rejects an empty edge set (Go 6522e5b4 accepts it)"]
 #[test]
 fn test_start_node_present_empty_edges() {
     assert!(

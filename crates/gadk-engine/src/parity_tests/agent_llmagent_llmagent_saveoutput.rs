@@ -89,7 +89,6 @@ fn case(
 }
 
 #[test]
-#[ignore = "8a bug: maybe_save_output_to_state writes a task agent's text turn to output_key (Go #1977 skips task mode; finish_task delivers the result)"]
 fn test_llm_agent_maybe_save_output_to_state() {
     let fc_part = Part {
         function_call: Some(FunctionCall {

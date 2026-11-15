@@ -195,7 +195,6 @@ async fn test_scheduler_hitl_node_auto_generates_interrupt_id() {
 }
 
 // A UUID provider returning "" does not stop the node from pausing.
-#[ignore = "8a bug: new_request_input_event keeps an empty provider UUID as the interrupt ID, so the node does not pause (Go e2614290 falls back to a random UUID)"]
 #[tokio::test]
 async fn test_scheduler_hitl_node_empty_provider_uuid_still_pauses() {
     let ctx = seeded_ctx_with_uuid(String::new);

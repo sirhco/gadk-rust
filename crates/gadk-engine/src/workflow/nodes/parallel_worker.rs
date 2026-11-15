@@ -188,7 +188,13 @@ impl Node for ParallelWorker {
                 }
             }
             drop(guard);
-            let err = first_err.lock().take();
+            let mut err = first_err.lock().take();
+            // Go dc44b8c9: items skipped at dispatch, and workers that return without an error
+            // once ctx is done, report no failure. Without this check the node would yield a
+            // partial or post-cancellation result as a success.
+            if err.is_none() && ctx.cancellation_token().is_cancelled() {
+                err = Some(context_err(&ctx));
+            }
             if let Some(e) = err {
                 yield Err(e);
                 return;

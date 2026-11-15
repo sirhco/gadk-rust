@@ -29,11 +29,17 @@ use crate::workflow::scheduler::wf_error;
 pub const WORKFLOW_INPUT_FUNCTION_CALL_NAME: &str = "adk_request_input";
 
 /// Port of Go NewRequestInputEvent: an event that pauses the workflow for human input. An empty
-/// interrupt id gets a fresh platform UUID. The request rides as a long-running
+/// interrupt id gets a fresh platform UUID; when the provider returns an empty string a random
+/// UUID is used, so the key is never empty (Go e2614290). The request rides as a long-running
 /// `adk_request_input` function call whose id is the interrupt id.
 pub fn new_request_input_event(ctx: &InvocationContext, mut req: RequestInput) -> Event {
     if req.interrupt_id.is_empty() {
         req.interrupt_id = ctx.platform().new_uuid();
+        if req.interrupt_id.is_empty() {
+            // The scheduler ignores an empty ID, so the node would not pause for input.
+            // Go `uuid.NewString()`: the default platform draws a random v4 UUID.
+            req.interrupt_id = gadk_platform::Platform::default().new_uuid();
+        }
     }
     let mut ev = Event::new(ctx.platform(), ctx.invocation_id());
     let mut args = Map::new();

@@ -158,14 +158,18 @@ fn run(ctx: InvocationContext) -> EventStream {
                 branch = format!("{}.{}", ctx.branch(), branch);
             }
             // Go builds each sub-context with icontext.NewInvocationContext from only Artifacts,
-            // Memory, Session, Branch, Agent, UserContent, RunConfig and InvocationID: a fresh,
-            // not-ended end flag (ending one branch does not end its siblings) and zero
-            // isolation scope, path, run id, resumed inputs and output-for-ancestors.
+            // Memory, Session, Branch, IsolationScope, Agent, UserContent, RunConfig and
+            // InvocationID: a fresh, not-ended end flag (ending one branch does not end its
+            // siblings) and zero path, run id, resumed inputs and output-for-ancestors. The
+            // parent's isolation scope is kept (Go 543edd3d): a workflow node stamps it on every
+            // event the branches emit and the LLM history filter matches it exactly, so an
+            // unscoped branch would lose its own turns.
             // The context shares the group's cancel scope (Go `NewInvocationContext(errGroupCtx, …)`).
             let sub_ctx = group_ctx.as_invocation().with_delta(ContextDelta {
                 fresh_invocation: true,
                 agent: Some(Arc::clone(sa)),
                 branch: Some(branch),
+                isolation_scope: Some(ctx.isolation_scope()),
                 ..Default::default()
             });
             let (sa, tx, group, first_err) = (Arc::clone(sa), tx.clone(), group.clone(), first_err.clone());
@@ -314,7 +318,8 @@ mod tests {
         })
         .unwrap();
         let par = parallel(vec![sub]);
-        // The parent is scoped, ended and carries a node path; Go's parallel child sees none of it.
+        // The parent is scoped, ended and carries a node path; Go's parallel child keeps only the
+        // isolation scope (Go 543edd3d).
         let parent = InvocationContext::builder()
             .agent(par.clone())
             .isolation_scope("scope-1")
@@ -330,7 +335,12 @@ mod tests {
         assert!(items[0].is_ok());
         assert_eq!(
             seen.lock().clone(),
-            Some((String::new(), false, String::new(), "par.sub".to_string()))
+            Some((
+                "scope-1".to_string(),
+                false,
+                String::new(),
+                "par.sub".to_string()
+            ))
         );
     }
 

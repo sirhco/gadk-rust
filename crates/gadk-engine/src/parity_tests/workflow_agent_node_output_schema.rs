@@ -276,7 +276,7 @@ async fn untyped_and_typed_requests(
 }
 
 // parity: adapted: Go's generic NewAgentNodeTyped[string, weatherOut] → AgentNode::with_schemas(inferred).
-#[ignore = "8a bug: a typed AgentNode does not pass its output schema to the model (Go be529e7b modelOutputSchema + WithBoundOutputSchema)"]
+#[ignore = "8a bug: a typed AgentNode does not pass its output schema to the model (Go be529e7b WithBoundOutputSchema needs a context-carried binding in gadk-agent and outputSchemaFor in llm/processors/basic.rs, neither owned by the D2b fix task)"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_agent_node_typed_object_output_sets_response_schema() {
     let llm = RequestRecorder::named("recorder");
@@ -298,7 +298,7 @@ async fn test_agent_node_typed_object_output_sets_response_schema() {
 
 // A Gemini API model cannot combine tools with a response schema, so the schema goes out as
 // set_model_response and the node returns its arguments.
-#[ignore = "8a bug: a typed AgentNode does not pass its output schema to the model (Go be529e7b modelOutputSchema + WithBoundOutputSchema)"]
+#[ignore = "8a bug: a typed AgentNode does not pass its output schema to the model (Go be529e7b WithBoundOutputSchema needs a context-carried binding in gadk-agent and outputSchemaFor in llm/processors/basic.rs, neither owned by the D2b fix task)"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_agent_node_typed_object_output_with_tools_uses_set_model_response() {
     let llm = Arc::new(RequestRecorder {
@@ -380,7 +380,7 @@ struct CityOnly {
 
 // One agent can back several nodes. Each node's schema reaches only its own runs, and the agent's
 // declared OutputSchema is never written.
-#[ignore = "8a bug: a typed AgentNode does not pass its output schema to the model (Go be529e7b modelOutputSchema + WithBoundOutputSchema)"]
+#[ignore = "8a bug: a typed AgentNode does not pass its output schema to the model (Go be529e7b WithBoundOutputSchema needs a context-carried binding in gadk-agent and outputSchemaFor in llm/processors/basic.rs, neither owned by the D2b fix task)"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_agent_node_one_agent_two_typed_nodes() {
     let llm = RequestRecorder::named("recorder");
@@ -652,7 +652,7 @@ async fn test_agent_node_agent_setup_keeps_its_request(#[case] name: &str) {
 
 // A model callback that edits the request's schema changes that request only; the node's next run
 // is sent the node's schema unchanged.
-#[ignore = "8a bug: a typed AgentNode does not pass its output schema to the model (Go be529e7b modelOutputSchema + WithBoundOutputSchema)"]
+#[ignore = "8a bug: a typed AgentNode does not pass its output schema to the model (Go be529e7b WithBoundOutputSchema needs a context-carried binding in gadk-agent and outputSchemaFor in llm/processors/basic.rs, neither owned by the D2b fix task)"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_agent_node_callback_edit_does_not_reach_next_run() {
     let llm = RequestRecorder::named("recorder");
@@ -712,7 +712,7 @@ impl Llm for StatelessLlm {
 
 // Concurrent runs of one node, as under a fan-out, each get their own schema.
 // parity: adapted: a Rust callback owns its LlmRequest, so two runs cannot share one *genai.Schema; the port checks each run's callback saw the node's schema (Go's pointer-identity check has no counterpart).
-#[ignore = "8a bug: a typed AgentNode does not pass its output schema to the model (Go be529e7b modelOutputSchema + WithBoundOutputSchema)"]
+#[ignore = "8a bug: a typed AgentNode does not pass its output schema to the model (Go be529e7b WithBoundOutputSchema needs a context-carried binding in gadk-agent and outputSchemaFor in llm/processors/basic.rs, neither owned by the D2b fix task)"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_agent_node_concurrent_runs_do_not_share_schema() {
     let seen: Arc<Mutex<Vec<Option<Schema>>>> = Arc::default();
@@ -759,7 +759,7 @@ async fn test_agent_node_concurrent_runs_do_not_share_schema() {
 
 // An agent that declares single_turn itself is treated like one that runs single_turn by default
 // at a node.
-#[ignore = "8a bug: a typed AgentNode does not pass its output schema to the model (Go be529e7b modelOutputSchema + WithBoundOutputSchema)"]
+#[ignore = "8a bug: a typed AgentNode does not pass its output schema to the model (Go be529e7b WithBoundOutputSchema needs a context-carried binding in gadk-agent and outputSchemaFor in llm/processors/basic.rs, neither owned by the D2b fix task)"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_agent_node_explicit_single_turn_agent_gets_output_schema() {
     let llm = RequestRecorder::named("recorder");
@@ -817,7 +817,7 @@ struct CityWithNote {
 // A pointer field goes out as nullable, so set_model_response accepts a null for it, and the null
 // reaches the output instead of the tool's error.
 // parity: adapted: Go `*string` field → Option<String>.
-#[ignore = "8a bug: a typed AgentNode does not pass its output schema to the model (Go be529e7b modelOutputSchema + WithBoundOutputSchema)"]
+#[ignore = "8a bug: a typed AgentNode does not pass its output schema to the model (Go be529e7b WithBoundOutputSchema needs a context-carried binding in gadk-agent and outputSchemaFor in llm/processors/basic.rs, neither owned by the D2b fix task)"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_agent_node_null_field_through_set_model_response() {
     let answer = json!({"city": "Paris", "note": null});

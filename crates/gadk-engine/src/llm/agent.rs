@@ -198,10 +198,21 @@ impl LiveAgent for LlmLive {
 
 /// Port of Go agent/llmagent/llmagent.go (*llmAgent).maybeSaveOutputToState: saves the model
 /// output to `state_delta[output_key]` when this agent authored a final text response. Never
-/// touches `event.output` (the node wrapper stamps output).
+/// touches `event.output` (the node wrapper stamps output). A task agent's text turns are never
+/// saved (Go 8c2e2e2a): its result is the finish_task output, which the node wrapper's
+/// `run_task` writes to `output_key` when the agent is entered as a node.
 pub(crate) fn maybe_save_output_to_state(state: &LlmAgentState, event: &mut Event) {
     if event.author != state.cfg.name {
         // Go TODO: log "Skipping output save for agent %s: event authored by %s"
+        return;
+    }
+    // A task agent delivers its result through finish_task, which run_task writes to
+    // output_key. Its text turns (a clarification question, a greeting) are not the result.
+    // run_task runs only when the task agent is entered as a node, whichever agent sits above
+    // it; when it is run through Run (as the sequential, loop and parallel agents do) or
+    // RunLive, nothing writes the finish_task output, so output_key stays unset. Matches
+    // adk-python's __maybe_save_output_to_state.
+    if state.cfg.mode == Mode::Task {
         return;
     }
     if state.cfg.output_key.is_empty() || !event.is_final_response() {

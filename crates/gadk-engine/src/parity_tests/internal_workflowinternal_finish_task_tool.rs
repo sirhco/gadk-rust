@@ -177,7 +177,6 @@ fn nullable(mut schema: Schema) -> Schema {
 /// The declaration must never offer the model a value Run rejects. A wrapped result is rejected
 /// when null, so the declared result must not be nullable.
 #[tokio::test]
-#[ignore = "8a bug: finish_task declares and validates a wrapped result with the user schema's nullable: true, so a null result is accepted (Go #1741 strips Nullable)"]
 async fn test_finish_task_tool_declaration_result_matches_validation() {
     let cases: Vec<(&str, Schema)> = vec![
         ("nullable string", nullable(s("STRING"))),
@@ -266,7 +265,6 @@ fn test_finish_task_tool_wrapper_key() {
 }
 
 #[tokio::test]
-#[ignore = "8a bug: finish_task declares and validates a wrapped result with the user schema's nullable: true, so a null result is accepted (Go #1741 strips Nullable)"]
 #[allow(clippy::approx_constant)] // Go's literal 3.14
 async fn test_finish_task_tool_run() {
     let want_success = obj(json!({ "result": FINISH_TASK_SUCCESS_RESULT }));
