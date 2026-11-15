@@ -496,7 +496,11 @@ impl Scheduler {
                 ..NodeRun::default()
             },
         );
-        self.run_cancels.insert(name.clone(), guard);
+        // Go `s.runCancels[name] = cancel` overwrites a still-running earlier activation's
+        // CancelFunc without calling it: that run stays live (its parent still bounds it).
+        if let Some(replaced) = self.run_cancels.insert(name.clone(), guard) {
+            replaced.release();
+        }
         // Go `go runNode(..)`: the activation runs on a fresh fiber started by this one (the
         // goroutine startNode creates), taken here on the spawning side.
         let node_fiber = fiber::spawn_child(SCHEDULER_CREATOR);
@@ -2083,6 +2087,39 @@ mod cause_tests {
             );
             assert_eq!(s.state.nodes[n.name()].status, NodeStatus::Failed);
         }
+    }
+
+    /// Go startNode overwrites `runCancels[name]` without calling the replaced CancelFunc: a
+    /// node re-started while its earlier activation still runs leaves that activation live.
+    #[tokio::test]
+    async fn restarting_a_running_node_keeps_the_earlier_run_live() {
+        let seen: Arc<Mutex<Vec<Context>>> = Arc::default();
+        let s2 = Arc::clone(&seen);
+        let n = TestNode::arc("again", NodeConfig::default(), move |ctx, _| {
+            s2.lock().push(ctx.clone());
+            futures::stream::once(async move {
+                ctx.cancellation_token().cancelled().await;
+            })
+            .filter_map(|()| async { None::<Result<Event, AgentError>> })
+            .boxed()
+        });
+        let wf = must_new(vec![edge(&start(), &n)]);
+        let mut s = Scheduler::new(top_level_ctx(), Arc::clone(&wf.graph), 0);
+        s.schedule_node(Arc::clone(&n), None, String::new(), String::new());
+        s.schedule_node(Arc::clone(&n), None, String::new(), String::new());
+        while seen.lock().len() < 2 {
+            tokio::task::yield_now().await;
+        }
+        let ctxs = seen.lock().clone();
+        assert!(
+            !ctxs[0].cancellation_token().is_cancelled(),
+            "earlier run cancelled"
+        );
+        assert!(!ctxs[1].cancellation_token().is_cancelled());
+        // The scheduler's end cancels the current activation only; the replaced one was released.
+        drop(s);
+        assert!(ctxs[1].cancellation_token().is_cancelled());
+        assert!(!ctxs[0].cancellation_token().is_cancelled());
     }
 
     #[tokio::test]

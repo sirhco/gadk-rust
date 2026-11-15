@@ -714,7 +714,7 @@ fn wait_then_stream_bot(ready: Gate) -> Arc<dyn Agent> {
     })
 }
 
-#[ignore = "7b-3b defect: ParallelAgent early stop aborts its branch tasks (Go #1186 teardown), and the LLM flow's cancel select prefers the cancellation over a ready model item"]
+#[ignore = "7b-3b defect: ParallelAgent early stop aborts its branch tasks (Go #1186 teardown)"]
 #[tokio::test]
 async fn test_runner_stop_reading_mid_stream_is_not_an_error() {
     // single streaming agent
@@ -935,7 +935,6 @@ async fn test_runner_concurrent_graph_parents_same_child_names() {
     );
 }
 
-#[ignore = "7b-3b defect: plugin identity_of (plugin/rows.rs) reads Context::path(), not context_path() (spec R8), so a workflow node agent's run has path \"\" and no node completion event matches it"]
 #[tokio::test]
 async fn test_runner_internally_recovered_errors_single_turn_tool_and_workflow_retry_emits_completed_terminal_rows()
  {
@@ -1081,7 +1080,6 @@ async fn test_runner_retried_composite_node_skips_cached_child_agent_error() {
     }
 }
 
-#[ignore = "7b-3b defect: plugin identity_of (plugin/rows.rs) reads Context::path(), not context_path() (spec R8), so a workflow node agent's run has path \"\" and no node completion event matches it"]
 #[tokio::test]
 async fn test_runner_purged_retry_attempt_timestamp_precedes_next_attempt() {
     let tp = setup_test_plugin().await;
@@ -1623,7 +1621,6 @@ async fn test_runner_workflow_retry_parallel_responded_branches_purges_failed_at
 
 // Go's ContentFormatter sleeps on the plugin's writer goroutine; a multi-threaded runtime keeps
 // the agents running while the formatter sleeps.
-#[ignore = "7b-3b defect: plugin identity_of (plugin/rows.rs) reads Context::path(), not context_path() (spec R8), so a workflow node agent's run has path \"\" and no node completion event matches it"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_runner_concurrent_workflow_retries_orders_purged_agent_error_before_next_starting() {
     for recorded in [true, false] {
@@ -1817,7 +1814,6 @@ async fn test_runner_concurrent_workflow_retries_orders_purged_agent_error_befor
     }
 }
 
-#[ignore = "7b-3b defect: plugin identity_of (plugin/rows.rs) reads Context::path(), not context_path() (spec R8), so a workflow node agent's run has path \"\" and no node completion event matches it"]
 #[tokio::test]
 // parity: adapted: Go's check of the std log for "… is not supported for callback context" is dropped
 // (Go agent/callback_context_wrapper.go log.Print; gadk has no such log).

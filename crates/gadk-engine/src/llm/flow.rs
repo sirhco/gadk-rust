@@ -348,10 +348,13 @@ impl Flow {
             loop {
                 let next = match inner.as_mut() {
                     None => None,
+                    // Model first: Go ranges over the model's responses without checking ctx
+                    // between them, so an already-ready response wins over the cancellation;
+                    // the cancellation ends the call only while the model is pending.
                     Some(inner) => tokio::select! {
                         biased;
-                        _ = token.cancelled() => None,
                         n = inner.next() => Some(n),
+                        _ = token.cancelled() => None,
                     },
                 };
                 // Go's model observes its context's end and yields `ctx.Err()` (the test models
@@ -1204,6 +1207,62 @@ mod tests {
         assert_eq!(texts_of(resp), "recovered");
         assert_eq!(*after_seen.lock(), ["streaming...", "recovered"]);
         assert_eq!(seen.lock().len(), 1);
+    }
+
+    /// A model that streams two chunks at once, then never yields again.
+    struct TwoThenWait;
+
+    impl Llm for TwoThenWait {
+        fn name(&self) -> &str {
+            "two-then-wait"
+        }
+        fn generate_content(
+            &self,
+            _req: LlmRequest,
+            _stream: bool,
+        ) -> BoxStream<'static, Result<LlmResponse, ModelError>> {
+            let partial = LlmResponse {
+                partial: true,
+                ..text_resp("streaming...")
+            };
+            futures::stream::iter([Ok(partial), Ok(text_resp("ready"))])
+                .chain(futures::stream::pending())
+                .boxed()
+        }
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+
+    /// Go's flow ranges over the model's responses without checking its context between
+    /// them: a response the model has ready when the cancellation lands is still processed;
+    /// the cancellation is noticed while the model is pending (Go's model yields `ctx.Err()`).
+    #[tokio::test]
+    async fn ready_model_item_wins_over_cancellation() {
+        let seen = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let flow = Arc::new(Flow {
+            on_model_error_callbacks: vec![recording_on_model_error(seen.clone(), None)],
+            ..Default::default()
+        });
+        let ctx = ctx_for("a");
+        let mut s = flow.call_model(
+            ctx.clone(),
+            Arc::new(TwoThenWait),
+            LlmRequest::default(),
+            SharedActions::default(),
+        );
+        let (first, _) = s.next().await.unwrap().unwrap();
+        assert!(first.partial);
+        ctx.cancel_with_cause(gadk_agent::CancelCause::Canceled);
+        let rest: Vec<_> = s.collect().await;
+        assert_eq!(rest.len(), 2, "{rest:?}");
+        let (ready, _) = rest[0].as_ref().unwrap();
+        assert_eq!(texts_of(ready), "ready");
+        assert!(matches!(rest[1], Err(AgentError::Cancelled)));
+        assert_eq!(
+            *seen.lock(),
+            [("context canceled".to_owned(), Some("Cancelled".to_owned()))]
+        );
     }
 
     fn texts_of(resp: &LlmResponse) -> String {

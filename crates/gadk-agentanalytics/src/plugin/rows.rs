@@ -1003,7 +1003,8 @@ pub(crate) fn identity_of(ctx: &CallbackCtx) -> Identity {
         user_id: c.user_id().to_owned(),
         app_name: c.app_name().to_owned(),
         branch: c.branch(),
-        path: c.path(),
+        // Spec R8 / Go contextPath: a fresh invocation's own path falls back to its fork's.
+        path: c.context_path(),
         state: Some(c.readonly_state()),
     }
 }
@@ -1334,6 +1335,28 @@ mod tests {
         assert_eq!(id.path, "");
         assert!(id.state.is_some());
         assert_eq!(runner_agent_of(&cb).unwrap().name(), "test_agent");
+    }
+
+    /// Spec R8 / Go `contextPath`: the identity path is the context's node path, else the path
+    /// the nearest fresh invocation forked from (a dynamic tool-run helper's own path is empty).
+    #[test]
+    fn identity_path_is_the_context_path() {
+        let promoted = Context::builder()
+            .build()
+            .with_delta(gadk_agent::ContextDelta {
+                path: Some("wf@1/task@1".into()),
+                ..gadk_agent::ContextDelta::default()
+            });
+        let helper = promoted.with_delta(gadk_agent::ContextDelta {
+            fresh_invocation: true,
+            ..gadk_agent::ContextDelta::default()
+        });
+        assert_eq!(helper.path(), "");
+        let cb = CallbackCtx {
+            adk: Some(helper),
+            ..CallbackCtx::default()
+        };
+        assert_eq!(identity_of(&cb).path, "wf@1/task@1");
     }
 
     #[test]

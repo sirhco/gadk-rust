@@ -342,7 +342,6 @@ async fn test_runner_stop_on_tool_run_helper_partial_event_emits_no_agent_error(
 }
 
 #[tokio::test]
-#[ignore = "7b-3b defect: identity_of reads Context::path(), not context_path() (spec R8), so the tool-run helper's path is empty and end_tool_runs_locked never ends its run with the tool call"]
 async fn test_runner_tool_run_helper_canceled_itself_after_partial_emits_agent_error() {
     let rows = run_helper_coordinator(self_canceling_stream_llm(), false).await;
     require_completed_with_handled_agent_error(&rows, "helper", "context canceled");

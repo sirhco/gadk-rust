@@ -1184,7 +1184,6 @@ async fn test_concurrency_race_reported_node_outcome_does_not_end_running_run() 
 }
 
 #[tokio::test]
-#[ignore = "7b-3b defect: plugin identity_of reads Context::path(), not context_path() (spec R8), so node agents have an empty identity path"]
 async fn test_runner_retried_parallel_node_with_silent_branch_failure_emits_branch_agent_error() {
     let tp = setup_test_plugin().await;
     let attempts = Arc::new(AtomicI32::new(0));
@@ -1873,7 +1872,6 @@ async fn test_repro_parallel_worker_guardrail_pins_nothing() {
 }
 
 #[tokio::test]
-#[ignore = "7b-3b defect: scheduler start_node drops the running activation's CancelGuard when the node starts again (Go overwrites runCancels[name])"]
 async fn test_runner_reported_node_outcome_before_delayed_response_call_in_flight_emits_no_agent_error()
  {
     for (name, tool_call) in [("model call", false), ("tool call", true)] {
@@ -1997,7 +1995,6 @@ async fn test_runner_reported_node_outcome_before_delayed_response_call_in_fligh
 }
 
 #[tokio::test]
-#[ignore = "7b-3b defect: plugin identity_of reads Context::path(), not context_path() (spec R8), so node agents have an empty identity path"]
 async fn test_runner_finish_task_with_reused_call_id_ends_the_run_on_the_event_path() {
     let tp = setup_test_plugin().await;
     let (model, _called) = finish_task_llm();
