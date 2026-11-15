@@ -32,8 +32,9 @@
   `gadk-platform`, and only the façade depends on it (feature `gcs`); `gadk-model`'s `gcp-auth`
   feature adds no gadk-* edge.
 - 4c: `gadk-vertexai` depends on exactly `gadk-session`, `gadk-memory`, `gadk-genai`, `gadk-model`
-  and `gadk-platform`, and only the façade (and, from 6b, `gadk-cli`) depends on it (feature
-  `vertexai`).
+  and `gadk-platform` (and, from 8b, `gadk-tools` and `gadk-agent`: the Example Store provider
+  implements `gadk_tools::example::Provider`), and only the façade (and, from 6b, `gadk-cli`)
+  depends on it (feature `vertexai`).
 - 5a: `gadk-server` depends on exactly `gadk-agent`, `gadk-engine`, `gadk-session`, `gadk-memory`,
   `gadk-artifact`, `gadk-genai`, `gadk-model` and `gadk-platform`; it is the third crate that may
   depend on `gadk-engine`, and only the façade (and, from 6b, `gadk-cli`) depends on it (feature
@@ -99,7 +100,8 @@ ALLOWED = {
     "gadk-openai": {"gadk-genai", "gadk-model", "gadk-platform"},
     "gadk-session-database": {"gadk-session", "gadk-model", "gadk-platform"},
     "gadk-artifact-gcs": {"gadk-artifact", "gadk-genai", "gadk-model", "gadk-platform"},
-    "gadk-vertexai": {"gadk-session", "gadk-memory", "gadk-genai", "gadk-model", "gadk-platform"},
+    "gadk-vertexai": {"gadk-session", "gadk-memory", "gadk-genai", "gadk-model", "gadk-platform",
+                      "gadk-tools", "gadk-agent"},
     "gadk-server": {"gadk-agent", "gadk-engine", "gadk-session", "gadk-memory", "gadk-artifact",
                     "gadk-genai", "gadk-model", "gadk-platform"},
     "gadk-a2a": {"gadk-agent", "gadk-engine", "gadk-session", "gadk-genai", "gadk-model", "gadk-auth",

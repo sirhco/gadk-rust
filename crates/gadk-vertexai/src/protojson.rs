@@ -20,7 +20,7 @@
 use base64::Engine as _;
 use base64::engine::general_purpose::{GeneralPurpose, GeneralPurposeConfig};
 use base64::engine::{DecodePaddingMode, general_purpose};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use serde_json::Value;
 
 /// Go `url.QueryEscape` (shared with the other gadk crates).
@@ -30,6 +30,9 @@ pub(crate) use gadk_platform::go_query_escape;
 const MIN_TIMESTAMP_SECONDS: i64 = -62_135_596_800;
 /// The last second protojson accepts: `9999-12-31T23:59:59Z`.
 const MAX_TIMESTAMP_SECONDS: i64 = 253_402_300_799;
+/// The largest seconds magnitude protojson accepts in a `google.protobuf.Duration`
+/// (`maxSecondsInDuration`, 10 000 years).
+const MAX_DURATION_SECONDS: i64 = 315_576_000_000;
 
 /// protojson `google.protobuf.Timestamp` encoding: RFC 3339 in UTC with `Z`, and 0, 3, 6 or 9
 /// fraction digits (`…:05Z`, `….120Z`, `….123456Z`, `….123456789Z`). Go refuses a time
@@ -74,6 +77,88 @@ pub(crate) fn parse_timestamp(s: &str) -> Result<DateTime<Utc>, String> {
         return Err(invalid());
     }
     Ok(t)
+}
+
+/// protojson `google.protobuf.Duration` decoding (`unmarshalDuration` + `parseDuration`), then
+/// Go `Duration.AsDuration` (saturating at the `time.Duration` range). The text is a decimal
+/// number of seconds with an `s` suffix: an optional sign, an integer part without leading
+/// zeros, and at most 9 fraction digits (`1s`, `0.1s`, `1.s`, `.1s`, `+1s`, `-.1s`).
+///
+/// # Errors
+///
+/// protojson's texts without its `proto: (line:col): ` prefix (as [`parse_timestamp`]):
+/// `unexpected token {raw}` for a non-string, `invalid google.protobuf.Duration value "{s}"`,
+/// or `google.protobuf.Duration value out of range: "{s}"` beyond ±315 576 000 000 s.
+pub(crate) fn parse_duration(v: &Value) -> Result<TimeDelta, String> {
+    let Value::String(s) = v else {
+        return Err(format!(
+            "unexpected token {}",
+            serde_json::to_string(v).unwrap_or_default()
+        ));
+    };
+    let quoted = serde_json::to_string(s).unwrap_or_default();
+    let (secs, nanos) = duration_parts(s)
+        .ok_or_else(|| format!("invalid google.protobuf.Duration value {quoted}"))?;
+    if !(-MAX_DURATION_SECONDS..=MAX_DURATION_SECONDS).contains(&secs) {
+        return Err(format!(
+            "google.protobuf.Duration value out of range: {quoted}"
+        ));
+    }
+    // Go `AsDuration`: an overflowing value saturates toward the sign of the seconds.
+    let nanos_total = secs
+        .checked_mul(1_000_000_000)
+        .and_then(|d| d.checked_add(nanos))
+        .unwrap_or(if secs < 0 { i64::MIN } else { i64::MAX });
+    Ok(TimeDelta::nanoseconds(nanos_total))
+}
+
+/// protojson `parseDuration`: the seconds and (same-signed) nanoseconds of a Duration text.
+fn duration_parts(input: &str) -> Option<(i64, i64)> {
+    let mut b = input.as_bytes().strip_suffix(b"s")?;
+    if input.len() < 2 {
+        return None;
+    }
+    let neg = b.first() == Some(&b'-');
+    if matches!(b.first(), Some(b'-' | b'+')) {
+        b = &b[1..];
+    }
+    let mut intp: &[u8] = &[];
+    match b.first()? {
+        b'0' => b = &b[1..],
+        b'1'..=b'9' => {
+            let n = b.iter().take_while(|c| c.is_ascii_digit()).count();
+            intp = &b[..n];
+            b = &b[n..];
+        }
+        b'.' => {}
+        _ => return None,
+    }
+    let mut nanos: i64 = 0;
+    if let Some(rest) = b.strip_prefix(b".") {
+        let n = rest
+            .iter()
+            .take(9)
+            .take_while(|c| c.is_ascii_digit())
+            .count();
+        if n != rest.len() {
+            return None;
+        }
+        for i in 0..9 {
+            nanos = nanos * 10 + rest.get(i).map_or(0, |d| i64::from(d - b'0'));
+        }
+    } else if !b.is_empty() {
+        return None;
+    }
+    let mut secs: i64 = if intp.is_empty() {
+        0
+    } else {
+        std::str::from_utf8(intp).ok()?.parse().ok()?
+    };
+    if neg {
+        secs = -secs;
+        nanos = -nanos;
+    }
+    Some((secs, nanos))
 }
 
 /// protojson `bytes` encoding: standard base64 with padding.
@@ -444,6 +529,54 @@ mod tests {
         assert!(decode_bytes("aGVs\r\nbG8=").is_err());
         assert_eq!(decode_bytes("aGVsbG8=").unwrap(), b"hello");
         assert_eq!(decode_bytes("YR==").unwrap(), b"a");
+    }
+
+    /// Go protojson `parseDuration` / `unmarshalDuration` (protobuf-go v1.36) and
+    /// `Duration.AsDuration`.
+    #[test]
+    fn parse_duration_matches_protojson() {
+        let ok = |s: &str| parse_duration(&json!(s)).unwrap();
+        assert_eq!(ok("5s"), TimeDelta::seconds(5));
+        assert_eq!(ok("0s"), TimeDelta::zero());
+        assert_eq!(ok("1.5s"), TimeDelta::milliseconds(1500));
+        assert_eq!(ok("1.s"), TimeDelta::seconds(1));
+        assert_eq!(ok(".1s"), TimeDelta::milliseconds(100));
+        assert_eq!(ok("+1s"), TimeDelta::seconds(1));
+        assert_eq!(ok("-1s"), TimeDelta::seconds(-1));
+        assert_eq!(ok("-.1s"), TimeDelta::milliseconds(-100));
+        assert_eq!(ok("0.000000001s"), TimeDelta::nanoseconds(1));
+        assert_eq!(ok("-1.000000001s"), TimeDelta::nanoseconds(-1_000_000_001));
+        assert_eq!(ok(".s"), TimeDelta::zero());
+        // In protojson's range but beyond time.Duration's: AsDuration saturates.
+        assert_eq!(ok("315576000000s"), TimeDelta::nanoseconds(i64::MAX));
+        assert_eq!(ok("-315576000000s"), TimeDelta::nanoseconds(i64::MIN));
+        for bad in [
+            "",
+            "s",
+            "5",
+            "-s",
+            "+s",
+            "01s",
+            "1.0000000001s",
+            "1m",
+            "5 s",
+            " 5s",
+            "1e3s",
+            "--1s",
+            "1.2.3s",
+            "x5s",
+        ] {
+            assert_eq!(
+                parse_duration(&json!(bad)).unwrap_err(),
+                format!("invalid google.protobuf.Duration value {}", json!(bad)),
+                "{bad:?}"
+            );
+        }
+        assert_eq!(
+            parse_duration(&json!("315576000001s")).unwrap_err(),
+            "google.protobuf.Duration value out of range: \"315576000001s\""
+        );
+        assert_eq!(parse_duration(&json!(5)).unwrap_err(), "unexpected token 5");
     }
 
     /// aiplatformpb v1.127.0 `ExecutableCode_Language` / `CodeExecutionResult_Outcome`.
