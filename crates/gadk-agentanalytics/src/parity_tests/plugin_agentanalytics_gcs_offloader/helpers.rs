@@ -122,10 +122,9 @@ fn test_is_safe_extension() {
 }
 
 #[test]
-#[ignore = "8a bug: path_segment adds no ~<sha256> suffix to altered, dot-only or over-128-byte ids and does not cut them to 128 bytes (Go #2018)"]
 fn test_path_segment() {
-    fn h(s: impl AsRef<[u8]>) -> String {
-        path_segment_hash_suffix(s)
+    fn h(s: impl AsRef<str>) -> String {
+        path_segment_hash_suffix(s.as_ref())
     }
     let a = |n: usize| "a".repeat(n);
     let tests: Vec<(&str, String, String)> = vec![

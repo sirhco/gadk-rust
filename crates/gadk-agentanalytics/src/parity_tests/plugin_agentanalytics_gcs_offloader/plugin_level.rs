@@ -46,7 +46,6 @@ use super::super::plugin_agentanalytics_bigquery_agent_analytics_plugin::support
     new_test_plugin_with_config, only_row_of_type, rows_of_type, span_ids, test_bq_client,
     until_event_type,
 };
-use super::sanitization::clean_gcs_prefix;
 use super::{
     FakeStorage, MAX_GCS_PREFIX_BYTES, as_log, as_off, hooked, path_segment_hash_suffix, wait_done,
 };
@@ -61,6 +60,7 @@ use crate::event_types::{
 };
 use crate::formatter::{TEXT_UPLOAD_CONTENT_TYPE, UPLOAD_FAILED_TEXT};
 use crate::offload::OwnedUploadError;
+use crate::offload::uploads::clean_gcs_prefix;
 use crate::offload::uploads::safe_upload_error_summary;
 use crate::plugin::new_bigquery_agent_analytics_plugin_with_clients;
 use crate::redaction::{REDACTED_VALUE, UNPARSEABLE_JSON_PLACEHOLDER};
@@ -1771,7 +1771,6 @@ async fn log_offloaded_text(tp: &TestPlugin) -> Row {
 
 // parity: adapted: Go's cleanGCSPrefix is the sanitization port's clean_gcs_prefix (read off gcs_object_path); a Rust &str is valid UTF-8, so the "invalid UTF-8" case is left out; the direct NewBatchProcessor subtest writes through FakeWriteServer instead of a gRPC server
 #[tokio::test(start_paused = true)]
-#[ignore = "8a bug: an unsafe GCSPathPrefix is neither rewritten to <base>~<sha256> nor warned about (\"WARNING: Config.GCSPathPrefix … was rewritten\") when the plugin or batch processor is built (Go #2018 resolveGCSPathPrefix)"]
 async fn test_gcs_path_prefix_rewrite_warning_and_disjoint_namespace() {
     // valid prefixes log no warning and pass verbatim to custom offloader
     for prefix in [

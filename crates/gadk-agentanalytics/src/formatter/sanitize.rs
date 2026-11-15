@@ -45,8 +45,8 @@ use serde::ser::{
 use serde_json::{Map, Number, Value};
 
 use super::{
-    BINARY_DATA_PLACEHOLDER, MAX_DEPTH_PLACEHOLDER, MAX_SANITIZE_DEPTH, NodeBudget,
-    SANITIZE_BUDGET_PLACEHOLDER, TRUNCATION_SUFFIX, UNSUPPORTED_KEY_PLACEHOLDER,
+    BINARY_DATA_PLACEHOLDER, COLLIDING_KEY_PLACEHOLDER, MAX_DEPTH_PLACEHOLDER, MAX_SANITIZE_DEPTH,
+    NodeBudget, SANITIZE_BUDGET_PLACEHOLDER, TRUNCATION_SUFFIX, UNSUPPORTED_KEY_PLACEHOLDER,
     UNSUPPORTED_OBJ_PLACEHOLDER,
 };
 use crate::error::Error;
@@ -475,6 +475,7 @@ impl<'s> Walker<'s> {
             map: BTreeMap::new(),
             unsupported_keys: 0,
             pending_key: None,
+            pending_redacted: false,
             seen: BTreeSet::new(),
             raw: None,
         }
@@ -605,11 +606,20 @@ impl<'s> Serializer for Walker<'s> {
         self.serialize_str(variant)
     }
 
+    /// A Go defined type: a newtype named for a credential (Go `hasSensitiveTypeName`: `type
+    /// Token string`, `type APIKey *string`, `type Credential any`, …) is written `[REDACTED]`
+    /// under redaction, without reading its value; any other is its value.
     fn serialize_newtype_struct<T: Serialize + ?Sized>(
         mut self,
         name: &'static str,
         value: &T,
     ) -> Result<Out, SanitizeError> {
+        if self.st.redact && name != JSON_NUMBER_TOKEN && is_sensitive_key(name) {
+            if let Some(out) = self.enter() {
+                return Ok(out);
+            }
+            return Ok((San::Str(REDACTED_VALUE.to_owned()), true));
+        }
         if name != JSON_NUMBER_TOKEN {
             return value.serialize(self);
         }
@@ -722,6 +732,9 @@ struct Compound<'s> {
     unsupported_keys: usize,
     /// The key of the map entry whose value comes next (`Err`: not a supported key).
     pending_key: Option<Result<String, ()>>,
+    /// The key of the map entry whose value comes next is redacted whole (Go
+    /// `mapKeyRedactsWhole`).
+    pending_redacted: bool,
     /// Go `seenNames`: struct field names already written or omitted.
     seen: BTreeSet<String>,
     /// The JSON text of a `RawValue`.
@@ -759,6 +772,28 @@ impl Compound<'_> {
         self.items.push(val);
         self.truncated |= t;
         self.stopped = stop;
+    }
+
+    /// An entry of Go's `walkMap` loop whose key is redacted whole (Go `mapKeyRedactsWhole`):
+    /// one node for the key and one for the skipped value, written `{"[REDACTED]":"[REDACTED]"}`.
+    fn redacted_entry(&mut self) {
+        if self.idle() {
+            return;
+        }
+        if self.st.budget.remaining <= 0 {
+            self.stop_with_budget_key();
+            return;
+        }
+        self.st.budget.take();
+        if !self.st.budget.take() {
+            self.stop_with_budget_key();
+            return;
+        }
+        self.map.insert(
+            REDACTED_VALUE.to_owned(),
+            San::Str(REDACTED_VALUE.to_owned()),
+        );
+        self.truncated = true;
     }
 
     /// One entry of Go's `walkMap` loop (`key` `Err`: `mapKeyString` failed).
@@ -806,7 +841,23 @@ impl Compound<'_> {
             self.stop_with_budget_key();
             return;
         }
-        self.map.insert(key, val);
+        // Keys written alike (such as `"1"` and 1) keep their value only if they agree on it,
+        // so that which one is written does not depend on the order of the map.
+        match self.map.get(&key) {
+            Some(existing) if *existing != val => {
+                let placeholder = if self.st.redact {
+                    REDACTED_VALUE
+                } else {
+                    COLLIDING_KEY_PLACEHOLDER
+                };
+                self.map.insert(key, San::Str(placeholder.to_owned()));
+                self.truncated = true;
+            }
+            Some(_) => {}
+            None => {
+                self.map.insert(key, val);
+            }
+        }
         self.truncated |= t;
     }
 
@@ -826,6 +877,18 @@ impl Compound<'_> {
             return;
         }
         if !self.seen.insert(key.to_owned()) {
+            return;
+        }
+        // Go `walkStruct`: a field whose type is redacted whole is written `[REDACTED]` (and
+        // marks the row truncated) before its name is looked at.
+        if self.st.redact && value_redacts_whole(value) {
+            if !self.st.budget.take() {
+                self.stop_with_budget_key();
+                return;
+            }
+            self.map
+                .insert(key.to_owned(), San::Str(REDACTED_VALUE.to_owned()));
+            self.truncated = true;
             return;
         }
         if GENAI_BYTES_FIELDS.contains(&(name, key)) {
@@ -962,10 +1025,19 @@ impl SerializeMap for Compound<'_> {
     type Ok = Out;
     type Error = SanitizeError;
     fn serialize_key<T: Serialize + ?Sized>(&mut self, key: &T) -> Result<(), SanitizeError> {
-        self.pending_key = Some(key.serialize(KeySer).map_err(|_| ()));
+        self.pending_redacted = self.st.redact && map_key_redacts_whole(key);
+        self.pending_key = if self.pending_redacted {
+            None
+        } else {
+            Some(key.serialize(KeySer).map_err(|_| ()))
+        };
         Ok(())
     }
     fn serialize_value<T: Serialize + ?Sized>(&mut self, value: &T) -> Result<(), SanitizeError> {
+        if std::mem::take(&mut self.pending_redacted) {
+            self.redacted_entry();
+            return Ok(());
+        }
         let key = self.pending_key.take().unwrap_or(Err(()));
         self.entry(key, value);
         Ok(())
@@ -1016,6 +1088,204 @@ impl SerializeStructVariant for Compound<'_> {
     }
     fn end(self) -> Result<Out, SanitizeError> {
         Ok(self.finish())
+    }
+}
+
+/// Go `mapKeyRedactsWhole(k)`: the map key is redacted whole from its type alone — a newtype,
+/// tuple struct or struct named for a credential (Go `mapKeyTypeRedactsWhole`: even a plain
+/// credential-named struct, which cannot be an object key), through `Some` (Go's pointers).
+fn map_key_redacts_whole<T: Serialize + ?Sized>(key: &T) -> bool {
+    matches!(
+        key.serialize(KeyTypeProbe { plain_struct: true }),
+        Err(KeyProbe::Sensitive)
+    )
+}
+
+/// Go `redactsWhole(t)` of a value: a newtype named for a credential, through `Some` (a
+/// credential-named struct is written by its fields, as Go's without a marshaler is).
+fn value_redacts_whole<T: Serialize + ?Sized>(value: &T) -> bool {
+    matches!(
+        value.serialize(KeyTypeProbe {
+            plain_struct: false
+        }),
+        Err(KeyProbe::Sensitive)
+    )
+}
+
+/// The outcome of [`KeyTypeProbe`]: `Sensitive` stops at a credential-named type; `Other`
+/// stops anywhere else.
+#[derive(Debug)]
+enum KeyProbe {
+    Sensitive,
+    Other,
+}
+
+impl fmt::Display for KeyProbe {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            KeyProbe::Sensitive => "credential-named key",
+            KeyProbe::Other => "other key",
+        })
+    }
+}
+
+impl std::error::Error for KeyProbe {}
+
+impl ser::Error for KeyProbe {
+    fn custom<M: fmt::Display>(_msg: M) -> Self {
+        KeyProbe::Other
+    }
+}
+
+/// Reads the serde type names of a map key or value (never its scalar values) for
+/// [`map_key_redacts_whole`] and [`value_redacts_whole`]; with `plain_struct`, a struct named
+/// for a credential matches too.
+struct KeyTypeProbe {
+    plain_struct: bool,
+}
+
+impl KeyTypeProbe {
+    fn named(&self, name: &str) -> Result<ser::Impossible<(), KeyProbe>, KeyProbe> {
+        Err(if self.plain_struct && is_sensitive_key(name) {
+            KeyProbe::Sensitive
+        } else {
+            KeyProbe::Other
+        })
+    }
+}
+
+impl Serializer for KeyTypeProbe {
+    type Ok = ();
+    type Error = KeyProbe;
+    type SerializeSeq = ser::Impossible<(), KeyProbe>;
+    type SerializeTuple = ser::Impossible<(), KeyProbe>;
+    type SerializeTupleStruct = ser::Impossible<(), KeyProbe>;
+    type SerializeTupleVariant = ser::Impossible<(), KeyProbe>;
+    type SerializeMap = ser::Impossible<(), KeyProbe>;
+    type SerializeStruct = ser::Impossible<(), KeyProbe>;
+    type SerializeStructVariant = ser::Impossible<(), KeyProbe>;
+
+    fn serialize_bool(self, _v: bool) -> Result<(), KeyProbe> {
+        Ok(())
+    }
+    fn serialize_i8(self, _v: i8) -> Result<(), KeyProbe> {
+        Ok(())
+    }
+    fn serialize_i16(self, _v: i16) -> Result<(), KeyProbe> {
+        Ok(())
+    }
+    fn serialize_i32(self, _v: i32) -> Result<(), KeyProbe> {
+        Ok(())
+    }
+    fn serialize_i64(self, _v: i64) -> Result<(), KeyProbe> {
+        Ok(())
+    }
+    fn serialize_u8(self, _v: u8) -> Result<(), KeyProbe> {
+        Ok(())
+    }
+    fn serialize_u16(self, _v: u16) -> Result<(), KeyProbe> {
+        Ok(())
+    }
+    fn serialize_u32(self, _v: u32) -> Result<(), KeyProbe> {
+        Ok(())
+    }
+    fn serialize_u64(self, _v: u64) -> Result<(), KeyProbe> {
+        Ok(())
+    }
+    fn serialize_f32(self, _v: f32) -> Result<(), KeyProbe> {
+        Ok(())
+    }
+    fn serialize_f64(self, _v: f64) -> Result<(), KeyProbe> {
+        Ok(())
+    }
+    fn serialize_char(self, _v: char) -> Result<(), KeyProbe> {
+        Ok(())
+    }
+    fn serialize_str(self, _v: &str) -> Result<(), KeyProbe> {
+        Ok(())
+    }
+    fn serialize_bytes(self, _v: &[u8]) -> Result<(), KeyProbe> {
+        Ok(())
+    }
+    fn serialize_none(self) -> Result<(), KeyProbe> {
+        Ok(())
+    }
+    fn serialize_some<T: Serialize + ?Sized>(self, value: &T) -> Result<(), KeyProbe> {
+        value.serialize(self)
+    }
+    fn serialize_unit(self) -> Result<(), KeyProbe> {
+        Ok(())
+    }
+    fn serialize_unit_struct(self, name: &'static str) -> Result<(), KeyProbe> {
+        self.named(name).map(|_| ())
+    }
+    fn serialize_unit_variant(
+        self,
+        _name: &'static str,
+        _index: u32,
+        _variant: &'static str,
+    ) -> Result<(), KeyProbe> {
+        Ok(())
+    }
+    fn serialize_newtype_struct<T: Serialize + ?Sized>(
+        self,
+        name: &'static str,
+        value: &T,
+    ) -> Result<(), KeyProbe> {
+        if name != JSON_NUMBER_TOKEN && is_sensitive_key(name) {
+            return Err(KeyProbe::Sensitive);
+        }
+        value.serialize(self)
+    }
+    fn serialize_newtype_variant<T: Serialize + ?Sized>(
+        self,
+        _name: &'static str,
+        _index: u32,
+        _variant: &'static str,
+        _value: &T,
+    ) -> Result<(), KeyProbe> {
+        Err(KeyProbe::Other)
+    }
+    fn serialize_seq(self, _len: Option<usize>) -> Result<Self::SerializeSeq, KeyProbe> {
+        Err(KeyProbe::Other)
+    }
+    fn serialize_tuple(self, _len: usize) -> Result<Self::SerializeTuple, KeyProbe> {
+        Err(KeyProbe::Other)
+    }
+    fn serialize_tuple_struct(
+        self,
+        name: &'static str,
+        _len: usize,
+    ) -> Result<Self::SerializeTupleStruct, KeyProbe> {
+        self.named(name)
+    }
+    fn serialize_tuple_variant(
+        self,
+        _name: &'static str,
+        _index: u32,
+        _variant: &'static str,
+        _len: usize,
+    ) -> Result<Self::SerializeTupleVariant, KeyProbe> {
+        Err(KeyProbe::Other)
+    }
+    fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap, KeyProbe> {
+        Err(KeyProbe::Other)
+    }
+    fn serialize_struct(
+        self,
+        name: &'static str,
+        _len: usize,
+    ) -> Result<Self::SerializeStruct, KeyProbe> {
+        self.named(name)
+    }
+    fn serialize_struct_variant(
+        self,
+        _name: &'static str,
+        _index: u32,
+        _variant: &'static str,
+        _len: usize,
+    ) -> Result<Self::SerializeStructVariant, KeyProbe> {
+        Err(KeyProbe::Other)
     }
 }
 

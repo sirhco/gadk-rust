@@ -347,7 +347,6 @@ fn test_resolve_resource_project() {
 }
 
 // parity: adapted: Go's resource.Default() reads the process environment; gadk's default resource reads the injected environment (no OTEL_RESOURCE_ATTRIBUTES, so it has no gcp.project_id)
-#[ignore = "8a bug: resolve_resource always adds gcp.project_id, empty when no resource project is known (Go #2082 adds it only for a known project)"]
 #[tokio::test]
 async fn test_resolve_resource_project_id() {
     let project_id_key = Key::from_static_str("gcp.project_id");

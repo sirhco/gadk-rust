@@ -996,7 +996,6 @@ fn test_doc_parity_default_config_batch_size_and_retry_delay() {
 
 // parity: adapted: gadk custom metadata is JSON, so the adk_compaction compacted_content *genai.Content is its JSON; the CaptureFullMessageContent and MaxContentLen -1 subtests (same checks) share one loop
 #[tokio::test]
-#[ignore = "8a bug: response summaries neither cap function names at 256 runes nor redact them, and do not cap the joined summary at MaxContentLen+4096 (Go #2246)"]
 async fn test_doc_parity_response_summary_and_function_name_bounds() {
     let at_call_cap = "c".repeat(256);
     let at_resp_cap = "r".repeat(256);

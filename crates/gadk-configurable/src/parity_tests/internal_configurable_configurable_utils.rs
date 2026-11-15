@@ -25,7 +25,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::tests::{CfgErr, fake_key_env, temp_dir, test_registry, write};
-use crate::{ConfigError, GoMap, GoValue, Registry};
+use crate::{ConfigError, GoMap, GoValue, Registry, resolve_config_reference};
 
 /// Go `utils.ErrNotValidRelativePath`'s text.
 const NOT_VALID_RELATIVE_PATH: &str = "path is not a relative path inside the base directory";
@@ -51,6 +51,14 @@ fn is_any_refusal(err: &str) -> bool {
 }
 
 /// The error text of a result (empty on success).
+/// Go `withinDir`: `path` resolves to a location at or below `dir`.
+fn within_dir(dir: &Path, path: &Path) -> bool {
+    match gadk_platform::go_filepath_rel(&dir.to_string_lossy(), &path.to_string_lossy()) {
+        Ok(rel) => gadk_platform::go_filepath_is_local(&rel),
+        Err(_) => false,
+    }
+}
+
 fn err_text<T>(result: Result<T, ConfigError>) -> String {
     result.err().map(|e| e.to_string()).unwrap_or_default()
 }
@@ -75,7 +83,6 @@ fn link_outside(base: &Path, agent_dir: &Path) {
 }
 
 // parity: adapted: Go's package-global registry is a `Registry` value with Go init()'s agent classes (`Registry::with_agent_classes`; the built-in tools are not needed here); Go's sentinels are matched by their text
-#[ignore = "8a bug: ResolveAgentReference takes the referencing config's file path (Go 0990f9e: its directory) and refuses with \"absolute paths are not allowed\"/\"path traversal detected\" instead of the utils.SafeSubpath sentinels (Go #1299)"]
 #[tokio::test]
 async fn test_resolve_agent_reference_rejects_escaping_config_path() {
     let (_guard, base, agent_dir, _) = new_agent_dir();
@@ -112,7 +119,6 @@ async fn test_resolve_agent_reference_rejects_escaping_config_path() {
 }
 
 // parity: adapted: Go's package-global registry is a `Registry` value with Go init()'s agent classes; the reference must also reach the loader (no "config file not found": sub_agent.yaml exists)
-#[ignore = "8a bug: ResolveAgentReference resolves the reference against the parent of its first argument (Go 0990f9e: the config directory itself), so agentDir/sub_agent.yaml is looked up one directory up (Go #1299)"]
 #[tokio::test]
 async fn test_resolve_agent_reference_allows_paths_inside_agent_dir() {
     let (_guard, _base, agent_dir, _) = new_agent_dir();
@@ -191,8 +197,6 @@ async fn test_resolve_tool_reference_mcp_toolset_non_string_args() {
     }
 }
 
-// parity: adapted: Go's resolveConfigReference(agentDir, "self.yaml") succeeding is ResolveAgentReference reaching the loader (the linked LlmAgent config has no model, so it fails on that, not as a refusal or a missing file)
-#[ignore = "8a bug: ResolveAgentReference resolves against the parent of the config directory and refuses ../outside.yaml with \"path traversal detected\" instead of utils.ErrNotValidRelativePath (Go #1299)"]
 #[tokio::test]
 async fn test_resolve_agent_reference_symlinked_parent_dir() {
     let (_guard, base) = temp_dir();
@@ -219,15 +223,11 @@ async fn test_resolve_agent_reference_symlinked_parent_dir() {
     // differently and the reference is refused.
     std::os::unix::fs::symlink(real_dir.join("root_agent.yaml"), real_dir.join("self.yaml"))
         .unwrap();
-    let err = err_text(
-        registry
-            .resolve_agent_reference(&agent_dir, "self.yaml")
-            .await,
-    );
-    assert!(
-        !is_any_refusal(&err) && !err.contains("config file not found"),
-        "resolveConfigReference({agent_dir:?}, self.yaml) = {err}, want success: the link lands inside the real directory"
-    );
+    if let Err(err) = resolve_config_reference(&agent_dir, "self.yaml") {
+        panic!(
+            "resolveConfigReference({agent_dir:?}, self.yaml) = {err}, want success: the link lands inside the real directory"
+        );
+    }
 
     // The symlinked parent must not weaken the check itself. The outside file exists, so an
     // accepted reference would load it rather than fail as not found, and the refusal must
@@ -244,11 +244,10 @@ async fn test_resolve_agent_reference_symlinked_parent_dir() {
     );
 }
 
-// parity: adapted: the Unix branch only (filepath.VolumeName is always empty there, so every reference is accepted); resolveConfigReference is driven through ResolveAgentReference, whose not-found read Go also accepts
+// parity: adapted: the Unix branch only (filepath.VolumeName is always empty there, so every reference is accepted)
 #[tokio::test]
 async fn test_resolve_config_reference_volume_qualified_refs() {
     let (_guard, _base, agent_dir, _) = new_agent_dir();
-    let registry = Registry::with_agent_classes();
 
     for ref_path in [
         r"C:node.yaml",
@@ -257,16 +256,14 @@ async fn test_resolve_config_reference_volume_qualified_refs() {
     ] {
         // Volume-qualified on this platform means the reference escapes and must be refused;
         // otherwise it is a legal file name and must be accepted.
-        let err = err_text(registry.resolve_agent_reference(&agent_dir, ref_path).await);
-        assert!(
-            !is_any_refusal(&err),
-            "resolveConfigReference({agent_dir:?}, {ref_path:?}) rejected ({err}), want rejected = false"
-        );
+        if let Err(err) = resolve_config_reference(&agent_dir, ref_path) {
+            panic!(
+                "resolveConfigReference({agent_dir:?}, {ref_path:?}) rejected = true ({err}), want rejected = false"
+            );
+        }
     }
 }
 
-// parity: adapted: resolveConfigReference returning the real path is ResolveAgentReference reading the linked file (a JoinNode config is no agent class, so the loader fails on that, not as a refusal or a missing file)
-#[ignore = "8a bug: ResolveAgentReference resolves the reference against the parent of the config directory, so the inside link is not found (Go #1299)"]
 #[tokio::test]
 async fn test_resolve_config_reference_accepts_links_that_stay_inside() {
     const NODE_YAML: &str = "name: join_node\nagent_class: JoinNode\n";
@@ -296,18 +293,20 @@ async fn test_resolve_config_reference_accepts_links_that_stay_inside() {
     for (name, layout) in tests {
         let (_guard, dir) = temp_dir();
         let ref_path = layout(&dir);
-        let registry = Registry::with_agent_classes();
 
-        let err = err_text(registry.resolve_agent_reference(&dir, ref_path).await);
-        assert!(
-            !is_any_refusal(&err) && err.contains("invalid agent class 'JoinNode'"),
-            "{name}: resolveConfigReference({dir:?}, {ref_path:?}) = {err}, want success: a link that stays inside the directory keeps loading"
+        let got = resolve_config_reference(&dir, ref_path).unwrap_or_else(|err| {
+            panic!(
+                "{name}: resolveConfigReference({dir:?}, {ref_path:?}) = {err}, want success: a link that stays inside the directory keeps loading"
+            )
+        });
+        let want = std::fs::canonicalize(dir.join(ref_path)).unwrap();
+        assert_eq!(
+            got, want,
+            "{name}: resolveConfigReference({dir:?}, {ref_path:?}), want the real path"
         );
     }
 }
 
-// parity: adapted: resolveConfigReference's keys are read off the registry's agent cache, keyed by the path ResolveAgentReference loaded
-#[ignore = "8a bug: ResolveAgentReference resolves against the parent of the config directory and keys the agent cache by the unresolved (symlinked) spelling, not the real path (Go #1299)"]
 #[tokio::test]
 async fn test_resolve_config_reference_aliased_directory_share_key() {
     let (_guard, base) = temp_dir();
@@ -322,7 +321,14 @@ async fn test_resolve_config_reference_aliased_directory_share_key() {
     std::os::unix::fs::symlink(&real_dir, &alias_dir).unwrap();
     let registry = Registry::with_agent_classes();
 
-    let real_key = real_dir.join("sub_agent.yaml");
+    let real_key = resolve_config_reference(&base, "real/sub_agent.yaml").unwrap_or_else(|err| {
+        panic!("resolveConfigReference through the real directory failed: {err}")
+    });
+    let alias_key = resolve_config_reference(&base, "alias/sub_agent.yaml").unwrap_or_else(|err| {
+        panic!("resolveConfigReference through an inside link failed: {err}")
+    });
+    assert_eq!(alias_key, real_key, "alias key, want the real key");
+
     if let Err(err) = registry
         .resolve_agent_reference(&base, "real/sub_agent.yaml")
         .await
@@ -347,29 +353,25 @@ async fn test_resolve_config_reference_aliased_directory_share_key() {
     );
 }
 
-// parity: adapted: resolveConfigReference is driven through ResolveAgentReference (no refusal; the read reports the missing file)
 #[tokio::test]
 async fn test_resolve_config_reference_below_non_directory() {
     let (_guard, _base, agent_dir, _) = new_agent_dir();
-    let registry = Registry::with_agent_classes();
 
     // sub_agent.yaml is a regular file, so sub_agent.yaml/nested.yaml cannot exist.
     let ref_path = "sub_agent.yaml/nested.yaml";
-    let err = err_text(registry.resolve_agent_reference(&agent_dir, ref_path).await);
-    assert!(
-        !is_any_refusal(&err),
-        "resolveConfigReference({agent_dir:?}, {ref_path:?}) = {err}, want no error: the reference cannot exist, which is the caller's read to report"
-    );
+    if let Err(err) = resolve_config_reference(&agent_dir, ref_path) {
+        panic!(
+            "resolveConfigReference({agent_dir:?}, {ref_path:?}) = {err}, want no error: the reference cannot exist, which is the caller's read to report"
+        );
+    }
 }
 
-// parity: adapted: resolveConfigReference is driven through ResolveAgentReference
-#[ignore = "8a bug: an empty reference is refused with \"agent reference path cannot be empty\", not utils.ErrNotValidRelativePath's \"…: rel path is empty\" (Go #1299)"]
+// parity: adapted: Go's errors.Is(err, utils.ErrNotValidRelativePath) is matched by the sentinel's text
 #[tokio::test]
 async fn test_resolve_config_reference_empty_ref() {
     let (_guard, _base, agent_dir, _) = new_agent_dir();
-    let registry = Registry::with_agent_classes();
 
-    let err = err_text(registry.resolve_agent_reference(&agent_dir, "").await);
+    let err = err_text(resolve_config_reference(&agent_dir, ""));
     assert!(
         err.contains(NOT_VALID_RELATIVE_PATH),
         "resolveConfigReference({agent_dir:?}, \"\") = {err}, want {NOT_VALID_RELATIVE_PATH:?}"
@@ -380,14 +382,12 @@ async fn test_resolve_config_reference_empty_ref() {
     );
 }
 
-// parity: adapted: the Unix branch (runtime.GOOS != "windows"); resolveConfigReference is driven through ResolveAgentReference, so Go's check that an accepted path stays inside the directory (withinDir) has no returned path to inspect
-#[ignore = "8a bug: an absolute reference is refused with \"absolute paths are not allowed\", not utils.ErrNotValidRelativePath (Go #1299)"]
+// parity: adapted: the Unix branch (runtime.GOOS != "windows"); Go's errors.Is(err, utils.ErrNotValidRelativePath) is matched by the sentinel's text
 #[tokio::test]
 async fn test_resolve_config_reference_os_specific_refs() {
     let (_guard, base) = temp_dir();
     let agent_dir = base.join("agents").join("root");
     let agent_path = write(&agent_dir, "root_agent.yaml", "agent_class: LlmAgent\n");
-    let registry = Registry::with_agent_classes();
 
     let windows = false;
     let tests = [
@@ -417,25 +417,33 @@ async fn test_resolve_config_reference_os_specific_refs() {
     ];
 
     for (name, ref_path, want_rejected) in tests {
-        let err = err_text(registry.resolve_agent_reference(&agent_dir, ref_path).await);
-        let got_rejected = is_any_refusal(&err);
+        let got = resolve_config_reference(&agent_dir, ref_path);
+        let got_rejected = got.is_err();
         assert_eq!(
             got_rejected, want_rejected,
-            "{name}: resolveConfigReference({agent_dir:?}, {ref_path:?}) rejected = {got_rejected} ({err}), want rejected = {want_rejected}"
+            "{name}: resolveConfigReference({agent_dir:?}, {ref_path:?}) rejected = {got_rejected} ({got:?}), want rejected = {want_rejected}"
         );
-        if got_rejected {
-            // A rejection here is the lexical containment check refusing the reference,
-            // never a later failure to load what it names.
-            assert!(
-                err.contains(NOT_VALID_RELATIVE_PATH),
-                "{name}: resolveConfigReference({agent_path:?}, {ref_path:?}) = {err}, want {NOT_VALID_RELATIVE_PATH:?}"
-            );
+        match got {
+            Err(err) => {
+                // A rejection here is the lexical containment check refusing the reference,
+                // never a later failure to load what it names.
+                assert!(
+                    err.to_string().contains(NOT_VALID_RELATIVE_PATH),
+                    "{name}: resolveConfigReference({agent_path:?}, {ref_path:?}) = {err}, want {NOT_VALID_RELATIVE_PATH:?}"
+                );
+            }
+            Ok(got) => {
+                // Accepted: the resolved path must not escape the parent directory.
+                assert!(
+                    within_dir(&agent_dir, &got),
+                    "{name}: resolveConfigReference({agent_path:?}, {ref_path:?}) = {got:?}, which escapes the parent directory {agent_dir:?}"
+                );
+            }
         }
     }
 }
 
 // parity: adapted: Go's t.Setenv("GOOGLE_API_KEY") is the registry's environment (fake_key_env); Go init()'s registries are Registry::new()
-#[ignore = "8a bug: an escaping sub_agents/AgentTool config_path is refused with \"path traversal detected\", not a utils.SafeSubpath sentinel wrapped as `config reference \"<ref>\": …` (Go #1299)"]
 #[tokio::test]
 async fn test_from_config_refuses_escaping_agent_references() {
     let (_guard, base, agent_dir, _) = new_agent_dir();
@@ -495,7 +503,6 @@ async fn test_from_config_refuses_escaping_agent_references() {
 }
 
 // parity: adapted: Go init()'s registries are a `Registry` value with Go init()'s agent classes (test_registry)
-#[ignore = "8a bug: a sub_agents link escaping through \"s/../y.yaml\" is refused with \"path traversal detected\", not utils.ErrSymlinkInRelativePath wrapped as `config reference \"x.yaml\": …` (Go #1299)"]
 #[tokio::test]
 async fn test_from_config_dot_dot_after_link_in_target() {
     use std::os::unix::fs::symlink;

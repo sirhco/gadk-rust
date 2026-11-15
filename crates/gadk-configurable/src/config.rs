@@ -86,7 +86,10 @@ pub struct BaseAgentConfig {
     pub before_agent_callbacks: Vec<CodeConfig>,
     /// Go `AfterAgentCallbacks yaml:"after_agent_callbacks,omitempty"`.
     pub after_agent_callbacks: Vec<CodeConfig>,
-    /// Go `ConfigPath yaml:"-"`: set by the factory after decoding.
+    /// Go `ConfigDir yaml:"-"` (0990f9e; was `ConfigPath`): the directory of the config file
+    /// this agent was loaded from, set by the factory after decoding. Every config reference in
+    /// the file must stay inside it. The field keeps its gadk name (a rename would break the
+    /// public API).
     #[serde(skip)]
     pub config_path: PathBuf,
     /// Go `AdditionalProperties map[string]any yaml:",inline"`: every other key.
@@ -110,7 +113,7 @@ pub struct LlmAgentYamlConfig {
     pub before_agent_callbacks: Vec<CodeConfig>,
     /// Inlined `baseAgentConfig.AfterAgentCallbacks`.
     pub after_agent_callbacks: Vec<CodeConfig>,
-    /// Inlined `baseAgentConfig.ConfigPath` (`yaml:"-"`).
+    /// Inlined `baseAgentConfig.ConfigDir` (`yaml:"-"`): the config file's directory.
     #[serde(skip)]
     pub config_path: PathBuf,
     /// Go `Model yaml:"model"`.
@@ -147,7 +150,7 @@ pub struct LoopAgentYamlConfig {
     pub before_agent_callbacks: Vec<CodeConfig>,
     /// Inlined `baseAgentConfig.AfterAgentCallbacks`.
     pub after_agent_callbacks: Vec<CodeConfig>,
-    /// Inlined `baseAgentConfig.ConfigPath` (`yaml:"-"`).
+    /// Inlined `baseAgentConfig.ConfigDir` (`yaml:"-"`): the config file's directory.
     #[serde(skip)]
     pub config_path: PathBuf,
     /// Go `MaxIterations uint yaml:"max_iterations"` (Go `uint` is 64-bit).
@@ -173,7 +176,7 @@ pub struct ParallelAgentYamlConfig {
     pub before_agent_callbacks: Vec<CodeConfig>,
     /// Inlined `baseAgentConfig.AfterAgentCallbacks`.
     pub after_agent_callbacks: Vec<CodeConfig>,
-    /// Inlined `baseAgentConfig.ConfigPath` (`yaml:"-"`).
+    /// Inlined `baseAgentConfig.ConfigDir` (`yaml:"-"`): the config file's directory.
     #[serde(skip)]
     pub config_path: PathBuf,
     /// Inlined `baseAgentConfig.AdditionalProperties` (`,inline`).
@@ -197,7 +200,7 @@ pub struct SequentialAgentYamlConfig {
     pub before_agent_callbacks: Vec<CodeConfig>,
     /// Inlined `baseAgentConfig.AfterAgentCallbacks`.
     pub after_agent_callbacks: Vec<CodeConfig>,
-    /// Inlined `baseAgentConfig.ConfigPath` (`yaml:"-"`).
+    /// Inlined `baseAgentConfig.ConfigDir` (`yaml:"-"`): the config file's directory.
     #[serde(skip)]
     pub config_path: PathBuf,
     /// Inlined `baseAgentConfig.AdditionalProperties` (`,inline`).
@@ -221,7 +224,7 @@ pub struct WorkflowYamlConfig {
     pub before_agent_callbacks: Vec<CodeConfig>,
     /// Inlined `baseAgentConfig.AfterAgentCallbacks`.
     pub after_agent_callbacks: Vec<CodeConfig>,
-    /// Inlined `baseAgentConfig.ConfigPath` (`yaml:"-"`).
+    /// Inlined `baseAgentConfig.ConfigDir` (`yaml:"-"`): the config file's directory.
     #[serde(skip)]
     pub config_path: PathBuf,
     /// Go `Edges []yaml.Node yaml:"edges"`: each element's root is the edge chain's node.
