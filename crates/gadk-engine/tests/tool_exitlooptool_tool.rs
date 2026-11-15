@@ -62,7 +62,6 @@ fn strip_ids(mut c: Content) -> Content {
     c
 }
 #[tokio::test]
-#[ignore = "8a bug: the flow (llm/functions.rs) never wraps a tool's nothing-result (exit_loop's empty map) as {\"result\": null} (Go 1ced38ba flow half)"]
 async fn test_exit_loop_tool_exits_loop_agent() {
     let cases: Vec<(&str, Vec<Content>, u32, Vec<Content>)> = vec![
         (

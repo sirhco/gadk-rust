@@ -609,7 +609,6 @@ async fn test_run_node_with_use_as_output_message_as_output_empty_text_is_valid_
     );
 }
 
-#[ignore = "8a bug: ErrOutputAlreadyDelegated text (error.rs WorkflowError::sentinel_text, not owned by the D2b fix task) says \"use_as_output child\" where Go 983d689e says \"use_as_output delegate\""]
 #[tokio::test]
 async fn test_run_node_with_use_as_output_second_delegation_returns_error() {
     let (c1, _) = stub_node("c1", json!("v1"));

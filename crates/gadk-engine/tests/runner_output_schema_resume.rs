@@ -231,7 +231,6 @@ async fn test_null_schema_reply_survives_resume() {
 
 // parity: adapted: an in-memory SQLite database stands in for Go's SQLite file in t.TempDir()
 #[tokio::test]
-#[ignore = "8a bug: process_llm_agent_output sets message_as_output even when the OutputSchema parsed a record, so the runner clears the parsed output and the resumed join gets the reply text"]
 async fn test_parsed_schema_reply_survives_resume_on_database() {
     let got = run_schema_reply_through_join(r#"{"title":"T"}"#).await;
     assert!(

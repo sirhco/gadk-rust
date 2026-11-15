@@ -199,7 +199,6 @@ async fn run_parent_with_sub_agent(sub: Arc<dyn Agent>, rec: &Arc<Mutex<Recorded
 }
 
 #[tokio::test]
-#[ignore = "8a bug: AgentTool (tool/agent_tool.rs) still starts its sub-runner with Runner::run; Go #1777 starts it with run_with_context(&ctx.with_inherited_plugins(), …) — un-ignore with that change"]
 async fn test_runner_parent_plugins_reach_agent_tool_llm_sub_agent() {
     let sub = llm_agent::new(LlmAgentConfig {
         name: "sub_agent".into(),
@@ -234,7 +233,6 @@ async fn test_runner_parent_plugins_reach_agent_tool_llm_sub_agent() {
 }
 
 #[tokio::test]
-#[ignore = "8a bug: AgentTool (tool/agent_tool.rs) still starts its sub-runner with Runner::run; Go #1777 starts it with run_with_context(&ctx.with_inherited_plugins(), …) — un-ignore with that change"]
 async fn test_runner_parent_plugins_reach_agent_tool_sequential_sub_agent() {
     let leaf = llm_agent::new(LlmAgentConfig {
         name: "leaf".into(),

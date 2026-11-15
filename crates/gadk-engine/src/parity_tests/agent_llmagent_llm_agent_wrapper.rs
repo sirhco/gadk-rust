@@ -448,7 +448,6 @@ async fn test_prepare_llm_agent_input() {
 
 // parity: adapted: the "nil event is no-op" subtest is dropped (&mut Event is not nullable)
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "8a bug: process_llm_agent_output (llm/node_wrapper.rs, not owned by the D2b fix task) marks a parsed output_schema reply MessageAsOutput (Go #2291 marks only an unparsed or null reply)"]
 async fn test_process_llm_agent_output() {
     let x = make_llm_agent("x", Mode::Unset, |_| {});
 

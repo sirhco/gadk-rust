@@ -252,8 +252,11 @@ impl RunnableTool for AgentTool {
             max_llm_calls,
             ..Default::default()
         };
-        // Dropping the stream (on return) cancels the child invocation.
-        let mut events = runner.run(
+        // Dropping the stream (on return) cancels the child invocation. Go 24d33b35 (#1777):
+        // the sub-runner starts with a context marked to inherit this invocation's plugins
+        // (`plugininternal.WithInheritedPlugins(toolCtx)`), which a plugin-less runner keeps.
+        let mut events = runner.run_with_context(
+            &ctx.as_invocation().with_inherited_plugins(),
             sub_session.user_id(),
             sub_session.id(),
             Some(content),

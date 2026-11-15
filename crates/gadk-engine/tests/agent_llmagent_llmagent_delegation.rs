@@ -609,7 +609,6 @@ phrase and target language. After the sub-agent returns, reply with
 one concise English sentence reporting the translation. Do NOT call
 the sub-agent more than once. Do NOT ask the user follow-up questions."#;
 
-#[ignore = "8a bug: a single_turn sub-agent's transcript reaches the root agent's context (Go #2128 keeps it out)"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_delegation_03_chat_to_single_turn() {
     let model: Arc<dyn Llm> = gemini_test_model(
@@ -809,7 +808,6 @@ transfer_to_agent with agent_name="writer". Do not attempt to edit
 the draft yourself. Do not produce any final text — let writer
 respond to the user."#;
 
-#[ignore = "8a bug: transfer_to_agent's empty result is sent as {} instead of {\"result\": null} (Go #2281)"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_delegation_05_chat_chained_through_chat_to_task() {
     let model: Arc<dyn Llm> = gemini_test_model(
@@ -1347,7 +1345,6 @@ transfer_to_agent with agent_name set to "billing" (for billing
 questions) or "support" (for technical questions). Never answer
 yourself; always transfer."#;
 
-#[ignore = "8a bug: transfer_to_agent's empty result is sent as {} instead of {\"result\": null} (Go #2281)"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_delegation_09_chat_peer_transfer_across_siblings() {
     let model: Arc<dyn Llm> = gemini_test_model(

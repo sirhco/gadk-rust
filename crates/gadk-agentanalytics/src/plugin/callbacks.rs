@@ -641,9 +641,16 @@ impl AnalyticsPlugin {
                 Some(&mut || span.clone()),
                 Some(&mut |d: &mut EventData| {
                     let origin = self.resolve_tool_origin(ctx, &id, t, args);
-                    d.content = Some(Payload::Json(tool_content(
-                        &name, "result", &result, origin,
-                    )));
+                    let mut content = tool_content(&name, "result", &result, origin);
+                    // Divergence (ledger 1b): a tool's empty result map is Go's nil result
+                    // (Go 1ced38ba, #2281: transfer_to_agent and exit_loop return nil), which
+                    // Go records as `"result": null`.
+                    if result.is_empty()
+                        && let Value::Object(m) = &mut content
+                    {
+                        m.insert("result".to_owned(), Value::Null);
+                    }
+                    d.content = Some(Payload::Json(content));
                     d.function_call_id = call_id.clone();
                 }),
             );

@@ -32,6 +32,7 @@ use serde_json::{Map, Value};
 use crate::{
     llm::{
         flow::Flow,
+        output_schema_binding::output_schema_for,
         processors::{go_json_marshal, wrap_err},
         state::{LlmAgentState, reveal},
     },
@@ -54,12 +55,14 @@ pub(crate) fn output_schema_request_processor<'a>(
         let Some(state) = reveal(&*agent) else {
             return Ok(Vec::new());
         };
-        let Some(schema) = state.cfg.output_schema.clone() else {
-            return Ok(Vec::new());
-        };
+        // Check if we need the processor in the first place.
         if !need_output_schema_processor(state) {
             return Ok(Vec::new());
         }
+        // Go be529e7b: the declared schema, else one a typed workflow node bound.
+        let Some(schema) = output_schema_for(ctx, state) else {
+            return Ok(Vec::new());
+        };
         let tool: Arc<dyn Tool> = Arc::new(SetModelResponseTool { schema });
         pack_tool(req, &tool).map_err(|e| wrap_err("failed to pack set_model_response tool", e))?;
         append_instructions(req, &[INSTRUCTION_FOR_PROCESSOR]);

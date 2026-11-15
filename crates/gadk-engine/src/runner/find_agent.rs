@@ -25,9 +25,10 @@ use gadk_session::{Event, Session};
 use serde_json::Value;
 
 use super::RunnerInner;
+use crate::agents::graph_resume::find_call_event;
 use crate::llm::state::reveal;
 use crate::tool::finish_task::{FINISH_TASK_SUCCESS_RESULT, FINISH_TASK_TOOL_NAME};
-use crate::tool::utils::{function_calls, function_responses};
+use crate::tool::utils::function_responses;
 
 /// Port of Go runner/runner.go `findActiveTaskIsolationScope`: the most recent isolation scope not
 /// yet closed by a successful `finish_task` function response; `""` when there is none.
@@ -58,8 +59,9 @@ pub(crate) fn find_active_task_isolation_scope(sess: Option<&dyn Session>) -> St
     String::new()
 }
 
-/// Port of Go runner/runner.go `handleUserFunctionCallResponse`: the event holding the function
-/// call that the first function response in `msg` answers.
+/// Port of Go `utils.FunctionCallEvent` (runner.go `handleUserFunctionCallResponse` before
+/// 51bc7ec5): the event holding the function call that the first function response in `msg`
+/// answers.
 pub(crate) fn handle_user_function_call_response<'a>(
     events: &'a [Event],
     msg: Option<&Content>,
@@ -69,12 +71,7 @@ pub(crate) fn handle_user_function_call_response<'a>(
     }
     // Go assumes every response in the message answers calls made by the same agent.
     let responses = function_responses(msg);
-    let call_id = &responses.first()?.id;
-    events.iter().rev().find(|e| {
-        function_calls(e.response.content.as_ref())
-            .iter()
-            .any(|fc| &fc.id == call_id)
-    })
+    find_call_event(events, &responses.first()?.id)
 }
 
 /// Port of Go runner/runner.go `(*Runner).isTransferableAcrossAgentTree`: whether `agent` and its

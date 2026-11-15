@@ -30,6 +30,8 @@ use tokio::task::{JoinHandle, JoinSet};
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 
+use crate::agents::graph_resume::graph_resume_indexes;
+
 /// Port of Go parallelagent.Config: the configuration of a parallel agent.
 #[derive(Clone, Default)]
 pub struct ParallelAgentConfig {
@@ -152,7 +154,13 @@ fn run(ctx: InvocationContext) -> EventStream {
         // Go errgroup `err` (first error, kept once): the shared value the cause carries.
         let first_err: Arc<Mutex<Option<CancelCause>>> = Arc::new(Mutex::new(None));
         let mut set = JoinSet::new();
-        for sa in cur.sub_agents() {
+        // Go 51bc7ec5 (#2188): resuming a nested graph workflow runs only the sub-agents holding
+        // the callers.
+        let mut sub_agents: Vec<Arc<dyn Agent>> = cur.sub_agents().to_vec();
+        if let Some(ix) = graph_resume_indexes(&ctx) {
+            sub_agents = ix.iter().filter_map(|&i| sub_agents.get(i).cloned()).collect();
+        }
+        for sa in &sub_agents {
             let mut branch = format!("{}.{}", cur.name(), sa.name());
             if !ctx.branch().is_empty() {
                 branch = format!("{}.{}", ctx.branch(), branch);

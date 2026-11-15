@@ -536,7 +536,6 @@ fn streaming_text_model(usage: GenerateContentResponseUsageMetadata) -> Arc<Mock
 
 // parity: adapted: Go's "the callback's own response objects are not modified" check is dropped (a Rust callback hands its replacement over by value, so the flow cannot mutate the callback's copy)
 #[tokio::test]
-#[ignore = "8a bug: an after-model callback replacement drops the replaced response's partial, turn_complete and usage_metadata (Go #1763 carries them over; Flow::call_model in llm/flow.rs is not owned by the D2b fix task)"]
 async fn test_after_model_callback_replacement_keeps_streaming_fields() {
     let usage_md = usage(120, 8, 128);
     let own_usage = usage(1, 1, 2);
@@ -966,7 +965,6 @@ async fn check(root: Arc<dyn Agent>, subtest: &str, wants: Vec<Vec<(&str, Conten
 }
 
 #[tokio::test]
-#[ignore = "8a bug: transfer_to_agent's empty result is sent as {} instead of {\"result\": null} (Go #2281; the flow's nothing-result wrap in llm/functions.rs is not owned by the D2b fix task)"]
 async fn test_agent_transfer() {
     let llm = |name: &str, model: &Arc<MockModel>, subs: Vec<Arc<dyn Agent>>, single: bool| {
         llm_agent::new(LlmAgentConfig {

@@ -25,6 +25,7 @@ pub(crate) mod functions;
 pub(crate) mod live;
 pub(crate) mod mode;
 pub(crate) mod node_wrapper;
+pub(crate) mod output_schema_binding;
 pub use node_wrapper::run_llm_agent_as_node;
 pub(crate) mod processors;
 pub(crate) mod state;

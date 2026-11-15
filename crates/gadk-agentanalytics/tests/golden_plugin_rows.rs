@@ -453,7 +453,6 @@ async fn golden_tool_error() {
     check("tool_error", root).await;
 }
 
-#[ignore = "8a bug: a tool returning nothing records {} instead of {\"result\": null} (Go #2281)"]
 #[tokio::test]
 async fn golden_transfer() {
     let helper = llm(LlmAgentConfig {

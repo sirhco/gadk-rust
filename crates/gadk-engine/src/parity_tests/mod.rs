@@ -70,6 +70,7 @@ mod internal_llminternal_live_injection;
 mod internal_llminternal_live_reconnect;
 mod internal_llminternal_mode;
 mod internal_llminternal_mode_contents;
+mod internal_llminternal_output_schema_binding;
 mod internal_llminternal_outputschema_processor;
 mod internal_llminternal_request_confirmation_processor;
 mod internal_llminternal_streaming_tool;

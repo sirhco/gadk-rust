@@ -1647,7 +1647,6 @@ async fn wire_failed_task() {
     replay("failed_task").await;
 }
 
-#[ignore = "8a bug: a tool returning nothing yields {} instead of {\"result\": null} (Go 1ced38ba #2281; gadk-engine)"]
 #[tokio::test(flavor = "multi_thread")]
 async fn wire_cancel_input_required_with_child() {
     replay("cancel_input_required_with_child").await;
