@@ -15,33 +15,27 @@
 
 //! Test-only fakes for the live flow: a Gemini Live wire-protocol server (port of Go
 //! startFakeLiveServer / startClosableLiveServer in internal/llminternal/base_flow_live_test.go),
-//! a scripted in-memory live model, and the helpers both live parity targets share
+//! the scripted in-memory live model (re-exported from `testutil::live`, where it is public
+//! under the `testutil` feature), and the helpers both live parity targets share
 //! (Go newLiveInvocationContext, liveConfigProcessor, testLiveReconnectPolicy, startDrain, …).
 
-use std::collections::VecDeque;
 use std::future::Future;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use async_trait::async_trait;
 use futures::future::BoxFuture;
-use futures::stream::BoxStream;
 use futures::{SinkExt, StreamExt};
 use gadk_agent::{
     AgentConfig, AgentError, EventStream, InvocationContext, LiveRunConfig, LiveSession, RunConfig,
     StreamingMode, agent,
 };
 use gadk_gemini::{ClientConfig, GeminiModel, MapEnv};
-use gadk_genai::{Content, GenerateContentConfig, LiveConnectConfig};
-use gadk_model::{
-    Backend, HttpOptions, LiveConnError, LiveConnErrorKind, LiveConnection, Llm, LlmRequest,
-    LlmResponse, ModelError, RealtimeInput,
-};
+use gadk_genai::GenerateContentConfig;
+use gadk_model::{Backend, HttpOptions, Llm, LlmRequest};
 use gadk_session::Event;
 use parking_lot::Mutex;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::Notify;
 use tokio::task::{AbortHandle, JoinHandle};
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
@@ -52,6 +46,7 @@ use tokio_util::sync::CancellationToken;
 use crate::llm::flow::{Flow, RequestProcessor};
 use crate::llm::live::reconnect::LiveReconnectPolicy;
 use crate::llm::live::session::{LiveProbe, LiveSessionImpl};
+pub(crate) use crate::testutil::live::ScriptedLiveLlm;
 
 /// The server's reply to the client's setup frame.
 pub(crate) const SETUP_COMPLETE: &str = r#"{"setupComplete":{}}"#;
@@ -228,135 +223,6 @@ impl Drop for FakeLiveServer {
         for h in self.conns.lock().drain(..) {
             h.abort();
         }
-    }
-}
-
-/// Shared state of a [`ScriptedLiveLlm`] and every connection it opened.
-struct ScriptedState {
-    responses: Mutex<VecDeque<LlmResponse>>,
-    sent: Mutex<Vec<Content>>,
-    closed: AtomicBool,
-    close_notify: Notify,
-    fail_history: bool,
-    connects: AtomicUsize,
-}
-
-/// An [`Llm`] whose `connect_live` returns an in-memory connection that yields `responses` in
-/// order and records what the flow sends. For tests that need no socket.
-pub(crate) struct ScriptedLiveLlm {
-    name: String,
-    state: Arc<ScriptedState>,
-}
-
-impl ScriptedLiveLlm {
-    fn build(name: &str, responses: Vec<LlmResponse>, fail_history: bool) -> Arc<ScriptedLiveLlm> {
-        Arc::new(ScriptedLiveLlm {
-            name: name.to_owned(),
-            state: Arc::new(ScriptedState {
-                responses: Mutex::new(responses.into()),
-                sent: Mutex::new(Vec::new()),
-                closed: AtomicBool::new(false),
-                close_notify: Notify::new(),
-                fail_history,
-                connects: AtomicUsize::new(0),
-            }),
-        })
-    }
-
-    pub(crate) fn new(name: &str, responses: Vec<LlmResponse>) -> Arc<ScriptedLiveLlm> {
-        Self::build(name, responses, false)
-    }
-
-    /// `send_history` fails client-side, as Go's NaN history does (`json: unsupported value: NaN`).
-    pub(crate) fn failing_history(name: &str) -> Arc<ScriptedLiveLlm> {
-        Self::build(name, Vec::new(), true)
-    }
-
-    #[expect(dead_code, reason = "for the later live tasks' tests (contract C4)")]
-    pub(crate) fn sent_contents(&self) -> Vec<Content> {
-        self.state.sent.lock().clone()
-    }
-
-    pub(crate) fn closed(&self) -> bool {
-        self.state.closed.load(Ordering::SeqCst)
-    }
-
-    pub(crate) fn connects(&self) -> usize {
-        self.state.connects.load(Ordering::SeqCst)
-    }
-}
-
-impl Llm for ScriptedLiveLlm {
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    fn generate_content(
-        &self,
-        _req: LlmRequest,
-        _stream: bool,
-    ) -> BoxStream<'static, Result<LlmResponse, ModelError>> {
-        futures::stream::empty().boxed()
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
-    fn connect_live<'a>(
-        &'a self,
-        _cfg: LiveConnectConfig,
-    ) -> BoxFuture<'a, Result<Box<dyn LiveConnection>, ModelError>> {
-        self.state.connects.fetch_add(1, Ordering::SeqCst);
-        let conn: Box<dyn LiveConnection> = Box::new(ScriptedConn(self.state.clone()));
-        Box::pin(async move { Ok(conn) })
-    }
-}
-
-struct ScriptedConn(Arc<ScriptedState>);
-
-#[async_trait]
-impl LiveConnection for ScriptedConn {
-    async fn send_history(&self, _history: &[Content]) -> Result<(), LiveConnError> {
-        if self.0.fail_history {
-            return Err(LiveConnError::new(
-                LiveConnErrorKind::Other,
-                "failed to send history: json: unsupported value: NaN",
-            ));
-        }
-        Ok(())
-    }
-
-    async fn send_content(&self, content: Content) -> Result<(), LiveConnError> {
-        self.0.sent.lock().push(content);
-        Ok(())
-    }
-
-    async fn send_realtime(&self, _input: RealtimeInput) -> Result<(), LiveConnError> {
-        Ok(())
-    }
-
-    /// The scripted responses in order, then parks until `close`, then a non-resumable error.
-    async fn recv(&self) -> Result<Option<LlmResponse>, LiveConnError> {
-        loop {
-            let notified = self.0.close_notify.notified();
-            if let Some(r) = self.0.responses.lock().pop_front() {
-                return Ok(Some(r));
-            }
-            if self.0.closed.load(Ordering::SeqCst) {
-                return Err(LiveConnError::new(
-                    LiveConnErrorKind::Other,
-                    "scripted connection closed",
-                ));
-            }
-            notified.await;
-        }
-    }
-
-    async fn close(&self) -> Result<(), LiveConnError> {
-        self.0.closed.store(true, Ordering::SeqCst);
-        self.0.close_notify.notify_waiters();
-        Ok(())
     }
 }
 
