@@ -16,14 +16,16 @@
 
 //! Port of Go tool/exampletool/tool_test.go (package exampletool, white-box).
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
-use gadk_agent::{Context, Tool};
+use async_trait::async_trait;
+use gadk_agent::{Context, Tool, ToolError};
 use gadk_genai::{Blob, Content, FunctionCall, FunctionResponse, Part};
 use gadk_model::LlmRequest;
 use serde_json::{Map, Value, json};
 
-use crate::example::{Example, ExampleToolConfig, new};
+use super::{test_err, wraps};
+use crate::example::{Example, ExampleToolConfig, ExampleToolError, Provider, new};
 
 fn obj(v: Value) -> Map<String, Value> {
     match v {
@@ -122,7 +124,7 @@ const HI_HELLO_INSTRUCT: &str = concat!(
     "<EXAMPLES>",
 );
 
-// parity: adapted: Go's mockToolContext becomes a built Context carrying only the user content; NilFirstPart uses an empty Part because a Rust part list cannot hold nil; New's never-returned error is dropped; Go's t.Run subtests report every mismatch, so the Rust loop collects them and fails once
+// parity: adapted: Go's mockToolContext becomes a built Context carrying only the user content; NilFirstPart uses an empty Part because a Rust part list cannot hold nil; Go's t.Run subtests report every mismatch, so the Rust loop collects them and fails once
 #[tokio::test]
 async fn test_example_tool_process_request() {
     let cases = vec![
@@ -484,8 +486,10 @@ async fn test_example_tool_process_request() {
     for tc in cases {
         let name = tc.name;
         let et = new(ExampleToolConfig {
-            examples: tc.examples,
-        });
+            examples: Some(tc.examples),
+            ..Default::default()
+        })
+        .unwrap();
         let mut req = LlmRequest {
             model: tc.model.into(),
             ..Default::default()
@@ -533,7 +537,7 @@ async fn test_example_tool_process_request() {
 #[tokio::test]
 async fn test_example_tool_process_request_stable_argument_order() {
     let et = new(ExampleToolConfig {
-        examples: vec![Example {
+        examples: Some(vec![Example {
             input: Content::from_text("book a flight", "user"),
             output: vec![Content {
                 role: "model".into(),
@@ -553,8 +557,10 @@ async fn test_example_tool_process_request_stable_argument_order() {
                     ..Default::default()
                 }],
             }],
-        }],
-    });
+        }]),
+        ..Default::default()
+    })
+    .unwrap();
     let want_call = "book_flight(cabin='economy', date='2026-11-01', destination='JFK', origin='SFO', passengers=2, refundable=true)";
     // Repeated so that a map order that happens to come out sorted once
     // cannot pass the test.
@@ -583,12 +589,268 @@ async fn test_example_tool_process_request_stable_argument_order() {
     }
 }
 
-// parity: skipped TestNew_BothExamplesAndProviderError: 8b — example providers (ExampleToolConfig.Provider)
-// parity: skipped TestExampleTool_ProcessRequest_Provider: 8b — example providers (ExampleToolConfig.Provider)
-
 #[test]
 fn test_example_tool_interface() {
-    let et: Arc<dyn Tool> = new(ExampleToolConfig::default());
+    let et: Arc<dyn Tool> = new(ExampleToolConfig::default()).unwrap();
     assert_eq!(et.name(), "example_tool", "Name()");
     assert!(!et.is_long_running(), "IsLongRunning() = true, want false");
+}
+
+/// Go `fakeProvider`: records each call's query and returns `examples`, or fails with `err`.
+#[derive(Default)]
+struct FakeProvider {
+    examples: Vec<Example>,
+    err: Option<&'static str>,
+    /// Go `gotQuery` and `calls`.
+    calls: Mutex<Vec<String>>,
+}
+
+impl FakeProvider {
+    fn calls(&self) -> Vec<String> {
+        self.calls.lock().unwrap().clone()
+    }
+}
+
+#[async_trait]
+impl Provider for FakeProvider {
+    async fn examples(&self, _ctx: &Context, query: &str) -> Result<Vec<Example>, ToolError> {
+        self.calls.lock().unwrap().push(query.to_string());
+        if let Some(err) = self.err {
+            return Err(test_err(err));
+        }
+        Ok(self.examples.clone())
+    }
+}
+
+/// `new` with only `provider` set.
+fn new_with_provider(fp: &Arc<FakeProvider>) -> Arc<dyn Tool> {
+    match new(ExampleToolConfig {
+        provider: Some(fp.clone()),
+        ..Default::default()
+    }) {
+        Ok(et) => et,
+        Err(e) => panic!("New() error = {e}"),
+    }
+}
+
+/// The Go `mockToolContext` of the provider tests: a context carrying only `user_content`.
+fn ctx_with(user_content: Option<Content>) -> Context {
+    let mut builder = Context::builder();
+    if let Some(uc) = user_content {
+        builder = builder.user_content(uc);
+    }
+    builder.build()
+}
+
+// parity: adapted: Go's empty non-nil Examples slice is Some(vec![]); the error's text is also checked
+#[test]
+fn test_new_both_examples_and_provider_error() {
+    let result = new(ExampleToolConfig {
+        examples: Some(vec![]),
+        provider: Some(Arc::new(FakeProvider::default())),
+    });
+    let Err(err) = result else {
+        panic!("New() with both Examples and Provider succeeded, want error");
+    };
+    assert_eq!(err, ExampleToolError::BothExamplesAndProvider);
+    assert_eq!(
+        err.to_string(),
+        "exampletool: cannot specify both Examples and Provider"
+    );
+}
+
+// parity: adapted: Go's mockToolContext becomes a built Context carrying only the user content; a nil Part becomes an empty Part because a Rust part list cannot hold nil; errors.Is is a source-chain search for the provider's sentinel, and the wrapped text is also checked
+#[tokio::test]
+async fn test_example_tool_process_request_provider() {
+    let basic_examples = vec![Example {
+        input: Content::from_text("test_input", "user"),
+        output: vec![Content::from_text("test_output", "model")],
+    }];
+    let want_basic_instruct = concat!(
+        "<EXAMPLES>\n",
+        "Begin few-shot\n",
+        "The following are examples of user queries and model responses using the available tools.\n",
+        "\n",
+        "EXAMPLE 1:\n",
+        "Begin example\n",
+        "[user]\n",
+        "test_input\n",
+        "[model]\n",
+        "test_output\n",
+        "End example\n",
+        "\n",
+        "End few-shot\n",
+        "<EXAMPLES>",
+    );
+
+    // fetches examples from provider and builds instruction
+    // reference: test_building_si_from_base_example_provider
+    for model_name in [
+        "",
+        "gemini-2.5-flash",
+        "google.gemini-2.5-flash",
+        "claude-sonnet-4-5",
+    ] {
+        let fp = Arc::new(FakeProvider {
+            examples: basic_examples.clone(),
+            ..Default::default()
+        });
+        let et = new_with_provider(&fp);
+        let mut req = LlmRequest {
+            model: model_name.into(),
+            ..Default::default()
+        };
+        let ctx = ctx_with(Some(Content::from_text("test_query", "user")));
+        if let Err(e) = et.process_request(&ctx, &mut req).await {
+            panic!("ProcessRequest() error = {e}");
+        }
+        assert_eq!(
+            fp.calls(),
+            ["test_query"],
+            "provider calls (model {model_name:?})"
+        );
+        let si = req
+            .config
+            .as_ref()
+            .and_then(|c| c.system_instruction.as_ref())
+            .expect("ProcessRequest() expected system instruction, got nil");
+        assert_eq!(
+            si.parts[0].text, want_basic_instruct,
+            "model {model_name:?}: System instruction mismatch"
+        );
+    }
+
+    // joins non-thought text parts and skips non-text first part
+    {
+        let fp = Arc::new(FakeProvider {
+            examples: basic_examples.clone(),
+            ..Default::default()
+        });
+        let et = new_with_provider(&fp);
+        let mut req = LlmRequest {
+            model: "gemini-2.5-flash".into(),
+            ..Default::default()
+        };
+        let ctx = ctx_with(Some(Content {
+            role: "user".into(),
+            parts: vec![
+                Part {
+                    inline_data: Some(Blob {
+                        mime_type: "image/png".into(),
+                        data: b"img".to_vec().into(),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+                Part::from_text("first part"),
+                Part::default(),
+                Part {
+                    text: "hidden reasoning".into(),
+                    thought: true,
+                    ..Default::default()
+                },
+                Part::from_text("second part"),
+            ],
+        }));
+        if let Err(e) = et.process_request(&ctx, &mut req).await {
+            panic!("ProcessRequest() error = {e}");
+        }
+        assert_eq!(fp.calls(), ["first part second part"], "provider calls");
+        assert!(
+            req.config
+                .as_ref()
+                .and_then(|c| c.system_instruction.as_ref())
+                .is_some(),
+            "ProcessRequest() expected system instruction, got nil"
+        );
+    }
+
+    // skips provider when user content has no text
+    for uc in [
+        None,
+        Some(Content {
+            role: "user".into(),
+            parts: vec![],
+        }),
+        Some(Content {
+            role: "user".into(),
+            parts: vec![Part::default()],
+        }),
+        Some(Content {
+            role: "user".into(),
+            parts: vec![Part::from_text("")],
+        }),
+        Some(Content {
+            role: "user".into(),
+            parts: vec![Part {
+                text: "hidden reasoning".into(),
+                thought: true,
+                ..Default::default()
+            }],
+        }),
+        Some(Content {
+            role: "user".into(),
+            parts: vec![Part {
+                inline_data: Some(Blob {
+                    mime_type: "image/png".into(),
+                    data: b"img".to_vec().into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }],
+        }),
+    ] {
+        let fp = Arc::new(FakeProvider {
+            examples: basic_examples.clone(),
+            ..Default::default()
+        });
+        let et = new_with_provider(&fp);
+        let mut req = LlmRequest {
+            model: "gemini-2.5-flash".into(),
+            ..Default::default()
+        };
+        let label = format!("{uc:?}");
+        let ctx = ctx_with(uc);
+        if let Err(e) = et.process_request(&ctx, &mut req).await {
+            panic!("ProcessRequest() error = {e}");
+        }
+        assert!(
+            fp.calls().is_empty(),
+            "{label}: provider calls = {:?}, want 0",
+            fp.calls()
+        );
+        assert!(
+            req.config
+                .as_ref()
+                .and_then(|c| c.system_instruction.as_ref())
+                .is_none(),
+            "{label}: unexpected system instruction: {:?}",
+            req.config
+        );
+    }
+
+    // propagates provider error
+    {
+        let fp = Arc::new(FakeProvider {
+            err: Some("provider failure"),
+            ..Default::default()
+        });
+        let et = new_with_provider(&fp);
+        let mut req = LlmRequest {
+            model: "gemini-2.5-flash".into(),
+            ..Default::default()
+        };
+        let ctx = ctx_with(Some(Content::from_text("hello", "user")));
+        let Err(err) = et.process_request(&ctx, &mut req).await else {
+            panic!("ProcessRequest() succeeded, want provider failure");
+        };
+        assert!(
+            wraps(&err, "provider failure"),
+            "ProcessRequest() error = {err}, want provider failure"
+        );
+        assert_eq!(
+            err.to_string(),
+            "exampletool: fetch examples: provider failure"
+        );
+    }
 }

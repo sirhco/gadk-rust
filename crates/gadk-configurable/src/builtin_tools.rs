@@ -214,7 +214,11 @@ pub(crate) async fn example_tool(
     };
     let normalized = GoValue::Seq(normalize_examples(examples_slice.clone()));
     let examples = decode_examples(&normalized)?;
-    Ok(example::new(ExampleToolConfig { examples }))
+    example::new(ExampleToolConfig {
+        examples: Some(examples),
+        ..Default::default()
+    })
+    .map_err(ConfigError::other)
 }
 
 /// Go `ExampleTool` step 2: every `map[string]any` item whose `output` is neither nil nor a
@@ -990,11 +994,13 @@ mod tests {
         .unwrap();
         assert_eq!(t.name(), "example_tool");
         let want = example::new(ExampleToolConfig {
-            examples: vec![Example {
+            examples: Some(vec![Example {
                 input: text_content("user", "ping"),
                 output: vec![text_content("model", "pong")],
-            }],
-        });
+            }]),
+            ..Default::default()
+        })
+        .unwrap();
         let ctx = Context::builder()
             .user_content(text_content("user", "question"))
             .build();
