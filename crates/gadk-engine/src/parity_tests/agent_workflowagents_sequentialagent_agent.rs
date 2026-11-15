@@ -690,3 +690,136 @@ async fn test_sequential_agent_stops_on_sub_agent_error() {
         "second agent's model called after the first agent failed"
     );
 }
+
+/// The live counterpart of `test_sequential_agent_stops_on_sub_agent_error`: a sub-agent whose
+/// live stream yields an error ends the sequence, and the next sub-agent is never started.
+#[tokio::test]
+#[ignore = "8a bug: sequential RunLive keeps running the next sub-agent after a sub-agent's live stream yields an error (Go #2151 stops, as Run does)"]
+async fn test_sequential_agent_run_live_stops_on_sub_agent_error() {
+    let (first_sess, _first_rx) = DummyLiveSession::new();
+    let first_sess2 = first_sess.clone();
+    let first = mock_live_agent(
+        "first",
+        Arc::new(move |_ctx: InvocationContext| {
+            let s: EventStream =
+                stream::iter(vec![Err(AgentError::other("live connection failed"))]).boxed();
+            Ok((first_sess2.clone() as Arc<dyn LiveSession>, s))
+        }),
+    );
+    let second_started = Arc::new(AtomicBool::new(false));
+    let second_started2 = second_started.clone();
+    let second = mock_live_agent(
+        "second",
+        Arc::new(move |ctx: InvocationContext| {
+            second_started2.store(true, Ordering::SeqCst);
+            let (sess, _rx) = DummyLiveSession::new();
+            let mut ev = Event::new(ctx.platform(), ctx.invocation_id());
+            ev.author = "second".into();
+            let s: EventStream = stream::iter(vec![Ok(ev)]).boxed();
+            Ok((sess as Arc<dyn LiveSession>, s))
+        }),
+    );
+
+    let seq = new_sequential_agent(vec![first, second], "pipeline");
+    let live = seq
+        .as_live()
+        .expect("sequential agent does not implement RunLive");
+    let (_sess, mut seq_stream) = live
+        .run_live(mock_ctx(seq.clone(), "inv"))
+        .await
+        .unwrap_or_else(|e| panic!("RunLive failed: {e}"));
+
+    // Keep reading after an error, as the runner does.
+    let mut errs = Vec::new();
+    let mut authors = Vec::new();
+    while let Some(item) = seq_stream.next().await {
+        match item {
+            Err(e) => errs.push(e.to_string()),
+            Ok(ev) => authors.push(ev.author),
+        }
+    }
+
+    assert!(
+        errs.len() == 1 && errs[0].contains("live connection failed"),
+        "got errors {errs:?}, want exactly one from the first sub-agent"
+    );
+    assert!(
+        !second_started.load(Ordering::SeqCst),
+        "second sub-agent was started after the first one failed; events from: {authors:?}"
+    );
+    assert!(
+        first_sess.closed(),
+        "first sub-agent's live session was not closed after its error"
+    );
+}
+
+/// An ordinary turn does not read the session to look for a resume target.
+#[tokio::test]
+async fn test_sequential_agent_run_without_session_or_function_response() {
+    let ran = Arc::new(AtomicBool::new(false));
+    let ran2 = ran.clone();
+    let sub = gadk_agent::new_agent(AgentConfig {
+        name: "sub".into(),
+        run: Some(Arc::new(move |_ctx: InvocationContext| {
+            ran2.store(true, Ordering::SeqCst);
+            stream::empty().boxed()
+        })),
+        ..Default::default()
+    })
+    .unwrap();
+    let root = new_sequential_agent(vec![sub], "root");
+    // Go icontext.NewInvocationContext(ctx, {Agent: root}): no session, no user content.
+    let ctx = InvocationContext::builder()
+        .agent(root.clone())
+        .build_invocation();
+    let mut s = root.run(ctx);
+    while let Some(item) = s.next().await {
+        if let Err(e) = item {
+            panic!("{e}");
+        }
+    }
+    assert!(ran.load(Ordering::SeqCst), "sub-agent did not run");
+}
+
+/// A FindAgent case: (name, root, target name, want).
+type FindAgentCase<'a> = (
+    &'a str,
+    &'a Arc<dyn Agent>,
+    &'a str,
+    Option<&'a Arc<dyn Agent>>,
+);
+
+#[test]
+fn test_sequential_agent_find_agent_returns_sequential_agent() {
+    let child = new_custom_agent(0);
+    let seq = new_sequential_agent(vec![child.clone()], "seq");
+    let llm_parent = llm_agent::new(LlmAgentConfig {
+        name: "llm_parent".into(),
+        sub_agents: vec![seq.clone()],
+        ..Default::default()
+    })
+    .unwrap();
+    let base_parent = gadk_agent::new_agent(AgentConfig {
+        name: "base_parent".into(),
+        sub_agents: vec![seq.clone()],
+        ..Default::default()
+    })
+    .unwrap();
+
+    let addr = |a: &Arc<dyn Agent>| Arc::as_ptr(a).cast::<()>();
+    let cases: Vec<FindAgentCase<'_>> = vec![
+        ("own name", &seq, "seq", Some(&seq)),
+        ("through llm agent parent", &llm_parent, "seq", Some(&seq)),
+        ("through base agent parent", &base_parent, "seq", Some(&seq)),
+        ("sub-agent", &seq, "custom_agent_0", Some(&child)),
+        ("unknown name", &seq, "unknown", None),
+    ];
+    for (name, root, target, want) in cases {
+        let got = root.find_agent(target);
+        assert_eq!(
+            got.as_ref().map(addr),
+            want.map(addr),
+            "{name}: FindAgent({target:?})"
+        );
+    }
+}

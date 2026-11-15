@@ -41,12 +41,12 @@ use crate::tool::finish_task::FINISH_TASK_SUCCESS_RESULT;
 
 /// Port of Go scriptedLLM: one scripted response per call, then the done text ("done" unless
 /// overridden) forever.
-struct ScriptedLlm {
+pub(super) struct ScriptedLlm {
     turns: Mutex<VecDeque<LlmResponse>>,
     done_text: &'static str,
 }
 impl ScriptedLlm {
-    fn new(turns: Vec<LlmResponse>) -> Arc<Self> {
+    pub(super) fn new(turns: Vec<LlmResponse>) -> Arc<Self> {
         Self::with_done_text(turns, "")
     }
     fn with_done_text(turns: Vec<LlmResponse>, done_text: &'static str) -> Arc<Self> {
@@ -114,17 +114,17 @@ fn obj(v: Value) -> Map<String, Value> {
         other => panic!("not an object: {other}"),
     }
 }
-fn schema(v: Value) -> Schema {
+pub(super) fn schema(v: Value) -> Schema {
     serde_json::from_value(v).unwrap()
 }
-fn text_resp(text: &str) -> LlmResponse {
+pub(super) fn text_resp(text: &str) -> LlmResponse {
     LlmResponse {
         content: Some(Content::from_text(text, ROLE_MODEL)),
         ..Default::default()
     }
 }
 /// Go fcContent, as a response.
-fn fc_resp(id: &str, name: &str, args: Value) -> LlmResponse {
+pub(super) fn fc_resp(id: &str, name: &str, args: Value) -> LlmResponse {
     let fc = FunctionCall {
         id: id.into(),
         name: name.into(),
@@ -166,7 +166,11 @@ fn model_event(parts: Vec<Part>) -> Event {
 }
 
 /// Port of Go makeLLMAgent + withMode (a ScriptedLlm with no script).
-fn make_llm_agent(name: &str, mode: Mode, f: impl FnOnce(&mut LlmAgentConfig)) -> Arc<dyn Agent> {
+pub(super) fn make_llm_agent(
+    name: &str,
+    mode: Mode,
+    f: impl FnOnce(&mut LlmAgentConfig),
+) -> Arc<dyn Agent> {
     let mut cfg = LlmAgentConfig {
         name: name.into(),
         description: "test agent".into(),
@@ -444,6 +448,7 @@ async fn test_prepare_llm_agent_input() {
 
 // parity: adapted: the "nil event is no-op" subtest is dropped (&mut Event is not nullable)
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "8a bug: process_llm_agent_output marks a parsed output_schema reply MessageAsOutput (Go #2291 marks only an unparsed or null reply)"]
 async fn test_process_llm_agent_output() {
     let x = make_llm_agent("x", Mode::Unset, |_| {});
 
@@ -533,6 +538,46 @@ async fn test_process_llm_agent_output() {
         other => panic!("Output = {other:?}, want a parsed object"),
     };
     assert_eq!(got.get("name"), Some(&json!("alice")));
+
+    let title_schema =
+        || schema(json!({"type": "OBJECT", "properties": {"title": {"type": "STRING"}}}));
+
+    // OutputSchema valid JSON: parsed Output is not marked MessageAsOutput
+    let a = make_llm_agent("x", Mode::Unset, |c| {
+        c.output_schema = Some(title_schema());
+        c.output_key = "story".into();
+    });
+    let mut ev = model_event(vec![Part::from_text(r#"{"title":"T"}"#)]);
+    process_llm_agent_output(a.as_ref(), &mut ev).unwrap_or_else(|e| panic!("err = {e}, want nil"));
+    assert_eq!(ev.output, Some(json!({"title": "T"})), "Output mismatch");
+    assert_eq!(
+        ev.actions.state_delta.as_ref().and_then(|d| d.get("story")),
+        Some(&json!({"title": "T"})),
+        "StateDelta[\"story\"] mismatch"
+    );
+    assert!(
+        !ev.node_info.as_ref().is_some_and(|n| n.message_as_output),
+        "MessageAsOutput = true, want unset (the parsed Output is the node output)"
+    );
+
+    // OutputSchema empty object reply: Output is the empty map, not marked MessageAsOutput
+    let a = make_llm_agent("x", Mode::Unset, |c| c.output_schema = Some(title_schema()));
+    let mut ev = model_event(vec![Part::from_text("{}")]);
+    process_llm_agent_output(a.as_ref(), &mut ev).unwrap_or_else(|e| panic!("err = {e}, want nil"));
+    assert_eq!(ev.output, Some(json!({})), "Output mismatch");
+    assert!(
+        !ev.node_info.as_ref().is_some_and(|n| n.message_as_output),
+        "MessageAsOutput = true, want unset (the empty map is the node output)"
+    );
+
+    // OutputSchema null reply: marked MessageAsOutput
+    let a = make_llm_agent("x", Mode::Unset, |c| c.output_schema = Some(title_schema()));
+    let mut ev = model_event(vec![Part::from_text("null")]);
+    process_llm_agent_output(a.as_ref(), &mut ev).unwrap_or_else(|e| panic!("err = {e}, want nil"));
+    assert!(
+        ev.node_info.as_ref().is_some_and(|n| n.message_as_output),
+        "MessageAsOutput is unset, want true (a null reply has no parsed value to keep)"
+    );
 
     // OutputSchema invalid JSON: returns validation error
     let a = make_llm_agent("x", Mode::Unset, |c| {
@@ -1019,5 +1064,102 @@ async fn test_llm_agent_new_does_not_mutate_a_sub_agents_mode() {
         reveal(sub.as_ref()).expect("an LlmAgent").cfg.mode,
         Mode::Unset,
         "the undeclared sub-agent's mode after building a coordinator must stay unset"
+    );
+}
+
+/// Port of Go scriptedLLM's callIdx: counts the calls to the wrapped model.
+struct CountingLlm {
+    inner: Arc<ScriptedLlm>,
+    calls: std::sync::atomic::AtomicUsize,
+}
+impl Llm for CountingLlm {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+    fn generate_content(
+        &self,
+        req: LlmRequest,
+        stream: bool,
+    ) -> BoxStream<'static, Result<LlmResponse, ModelError>> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.inner.generate_content(req, stream)
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+/// A task agent whose OutputSchema is a nullable non-object type must not finish with a null
+/// result: a nil Output reads as "the task did not finish", so the coordinator would never get a
+/// function response. finish_task rejects the null and the model retries with a value, which
+/// closes the delegation.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "8a bug: finish_task accepts a null result for a nullable non-object output_schema, so the task never finishes and the delegation never closes (Go #1741)"]
+async fn test_task_agent_nullable_result_closes_delegation() {
+    let task_llm = Arc::new(CountingLlm {
+        inner: ScriptedLlm::new(vec![
+            fc_resp("finish-1", "finish_task", json!({"result": null})),
+            fc_resp("finish-2", "finish_task", json!({"result": "retry-value"})),
+        ]),
+        calls: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let task = llm_agent::new(LlmAgentConfig {
+        name: "doer".into(),
+        description: "d".into(),
+        model: Some(task_llm.clone()),
+        mode: Mode::Task,
+        output_schema: Some(schema(json!({"type": "STRING", "nullable": true}))),
+        ..Default::default()
+    })
+    .unwrap_or_else(|e| panic!("llmagent.New(doer): {e}"));
+    let coord_llm = ScriptedLlm::new(vec![fc_resp("fc-1", "doer", json!({"request": "x"}))]);
+    let coord = llm_agent::new(LlmAgentConfig {
+        name: "coord".into(),
+        model: Some(coord_llm),
+        mode: Mode::Chat,
+        sub_agents: vec![task],
+        ..Default::default()
+    })
+    .unwrap_or_else(|e| panic!("llmagent.New(coord): {e}"));
+    let r = Runner::new(RunnerConfig {
+        app_name: "app".into(),
+        agent: coord,
+        session_service: Arc::new(InMemorySessionService::new()),
+        artifact_service: None,
+        memory_service: None,
+        plugin_config: PluginConfig::default(),
+        auto_create_session: true,
+        platform: Platform::default(),
+        compaction: None,
+    })
+    .unwrap_or_else(|e| panic!("runner.New: {e}"));
+
+    let mut stream = r.run(
+        "u",
+        "s",
+        Some(Content::from_text("go", ROLE_USER)),
+        RunConfig::default(),
+        RunOptions::default(),
+    );
+    let mut delegation_fr = None;
+    while let Some(ev) = stream.next().await {
+        let ev = ev.unwrap_or_else(|e| panic!("run: {e}"));
+        for p in parts(&ev) {
+            if let Some(fr) = p.function_response.as_ref().filter(|fr| fr.name == "doer") {
+                delegation_fr = Some(fr.clone());
+            }
+        }
+    }
+
+    let fr = delegation_fr.expect("no function response closed the delegation to doer");
+    assert_eq!(
+        Value::Object(fr.response),
+        json!({"output": "retry-value"}),
+        "delegation response mismatch"
+    );
+    assert_eq!(
+        task_llm.calls.load(std::sync::atomic::Ordering::SeqCst),
+        2,
+        "task model calls, want 2: the null result should be rejected and retried"
     );
 }

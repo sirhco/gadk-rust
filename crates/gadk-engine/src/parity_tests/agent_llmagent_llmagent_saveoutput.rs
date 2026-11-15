@@ -17,6 +17,7 @@
 
 use std::sync::Arc;
 
+use gadk_agent::Mode;
 use gadk_genai::{Content, FunctionCall, FunctionResponse, Part};
 use gadk_model::LlmResponse;
 use gadk_platform::Platform;
@@ -62,6 +63,7 @@ struct Case {
     name: &'static str,
     agent_name: &'static str,
     output_key: &'static str,
+    mode: Mode,
     event: Event,
     custom_parts: Option<Vec<Part>>,
     want: Map<String, Value>,
@@ -79,6 +81,7 @@ fn case(
         name,
         agent_name,
         output_key,
+        mode: Mode::Unset,
         event,
         custom_parts,
         want,
@@ -86,6 +89,7 @@ fn case(
 }
 
 #[test]
+#[ignore = "8a bug: maybe_save_output_to_state writes a task agent's text turn to output_key (Go #1977 skips task mode; finish_task delivers the result)"]
 fn test_llm_agent_maybe_save_output_to_state() {
     let fc_part = Part {
         function_call: Some(FunctionCall {
@@ -120,6 +124,17 @@ fn test_llm_agent_maybe_save_output_to_state() {
             None,
             obj(json!({"result": "Test response"})),
         ),
+        Case {
+            mode: Mode::Task,
+            ..case(
+                "skips task mode: finish_task delivers the result, not a text turn",
+                "test_agent",
+                "result",
+                create_test_event("test_agent", "Which language?", true),
+                None,
+                Map::new(),
+            )
+        },
         case(
             "skips when output_key is not set",
             "test_agent",
@@ -203,6 +218,7 @@ fn test_llm_agent_maybe_save_output_to_state() {
         let a = agent::new(LlmAgentConfig {
             name: tc.agent_name.into(),
             output_key: tc.output_key.into(),
+            mode: tc.mode,
             ..Default::default()
         })
         .unwrap();

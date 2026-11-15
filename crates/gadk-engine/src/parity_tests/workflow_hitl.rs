@@ -19,8 +19,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use futures::StreamExt;
-use gadk_agent::{Context, ContextDelta};
+use gadk_agent::{Context, ContextDelta, InvocationContext};
+use gadk_genai::{Content, Part};
+use gadk_platform::Platform;
 use gadk_session::{Event, RequestInput};
+use parking_lot::Mutex;
 use serde_json::{Map, Value, json};
 
 use crate::error::WorkflowErrorKind;
@@ -109,9 +112,33 @@ async fn test_scheduler_hitl_node_pauses_and_forwards_request() {
     assert_eq!(req.payload, Some(json!("the draft")));
 }
 
+/// Go `newSeededMockCtx(t)` with `platform.WithUUIDProvider(ctx, provider)`.
+fn seeded_ctx_with_uuid(
+    provider: impl Fn() -> String + Send + Sync + 'static,
+) -> InvocationContext {
+    InvocationContext::builder()
+        .invocation_id(TEST_INVOCATION_ID)
+        .platform(Platform::deterministic(1).with_uuid(provider))
+        .user_content(Content {
+            parts: vec![Part::from_text("seed")],
+            ..Content::default()
+        })
+        .build_invocation()
+}
+
 #[tokio::test]
 async fn test_scheduler_hitl_node_auto_generates_interrupt_id() {
+    // Each draw returns a new ID, so the checks below can tell which draw filled which field.
+    let draws: Arc<Mutex<Vec<String>>> = Arc::default();
+    let d = Arc::clone(&draws);
+    let ctx = seeded_ctx_with_uuid(move || {
+        let mut d = d.lock();
+        let id = format!("provider-uuid-{}", d.len() + 1);
+        d.push(id.clone());
+        id
+    });
     let asker = TestNode::arc("asker", NodeConfig::default(), |ctx, _| {
+        // InterruptID intentionally left empty.
         once(new_request_input_event(
             ctx.as_invocation(),
             RequestInput {
@@ -121,12 +148,79 @@ async fn test_scheduler_hitl_node_auto_generates_interrupt_id() {
         ))
     });
     let w = must_new(vec![edge(&start(), &asker)]);
-    let events = drain(w.run(seeded_mock_ctx())).await;
+    let events = drain(w.run(ctx)).await;
+    let (count, req_ev) = (
+        events
+            .iter()
+            .filter(|e| e.requested_input.is_some())
+            .count(),
+        events.iter().find(|e| e.requested_input.is_some()),
+    );
+    assert_eq!(count, 1, "expected exactly 1 RequestedInput event");
+    let req = req_ev.expect("request");
+    let want_id = req
+        .requested_input
+        .as_ref()
+        .expect("requested input")
+        .interrupt_id
+        .clone();
+    let draws = draws.lock().clone();
+    let i = draws.iter().position(|d| *d == want_id).unwrap_or_else(|| {
+        panic!("InterruptID = {want_id:?}, want a provider UUID from {draws:?}")
+    });
+    // The interrupt ID is drawn just before the event ID.
+    assert_eq!(
+        draws.get(i + 1),
+        Some(&req.id),
+        "event ID, want the draw after InterruptID {want_id:?} (draws: {draws:?})"
+    );
+    let call = req
+        .response
+        .content
+        .as_ref()
+        .and_then(|c| c.parts.first())
+        .and_then(|p| p.function_call.as_ref())
+        .expect("function call");
+    assert_eq!(call.id, want_id, "FunctionCall.ID");
+    assert_eq!(
+        call.args.get("interruptId"),
+        Some(&Value::String(want_id.clone())),
+        "FunctionCall.Args[interruptId]"
+    );
+    assert_eq!(
+        req.long_running_tool_ids,
+        vec![want_id],
+        "LongRunningToolIDs"
+    );
+}
+
+// A UUID provider returning "" does not stop the node from pausing.
+#[ignore = "8a bug: new_request_input_event keeps an empty provider UUID as the interrupt ID, so the node does not pause (Go e2614290 falls back to a random UUID)"]
+#[tokio::test]
+async fn test_scheduler_hitl_node_empty_provider_uuid_still_pauses() {
+    let ctx = seeded_ctx_with_uuid(String::new);
+    let downstream_ran = Arc::new(AtomicBool::new(false));
+    let asker = TestNode::arc("asker", NodeConfig::default(), |ctx, _| {
+        once(new_request_input_event(
+            ctx.as_invocation(),
+            RequestInput {
+                message: "approve?".into(),
+                ..RequestInput::default()
+            },
+        ))
+    });
+    let downstream = flag_node("downstream", &downstream_ran);
+    let w = must_new(vec![edge(&start(), &asker), edge(&asker, &downstream)]);
+    let events = drain(w.run(ctx)).await;
+    assert!(
+        !downstream_ran.load(Ordering::SeqCst),
+        "downstream node ran; an empty provider UUID must not skip the pause"
+    );
     let (req, count) = find_requested_input_event(&events);
     assert_eq!(count, 1, "expected exactly 1 RequestedInput event");
     assert!(
         !req.expect("request").interrupt_id.is_empty(),
-        "InterruptID is empty; engine must auto-generate when caller omits it"
+        "InterruptID is empty; engine must fall back to a non-empty ID"
     );
 }
 

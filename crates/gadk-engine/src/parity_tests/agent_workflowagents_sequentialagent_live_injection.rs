@@ -20,14 +20,17 @@ use std::any::Any;
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 
-use gadk_agent::{Agent, InvocationContext, Tool};
+use gadk_agent::{Agent, AgentError, InvocationContext, Tool};
+use gadk_model::LlmRequest;
 use tokio::sync::Barrier;
 
 use super::agent_workflowagents_sequentialagent_agent::{
     FakeLlm, new_custom_agent, new_sequential_agent,
 };
+use crate::llm::flow::Flow;
+use crate::llm::processors::instructions::instructions_request_processor;
 use crate::llm::state::reveal;
-use crate::llm::{LlmAgentConfig, agent as llm_agent};
+use crate::llm::{InstructionProvider, LlmAgentConfig, agent as llm_agent};
 
 const COMPLETION_INSTRUCTION_MARKER: &str = "call the task_completed function to exit";
 
@@ -151,4 +154,86 @@ async fn test_sequential_agent_run_live_preserves_existing_completion_tool() {
         "original instruction",
         "RunLive changed the instruction for a caller-provided completion tool"
     );
+}
+
+/// The system instruction the instructions request processor builds for `agent`.
+async fn system_instruction(agent: Arc<dyn Agent>) -> Result<String, AgentError> {
+    let ctx = ctx_for(agent, "provider");
+    let mut req = LlmRequest::default();
+    instructions_request_processor(&ctx, &mut req, &Flow::default()).await?;
+    Ok(req
+        .config
+        .and_then(|c| c.system_instruction)
+        .map(|si| si.parts.iter().map(|p| p.text.as_str()).collect::<String>())
+        .unwrap_or_default())
+}
+
+// parity: adapted: Go calls the wrapped State.InstructionProvider; gadk keeps the provider in the
+// immutable config, so the port reads the instruction the request processor builds from it (a
+// provider error is wrapped there, so it is matched by text; a Rust provider has no partial result).
+#[tokio::test]
+#[ignore = "8a bug: sequential RunLive appends the task_completed instruction only to Instruction, which an InstructionProvider overrides (Go #2079 appends it to the provider's result)"]
+async fn test_sequential_agent_run_live_appends_completion_instruction_to_provider() {
+    for (name, result, err, want) in [
+        (
+            "appends_to_provider_result",
+            "dynamic instruction",
+            None,
+            "dynamic instruction",
+        ),
+        (
+            "passes_provider_error_through",
+            "partial",
+            Some("provider failed"),
+            "",
+        ),
+    ] {
+        let provider: InstructionProvider = Arc::new(move |_ctx| {
+            Box::pin(async move {
+                match err {
+                    Some(e) => Err(AgentError::other(e)),
+                    None => Ok(result.to_string()),
+                }
+            })
+        });
+        let child = llm_agent::new(LlmAgentConfig {
+            name: "child".into(),
+            model: Some(Arc::new(FakeLlm {
+                id: 0,
+                calls: AtomicUsize::new(0),
+            })),
+            instruction_provider: Some(provider),
+            ..Default::default()
+        })
+        .unwrap();
+        let seq = new_sequential_agent(vec![child.clone()], "sequential");
+        let live = seq.as_live().expect("RunLive");
+        for _ in 0..2 {
+            if let Err(e) = live.run_live(ctx_for(seq.clone(), "provider")).await {
+                panic!("{name}: RunLive() error = {e}");
+            }
+        }
+
+        // The provider takes over Instruction, so the model is told about task_completed only
+        // if the provider's result carries it.
+        let got = system_instruction(child).await;
+        if let Some(want_err) = err {
+            let e = got.expect_err("want the provider's error");
+            assert!(
+                e.to_string().contains(want_err),
+                "{name}: InstructionProvider() error = {e}, want {want_err}"
+            );
+            continue;
+        }
+        let got = got.unwrap_or_else(|e| panic!("{name}: InstructionProvider() error = {e}"));
+        assert!(
+            got.starts_with(want),
+            "{name}: InstructionProvider() = {got:?}, want it to start with {want:?}"
+        );
+        let count = got.matches(COMPLETION_INSTRUCTION_MARKER).count();
+        assert_eq!(
+            count, 1,
+            "{name}: InstructionProvider() has {count} completion instructions, want 1: {got:?}"
+        );
+    }
 }

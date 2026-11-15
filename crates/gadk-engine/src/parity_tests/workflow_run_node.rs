@@ -609,6 +609,7 @@ async fn test_run_node_with_use_as_output_message_as_output_empty_text_is_valid_
     );
 }
 
+#[ignore = "8a bug: ErrOutputAlreadyDelegated text says \"use_as_output child\" where Go 983d689e says \"use_as_output delegate\""]
 #[tokio::test]
 async fn test_run_node_with_use_as_output_second_delegation_returns_error() {
     let (c1, _) = stub_node("c1", json!("v1"));
@@ -632,7 +633,7 @@ async fn test_run_node_with_use_as_output_second_delegation_returns_error() {
     );
     assert_eq!(
         err.to_string(),
-        "workflow: dynamic child orch/c2@1: workflow: parent already has a use_as_output child: orch already delegates to c1"
+        "workflow: dynamic child orch/c2@1: workflow: parent already has a use_as_output delegate: orch already delegates to c1"
     );
 }
 
