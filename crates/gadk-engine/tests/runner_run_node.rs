@@ -16,12 +16,10 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Port of ADK-Go runner/run_node_test.go.
 
-use std::any::Any;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use futures::StreamExt;
-use futures::stream::BoxStream;
 use gadk_agent::{
     Agent, AgentError, BeforeAgentCallback, Context, EventStream, RunConfig, ToolError,
 };
@@ -35,13 +33,16 @@ use gadk_engine::workflow::{
     chain, function_node,
 };
 use gadk_genai::{Content, FunctionCall, FunctionResponse, Part, Schema, Type};
-use gadk_model::{Llm, LlmRequest, LlmResponse, ModelError};
+use gadk_model::Llm;
 use gadk_platform::Platform;
 use gadk_session::{
     CreateRequest, Event, GetRequest, InMemorySessionService, Session, SessionService,
 };
 use parking_lot::Mutex;
 use serde_json::{Value, json};
+
+mod workflow_support;
+use workflow_support::ScriptedModel;
 
 const NODE_TEST_APP: &str = "node_test_app";
 const NODE_TEST_USER: &str = "u";
@@ -219,47 +220,6 @@ fn workflow_agent_of(name: &str, edges: Vec<Edge>) -> Arc<dyn Agent> {
         ..Default::default()
     })
     .expect("workflowagent.New()")
-}
-
-/// Port of Go `scriptedModel`: one response per call; past the end, repeats the last.
-struct ScriptedModel {
-    responses: Vec<Content>,
-    call: Mutex<usize>,
-}
-
-impl ScriptedModel {
-    fn new(responses: Vec<Content>) -> Arc<Self> {
-        Arc::new(Self {
-            responses,
-            call: Mutex::new(0),
-        })
-    }
-    fn calls(&self) -> usize {
-        *self.call.lock()
-    }
-}
-
-impl Llm for ScriptedModel {
-    fn name(&self) -> &str {
-        "scripted"
-    }
-    fn generate_content(
-        &self,
-        _req: LlmRequest,
-        _stream: bool,
-    ) -> BoxStream<'static, Result<LlmResponse, ModelError>> {
-        let mut call = self.call.lock();
-        let i = (*call).min(self.responses.len() - 1);
-        *call += 1;
-        let resp = LlmResponse {
-            content: Some(self.responses[i].clone()),
-            ..Default::default()
-        };
-        futures::stream::iter([Ok(resp)]).boxed()
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }
 
 fn scripted_agent(name: &str, text: &str) -> Arc<dyn Agent> {

@@ -763,6 +763,17 @@ mod live_tests {
     }
 }
 
+/// Installs (once per process) a no-op global `Registry`, so the global max-level hint and
+/// callsite interest never collapse to "off" while thread-default capture subscribers come
+/// and go on parallel test threads (as gadk-engine's `span_digest::pin_tracing_interest`).
+#[cfg(test)]
+pub(crate) fn pin_tracing_interest() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let _ = tracing::subscriber::set_global_default(tracing_subscriber::registry());
+    });
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod span_tests {
@@ -778,7 +789,7 @@ mod span_tests {
     use tracing_subscriber::layer::{Context as LayerContext, Layer, SubscriberExt};
 
     use super::telemetry::{OTEL_SEMCONV_1_36, SCHEMA_VERSION_OPT_IN_ENV_VAR, set_env_provider};
-    use super::{AgentConfig, new, new_with_state};
+    use super::{AgentConfig, new, new_with_state, pin_tracing_interest};
     use crate::context::InvocationContext;
     use crate::error::AgentError;
     use crate::state::{AgentState, AgentType};
@@ -823,16 +834,6 @@ mod span_tests {
                 values.record(&mut Fields(fields));
             }
         }
-    }
-
-    /// Installs (once per process) a no-op global `Registry`, so the global max-level hint and
-    /// callsite interest never collapse to "off" while thread-default capture subscribers come
-    /// and go on parallel test threads (as gadk-engine's `span_digest::pin_tracing_interest`).
-    fn pin_tracing_interest() {
-        static ONCE: std::sync::Once = std::sync::Once::new();
-        ONCE.call_once(|| {
-            let _ = tracing::subscriber::set_global_default(tracing_subscriber::registry());
-        });
     }
 
     /// Runs `agent` to completion under `schema`, inside an `invoke_workflow` span when `in_workflow`,

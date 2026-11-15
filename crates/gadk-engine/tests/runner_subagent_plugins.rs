@@ -16,11 +16,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Port of ADK-Go runner/subagent_plugins_test.go.
 
-use std::any::Any;
 use std::sync::Arc;
 
 use futures::StreamExt;
-use futures::stream::BoxStream;
 use gadk_agent::{
     AfterModelCallback, Agent, AgentConfig, AgentError, Context, EventStream, Plugin,
     PluginConfig as AgentPluginConfig, RunConfig, Tool, ToolError,
@@ -31,49 +29,14 @@ use gadk_engine::llm::agent as llm_agent;
 use gadk_engine::runner::{PluginConfig, RunOptions, Runner, RunnerConfig};
 use gadk_engine::tool::{AgentTool, FunctionTool, FunctionToolConfig};
 use gadk_genai::{Content, FunctionCall};
-use gadk_model::{Llm, LlmRequest, LlmResponse, ModelError};
+use gadk_model::LlmResponse;
 use gadk_platform::Platform;
 use gadk_session::InMemorySessionService;
 use parking_lot::Mutex;
 use serde_json::{Value, json};
 
-/// Port of Go `scriptedModel`: one response per call; past the end, repeats the last.
-struct ScriptedModel {
-    responses: Vec<Content>,
-    call: Mutex<usize>,
-}
-
-impl ScriptedModel {
-    fn arc(responses: Vec<Content>) -> Arc<dyn Llm> {
-        Arc::new(Self {
-            responses,
-            call: Mutex::new(0),
-        })
-    }
-}
-
-impl Llm for ScriptedModel {
-    fn name(&self) -> &str {
-        "scripted"
-    }
-    fn generate_content(
-        &self,
-        _req: LlmRequest,
-        _stream: bool,
-    ) -> BoxStream<'static, Result<LlmResponse, ModelError>> {
-        let mut call = self.call.lock();
-        let i = (*call).min(self.responses.len() - 1);
-        *call += 1;
-        let resp = LlmResponse {
-            content: Some(self.responses[i].clone()),
-            ..Default::default()
-        };
-        futures::stream::iter([Ok(resp)]).boxed()
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
+mod workflow_support;
+use workflow_support::ScriptedModel;
 
 fn model_text(text: &str) -> Content {
     Content::from_text(text, "model")

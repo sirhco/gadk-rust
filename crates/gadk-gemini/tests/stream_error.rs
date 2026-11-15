@@ -110,3 +110,35 @@ async fn stream_error_chunk_without_code_has_code_zero(#[case] backend: Backend)
         items[0]
     );
 }
+
+/// The `"error"` check is stream-only: genai v1.77.0 `deserializeUnaryResponse` decodes a unary
+/// 200 body as is (the `"error"` key is ignored), so `generateContent` answers a response without
+/// candidates, which ADK-Go `Genai2LLMResponse` turns into an empty model content.
+#[rstest]
+#[case::gemini_api(Backend::GeminiApi)]
+#[case::vertex_ai(Backend::VertexAi)]
+#[tokio::test]
+async fn unary_ok_body_with_error_is_decoded_not_an_error(#[case] backend: Backend) {
+    let http =
+        FakeHttp::json(r#"{"error":{"code":503,"message":"overloaded","status":"UNAVAILABLE"}}"#);
+    let model = GeminiModel::new("gemini-2.5-flash", config(backend, http))
+        .await
+        .unwrap();
+    let req = LlmRequest {
+        contents: vec![Content::from_text("hi", "user")],
+        ..Default::default()
+    };
+    let items: Vec<_> = model.generate_content(req, false).collect().await;
+    assert_eq!(items.len(), 1, "items: {items:?}");
+    let resp = items[0]
+        .as_ref()
+        .expect("a unary 200 body is not an API error");
+    assert!(
+        resp.error_code.is_empty(),
+        "error_code: {:?}",
+        resp.error_code
+    );
+    let content = resp.content.as_ref().expect("empty model content");
+    assert_eq!(content.role, "model");
+    assert!(content.parts.is_empty(), "parts: {:?}", content.parts);
+}

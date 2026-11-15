@@ -21,13 +21,11 @@ use std::sync::atomic::{AtomicBool, AtomicI32, Ordering::SeqCst};
 use std::time::Duration;
 
 use futures::StreamExt;
-use gadk_agent::{
-    Agent, AgentConfig, AgentError, AgentRunFn, Context, EventStream, InvocationContext, RunConfig,
-};
+use gadk_agent::{Agent, AgentError, Context, EventStream, RunConfig};
 use gadk_engine::agents::workflow_agent::{self, WorkflowAgentConfig};
 use gadk_engine::runner::{PluginConfig, RunOptions, Runner, RunnerConfig};
 use gadk_engine::workflow::{
-    AgentNode, Edge, Emit, JoinNode, Node, NodeConfig, RetryConfig, RunNodeOptions, START,
+    Edge, Emit, JoinNode, Node, NodeConfig, RetryConfig, RunNodeOptions, START,
     WORKFLOW_INPUT_FUNCTION_CALL_NAME, WorkflowNode, dynamic_node, function_node,
     resume_or_request_input, run_node,
 };
@@ -37,6 +35,9 @@ use gadk_platform::Platform;
 use gadk_session::{Event, InMemorySessionService, RequestInput};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
+
+mod workflow_support;
+use workflow_support::{agent_node, join_resume_agent, resume_content};
 
 fn start() -> Arc<dyn Node> {
     Arc::clone(&START)
@@ -64,11 +65,6 @@ fn function_response_content(id: &str, name: &str, response: Value) -> Content {
         },
         "user",
     )
-}
-
-/// Port of Go `resumeContent`: one FunctionResponse with the payload under "payload".
-fn resume_content(call_id: &str, call_name: &str, payload: Value) -> Content {
-    function_response_content(call_id, call_name, json!({ "payload": payload }))
 }
 
 /// Every event and every error, in order (Go loops that record `err` and continue).
@@ -124,58 +120,6 @@ fn run(r: &Runner, msg: Content) -> EventStream {
         RunConfig::default(),
         RunOptions::default(),
     )
-}
-
-/// Go `joinResumeAgent`: a custom agent that either pauses via ResumeOrRequestInput
-/// (interrupt id = its name) and then answers `output`, or answers `output` at once.
-fn join_resume_agent(name: &str, output: &str, interrupt: bool) -> Arc<dyn Agent> {
-    let (agent_name, output) = (name.to_string(), output.to_string());
-    let run_fn: AgentRunFn = Arc::new(move |ctx: InvocationContext| -> EventStream {
-        let (name, output) = (agent_name.clone(), output.clone());
-        Box::pin(async_stream::stream! {
-            if interrupt {
-                // Go's emit yields straight to the consumer; ResumeOrRequestInput emits at most one
-                // event and then returns, so buffering it until the call returns keeps the order.
-                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Event>();
-                let emit: Emit = Arc::new(move |ev: Event| {
-                    let tx = tx.clone();
-                    Box::pin(async move { tx.send(ev).map_err(|_| AgentError::other("consumer stopped")) })
-                });
-                let res = resume_or_request_input(
-                    &ctx.clone().into_context(),
-                    &emit,
-                    RequestInput { interrupt_id: name.clone(), message: "approve".into(), ..Default::default() },
-                )
-                .await;
-                drop(emit);
-                while let Ok(ev) = rx.try_recv() {
-                    yield Ok::<Event, AgentError>(ev);
-                }
-                if res.is_err() {
-                    return;
-                }
-                // Go yields a bare &session.Event{LLMResponse: …}; the agent wrapper fills author/ids.
-                let mut ev = Event::default();
-                ev.response.content = Some(Content::from_text(output.clone(), "model"));
-                yield Ok(ev);
-                return;
-            }
-            let mut ev = Event::new(ctx.platform(), ctx.invocation_id());
-            ev.response.content = Some(Content::from_text(output.clone(), "model"));
-            yield Ok(ev);
-        })
-    });
-    gadk_agent::agent::new(AgentConfig {
-        name: name.into(),
-        run: Some(run_fn),
-        ..Default::default()
-    })
-    .expect("agent.New")
-}
-
-/// Go `joinResumeAgentNode`.
-fn agent_node(a: &Arc<dyn Agent>) -> Arc<dyn Node> {
-    AgentNode::new(a.clone(), NodeConfig::default()).expect("workflow.NewAgentNode()")
 }
 
 /// Go `errors.Is(err, sentinel)` for a sentinel created with `errors.New(text)`: some error in

@@ -75,7 +75,7 @@ the public API.
   - `gadk_model`: `is_gemini_3x_live`, `is_gemini_35_live_translate`,
     `LIVE_ARTIFACT_NAMESPACE` and `is_internal_live_artifact_part`.
   - `gadk_platform::safe_subpath`, a port of Go `utils.SafeSubpath`, with `is_link_like` and
-    Go's two sentinel texts.
+    Go's two sentinel texts. It follows Unix path rules only.
   - `gadk_session::compare_by_last_update`.
   - `InvocationContext::{with_graph_resume_done, graph_resume_done}`.
   - `BoundModes::{with_output_schema, output_schema}`.
@@ -119,8 +119,9 @@ the public API.
 - **toolauth moved into `gadk-session`.** The toolauth wire model now lives in
   `gadk_session::toolauth`. `gadk_tools::toolauth` re-exports it unchanged, so existing paths
   keep working.
-- **gadk-configurable config paths name the config directory** (ADK-Go #1299). These now carry
-  the directory of the config file, not the file's path:
+- **gadk-configurable config paths name the config directory** (ADK-Go #1299; breaking
+  (semantic, Go parity): the types are unchanged, the values are not). These now carry the
+  directory of the config file, not the file's path:
   - the first argument of `Registry::resolve_agent_reference`
   - the `PathBuf` handed to an `AgentFactory`
   - `LoadCtx.parent_path`

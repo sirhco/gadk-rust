@@ -80,7 +80,7 @@ impl StreamAccumulator {
             // anthropic-sdk-go v1.84.0 `ssestream.Stream.Next`: `ping` and an absent or empty
             // event name are skipped.
             None | Some("" | "ping") => return Ok(Vec::new()),
-            // Any other name decodes (v1.84.0 dropped the v1.84.0 allow-list of names)...
+            // Any other name decodes (v1.84.0 dropped the old allow-list of names)...
             Some(_) => {}
         }
         // ...unless its data is empty (`len(TrimSuffix(data, "\n")) == 0`; `data` here has no

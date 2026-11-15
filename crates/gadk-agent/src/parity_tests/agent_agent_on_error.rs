@@ -25,7 +25,7 @@ use parking_lot::Mutex;
 use tracing::field::{Field, Visit};
 use tracing_subscriber::layer::{Context as LayerContext, Layer, SubscriberExt};
 
-use crate::agent::{Agent, AgentConfig, AgentRunFn, new};
+use crate::agent::{Agent, AgentConfig, AgentRunFn, new, pin_tracing_interest};
 use crate::callback::{AfterAgentCallback, BeforeAgentCallback, OnAgentErrorCallback};
 use crate::context::{CancelCause, InvocationContext};
 use crate::error::{AgentError, chain_any, wrap};
@@ -403,15 +403,6 @@ impl<S: tracing::Subscriber> Layer<S> for Exceptions {
             self.0.lock().push(m);
         }
     }
-}
-
-/// A no-op global `Registry`, so callsite interest never collapses to "off" while thread-default
-/// capture subscribers come and go on parallel test threads.
-fn pin_tracing_interest() {
-    static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| {
-        let _ = tracing::subscriber::set_global_default(tracing_subscriber::registry());
-    });
 }
 
 fn named_plugin(name: &str, cb: OnAgentErrorCallback) -> Plugin {

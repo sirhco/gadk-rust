@@ -84,7 +84,7 @@ pub(crate) async fn handle_function_calls(
     handle_function_calls_with(ctx, flow, tools, function_call_event, filters, None).await
 }
 
-/// Port of base_flow.go:1330 `(*Flow).handleFunctionCalls`, minus live (`liveSess` is always nil
+/// Port of base_flow.go:1501 `(*Flow).handleFunctionCalls`, minus live (`liveSess` is always nil
 /// in 1b). Go takes the `*model.LLMResponse`; Rust takes the event carrying it (C5 D5 signature).
 /// `filters` (adk-python's call-ID filter; Go has a TODO) keeps only calls whose ID is in the set.
 ///
@@ -110,7 +110,7 @@ pub(crate) async fn handle_function_calls_with(
     .await
 }
 
-/// Port of Go handleFunctionCalls with its `liveSess` argument set (base_flow.go:1330): the live
+/// Port of Go handleFunctionCalls with its `liveSess` argument set (base_flow.go:1501): the live
 /// streaming-tool and `stop_streaming` branches use `live`. No filters, no confirmations (Go's live
 /// flow passes nil).
 pub(crate) async fn handle_function_calls_live(
@@ -132,7 +132,7 @@ pub(crate) async fn handle_function_calls_live(
     .await
 }
 
-/// Port of base_flow.go:1330 `(*Flow).handleFunctionCalls`. Go takes the `*model.LLMResponse`;
+/// Port of base_flow.go:1501 `(*Flow).handleFunctionCalls`. Go takes the `*model.LLMResponse`;
 /// Rust takes the event carrying it (C5 D5 signature). `filters` (adk-python's call-ID filter; Go
 /// has a TODO) keeps only calls whose ID is in the set. `live` is Go's `liveSess` argument (`None`
 /// outside live mode).
@@ -272,7 +272,7 @@ impl Drop for FinishOnDrop {
     }
 }
 
-/// The body of Go's per-call task closure (base_flow.go:1350-1525).
+/// The body of Go's per-call task closure (base_flow.go:1521-1701).
 #[allow(clippy::too_many_arguments)]
 async fn run_one_call(
     ctx: InvocationContext,
@@ -431,7 +431,7 @@ async fn run_streaming(
     Map::from_iter([("result".to_owned(), Value::String(out))])
 }
 
-/// Go streaming branch with a live session (base_flow.go:1383-1426): answers at once with the
+/// Go streaming branch with a live session (base_flow.go:1560-1600): answers at once with the
 /// pending status and streams in a spawned task that outlives the call. Each chunk goes back to the
 /// model as user content through `live.send`. The task stops on cancellation (`stop_streaming`,
 /// session teardown, or the invocation's token) and unregisters before cancelling its scope.
@@ -539,7 +539,7 @@ fn error_map(msg: &str) -> Map<String, Value> {
     Map::from_iter([("error".to_owned(), Value::String(msg.to_owned()))])
 }
 
-/// Port of base_flow.go:1218 fakeTool.
+/// Port of base_flow.go:1389 fakeTool.
 struct FakeTool {
     name: String,
 }
@@ -556,7 +556,7 @@ impl Tool for FakeTool {
     }
 }
 
-/// Port of base_flow.go:1229 newToolNotFoundError (text verbatim, Python format).
+/// Port of base_flow.go:1400 newToolNotFoundError (text verbatim, Python format).
 fn new_tool_not_found_error(tool_name: &str, available_tools: &[String]) -> ToolError {
     let joined = available_tools.join(", ");
     ToolError::Execution(
@@ -578,7 +578,7 @@ Suggested fixes:
     )
 }
 
-/// Port of base_flow.go:1533 runOnToolErrorCallbacks: plugins first, then the agent callbacks.
+/// Port of base_flow.go:1711 runOnToolErrorCallbacks: plugins first, then the agent callbacks.
 async fn run_on_tool_error_callbacks(
     cbs: &ToolCallbacks,
     tool_ctx: &Context,
@@ -599,7 +599,7 @@ async fn run_on_tool_error_callbacks(
     invoke_on_tool_error_callbacks(cbs, tool_ctx, &tool, args, err).await
 }
 
-/// Port of base_flow.go:1544 `(*Flow).callTool`. Callback errors (`AgentError`) become
+/// Port of base_flow.go:1722 `(*Flow).callTool`. Callback errors (`AgentError`) become
 /// `ToolError` so a single "current error" flows through the on-error and after callbacks, as
 /// Go's untyped `error` does.
 ///
@@ -749,7 +749,7 @@ fn to_tool_error(e: AgentError) -> Arc<ToolError> {
     }
 }
 
-/// Port of base_flow.go:1591 invokeBeforeToolCallbacks: the arguments are threaded through
+/// Port of base_flow.go:1803 invokeBeforeToolCallbacks: the arguments are threaded through
 /// every callback (Go's one shared copy, e0cbfd30) and always handed back.
 async fn invoke_before_tool_callbacks(
     cbs: &ToolCallbacks,
@@ -773,7 +773,7 @@ async fn invoke_before_tool_callbacks(
     (args, None, None)
 }
 
-/// Port of base_flow.go:1606 invokeAfterToolCallbacks: with no callback answering, the inputs
+/// Port of base_flow.go:1818 invokeAfterToolCallbacks: with no callback answering, the inputs
 /// are returned unchanged.
 async fn invoke_after_tool_callbacks(
     cbs: &ToolCallbacks,
@@ -801,7 +801,7 @@ async fn invoke_after_tool_callbacks(
     (result, err)
 }
 
-/// Port of base_flow.go:1622 invokeOnToolErrorCallbacks: with no callback answering, the
+/// Port of base_flow.go:1834 invokeOnToolErrorCallbacks: with no callback answering, the
 /// original error is returned.
 async fn invoke_on_tool_error_callbacks(
     cbs: &ToolCallbacks,
@@ -820,7 +820,7 @@ async fn invoke_on_tool_error_callbacks(
     (None, Some(err))
 }
 
-/// Port of base_flow.go:1638 mergeParallelFunctionResponseEvents. The first non-`None` event
+/// Port of base_flow.go:1850 mergeParallelFunctionResponseEvents. The first non-`None` event
 /// becomes the merged result: its parts are those of every event in slot order and its actions
 /// the fold of every event's actions.
 pub(crate) fn merge_parallel_function_response_events(
@@ -859,7 +859,7 @@ pub(crate) fn merge_parallel_function_response_events(
     Ok(Some(result))
 }
 
-/// Port of base_flow.go:1672 mergeEventActions (adk-python merge_parallel_function_response_events).
+/// Port of base_flow.go:1884 mergeEventActions (adk-python merge_parallel_function_response_events).
 /// Each parallel call's confirmation and credential requests are kept under its own call ID.
 pub(crate) fn merge_event_actions(
     base: Option<EventActions>,
@@ -894,7 +894,7 @@ pub(crate) fn merge_event_actions(
     Some(base)
 }
 
-/// Port of base_flow.go:1706 mergeArtifactDeltas: prefers higher versions (a deliberate
+/// Port of base_flow.go:1924 mergeArtifactDeltas: prefers higher versions (a deliberate
 /// divergence from adk-python's last-write-wins).
 fn merge_artifact_deltas(
     dst: Option<BTreeMap<String, i64>>,
@@ -907,7 +907,7 @@ fn merge_artifact_deltas(
     dst
 }
 
-/// Port of base_flow.go:1720 deepMergeMap.
+/// Port of base_flow.go:1938 deepMergeMap.
 fn deep_merge_map(mut dst: Map<String, Value>, src: Map<String, Value>) -> Map<String, Value> {
     for (k, v) in src {
         match (dst.get_mut(&k), v) {
@@ -923,7 +923,7 @@ fn deep_merge_map(mut dst: Map<String, Value>, src: Map<String, Value>) -> Map<S
     dst
 }
 
-/// Port of base_flow.go:1288 displayableToolResultText: the tool result as text for a
+/// Port of base_flow.go:1459 displayableToolResultText: the tool result as text for a
 /// skip-summarization event, or `None` for results with nothing worth showing (errors, empty or
 /// null results). A single plain-text `"result"` is shown as-is; anything else as JSON (sorted
 /// keys, not HTML-escaped: Go `SetEscapeHTML(false)`).

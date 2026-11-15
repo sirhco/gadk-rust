@@ -192,14 +192,19 @@ fn decode_error(message: String, body: &[u8]) -> ModelError {
     }
 }
 
-/// Decodes one response object (a whole body, or one SSE event's data).
-fn decode_response(backend: Backend, data: &[u8]) -> Result<GenerateContentResponse, ModelError> {
+/// Decodes one response object: a whole body, or (with `stream`) one SSE event's data.
+fn decode_response(
+    backend: Backend,
+    data: &[u8],
+    stream: bool,
+) -> Result<GenerateContentResponse, ModelError> {
     let value: Value = serde_json::from_slice(data)
         .map_err(|e| decode_error(format!("invalid response JSON: {e}"), data))?;
-    if value.get("error").is_some_and(Value::is_object) {
+    if stream && value.get("error").is_some_and(Value::is_object) {
         // A chunk carrying `"error"` yields that `APIError` (genai v1.77.0
         // `iterateResponseStream`): code, status, message and details come from the body
-        // only, so a missing code is 0 as in Go.
+        // only, so a missing code is 0 as in Go. A unary 200 body is decoded as is
+        // (`deserializeUnaryResponse` has no such check; the `"error"` key is ignored).
         return Err(api_error_from_body(0, data));
     }
     serde_json::from_value(normalize_response(backend, value))
@@ -306,7 +311,7 @@ impl Transport {
         with_timeout(self.timeout, async move {
             let resp = self.send(url, body, headers).await?;
             let bytes = collect_body(resp.into_body()).await?;
-            decode_response(backend, &bytes)
+            decode_response(backend, &bytes, false)
         })
         .await
     }
@@ -330,7 +335,9 @@ impl Transport {
         .try_flatten();
         let mut failed = false;
         events
-            .map(move |event| event.and_then(|ev| decode_response(backend, ev.data.as_bytes())))
+            .map(move |event| {
+                event.and_then(|ev| decode_response(backend, ev.data.as_bytes(), true))
+            })
             .take_while(move |item| {
                 let keep = !failed;
                 failed |= item.is_err();

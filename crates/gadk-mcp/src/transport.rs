@@ -197,6 +197,9 @@ struct ChildTransport {
 impl ChildTransport {
     /// Spawns `cmd` with piped stdin and stdout.
     fn spawn(mut cmd: tokio::process::Command) -> std::io::Result<Self> {
+        // Divergence (ledger 2c): a command whose stderr the caller left unset inherits the host's
+        // stderr (tokio's default), where Go's os/exec with a nil `cmd.Stderr` discards it;
+        // `tokio::process::Command` has no getter to tell an unset stderr from a set one.
         cmd.stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .kill_on_drop(true);

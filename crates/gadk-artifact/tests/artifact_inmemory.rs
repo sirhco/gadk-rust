@@ -254,10 +254,6 @@ async fn test_in_memory_service_does_not_alias_stored_parts() {
     );
 }
 
-fn obj_of(v: Value) -> Map<String, Value> {
-    v.as_object().cloned().unwrap()
-}
-
 fn full_part() -> Part {
     Part {
         text: "x".into(),
@@ -276,19 +272,19 @@ fn full_part() -> Part {
             start_offset: chrono::TimeDelta::seconds(1),
             ..Default::default()
         }),
-        part_metadata: obj_of(json!({"src": {"name": "a"}, "list": [{"n": "1"}]})),
+        part_metadata: obj(json!({"src": {"name": "a"}, "list": [{"n": "1"}]})),
         media_resolution: Some(PartMediaResolution {
             level: Some(PartMediaResolutionLevel::MediaResolutionLow),
             ..Default::default()
         }),
         function_call: Some(FunctionCall {
             name: "fn".into(),
-            args: obj_of(json!({"a": {"b": "c"}})),
+            args: obj(json!({"a": {"b": "c"}})),
             ..Default::default()
         }),
         function_response: Some(FunctionResponse {
             name: "fn".into(),
-            response: obj_of(json!({"r": ["s"]})),
+            response: obj(json!({"r": ["s"]})),
             ..Default::default()
         }),
         executable_code: Some(ExecutableCode {
@@ -301,12 +297,12 @@ fn full_part() -> Part {
         }),
         tool_call: Some(ToolCall {
             id: "t".into(),
-            args: obj_of(json!({"q": ["a"]})),
+            args: obj(json!({"q": ["a"]})),
             ..Default::default()
         }),
         tool_response: Some(ToolResponse {
             id: "t".into(),
-            response: obj_of(json!({"r": {"k": "v"}})),
+            response: obj(json!({"r": {"k": "v"}})),
             ..Default::default()
         }),
         audio_transcription: Some(Transcription {
@@ -396,7 +392,7 @@ async fn test_in_memory_service_review_repro() {
             fps: Some(24.0),
             ..Default::default()
         }),
-        part_metadata: obj_of(json!({"src": {"name": "a"}})),
+        part_metadata: obj(json!({"src": {"name": "a"}})),
         media_resolution: Some(PartMediaResolution {
             level: Some(PartMediaResolutionLevel::MediaResolutionLow),
             ..Default::default()

@@ -15,8 +15,9 @@
 
 //! gadk-tools: ADK-Go's built-in tools that need no authentication (port of ADK-Go
 //! `tool/geminitool`, `tool/loadartifactstool`, `tool/loadmemorytool`, `tool/preloadmemorytool`,
-//! `tool/exampletool`, `tool/toolsearch` with `internal/ranksearch`, and `tool/skilltoolset`), plus
-//! adk-python's auth wire model (`tool/toolauth`).
+//! `tool/exampletool`, `tool/toolsearch` with `internal/ranksearch`, and `tool/skilltoolset`). The
+//! auth wire model (Go `tool/toolauth`) now lives in `gadk_session::toolauth`; it is re-exported
+//! here as [`toolauth`] so the `gadk_tools::toolauth` path keeps working.
 
 pub mod example;
 pub mod gemini;

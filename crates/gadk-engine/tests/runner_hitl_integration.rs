@@ -21,7 +21,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, Ordering::SeqCst};
 
 use futures::StreamExt;
-use futures::stream::BoxStream;
 use gadk_agent::{Agent, Context, EventStream, RunConfig};
 use gadk_engine::WorkflowError;
 use gadk_engine::agents::workflow_agent::{self, WorkflowAgentConfig};
@@ -33,12 +32,15 @@ use gadk_engine::workflow::{
     WORKFLOW_INPUT_FUNCTION_CALL_NAME, chain, dynamic_node, function_node, new_request_input_event,
     run_node,
 };
-use gadk_genai::{Content, FunctionCall, FunctionResponse};
-use gadk_model::{Llm, LlmRequest, LlmResponse, ModelError};
+use gadk_genai::{Content, FunctionCall};
+use gadk_model::Llm;
 use gadk_platform::Platform;
 use gadk_session::{CreateRequest, Event, InMemorySessionService, RequestInput, SessionService};
 use parking_lot::Mutex;
 use serde_json::{Value, json};
+
+mod workflow_support;
+use workflow_support::{ScriptedModel, resume_content};
 
 /// Go `for ev, err := range seq { if err != nil { t.Fatal(err) } }`: every event (with or
 /// without content), stopping at the first error.
@@ -70,22 +72,6 @@ fn model_call(name: &str, args: Value) -> Content {
             ..Default::default()
         },
         "model",
-    )
-}
-
-/// Port of Go `resumeContent`: one FunctionResponse with the payload under "payload".
-fn resume_content(call_id: &str, call_name: &str, payload: Value) -> Content {
-    Content::from_function_response(
-        FunctionResponse {
-            id: call_id.into(),
-            name: call_name.into(),
-            response: json!({ "payload": payload })
-                .as_object()
-                .cloned()
-                .unwrap_or_default(),
-            ..Default::default()
-        },
-        "user",
     )
 }
 
@@ -179,44 +165,6 @@ fn workflow_agent_of(
         ..Default::default()
     })
     .expect("workflowagent.New()")
-}
-
-/// Port of Go `scriptedModel`: one response per call; past the end, repeats the last.
-struct ScriptedModel {
-    responses: Vec<Content>,
-    call: Mutex<usize>,
-}
-
-impl ScriptedModel {
-    fn new(responses: Vec<Content>) -> Arc<Self> {
-        Arc::new(Self {
-            responses,
-            call: Mutex::new(0),
-        })
-    }
-}
-
-impl Llm for ScriptedModel {
-    fn name(&self) -> &str {
-        "scripted"
-    }
-    fn generate_content(
-        &self,
-        _req: LlmRequest,
-        _stream: bool,
-    ) -> BoxStream<'static, Result<LlmResponse, ModelError>> {
-        let mut call = self.call.lock();
-        let i = (*call).min(self.responses.len() - 1);
-        *call += 1;
-        let resp = LlmResponse {
-            content: Some(self.responses[i].clone()),
-            ..Default::default()
-        };
-        futures::stream::iter([Ok(resp)]).boxed()
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }
 
 /// Go `workflowAgentName`; also the Author stamped on the agent's events.
