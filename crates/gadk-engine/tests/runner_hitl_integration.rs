@@ -559,3 +559,49 @@ async fn test_runner_workflow_hitl_two_full_cycles_same_session() {
     run_cycle("first").await;
     run_cycle("second").await;
 }
+
+/// A workflow agent paused in two runs, then one message answering both interrupts: the
+/// workflow resumes the first run instead of restarting the graph, which would run finished
+/// nodes again and ask a new question.
+#[tokio::test]
+async fn test_runner_workflow_agent_answers_to_two_paused_runs_resume_the_first() {
+    let prepare_runs = Arc::new(AtomicI32::new(0));
+    let counter = prepare_runs.clone();
+    let prepare = function_node::<String, String, _, _>(
+        "prepare",
+        move |_ctx: Context, input: String| {
+            counter.fetch_add(1, SeqCst);
+            async move { Ok(format!("prepared:{input}")) }
+        },
+        NodeConfig::default(),
+    );
+    let asker = new_hitl_asker("asker", "", false);
+    let handler_input = Arc::new(Mutex::new(None::<String>));
+    let handler = recording_handler(&handler_input);
+    let r = new_workflow_runner(chain(&[start(), prepare, asker, handler])).await;
+    let (id1, name1) = find_long_running_interrupt(&drain(run(&r, user_text("draft1"))).await);
+    let (id2, name2) = find_long_running_interrupt(&drain(run(&r, user_text("draft2"))).await);
+    assert!(
+        !id1.is_empty() && !id2.is_empty() && id1 != id2,
+        "interrupt IDs = {id1:?}, {id2:?}, want two different IDs"
+    );
+
+    let first = resume_content(&id1, &name1, json!("first"));
+    let second = resume_content(&id2, &name2, json!("second"));
+    let msg = Content {
+        role: "user".into(),
+        parts: first.parts.into_iter().chain(second.parts).collect(),
+    };
+    let (new_id, _) = find_long_running_interrupt(&drain(run(&r, msg)).await);
+
+    assert_eq!(prepare_runs.load(SeqCst), 2, "prepare runs");
+    assert!(
+        new_id.is_empty(),
+        "the run raised a new interrupt {new_id:?}, want the paused run resumed"
+    );
+    assert_eq!(
+        handler_input.lock().as_deref(),
+        Some("first"),
+        "handler input"
+    );
+}

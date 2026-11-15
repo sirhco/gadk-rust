@@ -716,3 +716,576 @@ async fn test_runner_node_tolerates_unmatched_function_response() {
         "expected a fresh run to consult the model after an unmatched function response"
     );
 }
+
+/// Go `time.Date(2026, time.March, day, hour, 0, 0, 0, time.UTC)`.
+fn march(day: u32, hour: u32) -> chrono::DateTime<chrono::Utc> {
+    use chrono::TimeZone;
+    chrono::Utc
+        .with_ymd_and_hms(2026, 3, day, hour, 0, 0)
+        .unwrap()
+}
+
+/// A runner over `agent` with `plugins` whose platform clock always reads `run_time` (Go
+/// `platform.WithTimeProvider(ctx, func() time.Time { return runTime })`).
+fn new_timed_plugin_runner(
+    agent: Arc<dyn Agent>,
+    svc: Arc<dyn SessionService>,
+    plugins: Vec<gadk_agent::Plugin>,
+    run_time: chrono::DateTime<chrono::Utc>,
+) -> Runner {
+    Runner::new(RunnerConfig {
+        app_name: NODE_TEST_APP.into(),
+        agent,
+        session_service: svc,
+        artifact_service: None,
+        memory_service: None,
+        plugin_config: PluginConfig {
+            plugins,
+            ..Default::default()
+        },
+        auto_create_session: false,
+        platform: Platform::default().with_time(move || run_time),
+        compaction: None,
+    })
+    .expect("runner.New()")
+}
+
+/// A custom agent that yields `ev` (with its `invocation_id` set to the run's when `own_inv`).
+fn yielding_agent(name: &str, ev: Event, own_inv: bool) -> Arc<dyn Agent> {
+    let run: gadk_agent::AgentRunFn = Arc::new(move |ctx: gadk_agent::InvocationContext| {
+        let mut ev = ev.clone();
+        if own_inv {
+            ev.invocation_id = ctx.invocation_id().to_string();
+        }
+        futures::stream::iter([Ok(ev)]).boxed()
+    });
+    gadk_agent::new_agent(gadk_agent::AgentConfig {
+        name: name.into(),
+        run: Some(run),
+        ..Default::default()
+    })
+    .expect("agent.New()")
+}
+
+fn reply_event(author: &str, text: &str) -> Event {
+    let mut ev = Event {
+        author: author.into(),
+        ..Default::default()
+    };
+    ev.response.content = Some(model_text(text));
+    ev
+}
+
+fn sequential_root(sub_agents: Vec<Arc<dyn Agent>>) -> Arc<dyn Agent> {
+    gadk_engine::agents::sequential_agent::new(
+        gadk_engine::agents::sequential_agent::SequentialAgentConfig {
+            agent: gadk_agent::AgentConfig {
+                name: "seq_root".into(),
+                sub_agents,
+                ..Default::default()
+            },
+        },
+    )
+    .expect("sequentialagent.New()")
+}
+
+/// Go `newLlmRoot`: an LlmAgent root that transfers to its only sub-agent "custom".
+fn transferring_llm_root(sub: Arc<dyn Agent>) -> Arc<dyn Agent> {
+    let call = Content {
+        role: "model".into(),
+        parts: vec![Part {
+            function_call: Some(FunctionCall {
+                id: "transfer-1".into(),
+                name: "transfer_to_agent".into(),
+                args: json!({"agent_name": "custom"})
+                    .as_object()
+                    .cloned()
+                    .unwrap(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }],
+    };
+    llm_agent::new(LlmAgentConfig {
+        name: "llm_root".into(),
+        model: Some(ScriptedModel::new(vec![call]) as Arc<dyn Llm>),
+        sub_agents: vec![sub],
+        ..Default::default()
+    })
+    .expect("llmagent.New()")
+}
+
+fn event_has_text(ev: &Event, text: &str) -> bool {
+    ev.response
+        .content
+        .as_ref()
+        .is_some_and(|c| c.parts.len() == 1 && c.parts[0].text == text)
+}
+
+// parity: adapted: on_event receives the event by value, so Go's in-place rewrite (`*ev = …; return nil`) only changes the plugin's own copy and the agent's original event (also without a timestamp) is stored
+#[tokio::test]
+#[ignore = "8a bug: the runner stores an event yielded or returned by on_event without a timestamp with the zero time (Go #2091 stampTimestamp)"]
+async fn test_runner_stamps_events_yielded_without_timestamp() {
+    let run_time = march(2, 10);
+    let own_time = march(1, 9);
+    let zero = gadk_session::zero_time();
+    // (name, llm root, own timestamp, replace, rewrite, want)
+    let cases = [
+        ("sequential agent root", false, zero, false, false, run_time),
+        ("llm agent root", true, zero, false, false, run_time),
+        (
+            "sequential agent root, plugin replacement",
+            false,
+            zero,
+            true,
+            false,
+            run_time,
+        ),
+        (
+            "llm agent root, plugin replacement",
+            true,
+            zero,
+            true,
+            false,
+            run_time,
+        ),
+        (
+            "sequential agent root, plugin rewrites in place",
+            false,
+            zero,
+            false,
+            true,
+            run_time,
+        ),
+        (
+            "llm agent root, plugin rewrites in place",
+            true,
+            zero,
+            false,
+            true,
+            run_time,
+        ),
+        (
+            "sequential agent root, own timestamp",
+            false,
+            own_time,
+            false,
+            false,
+            own_time,
+        ),
+        (
+            "llm agent root, own timestamp",
+            true,
+            own_time,
+            false,
+            false,
+            own_time,
+        ),
+    ];
+    for (name, llm_root, own, replace, rewrite, want) in cases {
+        let svc: Arc<dyn SessionService> = Arc::new(InMemorySessionService::new());
+        new_node_test_session(&svc).await;
+        let saw_unstamped = Arc::new(Mutex::new(false));
+        let saw = saw_unstamped.clone();
+        let p = gadk_agent::Plugin::new(gadk_agent::PluginConfig {
+            name: "observe_and_replace".into(),
+            on_event_callback: Some(Arc::new(move |_ctx, ev: Event| {
+                let out = if ev.author != "custom" {
+                    None
+                } else {
+                    if ev.timestamp == gadk_session::zero_time() {
+                        *saw.lock() = true;
+                    }
+                    let copy = Event {
+                        author: ev.author.clone(),
+                        response: ev.response.clone(),
+                        ..Default::default()
+                    };
+                    if rewrite {
+                        drop(copy);
+                        None
+                    } else if replace {
+                        Some(copy)
+                    } else {
+                        None
+                    }
+                };
+                Box::pin(async move { Ok(out) })
+            })),
+            ..Default::default()
+        });
+        let mut ev = reply_event("custom", "reply");
+        ev.timestamp = own;
+        let custom = yielding_agent("custom", ev, false);
+        let root = if llm_root {
+            transferring_llm_root(custom)
+        } else {
+            sequential_root(vec![custom])
+        };
+        let r = new_timed_plugin_runner(root, svc.clone(), vec![p], run_time);
+        let (_, errs) = run_all(run(&r, user_text("go"))).await;
+        assert!(errs.is_empty(), "{name}: Run() error = {errs:?}");
+
+        let got = get_session(&svc).await;
+        let mut saw_reply = false;
+        for ev in got.events() {
+            if ev.author != "custom" {
+                continue;
+            }
+            saw_reply = true;
+            assert_eq!(ev.timestamp, want, "{name}: stored event timestamp");
+        }
+        assert!(
+            saw_reply,
+            "{name}: no event from the custom agent was stored"
+        );
+        assert_ne!(
+            got.last_update_time(),
+            gadk_session::zero_time(),
+            "{name}: session LastUpdateTime() is zero after the run"
+        );
+        assert!(
+            !*saw_unstamped.lock(),
+            "{name}: OnEventCallback saw the custom agent's event with a zero timestamp"
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "8a bug: the runner stores and streams an on_event replacement with the plugin's ID, invocation ID, timestamp and author instead of the original's (Go #2306 fromPlugin)"]
+async fn test_runner_plugin_replacement_keeps_event_identity() {
+    let run_time = march(2, 10);
+    let plugin_time = march(3, 11);
+    let agent_time = march(1, 9);
+    // (name, llm root, replacement author, want author)
+    let cases = [
+        ("sequential agent root, no author", false, "", "custom"),
+        ("llm agent root, no author", true, "", "custom"),
+        (
+            "sequential agent root, own author",
+            false,
+            "rewriter",
+            "rewriter",
+        ),
+        ("llm agent root, own author", true, "rewriter", "rewriter"),
+    ];
+    for (name, llm_root, author, want_author) in cases {
+        let svc: Arc<dyn SessionService> = Arc::new(InMemorySessionService::new());
+        new_node_test_session(&svc).await;
+        let original: Arc<Mutex<Option<Event>>> = Arc::default();
+        let seen = original.clone();
+        let p = gadk_agent::Plugin::new(gadk_agent::PluginConfig {
+            name: "replace".into(),
+            on_event_callback: Some(Arc::new(move |_ctx, ev: Event| {
+                let out = if ev.author != "custom" {
+                    None
+                } else {
+                    *seen.lock() = Some(ev.clone());
+                    let mut rep = Event {
+                        id: "plugin-id".into(),
+                        invocation_id: "plugin-invocation".into(),
+                        timestamp: plugin_time,
+                        author: author.into(),
+                        ..Default::default()
+                    };
+                    rep.response.content = Some(model_text("replaced"));
+                    Some(rep)
+                };
+                Box::pin(async move { Ok(out) })
+            })),
+            ..Default::default()
+        });
+        let mut ev = reply_event("custom", "reply");
+        ev.id = "agent-event".into();
+        ev.timestamp = agent_time;
+        let custom = yielding_agent("custom", ev, true);
+        let root = if llm_root {
+            transferring_llm_root(custom)
+        } else {
+            sequential_root(vec![custom])
+        };
+        let r = new_timed_plugin_runner(root, svc.clone(), vec![p], run_time);
+        let events = drain(run(&r, user_text("go"))).await;
+        let original = original
+            .lock()
+            .clone()
+            .unwrap_or_else(|| panic!("{name}: the plugin never saw the custom agent's event"));
+        let streamed = events
+            .iter()
+            .rfind(|e| event_has_text(e, "replaced"))
+            .cloned()
+            .unwrap_or_else(|| panic!("{name}: the replacement was not streamed"));
+        let stored = get_session(&svc)
+            .await
+            .events()
+            .into_iter()
+            .rfind(|e| event_has_text(e, "replaced"))
+            .unwrap_or_else(|| panic!("{name}: the replacement was not stored"));
+        for (where_, ev) in [("streamed", &streamed), ("stored", &stored)] {
+            assert_eq!(ev.id, original.id, "{name}: {where_} replacement ID");
+            assert_eq!(
+                ev.invocation_id, original.invocation_id,
+                "{name}: {where_} replacement InvocationID"
+            );
+            assert_eq!(
+                ev.timestamp, agent_time,
+                "{name}: {where_} replacement Timestamp"
+            );
+            assert_eq!(
+                ev.author, want_author,
+                "{name}: {where_} replacement Author"
+            );
+        }
+    }
+}
+
+// parity: adapted: Rust plugins hand back an owned Event, so the runner cannot write to the plugin's shared replacement; the guard checks the shared value and that each stored copy carries its original's identity
+#[tokio::test]
+#[ignore = "8a bug: the runner stores an on_event replacement without the original event's ID and author (Go #2306 fromPlugin)"]
+async fn test_runner_plugin_shared_replacement_is_not_modified() {
+    let run_time = march(2, 10);
+    let svc: Arc<dyn SessionService> = Arc::new(InMemorySessionService::new());
+    new_node_test_session(&svc).await;
+
+    let speaker = |name: &str| {
+        let mut ev = reply_event(name, "reply");
+        ev.id = format!("{name}-event");
+        yielding_agent(name, ev, true)
+    };
+    let root = sequential_root(vec![speaker("custom"), speaker("other")]);
+    let mut shared = Event::default();
+    shared.response.content = Some(model_text("redacted"));
+    let shared = Arc::new(Mutex::new(shared));
+    let plugin_shared = shared.clone();
+    let p = gadk_agent::Plugin::new(gadk_agent::PluginConfig {
+        name: "redact".into(),
+        on_event_callback: Some(Arc::new(move |_ctx, ev: Event| {
+            let out = if ev.author != "custom" && ev.author != "other" {
+                None
+            } else {
+                Some(plugin_shared.lock().clone())
+            };
+            Box::pin(async move { Ok(out) })
+        })),
+        ..Default::default()
+    });
+    let r = new_timed_plugin_runner(root, svc.clone(), vec![p], run_time);
+
+    let ids = |evs: &[Event]| -> Vec<(String, String)> {
+        evs.iter()
+            .filter(|e| event_has_text(e, "redacted"))
+            .map(|e| (e.id.clone(), e.author.clone()))
+            .collect()
+    };
+    let streamed = ids(&drain(run(&r, user_text("go"))).await);
+    let stored = ids(&get_session(&svc).await.events());
+    let want = vec![
+        ("custom-event".to_string(), "custom".to_string()),
+        ("other-event".to_string(), "other".to_string()),
+    ];
+    assert_eq!(streamed, want, "streamed replacements");
+    assert_eq!(stored, want, "stored replacements");
+    let shared = shared.lock();
+    assert!(
+        shared.id.is_empty()
+            && shared.invocation_id.is_empty()
+            && shared.author.is_empty()
+            && shared.timestamp == gadk_session::zero_time(),
+        "shared replacement was modified: {:?}",
+        *shared
+    );
+}
+
+// parity: adapted: on_event receives the event by value, so Go's in-place rewrite only changes the plugin's own copy; that case then stores the runner's own reply, which already has a timestamp
+#[tokio::test]
+#[ignore = "8a bug: the runner stores a before-run reply replaced by on_event with the plugin's ID, invocation ID, zero timestamp and empty author (Go #2306/#2091)"]
+async fn test_runner_stamps_before_run_replacement() {
+    let run_time = march(2, 10);
+    let plugin_time = march(3, 11);
+    for (name, rewrite) in [("replacement", false), ("rewrite in place", true)] {
+        let svc: Arc<dyn SessionService> = Arc::new(InMemorySessionService::new());
+        new_node_test_session(&svc).await;
+        let a = gadk_agent::new_agent(gadk_agent::AgentConfig {
+            name: "custom".into(),
+            ..Default::default()
+        })
+        .expect("agent.New()");
+        let original: Arc<Mutex<Option<Event>>> = Arc::default();
+        let seen = original.clone();
+        let p = gadk_agent::Plugin::new(gadk_agent::PluginConfig {
+            name: "cache".into(),
+            before_run_callback: Some(Arc::new(|_ctx| {
+                Box::pin(async { Ok(Some(model_text("cached"))) })
+            })),
+            on_event_callback: Some(Arc::new(move |_ctx, ev: Event| {
+                let out = if ev.author != "custom" {
+                    None
+                } else {
+                    *seen.lock() = Some(ev.clone());
+                    if rewrite {
+                        None
+                    } else {
+                        Some(Event {
+                            id: "plugin-id".into(),
+                            invocation_id: "plugin-invocation".into(),
+                            timestamp: plugin_time,
+                            response: ev.response.clone(),
+                            ..Default::default()
+                        })
+                    }
+                };
+                Box::pin(async move { Ok(out) })
+            })),
+            ..Default::default()
+        });
+        let r = new_timed_plugin_runner(a, svc.clone(), vec![p], run_time);
+        let (_, errs) = run_all(run(&r, user_text("go"))).await;
+        assert!(errs.is_empty(), "{name}: Run() error = {errs:?}");
+
+        let got = get_session(&svc).await;
+        let original = original.lock().clone().unwrap_or_default();
+        let mut saw_reply = false;
+        for ev in got.events() {
+            if !event_has_text(&ev, "cached") {
+                continue;
+            }
+            saw_reply = true;
+            assert_eq!(ev.author, "custom", "{name}: stored BeforeRun reply Author");
+            assert_eq!(
+                ev.timestamp, run_time,
+                "{name}: stored BeforeRun reply timestamp"
+            );
+            if rewrite {
+                continue;
+            }
+            assert_eq!(ev.id, original.id, "{name}: stored BeforeRun reply ID");
+            assert_eq!(
+                ev.invocation_id, original.invocation_id,
+                "{name}: stored BeforeRun reply InvocationID"
+            );
+        }
+        assert!(saw_reply, "{name}: the BeforeRun reply was not stored");
+        assert!(
+            !original.id.is_empty() && !original.invocation_id.is_empty(),
+            "{name}: the plugin saw a reply with ID {:?} and InvocationID {:?}, want both set",
+            original.id,
+            original.invocation_id
+        );
+        assert_ne!(
+            got.last_update_time(),
+            gadk_session::zero_time(),
+            "{name}: session LastUpdateTime() is zero after the run"
+        );
+    }
+}
+
+/// Go `newCallerRoot`: a custom root whose sub-agent "approver" made the seeded calls; the
+/// root yields one text event when it runs.
+fn new_caller_root() -> Arc<dyn Agent> {
+    let run: gadk_agent::AgentRunFn = Arc::new(|ctx: gadk_agent::InvocationContext| {
+        let mut ev = Event::new(ctx.platform(), ctx.invocation_id());
+        ev.author = "root".into();
+        ev.response.content = Some(model_text("root"));
+        futures::stream::iter([Ok(ev)]).boxed()
+    });
+    gadk_agent::new_agent(gadk_agent::AgentConfig {
+        name: "root".into(),
+        sub_agents: vec![new_permissive_agent()],
+        run: Some(run),
+        ..Default::default()
+    })
+    .expect("agent.New()")
+}
+
+/// Go `seedFunctionCall`: a model event by "approver" carrying calls `call_ids`, as if
+/// `invocation_id` had issued them.
+async fn seed_function_call(svc: &Arc<dyn SessionService>, invocation_id: &str, call_ids: &[&str]) {
+    let sess = get_session(svc).await;
+    let mut ev = Event::new(&Platform::default(), invocation_id);
+    ev.author = "approver".into();
+    ev.response.content = Some(Content {
+        role: "model".into(),
+        parts: call_ids
+            .iter()
+            .map(|id| Part {
+                function_call: Some(FunctionCall {
+                    id: (*id).into(),
+                    name: "tool".into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })
+            .collect(),
+    });
+    svc.append_event(&*sess, &mut ev)
+        .await
+        .expect("AppendEvent()");
+}
+
+/// Go `runFunctionResponses`: seeds fc-0 (no invocation ID), fc-1a/fc-1b (inv-1) and fc-2
+/// (inv-2), runs `root` on a message answering `call_ids`, and returns every yielded event's
+/// invocation ID.
+async fn run_function_responses(root: Arc<dyn Agent>, call_ids: &[&str]) -> Vec<String> {
+    let svc: Arc<dyn SessionService> = Arc::new(InMemorySessionService::new());
+    new_node_test_session(&svc).await;
+    seed_function_call(&svc, "", &["fc-0"]).await;
+    seed_function_call(&svc, "inv-1", &["fc-1a", "fc-1b"]).await;
+    seed_function_call(&svc, "inv-2", &["fc-2"]).await;
+    let r = new_node_test_runner(root, svc.clone());
+    let msg = Content {
+        role: "user".into(),
+        parts: call_ids
+            .iter()
+            .map(|id| Part {
+                function_response: Some(FunctionResponse {
+                    id: (*id).into(),
+                    name: "tool".into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })
+            .collect(),
+    };
+    let got: Vec<String> = drain(run(&r, msg))
+        .await
+        .into_iter()
+        .map(|e| e.invocation_id)
+        .collect();
+    assert!(!got.is_empty(), "Run() yielded no events");
+    got
+}
+
+#[rstest::rstest]
+#[case::agent_path_calls_of_one_invocation(new_caller_root as fn() -> Arc<dyn Agent>, &["fc-1a", "fc-1b"])]
+#[case::node_path_calls_of_one_invocation(new_permissive_agent as fn() -> Arc<dyn Agent>, &["fc-1a", "fc-1b"])]
+#[case::node_path_calls_of_two_invocations(new_permissive_agent as fn() -> Arc<dyn Agent>, &["fc-1a", "fc-2"])]
+#[tokio::test]
+async fn test_runner_function_responses_resume_their_invocation(
+    #[case] root: fn() -> Arc<dyn Agent>,
+    #[case] ids: &[&str],
+) {
+    for id in run_function_responses(root(), ids).await {
+        assert_eq!(id, "inv-1", "event InvocationID");
+    }
+}
+
+#[rstest::rstest]
+#[ignore = "8a bug: on the agent path the runner resumes the first call's invocation for answers to calls of two invocations instead of starting a new one (Go #2312)"]
+#[case::agent_path_calls_of_two_invocations(new_caller_root as fn() -> Arc<dyn Agent>, &["fc-1a", "fc-2"])]
+#[case::agent_path_unknown_calls(new_caller_root as fn() -> Arc<dyn Agent>, &["no-such-fc"])]
+#[case::node_path_unknown_calls(new_permissive_agent as fn() -> Arc<dyn Agent>, &["no-such-fc"])]
+// fc-0's event has no invocation ID, and that counts as an invocation of its own.
+#[case::agent_path_call_without_an_invocation_id_first(new_caller_root as fn() -> Arc<dyn Agent>, &["fc-0", "fc-2"])]
+#[case::node_path_call_without_an_invocation_id_first(new_permissive_agent as fn() -> Arc<dyn Agent>, &["fc-0", "fc-2"])]
+#[tokio::test]
+async fn test_runner_function_responses_start_new_invocation(
+    #[case] root: fn() -> Arc<dyn Agent>,
+    #[case] ids: &[&str],
+) {
+    for id in run_function_responses(root(), ids).await {
+        assert!(
+            !id.is_empty() && id != "inv-1" && id != "inv-2",
+            "event InvocationID = {id:?}, want a new invocation ID"
+        );
+    }
+}

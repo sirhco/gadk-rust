@@ -216,6 +216,10 @@ name = "facade_a2a"
 required-features = ["a2a"]
 
 [[test]]
+name = "agent_agent_name"
+required-features = ["a2a"]
+
+[[test]]
 name = "facade_launcher"
 required-features = ["launcher"]
 

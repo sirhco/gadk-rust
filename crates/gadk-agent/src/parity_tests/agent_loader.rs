@@ -77,6 +77,32 @@ fn test_duplicate_name() {
 }
 
 #[test]
+#[ignore = "8a bug: MultiLoader::list_agents returns registration order; Go #2164 returns the names sorted"]
+fn test_multi_loader_list_agents_sorted() {
+    let names = [
+        "transfer_agent",
+        "sequential_agent",
+        "hello_agent",
+        "tools_agent",
+        "agent_tool_agent",
+        "loop_agent",
+        "parallel_agent",
+        "remote_agent",
+        "template_agent",
+    ];
+    let root = test_agent("root_agent");
+    let agents = names.iter().map(|n| test_agent(n)).collect();
+    let loader = MultiLoader::new(root, agents).unwrap();
+
+    let mut want: Vec<String> = names.iter().map(|n| n.to_string()).collect();
+    want.push("root_agent".into());
+    want.sort();
+    // Go repeats the call because map iteration order is randomized; Rust's order is fixed, so
+    // one call decides.
+    assert_eq!(loader.list_agents(), want, "ListAgents()");
+}
+
+#[test]
 fn multi_loader_errors_carry_go_text_and_registration_order() {
     let err = MultiLoader::new(test_agent("root"), vec![test_agent("b"), test_agent("b")]).err();
     assert_eq!(err, Some(LoaderError("duplicate agent name: b".into())));
