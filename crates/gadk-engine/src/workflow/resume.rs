@@ -58,8 +58,9 @@ pub(crate) fn validate_resume_response(resp: Value, schema: &Value) -> Result<Va
 /// no-op (Go's nil state is the caller's `None` from `reconstruct_run_state`).
 ///
 /// Go's deferred cleanup (`cancelAll` + drain + `wg.Wait`) needs no code: dropping the stream
-/// drops the scheduler, whose `JoinSet` aborts every node task and whose cancel guards cancel
-/// every node token, so no successor is dispatched after the consumer leaves.
+/// drops the scheduler, which cancels every node token and hands the drain of the still-running
+/// node tasks to the invocation's teardown registry, so no successor is dispatched after the
+/// consumer leaves.
 pub(crate) fn resume_stream(
     wf: Arc<Workflow>,
     ctx: Context,

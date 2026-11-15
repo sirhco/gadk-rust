@@ -20,8 +20,9 @@
 //! Here each activation is a task in the scheduler's [`JoinSet`], and the consumer loop is the
 //! pull state machine [`Scheduler::next`], driven by the workflow's [`EventStream`]: the
 //! consumer polling again is Go's `yield` returning true, and dropping the stream (which drops
-//! the scheduler, aborting every task and cancelling every running node's context) is Go's
-//! `yield` returning false. Each activation runs on a fresh fiber (Go's `go runNode`), and a
+//! the scheduler: it releases the event the consumer stopped on, cancels every running node's
+//! context and hands the drain of the still-running tasks to the invocation's teardown registry)
+//! is Go's `yield` returning false. Each activation runs on a fresh fiber (Go's `go runNode`), and a
 //! finished node's context stays live (Go `handleCompletion` drops its CancelFunc uncalled).
 //!
 //! [`EventStream`]: gadk_agent::EventStream
@@ -334,8 +335,8 @@ struct LoopState {
     finished: bool,
 }
 
-/// Port of Go scheduler. Owned by the stream that drives it; dropping it aborts every node task
-/// and retry timer (the [`JoinSet`]) and cancels every per-node token (the [`CancelGuard`]s).
+/// Port of Go scheduler. Owned by the stream that drives it; dropping it is Go's consumer-gone
+/// drain (see the `Drop` impl): no node task is aborted.
 pub(crate) struct Scheduler {
     pub(crate) state: RunState,
     pub(crate) graph: Arc<Graph>,
@@ -352,6 +353,52 @@ pub(crate) struct Scheduler {
     max_concurrency: usize,
     pending_queue: VecDeque<PendingActivation>,
     lp: LoopState,
+}
+
+/// Go `run`'s consumer-gone path (scheduler.go:595-605: `yield` returned false → `cancelAll`, keep
+/// draining until every activation returned, releasing every producer's handshake). Dropping the
+/// scheduler releases the event the consumer stopped on, cancels every running activation
+/// plainly, stops the retry timers, and hands the drain of the still-running node tasks to the
+/// invocation's teardown registry ([`gadk_agent::InvocationContext::spawn_teardown`]), which the
+/// runner awaits before its after-run callbacks (Go runs the drain on the consumer's goroutine
+/// before `Run` returns). Nothing is yielded or finalized: the consumer is gone.
+impl Drop for Scheduler {
+    fn drop(&mut self) {
+        // Go `close(it.processed)` after `yield` returned false.
+        if let Some(ack) = self.lp.ack.take() {
+            let _ = ack.send(());
+        }
+        while self.tasks.try_join_next().is_some() {}
+        if self.tasks.is_empty() {
+            return;
+        }
+        self.cancel_all();
+        let mut tasks = std::mem::take(&mut self.tasks);
+        let (_, closed) = mpsc::channel(1);
+        let mut rx = std::mem::replace(&mut self.rx, closed);
+        self.parent_ctx.spawn_teardown(async move {
+            loop {
+                tokio::select! {
+                    biased;
+                    Some(item) = rx.recv() => release(item),
+                    joined = tasks.join_next() => if joined.is_none() { break },
+                }
+            }
+            while let Ok(item) = rx.try_recv() {
+                release(item);
+            }
+        });
+    }
+}
+
+/// A drained queue item: an event's producer is released (Go: always signal, even when
+/// draining, so a blocked producer does not leak); everything else is discarded.
+fn release(item: QueueItem) {
+    if let QueueItem::Event(mut it) = item
+        && let Some(p) = it.processed.take()
+    {
+        let _ = p.send(());
+    }
 }
 
 /// Port of Go buildNodesByName: the name → node lookup of every edge endpoint.

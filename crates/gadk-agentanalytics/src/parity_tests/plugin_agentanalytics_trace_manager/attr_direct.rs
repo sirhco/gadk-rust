@@ -398,7 +398,6 @@ async fn test_runner_tool_run_helper_canceled_by_outer_ctx_after_partial_emits_a
 }
 
 #[tokio::test]
-#[ignore = "7b-3b defect: dropping the run aborts the running tool tasks (TokioTaskRunner's JoinSet), so the failed helper's tool call never reaches its tool-error callbacks; Go's RunTasks waits for every task"]
 async fn test_runner_two_helpers_partial_then_handled_error_emits_completed() {
     let tp = setup_test_plugin().await;
     // Go streamThenErrorLLM: a partial event, then a model error.

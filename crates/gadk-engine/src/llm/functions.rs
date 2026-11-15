@@ -20,10 +20,12 @@
 use std::{
     any::Any,
     collections::{BTreeMap, HashMap, HashSet},
+    future::Future,
     sync::Arc,
 };
 
 use futures::{StreamExt, future::BoxFuture};
+use gadk_agent::fiber::{self, Fiber};
 use gadk_agent::{
     AfterToolCallback, AgentError, BeforeToolCallback, Context, ContextDelta, InvocationContext,
     LiveRequest, LiveSession, OnToolErrorCallback, REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
@@ -82,7 +84,7 @@ pub(crate) async fn handle_function_calls(
 /// `filters` (adk-python's call-ID filter; Go has a TODO) keeps only calls whose ID is in the set.
 ///
 /// Every call runs as one task on the platform's task runner (Go `platform.RunTasks`); dropping
-/// the returned future aborts the tool tasks still running.
+/// the returned future lets the tool tasks still running finish (see [`FinishOnDrop`]).
 pub(crate) async fn handle_function_calls_with(
     ctx: &InvocationContext,
     flow: &Flow,
@@ -131,8 +133,8 @@ pub(crate) async fn handle_function_calls_live(
 /// outside live mode).
 ///
 /// Every call runs as one task on the platform's task runner (Go `platform.RunTasks`); dropping
-/// the returned future aborts the tool tasks still running (a live streaming tool's spawned task
-/// is not one of them: it ends on its cancellation token).
+/// the returned future lets the tool tasks still running finish (see [`FinishOnDrop`]; a live
+/// streaming tool's spawned task is not one of them: it ends on its cancellation token).
 async fn handle_function_calls_inner(
     ctx: &InvocationContext,
     flow: &Flow,
@@ -176,11 +178,13 @@ async fn handle_function_calls_inner(
             .instrument(span),
         ));
     }
-    let run = ctx.platform().run_tasks(tasks);
-    match &merged_span {
-        Some(s) => run.instrument(s.clone()).await,
-        None => run.await,
-    }
+    let platform = ctx.platform().clone();
+    let run = async move { platform.run_tasks(tasks).await };
+    let run: BoxFuture<'static, ()> = match &merged_span {
+        Some(s) => Box::pin(run.instrument(s.clone())),
+        None => Box::pin(run),
+    };
+    FinishOnDrop::new(ctx, run).await;
     let events = std::mem::take(&mut *slots.lock());
     let merged = merge_parallel_function_response_events(events);
     if let Some(s) = &merged_span {
@@ -191,6 +195,58 @@ async fn handle_function_calls_inner(
         }
     }
     merged
+}
+
+/// Go `platform.RunTasks` blocks until every task completed (platform/exec.go:68), and a Go
+/// consumer that stops reading early unwinds through it on its own goroutine, so the tool calls
+/// in flight finish (after-tool and on-tool-error callbacks included) before the runner's
+/// deferred after-run callbacks. Dropping a Rust future cannot wait: dropped before completion,
+/// this hands the task runner's still-running future (it keeps its tasks running) to the
+/// invocation's teardown registry ([`InvocationContext::spawn_teardown`]) on the fiber and span
+/// it was started in, instead of cancelling the tool tasks.
+struct FinishOnDrop {
+    run: Option<BoxFuture<'static, ()>>,
+    ctx: InvocationContext,
+    fiber: Fiber,
+    span: tracing::Span,
+}
+
+impl FinishOnDrop {
+    fn new(ctx: &InvocationContext, run: BoxFuture<'static, ()>) -> Self {
+        Self {
+            run: Some(run),
+            ctx: ctx.clone(),
+            fiber: fiber::current(),
+            span: tracing::Span::current(),
+        }
+    }
+}
+
+impl Future for FinishOnDrop {
+    type Output = ();
+
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<()> {
+        let Some(run) = self.run.as_mut() else {
+            return std::task::Poll::Ready(());
+        };
+        let polled = run.as_mut().poll(cx);
+        if polled.is_ready() {
+            self.run = None;
+        }
+        polled
+    }
+}
+
+impl Drop for FinishOnDrop {
+    fn drop(&mut self) {
+        if let Some(run) = self.run.take() {
+            let work = self.fiber.clone().scope(run).instrument(self.span.clone());
+            self.ctx.spawn_teardown(work);
+        }
+    }
 }
 
 /// The body of Go's per-call task closure (base_flow.go:1350-1525).
@@ -1231,48 +1287,71 @@ mod tests {
     }
 
     /// Sends on drop: observes that a tool task's future was dropped.
-    struct DropSignal(Option<oneshot::Sender<()>>);
-
-    impl Drop for DropSignal {
-        fn drop(&mut self) {
-            if let Some(tx) = self.0.take() {
-                let _ = tx.send(());
-            }
-        }
-    }
-
+    /// Go `platform.RunTasks` waits for every tool task (exec.go:68): dropping the future does
+    /// not cancel a running tool; its task finishes, after-tool callbacks included, as a
+    /// teardown the invocation's registry awaits.
     #[tokio::test]
-    async fn dropping_the_future_cancels_tool_tasks() {
+    async fn dropping_the_future_lets_tool_tasks_finish_as_a_teardown() {
         let (started_tx, started_rx) = oneshot::channel::<()>();
-        let (dropped_tx, dropped_rx) = oneshot::channel::<()>();
-        let slots = Arc::new(parking_lot::Mutex::new(Some((started_tx, dropped_tx))));
-        let hanging = FnTool::arc(
-            "hang",
+        let release = Arc::new(tokio::sync::Notify::new());
+        let slots = Arc::new(parking_lot::Mutex::new(Some(started_tx)));
+        let gate = release.clone();
+        let blocking = FnTool::arc(
+            "block",
             Arc::new(move |_| {
-                let pair = slots.lock().take();
+                let started = slots.lock().take();
+                let gate = gate.clone();
                 Box::pin(async move {
-                    let Some((started, dropped)) = pair else {
-                        return Map::new();
-                    };
-                    let _guard = DropSignal(Some(dropped));
-                    let _ = started.send(());
-                    futures::future::pending::<()>().await;
+                    if let Some(started) = started {
+                        let _ = started.send(());
+                    }
+                    gate.notified().await;
                     Map::new()
                 })
             }),
         );
-        let tools = tool_map(vec![hanging]);
-        let ctx = ctx();
-        let flow = Flow::default();
-        let call = calls_event(&["hang"]);
+        let after_ran = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let after: AfterToolCallback = {
+            let after_ran = after_ran.clone();
+            Arc::new(move |_, _, _, _, _| {
+                after_ran.store(true, std::sync::atomic::Ordering::SeqCst);
+                Box::pin(async { Ok(None) })
+            })
+        };
+        let tools = tool_map(vec![blocking]);
+        let reg = Arc::new(gadk_agent::Teardowns::new());
+        let ctx = InvocationContext::builder()
+            .agent(
+                agent::new(AgentConfig {
+                    name: "a".into(),
+                    ..Default::default()
+                })
+                .unwrap(),
+            )
+            .teardowns(reg.clone())
+            .build_invocation();
+        let flow = Flow {
+            after_tool_callbacks: vec![after],
+            ..Default::default()
+        };
+        let call = calls_event(&["block"]);
         let mut fut = Box::pin(handle_function_calls(&ctx, &flow, &tools, &call, None));
         tokio::select! {
             _ = &mut fut => panic!("handle_function_calls must not complete"),
             r = started_rx => r.unwrap(),
         }
         drop(fut);
-        // The aborted task's future (and its guard) is dropped by the runtime.
-        dropped_rx.await.unwrap();
+        assert!(
+            !reg.is_empty(),
+            "the running tool call is handed to the registry"
+        );
+        assert!(!after_ran.load(std::sync::atomic::Ordering::SeqCst));
+        release.notify_one();
+        reg.wait().await;
+        assert!(
+            after_ran.load(std::sync::atomic::Ordering::SeqCst),
+            "the dropped call's after-tool callbacks ran before the teardown finished"
+        );
     }
 
     /// Go passes a callback's `err` value onward unchanged: a callback error carrying a

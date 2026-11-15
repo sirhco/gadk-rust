@@ -714,7 +714,6 @@ fn wait_then_stream_bot(ready: Gate) -> Arc<dyn Agent> {
     })
 }
 
-#[ignore = "7b-3b defect: ParallelAgent early stop aborts its branch tasks (Go #1186 teardown)"]
 #[tokio::test]
 async fn test_runner_stop_reading_mid_stream_is_not_an_error() {
     // single streaming agent
@@ -1174,7 +1173,6 @@ async fn test_runner_purged_retry_attempt_timestamp_precedes_next_attempt() {
     );
 }
 
-#[ignore = "7b-3b defect: ParallelAgent early stop aborts its branch tasks instead of acking the in-flight event and cancelling them, so branches never tear down (Go #1186)"]
 #[tokio::test]
 async fn test_runner_stop_on_partial_event_of_async_author_is_not_an_error() {
     let new_child = || {

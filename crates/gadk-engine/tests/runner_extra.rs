@@ -92,12 +92,14 @@ async fn tool_cancel_on_drop() {
     let (s2, d2) = (started.clone(), dropped.clone());
     let tool = FunctionTool::new(
         FunctionToolConfig::new("block", "blocks until cancelled"),
-        move |_ctx: Context, _a: NoArgs| {
+        move |ctx: Context, _a: NoArgs| {
             let (s, d) = (s2.clone(), d2.clone());
             async move {
                 let _guard = SetOnDrop(d);
                 s.notify_one();
-                std::future::pending::<()>().await;
+                // Dropping the stream cancels the invocation; the tool task is not aborted
+                // (Go `platform.RunTasks` waits for it), so it ends by observing the cancellation.
+                ctx.cancellation_token().cancelled().await;
                 Ok::<String, ToolError>(String::new())
             }
         },
