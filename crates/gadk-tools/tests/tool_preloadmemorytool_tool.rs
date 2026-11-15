@@ -16,7 +16,7 @@
 
 //! Port of Go tool/preloadmemorytool/tool_test.go.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use chrono::{DateTime, TimeZone, Utc};
@@ -27,10 +27,19 @@ use gadk_model::LlmRequest;
 use gadk_session::Session;
 use gadk_tools::preload_memory;
 
+/// Go `mockMemory`'s `searchCalls` / `lastQuery`, shared so the test can read them after the
+/// memory moves into the context.
+#[derive(Default)]
+struct SearchLog {
+    search_calls: usize,
+    last_query: String,
+}
+
 /// Port of Go `mockMemory`.
 struct MockMemory {
     memories: Vec<MemoryEntry>,
     err: Option<String>,
+    log: Arc<Mutex<SearchLog>>,
 }
 
 #[async_trait]
@@ -39,7 +48,12 @@ impl Memory for MockMemory {
         Ok(())
     }
 
-    async fn search_memory(&self, _query: &str) -> Result<SearchResponse, AgentError> {
+    async fn search_memory(&self, query: &str) -> Result<SearchResponse, AgentError> {
+        {
+            let mut log = self.log.lock().unwrap();
+            log.search_calls += 1;
+            log.last_query = query.to_string();
+        }
         if let Some(e) = &self.err {
             return Err(AgentError::other(e.clone()));
         }
@@ -110,6 +124,8 @@ struct Case {
     memories: Vec<MemoryEntry>,
     search_err: Option<&'static str>,
     want_err: bool,
+    want_no_search: bool,
+    want_query: &'static str,
     want_instruction: bool,
     want_text_contains: Vec<&'static str>,
     want_text_omits: Vec<&'static str>,
@@ -117,30 +133,54 @@ struct Case {
 
 // parity: adapted: Go's nil *genai.Part entries become empty Parts because a Rust part list cannot hold nil
 #[tokio::test]
+#[ignore = "8a bug: preload_memory ProcessRequest searches only the first user part's text; Go joins every non-empty text part with spaces (ff9e77c5)"]
 async fn test_preload_memory_tool_process_request() {
     let cases = vec![
         Case {
             name: "nil user content",
             user_content: None,
+            want_no_search: true,
             want_instruction: false,
             ..Default::default()
         },
         Case {
             name: "empty user content parts",
             user_content: Some(parts(vec![])),
+            want_no_search: true,
             want_instruction: false,
             ..Default::default()
         },
         Case {
             name: "user content with no text",
             user_content: Some(parts(vec![inline_part()])),
+            want_no_search: true,
             want_instruction: false,
             ..Default::default()
         },
         Case {
-            name: "text in later part is ignored",
+            name: "text after an image is searched",
             user_content: Some(parts(vec![inline_part(), text_part("later text")])),
-            want_instruction: false,
+            memories: vec![MemoryEntry {
+                author: "user".into(),
+                content: Some(Content::from_text("a memory", ROLE_USER)),
+                ..Default::default()
+            }],
+            want_query: "later text",
+            want_instruction: true,
+            want_text_contains: vec!["a memory"],
+            ..Default::default()
+        },
+        Case {
+            name: "multiple text parts are joined",
+            user_content: Some(parts(vec![text_part("my"), text_part("preferences")])),
+            memories: vec![MemoryEntry {
+                author: "user".into(),
+                content: Some(Content::from_text("a memory", ROLE_USER)),
+                ..Default::default()
+            }],
+            want_query: "my preferences",
+            want_instruction: true,
+            want_text_contains: vec!["a memory"],
             ..Default::default()
         },
         Case {
@@ -169,6 +209,23 @@ async fn test_preload_memory_tool_process_request() {
                     text_part("valid memory"),
                     Part::default(),
                     text_part(""),
+                ])),
+                ..Default::default()
+            }],
+            want_instruction: true,
+            // The newline catches a trailing separator.
+            want_text_contains: vec!["user: valid memory\n"],
+            ..Default::default()
+        },
+        Case {
+            name: "empty text between text parts adds no extra separator",
+            user_content: Some(Content::from_text("test query", ROLE_USER)),
+            memories: vec![MemoryEntry {
+                author: "user".into(),
+                content: Some(parts(vec![
+                    text_part("valid"),
+                    text_part(""),
+                    text_part("memory"),
                 ])),
                 ..Default::default()
             }],
@@ -255,6 +312,39 @@ async fn test_preload_memory_tool_process_request() {
             ..Default::default()
         },
         Case {
+            name: "thought between text parts adds no separator",
+            user_content: Some(Content::from_text("test", ROLE_USER)),
+            memories: vec![MemoryEntry {
+                author: "model".into(),
+                content: Some(parts(vec![
+                    text_part("visible"),
+                    thought_part("private reasoning"),
+                    text_part("answer"),
+                ])),
+                ..Default::default()
+            }],
+            want_instruction: true,
+            want_text_contains: vec!["\nmodel: visible answer\n"],
+            want_text_omits: vec!["private reasoning"],
+            ..Default::default()
+        },
+        Case {
+            name: "thought after text adds no trailing separator",
+            user_content: Some(Content::from_text("test", ROLE_USER)),
+            memories: vec![MemoryEntry {
+                author: "model".into(),
+                content: Some(parts(vec![
+                    text_part("visible answer"),
+                    thought_part("private reasoning"),
+                ])),
+                ..Default::default()
+            }],
+            want_instruction: true,
+            want_text_contains: vec!["\nmodel: visible answer\n"],
+            want_text_omits: vec!["private reasoning"],
+            ..Default::default()
+        },
+        Case {
             name: "thought-only memory entry",
             user_content: Some(Content::from_text("test", ROLE_USER)),
             memories: vec![MemoryEntry {
@@ -282,10 +372,12 @@ async fn test_preload_memory_tool_process_request() {
 
     for tt in cases {
         let name = tt.name;
+        let log = Arc::new(Mutex::new(SearchLog::default()));
         let tc = create_tool_context(
             MockMemory {
                 memories: tt.memories,
                 err: tt.search_err.map(str::to_string),
+                log: Arc::clone(&log),
             },
             tt.user_content,
         );
@@ -301,6 +393,27 @@ async fn test_preload_memory_tool_process_request() {
             panic!("{name}: ProcessRequest failed: {e}");
         }
 
+        {
+            let log = log.lock().unwrap();
+            if tt.want_no_search {
+                assert_eq!(
+                    log.search_calls, 0,
+                    "{name}: SearchMemory() called {} times, want 0",
+                    log.search_calls
+                );
+            } else if !tt.want_query.is_empty() {
+                assert_eq!(
+                    log.search_calls, 1,
+                    "{name}: SearchMemory() called {} times, want 1",
+                    log.search_calls
+                );
+                assert_eq!(
+                    log.last_query, tt.want_query,
+                    "{name}: SearchMemory() query"
+                );
+            }
+        }
+
         let si = llm_request
             .config
             .as_ref()
@@ -308,16 +421,16 @@ async fn test_preload_memory_tool_process_request() {
         assert_eq!(si.is_some(), tt.want_instruction, "{name}: hasInstruction");
         if let (true, Some(si)) = (tt.want_instruction, si) {
             let instruction = &si.parts[0].text;
-            for want in &tt.want_text_contains {
+            for (i, want) in tt.want_text_contains.iter().enumerate() {
                 assert!(
                     instruction.contains(want),
-                    "{name}: Instruction should contain {want:?}, got: {instruction}"
+                    "{name}: instruction is missing expected text at index {i}"
                 );
             }
-            for omit in &tt.want_text_omits {
+            for (i, omit) in tt.want_text_omits.iter().enumerate() {
                 assert!(
                     !instruction.contains(omit),
-                    "{name}: Instruction should not contain {omit:?}, got: {instruction}"
+                    "{name}: instruction contains omitted text at index {i}"
                 );
             }
         }

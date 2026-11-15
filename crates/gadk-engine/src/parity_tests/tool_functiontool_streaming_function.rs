@@ -373,7 +373,11 @@ fn test_streaming_function_tool_propagates_cleanup_panic_after_stop() {
                 .as_streaming()
                 .unwrap()
                 .run_stream(tool_ctx(&actions, None), request());
-            let _ = s.next().await;
+            let first = s.next().await;
+            assert!(
+                matches!(first, Some(Ok(_))),
+                "RunStream() error = {first:?}"
+            );
             drop(s);
         })
     }));

@@ -1748,6 +1748,7 @@ dependencies = [
  "rmcp",
  "serde_json",
  "sha2 0.11.1",
+ "tempfile",
  "thiserror",
  "tokio",
  "tokio-util",

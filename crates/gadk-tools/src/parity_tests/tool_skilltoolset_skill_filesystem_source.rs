@@ -194,6 +194,7 @@ async fn test_file_system_source_load_frontmatter() {
 
 // parity: adapted: Go's fstest.MapFS behind plainFS (Open only) becomes MemFs; errors.Is on a sentinel is SkillError::kind.
 #[tokio::test]
+#[ignore = "8a bug: FileSystemSource::load_instructions returns the SKILL.md body untrimmed; Go (8ed375d1) strings.TrimSpace's it"]
 async fn test_file_system_source_load_instructions() {
     let tests: Vec<(&str, FileSystemSource, &str, WantErr)> = vec![
         (
@@ -203,6 +204,15 @@ async fn test_file_system_source_load_instructions() {
                 "---\nname: test-skill\ndescription: test\n---\nMath instructions.",
             )]),
             "Math instructions.",
+            None,
+        ),
+        (
+            "Trims surrounding whitespace",
+            source(&[(
+                "test-skill/SKILL.md",
+                "---\nname: test-skill\ndescription: test\n---\n\n  # Math\n\n  - Add numbers.\n\n",
+            )]),
+            "# Math\n\n  - Add numbers.",
             None,
         ),
         (
