@@ -27,6 +27,9 @@ use opentelemetry::{Context, InstrumentationScope};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::logs::{LogProcessor, SdkLogRecord, SdkLoggerProvider};
+use opentelemetry_sdk::metrics::data::ResourceMetrics;
+use opentelemetry_sdk::metrics::reader::MetricReader;
+use opentelemetry_sdk::metrics::{InstrumentKind, Pipeline, SdkMeterProvider, Temporality};
 use opentelemetry_sdk::trace::{SdkTracerProvider, Span, SpanData, SpanProcessor};
 use parking_lot::RwLock;
 
@@ -65,8 +68,10 @@ enum Opt {
     GoogleCredentials(GoogleCredentials),
     SpanProcessors(Vec<SharedSpanProcessor>),
     LogRecordProcessors(Vec<SharedLogProcessor>),
+    MetricReader(SharedMetricReader),
     TracerProvider(SdkTracerProvider),
     LoggerProvider(SdkLoggerProvider),
+    MeterProvider(SdkMeterProvider),
 }
 
 /// Go `WithOtelToCloud`: enables or disables exporting telemetry to GCP.
@@ -118,6 +123,12 @@ pub fn with_log_record_processors(
     ))
 }
 
+/// Go `WithMetricReaders`: registers an additional metric reader (accumulates). Go's variadic
+/// option is one option per reader here.
+pub fn with_metric_reader<R: MetricReader + 'static>(reader: R) -> TelemetryOption {
+    TelemetryOption(Opt::MetricReader(SharedMetricReader::new(reader)))
+}
+
 /// Go `WithTracerProvider`: a preconfigured tracer provider, returned as is by [`crate::new`].
 pub fn with_tracer_provider(provider: SdkTracerProvider) -> TelemetryOption {
     TelemetryOption(Opt::TracerProvider(provider))
@@ -126,6 +137,11 @@ pub fn with_tracer_provider(provider: SdkTracerProvider) -> TelemetryOption {
 /// Go `WithLoggerProvider`: a preconfigured logger provider, returned as is by [`crate::new`].
 pub fn with_logger_provider(provider: SdkLoggerProvider) -> TelemetryOption {
     TelemetryOption(Opt::LoggerProvider(provider))
+}
+
+/// Go `WithMeterProvider`: a preconfigured meter provider, returned as is by [`crate::new`].
+pub fn with_meter_provider(provider: SdkMeterProvider) -> TelemetryOption {
+    TelemetryOption(Opt::MeterProvider(provider))
 }
 
 /// Go's unexported `config`.
@@ -138,8 +154,10 @@ pub(crate) struct Config {
     pub(crate) resource: Option<Resource>,
     pub(crate) span_processors: Vec<SharedSpanProcessor>,
     pub(crate) log_processors: Vec<SharedLogProcessor>,
+    pub(crate) metric_readers: Vec<SharedMetricReader>,
     pub(crate) tracer_provider: Option<SdkTracerProvider>,
     pub(crate) logger_provider: Option<SdkLoggerProvider>,
+    pub(crate) meter_provider: Option<SdkMeterProvider>,
 }
 
 /// Go `configFromOpts`. No gadk option can fail, so Go's `failed to apply option: %w` never
@@ -155,8 +173,10 @@ pub(crate) fn config_from_opts(opts: &[TelemetryOption]) -> Config {
             Opt::GoogleCredentials(v) => cfg.google_credentials = Some(v.clone()),
             Opt::SpanProcessors(v) => cfg.span_processors.extend(v.iter().cloned()),
             Opt::LogRecordProcessors(v) => cfg.log_processors.extend(v.iter().cloned()),
+            Opt::MetricReader(v) => cfg.metric_readers.push(v.clone()),
             Opt::TracerProvider(v) => cfg.tracer_provider = Some(v.clone()),
             Opt::LoggerProvider(v) => cfg.logger_provider = Some(v.clone()),
+            Opt::MeterProvider(v) => cfg.meter_provider = Some(v.clone()),
         }
     }
     cfg
@@ -247,11 +267,55 @@ impl LogProcessor for SharedLogProcessor {
     }
 }
 
+/// A metric reader shared by every clone of the option that registered it (Go shares the reader
+/// pointer). Every [`MetricReader`] method takes `&self`, so it delegates through the `Arc`.
+#[derive(Clone, Debug)]
+pub(crate) struct SharedMetricReader(Arc<dyn MetricReader>);
+
+impl SharedMetricReader {
+    pub(crate) fn new(reader: impl MetricReader + 'static) -> Self {
+        Self(Arc::new(reader))
+    }
+
+    /// Whether `self` and `other` are the same registered reader.
+    #[cfg(test)]
+    pub(crate) fn ptr_eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl MetricReader for SharedMetricReader {
+    fn register_pipeline(&self, pipeline: std::sync::Weak<Pipeline>) {
+        self.0.register_pipeline(pipeline);
+    }
+
+    fn collect(&self, rm: &mut ResourceMetrics) -> OTelSdkResult {
+        self.0.collect(rm)
+    }
+
+    fn force_flush(&self) -> OTelSdkResult {
+        self.0.force_flush()
+    }
+
+    fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
+        self.0.shutdown_with_timeout(timeout)
+    }
+
+    fn shutdown(&self) -> OTelSdkResult {
+        self.0.shutdown()
+    }
+
+    fn temporality(&self, kind: InstrumentKind) -> Temporality {
+        self.0.temporality(kind)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use opentelemetry::KeyValue;
     use opentelemetry::trace::{Tracer as _, TracerProvider as _};
     use opentelemetry_sdk::logs::{InMemoryLogExporter, SimpleLogProcessor};
+    use opentelemetry_sdk::metrics::ManualReader;
     use opentelemetry_sdk::trace::{InMemorySpanExporter, SimpleSpanProcessor};
     use pretty_assertions::assert_eq;
 
@@ -288,8 +352,10 @@ mod tests {
         assert!(cfg.resource.is_none());
         assert!(cfg.span_processors.is_empty());
         assert!(cfg.log_processors.is_empty());
+        assert!(cfg.metric_readers.is_empty());
         assert!(cfg.tracer_provider.is_none());
         assert!(cfg.logger_provider.is_none());
+        assert!(cfg.meter_provider.is_none());
     }
 
     #[test]
@@ -349,18 +415,38 @@ mod tests {
             with_otel_to_cloud(true),
             with_span_processors([span_processor()]),
             with_log_record_processors([log_processor(), log_processor()]),
+            with_metric_reader(ManualReader::builder().build()),
+            with_metric_reader(ManualReader::builder().build()),
         ]);
         assert_eq!(cfg.span_processors.len(), 3);
         assert_eq!(cfg.log_processors.len(), 3);
+        assert_eq!(cfg.metric_readers.len(), 2);
+    }
+
+    #[test]
+    fn later_meter_provider_overrides_an_earlier_one() {
+        let first = SdkMeterProvider::builder().build();
+        let second = SdkMeterProvider::builder().build();
+        let cfg = config_from_opts(&[
+            with_meter_provider(first.clone()),
+            with_meter_provider(second.clone()),
+        ]);
+        let got = cfg.meter_provider.unwrap();
+        // Shutting the chosen provider down shuts `second` down (they share their state).
+        got.shutdown().unwrap();
+        assert!(second.shutdown().is_err());
+        assert!(first.shutdown().is_ok());
     }
 
     #[test]
     fn cloned_options_share_their_processors() {
         let spans = with_span_processors([span_processor()]);
         let logs = with_log_record_processors([log_processor()]);
-        let a = config_from_opts(&[spans.clone(), logs.clone()]);
-        let b = config_from_opts(&[spans, logs]);
+        let readers = with_metric_reader(ManualReader::builder().build());
+        let a = config_from_opts(&[spans.clone(), logs.clone(), readers.clone()]);
+        let b = config_from_opts(&[spans, logs, readers]);
         assert!(a.span_processors[0].ptr_eq(&b.span_processors[0]));
         assert!(a.log_processors[0].ptr_eq(&b.log_processors[0]));
+        assert!(a.metric_readers[0].ptr_eq(&b.metric_readers[0]));
     }
 }

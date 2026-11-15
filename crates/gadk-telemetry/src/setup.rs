@@ -17,28 +17,56 @@
 //! resource and the exporters, then the providers. Error texts are Go's.
 
 use std::sync::Arc;
+use std::time::Duration;
 
+use gadk_platform::Platform;
 use gadk_platform::env::EnvProvider;
 use http::{HeaderName, HeaderValue};
 use opentelemetry::KeyValue;
-use opentelemetry_otlp::{LogExporter, SpanExporter, WithExportConfig as _, WithHttpConfig as _};
+use opentelemetry_otlp::{
+    LogExporter, MetricExporter, SpanExporter, WithExportConfig as _, WithHttpConfig as _,
+};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::logs::{BatchLogProcessor, SdkLoggerProvider};
+use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::trace::{BatchSpanProcessor, SdkTracerProvider};
 use tokio::runtime::Handle;
 
 use crate::config::{
-    Config, GoogleCredentials, SharedLogProcessor, SharedSpanProcessor, TelemetryOption,
-    config_from_opts,
+    Config, GoogleCredentials, SharedLogProcessor, SharedMetricReader, SharedSpanProcessor,
+    TelemetryOption, config_from_opts,
 };
 use crate::credentials::{CLOUD_PLATFORM_SCOPE, find_default_credentials};
 use crate::error::Error;
 use crate::gcp_detector::ResourceDetector;
 use crate::http_client::RuntimeHttpClient;
+use crate::metric_reader::new_periodic_reader;
 use crate::resource::{go_default_resource, go_merge, new_with_attributes};
 
-/// Go `newGcpSpanExporter`'s endpoint.
+/// Go `gcpTracesEndpoint`.
 pub(crate) const GCP_TRACES_ENDPOINT: &str = "https://telemetry.googleapis.com/v1/traces";
+
+/// Go `gcpMetricsEndpoint`.
+pub(crate) const GCP_METRICS_ENDPOINT: &str = "https://telemetry.googleapis.com/v1/metrics";
+
+/// Go `gcpMetricExportInterval`.
+const GCP_METRIC_EXPORT_INTERVAL: Duration = Duration::from_secs(5);
+
+/// The endpoints the GCP exporters send to: [`GcpEndpoints::TELEMETRY_API`] in production; tests
+/// point them at a local OTLP sink.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct GcpEndpoints<'a> {
+    pub(crate) traces: &'a str,
+    pub(crate) metrics: &'a str,
+}
+
+impl GcpEndpoints<'static> {
+    /// Go's `gcpTracesEndpoint` and `gcpMetricsEndpoint`.
+    pub(crate) const TELEMETRY_API: Self = Self {
+        traces: GCP_TRACES_ENDPOINT,
+        metrics: GCP_METRICS_ENDPOINT,
+    };
+}
 
 /// Why an exporter could not be created outside a Tokio runtime.
 // Divergence (ledger 7a): Go has no runtime to require; gadk's exporters send on the Tokio
@@ -46,12 +74,22 @@ pub(crate) const GCP_TRACES_ENDPOINT: &str = "https://telemetry.googleapis.com/v
 const NO_RUNTIME: &str = "no Tokio runtime: telemetry exporters must be created from within one";
 
 /// Go `configure`: ADC when cloud export is on and no credentials were given, the quota and
-/// resource projects, the resource, then the exporters' processors appended to the configured
-/// ones. `env` is the injected environment and `detector` the GCP resource detector.
+/// resource projects, the resource, then the exporters' processors and readers appended to the
+/// configured ones. `env` is the injected environment and `detector` the GCP resource detector.
 pub(crate) async fn configure(
     env: &Arc<dyn EnvProvider>,
     detector: &dyn ResourceDetector,
     opts: &[TelemetryOption],
+) -> Result<Config, Error> {
+    configure_to(env, detector, opts, GcpEndpoints::TELEMETRY_API).await
+}
+
+/// [`configure`] with the GCP exporters sending to `gcp`.
+pub(crate) async fn configure_to(
+    env: &Arc<dyn EnvProvider>,
+    detector: &dyn ResourceDetector,
+    opts: &[TelemetryOption],
+    gcp: GcpEndpoints<'_>,
 ) -> Result<Config, Error> {
     let mut cfg = config_from_opts(opts);
 
@@ -74,10 +112,18 @@ pub(crate) async fn configure(
         .map_err(|e| Error::new(format!("failed to resolve resource: {e}")))?;
     cfg.resource = Some(resource);
 
-    let (span_processors, log_processors) = configure_exporters(&cfg, env.as_ref())
+    let exp = configure_exporters(&cfg, env.as_ref(), gcp)
         .map_err(|e| Error::new(format!("failed to configure exporters: {e}")))?;
-    cfg.span_processors.extend(span_processors);
-    cfg.log_processors.extend(log_processors);
+    cfg.span_processors.extend(exp.span_processors);
+    cfg.log_processors.extend(exp.log_processors);
+    // A periodic reader runs from construction, so readers are built only
+    // once nothing else can fail; one built earlier would outlive the error.
+    for m in exp.metric_exporters {
+        cfg.metric_readers
+            .push(SharedMetricReader::new(new_periodic_reader(
+                m.exporter, m.interval,
+            )));
+    }
     Ok(cfg)
 }
 
@@ -135,14 +181,26 @@ pub(crate) fn resolve_project(
     Ok(project.to_owned())
 }
 
-/// Go `resolveResource`: Go's default resource ← `gcp.project_id` (only for a known project,
-/// Go #2082) and, with cloud export on, the GCP detector's resource ← the configured resource.
+/// Go `resolveResource`, later layers overriding earlier ones:
+///  1. With export to Google Cloud, a `service.instance.id` unique to this process.
+///  2. Go's default resource (`OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES`).
+///  3. `gcp.project_id`, only for a known project (Go #2082).
+///  4. With export to Google Cloud, the GCP detector's resource.
+///  5. The configured resource.
 pub(crate) async fn resolve_resource(
     cfg: &Config,
     env: &dyn EnvProvider,
     detector: &dyn ResourceDetector,
 ) -> Result<Resource, String> {
-    let r = go_default_resource(env);
+    let mut r = go_default_resource(env);
+    if cfg.otel_to_cloud {
+        let instance = new_with_attributes(
+            "",
+            [KeyValue::new("service.instance.id", service_instance_id())],
+        );
+        r = go_merge(&instance, &r)
+            .map_err(|e| format!("failed to merge default resource: {e}"))?;
+    }
 
     // Go `resource.New(ctx, WithAttributes(gcp.project_id), WithDetectors(gcp.NewDetector()))`.
     // Only a known project is recorded, as in adk-python: an empty one would still be merged
@@ -176,6 +234,13 @@ pub(crate) async fn resolve_resource(
     }
 }
 
+/// Go `serviceInstanceID`: an id unique to this process, in adk-python's `<uuid hex>-<pid>` form
+/// (a random UUID from gadk-platform's provider, hyphens removed).
+fn service_instance_id() -> String {
+    let uuid = Platform::default().new_uuid().replace('-', "");
+    format!("{uuid}-{}", std::process::id())
+}
+
 /// The trimmed value of `key` in `env` (empty when unset).
 fn trimmed_var(env: &dyn EnvProvider, key: &str) -> String {
     env.var(key).unwrap_or_default().trim().to_owned()
@@ -187,65 +252,152 @@ fn runtime_handle() -> Result<Handle, String> {
     Handle::try_current().map_err(|_| NO_RUNTIME.to_owned())
 }
 
-/// Go `configureExporters`: batch processors for the OTLP/HTTP exporters the environment asks
-/// for and, with cloud export on, the GCP span exporter. Exporters send through a
-/// [`crate::RuntimeHttpClient`] on the current Tokio runtime.
+/// The processors and metric exporters [`configure_exporters`] builds (Go `exporters`).
+#[derive(Debug, Default)]
+pub(crate) struct Exporters {
+    pub(crate) span_processors: Vec<SharedSpanProcessor>,
+    pub(crate) log_processors: Vec<SharedLogProcessor>,
+    pub(crate) metric_exporters: Vec<PeriodicMetricExporter>,
+}
+
+impl Exporters {
+    /// Go `exporters.add`.
+    fn add(&mut self, other: Exporters) {
+        self.span_processors.extend(other.span_processors);
+        self.log_processors.extend(other.log_processors);
+        self.metric_exporters.extend(other.metric_exporters);
+    }
+}
+
+/// Go `metricExporter`: a metric exporter and the interval of the periodic reader that will
+/// drive it (`None`: the SDK's).
+#[derive(Debug)]
+pub(crate) struct PeriodicMetricExporter {
+    pub(crate) exporter: MetricExporter,
+    pub(crate) interval: Option<Duration>,
+}
+
+/// Go `ownProviders`: which providers [`crate::new`] builds itself, as opposed to taking from
+/// `with_tracer_provider`, `with_logger_provider` or `with_meter_provider`.
+#[derive(Debug, Clone, Copy)]
+struct OwnProviders {
+    tracer: bool,
+    logger: bool,
+    meter: bool,
+}
+
+/// Go `configureExporters`: the OTLP/HTTP exporters the environment asks for and, with cloud
+/// export on, the GCP exporters, each only for a provider [`crate::new`] builds itself.
+/// Exporters send through a [`crate::RuntimeHttpClient`] on the current Tokio runtime.
 // Divergence (ledger 7a): only the endpoints come from the injected environment; the other
 // `OTEL_EXPORTER_OTLP_*` variables (headers, timeout, compression, protocol) are read by
 // opentelemetry-otlp from the process environment.
 pub(crate) fn configure_exporters(
     cfg: &Config,
     env: &dyn EnvProvider,
-) -> Result<(Vec<SharedSpanProcessor>, Vec<SharedLogProcessor>), String> {
-    let mut span_processors = Vec::new();
-    let mut log_processors = Vec::new();
+    gcp: GcpEndpoints<'_>,
+) -> Result<Exporters, String> {
+    let own = OwnProviders {
+        tracer: cfg.tracer_provider.is_none(),
+        logger: cfg.logger_provider.is_none(),
+        meter: cfg.meter_provider.is_none(),
+    };
+    let mut exp = otlp_exporters(env, own)?;
+    if cfg.otel_to_cloud {
+        exp.add(gcp_exporters(cfg, own, gcp)?);
+    }
+    Ok(exp)
+}
 
-    let otel_endpoint_env = trimmed_var(env, "OTEL_EXPORTER_OTLP_ENDPOINT");
-    // Tracing section.
-    let otel_traces_endpoint_env = trimmed_var(env, "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT");
-    if !otel_endpoint_env.is_empty() || !otel_traces_endpoint_env.is_empty() {
-        let endpoint = signal_endpoint(&otel_endpoint_env, &otel_traces_endpoint_env, "/v1/traces");
+/// Go `otlpExporters`.
+fn otlp_exporters(env: &dyn EnvProvider, own: OwnProviders) -> Result<Exporters, String> {
+    let endpoint = trimmed_var(env, "OTEL_EXPORTER_OTLP_ENDPOINT");
+    let signal_var =
+        |signal: &str| trimmed_var(env, &format!("OTEL_EXPORTER_OTLP_{signal}_ENDPOINT"));
+    let endpoint_set = |signal_endpoint: &str| !endpoint.is_empty() || !signal_endpoint.is_empty();
+
+    let mut exp = Exporters::default();
+    let traces_endpoint = signal_var("TRACES");
+    if own.tracer && endpoint_set(&traces_endpoint) {
+        let url = signal_endpoint(&endpoint, &traces_endpoint, "/v1/traces");
         let exporter = runtime_handle()
             .and_then(|handle| {
                 SpanExporter::builder()
                     .with_http()
                     .with_http_client(RuntimeHttpClient::new(handle))
-                    .with_endpoint(endpoint)
+                    .with_endpoint(url)
                     .build()
                     .map_err(|e| e.to_string())
             })
             .map_err(|e| format!("failed to create OTLP HTTP exporter: {e}"))?;
-        span_processors.push(SharedSpanProcessor::new(Box::new(
+        exp.span_processors.push(SharedSpanProcessor::new(Box::new(
             BatchSpanProcessor::builder(exporter).build(),
         )));
     }
-    if cfg.otel_to_cloud {
-        let exporter = new_gcp_span_exporter(cfg, GCP_TRACES_ENDPOINT)
-            .map_err(|e| format!("failed to create GCP span exporter: {e}"))?;
-        span_processors.push(SharedSpanProcessor::new(Box::new(
-            BatchSpanProcessor::builder(exporter).build(),
-        )));
+    let metrics_endpoint = signal_var("METRICS");
+    if own.meter && endpoint_set(&metrics_endpoint) {
+        let url = signal_endpoint(&endpoint, &metrics_endpoint, "/v1/metrics");
+        let exporter = runtime_handle()
+            .and_then(|handle| {
+                MetricExporter::builder()
+                    .with_http()
+                    .with_http_client(RuntimeHttpClient::new(handle))
+                    .with_endpoint(url)
+                    .build()
+                    .map_err(|e| e.to_string())
+            })
+            .map_err(|e| format!("failed to create OTLP HTTP metric exporter: {e}"))?;
+        exp.metric_exporters.push(PeriodicMetricExporter {
+            exporter,
+            interval: None,
+        });
     }
-    // Logs section.
-    let otel_logs_endpoint_env = trimmed_var(env, "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT");
-    if !otel_endpoint_env.is_empty() || !otel_logs_endpoint_env.is_empty() {
-        let endpoint = signal_endpoint(&otel_endpoint_env, &otel_logs_endpoint_env, "/v1/logs");
+    let logs_endpoint = signal_var("LOGS");
+    if own.logger && endpoint_set(&logs_endpoint) {
+        let url = signal_endpoint(&endpoint, &logs_endpoint, "/v1/logs");
         let exporter = runtime_handle()
             .and_then(|handle| {
                 LogExporter::builder()
                     .with_http()
                     .with_http_client(RuntimeHttpClient::new(handle))
-                    .with_endpoint(endpoint)
+                    .with_endpoint(url)
                     .build()
                     .map_err(|e| e.to_string())
             })
             .map_err(|e| format!("failed to create OTLP HTTP log exporter: {e}"))?;
-        log_processors.push(SharedLogProcessor::new(Box::new(
+        exp.log_processors.push(SharedLogProcessor::new(Box::new(
             BatchLogProcessor::builder(exporter).build(),
         )));
     }
-    // Golang OTel exporter to CloudLogging is not yet available.
-    Ok((span_processors, log_processors))
+    Ok(exp)
+}
+
+/// Go `gcpExporters`: the GCP span exporter and, on a 5 s reader, the GCP metric exporter, both
+/// with the credentials and the quota project header. Golang OTel exporter to CloudLogging is
+/// not yet available.
+fn gcp_exporters(
+    cfg: &Config,
+    own: OwnProviders,
+    gcp: GcpEndpoints<'_>,
+) -> Result<Exporters, String> {
+    let mut exp = Exporters::default();
+    if own.tracer {
+        let exporter = new_gcp_span_exporter(cfg, gcp.traces)
+            .map_err(|e| format!("failed to create GCP span exporter: {e}"))?;
+        exp.span_processors.push(SharedSpanProcessor::new(Box::new(
+            BatchSpanProcessor::builder(exporter).build(),
+        )));
+    }
+    if own.meter {
+        let exporter = new_gcp_metric_exporter(cfg, gcp.metrics)
+            .map_err(|e| format!("failed to create GCP metric exporter: {e}"))?;
+        exp.metric_exporters.push(PeriodicMetricExporter {
+            exporter,
+            interval: Some(GCP_METRIC_EXPORT_INTERVAL),
+        });
+    }
+    // TODO log exporter
+    Ok(exp)
 }
 
 /// The OTLP/HTTP endpoint of one signal, as Go's `otlptracehttp` / `otlploghttp` read it: the
@@ -285,12 +437,9 @@ fn go_path_join(base: &str, elem: &str) -> String {
     format!("/{}", out.join("/"))
 }
 
-/// Go `newGcpSpanExporter`: OTLP/HTTP protobuf to `endpoint` ([`GCP_TRACES_ENDPOINT`] in
-/// production) with the credentials' headers and `x-goog-user-project: <quota project>`.
-pub(crate) fn new_gcp_span_exporter(
-    cfg: &Config,
-    endpoint: &str,
-) -> Result<opentelemetry_otlp::SpanExporter, String> {
+/// The GCP exporters' client (Go `oauth2.NewClient` with `WithHeaders`): the credentials'
+/// headers and `x-goog-user-project: <quota project>` on every request.
+fn gcp_client(cfg: &Config) -> Result<RuntimeHttpClient, String> {
     let mut client = RuntimeHttpClient::new(runtime_handle()?);
     // Go `oauth2.NewClient(ctx, nil)` is a plain client: no token source, no credentials.
     if let Some(credentials) = cfg
@@ -309,13 +458,35 @@ pub(crate) fn new_gcp_span_exporter(
     // (`failed to parse header value`); Go accepts any string and `net/http` rejects the
     // request at export time.
     let quota_project = HeaderValue::from_str(&cfg.gcp_quota_project).map_err(|e| e.to_string())?;
-    client = client.with_header(
+    Ok(client.with_header(
         HeaderName::from_static("x-goog-user-project"),
         quota_project,
-    );
+    ))
+}
+
+/// Go `gcpExporters`' span exporter: OTLP/HTTP protobuf to `endpoint`
+/// ([`GCP_TRACES_ENDPOINT`] in production) through [`gcp_client`].
+pub(crate) fn new_gcp_span_exporter(
+    cfg: &Config,
+    endpoint: &str,
+) -> Result<opentelemetry_otlp::SpanExporter, String> {
     SpanExporter::builder()
         .with_http()
-        .with_http_client(client)
+        .with_http_client(gcp_client(cfg)?)
+        .with_endpoint(endpoint)
+        .build()
+        .map_err(|e| e.to_string())
+}
+
+/// Go `gcpExporters`' metric exporter: OTLP/HTTP protobuf to `endpoint`
+/// ([`GCP_METRICS_ENDPOINT`] in production) through [`gcp_client`].
+pub(crate) fn new_gcp_metric_exporter(
+    cfg: &Config,
+    endpoint: &str,
+) -> Result<MetricExporter, String> {
+    MetricExporter::builder()
+        .with_http()
+        .with_http_client(gcp_client(cfg)?)
         .with_endpoint(endpoint)
         .build()
         .map_err(|e| e.to_string())
@@ -354,6 +525,25 @@ pub(crate) fn init_logger_provider(cfg: &Config) -> Option<SdkLoggerProvider> {
     }
     for processor in &cfg.log_processors {
         builder = builder.with_log_processor(processor.clone());
+    }
+    Some(builder.build())
+}
+
+/// Go `initMeterProvider`: the configured provider, else `None` without readers, else a
+/// provider with the resource and the readers.
+pub(crate) fn init_meter_provider(cfg: &Config) -> Option<SdkMeterProvider> {
+    if let Some(provider) = &cfg.meter_provider {
+        return Some(provider.clone());
+    }
+    if cfg.metric_readers.is_empty() {
+        return None;
+    }
+    let mut builder = SdkMeterProvider::builder();
+    if let Some(resource) = &cfg.resource {
+        builder = builder.with_resource(resource.clone());
+    }
+    for reader in &cfg.metric_readers {
+        builder = builder.with_reader(reader.clone());
     }
     Some(builder.build())
 }
@@ -433,6 +623,31 @@ mod tests {
         assert_eq!(attr(&r, "cloud.provider").as_deref(), Some("gcp"));
         assert_eq!(attr(&r, "service.name").as_deref(), Some("detected"));
         assert_eq!(r.schema_url(), Some(SCHEMA_URL));
+    }
+
+    // The service.instance.id layer is the lowest: OTEL_RESOURCE_ATTRIBUTES overrides it, and
+    // each call generates a new one.
+    #[tokio::test]
+    async fn the_service_instance_id_is_beneath_the_environment() {
+        let key = "service.instance.id";
+        let cfg = config_from_opts(&[with_otel_to_cloud(true)]);
+        let r = resolve_resource(
+            &cfg,
+            env(&[("OTEL_RESOURCE_ATTRIBUTES", "service.instance.id=from-env")]).as_ref(),
+            &NoDetector,
+        )
+        .await
+        .unwrap();
+        assert_eq!(attr(&r, key).as_deref(), Some("from-env"));
+        assert_eq!(r.schema_url(), Some(SCHEMA_URL));
+
+        let first = resolve_resource(&cfg, env(&[]).as_ref(), &NoDetector)
+            .await
+            .unwrap();
+        let second = resolve_resource(&cfg, env(&[]).as_ref(), &NoDetector)
+            .await
+            .unwrap();
+        assert_ne!(attr(&first, key), attr(&second, key));
     }
 
     #[tokio::test]
@@ -661,6 +876,7 @@ mod tests {
         let providers = Providers {
             tracer_provider: init_tracer_provider(&cfg),
             logger_provider: init_logger_provider(&cfg),
+            meter_provider: init_meter_provider(&cfg),
         };
         let tracer = providers.tracer_provider.as_ref().unwrap().tracer("t");
         tracer.in_span("exported-span", |_| {});
@@ -725,6 +941,7 @@ mod tests {
         let err = configure_exporters(
             &cfg,
             env(&[("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "::")]).as_ref(),
+            GcpEndpoints::TELEMETRY_API,
         )
         .unwrap_err();
         assert!(
@@ -734,10 +951,21 @@ mod tests {
         let err = configure_exporters(
             &cfg,
             env(&[("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "::")]).as_ref(),
+            GcpEndpoints::TELEMETRY_API,
         )
         .unwrap_err();
         assert!(
             err.starts_with("failed to create OTLP HTTP log exporter: "),
+            "{err}"
+        );
+        let err = configure_exporters(
+            &cfg,
+            env(&[("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "::")]).as_ref(),
+            GcpEndpoints::TELEMETRY_API,
+        )
+        .unwrap_err();
+        assert!(
+            err.starts_with("failed to create OTLP HTTP metric exporter: "),
             "{err}"
         );
     }
@@ -757,6 +985,7 @@ mod tests {
                     .build(),
             ),
             logger_provider: None,
+            meter_provider: None,
         };
         providers
             .tracer_provider

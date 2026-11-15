@@ -115,11 +115,11 @@ tower-http = { version = "0.7.1", default-features = false, features = ["catch-p
 a2a-lf = { version = "=0.4.2", default-features = false }
 a2a-client-lf = { version = "=0.2.9", default-features = false, features = ["rustls-tls"] }
 a2a-server-lf = { version = "=0.5.3", default-features = false, features = ["rustls-tls"] }
-opentelemetry = { version = "0.33.1", default-features = false, features = ["trace", "logs"] }
-opentelemetry_sdk = { version = "0.33.1", default-features = false, features = ["trace", "logs"] }
-opentelemetry-otlp = { version = "0.33.1", default-features = false, features = ["http-proto", "trace", "logs"] }
+opentelemetry = { version = "0.33.1", default-features = false, features = ["trace", "logs", "metrics"] }
+opentelemetry_sdk = { version = "0.33.1", default-features = false, features = ["trace", "logs", "metrics", "experimental_metrics_custom_reader"] }
+opentelemetry-otlp = { version = "0.33.1", default-features = false, features = ["http-proto", "trace", "logs", "metrics"] }
 opentelemetry-http = { version = "0.33.1", default-features = false }
-opentelemetry-proto = { version = "0.33.1", default-features = false, features = ["gen-tonic-messages", "trace", "logs"] }
+opentelemetry-proto = { version = "0.33.1", default-features = false, features = ["gen-tonic-messages", "trace", "logs", "metrics"] }
 prost = "0.14.5"
 clap = { version = "4.6.7", default-features = false, features = ["std", "help", "usage", "error-context"] }
 tar = "0.4.46"
