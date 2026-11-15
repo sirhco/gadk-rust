@@ -17,24 +17,27 @@
 //! (`TestCleanGCSPrefix`, `TestGCSObjectPath_SanitizationAndBounds`,
 //! `TestBatchProcessor_ObjectPathCachesEffectivePrefix`).
 //!
-//! gadk has no `cleanGCSPrefix` yet, so [`clean_gcs_prefix`] reads the effective prefix off
-//! [`gcs_object_path`]'s result (the object name minus its fixed tail); the 8a fix task
-//! replaces it, [`super::path_segment_hash_suffix`] and the size constants with the production
-//! items.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
+use gadk_genai::{Content, Part};
 use pretty_assertions::assert_eq;
 
-use super::super::plugin_agentanalytics_batch_processor::support::utc;
+use super::super::plugin_agentanalytics_batch_processor::support::{queued_row, utc};
 use super::{
-    MAX_GCS_PREFIX_BYTES, MAX_GCS_REWRITTEN_PREFIX_BYTES, PATH_SEGMENT_HASH_SUFFIX_LEN, bare,
-    path_segment_hash_suffix,
+    FakeStorage, MAX_GCS_PREFIX_BYTES, MAX_GCS_REWRITTEN_PREFIX_BYTES,
+    PATH_SEGMENT_HASH_SUFFIX_LEN, bare, field, opts, parts, path_segment_hash_suffix, resolve,
 };
-use crate::config::Config;
+use crate::batch_processor::BatchProcessor;
+use crate::bigquery::fake::RecordingLogger;
+use crate::config::{Config, GcsContentOffloader};
+use crate::context::Context;
 use crate::formatter::{PendingUpload, TEXT_UPLOAD_CONTENT_TYPE};
-use crate::offload::uploads::gcs_object_path;
+use crate::offload::uploads::{clean_gcs_prefix, gcs_object_path, is_unsafe_gcs_prefix_rune};
+use crate::row::QueuedRow;
 use crate::row::{Row, RowValue};
 
 /// Cloud Storage's 1,024-byte object name limit (Go's test pins it as `wantObjectLimit`).
@@ -44,20 +47,30 @@ fn ts() -> DateTime<Utc> {
     utc(2026, 3, 4, 5, 6, 7, 0)
 }
 
-/// Go `cleanGCSPrefix(prefix)`, read off the name [`gcs_object_path`] gives a short part.
-pub(super) fn clean_gcs_prefix(prefix: &str) -> String {
-    const TAIL: &str = "2026-03-04/t/s_e_c0_p0";
-    let got = gcs_object_path(prefix, ts(), "t", "s", "e", 0, 0, "");
-    match got.strip_suffix(TAIL) {
-        Some("") => String::new(),
-        Some(lead) => lead.strip_suffix('/').unwrap_or(lead).to_owned(),
-        None => panic!("gcs_object_path({prefix:?}) = {got:?} does not end in {TAIL:?}"),
-    }
+/// Go's `queuedRow(partsOptions{maxLen: 1000, offload: true, inlineLimit: 5}, user text)` with
+/// the row's ids set as the upload subtests set them.
+fn upload_row(text: &str, trace_id: &str, span_id: &str, event_id: &str) -> QueuedRow {
+    let content = Content {
+        role: "user".to_owned(),
+        parts: vec![Part {
+            text: text.to_owned(),
+            ..Part::default()
+        }],
+    };
+    let mut q = queued_row(&opts(5), &[content]);
+    q.row.insert("timestamp".into(), RowValue::from(ts()));
+    q.row.insert("trace_id".into(), RowValue::from(trace_id));
+    q.row.insert("span_id".into(), RowValue::from(span_id));
+    q.row.insert("event_id".into(), RowValue::from(event_id));
+    q
 }
 
-/// Go `isUnsafeGCSPrefixRune(r)`.
-fn is_unsafe_gcs_prefix_rune(r: char) -> bool {
-    r < '\u{20}' || ('\u{7f}'..='\u{9f}').contains(&r) || r == '\u{2028}' || r == '\u{2029}'
+/// The `uri` of a queued row's first content part.
+fn first_uri(q: &QueuedRow) -> String {
+    parts(q)
+        .first()
+        .map(|p| field(p, "uri").to_owned())
+        .unwrap_or_default()
 }
 
 /// Go's `s[:n]` of a string whose first `n` bytes are ASCII.
@@ -65,12 +78,11 @@ fn cut(s: &str, n: usize) -> &str {
     &s[..n]
 }
 
-// parity: adapted: cleanGCSPrefix is read off gcs_object_path's name (gadk has none yet); a Rust &str is valid UTF-8, so the "a byte that is not UTF-8" case and the closing \xff / \xfe check are left out
+// parity: adapted: a Rust &str is valid UTF-8, so the "a byte that is not UTF-8" case and the closing \xff / \xfe check are left out
 #[test]
-#[ignore = "8a bug: GCSPathPrefix values with '~', control or line-separator characters, a leading .well-known/acme-challenge or over 750 bytes are not rewritten to <base>~<sha256> (Go #2018 cleanGCSPrefix)"]
 fn test_clean_gcs_prefix() {
-    fn h(s: impl AsRef<[u8]>) -> String {
-        path_segment_hash_suffix(s)
+    fn h(s: impl AsRef<str>) -> String {
+        path_segment_hash_suffix(s.as_ref())
     }
     let a = |n: usize| "a".repeat(n);
     // "aa" and 260 three-byte runes (782 bytes): the cut at 402 bytes falls inside the 134th
@@ -269,12 +281,11 @@ fn test_clean_gcs_prefix() {
     }
 }
 
-// parity: adapted: Go's int ordinals are usize (usize::MAX has the 20 digits of Go's math.MinInt); the "distinct non-ASCII event ids upload both payloads" subtest and the uploads of the "prefix sanitization and reserved paths" subtest (fake Cloud Storage) are left out (the 8a fix task ports them); a Rust &str is valid UTF-8, so the "invalid UTF-8 extension" subtest and the invalid-byte cases are left out
-#[test]
-#[ignore = "8a bug: gcs_object_path neither hash-suffixes altered or long ids, caps the name at 1,024 bytes, hashes unsafe extensions nor rewrites unsafe prefixes (Go #2018)"]
-fn test_gcs_object_path_sanitization_and_bounds() {
-    fn h(s: impl AsRef<[u8]>) -> String {
-        path_segment_hash_suffix(s)
+// parity: adapted: Go's int ordinals are usize (usize::MAX has the 20 digits of Go's math.MinInt); a Rust &str is valid UTF-8, so the "invalid UTF-8 extension" subtest and the invalid-byte cases are left out
+#[tokio::test]
+async fn test_gcs_object_path_sanitization_and_bounds() {
+    fn h(s: impl AsRef<str>) -> String {
+        path_segment_hash_suffix(s.as_ref())
     }
     let ts = ts();
     let path = |prefix: &str, trace: &str, span: &str, event: &str, ext: &str| {
@@ -314,6 +325,56 @@ fn test_gcs_object_path_sanitization_and_bounds() {
             p0, p1,
             "eventID {e0:?} and {e1:?} collided on a GCS object path"
         );
+    }
+
+    // distinct non-ASCII event ids upload both payloads
+    let upload_pairs: [(&str, &str); 7] = [
+        ("session-日本", "session-韓国"),
+        ("é", "__4a99557e"),
+        ("é", &e_hash),
+        ("a/b", "a_b_c14cddc0"),
+        ("a/b", &ab_hash),
+        (&long_a, &long_b),
+        (
+            "\u{ac01}\u{ac01}\u{ac02}\u{ac05}\u{ac09}",
+            "\u{ac01}\u{ac05}\u{ac0f}\u{ac08}\u{ac07}",
+        ),
+    ];
+    for (e0, e1) in upload_pairs {
+        let fs = FakeStorage::new();
+        let offloader = Arc::new(fs.offloader("test-bucket"));
+        let bp = bare(Config {
+            gcs_offloader: Some(offloader.clone() as Arc<dyn GcsContentOffloader>),
+            gcs_path_prefix: "logs".to_owned(),
+            connection_id: "us.conn".to_owned(),
+            ..Config::zero()
+        });
+        let mut rows = [
+            upload_row("payload-first-123456", "trace-1", "span-1", e0),
+            upload_row("payload-second-654321", "trace-1", "span-1", e1),
+        ];
+        resolve(&bp, &Context::background(), false, &mut rows).await;
+        let (uri0, uri1) = (first_uri(&rows[0]), first_uri(&rows[1]));
+        assert!(
+            !uri0.is_empty() && !uri1.is_empty() && uri0 != uri1,
+            "pair {e0:?} vs {e1:?} got URIs {uri0:?} and {uri1:?}, want two distinct non-empty gs:// URIs"
+        );
+        let stored = |uri: &str| {
+            fs.object(
+                "test-bucket",
+                uri.strip_prefix("gs://test-bucket/").unwrap_or(uri),
+            )
+            .map(|o| o.data)
+        };
+        assert_eq!(
+            (stored(&uri0), stored(&uri1)),
+            (
+                Some(Bytes::from_static(b"payload-first-123456")),
+                Some(Bytes::from_static(b"payload-second-654321"))
+            ),
+            "pair {e0:?} vs {e1:?}: want both payloads stored distinctly"
+        );
+        offloader.close().await.unwrap();
     }
 
     // long ids and prefixes stay within 1024 bytes without colliding
@@ -720,18 +781,63 @@ fn test_gcs_object_path_sanitization_and_bounds() {
         clean_gcs_prefix(&over_limit_raw),
     ];
     let mut seen: BTreeMap<String, String> = BTreeMap::new();
-    for p in distinct_prefixes {
+    let mut stored_checks: Vec<(String, String, String)> = Vec::new();
+    let fs = FakeStorage::new();
+    let offloader = Arc::new(fs.offloader("test-bucket"));
+    for (i, p) in distinct_prefixes.into_iter().enumerate() {
         let got = path(&p, "trace", "span", "event", ".txt");
         if let Some(prev) = seen.insert(got.clone(), p.clone()) {
             panic!("distinct prefixes {prev:?} and {p:?} collided on GCS object path {got:?}");
         }
+
+        let want_payload = format!("prefix-payload-{i}-{p}");
+        let bp = BatchProcessor::new(
+            &Context::background(),
+            None,
+            "test_stream",
+            Config {
+                gcs_offloader: Some(offloader.clone() as Arc<dyn GcsContentOffloader>),
+                gcs_path_prefix: p.clone(),
+                connection_id: "us.conn".to_owned(),
+                logger: Some(Arc::new(RecordingLogger::default())),
+                ..Config::default()
+            },
+        )
+        .await
+        .unwrap_or_else(|e| panic!("NewBatchProcessor(prefix={p:?}) error: {e}"));
+        let mut rows = [upload_row(&want_payload, "trace", "span", "event")];
+        resolve(&bp, &Context::background(), false, &mut rows).await;
+        bp.close().await;
+
+        let uri = first_uri(&rows[0]);
+        let want_uri = format!("gs://test-bucket/{got}");
+        assert!(
+            uri == want_uri,
+            "prefix {p:?} uploaded to {uri:?}, want {want_uri:?}"
+        );
+        let obj_path = uri
+            .strip_prefix("gs://test-bucket/")
+            .unwrap_or(&uri)
+            .to_owned();
+        assert!(
+            fs.object("test-bucket", &obj_path).map(|o| o.data)
+                == Some(Bytes::from(want_payload.clone())),
+            "prefix {p:?}: want {want_payload:?} stored at {uri:?}"
+        );
+        stored_checks.push((p, obj_path, want_payload));
     }
+    for (p, obj_path, want_payload) in stored_checks {
+        assert!(
+            fs.object("test-bucket", &obj_path).map(|o| o.data) == Some(Bytes::from(want_payload)),
+            "after all uploads, prefix {p:?} object {obj_path:?} does not hold its payload"
+        );
+    }
+    offloader.close().await.unwrap();
 }
 
-// parity: adapted: gadk's batch processor config is fixed at construction, so the check that replaces Config.GCSPathPrefix after construction and Go's allocation counts (runtime.MemStats, testing.AllocsPerRun) are left out; the path checks stay
-#[test]
-#[ignore = "8a bug: BatchProcessor::object_path uses the raw GCSPathPrefix (no effective prefix resolved and cached at construction), so a 4 MiB prefix makes a 4 MiB name and a control character reaches it (Go #2018)"]
-fn test_batch_processor_object_path_caches_effective_prefix() {
+// parity: adapted: Go's allocation counts (runtime.MemStats, testing.AllocsPerRun) are left out; the processor is the only holder of its Arc, so Arc::get_mut stands for Go's write to bp.config.GCSPathPrefix
+#[tokio::test]
+async fn test_batch_processor_object_path_caches_effective_prefix() {
     let ts = ts();
     let mut row = Row::new();
     row.insert("timestamp".into(), RowValue::from(ts));
@@ -749,16 +855,49 @@ fn test_batch_processor_object_path_caches_effective_prefix() {
         ("control_char_prefix", "logs\nx".to_owned()),
         ("slash_only_4MiB_prefix", "/".repeat(4 << 20)),
     ] {
-        let bp = bare(Config {
-            gcs_path_prefix: prefix.clone(),
-            ..Config::default().apply_defaults()
-        });
+        let mut bp = BatchProcessor::new(
+            &Context::background(),
+            None,
+            "test_stream",
+            Config {
+                gcs_path_prefix: prefix.clone(),
+                logger: Some(Arc::new(RecordingLogger::default())),
+                ..Config::default()
+            },
+        )
+        .await
+        .unwrap_or_else(|e| panic!("NewBatchProcessor() error: {e}"));
         assert!(
             bp.config.gcs_path_prefix == prefix,
-            "{name}: the raw prefix was not kept"
+            "{name}: len(bp.config.GCSPathPrefix) = {}, want raw {}-byte prefix preserved unmutated",
+            bp.config.gcs_path_prefix.len(),
+            prefix.len()
         );
         let want_clean = clean_gcs_prefix(&prefix);
         let want_path = gcs_object_path(&prefix, ts, "trace-1", "span-1", "event-1", 0, 0, ".txt");
+
+        // object_path must keep using the prefix that new resolved, even an empty one, instead
+        // of cleaning Config.GCSPathPrefix again: replace the raw prefix with a distinct one and
+        // expect the same path.
+        const SENTINEL: &str = "must-not-re-read-after-construction";
+        assert!(
+            gcs_object_path(SENTINEL, ts, "trace-1", "span-1", "event-1", 0, 0, ".txt")
+                != want_path,
+            "{name}: the sentinel prefix gives wantPath, so replacing the raw prefix proves nothing"
+        );
+        Arc::get_mut(&mut bp)
+            .expect("the processor is not shared")
+            .config
+            .gcs_path_prefix = SENTINEL.to_owned();
+        assert!(
+            bp.object_path(&row, &upload) == want_path,
+            "{name}: bp.objectPath() after replacing Config.GCSPathPrefix is not the path of the prefix resolved at construction"
+        );
+        Arc::get_mut(&mut bp)
+            .expect("the processor is not shared")
+            .config
+            .gcs_path_prefix = prefix.clone();
+
         let double_normalized = gcs_object_path(
             &want_clean,
             ts,
@@ -780,5 +919,6 @@ fn test_batch_processor_object_path_caches_effective_prefix() {
                 "{name}: call {i}: bp.objectPath() double-normalized the effective prefix"
             );
         }
+        bp.close().await;
     }
 }

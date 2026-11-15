@@ -35,7 +35,7 @@ use tokio_util::sync::CancellationToken;
 use crate::config::{Config, DEFAULT_MAX_PENDING_UPLOAD_BYTES, DropStats};
 use crate::context::{Context, ContextError};
 use crate::error::Error;
-use crate::offload::uploads::UploadResolveOptions;
+use crate::offload::uploads::{UploadResolveOptions, resolve_gcs_path_prefix};
 use crate::row::QueuedRow;
 use crate::schema::{project_arrow_schema, serialize_arrow_schema};
 use crate::storagepb::FinalizeWriteStreamRequest;
@@ -117,6 +117,10 @@ pub struct BatchProcessor {
     pub(crate) created_committed_stream: bool,
     /// Go `config` (after `applyDefaults`).
     pub(crate) config: Config,
+    /// Go `effectiveGCSPathPrefix` / `gcsPathPrefixResolved`: the prefix `new` resolved
+    /// (`resolve_gcs_path_prefix`); `None` when unresolved (Go's struct literals), so
+    /// `object_path` cleans `config.gcs_path_prefix` per call.
+    pub(crate) effective_gcs_path_prefix: Option<String>,
     /// Go `queue` (`chan map[string]any` of capacity `QueueMaxSize`).
     pub(crate) queue: Mutex<VecDeque<QueuedRow>>,
     /// The queue's capacity (Go `cap(queue)`).
@@ -211,6 +215,8 @@ impl BatchProcessor {
             created_committed_stream = true;
         }
 
+        let effective_gcs_path_prefix = resolve_gcs_path_prefix(&config);
+
         let queue_capacity = usize::try_from(config.queue_max_size).unwrap_or(0);
         let stream_writer = StreamWriter::new(
             ctx,
@@ -225,6 +231,7 @@ impl BatchProcessor {
             stream_name,
             created_committed_stream,
             config,
+            effective_gcs_path_prefix: Some(effective_gcs_path_prefix),
             queue: Mutex::new(VecDeque::with_capacity(queue_capacity.min(1024))),
             queue_capacity,
             counters: Arc::new(DropCounters::default()),
@@ -265,6 +272,7 @@ impl BatchProcessor {
             stream_name: String::new(),
             created_committed_stream: false,
             config,
+            effective_gcs_path_prefix: None,
             queue: Mutex::new(VecDeque::new()),
             queue_capacity,
             counters: Arc::new(DropCounters::default()),

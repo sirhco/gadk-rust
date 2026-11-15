@@ -65,7 +65,6 @@ fn new_workflow_layout() -> (tempfile::TempDir, PathBuf, PathBuf, PathBuf) {
     (guard, base, agent_dir, outside_node)
 }
 
-#[ignore = "8a bug: a workflow node reference outside the workflow directory (`../`, absolute) is loaded: no containment check on workflow edge refs (Go #1299)"]
 #[tokio::test]
 async fn test_workflow_node_reference_rejects_escaping_path() {
     let (_guard, _base, agent_dir, outside_node) = new_workflow_layout();
@@ -125,7 +124,6 @@ fn write_routed_workflow(dir: &Path, name: &str, router: &str, target: &str) -> 
     )
 }
 
-#[ignore = "8a bug: a route-map target outside the workflow directory (`../`, absolute) is loaded: no containment check on workflow edge refs (Go #1299)"]
 #[tokio::test]
 async fn test_workflow_route_map_reference_is_checked() {
     let (_guard, _base, agent_dir, outside_node) = new_workflow_layout();
@@ -174,7 +172,6 @@ async fn test_workflow_route_map_reference_is_checked() {
     }
 }
 
-#[ignore = "8a bug: the workflow node cache is keyed by the reference's lexical absolute path, not the real path of the file, and a name reference consults it (Go #1299)"]
 #[tokio::test]
 async fn test_workflow_node_registry_does_not_leak_across_directories() {
     let (_guard, base, agent_dir, _) = new_workflow_layout();
@@ -207,7 +204,6 @@ async fn test_workflow_node_registry_does_not_leak_across_directories() {
     );
 }
 
-#[ignore = "8a bug: a cached workflow node is handed out for an escaping reference (no containment check ahead of the node cache lookup) (Go #1299)"]
 #[tokio::test]
 async fn test_workflow_node_reference_cache_does_not_bypass_check() {
     let (_guard, base, agent_dir, outside_node) = new_workflow_layout();

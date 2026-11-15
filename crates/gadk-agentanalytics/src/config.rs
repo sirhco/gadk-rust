@@ -148,7 +148,10 @@ pub struct DropStats {
 /// length, never its bytes.
 #[derive(Clone, PartialEq, Eq, Default)]
 pub struct GcsUploadRequest {
-    /// The object name within the bucket; it already includes [`Config::gcs_path_prefix`].
+    /// The object name within the bucket. When [`Config::gcs_path_prefix`] is non-empty after
+    /// trimming leading and trailing `/`, it begins with the effective prefix and `/`: the
+    /// trimmed prefix verbatim, or its rewritten `<base>~<sha256>` form (see
+    /// [`Config::gcs_path_prefix`]).
     pub path: String,
     /// The raw payload.
     pub data: Bytes,
@@ -294,7 +297,15 @@ pub struct Config {
     pub gcs_bucket_name: String,
     /// Go `GCSClientOptions`; empty means [`client_options`](Self::client_options).
     pub gcs_client_options: ClientOptions,
-    /// Go `GCSPathPrefix`.
+    /// Go `GCSPathPrefix`: prepended, followed by `/`, to the names of offloaded objects, with
+    /// leading and trailing `/` trimmed. The trimmed prefix is used verbatim when it is at most
+    /// 750 bytes, holds no `~` (the rewrite hash delimiter), no control character (U+0000 to
+    /// U+001F, U+007F to U+009F) and no U+2028 / U+2029, and its first two `/`-separated
+    /// segments are not, case-insensitively, `.well-known` and `acme-challenge`. Any other
+    /// prefix is rewritten to `<base>~<sha256>` (those characters replaced with `_`, a leading
+    /// `.well-known` segment renamed `_well-known`, cut to at most 402 bytes, then `~` and the
+    /// 64 hex digits of the SHA-256 of the trimmed prefix), and a warning with the reason and
+    /// byte lengths (never the prefix text) is logged when the batch processor is built.
     pub gcs_path_prefix: String,
     /// Go `ConnectionID` (`location.connection_id`).
     pub connection_id: String,

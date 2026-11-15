@@ -54,7 +54,8 @@ use gadk_agent::{
 use gadk_engine::workflow::Node;
 use gadk_genai::Content;
 use gadk_platform::env::{EnvProvider, ProcessEnv};
-use gadk_platform::{go_path_clean, go_path_dir, go_path_join, go_quote};
+pub(crate) use gadk_platform::go_filepath_rel;
+use gadk_platform::{go_path_clean, go_path_dir, go_path_join, go_quote, safe_subpath};
 use gadk_session::Event;
 use parking_lot::{Mutex, RwLock};
 use serde_json::Value;
@@ -65,8 +66,9 @@ pub use error::ConfigError;
 pub use gadk_goyaml::GoValue;
 pub use govalue::GoMap;
 
-/// Go `AgentFactory func(ctx, configBytes []byte, configPath string) (agent.Agent, error)`:
-/// builds an agent from a config file's bytes and absolute path. The [`Registry`] (a cheap
+/// Go `AgentFactory func(ctx, configBytes []byte, agentDir string) (agent.Agent, error)`:
+/// builds an agent from a config file's bytes and the absolute path of its directory (Go
+/// 0990f9e; was the file's path). The [`Registry`] (a cheap
 /// handle) and the [`LoadCtx`] stand for Go's package globals and `ctx`.
 pub type AgentFactory = Arc<
     dyn Fn(
@@ -197,8 +199,9 @@ pub type SubAgentsCollector = Arc<Mutex<Vec<Arc<dyn Agent>>>>;
 /// the caller's `LoadCtx`, as Go's `ctx` is inherited.
 #[derive(Clone, Default)]
 pub struct LoadCtx {
-    /// Go `ctx.Value(parentPathKey)`: set by `resolveTools` to the config path of the agent
-    /// whose tools are resolved; `None` = not set (`parentPath not found in context`).
+    /// Go `ctx.Value(parentPathKey)`: set by `resolveTools` to the config directory of the
+    /// agent whose tools are resolved (Go 0990f9e; was its config file path); `None` = not set
+    /// (`parentPath not found in context`).
     pub parent_path: Option<PathBuf>,
     /// Go `ctx.Value(subAgentsCollectorKey)`: set by the workflow factory around `parseEdges`.
     pub sub_agents: Option<SubAgentsCollector>,
@@ -453,8 +456,9 @@ impl Registry {
                 )));
             };
 
+            let agent_dir = PathBuf::from(go_path_dir(&abs_path.to_string_lossy()));
             // 4. Delegate creation to the specific factory.
-            factory(self.clone(), ctx.clone(), data, abs_path).await
+            factory(self.clone(), ctx.clone(), data, agent_dir).await
         }
         .boxed()
     }
@@ -498,65 +502,31 @@ impl Registry {
         callback.ok_or_else(|| ConfigError::msg(format!("callback '{callback_name}' not found")))
     }
 
-    /// Go `ResolveAgentReference(context.Background(), parentPath, refPath)`: the top-level
-    /// entry point (an empty [`LoadCtx`]).
+    /// Go `ResolveAgentReference(context.Background(), configDir, refPath)`: the top-level
+    /// entry point (an empty [`LoadCtx`]). `config_dir` is the directory of the referencing
+    /// config and `ref_path` the reference as written there.
     pub async fn resolve_agent_reference(
         &self,
-        parent_path: &Path,
+        config_dir: &Path,
         ref_path: &str,
     ) -> Result<Arc<dyn Agent>, ConfigError> {
-        self.resolve_agent_reference_with_ctx(&LoadCtx::default(), parent_path, ref_path)
+        self.resolve_agent_reference_with_ctx(&LoadCtx::default(), config_dir, ref_path)
             .await
     }
 
-    /// Go `ResolveAgentReference(ctx, parentPath, refPath)`: rejects empty and absolute
-    /// references and paths escaping the parent's directory (after `EvalSymlinks`), returns the
-    /// cached agent for the absolute path, else loads it with [`Registry::from_config_with_ctx`]
-    /// and caches it (double-checked insert: the first cached agent wins). Boxed: recursive.
+    /// Go `ResolveAgentReference(ctx, configDir, refPath)`: the containment check
+    /// ([`resolve_config_reference`]), then the cached agent for the resolved real path, else
+    /// loads it with [`Registry::from_config_with_ctx`] and caches it (double-checked insert:
+    /// the first cached agent wins). Boxed: recursive.
     pub(crate) fn resolve_agent_reference_with_ctx<'a>(
         &'a self,
         ctx: &'a LoadCtx,
-        parent_path: &'a Path,
+        config_dir: &'a Path,
         ref_path: &'a str,
     ) -> BoxFuture<'a, Result<Arc<dyn Agent>, ConfigError>> {
         // Go: configurable_utils.go ResolveAgentReference
         async move {
-            if ref_path.is_empty() {
-                return Err(ConfigError::msg("agent reference path cannot be empty"));
-            }
-
-            if go_is_abs(ref_path) {
-                return Err(ConfigError::msg(format!(
-                    "absolute paths are not allowed in AgentTool config_path: {ref_path}"
-                )));
-            }
-
-            let parent = parent_path.to_string_lossy();
-            let target_path = go_path_join(&[go_path_dir(&parent).as_str(), ref_path]);
-
-            let abs_path = go_abs(Path::new(&target_path))
-                .map_err(|e| ConfigError::wrap("failed to resolve absolute path", e))?;
-
-            // Prevent path traversal outside the parent agent's directory. Both sides are
-            // made absolute before comparing, and symlinks are resolved where the paths
-            // exist, so a symlink inside the agent directory cannot be used to escape it.
-            let mut parent_dir = go_abs(Path::new(&go_path_dir(&parent)))
-                .map_err(|e| ConfigError::wrap("failed to resolve agent directory", e))?;
-            if let Some(resolved) = eval_symlinks(&parent_dir) {
-                parent_dir = resolved;
-            }
-            let mut check_path = abs_path.clone();
-            if let Some(resolved) = eval_symlinks(&abs_path) {
-                check_path = resolved;
-            }
-            let parent_dir = parent_dir.to_string_lossy();
-            let check_path = check_path.to_string_lossy();
-            if !check_path.starts_with(&format!("{parent_dir}/")) && check_path != parent_dir {
-                return Err(ConfigError::msg(format!(
-                    "path traversal detected: config_path {} resolves outside agent directory",
-                    go_quote(ref_path)
-                )));
-            }
+            let abs_path = resolve_config_reference(config_dir, ref_path)?;
 
             let cached = self.inner.read().agents.get(&abs_path).cloned();
             if let Some(agent) = cached {
@@ -573,6 +543,25 @@ impl Registry {
             Ok(agent)
         }
         .boxed()
+    }
+}
+
+/// Go `resolveConfigReference`: the one containment check for every config reference (a
+/// `sub_agents` or AgentTool `config_path` and a workflow edge), `config reference %q: %w`
+/// around Go `utils.SafeSubpath` ([`gadk_platform::safe_subpath`]). The result is the path the
+/// check followed the reference to, links replaced by their targets: it is what gets read and
+/// what keys the registries, so the file judged is the file opened.
+pub(crate) fn resolve_config_reference(
+    config_dir: &Path,
+    ref_path: &str,
+) -> Result<PathBuf, ConfigError> {
+    // Go: configurable_utils.go resolveConfigReference
+    match safe_subpath(config_dir, ref_path) {
+        Ok((abs, _)) => Ok(abs),
+        Err(e) => Err(ConfigError::wrap(
+            format!("config reference {}", go_quote(ref_path)),
+            ConfigError::msg(e.to_string()),
+        )),
     }
 }
 
@@ -594,69 +583,6 @@ pub(crate) fn go_abs(path: &Path) -> Result<PathBuf, ConfigError> {
         cwd.to_string_lossy().as_ref(),
         p.as_ref(),
     ])))
-}
-
-/// Go `filepath.Rel` (Unix): `targpath` relative to `basepath`, lexically; `Rel: can't make
-/// <targ> relative to <base>` when one is rooted and the other is not, or when `basepath` has a
-/// `..` element that `targpath` does not share.
-pub(crate) fn go_filepath_rel(basepath: &str, targpath: &str) -> Result<String, String> {
-    // Go: path/filepath/path.go Rel
-    let base_clean = go_path_clean(basepath);
-    let targ_clean = go_path_clean(targpath);
-    if targ_clean == base_clean {
-        return Ok(".".to_owned());
-    }
-    let base: &[u8] = if base_clean == "." {
-        b""
-    } else {
-        base_clean.as_bytes()
-    };
-    let targ = targ_clean.as_bytes();
-    let cant = || format!("Rel: can't make {targpath} relative to {basepath}");
-    let base_slashed = base.first() == Some(&b'/');
-    let targ_slashed = targ.first() == Some(&b'/');
-    if base_slashed != targ_slashed {
-        return Err(cant());
-    }
-    // Position base[b0..bi] and targ[t0..ti] at the first differing elements.
-    let (bl, tl) = (base.len(), targ.len());
-    let (mut b0, mut bi, mut t0, mut ti) = (0, 0, 0, 0);
-    loop {
-        while bi < bl && base[bi] != b'/' {
-            bi += 1;
-        }
-        while ti < tl && targ[ti] != b'/' {
-            ti += 1;
-        }
-        if targ[t0..ti] != base[b0..bi] {
-            break;
-        }
-        if bi < bl {
-            bi += 1;
-        }
-        if ti < tl {
-            ti += 1;
-        }
-        b0 = bi;
-        t0 = ti;
-    }
-    if &base[b0..bi] == b".." {
-        return Err(cant());
-    }
-    if b0 != bl {
-        // Base elements left. Must go up before going down.
-        let seps = base[b0..bl].iter().filter(|&&c| c == b'/').count();
-        let mut buf = String::from("..");
-        for _ in 0..seps {
-            buf.push_str("/..");
-        }
-        if t0 != tl {
-            buf.push('/');
-            buf.push_str(&String::from_utf8_lossy(&targ[t0..]));
-        }
-        return Ok(buf);
-    }
-    Ok(String::from_utf8_lossy(&targ[t0..]).into_owned())
 }
 
 /// The conformance plugins' base-directory check (Go record_plugin.go `parseRecordConfig` and
@@ -750,12 +676,6 @@ fn same_file(_: &std::fs::Metadata, _: &std::fs::Metadata) -> bool {
     false
 }
 
-/// Go `filepath.EvalSymlinks` for an absolute path: the path with every symlink resolved, or
-/// `None` when that fails (Go's callers then keep the unresolved path).
-fn eval_symlinks(path: &Path) -> Option<PathBuf> {
-    std::fs::canonicalize(path).ok()
-}
-
 /// Go `os.ReadFile`: an `open` *PathError when the file cannot be opened, a `read` one when it
 /// cannot be read (a directory opens but fails with `is a directory`).
 pub(crate) fn read_file(path: &Path) -> Result<Vec<u8>, ConfigError> {
@@ -845,12 +765,15 @@ mod tests {
     pub(crate) type Seen = Arc<Mutex<Vec<(Option<PathBuf>, Vec<u8>, PathBuf)>>>;
 
     /// An agent factory that records its inputs and builds a plain agent named after the
-    /// file stem.
+    /// config's `name:` line, else after the directory it was given.
     pub(crate) fn recording_factory(seen: Seen) -> AgentFactory {
         Arc::new(move |_r, ctx, data, path| {
             let seen = seen.clone();
             async move {
-                let name = path.file_stem().unwrap().to_string_lossy().into_owned();
+                let name = String::from_utf8_lossy(&data)
+                    .lines()
+                    .find_map(|l| l.strip_prefix("name: ").map(str::to_owned))
+                    .unwrap_or_else(|| path.file_name().unwrap().to_string_lossy().into_owned());
                 seen.lock().push((ctx.parent_path.clone(), data, path));
                 gadk_agent::new_agent(AgentConfig {
                     name,
@@ -1188,13 +1111,14 @@ mod tests {
         r.from_config_with_ctx(&ctx, &p).await.unwrap();
         let seen = seen.lock();
         assert_eq!(seen.len(), 2);
-        assert_eq!(seen[0], (None, content.as_bytes().to_vec(), p.clone()));
+        let dir = p.parent().unwrap().to_path_buf();
+        assert_eq!(seen[0], (None, content.as_bytes().to_vec(), dir.clone()));
         assert_eq!(
             seen[1],
             (
                 Some(PathBuf::from("/outer/agent.yaml")),
                 content.as_bytes().to_vec(),
-                p.clone()
+                dir
             )
         );
     }
@@ -1289,14 +1213,21 @@ mod tests {
     }
 
     /// Go's `newAgentDir` layout plus a plain test agent class (`agent_class: Test`).
+    /// `(guard, base, base/agents/root)`: the agent directory (Go 0990f9e passes the referencing
+    /// config's directory) with `root_agent.yaml`, `sub_agent.yaml` and `link.yaml` ->
+    /// `base/outside.yaml`.
     fn agent_dir() -> (tempfile::TempDir, PathBuf, PathBuf) {
         let (d, base) = temp_dir();
         let agent_dir = base.join("agents/root");
-        let parent = write(&agent_dir, "root_agent.yaml", "agent_class: Test\n");
-        write(&agent_dir, "sub_agent.yaml", "agent_class: Test\n");
+        write(&agent_dir, "root_agent.yaml", "agent_class: Test\n");
+        write(
+            &agent_dir,
+            "sub_agent.yaml",
+            "agent_class: Test\nname: sub_agent\n",
+        );
         let outside = write(&base, "outside.yaml", "agent_class: Test\n");
         std::os::unix::fs::symlink(&outside, agent_dir.join("link.yaml")).unwrap();
-        (d, base, parent)
+        (d, base, agent_dir)
     }
 
     fn counting_registry(seen: &Seen) -> Registry {
@@ -1307,30 +1238,49 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_agent_reference_rejections_have_go_texts() {
-        let (_d, _base, parent) = agent_dir();
+        let (_d, base, agent_dir) = agent_dir();
         let seen = Seen::default();
         let r = counting_registry(&seen);
+        let not_valid = "path is not a relative path inside the base directory";
         let cases = [
-            ("", "agent reference path cannot be empty".to_owned()),
+            (
+                "",
+                format!("config reference \"\": {not_valid}: rel path is empty"),
+            ),
             (
                 "/etc/passwd",
-                "absolute paths are not allowed in AgentTool config_path: /etc/passwd".to_owned(),
+                format!("config reference \"/etc/passwd\": {not_valid}: rel path is not local"),
             ),
             (
                 "../../outside.yaml",
-                "path traversal detected: config_path \"../../outside.yaml\" resolves outside agent directory".to_owned(),
+                format!(
+                    "config reference \"../../outside.yaml\": {not_valid}: rel path is not local"
+                ),
+            ),
+            (
+                ".",
+                format!("config reference \".\": {not_valid}: rel is effectively empty"),
             ),
             (
                 "link.yaml",
-                "path traversal detected: config_path \"link.yaml\" resolves outside agent directory".to_owned(),
+                format!(
+                    "config reference \"link.yaml\": path leads outside the base directory \
+                     through a link: it resolves to \"{}\"",
+                    base.join("outside.yaml").display()
+                ),
             ),
             (
                 "../root2/x\"y.yaml",
-                "path traversal detected: config_path \"../root2/x\\\"y.yaml\" resolves outside agent directory".to_owned(),
+                format!(
+                    "config reference \"../root2/x\\\"y.yaml\": {not_valid}: rel path is not local"
+                ),
             ),
         ];
         for (ref_path, want) in cases {
-            let err = r.resolve_agent_reference(&parent, ref_path).await.cfg_err();
+            let err = r
+                .resolve_agent_reference(&agent_dir, ref_path)
+                .await
+                .cfg_err();
             assert_eq!(err.to_string(), want, "{ref_path}");
         }
         // Rejected before loading anything.
@@ -1339,50 +1289,48 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_agent_reference_allows_symlinks_and_parents_inside_the_directory() {
-        let (_d, base, parent) = agent_dir();
-        let agent_dir = parent.parent().unwrap().to_path_buf();
+        let (_d, base, agent_dir) = agent_dir();
         let seen = Seen::default();
         let r = counting_registry(&seen);
-        // A symlink inside the directory pointing inside it.
+        // A symlink inside the directory pointing inside it: loaded from (and cached under) the
+        // file it points at.
         std::os::unix::fs::symlink(agent_dir.join("sub_agent.yaml"), agent_dir.join("in.yaml"))
             .unwrap();
-        assert_eq!(
-            r.resolve_agent_reference(&parent, "in.yaml")
-                .await
-                .unwrap()
-                .name(),
-            "in"
-        );
-        // The parent reached through a symlinked directory: both sides are resolved.
+        let a = r
+            .resolve_agent_reference(&agent_dir, "in.yaml")
+            .await
+            .unwrap();
+        assert_eq!(a.name(), "sub_agent");
+        // The directory reached through a symlink: the base is trusted and followed.
         std::os::unix::fs::symlink(&agent_dir, base.join("alias")).unwrap();
-        let via_alias = base.join("alias/root_agent.yaml");
-        r.resolve_agent_reference(&via_alias, "sub_agent.yaml")
+        let b = r
+            .resolve_agent_reference(&base.join("alias"), "sub_agent.yaml")
             .await
             .unwrap();
         // `..` that stays inside is fine.
-        r.resolve_agent_reference(&parent, "x/../sub_agent.yaml")
+        let c = r
+            .resolve_agent_reference(&agent_dir, "x/../sub_agent.yaml")
             .await
             .unwrap();
-        // The loader gets the unresolved absolute path.
+        assert!(Arc::ptr_eq(&a, &b) && Arc::ptr_eq(&a, &c));
+        // The loader gets the real path, once.
         let paths: Vec<PathBuf> = seen.lock().iter().map(|s| s.2.clone()).collect();
-        assert_eq!(
-            paths,
-            [
-                agent_dir.join("in.yaml"),
-                base.join("alias/sub_agent.yaml"),
-                agent_dir.join("sub_agent.yaml")
-            ]
+        assert_eq!(paths, std::slice::from_ref(&agent_dir));
+        assert!(
+            r.inner
+                .read()
+                .agents
+                .contains_key(&agent_dir.join("sub_agent.yaml"))
         );
     }
 
     #[tokio::test]
     async fn resolve_agent_reference_load_errors_are_returned_unwrapped() {
-        let (_d, _base, parent) = agent_dir();
-        let agent_dir = parent.parent().unwrap().to_path_buf();
+        let (_d, _base, agent_dir) = agent_dir();
         let r = counting_registry(&Seen::default());
         // A missing file inside the directory passes the containment check.
         assert_eq!(
-            r.resolve_agent_reference(&parent, "missing.yaml")
+            r.resolve_agent_reference(&agent_dir, "missing.yaml")
                 .await
                 .cfg_err()
                 .to_string(),
@@ -1391,20 +1339,24 @@ mod tests {
                 agent_dir.join("missing.yaml").display()
             )
         );
-        // `.` is the directory itself (Go's `checkPath == parentDir`), which fails to read.
+        // A directory inside passes the check and fails to read.
+        std::fs::create_dir(agent_dir.join("d.yaml")).unwrap();
         assert_eq!(
-            r.resolve_agent_reference(&parent, ".")
+            r.resolve_agent_reference(&agent_dir, "d.yaml")
                 .await
                 .cfg_err()
                 .to_string(),
-            format!("read {}: is a directory", agent_dir.display())
+            format!(
+                "read {}: is a directory",
+                agent_dir.join("d.yaml").display()
+            )
         );
     }
 
     #[tokio::test]
     async fn resolve_agent_reference_caches_by_absolute_path() {
         let (_d, _base, parent) = agent_dir();
-        let agent_dir = parent.parent().unwrap().to_path_buf();
+        let agent_dir = parent.clone();
         let seen = Seen::default();
         let r = counting_registry(&seen);
         let a = r
@@ -1417,7 +1369,7 @@ mod tests {
             .unwrap();
         let c = r
             .clone()
-            .resolve_agent_reference(&agent_dir.join("other.yaml"), "x/../sub_agent.yaml")
+            .resolve_agent_reference(&agent_dir, "x/../sub_agent.yaml")
             .await
             .unwrap();
         assert!(Arc::ptr_eq(&a, &b) && Arc::ptr_eq(&a, &c));
@@ -1440,14 +1392,14 @@ mod tests {
     #[tokio::test]
     async fn resolve_agent_reference_does_not_cache_failures() {
         let (_d, _base, parent) = agent_dir();
-        let agent_dir = parent.parent().unwrap().to_path_buf();
+        let agent_dir = parent.clone();
         let r = counting_registry(&Seen::default());
         assert!(
             r.resolve_agent_reference(&parent, "late.yaml")
                 .await
                 .is_err()
         );
-        write(&agent_dir, "late.yaml", "agent_class: Test\n");
+        write(&agent_dir, "late.yaml", "agent_class: Test\nname: late\n");
         let a = r
             .resolve_agent_reference(&parent, "late.yaml")
             .await
@@ -1458,7 +1410,7 @@ mod tests {
     #[tokio::test]
     async fn resolve_agent_reference_double_checked_insert_keeps_the_first_agent() {
         let (_d, _base, parent) = agent_dir();
-        let agent_dir = parent.parent().unwrap().to_path_buf();
+        let agent_dir = parent.clone();
         let calls = Arc::new(AtomicUsize::new(0));
         let r = Registry::empty();
         // The factory caches a different agent under the same path while it runs, as a

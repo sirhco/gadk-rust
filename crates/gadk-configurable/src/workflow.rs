@@ -28,7 +28,7 @@ use gadk_engine::workflow::{
     WorkflowOptions, chain, function_node,
 };
 use gadk_goyaml::{Document, Kind};
-use gadk_platform::{go_path_dir, go_path_join, go_quote, go_sprint_value};
+use gadk_platform::{go_quote, go_sprint_value};
 use gadk_session::Event;
 use parking_lot::Mutex;
 use serde_json::Value;
@@ -38,7 +38,8 @@ use crate::config::{
     WorkflowYamlConfig,
 };
 use crate::{
-    ConfigError, LoadCtx, NodeFn, NodeOutput, Registry, StrNodeFn, go_abs, go_is_abs, read_file,
+    ConfigError, LoadCtx, NodeFn, NodeOutput, Registry, StrNodeFn, read_file,
+    resolve_config_reference,
 };
 
 impl Registry {
@@ -66,7 +67,7 @@ pub(crate) async fn new_workflow_agent(
     registry: Registry,
     ctx: LoadCtx,
     data: Vec<u8>,
-    config_path: PathBuf,
+    config_dir: PathBuf,
 ) -> Result<Arc<dyn Agent>, ConfigError> {
     // Go: configurable_workflow.go newWorkflowAgent
     let cfg: WorkflowYamlConfig = config::unmarshal(&data)
@@ -81,7 +82,7 @@ pub(crate) async fn new_workflow_agent(
 
     let edge_parser_ctx = ctx.with_sub_agents(collector.clone());
 
-    let edges = parse_edges(&registry, &edge_parser_ctx, &config_path, &cfg.edges)
+    let edges = parse_edges(&registry, &edge_parser_ctx, &config_dir, &cfg.edges)
         .await
         .map_err(|e| ConfigError::wrap("failed to parse workflow edges", e))?;
 
@@ -114,7 +115,7 @@ pub(crate) async fn new_workflow_agent(
 pub(crate) async fn parse_edges(
     registry: &Registry,
     ctx: &LoadCtx,
-    parent_path: &Path,
+    config_dir: &Path,
     nodes: &[Document],
 ) -> Result<Vec<Edge>, ConfigError> {
     // Go: configurable_workflow.go parseEdges
@@ -136,8 +137,8 @@ pub(crate) async fn parse_edges(
         for &item in &edge_node.content {
             match edge_doc[item].kind {
                 Kind::Scalar => {
-                    let n = resolve_node_like(registry, ctx, parent_path, &edge_doc[item].value)
-                        .await?;
+                    let n =
+                        resolve_node_like(registry, ctx, config_dir, &edge_doc[item].value).await?;
                     chain_nodes.push(n);
                 }
                 Kind::Mapping => {
@@ -181,7 +182,7 @@ pub(crate) async fn parse_edges(
                 // deterministic.
                 for (route_val, target_ref) in route_map {
                     let target_node =
-                        resolve_node_like(registry, ctx, parent_path, target_ref).await?;
+                        resolve_node_like(registry, ctx, config_dir, target_ref).await?;
 
                     // Go `strings.EqualFold(routeVal, "default")`: no non-ASCII rune
                     // case-folds to a letter of "default", so ASCII folding is exact.
@@ -204,14 +205,15 @@ pub(crate) async fn parse_edges(
     Ok(edges)
 }
 
-/// Go `resolveNodeLike`: `START`; a `.yaml`/`.yml` reference (absolute, or relative to the
-/// parent's directory) through the node cache and [`resolve_node_from_yaml`]; otherwise a
-/// registered node function (never cached: a new function node per use), else
-/// `node or function reference %q not found in registries`.
+/// Go `resolveNodeLike`: `START`; a reference ending in `.yaml`/`.yml` is a file inside
+/// `config_dir`: the containment check ([`resolve_config_reference`]) runs ahead of the node
+/// cache (keyed by the file's real path) and [`resolve_node_from_yaml`]; anything else is a
+/// registered node function (never cached, never looked up in the node cache: a new function
+/// node per use), else `node or function reference %q not found in registries`.
 pub(crate) async fn resolve_node_like(
     registry: &Registry,
     ctx: &LoadCtx,
-    parent_path: &Path,
+    config_dir: &Path,
     node_ref: &str,
 ) -> Result<Arc<dyn Node>, ConfigError> {
     // Go: configurable_workflow.go resolveNodeLike
@@ -219,28 +221,9 @@ pub(crate) async fn resolve_node_like(
         return Ok(START.clone());
     }
 
-    let is_yaml = node_ref.ends_with(".yaml") || node_ref.ends_with(".yml");
-
-    let (cache_key, abs_path) = if is_yaml {
-        let target_path = if go_is_abs(node_ref) {
-            node_ref.to_owned()
-        } else {
-            let parent = parent_path.to_string_lossy();
-            go_path_join(&[go_path_dir(&parent).as_str(), node_ref])
-        };
-        let abs_path = go_abs(Path::new(&target_path))
-            .map_err(|e| ConfigError::wrap("failed to resolve absolute path", e))?;
-        (abs_path.to_string_lossy().into_owned(), abs_path)
-    } else {
-        (node_ref.to_owned(), PathBuf::new())
-    };
-
-    let cached = registry.inner.read().nodes.get(&cache_key).cloned();
-    if let Some(n) = cached {
-        return Ok(n);
-    }
-
-    if !is_yaml {
+    if !node_ref.ends_with(".yaml") && !node_ref.ends_with(".yml") {
+        // A name never consults the node cache: its keys are file paths, and a lookup by name
+        // would hand out a node loaded for another directory without the containment check.
         let typed_fn = registry.inner.read().node_functions.get(node_ref).cloned();
         let Some(typed_fn) = typed_fn else {
             return Err(ConfigError::msg(format!(
@@ -251,7 +234,17 @@ pub(crate) async fn resolve_node_like(
         return Ok(new_function_node(node_ref, typed_fn, NodeConfig::default()));
     }
 
-    let n = resolve_node_from_yaml(registry, ctx, parent_path, node_ref, &abs_path).await?;
+    // Node refs are loaded straight off disk, so they need the same containment check as agent
+    // refs, ahead of the cache lookup.
+    let abs_path = resolve_config_reference(config_dir, node_ref)?;
+    let cache_key = abs_path.to_string_lossy().into_owned();
+
+    let cached = registry.inner.read().nodes.get(&cache_key).cloned();
+    if let Some(n) = cached {
+        return Ok(n);
+    }
+
+    let n = resolve_node_from_yaml(registry, ctx, config_dir, node_ref, &abs_path).await?;
 
     registry.inner.write().nodes.insert(cache_key, n.clone());
     Ok(n)
@@ -262,7 +255,7 @@ pub(crate) async fn resolve_node_like(
 pub(crate) async fn resolve_node_from_yaml(
     registry: &Registry,
     ctx: &LoadCtx,
-    parent_path: &Path,
+    config_dir: &Path,
     node_ref: &str,
     abs_path: &Path,
 ) -> Result<Arc<dyn Node>, ConfigError> {
@@ -364,7 +357,7 @@ pub(crate) async fn resolve_node_from_yaml(
 
     // Otherwise, it is a standard agent class. Resolve it as an agent and wrap in NewAgentNode.
     let ag = registry
-        .resolve_agent_reference_with_ctx(ctx, parent_path, node_ref)
+        .resolve_agent_reference_with_ctx(ctx, config_dir, node_ref)
         .await?;
 
     // Track subagent dependency
@@ -758,21 +751,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resolve_node_like_looks_function_refs_up_in_the_node_cache_first() {
-        // Go checks nodeRegistry for every reference (nothing in Go inserts a function name).
+    async fn resolve_node_like_never_looks_function_refs_up_in_the_node_cache() {
+        // Go 0990f9e (#1299): a name never consults nodeRegistry, whose keys are file paths.
         let r = registry();
         let join: Arc<dyn Node> = JoinNode::new("cached");
         r.inner.write().nodes.insert("a".to_owned(), join.clone());
         let n = resolve_node_like(&r, &LoadCtx::default(), Path::new(""), "a")
             .await
             .unwrap();
-        assert!(Arc::ptr_eq(&n, &join));
+        assert!(!Arc::ptr_eq(&n, &join));
+        assert_eq!(n.name(), "a");
     }
 
     #[tokio::test]
-    async fn resolve_node_like_caches_yaml_nodes_by_absolute_path() {
+    async fn resolve_node_like_caches_yaml_nodes_by_real_path() {
         let (_guard, base) = temp_dir();
-        let parent = write(&base, "wf/workflow.yaml", "");
+        let parent = write(&base, "wf/workflow.yaml", "")
+            .parent()
+            .unwrap()
+            .to_path_buf();
         let join = write(&base, "wf/nodes/j.yml", "agent_class: JoinNode\nname: j\n");
         let r = registry();
         let ctx = LoadCtx::default();
@@ -781,14 +778,25 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(n1.name(), "j");
-        // The same file through another spelling (and an absolute reference) is a cache hit.
+        // The same file through another spelling (and through a link) is a cache hit.
         let n2 = resolve_node_like(&r, &ctx, &parent, "./nodes/../nodes/j.yml")
             .await
             .unwrap();
-        let n3 = resolve_node_like(&r, &ctx, &parent, &join.to_string_lossy())
+        std::os::unix::fs::symlink(&join, parent.join("link.yaml")).unwrap();
+        let n3 = resolve_node_like(&r, &ctx, &parent, "link.yaml")
             .await
             .unwrap();
         assert!(Arc::ptr_eq(&n1, &n2) && Arc::ptr_eq(&n1, &n3));
+        // An absolute reference is refused, cached or not.
+        let err = resolve_node_like(&r, &ctx, &parent, &join.to_string_lossy())
+            .await
+            .cfg_err();
+        assert!(
+            err.to_string().ends_with(
+                "path is not a relative path inside the base directory: rel path is not local"
+            ),
+            "{err}"
+        );
         let keys: Vec<String> = r.inner.read().nodes.keys().cloned().collect();
         assert_eq!(keys, [join.to_string_lossy().into_owned()]);
 
@@ -803,7 +811,10 @@ mod tests {
     #[tokio::test]
     async fn resolve_node_like_does_not_cache_failures() {
         let (_guard, base) = temp_dir();
-        let parent = write(&base, "workflow.yaml", "");
+        let parent = write(&base, "workflow.yaml", "")
+            .parent()
+            .unwrap()
+            .to_path_buf();
         write(&base, "j.yaml", "agent_class: JoinNode\n");
         let r = registry();
         let ctx = LoadCtx::default();
@@ -833,7 +844,10 @@ mod tests {
         tempfile::TempDir,
     ) {
         let (guard, base) = temp_dir();
-        let parent = write(&base, "workflow.yaml", "");
+        let parent = write(&base, "workflow.yaml", "")
+            .parent()
+            .unwrap()
+            .to_path_buf();
         let path = write(&base, file, content);
         (resolve_node_like(r, ctx, &parent, file).await, path, guard)
     }
@@ -843,7 +857,10 @@ mod tests {
         let r = registry();
         let ctx = LoadCtx::default();
         let (guard, base) = temp_dir();
-        let parent = write(&base, "workflow.yaml", "");
+        let parent = write(&base, "workflow.yaml", "")
+            .parent()
+            .unwrap()
+            .to_path_buf();
         let missing = base.join("missing.yaml");
         let err = resolve_node_like(&r, &ctx, &parent, "missing.yaml")
             .await
@@ -1005,7 +1022,10 @@ mod tests {
     #[tokio::test]
     async fn resolve_node_from_yaml_agent_node_is_collected_once() {
         let (_guard, base) = temp_dir();
-        let parent = write(&base, "workflow.yaml", "");
+        let parent = write(&base, "workflow.yaml", "")
+            .parent()
+            .unwrap()
+            .to_path_buf();
         write(
             &base,
             "loop.yaml",
@@ -1047,9 +1067,13 @@ mod tests {
             "invalid agent class 'Nope': not registered. Ensure the package is imported"
         );
 
-        // An absolute agent reference fails ResolveAgentReference (YAML nodes accept it).
+        // An absolute node reference fails the containment check ahead of any read (Go
+        // 0990f9e, #1299).
         let (guard, base) = temp_dir();
-        let parent = write(&base, "workflow.yaml", "");
+        let parent = write(&base, "workflow.yaml", "")
+            .parent()
+            .unwrap()
+            .to_path_buf();
         let abs = write(&base, "u.yaml", "agent_class: LoopAgent\nname: u\n");
         let err = resolve_node_like(&r, &ctx, &parent, &abs.to_string_lossy())
             .await
@@ -1057,8 +1081,9 @@ mod tests {
         assert_eq!(
             err.to_string(),
             format!(
-                "absolute paths are not allowed in AgentTool config_path: {}",
-                abs.display()
+                "config reference {}: path is not a relative path inside the base directory: \
+                 rel path is not local",
+                gadk_platform::go_quote(&abs.to_string_lossy())
             )
         );
         drop(guard);

@@ -27,6 +27,14 @@ use super::sanitize::truncate_string;
 use super::{ContentSummaryBuilder, MessageSummary, SummaryPiece, UNSUPPORTED_OBJ_PLACEHOLDER};
 use crate::redaction::COLUMN_CONTENT;
 
+/// Go `maxFunctionNameSummaryLength`: the runes of a function call / response name a response
+/// summary shows when `maxLength >= 0` (before the `...[TRUNCATED]` suffix).
+pub(crate) const MAX_FUNCTION_NAME_SUMMARY_LENGTH: i64 = 256;
+
+/// Go `responseSummarySlack`: the fixed rune allowance added to a non-negative `maxLength` when
+/// rendering a response summary, bounding the joined summary at `maxLength + 4096` runes.
+pub(crate) const RESPONSE_SUMMARY_SLACK: i64 = 4096;
+
 /// Go `contentSummary(content, maxLength, redact)`: what adk-python writes to
 /// `content.text_summary` — the text parts, each truncated, and descriptions of function
 /// responses and code parts, joined by `" | "` and truncated again. Function calls and inline
@@ -124,6 +132,11 @@ impl MessageSummary {
         let Some(content) = content else {
             return m;
         };
+        let name_limit = if max_length < 0 {
+            -1
+        } else {
+            MAX_FUNCTION_NAME_SUMMARY_LENGTH
+        };
         for (i, part) in content.parts.iter().enumerate() {
             let mut t = false;
             let mut is_text = false;
@@ -133,9 +146,13 @@ impl MessageSummary {
                 is_text = true;
                 format!("text: '{text}'")
             } else if let Some(call) = &part.function_call {
-                format!("call: {}", call.name)
+                let name;
+                (name, t) = sanitize_and_truncate_text(&call.name, name_limit, redact);
+                format!("call: {name}")
             } else if let Some(resp) = &part.function_response {
-                format!("resp: {}", resp.name)
+                let name;
+                (name, t) = sanitize_and_truncate_text(&resp.name, name_limit, redact);
+                format!("resp: {name}")
             } else if let Some(code) = &part.executable_code {
                 let text;
                 (text, t) = sanitize_and_truncate_text(&code.code, max_length, redact);
@@ -177,8 +194,11 @@ impl MessageSummary {
             truncated = truncated || p.truncated;
         }
         let joined = active.join(" | ");
-        if self.is_response {
-            return (joined, truncated);
+        let mut max_length = max_length;
+        if self.is_response && max_length >= 0 {
+            // Pieces are not strictly bounded by max_length (names at 256 runes, wrappers and
+            // per-piece suffixes), so a response summary gets the fixed slack on top.
+            max_length = max_length.saturating_add(RESPONSE_SUMMARY_SLACK);
         }
         let (summary, t) = truncate_string(&joined, max_length);
         (summary, truncated || t)
@@ -244,12 +264,13 @@ impl ContentSummaryBuilder {
         self.needs_rebuild = self.needs_rebuild || rebuild;
     }
 
-    /// Go `hasFailedUploadTruncated()`.
+    /// Go `hasFailedUploadTruncated()`: a non-omitted text piece was truncated (summary-only
+    /// caps on non-text pieces do not count).
     pub(crate) fn has_failed_upload_truncated(&self) -> bool {
         self.messages
             .iter()
             .flat_map(|m| &m.pieces)
-            .any(|p| !p.omitted && p.truncated)
+            .any(|p| p.is_text && !p.omitted && p.truncated)
     }
 
     /// Go `buildContent()`.

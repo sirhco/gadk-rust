@@ -156,7 +156,7 @@ pub(crate) async fn to_sequential_agent_config(
 pub(crate) async fn resolve_sub_agents(
     registry: &Registry,
     ctx: &LoadCtx,
-    parent_path: &Path,
+    config_dir: &Path,
     refs: &[AgentRefConfig],
 ) -> Result<Vec<Arc<dyn Agent>>, ConfigError> {
     // Go: configurable.go resolveSubAgents
@@ -164,7 +164,7 @@ pub(crate) async fn resolve_sub_agents(
     for r in refs {
         if !r.config_path.is_empty() {
             let a = registry
-                .resolve_agent_reference_with_ctx(ctx, parent_path, &r.config_path)
+                .resolve_agent_reference_with_ctx(ctx, config_dir, &r.config_path)
                 .await
                 .map_err(|e| {
                     ConfigError::wrap(
@@ -188,7 +188,7 @@ pub(crate) async fn resolve_sub_agents(
 pub(crate) async fn resolve_tools(
     registry: &Registry,
     ctx: &LoadCtx,
-    parent_path: &Path,
+    config_dir: &Path,
     tool_configs: &[ToolConfig],
 ) -> Result<(Vec<Arc<dyn Tool>>, Vec<Arc<dyn Toolset>>), ConfigError> {
     // Go: configurable.go resolveTools
@@ -196,7 +196,7 @@ pub(crate) async fn resolve_tools(
     let mut toolsets = Vec::new();
     for tc in tool_configs {
         if !tc.name.is_empty() {
-            let ctx = ctx.with_parent_path(parent_path);
+            let ctx = ctx.with_parent_path(config_dir);
             let (a, ts) = registry
                 .resolve_tool_reference(&ctx, &tc.name, tc.args.as_ref())
                 .await
@@ -251,7 +251,7 @@ pub(crate) async fn new_llm_agent(
     registry: Registry,
     ctx: LoadCtx,
     data: Vec<u8>,
-    config_path: PathBuf,
+    config_dir: PathBuf,
 ) -> Result<Arc<dyn Agent>, ConfigError> {
     // Go: configurable_utils.go newLLMAgent
     let mut cfg: LlmAgentYamlConfig = config::unmarshal(&data)
@@ -264,7 +264,7 @@ pub(crate) async fn new_llm_agent(
         return Err(ConfigError::msg("'model' is required for LlmAgent"));
     }
 
-    cfg.config_path = config_path;
+    cfg.config_path = config_dir;
 
     let agent_config = to_llm_agent_config(&cfg, &registry, &ctx)
         .await
@@ -279,7 +279,7 @@ pub(crate) async fn new_loop_agent(
     registry: Registry,
     ctx: LoadCtx,
     data: Vec<u8>,
-    config_path: PathBuf,
+    config_dir: PathBuf,
 ) -> Result<Arc<dyn Agent>, ConfigError> {
     // Go: configurable_utils.go newLoopAgent
     let mut cfg: LoopAgentYamlConfig = config::unmarshal(&data)
@@ -289,7 +289,7 @@ pub(crate) async fn new_loop_agent(
         return Err(ConfigError::msg("'name' is required"));
     }
 
-    cfg.config_path = config_path;
+    cfg.config_path = config_dir;
 
     let agent_config = to_loop_agent_config(&cfg, &registry, &ctx)
         .await
@@ -304,7 +304,7 @@ pub(crate) async fn new_parallel_agent(
     registry: Registry,
     ctx: LoadCtx,
     data: Vec<u8>,
-    config_path: PathBuf,
+    config_dir: PathBuf,
 ) -> Result<Arc<dyn Agent>, ConfigError> {
     // Go: configurable_utils.go newParallelAgent
     let mut cfg: ParallelAgentYamlConfig = config::unmarshal(&data)
@@ -314,7 +314,7 @@ pub(crate) async fn new_parallel_agent(
         return Err(ConfigError::msg("'name' is required"));
     }
 
-    cfg.config_path = config_path;
+    cfg.config_path = config_dir;
 
     let agent_config = to_parallel_agent_config(&cfg, &registry, &ctx)
         .await
@@ -330,7 +330,7 @@ pub(crate) async fn new_sequential_agent(
     registry: Registry,
     ctx: LoadCtx,
     data: Vec<u8>,
-    config_path: PathBuf,
+    config_dir: PathBuf,
 ) -> Result<Arc<dyn Agent>, ConfigError> {
     // Go: configurable_utils.go newSequentialAgent
     let mut cfg: SequentialAgentYamlConfig = config::unmarshal(&data)
@@ -340,7 +340,7 @@ pub(crate) async fn new_sequential_agent(
         return Err(ConfigError::msg("'name' is required"));
     }
 
-    cfg.config_path = config_path;
+    cfg.config_path = config_dir;
 
     let agent_config = to_sequential_agent_config(&cfg, &registry, &ctx)
         .await
@@ -522,7 +522,7 @@ mod tests {
         // The sub-agents are cached by absolute path.
         assert!(Arc::ptr_eq(
             &a.sub_agents()[0],
-            &r.resolve_agent_reference(&p, "s1.yaml").await.unwrap()
+            &r.resolve_agent_reference(&base, "s1.yaml").await.unwrap()
         ));
     }
 
@@ -563,7 +563,7 @@ mod tests {
             ),
             (
                 "agent_class: ParallelAgent\nname: r\nsub_agents:\n  - config_path: ../x.yaml\n",
-                "failed to create Parallel agent config: failed to resolve agent reference ../x.yaml: path traversal detected: config_path \"../x.yaml\" resolves outside agent directory".to_owned(),
+                "failed to create Parallel agent config: failed to resolve agent reference ../x.yaml: config reference \"../x.yaml\": path is not a relative path inside the base directory: rel path is not local".to_owned(),
             ),
             (
                 "agent_class: LoopAgent\nname: r\nsub_agents:\n  - code: pkg.Agent\n",
@@ -575,7 +575,7 @@ mod tests {
             ),
             (
                 "name: r\nmodel: gemini-2.0-flash\nsub_agents:\n  - config_path: /abs.yaml\n",
-                "failed to create LLM agent config: failed to resolve agent reference /abs.yaml: absolute paths are not allowed in AgentTool config_path: /abs.yaml".to_owned(),
+                "failed to create LLM agent config: failed to resolve agent reference /abs.yaml: config reference \"/abs.yaml\": path is not a relative path inside the base directory: rel path is not local".to_owned(),
             ),
         ];
         for (yaml, want) in cases {
@@ -690,8 +690,8 @@ mod tests {
             .boxed()
         });
         r.register_tool_factory("loader", loader).unwrap();
-        write(&base, "helper.yaml", "agent_class: Test\n");
-        write(&base, "direct.yaml", "agent_class: Test\n");
+        write(&base, "helper.yaml", "agent_class: Test\nname: helper\n");
+        write(&base, "direct.yaml", "agent_class: Test\nname: direct\n");
         let p = write(
             &base,
             "root.yaml",
@@ -700,11 +700,18 @@ mod tests {
         load(&r, &p).await.unwrap();
         let seen = seen.lock();
         // Sub-agents are resolved with the caller's context (no parent path at top level);
-        // the tool's nested load inherits the parent path set by resolveTools.
+        // the tool's nested load inherits the parent path set by resolveTools: the config
+        // directory (Go 0990f9e), which is also what each factory receives.
         assert_eq!(seen[0].0, None);
-        assert_eq!(seen[0].2, base.join("direct.yaml"));
-        assert_eq!(seen[1].0.as_deref(), Some(p.as_path()));
-        assert_eq!(seen[1].2, base.join("helper.yaml"));
+        assert_eq!(
+            (seen[0].1.as_slice(), &seen[0].2),
+            (&b"agent_class: Test\nname: direct\n"[..], &base)
+        );
+        assert_eq!(seen[1].0.as_deref(), Some(base.as_path()));
+        assert_eq!(
+            (seen[1].1.as_slice(), &seen[1].2),
+            (&b"agent_class: Test\nname: helper\n"[..], &base)
+        );
     }
 
     #[tokio::test]

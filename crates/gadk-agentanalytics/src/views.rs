@@ -363,7 +363,7 @@ pub(crate) fn view_definitions_with_denied(
 /// `_` and a lowercased event type). Go compares rune by rune under Unicode simple case
 /// folding; the only non-ASCII runes whose fold orbit holds an ASCII rune are U+212A KELVIN
 /// SIGN (`k`, `K`) and U+017F LATIN SMALL LETTER LONG S (`s`, `S`).
-fn ascii_equal_fold(ascii: &str, s: &str) -> bool {
+pub(crate) fn ascii_equal_fold(ascii: &str, s: &str) -> bool {
     let mut runes = s.chars();
     for a in ascii.bytes() {
         let Some(r) = runes.next() else {

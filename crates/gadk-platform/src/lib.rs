@@ -19,7 +19,9 @@
 //! `strings.ToLower`/`ToUpper` ([`go_to_lower`], [`go_to_upper`]), `url.QueryEscape` ([`go_query_escape`]), `fmt` `%v` of a JSON-decoded value
 //! ([`go_sprint_value`]), `time.Parse(time.RFC3339, …)` ([`go_parse_rfc3339`]),
 //! `path.Clean`/`path.Join`/`path.Dir`/`path.Base` ([`go_path_clean`], [`go_path_join`],
-//! [`go_path_dir`], [`go_path_base`]), the parts of `net/url` gadk reproduces ([`go_url`]),
+//! [`go_path_dir`], [`go_path_base`]), Unix `filepath.Rel`/`filepath.IsLocal` ([`go_filepath_rel`],
+//! [`go_filepath_is_local`]), ADK-Go `internal/utils.SafeSubpath` ([`safe_subpath`]), the parts
+//! of `net/url` gadk reproduces ([`go_url`]),
 //! Go's `fmt.Errorf("…: %w", err)` wrapping ([`GoWrapped`]), Go's built-in MIME table and
 //! `http.DetectContentType` ([`go_mime`]), `time.Duration` ([`GoDuration`],
 //! [`go_parse_duration`], [`go_format_duration`]) and the parts of Go's `flag` package the
@@ -34,6 +36,7 @@ pub mod go_mime;
 mod go_path;
 mod go_time;
 pub mod go_url;
+mod safe_subpath;
 mod time;
 mod tracking;
 mod uuid;
@@ -45,9 +48,15 @@ pub use go_fmt::{
     go_format_float_g, go_format_float_v, go_query_escape, go_quote, go_quote_bytes,
     go_sprint_value, go_to_lower, go_to_upper, go_type_name,
 };
-pub use go_path::{go_path_base, go_path_clean, go_path_dir, go_path_join};
+pub use go_path::{
+    go_filepath_is_local, go_filepath_rel, go_path_base, go_path_clean, go_path_dir, go_path_join,
+};
 pub use go_time::{
     GoDuration, go_format_duration, go_format_rfc3339_nano, go_parse_duration, go_parse_rfc3339,
+};
+pub use safe_subpath::{
+    ERR_NOT_VALID_RELATIVE_PATH, ERR_SYMLINK_IN_RELATIVE_PATH, SafeSubpathError,
+    SafeSubpathErrorKind, is_link_like, safe_subpath,
 };
 pub use time::TimeProvider;
 pub use tracking::tracking_header;

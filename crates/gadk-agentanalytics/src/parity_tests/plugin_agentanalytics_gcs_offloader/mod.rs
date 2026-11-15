@@ -90,23 +90,12 @@ pub(super) async fn resolve(
     .await;
 }
 
-/// Go `pathSegmentHashSuffix(s)` (ADK-Go `0990f9e`, #2018): `"~"` and the 64 lowercase hex
-/// digits of the SHA-256 digest of `s`. Test-local until gadk has its own (8a fix task).
-pub(super) fn path_segment_hash_suffix(s: impl AsRef<[u8]>) -> String {
-    use sha2::{Digest, Sha256};
-    let sum = Sha256::digest(s.as_ref());
-    let hex: String = sum.iter().map(|b| format!("{b:02x}")).collect();
-    format!("~{hex}")
-}
-
-/// Go `maxPathSegmentBytes` (#2018).
-pub(super) const MAX_PATH_SEGMENT_BYTES: usize = 128;
-/// Go `pathSegmentHashSuffixLen` (#2018).
-pub(super) const PATH_SEGMENT_HASH_SUFFIX_LEN: usize = 65;
-/// Go `maxGCSPrefixBytes` (#2018).
-pub(super) const MAX_GCS_PREFIX_BYTES: usize = 750;
-/// Go `maxGCSRewrittenPrefixBytes` (#2018).
-pub(super) const MAX_GCS_REWRITTEN_PREFIX_BYTES: usize = 467;
+/// Go `pathSegmentHashSuffix` and the #2018 size constants (ADK-Go `0990f9e`).
+pub(super) use crate::offload::uploads::path_segment_hash_suffix;
+pub(super) use crate::offload::{
+    MAX_GCS_PREFIX_BYTES, MAX_GCS_REWRITTEN_PREFIX_BYTES, MAX_PATH_SEGMENT_BYTES,
+    PATH_SEGMENT_HASH_SUFFIX_LEN,
+};
 
 /// Go `&BatchProcessor{config: config, queue: make(chan map[string]any, 4)}`.
 pub(super) fn bare(config: Config) -> Arc<BatchProcessor> {
@@ -654,10 +643,9 @@ fn test_is_precondition_failed() {
 }
 
 #[test]
-#[ignore = "8a bug: gcs_object_path neither hash-suffixes sanitized ids nor rewrites unsafe GCSPathPrefix values (~, control characters, .well-known/acme-challenge) (Go #2018)"]
 fn test_gcs_object_path() {
-    fn h(s: impl AsRef<[u8]>) -> String {
-        path_segment_hash_suffix(s)
+    fn h(s: impl AsRef<str>) -> String {
+        path_segment_hash_suffix(s.as_ref())
     }
     let unsafe_want = format!(
         "2026-03-04/a_b_c{}/x_y{}____{}_c0_p0.txt",

@@ -90,7 +90,6 @@ fn parse_list(s: &str) -> Vec<Value> {
 
 // parity: adapted: Go's credential-named defined types are Rust newtype structs (serde passes their name); the cases with no Rust value are left out (see the "skipped case" comments)
 #[test]
-#[ignore = "8a bug: values of credential-named newtypes (Go defined types Token, APIKey, Credential, …) and map keys of credential-named types are walked instead of written [REDACTED] (Go #2249)"]
 fn test_json_formatter_credential_named_types() {
     const SECRET: &str = "SYNTHETIC_SECRET_8642";
     #[derive(Serialize, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -617,7 +616,6 @@ fn test_json_formatter_credential_named_types() {
 
 // parity: adapted: Go's `type Token byte` is a newtype over u8 and `type Passphrase []byte` writes Go bytes; Go writes a []Token / []MyByte as a byte string with redaction off (a Rust Vec of newtypes is a sequence), so those redaction-off wants and the "nil slice" and "neutral defined byte slice" cases are left out
 #[test]
-#[ignore = "8a bug: elements of a credential-named byte newtype (Go `type Token byte`) and a credential-named byte-slice newtype are not written [REDACTED] (Go #2249)"]
 fn test_json_formatter_credential_byte_slice() {
     #[derive(Serialize, Clone, Copy)]
     struct Token(u8);
@@ -695,7 +693,6 @@ fn test_json_formatter_credential_byte_slice() {
 
 // parity: adapted: a Go struct map key is a serde struct key; the two walks with a budget of 2 and 3 nodes (Go's internal sanitizer) are left out
 #[test]
-#[ignore = "8a bug: a map key of a credential-named struct (Go `type Secret struct{…}`) is written [UNSUPPORTED_KEY] with its value walked instead of {\"[REDACTED]\":\"[REDACTED]\"} (Go #2249)"]
 fn test_json_formatter_plain_credential_struct_map_keys() {
     const SECRET: &str = "SYNTHETIC_SECRET_7531";
     #[derive(Serialize)]
@@ -766,7 +763,6 @@ fn test_json_formatter_plain_credential_struct_map_keys() {
 
 // parity: adapted: Go's map[any]any with an int and a string key is a serde map with entries in a fixed order (Go's result does not depend on the order); the invalid-UTF-8 keys case has no Rust input
 #[test]
-#[ignore = "8a bug: map keys that are written alike keep the last value instead of [REDACTED] / [COLLIDING_KEY] when their values differ (Go #2249)"]
 fn test_json_formatter_colliding_map_keys() {
     for (name, entries, want_on, want_off, want_trunc) in [
         (

@@ -51,6 +51,28 @@ pub(crate) const MISSING_EVENT_ID: &str = "no_event";
 /// Go `fallbackExtension`.
 pub(crate) const FALLBACK_EXTENSION: &str = ".bin";
 
+/// Go `maxGCSObjectNameBytes`: Cloud Storage's 1,024-byte UTF-8 object name limit.
+/// [`MAX_GCS_PREFIX_BYTES`] and [`MAX_PATH_SEGMENT_BYTES`] bound an unchanged prefix and each
+/// identifier segment, which keeps the names of the objects the plugin uploads at 905 bytes or
+/// less; a direct `gcs_object_path` call with a long unchanged prefix and long ids, or an
+/// oversized extension, assembles a longer name, which it cuts to this limit.
+pub(crate) const MAX_GCS_OBJECT_NAME_BYTES: usize = 1024;
+
+/// Go `maxGCSPrefixBytes`: the longest `GCSPathPrefix` (after trimming `/`) used verbatim.
+pub(crate) const MAX_GCS_PREFIX_BYTES: usize = 750;
+
+/// Go `maxGCSRewrittenPrefixBytes`: a rewritten prefix (at most 402 readable UTF-8 bytes plus
+/// the 65-byte `~<sha256>` suffix), so that with the 45 folder bytes
+/// `/<YYYY-MM-DD>/<32-hex-trace-id>/` the folder part of the name fits the 512-byte folder
+/// limit of hierarchical-namespace buckets.
+pub(crate) const MAX_GCS_REWRITTEN_PREFIX_BYTES: usize = 467;
+
+/// Go `maxPathSegmentBytes`.
+pub(crate) const MAX_PATH_SEGMENT_BYTES: usize = 128;
+
+/// Go `pathSegmentHashSuffixLen`: `~` and the 64 lowercase hex digits of a SHA-256 digest.
+pub(crate) const PATH_SEGMENT_HASH_SUFFIX_LEN: usize = 65;
+
 /// Go `mimeExtensions`, sorted by type.
 pub(crate) const MIME_EXTENSIONS: [(&str, &str); 11] = [
     ("application/json", ".json"),

@@ -57,6 +57,10 @@ pub(crate) const BINARY_DATA_PLACEHOLDER: &str = "[BINARY_DATA]";
 /// Go `circularRefPlaceholder`. Divergence (ledger 7b-1): unused — a `Serialize` value cannot
 /// contain itself, so there is no cycle detection (Go tracks visited maps, slices and pointers).
 pub(crate) const CIRCULAR_REF_PLACEHOLDER: &str = "[CIRCULAR_REFERENCE]";
+
+/// Go `collidingKeyPlaceholder`: the value of map keys that are written alike but disagree on
+/// their value, with redaction off.
+pub(crate) const COLLIDING_KEY_PLACEHOLDER: &str = "[COLLIDING_KEY]";
 /// Go `maxDepthPlaceholder`.
 pub(crate) const MAX_DEPTH_PLACEHOLDER: &str = "[MAX_DEPTH_EXCEEDED]";
 /// Go `sanitizeBudgetPlaceholder`.
