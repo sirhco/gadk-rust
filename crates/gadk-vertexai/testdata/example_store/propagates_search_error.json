@@ -1,0 +1,27 @@
+{
+  "name": "propagates search error",
+  "query": "query",
+  "request": {
+    "storedContentsExampleParameters": {
+      "contentSearchKey": {
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "query"
+              }
+            ]
+          }
+        ],
+        "searchKeyGenerationMethod": {
+          "lastEntry": {}
+        }
+      }
+    },
+    "exampleStore": "projects/p/locations/l/exampleStores/s",
+    "topK": "10"
+  },
+  "searchError": "rpc failed",
+  "error": "vertexai: search examples: rpc failed"
+}

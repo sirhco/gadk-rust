@@ -1,0 +1,93 @@
+{
+  "name": "keeps data-less parts with thought, signature, or video metadata and drops empty parts",
+  "query": "query",
+  "request": {
+    "storedContentsExampleParameters": {
+      "contentSearchKey": {
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "query"
+              }
+            ]
+          }
+        ],
+        "searchKeyGenerationMethod": {
+          "lastEntry": {}
+        }
+      }
+    },
+    "exampleStore": "projects/p/locations/l/exampleStores/s",
+    "topK": "10"
+  },
+  "response": {
+    "results": [
+      {
+        "example": {
+          "storedContentsExample": {
+            "searchKey": "search key",
+            "contentsExample": {
+              "expectedContents": [
+                {
+                  "content": {
+                    "role": "model",
+                    "parts": [
+                      {},
+                      {},
+                      {
+                        "thought": true
+                      },
+                      {
+                        "thoughtSignature": "c2lnLW9ubHk="
+                      },
+                      {
+                        "videoMetadata": {
+                          "startOffset": "2s",
+                          "endOffset": "8s"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "similarityScore": 1
+      }
+    ]
+  },
+  "examples": [
+    {
+      "input": {
+        "parts": [
+          {
+            "text": "search key"
+          }
+        ],
+        "role": "user"
+      },
+      "output": [
+        {
+          "parts": [
+            {
+              "thought": true
+            },
+            {
+              "thoughtSignature": "c2lnLW9ubHk="
+            },
+            {
+              "videoMetadata": {
+                "endOffset": "8s",
+                "startOffset": "2s"
+              }
+            }
+          ],
+          "role": "model"
+        }
+      ]
+    }
+  ]
+}

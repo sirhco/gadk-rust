@@ -1,0 +1,73 @@
+{
+  "name": "converts text part",
+  "query": "query",
+  "request": {
+    "storedContentsExampleParameters": {
+      "contentSearchKey": {
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "query"
+              }
+            ]
+          }
+        ],
+        "searchKeyGenerationMethod": {
+          "lastEntry": {}
+        }
+      }
+    },
+    "exampleStore": "projects/p/locations/l/exampleStores/s",
+    "topK": "10"
+  },
+  "response": {
+    "results": [
+      {
+        "example": {
+          "storedContentsExample": {
+            "searchKey": "what is the weather?",
+            "contentsExample": {
+              "expectedContents": [
+                {
+                  "content": {
+                    "role": "model",
+                    "parts": [
+                      {
+                        "text": "it is sunny"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "similarityScore": 1
+      }
+    ]
+  },
+  "examples": [
+    {
+      "input": {
+        "parts": [
+          {
+            "text": "what is the weather?"
+          }
+        ],
+        "role": "user"
+      },
+      "output": [
+        {
+          "parts": [
+            {
+              "text": "it is sunny"
+            }
+          ],
+          "role": "model"
+        }
+      ]
+    }
+  ]
+}
