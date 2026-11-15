@@ -14,7 +14,7 @@
 // limitations under the License.
 
 //! The shared REST transport of the provider crates (`gadk-anthropic`, `gadk-openai`): one
-//! `POST` with the Stainless SDKs' retry loop (anthropic-sdk-go v1.81.0 and openai-go v3.82.0
+//! `POST` with the Stainless SDKs' retry loop (anthropic-sdk-go v1.84.0 and openai-go v3.91.1
 //! `internal/requestconfig`), parameterised by a [`RetryPolicy`], a [`CallTimeout`] and a
 //! per-attempt [`RequestHeaders`] provider.
 //!
