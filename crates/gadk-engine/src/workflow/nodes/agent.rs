@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use futures::StreamExt;
 use gadk_agent::{Agent, AgentError, Context, ContextDelta, EventStream, Mode};
-use gadk_genai::Content;
+use gadk_genai::{Content, Schema};
 use gadk_session::{Event, EventActions, NodeInfo};
 use serde_json::{Map, Value, json};
 
@@ -30,6 +30,7 @@ use crate::llm::node_wrapper::run_llm_agent_as_node;
 use crate::llm::processors::go_json_marshal;
 use crate::llm::state::reveal;
 use crate::workflow::base_node::compile_schema;
+use crate::workflow::model_output_schema::model_output_schema;
 use crate::workflow::route::go_quote;
 use crate::workflow::scheduler::message_text;
 use crate::workflow::{BaseNode, Node, NodeConfig};
@@ -38,6 +39,11 @@ use crate::workflow::{BaseNode, Node, NodeConfig};
 pub struct AgentNode {
     pub(crate) base: BaseNode,
     pub(crate) agent: Arc<dyn Agent>,
+    /// Go `modelOutputSchema` (be529e7b): the output schema in the form the model is asked to
+    /// answer with, or `None`. Go's Run binds it per invocation (`WithBoundOutputSchema`); that
+    /// binding needs a context-carried value gadk-agent does not offer yet, so it is not bound.
+    #[allow(dead_code)] // Read by `run` once the bound-output-schema binding lands.
+    pub(crate) model_output_schema: Option<Schema>,
 }
 
 impl AgentNode {
@@ -64,7 +70,9 @@ impl AgentNode {
                 ),
             )
         })?;
-        let output = compile_schema(Some(output.unwrap_or_else(|| json!({})))).map_err(|e| {
+        let output = output.unwrap_or_else(|| json!({}));
+        let model_output_schema = model_output_schema(Some(&output));
+        let output = compile_schema(Some(output)).map_err(|e| {
             WorkflowError::new(
                 WorkflowErrorKind::Other,
                 format!(
@@ -76,7 +84,11 @@ impl AgentNode {
         // The wrapped agent's run already emits an invoke_agent span.
         cfg.emits_own_span = true;
         let base = BaseNode::from_compiled(agent.name(), agent.description(), cfg, input, output);
-        Ok(Arc::new(AgentNode { base, agent }))
+        Ok(Arc::new(AgentNode {
+            base,
+            agent,
+            model_output_schema,
+        }))
     }
 
     /// The wrapped agent.

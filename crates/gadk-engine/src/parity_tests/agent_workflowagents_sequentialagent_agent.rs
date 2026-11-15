@@ -694,7 +694,6 @@ async fn test_sequential_agent_stops_on_sub_agent_error() {
 /// The live counterpart of `test_sequential_agent_stops_on_sub_agent_error`: a sub-agent whose
 /// live stream yields an error ends the sequence, and the next sub-agent is never started.
 #[tokio::test]
-#[ignore = "8a bug: sequential RunLive keeps running the next sub-agent after a sub-agent's live stream yields an error (Go #2151 stops, as Run does)"]
 async fn test_sequential_agent_run_live_stops_on_sub_agent_error() {
     let (first_sess, _first_rx) = DummyLiveSession::new();
     let first_sess2 = first_sess.clone();

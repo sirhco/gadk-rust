@@ -273,10 +273,14 @@ impl Tool for TransferToAgentTool {
 
 #[async_trait]
 impl RunnableTool for TransferToAgentTool {
-    /// Port of agent_transfer.go:170 Run.
+    /// Port of agent_transfer.go:170 Run. A `Value::Null` argument is Go's nil args map (the
+    /// tool's `map[string]any` parameter), so it reports `empty agent_name: map[]`. A name outside
+    /// the declared enum is a tool error the model sees and can recover from (Go c8fff670);
+    /// setting `transfer_to_agent` to it would make the flow fail the whole invocation.
     async fn run(&self, ctx: Context, args: Value) -> Result<Map<String, Value>, ToolError> {
+        let empty = Value::Object(Map::new());
+        let args = if args.is_null() { empty } else { args };
         let m = match &args {
-            Value::Null => return Err(ToolError::InvalidArgument("missing argument".into())),
             Value::Object(m) => m,
             other => {
                 return Err(ToolError::InvalidArgument(format!(
@@ -295,6 +299,16 @@ impl RunnableTool for TransferToAgentTool {
                     go_sprint(&as_go_floats(&args))
                 ))
             })?;
+        // Go deliberately diverges from adk-python here, whose tool accepts any name and whose
+        // flow then raises ValueError.
+        let targets: Vec<&str> = self.supported_agents.iter().map(|a| a.name()).collect();
+        if !targets.contains(&agent) {
+            return Err(ToolError::InvalidArgument(format!(
+                "agent {} is not a valid transfer target; available agents: {}",
+                go_quote(agent),
+                targets.join(", ")
+            )));
+        }
         ctx.update_actions(|a| a.transfer_to_agent = agent.to_owned());
         Ok(Map::new())
     }
@@ -487,7 +501,10 @@ mod tests {
 
     #[tokio::test]
     async fn run_sets_transfer_action() {
-        let t = tool(vec![]);
+        let t = tool(vec![
+            llm("x", "", Mode::Unset, vec![]),
+            llm("y", "", Mode::Unset, vec![]),
+        ]);
         let ctx = Context::builder()
             .build()
             .with_delta(gadk_agent::ContextDelta {
@@ -524,7 +541,27 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.to_string(), "empty agent_name: map[agent_name:5]");
-        let err = runnable.run(ctx, Value::Null).await.unwrap_err();
-        assert_eq!(err.to_string(), "missing argument");
+        // Go's nil args map (`map[string]any(nil)`).
+        let err = runnable.run(ctx.clone(), Value::Null).await.unwrap_err();
+        assert_eq!(err.to_string(), "empty agent_name: map[]");
+        // Go c8fff670: a name outside the declared enum is a tool error naming the targets,
+        // and leaves the action unset.
+        let ctx = Context::builder()
+            .build()
+            .with_delta(gadk_agent::ContextDelta {
+                actions: Some(Arc::new(parking_lot::Mutex::new(
+                    gadk_session::EventActions::default(),
+                ))),
+                ..Default::default()
+            });
+        let err = runnable
+            .run(ctx.clone(), json!({"agent_name": "nobody"}))
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "agent \"nobody\" is not a valid transfer target; available agents: x, y"
+        );
+        assert_eq!(ctx.actions().transfer_to_agent, "");
     }
 }

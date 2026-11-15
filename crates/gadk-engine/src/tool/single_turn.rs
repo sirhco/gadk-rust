@@ -177,18 +177,29 @@ impl RunnableTool for SingleTurnTool {
             ToolError::Execution(format!("failed to create agent node: {e}").into())
         })?;
         let node: Arc<dyn Node> = node;
-        // Go WithUseSubBranch().
-        let result = run_node(
-            &ctx,
-            node,
-            node_input,
+        // Put the sub-agent's events on "<agent>@<function_call_id>", so the calling agent's
+        // contents builder can tell them apart from a workflow node's branch (Go ab78c5ae). Only
+        // the branch carries the id: the run id stays on the scheduler's counter, so a call id the
+        // model reuses still runs the sub-agent, as in adk-python. Without a call id: Go
+        // WithUseSubBranch().
+        let call_id = ctx.function_call_id();
+        let opts = if call_id.is_empty() {
             RunNodeOptions {
                 use_sub_branch: true,
                 ..Default::default()
-            },
-        )
-        .await
-        .map_err(|e| {
+            }
+        } else {
+            let mut branch = format!("{}@{call_id}", self.agent.name());
+            let base = ctx.branch();
+            if !base.is_empty() {
+                branch = format!("{base}.{branch}");
+            }
+            RunNodeOptions {
+                override_branch: Some(branch),
+                ..Default::default()
+            }
+        };
+        let result = run_node(&ctx, node, node_input, opts).await.map_err(|e| {
             ToolError::Execution(Box::new(ChainedError {
                 message: format!("failed to run agent node: {e}"),
                 source: e,

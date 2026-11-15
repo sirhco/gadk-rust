@@ -522,7 +522,6 @@ async fn test_parallel_agent_state_sync() {
 /// keeps only events whose scope matches exactly. A branch that ran unscoped would therefore drop
 /// its own earlier turns from its prompt.
 #[tokio::test]
-#[ignore = "8a bug: parallel agent branches run with an empty isolation scope instead of the parent's (Go #2054 keeps it)"]
 async fn test_parallel_agent_propagates_isolation_scope() {
     const SCOPE: &str = "scope-1";
     let got_scopes: Arc<Mutex<HashMap<String, String>>> = Arc::default();
@@ -594,7 +593,6 @@ async fn test_parallel_agent_propagates_isolation_scope() {
 /// The user-visible effect: an LLM branch of a scoped parallel agent must see its own earlier,
 /// scoped turn in the prompt it sends to the model.
 #[tokio::test]
-#[ignore = "8a bug: parallel agent branches run with an empty isolation scope, so a scoped branch's own earlier turn is filtered out of its prompt (Go #2054)"]
 async fn test_parallel_agent_scoped_branch_sees_its_own_history() {
     const SCOPE: &str = "scope-1";
     let mock = MockModel::from_contents(vec![Content::from_text("done", ROLE_MODEL)]);

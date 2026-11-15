@@ -84,13 +84,16 @@ impl FinishTaskTool {
         let (wrapped_schema, wrapper_key) = if is_object_schema(&user_schema) {
             (user_schema.clone(), String::new())
         } else {
+            // The unwrapped value becomes the task's output, and a null output reads as "the task
+            // did not finish", so the delegation would never close. Declare and validate the
+            // result as non-nullable (Go bec16021); the agent's own output schema keeps the
+            // nullable the user set.
+            let mut result = user_schema.clone();
+            result.nullable = None;
             (
                 Schema {
                     r#type: Some(Type::Object),
-                    properties: BTreeMap::from([(
-                        DEFAULT_WRAPPER_KEY.to_string(),
-                        user_schema.clone(),
-                    )]),
+                    properties: BTreeMap::from([(DEFAULT_WRAPPER_KEY.to_string(), result)]),
                     required: vec![DEFAULT_WRAPPER_KEY.to_string()],
                     ..Default::default()
                 },

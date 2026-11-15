@@ -481,7 +481,6 @@ fn spawn_run(
     })
 }
 
-#[ignore = "8a bug: ParallelWorker yields a partial result instead of ctx.Err() when cancelled while items wait for a slot (Go dc44b8c9)"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_parallel_worker_cancel_during_dispatch() {
     // With maxConcurrency 1, items 2 and 3 are still waiting for a slot when the caller cancels.
@@ -506,7 +505,6 @@ async fn test_parallel_worker_cancel_during_dispatch() {
     assert_eq!(got_output, None, "Run() yielded output, want none");
 }
 
-#[ignore = "8a bug: ParallelWorker yields a result instead of ctx.Err() when cancelled after every item was dispatched and none failed (Go dc44b8c9)"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_parallel_worker_cancel_after_dispatch() {
     // Every item is running when the caller cancels, and each one then returns no output and no
@@ -591,7 +589,6 @@ async fn test_parallel_worker_failure_before_cancel_is_returned() {
     );
 }
 
-#[ignore = "8a bug: a timed-out ParallelWorker yields a partial result instead of ctx.Err() (Go dc44b8c9)"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_parallel_worker_timeout_during_dispatch_in_workflow() {
     // The node timeout cancels the ParallelWorker while the workflow's own context stays live, so

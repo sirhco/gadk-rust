@@ -448,7 +448,7 @@ async fn test_prepare_llm_agent_input() {
 
 // parity: adapted: the "nil event is no-op" subtest is dropped (&mut Event is not nullable)
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "8a bug: process_llm_agent_output marks a parsed output_schema reply MessageAsOutput (Go #2291 marks only an unparsed or null reply)"]
+#[ignore = "8a bug: process_llm_agent_output (llm/node_wrapper.rs, not owned by the D2b fix task) marks a parsed output_schema reply MessageAsOutput (Go #2291 marks only an unparsed or null reply)"]
 async fn test_process_llm_agent_output() {
     let x = make_llm_agent("x", Mode::Unset, |_| {});
 
@@ -1094,7 +1094,6 @@ impl Llm for CountingLlm {
 /// function response. finish_task rejects the null and the model retries with a value, which
 /// closes the delegation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "8a bug: finish_task accepts a null result for a nullable non-object output_schema, so the task never finishes and the delegation never closes (Go #1741)"]
 async fn test_task_agent_nullable_result_closes_delegation() {
     let task_llm = Arc::new(CountingLlm {
         inner: ScriptedLlm::new(vec![

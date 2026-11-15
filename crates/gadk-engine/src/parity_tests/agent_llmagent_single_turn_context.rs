@@ -70,7 +70,7 @@ fn chat_coordinator(model: Arc<MockModel>, translator: Arc<dyn Agent>) -> Arc<dy
 /// function response. The sub-agent's own events live on the tool's sub-branch and must not come
 /// back in later turns.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "8a bug: a single_turn sub-agent runs on a counter branch (translator@1) and its transcript reaches the coordinator's later turns (Go #2128 keys the sub-branch by call id and keeps it out)"]
+#[ignore = "8a bug: the contents processor (llm/processors/contents.rs, not owned by the D2b fix task) does not skip a tool sub-branch event (Go ab78c5ae isToolSubBranchEvent)"]
 async fn test_single_turn_sub_agent_transcript_stays_out_of_coordinator_context() {
     let cases = [
         ("branch keyed by call id", "fc1", "translator@fc1"),

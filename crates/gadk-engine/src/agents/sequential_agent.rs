@@ -249,7 +249,8 @@ impl LiveAgent for SequentialLive {
     /// The returned stream runs each sub-agent's live session in turn; the returned session
     /// forwards `send` to the active one. A sub-agent that is not live-capable ends the stream
     /// with `sub-agent <name> does not support Live Run` when its turn comes, after the earlier
-    /// sub-agents have run (Go-parity: Go checks lazily, per sub-agent).
+    /// sub-agents have run (Go-parity: Go checks lazily, per sub-agent). A sub-agent's error is
+    /// forwarded and ends the sequence, closing that sub-agent's live session, as in Run.
     async fn run_live(
         &self,
         ctx: InvocationContext,
@@ -298,7 +299,14 @@ fn sequential_live_stream(
             // Dropping the stream here closes the sub-session from a spawned task.
             let guard = CloseOnDrop(Some(sub_sess));
             while let Some(item) = inner.next().await {
+                // A failed sub-agent ends the sequence, as in Run (Go 82b64f45): its live session
+                // is closed and no later sub-agent starts.
+                let failed = item.is_err();
                 yield item;
+                if failed {
+                    guard.close().await;
+                    return;
+                }
             }
             guard.close().await;
         }
