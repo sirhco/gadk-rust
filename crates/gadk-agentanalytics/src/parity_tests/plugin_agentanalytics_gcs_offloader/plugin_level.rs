@@ -769,6 +769,7 @@ async fn test_gcs_offloading_caller_changes_its_messages_while_rows_are_written(
     before_model(&tp, &mc, req.clone()).await;
     (tp.plugin.before_tool_callback().unwrap())(mc.ctx.clone(), fake_tool("lookup"), args.clone())
         .await
+        .1
         .unwrap_or_else(|e| panic!("callback error: {e}"));
 
     // The callbacks have returned, so the caller is free to change its messages. Its changes

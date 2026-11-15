@@ -161,7 +161,7 @@ pub(crate) fn callbacks_config(name: &str, plugin: &Arc<AnalyticsPlugin>) -> Plu
         move |ctx: Context, t: Arc<dyn Tool>, args: Map<String, Value>| {
             let cctx = CallbackCtx::from_context(&ctx);
             p.before_tool(&cctx, &t, &args);
-            async { Ok(None) }.boxed()
+            async move { (args, Ok(None)) }.boxed()
         },
     );
     let p = Arc::clone(plugin);

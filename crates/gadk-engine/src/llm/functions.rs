@@ -48,7 +48,9 @@ use crate::{
         },
         merged_tool_calls_span,
     },
-    tool::utils::{function_calls, function_responses, generate_function_call_id},
+    tool::utils::{
+        function_calls, function_responses, generate_function_call_id, model_error_text,
+    },
     workflow::route::go_quote,
 };
 
@@ -422,7 +424,7 @@ async fn run_streaming(
             Ok(c) => out.push_str(&c),
             Err(e) => {
                 let e = wrap_confirmation_error(tool.name(), e);
-                return error_map(&model_error_text(tool.name(), &e));
+                return error_map(&model_error_text(tool.name(), &e).0);
             }
         }
     }
@@ -600,26 +602,32 @@ async fn run_on_tool_error_callbacks(
 /// Port of base_flow.go:1544 `(*Flow).callTool`. Callback errors (`AgentError`) become
 /// `ToolError` so a single "current error" flows through the on-error and after callbacks, as
 /// Go's untyped `error` does.
+///
+/// `args` is the call's own copy of the model's arguments (Go e0cbfd30 `cloneArgs`; the caller
+/// passes a clone, so the function call event keeps the model's arguments). The before-tool
+/// callbacks (plugins, then the agent's) hand it back possibly edited, and the tool, the
+/// on-tool-error and the after-tool callbacks get the edited arguments.
 pub(crate) async fn call_tool(
     cbs: &ToolCallbacks,
     tool_ctx: Context,
     tool: Arc<dyn Tool>,
-    args: Map<String, Value>,
+    mut args: Map<String, Value>,
 ) -> Option<Map<String, Value>> {
     let pm = tool_ctx.plugin_manager();
     let mut response: Option<Map<String, Value>> = None;
     let mut err: Option<Arc<ToolError>> = None;
     if let Some(pm) = &pm {
-        match pm
-            .run_before_tool(tool_ctx.clone(), tool.clone(), args.clone())
-            .await
-        {
+        let (a, res) = pm
+            .run_before_tool(tool_ctx.clone(), tool.clone(), args)
+            .await;
+        args = a;
+        match res {
             Ok(r) => response = r,
             Err(e) => err = Some(to_tool_error(e)),
         }
     }
     if response.is_none() && err.is_none() {
-        (response, err) = invoke_before_tool_callbacks(cbs, &tool_ctx, &tool, &args).await;
+        (args, response, err) = invoke_before_tool_callbacks(cbs, &tool_ctx, &tool, args).await;
     }
     if response.is_none()
         && err.is_none()
@@ -685,52 +693,9 @@ pub(crate) async fn call_tool(
     }
 
     match err {
-        Some(e) => Some(error_map(&model_error_text(tool.name(), &e))),
+        Some(e) => Some(error_map(&model_error_text(tool.name(), &e).0)),
         None => response,
     }
-}
-
-/// Port of Go toolinternal.ModelErrorText (e83ab5b0): the text a tool error reaches the model,
-/// the session and REST clients as. A tool panic ([`ToolError::Panic`], found anywhere in the
-/// error's chain, also behind a callback that wrapped it) becomes a generic message, so the
-/// panic value stays out of the function response; callbacks still get the full error. Any
-/// other error keeps its text.
-pub(crate) fn model_error_text(tool_name: &str, err: &ToolError) -> String {
-    if is_tool_panic(err) {
-        return format!("Invoking `{tool_name}()` failed with an internal error.");
-    }
-    err.to_string()
-}
-
-/// Go `errors.AsType[*toolinternal.PanicError](err)`: walks the chain, stepping into the
-/// wrappers whose inner error is not their `source()` (a transparent [`ToolError::Execution`],
-/// [`AgentError::Other`] / [`AgentError::Workflow`], and [`SharedToolError`]).
-fn is_tool_panic(err: &ToolError) -> bool {
-    let mut cur: Option<&(dyn std::error::Error + 'static)> = Some(err);
-    while let Some(e) = cur {
-        if let Some(t) = e.downcast_ref::<ToolError>() {
-            match t {
-                ToolError::Panic(_) => return true,
-                ToolError::Execution(inner) => {
-                    cur = Some(&**inner);
-                    continue;
-                }
-                _ => {}
-            }
-        }
-        if let Some(AgentError::Other(inner) | AgentError::Workflow(inner)) =
-            e.downcast_ref::<AgentError>()
-        {
-            cur = Some(&**inner);
-            continue;
-        }
-        if let Some(shared) = e.downcast_ref::<SharedToolError>() {
-            cur = Some(&*shared.0);
-            continue;
-        }
-        cur = e.source();
-    }
-    false
 }
 
 /// Go `fmt.Errorf("error tool %q %w", name, tool.ErrConfirmation{Required,Rejected})`
@@ -784,21 +749,28 @@ fn to_tool_error(e: AgentError) -> Arc<ToolError> {
     }
 }
 
-/// Port of base_flow.go:1591 invokeBeforeToolCallbacks.
+/// Port of base_flow.go:1591 invokeBeforeToolCallbacks: the arguments are threaded through
+/// every callback (Go's one shared copy, e0cbfd30) and always handed back.
 async fn invoke_before_tool_callbacks(
     cbs: &ToolCallbacks,
     tool_ctx: &Context,
     tool: &Arc<dyn Tool>,
-    args: &Map<String, Value>,
-) -> (Option<Map<String, Value>>, Option<Arc<ToolError>>) {
+    mut args: Map<String, Value>,
+) -> (
+    Map<String, Value>,
+    Option<Map<String, Value>>,
+    Option<Arc<ToolError>>,
+) {
     for cb in &cbs.before {
-        match cb(tool_ctx.clone(), tool.clone(), args.clone()).await {
-            Err(e) => return (None, Some(to_tool_error(e))),
-            Ok(Some(r)) => return (Some(r), None),
+        let (a, res) = cb(tool_ctx.clone(), tool.clone(), args).await;
+        args = a;
+        match res {
+            Err(e) => return (args, None, Some(to_tool_error(e))),
+            Ok(Some(r)) => return (args, Some(r), None),
             Ok(None) => {}
         }
     }
-    (None, None)
+    (args, None, None)
 }
 
 /// Port of base_flow.go:1606 invokeAfterToolCallbacks: with no callback answering, the inputs
@@ -1593,9 +1565,14 @@ mod tests {
         let seen: Arc<Mutex<Option<Arc<ToolError>>>> = Arc::new(Mutex::new(None));
         let before: BeforeToolCallback = {
             let original = original.clone();
-            Arc::new(move |_, _, _| {
+            Arc::new(move |_, _, args| {
                 let original = original.clone();
-                Box::pin(async move { Err(AgentError::Other(Box::new(SharedToolError(original)))) })
+                Box::pin(async move {
+                    (
+                        args,
+                        Err(AgentError::Other(Box::new(SharedToolError(original)))),
+                    )
+                })
             })
         };
         let after: AfterToolCallback = {
@@ -1617,6 +1594,111 @@ mod tests {
         assert!(
             Arc::ptr_eq(&seen, &original),
             "after-tool got a new Arc: {seen:?}"
+        );
+    }
+
+    /// Go e0cbfd30: the plugin and agent before-tool callbacks share one copy of the arguments,
+    /// so a plugin's edit reaches the agent's callback, and both edits reach the tool, the
+    /// on-tool-error and the after-tool callbacks.
+    #[tokio::test]
+    async fn before_tool_arg_edits_reach_the_tool_and_later_callbacks() {
+        use std::sync::Mutex;
+
+        use gadk_agent::{OnToolErrorCallback, Plugin, PluginConfig, PluginManager};
+
+        struct ArgsTool(Mutex<Option<Value>>);
+        impl Tool for ArgsTool {
+            fn name(&self) -> &str {
+                "t"
+            }
+            fn description(&self) -> &str {
+                "records its args and fails"
+            }
+            fn as_runnable(&self) -> Option<&dyn RunnableTool> {
+                Some(self)
+            }
+            fn as_any(&self) -> &dyn Any {
+                self
+            }
+        }
+        #[async_trait]
+        impl RunnableTool for ArgsTool {
+            async fn run(&self, _: Context, args: Value) -> Result<Map<String, Value>, ToolError> {
+                *self.0.lock().unwrap() = Some(args);
+                Err(ToolError::InvalidArgument("boom".into()))
+            }
+        }
+
+        let plugin_before: BeforeToolCallback = Arc::new(|_, _, mut args| {
+            args.insert("p".into(), json!(1));
+            Box::pin(async move { (args, Ok(None)) })
+        });
+        let pm = PluginManager::new(
+            vec![Plugin::new(PluginConfig {
+                name: "edit".into(),
+                before_tool_callback: Some(plugin_before),
+                ..Default::default()
+            })],
+            std::time::Duration::from_secs(1),
+        )
+        .unwrap();
+        let agent_seen: Arc<Mutex<Option<Map<String, Value>>>> = Arc::default();
+        let error_seen: Arc<Mutex<Option<Map<String, Value>>>> = Arc::default();
+        let after_seen: Arc<Mutex<Option<Map<String, Value>>>> = Arc::default();
+        let before: BeforeToolCallback = {
+            let seen = agent_seen.clone();
+            Arc::new(move |_, _, mut args| {
+                *seen.lock().unwrap() = Some(args.clone());
+                args.insert("a".into(), json!(2));
+                Box::pin(async move { (args, Ok(None)) })
+            })
+        };
+        let on_error: OnToolErrorCallback = {
+            let seen = error_seen.clone();
+            Arc::new(move |_, _, args, _| {
+                *seen.lock().unwrap() = Some(args);
+                Box::pin(async { Ok(None) })
+            })
+        };
+        let after: AfterToolCallback = {
+            let seen = after_seen.clone();
+            Arc::new(move |_, _, args, _, _| {
+                *seen.lock().unwrap() = Some(args);
+                Box::pin(async { Ok(None) })
+            })
+        };
+        let cbs = ToolCallbacks {
+            before: vec![before],
+            after: vec![after],
+            on_error: vec![on_error],
+        };
+        let tool = Arc::new(ArgsTool(Mutex::new(None)));
+        let ictx = InvocationContext::builder()
+            .agent(
+                agent::new(AgentConfig {
+                    name: "a".into(),
+                    ..Default::default()
+                })
+                .unwrap(),
+            )
+            .plugin_manager(Arc::new(pm))
+            .build_invocation();
+        let model_args = Map::from_iter([("m".to_owned(), json!(0))]);
+        let resp = call_tool(&cbs, ictx.into_context(), tool.clone(), model_args.clone()).await;
+        assert_eq!(resp, Some(error_map("boom")));
+        assert_eq!(
+            agent_seen.lock().unwrap().clone(),
+            json!({"m": 0, "p": 1}).as_object().cloned()
+        );
+        let edited = json!({"m": 0, "p": 1, "a": 2});
+        assert_eq!(tool.0.lock().unwrap().clone(), Some(edited.clone()));
+        assert_eq!(
+            error_seen.lock().unwrap().clone(),
+            edited.as_object().cloned()
+        );
+        assert_eq!(
+            after_seen.lock().unwrap().clone(),
+            edited.as_object().cloned()
         );
     }
 }

@@ -147,6 +147,7 @@ impl Cb<'_> {
     async fn before_tool(&self, ctx: Context, t: &Arc<dyn Tool>, a: Map<String, Value>) {
         self.0.before_tool_callback().unwrap()(ctx, t.clone(), a)
             .await
+            .1
             .unwrap();
     }
     async fn after_tool(
@@ -269,7 +270,7 @@ async fn test_trace_manager_concurrent_sibling_tools_race() {
         let (ctx, t) = (run.tool(&format!("call-{i}")), lookup_tool.clone());
         let call = format!("call-{i}");
         handles.push(tokio::spawn(async move {
-            f(ctx, t, args(json!({"call": call}))).await.unwrap();
+            f(ctx, t, args(json!({"call": call}))).await.1.unwrap();
         }));
     }
     for h in handles.drain(..) {

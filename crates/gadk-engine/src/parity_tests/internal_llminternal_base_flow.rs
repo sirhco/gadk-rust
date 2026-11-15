@@ -96,9 +96,9 @@ impl RunnableTool for MockFunctionTool {
 }
 
 fn before(r: Result<Option<Value>, &'static str>) -> BeforeToolCallback {
-    Arc::new(move |_, _, _| {
+    Arc::new(move |_, _, args| {
         let r = r.clone();
-        Box::pin(async move { r.map(|o| o.map(obj)).map_err(AgentError::other) })
+        Box::pin(async move { (args, r.map(|o| o.map(obj)).map_err(AgentError::other)) })
     })
 }
 
@@ -508,7 +508,6 @@ impl RunnableTool for EchoTool {
 type ArgEdit = fn(&mut Map<String, Value>);
 
 #[tokio::test]
-#[ignore = "8a bug: a before-tool callback's argument edits do not reach the tool (gadk BeforeToolCallback gets an owned copy and has no way to hand edited args back; Go e0cbfd30 runs the tool with the callbacks' copy)"]
 async fn test_handle_function_calls_callback_arg_edits_do_not_reach_the_call_event() {
     let set_input: ArgEdit = |args| {
         args.insert("input_str".into(), json!("modified_input"));
@@ -516,7 +515,7 @@ async fn test_handle_function_calls_callback_arg_edits_do_not_reach_the_call_eve
     let before_cb = |edit: ArgEdit| -> BeforeToolCallback {
         Arc::new(move |_, _, mut args| {
             edit(&mut args);
-            Box::pin(async { Ok(None) })
+            Box::pin(async move { (args, Ok(None)) })
         })
     };
     let echo_args: OnToolErrorCallback = Arc::new(move |_, _, mut args, _| {

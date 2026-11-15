@@ -84,9 +84,9 @@ enum ToolBehavior {
 }
 
 fn before_tool(out: Result<Option<Value>, &'static str>) -> BeforeToolCallback {
-    Arc::new(move |_ctx, _tool, _args| {
+    Arc::new(move |_ctx, _tool, args| {
         let out = out.clone();
-        Box::pin(async move { out.map(|o| o.map(obj)).map_err(AgentError::other) })
+        Box::pin(async move { (args, out.map(|o| o.map(obj)).map_err(AgentError::other)) })
     })
 }
 
@@ -404,9 +404,9 @@ async fn test_call_tool() {
                 oe.store(true, SeqCst);
                 Box::pin(async { Ok(None) })
             })],
-            before_tool_callbacks: vec![Arc::new(move |_c, _t, _a| {
+            before_tool_callbacks: vec![Arc::new(move |_c, _t, a| {
                 bc.store(true, SeqCst);
-                Box::pin(async { Ok(None) })
+                Box::pin(async move { (a, Ok(None)) })
             })],
             after_tool_callbacks: vec![Arc::new(move |_c, _t, _a, _r, _e| {
                 ac.store(true, SeqCst);

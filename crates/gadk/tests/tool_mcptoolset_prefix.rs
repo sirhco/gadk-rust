@@ -112,9 +112,9 @@ async fn test_mcp_tool_name_prefix_runner() {
     ]);
     let callback_names: Arc<Mutex<Vec<String>>> = Arc::default();
     let names = callback_names.clone();
-    let before_tool: BeforeToolCallback = Arc::new(move |_ctx, called, _args| {
+    let before_tool: BeforeToolCallback = Arc::new(move |_ctx, called, args| {
         names.lock().unwrap().push(called.name().to_string());
-        Box::pin(async { Ok(None) })
+        Box::pin(async move { (args, Ok(None)) })
     });
     let agent = llm_agent::new(LlmAgentConfig {
         name: "search_agent".into(),

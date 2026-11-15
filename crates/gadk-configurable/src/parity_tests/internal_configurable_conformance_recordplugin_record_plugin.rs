@@ -212,6 +212,7 @@ async fn test_record_plugin() {
             tool_args.clone(),
         )
         .await
+        .1
         .unwrap_or_else(|e| panic!("beforeTool failed: {e}"));
 
         // 5. afterTool
