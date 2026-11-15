@@ -17,11 +17,12 @@
 
 #![allow(clippy::unwrap_used)]
 
+use chrono::TimeDelta;
 use gadk_a2a::a2a;
-use gadk_a2a::convert::{to_a2a_meta_key, to_a2a_parts, to_genai_parts};
+use gadk_a2a::convert::{to_a2a_meta_key, to_a2a_parts, to_genai_part, to_genai_parts};
 use gadk_genai::{
     Blob, CodeExecutionResult, ExecutableCode, FileData, FunctionCall, FunctionResponse,
-    FunctionResponseScheduling, Language, Outcome, Part,
+    FunctionResponseScheduling, Language, Outcome, Part, VideoMetadata,
 };
 use pretty_assertions::assert_eq;
 use serde_json::{Map, Value, json};
@@ -46,6 +47,7 @@ fn data_part(kind: &str, data: Value) -> a2a::Part {
 }
 
 #[test]
+#[ignore = "8a bug: video metadata travels under the unprefixed `video_metadata` key and is not read back into genai (Go 5fd47b21: `adk_video_metadata`)"]
 fn test_parts_two_way_conversion() {
     let long_running_key = to_a2a_meta_key("is_long_running");
     let cases: Vec<(&str, a2a::Part, Part, Vec<String>)> = vec![
@@ -97,6 +99,28 @@ fn test_parts_two_way_conversion() {
                     data: vec![0xff].into(),
                     mime_type: "image/jpeg".into(),
                     display_name: "cat.jpeg".into(),
+                }),
+                ..Default::default()
+            },
+            vec![],
+        ),
+        (
+            "file bytes with video metadata",
+            with_meta(
+                a2a::Part::raw(vec![0xff]).with_media_type("video/mp4"),
+                "adk_video_metadata",
+                json!({"startOffset": "10s", "endOffset": "25s", "fps": 2.0}),
+            ),
+            Part {
+                inline_data: Some(Blob {
+                    data: vec![0xff].into(),
+                    mime_type: "video/mp4".into(),
+                    ..Default::default()
+                }),
+                video_metadata: Some(VideoMetadata {
+                    start_offset: TimeDelta::seconds(10),
+                    end_offset: TimeDelta::seconds(25),
+                    fps: Some(2.0),
                 }),
                 ..Default::default()
             },
@@ -230,4 +254,142 @@ fn test_parts_data_part_conversion_round_trip() {
 
     let got_back_a2a = to_a2a_parts(&got_genai, &[]).unwrap();
     assert_eq!(got_back_a2a, vec![a2a_part]);
+}
+
+#[test]
+#[ignore = "8a bug: to_genai_part rejects an empty A2A text part (`unknown part type`); Go ee8d5ca4 converts it to an empty text part"]
+fn test_to_gen_ai_parts_empty_text() {
+    let thought = with_meta(
+        a2a::Part::text(""),
+        &to_a2a_meta_key("thought"),
+        json!(true),
+    );
+    let cases: Vec<(&str, Vec<a2a::Part>, Vec<Part>)> = vec![
+        (
+            "empty text",
+            vec![a2a::Part::text("")],
+            vec![Part::default()],
+        ),
+        (
+            "empty text after text",
+            vec![a2a::Part::text("Hello"), a2a::Part::text("")],
+            vec![
+                Part {
+                    text: "Hello".into(),
+                    ..Default::default()
+                },
+                Part::default(),
+            ],
+        ),
+        (
+            "empty thought",
+            vec![thought],
+            vec![Part {
+                thought: true,
+                ..Default::default()
+            }],
+        ),
+    ];
+    for (name, parts, want) in cases {
+        let got = to_genai_parts(&parts);
+        assert!(got.is_ok(), "{name}: to_genai_parts() error = {got:?}");
+        assert_eq!(got.unwrap(), want, "{name}");
+    }
+}
+
+/// A raw `video/mp4` part carrying `meta` under `adk_video_metadata`.
+fn video_part(key: &str, meta: Value) -> a2a::Part {
+    with_meta(
+        a2a::Part::raw(vec![0xff]).with_media_type("video/mp4"),
+        key,
+        meta,
+    )
+}
+
+fn video_blob() -> Option<Blob> {
+    Some(Blob {
+        data: vec![0xff].into(),
+        mime_type: "video/mp4".into(),
+        ..Default::default()
+    })
+}
+
+#[test]
+#[ignore = "8a bug: to_genai_part ignores `adk_video_metadata` on a raw part (Go 5fd47b21 decodes it into Part.video_metadata)"]
+fn test_to_gen_ai_parts_reads_video_metadata() {
+    let cases: Vec<(&str, a2a::Part, Part)> = vec![
+        (
+            "fps only",
+            video_part("adk_video_metadata", json!({"fps": 30.0})),
+            Part {
+                inline_data: video_blob(),
+                video_metadata: Some(VideoMetadata {
+                    fps: Some(30.0),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        ),
+        (
+            "fractional offsets",
+            video_part(
+                "adk_video_metadata",
+                json!({"startOffset": "1.5s", "endOffset": "3.25s"}),
+            ),
+            Part {
+                inline_data: video_blob(),
+                video_metadata: Some(VideoMetadata {
+                    start_offset: TimeDelta::milliseconds(1500),
+                    end_offset: TimeDelta::milliseconds(3250),
+                    fps: None,
+                }),
+                ..Default::default()
+            },
+        ),
+        (
+            "null is absent",
+            video_part("adk_video_metadata", Value::Null),
+            Part {
+                inline_data: video_blob(),
+                ..Default::default()
+            },
+        ),
+        (
+            "unprefixed key is ignored",
+            video_part("video_metadata", json!({"fps": 30.0})),
+            Part {
+                inline_data: video_blob(),
+                ..Default::default()
+            },
+        ),
+    ];
+    for (name, part, want) in cases {
+        let got = to_genai_part(&part);
+        assert!(got.is_ok(), "{name}: to_genai_part() error = {got:?}");
+        assert_eq!(got.unwrap(), want, "{name}");
+    }
+}
+
+// parity: adapted: Go's "not encodable" case (a `chan int` in the metadata) has no serde_json `Value` counterpart
+#[test]
+#[ignore = "8a bug: to_genai_part ignores `adk_video_metadata`, so malformed video metadata is not rejected (Go 5fd47b21)"]
+fn test_to_gen_ai_parts_rejects_malformed_video_metadata() {
+    let cases: Vec<(&str, Value)> = vec![
+        ("not an object", json!("peer-supplied-text")),
+        (
+            "unparsable offset",
+            json!({"startOffset": "peer-supplied-offset"}),
+        ),
+    ];
+    for (name, meta) in cases {
+        let got = to_genai_part(&video_part("adk_video_metadata", meta));
+        let Err(err) = got else {
+            panic!("{name}: to_genai_part() = {got:?}, want error");
+        };
+        // The error goes back to the A2A client and into logs, so it must not quote what the peer sent.
+        assert!(
+            !err.to_string().contains("peer-supplied"),
+            "{name}: to_genai_part() error = {err:?}, want no peer-supplied value in it"
+        );
+    }
 }

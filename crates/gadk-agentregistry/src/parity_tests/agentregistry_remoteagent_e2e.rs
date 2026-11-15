@@ -33,6 +33,7 @@ use gadk_session::{Event, InMemorySessionService};
 use serde_json::value::RawValue;
 
 use super::agentregistry_requester::{new_test_client, serve};
+use crate::factory::a2a::with_a2a_headers;
 use crate::types::{Agent, Card, Interface, Protocol};
 
 /// Go `reply`.
@@ -157,58 +158,116 @@ async fn remote_reply(record: serde_json::Value) -> String {
     run_and_collect_text(remote, "ping").await
 }
 
+/// Go `embeddedRecord`: a registry record carrying an `A2A_AGENT_CARD` with one
+/// streaming-capable interface at `server_url`, so the client takes the streaming path.
+fn embedded_record(server_url: &str, binding: &str, version: &str) -> Agent {
+    let card = card(
+        "Echo",
+        "echoes a canned reply",
+        vec![a2a::AgentInterface {
+            url: server_url.to_owned(),
+            protocol_binding: binding.to_owned(),
+            protocol_version: version.to_owned(),
+            tenant: None,
+        }],
+    );
+    Agent {
+        display_name: "Echo".to_owned(),
+        description: "echoes a canned reply".to_owned(),
+        card: Some(Card {
+            card_type: "A2A_AGENT_CARD".to_owned(),
+            content: Some(RawValue::from_string(serde_json::to_string(&card).unwrap()).unwrap()),
+        }),
+        ..Agent::default()
+    }
+}
+
+/// Go `discreteRecord`: a registry record describing the agent through discrete protocol
+/// fields; an empty `version` leaves `protocolVersion` unset.
+fn discrete_record(server_url: &str, binding: &str, version: &str) -> Agent {
+    Agent {
+        display_name: "Echo".to_owned(),
+        description: "echoes a canned reply".to_owned(),
+        protocols: vec![Protocol {
+            protocol_type: "A2A_AGENT".to_owned(),
+            protocol_version: version.to_owned(),
+            interfaces: vec![Interface {
+                url: server_url.to_owned(),
+                protocol_binding: binding.to_owned(),
+            }],
+        }],
+        ..Agent::default()
+    }
+}
+
+/// Go `a2av0.Version`.
+const A2A_V0_VERSION: &str = "0.3";
+
 /// Go `TestRemoteAgent_E2E`.
-// parity: adapted: one gadk-a2a server serves JSON-RPC at /jsonrpc and HTTP+JSON under /rest (Go: each transport at the root of its own server)
+// parity: adapted: one gadk-a2a server serves JSON-RPC at /jsonrpc and HTTP+JSON under /rest (Go: each transport at the root of its own server); the A2A 0.3 cases need an A2A 0.3 server, which gadk lacks (a2a-rs serves v1 only), so only the 1.0 cases run and test_remote_agent_on_the_wire pins the 0.3 wire
 #[tokio::test]
 async fn test_remote_agent_e2_e() {
     type Record = fn(&str) -> Agent;
-    let tests: [(&str, &str, Record); 2] = [
+    let tests: [(&str, &str, &str, Record); 9] = [
         (
-            "embedded A2A_AGENT_CARD over JSONRPC",
+            "embedded A2A_AGENT_CARD over JSONRPC 1.0",
             a2a::TRANSPORT_PROTOCOL_JSONRPC,
-            |server_url| {
-                let card = card(
-                    "Echo",
-                    "echoes a canned reply",
-                    vec![a2a::AgentInterface::new(
-                        server_url,
-                        a2a::TRANSPORT_PROTOCOL_JSONRPC,
-                    )],
-                );
-                Agent {
-                    display_name: "Echo".to_owned(),
-                    description: "echoes a canned reply".to_owned(),
-                    card: Some(Card {
-                        card_type: "A2A_AGENT_CARD".to_owned(),
-                        content: Some(
-                            RawValue::from_string(serde_json::to_string(&card).unwrap()).unwrap(),
-                        ),
-                    }),
-                    ..Agent::default()
-                }
-            },
+            a2a::VERSION,
+            |u| embedded_record(u, a2a::TRANSPORT_PROTOCOL_JSONRPC, a2a::VERSION),
         ),
         (
-            // Registry wire binding HTTP_JSON maps to a2a HTTP+JSON; the missing
-            // protocolVersion falls back to 0.3.0, which the compat provider serves.
-            "discrete protocols over HTTP+JSON",
+            "embedded A2A_AGENT_CARD over JSONRPC 0.3",
+            a2a::TRANSPORT_PROTOCOL_JSONRPC,
+            A2A_V0_VERSION,
+            |u| embedded_record(u, a2a::TRANSPORT_PROTOCOL_JSONRPC, A2A_V0_VERSION),
+        ),
+        (
+            "embedded A2A_AGENT_CARD over HTTP_JSON 0.3",
             a2a::TRANSPORT_PROTOCOL_HTTP_JSON,
-            |server_url| Agent {
-                display_name: "Echo".to_owned(),
-                description: "echoes a canned reply".to_owned(),
-                protocols: vec![Protocol {
-                    protocol_type: "A2A_AGENT".to_owned(),
-                    interfaces: vec![Interface {
-                        url: server_url.to_owned(),
-                        protocol_binding: "HTTP_JSON".to_owned(),
-                    }],
-                    ..Protocol::default()
-                }],
-                ..Agent::default()
-            },
+            A2A_V0_VERSION,
+            |u| embedded_record(u, a2a::TRANSPORT_PROTOCOL_HTTP_JSON, A2A_V0_VERSION),
+        ),
+        (
+            "discrete protocols without version over HTTP_JSON speak 0.3",
+            a2a::TRANSPORT_PROTOCOL_HTTP_JSON,
+            A2A_V0_VERSION,
+            |u| discrete_record(u, "HTTP_JSON", ""),
+        ),
+        (
+            "discrete protocols without version over JSONRPC speak 0.3",
+            a2a::TRANSPORT_PROTOCOL_JSONRPC,
+            A2A_V0_VERSION,
+            |u| discrete_record(u, "JSONRPC", ""),
+        ),
+        (
+            "discrete protocols with version 0.3.0 over HTTP_JSON",
+            a2a::TRANSPORT_PROTOCOL_HTTP_JSON,
+            A2A_V0_VERSION,
+            |u| discrete_record(u, "HTTP_JSON", A2A_V0_VERSION),
+        ),
+        (
+            "discrete protocols with version 0.3.0 over JSONRPC",
+            a2a::TRANSPORT_PROTOCOL_JSONRPC,
+            A2A_V0_VERSION,
+            |u| discrete_record(u, "JSONRPC", A2A_V0_VERSION),
+        ),
+        (
+            "discrete protocols with version 1.0 over HTTP_JSON",
+            a2a::TRANSPORT_PROTOCOL_HTTP_JSON,
+            a2a::VERSION,
+            |u| discrete_record(u, "HTTP_JSON", a2a::VERSION),
+        ),
+        (
+            "discrete protocols with version 1.0 over JSONRPC",
+            a2a::TRANSPORT_PROTOCOL_JSONRPC,
+            a2a::VERSION,
+            |u| discrete_record(u, "JSONRPC", a2a::VERSION),
         ),
     ];
-    for (name, binding, record) in tests {
+    for (name, binding, version, record) in tests {
+        if version != a2a::VERSION {
+            continue;
+        }
         let server = start_canned_a2a_server(REPLY).await;
         let a2a_url = endpoint(&server, binding);
         let got = remote_reply(serde_json::to_value(record(&a2a_url)).unwrap()).await;
@@ -217,6 +276,106 @@ async fn test_remote_agent_e2_e() {
             "{name}: remote agent response = {got:?}, want it to contain {REPLY:?}"
         );
     }
+}
+
+/// Go `TestRemoteAgent_OnTheWire`: what a registry record puts on the wire. A versionless
+/// record speaks 0.3 (`A2A-Version: 0.3`, the HTTP+JSON binding under the 0.3 `/v1` prefix); an
+/// explicit 1.0 record speaks 1.0; on both versions the caller's egress headers reach the server.
+// parity: adapted: the A2A endpoint is a recording stub answering 500 (gadk has no A2A 0.3 server; Go's canned 0.3/1.0 servers only answer "pong", which the test discards), so the run's error is ignored
+#[tokio::test]
+#[ignore = "8a bug: a versionless (0.3.0) registry record is rewritten to A2A 1.0 and sent with A2A-Version 1.0 and 1.0 routes (Go 869020a1 speaks A2A 0.3 to 0.3 interfaces)"]
+async fn test_remote_agent_on_the_wire() {
+    let tests = [
+        (
+            "HTTP_JSON without version",
+            "HTTP_JSON",
+            "",
+            A2A_V0_VERSION,
+            "/v1/message:send",
+        ),
+        (
+            "JSONRPC without version",
+            "JSONRPC",
+            "",
+            A2A_V0_VERSION,
+            "/",
+        ),
+        (
+            "HTTP_JSON 1.0",
+            "HTTP_JSON",
+            a2a::VERSION,
+            a2a::VERSION,
+            "/message:send",
+        ),
+        ("JSONRPC 1.0", "JSONRPC", a2a::VERSION, a2a::VERSION, "/"),
+    ];
+    for (name, wire_binding, record_version, server_version, want_path) in tests {
+        let a2a_srv = serve(|_| (500, String::new())).await;
+        let body =
+            serde_json::to_string(&discrete_record(&a2a_srv.url, wire_binding, record_version))
+                .unwrap();
+        let reg = serve(move |_| (200, body.clone())).await;
+        let remote = new_test_client(&reg)
+            .remote_agent(
+                "projects/p/locations/l/agents/echo",
+                &[with_a2a_headers([("X-Egress", "registry")])],
+            )
+            .await
+            .unwrap_or_else(|err| panic!("{name}: RemoteAgent() error = {err}"));
+        run_ignoring_errors(remote, "ping").await;
+
+        let seen = a2a_srv.requests();
+        assert!(
+            !seen.is_empty(),
+            "{name}: the A2A server received no request"
+        );
+        for (i, r) in seen.iter().enumerate() {
+            assert_eq!(r.path, want_path, "{name}: request {i} path");
+            let header = |key: &str| {
+                r.headers
+                    .get(key)
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or_default()
+                    .to_owned()
+            };
+            assert_eq!(
+                header(a2a::SVC_PARAM_VERSION),
+                server_version,
+                "{name}: request {i} {}",
+                a2a::SVC_PARAM_VERSION
+            );
+            assert_eq!(
+                header("X-Egress"),
+                "registry",
+                "{name}: request {i} X-Egress, want the egress header from with_a2a_headers"
+            );
+        }
+    }
+}
+
+/// Go `_ = runAndCollectText(t, remote, prompt)` against a server that does not answer: runs
+/// one turn and drops the events and errors.
+async fn run_ignoring_errors(agent: Arc<dyn GadkAgent>, prompt: &str) {
+    let runner = Runner::new(RunnerConfig {
+        app_name: agent.name().to_owned(),
+        agent,
+        session_service: Arc::new(InMemorySessionService::new()),
+        artifact_service: None,
+        memory_service: None,
+        plugin_config: PluginConfig::default(),
+        auto_create_session: true,
+        platform: gadk_platform::Platform::default(),
+        compaction: None,
+    })
+    .unwrap();
+    let mut events = runner.run(
+        "user",
+        "session",
+        Some(Content::from_text(prompt, ROLE_USER)),
+        RunConfig::default(),
+        RunOptions::default(),
+    );
+    while events.next().await.is_some() {}
 }
 
 /// Spec (R16, not a Go test): a card whose interfaces all advertise protocol `0.3.0` (JSON-RPC

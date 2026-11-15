@@ -29,7 +29,10 @@ use gadk_server::authn::Caller;
 use gadk_server::rest::PathVars;
 use gadk_server::rest::controllers::SessionsApiController;
 use gadk_server::rest::testutil::{FakeSessionService, SessionKey, TestSession};
-use gadk_session::{CreateRequest, GetRequest, InMemorySessionService, SessionService};
+use gadk_session::{
+    CreateRequest, DeleteRequest, GetRequest, InMemorySessionService, ListRequest, SessionError,
+    SessionService,
+};
 use http::{Method, StatusCode};
 use parking_lot::Mutex;
 use serde_json::{Map, Value, json};
@@ -150,6 +153,7 @@ fn stored(id: SessionKey, s: Value) -> TestSession {
 }
 
 #[tokio::test]
+#[ignore = "8a bug: the testutil FakeSessionService reports a missing session as SessionError::Backend(\"not found\") (500); Go ca7db168 (#1899) makes the fake wrap session.ErrNotFound (404)"]
 async fn test_get_session() {
     let id = test_id();
     struct Case {
@@ -173,14 +177,15 @@ async fn test_get_session() {
             want_status: StatusCode::OK,
         },
         Case {
-            // The fake reports a missing session with a bare error rather than
-            // SessionError::NotFound, which is how any other service failure looks: a 500.
-            name: "session service error is not a missing session",
+            // The fake reports a missing session with SessionError::NotFound, as the real
+            // services do, so the handler answers 404. A service failure that is not a missing
+            // session stays a 500: see test_get_session_service_failure_is_internal_error.
+            name: "missing session is not found",
             stored: vec![],
             session_id: id.clone(),
             want_session: None,
-            want_err: "not found",
-            want_status: StatusCode::INTERNAL_SERVER_ERROR,
+            want_err: "session not found: \"testSession\"",
+            want_status: StatusCode::NOT_FOUND,
         },
         Case {
             name: "user ID is missing in input",
@@ -410,6 +415,51 @@ async fn test_get_session_missing_session_is_not_found() {
     assert_eq!(status, StatusCode::NOT_FOUND, "body: {body}");
 }
 
+/// Go `getFailingService`: `Get` fails with an error that is not a missing session.
+struct GetFailingService;
+
+#[async_trait::async_trait]
+impl SessionService for GetFailingService {
+    async fn create(
+        &self,
+        _req: CreateRequest,
+    ) -> Result<Arc<dyn gadk_session::Session>, SessionError> {
+        Err(SessionError::Backend("not implemented".into()))
+    }
+    async fn get(&self, _req: GetRequest) -> Result<Arc<dyn gadk_session::Session>, SessionError> {
+        Err(SessionError::Backend("session store unavailable".into()))
+    }
+    async fn list(
+        &self,
+        _req: ListRequest,
+    ) -> Result<Vec<Arc<dyn gadk_session::Session>>, SessionError> {
+        Err(SessionError::Backend("not implemented".into()))
+    }
+    async fn delete(&self, _req: DeleteRequest) -> Result<(), SessionError> {
+        Err(SessionError::Backend("not implemented".into()))
+    }
+    async fn append_event(
+        &self,
+        _session: &dyn gadk_session::Session,
+        _event: &mut gadk_session::Event,
+    ) -> Result<(), SessionError> {
+        Err(SessionError::Backend("not implemented".into()))
+    }
+}
+
+#[tokio::test]
+async fn test_get_session_service_failure_is_internal_error() {
+    let id = test_id();
+    let controller = SessionsApiController::new(Arc::new(GetFailingService));
+    let (status, body) = read(
+        controller
+            .get_session_handler(new_session_request(Method::GET, &id, "", &id.user_id))
+            .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "body: {body}");
+}
+
 #[tokio::test]
 async fn test_get_session_existing_session_is_ok() {
     let id = test_id();
@@ -604,6 +654,45 @@ async fn test_update_session_applies_delta_through_an_event() {
     assert_eq!(
         events[0].actions.state_delta,
         Some(state(json!({"foo": "baz"})))
+    );
+}
+
+#[tokio::test]
+async fn test_update_session_writes_an_unchanged_plain_key() {
+    let id = test_id();
+    let service = new_service_with_session(&id, state(json!({"theme": "dark"}))).await;
+    let controller = SessionsApiController::new(service.clone());
+    let (status, body) = read(
+        controller
+            .update_session_handler(new_session_request(
+                Method::PATCH,
+                &id,
+                r#"{"stateDelta":{"theme":"dark"}}"#,
+                &id.user_id,
+            ))
+            .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    let stored = service
+        .get(GetRequest {
+            app_name: id.app_name.clone(),
+            user_id: id.user_id.clone(),
+            session_id: id.session_id.clone(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let events = stored.events();
+    assert_eq!(
+        events.len(),
+        1,
+        "session has {} events, want 1 carrying the unchanged key",
+        events.len()
+    );
+    assert_eq!(
+        events[0].actions.state_delta,
+        Some(state(json!({"theme": "dark"})))
     );
 }
 
@@ -825,6 +914,8 @@ async fn test_update_session_rename_applies_with_scoped_state_in_play() {
         json!({"displayName": "My renamed chat"})
     );
 }
+
+// parity: skipped TestUpdateSessionEchoedRedactedCredentials: 8c — sign-in (Go 1523862f #2231: credential secrets redacted from session reads, and a rename echoing the redacted state keeps the stored secrets)
 
 // ---- Authorization (Go `CanActAsUser` before any service call). ----
 

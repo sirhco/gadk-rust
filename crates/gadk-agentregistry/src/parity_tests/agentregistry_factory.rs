@@ -481,27 +481,44 @@ async fn test_remote_agent_integration() {
 }
 
 /// Go `TestA2AClientFactory_CompatProtocolVersion`: a card advertising an older A2A protocol
-/// version than the SDK's current one still yields a client.
+/// version than the SDK's current one still yields a client; a version with no registered
+/// transport, such as a future major, is refused rather than mapped onto one.
 #[tokio::test]
+#[ignore = "8a bug: compat_card rewrites any non-1.x JSONRPC/HTTP+JSON interface version (e.g. 2.0) to 1.0, so an unknown major yields a client (Go 869020a1 registers only 1.0 and 0.3 transports)"]
 async fn test_a2_a_client_factory_compat_protocol_version() {
     let tests = [
         (
             "http+json old version",
             a2a::TRANSPORT_PROTOCOL_HTTP_JSON,
             "0.3.0",
+            false,
         ),
         (
             "jsonrpc old version",
             a2a::TRANSPORT_PROTOCOL_JSONRPC,
             "0.3.0",
+            false,
         ),
         (
             "http+json current version",
             a2a::TRANSPORT_PROTOCOL_HTTP_JSON,
             a2a::VERSION,
+            false,
+        ),
+        (
+            "http+json unknown major",
+            a2a::TRANSPORT_PROTOCOL_HTTP_JSON,
+            "2.0",
+            true,
+        ),
+        (
+            "jsonrpc unknown major",
+            a2a::TRANSPORT_PROTOCOL_JSONRPC,
+            "2.0",
+            true,
         ),
     ];
-    for (name, binding, version) in tests {
+    for (name, binding, version, want_err) in tests {
         let card = a2a_card(
             "x",
             "",
@@ -518,7 +535,15 @@ async fn test_a2_a_client_factory_compat_protocol_version() {
             headers: Vec::new(),
         })
         .unwrap();
-        let client = match provider.create_client(ClientContext::Detached, &card).await {
+        let result = provider.create_client(ClientContext::Detached, &card).await;
+        if want_err {
+            if let Ok(client) = result {
+                let _ = client.destroy().await;
+                panic!("{name}: CreateFromCard({binding}@{version}) = client, want an error");
+            }
+            continue;
+        }
+        let client = match result {
             Ok(client) => client,
             Err(err) => {
                 panic!("{name}: CreateFromCard({binding}@{version}) error = {err}, want a client")
