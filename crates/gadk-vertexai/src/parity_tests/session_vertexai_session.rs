@@ -15,10 +15,11 @@
 
 //! Ports of ADK-Go `session/vertexai/session_test.go`.
 
-use gadk_session::{Event, Session, zero_time};
-use serde_json::Map;
+use gadk_model::rest::test_util::FakeServer;
+use gadk_session::{Event, ListRequest, Session, SessionService, zero_time};
+use serde_json::{Map, json};
 
-use crate::session::VertexSession;
+use crate::session::{VertexAiSessionService, VertexSession};
 
 fn event(id: &str) -> Event {
     Event {
@@ -84,4 +85,46 @@ fn test_local_session_events_concurrent_append() {
         }
     });
     assert_eq!(s.events().len(), COUNT, "final event count");
+}
+
+// parity: adapted: gadk has no sortSessionsByLastUpdate; a fake ListSessions answers the sessions in Go's input order and the test checks the order List returns
+#[ignore = "8a bug: SessionClient::list_sessions returns sessions in RPC order, not by last update time, then user ID, then session ID (Go #1919 8be7e250)"]
+#[tokio::test]
+async fn test_sort_sessions_by_last_update() {
+    let engine = "projects/test-project/locations/us-central1/reasoningEngines/123";
+    // At time 0, u2/a ties with u1/a and u1/b. Its session ID sorts before u1/b's but its user ID
+    // after, so only user ID then session ID gives the want.
+    let sessions: Vec<_> = [
+        ("u2", "x", "2026-01-01T00:01:00Z"),
+        ("u2", "a", "2026-01-01T00:00:00Z"),
+        ("u1", "b", "2026-01-01T00:00:00Z"),
+        ("u1", "c", "2026-01-01T01:00:00Z"),
+        ("u1", "a", "2026-01-01T00:00:00Z"),
+    ]
+    .into_iter()
+    .map(|(user, id, at)| {
+        json!({"name": format!("{engine}/sessions/{id}"), "userId": user, "updateTime": at})
+    })
+    .collect();
+    let server = FakeServer::json(json!({ "sessions": sessions }).to_string());
+    let svc = VertexAiSessionService::new(
+        super::session_vertexai_append_event_temp_state::fake_client_config(&server.url()),
+    )
+    .unwrap();
+
+    let got: Vec<String> = svc
+        .list(ListRequest {
+            app_name: "123".into(),
+            user_id: String::new(),
+        })
+        .await
+        .unwrap()
+        .iter()
+        .map(|s| format!("{}/{}", s.user_id(), s.id()))
+        .collect();
+    assert_eq!(
+        got,
+        ["u1/a", "u1/b", "u2/a", "u2/x", "u1/c"],
+        "sortSessionsByLastUpdate()"
+    );
 }

@@ -15,7 +15,7 @@
 
 //! Ports of ADK-Go `session/vertexai/append_event_temp_state_test.go`.
 
-use gadk_session::{Event, EventActions, KEY_PREFIX_TEMP, Session, SessionService};
+use gadk_session::{CreateRequest, Event, EventActions, KEY_PREFIX_TEMP, Session, SessionService};
 use serde_json::{Map, Value, json};
 
 use crate::session::{VertexAiSessionService, VertexAiSessionServiceConfig, VertexSession};
@@ -160,4 +160,79 @@ async fn test_append_event_strips_temp_keys_from_raw_event() {
         });
     assert_persisted_delta_has_no_temp(raw_delta, "rawEvent");
     assert_local_state(&sess);
+}
+
+// TestCreate_dropsTempKeysFromInitialState pins that temp: keys in CreateRequest.State never reach
+// Agent Engine, so they are absent from the created session and every later read of it.
+// AppendEvent already trims them from state deltas; adk-python drops them in create_session too.
+// parity: adapted: the CreateSession payload is read from the fake's recorded request body (Go's fake stores the RPC's session); the caller's map is checked on the clone it kept
+#[ignore = "8a bug: SessionClient::create_session sends CreateRequest.state with its temp: keys as sessionState, so they reach Agent Engine and the created session (Go #2100 0c109f7d)"]
+#[tokio::test]
+async fn test_create_drops_temp_keys_from_initial_state() {
+    let cases: [(&str, Value, Option<Value>); 2] = [
+        (
+            "temp and session keys",
+            json!({"temp:k1": "v1", "sk": "v2"}),
+            Some(json!({"sk": "v2"})),
+        ),
+        // None: no session_state sent at all.
+        ("only temp keys", json!({"temp:k1": "v1"}), None),
+    ];
+    for (name, state, want_state) in cases {
+        let fake = FakeAgentEngine::start();
+        let svc = VertexAiSessionService::new(fake_client_config(&fake.url())).unwrap();
+        let state = state.as_object().cloned().unwrap();
+        let request_state = state.clone();
+
+        let created = svc
+            .create(CreateRequest {
+                app_name: "123".into(),
+                user_id: "user1".into(),
+                session_id: Some("s1".into()),
+                state: Some(request_state),
+            })
+            .await
+            .unwrap_or_else(|e| panic!("{name}: Create() error = {e}"));
+
+        assert!(
+            state.contains_key("temp:k1"),
+            "{name}: Create removed temp:k1 from the caller's map; it must not mutate the request"
+        );
+
+        let create_rpc = fake
+            .requests()
+            .into_iter()
+            .find(|r| r.method == "POST" && r.path.ends_with("/sessions"))
+            .unwrap_or_else(|| panic!("{name}: no CreateSession request"));
+        let sent = create_rpc.json().get("sessionState").cloned();
+        match &want_state {
+            None => assert!(
+                sent.is_none(),
+                "{name}: CreateSession RPC session_state = {sent:?}, want none"
+            ),
+            Some(want) => {
+                let got = sent.as_ref().and_then(Value::as_object).unwrap_or_else(|| {
+                    panic!("{name}: CreateSession RPC session_state = {sent:?}")
+                });
+                for k in got.keys() {
+                    assert!(
+                        !k.starts_with(KEY_PREFIX_TEMP),
+                        "{name}: temp key reached the CreateSession RPC payload: key {k:?}, state {got:?}"
+                    );
+                }
+                for (k, w) in want.as_object().unwrap() {
+                    assert_eq!(
+                        got.get(k),
+                        Some(w),
+                        "{name}: CreateSession RPC session_state[{k:?}]"
+                    );
+                }
+            }
+        }
+
+        assert!(
+            created.state().get("temp:k1").is_err(),
+            "{name}: created session State().Get(\"temp:k1\") found the key, want ErrStateKeyNotExist"
+        );
+    }
 }

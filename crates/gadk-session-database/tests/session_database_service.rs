@@ -21,14 +21,14 @@ mod common;
 
 use std::sync::Arc;
 
-use chrono::{Duration, TimeZone, Utc};
+use chrono::{DateTime, Duration, TimeZone, Utc};
 use common::memory_service;
 use gadk_genai::{Content, ROLE_USER, Transcription};
 use gadk_platform::Platform;
 use gadk_session::testsuite::{SuiteOptions, run};
 use gadk_session::{
-    CreateRequest, Event, EventActions, GetRequest, NodeInfo, RequestInput, Session, SessionError,
-    SessionService,
+    CreateRequest, DeleteRequest, Event, EventActions, GetRequest, ListRequest, NodeInfo,
+    RequestInput, Session, SessionError, SessionService,
 };
 use gadk_session_database::DatabaseSessionService;
 use serde_json::{Map, Value, json};
@@ -357,20 +357,20 @@ async fn test_database_service_append_event_preserves_input_event_temp_state() {
     assert_eq!(stored_delta["sk"], json!("v2"));
 }
 
-// parity: adapted: the events carry fixed IDs and the order is asserted exactly (Go's random IDs leave "not reversed" failing whenever ascending ID order is reverse insertion order)
+// parity: adapted: the order is asserted exactly (Go asserts only "not the reverse of insertion order"; with ascending IDs both hold)
 #[tokio::test]
 async fn test_events_sharing_a_timestamp_come_back_in_a_stable_order() {
     let svc = memory_service().await;
     let sess = create(&svc, "app", "user").await;
     let platform = Platform::default();
 
-    // Six events on one instant, appended in a known order.
+    // Six events on one instant, appended in a known order. The IDs ascend because the query
+    // breaks ties on ID: random IDs land in exact reverse insertion order once in 720 runs.
     let ts = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
     let mut want = Vec::new();
     for i in 0..6 {
         let mut ev = Event::new(&platform, "inv1");
-        // Ties are broken by ID; IDs ascending with insertion make the expected order exact.
-        ev.id = format!("e{i}");
+        ev.id = format!("event-{i}");
         ev.author = "author".into();
         ev.timestamp = ts;
         ev.response.content = Some(Content::from_text(format!("event {i}"), ROLE_USER));
@@ -476,6 +476,294 @@ async fn test_database_service_append_event_locks_shared_state_rows() {
             );
         }
     }
+}
+
+// The test database is SQLite without foreign keys enforced, so the ON DELETE CASCADE on events
+// is not applied and only an explicit delete removes them.
+#[ignore = "8a bug: DatabaseSessionService::delete deletes only the session row; with sqlite foreign keys off its events stay behind (Go #1774 7af0f5f0 deletes them explicitly)"]
+#[tokio::test]
+async fn test_database_service_delete_removes_session_events() {
+    let svc = memory_service().await;
+    let key = |app: &str, user: &str, id: &str| DeleteRequest {
+        app_name: app.into(),
+        user_id: user.into(),
+        session_id: id.into(),
+    };
+    let deleted = key("app", "user", "s1");
+    // Sessions that share part of the deleted session's (app, user, session) key, so their
+    // events must survive the delete.
+    let kept = [
+        key("app", "user", "s2"),
+        key("app", "other-user", "s1"),
+        key("other-app", "user", "s1"),
+    ];
+    for k in std::iter::once(&deleted).chain(&kept) {
+        let created = svc
+            .create(CreateRequest {
+                app_name: k.app_name.clone(),
+                user_id: k.user_id.clone(),
+                session_id: Some(k.session_id.clone()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let mut event = Event {
+            id: format!("e-{}-{}-{}", k.app_name, k.user_id, k.session_id),
+            author: "tool".into(),
+            timestamp: Utc::now(),
+            ..Default::default()
+        };
+        event.response.content = Some(Content::from_text("tool output", ROLE_USER));
+        svc.append_event(created.as_ref(), &mut event)
+            .await
+            .unwrap();
+    }
+
+    svc.delete(deleted.clone()).await.unwrap();
+
+    let pool = svc.sqlite_pool().unwrap();
+    let count_events = |k: &DeleteRequest| {
+        let k = k.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT count(*) FROM events WHERE app_name = ? AND user_id = ? AND session_id = ?",
+            )
+            .bind(k.app_name)
+            .bind(k.user_id)
+            .bind(k.session_id)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+        }
+    };
+    assert_eq!(
+        count_events(&deleted).await,
+        0,
+        "events left for deleted session {deleted:?}"
+    );
+    for k in &kept {
+        assert_eq!(
+            count_events(k).await,
+            1,
+            "events left for kept session {k:?}"
+        );
+    }
+}
+
+// Create writes the same shared rows as AppendEvent, so it needs the same locks.
+// parity: adapted: a statement log (feature testutil) records what Go's gorm callbacks record; sqlite has no FOR UPDATE, but the log records the locked read Go requests
+#[ignore = "8a bug: DatabaseSessionService::create reads the app/user state rows without the insert-on-conflict-do-nothing + select-for-update lock AppendEvent takes (Go #1930 2f3b2c23)"]
+#[tokio::test]
+async fn test_database_service_create_locks_shared_state_rows() {
+    let cases: [(&str, Option<Value>, &[&str]); 5] = [
+        (
+            "no state",
+            None,
+            &["select app_states", "select user_states"],
+        ),
+        (
+            "session only",
+            Some(json!({"s": 1})),
+            &["select app_states", "select user_states"],
+        ),
+        (
+            "app only",
+            Some(json!({"app:a": 1})),
+            &[
+                "insert app_states on conflict do nothing",
+                "select app_states for update",
+                "select user_states",
+            ],
+        ),
+        (
+            "user only",
+            Some(json!({"user:u": 2})),
+            &[
+                "select app_states",
+                "insert user_states on conflict do nothing",
+                "select user_states for update",
+            ],
+        ),
+        (
+            "app and user",
+            Some(json!({"app:a": 1, "user:u": 2, "s": 3})),
+            &[
+                "insert app_states on conflict do nothing",
+                "select app_states for update",
+                "insert user_states on conflict do nothing",
+                "select user_states for update",
+            ],
+        ),
+    ];
+    for (name, initial, want) in cases {
+        let (svc, log) = memory_service().await.with_statement_log();
+        let created = svc
+            .create(CreateRequest {
+                app_name: "app".into(),
+                user_id: "user".into(),
+                state: initial.clone().map(|v| v.as_object().unwrap().clone()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(*log.lock(), want, "{name}: Create state statements");
+
+        let got = get(&svc, created.as_ref()).await;
+        for (key, value) in initial
+            .as_ref()
+            .and_then(Value::as_object)
+            .into_iter()
+            .flatten()
+        {
+            assert_eq!(
+                got.state().get(key).ok().as_ref(),
+                Some(value),
+                "{name}: state[{key:?}]"
+            );
+        }
+    }
+}
+
+// When the shared rows already exist, Create must keep the keys another session wrote there and
+// return them in the new session's state.
+#[tokio::test]
+async fn test_database_service_create_keeps_existing_shared_state() {
+    let svc = memory_service().await;
+    svc.create(CreateRequest {
+        app_name: "app".into(),
+        user_id: "user".into(),
+        state: state(json!({"app:a": 1, "user:u": 10})),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    let created = svc
+        .create(CreateRequest {
+            app_name: "app".into(),
+            user_id: "user".into(),
+            state: state(json!({"app:b": 2, "user:v": 20})),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let fetched = get(&svc, created.as_ref()).await;
+    let want = json!({"app:a": 1, "user:u": 10, "app:b": 2, "user:v": 20});
+    for (name, sess) in [("Create", &created), ("Get", &fetched)] {
+        for (key, w) in want.as_object().unwrap() {
+            assert_eq!(
+                sess.state().get(key).ok().as_ref(),
+                Some(w),
+                "{name} state[{key:?}]"
+            );
+        }
+    }
+}
+
+/// A service whose clock the test moves: Go passes a time provider per call through ctx; gadk
+/// sets one on the service's Platform and moves the shared instant between calls.
+async fn clocked() -> (
+    DatabaseSessionService,
+    Arc<parking_lot::Mutex<DateTime<Utc>>>,
+) {
+    let now = Arc::new(parking_lot::Mutex::new(Utc.timestamp_opt(0, 0).unwrap()));
+    let clock = now.clone();
+    let svc = memory_service()
+        .await
+        .with_platform(Platform::default().with_time(move || *clock.lock()));
+    (svc, now)
+}
+
+async fn create_with_id(svc: &DatabaseSessionService, user: &str, id: &str) -> Arc<dyn Session> {
+    svc.create(CreateRequest {
+        app_name: "app".into(),
+        user_id: user.into(),
+        session_id: Some(id.into()),
+        ..Default::default()
+    })
+    .await
+    .unwrap()
+}
+
+async fn list_keys(svc: &DatabaseSessionService, user: &str) -> Vec<String> {
+    svc.list(ListRequest {
+        app_name: "app".into(),
+        user_id: user.into(),
+    })
+    .await
+    .unwrap()
+    .iter()
+    .map(|s| {
+        if user.is_empty() {
+            format!("{}/{}", s.user_id(), s.id())
+        } else {
+            s.id().to_string()
+        }
+    })
+    .collect()
+}
+
+// parity: adapted: Go injects the create time per call via ctx; gadk uses one service Platform whose clock the test moves
+#[ignore = "8a bug: DatabaseSessionService::list returns rows in storage order, not ordered by last update time ascending (Go #1919 8be7e250)"]
+#[tokio::test]
+async fn test_database_service_list_ordered_by_last_update_time() {
+    let (svc, clock) = clocked().await;
+    let base = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+    let mut created = std::collections::BTreeMap::new();
+    // Create in reverse ID order so neither PK order nor creation order equals the want.
+    for (i, id) in ["c", "b", "a"].into_iter().enumerate() {
+        *clock.lock() = base + Duration::seconds(i as i64);
+        created.insert(id, create_with_id(&svc, "u", id).await);
+    }
+    // "c" (created first) becomes most recently active.
+    let mut ev = Event::new(&Platform::default(), "inv");
+    ev.timestamp = base + Duration::minutes(1);
+    svc.append_event(created["c"].as_ref(), &mut ev)
+        .await
+        .unwrap();
+    assert_eq!(list_keys(&svc, "u").await, ["b", "a", "c"], "List() order");
+}
+
+// Go stores update times in two zones: SQLite keeps each as RFC 3339 text with its own offset, so
+// text order puts "early" (14:00+02:00) after "late" (13:00Z).
+// parity: adapted: gadk's clock yields DateTime<Utc>, so both rows are written in UTC; the case checks the instant order of an early and a late row
+#[tokio::test]
+async fn test_database_service_list_orders_mixed_offsets_by_instant() {
+    let (svc, clock) = clocked().await;
+    let instant = Utc.with_ymd_and_hms(2026, 1, 1, 12, 0, 0).unwrap();
+    for (id, at) in [("early", instant), ("late", instant + Duration::hours(1))] {
+        *clock.lock() = at;
+        create_with_id(&svc, "u", id).await;
+    }
+    assert_eq!(
+        list_keys(&svc, "u").await,
+        ["early", "late"],
+        "List() order (by instant, not by stored text)"
+    );
+}
+
+#[ignore = "8a bug: DatabaseSessionService::list does not break update-time ties by user ID, then session ID (Go #1919 8be7e250)"]
+#[tokio::test]
+async fn test_database_service_list_tie_breaks_by_user_then_id() {
+    let (svc, clock) = clocked().await;
+    // Without this SQLite serves the app_name filter from the composite primary key index, so
+    // ties already arrive in (user_id, id) order and a dropped tie-break would stay green.
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_test_sessions_app_update ON sessions(app_name, update_time)",
+    )
+    .execute(svc.sqlite_pool().unwrap())
+    .await
+    .unwrap();
+    *clock.lock() = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+    // Equal update times across two users, created so that neither creation order nor ID order
+    // alone equals the want.
+    for (user, id) in [("u2", "a"), ("u1", "b"), ("u1", "a")] {
+        create_with_id(&svc, user, id).await;
+    }
+    assert_eq!(
+        list_keys(&svc, "").await,
+        ["u1/a", "u1/b", "u2/a"],
+        "List() order"
+    );
 }
 
 // parity: skipped TestDatabaseService_NonJSONStateErrorSurfaces: gadk state is a serde_json map, which cannot hold NaN, so a non-JSON state value cannot be constructed
