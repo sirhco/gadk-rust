@@ -26,7 +26,7 @@ use gadk_agent::{
 use gadk_session::Event;
 use parking_lot::Mutex;
 use tokio::sync::{mpsc, oneshot};
-use tokio::task::{AbortHandle, JoinSet};
+use tokio::task::{JoinHandle, JoinSet};
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 
@@ -93,12 +93,32 @@ impl std::error::Error for SubAgentError {
     }
 }
 
-/// Aborts the funnel task when the run stream is dropped.
-struct AbortOnDrop(AbortHandle);
+/// Go's deferred cleanup in the run iterator (agent.go:118-128, ADK #1186): when the run stream
+/// is dropped, the funnel task (which ends only after every sub-agent task has returned, its
+/// teardown included) is handed to the invocation's teardown registry instead of being aborted,
+/// so the runner's after-run callbacks wait for every branch. Without a registry it is detached.
+struct AwaitBranchesOnDrop {
+    ctx: InvocationContext,
+    funnel: Option<JoinHandle<()>>,
+}
 
-impl Drop for AbortOnDrop {
+impl Drop for AwaitBranchesOnDrop {
     fn drop(&mut self) {
-        self.0.abort();
+        if let Some(funnel) = self.funnel.take() {
+            self.ctx.register_teardown(funnel);
+        }
+    }
+}
+
+/// Go `close(res.ackChan)` after `yield` returned, whether it returned true or false: sent when
+/// the consumer asks for the next item, or when it drops the stream at this event.
+struct AckOnDrop(Option<oneshot::Sender<()>>);
+
+impl Drop for AckOnDrop {
+    fn drop(&mut self) {
+        if let Some(ack) = self.0.take() {
+            let _ = ack.send(());
+        }
     }
 }
 
@@ -115,8 +135,11 @@ impl Drop for AbortOnDrop {
 /// sub-agent has finished; once every sub-agent has returned, the group is cancelled plainly
 /// (errgroup `Wait`; the first cause wins). A sub-agent panic cancels the group plainly and is
 /// re-raised on the consumer's poll (`resume_unwind`, as the dynamic scheduler surfaces node
-/// panics) once every sub-agent has finished. Dropping the stream cancels the group plainly and
-/// aborts every sub-agent task, which drops (tears down) its stream.
+/// panics) once every sub-agent has finished. Dropping the stream (Go's early stop, agent.go:118-142)
+/// acknowledges the event the consumer stopped on, cancels the group plainly and hands the
+/// funnel, which waits for every sub-agent task to return, to the invocation's teardown
+/// registry ([`InvocationContext::register_teardown`]): no sub-agent task is aborted, and the
+/// runner's after-run callbacks run once they have all torn down.
 fn run(ctx: InvocationContext) -> EventStream {
     Box::pin(async_stream::stream! {
         let cur = ctx.agent();
@@ -193,15 +216,18 @@ fn run(ctx: InvocationContext) -> EventStream {
                 let _ = tx.send(SubResult::Err(e.to_agent_error())).await;
             }
         }.in_current_span());
-        // Aborting the funnel drops `set`, which aborts every sub-agent task.
-        let _abort_on_drop = AbortOnDrop(funnel.abort_handle());
+        // Declared after `_cancel_on_drop`, so a drop registers the funnel before the group is
+        // cancelled (locals drop in reverse order; both happen before the runner's guard).
+        let _await_branches = AwaitBranchesOnDrop { ctx: ctx.clone(), funnel: Some(funnel) };
         while let Some(res) = rx.recv().await {
             match res {
                 SubResult::Event(ev, ack) => {
+                    // Released when the consumer asks for the next item, i.e. after it has
+                    // processed this one, or when it drops the stream here: the innermost
+                    // local, so the ack is sent before the group is cancelled (Go closes the
+                    // ack channel before its deferred `cancelSubAgents`).
+                    let _ack = AckOnDrop(Some(ack));
                     yield Ok(*ev);
-                    // Reached only when the consumer asks for the next item, i.e. after it has
-                    // processed this one (Go close(res.ackChan)).
-                    let _ = ack.send(());
                 }
                 SubResult::Err(e) => yield Err(e),
                 SubResult::Panic(p) => std::panic::resume_unwind(p),
@@ -226,11 +252,13 @@ async fn run_sub_agent(
             _ = group.cancelled() => return Err(AgentError::Cancelled),
             sent = tx.send(SubResult::Event(Box::new(event), ack_tx)) => if sent.is_err() { return Ok(()); },
         }
-        // Wait for the consumer to finish processing before continuing.
+        // Wait for the consumer to finish processing before continuing. A ready ack wins over
+        // the group's cancellation: a consumer that stops on this event acknowledges it before
+        // cancelling the group, and Go's goroutine, parked in the select, wakes on the ack.
         tokio::select! {
             biased;
-            _ = group.cancelled() => return Err(AgentError::Cancelled),
             acked = ack_rx => if acked.is_err() { return Ok(()); },
+            _ = group.cancelled() => return Err(AgentError::Cancelled),
         }
     }
     Ok(())

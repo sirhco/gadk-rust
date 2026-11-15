@@ -56,6 +56,9 @@ pub(crate) struct Shared {
     /// The engine's per-invocation compaction runtime (Go `compactionctx.ToContext`). Opaque here:
     /// only the engine downcasts it. Every context derived within one invocation shares it.
     pub(crate) compaction: Option<Arc<dyn Any + Send + Sync>>,
+    /// The invocation's teardown registry ([`crate::teardown::Teardowns`]); the runner installs
+    /// one per invocation.
+    pub(crate) teardowns: Option<Arc<crate::teardown::Teardowns>>,
 }
 
 /// One snapshot of every context field; deltas clone it (cheap: `Arc`s and short strings).

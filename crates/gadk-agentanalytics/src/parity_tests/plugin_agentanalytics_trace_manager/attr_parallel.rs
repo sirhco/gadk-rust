@@ -901,7 +901,6 @@ async fn run_unjoined_late_child(
 }
 
 #[tokio::test]
-#[ignore = "7b-3b defect: a dropped ParallelAgent stream aborts its branch tasks (parallel_agent.rs AbortOnDrop) instead of Go's cancel-then-await teardown, so the slow branch's model call never reports context.Canceled"]
 async fn test_runner_parallel_root_stopped_mid_stream_sibling_model_returns_context_canceled_emits_completed_terminal_rows()
  {
     let tp = setup_test_plugin().await;
@@ -946,7 +945,6 @@ async fn test_runner_parallel_root_stopped_mid_stream_sibling_model_returns_cont
 }
 
 #[tokio::test]
-#[ignore = "7b-3b defect: a dropped ParallelAgent stream never acknowledges the event the reader stopped on and aborts its branch tasks (parallel_agent.rs), so the branch never goes on to start child as Go's does"]
 async fn test_runner_parallel_stream_stop_canceled_work_after_partial_is_not_an_error() {
     let new_children: [(&str, NewAgent); 2] = [
         ("sub-agent that fails with the context's error", || {

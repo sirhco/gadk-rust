@@ -310,6 +310,12 @@ async fn repair_after_append(
 ///   (Go runs the deferred calls on the consumer's goroutine; the guard is made inside the
 ///   runner's consumer `FiberStream`). Errors are logged.
 ///
+/// Before the after-run callbacks (inline or spawned) the guard awaits the invocation's teardown
+/// registry ([`gadk_agent::Teardowns`]): the started work that components dropped during the run
+/// handed over (a ParallelAgent's branches, a workflow scheduler's node tasks, in-flight tool
+/// calls), which in Go finishes on the consumer's goroutine before the deferred
+/// `RunAfterRunCallback`. The token is still live while it is awaited after a stop at a yield.
+///
 /// The guard also owns the invocation token's cancel-on-drop ([`InvocationGuard::cancel_on_drop`]).
 /// A drop inside an await cancels it at once (Go's caller cancelled its context, and the
 /// after-run callbacks see that). A drop at a yield (Go's `break`, after which the deferred
@@ -410,6 +416,7 @@ impl InvocationGuard {
     /// Go's deferred `RunAfterRunCallback`, at the end of a normal run.
     pub(crate) async fn finish(mut self) {
         if std::mem::take(&mut self.after_run_pending) {
+            wait_teardowns(&self.ctx).await;
             self.inner
                 .plugin_manager
                 .run_after_run(self.ctx.clone())
@@ -420,6 +427,7 @@ impl InvocationGuard {
     /// An early `return`: Go's defers in LIFO order, after-run, then compaction (logged).
     pub(crate) async fn finish_early(mut self) {
         if std::mem::take(&mut self.after_run_pending) {
+            wait_teardowns(&self.ctx).await;
             self.inner
                 .plugin_manager
                 .run_after_run(self.ctx.clone())
@@ -428,6 +436,15 @@ impl InvocationGuard {
         if let Some(e) = self.compact_inline().await {
             tracing::warn!("adk: {e}");
         }
+    }
+}
+
+/// Awaits the started work that components dropped during the invocation handed to its
+/// teardown registry ([`gadk_agent::Teardowns`]): in Go that work finishes on the consumer's
+/// goroutine before the deferred `RunAfterRunCallback` runs.
+async fn wait_teardowns(ctx: &InvocationContext) {
+    if let Some(t) = ctx.teardowns() {
+        t.wait().await;
     }
 }
 
@@ -457,6 +474,7 @@ impl Drop for InvocationGuard {
         let (inner, stored, ctx) = (self.inner.clone(), self.stored.clone(), self.ctx.clone());
         let task = self.fiber.clone().scope(async move {
             if after_run {
+                wait_teardowns(&ctx).await;
                 inner.plugin_manager.run_after_run(ctx.clone()).await;
             }
             drop(cancel_later);

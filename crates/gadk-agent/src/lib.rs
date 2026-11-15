@@ -31,6 +31,7 @@ pub mod run_config;
 pub mod scheduler;
 pub mod services;
 pub mod state;
+pub mod teardown;
 pub mod tool;
 pub mod tool_util;
 pub mod toolset;
@@ -60,6 +61,7 @@ pub use run_config::{RunConfig, StreamingMode, run_limits};
 pub use scheduler::DynamicSubScheduler;
 pub use services::{ArtifactBacking, Artifacts, Memory};
 pub use state::{AgentState, AgentType};
+pub use teardown::Teardowns;
 pub use tool::{
     ConfirmationProvider, RunnableTool, StreamingTool, Tool, ToolOriginKind, ToolPredicate, Toolset,
 };

@@ -188,7 +188,6 @@ fn text_event(ctx: &InvocationContext, author: &str, text: &str) -> Event {
 }
 
 #[tokio::test]
-#[ignore = "7b-3b defect: dropping the closed live session's event stream aborts the session task (GuardedStream::drop), whose JoinSet aborts the in-flight run_child call, so its AfterToolCallback never runs (Go's session goroutine finishes the call)"]
 async fn test_trace_manager_live_tool_cached_child_stop_race() {
     on_test_goroutine(async {
         let tp = setup_test_plugin().await;

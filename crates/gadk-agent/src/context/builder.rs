@@ -39,6 +39,7 @@ use crate::run_config::RunConfig;
 use crate::run_config::run_limits::LlmCallLimiter;
 use crate::services::{Artifacts, Memory};
 use crate::state::{AgentState, AgentType};
+use crate::teardown::Teardowns;
 
 /// Builder for contexts (Go `context_mock.go` / `common_context_mock.go` /
 /// `internal/context.NewInvocationContext`).
@@ -47,7 +48,7 @@ use crate::state::{AgentState, AgentType};
 /// `Platform::default()`, a custom agent named `"test_agent"`, invocation id
 /// `"e-" + platform.new_uuid()` (Go `NewInvocationContext`), empty branch and isolation scope, a
 /// fresh `CancellationToken`, `RunConfig::default()`, no resume inputs, and no artifacts, memory,
-/// plugins, parent map, session service, call limiter or compaction runtime.
+/// plugins, parent map, session service, call limiter, compaction runtime or teardown registry.
 #[derive(Default)]
 pub struct ContextBuilder {
     session: Option<Arc<dyn Session>>,
@@ -67,6 +68,7 @@ pub struct ContextBuilder {
     llm_call_limiter: Option<Arc<LlmCallLimiter>>,
     resumed_inputs: Option<Map<String, Value>>,
     compaction: Option<Arc<dyn Any + Send + Sync>>,
+    teardowns: Option<Arc<Teardowns>>,
 }
 
 impl ContextBuilder {
@@ -178,6 +180,13 @@ impl ContextBuilder {
         self
     }
 
+    /// The invocation's teardown registry ([`Teardowns`]): the runner installs one per
+    /// invocation and awaits it before the after-run callbacks.
+    pub fn teardowns(mut self, t: Arc<Teardowns>) -> Self {
+        self.teardowns = Some(t);
+        self
+    }
+
     /// Builds the invocation context: no actions, not ended, every node field empty. An empty
     /// explicit invocation id also takes the `"e-"` default, as Go's `params.InvocationID == ""`
     /// check does.
@@ -216,6 +225,7 @@ impl ContextBuilder {
             session_service: self.session_service,
             llm_call_limiter: self.llm_call_limiter,
             compaction: self.compaction,
+            teardowns: self.teardowns,
         };
         InvocationContext::from_inner(ContextInner {
             shared: Arc::new(shared),

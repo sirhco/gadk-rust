@@ -90,10 +90,10 @@ fn conn_err(err: LiveConnError) -> AgentError {
 }
 
 /// Go's `defer sess.Close()`, plus R9: once the session task ends, no streaming tool outlives
-/// the flow. A drop guard rather than trailing code, so it also runs when dropping the event
-/// stream aborts the task. Aborting does not stop a tool task already mid-poll on another worker,
-/// which can register a streaming tool after the drain; `done` is cancelled before the drain so
-/// that `start_live_streaming`, which checks it after registering, cancels such a late tool.
+/// the flow. A drop guard rather than trailing code, so it also runs if the task is dropped
+/// unfinished (a runtime shutting down). A tool task still running on another worker can
+/// register a streaming tool after the drain; `done` is cancelled before the drain so that
+/// `start_live_streaming`, which checks it after registering, cancels such a late tool.
 /// Equivalent to `LiveSession::close`, which is async only for the trait.
 struct Teardown(Arc<LiveSessionImpl>);
 
@@ -564,7 +564,6 @@ mod tests {
 
     use super::*;
     use crate::llm::flow::RequestProcessor;
-    use crate::llm::live::session::LiveProbe;
     use crate::llm::live::test_server::{
         FakeConn, FakeLiveServer, assert_no_run_live_leak, live_config_processor, live_ctx,
         probe_of, serve,
@@ -575,10 +574,11 @@ mod tests {
 
     /// A streaming tool that never yields. Its first `as_streaming` (made by the tool-call task,
     /// right before `start_live_streaming` registers it, with no await in between) reports that
-    /// the tool is starting, then blocks its worker until the session's teardown has drained the
-    /// registry: the interleaving in which dropping the event stream used to leak the tool.
+    /// the tool is starting, then blocks its worker until the event stream has been dropped
+    /// (`done` cancelled): the tool registers after the session was closed. The session task is
+    /// not aborted (Go's goroutine finishes the call), so it is its teardown that must cancel it.
     struct NeverYields {
-        probe: OnceLock<Arc<LiveProbe>>,
+        dropped: OnceLock<CancellationToken>,
         entered: Mutex<Option<oneshot::Sender<()>>>,
     }
 
@@ -594,11 +594,7 @@ mod tests {
                 let _ = tx.send(());
                 let deadline = Instant::now() + Duration::from_secs(10);
                 while Instant::now() < deadline {
-                    if self
-                        .probe
-                        .get()
-                        .is_some_and(|p| p.teardowns.load(Ordering::SeqCst) > 0)
-                    {
+                    if self.dropped.get().is_some_and(|d| d.is_cancelled()) {
                         break;
                     }
                     std::thread::sleep(Duration::from_millis(1));
@@ -621,7 +617,7 @@ mod tests {
         }
     }
 
-    /// R9 on the abort path: dropping the event stream while a streaming tool is starting must
+    /// R9 on the drop path: dropping the event stream while a streaming tool is starting must
     /// not leave the tool's task running, even for a direct `run_live` caller whose invocation is
     /// never cancelled.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -633,7 +629,7 @@ mod tests {
         .await;
         let (entered_tx, mut entered_rx) = oneshot::channel();
         let tool = Arc::new(NeverYields {
-            probe: OnceLock::new(),
+            dropped: OnceLock::new(),
             entered: Mutex::new(Some(entered_tx)),
         });
         let flow = Arc::new(Flow {
@@ -646,7 +642,13 @@ mod tests {
         let (ctx, _cancel) = live_ctx();
         let (sess, mut stream) = run_live(flow, ctx).unwrap();
         let probe = probe_of(&sess);
-        tool.probe.set(probe.clone()).unwrap();
+        let done = sess
+            .as_any()
+            .downcast_ref::<LiveSessionImpl>()
+            .unwrap()
+            .done()
+            .clone();
+        tool.dropped.set(done).unwrap();
 
         // Consume events (pushes are rendezvous) until the tool is starting.
         tokio::time::timeout(Duration::from_secs(10), async {
