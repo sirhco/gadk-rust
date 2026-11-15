@@ -544,7 +544,7 @@ impl Llm for TwoFinalResponsesModel {
 }
 
 #[tokio::test]
-async fn test_complete_responses_of_one_model_call_get_distinct_event_ids() {
+async fn test_complete_responses_of_one_model_call_get_distinct_event_i_ds() {
     let tool = FunctionTool::new(
         FunctionToolConfig::new("get_weather", "get weather for location"),
         |_ctx: Context, args: GetWeatherArgs| async move {
