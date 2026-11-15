@@ -36,7 +36,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.95"
 license = "Apache-2.0"
-repository = "https://github.com/sirhco/adk-rust"
+repository = "https://github.com/sirhco/gadk-rust"
 
 [workspace.dependencies]
 gadk-genai = { path = "crates/gadk-genai", version = "0.1.0" }

@@ -21,7 +21,7 @@ gadk is not published to crates.io yet; depend on it from Git:
 
 ```toml
 [dependencies]
-gadk = { git = "https://github.com/sirhco/adk-rust" }   # default features: gemini, gcp, mcp
+gadk = { git = "https://github.com/sirhco/gadk-rust" }   # default features: gemini, gcp, mcp
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"
 ```

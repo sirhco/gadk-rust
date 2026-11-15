@@ -85,5 +85,5 @@ lists the accepted divergences, each marked in the source with `// Divergence (l
 - Some `gadk-goyaml` type-name error texts differ from yaml.v3.
 - The live GCS artifact test has not been run against a real bucket.
 
-[Unreleased]: https://github.com/sirhco/adk-rust/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/sirhco/adk-rust/releases/tag/v0.1.0
+[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/sirhco/gadk-rust/releases/tag/v0.1.0
