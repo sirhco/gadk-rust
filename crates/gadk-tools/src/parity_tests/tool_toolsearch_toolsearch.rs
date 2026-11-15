@@ -41,6 +41,7 @@ use gadk_session::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
+use super::{TestError, test_err, wraps};
 use crate::gemini;
 use crate::ranksearch;
 use crate::toolsearch::{
@@ -52,46 +53,6 @@ use crate::toolsearch::{
 const TEST_AGENT: &str = "test_agent";
 
 // parity: skipped TestGatingToolset_SkipsDiscoveredToolsTheFlowCannotPack: every Rust Tool has a (defaulted) process_request, so Rust returns the non-packable stub this test reveals, and the flow packs nothing for it because it has no declaration (spec R8)
-
-// ---------------------------------------------------------------------------------------------
-// Errors (Go `errors.New` sentinels and `errors.Is`).
-
-/// A sentinel error, like Go's `errors.New(msg)` in the tests.
-#[derive(Debug)]
-struct TestError(&'static str);
-
-impl std::fmt::Display for TestError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.0)
-    }
-}
-
-impl std::error::Error for TestError {}
-
-fn test_err(msg: &'static str) -> ToolError {
-    ToolError::Execution(Box::new(TestError(msg)))
-}
-
-/// Go `errors.Is(err, errors.New(want))`: whether a [`TestError`] with text `want` is in the
-/// chain. The transparent `ToolError::Execution` and `SessionError::Backend` forward `source()`
-/// past their boxed error, so the walk steps into those boxes itself.
-fn wraps(err: &ToolError, want: &str) -> bool {
-    let mut cur: Option<&(dyn std::error::Error + 'static)> = Some(err);
-    while let Some(e) = cur {
-        if e.downcast_ref::<TestError>().is_some_and(|t| t.0 == want) {
-            return true;
-        }
-        cur = match (
-            e.downcast_ref::<ToolError>(),
-            e.downcast_ref::<SessionError>(),
-        ) {
-            (Some(ToolError::Execution(inner)), _) => Some(&**inner),
-            (_, Some(SessionError::Backend(inner))) => Some(&**inner),
-            _ => e.source(),
-        };
-    }
-    false
-}
 
 // ---------------------------------------------------------------------------------------------
 // Fake state and contexts (Go fakeState, stubReadonlyContext, fakeToolContext).

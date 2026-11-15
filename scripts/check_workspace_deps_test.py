@@ -151,9 +151,11 @@ class EdgeTest(unittest.TestCase):
                          {"gadk-artifact", "gadk-genai", "gadk-model", "gadk-platform"})
         self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-artifact-gcs" in deps], ["gadk"])
 
-    def test_vertexai_edges_are_exactly_session_memory_genai_model_platform(self):
+    def test_vertexai_edges_are_exactly_session_memory_genai_model_platform_tools_agent(self):
+        # 8b: the Example Store provider implements gadk_tools::example::Provider.
         self.assertEqual(cwd.ALLOWED["gadk-vertexai"],
-                         {"gadk-session", "gadk-memory", "gadk-genai", "gadk-model", "gadk-platform"})
+                         {"gadk-session", "gadk-memory", "gadk-genai", "gadk-model", "gadk-platform",
+                          "gadk-tools", "gadk-agent"})
         # 6b: the deploy CLI uses the Reasoning Engine client.
         self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-vertexai" in deps],
                          ["gadk-cli", "gadk"])

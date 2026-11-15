@@ -1,0 +1,322 @@
+// Copyright 2026 Chris Olson
+// Portions derived from ADK-Go (https://github.com/google/adk-go), Copyright 2026 Google LLC.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// 8b overlay probe: writes the gadk-vertexai Example Store goldens
+// (crates/gadk-vertexai/testdata/example_store/) with ADK-Go's tool/exampletool/vertexai itself at
+// docs/parity/ADK_GO_COMMIT. Not a file of this repository's build (hence the .txt suffix):
+// scripts/gen-go-8b/run.sh maps it into ADK-Go's tool/exampletool/vertexai package as
+// zz_gen8b_test.go with `go test -overlay` and runs `go test -run '^TestZZGen8bExampleStore$'` with
+// GEN_GO_8B_OUT set. ADK-Go's tree is not modified.
+//
+// Each case below is the input of the TestProvider_Examples subtest of the same name in
+// vertexai_test.go (query, fake client response or error), transcribed verbatim; the test fails
+// unless the case names equal that function's t.Run names, so a Go-side change cannot be missed.
+// The request is what Go's provider sends (captured by the package's own fakeExampleStoreClient),
+// the expected output is what Go's provider returns for the response.
+//
+// Every identifier here starts with zz so that it cannot collide with the package or its tests.
+
+package vertexai
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"cloud.google.com/go/aiplatform/apiv1beta1/aiplatformpb"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/structpb"
+)
+
+type zzCase struct {
+	name      string
+	query     string
+	resp      *aiplatformpb.SearchExamplesResponse
+	searchErr error
+}
+
+func zzMustStruct(t *testing.T, m map[string]any) *structpb.Struct {
+	t.Helper()
+	s, err := structpb.NewStruct(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+func zzText(text string) *aiplatformpb.Part {
+	return &aiplatformpb.Part{Data: &aiplatformpb.Part_Text{Text: text}}
+}
+
+func zzCases(t *testing.T) []zzCase {
+	return []zzCase{
+		{name: "searches the configured store", query: "what is the weather?", resp: &aiplatformpb.SearchExamplesResponse{}},
+		{name: "returns empty slice without results", query: "query", resp: &aiplatformpb.SearchExamplesResponse{Results: []*aiplatformpb.SearchExamplesResponse_SimilarExample{}}},
+		{name: "tolerates unset results", query: "query", resp: nil},
+		{name: "converts text part", query: "query", resp: &aiplatformpb.SearchExamplesResponse{
+			Results: []*aiplatformpb.SearchExamplesResponse_SimilarExample{
+				makeResult("what is the weather?", 1.0, makeExpectedContent("model", zzText("it is sunny"))),
+			},
+		}},
+		{name: "filters results below similarity threshold", query: "query", resp: &aiplatformpb.SearchExamplesResponse{
+			Results: []*aiplatformpb.SearchExamplesResponse_SimilarExample{
+				makeResult("too dissimilar", 0.49),
+				makeResult("similar enough", 0.5),
+			},
+		}},
+		{name: "converts function call part", query: "query", resp: &aiplatformpb.SearchExamplesResponse{
+			Results: []*aiplatformpb.SearchExamplesResponse_SimilarExample{
+				makeResult("search key", 1.0, makeExpectedContent("model", &aiplatformpb.Part{
+					Data: &aiplatformpb.Part_FunctionCall{FunctionCall: &aiplatformpb.FunctionCall{
+						Id: "call-1", Name: "get_weather", Args: zzMustStruct(t, map[string]any{"city": "London"}),
+					}},
+				})),
+			},
+		}},
+		{name: "converts function response part", query: "query", resp: &aiplatformpb.SearchExamplesResponse{
+			Results: []*aiplatformpb.SearchExamplesResponse_SimilarExample{
+				makeResult("search key", 1.0, makeExpectedContent("user", &aiplatformpb.Part{
+					Data: &aiplatformpb.Part_FunctionResponse{FunctionResponse: &aiplatformpb.FunctionResponse{
+						Id: "call-1", Name: "get_weather", Response: zzMustStruct(t, map[string]any{"temperature": float64(12)}),
+					}},
+				})),
+			},
+		}},
+		{name: "preserves inline data part", query: "query", resp: &aiplatformpb.SearchExamplesResponse{
+			Results: []*aiplatformpb.SearchExamplesResponse_SimilarExample{
+				makeResult("search key", 1.0, makeExpectedContent("model", &aiplatformpb.Part{
+					Data: &aiplatformpb.Part_InlineData{InlineData: &aiplatformpb.Blob{MimeType: "image/png", Data: []byte{0x89, 'P', 'N', 'G'}}},
+				})),
+			},
+		}},
+		{name: "converts file data, video metadata, executable code, code execution result, and thought fields", query: "query", resp: &aiplatformpb.SearchExamplesResponse{
+			Results: []*aiplatformpb.SearchExamplesResponse_SimilarExample{
+				makeResult("search key", 1.0, makeExpectedContent(
+					"model",
+					&aiplatformpb.Part{
+						Data: &aiplatformpb.Part_FileData{FileData: &aiplatformpb.FileData{MimeType: "video/mp4", FileUri: "gs://bucket/clip.mp4"}},
+						Metadata: &aiplatformpb.Part_VideoMetadata{VideoMetadata: &aiplatformpb.VideoMetadata{
+							StartOffset: durationpb.New(5 * time.Second),
+							EndOffset:   durationpb.New(15 * time.Second),
+						}},
+					},
+					&aiplatformpb.Part{Data: &aiplatformpb.Part_ExecutableCode{ExecutableCode: &aiplatformpb.ExecutableCode{
+						Code: "print(42)", Language: aiplatformpb.ExecutableCode_PYTHON,
+					}}},
+					&aiplatformpb.Part{Data: &aiplatformpb.Part_CodeExecutionResult{CodeExecutionResult: &aiplatformpb.CodeExecutionResult{
+						Outcome: aiplatformpb.CodeExecutionResult_OUTCOME_OK, Output: "42\n",
+					}}},
+					&aiplatformpb.Part{Thought: true, ThoughtSignature: []byte("sig-1"), Data: &aiplatformpb.Part_Text{Text: "reasoning step"}},
+				)),
+			},
+		}},
+		{name: "keeps data-less parts with thought, signature, or video metadata and drops empty parts", query: "query", resp: &aiplatformpb.SearchExamplesResponse{
+			Results: []*aiplatformpb.SearchExamplesResponse_SimilarExample{
+				makeResult("search key", 1.0, makeExpectedContent(
+					"model",
+					nil,
+					&aiplatformpb.Part{},
+					&aiplatformpb.Part{Thought: true},
+					&aiplatformpb.Part{ThoughtSignature: []byte("sig-only")},
+					&aiplatformpb.Part{Metadata: &aiplatformpb.Part_VideoMetadata{VideoMetadata: &aiplatformpb.VideoMetadata{
+						StartOffset: durationpb.New(2 * time.Second),
+						EndOffset:   durationpb.New(8 * time.Second),
+					}}},
+				)),
+			},
+		}},
+		{name: "preserves multi-step expected output", query: "query", resp: &aiplatformpb.SearchExamplesResponse{
+			Results: []*aiplatformpb.SearchExamplesResponse_SimilarExample{
+				makeResult("search key", 1.0,
+					makeExpectedContent("model", zzText("step 1")),
+					makeExpectedContent("model", zzText("step 2")),
+				),
+			},
+		}},
+		{name: "skips expected contents without content", query: "query", resp: &aiplatformpb.SearchExamplesResponse{
+			Results: []*aiplatformpb.SearchExamplesResponse_SimilarExample{
+				makeResult("search key", 1.0,
+					nil,
+					&aiplatformpb.ContentsExample_ExpectedContent{Content: nil},
+					makeExpectedContent("model", zzText("kept")),
+				),
+			},
+		}},
+		{name: "skips result without example", query: "query", resp: &aiplatformpb.SearchExamplesResponse{
+			Results: []*aiplatformpb.SearchExamplesResponse_SimilarExample{
+				nil,
+				{SimilarityScore: 1.0, Example: nil},
+				makeResult("search key", 1.0, makeExpectedContent("model", zzText("kept"))),
+			},
+		}},
+		{name: "skips result without stored contents example", query: "query", resp: &aiplatformpb.SearchExamplesResponse{
+			Results: []*aiplatformpb.SearchExamplesResponse_SimilarExample{
+				{SimilarityScore: 1.0, Example: &aiplatformpb.Example{}},
+				makeResult("search key", 1.0, makeExpectedContent("model", zzText("kept"))),
+			},
+		}},
+		{name: "tolerates unset contents example", query: "query", resp: &aiplatformpb.SearchExamplesResponse{
+			Results: []*aiplatformpb.SearchExamplesResponse_SimilarExample{
+				{SimilarityScore: 1.0, Example: &aiplatformpb.Example{ExampleType: &aiplatformpb.Example_StoredContentsExample{
+					StoredContentsExample: &aiplatformpb.StoredContentsExample{SearchKey: "prompt", ContentsExample: nil},
+				}}},
+			},
+		}},
+		{name: "propagates search error", query: "query", searchErr: errors.New("rpc failed")},
+	}
+}
+
+// zzSubtestNames returns the t.Run names of the named test function in file.
+func zzSubtestNames(t *testing.T, file, fn string) []string {
+	t.Helper()
+	f, err := parser.ParseFile(token.NewFileSet(), file, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, decl := range f.Decls {
+		fd, ok := decl.(*ast.FuncDecl)
+		if !ok || fd.Name.Name != fn {
+			continue
+		}
+		ast.Inspect(fd.Body, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok || len(call.Args) != 2 {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || sel.Sel.Name != "Run" {
+				return true
+			}
+			if lit, ok := call.Args[0].(*ast.BasicLit); ok && lit.Kind == token.STRING {
+				s, err := strconv.Unquote(lit.Value)
+				if err != nil {
+					t.Fatal(err)
+				}
+				names = append(names, s)
+			}
+			return true
+		})
+	}
+	return names
+}
+
+var zzNonAlnum = regexp.MustCompile(`[^a-z0-9]+`)
+
+// zzSlug is the golden file stem of a subtest name: lower case, every run of other characters
+// replaced by one underscore, no leading or trailing underscore.
+func zzSlug(name string) string {
+	return strings.Trim(zzNonAlnum.ReplaceAllString(strings.ToLower(name), "_"), "_")
+}
+
+// zzProtoJSON is protojson output with its deliberately unstable whitespace normalized away.
+func zzProtoJSON(t *testing.T, opts protojson.MarshalOptions, m proto.Message) json.RawMessage {
+	t.Helper()
+	raw, err := opts.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, raw); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+type zzGolden struct {
+	Name          string          `json:"name"`
+	Query         string          `json:"query"`
+	Request       json.RawMessage `json:"request"`
+	Response      json.RawMessage `json:"response,omitempty"`
+	ResponseIsNil bool            `json:"responseIsNil,omitempty"`
+	SearchError   string          `json:"searchError,omitempty"`
+	Examples      json.RawMessage `json:"examples,omitempty"`
+	Error         string          `json:"error,omitempty"`
+}
+
+func TestZZGen8bExampleStore(t *testing.T) {
+	out := os.Getenv("GEN_GO_8B_OUT")
+	if out == "" {
+		t.Skip("GEN_GO_8B_OUT is not set")
+	}
+	cases := zzCases(t)
+	var names []string
+	for _, c := range cases {
+		names = append(names, c.name)
+	}
+	if goNames := zzSubtestNames(t, "vertexai_test.go", "TestProvider_Examples"); !slices.Equal(names, goNames) {
+		t.Fatalf("case names differ from TestProvider_Examples' subtests:\n got %q\nwant %q", names, goNames)
+	}
+	dir := filepath.Join(out, "example_store")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range cases {
+		client := &fakeExampleStoreClient{resp: c.resp, err: c.searchErr}
+		p, err := newProvider(&ProviderConfig{ExampleStoreName: testStoreName}, client)
+		if err != nil {
+			t.Fatal(err)
+		}
+		examples, err := p.Examples(t.Context(), c.query)
+		g := zzGolden{
+			Name:    c.name,
+			Query:   c.query,
+			Request: zzProtoJSON(t, protojson.MarshalOptions{}, client.gotReq),
+		}
+		switch {
+		case c.searchErr != nil:
+			g.SearchError = c.searchErr.Error()
+		case c.resp == nil:
+			g.ResponseIsNil = true
+			g.Response = json.RawMessage("{}")
+		default:
+			g.Response = zzProtoJSON(t, protojson.MarshalOptions{UseEnumNumbers: true}, c.resp)
+		}
+		if err != nil {
+			g.Error = err.Error()
+		} else {
+			raw, merr := json.Marshal(examples)
+			if merr != nil {
+				t.Fatal(merr)
+			}
+			g.Examples = raw
+		}
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
+		enc.SetEscapeHTML(false)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(g); err != nil {
+			t.Fatal(err)
+		}
+		file := filepath.Join(dir, zzSlug(c.name)+".json")
+		if err := os.WriteFile(file, buf.Bytes(), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("wrote %s", file)
+	}
+}

@@ -53,6 +53,11 @@
 # 8a: every probe was re-run at ADK-Go 0990f9e2 (docs/parity/ADK_GO_COMMIT); no count changed
 # (the changed goldens and their causes are in docs/parity/8a-bug-report.md, "Go output changed"), and
 # encode_shapes.rs grew from 78 structs / 349 fields to 88 / 435.
+# 8b: the 8b probe (scripts/gen-go-8b: overlay tests mapped into ADK-Go's tool/exampletool/vertexai
+# and cmd/adkgo/internal/deploy/agentengine with `go test -overlay`) wrote exactly 16 Example Store
+# goldens under crates/gadk-vertexai/testdata/example_store/ and 14 environment goldens under
+# crates/gadk-cli/testdata/environment/; when go and ADK-Go are present, rerunning it into a temp
+# dir reproduces them (empty diff -r).
 set -euo pipefail
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 go="${ADK_GO_DIR:-$repo/../adk-go}"
@@ -321,6 +326,35 @@ else
   rm -rf "$agentanalytics_tmp"
 fi
 
+gen8b_counts=""
+for spec in gadk-vertexai/testdata/example_store:16 gadk-cli/testdata/environment:14; do
+  dir="$repo/crates/${spec%%:*}"
+  want="${spec#*:}"
+  got="$(find "$dir" -type f -name '*.json' 2>/dev/null | wc -l | tr -d ' ' || true)"
+  if [ "$got" -ne "$want" ]; then
+    echo "expected $want 8b goldens under $dir, found $got" >&2
+    fail=1
+  fi
+  gen8b_counts="$gen8b_counts ${dir##*/}=$got"
+done
+gen8b_status="not rerun"
+if ! command -v go >/dev/null 2>&1 || [ ! -f "$go/cmd/adkgo/internal/deploy/agentengine/environment.go" ]; then
+  echo "skipping the gen-go-8b rerun: needs go and ADK-Go at $go (set ADK_GO_DIR)" >&2
+else
+  gen8b_tmp="$(mktemp -d)"
+  if ! ADK_GO_DIR="$(cd "$go" && pwd)" "$repo/scripts/gen-go-8b/run.sh" "$gen8b_tmp" >/dev/null; then
+    echo "scripts/gen-go-8b failed" >&2
+    fail=1
+  elif ! diff -r "$repo/crates/gadk-vertexai/testdata/example_store" "$gen8b_tmp/example_store" >&2 ||
+    ! diff -r "$repo/crates/gadk-cli/testdata/environment" "$gen8b_tmp/environment" >&2; then
+    echo "gen-go-8b output differs from the checked-in goldens (rerun scripts/gen-go-8b/run.sh)" >&2
+    fail=1
+  else
+    gen8b_status="reproduced by the probe"
+  fi
+  rm -rf "$gen8b_tmp"
+fi
+
 storagepb="$repo/crates/gadk-agentanalytics/src/storagepb"
 storagepb_status="not regenerated"
 storagepb_manifest="$repo/scripts/gen-storagepb/Cargo.toml"
@@ -350,6 +384,7 @@ if [ "$fail" -eq 0 ]; then
     "goyaml$goyaml_counts; float table $float_n rows; goyaml $goyaml_status;" \
     "configurable$configurable_counts; canonicalize $canon_n rows; configurable $configurable_status;" \
     "agentanalytics $agentanalytics_total fixtures$agentanalytics_counts; agentanalytics $agentanalytics_status;" \
+    "8b goldens$gen8b_counts; gen-go-8b $gen8b_status;" \
     "storagepb $storagepb_status"
 fi
 exit "$fail"

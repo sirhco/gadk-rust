@@ -1649,7 +1649,7 @@ class RealTreeTest(unittest.TestCase):
         self.assertEqual(pc.count(ADK_GO, in_scope), 190)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "1c"), [])
 
-    def test_2a_count_is_162(self):
+    def test_2a_count_is_164(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/2a.md")
         self.assertEqual(in_scope, [
             "examples/toolsearch/main_test.go",
@@ -1660,6 +1660,7 @@ class RealTreeTest(unittest.TestCase):
             "plugin/retryandreflect/plugin_test.go",
             "tool/exampletool/example_test.go",
             "tool/exampletool/tool_test.go",
+            "tool/exampletool/vertexai/vertexai_test.go",
             "tool/geminitool/enterprise_web_search_test.go",
             "tool/geminitool/tool_test.go",
             "tool/loadartifactstool/load_artifacts_tool_test.go",
@@ -1676,7 +1677,7 @@ class RealTreeTest(unittest.TestCase):
             "tool/toolsearch/toolsearch_test.go",
         ])
         self.assertEqual(deferred, {})
-        self.assertEqual(pc.count(ADK_GO, in_scope), 162)
+        self.assertEqual(pc.count(ADK_GO, in_scope), 164)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "2a"), [])
         # tool/toolutils stays a 1b file.
         in_1b, _ = pc.parse_header(HERE.parent / "docs/parity/1b.md")

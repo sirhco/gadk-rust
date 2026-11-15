@@ -86,8 +86,15 @@ pub async fn execute(args: Vec<OsString>, env: &Env) -> u8 {
             (flags.deploy_on_cloud_run(env).await, "cloudrun")
         }
         Some(("agentengine", m)) => {
-            let mut flags = agentengine::from_matches(m);
-            (flags.deploy_on_agent_engine(env).await, "agentengine")
+            let result = match agentengine::validate_args(m) {
+                Ok(()) => {
+                    agentengine::from_matches(m)
+                        .deploy_on_agent_engine(env)
+                        .await
+                }
+                Err(e) => Err(e),
+            };
+            (result, "agentengine")
         }
         _ => {
             // Go `DeployCmd.RunE`: help when there are no arguments, else nothing.
@@ -458,6 +465,8 @@ mod tests {
                 ("mem_deploy", None, "false"),
                 ("mem_model", None, ""),
                 ("mem_ttl", None, "8760h0m0s"),
+                ("env", None, ""),
+                ("default_env", None, "true"),
                 ("bin", None, ""),
             ])
         );

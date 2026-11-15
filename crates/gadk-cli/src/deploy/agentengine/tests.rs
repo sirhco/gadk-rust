@@ -19,6 +19,7 @@
 //! (gadk-model's `FakeServer` on a socket; `ScriptedClient` under paused time).
 
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -143,7 +144,7 @@ fn printed_temp_dir(out: &str) -> String {
 }
 
 /// Go `time.Now().Format(time.RFC3339)` of the fixed clock, in local time.
-fn local_rfc3339() -> String {
+pub(crate) fn local_rfc3339() -> String {
     default_now()
         .with_timezone(&Local)
         .to_rfc3339_opts(SecondsFormat::Secs, true)
@@ -163,7 +164,7 @@ fn done_op() -> Value {
 }
 
 /// A fake Vertex AI answering one create/update with a pending operation, then the done one.
-fn fake_vertex() -> FakeServer {
+pub(crate) fn fake_vertex() -> FakeServer {
     FakeServer::sequence(vec![
         FakeResponse::json(json!({"name": OP}).to_string()),
         FakeResponse::json(done_op().to_string()),
@@ -171,7 +172,7 @@ fn fake_vertex() -> FakeServer {
 }
 
 /// Points `t` at `server` without credentials.
-fn use_fake_vertex(t: &mut TestEnv, server: &FakeServer) {
+pub(crate) fn use_fake_vertex(t: &mut TestEnv, server: &FakeServer) {
     t.env.vertex = ReasoningEngineOptions {
         endpoint: Some(server.url()),
         without_authentication: true,
@@ -201,19 +202,10 @@ fn workspace_fixture() -> (tempfile::TempDir, PathBuf) {
     (dir, ws)
 }
 
-/// Spec Design: Go's `fmt.Println(flags)` with every default and `-e x`.
+/// Every flag lands in its Go field (`--bin` in gadk's); without `--env`/`--default_env` the
+/// environment is the defaults and an update keeps the deployed one.
 #[test]
-fn go_v_golden_line_with_defaults() {
-    let f = parse(&["-e", "x"]);
-    assert_eq!(
-        f.go_v(),
-        "{{ } {  8080  {false  31536000000000000}} {    } { x  }}"
-    );
-}
-
-/// Every flag lands in its Go field, printed in Go's struct order (`--bin` not printed).
-#[test]
-fn go_v_prints_every_flag_in_go_order() {
+fn from_matches_reads_every_flag() {
     let f = parse(&[
         "-r",
         "us-central1",
@@ -239,12 +231,122 @@ fn go_v_prints_every_flag_in_go_order() {
         "--bin",
         "b",
     ]);
+    let want = AgentEngineFlags {
+        gcloud: GCloudFlags {
+            region: "us-central1".into(),
+            project_name: "my-project".into(),
+        },
+        agent_engine: AgentEngineServiceFlags {
+            name: "my-agent".into(),
+            display_name: String::new(),
+            server_port: 9090,
+            agent_engine_id: "42".into(),
+            memory_bank: MemoryBankFlags {
+                deploy: true,
+                model: "m".into(),
+                ttl: GoDuration(3_600_000_000_000),
+            },
+            env: Vec::new(),
+            default_env: true,
+            env_vars: Vec::new(),
+            update_env: false,
+        },
+        build: BuildFlags {
+            temp_dir: "/tmp/t".into(),
+            ..BuildFlags::default()
+        },
+        source: SourceFlags {
+            entry_point_path: "./agent".into(),
+            source_dir: "..".into(),
+            ..SourceFlags::default()
+        },
+        bin: "b".into(),
+        target: None,
+    };
+    assert_eq!(f, want);
+}
+
+/// `--env` is repeatable and kept verbatim (no comma splitting, `-`-leading values); either
+/// environment flag on the command line, even at its default, sets `update_env` (cobra
+/// `Changed`); `--default_env false` leaves `false` as a positional.
+#[test]
+fn environment_flags_parse_like_pflag() {
+    let f = parse(&["--env", "A=1,2", "--env=B=-x", "--env", "-C=3"]);
     assert_eq!(
-        f.go_v(),
-        "{{us-central1 my-project} {my-agent  9090 42 {true m 3600000000000}} {/tmp/t    } { ./agent  ..}}"
+        f.agent_engine.env,
+        [
+            OsString::from("A=1,2"),
+            OsString::from("B=-x"),
+            OsString::from("-C=3")
+        ]
     );
-    assert_eq!(f.bin, "b");
-    assert_eq!(f.target, None);
+    assert!(f.agent_engine.default_env && f.agent_engine.update_env);
+    for (args, default_env, update_env) in [
+        (&[][..], true, false),
+        (&["--default_env=true"][..], true, true),
+        (&["--default_env"][..], true, true),
+        (&["--default_env=false"][..], false, true),
+        (&["--default_env=0"][..], false, true),
+    ] {
+        let f = parse(args);
+        assert_eq!(
+            (f.agent_engine.default_env, f.agent_engine.update_env),
+            (default_env, update_env),
+            "{args:?}"
+        );
+    }
+    let m = command()
+        .try_get_matches_from(["agentengine", "--default_env", "false"])
+        .unwrap();
+    assert!(bool_value(&m, "default_env"));
+    assert_eq!(
+        validate_args(&m),
+        Err("accepts 0 arg(s), received 1".to_string())
+    );
+}
+
+/// R8: an update with the environment and the memory bank masks the environment before the
+/// memory bank's `spec.contextSpec` (Go appends `spec.deployment_spec.env` first).
+#[tokio::test]
+async fn update_masks_environment_before_memory_bank() {
+    let (dir, ws) = workspace_fixture();
+    let server = fake_vertex();
+    let mut t = test_env(&ws, &ws, "agent", &["agent"]);
+    use_fake_vertex(&mut t, &server);
+    let mut f = parse(&[
+        "-r",
+        "us-central1",
+        "-p",
+        "my-project",
+        "-t",
+        &dir.path().display().to_string(),
+        "--agent_engine_id",
+        "42",
+        "--mem_deploy",
+        "--default_env=false",
+        "--env=ONLY=custom",
+    ]);
+
+    f.deploy_on_agent_engine(&t.env).await.unwrap();
+
+    let update = &server.requests()[0];
+    assert_eq!(
+        update.query.as_deref(),
+        Some(
+            "%24alt=json%3Benum-encoding%3Dint\
+             &updateMask=spec.sourceCodeSpec%2Cspec.classMethods%2Cspec.deploymentSpec.env%2Cspec.contextSpec"
+        )
+    );
+    let body = update.json();
+    assert_eq!(
+        body["spec"]["deploymentSpec"],
+        json!({"env": [{"name": "ONLY", "value": "custom"}]})
+    );
+    assert_eq!(
+        body["contextSpec"],
+        json!({"memoryBankConfig": {"ttlConfig": {"defaultTtl": "31536000s"}}})
+    );
+    assert!(!t.out.text().contains("custom"));
 }
 
 /// R9: Go's derived fields, the `agentEngine_<local stamp>__*` temp dir, the display-name
@@ -590,10 +692,18 @@ async fn deploy_creates_the_reasoning_engine() {
     let out = t.out.text();
     let tmp = printed_temp_dir(&out);
     let expected = [
-        format!("{{{{us-central1 my-project}} {{my-agent  8080  {{false  31536000000000000}}}} {{{temp_arg}    }} {{   }}}}\n"),
-        step("Computing flags & preparing temp", &[format!("Using temp dir: {tmp}")]),
-        step("Preparing Dockerfile", &[format!("Writing: {tmp}/Dockerfile")]),
-        step("Creating source archive", &[format!("Creating: {tmp}/archive.tgz")]),
+        step(
+            "Computing flags & preparing temp",
+            &[format!("Using temp dir: {tmp}")],
+        ),
+        step(
+            "Preparing Dockerfile",
+            &[format!("Writing: {tmp}/Dockerfile")],
+        ),
+        step(
+            "Creating source archive",
+            &[format!("Creating: {tmp}/archive.tgz")],
+        ),
         step(
             "Deploying to Agent Engine",
             &[
@@ -604,7 +714,10 @@ async fn deploy_creates_the_reasoning_engine() {
                 "Display Name: my-agent".into(),
             ],
         ),
-        step("Cleaning temp", &[format!("Clean temp starting with {tmp}")]),
+        step(
+            "Cleaning temp",
+            &[format!("Clean temp starting with {tmp}")],
+        ),
     ]
     .concat();
     assert_eq!(out, expected);

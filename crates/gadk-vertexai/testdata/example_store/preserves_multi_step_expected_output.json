@@ -1,0 +1,91 @@
+{
+  "name": "preserves multi-step expected output",
+  "query": "query",
+  "request": {
+    "storedContentsExampleParameters": {
+      "contentSearchKey": {
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "query"
+              }
+            ]
+          }
+        ],
+        "searchKeyGenerationMethod": {
+          "lastEntry": {}
+        }
+      }
+    },
+    "exampleStore": "projects/p/locations/l/exampleStores/s",
+    "topK": "10"
+  },
+  "response": {
+    "results": [
+      {
+        "example": {
+          "storedContentsExample": {
+            "searchKey": "search key",
+            "contentsExample": {
+              "expectedContents": [
+                {
+                  "content": {
+                    "role": "model",
+                    "parts": [
+                      {
+                        "text": "step 1"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "content": {
+                    "role": "model",
+                    "parts": [
+                      {
+                        "text": "step 2"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "similarityScore": 1
+      }
+    ]
+  },
+  "examples": [
+    {
+      "input": {
+        "parts": [
+          {
+            "text": "search key"
+          }
+        ],
+        "role": "user"
+      },
+      "output": [
+        {
+          "parts": [
+            {
+              "text": "step 1"
+            }
+          ],
+          "role": "model"
+        },
+        {
+          "parts": [
+            {
+              "text": "step 2"
+            }
+          ],
+          "role": "model"
+        }
+      ]
+    }
+  ]
+}

@@ -17,8 +17,8 @@
 //! `gadk deploy agentengine`.
 //!
 //! The flag structs keep Go's shape (`deployAgentEngineFlags` and its nested structs, field
-//! for field in Go's order) so [`AgentEngineFlags::go_v`] can print Go's `fmt.Println(flags)`
-//! line; gadk's additions (`bin`, `target`) sit after Go's fields and are never printed.
+//! for field in Go's order); gadk's additions (`bin`, `target`) sit after Go's fields. As Go
+//! since #1981, the flags are not printed: `--env` values may be secrets.
 //!
 //! `compute_flags` resolves the Cargo target (R4) where Go splits a `main.go` path, and fixes
 //! the archive root (`-d`, else the Cargo workspace root, R9); the derived fields are set as
@@ -26,6 +26,7 @@
 //! `sourceDir` = the absolute archive root). Vertex AI is reached through
 //! `gadk_vertexai::reasoning_engine` with [`Env::vertex`] (R11).
 
+use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
 use std::io::{ErrorKind, Write};
 use std::os::unix::fs::OpenOptionsExt;
@@ -42,8 +43,8 @@ use serde_json::{Value, json};
 
 use crate::Env;
 use crate::flags::{
-    bool_flag, bool_value, duration_flag, duration_value, int_flag, int_value, pflag_command,
-    stray_args, string_flag, string_value,
+    STRAY_ARGS, bool_flag, bool_value, duration_flag, duration_value, int_flag, int_value, passed,
+    pflag_command, stray_args, string_flag, string_value,
 };
 use crate::stage::{BuilderStage, SourceTree, dockerfile, make_temp};
 use crate::target::{
@@ -52,8 +53,11 @@ use crate::target::{
 };
 use crate::util::{Printer, log_start_stop, validate_shell_arg_safe};
 
+pub mod environment;
 #[cfg(test)]
 pub(crate) mod tests;
+
+use environment::{EnvVar, deployment_spec, register_environment_flags};
 
 /// Go `agentEngineOperationTimeout`: the bound on waiting for a create/update operation.
 pub const AGENT_ENGINE_OPERATION_TIMEOUT: Duration = Duration::from_secs(45 * 60);
@@ -78,14 +82,53 @@ pub struct MemoryBankFlags {
     pub ttl: GoDuration,
 }
 
-/// Go `agentEngineServiceFlags`.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// Go `agentEngineServiceFlags`. `Debug` shows the `--env` names only: values may be secrets.
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct AgentEngineServiceFlags {
     pub name: String,
     pub display_name: String,
     pub server_port: i64,
     pub agent_engine_id: String,
     pub memory_bank: MemoryBankFlags,
+    /// `--env` entries, verbatim (Go `env []string`; unvalidated until
+    /// [`AgentEngineFlags::environment_variables`]).
+    pub env: Vec<OsString>,
+    /// `--default_env`.
+    pub default_env: bool,
+    /// The environment [`AgentEngineFlags::compute_flags`] computed.
+    pub env_vars: Vec<EnvVar>,
+    /// `--env` or `--default_env` was on the command line (Go: cobra `Changed`): an update
+    /// replaces the environment.
+    pub update_env: bool,
+}
+
+impl std::fmt::Debug for AgentEngineServiceFlags {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Each `--env` entry as its name (the text before the first `=`), value redacted; an
+        // entry without `=` is malformed and could be a bare value, so it is redacted whole.
+        let env: Vec<String> = self
+            .env
+            .iter()
+            .map(|e| {
+                let e = e.to_string_lossy();
+                match e.split_once('=') {
+                    Some((name, _)) => format!("{name}=<redacted>"),
+                    None => "<redacted>".to_owned(),
+                }
+            })
+            .collect();
+        f.debug_struct("AgentEngineServiceFlags")
+            .field("name", &self.name)
+            .field("display_name", &self.display_name)
+            .field("server_port", &self.server_port)
+            .field("agent_engine_id", &self.agent_engine_id)
+            .field("memory_bank", &self.memory_bank)
+            .field("env", &env)
+            .field("default_env", &self.default_env)
+            .field("env_vars", &self.env_vars)
+            .field("update_env", &self.update_env)
+            .finish()
+    }
 }
 
 /// Go `buildFlags`.
@@ -121,8 +164,10 @@ pub struct AgentEngineFlags {
 }
 
 /// Go `agentEngineCmd` with the flags of its `init`, in Go's order, plus gadk's `--bin`.
+/// Positional arguments are collected (not a clap error) so [`validate_args`] can reject them
+/// with cobra's text.
 pub fn command() -> Command {
-    pflag_command("agentengine")
+    let cmd = pflag_command("agentengine")
         .about(SHORT)
         .long_about(LONG)
         .arg(string_flag("region", Some('r'), "", "GCP Region"))
@@ -172,7 +217,8 @@ pub fn command() -> Command {
             None,
             "8760h0m0s",
             "Time-To-Live for memories",
-        ))
+        ));
+    register_environment_flags(cmd)
         // Divergence (ledger 6b): gadk-only flag selecting the Cargo binary target.
         .arg(string_flag(
             "bin",
@@ -181,6 +227,17 @@ pub fn command() -> Command {
             "Binary target of the package to deploy, required when the package has more than one",
         ))
         .arg(stray_args())
+}
+
+/// Go `agentEngineCmd.Args` (`cobra.ExactArgs(0)`): any positional argument fails with
+/// cobra's `accepts 0 arg(s), received N`, which does not echo the arguments; runs before
+/// anything else.
+pub fn validate_args(m: &ArgMatches) -> Result<(), String> {
+    let n = m.get_raw(STRAY_ARGS).map_or(0, |v| v.len());
+    if n != 0 {
+        return Err(format!("accepts 0 arg(s), received {n}"));
+    }
+    Ok(())
 }
 
 /// The flags of a parsed `agentengine` command (Go: cobra binds them into the package
@@ -201,6 +258,13 @@ pub fn from_matches(m: &ArgMatches) -> AgentEngineFlags {
                 model: string_value(m, "mem_model"),
                 ttl: duration_value(m, "mem_ttl"),
             },
+            env: m
+                .get_many::<OsString>("env")
+                .map(|v| v.cloned().collect())
+                .unwrap_or_default(),
+            default_env: bool_value(m, "default_env"),
+            env_vars: Vec::new(),
+            update_env: passed(m, "env") || passed(m, "default_env"),
         },
         build: BuildFlags {
             temp_dir: string_value(m, "temp_dir"),
@@ -255,44 +319,8 @@ fn str_field<'a>(v: &'a Value, name: &str) -> &'a str {
 }
 
 impl AgentEngineFlags {
-    /// Go `fmt.Println(flags)`'s line without the newline: Go's `%v` of
-    /// `deployAgentEngineFlags`, field for field (durations as nanoseconds, derived fields as
-    /// they are now); `bin` and `target` are not printed.
-    // Divergence (ledger 6b): Go prints the package global `flags`; gadk has no global and
-    // prints the receiver (the same value when run from the command line).
-    pub fn go_v(&self) -> String {
-        let AgentEngineFlags {
-            gcloud,
-            agent_engine: ae,
-            build,
-            source,
-            ..
-        } = self;
-        let mb = &ae.memory_bank;
-        format!(
-            "{{{{{} {}}} {{{} {} {} {} {{{} {} {}}}}} {{{} {} {} {} {}}} {{{} {} {} {}}}}}",
-            gcloud.region,
-            gcloud.project_name,
-            ae.name,
-            ae.display_name,
-            ae.server_port,
-            ae.agent_engine_id,
-            mb.deploy,
-            mb.model,
-            mb.ttl.0,
-            build.temp_dir,
-            build.exec_path,
-            build.exec_file,
-            build.dockerfile_build_path,
-            build.archive_path,
-            source.src_base_path,
-            source.entry_point_path,
-            source.orig_entry_point_path,
-            source.source_dir,
-        )
-    }
-
-    /// Go `computeFlags` (R9): target resolution, the shell-safe checks, the archive root,
+    /// Go `computeFlags` (R9): the environment (validated first, before any other step),
+    /// target resolution, the shell-safe checks, the archive root,
     /// the `agentEngine_<local time>__*` temp dir, the derived paths, the display name and the
     /// `--mem_model` prefix. Every check runs before the temp dir is created.
     pub async fn compute_flags(&mut self, env: &Env) -> Result<(), String> {
@@ -300,6 +328,7 @@ impl AgentEngineFlags {
             &env.out,
             "Computing flags & preparing temp",
             async |p: Printer| {
+                self.agent_engine.env_vars = self.environment_variables()?;
                 self.source.orig_entry_point_path = self.source.entry_point_path.clone();
                 let orig = self.source.orig_entry_point_path.clone();
                 self.source.entry_point_path = env.abs(&orig).to_string_lossy().into_owned();
@@ -559,14 +588,7 @@ impl AgentEngineFlags {
                 "spec": {
                     "sourceCodeSpec": source_code_spec,
                     "agentFramework": "google-adk",
-                    "deploymentSpec": {
-                        "env": [
-                            {"name": "GOOGLE_CLOUD_REGION", "value": self.gcloud.region},
-                            {"name": "NUM_WORKERS", "value": "1"},
-                            {"name": "GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY", "value": "true"},
-                            {"name": "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT", "value": "true"},
-                        ],
-                    },
+                    "deploymentSpec": deployment_spec(&self.agent_engine.env_vars),
                     "classMethods": methods,
                 },
             });
@@ -592,7 +614,8 @@ impl AgentEngineFlags {
 
     /// Go `gcloudUpdateAgentEngine` (R11 update): `UpdateReasoningEngine` of
     /// `projects/<p>/locations/<r>/reasoningEngines/<id>` with Go's update mask in protojson
-    /// form, then the operation awaited for at most 45 minutes.
+    /// form (the environment only when [`AgentEngineServiceFlags::update_env`], before the
+    /// memory bank's `spec.contextSpec`), then the operation awaited for at most 45 minutes.
     pub async fn update_agent_engine(&self, env: &Env) -> Result<(), String> {
         log_start_stop(&env.out, "Updating Agent Engine", async |p: Printer| {
             let name = format!(
@@ -609,6 +632,10 @@ impl AgentEngineFlags {
                 },
             });
             let mut mask = vec!["spec.sourceCodeSpec", "spec.classMethods"];
+            if self.agent_engine.update_env {
+                engine["spec"]["deploymentSpec"] = deployment_spec(&self.agent_engine.env_vars);
+                mask.push("spec.deploymentSpec.env");
+            }
             if self.agent_engine.memory_bank.deploy {
                 engine["contextSpec"] = self.memory_bank_context_spec();
                 // Divergence (ledger 6b): Go's mask path `spec.context_spec` is kept (in
@@ -632,11 +659,9 @@ impl AgentEngineFlags {
         .await
     }
 
-    /// Go `deployOnAgentEngine`: prints [`AgentEngineFlags::go_v`], then compute →
-    /// Dockerfile → archive → update|deploy → clean, stopping at the first error (the temp
-    /// dir is kept).
+    /// Go `deployOnAgentEngine`: compute → Dockerfile → archive → update|deploy → clean,
+    /// stopping at the first error (the temp dir is kept).
     pub async fn deploy_on_agent_engine(&mut self, env: &Env) -> Result<(), String> {
-        env.out.write_str(&format!("{}\n", self.go_v()));
         self.compute_flags(env).await?;
         self.prepare_dockerfile(env).await?;
         self.create_archive(env).await?;

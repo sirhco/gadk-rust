@@ -1,0 +1,85 @@
+{
+  "name": "converts function call part",
+  "query": "query",
+  "request": {
+    "storedContentsExampleParameters": {
+      "contentSearchKey": {
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "query"
+              }
+            ]
+          }
+        ],
+        "searchKeyGenerationMethod": {
+          "lastEntry": {}
+        }
+      }
+    },
+    "exampleStore": "projects/p/locations/l/exampleStores/s",
+    "topK": "10"
+  },
+  "response": {
+    "results": [
+      {
+        "example": {
+          "storedContentsExample": {
+            "searchKey": "search key",
+            "contentsExample": {
+              "expectedContents": [
+                {
+                  "content": {
+                    "role": "model",
+                    "parts": [
+                      {
+                        "functionCall": {
+                          "id": "call-1",
+                          "name": "get_weather",
+                          "args": {
+                            "city": "London"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "similarityScore": 1
+      }
+    ]
+  },
+  "examples": [
+    {
+      "input": {
+        "parts": [
+          {
+            "text": "search key"
+          }
+        ],
+        "role": "user"
+      },
+      "output": [
+        {
+          "parts": [
+            {
+              "functionCall": {
+                "id": "call-1",
+                "args": {
+                  "city": "London"
+                },
+                "name": "get_weather"
+              }
+            }
+          ],
+          "role": "model"
+        }
+      ]
+    }
+  ]
+}

@@ -15,7 +15,7 @@
 
 //! gadk-telemetry: OpenTelemetry export for gadk (port of ADK-Go's `telemetry` package).
 //!
-//! [`new`] builds the OpenTelemetry SDK tracer and logger providers ([`Providers`]) from
+//! [`new`] builds the OpenTelemetry SDK tracer, logger and meter providers ([`Providers`]) from
 //! [`TelemetryOption`]s and the environment, as Go's `telemetry.New`: OTLP/HTTP exporters when
 //! `OTEL_EXPORTER_OTLP_*ENDPOINT` is set, export to `telemetry.googleapis.com` with
 //! [`with_otel_to_cloud`], the resource from Go's default resource, the GCP project and the GCP
@@ -32,6 +32,7 @@ mod credentials;
 mod error;
 pub mod gcp_detector;
 mod http_client;
+mod metric_reader;
 mod providers;
 mod resource;
 mod setup;
@@ -44,8 +45,9 @@ mod test_support;
 pub use bridge::OtelBridge;
 pub use config::{
     GoogleCredentials, TelemetryOption, with_gcp_quota_project, with_gcp_resource_project,
-    with_google_credentials, with_log_record_processors, with_logger_provider, with_otel_to_cloud,
-    with_resource, with_span_processors, with_tracer_provider,
+    with_google_credentials, with_log_record_processors, with_logger_provider, with_meter_provider,
+    with_metric_reader, with_otel_to_cloud, with_resource, with_span_processors,
+    with_tracer_provider,
 };
 pub use error::Error;
 pub use http_client::RuntimeHttpClient;

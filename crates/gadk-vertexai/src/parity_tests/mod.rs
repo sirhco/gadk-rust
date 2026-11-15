@@ -13,8 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! In-crate parity targets: ports of ADK-Go `session/vertexai` tests, which reach the
-//! crate-private client, conversions and test servers.
+//! In-crate parity targets: ports of ADK-Go `session/vertexai` and
+//! `tool/exampletool/vertexai` tests, which reach the crate-private clients, conversions and
+//! test servers.
 
 mod session_vertexai_append_event_temp_state;
 mod session_vertexai_compaction_persistence;
@@ -25,3 +26,4 @@ mod session_vertexai_raw_event_crossruntime;
 mod session_vertexai_service;
 mod session_vertexai_session;
 mod session_vertexai_vertexai;
+mod tool_exampletool_vertexai_vertexai;

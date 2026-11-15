@@ -15,9 +15,76 @@
 
 //! The few-shot `example_tool` (port of Go `tool/exampletool`).
 //!
-//! The tool adds static few-shot examples to the system instruction of every model request that
-//! has user text. Python's dynamic `ExampleProvider` is not ported; Go does not have it either.
-//! The tool has no declaration, so the flow never packs it.
+//! The tool adds few-shot examples to the system instruction of every model request that has
+//! user text. The examples are either a static list ([`ExampleToolConfig::examples`]) or fetched
+//! for each user query from a [`Provider`] ([`ExampleToolConfig::provider`]). The tool has no
+//! declaration, so the flow never packs it.
+//!
+//! A provider that picks the stored examples sharing a word with the user query (Go
+//! `ExampleNew_provider`):
+//!
+//! ```
+//! use std::sync::Arc;
+//!
+//! use async_trait::async_trait;
+//! use gadk_agent::{Context, ToolError};
+//! use gadk_genai::Content;
+//! use gadk_tools::example::{self, Example, ExampleToolConfig, Provider};
+//!
+//! /// Returns the stored examples whose input text shares a word with the user query.
+//! struct KeywordProvider {
+//!     examples: Vec<Example>,
+//! }
+//!
+//! #[async_trait]
+//! impl Provider for KeywordProvider {
+//!     async fn examples(&self, _ctx: &Context, query: &str) -> Result<Vec<Example>, ToolError> {
+//!         Ok(self
+//!             .examples
+//!             .iter()
+//!             .filter(|ex| {
+//!                 query
+//!                     .split_whitespace()
+//!                     .any(|word| ex.input.parts[0].text.contains(word))
+//!             })
+//!             .cloned()
+//!             .collect())
+//!     }
+//! }
+//!
+//! # #[tokio::main(flavor = "current_thread")]
+//! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let provider = Arc::new(KeywordProvider {
+//!     examples: vec![
+//!         Example {
+//!             input: Content::from_text("What is 2 + 2?", "user"),
+//!             output: vec![Content::from_text("4", "model")],
+//!         },
+//!         Example {
+//!             input: Content::from_text("What is the capital of France?", "user"),
+//!             output: vec![Content::from_text("Paris", "model")],
+//!         },
+//!     ],
+//! });
+//!
+//! let et = example::new(ExampleToolConfig {
+//!     provider: Some(provider.clone()),
+//!     ..Default::default()
+//! })?;
+//! assert_eq!(et.name(), "example_tool");
+//!
+//! // The tool makes this call with the user's text on each turn.
+//! let examples = provider
+//!     .examples(&Context::builder().build(), "capital of Spain")
+//!     .await?;
+//! let inputs: Vec<&str> = examples
+//!     .iter()
+//!     .map(|ex| ex.input.parts[0].text.as_str())
+//!     .collect();
+//! assert_eq!(inputs, ["What is the capital of France?"]);
+//! # Ok(())
+//! # }
+//! ```
 
 use std::any::Any;
 use std::fmt::Write as _;
@@ -31,7 +98,9 @@ use gadk_model::LlmRequest;
 use gadk_platform::go_sprint_value;
 use serde_json::Value;
 
-/// Port of Go `exampletool.Example` (tool.go:30): one few-shot example, an input and its expected
+use crate::go_fmt::wrap_err;
+
+/// Port of Go `exampletool.Example` (tool.go:34): one few-shot example, an input and its expected
 /// output.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Example {
@@ -41,23 +110,72 @@ pub struct Example {
     pub output: Vec<Content>,
 }
 
-/// Port of Go `exampletool.ExampleToolConfig` (tool.go:36).
-#[derive(Debug, Clone, Default)]
+/// Port of Go `exampletool.Provider` (tool.go:43): fetches few-shot examples for a user query.
+///
+/// `examples` takes the invocation context and returns an error because providers may perform
+/// I/O.
+#[async_trait]
+pub trait Provider: Send + Sync {
+    /// Returns the examples for `query`, the joined non-thought text of the user content.
+    async fn examples(&self, ctx: &Context, query: &str) -> Result<Vec<Example>, ToolError>;
+}
+
+/// Port of Go `exampletool.ExampleToolConfig` (tool.go:49). Set either `examples` or
+/// `provider`, not both: [`new`] rejects a config that sets both, even with `Some(vec![])` (Go
+/// checks `Examples != nil`).
+#[derive(Clone, Default)]
 pub struct ExampleToolConfig {
-    /// The few-shot examples to add.
-    pub examples: Vec<Example>,
+    /// The static few-shot examples to add.
+    pub examples: Option<Vec<Example>>,
+    /// Fetches the examples for each user query.
+    pub provider: Option<Arc<dyn Provider>>,
 }
 
-/// Port of Go `exampletool.New` (tool.go:47). Go's never-returned error is dropped.
-pub fn new(config: ExampleToolConfig) -> Arc<dyn Tool> {
-    Arc::new(ExampleTool {
-        examples: config.examples,
-    })
+impl std::fmt::Debug for ExampleToolConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExampleToolConfig")
+            .field("examples", &self.examples)
+            .field("provider", &self.provider.as_ref().map(|_| "<provider>"))
+            .finish()
+    }
 }
 
-/// Port of Go `exampleTool` (tool.go:41).
+/// The error [`new`] returns, with Go's text.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExampleToolError {
+    /// Go `New`: both `Examples` and `Provider` are set.
+    BothExamplesAndProvider,
+}
+
+impl std::fmt::Display for ExampleToolError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExampleToolError::BothExamplesAndProvider => {
+                f.write_str("exampletool: cannot specify both Examples and Provider")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ExampleToolError {}
+
+/// Port of Go `exampletool.New` (tool.go:62): an example tool that adds the configured few-shot
+/// examples to the LLM request. It fails when both `examples` and `provider` are set.
+pub fn new(config: ExampleToolConfig) -> Result<Arc<dyn Tool>, ExampleToolError> {
+    if config.examples.is_some() && config.provider.is_some() {
+        return Err(ExampleToolError::BothExamplesAndProvider);
+    }
+    Ok(Arc::new(ExampleTool {
+        examples: config.examples.unwrap_or_default(),
+        provider: config.provider,
+    }))
+}
+
+/// Port of Go `exampleTool` (tool.go:55).
 struct ExampleTool {
     examples: Vec<Example>,
+    provider: Option<Arc<dyn Provider>>,
 }
 
 #[async_trait]
@@ -70,17 +188,40 @@ impl Tool for ExampleTool {
         "example tool"
     }
 
-    /// Port of Go `exampleTool.ProcessRequest` (tool.go:62). It does nothing unless the first user
-    /// part has text.
+    /// Port of Go `exampleTool.ProcessRequest` (tool.go:83). With a provider, it fetches the
+    /// examples for the joined non-thought user text and does nothing when that text is empty;
+    /// with a static list, it does nothing unless the first user part has text.
     async fn process_request(&self, ctx: &Context, req: &mut LlmRequest) -> Result<(), ToolError> {
-        let has_text = ctx
-            .user_content()
-            .and_then(|c| c.parts.first())
-            .is_some_and(|p| !p.text.is_empty());
-        if !has_text {
+        let Some(user_content) = ctx.user_content() else {
             return Ok(());
-        }
-        let instruction = build_examples_system_instruction(&self.examples, &req.model);
+        };
+        let Some(first) = user_content.parts.first() else {
+            return Ok(());
+        };
+
+        let fetched;
+        let examples: &[Example] = if let Some(provider) = &self.provider {
+            let query = user_query(user_content);
+            if query.is_empty() {
+                return Ok(());
+            }
+            // Unlike adk-python's get_examples, the provider takes a context and returns an
+            // error because it may perform I/O.
+            fetched = provider
+                .examples(ctx, &query)
+                .await
+                .map_err(|e| wrap_err("exampletool: fetch examples", e))?;
+            &fetched
+        } else {
+            // Unlike adk-python, the static list path checks only the first part for non-empty
+            // text to preserve existing behavior.
+            if first.text.is_empty() {
+                return Ok(());
+            }
+            &self.examples
+        };
+
+        let instruction = build_examples_system_instruction(examples, &req.model);
         append_instructions(req, &[&instruction]);
         Ok(())
     }
@@ -90,7 +231,18 @@ impl Tool for ExampleTool {
     }
 }
 
-// Go tool.go:82-94.
+/// Port of Go `userQuery` (tool.go:121): the non-empty, non-thought text parts of `c` joined
+/// with single spaces.
+fn user_query(c: &Content) -> String {
+    c.parts
+        .iter()
+        .filter(|p| !p.thought && !p.text.is_empty())
+        .map(|p| p.text.as_str())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+// Go tool.go:136-148.
 const EXAMPLES_INTRO: &str = "<EXAMPLES>\nBegin few-shot\nThe following are examples of user queries and model responses using the available tools.\n\n";
 const EXAMPLES_END: &str = "End few-shot\n<EXAMPLES>";
 const EXAMPLE_END: &str = "End example\n\n";
@@ -107,7 +259,7 @@ fn protect(text: &str) -> String {
     text.replace("End few-shot", "[PROTECTED]")
 }
 
-/// Port of Go `buildExamplesSystemInstruction` (tool.go:97).
+/// Port of Go `buildExamplesSystemInstruction` (tool.go:151).
 fn build_examples_system_instruction(examples: &[Example], model: &str) -> String {
     let mut sb = String::from(EXAMPLES_INTRO);
     // Go 5199d9fe (adk-python's convert_examples_to_text): Gemini models, and a request that
@@ -167,9 +319,8 @@ fn build_examples_system_instruction(examples: &[Example], model: &str) -> Strin
     sb
 }
 
-/// Go's function-call args loop (tool.go:121-128). Strings are written `k='v'` and other values
-/// `k=<Go %v>`, joined with `", "` in ascending key order (Go-parity note 2: Go's map order is
-/// random, and the sorted order is one valid Go output).
+/// Go's function-call args loop (tool.go:184-193). Strings are written `k='v'` and other values
+/// `k=<Go %v>`, joined with `", "` in ascending key order (Go e342d2f6 `slices.Sorted`).
 fn format_function_call_args(fc: &FunctionCall) -> String {
     let mut args: Vec<(&String, &Value)> = fc.args.iter().collect();
     args.sort_by(|a, b| a.0.cmp(b.0));

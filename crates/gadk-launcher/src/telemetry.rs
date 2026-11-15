@@ -15,8 +15,8 @@
 
 //! Go `cmd/launcher/internal/telemetry` (`InitAndSetGlobalOtelProviders`): the console and web
 //! launchers build gadk-telemetry's providers from [`Config::telemetry_options`], set the global
-//! tracer provider and install one global `tracing` subscriber: the providers' bridge layer
-//! first, then [`Config::telemetry_layers`].
+//! tracer and meter providers and install one global `tracing` subscriber: the providers' bridge
+//! layer first, then [`Config::telemetry_layers`].
 //!
 //! Divergences: Go always replaces the global OpenTelemetry providers; gadk keeps a global
 //! `tracing` subscriber that is already installed and logs that the launcher's layers were not
@@ -53,8 +53,8 @@ pub(crate) struct Globals {
 }
 
 impl Globals {
-    /// The process environment, OpenTelemetry's global tracer provider and the global `tracing`
-    /// dispatcher.
+    /// The process environment, OpenTelemetry's global tracer and meter providers and the global
+    /// `tracing` dispatcher.
     pub(crate) fn process() -> Globals {
         Globals {
             env: Arc::new(ProcessEnv),
@@ -97,8 +97,8 @@ impl Globals {
 
 /// Go `InitAndSetGlobalOtelProviders`: builds the providers from a copy of
 /// `config.telemetry_options` (with `with_otel_to_cloud(true)` appended when `otel_to_cloud`,
-/// Go's `-otel_to_cloud` flag), sets OpenTelemetry's global tracer provider, then installs a
-/// global `tracing` subscriber of the providers' bridge layer and the drained
+/// Go's `-otel_to_cloud` flag), sets OpenTelemetry's global tracer and meter providers, then
+/// installs a global `tracing` subscriber of the providers' bridge layer and the drained
 /// `config.telemetry_layers`; an existing global subscriber is kept and `config.log` says so.
 /// With neither providers nor layers nothing is installed. Errors are gadk-telemetry's (Go's
 /// texts) as `Error::Telemetry`; callers wrap them as `telemetry initialization failed: <err>`.

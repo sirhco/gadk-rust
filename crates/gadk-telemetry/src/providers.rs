@@ -20,6 +20,7 @@ use std::sync::Arc;
 use gadk_platform::env::{EnvProvider, ProcessEnv};
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::logs::SdkLoggerProvider;
+use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use tokio::runtime::Handle;
 
@@ -36,10 +37,12 @@ pub struct Providers {
     pub tracer_provider: Option<SdkTracerProvider>,
     /// The configured logger provider or `None`.
     pub logger_provider: Option<SdkLoggerProvider>,
+    /// The configured meter provider or `None`.
+    pub meter_provider: Option<SdkMeterProvider>,
 }
 
 impl Providers {
-    /// Go `Shutdown`: shuts both providers down and returns their errors joined with `\n` (Go
+    /// Go `Shutdown`: shuts the providers down and returns their errors joined with `\n` (Go
     /// `errors.Join`). The SDK's blocking shutdowns run on `spawn_blocking`, so a current-thread
     /// runtime keeps driving the exports they wait for. A second call returns `Ok`, as Go's does.
     ///
@@ -49,6 +52,7 @@ impl Providers {
     pub async fn shutdown(&self) -> Result<(), Error> {
         let tracer_provider = self.tracer_provider.clone();
         let logger_provider = self.logger_provider.clone();
+        let meter_provider = self.meter_provider.clone();
         let shutdown = move || {
             let mut errs = Vec::new();
             if let Some(tp) = tracer_provider {
@@ -56,6 +60,12 @@ impl Providers {
             }
             if let Some(lp) = logger_provider {
                 push_err(&mut errs, lp.shutdown());
+            }
+            if let Some(mp) = meter_provider {
+                // The tracer and logger providers return Ok on a repeated shutdown; the meter
+                // provider returns the bare `AlreadyShutdown` (Go `ErrReaderShutdown`). A
+                // reader's own error on the first shutdown comes as `InternalFailure` and is kept.
+                push_err(&mut errs, mp.shutdown());
             }
             errs
         };
@@ -73,16 +83,20 @@ impl Providers {
         }
     }
 
-    /// Go `SetGlobalOtelProviders`: sets OpenTelemetry's global tracer provider when one is
-    /// configured. OpenTelemetry Rust has no global logger provider.
+    /// Go `SetGlobalOtelProviders`: sets OpenTelemetry's global tracer and meter providers, each
+    /// when one is configured. OpenTelemetry Rust has no global logger provider.
     // Divergence (ledger 7a): no global logger provider is set (OpenTelemetry Rust has none).
     pub fn set_global_otel_providers(&self) {
         self.set_global_otel_providers_with(|tp| {
             opentelemetry::global::set_tracer_provider(tp);
         });
+        if let Some(mp) = &self.meter_provider {
+            opentelemetry::global::set_meter_provider(mp.clone());
+        }
     }
 
-    /// [`Providers::set_global_otel_providers`] with the global setter injected (tests).
+    /// [`Providers::set_global_otel_providers`]'s tracer half with the global setter injected
+    /// (tests); the meter provider is not passed to it.
     pub fn set_global_otel_providers_with(
         &self,
         set_tracer_provider: impl FnOnce(SdkTracerProvider),
@@ -101,7 +115,9 @@ impl Providers {
 /// Records a provider shutdown error; the SDK's already-shut-down error is success, as a
 /// second Go `Shutdown` is.
 // Divergence (ledger 7a): the text is opentelemetry_sdk's provider error
-// (`Operation failed: Shutdown errors: [InternalFailure("<processor error>")]`), not Go's.
+// (`Operation failed: Shutdown errors: [InternalFailure("<processor error>")]`), not Go's; a
+// periodic metric reader whose exporter fails to shut down reports
+// `Operation failed: [InternalFailure("Failed to shutdown")]`, without the exporter's error.
 fn push_err(errs: &mut Vec<String>, result: OTelSdkResult) {
     match result {
         Ok(()) | Err(OTelSdkError::AlreadyShutdown) => {}
@@ -134,11 +150,16 @@ pub async fn new_with(
     opts: &[TelemetryOption],
 ) -> Result<Providers, Error> {
     let cfg = setup::configure(&env, detector, opts).await?;
-    // Go initializes no meter provider (adk-go issue #479).
-    Ok(Providers {
-        tracer_provider: setup::init_tracer_provider(&cfg),
-        logger_provider: setup::init_logger_provider(&cfg),
-    })
+    Ok(new_internal(&cfg))
+}
+
+/// Go `newInternal`: the providers of a configured [`setup::configure`] result.
+pub(crate) fn new_internal(cfg: &crate::config::Config) -> Providers {
+    Providers {
+        tracer_provider: setup::init_tracer_provider(cfg),
+        logger_provider: setup::init_logger_provider(cfg),
+        meter_provider: setup::init_meter_provider(cfg),
+    }
 }
 
 #[cfg(test)]
@@ -161,6 +182,7 @@ mod tests {
         let providers = new_with(env(&[]), &NoDetector, &[]).await.unwrap();
         assert!(providers.tracer_provider.is_none());
         assert!(providers.logger_provider.is_none());
+        assert!(providers.meter_provider.is_none());
         providers.shutdown().await.unwrap();
     }
 

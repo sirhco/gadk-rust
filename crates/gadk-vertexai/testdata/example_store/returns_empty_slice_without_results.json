@@ -1,0 +1,27 @@
+{
+  "name": "returns empty slice without results",
+  "query": "query",
+  "request": {
+    "storedContentsExampleParameters": {
+      "contentSearchKey": {
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "query"
+              }
+            ]
+          }
+        ],
+        "searchKeyGenerationMethod": {
+          "lastEntry": {}
+        }
+      }
+    },
+    "exampleStore": "projects/p/locations/l/exampleStores/s",
+    "topK": "10"
+  },
+  "response": {},
+  "examples": []
+}
