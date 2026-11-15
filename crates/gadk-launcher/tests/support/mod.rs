@@ -351,6 +351,13 @@ fn dechunk(mut raw: &[u8]) -> Vec<u8> {
     }
 }
 
+/// The probe's `hasWallClockTime`: whether `s` holds an N5 time field with fractional seconds
+/// (a wall-clock time, or an Agent Engine event timestamp in Unix seconds with microseconds),
+/// whose text width varies run to run, so the body's length is not recorded.
+fn has_wall_clock_time(s: &str) -> bool {
+    TIME_FIELD.captures_iter(s).any(|c| c[2].contains('.'))
+}
+
 /// A raw response as the fixture's `response` records it (after N2, N5–N7; header names in Go's
 /// canonical form, sorted by name then value). `head_request`: the body is not read (Go's
 /// `http.ReadResponse` for a HEAD request).
@@ -410,12 +417,13 @@ pub fn parse_response(raw: &[u8], head_request: bool, port: u16) -> Value {
         })
         .collect();
     headers.sort();
+    let body_length = (!has_wall_clock_time(&String::from_utf8_lossy(&body))).then_some(body.len());
     json!({
         "status": status,
         "status_text": status_text,
         "headers": headers,
         "body": inline,
-        "body_length": body.len(),
+        "body_length": body_length,
         "body_sha256": sha,
         "base_href": base_href,
     })

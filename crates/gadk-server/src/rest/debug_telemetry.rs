@@ -106,7 +106,7 @@ pub(crate) struct SpanRecord {
     pub(crate) trace_id: [u8; 16],
     pub(crate) span_id: [u8; 8],
     pub(crate) parent_span_id: [u8; 8],
-    pub(crate) attributes: BTreeMap<String, String>,
+    pub(crate) attributes: BTreeMap<String, Value>,
     pub(crate) logs: Vec<DebugLog>,
 }
 
@@ -219,17 +219,17 @@ impl Store {
         let record = Arc::new(record);
         let trace_id = hex(&record.trace_id);
         let mut inner = self.inner.lock();
-        if let Some(session_id) = record.attributes.get(CONVERSATION_ID_ATTRIBUTE) {
+        if let Some(session_id) = string_attribute(&record, CONVERSATION_ID_ATTRIBUTE) {
             inner
                 .trace_ids_by_session_id
-                .entry(session_id.clone())
+                .entry(session_id.to_owned())
                 .or_default()
                 .insert(trace_id.clone());
         }
-        if let Some(event_id) = record.attributes.get(EVENT_ID_ATTRIBUTE) {
+        if let Some(event_id) = string_attribute(&record, EVENT_ID_ATTRIBUTE) {
             inner
                 .records_by_event_id
-                .entry(event_id.clone())
+                .entry(event_id.to_owned())
                 .or_default()
                 .push(record.clone());
         }
@@ -289,7 +289,7 @@ impl StoreInner {
             if !is_valid_trace_id(&span.trace_id) {
                 continue;
             }
-            if let Some(event_id) = span.attributes.get(EVENT_ID_ATTRIBUTE) {
+            if let Some(event_id) = string_attribute(span, EVENT_ID_ATTRIBUTE) {
                 // Go `evictRecordsByEventID`.
                 if let Some(list) = self.records_by_event_id.get_mut(event_id) {
                     list.retain(|r| r.span_id != span.span_id);
@@ -298,7 +298,7 @@ impl StoreInner {
                     }
                 }
             }
-            if let Some(session_id) = span.attributes.get(CONVERSATION_ID_ATTRIBUTE) {
+            if let Some(session_id) = string_attribute(span, CONVERSATION_ID_ATTRIBUTE) {
                 // Go `evictTraceIDsBySessionID`.
                 if let Some(traces) = self.trace_ids_by_session_id.get_mut(session_id) {
                     traces.remove(trace_id);
@@ -309,6 +309,12 @@ impl StoreInner {
             }
         }
     }
+}
+
+/// A string attribute of `record` (Go `span.Attributes[key].(string)`): the session and event
+/// indexes only use string values.
+fn string_attribute<'a>(record: &'a SpanRecord, key: &str) -> Option<&'a str> {
+    record.attributes.get(key).and_then(Value::as_str)
 }
 
 /// Go `TraceID.IsValid`.
@@ -351,12 +357,15 @@ pub(crate) fn convert_records(records: Vec<Arc<SpanRecord>>) -> Vec<DebugSpan> {
 /// Go `eventIDAttributes`: a fresh copy of the span's attributes in which a `generate_content`
 /// span without an event ID gets its own span ID as one (the web UI's schema requires the
 /// attribute there, and a failed model call never records it). The stored record is untouched.
-fn event_id_attributes(r: &SpanRecord) -> BTreeMap<String, String> {
+fn event_id_attributes(r: &SpanRecord) -> BTreeMap<String, Value> {
     let mut attributes = r.attributes.clone();
     if !attributes.contains_key(EVENT_ID_ATTRIBUTE)
         && r.name.starts_with(GENERATE_CONTENT_SPAN_PREFIX)
     {
-        attributes.insert(EVENT_ID_ATTRIBUTE.to_owned(), hex(&r.span_id));
+        attributes.insert(
+            EVENT_ID_ATTRIBUTE.to_owned(),
+            Value::String(hex(&r.span_id)),
+        );
     }
     attributes
 }
@@ -426,110 +435,40 @@ fn random_span_id() -> [u8; 8] {
 }
 
 /// Merges one visit's decoded span fields into `record`: a recorded name replaces the current
-/// one, every attribute is stored as its Go string ([`emit`]); the status is not stored.
+/// one, every attribute is stored as its Go `telemetry.FromLogValue` JSON value
+/// ([`from_log_value`]), and one JSON cannot encode is left out (Go #1988); the status is not
+/// stored.
 fn apply(record: &mut SpanRecord, fields: D6Fields) {
     if let Some(name) = fields.name {
         record.name = name;
     }
     for (key, value) in fields.attributes {
-        record.attributes.insert(key, emit(&value));
-    }
-}
-
-/// Go `attribute.Value.Emit` of a decoded attribute (see the module docs).
-fn emit(v: &D6Value) -> String {
-    match v {
-        D6Value::Str(s) => s.clone(),
-        D6Value::I64(i) => i.to_string(),
-        D6Value::U64(u) => u.to_string(),
-        D6Value::F64(f) => emit_float(*f),
-        D6Value::Bool(b) => b.to_string(),
-        D6Value::StrSlice(items) => emit_string_slice(items),
-        D6Value::Json(value) => {
-            let mut out = String::new();
-            append_otel_json(&mut out, value);
-            out
-        }
-        D6Value::Bytes(bytes) => base64::engine::general_purpose::STANDARD.encode(bytes),
-    }
-}
-
-/// Go `attribute.Value.Emit` of a FLOAT64: `fmt.Sprint(f)`.
-fn emit_float(f: f64) -> String {
-    if f.is_nan() {
-        "NaN".to_owned()
-    } else if f.is_infinite() {
-        if f > 0.0 { "+Inf" } else { "-Inf" }.to_owned()
-    } else {
-        Number::from_f64(f).map_or_else(String::new, |n| go_sprint_value(&Value::Number(n)))
-    }
-}
-
-/// Go `Emit` of a STRINGSLICE: `json.Marshal` (HTML-escaped); OTel JSON if that fails.
-fn emit_string_slice(items: &[String]) -> String {
-    let value = Value::Array(items.iter().cloned().map(Value::String).collect());
-    if let Ok(bytes) = gadk_model::to_go_json(&value) {
-        return String::from_utf8_lossy(&bytes).into_owned();
-    }
-    let mut out = String::new();
-    append_otel_json(&mut out, &value);
-    out
-}
-
-/// OTel `appendJSONValue` for a JSON-decoded value.
-fn append_otel_json(out: &mut String, v: &Value) {
-    match v {
-        Value::Null => out.push_str("null"),
-        Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
-        Value::Number(n) if n.is_f64() => out.push_str(&go_sprint_value(v)),
-        Value::Number(n) => out.push_str(&n.to_string()),
-        Value::String(s) => append_otel_json_string(out, s),
-        Value::Array(items) => {
-            out.push('[');
-            for (i, item) in items.iter().enumerate() {
-                if i > 0 {
-                    out.push(',');
-                }
-                append_otel_json(out, item);
-            }
-            out.push(']');
-        }
-        Value::Object(m) => {
-            out.push('{');
-            for (i, (k, item)) in m.iter().enumerate() {
-                if i > 0 {
-                    out.push(',');
-                }
-                append_otel_json_string(out, k);
-                out.push(':');
-                append_otel_json(out, item);
-            }
-            out.push('}');
+        // Go `convertAttrs` skips a value JSON cannot encode.
+        if let Some(v) = from_log_value(&value) {
+            record.attributes.insert(key, v);
         }
     }
 }
 
-/// OTel `appendJSONString`: `encoding/json` string escaping without the HTML escapes.
-fn append_otel_json_string(out: &mut String, s: &str) {
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '\\' | '"' => {
-                out.push('\\');
-                out.push(c);
-            }
-            '\u{8}' => out.push_str("\\b"),
-            '\u{c}' => out.push_str("\\f"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if u32::from(c) < 0x20 => out.push_str(&format!("\\u{:04x}", u32::from(c))),
-            '\u{2028}' => out.push_str("\\u2028"),
-            '\u{2029}' => out.push_str("\\u2029"),
-            c => out.push(c),
+/// Go `telemetry.FromLogValue` of a decoded attribute, as the JSON `json.Marshal` writes for it:
+/// STRING, INT64, BOOL as JSON scalars, FLOAT64 as a number, STRINGSLICE as an array, a
+/// structured value (D6's JSON bytes; Go MAP / SLICE) as itself, BYTESLICE as base64 text.
+/// `None` for a non-finite FLOAT64, which `json.Marshal` cannot encode.
+fn from_log_value(v: &D6Value) -> Option<Value> {
+    Some(match v {
+        D6Value::Str(s) => Value::String(s.clone()),
+        D6Value::I64(i) => Value::from(*i),
+        D6Value::U64(u) => Value::from(*u),
+        D6Value::F64(f) => Value::Number(Number::from_f64(*f)?),
+        D6Value::Bool(b) => Value::Bool(*b),
+        D6Value::StrSlice(items) => {
+            Value::Array(items.iter().cloned().map(Value::String).collect())
         }
-    }
-    out.push('"');
+        D6Value::Json(value) => value.clone(),
+        D6Value::Bytes(bytes) => {
+            Value::String(base64::engine::general_purpose::STANDARD.encode(bytes))
+        }
+    })
 }
 
 /// Go `normalizeLogBody`: the body reshaped for the web UI ([`normalize_message_shape`]); a body
@@ -844,8 +783,9 @@ pub struct DebugSpan {
     pub trace_id: String,
     /// The parent's span ID; 16 zeros for a root span (Go `SpanID{}.String()`).
     pub parent_span_id: String,
-    /// The span's attributes as strings (Go `attribute.Value.Emit`), sorted by key.
-    pub attributes: BTreeMap<String, String>,
+    /// The span's attributes as JSON values (Go `telemetry.FromLogValue`; values JSON cannot
+    /// encode are left out), sorted by key.
+    pub attributes: BTreeMap<String, Value>,
     /// The log records emitted under the span.
     pub logs: Vec<DebugLog>,
 }
@@ -889,7 +829,7 @@ mod tests {
             span_id: "00000000000000aa".into(),
             trace_id: "0000000000000000000000000000000b".into(),
             parent_span_id: "0000000000000000".into(),
-            attributes: BTreeMap::from([("z".into(), "1".into()), ("a".into(), "<x>".into())]),
+            attributes: BTreeMap::from([("z".into(), 1.into()), ("a".into(), "<x>".into())]),
             logs: vec![DebugLog {
                 body: serde_json::json!({"content": "hi"}),
                 attributes: Some(Map::new()),
@@ -904,15 +844,16 @@ mod tests {
             concat!(
                 r#"{"name":"invoke_agent a","start_time":1,"end_time":2,"span_id":"00000000000000aa","#,
                 r#""trace_id":"0000000000000000000000000000000b","parent_span_id":"0000000000000000","#,
-                r#""attributes":{"a":"\u003cx\u003e","z":"1"},"logs":[{"body":{"content":"hi"},"#,
+                r#""attributes":{"a":"\u003cx\u003e","z":1},"logs":[{"body":{"content":"hi"},"#,
                 r#""observed_timestamp":"t","trace_id":"tr","span_id":"sp","event_name":"gen_ai.user.message"}]}"#
             )
         );
     }
 
-    /// Go `attribute.Value.Emit` per type, as the engine records each (plan decision D6).
+    /// Go `telemetry.FromLogValue` per type, as the engine records each (plan decision D6): JSON
+    /// scalars, arrays and objects keep their types; non-finite floats are left out (#1988).
     #[test]
-    fn span_attributes_emit_like_go() {
+    fn span_attributes_keep_their_json_types_like_go() {
         let dt = DebugTelemetry::new(DebugTelemetryConfig::default());
         let sub = tracing_subscriber::registry().with(dt.clone());
         tracing::subscriber::with_default(sub, || {
@@ -941,25 +882,26 @@ mod tests {
         assert_eq!(spans.len(), 1);
         assert_eq!(spans[0].name, "generate_content m");
         let attrs = &spans[0].attributes;
-        let want: BTreeMap<String, String> = [
-            ("gen_ai.conversation.id", "s"),
-            ("s", "<a>"),
-            ("b", "true"),
-            ("i", "-3"),
-            ("u", "7"),
-            ("f_int", "1e+06"),
-            ("f_frac", "0.5"),
-            ("f_nan", "NaN"),
-            ("f_inf", "-Inf"),
-            ("strs", r#"["tool_call","\u003cx\u003e"]"#),
-            ("slice", r#"[1,"<y>",2.5,1e+21,true,null]"#),
-            ("map", r#"{"k":"v\u2028"}"#),
-            ("raw", "/w=="),
+        let want: BTreeMap<String, Value> = [
+            ("gen_ai.conversation.id", serde_json::json!("s")),
+            ("s", serde_json::json!("<a>")),
+            ("b", serde_json::json!(true)),
+            ("i", serde_json::json!(-3)),
+            ("u", serde_json::json!(7)),
+            ("f_int", serde_json::json!(1_000_000.0)),
+            ("f_frac", serde_json::json!(0.5)),
+            ("strs", serde_json::json!(["tool_call", "<x>"])),
+            (
+                "slice",
+                serde_json::json!([1, "<y>", 2.5, 1e21, true, null]),
+            ),
+            ("map", serde_json::json!({"k": "v\u{2028}"})),
+            ("raw", serde_json::json!("/w==")),
             // A failed generate_content span gains its own span ID as the event ID.
-            (EVENT_ID_ATTRIBUTE, spans[0].span_id.as_str()),
+            (EVENT_ID_ATTRIBUTE, serde_json::json!(spans[0].span_id)),
         ]
         .into_iter()
-        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .map(|(k, v)| (k.to_owned(), v))
         .collect();
         assert_eq!(attrs, &want);
     }
@@ -1222,8 +1164,8 @@ mod tests {
             trace_id: [t; 16],
             span_id: [t; 8],
             attributes: BTreeMap::from([
-                (CONVERSATION_ID_ATTRIBUTE.to_owned(), s.to_owned()),
-                (EVENT_ID_ATTRIBUTE.to_owned(), e.to_owned()),
+                (CONVERSATION_ID_ATTRIBUTE.to_owned(), Value::from(s)),
+                (EVENT_ID_ATTRIBUTE.to_owned(), Value::from(e)),
             ]),
             ..Default::default()
         };

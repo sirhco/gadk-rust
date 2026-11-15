@@ -108,7 +108,6 @@ fn two_inner() -> Vec<Arc<dyn Agent>> {
 
 // parity: adapted: geminitool.GoogleSearch and loadartifactstool live in gadk-tools, which gadk-a2a may not depend on (plan D12); stand-in tools with the same names and descriptions
 #[test]
-#[ignore = "8a bug: an LLM agent's model skill description appends its pronoun-replaced instruction and global instruction (Go 1c354701 uses the description alone)"]
 fn test_get_agent_skills_llm_agent() {
     let google_search = google_search();
     let load_artifacts = load_artifacts();
@@ -396,7 +395,6 @@ fn test_get_agent_skills_llm_agent() {
 /// Go checks that no skill repeats an LLM agent's instructions: the agent card is served
 /// without authentication.
 #[test]
-#[ignore = "8a bug: an LLM agent's model skill description appends its pronoun-replaced instruction and global instruction (Go 1c354701 uses the description alone)"]
 fn test_build_agent_skills_omits_instructions() {
     const SECRET: &str = "discount code SECRET-42";
     let sub = llm_agent::new(LlmAgentConfig {

@@ -80,7 +80,7 @@ fn want_span(name: &str, attributes: &[(&str, &str)], logs: Vec<DebugLog>) -> De
         name: name.into(),
         attributes: attributes
             .iter()
-            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .map(|(k, v)| ((*k).to_owned(), Value::from(*v)))
             .collect(),
         logs,
         ..Default::default()
@@ -117,7 +117,13 @@ fn comparable(spans: Vec<DebugSpan>) -> Vec<DebugSpan> {
 
 /// Go `compareDebugSpans`.
 fn compare_debug_spans(a: &DebugSpan, b: &DebugSpan) -> std::cmp::Ordering {
-    let attr = |s: &DebugSpan, k: &str| s.attributes.get(k).cloned().unwrap_or_default();
+    let attr = |s: &DebugSpan, k: &str| {
+        s.attributes
+            .get(k)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
     a.name
         .cmp(&b.name)
         .then_with(|| a.parent_span_id.cmp(&b.parent_span_id))
@@ -578,14 +584,14 @@ fn test_convert_records_synthesizes_event_id_for_failed_generate_content() {
     assert_eq!(got.len(), 1, "the span must be kept, not dropped");
     assert_eq!(
         got[0].attributes.get(EVENT_ID_ATTRIBUTE),
-        Some(&got[0].span_id)
+        Some(&Value::from(got[0].span_id.as_str()))
     );
     // The stored record is not touched: it is shared with the store.
     assert!(!records[0].attributes.contains_key(EVENT_ID_ATTRIBUTE));
 
     // a real event id is left alone
     let mut real = record("generate_content gemini", 0x03, 0x03);
-    real.attributes = BTreeMap::from([(EVENT_ID_ATTRIBUTE.to_owned(), "event-1".to_owned())]);
+    real.attributes = BTreeMap::from([(EVENT_ID_ATTRIBUTE.to_owned(), Value::from("event-1"))]);
     let got = convert_records(vec![Arc::new(real)]);
     assert_eq!(got[0].attributes[EVENT_ID_ATTRIBUTE], "event-1");
 

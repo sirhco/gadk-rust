@@ -307,7 +307,6 @@ async fn console_fixtures_replay() {
 }
 
 /// The web servers, one after another (each on its own port).
-#[ignore = "8a bug: agent card skill descriptions append the agent instruction (Go #2110), and an A2A v1 request without A2A-Version is served instead of refused with VERSION_NOT_SUPPORTED (a2a-go v2.7.0)"]
 #[tokio::test(flavor = "multi_thread")]
 async fn wire_fixtures_replay() {
     install_global_subscriber();

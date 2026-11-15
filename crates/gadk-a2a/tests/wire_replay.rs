@@ -1622,43 +1622,37 @@ async fn replay(scenario: &str) {
     }
 }
 
-#[ignore = "8a bug: the remote agent's finished-task event lacks skipSummarization (Go #2102); the A2A client sends a2a-go v2.6.0 Accept headers, not v2.7.0's (text/event-stream, application/json; application/a2a+json, application/json), and the declared REST Content-Type deltas are stale"]
 #[tokio::test(flavor = "multi_thread")]
 async fn wire_text_reply() {
     replay("text_reply").await;
 }
 
-#[ignore = "8a bug: the A2A client sends a2a-go v2.6.0 Accept headers, not v2.7.0's (text/event-stream, application/json; application/a2a+json, application/json), and the declared REST Content-Type deltas are stale"]
 #[tokio::test(flavor = "multi_thread")]
 async fn wire_streaming_partials_per_run() {
     replay("streaming_partials_per_run").await;
 }
 
-#[ignore = "8a bug: the A2A client sends a2a-go v2.6.0 Accept headers, not v2.7.0's (text/event-stream, application/json; application/a2a+json, application/json), and the declared REST Content-Type deltas are stale"]
 #[tokio::test(flavor = "multi_thread")]
 async fn wire_streaming_partials_per_event() {
     replay("streaming_partials_per_event").await;
 }
 
-#[ignore = "8a bug: the remote agent's finished-task event lacks skipSummarization (Go #2102); the A2A client sends a2a-go v2.6.0 Accept headers, not v2.7.0's (text/event-stream, application/json; application/a2a+json, application/json), and the declared REST Content-Type deltas are stale"]
 #[tokio::test(flavor = "multi_thread")]
 async fn wire_input_required_resume() {
     replay("input_required_resume").await;
 }
 
-#[ignore = "8a bug: the A2A client sends a2a-go v2.6.0 Accept headers, not v2.7.0's (text/event-stream, application/json; application/a2a+json, application/json), and the declared REST Content-Type deltas are stale"]
 #[tokio::test(flavor = "multi_thread")]
 async fn wire_failed_task() {
     replay("failed_task").await;
 }
 
-#[ignore = "8a bug: a tool returning nothing yields {} instead of {\"result\": null} (Go #2281); the A2A client sends a2a-go v2.6.0 Accept headers, not v2.7.0's (text/event-stream, application/json; application/a2a+json, application/json), and the declared REST Content-Type deltas are stale"]
+#[ignore = "8a bug: a tool returning nothing yields {} instead of {\"result\": null} (Go 1ced38ba #2281; gadk-engine)"]
 #[tokio::test(flavor = "multi_thread")]
 async fn wire_cancel_input_required_with_child() {
     replay("cancel_input_required_with_child").await;
 }
 
-#[ignore = "8a bug: agent card skill descriptions append the agent instruction (Go #2110 keeps them out), the remote agent's finished-task event lacks skipSummarization (Go #2102), and the REST Content-Type delta is stale"]
 #[tokio::test(flavor = "multi_thread")]
 async fn wire_agent_card_workflow() {
     replay("agent_card_workflow").await;

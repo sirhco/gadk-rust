@@ -60,22 +60,31 @@ pub(crate) fn get_user_function_call_at(
     if candidate.author != "user" {
         return None;
     }
-    let fn_call_id = get_function_response_call_id(candidate)?;
-    for request in events[..index].iter().rev() {
-        if request.isolation_scope != scope
-            || !is_function_call_event(request, &fn_call_id, agent_name)
-        {
-            continue;
+    let content = candidate.response.content.as_ref()?;
+    // Every function response of a mixed user event is tried (Go 7c87fdff).
+    for response in content
+        .parts
+        .iter()
+        .filter_map(|p| p.function_response.as_ref())
+    {
+        let fn_call_id = &response.id;
+        for request in events[..index].iter().rev() {
+            if request.isolation_scope != scope
+                || !is_function_call_event(request, fn_call_id, agent_name)
+            {
+                continue;
+            }
+            if !agent_name.is_empty() && is_before_run_reply(request) {
+                // This cached call owns the ID; an older remote task must not resume.
+                break;
+            }
+            let (task_id, context_id) = get_a2a_task_info(request);
+            return Some(UserFunctionCall {
+                response: candidate.clone(),
+                task_id,
+                context_id,
+            });
         }
-        if !agent_name.is_empty() && is_before_run_reply(request) {
-            return None;
-        }
-        let (task_id, context_id) = get_a2a_task_info(request);
-        return Some(UserFunctionCall {
-            response: candidate.clone(),
-            task_id,
-            context_id,
-        });
     }
     None
 }
@@ -190,18 +199,6 @@ pub(crate) fn unmatched_function_response_text(fr: &FunctionResponse) -> String 
         "Tool {name} returned: {}",
         marshal_function_response_json(&fr.response)
     )
-}
-
-/// Go `getFunctionResponseCallID`: the call ID of the event's first function response.
-fn get_function_response_call_id(event: &Event) -> Option<String> {
-    event
-        .response
-        .content
-        .as_ref()?
-        .parts
-        .iter()
-        .find_map(|part| part.function_response.as_ref())
-        .map(|fr| fr.id.clone())
 }
 
 /// Go `toMissingRemoteSessionParts`: the parts of every in-scope event after this agent's last

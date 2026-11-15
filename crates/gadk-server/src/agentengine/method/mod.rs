@@ -101,7 +101,7 @@ pub(crate) mod replay {
     use gadk_artifact::InMemoryArtifactService;
     use gadk_memory::InMemoryMemoryService;
     use gadk_platform::GoDuration;
-    use gadk_session::InMemorySessionService;
+    use gadk_session::{GetRequest, InMemorySessionService, SessionService};
     use http::{Method, Request};
     use pretty_assertions::assert_eq;
     use serde_json::Value;
@@ -121,6 +121,8 @@ pub(crate) mod replay {
     pub(crate) struct Scenario {
         config: &'static str,
         handler: Handler,
+        /// The handler's session service, for a fixture's `seed` event.
+        sessions: Arc<InMemorySessionService>,
         log: Arc<Mutex<String>>,
         /// What `new_handler` logged.
         startup_log: String,
@@ -144,8 +146,9 @@ pub(crate) mod replay {
             max_payload_size: i64,
         ) -> Scenario {
             let platform = fixed_platform();
+            let sessions = Arc::new(InMemorySessionService::with_platform(platform.clone()));
             let mut cfg = AgentEngineConfig::new(
-                Arc::new(InMemorySessionService::with_platform(platform.clone())),
+                sessions.clone(),
                 Arc::new(SingleLoader::new(assistant_agent())),
             );
             cfg.memory_service = Some(Arc::new(InMemoryMemoryService::new()));
@@ -167,6 +170,7 @@ pub(crate) mod replay {
             Scenario {
                 config,
                 handler,
+                sessions,
                 log,
                 startup_log,
             }
@@ -208,6 +212,9 @@ pub(crate) mod replay {
                 other => panic!("{name}: unknown fixture kind {other}"),
             }
 
+            if let Some(seed) = fx.get("seed") {
+                self.append_seed(seed).await;
+            }
             let request = &fx["request"];
             let mut req = Request::builder()
                 .method(Method::from_bytes(request["method"].as_str().unwrap().as_bytes()).unwrap())
@@ -292,6 +299,30 @@ pub(crate) mod replay {
         }
     }
 
+    impl Scenario {
+        /// The probe's `appendSeed`: appends the fixture's `seed.event` (session event JSON) to
+        /// the `test-engine` session `seed.session_id` of `seed.user_id` through the session
+        /// service, not over HTTP.
+        async fn append_seed(&self, seed: &Value) {
+            let mut event: gadk_session::Event =
+                serde_json::from_value(seed["event"].clone()).unwrap();
+            let session = self
+                .sessions
+                .get(GetRequest {
+                    app_name: "test-engine".into(),
+                    user_id: seed["user_id"].as_str().unwrap().into(),
+                    session_id: seed["session_id"].as_str().unwrap().into(),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+            self.sessions
+                .append_event(&*session, &mut event)
+                .await
+                .unwrap();
+        }
+    }
+
     /// The server fixtures (C.11), sorted: `*.json` without `*.deltas.json`.
     fn fixture_names() -> Vec<String> {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/agentengine");
@@ -305,14 +336,14 @@ pub(crate) mod replay {
         names
     }
 
-    /// Every server fixture `scripts/gen-go-agentengine` recorded from ADK-Go (29, spec R19), replayed in
+    /// Every server fixture `scripts/gen-go-agentengine` recorded from ADK-Go (30, spec R19), replayed in
     /// file-name order through the real handlers, one handler per configuration (`main_*`,
     /// then `small_*`), so later requests see earlier state and draw later clock and UUID
     /// values exactly as in the probe.
     #[tokio::test]
     async fn replays_every_server_fixture_in_order() {
         let names = fixture_names();
-        assert_eq!(names.len(), 29, "{names:?}");
+        assert_eq!(names.len(), 30, "{names:?}");
         let mut replayed = 0;
         for config in ["main", "small"] {
             let prefix = format!("{config}_");

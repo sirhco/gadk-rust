@@ -28,7 +28,7 @@ use gadk_genai::{
 use gadk_session::{Event, EventActions};
 use serde_json::{Map, Value};
 
-use super::agent::{A2AConfig, to_error_event};
+use super::agent::A2AConfig;
 use crate::Error;
 use crate::convert::{
     artifact_update_visible_meta, is_partial_flag_set, new_remote_agent_event, stream_meta,
@@ -227,8 +227,9 @@ impl RunProcessor {
         self.aggregation_order.push(aid.to_owned());
     }
 
-    /// Go `convertToSessionEvent`: the session event for one remote response (an error event
-    /// for a transport error or a conversion failure); `None` when nothing should be emitted.
+    /// Go `convertToSessionEvent`: the session event for one remote response; a transport error
+    /// or a conversion failure is returned as the error (Go 4d841aba); `None` when nothing
+    /// should be emitted.
     pub(crate) async fn convert_to_session_event(
         &self,
         ctx: &InvocationContext,
@@ -236,9 +237,7 @@ impl RunProcessor {
         err: Option<&a2a::A2AError>,
     ) -> Result<Option<Event>, Error> {
         if let Some(err) = err {
-            let mut event = to_error_event(ctx, &err.to_string());
-            self.update_custom_metadata(&mut event, None);
-            return Ok(Some(event));
+            return Err(Error::A2A(err.clone()));
         }
         let Some(a2a_event) = a2a_event else {
             return Ok(None);
@@ -252,11 +251,7 @@ impl RunProcessor {
         .await
         {
             Ok(event) => event,
-            Err(err) => {
-                let mut event = to_error_event(ctx, &format!("failed to convert a2aEvent: {err}"));
-                self.update_custom_metadata(&mut event, None);
-                return Ok(Some(event));
-            }
+            Err(err) => return Err(Error::wrap("failed to convert a2aEvent", err)),
         };
 
         Ok(event.map(|mut event| {

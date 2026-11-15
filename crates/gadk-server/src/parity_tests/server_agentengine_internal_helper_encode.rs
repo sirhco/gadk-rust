@@ -433,7 +433,6 @@ fn test_omit_empty() {
 #[test]
 // parity: adapted: gadk converts a `time.Time` only as a struct field (there is no GoSnake for a
 // bare chrono time), so each time is converted as a session event's `timestamp`
-#[ignore = "8a bug: convertSnake writes time.Time as integer Unix seconds (UnixMilli() / 1000); Go c00807e6 (#2199) writes float64(UnixMicro()) / 1e6, keeping microseconds"]
 fn test_time_fractional_seconds() {
     let converted_timestamp = |t: chrono::DateTime<chrono::Utc>| {
         let event = Event {

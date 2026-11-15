@@ -309,7 +309,8 @@ async fn task_to_event(
     if parts.is_empty() && !is_terminal {
         return Ok(None);
     }
-    if !parts.is_empty() {
+    let has_parts = !parts.is_empty();
+    if has_parts {
         event.response.content = Some(model_content(parts));
     }
     if task.status.state == a2a::TaskState::InputRequired {
@@ -317,6 +318,17 @@ async fn task_to_event(
     }
     process_a2a_meta(source, &mut event)
         .map_err(|e| Error::wrap("metadata processing failed", e))?;
+    // A completed, failed or canceled task is the remote agent's final response, even when its
+    // artifacts replay the peer's tool calls (Go d6bb1e86, adk-python's
+    // convert_a2a_task_to_event): rejected is left out, so this is not `is_terminal()`.
+    if has_parts
+        && matches!(
+            task.status.state,
+            a2a::TaskState::Completed | a2a::TaskState::Failed | a2a::TaskState::Canceled
+        )
+    {
+        event.actions.skip_summarization = true;
+    }
     event.response.turn_complete = is_terminal;
     Ok(Some(event))
 }

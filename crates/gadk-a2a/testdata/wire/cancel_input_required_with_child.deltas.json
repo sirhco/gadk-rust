@@ -15,6 +15,13 @@
     },
     {
       "unit": "server.jsonrpc",
+      "path": "/exchanges/0/child/0/request/headers/Accept",
+      "fixture": "text/event-stream, application/json",
+      "actual": "text/event-stream",
+      "divergence": "a2a-rs's client sends reqwest's Accept: */* on non-streaming JSON-RPC and REST calls and on the agent-card fetch, and Accept: text/event-stream alone on streaming calls (a2a-go v2.7.0: no Accept for non-streaming JSON-RPC, application/a2a+json, application/json for non-streaming REST, text/event-stream, application/json for streaming)"
+    },
+    {
+      "unit": "server.jsonrpc",
       "path": "/exchanges/0/child/0/response/sse/0/result/task/status/timestamp",
       "actual": "<t>",
       "divergence": "a2a-rs backfills status.timestamp on every task and status event, so the streamed submitted task carries a timestamp (Go: none)"
@@ -35,7 +42,7 @@
       "unit": "server.jsonrpc",
       "path": "/exchanges/1/child/0/request/headers/Accept",
       "actual": "*/*",
-      "divergence": "a2a-rs's client sends reqwest's Accept: */* on non-streaming JSON-RPC and REST calls and on the agent-card fetch (a2a-go: no Accept for JSON-RPC, application/json for REST)"
+      "divergence": "a2a-rs's client sends reqwest's Accept: */* on non-streaming JSON-RPC and REST calls and on the agent-card fetch, and Accept: text/event-stream alone on streaming calls (a2a-go v2.7.0: no Accept for non-streaming JSON-RPC, application/a2a+json, application/json for non-streaming REST, text/event-stream, application/json for streaming)"
     },
     {
       "unit": "server.jsonrpc",
@@ -60,7 +67,7 @@
               "text": "For context:"
             },
             {
-              "text": "[root] transfer_to_agent tool returned result: map[]"
+              "text": "[root] transfer_to_agent tool returned result: map[result:<nil>]"
             }
           ],
           "role": "ROLE_USER"
@@ -115,7 +122,7 @@
               "text": "For context:"
             },
             {
-              "text": "[root] transfer_to_agent tool returned result: map[]"
+              "text": "[root] transfer_to_agent tool returned result: map[result:<nil>]"
             }
           ],
           "role": "ROLE_USER"
@@ -291,6 +298,13 @@
     },
     {
       "unit": "server.rest",
+      "path": "/exchanges/0/child/0/request/headers/Accept",
+      "fixture": "text/event-stream, application/json",
+      "actual": "text/event-stream",
+      "divergence": "a2a-rs's client sends reqwest's Accept: */* on non-streaming JSON-RPC and REST calls and on the agent-card fetch, and Accept: text/event-stream alone on streaming calls (a2a-go v2.7.0: no Accept for non-streaming JSON-RPC, application/a2a+json, application/json for non-streaming REST, text/event-stream, application/json for streaming)"
+    },
+    {
+      "unit": "server.rest",
       "path": "/exchanges/0/child/0/response/sse/0/result/task/status/timestamp",
       "actual": "<t>",
       "divergence": "a2a-rs backfills status.timestamp on every task and status event, so the streamed submitted task carries a timestamp (Go: none)"
@@ -309,16 +323,9 @@
     },
     {
       "unit": "server.rest",
-      "path": "/exchanges/0/response/headers/Content-Type",
-      "fixture": "application/json",
-      "actual": "application/a2a+json",
-      "divergence": "a2a-rs's REST binding answers JSON with Content-Type: application/a2a+json (a2a-go: application/json)"
-    },
-    {
-      "unit": "server.rest",
       "path": "/exchanges/1/child/0/request/headers/Accept",
       "actual": "*/*",
-      "divergence": "a2a-rs's client sends reqwest's Accept: */* on non-streaming JSON-RPC and REST calls and on the agent-card fetch (a2a-go: no Accept for JSON-RPC, application/json for REST)"
+      "divergence": "a2a-rs's client sends reqwest's Accept: */* on non-streaming JSON-RPC and REST calls and on the agent-card fetch, and Accept: text/event-stream alone on streaming calls (a2a-go v2.7.0: no Accept for non-streaming JSON-RPC, application/a2a+json, application/json for non-streaming REST, text/event-stream, application/json for streaming)"
     },
     {
       "unit": "server.rest",
@@ -343,7 +350,7 @@
               "text": "For context:"
             },
             {
-              "text": "[root] transfer_to_agent tool returned result: map[]"
+              "text": "[root] transfer_to_agent tool returned result: map[result:<nil>]"
             }
           ],
           "role": "ROLE_USER"
@@ -398,7 +405,7 @@
               "text": "For context:"
             },
             {
-              "text": "[root] transfer_to_agent tool returned result: map[]"
+              "text": "[root] transfer_to_agent tool returned result: map[result:<nil>]"
             }
           ],
           "role": "ROLE_USER"
@@ -494,13 +501,6 @@
     },
     {
       "unit": "server.rest",
-      "path": "/exchanges/1/response/headers/Content-Type",
-      "fixture": "application/json",
-      "actual": "application/a2a+json",
-      "divergence": "a2a-rs's REST binding answers JSON with Content-Type: application/a2a+json (a2a-go: application/json)"
-    },
-    {
-      "unit": "server.rest",
       "path": "/exchanges/2/response/body/history",
       "fixture": [
         {
@@ -566,13 +566,6 @@
         "https://google.github.io/adk-docs/a2a/a2a-extension/": true
       },
       "divergence": "a2a-rs's task store keeps only a Task event's own metadata and replaces the status without moving the previous status message into history: SendMessage/GetTask/CancelTask task results lack Go's merged status-update metadata and earlier status messages"
-    },
-    {
-      "unit": "server.rest",
-      "path": "/exchanges/2/response/headers/Content-Type",
-      "fixture": "application/json",
-      "actual": "application/a2a+json",
-      "divergence": "a2a-rs's REST binding answers JSON with Content-Type: application/a2a+json (a2a-go: application/json)"
     }
   ]
 }

@@ -47,7 +47,6 @@ fn data_part(kind: &str, data: Value) -> a2a::Part {
 }
 
 #[test]
-#[ignore = "8a bug: video metadata travels under the unprefixed `video_metadata` key and is not read back into genai (Go 5fd47b21: `adk_video_metadata`)"]
 fn test_parts_two_way_conversion() {
     let long_running_key = to_a2a_meta_key("is_long_running");
     let cases: Vec<(&str, a2a::Part, Part, Vec<String>)> = vec![
@@ -109,7 +108,8 @@ fn test_parts_two_way_conversion() {
             with_meta(
                 a2a::Part::raw(vec![0xff]).with_media_type("video/mp4"),
                 "adk_video_metadata",
-                json!({"startOffset": "10s", "endOffset": "25s", "fps": 2.0}),
+                // Go's float64 2 encodes as `2`; serde_json keeps that as an integer number.
+                json!({"startOffset": "10s", "endOffset": "25s", "fps": 2}),
             ),
             Part {
                 inline_data: Some(Blob {
@@ -257,7 +257,6 @@ fn test_parts_data_part_conversion_round_trip() {
 }
 
 #[test]
-#[ignore = "8a bug: to_genai_part rejects an empty A2A text part (`unknown part type`); Go ee8d5ca4 converts it to an empty text part"]
 fn test_to_gen_ai_parts_empty_text() {
     let thought = with_meta(
         a2a::Part::text(""),
@@ -315,7 +314,6 @@ fn video_blob() -> Option<Blob> {
 }
 
 #[test]
-#[ignore = "8a bug: to_genai_part ignores `adk_video_metadata` on a raw part (Go 5fd47b21 decodes it into Part.video_metadata)"]
 fn test_to_gen_ai_parts_reads_video_metadata() {
     let cases: Vec<(&str, a2a::Part, Part)> = vec![
         (
@@ -372,7 +370,6 @@ fn test_to_gen_ai_parts_reads_video_metadata() {
 
 // parity: adapted: Go's "not encodable" case (a `chan int` in the metadata) has no serde_json `Value` counterpart
 #[test]
-#[ignore = "8a bug: to_genai_part ignores `adk_video_metadata`, so malformed video metadata is not rejected (Go 5fd47b21)"]
 fn test_to_gen_ai_parts_rejects_malformed_video_metadata() {
     let cases: Vec<(&str, Value)> = vec![
         ("not an object", json!("peer-supplied-text")),

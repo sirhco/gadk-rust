@@ -104,7 +104,6 @@ fn emit_span_without_logs(dt: &DebugTelemetry, session_id: &str, event_id: &str,
 // the bytes of its JSON text); JSON text cannot hold ±Inf, so Go's `test.infinity` and
 // `test.nested_invalid` (non-finite numbers inside containers) have no D6 recording and only the
 // FLOAT64 `test.nan` checks that a value JSON cannot represent is omitted
-#[ignore = "8a bug: the debug span endpoints answer every attribute as its Go Emit string (ints, floats, bools, slices and maps become strings) and keep NaN as \"NaN\"; Go c377836c (#1988) keeps each attribute's JSON type and omits values JSON cannot represent"]
 async fn test_debug_handlers_preserve_attribute_types() {
     const SESSION_ID: &str = "typed-session";
     const EVENT_ID: &str = "typed-event";

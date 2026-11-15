@@ -22,7 +22,6 @@ use gadk_session::{CreateRequest, GetRequest, InMemorySessionService, SessionSer
 use crate::rest::models;
 
 #[tokio::test]
-#[ignore = "8a bug: Session::validate rejects updated_at == 0, so a session last updated in [0s, 1s) of 1970 fails every GET and list with \"updated_at is empty\"; Go 4db0bd99 (#1870) drops the check"]
 async fn test_from_session_accepts_last_update_in_first_second_of1970() {
     let service = InMemorySessionService::new();
     let created = service

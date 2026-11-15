@@ -329,6 +329,7 @@ type serverFixture struct {
 	Name     string           `json:"name"`
 	Config   string           `json:"config"`
 	Kind     string           `json:"kind"`
+	Seed     *seedEvent       `json:"seed,omitempty"`
 	Request  *wireRequest     `json:"request"`
 	Response *serverResponse  `json:"response"`
 	Log      string           `json:"log"`
@@ -411,18 +412,42 @@ func dropProcessingEvents(s string) string {
 	return b.String()
 }
 
-// serverStep is one request of a configuration's script; body, when set,
-// computes the request body from earlier responses; after sees the response
-// body.
+// serverStep is one request of a configuration's script; seed, when set, names
+// an event the probe appends through the session service before the request;
+// body, when set, computes the request body from earlier responses; after sees
+// the response body.
 type serverStep struct {
 	name    string
 	kind    string // "" = exchange
+	seed    func() *seedEvent
 	method  string
 	target  string
 	headers [][2]string
 	body    func() string
 	after   func(body []byte)
 }
+
+// seedEvent is an event appended to an engineID session through the session
+// service (not over HTTP), recorded in its fixture so a replay can append the
+// same event. Event is session.Event JSON, read by session.Event's decoder.
+type seedEvent struct {
+	UserID    string          `json:"user_id"`
+	SessionID string          `json:"session_id"`
+	Event     json.RawMessage `json:"event"`
+}
+
+// authRequestEvent is the event main_28 appends: a tool's credential request
+// (EventActions.RequestedAuthConfigs, ADK-Go #2114), with a timestamp that has
+// fractional seconds (#2199). Only a tool writes these, so no HTTP request can.
+const authRequestEvent = `{"id":"auth-request","invocationId":"e-auth","author":"assistant",` +
+	`"timestamp":"2026-01-02T03:05:00.123456Z",` +
+	`"content":{"role":"model","parts":[{"text":"Please sign in."}]},` +
+	`"actions":{"requestedAuthConfigs":{"call-1":{` +
+	`"authScheme":{"type":"oauth2","flows":{"authorizationCode":{"authorizationUrl":"https://idp.example/auth",` +
+	`"tokenUrl":"https://idp.example/token","scopes":{"files":"Read files"}}}},` +
+	`"rawAuthCredential":{"authType":"oauth2","oauth2":{"clientId":"app","clientSecret":"s3cret"}},` +
+	`"exchangedAuthCredential":{"authType":"http","http":{"scheme":"bearer","credentials":{"token":"tk"}}},` +
+	`"credentialKey":"drive"}}}}`
 
 type serverConfig struct {
 	name           string
@@ -559,6 +584,13 @@ func mainSteps(svc session.Service) []serverStep {
 		{name: "trailing_slash", method: "POST", target: re + "/", headers: ct(), body: lit(listU1())},
 		{name: "unclean_path", method: "POST", target: "/x/.." + re, headers: ct(), body: lit(listU1())},
 		{name: "reasoning_engine_query", method: "POST", target: re + "?x=1", headers: ct(), body: lit(listU1())},
+		{name: "get_session_requested_auth_configs", method: "POST", target: re, headers: ct(),
+			seed: func() *seedEvent {
+				return &seedEvent{UserID: "u1", SessionID: s02, Event: json.RawMessage(authRequestEvent)}
+			},
+			body: func() string {
+				return call("async_get_session", map[string]string{"user_id": "u1", "session_id": s02})
+			}},
 	}
 }
 
@@ -648,6 +680,10 @@ func runServerConfig(c serverConfig, files fileSet, logBuf *syncBuffer) {
 			}
 		default:
 			f.Kind = "exchange"
+			if s.seed != nil {
+				f.Seed = s.seed()
+				appendSeed(svc, f.Seed)
+			}
 			logBuf.take()
 			req, resp, data := sendServer(client, tap, ts.URL, s)
 			f.Request, f.Response = req, resp
@@ -658,6 +694,17 @@ func runServerConfig(c serverConfig, files fileSet, logBuf *syncBuffer) {
 		}
 		files[filepath.Join(serverDir, name+".json")] = encode(f)
 	}
+}
+
+// appendSeed appends sd.Event to sd's session through svc. The event has its ID
+// and timestamp, so the in-memory service reads no clock or UUID.
+func appendSeed(svc session.Service, sd *seedEvent) {
+	var ev session.Event
+	check(json.Unmarshal(sd.Event, &ev))
+	ctx := context.Background()
+	resp, err := svc.Get(ctx, &session.GetRequest{AppName: engineID, UserID: sd.UserID, SessionID: sd.SessionID})
+	check(err)
+	check(svc.AppendEvent(ctx, resp.Session, &ev))
 }
 
 func generateServer() fileSet {

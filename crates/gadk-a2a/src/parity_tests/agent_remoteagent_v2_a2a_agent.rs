@@ -2562,7 +2562,6 @@ mod remote_runs {
     }
 
     #[tokio::test]
-    #[ignore = "8a bug: the remote agent yields an error event instead of returning the sender creation error from run (Go 4d841aba)"]
     async fn test_remote_agent_error_if_no_compatible_transport() {
         let executor = a2a_event_replay(vec![a2a::StreamResponse::Message(agent_msg(vec![
             a2a::Part::text("will not be invoked!"),
@@ -2599,7 +2598,6 @@ mod remote_runs {
     }
 
     #[tokio::test]
-    #[ignore = "8a bug: a transport error from the remote server becomes an error event instead of an error returned from run (Go 4d841aba)"]
     async fn test_remote_agent_error_on_server_error() {
         let executor = MockExecutor {
             execute: Some(Arc::new(|_| {
@@ -2623,7 +2621,6 @@ mod remote_runs {
     }
 
     #[tokio::test]
-    #[ignore = "8a bug: the default conversion turns a transport or conversion error into an error event, so the after-request callback gets an event and no error (Go 4d841aba)"]
     async fn test_remote_agent_after_request_callback_gets_nil_event_on_default_converter_error() {
         struct Case {
             name: &'static str,
@@ -2700,7 +2697,6 @@ mod remote_runs {
     }
 
     #[tokio::test]
-    #[ignore = "8a bug: an agent card resolution failure is yielded as an error event instead of returned from run (Go 4d841aba)"]
     async fn test_remote_agent_error_if_agent_card_resolution_fails() {
         let remote = new_a2a(A2AConfig {
             name: "a2a".into(),
@@ -2728,7 +2724,6 @@ mod remote_runs {
     }
 
     #[tokio::test]
-    #[ignore = "8a bug: a message creation failure is yielded as an error event instead of returned from run (Go 4d841aba)"]
     async fn test_remote_agent_error_if_message_creation_fails() {
         let executor = MockExecutor {
             execute: Some(Arc::new(|_| {
@@ -2767,7 +2762,6 @@ mod remote_runs {
     }
 
     #[tokio::test]
-    #[ignore = "8a bug: a default conversion failure is yielded as an error event instead of returned from run (Go 4d841aba)"]
     async fn test_remote_agent_error_if_default_conversion_fails() {
         let executor = a2a_event_replay(vec![a2a::StreamResponse::Message(agent_msg(vec![
             a2a::Part::text("hello"),

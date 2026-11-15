@@ -230,7 +230,6 @@ fn grounding() -> Option<GroundingMetadata> {
 }
 
 #[tokio::test]
-#[ignore = "8a bug: a completed/failed/canceled task with parts does not set actions.skip_summarization (Go d6bb1e86)"]
 async fn test_to_session_event() {
     let (task_id, context_id) = (a2a::new_task_id(), a2a::new_context_id());
     let (tid, cid) = (task_id.as_str(), context_id.as_str());
@@ -904,7 +903,6 @@ fn test_transfer_to_agent_from_meta() {
 /// Go checks that a peer's empty text part, which adk-python sends for a model's empty text
 /// part, does not fail the whole event.
 #[tokio::test]
-#[ignore = "8a bug: to_genai_part rejects an empty A2A text part (`unknown part type`); Go ee8d5ca4 converts it to an empty text part"]
 async fn test_to_session_event_empty_text_part() {
     let agent = new_agent(AgentConfig {
         name: AGENT_NAME.into(),
@@ -925,7 +923,6 @@ async fn test_to_session_event_empty_text_part() {
 /// when its artifacts replay the tool calls the peer made; rejected and auth-required tasks are
 /// not final (adk-python's `convert_a2a_task_to_event` states).
 #[tokio::test]
-#[ignore = "8a bug: a completed/failed/canceled task with parts does not set actions.skip_summarization, so is_final_response() is false (Go d6bb1e86)"]
 async fn test_to_session_event_final_response_by_task_state() {
     let tool_parts = || {
         let call = a2a::Part {

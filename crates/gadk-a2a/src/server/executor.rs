@@ -748,11 +748,17 @@ impl a2a_server::AgentExecutor for Executor {
     }
 
     /// Go `Cancel`, wrapped in the cleanup guard: one `canceled` status update. The task's
-    /// running execution, if any, stops at once (Go cancels its context).
+    /// running execution, if any, stops at once (Go cancels its context). A request without a
+    /// task ID yields only an error (Go 58429928).
     fn cancel(
         &self,
         ctx: a2a_server::ExecutorContext,
     ) -> BoxStream<'static, Result<a2a::StreamResponse, a2a::A2AError>> {
+        if ctx.task_id.is_empty() {
+            return Box::pin(futures::stream::iter([Err(a2a::A2AError::internal(
+                "A2A cancellation must have a task ID",
+            ))]));
+        }
         let event = new_status_update(&TaskInfo::of(&ctx), a2a::TaskState::Canceled, None);
         let event = stamped(a2a::StreamResponse::StatusUpdate(event));
         self.stop_execution(&ctx.task_id, &event);

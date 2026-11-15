@@ -20,16 +20,13 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, Utc};
 use gadk_genai::{Content, FunctionCall, Part};
 use gadk_session::{
-    EventActions, EventCompaction, NodeInfo, RequestInput, ToolConfirmation, zero_time,
+    EventActions, EventCompaction, NodeInfo, RequestInput, ToolConfirmation, toolauth, zero_time,
 };
 use serde_json::{Value, json};
 
 use crate::rest::models;
 
 #[test]
-// parity: adapted: gadk's models::Event has no timestamp field yet, so the REST timestamp is read
-// off the event's JSON and the round trip decodes that JSON
-#[ignore = "8a bug: the REST Event carries no timestamp (dropped by from_session_event, not read by to_session_event); Go 4db0bd99 (#1870) writes epoch seconds with microseconds"]
 fn test_event_round_trip_preserves_workflow_fields() {
     let ev = gadk_session::Event {
         id: "e1".into(),
@@ -62,6 +59,10 @@ fn test_event_round_trip_preserves_workflow_fields() {
     };
 
     let rest_event = models::Event::from_session_event(&ev);
+    assert_eq!(
+        rest_event.timestamp, 1733040000.123456,
+        "FromSessionEvent().Timestamp, want 1733040000.123456"
+    );
     let raw_json = gadk_model::to_go_json(&rest_event).unwrap();
     let wire: Value = serde_json::from_slice(&raw_json).unwrap();
     assert_eq!(
@@ -72,11 +73,14 @@ fn test_event_round_trip_preserves_workflow_fields() {
     );
     let decoded_rest_event: models::Event = serde_json::from_slice(&raw_json).unwrap();
 
-    let back = decoded_rest_event.to_session_event();
+    let back = decoded_rest_event
+        .to_session_event()
+        .unwrap_or_else(|e| panic!("ToSessionEvent() failed: {e}"));
 
     assert_eq!(back.timestamp, ev.timestamp, "Timestamp");
-    let zero_back =
-        models::Event::from_session_event(&gadk_session::Event::default()).to_session_event();
+    let zero_back = models::Event::from_session_event(&gadk_session::Event::default())
+        .to_session_event()
+        .unwrap_or_else(|e| panic!("ToSessionEvent(zero event) failed: {e}"));
     assert_eq!(
         zero_back.timestamp,
         zero_time(),
@@ -131,8 +135,11 @@ fn test_compaction_is_read_only_over_rest() {
         },
         ..Default::default()
     };
+    let got = inbound
+        .to_session_event()
+        .unwrap_or_else(|e| panic!("ToSessionEvent() failed: {e}"));
     assert!(
-        inbound.to_session_event().actions.compaction.is_none(),
+        got.actions.compaction.is_none(),
         "ToSessionEvent kept a client-supplied compaction record; it must be dropped"
     );
 
@@ -151,23 +158,193 @@ fn test_compaction_is_read_only_over_rest() {
     assert_eq!(c.end_timestamp, record.end_timestamp, "EndTimestamp");
 }
 
+#[test]
+fn test_requested_auth_configs_go_out_without_secrets() {
+    // (name, a toolauth.Config as JSON, it without its secrets)
+    let tests = [
+        (
+            "oauth2 client and flow state",
+            r#"{
+				"authScheme": {"type": "oauth2", "flows": {"authorizationCode": {
+					"authorizationUrl": "https://idp.example/auth", "tokenUrl": "https://idp.example/token",
+					"scopes": {"files": "Read files"}}}},
+				"rawAuthCredential": {"authType": "oauth2", "oauth2": {
+					"clientId": "app", "clientSecret": "s3cret", "tokenEndpointAuthMethod": "client_secret_post"}},
+				"exchangedAuthCredential": {"authType": "oauth2", "oauth2": {
+					"clientId": "app", "authUri": "https://idp.example/auth?state=st", "state": "st",
+					"authResponseUri": "https://app.example/cb?code=c0de", "authCode": "c0de",
+					"accessToken": "at", "refreshToken": "rt", "idToken": "it", "codeVerifier": "cv",
+					"expiresAt": 1700000000, "tokenEndpointAuthMethod": "client_secret_post"}},
+				"credentialKey": "drive"
+			}"#,
+            r#"{
+				"authScheme": {"type": "oauth2", "flows": {"authorizationCode": {
+					"authorizationUrl": "https://idp.example/auth", "tokenUrl": "https://idp.example/token",
+					"scopes": {"files": "Read files"}}}},
+				"rawAuthCredential": {"authType": "oauth2", "oauth2": {
+					"clientId": "app", "tokenEndpointAuthMethod": "client_secret_post"}},
+				"exchangedAuthCredential": {"authType": "oauth2", "oauth2": {
+					"clientId": "app", "authUri": "https://idp.example/auth?state=st", "state": "st",
+					"expiresAt": 1700000000, "tokenEndpointAuthMethod": "client_secret_post"}},
+				"credentialKey": "drive"
+			}"#,
+        ),
+        (
+            "http password, token and headers",
+            r#"{
+				"authScheme": {"type": "http", "scheme": "basic"},
+				"rawAuthCredential": {"authType": "http", "http": {"scheme": "basic",
+					"credentials": {"username": "ann", "password": "pw", "token": "tk"},
+					"additionalHeaders": {"X-Api-Key": "hk"}}},
+				"credentialKey": "basic"
+			}"#,
+            r#"{
+				"authScheme": {"type": "http", "scheme": "basic"},
+				"rawAuthCredential": {"authType": "http", "http": {"scheme": "basic",
+					"credentials": {"username": "ann"}}},
+				"credentialKey": "basic"
+			}"#,
+        ),
+        (
+            "api key next to a service account key",
+            r#"{
+				"authScheme": {"type": "apiKey", "in": "header", "name": "X-Key"},
+				"rawAuthCredential": {"authType": "apiKey", "apiKey": "ak"},
+				"exchangedAuthCredential": {"authType": "serviceAccount", "serviceAccount": {
+					"serviceAccountCredential": {"type": "service_account", "projectId": "p",
+						"privateKeyId": "kid", "privateKey": "pk", "clientEmail": "sa@p.example",
+						"clientId": "123", "authUri": "https://accounts.example/auth",
+						"tokenUri": "https://accounts.example/token",
+						"authProviderX509CertUrl": "https://certs.example/p",
+						"clientX509CertUrl": "https://certs.example/c", "universeDomain": "example.com"},
+					"scopes": ["cloud-platform"], "useDefaultCredential": false, "useIdToken": false}},
+				"credentialKey": "mixed"
+			}"#,
+            r#"{
+				"authScheme": {"type": "apiKey", "in": "header", "name": "X-Key"},
+				"rawAuthCredential": {"authType": "apiKey"},
+				"exchangedAuthCredential": {"authType": "serviceAccount", "serviceAccount": {
+					"serviceAccountCredential": {"type": "service_account", "projectId": "p",
+						"clientEmail": "sa@p.example",
+						"clientId": "123", "authUri": "https://accounts.example/auth",
+						"tokenUri": "https://accounts.example/token",
+						"authProviderX509CertUrl": "https://certs.example/p",
+						"clientX509CertUrl": "https://certs.example/c", "universeDomain": "example.com"},
+					"scopes": ["cloud-platform"], "useDefaultCredential": false, "useIdToken": false}},
+				"credentialKey": "mixed"
+			}"#,
+        ),
+        (
+            // Unknown keys keep the spelling they arrived with, so each secret name is dropped
+            // here only if the list holds that exact spelling.
+            "every secret key name as an unknown key",
+            r#"{
+				"authScheme": {"type": "apiKey", "in": "header", "name": "X-Key"},
+				"credentialKey": "extra",
+				"keep": "me",
+				"password": "s", "token": "s",
+				"additionalHeaders": "s", "additional_headers": "s",
+				"clientSecret": "s", "client_secret": "s",
+				"authResponseUri": "s", "auth_response_uri": "s",
+				"authCode": "s", "auth_code": "s",
+				"accessToken": "s", "access_token": "s",
+				"refreshToken": "s", "refresh_token": "s",
+				"idToken": "s", "id_token": "s",
+				"codeVerifier": "s", "code_verifier": "s",
+				"privateKeyId": "s", "private_key_id": "s",
+				"privateKey": "s", "private_key": "s",
+				"apiKey": "s", "api_key": "s"
+			}"#,
+            r#"{
+				"authScheme": {"type": "apiKey", "in": "header", "name": "X-Key"},
+				"credentialKey": "extra",
+				"keep": "me"
+			}"#,
+        ),
+        (
+            "unknown key keeps its digits and loses nested secrets",
+            r#"{
+				"authScheme": {"type": "oauth2", "flows": {"clientCredentials": {
+					"tokenUrl": "https://idp.example/token", "scopes": {}}}},
+				"exchangedAuthCredential": {"authType": "oauth2", "oauth2": {
+					"clientId": "app", "tokenEndpointAuthMethod": "client_secret_post",
+					"provider": {"user": "ann", "id": 9007199254740993, "refresh_token": "rt",
+						"sessions": [{"access_token": "at", "scope": "files"}]}}},
+				"credentialKey": "cc"
+			}"#,
+            r#"{
+				"authScheme": {"type": "oauth2", "flows": {"clientCredentials": {
+					"tokenUrl": "https://idp.example/token", "scopes": {}}}},
+				"exchangedAuthCredential": {"authType": "oauth2", "oauth2": {
+					"clientId": "app", "tokenEndpointAuthMethod": "client_secret_post",
+					"provider": {"user": "ann", "id": 9007199254740993,
+						"sessions": [{"scope": "files"}]}}},
+				"credentialKey": "cc"
+			}"#,
+        ),
+    ];
+    for (name, input, want) in tests {
+        let cfg: toolauth::Config = serde_json::from_str(input)
+            .unwrap_or_else(|e| panic!("{name}: json.Unmarshal(in) failed: {e}"));
+        let ev = gadk_session::Event {
+            actions: EventActions {
+                requested_auth_configs: BTreeMap::from([("call-1".to_owned(), cfg)]),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let b = gadk_model::to_go_json(&models::Event::from_session_event(&ev))
+            .unwrap_or_else(|e| panic!("{name}: json.Marshal(event) failed: {e}"));
+
+        // serde_json keeps an integer such as 9007199254740993 exact (Go: decodeKeepingNumbers).
+        let got: Value = serde_json::from_slice(&b).unwrap();
+        let want: Value = serde_json::from_str(want).unwrap();
+        assert_eq!(
+            want, got["actions"]["requestedAuthConfigs"]["call-1"],
+            "{name}: requestedAuthConfigs[call-1] mismatch (want, got)"
+        );
+    }
+}
+
+// parity: skipped TestRequestedAuthConfigsEncodeFailureFailsTheEvent: a gadk toolauth::Config keeps every unknown value as JSON text, so it cannot hold Go's NaN and always encodes; the encode-failure path has no input
+
+#[test]
+fn test_requested_auth_configs_are_not_taken_from_requests() {
+    let body = r#"{"events": [{"author": "user", "actions": {"requestedAuthConfigs": {
+		"call-1": {"authScheme": {"type": "apiKey", "in": "header", "name": "X-Key"}}}}}]}"#;
+    let req: models::CreateSessionRequest =
+        serde_json::from_str(body).unwrap_or_else(|e| panic!("json.Unmarshal(body) failed: {e}"));
+    let events = req.events.unwrap_or_default();
+    assert!(
+        events.len() == 1 && events[0].actions.requested_auth_configs.len() == 1,
+        "decoded {events:?}, want one event carrying one credential request"
+    );
+
+    let got = events[0]
+        .to_session_event()
+        .unwrap_or_else(|e| panic!("ToSessionEvent() failed: {e}"));
+    assert!(
+        got.actions.requested_auth_configs.is_empty(),
+        "ToSessionEvent kept a client-supplied credential request; it must be dropped"
+    );
+}
+
 // parity: skipped TestRequestCredentialPartsGoOutWithoutSecrets: 8c — sign-in (Go 1523862f #2231: adk_request_credential parts reach REST clients without credential secrets)
 // parity: skipped TestOtherFunctionPartsKeepSecretLookingFields: 8c — sign-in (Go 1523862f #2231: the scope of the adk_request_credential part redaction)
 // parity: skipped TestRequestCredentialRedactionLeavesTheStoredEventAlone: 8c — sign-in (Go 1523862f #2231: the part redaction copies, never strips, the stored event)
 // parity: skipped TestStateDeltaCredentialsGoOutWithoutSecrets: 8c — sign-in (Go 1523862f #2231: credentials in a state delta reach REST clients without secrets)
 
-/// The REST event `{"timestamp": secs}` converted to a session event timestamp (Go
-/// `models.ToSessionEvent(models.Event{Timestamp: secs})`).
+/// Go `models.ToSessionEvent(models.Event{Timestamp: secs})`'s timestamp.
 fn rest_timestamp(secs: f64) -> Result<DateTime<Utc>, String> {
-    let ev: models::Event =
-        serde_json::from_value(json!({ "timestamp": secs })).map_err(|e| e.to_string())?;
-    Ok(ev.to_session_event().timestamp)
+    let ev = models::Event {
+        timestamp: secs,
+        ..Default::default()
+    };
+    Ok(ev.to_session_event()?.timestamp)
 }
 
 #[test]
-// parity: adapted: gadk's to_session_event cannot fail yet and models::Event has no timestamp
-// field, so the REST side is `rest_timestamp` over the event's JSON
-#[ignore = "8a bug: the REST Event ignores its timestamp, so implausible timestamps (outside years 1..9999) are not refused; Go 4db0bd99 (#1870) refuses them in ToSessionEvent with the session decoder's bounds"]
 fn test_to_session_event_timestamp_bounds_match_session_decoder() {
     for secs in [
         0.5,

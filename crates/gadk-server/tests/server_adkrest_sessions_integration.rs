@@ -168,7 +168,6 @@ async fn do_timestamp_request(
 #[tokio::test]
 // parity: adapted: in-memory service only; Go's SQLite case needs gadk-session-database, which
 // gadk-server does not depend on (not even for tests)
-#[ignore = "8a bug: create-session ignores event timestamps (each event is stored with the zero time), so implausible timestamps are not refused; Go 4db0bd99 (#1870) converts them and answers 400 outside years 1..9999"]
 async fn test_create_session_event_timestamps() {
     // (name, timestamp, wantOK)
     let tests = [

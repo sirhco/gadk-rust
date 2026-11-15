@@ -17,18 +17,22 @@
 
 use std::collections::BTreeMap;
 
+use chrono::{DateTime, Utc};
 use gadk_genai::serde_util::is_zero;
 use gadk_genai::{
     Content, FinishReason, GenerateContentResponseUsageMetadata, GroundingMetadata, Part,
     Transcription,
 };
-use gadk_session::{EventCompaction, NodeInfo, RequestInput, ToolConfirmation};
+use gadk_platform::go_format_float_v;
+use gadk_session::toolauth;
+use gadk_session::{EventCompaction, NodeInfo, RequestInput, ToolConfirmation, zero_time};
 use serde::ser::{Error as _, SerializeMap};
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::value::RawValue;
 use serde_json::{Map, Value};
 
 use super::null_default;
+use super::redact::serialize_auth_configs;
 
 /// Port of Go `models.EventActions` (plain struct tags: `stateDelta` and `artifactDelta` are
 /// written as `null` when unset).
@@ -54,6 +58,15 @@ pub struct EventActions {
         deserialize_with = "null_default"
     )]
     pub requested_tool_confirmations: BTreeMap<String, ToolConfirmation>,
+    /// Go `RequestedAuthConfigs authConfigs`, `omitempty`; written without the credential
+    /// secret keys at any depth (Go `redact.go`) and read-only over REST:
+    /// [`Event::to_session_event`] drops it.
+    #[serde(
+        skip_serializing_if = "BTreeMap::is_empty",
+        serialize_with = "serialize_auth_configs",
+        deserialize_with = "null_default"
+    )]
+    pub requested_auth_configs: BTreeMap<String, toolauth::Config>,
     /// `omitempty`; read-only over REST: [`Event::to_session_event`] drops it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub compaction: Option<EventCompaction>,
@@ -68,6 +81,10 @@ pub struct Event {
     /// Go `ID`.
     #[serde(deserialize_with = "null_default")]
     pub id: String,
+    /// Go `Timestamp float64`: epoch seconds with microseconds, `0` for no timestamp (Go's
+    /// zero time).
+    #[serde(deserialize_with = "null_default")]
+    pub timestamp: f64,
     /// Go `InvocationID`.
     #[serde(deserialize_with = "null_default")]
     pub invocation_id: String,
@@ -131,11 +148,18 @@ pub struct Event {
 }
 
 impl Event {
-    /// Port of Go `models.FromSessionEvent` (the timestamp is not part of the REST view).
+    /// Port of Go `models.FromSessionEvent`: the timestamp as epoch seconds with microseconds
+    /// (`0` for the zero time).
     pub fn from_session_event(ev: &gadk_session::Event) -> Event {
         let r = &ev.response;
+        let timestamp = if ev.timestamp == zero_time() {
+            0.0
+        } else {
+            ev.timestamp.timestamp_micros() as f64 / 1e6
+        };
         Event {
             id: ev.id.clone(),
+            timestamp,
             invocation_id: ev.invocation_id.clone(),
             branch: ev.branch.clone(),
             author: ev.author.clone(),
@@ -160,6 +184,7 @@ impl Event {
                 skip_summarization: ev.actions.skip_summarization,
                 transfer_to_agent: ev.actions.transfer_to_agent.clone(),
                 requested_tool_confirmations: ev.actions.requested_tool_confirmations.clone(),
+                requested_auth_configs: ev.actions.requested_auth_configs.clone(),
                 compaction: ev.actions.compaction.clone(),
             },
             output: ev.output.clone(),
@@ -172,9 +197,14 @@ impl Event {
 
     /// Port of Go `models.ToSessionEvent`. `actions.compaction` is deliberately dropped: a
     /// client-supplied compaction record would let it erase history and speak into the gap.
-    pub fn to_session_event(&self) -> gadk_session::Event {
+    /// `actions.requested_auth_configs` is dropped too: only a tool writes a credential
+    /// request. Fails when the timestamp is not a plausible date (see
+    /// [`timestamp_from_epoch_seconds`]).
+    pub fn to_session_event(&self) -> Result<gadk_session::Event, String> {
+        let timestamp = timestamp_from_epoch_seconds(self.timestamp)?;
         let mut ev = gadk_session::Event {
             id: self.id.clone(),
+            timestamp,
             invocation_id: self.invocation_id.clone(),
             branch: self.branch.clone(),
             author: self.author.clone(),
@@ -207,18 +237,47 @@ impl Event {
             skip_summarization: self.actions.skip_summarization,
             transfer_to_agent: self.actions.transfer_to_agent.clone(),
             requested_tool_confirmations: self.actions.requested_tool_confirmations.clone(),
-            // Go `ToSessionEvent` ignores requestedAuthConfigs inbound (#2114).
+            // Go `ToSessionEvent` ignores requestedAuthConfigs inbound (#2114): one taken from
+            // a request body would claim a sign-in no tool asked for, which compaction then
+            // holds open as an unanswered call.
             requested_auth_configs: Default::default(),
             compaction: None,
         };
-        ev
+        Ok(ev)
     }
+}
+
+/// The calendar bounds for an event timestamp, in epoch microseconds: the first and last
+/// instants of years 1 and 9999 (the session event decoder's bounds for a numeric timestamp).
+const MIN_TIMESTAMP_MICROS: f64 = -62_135_596_800.0 * 1e6;
+const MAX_TIMESTAMP_MICROS: f64 = 253_402_300_799.0 * 1e6;
+
+/// Go `timestampFromEpochSeconds`: a REST event timestamp as a time. Zero means the client sent
+/// none and maps to the zero time. A value outside years 1 to 9999 (most often epoch
+/// milliseconds sent as seconds) is an error rather than an instant.
+fn timestamp_from_epoch_seconds(secs: f64) -> Result<DateTime<Utc>, String> {
+    if secs == 0.0 {
+        return Ok(zero_time());
+    }
+    let micros = (secs * 1e6).round();
+    let implausible = || {
+        format!(
+            "event timestamp {} is not a plausible date: want epoch seconds between years 1 and 9999",
+            go_format_float_v(secs)
+        )
+    };
+    if micros.is_nan() || !(MIN_TIMESTAMP_MICROS..=MAX_TIMESTAMP_MICROS).contains(&micros) {
+        return Err(implausible());
+    }
+    // In range by the check above, so the conversion is exact.
+    DateTime::from_timestamp_micros(micros as i64).ok_or_else(implausible)
 }
 
 impl Serialize for Event {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let mut m = s.serialize_map(None)?;
         m.serialize_entry("id", &self.id)?;
+        m.serialize_entry("timestamp", &self.timestamp)?;
         m.serialize_entry("invocationId", &self.invocation_id)?;
         if !self.branch.is_empty() {
             m.serialize_entry("branch", &self.branch)?;
@@ -357,7 +416,7 @@ mod tests {
         };
         assert_eq!(
             wire(&ev),
-            r#"{"id":"e","invocationId":"","author":"a","groundingMetadata":null,"usageMetadata":null,"actions":{"stateDelta":null,"artifactDelta":null},"content":null}"#
+            r#"{"id":"e","timestamp":0,"invocationId":"","author":"a","groundingMetadata":null,"usageMetadata":null,"actions":{"stateDelta":null,"artifactDelta":null},"content":null}"#
         );
     }
 
@@ -403,7 +462,7 @@ mod tests {
         assert_eq!(
             wire(&ev),
             concat!(
-                r#"{"id":"e1","invocationId":"inv","branch":"b","author":"model","#,
+                r#"{"id":"e1","timestamp":0,"invocationId":"inv","branch":"b","author":"model","#,
                 r#""groundingMetadata":null,"usageMetadata":null,"turnComplete":true,"#,
                 r#""avgLogprobs":-0.5,"actions":{"stateDelta":{"k":1},"artifactDelta":null,"escalate":true},"#,
                 r#""output":"out","routes":["r"],"#,
