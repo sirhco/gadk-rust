@@ -30,6 +30,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::agent::Agent;
 use crate::context::activation::ActivationId;
+use crate::context::cancel::CancelScope;
 use crate::context::identity::Identity;
 use crate::mode::BoundModes;
 use crate::parent_map::ParentMap;
@@ -55,6 +56,9 @@ pub(crate) struct Shared {
     /// The engine's per-invocation compaction runtime (Go `compactionctx.ToContext`). Opaque here:
     /// only the engine downcasts it. Every context derived within one invocation shares it.
     pub(crate) compaction: Option<Arc<dyn Any + Send + Sync>>,
+    /// The invocation's teardown registry ([`crate::teardown::Teardowns`]); the runner installs
+    /// one per invocation.
+    pub(crate) teardowns: Option<Arc<crate::teardown::Teardowns>>,
 }
 
 /// One snapshot of every context field; deltas clone it (cheap: `Arc`s and short strings).
@@ -70,7 +74,9 @@ pub(crate) struct ContextInner {
     pub(crate) ended: Arc<AtomicBool>,
     /// The identity of `ended`: replaced together with it, never without it.
     pub(crate) activation: ActivationId,
-    pub(crate) cancellation_token: CancellationToken,
+    /// The context's cancel scope (Go its `context.Context` cancellation and cause); its token is
+    /// the context's cancellation token.
+    pub(crate) cancel_scope: Arc<CancelScope>,
     pub(crate) bound_modes: BoundModes,
     /// Go `InvocationContextParams.LiveSessionResumptionHandle`. One slot per invocation, shared by
     /// every derived context (the live reader and the reconnect loop run on different tasks);
@@ -85,6 +91,10 @@ pub(crate) struct ContextInner {
     pub(crate) run_id: String,
     pub(crate) sub_scheduler: Option<Arc<dyn DynamicSubScheduler>>,
     pub(crate) output_for_ancestors: Option<Vec<String>>,
+    /// Go `contextPath`'s walk past a fresh invocation context: the path of the context a
+    /// `fresh_invocation` / `fresh_end_flag` delta forked from (its own path, else its enclosing
+    /// path); every other delta copies it unchanged.
+    pub(crate) enclosing_path: String,
 }
 
 /// Go `agent.ReadonlyContext`: read-only access to the invocation's values.
@@ -150,7 +160,7 @@ impl ReadonlyContext {
     /// same token [`InvocationContext::cancellation_token`](crate::InvocationContext::cancellation_token)
     /// returns, so a toolset's `tools` can stop when the invocation is cancelled.
     pub fn cancellation_token(&self) -> &CancellationToken {
-        &self.inner.cancellation_token
+        &self.inner.cancel_scope.token
     }
 }
 

@@ -30,27 +30,26 @@ use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
 
 use super::direct_support::{
-    MockRun, SpanCounts, bg, context_running, err, fake_tool, invocation_of, open_spans,
-    set_agent_span, text_content as text,
+    MockRun, SpanCounts, bg, check_late_record_dropped, context_running, err, fake_tool,
+    invocation_of, late_review_trace, open_spans, set_agent_span, text_content as text,
 };
+use super::runner_support::require_completed_with_handled_agent_error;
 use crate::context::ContextError;
 use crate::error::Error;
 use crate::event_types::{
-    EVENT_AGENT_ERROR, EVENT_AGENT_STARTING, EVENT_INVOCATION_COMPLETED, EVENT_INVOCATION_ERROR,
+    EVENT_AGENT_STARTING, EVENT_INVOCATION_COMPLETED, EVENT_INVOCATION_ERROR,
     EVENT_INVOCATION_STARTING, EVENT_LLM_REQUEST, EVENT_LLM_RESPONSE, EVENT_TOOL_COMPLETED,
     EVENT_TOOL_ERROR, EVENT_TOOL_STARTING,
 };
 use crate::parity_tests::plugin_agentanalytics_bigquery_agent_analytics_plugin::support::{
     MockCtx, agent_error_counts, event_types, must_latency, only_row_of_type, place_of,
-    rows_of_type, setup_test_plugin, str_col, until_event_type, until_invocation_end,
+    rows_of_type, setup_test_plugin, until_event_type, until_invocation_end,
 };
 use crate::plugin::callbacks::node_completion;
-use crate::row::Row;
 use crate::trace::causes::error_is;
 use crate::trace::testkit::{ManualClock, custom, ident, llm};
 use crate::trace::{
-    CallbackCtx, Identity, InvocationTrace, SpanRef, TraceError, TraceManager, UnclosedAgentSpan,
-    llm_key, tool_key,
+    CallbackCtx, Identity, SpanRef, TraceError, TraceManager, UnclosedAgentSpan, llm_key, tool_key,
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -129,80 +128,6 @@ fn push_ended(tm: &TraceManager, who: &Identity, end: bool) -> SpanRef {
 /// `src.reads == 1`; it is never read again once it reported true).
 fn ended_read(rec: &SpanRef) -> bool {
     rec.lock().context_ended
-}
-
-/// Go `lateReviewTrace(t, tm, invID)`.
-fn late_trace(tm: &TraceManager, inv: &str) -> Arc<InvocationTrace> {
-    tm.mu
-        .lock()
-        .completed
-        .get(inv)
-        .and_then(|c| c.late.clone())
-        .unwrap_or_else(|| panic!("completed run {inv:?} has no late state"))
-}
-
-/// Go `checkLateRecordDropped(t, late, rec)`.
-fn check_late_record_dropped(late: &InvocationTrace, rec: &SpanRef) {
-    let st = late.mu.lock();
-    let r = rec.lock();
-    assert!(
-        !st.agent_stack.iter().any(|s| s.is_record(&r)),
-        "activation {:?} is still on the late agentStack",
-        r.name
-    );
-    assert!(
-        r.canceled.is_none(),
-        "retired late activation {:?} keeps the context of its callback",
-        r.name
-    );
-    assert!(
-        r.ended.is_none() && r.activation.is_none(),
-        "retired late activation {:?} keeps its InvocationContext",
-        r.name
-    );
-    assert!(
-        r.parent.is_none(),
-        "retired late activation {:?} keeps the span that it ran under",
-        r.name
-    );
-    assert!(
-        r.retired_causes.is_empty(),
-        "retired late activation {:?} keeps a failure cause",
-        r.name
-    );
-}
-
-/// Go `requireCompletedWithHandledAgentError(t, rows, agentName, wantErr)`.
-fn require_completed_with_handled_agent_error(rows: &[Row], agent_name: &str, want_err: &str) {
-    assert!(
-        rows_of_type(rows, EVENT_INVOCATION_ERROR).is_empty(),
-        "got INVOCATION_ERROR, want INVOCATION_COMPLETED; event types: {:?}",
-        event_types(rows)
-    );
-    let inv_row = only_row_of_type(rows, EVENT_INVOCATION_COMPLETED);
-    assert_eq!(
-        str_col(&inv_row, "status"),
-        "OK",
-        "INVOCATION_COMPLETED status"
-    );
-    let err_row = only_row_of_type(rows, EVENT_AGENT_ERROR);
-    assert_eq!(str_col(&err_row, "agent"), agent_name, "AGENT_ERROR agent");
-    let start = rows_of_type(rows, EVENT_AGENT_STARTING)
-        .into_iter()
-        .find(|r| str_col(r, "agent") == agent_name)
-        .unwrap_or_else(|| {
-            panic!(
-                "no AGENT_STARTING row of {agent_name:?}; event types: {:?}",
-                event_types(rows)
-            )
-        });
-    assert_eq!(place_of(&err_row), place_of(&start), "AGENT_ERROR place");
-    must_latency(&err_row);
-    let msg = str_col(&err_row, "error_message");
-    assert!(
-        msg.contains(want_err),
-        "AGENT_ERROR error_message = {msg:?}, want it to contain {want_err:?}"
-    );
 }
 
 /// Go `session.NewEvent(ctx, invocationID)` by `author`.
@@ -2166,7 +2091,7 @@ async fn test_trace_manager_tool_span_across_after_run() {
             "read of late sub-agent's ended InvocationContext at branch_a end and after popToolSpan = {at_branch_end}, {}; want false, true",
             ended_read(&src)
         );
-        let late = late_trace(&tm, INV);
+        let late = late_review_trace(&tm, INV);
         // Nothing can end either activation anymore, so neither record keeps a context of its
         // callbacks or the span that it ran under.
         check_late_record_dropped(&late, &branch_a_rec);

@@ -20,19 +20,21 @@
 //! Here each activation is a task in the scheduler's [`JoinSet`], and the consumer loop is the
 //! pull state machine [`Scheduler::next`], driven by the workflow's [`EventStream`]: the
 //! consumer polling again is Go's `yield` returning true, and dropping the stream (which drops
-//! the scheduler, aborting every task and cancelling every per-node token) is Go's `yield`
-//! returning false.
+//! the scheduler: it releases the event the consumer stopped on, cancels every running node's
+//! context and hands the drain of the still-running tasks to the invocation's teardown registry)
+//! is Go's `yield` returning false. Each activation runs on a fresh fiber (Go's `go runNode`), and a
+//! finished node's context stays live (Go `handleCompletion` drops its CancelFunc uncalled).
 //!
 //! [`EventStream`]: gadk_agent::EventStream
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use futures::{FutureExt, StreamExt};
-use gadk_agent::{AgentError, CancelGuard, Context, ContextDelta};
+use gadk_agent::fiber::{self, AttemptSite, SCHEDULER_CREATOR};
+use gadk_agent::{AgentError, CancelCause, CancelGuard, Context, ContextDelta, SharedCauseError};
 use gadk_genai::Content;
 use gadk_session::{Event, NodeInfo};
 use serde_json::{Map, Value};
@@ -53,7 +55,7 @@ use crate::workflow::persistence::{
 };
 use crate::workflow::route::{go_quote, is_default_route};
 use crate::workflow::state::{NodeStatus, RunState};
-use crate::workflow::{JoinNode, Node, START, calculate_delay, should_retry};
+use crate::workflow::{AgentNode, JoinNode, Node, START, calculate_delay, should_retry};
 
 /// Port of Go defaultEventQueueCapacity.
 pub(crate) const DEFAULT_EVENT_QUEUE_CAPACITY: usize = 16;
@@ -92,6 +94,17 @@ pub(crate) fn chain_any(err: &AgentError, pred: &dyn Fn(&AgentError) -> bool) ->
             .and_then(|s| s.downcast_ref::<AgentError>());
     }
     false
+}
+
+/// Go `errors.Is(err, cause)` for one link of the chain: `e` carries the cause's shared error
+/// (the same `Arc`, as [`CancelCause::to_agent_error`] builds it).
+fn holds_cause(e: &AgentError, cause: &Arc<dyn std::error::Error + Send + Sync>) -> bool {
+    match e {
+        AgentError::Other(b) => b
+            .downcast_ref::<SharedCauseError>()
+            .is_some_and(|s| Arc::ptr_eq(&s.0, cause)),
+        _ => false,
+    }
 }
 
 /// Go `errors.Is(err, context.Canceled)`.
@@ -322,8 +335,8 @@ struct LoopState {
     finished: bool,
 }
 
-/// Port of Go scheduler. Owned by the stream that drives it; dropping it aborts every node task
-/// and retry timer (the [`JoinSet`]) and cancels every per-node token (the [`CancelGuard`]s).
+/// Port of Go scheduler. Owned by the stream that drives it; dropping it is Go's consumer-gone
+/// drain (see the `Drop` impl): no node task is aborted.
 pub(crate) struct Scheduler {
     pub(crate) state: RunState,
     pub(crate) graph: Arc<Graph>,
@@ -340,6 +353,58 @@ pub(crate) struct Scheduler {
     max_concurrency: usize,
     pending_queue: VecDeque<PendingActivation>,
     lp: LoopState,
+}
+
+/// Go `run`'s consumer-gone path (scheduler.go:595-605: `yield` returned false → `cancelAll`, keep
+/// draining until every activation returned, releasing every producer's handshake). Dropping the
+/// scheduler releases the event the consumer stopped on, cancels every running activation
+/// plainly, stops the retry timers, and hands the drain of the still-running node tasks to the
+/// invocation's teardown registry ([`gadk_agent::InvocationContext::spawn_teardown`]), which the
+/// runner awaits before its after-run callbacks (Go runs the drain on the consumer's goroutine
+/// before `Run` returns). Nothing is yielded or finalized: the consumer is gone.
+impl Drop for Scheduler {
+    fn drop(&mut self) {
+        // Go `close(it.processed)` after `yield` returned false.
+        if let Some(ack) = self.lp.ack.take() {
+            let _ = ack.send(());
+        }
+        while self.tasks.try_join_next().is_some() {}
+        if self.tasks.is_empty() {
+            return;
+        }
+        self.cancel_all();
+        let mut tasks = std::mem::take(&mut self.tasks);
+        let (_, closed) = mpsc::channel(1);
+        let mut rx = std::mem::replace(&mut self.rx, closed);
+        self.parent_ctx.spawn_teardown(async move {
+            loop {
+                tokio::select! {
+                    biased;
+                    Some(item) = rx.recv() => release(item),
+                    joined = tasks.join_next() => match joined {
+                        None => break,
+                        Some(Err(e)) if e.is_panic() => {
+                            tracing::warn!("adk: a workflow node task panicked during teardown");
+                        }
+                        Some(_) => {}
+                    },
+                }
+            }
+            while let Ok(item) = rx.try_recv() {
+                release(item);
+            }
+        });
+    }
+}
+
+/// A drained queue item: an event's producer is released (Go: always signal, even when
+/// draining, so a blocked producer does not leak); everything else is discarded.
+fn release(item: QueueItem) {
+    if let QueueItem::Event(mut it) = item
+        && let Some(p) = it.processed.take()
+    {
+        let _ = p.send(());
+    }
 }
 
 /// Port of Go buildNodesByName: the name → node lookup of every edge endpoint.
@@ -464,7 +529,12 @@ impl Scheduler {
             output_for_ancestors: Some(ofa),
             ..ContextDelta::default()
         });
-        let (per_node, guard) = per_node.with_agent_cancel();
+        // Go `cfg.Timeout > 0`: WithAgentTimeout (the scope's own timer records
+        // DeadlineExceeded), else WithAgentCancel; a zero timeout means "no timeout".
+        let (per_node, guard) = match n.config().timeout.filter(|d| !d.is_zero()) {
+            Some(t) => per_node.with_agent_timeout(t),
+            None => per_node.with_agent_cancel(),
+        };
         let ns = self.state.ensure_node(&name);
         ns.status = NodeStatus::Running;
         ns.output = None;
@@ -479,14 +549,21 @@ impl Scheduler {
                 ..NodeRun::default()
             },
         );
-        self.run_cancels.insert(name.clone(), guard);
-        // Go `cfg.Timeout > 0`: a zero timeout means "no timeout".
-        let timeout = n.config().timeout.filter(|d| !d.is_zero());
+        // Go `s.runCancels[name] = cancel` overwrites a still-running earlier activation's
+        // CancelFunc without calling it: that run stays live (its parent still bounds it).
+        if let Some(replaced) = self.run_cancels.insert(name.clone(), guard) {
+            replaced.release();
+        }
+        // Go `go runNode(..)`: the activation runs on a fresh fiber started by this one (the
+        // goroutine startNode creates), taken here on the spawning side.
+        let node_fiber = fiber::spawn_child(SCHEDULER_CREATOR);
         // `.in_current_span()`: a spawned task starts with no span, so without it node/agent
         // spans opened inside the task would lose the runner/workflow span as their parent (Go
         // passes the span through ctx to the goroutine).
         self.tasks.spawn(
-            run_node_task(self.tx.clone(), name, n, per_node, input, timeout).in_current_span(),
+            node_fiber
+                .scope(run_node_task(self.tx.clone(), name, n, per_node, input))
+                .in_current_span(),
         );
     }
 
@@ -525,6 +602,7 @@ impl Scheduler {
     /// Port of Go cancelAll: cancels every running activation, stops every retry timer and
     /// drops the pending queue (their NodeState stays NodePending).
     pub(crate) fn cancel_all(&mut self) {
+        // Plain cancels through each node's scope: they record `Canceled` (Go `cancel()`).
         for guard in self.run_cancels.values() {
             guard.cancel();
         }
@@ -566,7 +644,12 @@ impl Scheduler {
             // External cancellation is recorded and starts draining whichever case won the
             // select (Go lines 576-591): a queued completion can be picked ahead of it.
             if self.lp.cancel_err.is_none() && token.is_cancelled() {
-                self.lp.cancel_err = Some(AgentError::Cancelled);
+                // Go `cancelErr = context.Cause(s.parentCtx)`.
+                self.lp.cancel_err = Some(
+                    self.parent_ctx
+                        .cause()
+                        .map_or(AgentError::Cancelled, |c| c.to_agent_error()),
+                );
                 if !self.lp.draining {
                     self.lp.draining = true;
                     self.cancel_all();
@@ -792,19 +875,21 @@ impl Scheduler {
         mut nr: Option<NodeRun>,
         schedule_new_work: bool,
     ) -> Option<AgentError> {
-        self.run_cancels.remove(name);
+        // Go `delete(s.runCancels, name)` without calling the CancelFunc: a finished node's
+        // context stays live until its timeout fires or its parent ends.
+        if let Some(guard) = self.run_cancels.remove(name) {
+            guard.release();
+        }
         // A dead invocation context: the cancellation came from outside the scheduler. A node
-        // that failed for its own reason keeps that error (Go echoesCancellation; the parent's
-        // cause is always Cancelled here, as tokens carry no cause).
+        // that failed for its own reason keeps that error (Go echoesCancellation).
         if self.parent_ctx.cancellation_token().is_cancelled() {
-            let ns = self.state.ensure_node(name);
             if let Some(e) = err
-                && !is_cancelled(&e)
+                && !self.echoes_cancellation(&e)
             {
-                ns.status = NodeStatus::Failed;
+                self.state.ensure_node(name).status = NodeStatus::Failed;
                 return Some(e);
             }
-            ns.status = NodeStatus::Cancelled;
+            self.state.ensure_node(name).status = NodeStatus::Cancelled;
             return None;
         }
         if let Some(e) = &err {
@@ -890,6 +975,23 @@ impl Scheduler {
             self.schedule_node(s.node, s.input, s.triggered_by, s.branch);
         }
         None
+    }
+
+    /// Port of Go echoesCancellation: whether `err` is the dying invocation context reflected
+    /// back by a node — a plain cancellation, the parent's own error kind (DeadlineExceeded),
+    /// or the parent's cause (the same shared error value). Only meaningful once the parent
+    /// context has ended (`cause()` is `None` while it is live).
+    fn echoes_cancellation(&self, err: &AgentError) -> bool {
+        if is_cancelled(err) {
+            return true;
+        }
+        match self.parent_ctx.cause() {
+            Some(CancelCause::DeadlineExceeded) => {
+                chain_any(err, &|e| matches!(e, AgentError::DeadlineExceeded))
+            }
+            Some(CancelCause::Error(cause)) => chain_any(err, &|e| holds_cause(e, &cause)),
+            _ => false,
+        }
     }
 
     /// Port of Go completionEvent: a history record for an activation that failed, was
@@ -985,10 +1087,17 @@ pub(crate) async fn run_node_task(
     node: Arc<dyn Node>,
     ctx: Context,
     input: Option<Value>,
-    timeout: Option<Duration>,
 ) {
     let span = start_node_span(&ctx, &node);
-    let body = drive_activation(out.clone(), name.clone(), node, ctx, input, timeout);
+    // The agent of an agent node runs as this attempt (Go attemptNode: runNode, then
+    // AgentNode.Run, then the agent's Run).
+    let is_agent_node = node.as_any().is::<AgentNode>();
+    let body = drive_activation(out.clone(), name.clone(), node, ctx, input);
+    let body = if is_agent_node {
+        fiber::with_attempt(AttemptSite::Node, body).boxed()
+    } else {
+        body.boxed()
+    };
     let body = match &span {
         Some(s) => body.instrument(s.clone()).boxed(),
         None => body.boxed(),
@@ -1024,14 +1133,14 @@ enum Outcome {
 }
 
 /// The body of Go runNode: input validation, then the node's events into the queue with the
-/// back-pressure handshake, honoring the per-node token and timeout.
+/// back-pressure handshake, honoring the per-node token (whose scope carries the node's
+/// timeout, Go WithAgentTimeout).
 async fn drive_activation(
     out: mpsc::Sender<QueueItem>,
     name: String,
     node: Arc<dyn Node>,
     ctx: Context,
     input: Option<Value>,
-    timeout: Option<Duration>,
 ) -> (Option<AgentError>, FailureInventory) {
     let validated = match node.validate_input(input.unwrap_or(Value::Null)) {
         Ok(v) => v,
@@ -1048,7 +1157,6 @@ async fn drive_activation(
     };
     let recorder = failure_inventory::with_failure_inventory(&node);
     let token = ctx.cancellation_token().clone();
-    let timed_out = Arc::new(AtomicBool::new(false));
     let drive = failure_inventory::scope(Arc::clone(&recorder), async {
         let mut stream = node.run(ctx.clone(), validated);
         while let Some(item) = stream.next().await {
@@ -1089,31 +1197,24 @@ async fn drive_activation(
         }
         // `stream` drops here, inside catch_unwind: a cleanup panic supersedes the outcome.
     });
-    let mut drive = std::pin::pin!(drive);
-    let outcome = match timeout {
-        None => drive.await,
-        Some(d) => tokio::select! {
-            o = &mut drive => o,
-            () = tokio::time::sleep(d) => {
-                timed_out.store(true, Ordering::SeqCst);
-                token.cancel();
-                drive.await
-            }
-        },
-    };
-    let ctx_err = || {
-        if timed_out.load(Ordering::SeqCst) {
-            deadline_exceeded()
-        } else {
-            AgentError::Cancelled
-        }
-    };
+    let outcome = drive.await;
+    // Go `ctx.Err()`: DeadlineExceeded when the node's context ended by a deadline (its own
+    // timeout, or an enclosing one), else Canceled.
+    let deadline = || matches!(ctx.cause(), Some(CancelCause::DeadlineExceeded));
     match outcome {
         Outcome::Done => (None, FailureInventory::default()),
-        Outcome::Ctx => (Some(ctx_err()), FailureInventory::default()),
+        Outcome::Ctx => {
+            let err = if deadline() {
+                deadline_exceeded()
+            } else {
+                AgentError::Cancelled
+            };
+            (Some(err), FailureInventory::default())
+        }
         Outcome::NodeError(e) => {
-            // A timed-out node that forwards its context's cancellation reports the deadline.
-            let e = if timed_out.load(Ordering::SeqCst) && is_cancelled(&e) {
+            // A node that forwards its context's cancellation (gadk nodes report it as
+            // `Cancelled`) after the deadline reports the deadline, as Go's ctx.Err() would.
+            let e = if is_cancelled(&e) && deadline() {
                 deadline_exceeded()
             } else {
                 e
@@ -1883,5 +1984,312 @@ pub(crate) mod test_support {
                 .cloned()
                 .collect()
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod cause_tests {
+    //! Go startNode / runNode / handleCompletion / run-loop semantics of the per-node scope:
+    //! fibers and the Node attempt site, released (not cancelled) finished nodes, the node
+    //! timeout in the scope, and cause-aware external cancellation (echoesCancellation).
+
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use futures::{FutureExt, StreamExt};
+    use gadk_agent::fiber::{self, AttemptSite, Fiber, Origin, SCHEDULER_CREATOR};
+    use gadk_agent::{
+        AgentConfig, AgentError, BeforeAgentCallback, CancelCause, Context, SharedCauseError,
+    };
+    use gadk_session::Event;
+    use parking_lot::Mutex;
+    use serde_json::json;
+
+    use super::Scheduler;
+    use super::test_support::{
+        TestError, TestNode, edge, must_new, once, output_event, start, test_err, top_level_ctx,
+    };
+    use crate::workflow::state::NodeStatus;
+    use crate::workflow::{AgentNode, Node, NodeConfig};
+
+    type Slot<T> = Arc<Mutex<Option<T>>>;
+
+    /// Schedules `nodes` on a scheduler over `parent` and drives it to the end.
+    async fn run_nodes(
+        parent: Context,
+        nodes: &[&Arc<dyn Node>],
+    ) -> (Scheduler, Vec<Result<Event, AgentError>>) {
+        let edges = nodes.iter().map(|n| edge(&start(), n)).collect();
+        let wf = must_new(edges);
+        let mut s = Scheduler::new(parent, Arc::clone(&wf.graph), 0);
+        for n in nodes {
+            s.schedule_node(Arc::clone(n), None, String::new(), String::new());
+        }
+        let mut items = Vec::new();
+        while let Some(it) = s.next().await {
+            items.push(it);
+        }
+        (s, items)
+    }
+
+    fn timeout_cfg(secs: u64) -> NodeConfig {
+        NodeConfig {
+            timeout: Some(Duration::from_secs(secs)),
+            ..NodeConfig::default()
+        }
+    }
+
+    /// A node that keeps its context and emits one output at once.
+    fn capturing_node(name: &str, cfg: NodeConfig, slot: Slot<Context>) -> Arc<dyn Node> {
+        TestNode::arc(name, cfg, move |ctx, _| {
+            *slot.lock() = Some(ctx.clone());
+            once(output_event(&ctx, json!("done")))
+        })
+    }
+
+    /// A node that waits for its context to end, then ends with `end(ctx)` (None: a clean
+    /// return, Go's `return` after observing ctx.Done()).
+    fn waiting_node(
+        name: &str,
+        cfg: NodeConfig,
+        end: impl Fn(&Context) -> Option<AgentError> + Send + Sync + Clone + 'static,
+    ) -> Arc<dyn Node> {
+        TestNode::arc(name, cfg, move |ctx, _| {
+            let end = end.clone();
+            futures::stream::once(async move {
+                ctx.cancellation_token().cancelled().await;
+                end(&ctx)
+            })
+            .filter_map(|e| async move { e.map(Err) })
+            .boxed()
+        })
+    }
+
+    fn last_err(items: &[Result<Event, AgentError>]) -> &AgentError {
+        match items.last() {
+            Some(Err(e)) => e,
+            other => panic!("want a final error, got {other:?}"),
+        }
+    }
+
+    fn shared_cause_of(e: &AgentError) -> &SharedCauseError {
+        let AgentError::Other(b) = e else {
+            panic!("not Other: {e:?}")
+        };
+        b.downcast_ref::<SharedCauseError>()
+            .unwrap_or_else(|| panic!("not a SharedCauseError: {e:?}"))
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn completed_timeout_node_context_is_live_until_its_deadline() {
+        let slot: Slot<Context> = Arc::default();
+        let n = capturing_node("timed", timeout_cfg(10), Arc::clone(&slot));
+        let (s, items) = run_nodes(top_level_ctx(), &[&n]).await;
+        assert!(items.iter().all(Result::is_ok), "{items:?}");
+        assert_eq!(s.state.nodes["timed"].status, NodeStatus::Completed);
+        // Go handleCompletion deletes the CancelFunc without calling it, and the scheduler's
+        // end does not cancel finished nodes either.
+        drop(s);
+        let node_ctx = slot.lock().clone().expect("node ran");
+        assert!(!node_ctx.cancellation_token().is_cancelled());
+        assert!(node_ctx.cause().is_none());
+        tokio::time::sleep(Duration::from_secs(9)).await;
+        assert!(!node_ctx.cancellation_token().is_cancelled());
+        assert!(node_ctx.cause().is_none());
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert!(node_ctx.cancellation_token().is_cancelled());
+        assert!(
+            matches!(node_ctx.cause(), Some(CancelCause::DeadlineExceeded)),
+            "{:?}",
+            node_ctx.cause()
+        );
+    }
+
+    #[tokio::test]
+    async fn completed_node_context_is_live_until_its_parent_ends() {
+        let (parent, _parent_guard) = top_level_ctx().with_agent_cancel();
+        let slot: Slot<Context> = Arc::default();
+        let n = capturing_node("plain", NodeConfig::default(), Arc::clone(&slot));
+        let (s, items) = run_nodes(parent.clone(), &[&n]).await;
+        assert!(items.iter().all(Result::is_ok), "{items:?}");
+        drop(s);
+        let node_ctx = slot.lock().clone().expect("node ran");
+        assert!(node_ctx.cause().is_none());
+        let boom: Arc<dyn std::error::Error + Send + Sync> = Arc::new(TestError("boom"));
+        parent.cancel_with_cause(CancelCause::Error(Arc::clone(&boom)));
+        assert!(node_ctx.cancellation_token().is_cancelled());
+        match node_ctx.cause() {
+            Some(CancelCause::Error(e)) => assert!(Arc::ptr_eq(&e, &boom)),
+            other => panic!("want the parent's Error cause, got {other:?}"),
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn node_timeout_reports_deadline_exceeded() {
+        // A clean return after the deadline (Go `completion.err = ctx.Err()`) and a node that
+        // forwards its context's cancellation both report the deadline.
+        let returns = waiting_node("returns", timeout_cfg(1), |_| None);
+        let forwards = waiting_node("forwards", timeout_cfg(1), |_| Some(AgentError::Cancelled));
+        for n in [returns, forwards] {
+            let (s, items) = run_nodes(top_level_ctx(), &[&n]).await;
+            assert!(
+                matches!(last_err(&items), AgentError::DeadlineExceeded),
+                "{}: {items:?}",
+                n.name()
+            );
+            assert_eq!(s.state.nodes[n.name()].status, NodeStatus::Failed);
+        }
+    }
+
+    /// Go startNode overwrites `runCancels[name]` without calling the replaced CancelFunc: a
+    /// node re-started while its earlier activation still runs leaves that activation live.
+    #[tokio::test]
+    async fn restarting_a_running_node_keeps_the_earlier_run_live() {
+        let seen: Arc<Mutex<Vec<Context>>> = Arc::default();
+        let s2 = Arc::clone(&seen);
+        let n = TestNode::arc("again", NodeConfig::default(), move |ctx, _| {
+            s2.lock().push(ctx.clone());
+            futures::stream::once(async move {
+                ctx.cancellation_token().cancelled().await;
+            })
+            .filter_map(|()| async { None::<Result<Event, AgentError>> })
+            .boxed()
+        });
+        let wf = must_new(vec![edge(&start(), &n)]);
+        let mut s = Scheduler::new(top_level_ctx(), Arc::clone(&wf.graph), 0);
+        s.schedule_node(Arc::clone(&n), None, String::new(), String::new());
+        s.schedule_node(Arc::clone(&n), None, String::new(), String::new());
+        while seen.lock().len() < 2 {
+            tokio::task::yield_now().await;
+        }
+        let ctxs = seen.lock().clone();
+        assert!(
+            !ctxs[0].cancellation_token().is_cancelled(),
+            "earlier run cancelled"
+        );
+        assert!(!ctxs[1].cancellation_token().is_cancelled());
+        // The scheduler's end cancels the current activation only; the replaced one was released.
+        drop(s);
+        assert!(ctxs[1].cancellation_token().is_cancelled());
+        assert!(!ctxs[0].cancellation_token().is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn cancel_all_records_canceled_on_running_siblings() {
+        let slot: Slot<Context> = Arc::default();
+        let s2 = Arc::clone(&slot);
+        let sibling = waiting_node("sibling", NodeConfig::default(), move |ctx| {
+            *s2.lock() = Some(ctx.clone());
+            None
+        });
+        let failing = TestNode::arc("failing", NodeConfig::default(), |_, _| {
+            super::test_support::fail(test_err("boom"))
+        });
+        let (s, items) = run_nodes(top_level_ctx(), &[&sibling, &failing]).await;
+        assert_eq!(last_err(&items).to_string(), "boom");
+        assert_eq!(s.state.nodes["sibling"].status, NodeStatus::Cancelled);
+        let sib_ctx = slot.lock().clone().expect("sibling ended");
+        assert!(matches!(sib_ctx.cause(), Some(CancelCause::Canceled)));
+    }
+
+    #[tokio::test]
+    async fn external_cancel_reports_the_parents_error_cause() {
+        let (parent, _parent_guard) = top_level_ctx().with_agent_cancel();
+        let boom: Arc<dyn std::error::Error + Send + Sync> = Arc::new(TestError("boom"));
+        let (p, b) = (parent.clone(), Arc::clone(&boom));
+        // Cancels the invocation from inside (external to the scheduler), then reflects the
+        // cause back (Go `return context.Cause(ctx)`): an echo, so the node is Cancelled.
+        let echo = TestNode::arc("echo", NodeConfig::default(), move |ctx, _| {
+            let (p, b) = (p.clone(), Arc::clone(&b));
+            futures::stream::once(async move {
+                p.cancel_with_cause(CancelCause::Error(b));
+                ctx.cancellation_token().cancelled().await;
+                Err(ctx.cause().expect("ended").to_agent_error())
+            })
+            .boxed()
+        });
+        let quiet = waiting_node("quiet", NodeConfig::default(), |_| None);
+        let (s, items) = run_nodes(parent, &[&echo, &quiet]).await;
+        let err = last_err(&items);
+        assert_eq!(err.to_string(), "boom");
+        assert!(Arc::ptr_eq(&shared_cause_of(err).0, &boom));
+        assert_eq!(s.state.nodes["echo"].status, NodeStatus::Cancelled);
+        assert_eq!(s.state.nodes["quiet"].status, NodeStatus::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn external_cancel_keeps_a_nodes_own_error() {
+        let (parent, guard) = top_level_ctx().with_agent_cancel();
+        let guard = Arc::new(Mutex::new(Some(guard)));
+        let own = TestNode::arc("own", NodeConfig::default(), move |ctx, _| {
+            let guard = Arc::clone(&guard);
+            futures::stream::once(async move {
+                drop(guard.lock().take());
+                ctx.cancellation_token().cancelled().await;
+                Err(test_err("own failure"))
+            })
+            .boxed()
+        });
+        let (s, items) = run_nodes(parent, &[&own]).await;
+        assert_eq!(last_err(&items).to_string(), "own failure");
+        assert_eq!(s.state.nodes["own"].status, NodeStatus::Failed);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn external_deadline_is_reported_and_echoed() {
+        let (parent, _parent_guard) = top_level_ctx().with_agent_timeout(Duration::from_secs(5));
+        // The node forwards a plain cancellation; under the parent's deadline it reads as
+        // DeadlineExceeded (Go ctx.Err()), which echoes the parent's error.
+        let n = waiting_node("n", NodeConfig::default(), |_| Some(AgentError::Cancelled));
+        let (s, items) = run_nodes(parent, &[&n]).await;
+        assert!(
+            matches!(last_err(&items), AgentError::DeadlineExceeded),
+            "{items:?}"
+        );
+        assert_eq!(s.state.nodes["n"].status, NodeStatus::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn nodes_run_on_scheduler_fibers_and_agent_nodes_claim_the_node_attempt() {
+        let seen_agent: Slot<(fiber::Fiber, Option<AttemptSite>)> = Arc::default();
+        let sa = Arc::clone(&seen_agent);
+        let before: BeforeAgentCallback = Arc::new(move |_ctx| {
+            *sa.lock() = Some((fiber::current(), fiber::current_attempt()));
+            async { Ok(None) }.boxed()
+        });
+        let agent = gadk_agent::new_agent(AgentConfig {
+            name: "agent".into(),
+            before_agent_callbacks: vec![before],
+            run: Some(Arc::new(|_| futures::stream::empty().boxed())),
+            ..AgentConfig::default()
+        })
+        .expect("agent");
+        let agent_node: Arc<dyn Node> =
+            AgentNode::new(agent, NodeConfig::default()).expect("agent node");
+        let seen_fn: Slot<(fiber::Fiber, Option<AttemptSite>)> = Arc::default();
+        let sf = Arc::clone(&seen_fn);
+        let fn_node = TestNode::arc("func", NodeConfig::default(), move |ctx, _| {
+            *sf.lock() = Some((fiber::current(), fiber::current_attempt()));
+            once(output_event(&ctx, json!("ok")))
+        });
+        let consumer = Fiber::root();
+        let consumer_id = consumer.id;
+        let (_s, items) = consumer
+            .scope(run_nodes(top_level_ctx(), &[&agent_node, &fn_node]))
+            .await;
+        assert!(items.iter().all(Result::is_ok), "{items:?}");
+        let want = Origin {
+            creator: SCHEDULER_CREATOR,
+            parent: consumer_id,
+        };
+        let (agent_fiber, agent_attempt) = seen_agent.lock().clone().expect("agent ran");
+        let (fn_fiber, fn_attempt) = seen_fn.lock().clone().expect("function node ran");
+        assert_eq!(agent_fiber.origin, want);
+        assert_eq!(fn_fiber.origin, want);
+        assert_ne!(agent_fiber.id, consumer_id);
+        assert_ne!(agent_fiber.id, fn_fiber.id);
+        assert_eq!(agent_attempt, Some(AttemptSite::Node));
+        assert_eq!(fn_attempt, None);
     }
 }

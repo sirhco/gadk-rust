@@ -35,14 +35,6 @@ use crate::parity_tests::plugin_agentanalytics_bigquery_agent_analytics_plugin::
 use crate::row::Row;
 use crate::trace::testkit::sequential;
 
-/// A model answering "never sent" once.
-fn never_sent() -> Arc<dyn gadk_model::Llm> {
-    scripted_llm(vec![Ok(LlmResponse {
-        content: Some(text_content("model", "never sent")),
-        ..Default::default()
-    })])
-}
-
 #[tokio::test]
 async fn test_runner_prior_plugin_answers_only_child_emits_invocation_completed_ok() {
     for (name, drain) in [
@@ -1132,16 +1124,6 @@ async fn test_runner_progress_event_without_content() {
     }
 }
 
-/// Go `newCacheHitAgent(t)`: an LLM agent `cached` that its BeforeAgentCallback answers.
-fn new_cache_hit_agent() -> Arc<dyn gadk_agent::Agent> {
-    llm_agent(LlmAgentConfig {
-        name: "cached".into(),
-        model: Some(never_sent()),
-        before_agent_callbacks: vec![answering_before_agent(text_content("model", "cache hit"))],
-        ..Default::default()
-    })
-}
-
 /// Go's `guard`: a custom agent that drains `cached` without forwarding its events.
 fn silent_guard(cached: Arc<dyn gadk_agent::Agent>) -> Arc<dyn gadk_agent::Agent> {
     let run_cached = cached.clone();
@@ -1371,8 +1353,6 @@ async fn test_runner_non_task_mode_finish_task_tool() {
         assert_agent_spans_closed(&rows);
     }
 }
-
-// parity: skipped TestRunner_FinishTaskWithReusedCallIDEndsTheRunOnTheEventPath: deferred to 7b-3b (workflow node run: run_llm_agent_as_node is crate-private and node paths are reset)
 
 // parity: adapted: Go's `context.WithCancelCause(ctx)` + `cancel(runErr)` is a child cancellation
 // token cancelled on the first error (a gadk token carries no cause; spec R3).

@@ -22,6 +22,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::FutureExt;
+use gadk_agent::fiber::{self, Fiber};
 use gadk_agent::{Agent, AgentError, ContextDelta, InvocationContext, go_quote};
 use gadk_session::compaction::{CompactionError, Config, LlmSummarizer, LlmSummarizerConfig};
 use gadk_session::{Event, Session, SessionService};
@@ -305,7 +306,15 @@ async fn repair_after_append(
 /// - Stream dropped: `Drop` spawns one task on the current runtime that runs the after-run
 ///   callbacks and then, if the stream was dropped at a yield, compaction on a context
 ///   re-derived with a fresh cancellation token (Go's `break` leaves the caller's context
-///   uncancelled), inside the span that was current when the guard was made. Errors are logged.
+///   uncancelled), inside the span and the fiber that were current when the guard was made
+///   (Go runs the deferred calls on the consumer's goroutine; the guard is made inside the
+///   runner's consumer `FiberStream`). Errors are logged.
+///
+/// Before the after-run callbacks (inline or spawned) the guard awaits the invocation's teardown
+/// registry ([`gadk_agent::Teardowns`]): the started work that components dropped during the run
+/// handed over (a ParallelAgent's branches, a workflow scheduler's node tasks, in-flight tool
+/// calls), which in Go finishes on the consumer's goroutine before the deferred
+/// `RunAfterRunCallback`. The token is still live while it is awaited after a stop at a yield.
 ///
 /// The guard also owns the invocation token's cancel-on-drop ([`InvocationGuard::cancel_on_drop`]).
 /// A drop inside an await cancels it at once (Go's caller cancelled its context, and the
@@ -320,6 +329,9 @@ async fn repair_after_append(
 ///
 /// A drop before the summary append is Go's cancellation decline; once the summary is stored,
 /// the straggler repair is detached ([`apply::repair`] spawns it) and always runs.
+///
+/// The live path ([`InvocationGuard::no_compaction`]) uses only the after-run and
+/// cancel-on-drop parts: Go `RunLive` does not compact.
 pub(crate) struct InvocationGuard {
     inner: Arc<RunnerInner>,
     stored: Arc<dyn Session>,
@@ -332,6 +344,8 @@ pub(crate) struct InvocationGuard {
     /// Cancels the invocation token when dropped (see [`InvocationGuard::cancel_on_drop`]).
     cancel_on_drop: Option<DropGuard>,
     span: tracing::Span,
+    /// The consumer's fiber, re-entered by the task `Drop` spawns.
+    fiber: Fiber,
 }
 
 impl InvocationGuard {
@@ -351,7 +365,13 @@ impl InvocationGuard {
             compaction_pending: true,
             cancel_on_drop: None,
             span: tracing::Span::current(),
+            fiber: fiber::current(),
         }
+    }
+
+    /// No compaction for this invocation (Go `RunLive`, which attaches no compaction runtime).
+    pub(crate) fn no_compaction(&mut self) {
+        self.compaction_pending = false;
     }
 
     /// Hands the invocation token's cancel-on-drop to the guard, which cancels it when the
@@ -396,6 +416,7 @@ impl InvocationGuard {
     /// Go's deferred `RunAfterRunCallback`, at the end of a normal run.
     pub(crate) async fn finish(mut self) {
         if std::mem::take(&mut self.after_run_pending) {
+            wait_teardowns(&self.ctx).await;
             self.inner
                 .plugin_manager
                 .run_after_run(self.ctx.clone())
@@ -406,6 +427,7 @@ impl InvocationGuard {
     /// An early `return`: Go's defers in LIFO order, after-run, then compaction (logged).
     pub(crate) async fn finish_early(mut self) {
         if std::mem::take(&mut self.after_run_pending) {
+            wait_teardowns(&self.ctx).await;
             self.inner
                 .plugin_manager
                 .run_after_run(self.ctx.clone())
@@ -417,6 +439,19 @@ impl InvocationGuard {
     }
 }
 
+/// Awaits the started work that components dropped during the invocation handed to its
+/// teardown registry ([`gadk_agent::Teardowns`]): in Go that work finishes on the consumer's
+/// goroutine before the deferred `RunAfterRunCallback` runs.
+async fn wait_teardowns(ctx: &InvocationContext) {
+    if let Some(t) = ctx.teardowns() {
+        t.wait().await;
+    }
+}
+
+// Divergence (ledger 7b-3a): a consumer that stops early unwinds Go's iterator on its own
+// goroutine (teardown, `RunAfterRunCallback`, compaction) before its `break` returns; a dropped
+// Rust stream cannot block its dropper, so this runs that work on a spawned task re-entering the
+// consumer's fiber, which may overlap whatever the consumer does next.
 impl Drop for InvocationGuard {
     fn drop(&mut self) {
         let after_run = std::mem::take(&mut self.after_run_pending);
@@ -441,23 +476,22 @@ impl Drop for InvocationGuard {
             None
         };
         let (inner, stored, ctx) = (self.inner.clone(), self.stored.clone(), self.ctx.clone());
-        handle.spawn(
-            async move {
-                if after_run {
-                    inner.plugin_manager.run_after_run(ctx.clone()).await;
-                }
-                drop(cancel_later);
-                if compact {
-                    let fresh = ctx.with_delta(ContextDelta {
-                        cancellation_token: Some(CancellationToken::new()),
-                        ..Default::default()
-                    });
-                    if let Err(e) = inner.compact_after_invocation(&stored, &fresh).await {
-                        tracing::warn!("adk: {e}");
-                    }
+        let task = self.fiber.clone().scope(async move {
+            if after_run {
+                wait_teardowns(&ctx).await;
+                inner.plugin_manager.run_after_run(ctx.clone()).await;
+            }
+            drop(cancel_later);
+            if compact {
+                let fresh = ctx.with_delta(ContextDelta {
+                    cancellation_token: Some(CancellationToken::new()),
+                    ..Default::default()
+                });
+                if let Err(e) = inner.compact_after_invocation(&stored, &fresh).await {
+                    tracing::warn!("adk: {e}");
                 }
             }
-            .instrument(self.span.clone()),
-        );
+        });
+        handle.spawn(task.instrument(self.span.clone()));
     }
 }

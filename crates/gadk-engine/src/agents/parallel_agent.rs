@@ -18,14 +18,15 @@
 use std::sync::Arc;
 
 use futures::StreamExt;
+use gadk_agent::fiber::{self, ERRGROUP_CREATOR};
 use gadk_agent::{
-    Agent, AgentConfig, AgentError, AgentState, AgentType, ContextDelta, EventStream,
+    Agent, AgentConfig, AgentError, AgentState, AgentType, CancelCause, ContextDelta, EventStream,
     InvocationContext, go_quote,
 };
 use gadk_session::Event;
 use parking_lot::Mutex;
 use tokio::sync::{mpsc, oneshot};
-use tokio::task::{AbortHandle, JoinSet};
+use tokio::task::{JoinHandle, JoinSet};
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 
@@ -92,34 +93,64 @@ impl std::error::Error for SubAgentError {
     }
 }
 
-/// Aborts the funnel task when the run stream is dropped.
-struct AbortOnDrop(AbortHandle);
+/// Go's deferred cleanup in the run iterator (agent.go:118-128, ADK #1186): when the run stream
+/// is dropped, the funnel task (which ends only after every sub-agent task has returned, its
+/// teardown included) is handed to the invocation's teardown registry instead of being aborted,
+/// so the runner's after-run callbacks wait for every branch. Without a registry it is detached.
+struct AwaitBranchesOnDrop {
+    ctx: InvocationContext,
+    funnel: Option<JoinHandle<()>>,
+}
 
-impl Drop for AbortOnDrop {
+impl Drop for AwaitBranchesOnDrop {
     fn drop(&mut self) {
-        self.0.abort();
+        if let Some(funnel) = self.funnel.take() {
+            self.ctx.register_teardown(funnel);
+        }
+    }
+}
+
+/// Go `close(res.ackChan)` after `yield` returned, whether it returned true or false: sent when
+/// the consumer asks for the next item, or when it drops the stream at this event.
+struct AckOnDrop(Option<oneshot::Sender<()>>);
+
+impl Drop for AckOnDrop {
+    fn drop(&mut self) {
+        if let Some(ack) = self.0.take() {
+            let _ = ack.send(());
+        }
     }
 }
 
 /// Port of Go parallelagent run.
 ///
-/// Every sub-agent runs in its own task on a context with branch `<parent>.<sub>` (prefixed with
-/// the current branch when there is one), the same invocation, and a shared group cancellation
-/// token. Each event is handed to the consumer with an acknowledgement, and the sub-agent does not
+/// Every sub-agent runs in its own task (on a fresh fiber spawned with [`ERRGROUP_CREATOR`], Go's
+/// `errgroup.Go` goroutine) on a context with branch `<parent>.<sub>` (prefixed with the current
+/// branch when there is one), the same invocation, and the group's cancel scope (Go
+/// `errgroup.WithContext`, a `context.WithCancelCause` child of the run context). Each event is handed to the consumer with an acknowledgement, and the sub-agent does not
 /// continue until the consumer asks for the next item, i.e. after it has processed the event (for
-/// the runner: after plugins and the session append). The first sub-agent error cancels the group
-/// and is yielded once every sub-agent has finished. A sub-agent panic cancels the group and is
+/// the runner: after plugins and the session append). The first sub-agent error, wrapped as
+/// `failed to run sub-agent "<name>": <err>`, cancels the group with that error as its cause
+/// (`CancelCause::Error`, the same `Arc` the yielded error carries) and is yielded once every
+/// sub-agent has finished; once every sub-agent has returned, the group is cancelled plainly
+/// (errgroup `Wait`; the first cause wins). A sub-agent panic cancels the group plainly and is
 /// re-raised on the consumer's poll (`resume_unwind`, as the dynamic scheduler surfaces node
-/// panics) once every sub-agent has finished. Dropping the stream cancels the group and aborts
-/// every sub-agent task, which drops (tears down) its stream.
+/// panics) once every sub-agent has finished. Dropping the stream (Go's early stop, agent.go:118-142)
+/// acknowledges the event the consumer stopped on, cancels the group plainly and hands the
+/// funnel, which waits for every sub-agent task to return, to the invocation's teardown
+/// registry ([`InvocationContext::register_teardown`]): no sub-agent task is aborted, and the
+/// runner's after-run callbacks run once they have all torn down.
 fn run(ctx: InvocationContext) -> EventStream {
     Box::pin(async_stream::stream! {
         let cur = ctx.agent();
-        // Go: context.WithCancel(ctx) + errgroup.WithContext; cancelled on early stop.
-        let group = ctx.cancellation_token().child_token();
-        let _cancel_on_drop = group.clone().drop_guard();
+        // Go: context.WithCancel(ctx) + errgroup.WithContext (one scope here: the early-stop
+        // cancel is plain, so the group reads `Canceled` either way); the guard cancels it
+        // plainly on early stop.
+        let (group_ctx, _cancel_on_drop) = ctx.clone().into_context().with_agent_cancel();
+        let group = group_ctx.cancellation_token().clone();
         let (tx, mut rx) = mpsc::channel::<SubResult>(1);
-        let first_err: Arc<Mutex<Option<AgentError>>> = Arc::new(Mutex::new(None));
+        // Go errgroup `err` (first error, kept once): the shared value the cause carries.
+        let first_err: Arc<Mutex<Option<CancelCause>>> = Arc::new(Mutex::new(None));
         let mut set = JoinSet::new();
         for sa in cur.sub_agents() {
             let mut branch = format!("{}.{}", cur.name(), sa.name());
@@ -130,30 +161,37 @@ fn run(ctx: InvocationContext) -> EventStream {
             // Memory, Session, Branch, Agent, UserContent, RunConfig and InvocationID: a fresh,
             // not-ended end flag (ending one branch does not end its siblings) and zero
             // isolation scope, path, run id, resumed inputs and output-for-ancestors.
-            let sub_ctx = ctx.with_delta(ContextDelta {
+            // The context shares the group's cancel scope (Go `NewInvocationContext(errGroupCtx, …)`).
+            let sub_ctx = group_ctx.as_invocation().with_delta(ContextDelta {
                 fresh_invocation: true,
                 agent: Some(Arc::clone(sa)),
                 branch: Some(branch),
-                cancellation_token: Some(group.clone()),
                 ..Default::default()
             });
             let (sa, tx, group, first_err) = (Arc::clone(sa), tx.clone(), group.clone(), first_err.clone());
-            set.spawn(async move {
-                if let Err(e) = run_sub_agent(sub_ctx, sa.clone(), tx, group.clone()).await {
-                    let wrapped = AgentError::Other(Box::new(SubAgentError {
+            // Go `errGroup.Go`: a goroutine started here, by the goroutine running the agent.
+            let branch_fiber = fiber::spawn_child(ERRGROUP_CREATOR);
+            set.spawn(branch_fiber.scope(async move {
+                if let Err(e) = run_sub_agent(sub_ctx.clone(), sa.clone(), tx, group).await {
+                    let wrapped = CancelCause::Error(Arc::new(SubAgentError {
                         name: sa.name().to_string(),
                         source: e,
                     }));
-                    // errgroup keeps the first error and cancels the group context.
-                    first_err.lock().get_or_insert(wrapped);
-                    group.cancel();
+                    // errgroup `errOnce`: the first error is kept and cancels the group with it as
+                    // the cause (a no-op if the group was already cancelled).
+                    let mut first = first_err.lock();
+                    if first.is_none() {
+                        *first = Some(wrapped.clone());
+                        drop(first);
+                        sub_ctx.cancel_with_cause(wrapped);
+                    }
                 }
-            }.in_current_span());
+            }).in_current_span());
         }
         // The funnel: once every sub-agent has finished, report the first error; the channel
         // closes when the funnel and every sub-agent have dropped their senders (Go
         // close(resultsChan)).
-        let funnel_group = group.clone();
+        let funnel_group = group_ctx.clone();
         let funnel = tokio::spawn(async move {
             let mut panic = None;
             while let Some(res) = set.join_next().await {
@@ -161,28 +199,38 @@ fn run(ctx: InvocationContext) -> EventStream {
                     && je.is_panic()
                 {
                     // Stop the siblings; the panic is re-raised once they have torn down.
-                    funnel_group.cancel();
+                    funnel_group.cancel_with_cause(CancelCause::Canceled);
                     panic.get_or_insert(je.into_panic());
                 }
             }
+            // errgroup `Wait`: `cancel(g.err)` once every branch returned — plain when no branch
+            // failed; the first cause wins otherwise.
+            funnel_group.cancel_with_cause(CancelCause::Canceled);
             if let Some(p) = panic {
-                let _ = tx.send(SubResult::Panic(p)).await;
+                if tx.send(SubResult::Panic(p)).await.is_err() {
+                    // Stopped early: nobody is left to re-raise it.
+                    tracing::warn!("adk: a parallel agent branch panicked after an early stop");
+                }
                 return;
             }
             let err = first_err.lock().take();
             if let Some(e) = err {
-                let _ = tx.send(SubResult::Err(e)).await;
+                // The yielded error holds the same `Arc` as the group's cause.
+                let _ = tx.send(SubResult::Err(e.to_agent_error())).await;
             }
         }.in_current_span());
-        // Aborting the funnel drops `set`, which aborts every sub-agent task.
-        let _abort_on_drop = AbortOnDrop(funnel.abort_handle());
+        // Declared after `_cancel_on_drop`, so a drop registers the funnel before the group is
+        // cancelled (locals drop in reverse order; both happen before the runner's guard).
+        let _await_branches = AwaitBranchesOnDrop { ctx: ctx.clone(), funnel: Some(funnel) };
         while let Some(res) = rx.recv().await {
             match res {
                 SubResult::Event(ev, ack) => {
+                    // Released when the consumer asks for the next item, i.e. after it has
+                    // processed this one, or when it drops the stream here: the innermost
+                    // local, so the ack is sent before the group is cancelled (Go closes the
+                    // ack channel before its deferred `cancelSubAgents`).
+                    let _ack = AckOnDrop(Some(ack));
                     yield Ok(*ev);
-                    // Reached only when the consumer asks for the next item, i.e. after it has
-                    // processed this one (Go close(res.ackChan)).
-                    let _ = ack.send(());
                 }
                 SubResult::Err(e) => yield Err(e),
                 SubResult::Panic(p) => std::panic::resume_unwind(p),
@@ -207,11 +255,13 @@ async fn run_sub_agent(
             _ = group.cancelled() => return Err(AgentError::Cancelled),
             sent = tx.send(SubResult::Event(Box::new(event), ack_tx)) => if sent.is_err() { return Ok(()); },
         }
-        // Wait for the consumer to finish processing before continuing.
+        // Wait for the consumer to finish processing before continuing. A ready ack wins over
+        // the group's cancellation: a consumer that stops on this event acknowledges it before
+        // cancelling the group, and Go's goroutine, parked in the select, wakes on the ack.
         tokio::select! {
             biased;
-            _ = group.cancelled() => return Err(AgentError::Cancelled),
             acked = ack_rx => if acked.is_err() { return Ok(()); },
+            _ = group.cancelled() => return Err(AgentError::Cancelled),
         }
     }
     Ok(())
@@ -227,6 +277,9 @@ mod tests {
     use gadk_genai::{Content, ROLE_MODEL};
     use gadk_session::Event;
     use parking_lot::Mutex;
+
+    use gadk_agent::fiber::{self, ERRGROUP_CREATOR, Fiber};
+    use gadk_agent::{AgentError, CancelCause, SharedCauseError};
 
     use super::{ParallelAgentConfig, new, run};
 
@@ -310,5 +363,113 @@ mod tests {
             .or_else(|| payload.downcast_ref::<String>().cloned())
             .unwrap_or_default();
         assert_eq!(msg, "sub-agent exploded");
+    }
+
+    /// A sub-agent that records the fiber and context its run sees, then ends (`fail`: with an
+    /// error) or waits for the group to be cancelled first (`wait`).
+    fn recorder(
+        name: &str,
+        behaviour: &'static str,
+        seen: Arc<Mutex<Vec<(String, Fiber, InvocationContext)>>>,
+    ) -> Arc<dyn Agent> {
+        let name_owned = name.to_string();
+        gadk_agent::new_agent(AgentConfig {
+            name: name.into(),
+            run: Some(Arc::new(move |ctx: InvocationContext| {
+                let (seen, name) = (seen.clone(), name_owned.clone());
+                Box::pin(async_stream::stream! {
+                    seen.lock().push((name, fiber::current(), ctx.clone()));
+                    match behaviour {
+                        "fail" => yield Err(AgentError::other("boom")),
+                        "wait" => ctx.cancellation_token().cancelled().await,
+                        _ => {}
+                    }
+                })
+            })),
+            ..Default::default()
+        })
+        .unwrap()
+    }
+
+    /// R7: a failing branch cancels the group with `CancelCause::Error` carrying the wrapped
+    /// `failed to run sub-agent "<name>": <err>` error — the same value the run yields.
+    #[tokio::test]
+    async fn a_failing_branch_cancels_the_group_with_the_wrapped_error() {
+        let seen = Arc::default();
+        let par = parallel(vec![
+            recorder("waiter", "wait", Arc::clone(&seen)),
+            recorder("failer", "fail", Arc::clone(&seen)),
+        ]);
+        let parent = InvocationContext::builder()
+            .agent(par.clone())
+            .build_invocation();
+        let items: Vec<_> = run(parent.clone()).collect().await;
+        assert_eq!(items.len(), 1);
+        let err = items[0].as_ref().unwrap_err();
+        let want = r#"failed to run sub-agent "failer": boom"#;
+        assert_eq!(err.to_string(), want);
+        let seen = seen.lock();
+        assert_eq!(seen.len(), 2);
+        for (name, _, ctx) in seen.iter() {
+            match ctx.cause() {
+                Some(CancelCause::Error(e)) => {
+                    assert_eq!(e.to_string(), want, "{name}");
+                    let AgentError::Other(yielded) = err else {
+                        panic!("{err:?}");
+                    };
+                    let shared = yielded.downcast_ref::<SharedCauseError>().unwrap();
+                    assert!(
+                        Arc::ptr_eq(&shared.0, &e),
+                        "{name}: the cause is the yielded error"
+                    );
+                }
+                other => panic!("{name}: cause = {other:?}"),
+            }
+        }
+        assert!(parent.cause().is_none(), "the run context stays live");
+    }
+
+    /// R7 (errgroup `Wait`): once every branch returned without error the group reads a plain
+    /// `Canceled`, while the run context stays live.
+    #[tokio::test]
+    async fn the_group_is_cancelled_plainly_after_every_branch_returned() {
+        let seen = Arc::default();
+        let par = parallel(vec![
+            recorder("a", "ok", Arc::clone(&seen)),
+            recorder("b", "ok", Arc::clone(&seen)),
+        ]);
+        let parent = InvocationContext::builder()
+            .agent(par.clone())
+            .build_invocation();
+        let items: Vec<_> = run(parent.clone()).collect().await;
+        assert!(items.is_empty());
+        for (name, _, ctx) in seen.lock().iter() {
+            assert!(matches!(ctx.cause(), Some(CancelCause::Canceled)), "{name}");
+        }
+        assert!(parent.cause().is_none());
+    }
+
+    /// R3: each branch runs on its own fiber started (`ERRGROUP_CREATOR`) by the fiber polling
+    /// the run.
+    #[tokio::test]
+    async fn every_branch_runs_on_an_errgroup_fiber() {
+        let seen = Arc::default();
+        let par = parallel(vec![
+            recorder("a", "ok", Arc::clone(&seen)),
+            recorder("b", "ok", Arc::clone(&seen)),
+        ]);
+        let parent = InvocationContext::builder()
+            .agent(par.clone())
+            .build_invocation();
+        let outer = Fiber::root();
+        let outer_id = outer.id;
+        let _: Vec<_> = outer.scope(run(parent).collect::<Vec<_>>()).await;
+        let seen = seen.lock();
+        assert_eq!(seen.len(), 2);
+        for (name, f, _) in seen.iter() {
+            assert_eq!(f.origin.creator, ERRGROUP_CREATOR, "{name}");
+            assert_eq!(f.origin.parent, outer_id, "{name}");
+        }
+        assert_ne!(seen[0].1.id, seen[1].1.id);
     }
 }

@@ -167,7 +167,8 @@ impl LiveSessionImpl {
     }
 
     /// Go recvIter: the pushed items until `done`. Called once per session (later calls get an
-    /// empty stream). Dropping the stream cancels `done` and aborts `task`.
+    /// empty stream). Dropping the stream cancels `done` and detaches `task`, which finishes the
+    /// work in flight (Go `Close` only closes `done`; the session goroutine returns on its own).
     pub(crate) fn event_stream(
         self: &Arc<Self>,
         task: Option<tokio::task::JoinHandle<()>>,
@@ -312,11 +313,12 @@ impl Stream for GuardedStream {
 }
 
 impl Drop for GuardedStream {
+    /// Go: closing the session (or dropping its iterator) closes `done` and nothing more; the
+    /// session goroutine finishes its in-flight `handleFunctionCalls` (after-tool callbacks
+    /// included, base_flow.go:424) and returns. The task is detached, not aborted.
     fn drop(&mut self) {
         self.done.cancel();
-        if let Some(t) = self.task.take() {
-            t.abort();
-        }
+        drop(self.task.take());
     }
 }
 
@@ -507,23 +509,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dropping_the_stream_cancels_done_and_aborts_the_task() {
+    async fn dropping_the_stream_cancels_done_and_lets_the_task_finish() {
         let sess = LiveSessionImpl::new();
-        // The task holds `alive` until its future is dropped, which only an abort does.
-        let (alive, dropped) = oneshot::channel::<()>();
+        // The task observes `done`, then finishes its in-flight work (Go's session goroutine
+        // after Close): an aborted task would never send `finished`.
+        let (finished_tx, finished) = oneshot::channel::<()>();
+        let done = sess.done().clone();
         let task = tokio::spawn(async move {
-            let _alive = alive;
-            std::future::pending::<()>().await;
+            done.cancelled().await;
+            tokio::task::yield_now().await;
+            let _ = finished_tx.send(());
         });
         let stream = sess.event_stream(Some(task));
         drop(stream);
         assert!(sess.done().is_cancelled());
-        // The timeout only turns a missing abort into a failure instead of a hang.
-        let got = tokio::time::timeout(std::time::Duration::from_secs(30), dropped).await;
-        assert!(
-            matches!(got, Ok(Err(_))),
-            "the session task was not aborted"
-        );
+        // The timeout only turns an aborted task into a failure instead of a hang.
+        let got = tokio::time::timeout(std::time::Duration::from_secs(30), finished).await;
+        assert!(matches!(got, Ok(Ok(()))), "the session task was aborted");
     }
 
     #[test]

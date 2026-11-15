@@ -35,6 +35,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
+use gadk_agent::fiber::SCHEDULER_CREATOR;
 use gadk_agent::{Agent, go_quote};
 use gadk_engine::telemetry::d6::SpanIds;
 use parking_lot::Mutex;
@@ -42,8 +43,7 @@ use sha2::{Digest, Sha256};
 
 use super::invocation::{InvocationTrace, prepare_root_agent_input, same_agent, unix_nanos};
 use super::span::{
-    AttemptSite, GoroutineOrigin, NodeRunKey, RowSpan, SpanKind, SpanRecord, SpanRef,
-    UnclosedAgentSpan, latency_of,
+    AttemptSite, NodeRunKey, RowSpan, SpanKind, SpanRecord, SpanRef, UnclosedAgentSpan, latency_of,
 };
 use super::{
     AgentKey, CallbackCtx, Clock, INVOCATION_TTL, Identity, LogFn, MAX_TRACKED_INVOCATIONS,
@@ -678,13 +678,13 @@ impl TraceManager {
     }
 
     /// Go `pushAgentSpan(ctx, id)`: the place of `AGENT_STARTING` and the activations purged
-    /// as failed earlier attempts (only Go's synthetic-retry fallback purges in 7b-3a; it calls
+    /// as failed earlier attempts (it calls
     /// `settle_ended_in_subtree_locked`, `failures_locked`, `reported_over_locked` and
     /// `purge_activation_locked` of [`super::settle`]).
     ///
     /// Go reads the goroutine of the callback (`currentGoroutine`) when the context shows its
-    /// activation; goroutine attribution is 7b-3b, so the goroutine ID, its origin and the
-    /// attempt site are zero here, and every branch that needs them is false.
+    /// activation: here the callback's fiber, its origin and the engine's attempt site
+    /// (`super::settle::current_goroutine`).
     pub(crate) fn push_agent_span(
         &self,
         ctx: &CallbackCtx,
@@ -699,8 +699,8 @@ impl TraceManager {
         let root_in = prepare_root_agent_input(ctx, &inv, id, None, None);
         let activation = ctx.activation_key();
         let ended = ctx.ended_func();
-        // Go `currentGoroutine()` (7b-3b): zero attribution.
-        let (goid, origin, attempt) = (0_u64, GoroutineOrigin::default(), AttemptSite::None);
+        // Go `if ended != nil { goid, origin, attempt = currentGoroutine() }`.
+        let (goid, origin, attempt) = super::settle::current_goroutine(ctx);
         let same_goroutine_since = if attempt == AttemptSite::None {
             NO_FRAME
         } else {
@@ -747,10 +747,8 @@ impl TraceManager {
             if attempt == AttemptSite::Node
                 && other.attempt == AttemptSite::Node
                 && other.node_run_ended
-                && origin.started_by(super::span::SCHEDULER_CREATOR, Some(&op))
-                && other
-                    .origin
-                    .started_by(super::span::SCHEDULER_CREATOR, Some(&op))
+                && origin.started_by(SCHEDULER_CREATOR, op.goroutine_id)
+                && other.origin.started_by(SCHEDULER_CREATOR, op.goroutine_id)
             {
                 return (true, false);
             }
@@ -767,7 +765,7 @@ impl TraceManager {
         // triggered again.
         let restarted = attempt == AttemptSite::Node && {
             let p = parent.lock();
-            p.is_workflow && origin.started_by(super::span::SCHEDULER_CREATOR, Some(&p))
+            p.is_workflow && origin.started_by(SCHEDULER_CREATOR, p.goroutine_id)
         };
         // Register the concurrent peers that are not earlier attempts before the retry loop.
         for other_ref in st.agent_stack.iter().skip(1) {
@@ -777,10 +775,7 @@ impl TraceManager {
             }
             if restarted && other.attempt == AttemptSite::Node && other.goroutine_id != goid {
                 let p = parent.lock();
-                if other
-                    .origin
-                    .started_by(super::span::SCHEDULER_CREATOR, Some(&p))
-                {
+                if other.origin.started_by(SCHEDULER_CREATOR, p.goroutine_id) {
                     drop(p);
                     other.started_again = true;
                 }

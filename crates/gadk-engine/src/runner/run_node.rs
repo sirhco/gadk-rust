@@ -21,7 +21,8 @@ use std::sync::Arc;
 
 use futures::StreamExt;
 use gadk_agent::{
-    Agent, AgentError, AgentType, EventStream, InvocationContext, Mode, RunConfig, run_limits,
+    Agent, AgentError, AgentType, EventStream, InvocationContext, Mode, RunConfig, Teardowns,
+    run_limits,
 };
 use gadk_genai::{Content, FunctionResponse};
 use gadk_session::{Event, Session};
@@ -84,7 +85,10 @@ impl RunnerInner {
             .platform(self.platform.clone())
             .plugin_manager(self.plugin_manager.clone())
             .parent_map(self.parents.clone())
-            .cancellation_token(token.clone());
+            .cancellation_token(token.clone())
+            // Started work a dropped component hands over; awaited before the after-run
+            // callbacks (see `InvocationGuard`).
+            .teardowns(Arc::new(Teardowns::new()));
         if let Some(m) = msg {
             b = b.user_content(m);
         }

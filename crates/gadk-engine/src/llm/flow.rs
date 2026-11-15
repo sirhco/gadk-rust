@@ -25,7 +25,7 @@ use std::{
 use futures::{StreamExt, future::BoxFuture, stream::BoxStream};
 use gadk_agent::{
     AfterModelCallback, AfterToolCallback, Agent, AgentError, BeforeModelCallback,
-    BeforeToolCallback, Context, ContextDelta, EventStream, InvocationContext,
+    BeforeToolCallback, CancelCause, Context, ContextDelta, EventStream, InvocationContext,
     OnModelErrorCallback, OnToolErrorCallback, StreamingMode, Tool, tool_from_request,
 };
 use gadk_genai::Content;
@@ -341,21 +341,37 @@ impl Flow {
                 l.increment_and_enforce()?;
             }
             let token = ctx.cancellation_token().clone();
-            if token.is_cancelled() {
-                Err::<(), AgentError>(AgentError::Cancelled)?;
-            }
-            let mut inner = generate_content(&ctx, model, req.clone(), use_stream);
+            // An already-ended context skips the model call (and its span); the cancellation
+            // is then handled as one that ends the call below. Divergence (ledger 7b-3a): Go
+            // calls the model with the ended context, inside its generate_content span (Rust
+            // models do not observe the context).
+            let mut inner = (!token.is_cancelled())
+                .then(|| generate_content(&ctx, model, req.clone(), use_stream));
             loop {
-                let next = tokio::select! {
-                    biased;
-                    _ = token.cancelled() => None,
-                    n = inner.next() => Some(n),
+                let next = match inner.as_mut() {
+                    None => None,
+                    // Model first: Go ranges over the model's responses without checking ctx
+                    // between them, so an already-ready response wins over the cancellation;
+                    // the cancellation ends the call only while the model is pending.
+                    Some(inner) => tokio::select! {
+                        biased;
+                        n = inner.next() => Some(n),
+                        _ = token.cancelled() => None,
+                    },
                 };
-                let Some(next) = next else {
-                    Err::<(), AgentError>(AgentError::Cancelled)?;
-                    break;
+                // Go's model observes its context's end and yields `ctx.Err()` (the test models
+                // of plugin/agentanalytics; genai's HTTP client yields the cause wrapped), which
+                // runs the on-model-error callbacks (Go base_flow.go:1031-1046). Rust models do
+                // not see the context, so the flow ends the call and yields that error for it.
+                let (item, event_id, cancelled) = match next {
+                    None => (
+                        Err(ModelError::Other(Box::new(context_err(&ctx)))),
+                        ctx.platform().new_uuid(),
+                        true,
+                    ),
+                    Some(None) => break,
+                    Some(Some((item, event_id))) => (item, event_id, false),
                 };
-                let Some((item, event_id)) = next else { break };
                 let mut resp = match item {
                     Ok(r) => r,
                     Err(model_err) => {
@@ -363,6 +379,12 @@ impl Flow {
                         match self.run_on_model_error_callbacks(&ctx, &req, &actions, err.clone()).await {
                             Err(cb_err) => {
                                 Err::<(), AgentError>(cb_err)?;
+                                break;
+                            }
+                            // Go yields the model's error as is: for a cancelled call that is
+                            // `ctx.Err()`, gadk's `AgentError::Cancelled` / `DeadlineExceeded`.
+                            Ok(None) if cancelled => {
+                                Err::<(), AgentError>(context_err(&ctx))?;
                                 break;
                             }
                             Ok(None) => {
@@ -382,6 +404,10 @@ impl Flow {
                 match res? {
                     Some(r) => yield (r, event_id),
                     None => yield (resp, event_id),
+                }
+                // Go's model returns after yielding `ctx.Err()`: a callback's reply ends the call.
+                if cancelled {
+                    break;
                 }
             }
         })
@@ -484,6 +510,17 @@ impl fmt::Display for SharedModelError {
 impl std::error::Error for SharedModelError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         Some(&*self.0)
+    }
+}
+
+/// Go `ctx.Err()` of an ended context: `context.DeadlineExceeded` when its deadline passed,
+/// else `context.Canceled` (also for a `WithCancelCause` context, whatever its cause). Shared by
+/// the LLM flow (Go base_flow.go: the model yields `ctx.Err()`) and the parallel worker (Go
+/// parallel_worker.go `reportFailure(ctx.Err())`).
+pub(crate) fn context_err(ctx: &InvocationContext) -> AgentError {
+    match ctx.cause() {
+        Some(CancelCause::DeadlineExceeded) => AgentError::DeadlineExceeded,
+        _ => AgentError::Cancelled,
     }
 }
 
@@ -1007,6 +1044,234 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert!(matches!(items[0], Err(AgentError::Cancelled)));
         assert!(model.requests().is_empty());
+    }
+
+    /// A model that streams one partial chunk, then never yields again (Go
+    /// streamThenWaitLLM's `<-ctx.Done()`: the flow's cancellation ends the wait).
+    struct PartialThenWait;
+
+    impl Llm for PartialThenWait {
+        fn name(&self) -> &str {
+            "partial-then-wait"
+        }
+        fn generate_content(
+            &self,
+            _req: LlmRequest,
+            _stream: bool,
+        ) -> BoxStream<'static, Result<LlmResponse, ModelError>> {
+            let partial = LlmResponse {
+                partial: true,
+                ..text_resp("streaming...")
+            };
+            futures::stream::iter([Ok(partial)])
+                .chain(futures::stream::pending())
+                .boxed()
+        }
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+
+    /// The (text, context-error kind) pairs an on-model-error callback saw.
+    type SeenErrors = Arc<parking_lot::Mutex<Vec<(String, Option<String>)>>>;
+
+    /// An on-model-error callback recording the error text and whether the error is Go's
+    /// context error (`ModelError::Other(AgentError::Cancelled | DeadlineExceeded)`).
+    fn recording_on_model_error(
+        seen: SeenErrors,
+        reply: Option<LlmResponse>,
+    ) -> OnModelErrorCallback {
+        Arc::new(move |_, _, err| {
+            let ctx_err = match &*err {
+                ModelError::Other(b) => b.downcast_ref::<AgentError>().map(|a| match a {
+                    AgentError::Cancelled => "Cancelled".to_owned(),
+                    AgentError::DeadlineExceeded => "DeadlineExceeded".to_owned(),
+                    other => format!("other: {other}"),
+                }),
+                _ => None,
+            };
+            seen.lock().push((err.to_string(), ctx_err));
+            let reply = reply.clone();
+            Box::pin(async move { Ok(reply) })
+        })
+    }
+
+    /// Go base_flow.go:1031-1041: a model call that its context's cancellation ends after a
+    /// partial chunk yields `ctx.Err()`, so the on-model-error callbacks run with
+    /// `context.Canceled` and, returning nothing, the flow yields that error.
+    #[tokio::test]
+    async fn cancel_after_partial_runs_on_model_error_with_context_canceled() {
+        let seen = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let ctx = ctx_for("a");
+        let flow = Flow {
+            model: Some(Arc::new(PartialThenWait)),
+            on_model_error_callbacks: vec![recording_on_model_error(seen.clone(), None)],
+            ..Default::default()
+        };
+        let mut s = Arc::new(flow).run(ctx.clone());
+        let first = s.next().await.unwrap().unwrap();
+        assert!(first.response.partial);
+        ctx.cancel_with_cause(gadk_agent::CancelCause::Canceled);
+        let rest: Vec<_> = s.collect().await;
+        assert_eq!(rest.len(), 1);
+        assert!(matches!(rest[0], Err(AgentError::Cancelled)));
+        assert_eq!(
+            *seen.lock(),
+            [("context canceled".to_owned(), Some("Cancelled".to_owned()))]
+        );
+    }
+
+    /// Go `ctx.Err()` is `context.DeadlineExceeded` for a context whose deadline passed; the
+    /// model is not called on an already-ended context.
+    #[tokio::test]
+    async fn deadline_cancel_runs_on_model_error_with_deadline_exceeded() {
+        let seen = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let model = MockModel::new(vec![Ok(text_resp("never"))]);
+        let ctx = ctx_for("a");
+        ctx.cancel_with_cause(gadk_agent::CancelCause::DeadlineExceeded);
+        let flow = Flow {
+            model: Some(model.clone()),
+            on_model_error_callbacks: vec![recording_on_model_error(seen.clone(), None)],
+            ..Default::default()
+        };
+        let items = run_all(flow, ctx).await;
+        assert_eq!(items.len(), 1);
+        assert!(matches!(items[0], Err(AgentError::DeadlineExceeded)));
+        assert!(model.requests().is_empty());
+        assert_eq!(
+            *seen.lock(),
+            [(
+                "context deadline exceeded".to_owned(),
+                Some("DeadlineExceeded".to_owned())
+            )]
+        );
+    }
+
+    /// Go `ctx.Err()` of a `WithCancelCause` context is `context.Canceled` whatever the
+    /// cause: the callbacks see `context canceled`, not the cause's text.
+    #[tokio::test]
+    async fn error_cause_runs_on_model_error_with_context_canceled() {
+        let seen = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let ctx = ctx_for("a");
+        let flow = Flow {
+            model: Some(Arc::new(PartialThenWait)),
+            on_model_error_callbacks: vec![recording_on_model_error(seen.clone(), None)],
+            ..Default::default()
+        };
+        let mut s = Arc::new(flow).run(ctx.clone());
+        s.next().await.unwrap().unwrap();
+        let cause: Arc<dyn std::error::Error + Send + Sync> =
+            Arc::new(std::io::Error::other("sibling failed"));
+        ctx.cancel_with_cause(gadk_agent::CancelCause::Error(cause));
+        let rest: Vec<_> = s.collect().await;
+        assert_eq!(rest.len(), 1);
+        assert!(matches!(rest[0], Err(AgentError::Cancelled)));
+        assert_eq!(
+            *seen.lock(),
+            [("context canceled".to_owned(), Some("Cancelled".to_owned()))]
+        );
+    }
+
+    /// Go base_flow.go:1042-1046: an on-model-error callback's response replaces the
+    /// cancelled call's error; the after-model callbacks see it and it is yielded, and the
+    /// model call then ends (Go's model returns after yielding `ctx.Err()`).
+    #[tokio::test]
+    async fn on_model_error_reply_on_cancel_is_yielded_and_ends_the_call() {
+        let seen = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let after_seen = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let after_seen2 = after_seen.clone();
+        let after: gadk_agent::AfterModelCallback = Arc::new(move |_, resp: LlmResponse, _| {
+            after_seen2.lock().push(texts_of(&resp));
+            Box::pin(async move { (resp, Ok(None)) })
+        });
+        let flow = Arc::new(Flow {
+            on_model_error_callbacks: vec![recording_on_model_error(
+                seen.clone(),
+                Some(text_resp("recovered")),
+            )],
+            after_model_callbacks: vec![after],
+            ..Default::default()
+        });
+        let ctx = ctx_for("a");
+        let actions = SharedActions::default();
+        let mut s = flow.call_model(
+            ctx.clone(),
+            Arc::new(PartialThenWait),
+            LlmRequest::default(),
+            actions,
+        );
+        let (first, _) = s.next().await.unwrap().unwrap();
+        assert!(first.partial);
+        ctx.cancel_with_cause(gadk_agent::CancelCause::Canceled);
+        let rest: Vec<_> = s.collect().await;
+        assert_eq!(rest.len(), 1);
+        let (resp, _) = rest[0].as_ref().unwrap();
+        assert_eq!(texts_of(resp), "recovered");
+        assert_eq!(*after_seen.lock(), ["streaming...", "recovered"]);
+        assert_eq!(seen.lock().len(), 1);
+    }
+
+    /// A model that streams two chunks at once, then never yields again.
+    struct TwoThenWait;
+
+    impl Llm for TwoThenWait {
+        fn name(&self) -> &str {
+            "two-then-wait"
+        }
+        fn generate_content(
+            &self,
+            _req: LlmRequest,
+            _stream: bool,
+        ) -> BoxStream<'static, Result<LlmResponse, ModelError>> {
+            let partial = LlmResponse {
+                partial: true,
+                ..text_resp("streaming...")
+            };
+            futures::stream::iter([Ok(partial), Ok(text_resp("ready"))])
+                .chain(futures::stream::pending())
+                .boxed()
+        }
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+
+    /// Go's flow ranges over the model's responses without checking its context between
+    /// them: a response the model has ready when the cancellation lands is still processed;
+    /// the cancellation is noticed while the model is pending (Go's model yields `ctx.Err()`).
+    #[tokio::test]
+    async fn ready_model_item_wins_over_cancellation() {
+        let seen = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let flow = Arc::new(Flow {
+            on_model_error_callbacks: vec![recording_on_model_error(seen.clone(), None)],
+            ..Default::default()
+        });
+        let ctx = ctx_for("a");
+        let mut s = flow.call_model(
+            ctx.clone(),
+            Arc::new(TwoThenWait),
+            LlmRequest::default(),
+            SharedActions::default(),
+        );
+        let (first, _) = s.next().await.unwrap().unwrap();
+        assert!(first.partial);
+        ctx.cancel_with_cause(gadk_agent::CancelCause::Canceled);
+        let rest: Vec<_> = s.collect().await;
+        assert_eq!(rest.len(), 2, "{rest:?}");
+        let (ready, _) = rest[0].as_ref().unwrap();
+        assert_eq!(texts_of(ready), "ready");
+        assert!(matches!(rest[1], Err(AgentError::Cancelled)));
+        assert_eq!(
+            *seen.lock(),
+            [("context canceled".to_owned(), Some("Cancelled".to_owned()))]
+        );
+    }
+
+    fn texts_of(resp: &LlmResponse) -> String {
+        resp.content
+            .as_ref()
+            .map(|c| c.parts.iter().map(|p| p.text.as_str()).collect())
+            .unwrap_or_default()
     }
 }
 

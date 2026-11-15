@@ -1,4 +1,4 @@
-import contextlib, importlib.machinery, importlib.util, io, os, pathlib, tempfile, unittest
+import collections, contextlib, importlib.machinery, importlib.util, io, os, pathlib, tempfile, unittest
 from unittest import mock
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -1991,21 +1991,27 @@ class RealTreeTest(unittest.TestCase):
              "crates/gadk-agentanalytics/src/parity_tests/plugin_agentanalytics_trace_manager/mod.rs"),
         ]:
             self.assertEqual(pc.find_target(HERE.parent, f), (target, []))
-        # 239 ported (59 adapted) + 99 trace_manager_test.go tests deferred to 7b-3b: the spec's
-        # 97 (R10) and the 2 reclassified while porting.
+        # All 338 ported (73 adapted): 239 in 7b-3a (59 adapted) and the 99 trace_manager_test.go
+        # tests that need goroutine attribution in 7b-3b (14 adapted), none skipped.
         rows = pc.parse_rows(HERE.parent / "docs/parity/7b-3a.md")
         self.assertEqual(len(rows), 338)
-        self.assertEqual(sum(r[2].startswith("ported") for r in rows), 239)
-        self.assertEqual(sum(r[2].startswith("ported (adapted: ") for r in rows), 59)
-        skipped = [r for r in rows if r[2] == "skipped"]
-        self.assertEqual(len(skipped), 99)
-        self.assertTrue(all(r[0] == "plugin/agentanalytics/trace_manager_test.go" for r in skipped))
-        self.assertTrue(all(r[4].startswith("deferred to 7b-3b (") for r in skipped))
-        self.assertEqual(
-            sorted(r[1] for r in skipped
-                   if not r[3].endswith("plugin_agentanalytics_trace_manager/deferred.rs")),
-            ["TestLateReviewShortcutUnderInvocationSpan",
-             "TestRunner_FinishTaskWithReusedCallIDEndsTheRunOnTheEventPath"])
+        self.assertEqual(sum(r[2].startswith("ported") for r in rows), 338)
+        self.assertEqual(sum(r[2].startswith("ported (adapted: ") for r in rows), 73)
+        self.assertEqual([r for r in rows if r[2] == "skipped"], [])
+        # 7b-3b: the 99 attribution ports sit in the attr_*.rs files by group (deferred.rs is gone):
+        # A 5, B/F/H 14, C 7, D 18 + 18, E 18, G 19.
+        attr = collections.Counter(
+            r[3].rsplit("/", 1)[1] for r in rows
+            if r[3].rsplit("/", 2)[1] == "plugin_agentanalytics_trace_manager"
+            and r[3].rsplit("/", 1)[1].startswith("attr_"))
+        self.assertEqual(attr, {
+            "attr_fiber.rs": 5, "attr_direct.rs": 14, "attr_live.rs": 7, "attr_workflow_1.rs": 18,
+            "attr_workflow_2.rs": 18, "attr_parallel.rs": 18, "attr_spawns.rs": 19,
+        })
+        self.assertTrue(all(r[0] == "plugin/agentanalytics/trace_manager_test.go"
+                            for r in rows if r[3].rsplit("/", 1)[1].startswith("attr_")))
+        self.assertFalse((HERE.parent / "crates/gadk-agentanalytics/src/parity_tests/"
+                          "plugin_agentanalytics_trace_manager/deferred.rs").exists())
         self.assertIn("7b-3a", pc.GENERATED_LEDGERS)
         self.assertEqual(pc.check_1b(ADK_GO, HERE.parent, HERE.parent / "docs/parity/7b-3a.md", name="7b-3a"), [])
 

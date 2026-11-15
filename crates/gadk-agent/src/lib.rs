@@ -14,11 +14,21 @@
 // limitations under the License.
 
 //! gadk-agent: the agent API — Agent, contexts, tools, callbacks, plugins (port of ADK-Go agent/, tool/, plugin/).
+//!
+//! Beside Go's API it carries what stands in for Go's goroutines and contexts:
+//! [`fiber`] (fiber ids, spawn origins and attempt sites the engine sets where Go starts a
+//! goroutine; read by the analytics plugin's goroutine attribution), cancel causes
+//! ([`CancelCause`], [`InvocationContext::cancel_with_cause`] / [`InvocationContext::cause`]: Go's
+//! `context.Cause`, with `DeadlineExceeded` for agent timeouts), [`Context::context_path`] (Go's
+//! `contextPath`) and the per-invocation teardown registry [`Teardowns`], through which work a
+//! component was dropped with finishes before the runner's after-run callbacks, as Go's
+//! synchronous unwinding on early stop.
 
 pub mod agent;
 pub mod callback;
 pub mod context;
 pub mod error;
+pub mod fiber;
 mod go_fmt;
 pub mod live;
 pub mod loader;
@@ -30,6 +40,7 @@ pub mod run_config;
 pub mod scheduler;
 pub mod services;
 pub mod state;
+pub mod teardown;
 pub mod tool;
 pub mod tool_util;
 pub mod toolset;
@@ -43,8 +54,8 @@ pub use agent::{
 };
 pub use callback::*;
 pub use context::{
-    ActivationId, CancelGuard, Context, ContextBuilder, ContextDelta, Identity, InvocationContext,
-    ReadonlyContext,
+    ActivationId, CancelCause, CancelGuard, Context, ContextBuilder, ContextDelta, Identity,
+    InvocationContext, ReadonlyContext, SharedCauseError,
 };
 pub use error::{AgentError, EventStream, SharedToolError, ToolError};
 #[doc(hidden)]
@@ -59,6 +70,7 @@ pub use run_config::{RunConfig, StreamingMode, run_limits};
 pub use scheduler::DynamicSubScheduler;
 pub use services::{ArtifactBacking, Artifacts, Memory};
 pub use state::{AgentState, AgentType};
+pub use teardown::Teardowns;
 pub use tool::{
     ConfirmationProvider, RunnableTool, StreamingTool, Tool, ToolOriginKind, ToolPredicate, Toolset,
 };

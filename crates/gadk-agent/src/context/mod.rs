@@ -17,6 +17,7 @@
 
 pub mod activation;
 pub mod builder;
+pub mod cancel;
 #[allow(clippy::module_inception)]
 pub mod context;
 pub mod delta;
@@ -30,6 +31,8 @@ pub mod readonly;
 pub use activation::*;
 #[allow(unused_imports)]
 pub use builder::*;
+#[allow(unused_imports)]
+pub use cancel::*;
 #[allow(unused_imports)]
 pub use context::*;
 #[allow(unused_imports)]

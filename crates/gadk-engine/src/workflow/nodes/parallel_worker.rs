@@ -19,18 +19,20 @@ use std::any::Any;
 use std::sync::Arc;
 
 use futures::StreamExt;
-use gadk_agent::{AgentError, Context, ContextDelta, EventStream};
+use gadk_agent::fiber::{self, AttemptSite, PARALLEL_WORKER_CREATOR};
+use gadk_agent::{AgentError, CancelCause, Context, ContextDelta, EventStream};
 use gadk_platform::go_type_name;
 use gadk_session::Event;
 use parking_lot::Mutex;
 use serde_json::Value;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinSet;
-use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 
 use crate::error::{WorkflowError, WorkflowErrorKind};
+use crate::llm::flow::context_err;
 use crate::workflow::branch::derive_sub_branch;
+use crate::workflow::nodes::AgentNode;
 use crate::workflow::scheduler::{record_node_error, start_node_span};
 use crate::workflow::{BaseNode, Node, NodeConfig, RetryConfig, calculate_delay, should_retry};
 
@@ -97,8 +99,12 @@ impl Node for ParallelWorker {
     /// `max_concurrency` at a time; 0 = unlimited), each item under its own sub-branch
     /// `<wrapped>@<i+1>` and retried independently under the worker's RetryConfig. The first
     /// non-retryable failure cancels the in-flight siblings and is the node's error; otherwise one
-    /// event carries the per-index outputs. Intermediate wrapped events are suppressed. Dropping
-    /// the stream drops the `JoinSet`, aborting the workers.
+    /// event carries the per-index outputs. Intermediate wrapped events are suppressed. Each item
+    /// task runs on a fresh fiber spawned with [`PARALLEL_WORKER_CREATOR`] (Go's `go
+    /// n.runWorker(..)` goroutine; its retries stay on it). Dropping the stream drops the
+    /// `JoinSet`, aborting the workers, where Go's `Run` keeps ranging its results until
+    /// `wg.Wait`; the engine never drops it mid-await (the scheduler drains its node tasks), so
+    /// only a direct user of the stream sees the abort.
     fn run(&self, ctx: Context, input: Value) -> EventStream {
         let name = self.base.name().to_string();
         let wrapped = Arc::clone(&self.wrapped);
@@ -161,9 +167,10 @@ impl Node for ParallelWorker {
                     ctx: item_ctx,
                     retry: retry.clone(),
                     first_err: Arc::clone(&first_err),
-                    token: token.clone(),
                 };
-                set.spawn(job.run(i, item, permit).in_current_span());
+                // Go `go n.runWorker(..)`: a goroutine started by the one running the node.
+                let worker_fiber = fiber::spawn_child(PARALLEL_WORKER_CREATOR);
+                set.spawn(worker_fiber.scope(job.run(i, item, permit)).in_current_span());
             }
             let mut outputs = vec![Value::Null; n];
             while let Some(res) = set.join_next().await {
@@ -211,18 +218,34 @@ fn make_worker_output(mut outputs: Vec<Value>) -> Option<Value> {
     }
 }
 
-/// Port of Go reportFailure (`sync.Once`): the first error wins and cancels the siblings.
-fn report_failure(first: &Mutex<Option<AgentError>>, token: &CancellationToken, err: AgentError) {
+/// Port of Go reportFailure (`sync.Once`): the first error wins and cancels the siblings plainly
+/// (Go `cancelFunc()`) through the worker context's cancel scope, which every item context shares.
+fn report_failure(first: &Mutex<Option<AgentError>>, ctx: &Context, err: AgentError) {
     let mut g = first.lock();
     if g.is_none() {
         *g = Some(err);
-        token.cancel();
+        ctx.cancel_with_cause(CancelCause::Canceled);
     }
 }
 
 /// Port of Go (*ParallelWorker).runWrappedOnce: one attempt under its own `invoke_node` span, so
-/// each item and each retry attempt is a distinct span.
+/// each item and each retry attempt is a distinct span. An `AgentNode`'s attempt is marked as a
+/// worker attempt on the item's fiber (`with_attempt(Worker, ..)`, Go's `attemptWorker`, which
+/// Go's trace manager reads off the goroutine's stack).
 async fn run_wrapped_once(
+    wrapped: &Arc<dyn Node>,
+    ctx: &Context,
+    item: Value,
+) -> Result<Vec<Value>, AgentError> {
+    if wrapped.as_any().is::<AgentNode>() {
+        fiber::with_attempt(AttemptSite::Worker, run_wrapped_attempt(wrapped, ctx, item)).await
+    } else {
+        run_wrapped_attempt(wrapped, ctx, item).await
+    }
+}
+
+/// One attempt of [`run_wrapped_once`].
+async fn run_wrapped_attempt(
     wrapped: &Arc<dyn Node>,
     ctx: &Context,
     item: Value,
@@ -253,7 +276,6 @@ struct Worker {
     ctx: Context,
     retry: Option<RetryConfig>,
     first_err: Arc<Mutex<Option<AgentError>>>,
-    token: CancellationToken,
 }
 
 impl Worker {
@@ -279,18 +301,169 @@ impl Worker {
                         let delay = calculate_delay(cfg, failed_attempts, self.ctx.platform());
                         tokio::select! {
                             () = tokio::time::sleep(delay) => continue,
-                            () = self.token.cancelled() => {
-                                // Cancellation while parked in the retry delay is a real failure.
-                                report_failure(&self.first_err, &self.token, AgentError::Cancelled);
+                            () = self.ctx.cancellation_token().cancelled() => {
+                                // Cancellation while parked in the retry delay is a real failure
+                                // (Go `reportFailure(ctx.Err())`).
+                                report_failure(&self.first_err, &self.ctx, context_err(&self.ctx));
                                 return (idx, None);
                             }
                         }
                     }
                     // Cannot retry or exhausted attempts.
-                    report_failure(&self.first_err, &self.token, run_err);
+                    report_failure(&self.first_err, &self.ctx, run_err);
                     return (idx, None);
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    use futures::StreamExt;
+    use gadk_agent::fiber::{self, AttemptSite, Fiber, PARALLEL_WORKER_CREATOR};
+    use gadk_agent::{
+        AgentConfig, AgentError, BeforeAgentCallback, CancelCause, Context, InvocationContext,
+    };
+    use gadk_session::Event;
+    use parking_lot::Mutex;
+    use serde_json::{Value, json};
+
+    use super::ParallelWorker;
+    use crate::workflow::nodes::AgentNode;
+    use crate::workflow::{Node, NodeConfig, RetryConfig, default_retry_config, function_node};
+
+    fn ctx() -> Context {
+        InvocationContext::builder().build()
+    }
+
+    fn retry(max_attempts: i32, delay: Duration) -> NodeConfig {
+        NodeConfig {
+            retry_config: Some(RetryConfig {
+                max_attempts,
+                initial_delay: delay,
+                max_delay: delay,
+                jitter: 0.0,
+                ..default_retry_config()
+            }),
+            ..NodeConfig::default()
+        }
+    }
+
+    async fn run(
+        node: &Arc<ParallelWorker>,
+        ctx: Context,
+        input: Value,
+    ) -> Vec<Result<Event, AgentError>> {
+        node.run(ctx, input).collect().await
+    }
+
+    /// R2/R3: each item of a wrapped `AgentNode` runs on its own `PARALLEL_WORKER_CREATOR` fiber
+    /// started by the fiber running the worker, and every attempt (retries included, on the same
+    /// fiber) is claimed by the agent as a `Worker` attempt.
+    #[tokio::test]
+    async fn agent_node_attempts_are_worker_attempts_on_the_item_fiber() {
+        type Seen = Arc<Mutex<Vec<(Fiber, Option<AttemptSite>)>>>;
+        let seen: Seen = Arc::default();
+        let seen_cb = seen.clone();
+        let before: BeforeAgentCallback = Arc::new(move |_ctx: Context| {
+            seen_cb
+                .lock()
+                .push((fiber::current(), fiber::current_attempt()));
+            Box::pin(async { Ok(None) })
+        });
+        let runs = Arc::new(AtomicUsize::new(0));
+        let runs_agent = runs.clone();
+        let agent = gadk_agent::new_agent(AgentConfig {
+            name: "flaky".into(),
+            before_agent_callbacks: vec![before],
+            run: Some(Arc::new(move |_ctx: InvocationContext| {
+                let n = runs_agent.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async_stream::stream! {
+                    if n == 0 {
+                        yield Err(AgentError::other("flaky"));
+                    }
+                })
+            })),
+            ..Default::default()
+        })
+        .unwrap();
+        let wrapped: Arc<dyn Node> = AgentNode::new(agent, NodeConfig::default()).unwrap();
+        let worker = ParallelWorker::new("pw", wrapped, 0, retry(3, Duration::ZERO)).unwrap();
+        let outer = Fiber::root();
+        let outer_id = outer.id;
+        let items = outer.scope(run(&worker, ctx(), json!(["a"]))).await;
+        assert_eq!(items.len(), 1);
+        assert!(items[0].is_ok(), "{:?}", items[0]);
+        let seen = seen.lock().clone();
+        assert_eq!(seen.len(), 2, "one record per attempt");
+        for (f, attempt) in &seen {
+            assert_eq!(*attempt, Some(AttemptSite::Worker));
+            assert_eq!(f.origin.creator, PARALLEL_WORKER_CREATOR);
+            assert_eq!(f.origin.parent, outer_id);
+            assert_ne!(f.id, outer_id);
+        }
+        assert_eq!(
+            seen[0].0.id, seen[1].0.id,
+            "a retry stays on the item's fiber"
+        );
+    }
+
+    /// R7: the first failure cancels the in-flight siblings plainly (Go `cancelFunc()`).
+    #[tokio::test]
+    async fn the_first_failure_cancels_the_siblings_plainly() {
+        let causes: Arc<Mutex<Vec<Option<CancelCause>>>> = Arc::default();
+        let causes_node = causes.clone();
+        let wrapped = function_node::<String, String, _, _>(
+            "item",
+            move |c: Context, input: String| {
+                let causes = causes_node.clone();
+                async move {
+                    if input == "fail" {
+                        return Err(AgentError::other("boom"));
+                    }
+                    c.cancellation_token().cancelled().await;
+                    causes.lock().push(c.cause());
+                    Ok(input)
+                }
+            },
+            NodeConfig::default(),
+        );
+        let worker = ParallelWorker::new("pw", wrapped, 0, NodeConfig::default()).unwrap();
+        let items = run(&worker, ctx(), json!(["wait", "fail"])).await;
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].as_ref().unwrap_err().to_string(), "boom");
+        let causes = causes.lock();
+        assert_eq!(causes.len(), 1);
+        assert!(
+            matches!(causes[0], Some(CancelCause::Canceled)),
+            "{causes:?}"
+        );
+    }
+
+    /// Go `reportFailure(ctx.Err())`: a worker parked in its retry delay when the enclosing
+    /// node's timeout fires fails with `context deadline exceeded`, not `context canceled`.
+    #[tokio::test(start_paused = true)]
+    async fn a_deadline_during_the_retry_delay_is_the_workers_error() {
+        let wrapped = function_node::<String, String, _, _>(
+            "item",
+            |_c: Context, _input: String| async move { Err(AgentError::other("boom")) },
+            NodeConfig::default(),
+        );
+        let worker =
+            ParallelWorker::new("pw", wrapped, 0, retry(5, Duration::from_secs(1))).unwrap();
+        let (tctx, _guard) = ctx().with_agent_timeout(Duration::from_millis(10));
+        let items = run(&worker, tctx, json!(["a"])).await;
+        assert_eq!(items.len(), 1);
+        assert!(
+            matches!(items[0], Err(AgentError::DeadlineExceeded)),
+            "{:?}",
+            items[0]
+        );
     }
 }

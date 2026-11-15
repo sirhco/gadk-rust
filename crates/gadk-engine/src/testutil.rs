@@ -448,6 +448,9 @@ impl TestAgentRunner {
     }
 }
 
+/// The scripted in-memory live model and the responses Go's fake Live server messages decode to.
+pub mod live;
+
 /// Telemetry test helpers (port of Go `internal/telemetry/telemetrytest`): the span and log
 /// digests, the `tracing` capture behind them, and the lock that serialises tests changing the
 /// telemetry environment (plan decision D7).

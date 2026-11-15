@@ -31,6 +31,7 @@ use crate::callback::{AfterAgentCallback, BeforeAgentCallback};
 use crate::context::delta::new_actions;
 use crate::context::{Context, ContextDelta, InvocationContext};
 use crate::error::{AgentError, EventStream, wrap};
+use crate::fiber;
 use crate::live::LiveSession;
 use crate::state::{AgentState, AgentType};
 
@@ -216,6 +217,7 @@ impl Agent for CustomAgent {
             pending: VecDeque::new(),
             span: span.clone(),
             last_error: None,
+            active_run: fiber::ActiveRun::default(),
         };
         futures::stream::unfold(st, move |st| step(st).instrument(span.clone())).boxed()
     }
@@ -250,6 +252,9 @@ struct RunState {
     span: tracing::Span,
     /// The last item's error: Go `err.Error()` and `errorType(err)`.
     last_error: Option<(String, String)>,
+    /// This run's registration as active on the fiber that ran its before-agent callbacks (Go: the
+    /// `(*agent).Run` frame on the goroutine's stack), from then until the run ends or is dropped.
+    active_run: fiber::ActiveRun,
 }
 
 /// Port of Go `telemetry.StartNodeSpan(OperationAgent)` (`internal/telemetry/node_tracing.go`):
@@ -325,7 +330,13 @@ async fn step(mut st: RunState) -> Option<(Result<Event, AgentError>, RunState)>
         }
         match std::mem::replace(&mut st.phase, Phase::Done) {
             Phase::Before => {
-                match run_before_agent_callbacks(&st.agent, &st.ctx).await {
+                // Go `attemptSiteOfTrace`: the before-agent callbacks see the fiber's pending
+                // attempt only if no other agent run is active on it; the run stays registered
+                // as active until it ends.
+                let claim = fiber::claim_attempt();
+                let before = run_before_agent_callbacks(&st.agent, &st.ctx).await;
+                st.active_run = claim.into_active_run();
+                match before {
                     Ok(Some(mut ev)) => {
                         if let Some(hook) = &st.agent.state.on_before_agent_callback_event {
                             hook(&mut ev);
@@ -884,5 +895,144 @@ mod span_tests {
                 "{schema:?} in_workflow={in_workflow}"
             );
         }
+    }
+}
+
+/// The attempt claim of [`CustomAgent::run`] (Go `attemptSiteOfTrace` for traces taken in
+/// `runBeforeAgentCallbacks`).
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod attempt_tests {
+    use std::sync::Arc;
+
+    use futures::{FutureExt, StreamExt};
+    use gadk_session::Event;
+    use parking_lot::Mutex;
+
+    use super::{Agent, AgentConfig, AgentRunFn, new};
+    use crate::callback::BeforeAgentCallback;
+    use crate::context::InvocationContext;
+    use crate::fiber::{self, AttemptSite, Fiber};
+
+    type Seen = Arc<Mutex<Vec<(&'static str, Option<AttemptSite>)>>>;
+
+    /// A before-agent callback recording `current_attempt()` under `label`.
+    fn record(seen: &Seen, label: &'static str) -> BeforeAgentCallback {
+        let seen = seen.clone();
+        Arc::new(move |_ctx| {
+            seen.lock().push((label, fiber::current_attempt()));
+            async { Ok(None) }.boxed()
+        })
+    }
+
+    /// A run function recording `current_attempt()` under `label`, then running `inner` (if any)
+    /// in the same context, then yielding one event.
+    fn run_fn(seen: &Seen, label: &'static str, inner: Option<Arc<dyn Agent>>) -> AgentRunFn {
+        let seen = seen.clone();
+        Arc::new(move |ic: InvocationContext| {
+            seen.lock().push((label, fiber::current_attempt()));
+            let nested = inner.as_ref().map(|a| a.run(ic.clone()));
+            let own = futures::stream::iter([Ok(Event::default())]);
+            match nested {
+                Some(n) => n.chain(own).boxed(),
+                None => own.boxed(),
+            }
+        })
+    }
+
+    fn agent(seen: &Seen, name: &'static str, inner: Option<Arc<dyn Agent>>) -> Arc<dyn Agent> {
+        new(AgentConfig {
+            name: name.into(),
+            before_agent_callbacks: vec![record(seen, name)],
+            run: Some(run_fn(seen, name, inner)),
+            ..Default::default()
+        })
+        .unwrap()
+    }
+
+    async fn drain(a: &Arc<dyn Agent>) {
+        let items: Vec<_> = a
+            .run(InvocationContext::builder().build_invocation())
+            .collect()
+            .await;
+        assert!(items.iter().all(Result::is_ok), "{items:?}");
+    }
+
+    #[tokio::test]
+    async fn the_run_claims_the_pending_attempt_for_its_callbacks_only() {
+        let seen = Seen::default();
+        let a = agent(&seen, "node_agent", None);
+        Fiber::root()
+            .scope(fiber::with_attempt(AttemptSite::Node, drain(&a)))
+            .await;
+        assert_eq!(
+            *seen.lock(),
+            vec![
+                ("node_agent", Some(AttemptSite::Node)),
+                ("node_agent", None)
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_nested_run_sees_none() {
+        let seen = Seen::default();
+        let child = agent(&seen, "nested_child", None);
+        let parent = agent(&seen, "worker_agent", Some(child));
+        Fiber::root()
+            .scope(fiber::with_attempt(AttemptSite::Worker, drain(&parent)))
+            .await;
+        assert_eq!(
+            *seen.lock(),
+            vec![
+                ("worker_agent", Some(AttemptSite::Worker)),
+                ("worker_agent", None),
+                ("nested_child", None),
+                ("nested_child", None),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_second_run_on_the_fiber_sees_none() {
+        let seen = Seen::default();
+        let a = agent(&seen, "a", None);
+        Fiber::root()
+            .scope(fiber::with_attempt(AttemptSite::Node, async {
+                drain(&a).await;
+                drain(&a).await;
+            }))
+            .await;
+        let before: Vec<_> = seen.lock().iter().step_by(2).map(|s| s.1).collect();
+        assert_eq!(before, vec![Some(AttemptSite::Node), None]);
+    }
+
+    #[tokio::test]
+    async fn without_a_mark_or_a_fiber_the_run_sees_none() {
+        let seen = Seen::default();
+        let a = agent(&seen, "a", None);
+        Fiber::root().scope(drain(&a)).await;
+        fiber::with_attempt(AttemptSite::Node, drain(&a)).await;
+        assert!(
+            seen.lock().iter().all(|s| s.1.is_none()),
+            "{:?}",
+            seen.lock()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_dropped_run_is_no_longer_active() {
+        let seen = Seen::default();
+        let a = agent(&seen, "a", None);
+        let f = Fiber::root();
+        f.clone()
+            .scope(async {
+                let mut s = a.run(InvocationContext::builder().build_invocation());
+                assert!(s.next().await.unwrap().is_ok());
+                drop(s); // stopped mid-run
+                fiber::with_attempt(AttemptSite::Node, drain(&a)).await;
+            })
+            .await;
+        assert_eq!(seen.lock()[2], ("a", Some(AttemptSite::Node)));
     }
 }

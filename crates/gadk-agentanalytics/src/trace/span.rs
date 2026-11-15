@@ -14,10 +14,11 @@
 // limitations under the License.
 
 //! Span records and the places of rows, from ADK-Go `plugin/agentanalytics/trace_manager.go`:
-//! `spanKind`, `spanRecord` (with the goroutine attribution fields, which stay zero until
-//! 7b-3b), `retiredCause`, `rowSpan`, `unclosedAgentSpan`, `latencyOf`, `goroutineOrigin`,
-//! `attemptSite`, `nodeRunKey`, and the record-local helpers that are not about failures
-//! (those are [`super::causes`]) or settling (those are [`super::settle`]).
+//! `spanKind`, `spanRecord` (with the goroutine attribution fields, read from the callback's
+//! fiber, `gadk_agent::fiber`), `retiredCause`, `rowSpan`, `unclosedAgentSpan`, `latencyOf`,
+//! `goroutineOrigin` (`gadk_agent::fiber::Origin`), `attemptSite`, `nodeRunKey`, and the
+//! record-local helpers that are not about failures (those are [`super::causes`]) or settling
+//! (those are [`super::settle`]).
 //!
 //! Go's `*spanRecord` pointers are [`SpanRef`]s (`Arc<parking_lot::Mutex<SpanRecord>>`, equal
 //! by address). Every record is read and written only while the `mu` of the invocation that
@@ -31,19 +32,13 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use gadk_agent::ActivationId;
+use gadk_agent::fiber::{ERRGROUP_CREATOR, SCHEDULER_CREATOR};
 use parking_lot::{Mutex, MutexGuard};
 use tokio_util::sync::CancellationToken;
 
 use super::TraceError;
 use crate::context::ContextError;
 use crate::error::Error;
-
-/// Go `schedulerCreator`: the spawn site of the goroutine (task) on which a workflow agent's
-/// scheduler runs a node. Goroutine attribution is 7b-3b: no record carries an origin yet, so
-/// [`GoroutineOrigin::started_by`] never matches it in 7b-3a.
-pub(crate) const SCHEDULER_CREATOR: &str = "gadk_engine::workflow::scheduler::start_node";
-/// Go `errgroupCreator`: the spawn site of a ParallelAgent's branch (7b-3b, as above).
-pub(crate) const ERRGROUP_CREATOR: &str = "gadk_engine::agents::parallel_agent::branch";
 
 /// Go `spanKind`: the kind of operation a span covers. `None` is Go's zero value, which no
 /// record that the manager makes has.
@@ -62,15 +57,13 @@ pub(crate) enum SpanKind {
     Tool,
 }
 
-/// Go `goroutineOrigin`: the function that created a goroutine and the goroutine that ran it.
-/// Always zero in 7b-3a (7b-3b fills it from gadk-engine's spawn origins).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub(crate) struct GoroutineOrigin {
-    pub(crate) creator: String,
-    pub(crate) parent: u64,
-}
+/// Go `goroutineOrigin`: the spawn site that started the fiber (a `gadk_agent::fiber` creator
+/// constant, Go's creator function) and the fiber it ran on. Go `startedBy(creator, p)` is
+/// `origin.started_by(creator, p.goroutine_id)` (false when `p` has no goroutine).
+pub(crate) type GoroutineOrigin = gadk_agent::fiber::Origin;
 
-/// Go `attemptSite`. Always [`AttemptSite::None`] in 7b-3a.
+/// Go `attemptSite`: `None` is Go's `attemptNone`, the others are the engine's claimed
+/// `gadk_agent::fiber::AttemptSite`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub(crate) enum AttemptSite {
     /// Go `attemptNone`.
@@ -82,6 +75,16 @@ pub(crate) enum AttemptSite {
     Worker,
 }
 
+impl From<Option<gadk_agent::fiber::AttemptSite>> for AttemptSite {
+    fn from(site: Option<gadk_agent::fiber::AttemptSite>) -> AttemptSite {
+        match site {
+            None => AttemptSite::None,
+            Some(gadk_agent::fiber::AttemptSite::Node) => AttemptSite::Node,
+            Some(gadk_agent::fiber::AttemptSite::Worker) => AttemptSite::Worker,
+        }
+    }
+}
+
 /// Go `nodeRunKey`: the node path and branch of a workflow node run.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub(crate) struct NodeRunKey {
@@ -91,29 +94,84 @@ pub(crate) struct NodeRunKey {
 
 /// Go `spanRecord.canceled` (`canceledFunc(ctx)`): the cancellation of the context of the
 /// callback that started the span, read later to tell how it ended (R3).
-#[derive(Debug, Clone)]
+#[derive(Clone, Default)]
 pub(crate) struct CancelSource {
-    /// The context's token (an ADK context's `cancellation_token()`).
+    /// The context's token (an ADK context's `cancellation_token()`, or a test's own).
     pub(crate) token: CancellationToken,
-    /// Go `context.Cause` once cancelled; `None` = Go `context.Canceled` (always `None` for
-    /// ADK contexts; see `CallbackCtx::cancel_cause`).
+    /// A test's cause (Go `context.WithCancelCause`) once `token` is cancelled; `None` = Go
+    /// `context.Canceled`. Unused when `adk` is set.
     pub(crate) cause: Option<TraceError>,
+    /// The ADK context whose `cause()` (Go `context.Cause`) is read at each
+    /// [`check`](Self::check), so a cause recorded after the span started is seen.
+    pub(crate) adk: Option<gadk_agent::Context>,
+}
+
+impl std::fmt::Debug for CancelSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CancelSource")
+            .field("token", &self.token)
+            .field("cause", &self.cause)
+            .field("adk", &self.adk.is_some())
+            .finish()
+    }
 }
 
 impl CancelSource {
+    /// An ADK context's cancellation: its token, its cause read lazily.
+    pub(crate) fn of_context(ctx: &gadk_agent::Context) -> CancelSource {
+        CancelSource {
+            token: ctx.cancellation_token().clone(),
+            cause: None,
+            adk: Some(ctx.clone()),
+        }
+    }
+
+    /// A test's token with an optional cause (Go `context.WithCancel` /
+    /// `context.WithCancelCause`).
+    #[cfg(test)]
+    pub(crate) fn of_token(token: CancellationToken, cause: Option<TraceError>) -> CancelSource {
+        CancelSource {
+            token,
+            cause,
+            adk: None,
+        }
+    }
+
+    /// Go `context.Cause(ctx)` once the token is cancelled (`None` while live): the ADK
+    /// context's cause (`Canceled` → Go `context.Canceled`, `DeadlineExceeded` → Go
+    /// `context.DeadlineExceeded`, `Error(e)` → `e`'s text with any cancellation or deadline in
+    /// its chain as Go's sentinel), else the test cause, else Go `context.Canceled`.
+    pub(crate) fn cause(&self) -> Option<TraceError> {
+        if !self.token.is_cancelled() {
+            return None;
+        }
+        let cause = match &self.adk {
+            Some(ctx) => ctx.cause().map(|c| trace_error_of_cause(&c)),
+            None => self.cause.clone(),
+        };
+        Some(cause.unwrap_or_else(|| Arc::new(Error::Context(ContextError::Canceled))))
+    }
+
     /// The Go closure `canceledFunc` returns: `(false, None)` while live; `(true, None)` when
     /// cancelled with Go's `context.Canceled` cause; `(false, Some(cause))` otherwise.
     pub(crate) fn check(&self) -> (bool, Option<TraceError>) {
-        if !self.token.is_cancelled() {
-            return (false, None);
+        match self.cause() {
+            None => (false, None),
+            Some(cause) if matches!(*cause, Error::Context(ContextError::Canceled)) => (true, None),
+            Some(cause) => (false, Some(cause)),
         }
-        match &self.cause {
-            None => (true, None),
-            Some(cause) if matches!(**cause, Error::Context(ContextError::Canceled)) => {
-                (true, None)
-            }
-            Some(cause) => (false, Some(cause.clone())),
+    }
+}
+
+/// A gadk cancel cause as the trace manager keeps errors (Go `context.Cause`'s value).
+pub(crate) fn trace_error_of_cause(cause: &gadk_agent::CancelCause) -> TraceError {
+    match cause {
+        gadk_agent::CancelCause::DeadlineExceeded => {
+            Arc::new(Error::Context(ContextError::DeadlineExceeded))
         }
+        gadk_agent::CancelCause::Error(e) => crate::plugin::callbacks::trace_error_of(e.as_ref()),
+        // `Canceled` and any later variant read as Go's plain `context.Canceled`.
+        _ => Arc::new(Error::Context(ContextError::Canceled)),
     }
 }
 
@@ -189,7 +247,8 @@ pub(crate) struct SpanRecord {
     pub(crate) awaiting_model_event: i64,
     pub(crate) awaiting_tool_event: i64,
     pub(crate) concurrent_peer: bool,
-    /// Go `goroutineID`, `origin`, `attempt`: zero in 7b-3a (7b-3b).
+    /// Go `goroutineID`, `origin`, `attempt`: the fiber of the callback that started the span
+    /// (`settle::current_goroutine`), zero when its context showed no activation.
     pub(crate) goroutine_id: u64,
     pub(crate) origin: GoroutineOrigin,
     pub(crate) attempt: AttemptSite,
@@ -306,9 +365,9 @@ impl SpanRecord {
         self.kind == SpanKind::Agent && self.activation.is_some() && self.activation == activation
     }
 
-    /// Go `endedWithRun(runner)`: false whenever the parent's `goroutine_id` is 0, i.e.
-    /// always in 7b-3a (the body is ported whole). Locks the records above `self` one pair at
-    /// a time (never `self`, whose guard the caller holds).
+    /// Go `endedWithRun(runner)`: false whenever the parent's `goroutine_id` is 0. Locks the records above `self` one at a
+    /// time (never `self`, whose guard the caller holds): each step reads `a` into a
+    /// [`JoinView`] before it locks `a`'s parent (R10).
     pub(crate) fn ended_with_run(&self, runner: &str) -> bool {
         let Some(mut a_ref) = self.parent.clone() else {
             return false;
@@ -327,14 +386,17 @@ impl SpanRecord {
             }
         }
         loop {
-            let Some(p_ref) = a_ref.lock().parent.clone() else {
+            let (a, a_has_activation, parent) = {
+                let g = a_ref.lock();
+                (JoinView::of(&g), g.activation.is_some(), g.parent.clone())
+            };
+            let Some(p_ref) = parent else {
                 return false;
             };
             {
-                let a = a_ref.lock();
                 let p = p_ref.lock();
                 if p.kind == SpanKind::Invocation {
-                    return a.name == runner && a.activation.is_some() && a.goroutine_id != 0;
+                    return a.name == runner && a_has_activation && a.goroutine_id != 0;
                 }
                 if p.kind != SpanKind::Agent
                     || a.goroutine_id == 0
@@ -347,12 +409,12 @@ impl SpanRecord {
         }
     }
 
-    /// Go `isNodeAgentOf(w)` (attribution; false with zero goroutine information).
+    /// Go `isNodeAgentOf(w)` (attribution).
     pub(crate) fn is_node_agent_of(&self, w: &SpanRecord) -> bool {
         if !w.is_workflow
             || !self.parent.as_ref().is_some_and(|p| p.is_record(w))
             || self.attempt != AttemptSite::Node
-            || !self.origin.started_by(SCHEDULER_CREATOR, Some(w))
+            || !self.origin.started_by(SCHEDULER_CREATOR, w.goroutine_id)
         {
             return false;
         }
@@ -368,34 +430,62 @@ impl SpanRecord {
     }
 }
 
-/// Go `(p *spanRecord).joinsOnceReturned(c)` (attribution).
-#[allow(dead_code)] // consumer: 7b-3b (goroutine attribution)
-pub(crate) fn joins_once_returned(p: &SpanRef, c: &SpanRef) -> bool {
-    let (p, c) = (p.lock(), c.lock());
-    joins_once_returned_records(&p, &c)
+/// The fields of a child record `c` that Go's `p.joins(c, …)` and `p.joinsOnceReturned(c)`
+/// read, taken while only `c` is locked: the walks up a parent chain never hold a parent's
+/// guard while locking its child (R10), so a record met again on the walk is never locked
+/// twice.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct JoinView {
+    pub(crate) goroutine_id: u64,
+    pub(crate) origin: GoroutineOrigin,
+    pub(crate) attempt: AttemptSite,
+    pub(crate) name: String,
+    pub(crate) branch: String,
 }
 
-/// [`joins_once_returned`] over locked records.
-pub(crate) fn joins_once_returned_records(p: &SpanRecord, c: &SpanRecord) -> bool {
+impl JoinView {
+    /// The join fields of `c`.
+    pub(crate) fn of(c: &SpanRecord) -> JoinView {
+        JoinView {
+            goroutine_id: c.goroutine_id,
+            origin: c.origin,
+            attempt: c.attempt,
+            name: c.name.clone(),
+            branch: c.branch.clone(),
+        }
+    }
+}
+
+/// Go `(p *spanRecord).joinsOnceReturned(c)` (attribution). Locks `c`, then `p`, never both.
+/// The trace manager's walks use [`joins_once_returned_records`]; this form is for tests.
+#[cfg(test)]
+pub(crate) fn joins_once_returned(p: &SpanRef, c: &SpanRef) -> bool {
+    let c = JoinView::of(&c.lock());
+    joins_once_returned_records(&p.lock(), &c)
+}
+
+/// Go `(p *spanRecord).joinsOnceReturned(c)` over the locked parent and the child's [`JoinView`].
+pub(crate) fn joins_once_returned_records(p: &SpanRecord, c: &JoinView) -> bool {
     joins_records(p, c, false)
         || (p.is_parallel
             && p.goroutine_id != 0
-            && c.origin.started_by(ERRGROUP_CREATOR, Some(p))
+            && c.origin.started_by(ERRGROUP_CREATOR, p.goroutine_id)
             && p.children.contains(&c.name)
             && c.branch == parallel_branch(p, &c.name))
         || (p.is_workflow && c.attempt == AttemptSite::Worker)
 }
 
-/// Go `(p *spanRecord).joins(c, reported)` (attribution; with zero goroutine information only
-/// the `completed` / `runDone` and parallel-branch fallbacks apply).
-#[allow(dead_code)] // consumer: 7b-3b (goroutine attribution)
+/// Go `(p *spanRecord).joins(c, reported)` (attribution; false when either has no goroutine).
+/// Locks `c`, then `p`, never both. The trace manager's walks use [`joins_records`]; this form
+/// is for tests.
+#[cfg(test)]
 pub(crate) fn joins(p: &SpanRef, c: &SpanRef, reported: bool) -> bool {
-    let (p, c) = (p.lock(), c.lock());
-    joins_records(&p, &c, reported)
+    let c = JoinView::of(&c.lock());
+    joins_records(&p.lock(), &c, reported)
 }
 
-/// [`joins`] over locked records.
-pub(crate) fn joins_records(p: &SpanRecord, c: &SpanRecord, reported: bool) -> bool {
+/// Go `(p *spanRecord).joins(c, reported)` over the locked parent and the child's [`JoinView`].
+pub(crate) fn joins_records(p: &SpanRecord, c: &JoinView, reported: bool) -> bool {
     if !p.propagates_child_error || p.goroutine_id == 0 || c.goroutine_id == 0 {
         return false;
     }
@@ -403,24 +493,15 @@ pub(crate) fn joins_records(p: &SpanRecord, c: &SpanRecord, reported: bool) -> b
         return true;
     }
     if p.is_workflow {
-        return c.origin.started_by(SCHEDULER_CREATOR, Some(p));
+        return c.origin.started_by(SCHEDULER_CREATOR, p.goroutine_id);
     }
     if p.is_parallel {
-        return c.origin.started_by(ERRGROUP_CREATOR, Some(p))
+        return c.origin.started_by(ERRGROUP_CREATOR, p.goroutine_id)
             && p.children.contains(&c.name)
             && c.branch == parallel_branch(p, &c.name)
             && (p.completed || (reported && p.node_run_ended));
     }
     false
-}
-
-impl GoroutineOrigin {
-    /// Go `startedBy(creator, p)`: false when `p` is `None` or has no goroutine.
-    pub(crate) fn started_by(&self, creator: &str, p: Option<&SpanRecord>) -> bool {
-        p.is_some_and(|p| {
-            p.goroutine_id != 0 && self.parent == p.goroutine_id && self.creator == creator
-        })
-    }
 }
 
 /// Go `parallelBranch(a, childName)`: the branch of a ParallelAgent `a`'s branch running
@@ -465,22 +546,52 @@ mod tests {
     #[test]
     fn cancel_source_reports_how_the_context_ended() {
         let token = CancellationToken::new();
-        let live = CancelSource {
-            token: token.clone(),
-            cause: Some(err("deadline")),
-        };
+        let live = CancelSource::of_token(token.clone(), Some(err("deadline")));
         assert!(matches!(live.check(), (false, None)));
         token.cancel();
         let (canceled, cause) = live.check();
         assert!(!canceled);
         assert!(cause.unwrap().is_context(ContextError::DeadlineExceeded));
-        let explicit = CancelSource {
-            token: token.clone(),
-            cause: Some(err("canceled")),
-        };
+        let explicit = CancelSource::of_token(token.clone(), Some(err("canceled")));
         assert!(matches!(explicit.check(), (true, None)));
-        let bare = CancelSource { token, cause: None };
+        let bare = CancelSource::of_token(token, None);
         assert!(matches!(bare.check(), (true, None)));
+    }
+
+    /// An ADK context's cause is read at each check (R9): a cause recorded after the record
+    /// was made is seen, and each gadk cause maps to Go's.
+    #[test]
+    fn cancel_source_reads_an_adk_context_cause_lazily() {
+        let base = adk_ctx(&custom("a", vec![]), "inv", None);
+        let (ctx, guard) = base.with_agent_cancel();
+        let src = CancelSource::of_context(&ctx);
+        assert!(matches!(src.check(), (false, None)));
+        assert!(src.cause().is_none());
+        let boom: Arc<dyn std::error::Error + Send + Sync> =
+            Arc::new(std::io::Error::other("failed to run sub-agent \"b\": boom"));
+        ctx.cancel_with_cause(gadk_agent::CancelCause::Error(boom));
+        let (canceled, cause) = src.check();
+        assert!(!canceled);
+        assert_eq!(
+            cause.unwrap().to_string(),
+            "failed to run sub-agent \"b\": boom"
+        );
+        drop(guard);
+
+        let (ctx, _guard) = base.with_agent_timeout(std::time::Duration::ZERO);
+        let (canceled, cause) = CancelSource::of_context(&ctx).check();
+        assert!(!canceled);
+        assert!(matches!(
+            *cause.unwrap(),
+            Error::Context(ContextError::DeadlineExceeded)
+        ));
+
+        let (ctx, guard) = base.with_agent_cancel();
+        guard.cancel();
+        assert!(matches!(
+            CancelSource::of_context(&ctx).check(),
+            (true, None)
+        ));
     }
 
     #[test]
@@ -525,10 +636,7 @@ mod tests {
     fn drop_contexts_forgets_the_run() {
         let adk = adk_ctx(&custom("a", vec![]), "inv", None);
         let mut rec = SpanRecord {
-            canceled: Some(CancelSource {
-                token: CancellationToken::new(),
-                cause: None,
-            }),
+            canceled: Some(CancelSource::of_token(CancellationToken::new(), None)),
             ended: Some(adk.clone()),
             activation: Some(adk.activation_id()),
             parent: Some(SpanRef::default()),
@@ -599,21 +707,28 @@ mod tests {
     #[test]
     fn started_by_needs_the_parent_goroutine_and_creator() {
         let origin = GoroutineOrigin {
-            creator: SCHEDULER_CREATOR.into(),
+            creator: SCHEDULER_CREATOR,
             parent: 7,
         };
         let p = SpanRecord {
             goroutine_id: 7,
             ..SpanRecord::default()
         };
-        assert!(origin.started_by(SCHEDULER_CREATOR, Some(&p)));
-        assert!(!origin.started_by(ERRGROUP_CREATOR, Some(&p)));
-        assert!(!origin.started_by(SCHEDULER_CREATOR, None));
-        assert!(!GoroutineOrigin::default().started_by("", Some(&SpanRecord::default())));
+        assert!(origin.started_by(SCHEDULER_CREATOR, p.goroutine_id));
+        assert!(!origin.started_by(ERRGROUP_CREATOR, p.goroutine_id));
+        assert!(!GoroutineOrigin::default().started_by("", SpanRecord::default().goroutine_id));
     }
 
-    /// With zero goroutine information (7b-3a) no activation joins another and no open call
-    /// ends with the run.
+    #[test]
+    fn attempt_site_maps_the_engine_slot() {
+        use gadk_agent::fiber::AttemptSite as Slot;
+        assert_eq!(AttemptSite::from(None), AttemptSite::None);
+        assert_eq!(AttemptSite::from(Some(Slot::Node)), AttemptSite::Node);
+        assert_eq!(AttemptSite::from(Some(Slot::Worker)), AttemptSite::Worker);
+    }
+
+    /// With zero goroutine information no activation joins another and no open call ends with
+    /// the run (Go's zero-information branches).
     #[test]
     fn attribution_is_false_without_goroutines() {
         let act = adk_ctx(&custom("root", vec![]), "inv", None).activation_id();
@@ -648,7 +763,7 @@ mod tests {
         assert!(!child.lock().is_node_agent_of(&agent.lock()));
     }
 
-    /// The ported bodies, driven with goroutine information set by hand (as 7b-3b will).
+    /// The ported bodies, driven with goroutine information set by hand.
     #[test]
     fn attribution_bodies_with_goroutines() {
         let act = adk_ctx(&custom("root", vec![]), "inv", None).activation_id();
@@ -673,7 +788,7 @@ mod tests {
             activation: Some(act),
             goroutine_id: 2,
             origin: GoroutineOrigin {
-                creator: SCHEDULER_CREATOR.into(),
+                creator: SCHEDULER_CREATOR,
                 parent: 1,
             },
             attempt: AttemptSite::Node,
