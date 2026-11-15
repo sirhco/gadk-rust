@@ -138,7 +138,7 @@ where
 }
 
 /// Go `for range events {}`: reads `events` to the end.
-async fn drain(mut events: EventStream) {
+async fn read_to_end(mut events: EventStream) {
     while events.next().await.is_some() {}
 }
 
@@ -693,7 +693,7 @@ async fn test_concurrency_race_concurrent_same_llm_agent_model_error_not_cleared
             prior_tool_turn,
         };
     let modes = [
-        mode("drain failing activation", false, false, false, false),
+        mode("read_to_end failing activation", false, false, false, false),
         mode(
             "break on failing activation error",
             true,
@@ -702,7 +702,7 @@ async fn test_concurrency_race_concurrent_same_llm_agent_model_error_not_cleared
             false,
         ),
         mode(
-            "drain failing activation/with_peer_after_agent_trailer",
+            "read_to_end failing activation/with_peer_after_agent_trailer",
             false,
             true,
             false,
@@ -723,7 +723,7 @@ async fn test_concurrency_race_concurrent_same_llm_agent_model_error_not_cleared
             false,
         ),
         mode(
-            "drain failing activation/prior_tool_turn",
+            "read_to_end failing activation/prior_tool_turn",
             false,
             false,
             false,
@@ -737,7 +737,7 @@ async fn test_concurrency_race_concurrent_same_llm_agent_model_error_not_cleared
             true,
         ),
         mode(
-            "drain failing activation/with_peer_after_agent_trailer/prior_tool_turn",
+            "read_to_end failing activation/with_peer_after_agent_trailer/prior_tool_turn",
             false,
             true,
             false,
@@ -1146,7 +1146,7 @@ async fn test_concurrency_race_custom_parent_returns_before_unjoined_child_ends_
                             }
                             go(async move {
                                 let _done = CloseOnDrop(child_done);
-                                drain(child.run(ctx)).await;
+                                read_to_end(child.run(ctx)).await;
                             });
                             if !within(&child_in_before).await {
                                 y.call(Err(AgentError::other(
@@ -1218,7 +1218,7 @@ async fn test_concurrency_race_custom_parent_returns_before_unjoined_child_ends_
                             // Start the cached child without joining it.
                             go(async move {
                                 let _done = CloseOnDrop(cached_done);
-                                drain(cached.run(ctx)).await;
+                                read_to_end(cached.run(ctx)).await;
                             });
                             if !within(&cached_in_before).await {
                                 y.call(Err(AgentError::other(
@@ -1275,7 +1275,7 @@ async fn test_concurrency_race_custom_parent_returns_before_unjoined_child_ends_
                             let cached_done = cached_done.clone();
                             async move {
                                 let _done = CloseOnDrop(cached_done);
-                                drain(cached.run(ctx)).await;
+                                read_to_end(cached.run(ctx)).await;
                             }
                         });
                         if !within(&cached_done).await {
@@ -1420,7 +1420,7 @@ async fn test_runner_tool_run_custom_parent_with_unjoined_cached_child_emits_no_
                             let ctx = ctx.clone();
                             async move {
                                 let _done = CloseOnDrop(child_done);
-                                drain(cached.run(ctx)).await;
+                                read_to_end(cached.run(ctx)).await;
                             }
                         });
                         if !within(&entered).await {
@@ -1503,7 +1503,7 @@ async fn test_runner_tool_returns_before_helper_model_call_ends_keeps_helper_ope
                 (helper.clone(), helper_done.clone(), entered.clone());
             go(async move {
                 let _done = CloseOnDrop(helper_done);
-                drain(helper.run(helper_ctx)).await;
+                read_to_end(helper.run(helper_ctx)).await;
             });
             async move {
                 let started = tokio::time::timeout(Duration::from_secs(10), async {
@@ -1769,7 +1769,7 @@ async fn test_repro_unjoined_call_started_after_launcher_returned_moves_to_late(
                 yielding(move |_y| async move {
                     go(async move {
                         let _done = CloseOnDrop(s_done);
-                        drain(s.run(ctx)).await;
+                        read_to_end(s.run(ctx)).await;
                     });
                     s_started.wait().await;
                 })
@@ -1915,7 +1915,7 @@ async fn test_runner_agent_starting_across_after_run_starts_in_late_state() {
                         async move {
                             let _done = CloseOnDrop(child_done);
                             child_goroutine.store(goroutine_id(), Ordering::SeqCst);
-                            drain(child.run(ctx)).await;
+                            read_to_end(child.run(ctx)).await;
                         }
                     });
                     if !within(&held).await {

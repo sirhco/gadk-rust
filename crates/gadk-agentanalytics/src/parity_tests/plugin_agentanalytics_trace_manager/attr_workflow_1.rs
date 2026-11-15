@@ -53,7 +53,7 @@ use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
 
 use super::attr_support::{
-    CloseOnDrop, ERR_SIBLING_FAILED, Gate, agent_node, blocking_llm, ctx_err,
+    CloseOnDrop, ERR_SIBLING_FAILED, Gate, agent_node, blocking_llm, ctx_err, event_on_branch,
     flaky_on_first_pass_llm, gated_flaky_llm, go, new_parallel_agent, start, then_wait_for_cancel,
     wait_then_stream_partial_llm, workflow_agent,
 };
@@ -154,10 +154,8 @@ fn is_error(err: &AgentError, want: &str) -> bool {
 
 /// A model-authored event of `ctx` by `author` on the context's branch (Go
 /// `session.NewEvent(ctx, ctx.InvocationID())` with `Author`, `Branch` and `LLMResponse` set).
-fn event_of(ctx: &InvocationContext, author: &str, response: LlmResponse) -> Event {
-    let mut ev = new_event(ctx);
-    ev.author = author.into();
-    ev.branch = ctx.branch();
+fn event_with_response(ctx: &InvocationContext, author: &str, response: LlmResponse) -> Event {
+    let mut ev = event_on_branch(ctx, author);
     ev.response = response;
     ev
 }
@@ -274,13 +272,13 @@ fn new_shortcut_sequence_graph(next: Arc<dyn Agent>, register_sequence: bool) ->
     .expect("workflow agent")
 }
 
-/// Go `newStreamingAuthor(t, child, withContent)`.
-fn new_streaming_author(child: Arc<dyn Agent>, with_content: bool) -> Arc<dyn Agent> {
+/// Go `newStreamingAuthor(t, child, withContent)`, as a `go_iter` custom agent (`attr_parallel`'s twin runs on `go_agent`).
+fn new_streaming_author_via_go_iter(child: Arc<dyn Agent>, with_content: bool) -> Arc<dyn Agent> {
     let run_child = child.clone();
     custom_agent("author", vec![child], move |ctx| {
         let child = run_child.clone();
         go_iter(move |y| async move {
-            let mut partial = event_of(
+            let mut partial = event_with_response(
                 &ctx,
                 "author",
                 LlmResponse {
@@ -333,7 +331,7 @@ fn new_branch_a(child_started: Gate, done: Gate, with_event: bool) -> Arc<dyn Ag
                 return;
             }
             if with_event {
-                let mut state = event_of(&ctx, "branch_a", LlmResponse::default());
+                let mut state = event_with_response(&ctx, "branch_a", LlmResponse::default());
                 state.actions.state_delta =
                     Some(json!({"seen": true}).as_object().cloned().unwrap());
                 y.send(Ok(state)).await;
@@ -1097,7 +1095,8 @@ async fn test_runner_purged_retry_attempt_timestamp_precedes_next_attempt() {
 async fn test_runner_stop_on_partial_event_of_async_author_is_not_an_error() {
     let new_child = || {
         custom_agent("child", vec![], |ctx| {
-            let answer = event_of(&ctx, "child", text_response("child answer", false, false));
+            let answer =
+                event_with_response(&ctx, "child", text_response("child answer", false, false));
             futures::stream::iter([Ok(answer)]).boxed()
         })
     };
@@ -1110,7 +1109,10 @@ async fn test_runner_stop_on_partial_event_of_async_author_is_not_an_error() {
         });
         new_parallel_agent(
             "par_root",
-            vec![new_streaming_author(new_child(), with_content), waiter],
+            vec![
+                new_streaming_author_via_go_iter(new_child(), with_content),
+                waiter,
+            ],
         )
     };
     type NewRoot<'a> = Box<dyn Fn() -> Arc<dyn Agent> + 'a>;
@@ -1128,7 +1130,10 @@ async fn test_runner_stop_on_partial_event_of_async_author_is_not_an_error() {
             Box::new(|| {
                 fan_out_workflow(
                     "wf_root",
-                    vec![agent_node(new_streaming_author(new_child(), true))],
+                    vec![agent_node(new_streaming_author_via_go_iter(
+                        new_child(),
+                        true,
+                    ))],
                 )
             }),
         ),
@@ -1258,7 +1263,11 @@ async fn test_runner_workflow_node_failure_while_sibling_streams_emits_invocatio
     let make_streamer = || {
         custom_agent("streamer", vec![], |ic| {
             go_iter(move |y| async move {
-                let partial = event_of(&ic, "streamer", text_response("streaming...", true, false));
+                let partial = event_with_response(
+                    &ic,
+                    "streamer",
+                    text_response("streaming...", true, false),
+                );
                 y.send(Ok(partial)).await;
                 // Keep running until the caller stops or the workflow cancels us.
                 ic.cancellation_token().cancelled().await;
@@ -1445,15 +1454,18 @@ async fn test_runner_workflow_retry_parallel_responded_branches_purges_failed_at
                             () = final_seen.wait() => {}
                             () = ctx.cancellation_token().cancelled() => return,
                         }
-                        let partial =
-                            event_of(&ctx, "streamer", text_response("streaming...", true, false));
+                        let partial = event_with_response(
+                            &ctx,
+                            "streamer",
+                            text_response("streaming...", true, false),
+                        );
                         y.send(Ok(partial)).await;
                         acked.close();
                         ctx.cancellation_token().cancelled().await;
                         y.send(Err(ctx_err(&ctx))).await;
                         return;
                     }
-                    let ev = event_of(
+                    let ev = event_with_response(
                         &ctx,
                         "streamer",
                         text_response("streamer succeeded on retry", false, true),
@@ -1469,8 +1481,11 @@ async fn test_runner_workflow_retry_parallel_responded_branches_purges_failed_at
                 let ready = ready.clone();
                 go_iter(move |y| async move {
                     if first {
-                        let final_ev =
-                            event_of(&ctx, "failer", text_response("initial answer", false, true));
+                        let final_ev = event_with_response(
+                            &ctx,
+                            "failer",
+                            text_response("initial answer", false, true),
+                        );
                         y.send(Ok(final_ev)).await;
                         tokio::select! {
                             () = ready.wait() => {}
@@ -1479,7 +1494,7 @@ async fn test_runner_workflow_retry_parallel_responded_branches_purges_failed_at
                         y.send(Err(AgentError::other(ERR_SIBLING_FAILED))).await;
                         return;
                     }
-                    let ev = event_of(
+                    let ev = event_with_response(
                         &ctx,
                         "failer",
                         text_response("failer succeeded on retry", false, true),
@@ -1645,7 +1660,7 @@ async fn test_runner_concurrent_workflow_retries_orders_purged_agent_error_befor
                         y.send(Err(AgentError::other(err_transient))).await;
                         return;
                     }
-                    let ev = event_of(
+                    let ev = event_with_response(
                         &ctx,
                         &author,
                         text_response(&format!("{author} ok"), false, true),
@@ -1973,8 +1988,11 @@ async fn test_concurrency_race_concurrent_same_agent_on_same_branch_and_path() {
                                 .await;
                             return;
                         }
-                        let ev =
-                            event_of(&ctx, "child", text_response("child answer", false, false));
+                        let ev = event_with_response(
+                            &ctx,
+                            "child",
+                            text_response("child answer", false, false),
+                        );
                         y.send(Ok(ev)).await;
                     })
                 }
@@ -1983,8 +2001,11 @@ async fn test_concurrency_race_concurrent_same_agent_on_same_branch_and_path() {
             let parent = custom_agent("parent", vec![], move |ctx| {
                 let (child, first_entered) = (child.clone(), first_entered.clone());
                 go_iter(move |y| async move {
-                    let answer =
-                        event_of(&ctx, "parent", text_response("parent answer", false, false));
+                    let answer = event_with_response(
+                        &ctx,
+                        "parent",
+                        text_response("parent answer", false, false),
+                    );
                     y.send(Ok(answer)).await;
 
                     // Only the answering run's events are forwarded: the cached run's event is
@@ -2116,7 +2137,7 @@ async fn test_runner_workflow_agent_with_after_agent_callback_drained_after_bran
                 let answered = answered.clone();
                 go_iter(move |y| async move {
                     let _close = CloseOnDrop(answered);
-                    let ev = event_of(
+                    let ev = event_with_response(
                         &ctx,
                         "answering",
                         text_response("answering branch answer", false, false),
@@ -2128,7 +2149,7 @@ async fn test_runner_workflow_agent_with_after_agent_callback_drained_after_bran
         let failing = custom_agent("failing", vec![], move |ctx| {
             let answered = answered.clone();
             go_iter(move |y| async move {
-                let ev = event_of(
+                let ev = event_with_response(
                     &ctx,
                     "failing",
                     text_response("failing branch answer", false, false),

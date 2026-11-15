@@ -447,13 +447,19 @@ pub(crate) fn tool_result(key: &str, value: Value) -> Map<String, Value> {
 /// Go `errSiblingFailed`.
 pub(crate) const ERR_SIBLING_FAILED: &str = "guardrail rejected the request";
 
+/// Go `session.NewEvent(ctx, ctx.InvocationID())` with `Author` and `Branch` set.
+pub(crate) fn event_on_branch(ctx: &InvocationContext, author: &str) -> Event {
+    let mut ev = new_event(ctx);
+    ev.author = author.into();
+    ev.branch = ctx.branch();
+    ev
+}
+
 /// An event of `author` on `ctx`'s branch with model text `text` (Go
 /// `ev := session.NewEvent(ctx, ctx.InvocationID()); ev.Author = author; ev.Branch =
 /// ctx.Branch(); ev.Content = textContent("model", text)`).
 pub(crate) fn content_event(ctx: &InvocationContext, author: &str, text: &str) -> Event {
-    let mut ev = new_event(ctx);
-    ev.author = author.into();
-    ev.branch = ctx.branch();
+    let mut ev = event_on_branch(ctx, author);
     ev.response.content = Some(text_content("model", text));
     ev
 }

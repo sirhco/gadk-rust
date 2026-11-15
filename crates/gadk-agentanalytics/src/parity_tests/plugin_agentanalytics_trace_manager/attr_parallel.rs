@@ -47,8 +47,8 @@ use parking_lot::Mutex;
 use serde_json::{Map, Value, json};
 
 use super::attr_support::{
-    ERR_SIBLING_FAILED, Gate, context_canceled_on_done_llm, ctx_err, go, new_parallel_agent,
-    run_unjoined_late_child, stream_then_wait_llm, then_wait_for_cancel,
+    ERR_SIBLING_FAILED, Gate, context_canceled_on_done_llm, ctx_err, event_on_branch, go,
+    new_parallel_agent, run_unjoined_late_child, stream_then_wait_llm, then_wait_for_cancel,
     wait_then_stream_partial_llm, within,
 };
 use super::runner_support::*;
@@ -149,17 +149,9 @@ async fn done(ctx: &InvocationContext) {
     ctx.cancellation_token().cancelled().await;
 }
 
-/// Go `session.NewEvent(ctx, ctx.InvocationID())` with `Author` and `Branch` set.
-fn event_of(ctx: &InvocationContext, author: &str) -> Event {
-    let mut ev = new_event(ctx);
-    ev.author = author.into();
-    ev.branch = ctx.branch();
-    ev
-}
-
-/// [`event_of`] with `Content: textContent("model", text)`.
+/// [`event_on_branch`] with `Content: textContent("model", text)`.
 fn text_event(ctx: &InvocationContext, author: &str, text: &str) -> Event {
-    let mut ev = event_of(ctx, author);
+    let mut ev = event_on_branch(ctx, author);
     ev.response.content = Some(text_content("model", text));
     ev
 }
@@ -171,17 +163,17 @@ fn final_event(ctx: &InvocationContext, author: &str, text: &str) -> Event {
     ev
 }
 
-/// [`event_of`] with `Partial: true` and, if any, `Content: textContent("model", text)`.
+/// [`event_on_branch`] with `Partial: true` and, if any, `Content: textContent("model", text)`.
 fn partial_event(ctx: &InvocationContext, author: &str, text: Option<&str>) -> Event {
-    let mut ev = event_of(ctx, author);
+    let mut ev = event_on_branch(ctx, author);
     ev.response.partial = true;
     ev.response.content = text.map(|t| text_content("model", t));
     ev
 }
 
-/// [`event_of`] with `Actions.StateDelta: delta`.
+/// [`event_on_branch`] with `Actions.StateDelta: delta`.
 fn state_event(ctx: &InvocationContext, author: &str, delta: Value) -> Event {
-    let mut ev = event_of(ctx, author);
+    let mut ev = event_on_branch(ctx, author);
     ev.actions.state_delta = delta.as_object().cloned();
     ev
 }
@@ -320,8 +312,9 @@ fn transfer_root(par: Arc<dyn Agent>) -> Arc<dyn Agent> {
     })
 }
 
-/// Go `newStreamingAuthor(t, child, withContent)`.
-fn new_streaming_author(child: Arc<dyn Agent>, with_content: bool) -> Arc<dyn Agent> {
+/// Go `newStreamingAuthor(t, child, withContent)` as a `go_agent` (`attr_workflow_1`'s twin runs
+/// on `go_iter`).
+fn new_streaming_author_via_go_agent(child: Arc<dyn Agent>, with_content: bool) -> Arc<dyn Agent> {
     let run_child = child.clone();
     go_agent("author", vec![child], move |ctx, y| {
         let child = run_child.clone();
@@ -547,7 +540,7 @@ fn branch_failure_cases() -> Vec<BranchFailureCase> {
                 new_parallel_agent(
                     "par_root",
                     vec![
-                        new_streaming_author(worker, false),
+                        new_streaming_author_via_go_agent(worker, false),
                         new_custom_failer(ready),
                     ],
                 )
