@@ -737,7 +737,7 @@ pub(crate) fn struct_as_map(v: Option<&Value>) -> Map<String, Value> {
 // ---- Reading protojson fields ----
 
 /// A field's value; protojson treats `null` as absent.
-fn field<'a>(v: &'a Value, key: &str) -> Option<&'a Value> {
+pub(crate) fn field<'a>(v: &'a Value, key: &str) -> Option<&'a Value> {
     v.get(key).filter(|f| !f.is_null())
 }
 
@@ -746,11 +746,11 @@ pub(crate) fn str_field<'a>(v: &'a Value, key: &str) -> &'a str {
     v.get(key).and_then(Value::as_str).unwrap_or_default()
 }
 
-fn bool_field(v: &Value, key: &str) -> bool {
+pub(crate) fn bool_field(v: &Value, key: &str) -> bool {
     v.get(key).and_then(Value::as_bool).unwrap_or_default()
 }
 
-fn array_field<'a>(v: &'a Value, key: &str) -> &'a [Value] {
+pub(crate) fn array_field<'a>(v: &'a Value, key: &str) -> &'a [Value] {
     v.get(key)
         .and_then(Value::as_array)
         .map(Vec::as_slice)
@@ -770,8 +770,10 @@ fn strings_field(v: &Value, key: &str) -> Vec<String> {
 
 /// A `bytes` field; text that is not base64 reads as empty. The lenience is safe because
 /// [`session_event_to_event`] has already rejected such text through [`validate_scalars`]; the
-/// infallible readers are otherwise reached only by the Go-test ports with well-formed input.
-fn bytes_field(v: &Value, key: &str) -> Vec<u8> {
+/// infallible readers are otherwise reached by the Go-test ports with well-formed input and by
+/// the Example Store's response mapping (`crate::example_store`), which first rejects such text
+/// through [`check_bytes`].
+pub(crate) fn bytes_field(v: &Value, key: &str) -> Vec<u8> {
     decode_bytes(str_field(v, key)).unwrap_or_default()
 }
 
@@ -800,7 +802,7 @@ fn float32_value(v: &Value) -> f32 {
     f as f32
 }
 
-fn float32_field(v: &Value, key: &str) -> f32 {
+pub(crate) fn float32_field(v: &Value, key: &str) -> f32 {
     v.get(key).map(float32_value).unwrap_or_default()
 }
 
@@ -874,7 +876,9 @@ fn float32_is_valid(v: &Value) -> bool {
     }
 }
 
-fn check_bytes(v: &Value, key: &str) -> Result<(), String> {
+/// protojson's check of a `bytes` field: absent or `null` is fine; anything but valid base64
+/// text fails with `invalid value for bytes field {key}: {raw token}`.
+pub(crate) fn check_bytes(v: &Value, key: &str) -> Result<(), String> {
     match field(v, key) {
         Some(f) if f.as_str().is_none_or(|s| decode_bytes(s).is_err()) => {
             Err(invalid_scalar("bytes", key, f))

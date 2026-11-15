@@ -36,6 +36,7 @@
 //! # Ok(()) }
 //! ```
 
+pub mod example_store;
 pub mod memory;
 pub mod reasoning_engine;
 pub mod session;

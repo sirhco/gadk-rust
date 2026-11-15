@@ -20,6 +20,8 @@ gadk-memory = { workspace = true }
 gadk-genai = { workspace = true }
 gadk-model = { workspace = true, features = ["gcp-auth"] }
 gadk-platform = { workspace = true }
+gadk-tools = { workspace = true }
+gadk-agent = { workspace = true }
 google-cloud-auth = { workspace = true }
 http = { workspace = true }
 bytes = { workspace = true }
