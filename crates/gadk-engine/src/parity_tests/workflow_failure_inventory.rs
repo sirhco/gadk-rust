@@ -204,7 +204,7 @@ async fn test_scheduler_failure_inventory_executors(#[case] mode: &'static str) 
     let (tx, mut rx) = tokio::sync::mpsc::channel(DEFAULT_EVENT_QUEUE_CAPACITY);
     let task = tokio::spawn(scope(
         Arc::clone(&rec),
-        run_node_task(tx, "body".into(), node, top_level_ctx(), None, None),
+        run_node_task(tx, "body".into(), node, top_level_ctx(), None),
     ));
     let completion = loop {
         match rx.recv().await.expect("queue closed before completion") {
@@ -256,7 +256,6 @@ async fn run_to_completion(node: Arc<dyn Node>) -> CompletionItem {
         "body".into(),
         node,
         top_level_ctx(),
-        None,
         None,
     ));
     let completion = loop {
