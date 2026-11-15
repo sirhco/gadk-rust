@@ -449,3 +449,19 @@ async fn test_workflow_run_skips_nil_user_content_parts(
         "seed input"
     );
 }
+
+// A workflow with no edges builds, and running it ends without an error or any event, matching
+// adk-python's Workflow(edges=[]).
+// parity: adapted: Go's nil and empty []Edge are both an empty Vec in Rust; one case covers both.
+#[tokio::test]
+async fn test_workflow_with_no_edges_runs_to_completion() {
+    let w = Workflow::new("wf", Vec::new(), WorkflowOptions::default())
+        .unwrap_or_else(|e| panic!("New() error = {e}, want nil"));
+    let (events, err) = collect(w.run(seeded_mock_ctx())).await;
+    assert!(err.is_none(), "Run() error = {err:?}");
+    assert!(
+        events.is_empty(),
+        "Run() yielded {} events, want none: {events:?}",
+        events.len()
+    );
+}

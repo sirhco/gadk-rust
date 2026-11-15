@@ -62,6 +62,49 @@ pub(crate) fn convert_with_schema<In: serde::Serialize, Out: serde::de::Deserial
     serde_json::from_value(decoded).map_err(|e| e.to_string())
 }
 
+/// [`convert_with_schema`] for a function tool's call arguments: Go's functiontool decodes them
+/// through `json.Marshal`, which writes an integral `float64` without a fraction, so a typed
+/// decode into an integer field accepts it ([`go_marshaled_numbers`]).
+pub(crate) fn convert_args_with_schema<Out: serde::de::DeserializeOwned>(
+    args: &Value,
+    schema: Option<&CompiledSchema>,
+) -> Result<Out, String> {
+    convert_with_schema(&go_marshaled_numbers(args.clone()), schema)
+}
+
+/// Go's `json.Marshal` → `json.Unmarshal` round trip of numbers: a float64 with an integral value
+/// is written without a fraction (`1`, not `1.0`), so a typed decode into an integer field
+/// accepts it. serde_json keeps a `1.0` float a float, which an `i64` field rejects; such floats
+/// (as streamed partial arguments carry them) become integers here.
+fn go_marshaled_numbers(v: Value) -> Value {
+    /// Go's `float64` encoding switches to an exponent from 1e21 on.
+    const GO_EXPONENT_FROM: f64 = 1e21;
+    match v {
+        Value::Number(n) if !n.is_i64() && !n.is_u64() => match n.as_f64() {
+            Some(f) if f.fract() == 0.0 && f.abs() < GO_EXPONENT_FROM => {
+                if f >= i64::MIN as f64 && f < i64::MAX as f64 {
+                    #[allow(clippy::cast_possible_truncation)] // integral and in range
+                    Value::from(f as i64)
+                } else if f >= 0.0 && f < u64::MAX as f64 {
+                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                    // integral, in range
+                    Value::from(f as u64)
+                } else {
+                    Value::Number(n)
+                }
+            }
+            _ => Value::Number(n),
+        },
+        Value::Array(items) => Value::Array(items.into_iter().map(go_marshaled_numbers).collect()),
+        Value::Object(m) => Value::Object(
+            m.into_iter()
+                .map(|(k, v)| (k, go_marshaled_numbers(v)))
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
 /// Port of Go typeutil.ValidateWithJSONSchema.
 pub(crate) fn validate_with_schema<In: serde::Serialize>(
     v: &In,
@@ -473,6 +516,49 @@ pub(crate) fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
     } else {
         "Box<dyn Any>".to_string()
     }
+}
+
+/// Go `toolinternal.ModelErrorText` (e83ab5b0): the text a failed call of the tool named
+/// `tool_name` may show the model, and whether `err` turned out to be a recovered panic. A
+/// [`ToolError::Panic`](gadk_agent::ToolError::Panic) anywhere in the error chain (Go
+/// `errors.AsType[*PanicError]`) gives the generic ``Invoking `<tool>()` failed with an internal
+/// error.``, because the panic's own text carries the panic value; any other error gives its
+/// own text.
+pub(crate) fn model_error_text(tool_name: &str, err: &gadk_agent::ToolError) -> (String, bool) {
+    if chain_has_panic(err) {
+        return (
+            format!("Invoking `{tool_name}()` failed with an internal error."),
+            true,
+        );
+    }
+    (err.to_string(), false)
+}
+
+/// Whether a [`ToolError::Panic`](gadk_agent::ToolError::Panic) is anywhere in `err`'s chain.
+/// Transparent layers (`ToolError::Execution`, `SharedToolError`, `AgentError::Other` /
+/// `AgentError::Workflow`) forward `source()` past their inner error, so the walk descends into
+/// them directly.
+fn chain_has_panic(err: &(dyn std::error::Error + 'static)) -> bool {
+    use gadk_agent::{AgentError, SharedToolError, ToolError};
+    let mut cur: Option<&(dyn std::error::Error + 'static)> = Some(err);
+    while let Some(e) = cur {
+        cur = if let Some(te) = e.downcast_ref::<ToolError>() {
+            match te {
+                ToolError::Panic(_) => return true,
+                ToolError::Execution(inner) => Some(&**inner),
+                _ => std::error::Error::source(te),
+            }
+        } else if let Some(shared) = e.downcast_ref::<SharedToolError>() {
+            Some(&*shared.0)
+        } else if let Some(AgentError::Other(inner) | AgentError::Workflow(inner)) =
+            e.downcast_ref::<AgentError>()
+        {
+            Some(&**inner)
+        } else {
+            e.source()
+        };
+    }
+    false
 }
 
 #[cfg(test)]

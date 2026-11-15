@@ -14,7 +14,7 @@
 // limitations under the License.
 
 //! Client configuration and its resolution: a port of genai's `NewInternalAPIClient`
-//! (`google.golang.org/genai@v1.75.0` `client.go`) and `getBaseURL` (`base_url.go`).
+//! (`google.golang.org/genai@v1.77.0` `client.go`) and `getBaseURL` (`base_url.go`).
 //!
 //! Deliberate gadk deviation: Vertex AI never takes an API key (genai's "express mode"),
 //! and ephemeral `auth_tokens/` keys are rejected.

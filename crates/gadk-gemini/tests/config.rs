@@ -16,7 +16,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 //! Port of the genai `NewInternalAPIClient` config resolution ladder
-//! (`google.golang.org/genai@v1.75.0` `client.go`). Every warn and error branch has a
+//! (`google.golang.org/genai@v1.77.0` `client.go`). Every warn and error branch has a
 //! `config_ladder_*` case.
 
 use gadk_gemini::*;

@@ -85,9 +85,12 @@ async fn append_agent_instructions(
     state: &LlmAgentState,
 ) -> Result<(), AgentError> {
     if let Some(provider) = &state.cfg.instruction_provider {
-        let instruction = provider(ctx.as_readonly().clone())
+        let mut instruction = provider(ctx.as_readonly().clone())
             .await
             .map_err(|e| wrap_err("failed to evaluate instruction provider", e))?;
+        // Go dd39c80a (#2079): the live task_completed suffix wraps the provider, as in
+        // adk-python's _append_instruction (the provider's text is not templated).
+        instruction.push_str(state.instruction_suffix.read().as_str());
         append_instructions(req, &[instruction.as_str()]);
         return Ok(());
     }
@@ -163,7 +166,10 @@ pub(crate) async fn replace_match(ctx: &InvocationContext, m: &str) -> Result<St
             return Err(AgentError::other("artifact service is not initialized"));
         };
         return match arts.load(file).await {
-            Ok(resp) => Ok(resp.part.map(|p| p.text).unwrap_or_default()),
+            Ok(resp) => Ok(resp
+                .part
+                .map(|p| artifact_text(file, &p))
+                .unwrap_or_default()),
             Err(e) if optional && is_artifact_not_found(&e) => Ok(String::new()),
             Err(e) => Err(wrap_err(format!("failed to load artifact {file}"), e)),
         };
@@ -182,6 +188,90 @@ pub(crate) async fn replace_match(ctx: &InvocationContext, m: &str) -> Result<St
         // Unwrapped, as Go returns err as is.
         Err(e) => Err(AgentError::Session(e)),
     }
+}
+
+/// Port of instruction_processor.go artifactText (Go 860c7dac): renders a loaded artifact for an
+/// instruction. A text artifact can come back as inline data rather than as text (gcsartifact
+/// stores a text part as a text/plain object and loads it back as bytes). Inline data goes
+/// through adk-python's `as_safe_part_for_llm` checks, in the same order:
+///
+/// 1. Inline data whose MIME type Gemini accepts inline (image/*, audio/*, video/*,
+///    application/pdf, apart from the SVG and XML image types) is never decoded.
+/// 2. Otherwise it is decoded when its MIME type is text/* or one of adk-python's
+///    `_TEXT_LIKE_MIME_TYPES`, or its name has a .csv, .txt, .json or .xml extension.
+///
+/// Anything else renders as the part's text (empty for binary data). Invalid UTF-8 becomes one
+/// U+FFFD per run of invalid bytes (Go `strings.ToValidUTF8`).
+pub(crate) fn artifact_text(name: &str, part: &gadk_genai::Part) -> String {
+    let Some(blob) = &part.inline_data else {
+        return part.text.clone();
+    };
+    let mime_type = normalize_mime_type(&blob.mime_type);
+    if is_gemini_inline_mime_type(&mime_type) {
+        return part.text.clone();
+    }
+    if is_text_like_mime_type(&mime_type) || has_text_file_extension(name) {
+        return to_valid_utf8(&blob.data);
+    }
+    part.text.clone()
+}
+
+/// Go normalizeMIMEType: the lowercase media type without parameters such as charset.
+fn normalize_mime_type(mime_type: &str) -> String {
+    let media_type = mime_type.split_once(';').map_or(mime_type, |(m, _)| m);
+    media_type.trim().to_lowercase()
+}
+
+/// Go isGeminiInlineMIMEType (adk-python `_is_inline_mime_type_supported`).
+fn is_gemini_inline_mime_type(mime_type: &str) -> bool {
+    match mime_type {
+        "image/svg" | "image/svg+xml" | "image/xml" => false,
+        "application/pdf" => true,
+        m => m.starts_with("image/") || m.starts_with("audio/") || m.starts_with("video/"),
+    }
+}
+
+/// Go isTextLikeMIMEType: a MIME type adk-python decodes as text.
+fn is_text_like_mime_type(mime_type: &str) -> bool {
+    mime_type.starts_with("text/")
+        || matches!(
+            mime_type,
+            "application/csv"
+                | "application/json"
+                | "application/svg+xml"
+                | "application/xml"
+                | "image/svg"
+                | "image/svg+xml"
+                | "image/xml"
+        )
+}
+
+/// Go hasTextFileExtension over `path.Ext(name)` (the suffix from the final dot of the final
+/// slash-separated element).
+fn has_text_file_extension(name: &str) -> bool {
+    let base = name.rsplit('/').next().unwrap_or(name);
+    let ext = base.rfind('.').map_or("", |i| &base[i..]);
+    matches!(
+        ext.to_lowercase().as_str(),
+        ".csv" | ".txt" | ".json" | ".xml"
+    )
+}
+
+/// Go `strings.ToValidUTF8(s, "\uFFFD")`: each run of invalid bytes becomes one U+FFFD.
+fn to_valid_utf8(data: &[u8]) -> String {
+    let mut out = String::with_capacity(data.len());
+    let mut in_invalid_run = false;
+    for chunk in data.utf8_chunks() {
+        if !chunk.valid().is_empty() {
+            out.push_str(chunk.valid());
+            in_invalid_run = false;
+        }
+        if !chunk.invalid().is_empty() && !in_invalid_run {
+            out.push('\u{FFFD}');
+            in_invalid_run = true;
+        }
+    }
+    out
 }
 
 /// Go errors.Is(err, fs.ErrNotExist).
@@ -353,10 +443,10 @@ mod tests {
         assert_eq!(system_instruction_for(a).await, "\nsuffix");
     }
 
-    /// Go appendInstructions uses the provider's output alone; State.Instruction (and so the suffix)
-    /// is ignored.
+    /// Go dd39c80a: State.Instruction is ignored with a provider, but the live suffix wraps the
+    /// provider's output.
     #[tokio::test]
-    async fn live_instruction_suffix_is_ignored_with_an_instruction_provider() {
+    async fn live_instruction_suffix_is_appended_to_an_instruction_provider() {
         let provider: InstructionProvider =
             Arc::new(|_ctx| Box::pin(async { Ok::<_, AgentError>("from provider".to_string()) }));
         let a = llm_agent::new(LlmAgentConfig {
@@ -371,6 +461,6 @@ mod tests {
             .instruction_suffix
             .write()
             .push_str("\nsuffix");
-        assert_eq!(system_instruction_for(a).await, "from provider");
+        assert_eq!(system_instruction_for(a).await, "from provider\nsuffix");
     }
 }

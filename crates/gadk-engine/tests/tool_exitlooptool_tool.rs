@@ -23,7 +23,9 @@ use gadk_engine::llm::{LlmAgentConfig, agent as llm_agent};
 use gadk_engine::testutil::{MockModel, TestAgentRunner};
 use gadk_engine::tool::exit_loop;
 use gadk_genai::{Content, FunctionCall, FunctionResponse};
-use serde_json::Map;
+use serde_json::{Map, Value, json};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn text(t: &str) -> Content {
     Content::from_text(t, "model")
@@ -42,7 +44,7 @@ fn exit_response() -> Content {
     Content::from_function_response(
         FunctionResponse {
             name: "exit_loop".into(),
-            response: Map::new(),
+            response: Map::from_iter([("result".to_owned(), Value::Null)]),
             ..Default::default()
         },
         "user",
@@ -138,4 +140,81 @@ async fn test_exit_loop_tool_exits_loop_agent() {
         }
         assert_eq!(count, want.len(), "{name}: unexpected stream length");
     }
+}
+
+// exit_loop returns no result of its own, so after-tool callbacks see nil. The
+// model is still sent {"result": null}.
+// parity: adapted: Rust tool results are a Map with no nil, so Go's nil result is an empty map
+#[tokio::test]
+async fn test_exit_loop_tool_after_tool_callback_sees_no_result() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let got_result = Arc::new(parking_lot::Mutex::new(None::<Map<String, Value>>));
+    let (c, g) = (calls.clone(), got_result.clone());
+    let a = llm_agent::new(LlmAgentConfig {
+        name: "simple agent".into(),
+        model: Some(MockModel::from_contents(vec![exit_call()])),
+        tools: vec![exit_loop()],
+        after_tool_callbacks: vec![Arc::new(move |_ctx, _tool, _args, result, _err| {
+            c.fetch_add(1, Ordering::SeqCst);
+            *g.lock() = Some(result);
+            Box::pin(async { Ok(None) })
+        })],
+        ..Default::default()
+    })
+    .unwrap();
+    let runner = TestAgentRunner::new(a).await;
+    let mut stream = runner.run("message");
+    while let Some(item) = stream.next().await {
+        item.unwrap_or_else(|e| panic!("runner returned unexpected error: {e}"));
+    }
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "after-tool callback ran {} times, want 1",
+        calls.load(Ordering::SeqCst)
+    );
+    let got = got_result.lock().clone().unwrap();
+    assert!(
+        got.is_empty(),
+        "after-tool callback result = {got:?}, want nil"
+    );
+}
+
+// A map an after-tool callback returns in place of exit_loop's nil result is
+// sent to the model as it is, not wrapped as {"result": ...}.
+#[tokio::test]
+async fn test_exit_loop_tool_after_tool_callback_replaces_result() {
+    let a = llm_agent::new(LlmAgentConfig {
+        name: "simple agent".into(),
+        model: Some(MockModel::from_contents(vec![exit_call()])),
+        tools: vec![exit_loop()],
+        after_tool_callbacks: vec![Arc::new(|_ctx, _tool, _args, _result, _err| {
+            Box::pin(async {
+                Ok(Some(
+                    json!({"exited": true})
+                        .as_object()
+                        .cloned()
+                        .unwrap_or_default(),
+                ))
+            })
+        })],
+        ..Default::default()
+    })
+    .unwrap();
+    let runner = TestAgentRunner::new(a).await;
+    let mut stream = runner.run("message");
+    let mut responses = Vec::new();
+    while let Some(item) = stream.next().await {
+        let ev = item.unwrap_or_else(|e| panic!("runner returned unexpected error: {e}"));
+        for p in ev.response.content.iter().flat_map(|c| c.parts.iter()) {
+            if let Some(fr) = &p.function_response {
+                responses.push(Value::Object(fr.response.clone()));
+            }
+        }
+    }
+    assert_eq!(
+        responses,
+        vec![json!({"exited": true})],
+        "function responses mismatch"
+    );
 }

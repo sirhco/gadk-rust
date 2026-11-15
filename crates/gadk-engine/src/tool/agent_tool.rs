@@ -16,6 +16,7 @@
 //! `AgentTool`, `AgentToolConfig`: run an agent as a tool (port of Go tool/agenttool/agent_tool.go).
 
 use std::any::Any;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -32,7 +33,7 @@ use crate::artifacts::new_forwarding_service;
 use crate::llm::processors::{as_go_floats, go_json_marshal, go_sprint};
 use crate::llm::state::reveal;
 use crate::runner::{PluginConfig, RunOptions, Runner, RunnerConfig};
-use crate::tool::single_turn::make_function_declaration;
+use crate::tool::single_turn::{input_schema_of, make_function_declaration};
 use crate::tool::utils::{go_type_name, validate_map_on_schema, validate_output_schema};
 use crate::workflow::route::go_quote;
 
@@ -178,15 +179,12 @@ impl RunnableTool for AgentTool {
             }
         };
 
-        if self.skip_summarization {
-            ctx.update_actions(|a| a.skip_summarization = true);
-        }
-
-        // Cloned so no borrow of the agent state is held across an await.
-        let (input_schema, output_schema) = match reveal(&*self.agent) {
-            Some(s) => (s.cfg.input_schema.clone(), s.cfg.output_schema.clone()),
-            None => (None, None),
-        };
+        // The same lookup as the declaration (Go 31111f89 `workflowinternal.InputSchema`), so a
+        // workflow agent takes the arguments of its first sub-agent's input schema. The output
+        // schema is an LLM agent's own only. Cloned so no borrow of the agent state is held
+        // across an await.
+        let input_schema = input_schema_of(&*self.agent);
+        let output_schema = reveal(&*self.agent).and_then(|s| s.cfg.output_schema.clone());
 
         let content = match &input_schema {
             Some(schema) => {
@@ -208,6 +206,12 @@ impl RunnableTool for AgentTool {
                 Content::from_text(go_sprint(&as_go_floats(input)), ROLE_USER)
             }
         };
+
+        // Set only once the input is valid, so an argument error goes back to the parent model
+        // instead of ending its turn (Go 4cc7ce5f).
+        if self.skip_summarization {
+            ctx.update_actions(|a| a.skip_summarization = true);
+        }
 
         let session_service: Arc<dyn SessionService> = Arc::new(InMemorySessionService::new());
         let runner = Runner::new(RunnerConfig {
@@ -248,8 +252,11 @@ impl RunnableTool for AgentTool {
             max_llm_calls,
             ..Default::default()
         };
-        // Dropping the stream (on return) cancels the child invocation.
-        let mut events = runner.run(
+        // Dropping the stream (on return) cancels the child invocation. Go 24d33b35 (#1777):
+        // the sub-runner starts with a context marked to inherit this invocation's plugins
+        // (`plugininternal.WithInheritedPlugins(toolCtx)`), which a plugin-less runner keeps.
+        let mut events = runner.run_with_context(
+            &ctx.as_invocation().with_inherited_plugins(),
             sub_session.user_id(),
             sub_session.id(),
             Some(content),
@@ -257,6 +264,10 @@ impl RunnableTool for AgentTool {
             RunOptions::default(),
         );
         let mut last_content: Option<Content> = None;
+        // Long-running calls that are never answered before the run ends (e.g. a tool
+        // confirmation) leave the sub-agent paused. Its session is discarded, so the pause can
+        // never be resumed (Go f25d1424).
+        let mut pending_ids: BTreeSet<String> = BTreeSet::new();
         loop {
             // Go passes toolCtx as the child's context: cancelling the caller cancels the child.
             let next = tokio::select! {
@@ -281,13 +292,38 @@ impl RunnableTool for AgentTool {
                     go_quote(message)
                 )));
             }
+            // Partial chunks carry IDs the flow never acts on; a streamed call gets its final
+            // ID only on the aggregated event.
+            if !event.response.partial {
+                pending_ids.extend(event.long_running_tool_ids.iter().cloned());
+                if let Some(c) = &event.response.content {
+                    for fr in c.parts.iter().filter_map(|p| p.function_response.as_ref()) {
+                        pending_ids.remove(&fr.id);
+                    }
+                }
+            }
             if let Some(c) = event.response.content {
                 last_content = Some(c);
             }
         }
 
+        if !pending_ids.is_empty() {
+            // The parent model must see this error, so don't end its turn here, whatever set
+            // skip_summarization on this call.
+            ctx.update_actions(|a| a.skip_summarization = false);
+            return Err(exec(format!(
+                "sub-agent {} stopped waiting on unresolved long-running tool calls [{}], which AgentTool cannot resume",
+                go_quote(&name),
+                pending_ids.into_iter().collect::<Vec<_>>().join(" ")
+            )));
+        }
+
+        // Go a8a9b936: an empty reply is the result "" (also with an output schema: there is
+        // nothing to validate).
+        let empty_result =
+            || Map::from_iter([("result".to_string(), Value::String(String::new()))]);
         let Some(last) = last_content else {
-            return Ok(Map::new());
+            return Ok(empty_result());
         };
         let output_text = last
             .parts
@@ -298,7 +334,7 @@ impl RunnableTool for AgentTool {
             .collect::<Vec<_>>()
             .join("\n");
         if output_text.is_empty() {
-            return Ok(Map::new());
+            return Ok(empty_result());
         }
         if let Some(schema) = &output_schema {
             return validate_output_schema(&output_text, schema).map_err(|e| {

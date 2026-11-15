@@ -165,7 +165,7 @@ fn is_not_found(err: &ToolError) -> bool {
     false
 }
 
-// parity: adapted: Go's []string and []any argument values are both JSON arrays in Rust; the two error cases also pin Go's encoding/json error text
+// parity: adapted: Go's []string and []any argument values are both JSON arrays in Rust
 #[tokio::test]
 async fn test_load_artifacts_tool_run() {
     let tool = load_artifacts::new();
@@ -173,60 +173,66 @@ async fn test_load_artifacts_tool_run() {
     let tool_impl = tool
         .as_runnable()
         .expect("loadArtifactsTool does not implement FunctionTool");
-    let cases: Vec<(&str, Value, Result<Value, &str>)> = vec![
+    // Arguments the model can correct get adk-python's error result, not a Go
+    // error.
+    let invalid_artifact_names_result = json!({
+        "error": "'artifact_names' must be a list of strings.",
+        "error_code": "INVALID_ARGUMENTS",
+    });
+    let cases: Vec<(&str, Value, Value)> = vec![
         (
             "basic string slice",
             json!({"artifact_names": ["file1", "file2"]}),
-            Ok(json!({"artifact_names": ["file1", "file2"]})),
+            json!({"artifact_names": ["file1", "file2"]}),
         ),
-        ("empty args", json!({}), Ok(json!({"artifact_names": []}))),
+        ("empty args", json!({}), json!({"artifact_names": []})),
         (
             "any slice with strings",
             json!({"artifact_names": ["fileA", "fileB"]}),
-            Ok(json!({"artifact_names": ["fileA", "fileB"]})),
+            json!({"artifact_names": ["fileA", "fileB"]}),
         ),
         (
             "empty string slice",
             json!({"artifact_names": []}),
-            Ok(json!({"artifact_names": []})),
+            json!({"artifact_names": []}),
         ),
         (
             "empty any slice",
             json!({"artifact_names": []}),
-            Ok(json!({"artifact_names": []})),
+            json!({"artifact_names": []}),
         ),
         (
             "nil value",
             json!({"artifact_names": null}),
-            Ok(json!({"artifact_names": []})),
+            json!({"artifact_names": []}),
         ),
         (
             "incorrect type (not a slice)",
             json!({"artifact_names": "not a slice"}),
-            Err(
-                "failed to unmarshal artifact_names from JSON to []string: json: cannot unmarshal string into Go value of type []string",
-            ),
+            invalid_artifact_names_result.clone(),
+        ),
+        (
+            "incorrect type (object)",
+            json!({"artifact_names": {"name": "fileA"}}),
+            invalid_artifact_names_result.clone(),
         ),
         (
             "any slice with non-string",
             json!({"artifact_names": ["fileA", 123]}),
-            Err(
-                "failed to unmarshal artifact_names from JSON to []string: json: cannot unmarshal number into Go value of type string",
-            ),
+            invalid_artifact_names_result.clone(),
+        ),
+        (
+            "any slice with null",
+            json!({"artifact_names": ["fileA", null]}),
+            invalid_artifact_names_result.clone(),
         ),
     ];
     for (name, args, want) in cases {
-        let got = tool_impl.run(tc.clone(), args).await;
-        match want {
-            Ok(want) => {
-                let result = got.unwrap_or_else(|e| panic!("{name}: Run() error = {e}"));
-                assert_eq!(Value::Object(result), want, "{name}: Run() result diff");
-            }
-            Err(want_err) => {
-                let err = got.expect_err(&format!("{name}: Run() error = nil, wantErr true"));
-                assert_eq!(err.to_string(), want_err, "{name}");
-            }
-        }
+        let result = tool_impl
+            .run(tc.clone(), args)
+            .await
+            .unwrap_or_else(|e| panic!("{name}: Run() error = {e}, want nil"));
+        assert_eq!(Value::Object(result), want, "{name}: Run() result diff");
     }
 }
 

@@ -31,7 +31,7 @@
                           "text": "For context:"
                         },
                         {
-                          "text": "[root] transfer_to_agent tool returned result: map[]"
+                          "text": "[root] transfer_to_agent tool returned result: map[result:<nil>]"
                         }
                       ],
                       "role": "ROLE_USER"
@@ -40,7 +40,7 @@
                 },
                 "headers": {
                   "A2a-Version": "1.0",
-                  "Accept": "text/event-stream",
+                  "Accept": "text/event-stream, application/json",
                   "Content-Type": "application/json"
                 },
                 "method": "POST",
@@ -81,7 +81,7 @@
                                 "text": "For context:"
                               },
                               {
-                                "text": "[root] transfer_to_agent tool returned result: map[]"
+                                "text": "[root] transfer_to_agent tool returned result: map[result:<nil>]"
                               }
                             ],
                             "role": "ROLE_USER"
@@ -283,7 +283,10 @@
                         {
                           "data": {
                             "id": "adk-<id-4>",
-                            "name": "transfer_to_agent"
+                            "name": "transfer_to_agent",
+                            "response": {
+                              "result": null
+                            }
                           },
                           "metadata": {
                             "adk_type": "function_response"
@@ -447,7 +450,7 @@
                             "text": "For context:"
                           },
                           {
-                            "text": "[root] transfer_to_agent tool returned result: map[]"
+                            "text": "[root] transfer_to_agent tool returned result: map[result:<nil>]"
                           }
                         ],
                         "role": "ROLE_USER"
@@ -546,7 +549,10 @@
                       {
                         "data": {
                           "id": "adk-<id-4>",
-                          "name": "transfer_to_agent"
+                          "name": "transfer_to_agent",
+                          "response": {
+                            "result": null
+                          }
                         },
                         "metadata": {
                           "adk_type": "function_response"
@@ -667,7 +673,10 @@
                       {
                         "data": {
                           "id": "adk-<id-4>",
-                          "name": "transfer_to_agent"
+                          "name": "transfer_to_agent",
+                          "response": {
+                            "result": null
+                          }
                         },
                         "metadata": {
                           "adk_type": "function_response"
@@ -811,7 +820,10 @@
               {
                 "functionResponse": {
                   "id": "adk-<id-4>",
-                  "name": "transfer_to_agent"
+                  "name": "transfer_to_agent",
+                  "response": {
+                    "result": null
+                  }
                 }
               }
             ],
@@ -974,7 +986,7 @@
                     "text": "For context:"
                   },
                   {
-                    "text": "[root] transfer_to_agent tool returned result: map[]"
+                    "text": "[root] transfer_to_agent tool returned result: map[result:<nil>]"
                   }
                 ],
                 "role": "ROLE_USER"
@@ -1065,7 +1077,7 @@
                           "text": "For context:"
                         },
                         {
-                          "text": "[root] transfer_to_agent tool returned result: map[]"
+                          "text": "[root] transfer_to_agent tool returned result: map[result:<nil>]"
                         }
                       ],
                       "role": "ROLE_USER"
@@ -1074,7 +1086,7 @@
                 },
                 "headers": {
                   "A2a-Version": "1.0",
-                  "Accept": "text/event-stream",
+                  "Accept": "text/event-stream, application/json",
                   "Content-Type": "application/json"
                 },
                 "method": "POST",
@@ -1115,7 +1127,7 @@
                                 "text": "For context:"
                               },
                               {
-                                "text": "[root] transfer_to_agent tool returned result: map[]"
+                                "text": "[root] transfer_to_agent tool returned result: map[result:<nil>]"
                               }
                             ],
                             "role": "ROLE_USER"
@@ -1278,7 +1290,7 @@
             },
             "headers": {
               "A2a-Version": "1.0",
-              "Accept": "application/json",
+              "Accept": "application/a2a+json, application/json",
               "Content-Type": "application/json"
             },
             "method": "POST",
@@ -1310,7 +1322,10 @@
                       {
                         "data": {
                           "id": "adk-<id-4>",
-                          "name": "transfer_to_agent"
+                          "name": "transfer_to_agent",
+                          "response": {
+                            "result": null
+                          }
                         },
                         "metadata": {
                           "adk_type": "function_response"
@@ -1381,7 +1396,7 @@
               }
             },
             "headers": {
-              "Content-Type": "application/json"
+              "Content-Type": "application/a2a+json"
             },
             "status": 200
           }
@@ -1473,7 +1488,7 @@
                             "text": "For context:"
                           },
                           {
-                            "text": "[root] transfer_to_agent tool returned result: map[]"
+                            "text": "[root] transfer_to_agent tool returned result: map[result:<nil>]"
                           }
                         ],
                         "role": "ROLE_USER"
@@ -1532,7 +1547,7 @@
             "body": null,
             "headers": {
               "A2a-Version": "1.0",
-              "Accept": "application/json"
+              "Accept": "application/a2a+json, application/json"
             },
             "method": "POST",
             "path": "/rest/tasks/<task-2>:cancel"
@@ -1562,7 +1577,10 @@
                     {
                       "data": {
                         "id": "adk-<id-4>",
-                        "name": "transfer_to_agent"
+                        "name": "transfer_to_agent",
+                        "response": {
+                          "result": null
+                        }
                       },
                       "metadata": {
                         "adk_type": "function_response"
@@ -1632,7 +1650,7 @@
               }
             },
             "headers": {
-              "Content-Type": "application/json"
+              "Content-Type": "application/a2a+json"
             },
             "status": 200
           }
@@ -1642,7 +1660,7 @@
             "body": null,
             "headers": {
               "A2a-Version": "1.0",
-              "Accept": "application/json"
+              "Accept": "application/a2a+json, application/json"
             },
             "method": "GET",
             "path": "/rest/tasks/<task-2>"
@@ -1672,7 +1690,10 @@
                     {
                       "data": {
                         "id": "adk-<id-4>",
-                        "name": "transfer_to_agent"
+                        "name": "transfer_to_agent",
+                        "response": {
+                          "result": null
+                        }
                       },
                       "metadata": {
                         "adk_type": "function_response"
@@ -1742,7 +1763,7 @@
               }
             },
             "headers": {
-              "Content-Type": "application/json"
+              "Content-Type": "application/a2a+json"
             },
             "status": 200
           }
@@ -1815,7 +1836,10 @@
               {
                 "functionResponse": {
                   "id": "adk-<id-4>",
-                  "name": "transfer_to_agent"
+                  "name": "transfer_to_agent",
+                  "response": {
+                    "result": null
+                  }
                 }
               }
             ],
@@ -1978,7 +2002,7 @@
                     "text": "For context:"
                   },
                   {
-                    "text": "[root] transfer_to_agent tool returned result: map[]"
+                    "text": "[root] transfer_to_agent tool returned result: map[result:<nil>]"
                   }
                 ],
                 "role": "ROLE_USER"

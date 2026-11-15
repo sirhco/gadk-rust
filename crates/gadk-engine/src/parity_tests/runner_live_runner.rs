@@ -892,3 +892,385 @@ async fn test_runner_run_live_send_drops_nil_parts() {
         );
     }
 }
+
+/// Go `time.Date(2026, time.March, d, h, 0, 0, 0, time.UTC)`.
+fn march(day: u32, hour: u32) -> DateTime<Utc> {
+    Utc.with_ymd_and_hms(2026, 3, day, hour, 0, 0).unwrap()
+}
+
+/// A runner over `agent` whose platform clock always reads `run_time` (Go
+/// `platform.WithTimeProvider(ctx, func() time.Time { return runTime })`).
+fn new_timed_runner(
+    agent: Arc<dyn Agent>,
+    svc: Arc<dyn SessionService>,
+    plugins: Vec<Plugin>,
+    run_time: DateTime<Utc>,
+) -> Runner {
+    Runner::new(RunnerConfig {
+        app_name: APP.into(),
+        agent,
+        session_service: svc,
+        artifact_service: None,
+        memory_service: None,
+        plugin_config: PluginConfig {
+            plugins,
+            ..Default::default()
+        },
+        auto_create_session: false,
+        platform: Platform::default().with_time(move || run_time),
+        compaction: None,
+    })
+    .unwrap()
+}
+
+// parity: adapted: on_event receives the event by value, so Go's in-place rewrite (`*ev = …; return nil`) only changes the plugin's own copy; the "rewrite" case then stores the agent's original event, which carries no timestamp either
+#[tokio::test]
+async fn test_runner_run_live_stamps_events_yielded_without_timestamp() {
+    let run_time = march(2, 10);
+    let own_time = march(1, 9);
+    struct Case {
+        name: &'static str,
+        own: DateTime<Utc>,
+        replace: bool,
+        rewrite: bool,
+        want: DateTime<Utc>,
+    }
+    let zero = gadk_session::zero_time();
+    let cases = [
+        Case {
+            name: "agent event",
+            own: zero,
+            replace: false,
+            rewrite: false,
+            want: run_time,
+        },
+        Case {
+            name: "plugin replacement",
+            own: zero,
+            replace: true,
+            rewrite: false,
+            want: run_time,
+        },
+        Case {
+            name: "plugin rewrites in place",
+            own: zero,
+            replace: false,
+            rewrite: true,
+            want: run_time,
+        },
+        Case {
+            name: "own timestamp",
+            own: own_time,
+            replace: false,
+            rewrite: false,
+            want: own_time,
+        },
+    ];
+    for tc in cases {
+        const SESSION_ID: &str = "testSession";
+        let svc: Arc<dyn SessionService> = Arc::new(InMemorySessionService::new());
+        create_session(&*svc, SESSION_ID).await;
+        let saw_unstamped = Arc::new(AtomicBool::new(false));
+        let saw = saw_unstamped.clone();
+        let (replace, rewrite) = (tc.replace, tc.rewrite);
+        let plugin = Plugin::new(gadk_agent::PluginConfig {
+            name: "observe_and_replace".into(),
+            on_event_callback: Some(Arc::new(move |_ctx, mut ev: Event| {
+                if ev.timestamp == gadk_session::zero_time() {
+                    saw.store(true, Ordering::SeqCst);
+                }
+                let out = if rewrite {
+                    ev = Event {
+                        author: ev.author.clone(),
+                        response: ev.response.clone(),
+                        ..Default::default()
+                    };
+                    let _ = ev;
+                    None
+                } else if replace {
+                    Some(Event {
+                        author: ev.author.clone(),
+                        response: ev.response.clone(),
+                        ..Default::default()
+                    })
+                } else {
+                    None
+                };
+                Box::pin(async move { Ok(out) })
+            })),
+            ..Default::default()
+        });
+        let own = tc.own;
+        let sequence: Sequence = Arc::new(move |_ctx: InvocationContext| {
+            let mut ev = Event {
+                author: "test_agent".into(),
+                timestamp: own,
+                ..Default::default()
+            };
+            ev.response.content = Some(Content::from_text("reply", ROLE_MODEL));
+            futures::stream::iter(vec![Ok(ev)]).boxed()
+        });
+        let agent = mock_live_agent(
+            "test_agent",
+            Arc::new(DummyLiveSession),
+            sequence,
+            Arc::new(AtomicBool::new(false)),
+        );
+        let r = new_timed_runner(agent, svc.clone(), vec![plugin], run_time);
+        let (_sess, mut stream) = r
+            .run_live(
+                USER,
+                SESSION_ID,
+                LiveRunConfig::default(),
+                RunOptions::default(),
+            )
+            .await
+            .unwrap_or_else(|e| panic!("{}: RunLive() error = {e}", tc.name));
+        while let Some(item) = stream.next().await {
+            item.unwrap_or_else(|e| panic!("{}: {e}", tc.name));
+        }
+
+        let mut saw_reply = false;
+        for ev in get_run_live_test_events(&*svc, SESSION_ID).await {
+            if ev.author != "test_agent" {
+                continue;
+            }
+            saw_reply = true;
+            assert_eq!(ev.timestamp, tc.want, "{}: stored event timestamp", tc.name);
+        }
+        assert!(
+            saw_reply,
+            "{}: no event from the live agent was stored",
+            tc.name
+        );
+        assert!(
+            !saw_unstamped.load(Ordering::SeqCst),
+            "{}: OnEventCallback saw the live agent's event with a zero timestamp",
+            tc.name
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_runner_run_live_plugin_replacement_keeps_event_identity() {
+    const SESSION_ID: &str = "testSession";
+    let run_time = march(2, 10);
+    let agent_time = march(1, 9);
+    let svc: Arc<dyn SessionService> = Arc::new(InMemorySessionService::new());
+    create_session(&*svc, SESSION_ID).await;
+    let original_invocation_id: Arc<Mutex<String>> = Arc::default();
+    let seen = original_invocation_id.clone();
+    let plugin = Plugin::new(gadk_agent::PluginConfig {
+        name: "replace".into(),
+        on_event_callback: Some(Arc::new(move |_ctx, ev: Event| {
+            *seen.lock() = ev.invocation_id.clone();
+            let mut out = Event {
+                id: "plugin-id".into(),
+                invocation_id: "plugin-invocation".into(),
+                timestamp: march(3, 11),
+                ..Default::default()
+            };
+            out.response.content = Some(Content::from_text("replaced", ROLE_MODEL));
+            out.response
+                .custom_metadata
+                .insert("modified".into(), json!(true));
+            Box::pin(async move { Ok(Some(out)) })
+        })),
+        ..Default::default()
+    });
+    let sequence: Sequence = Arc::new(move |ctx: InvocationContext| {
+        let mut ev = Event {
+            id: "agent-event".into(),
+            invocation_id: ctx.invocation_id().to_string(),
+            timestamp: agent_time,
+            author: "test_agent".into(),
+            ..Default::default()
+        };
+        ev.response.content = Some(Content::from_text("reply", ROLE_MODEL));
+        futures::stream::iter(vec![Ok(ev)]).boxed()
+    });
+    let agent = mock_live_agent(
+        "test_agent",
+        Arc::new(DummyLiveSession),
+        sequence,
+        Arc::new(AtomicBool::new(false)),
+    );
+    let r = new_timed_runner(agent, svc.clone(), vec![plugin], run_time);
+    let (_sess, stream) = r
+        .run_live(
+            USER,
+            SESSION_ID,
+            LiveRunConfig::default(),
+            RunOptions::default(),
+        )
+        .await
+        .expect("RunLive() error");
+    let streamed: Vec<Event> = stream.map(|r| r.unwrap()).collect().await;
+    let stored = get_run_live_test_events(&*svc, SESSION_ID).await;
+    let original_invocation_id = original_invocation_id.lock().clone();
+    assert!(
+        !original_invocation_id.is_empty(),
+        "the plugin never saw the live agent's event"
+    );
+
+    // Go cmp.Diff ignoring Actions: identity from the original, content and metadata from the
+    // replacement.
+    let check = |where_: &str, evs: &[Event]| {
+        assert_eq!(evs.len(), 1, "{where_} events");
+        let ev = &evs[0];
+        assert_eq!(ev.id, "agent-event", "{where_} ID");
+        assert_eq!(
+            ev.invocation_id, original_invocation_id,
+            "{where_} InvocationID"
+        );
+        assert_eq!(ev.timestamp, agent_time, "{where_} Timestamp");
+        assert_eq!(ev.author, "test_agent", "{where_} Author");
+        assert_eq!(
+            ev.response.content,
+            Some(Content::from_text("replaced", ROLE_MODEL)),
+            "{where_} Content"
+        );
+        assert_eq!(
+            ev.response.custom_metadata.get("modified"),
+            Some(&json!(true)),
+            "{where_} CustomMetadata"
+        );
+        assert_eq!(
+            ev.response.custom_metadata.len(),
+            1,
+            "{where_} CustomMetadata"
+        );
+    };
+    check("streamed", &streamed);
+    check("stored", &stored);
+}
+
+#[tokio::test]
+async fn test_runner_run_live_early_exit_runs_on_event_and_after_run() {
+    const SESSION_ID: &str = "testSession";
+    let svc: Arc<dyn SessionService> = Arc::new(InMemorySessionService::new());
+    create_session(&*svc, SESSION_ID).await;
+
+    let cached_reply = Content::from_text("cached answer", ROLE_MODEL);
+    let redacted_reply = Content::from_text("redacted answer", ROLE_MODEL);
+    let on_event_calls = Arc::new(Mutex::new(0usize));
+    let after_run_calls = Arc::new(Mutex::new(0usize));
+    let (oe, ar, cached, redacted) = (
+        on_event_calls.clone(),
+        after_run_calls.clone(),
+        cached_reply.clone(),
+        redacted_reply.clone(),
+    );
+    let plugin = Plugin::new(gadk_agent::PluginConfig {
+        name: "cache".into(),
+        before_run_callback: Some(Arc::new(move |_ctx| {
+            let out = Ok(Some(cached.clone()));
+            Box::pin(async move { out })
+        })),
+        on_event_callback: Some(Arc::new(move |_ctx, mut ev: Event| {
+            *oe.lock() += 1;
+            ev.response.content = Some(redacted.clone());
+            Box::pin(async move { Ok(Some(ev)) })
+        })),
+        after_run_callback: Some(Arc::new(move |_ctx| {
+            *ar.lock() += 1;
+            Box::pin(async {})
+        })),
+        ..Default::default()
+    });
+
+    let run_live_called = Arc::new(AtomicBool::new(false));
+    let sequence: Sequence = Arc::new(|_ctx: InvocationContext| futures::stream::empty().boxed());
+    let agent = mock_live_agent(
+        "test_agent",
+        Arc::new(DummyLiveSession),
+        sequence,
+        run_live_called.clone(),
+    );
+    let r = new_runner(agent, svc.clone(), vec![plugin]);
+    let (_sess, stream) = r
+        .run_live(
+            USER,
+            SESSION_ID,
+            LiveRunConfig::default(),
+            RunOptions::default(),
+        )
+        .await
+        .expect("RunLive failed");
+    let got: Vec<Event> = stream.map(|r| r.unwrap()).collect().await;
+
+    assert!(
+        !run_live_called.load(Ordering::SeqCst),
+        "the agent ran although BeforeRun replied"
+    );
+    assert_eq!(*on_event_calls.lock(), 1, "OnEvent calls");
+    assert_eq!(*after_run_calls.lock(), 1, "AfterRun calls");
+    assert_eq!(got.len(), 1, "yielded events");
+    assert_eq!(
+        got[0].response.content.as_ref(),
+        Some(&redacted_reply),
+        "yielded reply"
+    );
+    let stored = get_run_live_test_events(&*svc, SESSION_ID).await;
+    assert_eq!(stored.len(), 1, "stored events");
+    assert_eq!(
+        stored[0].response.content.as_ref(),
+        Some(&redacted_reply),
+        "stored reply"
+    );
+}
+
+#[tokio::test]
+async fn test_runner_run_live_send_rejects_user_function_call() {
+    const SESSION_ID: &str = "testSessionUserFunctionCall";
+    let svc: Arc<dyn SessionService> = Arc::new(InMemorySessionService::new());
+    create_session(&*svc, SESSION_ID).await;
+    let agent_sess = Arc::new(RecordingLiveSession::default());
+    let sequence: Sequence = Arc::new(|_ctx: InvocationContext| futures::stream::empty().boxed());
+    let agent = mock_live_agent(
+        "test_agent",
+        agent_sess.clone(),
+        sequence,
+        Arc::new(AtomicBool::new(false)),
+    );
+    let r = new_runner(agent, svc.clone(), vec![]);
+    let (sess, _stream) = r
+        .run_live(
+            USER,
+            SESSION_ID,
+            LiveRunConfig::default(),
+            RunOptions::default(),
+        )
+        .await
+        .expect("RunLive failed");
+
+    let content = Content {
+        role: ROLE_USER.into(),
+        parts: vec![
+            Part::from_text("hi"),
+            Part {
+                function_call: Some(FunctionCall {
+                    name: "some_tool".into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        ],
+    };
+    let err = sess
+        .send(LiveRequest {
+            content: Some(content),
+            realtime_input: None,
+        })
+        .await;
+    match err {
+        Err(e) => assert_eq!(e.to_string(), "user message cannot contain function calls"),
+        Ok(()) => panic!("Send() error = nil, want \"user message cannot contain function calls\""),
+    }
+    assert_eq!(agent_sess.requests.lock().len(), 0, "forwarded requests");
+    assert_eq!(
+        get_run_live_test_events(&*svc, SESSION_ID).await.len(),
+        0,
+        "saved events"
+    );
+}

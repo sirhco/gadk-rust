@@ -105,7 +105,10 @@ async fn test_generate_content_tracing() {
     let (closed_after, spans) = capture_spans(async {
         let mut s = generate_content(&ctx, m, LlmRequest::default(), true);
         let mut closed_after = Vec::new();
-        while s.next().await.is_some() {
+        while let Some((item, _)) = s.next().await {
+            if let Err(e) = item {
+                panic!("generateContent() error = {e}");
+            }
             closed_after.push(closed_count("generate_content"));
         }
         closed_after
@@ -138,7 +141,10 @@ async fn test_generate_content_tracing_no_final_response() {
     let (closed_after, spans) = capture_spans(async {
         let mut s = generate_content(&ctx, m, LlmRequest::default(), true);
         let mut closed_after = Vec::new();
-        while s.next().await.is_some() {
+        while let Some((item, _)) = s.next().await {
+            if let Err(e) = item {
+                panic!("generateContent() error = {e}");
+            }
             closed_after.push(closed_count("generate_content"));
         }
         closed_after
@@ -259,7 +265,11 @@ async fn test_logging_span_id_propagation() {
     let ctx = InvocationContext::builder().build_invocation();
     let ((), spans, logs) = capture(async {
         let mut s = generate_content(&ctx, model, req, true);
-        while s.next().await.is_some() {}
+        while let Some((item, _)) = s.next().await {
+            if let Err(e) = item {
+                panic!("generateContent() error = {e}");
+            }
+        }
     })
     .await;
     assert_eq!(
@@ -320,7 +330,11 @@ async fn test_inference_event_describes_the_request_the_span_does() {
     let ctx = InvocationContext::builder().build_invocation();
     let ((), spans, logs) = capture(async {
         let mut s = generate_content(&ctx, model, req, false);
-        while s.next().await.is_some() {}
+        while let Some((item, _)) = s.next().await {
+            if let Err(e) = item {
+                panic!("generateContent() error = {e}");
+            }
+        }
     })
     .await;
     let want = *received.lock();

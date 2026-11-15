@@ -577,7 +577,8 @@ async fn test_value_ending_in_key_name() {
                 fake_tool("lookup"),
                 input.clone(),
             )
-            .await,
+            .await
+            .1,
         );
         errs.add(
             (p.after_tool_callback().unwrap())(

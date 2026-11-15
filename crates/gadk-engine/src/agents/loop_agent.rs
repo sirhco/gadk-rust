@@ -22,6 +22,8 @@ use gadk_agent::{
     Agent, AgentConfig, AgentError, AgentState, AgentType, EventStream, InvocationContext,
 };
 
+use crate::agents::graph_resume::graph_resume_indexes;
+
 /// Port of Go loopagent.Config: the configuration of a loop agent.
 #[derive(Clone, Default)]
 pub struct LoopAgentConfig {
@@ -67,6 +69,14 @@ fn run(ctx: InvocationContext, max_iterations: u32) -> EventStream {
         if subs.is_empty() {
             return;
         }
+        // Go 51bc7ec5 (#2188): only the first pass narrows to the sub-agent holding the
+        // lowest-indexed caller; later passes run every sub-agent under a context marked done,
+        // so nothing beneath narrows again.
+        let mut pass_subs: &[Arc<dyn Agent>] = &subs;
+        if let Some(&first) = graph_resume_indexes(&ctx).as_ref().and_then(|ix| ix.first()) {
+            pass_subs = &subs[first..];
+        }
+        let mut pass_ctx = ctx.clone();
         let mut count = max_iterations;
         loop {
             // A pass can yield no events (for example when every sub-agent is empty), so the
@@ -80,8 +90,8 @@ fn run(ctx: InvocationContext, max_iterations: u32) -> EventStream {
             // can land.
             tokio::task::yield_now().await;
             let mut should_exit = false;
-            for sub in &subs {
-                let mut s = sub.run(ctx.clone());
+            for sub in pass_subs {
+                let mut s = sub.run(pass_ctx.clone());
                 while let Some(item) = s.next().await {
                     match item {
                         // A failed sub-agent ends the loop, as in adk-python: retrying it would
@@ -104,6 +114,8 @@ fn run(ctx: InvocationContext, max_iterations: u32) -> EventStream {
                     return;
                 }
             }
+            pass_subs = &subs;
+            pass_ctx = ctx.with_graph_resume_done();
             if count > 0 {
                 count -= 1;
                 if count == 0 {

@@ -22,7 +22,8 @@ use gadk_model::LlmRequest;
 use gadk_session::Event;
 
 use crate::llm::{
-    flow::Flow, processors::output_schema::need_output_schema_processor, state::reveal,
+    flow::Flow, output_schema_binding::output_schema_for,
+    processors::output_schema::need_output_schema_processor, state::reveal,
 };
 
 /// Port of Go internal/llminternal/basic_processor.go basicRequestProcessor (line 31).
@@ -42,11 +43,12 @@ pub(crate) fn basic_request_processor<'a>(
             .unwrap_or_default();
         // Task-mode agents never set ResponseSchema (the finish_task declaration carries it).
         // Reads the DECLARED mode (mode.go doc).
+        // Go be529e7b: the declared schema, else one a typed workflow node bound.
         if state.cfg.mode != Mode::Task
-            && state.cfg.output_schema.is_some()
             && !need_output_schema_processor(state)
+            && let Some(schema) = output_schema_for(ctx, state)
         {
-            cfg.response_schema = state.cfg.output_schema.clone();
+            cfg.response_schema = Some(schema);
             cfg.response_mime_type = "application/json".to_owned();
         }
         req.config = Some(cfg);

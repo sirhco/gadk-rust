@@ -19,11 +19,11 @@ use gadk_genai::*;
 use pretty_assertions::assert_eq;
 use serde_json::{Value, json};
 
-/// Fields the live API sends that genai v1.75.0 does not model.
+/// Fields the live API sends that genai v1.77.0 does not model.
 const UNMODELED: &[&str] = &[
     "turnToken",
     // generate_content_response_000.json: `usageMetadata.rawPromptTokenCount` and
-    // `usageMetadata.serviceTier` are not fields of genai v1.75.0
+    // `usageMetadata.serviceTier` are not fields of genai v1.77.0
     // `GenerateContentResponseUsageMetadata` (only Live `UsageMetadata` has `serviceTier`).
     "rawPromptTokenCount",
     "serviceTier",
@@ -141,6 +141,118 @@ fn serde_config_continuation_token_and_automatic_continuation() {
         serde_json::from_value::<GenerateContentConfig>(v).unwrap(),
         cfg
     );
+}
+
+/// genai v1.77.0 `GenerateContentConfig.{GenerationOutputConfig, Store}`: Go JSON names,
+/// omitted when unset, `store: false` and an empty `generationOutputConfig` kept.
+#[test]
+fn serde_config_generation_output_config_and_store() {
+    assert_eq!(
+        serde_json::to_value(GenerateContentConfig::default()).unwrap(),
+        json!({})
+    );
+    for (cfg, want) in [
+        (
+            GenerateContentConfig {
+                generation_output_config: Some(GenerationOutputConfig {
+                    output_uri_prefix: "gs://b/p/".into(),
+                }),
+                store: Some(true),
+                ..Default::default()
+            },
+            json!({"generationOutputConfig": {"outputUriPrefix": "gs://b/p/"}, "store": true}),
+        ),
+        (
+            GenerateContentConfig {
+                generation_output_config: Some(GenerationOutputConfig::default()),
+                store: Some(false),
+                ..Default::default()
+            },
+            json!({"generationOutputConfig": {}, "store": false}),
+        ),
+    ] {
+        let v = serde_json::to_value(&cfg).unwrap();
+        assert_eq!(v, want);
+        assert_eq!(
+            serde_json::from_value::<GenerateContentConfig>(v).unwrap(),
+            cfg
+        );
+    }
+}
+
+/// genai v1.77.0 `FunctionResponsePart.MediaProcessing`.
+#[test]
+fn serde_function_response_part_media_processing() {
+    let part = FunctionResponsePart {
+        media_processing: Some(MediaProcessing::Agentic),
+        ..Default::default()
+    };
+    let v = serde_json::to_value(&part).unwrap();
+    assert_eq!(v, json!({"mediaProcessing": "AGENTIC"}));
+    assert_eq!(
+        serde_json::from_value::<FunctionResponsePart>(v).unwrap(),
+        part
+    );
+    assert_eq!(
+        serde_json::to_value(FunctionResponsePart::default()).unwrap(),
+        json!({})
+    );
+    // Go's `omitempty` on the string type: a decoded `""` is not re-encoded (Part too).
+    let empty: FunctionResponsePart =
+        serde_json::from_value(json!({"mediaProcessing": ""})).unwrap();
+    assert_eq!(serde_json::to_value(&empty).unwrap(), json!({}));
+    let part: Part = serde_json::from_value(json!({"text": "t", "mediaProcessing": ""})).unwrap();
+    assert_eq!(serde_json::to_value(&part).unwrap(), json!({"text": "t"}));
+}
+
+/// genai v1.77.0 `LiveConnectConfig.Labels` and `LiveClientContextUpdate{,Tools}`: an unset
+/// tools wrapper is omitted, a set one with no tools is `{}`.
+#[test]
+fn serde_live_labels_and_context_update() {
+    let cfg = LiveConnectConfig {
+        labels: [("k".to_string(), "v".to_string())].into_iter().collect(),
+        ..Default::default()
+    };
+    let v = serde_json::to_value(&cfg).unwrap();
+    assert_eq!(v, json!({"labels": {"k": "v"}}));
+    assert_eq!(serde_json::from_value::<LiveConnectConfig>(v).unwrap(), cfg);
+    assert_eq!(
+        serde_json::to_value(LiveConnectConfig::default()).unwrap(),
+        json!({})
+    );
+
+    for (update, want) in [
+        (LiveClientContextUpdate::default(), json!({})),
+        (
+            LiveClientContextUpdate {
+                tools: Some(LiveClientContextUpdateTools::default()),
+                ..Default::default()
+            },
+            json!({"tools": {}}),
+        ),
+        (
+            LiveClientContextUpdate {
+                system_instruction: Some(Content::from_text("s", "user")),
+                tools: Some(LiveClientContextUpdateTools {
+                    tools: vec![Tool {
+                        google_search: Some(GoogleSearch::default()),
+                        ..Default::default()
+                    }],
+                }),
+            },
+            json!({
+                "systemInstruction": {"parts": [{"text": "s"}], "role": "user"},
+                "tools": {"tools": [{"googleSearch": {}}]},
+            }),
+        ),
+    ] {
+        let v = serde_json::to_value(&update).unwrap();
+        assert_eq!(v, want);
+        assert_eq!(
+            serde_json::from_value::<LiveClientContextUpdate>(v).unwrap(),
+            update
+        );
+    }
 }
 
 #[test]

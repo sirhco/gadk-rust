@@ -188,9 +188,16 @@ mod test_support {
     use crate::llm::{config::LlmAgentConfig, state::LlmAgentState};
 
     /// Go mockLLMAgent{Agent: agent.New(Config{Name, Description, SubAgents}), s: &State{...}}.
+    /// An empty name becomes `test_agent`: `agent::new` rejects it (Go #2124), and Go's
+    /// name-less mocks embed no agent at all.
     pub(crate) fn test_llm_agent(cfg: LlmAgentConfig) -> Arc<dyn Agent> {
+        let name = if cfg.name.is_empty() {
+            "test_agent".to_owned()
+        } else {
+            cfg.name.clone()
+        };
         let base = AgentConfig {
-            name: cfg.name.clone(),
+            name,
             description: cfg.description.clone(),
             sub_agents: cfg.sub_agents.clone(),
             ..Default::default()

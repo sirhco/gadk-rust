@@ -26,7 +26,10 @@ use pretty_assertions::assert_eq;
 use serde_json::{Value, json};
 
 use super::super::plugin_agentanalytics_batch_processor::support::{image_content, queued_row};
-use super::{Barrier, as_off, bare, hooked, opts, resolve};
+use super::{
+    Barrier, MAX_PATH_SEGMENT_BYTES, PATH_SEGMENT_HASH_SUFFIX_LEN, as_off, bare, hooked, opts,
+    path_segment_hash_suffix, resolve,
+};
 use crate::bigquery::fake::RecordingLogger;
 use crate::config::{Config, GCS_UPLOAD_TIMEOUT};
 use crate::context::Context;
@@ -120,29 +123,90 @@ fn test_is_safe_extension() {
 
 #[test]
 fn test_path_segment() {
-    let tests = [
+    fn h(s: impl AsRef<str>) -> String {
+        path_segment_hash_suffix(s.as_ref())
+    }
+    let a = |n: usize| "a".repeat(n);
+    let tests: Vec<(&str, String, String)> = vec![
         (
             "a trace id",
-            "4bf92f3577b34da6a3ce929d0e0e4736",
-            "4bf92f3577b34da6a3ce929d0e0e4736",
+            "4bf92f3577b34da6a3ce929d0e0e4736".into(),
+            "4bf92f3577b34da6a3ce929d0e0e4736".into(),
         ),
-        ("all the safe characters", "aZ09-_.x", "aZ09-_.x"),
-        ("empty", "", "fallback"),
-        ("a slash", "a/b", "a_b"),
-        ("a path", "../x", ".._x"),
-        ("blanks and control characters", "a b\tc\nd", "a_b_c_d"),
-        ("one underscore per rune", "é?*", "___"),
-        ("only unsafe characters", "///", "___"),
-        ("the current directory", ".", "fallback"),
-        ("the parent directory", "..", "fallback"),
-        ("only dots", "....", "fallback"),
-        ("dots next to a name", "a..", "a.."),
-        ("a dot name that is not a path element", ".x", ".x"),
-        ("the edges of the character classes", "azAZ09", "azAZ09"),
-        ("just outside the character classes", "`{@[/:", "______"),
+        (
+            "all the safe characters",
+            "aZ09-_.x".into(),
+            "aZ09-_.x".into(),
+        ),
+        ("empty", String::new(), "fallback".into()),
+        ("a slash", "a/b".into(), format!("a_b{}", h("a/b"))),
+        ("a path", "../x".into(), format!(".._x{}", h("../x"))),
+        (
+            "blanks and control characters",
+            "a b\tc\nd".into(),
+            format!("a_b_c_d{}", h("a b\tc\nd")),
+        ),
+        (
+            "one underscore per rune",
+            "é?*".into(),
+            format!("___{}", h("é?*")),
+        ),
+        (
+            "only unsafe characters",
+            "///".into(),
+            format!("___{}", h("///")),
+        ),
+        (
+            "the current directory",
+            ".".into(),
+            format!("fallback{}", h(".")),
+        ),
+        (
+            "the parent directory",
+            "..".into(),
+            format!("fallback{}", h("..")),
+        ),
+        ("only dots", "....".into(), format!("fallback{}", h("...."))),
+        ("dots next to a name", "a..".into(), "a..".into()),
+        (
+            "a dot name that is not a path element",
+            ".x".into(),
+            ".x".into(),
+        ),
+        (
+            "the edges of the character classes",
+            "azAZ09".into(),
+            "azAZ09".into(),
+        ),
+        (
+            "just outside the character classes",
+            "`{@[/: ".into(),
+            format!("_______{}", h("`{@[/: ")),
+        ),
+        ("exactly 128 safe ASCII bytes", a(128), a(128)),
+        (
+            "129 safe ASCII bytes is truncated with hash",
+            a(129),
+            format!(
+                "{}{}",
+                a(MAX_PATH_SEGMENT_BYTES - PATH_SEGMENT_HASH_SUFFIX_LEN),
+                h(a(129))
+            ),
+        ),
+        (
+            "tilde is outside the unchanged safe alphabet",
+            "a~b".into(),
+            format!("a_b{}", h("a~b")),
+        ),
     ];
     for (name, id, want) in tests {
-        assert_eq!(path_segment(id, "fallback"), want, "{name}");
+        let got = path_segment(&id, "fallback");
+        assert_eq!(got, want, "{name}");
+        assert!(
+            id.is_empty() || got.len() <= MAX_PATH_SEGMENT_BYTES,
+            "{name}: len(pathSegment({id:?}, \"fallback\")) = {}, exceeds {MAX_PATH_SEGMENT_BYTES}",
+            got.len()
+        );
     }
 }
 

@@ -17,14 +17,14 @@
 
 use bytes::Bytes;
 use gadk_genai::{
-    Blob, Content, ExecutableCode, FileData, FunctionCall, FunctionResponse, Part,
-    PartMediaResolution, PartMediaResolutionLevel, VideoMetadata,
+    Blob, CodeExecutionResult, Content, ExecutableCode, FileData, FunctionCall, FunctionResponse,
+    Language, Outcome, Part, PartMediaResolution, PartMediaResolutionLevel, VideoMetadata,
 };
 use pretty_assertions::assert_eq;
 use serde_json::{Map, Value, json};
 
 use crate::shared::contents::{
-    PartField, flatten_content_text, replayed_reasoning, unsupported_payload,
+    PartField, code_execution_text, flatten_content_text, replayed_reasoning, unsupported_payload,
 };
 
 fn text(t: &str) -> Part {
@@ -276,6 +276,73 @@ fn test_unsupported_payload_emitting_media_does_not_hide_anything_else() {
         unsupported_payload(&part, &[PartField::Media]),
         Some("ExecutableCode")
     );
+    assert_eq!(
+        unsupported_payload(&part, &[PartField::Media, PartField::CodeExecution]),
+        None,
+        "UnsupportedPayload(PartFieldMedia, PartFieldCodeExecution)"
+    );
+}
+
+// parity: adapted: Go's "nil" case (a nil *genai.Part) has no Rust value; the other cases are Go's
+#[test]
+fn test_code_execution_text() {
+    let cases = [
+        ("neither field", text("hi"), ""),
+        (
+            "code",
+            Part {
+                executable_code: Some(ExecutableCode {
+                    code: "print(1)".to_string(),
+                    language: Some(Language::Python),
+                    ..ExecutableCode::default()
+                }),
+                ..Part::default()
+            },
+            "Code:```python\nprint(1)\n```",
+        ),
+        (
+            "result",
+            Part {
+                code_execution_result: Some(CodeExecutionResult {
+                    outcome: Some(Outcome::Ok),
+                    output: "1".to_string(),
+                    ..CodeExecutionResult::default()
+                }),
+                ..Part::default()
+            },
+            "Execution Result:```code_output\n1\n```",
+        ),
+        (
+            "both, code first",
+            Part {
+                executable_code: Some(ExecutableCode {
+                    code: "print(1)".to_string(),
+                    ..ExecutableCode::default()
+                }),
+                code_execution_result: Some(CodeExecutionResult {
+                    output: "1".to_string(),
+                    ..CodeExecutionResult::default()
+                }),
+                ..Part::default()
+            },
+            "Code:```python\nprint(1)\n```\nExecution Result:```code_output\n1\n```",
+        ),
+        (
+            "empty code is still labeled",
+            Part {
+                executable_code: Some(ExecutableCode::default()),
+                ..Part::default()
+            },
+            "Code:```python\n\n```",
+        ),
+    ];
+    for (name, part, want) in cases {
+        assert_eq!(
+            code_execution_text(&part),
+            want,
+            "{name}: CodeExecutionText()"
+        );
+    }
 }
 
 /// Reasoning is droppable only when the part holds nothing else, and media is something else

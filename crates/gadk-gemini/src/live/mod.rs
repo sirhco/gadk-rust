@@ -15,7 +15,7 @@
 
 //! The Live (bidi streaming) connection over a WebSocket, for the Gemini API and Vertex AI.
 //!
-//! Ports genai v1.75.0 `live.go` (`Live.Connect`, `Session` send/receive) and ADK-Go
+//! Ports genai v1.77.0 `live.go` (`Live.Connect`, `Session` send/receive) and ADK-Go
 //! `internal/llminternal/googlellm/live_connection.go` (`LiveConnection`).
 
 mod messages;
@@ -30,7 +30,8 @@ use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use gadk_genai::{
     ActivityEnd, ActivityStart, Content, FunctionResponse, LiveClientContentInput,
-    LiveConnectConfig, LiveRealtimeInput, LiveServerMessage, LiveToolResponseInput, Part,
+    LiveClientContextUpdate, LiveConnectConfig, LiveRealtimeInput, LiveServerMessage,
+    LiveToolResponseInput, Part,
 };
 pub use gadk_model::RealtimeInput;
 use gadk_model::{Backend, LiveConnError, LiveConnErrorKind, LlmResponse};
@@ -345,6 +346,12 @@ impl LiveConnection {
         self.model_name.contains("gemini-3.1")
     }
 
+    /// Go `isGemini3xLive(c.modelName)`: a Gemini 3.x Live model (not Live Translate), on
+    /// either backend (Go d8e47448).
+    fn is_gemini_3x_live(&self) -> bool {
+        gadk_model::is_gemini_3x_live(&self.model_name)
+    }
+
     async fn write(&self, text: String) -> Result<(), GeminiError> {
         self.sink
             .lock()
@@ -363,9 +370,10 @@ impl LiveConnection {
         self.write(messages::realtime_input_message(&input)?).await
     }
 
-    /// Port of Go `SendHistory`: sends `history` without audio inline-data parts as one
-    /// client-content message, completing the turn when the last content is the user's.
-    /// Nothing is sent when no part remains, or for gemini-3.1 models.
+    /// Port of Go `SendHistory`: sends `history` without audio inline-data parts and without
+    /// internal live-artifact references ([`gadk_model::is_internal_live_artifact_part`], Go
+    /// 22ff1839) as one client-content message, completing the turn when the last content is
+    /// the user's. Nothing is sent when no part remains, or for gemini-3.1 models.
     pub async fn send_history(&self, history: &[Content]) -> Result<(), GeminiError> {
         // TODO(adk-go): genai seems to be missing initial_history_in_client_content.
         if self.is_gemini_31() {
@@ -382,6 +390,7 @@ impl LiveConnection {
                         !p.inline_data
                             .as_ref()
                             .is_some_and(|b| b.mime_type.starts_with("audio/"))
+                            && !gadk_model::is_internal_live_artifact_part(p)
                     })
                     .cloned()
                     .collect();
@@ -405,8 +414,8 @@ impl LiveConnection {
     }
 
     /// Port of Go `SendContent`: function responses (when the first part is one) go as a
-    /// tool response; single-text content to a gemini-3.1 model on the Gemini API goes as
-    /// realtime text; anything else as a complete client-content turn.
+    /// tool response; single-text content to a Gemini 3.x Live model goes as realtime text;
+    /// anything else as a complete client-content turn.
     pub async fn send_content(&self, content: Content) -> Result<(), GeminiError> {
         if content.parts.is_empty() {
             return Err(live_other("empty content"));
@@ -419,8 +428,7 @@ impl LiveConnection {
         }
         if let [only] = content.parts.as_slice()
             && !only.text.is_empty()
-            && self.is_gemini_31()
-            && self.backend == Backend::GeminiApi
+            && self.is_gemini_3x_live()
         {
             let text = only.text.clone();
             return self
@@ -439,8 +447,10 @@ impl LiveConnection {
         .map_err(|e| wrap_live("failed to send content", e))
     }
 
-    /// Port of Go `SendRealtime`. Blobs go as `mediaChunks`, or for a gemini-3.1 model on
-    /// the Gemini API as `video` (image MIME types) or `audio`.
+    /// Port of Go `SendRealtime`. Blobs go as `mediaChunks`, or for a Gemini 3.x Live or
+    /// Gemini 3.5 Live Translate model as `video` (image MIME types) or `audio` (everything
+    /// else, where the server rejects a type other than `audio/*`; the error goes to the
+    /// caller, as in Go).
     pub async fn send_realtime(&self, input: RealtimeInput) -> Result<(), GeminiError> {
         let input = match input {
             RealtimeInput::Blob(mut blob) => {
@@ -451,7 +461,9 @@ impl LiveConnection {
                         "audio/pcm".into()
                     };
                 }
-                if self.is_gemini_31() && self.backend == Backend::GeminiApi {
+                if self.is_gemini_3x_live()
+                    || gadk_model::is_gemini_35_live_translate(&self.model_name)
+                {
                     if blob.mime_type.starts_with("image/") {
                         LiveRealtimeInput {
                             video: Some(blob),
@@ -500,7 +512,19 @@ impl LiveConnection {
         let input = LiveToolResponseInput {
             function_responses: responses,
         };
-        self.write(messages::tool_response_message(&input)?).await
+        self.write(messages::tool_response_message(self.backend, &input)?)
+            .await
+    }
+
+    /// genai `SendContextUpdate` (v1.77.0, preview): updates the system instruction and/or
+    /// the tools of the current session. Only the fields that are set are updated; the
+    /// update is processed in order with the rest of the inputs.
+    pub async fn send_context_update(
+        &self,
+        input: LiveClientContextUpdate,
+    ) -> Result<(), GeminiError> {
+        self.write(messages::context_update_message(self.backend, &input)?)
+            .await
     }
 
     /// Port of Go `Recv`: the next response. `None` when the stream ended without a close

@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The Live WebSocket URL and setup model name: port of genai v1.75.0 `live.go`
+//! The Live WebSocket URL and setup model name: port of genai v1.77.0 `live.go`
 //! `Live.Connect` (lines 64–135) and `transformer.go` `tModel` / `tModelFullName`.
 
 use gadk_model::Backend;

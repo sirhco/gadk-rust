@@ -168,10 +168,11 @@ async fn test_model_generate_stream_terminal_tool_calls_are_authoritative() {
     }
 
     {
-        // Replacing must not reorder: blocking reports the call first for the same body.
+        // The snapshot omits streamed text, so it cannot mask adoption's ordering by replacing
+        // the whole turn afterward.
         let name = "the event's calls keep the place the turn's calls held";
         let ev_call_then_text = completed_with(&format!(
-            r#"{CALL_SF},{{"type":"message","content":[{{"type":"output_text","text":"hello"}}]}}"#
+            r#"{CALL_SF},{{"type":"message","content":[{{"type":"output_text","text":"terminal"}}]}}"#
         ));
         let got = streamed_ok(
             name,
@@ -968,6 +969,114 @@ async fn test_model_generate_stream_completed_text_after_empty_function_args() {
         assert_eq!(
             final_resp.content, blocking.content,
             "{name}: content mismatch (blocking vs streamed)"
+        );
+    }
+}
+
+/// When the terminal call restates its ID and arguments, an item-ID fallback must not prevent
+/// recovery of text present only in the completed response (a1603c7f, #1897).
+#[tokio::test]
+async fn test_model_generate_stream_completed_text_after_call_id_fallback() {
+    const ADDED_WITHOUT_CALL_ID: &str = r#"{"type":"response.output_item.added","item":{"id":"item_1","type":"function_call","name":"ping"}}"#;
+    const ARGS_DONE: &str =
+        r#"{"type":"response.function_call_arguments.done","item_id":"item_1","arguments":"{}"}"#;
+    const TERMINAL_CALL: &str = r#"{"id":"item_1","type":"function_call","call_id":"call_1","name":"ping","arguments":"{}"}"#;
+    // (name, streamed text, terminal text, incomplete, want text)
+    let tests = [
+        ("terminal-only text", "", "pong", false, "pong"),
+        (
+            "terminal extends streamed text",
+            "po",
+            "pong",
+            false,
+            "pong",
+        ),
+        (
+            "terminal omits streamed text",
+            "checking",
+            "pong",
+            false,
+            "checking",
+        ),
+        (
+            "incomplete terminal keeps streamed text",
+            "po",
+            "pong",
+            true,
+            "po",
+        ),
+    ];
+    for (name, streamed_text, terminal_text, incomplete, want_text) in tests {
+        let (status, event_type) = if incomplete {
+            ("incomplete", "response.incomplete")
+        } else {
+            ("completed", "response.completed")
+        };
+        let body = format!(
+            r#"{{"id":"resp_1","model":"stream-model","status":"{status}","output":[{TERMINAL_CALL},{{"type":"message","role":"assistant","content":[{{"type":"output_text","text":"{terminal_text}"}}]}}]}}"#
+        );
+        let mut events = vec![
+            EV_CREATED.to_string(),
+            ADDED_WITHOUT_CALL_ID.to_string(),
+            ARGS_DONE.to_string(),
+        ];
+        if !streamed_text.is_empty() {
+            events.push(format!(
+                r#"{{"type":"response.output_text.delta","delta":"{streamed_text}"}}"#
+            ));
+        }
+        events.push(terminal(event_type, &body));
+        let got = streamed_ok(name, &refs(&events)).await;
+        let final_resp = assert_turn_shape(&got);
+        assert_eq!(
+            all_text(final_resp.content.as_ref()),
+            want_text,
+            "{name}: final text"
+        );
+        assert_eq!(
+            function_calls(final_resp),
+            vec![call("ping", "call_1", json!({}))],
+            "{name}: final calls"
+        );
+        let partial_text: String = got
+            .iter()
+            .filter(|r| r.partial)
+            .map(|r| all_text(r.content.as_ref()))
+            .collect();
+        assert_eq!(partial_text, streamed_text, "{name}: partial text");
+    }
+}
+
+/// Go `TestModel_GenerateStream_CompletedContentSupersedesBeforeCallAdoption`: passes on gadk, which
+/// already tests supersession before adopting the terminal calls.
+#[tokio::test]
+async fn test_model_generate_stream_completed_content_supersedes_before_call_adoption() {
+    for (name, call_id) in [
+        ("distinct call ID", r#","call_id":"call_1""#),
+        ("omitted call ID", ""),
+    ] {
+        let body = format!(
+            r#"{{"id":"resp_1","model":"stream-model","status":"completed","output":[{{"type":"function_call","name":"get_weather"{call_id}}},{{"type":"function_call","name":"get_weather","call_id":"call_2","arguments":"{{\"city\":\"NY\"}}"}}]}}"#
+        );
+        let completed = format!(r#"{{"type":"response.completed","response":{body}}}"#);
+        let got = streamed_ok(
+            name,
+            &[
+                EV_CREATED,
+                r#"{"type":"response.output_item.added","item":{"id":"item_2","type":"function_call","call_id":"call_2","name":"get_weather"}}"#,
+                r#"{"type":"response.function_call_arguments.done","item_id":"item_2","arguments":"{\"city\":\"NY\"}"}"#,
+                &completed,
+            ],
+        )
+        .await;
+        let blocked = blocking_ok(name, &body).await;
+        let calls = function_calls(assert_turn_shape(&got));
+        assert_eq!(calls.len(), 2, "{name}: final call count");
+        assert_eq!(calls[0].args.len(), 0, "{name}: first call arguments");
+        assert_eq!(
+            function_calls(&blocked),
+            calls,
+            "{name}: streaming calls differ from blocking"
         );
     }
 }

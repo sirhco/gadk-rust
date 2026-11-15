@@ -169,6 +169,72 @@ fn test_finish_task_tool_declaration() {
     }
 }
 
+fn nullable(mut schema: Schema) -> Schema {
+    schema.nullable = Some(true);
+    schema
+}
+
+/// The declaration must never offer the model a value Run rejects. A wrapped result is rejected
+/// when null, so the declared result must not be nullable.
+#[tokio::test]
+async fn test_finish_task_tool_declaration_result_matches_validation() {
+    let cases: Vec<(&str, Schema)> = vec![
+        ("nullable string", nullable(s("STRING"))),
+        ("nullable integer", nullable(s("INTEGER"))),
+        ("nullable array", nullable(arr(s("STRING")))),
+        ("string", s("STRING")),
+        (
+            "nullable string enum with description",
+            nullable(Schema {
+                r#type: Some(Type::String),
+                description: "The verdict.".into(),
+                r#enum: vec!["yes".into(), "no".into()],
+                ..Default::default()
+            }),
+        ),
+    ];
+    for (name, output_schema) in cases {
+        let agent = make_task_agent(Some(output_schema.clone()));
+        let ft = FinishTaskTool::new(agent.as_ref()).expect("NewFinishTaskTool failed");
+        let mut want_declared = output_schema.clone();
+        want_declared.nullable = None;
+
+        let key = ft.wrapper_key_str().to_owned();
+        let params = ft
+            .declaration()
+            .and_then(|d| d.parameters)
+            .unwrap_or_else(|| panic!("{name}: Declaration().Parameters = None"));
+        let declared = params
+            .properties
+            .get(&key)
+            .unwrap_or_else(|| panic!("{name}: Declaration() has no {key:?} property"));
+        assert_eq!(
+            declared, &want_declared,
+            "{name}: declared {key:?} schema mismatch"
+        );
+
+        let got = ft
+            .as_runnable()
+            .expect("runnable")
+            .run(Context::builder().build(), json!({ key.clone(): null }))
+            .await
+            .unwrap_or_else(|e| panic!("{name}: Run() unexpected error: {e}"));
+        assert!(
+            got.contains_key("error"),
+            "{name}: Run() with null {key:?} = {got:?}, want a validation error"
+        );
+
+        // The agent's own OutputSchema keeps the Nullable the user set.
+        let agent_schema = crate::llm::state::reveal(agent.as_ref())
+            .and_then(|state| state.cfg.output_schema.clone());
+        assert_eq!(
+            agent_schema.as_ref(),
+            Some(&output_schema),
+            "{name}: agent OutputSchema changed"
+        );
+    }
+}
+
 #[test]
 fn test_finish_task_tool_wrapper_key() {
     let cases: Vec<(&str, Option<Schema>, &str)> = vec![
@@ -267,6 +333,27 @@ async fn test_finish_task_tool_run() {
             json!({"result": []}),
             false,
             vec![],
+        ),
+        (
+            "nullable string wrapper, non-null args",
+            Some(nullable(s("STRING"))),
+            json!({"result": "hello"}),
+            false,
+            vec![],
+        ),
+        (
+            "validation error: nullable string wrapper, null result",
+            Some(nullable(s("STRING"))),
+            json!({"result": null}),
+            false,
+            vec!["finish_task", "validation errors", "result"],
+        ),
+        (
+            "validation error: string wrapper, null result",
+            Some(s("STRING")),
+            json!({"result": null}),
+            false,
+            vec!["finish_task", "validation errors"],
         ),
         (
             "validation error: missing required field",

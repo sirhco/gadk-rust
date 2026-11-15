@@ -263,7 +263,9 @@ async fn test_tool_confirmation_required_completes_call() {
     })));
     let mut errs = CallbackErrors::default();
     errs.add(
-        (p.before_tool_callback().unwrap())(ctx.clone(), deploy_tool.clone(), args.clone()).await,
+        (p.before_tool_callback().unwrap())(ctx.clone(), deploy_tool.clone(), args.clone())
+            .await
+            .1,
     );
     let res = (p.on_tool_error_callback().unwrap())(
         ctx.clone(),
@@ -288,7 +290,9 @@ async fn test_tool_confirmation_required_completes_call() {
     );
     // The user confirms the call, and ADK runs the tool.
     errs.add(
-        (p.before_tool_callback().unwrap())(ctx.clone(), deploy_tool.clone(), args.clone()).await,
+        (p.before_tool_callback().unwrap())(ctx.clone(), deploy_tool.clone(), args.clone())
+            .await
+            .1,
     );
     errs.add(
         (p.after_tool_callback().unwrap())(
@@ -359,7 +363,8 @@ async fn test_tool_callbacks_nil_tool_does_not_panic() {
     let mut errs = CallbackErrors::default();
     errs.add(
         (p.before_tool_callback().unwrap())(ctx.clone(), nil_tool.clone(), obj(json!({"q": "1"})))
-            .await,
+            .await
+            .1,
     );
     errs.add(
         (p.on_tool_error_callback().unwrap())(
@@ -649,7 +654,11 @@ async fn test_log_event_recovers_from_panics() {
         ..FakeTool::default()
     });
     let mut errs = CallbackErrors::default();
-    errs.add((p.before_tool_callback().unwrap())(ctx.clone(), broken.clone(), no_args()).await);
+    errs.add(
+        (p.before_tool_callback().unwrap())(ctx.clone(), broken.clone(), no_args())
+            .await
+            .1,
+    );
     errs.add(
         (p.after_tool_callback().unwrap())(
             ctx.clone(),

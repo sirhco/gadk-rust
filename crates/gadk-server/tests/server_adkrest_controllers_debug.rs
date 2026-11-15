@@ -98,6 +98,107 @@ fn emit_span_without_logs(dt: &DebugTelemetry, session_id: &str, event_id: &str,
     });
 }
 
+#[tokio::test]
+// parity: adapted: the span is a `tracing` span recorded as gadk's telemetry records one (plan
+// decision D6: strings, bools, INT64 and FLOAT64 as `tracing` primitives, every slice and map as
+// the bytes of its JSON text); JSON text cannot hold ±Inf, so Go's `test.infinity` and
+// `test.nested_invalid` (non-finite numbers inside containers) have no D6 recording and only the
+// FLOAT64 `test.nan` checks that a value JSON cannot represent is omitted
+async fn test_debug_handlers_preserve_attribute_types() {
+    const SESSION_ID: &str = "typed-session";
+    const EVENT_ID: &str = "typed-event";
+    let dt = setup_test_telemetry();
+    with_layer(&dt, || {
+        let span = tracing::info_span!(
+            parent: None,
+            "span",
+            otel.name = "generate_content test-model",
+            gcp.vertex.agent.event_id = EVENT_ID,
+            gen_ai.conversation.id = SESSION_ID,
+            gen_ai.operation.name = "generate_content",
+            gen_ai.usage.input_tokens = 773_i64,
+            gen_ai.usage.output_tokens = 75_i64,
+            gen_ai.response.finish_reasons = br#"["tool_call"]"#.as_slice(),
+            gen_ai.request.temperature = 0.5_f64,
+            test.enabled = true,
+            test.counts = b"[1,2]".as_slice(),
+            test.weights = b"[0.25,0.5]".as_slice(),
+            test.flags = b"[true,false]".as_slice(),
+            test.empty = b"[]".as_slice(),
+            test.json_string = r#"["keep as text"]"#,
+            test.nested = br#"{"values":[3,false]}"#.as_slice(),
+            test.nan = f64::NAN
+        );
+        drop(span);
+    });
+    let c = controller(&dt);
+    let want = json!({
+        "gcp.vertex.agent.event_id": EVENT_ID,
+        "gen_ai.conversation.id": SESSION_ID,
+        "gen_ai.operation.name": "generate_content",
+        "gen_ai.usage.input_tokens": 773.0,
+        "gen_ai.usage.output_tokens": 75.0,
+        "gen_ai.response.finish_reasons": ["tool_call"],
+        "gen_ai.request.temperature": 0.5,
+        "test.enabled": true,
+        "test.counts": [1.0, 2.0],
+        "test.weights": [0.25, 0.5],
+        "test.flags": [true, false],
+        "test.empty": [],
+        "test.json_string": r#"["keep as text"]"#,
+        "test.nested": {"values": [3.0, false]},
+    });
+    for name in ["session", "event"] {
+        let resp = if name == "session" {
+            c.session_spans_handler(request(&[("session_id", SESSION_ID)]))
+                .await
+        } else {
+            c.event_span_handler(request(&[("event_id", EVENT_ID)]))
+                .await
+        };
+        let (status, body) = read(resp).await;
+        assert_eq!(status, StatusCode::OK, "{name}: body {body:?}");
+        let got: Value = serde_json::from_str(&body)
+            .unwrap_or_else(|_| panic!("{name} response is not valid JSON"));
+        let attrs = if name == "session" {
+            let spans = got.as_array().unwrap();
+            assert_eq!(spans.len(), 1, "{name}: got {} spans, want 1", spans.len());
+            spans[0]["attributes"].clone()
+        } else {
+            got
+        };
+        // Go `json.Unmarshal` into `any`: every number is a float64.
+        let as_go = |v: &Value| -> Value {
+            serde_json::from_str::<Value>(&v.to_string())
+                .map(|v| go_floats(&v))
+                .unwrap()
+        };
+        for (key, expected) in want.as_object().unwrap() {
+            assert_eq!(
+                as_go(&attrs[key]),
+                as_go(expected),
+                "{name}: attribute {key} has incorrect value or type"
+            );
+        }
+        assert!(
+            attrs.get("test.nan").is_none(),
+            "{name}: attribute test.nan cannot be represented in JSON and should be omitted"
+        );
+    }
+}
+
+/// Every JSON number in `v` as a float (Go's `float64` from `json.Unmarshal` into `any`).
+fn go_floats(v: &Value) -> Value {
+    match v {
+        Value::Number(n) => n.as_f64().map(Value::from).unwrap_or(Value::Null),
+        Value::Array(a) => Value::Array(a.iter().map(go_floats).collect()),
+        Value::Object(o) => {
+            Value::Object(o.iter().map(|(k, v)| (k.clone(), go_floats(v))).collect())
+        }
+        other => other.clone(),
+    }
+}
+
 /// Go `emitElidedMessageLogs`: the two records the server emits with content capture off.
 fn emit_elided_message_logs(dt: &DebugTelemetry, session_id: &str, event_id: &str, op_name: &str) {
     with_layer(dt, || {
@@ -542,6 +643,105 @@ async fn test_event_graph_handler_response_shape() {
 }
 
 // parity: skipped TestEventGraphHandlerRejectsANilAgent: a gadk Loader returns Arc<dyn Agent>, which cannot be null, so the nil-agent guard has nothing to guard
+
+/// Go `TestEventGraphHandlerToleratesNilParts`: the event graph's function-call and
+/// function-response scans find a `lookup` call or response, so the `lookup` tool node is
+/// highlighted (filled).
+#[tokio::test]
+// parity: adapted: a Rust content holds no nil parts (and a JSON `null` part fails gadk-genai's
+// decode), so each case's parts are a text part (standing in for the nil slot) followed by the
+// call or response; the remaining contract is pinned: the scan finds the call or response after
+// the first part and the lookup node is highlighted
+async fn test_event_graph_handler_tolerates_nil_parts() {
+    let (app_name, user_id, session_id, event_id) =
+        ("test-app", "test-user", "test-session", "test-event");
+
+    struct LookupTool;
+    impl gadk_agent::Tool for LookupTool {
+        fn name(&self) -> &str {
+            "lookup"
+        }
+        fn description(&self) -> &str {
+            "a lookup tool"
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    let cases = [
+        (
+            "call after a nil part",
+            Part {
+                function_call: Some(FunctionCall {
+                    name: "lookup".into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        ),
+        (
+            "response after a nil part",
+            Part {
+                function_response: Some(FunctionResponse {
+                    name: "lookup".into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        ),
+    ];
+    for (name, part) in cases {
+        let root_agent = gadk_engine::llm_agent::new(gadk_engine::llm::LlmAgentConfig {
+            name: app_name.into(),
+            description: "graph test agent".into(),
+            tools: vec![Arc::new(LookupTool)],
+            ..Default::default()
+        })
+        .unwrap();
+        let event = Event {
+            id: event_id.into(),
+            author: app_name.into(),
+            response: LlmResponse {
+                content: Some(Content {
+                    parts: vec![Part::from_text(""), part],
+                    role: String::new(),
+                }),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let key = SessionKey {
+            app_name: app_name.into(),
+            user_id: user_id.into(),
+            session_id: session_id.into(),
+        };
+        let sessions =
+            FakeSessionService::new([TestSession::new(key, Map::new(), vec![event], Utc::now())]);
+        let c = DebugApiController::new(
+            Arc::new(sessions),
+            Some(Arc::new(SingleLoader::new(root_agent))),
+            setup_test_telemetry(),
+        );
+        let req = request(&[
+            ("app_name", app_name),
+            ("user_id", user_id),
+            ("session_id", session_id),
+            ("event_id", event_id),
+        ]);
+        let (status, body) = read(c.event_graph_handler(req).await).await;
+        assert_eq!(status, StatusCode::OK, "{name}: body {body:?}");
+        let got: Value = serde_json::from_str(&body).unwrap();
+        let dot_src = got["dotSrc"].as_str().unwrap();
+        let lookup_highlighted = dot_src
+            .lines()
+            .any(|line| line.contains("lookup") && line.contains("filled"));
+        assert!(
+            lookup_highlighted,
+            "{name}: lookup node not highlighted: the scan did not find the call or response past the first part.\ndot: {dot_src}"
+        );
+    }
+}
 
 fn event_with_parts(id: &str, parts: Vec<Part>) -> Event {
     Event {

@@ -177,7 +177,9 @@ fn test_to_session_event_event_actions() {
             actions,
             ..Default::default()
         };
-        let got = src.to_session_event();
+        let got = src
+            .to_session_event()
+            .unwrap_or_else(|e| panic!("{name}: ToSessionEvent() failed: {e}"));
         assert_eq!(
             want, got.actions,
             "{name}: ToSessionEvent().Actions mismatch"
@@ -206,7 +208,9 @@ fn test_from_session_event_round_trip() {
         ..Default::default()
     };
 
-    let got = Event::from_session_event(&original).to_session_event();
+    let got = Event::from_session_event(&original)
+        .to_session_event()
+        .unwrap_or_else(|e| panic!("ToSessionEvent() failed: {e}"));
 
     assert_eq!(
         original.actions, got.actions,

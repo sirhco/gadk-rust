@@ -87,24 +87,49 @@ impl AgentError {
     /// Go `errors.Is(err, compaction.ErrCompaction)`: whether this error, or any error it wraps,
     /// is a [`CompactionError`].
     pub fn is_compaction(&self) -> bool {
-        let mut cur: Option<&(dyn std::error::Error + 'static)> = Some(self);
-        while let Some(e) = cur {
-            if e.is::<CompactionError>() {
-                return true;
-            }
-            match e.downcast_ref::<AgentError>() {
-                Some(AgentError::Compaction(_)) => return true,
-                // These carry their error as a plain field, not a `#[source]`: step into it.
-                Some(AgentError::Other(inner) | AgentError::Workflow(inner)) => {
-                    cur = Some(&**inner);
-                    continue;
-                }
-                _ => {}
-            }
-            cur = e.source();
-        }
-        false
+        chain_any(self, &|e| {
+            e.is::<CompactionError>()
+                || matches!(
+                    e.downcast_ref::<AgentError>(),
+                    Some(AgentError::Compaction(_))
+                )
+        })
     }
+}
+
+/// Go `errors.Is`'s walk: whether `pred` holds for `err` or any error it wraps. Besides
+/// `source()`, it steps into the errors [`AgentError::Other`], [`AgentError::Workflow`] and
+/// [`ToolError::Execution`] carry as a plain field (their `source()` skips them).
+pub(crate) fn chain_any(
+    err: &AgentError,
+    pred: &dyn Fn(&(dyn std::error::Error + 'static)) -> bool,
+) -> bool {
+    let mut cur: Option<&(dyn std::error::Error + 'static)> = Some(err);
+    while let Some(e) = cur {
+        if pred(e) {
+            return true;
+        }
+        match e.downcast_ref::<AgentError>() {
+            Some(AgentError::Other(inner) | AgentError::Workflow(inner)) => {
+                cur = Some(&**inner);
+                continue;
+            }
+            Some(AgentError::Tool {
+                source: ToolError::Execution(inner),
+                ..
+            }) => {
+                cur = Some(&**inner);
+                continue;
+            }
+            _ => {}
+        }
+        if let Some(ToolError::Execution(inner)) = e.downcast_ref::<ToolError>() {
+            cur = Some(&**inner);
+            continue;
+        }
+        cur = e.source();
+    }
+    false
 }
 
 /// Errors produced by tools.

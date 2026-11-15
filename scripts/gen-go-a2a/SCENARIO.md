@@ -1,7 +1,7 @@
 # gen-go-a2a scenario
 
 `scripts/gen-go-a2a` runs ADK-Go's A2A v2 executor (`server/adka2a/v2`, ADK-Go at
-`docs/parity/ADK_GO_COMMIT`) behind a2a-go v2.6.0's `a2asrv` (JSON-RPC handler, REST handler and a
+`docs/parity/ADK_GO_COMMIT`) behind a2a-go v2.7.0's `a2asrv` (JSON-RPC handler, REST handler and a
 static agent card) on loopback listeners (`httptest.NewServer`). It drives the server with raw HTTP
 requests (server direction) and runs ADK-Go's v2 remote agent (`agent/remoteagent/v2`) against it
 (client direction). Every scenario below is written, normalized, to
@@ -127,13 +127,13 @@ number. `session_events` (only in `cancel_input_required_with_child`): the root 
 last step, each event `json.Marshal(*session.Event)` (the same Go JSON as
 `scripts/gen-go-events`).
 
-The probe sends exactly the headers a2a-go's own client (`a2aclient` v2.6.0) sends:
+The probe sends exactly the headers a2a-go's own client (`a2aclient` v2.7.0) sends:
 
 | operation | JSON-RPC (`POST /jsonrpc`, method) | REST | headers |
 |---|---|---|---|
-| send | `SendMessage` | `POST /rest/message:send` | `A2A-Version: 1.0`, `Content-Type: application/json`; REST also `Accept: application/json` |
-| stream | `SendStreamingMessage` | `POST /rest/message:stream` | `A2A-Version: 1.0`, `Content-Type: application/json`, `Accept: text/event-stream` |
-| get | `GetTask` (`params: {"id": <task>}`) | `GET /rest/tasks/<task>` (no body) | JSON-RPC: `A2A-Version`, `Content-Type`; REST: `A2A-Version: 1.0`, `Accept: application/json` |
+| send | `SendMessage` | `POST /rest/message:send` | `A2A-Version: 1.0`, `Content-Type: application/json`; REST also `Accept: application/a2a+json, application/json` |
+| stream | `SendStreamingMessage` | `POST /rest/message:stream` | `A2A-Version: 1.0`, `Content-Type: application/json`, `Accept: text/event-stream, application/json` |
+| get | `GetTask` (`params: {"id": <task>}`) | `GET /rest/tasks/<task>` (no body) | JSON-RPC: `A2A-Version`, `Content-Type`; REST: `A2A-Version: 1.0`, `Accept: application/a2a+json, application/json` |
 | cancel | `CancelTask` (`params: {"id": <task>}`) | `POST /rest/tasks/<task>:cancel` (no body) | as get |
 | card | — | `GET /.well-known/agent-card.json` (no headers) | — |
 
@@ -354,4 +354,4 @@ Results ADK-Go produced (states as in the fixtures; artifacts in `server.jsonrpc
 
 - `main.go`: the probe.
 - `go.mod`, `go.sum`: module `gadk/gen-go-a2a`; `google.golang.org/adk/v2 => ../../../adk-go`,
-  `github.com/a2aproject/a2a-go/v2 v2.6.0` (ADK-Go's own pin).
+  `github.com/a2aproject/a2a-go/v2 v2.7.0` (ADK-Go's own pin).

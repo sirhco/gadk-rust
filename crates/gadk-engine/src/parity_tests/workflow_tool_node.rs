@@ -16,10 +16,12 @@
 //! Port of Go workflow/tool_node_test.go.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use chrono::{DateTime, Utc};
-use gadk_agent::{Context, Tool, ToolError};
+use gadk_agent::{Context, InvocationContext, Tool, ToolError};
 use gadk_genai::Content;
+use gadk_platform::Platform;
 use gadk_session::{EventCompaction, EventRef};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -99,6 +101,7 @@ async fn test_tool_node_new() {
 #[case::struct_input_output("struct_input_output")]
 #[case::string_output("string_output")]
 #[case::tool_execution_error("tool_execution_error")]
+#[case::function_call_id_from_uuid_provider("function_call_id_from_uuid_provider")]
 #[case::nil_output_schema_no_panic("nil_output_schema_no_panic")]
 #[tokio::test]
 async fn test_tool_node_run(#[case] case: &'static str) {
@@ -108,6 +111,10 @@ async fn test_tool_node_run(#[case] case: &'static str) {
             |_c: Context, i: Input| async move {
                 Ok::<_, ToolError>(format!("HELLO {}", i.name.to_uppercase()))
             },
+        ),
+        "function_call_id_from_uuid_provider" => FunctionTool::new(
+            FunctionToolConfig::new("call_id", ""),
+            |c: Context, _i: Input| async move { Ok::<_, ToolError>(c.function_call_id()) },
         ),
         "tool_execution_error" => FunctionTool::new(
             FunctionToolConfig::new("fail_tool", ""),
@@ -127,7 +134,7 @@ async fn test_tool_node_run(#[case] case: &'static str) {
     .expect("failed to create tool");
     let node: Arc<ToolNode> = match case {
         "nil_output_schema_no_panic" => ToolNode::new(tool, NodeConfig::default()),
-        "string_output" => ToolNode::with_schemas(
+        "string_output" | "function_call_id_from_uuid_provider" => ToolNode::with_schemas(
             tool,
             Some(infer_schema::<Input>()),
             Some(json!({"type": "string"})),
@@ -143,7 +150,14 @@ async fn test_tool_node_run(#[case] case: &'static str) {
     .expect("node creation failed");
     let input = json!({"name": if case == "string_output" { "world" } else { "World" }});
     let validated = node.validate_input(input).expect("ValidateInput failed");
-    let (events, err) = collect(node.run(top_level_ctx(), validated)).await;
+    let draws = Arc::new(AtomicUsize::new(0));
+    let ctx = InvocationContext::builder()
+        .invocation_id(TEST_INVOCATION_ID)
+        .platform(Platform::deterministic(1).with_uuid(move || {
+            format!("provider-uuid-{}", draws.fetch_add(1, Ordering::SeqCst) + 1)
+        }))
+        .build();
+    let (events, err) = collect(node.run(ctx, validated)).await;
     if case == "tool_execution_error" {
         let err = err.expect("expected error, got nil");
         assert!(
@@ -159,7 +173,7 @@ async fn test_tool_node_run(#[case] case: &'static str) {
     // Run yields the raw FunctionTool map output; the {"result": X} unwrap happens
     // scheduler-side in ToolNode::validate_output.
     let got = match case {
-        "string_output" => out
+        "string_output" | "function_call_id_from_uuid_provider" => out
             .get("result")
             .and_then(Value::as_str)
             .map(str::to_string),
@@ -168,10 +182,11 @@ async fn test_tool_node_run(#[case] case: &'static str) {
             .and_then(Value::as_str)
             .map(str::to_string),
     };
-    let want = if case == "string_output" {
-        "HELLO WORLD"
-    } else {
-        "Hello World"
+    let want = match case {
+        "string_output" => "HELLO WORLD",
+        // The call ID is the first draw, before the event ID.
+        "function_call_id_from_uuid_provider" => "provider-uuid-1",
+        _ => "Hello World",
     };
     assert_eq!(got.as_deref(), Some(want));
 }

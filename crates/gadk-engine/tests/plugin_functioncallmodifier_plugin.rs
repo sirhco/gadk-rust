@@ -20,12 +20,16 @@ use std::any::Any;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
-use gadk_agent::{AgentConfig, Context, Tool, ToolError, new_agent};
+use futures::StreamExt;
+use gadk_agent::{AfterModelCallback, AgentConfig, Context, Tool, ToolError, new_agent, pack_tool};
+use gadk_engine::llm::{LlmAgentConfig, agent as llm_agent};
 use gadk_engine::plugin::{FunctionCallModifierConfig, new_function_call_modifier_plugin};
+use gadk_engine::runner::PluginConfig as RunnerPluginConfig;
+use gadk_engine::testutil::{MockModel, TestAgentRunner};
 use gadk_engine::tool::{AgentTool, FunctionTool, FunctionToolConfig};
 use gadk_genai::{
-    Content, FunctionCall, FunctionDeclaration, GenerateContentConfig, Part, Schema,
-    Tool as GenaiTool, Type,
+    Behavior, Content, FinishReason, FunctionCall, FunctionDeclaration, GenerateContentConfig,
+    Part, Schema, Tool as GenaiTool, Type,
 };
 use gadk_model::{LlmRequest, LlmResponse};
 use gadk_session::{CreateRequest, InMemorySessionService, Session, SessionError, SessionService};
@@ -304,7 +308,7 @@ fn check_state(ses: &Arc<dyn Session>, case: &str, key: &str, should_have: bool,
     }
 }
 
-// parity: adapted: Go checks the args edited in place in tc.content; Rust checks the response the callback hands back (R1)
+// parity: adapted: Go checks the args edited in place in tc.content; Rust checks the response the callback hands back (R1); Rust parts cannot be nil, so the nil-part case puts an empty Part first
 #[tokio::test]
 async fn test_after_model_callback() {
     let cases = vec![
@@ -347,6 +351,32 @@ async fn test_after_model_callback() {
             want_rationale_state_value: "r1",
             should_have_skill_state: true,
             should_have_rationale_state: true,
+        },
+        AfterCase {
+            // A nil part in a model response (a degenerate provider chunk) is
+            // skipped, not dereferenced; the function call after it is still
+            // rewritten.
+            name: "nil part before the function call",
+            content: Content {
+                parts: vec![
+                    Part::default(),
+                    call(
+                        "fcId",
+                        "test_agent",
+                        json!({"request": "do", "skill_id": "s1"}),
+                    )
+                    .parts
+                    .remove(0),
+                ],
+                ..Default::default()
+            },
+            want_args: Some(json!({"request": "do"})),
+            want_skill_state_key: "fcId/skill_id",
+            want_skill_state_value: "s1",
+            want_rationale_state_key: "",
+            want_rationale_state_value: "",
+            should_have_skill_state: true,
+            should_have_rationale_state: false,
         },
         AfterCase {
             name: "agent tool with only skill_id",
@@ -422,12 +452,14 @@ async fn test_after_model_callback() {
             panic!("{}: AfterModelCallback failed: {e}", tc.name);
         }
 
-        // Check if args are pruned
-        if let (Some(want_args), Some(part)) = (
+        // Check if args are pruned, on the first function-call part.
+        if let (Some(want_args), Some(fc)) = (
             &tc.want_args,
-            resp.content.as_ref().and_then(|c| c.parts.first()),
-        ) && let Some(fc) = &part.function_call
-        {
+            resp.content
+                .iter()
+                .flat_map(|c| c.parts.iter())
+                .find_map(|p| p.function_call.as_ref()),
+        ) {
             assert_eq!(
                 want_args,
                 &Value::Object(fc.args.clone()),
@@ -452,4 +484,248 @@ async fn test_after_model_callback() {
             tc.want_rationale_state_value,
         );
     }
+}
+
+/// Go `contentlessModel`: answers the request with a response that carries no content, as a
+/// model does when it stops on MAX_TOKENS or SAFETY.
+fn contentless_model() -> Arc<MockModel> {
+    MockModel::new(vec![Ok(LlmResponse {
+        finish_reason: Some(FinishReason::MaxTokens),
+        error_code: "MAX_TOKENS".into(),
+        ..Default::default()
+    })])
+}
+
+// TestAfterModelCallback_ContentlessResponseKeepsChain pins that the plugin
+// leaves a response with nothing to rewrite to the rest of the after-model
+// chain, so an agent's own AfterModelCallbacks still see it.
+#[tokio::test]
+async fn test_after_model_callback_contentless_response_keeps_chain() {
+    let plugin = new_function_call_modifier_plugin(FunctionCallModifierConfig {
+        predicate: Arc::new(|_: &str| true),
+        args: BTreeMap::from([(
+            "skill_id".to_string(),
+            Schema {
+                r#type: Some(Type::String),
+                ..Default::default()
+            },
+        )]),
+        override_description: None,
+    });
+
+    const RECOVERED: &str = "recovered from an empty response";
+    let agent_callback_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let calls = agent_callback_calls.clone();
+    let after: AfterModelCallback = Arc::new(move |_ctx, resp: LlmResponse, _err| {
+        calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let replacement = resp.content.is_none().then(|| LlmResponse {
+            content: Some(Content::from_text(RECOVERED, "model")),
+            ..Default::default()
+        });
+        Box::pin(async move { (resp, Ok(replacement)) })
+    });
+    let a = llm_agent::new(LlmAgentConfig {
+        name: "agent".into(),
+        model: Some(contentless_model()),
+        after_model_callbacks: vec![after],
+        ..Default::default()
+    })
+    .unwrap_or_else(|e| panic!("llmagent.New() error = {e}"));
+
+    let runner = TestAgentRunner::with_plugins(
+        a,
+        RunnerPluginConfig {
+            plugins: vec![plugin],
+            ..Default::default()
+        },
+    )
+    .await;
+    let mut stream = runner.run("hi");
+    let mut texts = Vec::new();
+    while let Some(item) = stream.next().await {
+        let ev = item.unwrap_or_else(|e| panic!("Run() error = {e}"));
+        for part in ev.response.content.iter().flat_map(|c| c.parts.iter()) {
+            if !part.text.is_empty() {
+                texts.push(part.text.clone());
+            }
+        }
+    }
+
+    let n = agent_callback_calls.load(std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(n, 1, "agent AfterModelCallback ran {n} times, want 1");
+    assert_eq!(texts, vec![RECOVERED.to_string()], "event texts");
+}
+
+/// Go `cachedDeclarationTool`: hands out one declaration on every call, as the task and
+/// single_turn tools do.
+struct CachedDeclarationTool {
+    decl: FunctionDeclaration,
+}
+
+impl Tool for CachedDeclarationTool {
+    fn name(&self) -> &str {
+        &self.decl.name
+    }
+
+    fn description(&self) -> &str {
+        &self.decl.description
+    }
+
+    fn declaration(&self) -> Option<FunctionDeclaration> {
+        Some(self.decl.clone())
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+/// Go `propertyNames`.
+fn property_names(decl: &FunctionDeclaration) -> Vec<String> {
+    decl.parameters
+        .as_ref()
+        .map(|p| p.properties.keys().cloned().collect())
+        .unwrap_or_default()
+}
+
+// TestBeforeModelCallback_LeavesToolDeclarationUnchanged pins that the plugin
+// edits only the request. A task agent tool hands out the same declaration on
+// every call, and an agent tool reuses its agent's InputSchema, so editing
+// them in place would wrap the description once more on every request and add
+// the arguments to the agent's own schema. It also pins that the request's
+// copy keeps every other field of the tool's declaration.
+// parity: adapted: the "task agent tool" case is dropped (gadk's TaskAgentTool is crate-private; CachedDeclarationTool covers the same shared-declaration shape); Rust declarations are owned values, so the tool side is unchanged by construction
+#[tokio::test]
+async fn test_before_model_callback_leaves_tool_declaration_unchanged() {
+    const PREFIX: &str = "Accepts skill_id. ";
+    let plugin = new_function_call_modifier_plugin(FunctionCallModifierConfig {
+        predicate: Arc::new(|_: &str| true),
+        args: BTreeMap::from([(
+            "skill_id".to_string(),
+            Schema {
+                r#type: Some(Type::String),
+                ..Default::default()
+            },
+        )]),
+        override_description: Some(Arc::new(|original: &str| format!("{PREFIX}{original}"))),
+    });
+
+    let input_schema = Schema {
+        r#type: Some(Type::Object),
+        properties: BTreeMap::from([(
+            "query".to_string(),
+            Schema {
+                r#type: Some(Type::String),
+                ..Default::default()
+            },
+        )]),
+        ..Default::default()
+    };
+    let schema_agent = llm_agent::new(LlmAgentConfig {
+        name: "schema_agent".into(),
+        description: "answers queries".into(),
+        input_schema: Some(input_schema.clone()),
+        ..Default::default()
+    })
+    .unwrap_or_else(|e| panic!("llmagent.New() error = {e}"));
+
+    let cases: Vec<(&str, Arc<dyn Tool>)> = vec![
+        (
+            "agent tool with input schema",
+            AgentTool::new(schema_agent.clone(), None),
+        ),
+        (
+            "cached declaration without parameters",
+            Arc::new(CachedDeclarationTool {
+                decl: FunctionDeclaration {
+                    name: "no_params".into(),
+                    description: "takes nothing".into(),
+                    ..Default::default()
+                },
+            }),
+        ),
+        (
+            "cached declaration with response schema and behavior",
+            Arc::new(CachedDeclarationTool {
+                decl: FunctionDeclaration {
+                    name: "full".into(),
+                    description: "has a response schema and a behavior".into(),
+                    behavior: Some(Behavior::NonBlocking),
+                    parameters: Some(Schema {
+                        r#type: Some(Type::Object),
+                        description: "a query".into(),
+                        required: vec!["query".into()],
+                        properties: BTreeMap::from([(
+                            "query".to_string(),
+                            Schema {
+                                r#type: Some(Type::String),
+                                ..Default::default()
+                            },
+                        )]),
+                        ..Default::default()
+                    }),
+                    response_json_schema: Some(json!({"type": "string"})),
+                    ..Default::default()
+                },
+            }),
+        ),
+    ];
+
+    let before = plugin.before_model_callback().unwrap();
+    for (name, tool) in cases {
+        let original = tool.declaration().unwrap();
+        let original_description = original.description.clone();
+        let original_properties = property_names(&original);
+        // The request's copy may differ from the tool's declaration only in its
+        // description and the added skill_id, plus the object schema that holds
+        // skill_id when the declaration has no parameters.
+        let mut want_decl = original.clone();
+        want_decl.parameters.get_or_insert_with(|| Schema {
+            r#type: Some(Type::Object),
+            ..Default::default()
+        });
+
+        let ctx = Context::builder().build();
+        for request in 0..2 {
+            let mut req = LlmRequest::default();
+            pack_tool(&mut req, &tool).unwrap_or_else(|e| panic!("PackTool() error = {e}"));
+            let (req, res) = before(ctx.clone(), req).await;
+            if let Err(e) = res {
+                panic!("{name}: BeforeModelCallback() error = {e}");
+            }
+            let mut decl = find_declaration(&req, tool.name()).unwrap().clone();
+            assert_eq!(
+                decl.description,
+                format!("{PREFIX}{original_description}"),
+                "{name}: request {request}: description"
+            );
+            assert!(
+                property_names(&decl).iter().any(|p| p == "skill_id"),
+                "{name}: request {request}: declaration lacks skill_id"
+            );
+            decl.description = want_decl.description.clone();
+            if let Some(p) = decl.parameters.as_mut() {
+                p.properties.remove("skill_id");
+            }
+            assert_eq!(
+                decl, want_decl,
+                "{name}: request {request}: declaration differs beyond the description and skill_id"
+            );
+        }
+
+        let after = tool.declaration().unwrap();
+        assert_eq!(
+            after.description, original_description,
+            "{name}: tool description"
+        );
+        assert_eq!(
+            property_names(&after),
+            original_properties,
+            "{name}: tool parameters"
+        );
+    }
+    assert!(
+        !input_schema.properties.contains_key("skill_id"),
+        "agent InputSchema gained skill_id"
+    );
 }

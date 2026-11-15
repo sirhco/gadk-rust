@@ -77,18 +77,43 @@ fn test_duplicate_name() {
 }
 
 #[test]
-fn multi_loader_errors_carry_go_text_and_registration_order() {
+fn test_multi_loader_list_agents_sorted() {
+    let names = [
+        "transfer_agent",
+        "sequential_agent",
+        "hello_agent",
+        "tools_agent",
+        "agent_tool_agent",
+        "loop_agent",
+        "parallel_agent",
+        "remote_agent",
+        "template_agent",
+    ];
+    let root = test_agent("root_agent");
+    let agents = names.iter().map(|n| test_agent(n)).collect();
+    let loader = MultiLoader::new(root, agents).unwrap();
+
+    let mut want: Vec<String> = names.iter().map(|n| n.to_string()).collect();
+    want.push("root_agent".into());
+    want.sort();
+    // Go repeats the call because map iteration order is randomized; Rust's order is fixed, so
+    // one call decides.
+    assert_eq!(loader.list_agents(), want, "ListAgents()");
+}
+
+#[test]
+fn multi_loader_errors_carry_go_text_and_sorted_names() {
     let err = MultiLoader::new(test_agent("root"), vec![test_agent("b"), test_agent("b")]).err();
     assert_eq!(err, Some(LoaderError("duplicate agent name: b".into())));
 
     let loader =
         MultiLoader::new(test_agent("root"), vec![test_agent("b"), test_agent("a")]).unwrap();
-    assert_eq!(loader.list_agents(), ["root", "b", "a"]);
+    assert_eq!(loader.list_agents(), ["a", "b", "root"]);
     assert_eq!(loader.load_agent("a").unwrap().name(), "a");
     assert_eq!(loader.root_agent().name(), "root");
     assert_eq!(
         loader.load_agent("zzz").err().unwrap().to_string(),
-        "agent zzz not found. Please specify one of those: [root b a]"
+        "agent zzz not found. Please specify one of those: [a b root]"
     );
 }
 

@@ -565,21 +565,132 @@ fn test_build_params_tools_pin_strict_off() {
 fn test_build_params_unsupported_part() {
     // The leading turn makes this bite: alone, the unsupported part leaves the request empty,
     // so a build that skipped it would still fail with ErrNoContents.
+    //
+    // The part carries a server-side tool call rather than media or code: both of those have a
+    // way out of this endpoint now, and the walk below covers what is left.
     let req = request(vec![
         text_content("q", "user"),
         user_turn(vec![Part {
-            executable_code: Some(ExecutableCode {
-                code: "print(1)".to_string(),
-                ..ExecutableCode::default()
+            tool_call: Some(ToolCall {
+                id: "t1".to_string(),
+                ..ToolCall::default()
             }),
             ..Part::default()
         }]),
     ]);
-    let err =
-        build_params("fallback", &req).expect_err("expected error for an executable code part");
+    let err = build_params("fallback", &req).expect_err("expected error for a tool call part");
     assert!(
         !err.is(ErrorKind::NoContents) && err.to_string().contains("unsupported content part"),
         "buildParams() err = {err}, want an unsupported-content-part error"
+    );
+}
+
+/// Go `TestBuildParams_CodeExecutionAsText`: a Gemini code-execution turn replayed into an OpenAI
+/// request used to fail the whole request, and now goes out as the fenced text adk-python sends
+/// (ded357e3, #1956).
+#[test]
+fn test_build_params_code_execution_as_text() {
+    let code = |c: &str| Part {
+        executable_code: Some(ExecutableCode {
+            code: c.to_string(),
+            ..ExecutableCode::default()
+        }),
+        ..Part::default()
+    };
+    let tests: Vec<(&str, Vec<Content>, Vec<&str>)> = vec![
+        (
+            "code_and_result_on_a_model_turn",
+            vec![
+                model_turn(vec![Part {
+                    executable_code: Some(ExecutableCode {
+                        code: "print(1)".to_string(),
+                        language: Some(gadk_genai::Language::Python),
+                        ..ExecutableCode::default()
+                    }),
+                    ..Part::default()
+                }]),
+                model_turn(vec![Part {
+                    code_execution_result: Some(CodeExecutionResult {
+                        outcome: Some(gadk_genai::Outcome::Ok),
+                        output: "1".to_string(),
+                        ..CodeExecutionResult::default()
+                    }),
+                    ..Part::default()
+                }]),
+            ],
+            vec![
+                "out/assistant:Code:```python\nprint(1)\n```",
+                "out/assistant:Execution Result:```code_output\n1\n```",
+            ],
+        ),
+        (
+            "text_keeps_its_place_ahead_of_the_code",
+            vec![user_turn(vec![text("For context:"), code("print(1)")])],
+            vec!["in/user:For context:|Code:```python\nprint(1)\n```"],
+        ),
+        (
+            "code_keeps_its_place_on_a_media_message",
+            vec![user_turn(vec![
+                code("print(1)"),
+                Part {
+                    inline_data: Some(png()),
+                    ..Part::default()
+                },
+            ])],
+            vec![
+                "in/user:Code:```python\nprint(1)\n```|img/auto:image_url=data:image/png;base64,AQ==",
+            ],
+        ),
+        (
+            "both_fields_on_one_part_render_code_then_result",
+            vec![user_turn(vec![Part {
+                executable_code: Some(ExecutableCode {
+                    code: "print(1)".to_string(),
+                    ..ExecutableCode::default()
+                }),
+                code_execution_result: Some(CodeExecutionResult {
+                    output: "1".to_string(),
+                    ..CodeExecutionResult::default()
+                }),
+                ..Part::default()
+            }])],
+            vec!["in/user:Code:```python\nprint(1)\n```\nExecution Result:```code_output\n1\n```"],
+        ),
+        (
+            "empty_code_is_still_sent",
+            vec![user_turn(vec![code("")])],
+            vec!["in/user:Code:```python\n\n```"],
+        ),
+    ];
+    for (name, contents, want) in tests {
+        let params = build_params("fallback", &request(contents))
+            .unwrap_or_else(|err| panic!("{name}: buildParams() err = {err}"));
+        assert_eq!(describe_input(&params), want, "{name}: input items");
+    }
+}
+
+/// Go `TestBuildParams_DropsReplayedThoughts`, case
+/// `thought_text_riding_on_code_drops_only_the_text` (changed from
+/// `thought_text_riding_on_code_is_still_rejected`): marking the part as a thought drops the
+/// scratchpad and leaves the code, the same split media already gets. Kept out of
+/// `test_build_params_drops_replayed_thoughts`'s table so that table stays a live guard.
+#[test]
+fn test_build_params_drops_replayed_thoughts_thought_text_riding_on_code_drops_only_the_text() {
+    let req = request(vec![
+        text_content("q", "user"),
+        model_turn(vec![Part {
+            executable_code: Some(ExecutableCode {
+                code: "print(1)".to_string(),
+                ..ExecutableCode::default()
+            }),
+            ..thought("scratch")
+        }]),
+    ]);
+    let params = build_params("fallback", &req)
+        .unwrap_or_else(|err| panic!("thought_text_riding_on_code_drops_only_the_text: {err}"));
+    assert_eq!(
+        describe_input(&params),
+        vec!["in/user:q", "out/assistant:Code:```python\nprint(1)\n```"]
     );
 }
 
@@ -808,20 +919,9 @@ fn test_build_params_drops_replayed_thoughts() {
                 "in/user:img/auto:image_url=data:image/png;base64,AQ==",
             ]),
         ),
-        (
-            "thought_text_riding_on_code_is_still_rejected",
-            vec![
-                text_content("q", "user"),
-                model_turn(vec![Part {
-                    executable_code: Some(ExecutableCode {
-                        code: "print(1)".to_string(),
-                        ..ExecutableCode::default()
-                    }),
-                    ..thought("scratch")
-                }]),
-            ],
-            fails(None, "unsupported content part"),
-        ),
+        // Go's "thought_text_riding_on_code_drops_only_the_text" case is the separate
+        // `test_build_params_drops_replayed_thoughts_thought_text_riding_on_code_drops_only_the_text`
+        // below: it fails on today's gadk, and kept out of this table it leaves the rest guarding.
         // Dropping the reasoning must not swallow the role error the same turn would have
         // raised had its text been an answer.
         (
@@ -1545,6 +1645,8 @@ const ACCOUNTED_FOR_FIELDS: &[(&str, &str)] = &[
         "FileData",
         "sent as an input_image or input_file naming an upload or a location",
     ),
+    ("ExecutableCode", "sent as a fenced python block"),
+    ("CodeExecutionResult", "sent as a fenced code_output block"),
 ];
 
 fn accounted_for(field: &str) -> Option<&'static str> {
@@ -1590,7 +1692,7 @@ fn test_unsupported_payload_walks_every_part_field() {
     for (field, set) in part_fields() {
         let mut part = Part::default();
         set(&mut part);
-        let got = unsupported_payload(&part, &[PartField::Media]);
+        let got = unsupported_payload(&part, &[PartField::Media, PartField::CodeExecution]);
         if let Some(why) = accounted_for(field) {
             assert_eq!(
                 got, None,

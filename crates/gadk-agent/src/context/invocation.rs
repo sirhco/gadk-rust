@@ -168,6 +168,46 @@ impl InvocationContext {
         self.inner().shared.plugin_manager.clone()
     }
 
+    /// Go `plugininternal.WithInheritedPlugins` (#1777): a derived context marked so that the
+    /// next runner started with it (`Runner::run_with_context`) keeps this context's plugin
+    /// manager ([`InvocationContext::plugin_manager`], Go `FromContext`) when that runner has no
+    /// plugins of its own. Only the agent tool sets this mark, for the sub-runner it starts; any
+    /// other runner uses only its own plugins. The receiver is unchanged.
+    pub fn with_inherited_plugins(&self) -> InvocationContext {
+        let mut n = self.inner().clone();
+        n.inherited_plugins = self.plugin_manager();
+        Self::from_inner(n)
+    }
+
+    /// Go `plugininternal.TakeInheritedPlugins` (#1777): the plugin manager marked by
+    /// [`InvocationContext::with_inherited_plugins`] (`None` without a mark) and a derived context
+    /// with the mark cleared, so that the mark applies to one runner only and not to runners
+    /// started further down.
+    pub fn take_inherited_plugins(&self) -> (InvocationContext, Option<Arc<PluginManager>>) {
+        let Some(pm) = self.inner().inherited_plugins.clone() else {
+            return (self.clone(), None);
+        };
+        let mut n = self.inner().clone();
+        n.inherited_plugins = None;
+        (Self::from_inner(n), Some(pm))
+    }
+
+    /// Go `utils.WithGraphResumeDone` (51bc7ec5, #2188): a derived context marked so that
+    /// resuming a nested graph workflow is done for it and every context derived from it (a loop
+    /// agent runs its later passes with it: only the first pass narrows to the sub-agents holding
+    /// the callers of the user's function responses). The receiver is unchanged.
+    pub fn with_graph_resume_done(&self) -> InvocationContext {
+        let mut n = self.inner().clone();
+        n.graph_resume_done = true;
+        Self::from_inner(n)
+    }
+
+    /// Whether the context is marked by [`InvocationContext::with_graph_resume_done`] (Go
+    /// `ctx.Value(graphResumeDoneKey{}) != nil`).
+    pub fn graph_resume_done(&self) -> bool {
+        self.inner().graph_resume_done
+    }
+
     /// The agent tree's parent map, if set.
     pub fn parent_map(&self) -> Option<Arc<ParentMap>> {
         self.inner().shared.parent_map.clone()
@@ -331,5 +371,37 @@ mod tests {
                 .compaction_runtime()
                 .is_none()
         );
+    }
+
+    /// Go `WithGraphResumeDone` is a context value: every context derived from a marked one,
+    /// fresh invocations included, carries it; the receiver stays unmarked.
+    #[test]
+    fn graph_resume_done_is_inherited_by_every_derivation() {
+        let ctx = InvocationContext::builder().build_invocation();
+        assert!(!ctx.graph_resume_done());
+        let done = ctx.with_graph_resume_done();
+        assert!(done.graph_resume_done());
+        assert!(!ctx.graph_resume_done(), "the receiver is unchanged");
+        let derived = [
+            done.with_delta(ContextDelta {
+                branch: Some("a.b".into()),
+                ..Default::default()
+            }),
+            done.with_delta(ContextDelta {
+                fresh_invocation: true,
+                ..Default::default()
+            }),
+            done.clone()
+                .into_context()
+                .with_delta(ContextDelta {
+                    function_call_id: Some("fc".into()),
+                    ..Default::default()
+                })
+                .as_invocation()
+                .clone(),
+        ];
+        for d in &derived {
+            assert!(d.graph_resume_done());
+        }
     }
 }

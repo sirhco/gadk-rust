@@ -271,3 +271,80 @@ async fn test_parallel_function_calls_with_partial_hitl() {
         SUMMARY
     );
 }
+
+/// A confirmed tool that sets SkipSummarization ends the turn on resume, as it does when the
+/// tool needs no confirmation. RequestConfirmationRequestProcessor runs the confirmed tool
+/// before the model call, so its final response event comes out of preprocessing; the model
+/// must not be called again to summarize it. adk-python stops on the same condition
+/// (base_llm_flow.py, _run_one_step_async, preprocess_yielded_final_response).
+#[tokio::test]
+async fn test_confirmed_tool_with_skip_summarization_ends_the_turn() {
+    let secure_tool = FunctionTool::new(
+        FunctionToolConfig {
+            require_confirmation: true,
+            ..FunctionToolConfig::new("secure_action", "performs a sensitive/secure action")
+        },
+        |ctx: Context, _input: SecureActionArgs| async move {
+            ctx.update_actions(|a| a.skip_summarization = true);
+            Ok::<_, ToolError>(SecureActionResult { executed: true })
+        },
+    )
+    .unwrap();
+    let model = Arc::new(HitlModel::default());
+    let agent = gadk_engine::llm::agent::new(LlmAgentConfig {
+        name: "hitl_tester".into(),
+        model: Some(model.clone()),
+        tools: vec![secure_tool],
+        ..Default::default()
+    })
+    .unwrap();
+    let r = TestRunner::new(agent, "testApp", "testUser", "testSession").await;
+
+    // Turn 1: both calls ask for confirmation.
+    let turn1 = r
+        .run(
+            Content::from_parts(
+                vec![Part::from_text("Please run prod deploy and db delete")],
+                ROLE_USER,
+            ),
+            StreamingMode::None,
+        )
+        .await
+        .unwrap();
+    let confirm_call_ids: Vec<String> = turn1
+        .iter()
+        .flat_map(|ev| ev.response.content.iter().flat_map(|c| c.parts.iter()))
+        .filter_map(|p| p.function_call.as_ref())
+        .filter(|fc| fc.name == REQUEST_CONFIRMATION_FUNCTION_CALL_NAME)
+        .map(|fc| fc.id.clone())
+        .collect();
+    assert_eq!(
+        confirm_call_ids.len(),
+        2,
+        "turn 1 asked for {} confirmations, want 2",
+        confirm_call_ids.len()
+    );
+
+    // Turn 2: the user approves both.
+    let reply = Content::from_parts(
+        confirm_call_ids.iter().map(|id| approval(id)).collect(),
+        ROLE_USER,
+    );
+    let turn2 = r.run(reply, StreamingMode::None).await.unwrap();
+
+    assert_eq!(
+        model.calls.load(Ordering::SeqCst),
+        1,
+        "model calls: the confirmed tool's SkipSummarization response must end turn 2 without another model call"
+    );
+    assert_eq!(
+        turn2.len(),
+        1,
+        "turn 2 yielded {} events, want 1 (the confirmed tool responses)",
+        turn2.len()
+    );
+    assert!(
+        turn2[0].is_final_response(),
+        "turn 2 event IsFinalResponse() = false, want true"
+    );
+}

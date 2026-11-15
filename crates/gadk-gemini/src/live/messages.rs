@@ -16,8 +16,9 @@
 //! Live wire messages.
 //!
 //! Outgoing: the client envelope (genai `LiveClientMessage`) with the converters of genai
-//! v1.75.0 `live_converters.go` (`liveConnectParametersTo{Mldev,Vertex}`,
-//! `liveClientMessageTo{Mldev,Vertex}`, `liveSendRealtimeInputParametersTo{Mldev,Vertex}`)
+//! v1.77.0 `live_converters.go` (`liveConnectParametersTo{Mldev,Vertex}`,
+//! `liveClientMessageTo{Mldev,Vertex}`, `liveClientContextUpdateTo{Mldev,Vertex}`,
+//! `liveClientToolResponseToVertex`, `liveSendRealtimeInputParametersTo{Mldev,Vertex}`)
 //! and the `toLiveClientMessage` methods of `types.go`.
 //!
 //! Incoming: genai `Session.Receive` decoding (with `liveServerMessageFromVertex`) and the
@@ -27,8 +28,9 @@
 use std::collections::VecDeque;
 
 use gadk_genai::{
-    Content, FunctionResponse, LiveClientContentInput, LiveConnectConfig, LiveRealtimeInput,
-    LiveServerMessage, LiveToolResponseInput, Part, Transcription,
+    Content, FunctionResponse, GenerateContentResponseUsageMetadata, LiveClientContentInput,
+    LiveClientContextUpdate, LiveConnectConfig, LiveRealtimeInput, LiveServerMessage,
+    LiveToolResponseInput, Part, Transcription, UsageMetadata,
 };
 use gadk_model::{Backend, LlmResponse, ModelError, body_prefix};
 use serde::Serialize;
@@ -37,8 +39,8 @@ use serde_json::Value;
 use super::live_other;
 use crate::error::GeminiError;
 use crate::request::{
-    Obj, as_obj, content, convert_list, convert_obj, copy, reject, safety_setting_mldev,
-    speech_config_vertex, to_value, tool,
+    Obj, as_obj, content, convert_list, convert_obj, copy, function_response_vertex, reject,
+    safety_setting_mldev, speech_config_vertex, to_value, tool,
 };
 
 /// genai `LiveClientMessage`: exactly one field is set per message. Fields hold the
@@ -54,6 +56,8 @@ struct LiveClientMessage {
     realtime_input: Option<Obj>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_response: Option<Obj>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    context_update: Option<Obj>,
 }
 
 impl LiveClientMessage {
@@ -165,6 +169,7 @@ pub(crate) fn setup_message(
     if let Some(v) = get(&from, "translationConfig") {
         set_generation(&mut setup, "translationConfig", v.clone());
     }
+    copy(&from, &mut setup, &["labels"]);
 
     LiveClientMessage {
         setup: Some(setup),
@@ -199,11 +204,57 @@ pub(crate) fn client_content_message(
     .to_json()
 }
 
-/// genai `SendToolResponse`: `LiveSendToolResponseParameters.toLiveClientMessage`; the tool
-/// response is copied unconverted.
-pub(crate) fn tool_response_message(input: &LiveToolResponseInput) -> Result<String, GeminiError> {
+/// genai `SendToolResponse`: `LiveSendToolResponseParameters.toLiveClientMessage`. The
+/// Gemini API copies the tool response unconverted; Vertex AI applies
+/// `liveClientToolResponseToVertex` (each function response through
+/// `functionResponseToVertex`).
+pub(crate) fn tool_response_message(
+    backend: Backend,
+    input: &LiveToolResponseInput,
+) -> Result<String, GeminiError> {
+    let from = as_obj(&to_value(input)?);
+    let tool_response = match backend {
+        Backend::GeminiApi => from,
+        Backend::VertexAi => {
+            let mut to = Obj::new();
+            convert_list(
+                &from,
+                &mut to,
+                "functionResponses",
+                function_response_vertex,
+            )?;
+            to
+        }
+    };
     LiveClientMessage {
-        tool_response: Some(as_obj(&to_value(input)?)),
+        tool_response: Some(tool_response),
+        ..Default::default()
+    }
+    .to_json()
+}
+
+/// genai `SendContextUpdate` (v1.77.0): `liveClientContextUpdateTo{Mldev,Vertex}` with
+/// `liveClientContextUpdateToolsTo{Mldev,Vertex}`. The system instruction goes through
+/// `contentTo*`, each tool through `toolTo*`; a set but empty tools wrapper stays `{}`.
+pub(crate) fn context_update_message(
+    backend: Backend,
+    input: &LiveClientContextUpdate,
+) -> Result<String, GeminiError> {
+    let from = as_obj(&to_value(input)?);
+    let mut to = Obj::new();
+    if let Some(v) = get(&from, "systemInstruction") {
+        to.insert(
+            "systemInstruction".into(),
+            Value::Object(content(&as_obj(v), backend)?),
+        );
+    }
+    convert_obj(&from, &mut to, "tools", |tools| {
+        let mut out = Obj::new();
+        convert_list(tools, &mut out, "tools", |t| tool(t, backend))?;
+        Ok(out)
+    })?;
+    LiveClientMessage {
+        context_update: Some(to),
         ..Default::default()
     }
     .to_json()
@@ -341,10 +392,13 @@ impl RecvState {
     }
 
     /// Port of the mapping half of Go `Recv`: one server message to one response. Messages
-    /// without a branch (setupComplete, goAway, usage metadata, ...) map to an empty
-    /// response.
+    /// without a branch (setupComplete, goAway, ...) map to an empty response; a message's
+    /// usage metadata rides on its response (Go f2dc5d3a).
     pub(crate) fn map(&mut self, msg: LiveServerMessage) -> LlmResponse {
-        let mut resp = LlmResponse::default();
+        let mut resp = LlmResponse {
+            usage_metadata: msg.usage_metadata.map(live_usage_metadata),
+            ..LlmResponse::default()
+        };
 
         if let Some(update) = msg.session_resumption_update {
             resp.session_resumption_handle = update.new_handle;
@@ -408,6 +462,27 @@ impl RecvState {
         }
 
         resp
+    }
+}
+
+/// Go `liveUsageMetadata`: the Live API token usage as the usage type [`LlmResponse`] carries.
+/// The Live API names output tokens `responseTokenCount` / `responseTokensDetails` where the
+/// generateContent type calls them `candidatesTokenCount` / `candidatesTokensDetails`
+/// (adk-python maps the fields the same way). `service_tier` has no counterpart and is dropped,
+/// as in Go.
+fn live_usage_metadata(u: UsageMetadata) -> GenerateContentResponseUsageMetadata {
+    GenerateContentResponseUsageMetadata {
+        prompt_token_count: u.prompt_token_count,
+        cached_content_token_count: u.cached_content_token_count,
+        candidates_token_count: u.response_token_count,
+        total_token_count: u.total_token_count,
+        thoughts_token_count: u.thoughts_token_count,
+        tool_use_prompt_token_count: u.tool_use_prompt_token_count,
+        prompt_tokens_details: u.prompt_tokens_details,
+        cache_tokens_details: u.cache_tokens_details,
+        candidates_tokens_details: u.response_tokens_details,
+        tool_use_prompt_tokens_details: u.tool_use_prompt_tokens_details,
+        traffic_type: u.traffic_type,
     }
 }
 

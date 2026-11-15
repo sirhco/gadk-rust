@@ -39,6 +39,9 @@ pub(crate) const DATA_PART_TYPE_CODE_EXEC_RESULT: &str = "code_execution_result"
 pub(crate) const DATA_PART_TYPE_EXECUTABLE_CODE: &str = "executable_code";
 /// Go `ToA2AMetaKey("thought")`: marks a text part as a thought.
 const META_THOUGHT_KEY: &str = "adk_thought";
+/// Go `a2aPartMetaVideoMetadataKey` (`ToA2AMetaKey("video_metadata")`): a file part's genai
+/// video metadata.
+const META_VIDEO_METADATA_KEY: &str = "adk_video_metadata";
 
 /// The wrapper an A2A data part's JSON gets inside a genai text blob.
 const DATA_PART_JSON_PREFIX: &str = "<a2a_datapart_json>";
@@ -99,7 +102,9 @@ pub fn to_a2a_parts(
 /// Go `ToGenAIPart`: converts one A2A part.
 pub fn to_genai_part(part: &a2a::Part) -> Result<Part, Error> {
     match &part.content {
-        a2a::PartContent::Text(text) if !text.is_empty() => {
+        // Go matches the content type, not non-empty text: an empty text part is still a text
+        // part (ee8d5ca4).
+        a2a::PartContent::Text(text) => {
             let mut result = Part {
                 text: text.clone(),
                 ..Default::default()
@@ -116,6 +121,7 @@ pub fn to_genai_part(part: &a2a::Part) -> Result<Part, Error> {
                 mime_type: part.media_type.clone().unwrap_or_default(),
                 display_name: part.filename.clone().unwrap_or_default(),
             }),
+            video_metadata: to_genai_video_metadata(part)?,
             ..Default::default()
         }),
         a2a::PartContent::Url(url) if !url.is_empty() => Ok(Part {
@@ -218,9 +224,23 @@ fn to_a2a_file_part(part: &Part) -> Result<a2a::Part, Error> {
     result.filename = non_empty(&blob.display_name);
     if let Some(video) = &part.video_metadata {
         let data = to_map_structure(video)?;
-        set_meta(&mut result, "video_metadata", map_value(data));
+        set_meta(&mut result, META_VIDEO_METADATA_KEY, map_value(data));
     }
     Ok(result)
+}
+
+/// Go `toGenAIFilePart`'s video metadata: `adk_video_metadata` on a raw part decodes into
+/// [`Part::video_metadata`] (`null` is absent). A value that does not decode is an error that
+/// does not quote the peer's value (it reaches the A2A client and the logs).
+fn to_genai_video_metadata(part: &a2a::Part) -> Result<Option<gadk_genai::VideoMetadata>, Error> {
+    let Some(value) = part_meta(part, META_VIDEO_METADATA_KEY) else {
+        return Ok(None);
+    };
+    serde_json::from_value(value.clone()).map_err(|_| {
+        Error::msg(format!(
+            "decode {META_VIDEO_METADATA_KEY} part metadata: want an object whose offsets are durations such as \"1.5s\""
+        ))
+    })
 }
 
 /// Go `toA2ADataPart`.

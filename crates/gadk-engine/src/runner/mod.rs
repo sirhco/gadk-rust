@@ -61,7 +61,10 @@ pub struct RunnerConfig {
     pub memory_service: Option<Arc<dyn gadk_memory::MemoryService>>,
     /// Plugins and their close timeout.
     pub plugin_config: PluginConfig,
-    /// Create the session on `run` when it does not exist.
+    /// Create the session on `run` / `run_live` when it does not exist: when the session ID is
+    /// empty (the service generates one) or when the session service's `get` reports
+    /// `SessionError::NotFound`. Any other `get` error is returned as is, so a transient storage
+    /// failure never replaces an existing session.
     pub auto_create_session: bool,
     /// Clock and ID source.
     pub platform: Platform,
@@ -161,10 +164,57 @@ fn is_llm_calls_limit(err: &AgentError) -> bool {
 }
 
 /// Port of Go `fromPlugin`: whatever the plugin returns, the framework's compaction record wins.
-fn from_plugin(original: Event, modified: Option<Event>, record: Option<EventCompaction>) -> Event {
-    let mut ev = modified.unwrap_or(original);
-    ev.actions.compaction = record;
-    ev
+/// A replacement also keeps the identity of the event it replaces (Go #2306): its ID, invocation
+/// ID and timestamp, and its author when the replacement names none; its other fields win as
+/// given. The plugin's own copy is never written to (it handed the replacement over by value).
+pub(crate) fn from_plugin(
+    original: Event,
+    modified: Option<Event>,
+    record: Option<EventCompaction>,
+) -> Event {
+    let Some(mut out) = modified else {
+        let mut ev = original;
+        ev.actions.compaction = record;
+        return ev;
+    };
+    out.actions.compaction = record;
+    out.id = original.id;
+    out.invocation_id = original.invocation_id;
+    out.timestamp = original.timestamp;
+    if out.author.is_empty() {
+        out.author = original.author;
+    }
+    out
+}
+
+/// Port of Go `stampTimestamp` (#2091): an event without a timestamp (an agent yielded one built
+/// without `Event::new`, or a plugin left one without it) gets the time the runner received it,
+/// so a stored event never moves the session's last update time back to year 1.
+pub(crate) fn stamp_timestamp(ctx: &InvocationContext, event: &mut Event) {
+    if event.timestamp == gadk_session::zero_time() {
+        event.timestamp = ctx.platform().now();
+    }
+}
+
+/// Go `errUserFunctionCall` (#2302): only a model makes function calls, so storing one from a
+/// user message would put a call no model produced into the history.
+pub(crate) const ERR_USER_FUNCTION_CALL: &str = "user message cannot contain function calls";
+
+/// Go `len(utils.FunctionCalls(content)) > 0`.
+pub(crate) fn has_function_call(content: Option<&Content>) -> bool {
+    !crate::tool::utils::function_calls(content).is_empty()
+}
+
+/// Port of Go `asUserContent` (#1877): the inbound message of a run is a user turn whatever role
+/// the caller (or an `on_user_message` plugin) set, so the role becomes `user`. An empty role
+/// would be skipped when the model request is built, and a `model` role would present the
+/// caller's text as the model's own earlier turn. The caller's message is not modified (it is
+/// handed over by value).
+fn as_user_content(msg: Option<Content>) -> Option<Content> {
+    msg.map(|mut m| {
+        m.role = gadk_genai::ROLE_USER.to_string();
+        m
+    })
 }
 
 /// Outcome of the per-event pipeline shared by both run paths.
@@ -262,12 +312,56 @@ impl Runner {
         cfg: RunConfig,
         opts: RunOptions,
     ) -> EventStream {
+        self.run_inner(None, user_id, session_id, msg, cfg, opts)
+    }
+
+    /// [`Runner::run`] started from a caller's context (Go `(*Runner).Run(ctx, …)`); only the
+    /// context's plugin-inheritance mark is read (Go #1777, [`InvocationContext::with_inherited_plugins`]).
+    ///
+    /// A runner with no plugins of its own, started with a context the agent tool marked, puts the
+    /// marked (calling run's) plugin manager in its invocation context, so those plugins also see
+    /// the sub-run's agents, models and tools. Any other runner uses only its own plugins. The
+    /// mark is taken (Go `TakeInheritedPlugins`), so it applies to this runner only. Run-level
+    /// callbacks (`on_user_message`, `before_run`, `on_event`, `after_run`) always stay with this
+    /// runner's own plugins.
+    pub fn run_with_context(
+        &self,
+        ctx: &InvocationContext,
+        user_id: &str,
+        session_id: &str,
+        msg: Option<Content>,
+        cfg: RunConfig,
+        opts: RunOptions,
+    ) -> EventStream {
+        let (_, inherited) = ctx.take_inherited_plugins();
+        self.run_inner(inherited, user_id, session_id, msg, cfg, opts)
+    }
+
+    fn run_inner(
+        &self,
+        inherited: Option<Arc<PluginManager>>,
+        user_id: &str,
+        session_id: &str,
+        msg: Option<Content>,
+        cfg: RunConfig,
+        opts: RunOptions,
+    ) -> EventStream {
         let inner = self.inner.clone();
         let root = inner.root_agent.clone();
+        let plugins = inner.with_plugin_manager(inherited);
         let stream = crate::telemetry::instrumentation::instrument_invocation(
             root.as_ref(),
             session_id,
-            || inner.run_stream(user_id.to_string(), session_id.to_string(), msg, cfg, opts),
+            || {
+                inner.run_stream(
+                    plugins,
+                    user_id.to_string(),
+                    session_id.to_string(),
+                    msg,
+                    cfg,
+                    opts,
+                )
+            },
         );
         FiberStream::consumer(stream).boxed()
     }
@@ -279,8 +373,58 @@ impl Runner {
 }
 
 impl RunnerInner {
-    /// Port of Go `(*Runner).getOrCreateSession`: any `get` error creates the session when
-    /// auto-create is on.
+    /// Port of Go `(*Runner).withPluginManager` (#1777): the plugin manager the invocation
+    /// context carries (where tools and callbacks look it up). A runner without plugins keeps
+    /// the `inherited` manager (taken from an agent tool's mark) when that one has plugins;
+    /// otherwise this runner's own. Run-level callbacks always use `self.plugin_manager`.
+    pub(crate) fn with_plugin_manager(
+        &self,
+        inherited: Option<Arc<PluginManager>>,
+    ) -> Arc<PluginManager> {
+        match inherited {
+            Some(pm) if !self.plugin_manager.has_plugins() && pm.has_plugins() => pm,
+            _ => self.plugin_manager.clone(),
+        }
+    }
+
+    /// The agent path's route for a function response (Go #1808, runner.go `run`): the agent that
+    /// made the call the first response in `msg` answers, its branch, and `true`, when that agent
+    /// is in the tree and not in a graph workflow; else the root, `""` and `false`.
+    fn route_function_response(
+        &self,
+        stored: &dyn Session,
+        msg: Option<&Content>,
+    ) -> (Arc<dyn Agent>, String, bool) {
+        let events = stored.events();
+        if let Some(ev) = find_agent::handle_user_function_call_response(&events, msg)
+            && let Some(sub) = self.root_agent.find_agent(&ev.author)
+            && !self.is_in_graph_workflow(&sub)
+        {
+            return (sub, ev.branch.clone(), true);
+        }
+        (self.root_agent.clone(), String::new(), false)
+    }
+
+    /// Port of Go `(*Runner).isInGraphWorkflow`: whether `a` or one of its ancestors is a graph
+    /// workflow agent.
+    fn is_in_graph_workflow(&self, a: &Arc<dyn Agent>) -> bool {
+        let mut cur = Some(a.clone());
+        while let Some(x) = cur {
+            if x.agent_state().agent_type == gadk_agent::AgentType::WorkflowAgent {
+                return true;
+            }
+            cur = self.parents.parent(x.name());
+        }
+        false
+    }
+
+    /// Port of Go `(*Runner).getOrCreateSession` (#1899): with auto-create on, the session is
+    /// created when the session ID is empty (the service generates one; services reject an empty
+    /// ID in `get` with a validation error) or when `get` reports [`SessionError::NotFound`]. Any
+    /// other `get` error is returned as is, so a transient storage failure never replaces an
+    /// existing session.
+    ///
+    /// [`SessionError::NotFound`]: gadk_session::SessionError::NotFound
     async fn get_or_create_session(
         &self,
         user_id: &str,
@@ -297,7 +441,13 @@ impl RunnerInner {
             .await;
         match got {
             Ok(s) => Ok(s),
-            Err(e) if !self.auto_create_session => Err(e.into()),
+            Err(e)
+                if !self.auto_create_session
+                    || (!session_id.is_empty()
+                        && !matches!(e, gadk_session::SessionError::NotFound)) =>
+            {
+                Err(e.into())
+            }
             Err(_) => Ok(self
                 .session_service
                 .create(CreateRequest {
@@ -314,6 +464,7 @@ impl RunnerInner {
     /// ([`run_node::run_node`]); any other root runs directly.
     fn run_stream(
         self: Arc<Self>,
+        plugins: Arc<PluginManager>,
         user_id: String,
         session_id: String,
         msg: Option<Content>,
@@ -321,6 +472,9 @@ impl RunnerInner {
         opts: RunOptions,
     ) -> EventStream {
         let this = self;
+        // Go: normalized once, so find_agent_to_run, the invocation context and the stored
+        // event all see the same message.
+        let msg = as_user_content(msg);
         Box::pin(async_stream::stream! {
             let stored = match this.get_or_create_session(&user_id, &session_id).await {
                 Ok(s) => s,
@@ -361,24 +515,49 @@ impl RunnerInner {
                         Err(e) => { yield Err(e); return; }
                     }
                 };
-                let mut events =
-                    run_node::run_node(this.clone(), stored, agent_to_run, root_mode, msg, cfg, opts);
+                let mut events = run_node::run_node(
+                    this.clone(),
+                    plugins,
+                    stored,
+                    agent_to_run,
+                    root_mode,
+                    msg,
+                    cfg,
+                    opts,
+                );
                 while let Some(item) = events.next().await {
                     yield item;
                 }
                 return;
             }
 
-            // Agent path (runner.go:644-794): the root agent runs directly.
+            // Agent path (runner.go:644-794).
+            //
+            // A function response goes back to the agent that made the call, on the branch it
+            // ran on (Go #1808; adk-python find_agent_to_run and restore_branch_from_history):
+            // re-running the root would run agents that never saw the call, and they fail on the
+            // unmatched response. A call made inside a graph workflow is the exception: the root
+            // runs. The first response in the message decides the route.
+            let (agent_to_run, branch, routed_to_caller) = this.route_function_response(&*stored, msg.as_ref());
+            // Go #2312: answers to calls from several invocations start a new invocation when
+            // they go back to the calling agent; otherwise the first call's invocation is kept.
+            let (mut invocation_id, spans_invocations) =
+                run_node::resolve_invocation_id(Some(&*stored), msg.as_ref());
+            if spans_invocations && routed_to_caller {
+                invocation_id = String::new();
+            }
             let token = CancellationToken::new();
             let cancel_on_drop = token.clone().drop_guard();
             let ictx = this.new_invocation_context(
                 &stored,
-                this.root_agent.clone(),
+                agent_to_run.clone(),
                 msg.clone(),
                 &cfg,
                 &token,
                 true,
+                plugins,
+                invocation_id,
+                branch,
             );
             let appended = this
                 .append_message_to_session(
@@ -404,7 +583,7 @@ impl RunnerInner {
                     Ok(Some(ev)) => { guard.at_yield(true); yield Ok(ev); guard.at_yield(false); early = true; break 'run; }
                     Ok(None) => {}
                 }
-                let mut events = this.root_agent.run(ictx.clone());
+                let mut events = agent_to_run.run(ictx.clone());
                 while let Some(item) = events.next().await {
                     let event = match item {
                         Ok(ev) => ev,
@@ -454,6 +633,7 @@ impl RunnerInner {
         stored: &dyn Session,
         mut event: Event,
     ) -> Processed {
+        stamp_timestamp(ctx, &mut event);
         if !event.response.partial
             && event
                 .node_info
@@ -473,6 +653,8 @@ impl RunnerInner {
             Err(e) => return Processed::PluginError(e),
             Ok(modified) => event = from_plugin(event, modified, record),
         }
+        // A plugin may have handed back an event without a timestamp.
+        stamp_timestamp(ctx, &mut event);
         // Only non-partial events are committed to the session.
         if !event.response.partial
             && let Err(e) = self.session_service.append_event(stored, &mut event).await
@@ -507,6 +689,7 @@ impl RunnerInner {
             .response
             .custom_metadata
             .insert(BEFORE_RUN_REPLY_KEY.to_string(), Value::Bool(true));
+        stamp_timestamp(ctx, &mut event);
         if !event.response.partial {
             // Go appends to ctx.Session(); writers always use the unwrapped session.
             let session = underlying_session(&ctx.session());
@@ -538,11 +721,17 @@ impl RunnerInner {
             .await
             .map_err(|e| wrap("error running on run user message callback ", e))?;
         if let Some(m) = modified {
+            // A plugin can return a message with any role.
             msg = m;
+            msg.role = gadk_genai::ROLE_USER.to_string();
             ctx = ctx.with_delta(ContextDelta {
                 user_content: Some(Some(msg.clone())),
                 ..Default::default()
             });
+        }
+
+        if has_function_call(Some(&msg)) {
+            return Err(AgentError::other(ERR_USER_FUNCTION_CALL));
         }
 
         if let (Some(artifacts), true) = (ctx.artifacts(), save_input_blobs_as_artifacts) {

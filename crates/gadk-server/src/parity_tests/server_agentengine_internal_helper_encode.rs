@@ -429,3 +429,48 @@ fn test_omit_empty() {
         assert_eq!(got, want, "{name}");
     }
 }
+
+#[test]
+// parity: adapted: gadk converts a `time.Time` only as a struct field (there is no GoSnake for a
+// bare chrono time), so each time is converted as a session event's `timestamp`
+fn test_time_fractional_seconds() {
+    let converted_timestamp = |t: chrono::DateTime<chrono::Utc>| {
+        let event = Event {
+            timestamp: t,
+            ..Default::default()
+        };
+        let o = event.go_snake("").expect("convertSnake() failed");
+        get(&o, "timestamp").cloned()
+    };
+
+    // Verify microsecond resolution is preserved (e.g., matching adkrest UnixMicro / 1e6)
+    let want = 1733040000.123456;
+    let got =
+        converted_timestamp(chrono::DateTime::from_timestamp_micros(1733040000123456).unwrap());
+    assert_eq!(
+        got,
+        Some(GoValue::Float(want)),
+        "convertSnake(time.Time), want float64 {want}"
+    );
+
+    // Verify whole-second timestamps
+    let got_whole = converted_timestamp(chrono::DateTime::from_timestamp(1700000000, 0).unwrap());
+    assert_eq!(
+        got_whole,
+        Some(GoValue::Float(1700000000.0)),
+        "convertSnake(whole second), want 1700000000.0"
+    );
+
+    // Verify EmitJSON serialization output
+    let event = Event {
+        id: "event-1".into(),
+        timestamp: chrono::DateTime::from_timestamp_micros(1733040000123456).unwrap(),
+        ..Default::default()
+    };
+    let body = emit_json(&event, &Log(None)).expect("EmitJSON() failed");
+    let json_map: Value = serde_json::from_slice(&body).expect("json.Unmarshal failed");
+    let ts = json_map["timestamp"]
+        .as_f64()
+        .unwrap_or_else(|| panic!("timestamp missing or not float64 in JSON: {json_map}"));
+    assert_eq!(ts, want, "EmitJSON timestamp");
+}

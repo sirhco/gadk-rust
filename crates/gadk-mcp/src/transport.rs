@@ -23,8 +23,11 @@ use gadk_auth::{AuthContext, CredentialProvider};
 use rmcp::RoleClient;
 use rmcp::model::ClientConfig;
 use rmcp::service::RunningService;
+use rmcp::service::{RxJsonRpcMessage, TxJsonRpcMessage};
+use rmcp::transport::StreamableHttpClientTransport;
+use rmcp::transport::Transport;
+use rmcp::transport::async_rw::AsyncRwTransport;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
-use rmcp::transport::{StreamableHttpClientTransport, TokioChildProcess};
 
 use crate::config::{CommandBuilder, Config, McpTransport, TransportFactory, serve_client};
 use crate::error::{BoxError, Error};
@@ -170,8 +173,76 @@ impl TransportFactory for CommandFactory {
         &self,
         client_info: ClientConfig,
     ) -> Result<RunningService<RoleClient, ClientConfig>, BoxError> {
-        let child = TokioChildProcess::new((self.build)())?;
+        let child = ChildTransport::spawn((self.build)())?;
         serve_client(client_info, child).await
+    }
+}
+
+/// How long [`ChildTransport::close`] waits for the child to exit after closing its stdin (go-sdk
+/// `CommandTransport`'s default `terminateDuration`).
+const CHILD_TERMINATE_DURATION: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// The client side of a child process speaking MCP over stdio (go-sdk `CommandTransport` /
+/// `pipeRWC`). Unlike rmcp's `TokioChildProcess`, whose builder always sets the child's stderr
+/// (to `Stdio::inherit()` by default), it keeps every setting of the caller's command, its
+/// stderr included (Go 1a84f04f keeps `cmd.Stderr` on every connect); only stdin and stdout are
+/// replaced by pipes.
+struct ChildTransport {
+    /// The running child; it is killed when the transport is dropped (`kill_on_drop`).
+    child: tokio::process::Child,
+    /// JSON-RPC over the child's stdout (read) and stdin (write).
+    io: AsyncRwTransport<RoleClient, tokio::process::ChildStdout, tokio::process::ChildStdin>,
+}
+
+impl ChildTransport {
+    /// Spawns `cmd` with piped stdin and stdout.
+    fn spawn(mut cmd: tokio::process::Command) -> std::io::Result<Self> {
+        // Divergence (ledger 2c): a command whose stderr the caller left unset inherits the host's
+        // stderr (tokio's default), where Go's os/exec with a nil `cmd.Stderr` discards it;
+        // `tokio::process::Command` has no getter to tell an unset stderr from a set one.
+        cmd.stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .kill_on_drop(true);
+        let mut child = cmd.spawn()?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| std::io::Error::other("stdin was already taken"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| std::io::Error::other("stdout was already taken"))?;
+        Ok(Self {
+            child,
+            io: AsyncRwTransport::new_client(stdout, stdin),
+        })
+    }
+}
+
+impl Transport<RoleClient> for ChildTransport {
+    type Error = std::io::Error;
+
+    fn send(
+        &mut self,
+        item: TxJsonRpcMessage<RoleClient>,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send + 'static {
+        self.io.send(item)
+    }
+
+    fn receive(&mut self) -> impl Future<Output = Option<RxJsonRpcMessage<RoleClient>>> + Send {
+        self.io.receive()
+    }
+
+    /// go-sdk `pipeRWC.Close`: closes the child's stdin, waits up to
+    /// [`CHILD_TERMINATE_DURATION`] for it to exit, then kills it.
+    // Divergence (ledger 2c): go-sdk sends SIGTERM and waits once more before killing; without
+    // a signal API (no `unsafe`, no libc dependency) the child is killed at once.
+    async fn close(&mut self) -> Result<(), Self::Error> {
+        self.io.close().await?;
+        match tokio::time::timeout(CHILD_TERMINATE_DURATION, self.child.wait()).await {
+            Ok(status) => status.map(|_| ()),
+            Err(_) => self.child.kill().await,
+        }
     }
 }
 

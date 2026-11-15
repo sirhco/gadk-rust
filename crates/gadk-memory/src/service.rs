@@ -19,7 +19,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use gadk_genai::Content;
-use gadk_session::{Session, SessionError};
+use gadk_session::{Event, Session, SessionError};
 use serde_json::{Map, Value};
 
 /// Port of Go memory.Service: a definition of the memory service.
@@ -36,6 +36,68 @@ pub trait MemoryService: Send + Sync {
     /// Returns memory entries relevant to the given query.
     /// Empty slice is returned if there are no matches.
     async fn search_memory(&self, req: SearchRequest) -> Result<SearchResponse, MemoryError>;
+
+    /// The service's [`EventAdder`], when it can ingest an incremental delta of events (Go's
+    /// type assertion `svc.(EventAdder)`); `None` by default.
+    ///
+    /// A type that wraps a service forwards this method itself, or its wrapped adder is not
+    /// reachable through [`add_events_to_memory`].
+    ///
+    /// EXPERIMENTAL (as in ADK-Go): its API and behavior may change or be removed later.
+    fn as_event_adder(&self) -> Option<&dyn EventAdder> {
+        None
+    }
+}
+
+/// Port of Go memory.EventAdder: an optional capability of a [`MemoryService`] that can ingest
+/// an incremental delta of events without re-ingesting a full session. A service exposes it
+/// through [`MemoryService::as_event_adder`]; [`crate::InMemoryMemoryService`] implements it.
+///
+/// EXPERIMENTAL (as in ADK-Go): its API and behavior may change or be removed later.
+#[async_trait]
+pub trait EventAdder: Send + Sync {
+    /// Appends an incremental batch of events to the memory service for the scope named by
+    /// `req` (Go `AddEventsToMemory`). Events already stored for the scope are kept: the batch
+    /// never replaces them. Implementations document how they treat events that repeat an ID
+    /// already stored.
+    async fn add_events(&self, req: AddEventsRequest) -> Result<(), MemoryError>;
+}
+
+/// Port of Go memory.AddEventsRequest: the parameter of [`EventAdder::add_events`] and
+/// [`add_events_to_memory`].
+///
+/// EXPERIMENTAL (as in ADK-Go): its API and behavior may change or be removed later.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AddEventsRequest {
+    /// The application name for memory scope.
+    pub app_name: String,
+    /// The user ID for memory scope.
+    pub user_id: String,
+    /// The optional session ID for memory partitioning. In the in-memory service an empty ID
+    /// places the events in a shared default bucket per (app, user), distinct from the bucket
+    /// of every session, including a session whose ID is `""` added with
+    /// [`MemoryService::add_session_to_memory`]. Implementations for which session
+    /// partitioning does not apply may ignore it.
+    pub session_id: String,
+    /// The ordered events to add to memory.
+    pub events: Vec<Event>,
+    /// Optional, implementation-defined metadata for memory generation. The in-memory service
+    /// ignores it.
+    pub custom_metadata: Map<String, Value>,
+}
+
+/// Port of Go memory.AddEventsToMemory: adds `req.events` to `svc` through its
+/// [`EventAdder`], or returns [`MemoryError::AddEventsUnsupported`] when `svc` has none.
+///
+/// EXPERIMENTAL (as in ADK-Go): its API and behavior may change or be removed later.
+pub async fn add_events_to_memory(
+    svc: &dyn MemoryService,
+    req: AddEventsRequest,
+) -> Result<(), MemoryError> {
+    let adder = svc
+        .as_event_adder()
+        .ok_or(MemoryError::AddEventsUnsupported)?;
+    adder.add_events(req).await
 }
 
 /// Port of Go memory.SearchRequest: a request for memory search.
@@ -85,4 +147,11 @@ pub enum MemoryError {
     /// The storage backend failed.
     #[error(transparent)]
     Backend(Box<dyn std::error::Error + Send + Sync>),
+    /// The service does not implement [`EventAdder`] (Go `ErrAddEventsUnsupported`, which
+    /// wraps `errors.ErrUnsupported`). A caller that receives it can ingest the full session
+    /// with [`MemoryService::add_session_to_memory`] instead, as its message says.
+    #[error(
+        "memory: service does not support adding event deltas; call Service.AddSessionToMemory to ingest the full session"
+    )]
+    AddEventsUnsupported,
 }

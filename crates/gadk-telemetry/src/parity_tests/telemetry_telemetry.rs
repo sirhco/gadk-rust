@@ -38,8 +38,10 @@ use crate::config::{
     with_tracer_provider,
 };
 use crate::providers::new_with;
+use crate::resource::go_default_resource;
 use crate::setup::{
     configure, configure_exporters, resolve_gcp_quota_project, resolve_gcp_resource_project,
+    resolve_resource,
 };
 use crate::test_support::{NoDetector, ResourceSpanExporter, env};
 
@@ -232,6 +234,15 @@ async fn test_telemetry_custom_logger_provider() {
     providers.shutdown().await.unwrap();
 }
 
+// parity: skipped TestResolveResourceServiceInstanceID: 8b — MeterProvider with OTLP and Google Cloud export (#2042; service.instance.id on the exported resource)
+// parity: skipped TestTelemetryCustomMeterProvider: 8b — MeterProvider with OTLP and Google Cloud export (#2042)
+// parity: skipped TestTelemetryShutdownReturnsReaderErrors: 8b — MeterProvider with OTLP and Google Cloud export (#2042)
+// parity: skipped TestNewErrorLeavesNoReaderRunning: 8b — MeterProvider with OTLP and Google Cloud export (#2042)
+// parity: skipped TestTelemetryNoReadersNoMeterProvider: 8b — MeterProvider with OTLP and Google Cloud export (#2042)
+// parity: skipped TestOtlpEnvMetricShutdownDoesNotExport: 8b — MeterProvider with OTLP and Google Cloud export (#2042)
+// parity: skipped TestGcpExporters: 8b — MeterProvider with OTLP and Google Cloud export (#2042; GCP span and metric exporters per own provider)
+// parity: skipped TestPeriodicReader: 8b — MeterProvider with OTLP and Google Cloud export (#2042)
+
 fn creds(project_id: &str) -> TelemetryOption {
     with_google_credentials(GoogleCredentials {
         credentials: None,
@@ -333,6 +344,35 @@ fn test_resolve_resource_project() {
         },
     ];
     run_project_cases(cases, resolve_gcp_resource_project, "resource");
+}
+
+// parity: adapted: Go's resource.Default() reads the process environment; gadk's default resource reads the injected environment (no OTEL_RESOURCE_ATTRIBUTES, so it has no gcp.project_id)
+#[tokio::test]
+async fn test_resolve_resource_project_id() {
+    let project_id_key = Key::from_static_str("gcp.project_id");
+    let env = env(&[]);
+    // The default resource is compared against rather than a fixed value.
+    let default_project = go_default_resource(env.as_ref()).get(&project_id_key);
+
+    let cases = [
+        (
+            "no project keeps the default resource's",
+            vec![],
+            default_project,
+        ),
+        (
+            "configured project",
+            vec![with_gcp_resource_project("option-project")],
+            Some(opentelemetry::Value::from("option-project")),
+        ),
+    ];
+    for (name, opts, want) in cases {
+        let cfg = config_from_opts(&opts);
+        let r = resolve_resource(&cfg, env.as_ref(), &NoDetector)
+            .await
+            .unwrap_or_else(|e| panic!("{name}: resolveResource() unexpected error: {e}"));
+        assert_eq!(r.get(&project_id_key), want, "{name}: gcp.project_id");
+    }
 }
 
 #[test]

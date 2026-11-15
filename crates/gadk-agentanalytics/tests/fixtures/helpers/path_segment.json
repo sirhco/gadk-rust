@@ -3,17 +3,17 @@
   "cases": [
     {"fallback":"fb","id":"abc","result":"abc"},
     {"fallback":"fb","id":"","result":"fb"},
-    {"fallback":"fb","id":".","result":"fb"},
-    {"fallback":"fb","id":"..","result":"fb"},
-    {"fallback":"fb","id":"...","result":"fb"},
+    {"fallback":"fb","id":".","result":"fb~cdb4ee2aea69cc6a83331bbe96dc2caa9a299d21329efb0336fc02a82e1839a8"},
+    {"fallback":"fb","id":"..","result":"fb~5ec1f7e700f37c3d0b2981d04855fc34b94aaa15457b05ca571817442d228f81"},
+    {"fallback":"fb","id":"...","result":"fb~ab5df625bc76dbd4e163bed2dd888df828f90159bb93556525c31821b6541d46"},
     {"fallback":"fb","id":".a.","result":".a."},
-    {"fallback":"fb","id":"a/b","result":"a_b"},
-    {"fallback":"fb","id":"a b\tc","result":"a_b_c"},
-    {"fallback":"fb","id":"ü","result":"_"},
-    {"fallback":"fb","id":"🤖x","result":"_x"},
+    {"fallback":"fb","id":"a/b","result":"a_b~c14cddc033f64b9dea80ea675cf280a015e672516090a5626781153dc68fea11"},
+    {"fallback":"fb","id":"a b\tc","result":"a_b_c~b314d97eee1b4917a59206191f4596618580e1c78605bedb10d90681ba719790"},
+    {"fallback":"fb","id":"ü","result":"_~607474ca475a9724d7360aba71a56d5df77e61350e3f724cfa1f46e857e2d85f"},
+    {"fallback":"fb","id":"🤖x","result":"_x~6e2c7ff9faa76d49a8318893347de607c81f1dfd0e5153f4f609bb3159c8d5c0"},
     {"fallback":"fb","id":"A-Z_0.9","result":"A-Z_0.9"},
-    {"fallback":"fb","id":"%2F","result":"_2F"},
-    {"fallback":"fb","id":"\u0000","result":"_"},
+    {"fallback":"fb","id":"%2F","result":"_2F~40ac38fa867107d745383da042a9123e5e66d2943f14feeb0d5298dbe2547d4b"},
+    {"fallback":"fb","id":"\u0000","result":"_~6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d"},
     {"fallback":"","id":"","result":""}
   ]
 }

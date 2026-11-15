@@ -46,7 +46,10 @@ use super::super::plugin_agentanalytics_bigquery_agent_analytics_plugin::support
     new_test_plugin_with_config, only_row_of_type, rows_of_type, span_ids, test_bq_client,
     until_event_type,
 };
-use super::{FakeStorage, as_log, as_off, hooked, wait_done};
+use super::{
+    FakeStorage, MAX_GCS_PREFIX_BYTES, as_log, as_off, hooked, path_segment_hash_suffix, wait_done,
+};
+use crate::batch_processor::BatchProcessor;
 use crate::bigquery::fake::RecordingLogger;
 use crate::config::{ClientOptions, Config, ContentFormatter};
 use crate::context::Context;
@@ -57,6 +60,7 @@ use crate::event_types::{
 };
 use crate::formatter::{TEXT_UPLOAD_CONTENT_TYPE, UPLOAD_FAILED_TEXT};
 use crate::offload::OwnedUploadError;
+use crate::offload::uploads::clean_gcs_prefix;
 use crate::offload::uploads::safe_upload_error_summary;
 use crate::plugin::new_bigquery_agent_analytics_plugin_with_clients;
 use crate::redaction::{REDACTED_VALUE, UNPARSEABLE_JSON_PLACEHOLDER};
@@ -765,6 +769,7 @@ async fn test_gcs_offloading_caller_changes_its_messages_while_rows_are_written(
     before_model(&tp, &mc, req.clone()).await;
     (tp.plugin.before_tool_callback().unwrap())(mc.ctx.clone(), fake_tool("lookup"), args.clone())
         .await
+        .1
         .unwrap_or_else(|e| panic!("callback error: {e}"));
 
     // The callbacks have returned, so the caller is free to change its messages. Its changes
@@ -1738,4 +1743,297 @@ async fn test_gcs_offloading_built_in_offloader_error_preserves_scrubbed_detail(
             && summary.contains(REDACTED_VALUE),
         "safeUploadErrorSummary = {summary:?}, want queryless URL and scrubbed diagnostic reason preserved"
     );
+}
+
+/// Go `countWarnings(l)`: the logged lines about a rewritten `GCSPathPrefix`.
+fn count_prefix_warnings(l: &RecordingLogger) -> usize {
+    l.lines()
+        .iter()
+        .filter(|line| line.contains("WARNING: Config.GCSPathPrefix"))
+        .count()
+}
+
+/// The one upload `off` received, which must be the only one.
+fn only_upload_path(off: &HookOffloader, what: &str) -> String {
+    let uploads = off.uploads();
+    assert_eq!(uploads.len(), 1, "{what}: len(uploads)");
+    uploads[0].path.clone()
+}
+
+/// Go's `logRequest` of one offloaded text message.
+async fn log_offloaded_text(tp: &TestPlugin) -> Row {
+    let mc = Mc::of(&tp.ctx);
+    let req = LlmRequest {
+        model: "gemini-2.5-flash".into(),
+        ..request(vec![Content::from_text("offloaded text payload", "user")])
+    };
+    log_request(tp, &mc, req).await
+}
+
+// parity: adapted: Go's cleanGCSPrefix is the sanitization port's clean_gcs_prefix (read off gcs_object_path); a Rust &str is valid UTF-8, so the "invalid UTF-8" case is left out; the direct NewBatchProcessor subtest writes through FakeWriteServer instead of a gRPC server
+#[tokio::test(start_paused = true)]
+async fn test_gcs_path_prefix_rewrite_warning_and_disjoint_namespace() {
+    // valid prefixes log no warning and pass verbatim to custom offloader
+    for prefix in [
+        String::new(),
+        "/logs/tenant/".into(),
+        r"logs\prod".into(),
+        "a//b".into(),
+        "a/./b".into(),
+        "../a/../b".into(),
+        ".well-known/acme-challenge-x".into(),
+        "a".repeat(MAX_GCS_PREFIX_BYTES),
+    ] {
+        let off = Arc::new(HookOffloader::default());
+        let log = Arc::new(RecordingLogger::default());
+        let tp = offloading_plugin(&off, |c| {
+            c.gcs_path_prefix = prefix.clone();
+            c.max_inline_text_size = 5;
+            c.logger = as_log(&log);
+        })
+        .await;
+        assert_eq!(
+            count_prefix_warnings(&log),
+            0,
+            "prefix {prefix:?}: warnings ({log})"
+        );
+        let row = log_offloaded_text(&tp).await;
+        let got = only_upload_path(&off, &format!("prefix {prefix:?}"));
+        let mut want_lead = format!("{}/", row_date(&row));
+        let trimmed = prefix.trim_matches('/');
+        if !trimmed.is_empty() {
+            want_lead = format!("{trimmed}/{want_lead}");
+        }
+        assert!(
+            got.starts_with(&want_lead),
+            "prefix {prefix:?}: GCSUploadRequest.Path = {got:?}, want prefix {want_lead:?}"
+        );
+    }
+
+    // rewritten prefixes log constant privacy-safe warning and stay disjoint when reused
+    const SECRET_SENTINEL: &str = "PrivateCustomerSecretMarker98765";
+    for (name, prefix, want_reason) in [
+        (
+            "reserved acme-challenge",
+            format!(".well-known/acme-challenge/{SECRET_SENTINEL}"),
+            "starts with reserved .well-known/acme-challenge prefix",
+        ),
+        (
+            "control character",
+            format!("tenant-{SECRET_SENTINEL}\ninjected"),
+            "contains control or line-separator character",
+        ),
+        (
+            "reserved tilde",
+            format!("tenant-{SECRET_SENTINEL}~v1"),
+            "contains reserved '~'",
+        ),
+        // skipped case: "invalid UTF-8" — a Rust String is valid UTF-8.
+        (
+            "over 750 bytes",
+            format!(
+                "{SECRET_SENTINEL}{}",
+                "a".repeat(MAX_GCS_PREFIX_BYTES + 1 - SECRET_SENTINEL.len())
+            ),
+            "exceeds 750 bytes",
+        ),
+    ] {
+        let trimmed = prefix.trim_matches('/');
+        let want_effective = clean_gcs_prefix(&prefix);
+        let off = Arc::new(HookOffloader::default());
+        let log = Arc::new(RecordingLogger::default());
+        let tp = offloading_plugin(&off, |c| {
+            c.gcs_path_prefix = prefix.clone();
+            c.max_inline_text_size = 5;
+            c.logger = as_log(&log);
+        })
+        .await;
+        assert_eq!(count_prefix_warnings(&log), 1, "{name}: warnings ({log})");
+        assert!(
+            !log.contains(SECRET_SENTINEL),
+            "{name}: warning {log} leaked the sentinel"
+        );
+        assert!(
+            !log.contains(&prefix) && !log.contains(&want_effective),
+            "{name}: warning {log} logged raw or rewritten prefix text"
+        );
+        let digest_hex = path_segment_hash_suffix(trimmed)[1..].to_owned();
+        assert!(
+            !log.contains(&digest_hex),
+            "{name}: warning {log} logged the prefix digest"
+        );
+        let want_counts = format!(
+            "({} raw bytes, {} trimmed bytes) was rewritten ({} effective bytes)",
+            prefix.len(),
+            trimmed.len(),
+            want_effective.len()
+        );
+        assert!(
+            log.contains(&want_counts),
+            "{name}: warning {log} missing {want_counts:?}"
+        );
+        assert!(
+            log.contains(want_reason),
+            "{name}: warning {log} missing {want_reason:?}"
+        );
+        let row = log_offloaded_text(&tp).await;
+        let got = only_upload_path(&off, name);
+        let want_lead = format!("{want_effective}/{}/", row_date(&row));
+        assert!(
+            got.starts_with(&want_lead),
+            "{name}: GCSUploadRequest.Path = {got:?}, want prefix {want_lead:?}"
+        );
+
+        // Passing a generated "<base>~<sha256>" output back into Config.GCSPathPrefix must
+        // rewrite it again (never alias the original rewritten prefix).
+        let want_reused_effective = clean_gcs_prefix(&want_effective);
+        assert_ne!(
+            want_reused_effective, want_effective,
+            "{name}: cleanGCSPrefix of the rewritten prefix"
+        );
+        let off_reuse = Arc::new(HookOffloader::default());
+        let log_reuse = Arc::new(RecordingLogger::default());
+        let tp_reuse = offloading_plugin(&off_reuse, |c| {
+            c.gcs_path_prefix = want_effective.clone();
+            c.max_inline_text_size = 5;
+            c.logger = as_log(&log_reuse);
+        })
+        .await;
+        assert_eq!(
+            count_prefix_warnings(&log_reuse),
+            1,
+            "{name}: reuse warnings ({log_reuse})"
+        );
+        assert!(
+            !log_reuse.contains(SECRET_SENTINEL)
+                && !log_reuse.contains(&want_effective)
+                && !log_reuse.contains(&want_reused_effective),
+            "{name}: reuse warning {log_reuse} leaked prefix text or sentinel"
+        );
+        assert!(
+            log_reuse.contains("contains reserved '~'"),
+            "{name}: reuse warning {log_reuse} missing the '~' reason"
+        );
+        let row_reuse = log_offloaded_text(&tp_reuse).await;
+        let got_reuse = only_upload_path(&off_reuse, name);
+        let want_reuse_lead = format!("{want_reused_effective}/{}/", row_date(&row_reuse));
+        assert!(
+            got_reuse.starts_with(&want_reuse_lead),
+            "{name}: reused prefix uploaded to {got_reuse:?}, want prefix {want_reuse_lead:?}"
+        );
+        assert!(
+            !got_reuse.starts_with(&format!("{want_effective}/")),
+            "{name}: reused effective prefix aliased the original in {got_reuse:?}"
+        );
+    }
+
+    // direct NewBatchProcessor warns once without leaking prefix and disabled plugin stays quiet
+    const DIRECT_SENTINEL: &str = "DirectCustomerSecret42";
+    let server = FakeWriteServer::new();
+    let warn_log = Arc::new(RecordingLogger::default());
+    let mut cfg_warn = Config::default();
+    cfg_warn.project_id = "test-project".into();
+    cfg_warn.dataset_id = "test_dataset".into();
+    cfg_warn.table_name = "test-table".into();
+    cfg_warn.gcs_path_prefix = format!("/.well-known/acme-challenge/{DIRECT_SENTINEL}/");
+    cfg_warn.logger = as_log(&warn_log);
+    let bp_warn = BatchProcessor::new(
+        &Context::background(),
+        Some(server.client().unwrap()),
+        "",
+        cfg_warn.clone(),
+    )
+    .await
+    .unwrap_or_else(|e| panic!("NewBatchProcessor(rewrite) error: {e}"));
+    bp_warn.close().await;
+    let want_warn_effective = clean_gcs_prefix(&cfg_warn.gcs_path_prefix);
+    let want_direct_counts = format!(
+        "({} raw bytes, {} trimmed bytes) was rewritten ({} effective bytes)",
+        cfg_warn.gcs_path_prefix.len(),
+        cfg_warn.gcs_path_prefix.trim_matches('/').len(),
+        want_warn_effective.len()
+    );
+    assert_eq!(
+        count_prefix_warnings(&warn_log),
+        1,
+        "direct NewBatchProcessor(rewrite) warnings ({warn_log})"
+    );
+    assert!(
+        !warn_log.contains(DIRECT_SENTINEL) && !warn_log.contains(&want_warn_effective),
+        "direct NewBatchProcessor(rewrite) warning {warn_log} leaked prefix text"
+    );
+    assert!(
+        warn_log.contains(&want_direct_counts)
+            && warn_log.contains("starts with reserved .well-known/acme-challenge prefix"),
+        "direct NewBatchProcessor(rewrite) warning {warn_log} missing counts {want_direct_counts:?} or reason"
+    );
+    let ok_log = Arc::new(RecordingLogger::default());
+    let mut cfg_ok = cfg_warn.clone();
+    cfg_ok.gcs_path_prefix = r"team\logs".into();
+    cfg_ok.logger = as_log(&ok_log);
+    let bp_ok = BatchProcessor::new(
+        &Context::background(),
+        Some(server.client().unwrap()),
+        "",
+        cfg_ok,
+    )
+    .await
+    .unwrap_or_else(|e| panic!("NewBatchProcessor(valid) error: {e}"));
+    bp_ok.close().await;
+    assert_eq!(
+        count_prefix_warnings(&ok_log),
+        0,
+        "direct NewBatchProcessor(valid) warnings ({ok_log})"
+    );
+    let disabled_log = Arc::new(RecordingLogger::default());
+    let mut cfg_disabled = Config::default();
+    cfg_disabled.enabled = false;
+    cfg_disabled.gcs_path_prefix = format!("logs\ninjected-{DIRECT_SENTINEL}");
+    cfg_disabled.logger = as_log(&disabled_log);
+    let p_disabled = new_bigquery_agent_analytics_plugin_with_clients(
+        &Context::background(),
+        cfg_disabled,
+        None,
+        None,
+    )
+    .await
+    .unwrap_or_else(|e| panic!("NewBigQueryAgentAnalyticsPluginWithClients(disabled) error: {e}"));
+    let _ = (p_disabled.close().unwrap())().await;
+    assert_eq!(
+        count_prefix_warnings(&disabled_log),
+        0,
+        "disabled plugin warnings ({disabled_log})"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn test_gcs_offload_rewritten_prefix_fits_hierarchical_namespace_folder_limit() {
+    for n in [402usize, 403, 467] {
+        let prefix = format!("{}~", "a".repeat(n - 1));
+        let off = hooked(|_, req| {
+            Box::pin(async move {
+                let folder_len = req.path.rfind('/').map_or(0, |i| i + 1);
+                let base_len = req.path.len() - folder_len;
+                if folder_len > 512 || base_len > 512 {
+                    return Err(Error::msg(format!(
+                        "HNS limit exceeded: folder={folder_len}B base={base_len}B path={:?}",
+                        req.path
+                    )));
+                }
+                Ok(())
+            })
+        });
+        let tp = offloading_plugin(&off, |c| {
+            c.gcs_path_prefix = prefix.clone();
+            c.logger = as_log(&Arc::new(RecordingLogger::default()));
+        })
+        .await;
+        let mc = Mc::of(&tp.ctx);
+        let row = log_request(&tp, &mc, request(vec![image_content(&[1, 2, 3])])).await;
+        let parts = content_parts_of(&row);
+        assert!(
+            parts.len() == 1 && s(&parts[0], "storage_mode") == "GCS_REFERENCE",
+            "prefix len {n}: content_parts = {parts:?}, want 1 GCS_REFERENCE part"
+        );
+    }
 }

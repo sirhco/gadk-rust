@@ -178,6 +178,15 @@ async fn basic(srv: Arc<dyn ArtifactService>) {
         }
     }
 
+    // LoadNonexistentVersion
+    let got = srv.load(load_req(SESSION, "file1", 99)).await;
+    if !is_not_found(&got) {
+        fail!(
+            format!("{s}/LoadNonexistentVersion"),
+            "Load('file1', ver=99) = {got:?}, want NotFound"
+        );
+    }
+
     // List
     let mut got = match srv.list(list_req(SESSION)).await {
         Ok(r) => r.file_names,
@@ -213,6 +222,10 @@ async fn basic(srv: Arc<dyn ArtifactService>) {
         Ok(r) if r.part == Some(bytes("file v2", "text/plain")) => {}
         Ok(r) => fail!(step, "Load('file1') = {:?}, want file v2", r.part),
         Err(e) => fail!(step, "Load('file1') failed: {e}"),
+    }
+    let deleted = srv.load(load_req(SESSION, "file1", 3)).await;
+    if !is_not_found(&deleted) {
+        fail!(step, "Load('file1', ver=3) = {deleted:?}, want NotFound");
     }
 
     must_delete(srv, s, delete_req(SESSION, "file1", 0)).await;

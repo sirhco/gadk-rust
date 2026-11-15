@@ -28,6 +28,7 @@ use crate::compaction::summary_event::new_summary_event;
 use crate::compaction::test_support::{
     at, call_and_response_event, call_event, compaction_event, confirmation_event, excl, ids,
     model_text_event, multi_call_event, new_event, response_event, strs, text_event,
+    with_auth_request,
 };
 use crate::compaction::window::{
     covers_all_of, latest_compaction_event, longest_self_contained_prefix, select_sliding_window,
@@ -128,6 +129,27 @@ fn test_longest_self_contained_prefix() {
                 response_event("c", "inv1", 3, "c1"),
             ],
             strs(&["a", "b", "c"]),
+        ),
+        (
+            // The request rides on the tool's own response, which must not close the call the
+            // request is about.
+            "unresolved credential request blocks the prefix",
+            vec![
+                text_event("a", "inv1", 1, "hi"),
+                call_event("b", "inv1", 2, "c1"),
+                with_auth_request(response_event("c", "inv1", 3, "c1"), "c1"),
+            ],
+            strs(&["a"]),
+        ),
+        (
+            "credential request resolved by the rerun is fine",
+            vec![
+                text_event("a", "inv1", 1, "hi"),
+                call_event("b", "inv1", 2, "c1"),
+                with_auth_request(response_event("c", "inv1", 3, "c1"), "c1"),
+                response_event("d", "inv1", 4, "c1"),
+            ],
+            strs(&["a", "b", "c", "d"]),
         ),
         (
             "response within the same event as its call still opens the obligation",
@@ -535,6 +557,30 @@ fn test_select_sliding_window_survives_blocked_head() {
                 text_event("b", "inv3", 3, "q3"),
             ],
             strs(&["a", "b"]),
+        ),
+        (
+            "unanswered credential request at the head is stepped over",
+            3,
+            vec![
+                with_auth_request(new_event("stuck", "inv1", 1, "model", vec![]), "c1"),
+                text_event("a", "inv2", 2, "q2"),
+                text_event("b", "inv3", 3, "q3"),
+            ],
+            strs(&["a", "b"]),
+        ),
+        (
+            // c0 never answers, so only stepping over the head can compact here, and the rerun
+            // that answers c1 must stay with its request.
+            "a tail answering a credential request left in the head is refused",
+            3,
+            vec![
+                multi_call_event("calls", "inv1", 1, &["c0", "c1"]),
+                with_auth_request(response_event("ask", "inv1", 2, "c1"), "c1"),
+                text_event("a", "inv2", 3, "q2"),
+                response_event("rerun", "inv2", 4, "c1"),
+                text_event("b", "inv3", 5, "q3"),
+            ],
+            strs(&["b"]),
         ),
         (
             "still nil when nothing after the blockage is self-contained",

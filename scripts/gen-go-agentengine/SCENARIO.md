@@ -4,7 +4,7 @@
 `docs/parity/ADK_GO_COMMIT`) as gadk fixtures, and generates gadk-server's `ConvertSnake` shape
 table:
 
-- `crates/gadk-server/testdata/agentengine/` (29 files): `server/agentengine.NewHandler` served by
+- `crates/gadk-server/testdata/agentengine/` (30 files): `server/agentengine.NewHandler` served by
   `httptest.NewServer`, one file per exchange, plus its startup log and `ListClassMethods()`;
 - `crates/gadk-launcher/testdata/agentengine/` (13 files): `cmd/launcher/agentengine.NewLauncher`
   as a subprocess: command lines (`cli_*`) and web servers (`wire_*`);
@@ -35,7 +35,7 @@ cd scripts/gen-go-agentengine && tmp="$(mktemp -d)" && \
 The probe records every fixture twice and compares the two runs byte for byte; on any difference
 it prints both and exits 1 without writing. Otherwise it deletes the `*.json` files (except
 `*.deltas.json`) of both directories, writes the fixtures and prints
-`wrote server=29 launcher=13 fixtures`. A run takes a few seconds.
+`wrote server=30 launcher=13 fixtures`. A run takes a few seconds.
 
 ## Agent, model and providers
 
@@ -126,7 +126,17 @@ File `<config>_<NN>_<case>.json`, written by `json.Encoder` with `SetEscapeHTML(
 | `main_25_trailing_slash` | `/reasoning_engine/`, the list body (strict-slash redirect) |
 | `main_26_unclean_path` | `/x/../reasoning_engine`, the list body (clean-path redirect) |
 | `main_27_reasoning_engine_query` | `/reasoning_engine?x=1`, the list body |
+| `main_28_get_session_requested_auth_configs` | seed: `authRequestEvent` appended to `main_02`'s session; then `/reasoning_engine` `async_get_session` of that session (`u1`) |
 | `small_01_over_limit_payload` | `/reasoning_engine`, the list body (63 bytes, read up to 32) |
+
+A step with a seed appends an event to an `engineID` session through the session service before
+its request, not over HTTP: only a tool writes `EventActions.RequestedAuthConfigs` (ADK-Go #2114),
+so no request can. The fixture records it under `seed` (omitted elsewhere): `{"user_id", "session_id",
+"event"}`, where `event` is `session.Event` JSON with its own ID and timestamp (so the in-memory
+service reads no clock or UUID). `main_28`'s event (`authRequestEvent`) carries one requested auth
+config (an OAuth2 authorization-code scheme, an OAuth2 raw credential with a client secret, an HTTP
+bearer exchanged credential, credential key `drive`) and a timestamp with microseconds (#2199).
+A replay appends the same event before sending the request.
 
 Session IDs come from earlier responses (`output.id`; `main_14`'s first NDJSON line's
 `session_id`), except `main_09`'s, which the stream does not name: the probe reads it from the
@@ -213,7 +223,7 @@ identity) → `RawMessage`; `time.Time` → `Time`; pointer → `Pointer`; `[]by
 array → `Slice`; map (string keys, else fail) → `Map`; struct → `Struct("<type>")`; interface →
 `Interface`; `string` → `String`, another string type → `NamedString`; `bool` → `Bool`; ints →
 `Int`; uints → `Uint`; `float32`/`float64` → `Float32`/`Float64`; anything else fails. At
-`bb1fd51a`: 78 structs, 349 fields. `scripts/check-fixtures.sh` regenerates the file into a
+`0990f9e2`: 88 structs, 435 fields. `scripts/check-fixtures.sh` regenerates the file into a
 temporary directory and `cmp`s it with the checked-in one.
 
 ## Files

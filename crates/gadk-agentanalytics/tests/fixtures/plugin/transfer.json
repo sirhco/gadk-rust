@@ -311,7 +311,7 @@
         }
       },
       "content": {
-        "result": {},
+        "result": null,
         "tool": "transfer_to_agent",
         "tool_origin": "TRANSFER_AGENT"
       },
@@ -459,7 +459,7 @@
             "role": "user"
           },
           {
-            "content": "For context: | [coordinator] `transfer_to_agent` tool returned result: {}",
+            "content": "For context: | [coordinator] `transfer_to_agent` tool returned result: {\"result\":null}",
             "role": "user"
           }
         ],
@@ -494,7 +494,7 @@
           "mime_type": "text/plain",
           "part_index": 1,
           "storage_mode": "INLINE",
-          "text": "[coordinator] `transfer_to_agent` tool returned result: {}"
+          "text": "[coordinator] `transfer_to_agent` tool returned result: {\"result\":null}"
         },
         {
           "mime_type": "text/plain",

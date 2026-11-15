@@ -1009,7 +1009,9 @@ async fn test_compaction_runs_when_consumer_stops_early() {
     // Consume one event, then stop, as a streaming caller does on the terminal event.
     {
         let mut s = run(&r, "q1");
-        let _ = s.next().await;
+        if let Some(Err(e)) = s.next().await {
+            panic!("run failed: {e}");
+        }
     }
 
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);

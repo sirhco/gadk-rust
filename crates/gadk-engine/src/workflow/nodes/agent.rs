@@ -20,16 +20,18 @@ use std::sync::Arc;
 
 use futures::StreamExt;
 use gadk_agent::{Agent, AgentError, Context, ContextDelta, EventStream, Mode};
-use gadk_genai::Content;
+use gadk_genai::{Content, Schema};
 use gadk_session::{Event, EventActions, NodeInfo};
 use serde_json::{Map, Value, json};
 
 use crate::error::{WorkflowError, WorkflowErrorKind};
 use crate::llm::mode::{resolve_mode, with_bound_mode};
 use crate::llm::node_wrapper::run_llm_agent_as_node;
+use crate::llm::output_schema_binding::with_bound_output_schema;
 use crate::llm::processors::go_json_marshal;
 use crate::llm::state::reveal;
 use crate::workflow::base_node::compile_schema;
+use crate::workflow::model_output_schema::model_output_schema;
 use crate::workflow::route::go_quote;
 use crate::workflow::scheduler::message_text;
 use crate::workflow::{BaseNode, Node, NodeConfig};
@@ -38,6 +40,11 @@ use crate::workflow::{BaseNode, Node, NodeConfig};
 pub struct AgentNode {
     pub(crate) base: BaseNode,
     pub(crate) agent: Arc<dyn Agent>,
+    /// Go `modelOutputSchema` (be529e7b): the output schema in the form the model is asked to
+    /// answer with, or `None`. `run` binds it per invocation
+    /// ([`crate::llm::output_schema_binding::with_bound_output_schema`]) rather than setting it on
+    /// the agent.
+    pub(crate) model_output_schema: Option<Schema>,
 }
 
 impl AgentNode {
@@ -64,7 +71,9 @@ impl AgentNode {
                 ),
             )
         })?;
-        let output = compile_schema(Some(output.unwrap_or_else(|| json!({})))).map_err(|e| {
+        let output = output.unwrap_or_else(|| json!({}));
+        let model_output_schema = model_output_schema(Some(&output));
+        let output = compile_schema(Some(output)).map_err(|e| {
             WorkflowError::new(
                 WorkflowErrorKind::Other,
                 format!(
@@ -76,7 +85,11 @@ impl AgentNode {
         // The wrapped agent's run already emits an invoke_agent span.
         cfg.emits_own_span = true;
         let base = BaseNode::from_compiled(agent.name(), agent.description(), cfg, input, output);
-        Ok(Arc::new(AgentNode { base, agent }))
+        Ok(Arc::new(AgentNode {
+            base,
+            agent,
+            model_output_schema,
+        }))
     }
 
     /// The wrapped agent.
@@ -113,6 +126,7 @@ impl Node for AgentNode {
     /// (except for task-mode agents), and events are stamped with the ctx isolation scope.
     fn run(&self, ctx: Context, input: Value) -> EventStream {
         let agent = Arc::clone(self.agent());
+        let model_output_schema = self.model_output_schema.clone();
         Box::pin(async_stream::stream! {
             let user_content = match node_input_to_content(&input) {
                 Ok(c) => c,
@@ -145,6 +159,16 @@ impl Node for AgentNode {
                 // bound under this agent's own key.
                 let mode = resolve_mode(declared, Mode::SingleTurn);
                 let bound = with_bound_mode(ctx.as_invocation(), agent.name(), agent.agent_state(), mode);
+                // Offer the node's output shape to the model (Go be529e7b). Each request decides
+                // whether to use it, against the mode bound for it and the agent's own setup. A
+                // `None` schema is still bound, so this placement clears one an outer placement
+                // bound.
+                let bound = with_bound_output_schema(
+                    &bound,
+                    agent.name(),
+                    agent.agent_state(),
+                    model_output_schema.clone(),
+                );
                 delta.bound_modes = Some(bound.bound_modes().clone());
             }
             let ex_ctx = ctx.with_delta(delta);

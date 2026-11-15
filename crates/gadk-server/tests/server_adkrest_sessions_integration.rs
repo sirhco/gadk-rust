@@ -16,17 +16,20 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 //! Port of Go `server/adkrest/sessions_integration_test.go`: session creation with a chunked
-//! request body (no `Content-Length`) over a real loopback socket.
+//! request body (no `Content-Length`) over a real loopback socket, and the event timestamps a
+//! create-session body may carry.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use axum::body::Body;
 use gadk_server::rest::testutil::{authenticate_as, serve_loopback};
 use gadk_server::rest::{Server, ServerConfig};
 use gadk_session::InMemorySessionService;
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tower::ServiceExt as _;
 
 const TARGET: &str = "/apps/test-app/users/test-user/sessions/test-session";
 
@@ -134,4 +137,94 @@ async fn test_create_session_rejects_malformed_chunked_body() {
     let addr = new_chunked_session_server("test-user").await;
     let (status, body) = post_chunked(addr, Some("application/json"), r#"{"state":"#).await;
     assert_eq!(status, 400, "create session status; body: {body}");
+}
+
+/// Go `doTimestampRequest`: `method target` with `body` (JSON when not empty) through `router`;
+/// the status and body of the answer.
+async fn do_timestamp_request(
+    router: &axum::Router,
+    method: http::Method,
+    target: &str,
+    body: &str,
+) -> (u16, String) {
+    let mut req = http::Request::builder().method(method).uri(target);
+    if !body.is_empty() {
+        req = req.header("Content-Type", "application/json");
+    }
+    let resp = router
+        .clone()
+        .oneshot(req.body(Body::from(body.to_owned())).unwrap())
+        .await
+        .unwrap();
+    let status = resp.status().as_u16();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    (status, String::from_utf8(bytes.to_vec()).unwrap())
+}
+
+/// Whatever number a client sends as an event timestamp, create-session either refuses it with a
+/// 400 and stores nothing, or stores a session that GET and the list endpoint still return.
+#[tokio::test]
+// parity: adapted: in-memory service only; Go's SQLite case needs gadk-session-database, which
+// gadk-server does not depend on (not even for tests)
+async fn test_create_session_event_timestamps() {
+    // (name, timestamp, wantOK)
+    let tests = [
+        ("sub-second after epoch", "0.5", true),
+        ("sub-second before epoch", "-0.5", true),
+        ("epoch seconds with microseconds", "1733040000.123456", true),
+        ("first second of year 1", "-62135596800", true),
+        ("last second of year 9999", "253402300799", true),
+        ("epoch milliseconds", "1733040000123", false),
+        ("overflows int64 microseconds", "1e13", false),
+        ("year 10000", "253402300800", false),
+        ("before year 1", "-62135596801", false),
+    ];
+    for (name, timestamp, want_ok) in tests {
+        let mut cfg = ServerConfig::new(Arc::new(InMemorySessionService::new()));
+        cfg.authenticator = Some(authenticate_as("u"));
+        let router = Server::new(cfg).unwrap().router();
+        let base = "/apps/app/users/u/sessions";
+
+        // The create route without a session ID: a 500 there would not carry the generated ID,
+        // leaving the client no way to find the session again.
+        let (status, body) = do_timestamp_request(
+            &router,
+            http::Method::POST,
+            base,
+            &format!(r#"{{"events":[{{"author":"user","timestamp":{timestamp}}}]}}"#),
+        )
+        .await;
+        if !want_ok {
+            assert_eq!(
+                status, 400,
+                "inmemory/{name}: create with timestamp {timestamp}; body: {body}"
+            );
+            let (status, body) = do_timestamp_request(&router, http::Method::GET, base, "").await;
+            assert_eq!(
+                (status, body.trim()),
+                (200, "[]"),
+                "inmemory/{name}: list after refused create"
+            );
+            continue;
+        }
+        assert_eq!(
+            status, 200,
+            "inmemory/{name}: create with timestamp {timestamp}; body: {body}"
+        );
+        let created: Value = serde_json::from_str(&body).unwrap();
+        let id = created["id"].as_str().unwrap();
+        let (status, body) =
+            do_timestamp_request(&router, http::Method::GET, &format!("{base}/{id}"), "").await;
+        assert_eq!(
+            status, 200,
+            "inmemory/{name}: GET created session; body: {body}"
+        );
+        let (status, body) = do_timestamp_request(&router, http::Method::GET, base, "").await;
+        assert!(
+            status == 200 && body.contains(id),
+            "inmemory/{name}: list after create = {status} {body}, want 200 listing {id:?}"
+        );
+    }
 }

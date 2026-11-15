@@ -28,7 +28,7 @@ use gadk_model::{
 use serde_json::Value;
 
 use crate::client::{OpenAiClient, RESPONSES_PATH, Reply, decode_body, encode_body, event_stream};
-use crate::error::OpenAiError;
+use crate::error::{ErrorKind, OpenAiError};
 use crate::responses::consts::{RESPONSE_COMPLETED, RESPONSE_CREATED, RESPONSE_INCOMPLETE};
 use crate::responses::request::build_params;
 use crate::responses::response::{
@@ -322,6 +322,8 @@ impl StreamRun {
         }
 
         let mut final_resp = self.aggregator.close();
+        let mut completed_content = None;
+        let mut terminal_conversion_err = None;
         if !carries_content(final_resp.as_ref()) && term.seen {
             // The deltas contributed nothing that survived aggregation, but the terminal
             // event can still hold the whole turn: rebuild it the way the blocking path
@@ -338,17 +340,24 @@ impl StreamRun {
             // A completed response can contain text that never arrived as a delta. Use its
             // content for the final response unless it is unusable or omits content that
             // already streamed.
-            if let (Ok(genai_resp), Some(resp)) =
-                (convert_response(term.resp.as_ref()), final_resp.as_mut())
-            {
-                let content = genai_resp
-                    .candidates
-                    .into_iter()
-                    .next()
-                    .and_then(|c| c.content);
-                if completed_content_supersedes(resp.content.as_ref(), content.as_ref()) {
-                    resp.content = content;
+            match (convert_response(term.resp.as_ref()), final_resp.as_mut()) {
+                (Ok(genai_resp), Some(resp)) => {
+                    completed_content = genai_resp
+                        .candidates
+                        .into_iter()
+                        .next()
+                        .and_then(|c| c.content);
+                    // If the snapshot preserves the streamed content, use it before adoption
+                    // so additional calls do not borrow streamed arguments.
+                    if completed_content_supersedes(
+                        resp.content.as_ref(),
+                        completed_content.as_ref(),
+                    ) {
+                        resp.content = completed_content.clone();
+                    }
                 }
+                (Err(err), _) => terminal_conversion_err = Some(err),
+                (Ok(_), None) => {}
             }
         }
         // No aggregated turn and nothing to rebuild one from.
@@ -356,8 +365,38 @@ impl StreamRun {
             return Ok(None);
         };
         adopt_terminal_calls(&mut final_resp, term)?;
+        // Retry after adoption: when the snapshot restates the call's ID and arguments,
+        // correcting an item-ID fallback can make it supersede (Go a1603c7f).
+        if completed_content_supersedes(final_resp.content.as_ref(), completed_content.as_ref()) {
+            final_resp.content = completed_content;
+        }
+        // Record only recovered failures; errors returned above belong to the caller.
+        // Classified without retaining provider-controlled error text (Go 450b4a54).
+        if let Some(error_type) = terminal_conversion_err
+            .as_ref()
+            .and_then(terminal_conversion_error_type)
+        {
+            tracing::info!(
+                error.type = error_type,
+                "openai.terminal_response_conversion_failed"
+            );
+        }
         finalize_stream_response(&mut final_resp, term);
         Ok(Some(final_resp))
+    }
+}
+
+/// Go's `error.type` category of a recovered terminal conversion failure: `None` for a failure
+/// that is not recorded.
+fn terminal_conversion_error_type(err: &OpenAiError) -> Option<&'static str> {
+    if err.is(ErrorKind::UnsupportedOutputItemType) {
+        Some("unsupported_output_item")
+    } else if err.is(ErrorKind::UnsupportedMessageContentType) {
+        Some("unsupported_message_content")
+    } else if err.is(ErrorKind::FunctionCallArgs) {
+        Some("invalid_function_call_arguments")
+    } else {
+        None
     }
 }
 

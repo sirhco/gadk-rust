@@ -21,11 +21,12 @@ use std::time::Duration;
 use futures::StreamExt;
 use gadk_agent::{Agent, AgentConfig, AgentError, EventStream, InvocationContext, RunConfig};
 use gadk_artifact::{ArtifactService, InMemoryArtifactService, ListRequest, LoadRequest};
-use gadk_genai::{Blob, Content, FunctionCall, FunctionResponse, Part, ROLE_USER};
+use gadk_genai::{Blob, Content, FunctionCall, FunctionResponse, Part, ROLE_MODEL, ROLE_USER};
 use gadk_model::LlmResponse;
 use gadk_platform::Platform;
 use gadk_session::{
-    CreateRequest, Event, GetRequest, InMemorySessionService, Session, SessionService,
+    CreateRequest, DeleteRequest, Event, GetRequest, InMemorySessionService, Session, SessionError,
+    SessionService,
 };
 use parking_lot::Mutex;
 use rstest::rstest;
@@ -34,6 +35,7 @@ use crate::llm::{LlmAgentConfig, agent as llm_agent};
 use crate::runner::run_node::build_runner_node;
 use crate::runner::{PluginConfig, RunOptions, Runner, RunnerConfig};
 use crate::testutil::MockModel;
+use async_trait::async_trait;
 
 fn noop_run() -> gadk_agent::AgentRunFn {
     Arc::new(|_ctx: InvocationContext| -> EventStream { Box::pin(futures::stream::empty()) })
@@ -498,3 +500,501 @@ async fn test_runner_auto_create_session(
 }
 
 // parity: skipped TestRunner_NilEventYieldedTerminatesRun: an EventStream item is Result<Event, AgentError>; an agent cannot yield a nil event
+
+async fn create_test_session(svc: &Arc<dyn SessionService>, app: &str, user: &str, id: &str) {
+    svc.create(CreateRequest {
+        app_name: app.into(),
+        user_id: user.into(),
+        session_id: Some(id.into()),
+        state: None,
+    })
+    .await
+    .expect("sessionService.Create()");
+}
+
+async fn get_test_session(
+    svc: &Arc<dyn SessionService>,
+    app: &str,
+    user: &str,
+    id: &str,
+) -> Arc<dyn Session> {
+    svc.get(GetRequest {
+        app_name: app.into(),
+        user_id: user.into(),
+        session_id: id.into(),
+        ..Default::default()
+    })
+    .await
+    .expect("sessionService.Get()")
+}
+
+/// Go `recordingModel`: records each request and replies "ok".
+fn recording_model() -> Arc<MockModel> {
+    MockModel::from_contents(vec![
+        Content::from_text("ok", ROLE_MODEL),
+        Content::from_text("ok", ROLE_MODEL),
+    ])
+}
+
+/// A custom agent whose run sets `ran` (Go `func(...) { ran = true }`).
+fn flagging_agent(name: &str, ran: Arc<Mutex<bool>>) -> Arc<dyn Agent> {
+    let run: gadk_agent::AgentRunFn = Arc::new(move |_ctx: InvocationContext| -> EventStream {
+        *ran.lock() = true;
+        Box::pin(futures::stream::empty())
+    });
+    gadk_agent::new_agent(AgentConfig {
+        name: name.into(),
+        run: Some(run),
+        ..Default::default()
+    })
+    .unwrap()
+}
+
+fn replacing_plugin(name: &str, returned: Content) -> gadk_agent::Plugin {
+    gadk_agent::Plugin::new(gadk_agent::PluginConfig {
+        name: name.into(),
+        on_user_message_callback: Some(Arc::new(move |_ctx, _msg| {
+            let out = returned.clone();
+            Box::pin(async move { Ok(Some(out)) })
+        })),
+        ..Default::default()
+    })
+}
+
+#[rstest]
+#[case::empty_role("")]
+#[case::model_role(ROLE_MODEL)]
+#[case::user_role(ROLE_USER)]
+#[tokio::test]
+async fn test_runner_inbound_message_is_user_turn(#[case] role: &str) {
+    let m = recording_model();
+    let a = llm(LlmAgentConfig {
+        name: "a".into(),
+        model: Some(m.clone()),
+        ..Default::default()
+    });
+    let svc: Arc<dyn SessionService> = Arc::new(InMemorySessionService::new());
+    let r = Runner::new(RunnerConfig {
+        app_name: "app".into(),
+        ..runner_cfg(a, svc.clone())
+    })
+    .unwrap();
+    create_test_session(&svc, "app", "u", "s").await;
+
+    let msg = Content {
+        role: role.into(),
+        parts: vec![Part::from_text("hello model")],
+    };
+    let errs = drain_errors(r.run(
+        "u",
+        "s",
+        Some(msg.clone()),
+        RunConfig::default(),
+        RunOptions::default(),
+    ))
+    .await;
+    assert!(errs.is_empty(), "r.Run() returned an error: {errs:?}");
+
+    // The caller's message is left alone.
+    assert_eq!(msg.role, role, "caller's msg.Role");
+
+    // The model sees the message as a user turn.
+    let reqs = m.requests();
+    assert_eq!(reqs.len(), 1, "model requests");
+    let sent: Vec<String> = reqs[0]
+        .contents
+        .iter()
+        .filter(|c| c.parts.iter().any(|p| p.text == "hello model"))
+        .map(|c| c.role.clone())
+        .collect();
+    assert_eq!(sent, vec![ROLE_USER.to_string()], "roles the model saw");
+
+    // The stored event is a user turn too.
+    let got = get_test_session(&svc, "app", "u", "s").await;
+    let first = &got.events()[0];
+    assert_eq!(first.author, "user");
+    assert_eq!(
+        first.response.content.as_ref().map(|c| c.role.as_str()),
+        Some(ROLE_USER),
+        "stored inbound event role"
+    );
+}
+
+// parity: adapted: Rust's Runner::run takes the message by value, so it can never mutate the caller's struct; the guard checks the caller's copy keeps its blob part
+#[tokio::test]
+async fn test_runner_save_input_blobs_does_not_mutate_caller_message() {
+    let svc: Arc<dyn SessionService> = Arc::new(InMemorySessionService::new());
+    let r = Runner::new(RunnerConfig {
+        app_name: "app".into(),
+        artifact_service: Some(Arc::new(InMemoryArtifactService::new())),
+        ..runner_cfg(custom_agent("test_agent"), svc.clone())
+    })
+    .unwrap();
+    create_test_session(&svc, "app", "u", "s").await;
+
+    let blob = Part {
+        inline_data: Some(Blob {
+            mime_type: "application/octet-stream".into(),
+            data: b"data".to_vec().into(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let msg = Content {
+        role: ROLE_USER.into(),
+        parts: vec![Part::from_text("file"), blob.clone()],
+    };
+    let cfg = RunConfig {
+        save_input_blobs_as_artifacts: true,
+        ..Default::default()
+    };
+    let errs = drain_errors(r.run("u", "s", Some(msg.clone()), cfg, RunOptions::default())).await;
+    assert!(errs.is_empty(), "r.Run() returned an error: {errs:?}");
+    assert_eq!(msg.parts[1], blob, "caller's message was modified");
+}
+
+#[tokio::test]
+async fn test_runner_inbound_role_normalized_for_context_and_plugin() {
+    let got_user_content: Arc<Mutex<Option<Content>>> = Arc::default();
+    let seen = got_user_content.clone();
+    let run: gadk_agent::AgentRunFn = Arc::new(move |ctx: InvocationContext| -> EventStream {
+        *seen.lock() = ctx.user_content().cloned();
+        Box::pin(futures::stream::empty())
+    });
+    let test_agent = gadk_agent::new_agent(AgentConfig {
+        name: "test_agent".into(),
+        run: Some(run),
+        ..Default::default()
+    })
+    .unwrap();
+    let svc: Arc<dyn SessionService> = Arc::new(InMemorySessionService::new());
+    let r = Runner::new(RunnerConfig {
+        app_name: "app".into(),
+        ..runner_cfg(test_agent.clone(), svc.clone())
+    })
+    .unwrap();
+    create_test_session(&svc, "app", "u", "s").await;
+    let msg = Content {
+        role: String::new(),
+        parts: vec![Part::from_text("hi")],
+    };
+    let errs = drain_errors(r.run(
+        "u",
+        "s",
+        Some(msg.clone()),
+        RunConfig::default(),
+        RunOptions::default(),
+    ))
+    .await;
+    assert!(errs.is_empty(), "r.Run() returned an error: {errs:?}");
+    let got = got_user_content.lock().clone();
+    assert_eq!(
+        got.as_ref().map(|c| c.role.as_str()),
+        Some(ROLE_USER),
+        "ctx.UserContent() = {got:?}"
+    );
+
+    // A plugin that returns a message with no Role still yields a user turn.
+    let roleless = replacing_plugin(
+        "roleless",
+        Content {
+            role: String::new(),
+            parts: vec![Part::from_text("from plugin")],
+        },
+    );
+    let r2 = Runner::new(RunnerConfig {
+        app_name: "app".into(),
+        plugin_config: PluginConfig {
+            plugins: vec![roleless],
+            close_timeout: Duration::from_secs(1),
+        },
+        ..runner_cfg(test_agent, svc.clone())
+    })
+    .unwrap();
+    create_test_session(&svc, "app", "u", "s2").await;
+    *got_user_content.lock() = None;
+    let errs = drain_errors(r2.run(
+        "u",
+        "s2",
+        Some(msg),
+        RunConfig::default(),
+        RunOptions::default(),
+    ))
+    .await;
+    assert!(errs.is_empty(), "r2.Run() returned an error: {errs:?}");
+    let got = got_user_content.lock().clone();
+    assert!(
+        got.as_ref()
+            .is_some_and(|c| c.role == ROLE_USER && c.parts[0].text == "from plugin"),
+        "ctx.UserContent() with plugin = {got:?}, want the plugin message with Role user"
+    );
+    let stored = get_test_session(&svc, "app", "u", "s2").await;
+    let first = stored.events()[0].response.content.clone();
+    assert!(
+        first
+            .as_ref()
+            .is_some_and(|c| c.role == ROLE_USER && c.parts[0].text == "from plugin"),
+        "stored event content = {first:?}, want the plugin message with Role user"
+    );
+}
+
+fn function_call_part(name: &str, args: serde_json::Value) -> Part {
+    Part {
+        function_call: Some(FunctionCall {
+            name: name.into(),
+            args: args.as_object().cloned().unwrap_or_default(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
+#[rstest]
+#[case::legacy_path(false, vec![function_call_part("some_tool", serde_json::json!({"key": "value"}))])]
+#[case::node_path(true, vec![function_call_part("some_tool", serde_json::json!({"key": "value"}))])]
+#[case::node_path_call_after_text(true, vec![Part::from_text("hi"), function_call_part("some_tool", serde_json::json!({"key": "value"}))])]
+#[case::legacy_path_call_after_inline_data(false, vec![png_part(), function_call_part("some_tool", serde_json::json!({"key": "value"}))])]
+#[case::node_path_call_after_inline_data(true, vec![png_part(), function_call_part("some_tool", serde_json::json!({"key": "value"}))])]
+#[tokio::test]
+async fn test_runner_rejects_user_function_call(#[case] llm_root: bool, #[case] parts: Vec<Part>) {
+    let ran = Arc::new(Mutex::new(false));
+    let m = recording_model();
+    let a = if llm_root {
+        llm(LlmAgentConfig {
+            name: "test_agent".into(),
+            model: Some(m.clone()),
+            ..Default::default()
+        })
+    } else {
+        flagging_agent("test_agent", ran.clone())
+    };
+    let svc: Arc<dyn SessionService> = Arc::new(InMemorySessionService::new());
+    let store = Arc::new(InMemoryArtifactService::new());
+    let r = Runner::new(RunnerConfig {
+        app_name: "app".into(),
+        artifact_service: Some(store.clone()),
+        ..runner_cfg(a, svc.clone())
+    })
+    .unwrap();
+    create_test_session(&svc, "app", "u", "s").await;
+
+    let msg = Content {
+        role: ROLE_USER.into(),
+        parts,
+    };
+    let cfg = RunConfig {
+        save_input_blobs_as_artifacts: true,
+        ..Default::default()
+    };
+    let errs = drain_errors(r.run("u", "s", Some(msg), cfg, RunOptions::default())).await;
+    assert_eq!(
+        errs.last().map(ToString::to_string).as_deref(),
+        Some("user message cannot contain function calls"),
+        "r.Run() errors: {errs:?}"
+    );
+    assert!(
+        !*ran.lock() && m.requests().is_empty(),
+        "agent ran = {}, model requests = {}, want no agent run and no model request",
+        *ran.lock(),
+        m.requests().len()
+    );
+    let got = get_test_session(&svc, "app", "u", "s").await;
+    assert_eq!(got.events().len(), 0, "session events");
+    let saved = store
+        .list(ListRequest {
+            app_name: "app".into(),
+            user_id: "u".into(),
+            session_id: "s".into(),
+        })
+        .await
+        .unwrap();
+    assert!(
+        saved.file_names.is_empty(),
+        "saved artifacts = {:?}",
+        saved.file_names
+    );
+}
+
+fn png_part() -> Part {
+    Part {
+        inline_data: Some(Blob {
+            mime_type: "image/png".into(),
+            data: vec![0x89, 0x50].into(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
+#[rstest]
+#[case::plugin_removes_the_call(vec![function_call_part("some_tool", serde_json::json!({}))], vec![Part::from_text("from plugin")], false)]
+#[case::plugin_adds_a_call(vec![Part::from_text("hi")], vec![function_call_part("some_tool", serde_json::json!({}))], true)]
+#[tokio::test]
+async fn test_runner_user_function_call_checked_after_plugin(
+    #[case] sent: Vec<Part>,
+    #[case] returned: Vec<Part>,
+    #[case] want_err: bool,
+) {
+    let replacer = replacing_plugin(
+        "replacer",
+        Content {
+            role: ROLE_USER.into(),
+            parts: returned,
+        },
+    );
+    let svc: Arc<dyn SessionService> = Arc::new(InMemorySessionService::new());
+    let r = Runner::new(RunnerConfig {
+        app_name: "app".into(),
+        plugin_config: PluginConfig {
+            plugins: vec![replacer],
+            close_timeout: Duration::from_secs(1),
+        },
+        ..runner_cfg(custom_agent("test_agent"), svc.clone())
+    })
+    .unwrap();
+    create_test_session(&svc, "app", "u", "s").await;
+    let errs = drain_errors(r.run(
+        "u",
+        "s",
+        Some(Content {
+            role: ROLE_USER.into(),
+            parts: sent,
+        }),
+        RunConfig::default(),
+        RunOptions::default(),
+    ))
+    .await;
+    assert_eq!(!errs.is_empty(), want_err, "r.Run() errors: {errs:?}");
+}
+
+// parity: skipped TestRunner_UserMessageWithNilPartRuns: Content.parts is a Vec<Part>, so a user message cannot carry a nil part
+
+/// Go `getErrSessionService`: fails `get` with a chosen error and counts `create` calls.
+struct GetErrSessionService {
+    inner: Arc<dyn SessionService>,
+    get_err: fn() -> SessionError,
+    creates: Mutex<usize>,
+}
+
+#[async_trait]
+impl SessionService for GetErrSessionService {
+    async fn create(&self, req: CreateRequest) -> Result<Arc<dyn Session>, SessionError> {
+        *self.creates.lock() += 1;
+        self.inner.create(req).await
+    }
+    async fn get(&self, _req: GetRequest) -> Result<Arc<dyn Session>, SessionError> {
+        Err((self.get_err)())
+    }
+    async fn list(
+        &self,
+        req: gadk_session::ListRequest,
+    ) -> Result<Vec<Arc<dyn Session>>, SessionError> {
+        self.inner.list(req).await
+    }
+    async fn delete(&self, req: DeleteRequest) -> Result<(), SessionError> {
+        self.inner.delete(req).await
+    }
+    async fn append_event(
+        &self,
+        session: &dyn Session,
+        event: &mut Event,
+    ) -> Result<(), SessionError> {
+        self.inner.append_event(session, event).await
+    }
+}
+
+/// Go `errors.Is(err, target)` over the source chain: the [`SessionError`] in `err`'s chain,
+/// rendered.
+fn session_error_in(err: &AgentError) -> Option<String> {
+    let mut cur: Option<&(dyn std::error::Error + 'static)> = Some(err);
+    while let Some(e) = cur {
+        if let Some(se) = e.downcast_ref::<SessionError>() {
+            return Some(se.to_string());
+        }
+        if let Some(AgentError::Session(se)) = e.downcast_ref::<AgentError>() {
+            return Some(se.to_string());
+        }
+        cur = e.source();
+    }
+    None
+}
+
+fn transient_err() -> SessionError {
+    SessionError::Backend("connection refused".into())
+}
+fn plain_not_found_err() -> SessionError {
+    SessionError::Backend("not found".into())
+}
+fn not_found_err() -> SessionError {
+    SessionError::NotFound
+}
+
+#[rstest]
+#[case::transient_error_is_returned_without_create(true, transient_err as fn() -> SessionError, 0, Some("connection refused"))]
+#[case::unwrapped_not_found_is_returned_without_create(true, plain_not_found_err as fn() -> SessionError, 0, Some("not found"))]
+#[case::wrapped_not_found_creates_once(true, not_found_err as fn() -> SessionError, 1, None)]
+#[case::auto_create_false_returns_not_found(false, not_found_err as fn() -> SessionError, 0, Some("session not found"))]
+#[tokio::test]
+// parity: adapted: Go's wrapped `fmt.Errorf("%w: %q", session.ErrNotFound, …)` is SessionError::NotFound; a third-party "not found" and a transient failure are SessionError::Backend; errors.Is is a source-chain search for the same SessionError
+async fn test_runner_auto_create_session_get_error(
+    #[case] auto_create: bool,
+    #[case] get_err: fn() -> SessionError,
+    #[case] want_creates: usize,
+    #[case] want_err: Option<&str>,
+) {
+    let svc = Arc::new(GetErrSessionService {
+        inner: Arc::new(InMemorySessionService::new()),
+        get_err,
+        creates: Mutex::new(0),
+    });
+    let r = Runner::new(RunnerConfig {
+        auto_create_session: auto_create,
+        ..runner_cfg(custom_agent("test_agent"), svc.clone())
+    })
+    .unwrap();
+    let errs = drain_errors(r.run(
+        "testUser",
+        "testSession",
+        Some(Content::from_parts(vec![Part::from_text("hello")], "")),
+        RunConfig::default(),
+        RunOptions::default(),
+    ))
+    .await;
+    let got = errs.last().and_then(session_error_in);
+    assert_eq!(got.as_deref(), want_err, "Runner.Run() errors = {errs:?}");
+    assert_eq!(*svc.creates.lock(), want_creates, "Create calls");
+}
+
+#[tokio::test]
+async fn test_runner_auto_create_session_empty_session_id() {
+    let svc: Arc<dyn SessionService> = Arc::new(InMemorySessionService::new());
+    let r = Runner::new(RunnerConfig {
+        auto_create_session: true,
+        ..runner_cfg(custom_agent("test_agent"), svc.clone())
+    })
+    .unwrap();
+    let errs = drain_errors(r.run(
+        "testUser",
+        "",
+        Some(Content::from_parts(vec![Part::from_text("hello")], "")),
+        RunConfig::default(),
+        RunOptions::default(),
+    ))
+    .await;
+    assert!(
+        errs.is_empty(),
+        "Runner.Run() with an empty session ID error = {errs:?}"
+    );
+    let sessions = svc
+        .list(gadk_session::ListRequest {
+            app_name: "testApp".into(),
+            user_id: "testUser".into(),
+        })
+        .await
+        .expect("List()");
+    assert_eq!(sessions.len(), 1, "List() sessions");
+    assert!(
+        !sessions[0].id().is_empty(),
+        "created session has an empty ID"
+    );
+}

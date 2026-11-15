@@ -115,7 +115,7 @@ pub(crate) fn session_event_to_event(v: &Value) -> Result<Event, BoxError> {
         timestamp,
         invocation_id,
         author,
-        actions: actions_from_wire(field(v, "actions")),
+        actions: actions_from_wire(field(v, "actions")).map_err(|e| wrap(LIST_EVENTS, e))?,
         ..Default::default()
     };
     event.response.content = field(v, "content").map(content_from_wire);
@@ -347,11 +347,13 @@ pub(crate) fn content_from_wire(v: &Value) -> Content {
     }
 }
 
-/// Go `createAiplatformpbEventActions` (`None` when both deltas are empty).
+/// Go `createAiplatformpbEventActions` (`None` when both deltas and the requested auth configs
+/// are empty).
 ///
 /// # Errors
 ///
-/// `artifact "{name}" version {v} does not fit in int32` for a version outside `i32`.
+/// `artifact "{name}" version {v} does not fit in int32` for a version outside `i32`;
+/// `failed to convert requested auth configs to structpb: …` when the configs do not convert.
 pub(crate) fn actions_to_wire(event: &Event) -> Result<Option<Value>, BoxError> {
     let state_delta = event.actions.state_delta.as_ref().filter(|m| !m.is_empty());
     let artifact_delta = event
@@ -359,7 +361,8 @@ pub(crate) fn actions_to_wire(event: &Event) -> Result<Option<Value>, BoxError> 
         .artifact_delta
         .as_ref()
         .filter(|m| !m.is_empty());
-    if state_delta.is_none() && artifact_delta.is_none() {
+    let requested_auth_configs = &event.actions.requested_auth_configs;
+    if state_delta.is_none() && artifact_delta.is_none() && requested_auth_configs.is_empty() {
         return Ok(None);
     }
     let mut actions = Map::new();
@@ -380,14 +383,27 @@ pub(crate) fn actions_to_wire(event: &Event) -> Result<Option<Value>, BoxError> 
         }
         actions.insert("artifactDelta".into(), Value::Object(versions));
     }
+    if !requested_auth_configs.is_empty() {
+        let configs = serde_json::to_value(requested_auth_configs)
+            .map_err(|e| wrap("failed to marshal value", e))
+            .and_then(|v| to_struct(&v))
+            .map_err(|e| wrap("failed to convert requested auth configs to structpb", e))?;
+        actions.insert("requestedAuthConfigs".into(), configs);
+    }
     Ok(Some(Value::Object(actions)))
 }
 
 /// Go `aiplatformToSessionEventActions`: absent actions give empty actions; present ones
-/// always carry a state delta (`null` values dropped) and an artifact delta when non-empty.
-pub(crate) fn actions_from_wire(v: Option<&Value>) -> EventActions {
+/// always carry a state delta (`null` values dropped), an artifact delta when non-empty and the
+/// requested auth configs when non-empty.
+///
+/// # Errors
+///
+/// `unmarshaling requested auth configs: …` when a requested auth config does not decode as a
+/// `toolauth::Config`.
+pub(crate) fn actions_from_wire(v: Option<&Value>) -> Result<EventActions, BoxError> {
     let Some(actions) = v.filter(|a| !a.is_null()) else {
-        return EventActions::default();
+        return Ok(EventActions::default());
     };
     let versions: BTreeMap<String, i64> = object_field(actions, "artifactDelta")
         .map(|m| {
@@ -396,14 +412,22 @@ pub(crate) fn actions_from_wire(v: Option<&Value>) -> EventActions {
                 .collect()
         })
         .unwrap_or_default();
-    EventActions {
+    let configs = struct_as_map(field(actions, "requestedAuthConfigs"));
+    let requested_auth_configs = if configs.is_empty() {
+        BTreeMap::new()
+    } else {
+        serde_json::from_value(Value::Object(configs))
+            .map_err(|e| wrap("unmarshaling requested auth configs", e))?
+    };
+    Ok(EventActions {
         state_delta: Some(filter_nil_values(&struct_as_map(field(
             actions,
             "stateDelta",
         )))),
         artifact_delta: (!versions.is_empty()).then_some(versions),
+        requested_auth_configs,
         ..Default::default()
-    }
+    })
 }
 
 /// Go `createAiplatformpbMetadata`: always an object.

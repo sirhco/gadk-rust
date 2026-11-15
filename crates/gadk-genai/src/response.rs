@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! GenerateContent response types (port of genai v1.75.0 `types.go`).
+//! GenerateContent response types (port of genai v1.77.0 `types.go`).
 
 use crate::config::{HarmBlockThreshold, HarmCategory};
 use crate::content::Content;

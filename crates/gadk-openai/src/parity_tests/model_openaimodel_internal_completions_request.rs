@@ -25,11 +25,11 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use gadk_genai::{
-    AudioTranscriptionConfig, Blob, Content, FileData, FunctionCall, FunctionResponse,
-    GenerateContentConfig, GenerationConfigRoutingConfig, ImageConfig, MediaResolution,
-    ModelArmorConfig, ModelSelectionConfig, Part, PartMediaResolution, PartMediaResolutionLevel,
-    SafetySetting, Schema, ServiceTier, SpeechConfig, ThinkingConfig, ThinkingLevel, Type,
-    VideoMetadata,
+    AudioTranscriptionConfig, Blob, CodeExecutionResult, Content, ExecutableCode, FileData,
+    FunctionCall, FunctionResponse, GenerateContentConfig, GenerationConfigRoutingConfig,
+    ImageConfig, MediaResolution, ModelArmorConfig, ModelSelectionConfig, Part,
+    PartMediaResolution, PartMediaResolutionLevel, SafetySetting, Schema, ServiceTier,
+    SpeechConfig, ThinkingConfig, ThinkingLevel, Type, VideoMetadata,
 };
 use gadk_model::{HttpOptions, LlmRequest};
 use pretty_assertions::assert_eq;
@@ -266,6 +266,94 @@ fn test_build_params_multi_turn_history() {
         json!("noted"),
         "assistant content"
     );
+}
+
+/// Go `TestBuildParams_CodeExecutionAsText` pins the regression for a Gemini code-execution
+/// turn replayed into a Chat Completions request. The parts used to fail the request; they now
+/// go out as the same fenced text the Responses path sends, rather than being dropped.
+#[test]
+fn test_build_params_code_execution_as_text() {
+    let code = "Code:```python\nprint(1)\n```";
+    let result = "Execution Result:```code_output\n1\n```";
+    let exec = |c: &str| ExecutableCode {
+        code: c.to_string(),
+        ..ExecutableCode::default()
+    };
+    // (name, request, want content, want role)
+    let tests: Vec<(&str, LlmRequest, String, &str)> = vec![
+        (
+            "user code",
+            user_req(vec![
+                text("For context:"),
+                Part {
+                    executable_code: Some(exec("print(1)")),
+                    ..Part::default()
+                },
+            ]),
+            format!("For context:\n{code}"),
+            "user",
+        ),
+        (
+            "model code and result",
+            LlmRequest {
+                contents: vec![content(
+                    "model",
+                    vec![
+                        Part {
+                            executable_code: Some(ExecutableCode {
+                                language: Some(gadk_genai::Language::Python),
+                                ..exec("print(1)")
+                            }),
+                            ..Part::default()
+                        },
+                        Part {
+                            code_execution_result: Some(CodeExecutionResult {
+                                outcome: Some(gadk_genai::Outcome::Ok),
+                                output: "1".to_string(),
+                                ..CodeExecutionResult::default()
+                            }),
+                            ..Part::default()
+                        },
+                    ],
+                )],
+                ..LlmRequest::default()
+            },
+            format!("{code}\n{result}"),
+            "assistant",
+        ),
+        (
+            "thought text is dropped and the code remains",
+            LlmRequest {
+                contents: vec![content(
+                    "model",
+                    vec![Part {
+                        thought: true,
+                        text: "scratch".to_string(),
+                        executable_code: Some(exec("print(1)")),
+                        ..Part::default()
+                    }],
+                )],
+                ..LlmRequest::default()
+            },
+            code.to_string(),
+            "assistant",
+        ),
+        (
+            "empty code is still sent",
+            user_req(vec![Part {
+                executable_code: Some(ExecutableCode::default()),
+                ..Part::default()
+            }]),
+            "Code:```python\n\n```".to_string(),
+            "user",
+        ),
+    ];
+    for (name, req, want, want_role) in tests {
+        let msgs = wire_messages(&request_wire(&req));
+        assert_eq!(msgs.len(), 1, "{name}: messages, want 1: {msgs:?}");
+        assert_eq!(field(&msgs[0], "role"), json!(want_role), "{name}: role");
+        assert_eq!(field(&msgs[0], "content"), json!(want), "{name}: content");
+    }
 }
 
 #[test]

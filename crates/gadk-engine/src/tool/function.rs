@@ -27,8 +27,8 @@ use gadk_genai::FunctionDeclaration;
 use serde_json::{Map, Value};
 
 use crate::tool::utils::{
-    CompiledSchema, convert_with_schema, go_type_name, infer_output_schema, infer_schema,
-    panic_message, schema_expects_object, validate_with_schema,
+    CompiledSchema, convert_args_with_schema, convert_with_schema, go_type_name,
+    infer_output_schema, infer_schema, panic_message, schema_expects_object, validate_with_schema,
 };
 
 /// Go functiontool's long-running declaration note (function.go Declaration).
@@ -269,7 +269,7 @@ impl FunctionTool {
             let (input_schema, output_schema) = (in_schema.clone(), out_schema.clone());
             async move {
                 check_args_value(&args)?;
-                let input: Args = convert_with_schema(&args, Some(&input_schema))
+                let input: Args = convert_args_with_schema(&args, Some(&input_schema))
                     .map_err(ToolError::InvalidArgument)?;
                 check_confirmation(&ctx, &name, || {
                     provider

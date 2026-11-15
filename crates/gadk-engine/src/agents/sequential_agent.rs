@@ -28,6 +28,7 @@ use gadk_agent::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::agents::graph_resume::graph_resume_indexes;
 use crate::llm::state::reveal;
 use crate::runner::wrap;
 use crate::tool::{FunctionTool, FunctionToolConfig};
@@ -65,7 +66,12 @@ pub fn new(cfg: SequentialAgentConfig) -> Result<Arc<dyn Agent>, AgentError> {
 /// Port of Go (*sequentialAgent).Run.
 fn run(ctx: InvocationContext) -> EventStream {
     Box::pin(async_stream::stream! {
-        let subs: Vec<Arc<dyn Agent>> = ctx.agent().sub_agents().to_vec();
+        let mut subs: Vec<Arc<dyn Agent>> = ctx.agent().sub_agents().to_vec();
+        // Go 51bc7ec5 (#2188): resuming a nested graph workflow starts from the sub-agent
+        // holding the lowest-indexed caller.
+        if let Some(&first) = graph_resume_indexes(&ctx).as_ref().and_then(|ix| ix.first()) {
+            subs.drain(..first);
+        }
         for sub in subs {
             let mut s = sub.run(ctx.clone());
             while let Some(item) = s.next().await {
@@ -249,7 +255,8 @@ impl LiveAgent for SequentialLive {
     /// The returned stream runs each sub-agent's live session in turn; the returned session
     /// forwards `send` to the active one. A sub-agent that is not live-capable ends the stream
     /// with `sub-agent <name> does not support Live Run` when its turn comes, after the earlier
-    /// sub-agents have run (Go-parity: Go checks lazily, per sub-agent).
+    /// sub-agents have run (Go-parity: Go checks lazily, per sub-agent). A sub-agent's error is
+    /// forwarded and ends the sequence, closing that sub-agent's live session, as in Run.
     async fn run_live(
         &self,
         ctx: InvocationContext,
@@ -298,7 +305,14 @@ fn sequential_live_stream(
             // Dropping the stream here closes the sub-session from a spawned task.
             let guard = CloseOnDrop(Some(sub_sess));
             while let Some(item) = inner.next().await {
+                // A failed sub-agent ends the sequence, as in Run (Go 82b64f45): its live session
+                // is closed and no later sub-agent starts.
+                let failed = item.is_err();
                 yield item;
+                if failed {
+                    guard.close().await;
+                    return;
+                }
             }
             guard.close().await;
         }

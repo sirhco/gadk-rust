@@ -39,6 +39,9 @@ use crate::service::{
     CreateRequest, DeleteRequest, GetRequest, KEY_PREFIX_TEMP, ListRequest, Session,
     SessionService, State,
 };
+use crate::toolauth::{
+    Config, Credential, CredentialType, OAuth2Auth, OAuthFlow, OAuthFlows, Scheme, SchemeType,
+};
 
 /// A snapshot of a session's public state, for test comparisons (Go `ExpectedSession`).
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -73,6 +76,10 @@ pub struct SuiteOptions {
     pub supports_user_provided_session_id: bool,
     /// The backend names events itself, so a caller's event ID is not what it stores.
     pub provides_server_assigned_event_id: bool,
+    /// Runs the case that requires `append_event` to refuse an event whose requested auth
+    /// config does not decode as a [`crate::toolauth::Config`] (Go
+    /// `ChecksRequestedAuthConfigs`). [`SessionService`] does not require that check.
+    pub checks_requested_auth_configs: bool,
     /// The app name to use; `"testApp"` when `None`.
     pub app_name: Option<String>,
 }
@@ -128,6 +135,8 @@ where
         "AppendEvent/when_session_deleted_returns_ErrNotFound" => append_event_when_session_deleted_returns_err_not_found,
         "AppendEvent/ok" => append_event_ok,
         "AppendEvent/compaction_record_round_trips" => append_event_compaction_record_round_trips,
+        "AppendEvent/requested_auth_configs_round_trip" => append_event_requested_auth_configs_round_trip,
+        "AppendEvent/requested_auth_config_that_does_not_decode_is_refused" => append_event_requested_auth_config_that_does_not_decode_is_refused,
         "AppendEvent/a_hole_still_names_its_event_after_a_round_trip" => append_event_a_hole_still_names_its_event_after_a_round_trip,
         "AppendEvent/a_missing_event_id_is_assigned" => append_event_a_missing_event_id_is_assigned,
         "AppendEvent/partial_events_are_not_persisted" => append_event_partial_events_are_not_persisted,
@@ -756,6 +765,181 @@ async fn append_event_compaction_record_round_trips(
     Ok(())
 }
 
+/// The `call-1` request of Go's `requested_auth_configs_round_trip` case.
+fn requested_auth_configs() -> BTreeMap<String, Config> {
+    let flow = OAuthFlow {
+        authorization_url: "https://example.com/authorize".into(),
+        token_url: "https://example.com/token".into(),
+        scopes: BTreeMap::from([("read".into(), "Read".into())]),
+        ..Default::default()
+    };
+    let config = Config {
+        auth_scheme: Scheme {
+            r#type: SchemeType::OAUTH2,
+            flows: Some(OAuthFlows {
+                authorization_code: Some(flow),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        raw_auth_credential: Some(Credential {
+            auth_type: CredentialType::OAUTH2,
+            oauth2: Some(OAuth2Auth {
+                client_id: "cid".into(),
+                token_endpoint_auth_method: "client_secret_basic".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+        credential_key: "my_tool_tokens".into(),
+        ..Default::default()
+    };
+    BTreeMap::from([("call-1".into(), config)])
+}
+
+async fn append_event_requested_auth_configs_round_trip(
+    t: &mut T,
+    s: Arc<dyn SessionService>,
+    opts: &SuiteOptions,
+) -> Outcome {
+    // A pending credential request is recorded only on the event that made it. The user may
+    // answer after a restart or on another server, and a backend that drops the config leaves
+    // nothing to match the answer against.
+    let app = app_name(opts);
+    let created = s
+        .create(create_req(&app, "user1"))
+        .await
+        .map_err(|e| format!("Setup: Create failed: {e}"))?;
+    let mut event = Event {
+        actions: EventActions {
+            requested_auth_configs: requested_auth_configs(),
+            ..Default::default()
+        },
+        author: "agent".into(),
+        ..simple_event("auth_request_event", "inv-auth")
+    };
+    s.append_event(created.as_ref(), &mut event)
+        .await
+        .map_err(|e| format!("AppendEvent() error = {e}"))?;
+
+    let got = s
+        .get(get_req(&app, "user1", created.id()))
+        .await
+        .map_err(|e| format!("Get() error = {e}"))?;
+    let snap = snapshot(got.as_ref());
+    if snap.events.len() != 1 {
+        return Err(format!("Expected 1 event, got {}", snap.events.len()));
+    }
+    let want = requested_auth_configs();
+    if snap.events[0].actions.requested_auth_configs != want {
+        t.errorf(format!(
+            "RequestedAuthConfigs mismatch after a round trip: want {want:?}, got {:?}",
+            snap.events[0].actions.requested_auth_configs
+        ));
+    }
+    Ok(())
+}
+
+async fn append_event_requested_auth_config_that_does_not_decode_is_refused(
+    t: &mut T,
+    s: Arc<dyn SessionService>,
+    opts: &SuiteOptions,
+) -> Outcome {
+    // A toolauth Config struct literal is not checked when it is built, and its encoder
+    // accepts configs its decoder refuses. A backend that stored one could not read the
+    // session back. A backend that opts in refuses the append, even if it never decodes.
+    if !opts.checks_requested_auth_configs {
+        // Go: t.Skip("Skipping: the backend does not check requested auth configs on append")
+        return Ok(());
+    }
+    let app = app_name(opts);
+    let cases = [
+        (
+            "zero_scheme",
+            Config {
+                credential_key: "k".into(),
+                ..Default::default()
+            },
+        ),
+        (
+            "oauth2_flow_without_urls",
+            Config {
+                auth_scheme: Scheme {
+                    r#type: SchemeType::OAUTH2,
+                    flows: Some(OAuthFlows {
+                        authorization_code: Some(OAuthFlow::default()),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        ),
+        (
+            "credential_without_auth_type",
+            Config {
+                auth_scheme: Scheme {
+                    r#type: SchemeType::API_KEY,
+                    r#in: "header".into(),
+                    name: "X-Key".into(),
+                    ..Default::default()
+                },
+                raw_auth_credential: Some(Credential {
+                    api_key: "k".into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        ),
+    ];
+    for (name, config) in cases {
+        // Go t.Run(tc.name): a fatal failure ends this subcase only.
+        let mut sub = T::default();
+        let outcome: Outcome = async {
+            let created = s
+                .create(create_req(&app, "user1"))
+                .await
+                .map_err(|e| format!("Setup: Create failed: {e}"))?;
+            let mut event = Event {
+                actions: EventActions {
+                    requested_auth_configs: BTreeMap::from([("call-1".into(), config)]),
+                    ..Default::default()
+                },
+                author: "agent".into(),
+                ..simple_event("bad_auth_request_event", "inv-auth")
+            };
+            if s.append_event(created.as_ref(), &mut event).await.is_ok() {
+                sub.errorf(
+                    "AppendEvent() succeeded, want an error for a request that does not decode",
+                );
+            }
+            let got = s
+                .get(get_req(&app, "user1", created.id()))
+                .await
+                .map_err(|e| format!("Get() after the refused append failed: {e}"))?;
+            let n = got.events().len();
+            if n != 0 {
+                sub.errorf(format!("Get() returned {n} events, want 0"));
+            }
+            let n = created.events().len();
+            if n != 0 {
+                sub.errorf(format!(
+                    "the caller's session holds {n} events after the refused append, want 0"
+                ));
+            }
+            Ok(())
+        }
+        .await;
+        if let Err(fatal) = outcome {
+            sub.errors.push(fatal);
+        }
+        for e in sub.errors {
+            t.errorf(format!("{name}: {e}"));
+        }
+    }
+    Ok(())
+}
+
 async fn append_event_a_hole_still_names_its_event_after_a_round_trip(
     t: &mut T,
     s: Arc<dyn SessionService>,
@@ -1295,6 +1479,7 @@ mod tests {
         run_named(
             SuiteOptions {
                 supports_user_provided_session_id: true,
+                checks_requested_auth_configs: true,
                 ..Default::default()
             },
             move |name| {
@@ -1320,6 +1505,8 @@ mod tests {
                 "AppendEvent/when_session_deleted_returns_ErrNotFound",
                 "AppendEvent/ok",
                 "AppendEvent/compaction_record_round_trips",
+                "AppendEvent/requested_auth_configs_round_trip",
+                "AppendEvent/requested_auth_config_that_does_not_decode_is_refused",
                 "AppendEvent/a_hole_still_names_its_event_after_a_round_trip",
                 "AppendEvent/a_missing_event_id_is_assigned",
                 "AppendEvent/partial_events_are_not_persisted",

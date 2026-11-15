@@ -31,11 +31,11 @@ use gadk_engine::agents::loop_agent::{self, LoopAgentConfig};
 use gadk_engine::agents::parallel_agent::{self, ParallelAgentConfig};
 use gadk_engine::llm::{LlmAgentConfig, agent as llm_agent};
 use gadk_engine::runner::{PluginConfig, RunOptions, Runner, RunnerConfig};
-use gadk_engine::testutil::{TestAgentRunner, collect_events, gemini_test_model};
+use gadk_engine::testutil::{MockModel, TestAgentRunner, collect_events, gemini_test_model};
 use gadk_engine::tool::{FunctionTool, FunctionToolConfig};
 use gadk_genai::{Content, ROLE_MODEL, ROLE_USER};
 use gadk_platform::Platform;
-use gadk_session::{CreateRequest, Event, InMemorySessionService, SessionService};
+use gadk_session::{CreateRequest, Event, GetRequest, InMemorySessionService, SessionService};
 use parking_lot::Mutex;
 use pretty_assertions::assert_eq;
 use serde::Deserialize;
@@ -177,8 +177,10 @@ async fn test_new_parallel_agent() {
         .into_iter()
         .map(|r| r.unwrap_or_else(|e| panic!("subagents complete run: unexpected error: {e}")))
         .map(|mut ev| {
-            // IDs are fresh UUIDs assigned at append; Go ignores only ID.
+            // IDs and timestamps are filled in when the events are run and appended, so they
+            // cannot be expressed in a fixture (Go ignores ID and Timestamp).
             ev.id.clear();
+            ev.timestamp = Event::default().timestamp;
             ev
         })
         .collect();
@@ -513,4 +515,154 @@ async fn test_parallel_agent_state_sync() {
         Some(Err(e)) => panic!("expected to get value from state, got error: {e}"),
         None => panic!("after-agent callback did not run"),
     }
+}
+
+/// Every sub-agent runs with the parent's isolation scope. A workflow node that wraps a parallel
+/// agent stamps the node's scope on every event the branches emit, and the LLM history filter
+/// keeps only events whose scope matches exactly. A branch that ran unscoped would therefore drop
+/// its own earlier turns from its prompt.
+#[tokio::test]
+async fn test_parallel_agent_propagates_isolation_scope() {
+    const SCOPE: &str = "scope-1";
+    let got_scopes: Arc<Mutex<HashMap<String, String>>> = Arc::default();
+    let got_branch: Arc<Mutex<HashMap<String, String>>> = Arc::default();
+    let record = |name: &str| {
+        let (scopes, branches, name2) = (got_scopes.clone(), got_branch.clone(), name.to_string());
+        gadk_agent::new_agent(AgentConfig {
+            name: name.into(),
+            run: Some(Arc::new(move |ctx: InvocationContext| {
+                scopes.lock().insert(name2.clone(), ctx.isolation_scope());
+                branches.lock().insert(name2.clone(), ctx.branch());
+                stream::empty().boxed()
+            })),
+            ..Default::default()
+        })
+        .unwrap()
+    };
+    let parallel = parallel_agent::new(ParallelAgentConfig {
+        agent: AgentConfig {
+            name: "parallel".into(),
+            sub_agents: vec![record("a"), record("b")],
+            ..Default::default()
+        },
+    })
+    .unwrap();
+
+    let svc = InMemorySessionService::new();
+    let created = svc
+        .create(CreateRequest {
+            app_name: "app".into(),
+            user_id: "user".into(),
+            session_id: Some("session".into()),
+            state: None,
+        })
+        .await
+        .unwrap();
+    let ctx = InvocationContext::builder()
+        .session(created)
+        .agent(parallel.clone())
+        .isolation_scope(SCOPE)
+        .invocation_id("inv-1")
+        .build_invocation();
+
+    let mut s = parallel.run(ctx);
+    while let Some(item) = s.next().await {
+        if let Err(e) = item {
+            panic!("{e}");
+        }
+    }
+
+    let want_scopes: HashMap<String, String> = [
+        ("a".to_string(), SCOPE.to_string()),
+        ("b".to_string(), SCOPE.to_string()),
+    ]
+    .into();
+    assert_eq!(
+        want_scopes,
+        *got_scopes.lock(),
+        "sub-agent isolation scopes"
+    );
+    let want_branch: HashMap<String, String> = [
+        ("a".to_string(), "parallel.a".to_string()),
+        ("b".to_string(), "parallel.b".to_string()),
+    ]
+    .into();
+    assert_eq!(want_branch, *got_branch.lock(), "sub-agent branches");
+}
+
+/// The user-visible effect: an LLM branch of a scoped parallel agent must see its own earlier,
+/// scoped turn in the prompt it sends to the model.
+#[tokio::test]
+async fn test_parallel_agent_scoped_branch_sees_its_own_history() {
+    const SCOPE: &str = "scope-1";
+    let mock = MockModel::from_contents(vec![Content::from_text("done", ROLE_MODEL)]);
+    let branch_agent = llm_agent::new(LlmAgentConfig {
+        name: "a".into(),
+        model: Some(mock.clone()),
+        ..Default::default()
+    })
+    .unwrap();
+    let parallel = parallel_agent::new(ParallelAgentConfig {
+        agent: AgentConfig {
+            name: "parallel".into(),
+            sub_agents: vec![branch_agent],
+            ..Default::default()
+        },
+    })
+    .unwrap();
+
+    let svc = InMemorySessionService::new();
+    let created = svc
+        .create(CreateRequest {
+            app_name: "app".into(),
+            user_id: "user".into(),
+            session_id: Some("session".into()),
+            state: None,
+        })
+        .await
+        .unwrap();
+    // An earlier turn of this branch, stamped with the node's scope the way workflow's agent
+    // node stamps every event a wrapped agent emits.
+    let mut earlier = model_event("earlier scoped answer");
+    earlier.id = "earlier".into();
+    earlier.invocation_id = "inv-1".into();
+    earlier.author = "a".into();
+    earlier.branch = "parallel.a".into();
+    earlier.isolation_scope = SCOPE.into();
+    svc.append_event(&*created, &mut earlier).await.unwrap();
+    let got = svc
+        .get(GetRequest {
+            app_name: "app".into(),
+            user_id: "user".into(),
+            session_id: "session".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    let ctx = InvocationContext::builder()
+        .session(got)
+        .agent(parallel.clone())
+        .isolation_scope(SCOPE)
+        .invocation_id("inv-1")
+        .run_config(RunConfig::default())
+        .build_invocation();
+    let mut s = parallel.run(ctx);
+    while let Some(item) = s.next().await {
+        if let Err(e) = item {
+            panic!("{e}");
+        }
+    }
+
+    let requests = mock.requests();
+    assert_eq!(requests.len(), 1, "model requests");
+    let texts: Vec<String> = requests[0]
+        .contents
+        .iter()
+        .flat_map(|c| c.parts.iter().map(|p| p.text.clone()))
+        .collect();
+    assert!(
+        texts.iter().any(|t| t == "earlier scoped answer"),
+        "branch prompt is missing its own scoped history; prompt texts: {texts:?}"
+    );
 }

@@ -337,16 +337,14 @@ fn stream_hops(
 }
 
 /// gemini.go `generate`: the first candidate of the single response.
+///
+/// A response without candidates is not an error: a blocked prompt reports why in
+/// `PromptFeedback`, which `llm_response_from_genai` turns into `error_code` and
+/// `error_message`, as the streaming path already does (Go 15e9d4cd).
 fn generate(prepared: Prepared) -> BoxStream<'static, Result<LlmResponse, ModelError>> {
     run_hops(prepared, false)
         .take(1)
-        .map(|item| {
-            let resp = item?;
-            if resp.candidates.is_empty() {
-                return Err(ModelError::EmptyResponse);
-            }
-            Ok(llm_response_from_genai(&resp))
-        })
+        .map(|item| item.map(|resp| llm_response_from_genai(&resp)))
         .boxed()
 }
 

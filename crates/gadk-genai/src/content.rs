@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Content and Part types (port of genai v1.75.0 `types.go`).
+//! Content and Part types (port of genai v1.77.0 `types.go`).
 
 use crate::serde_util::{base64_bytes, decode_duration, format_go_seconds, is_zero};
 use bytes::Bytes;
@@ -229,6 +229,12 @@ pub struct FunctionResponseFileData {
     pub display_name: String,
 }
 
+/// Go `omitempty` for the string type `MediaProcessing`: unset or `""` is omitted (a decoded
+/// `""` is `Some(MediaProcessing::Unknown(""))`).
+fn media_processing_is_zero(v: &Option<MediaProcessing>) -> bool {
+    v.as_ref().is_none_or(|m| m.as_str().is_empty())
+}
+
 /// Port of genai types.go `FunctionResponsePart`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -237,6 +243,10 @@ pub struct FunctionResponsePart {
     pub inline_data: Option<FunctionResponseBlob>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file_data: Option<FunctionResponseFileData>,
+    /// Optional. How the model processes this part's media (video parts only). Not supported
+    /// in Vertex AI (genai v1.77.0). Go's string-typed `omitempty`: `""` is not serialized.
+    #[serde(default, skip_serializing_if = "media_processing_is_zero")]
+    pub media_processing: Option<MediaProcessing>,
 }
 
 /// Port of genai types.go `FunctionResponse`.
@@ -440,7 +450,7 @@ pub struct Part {
     pub part_metadata: Map<String, Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audio_transcription: Option<Transcription>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "media_processing_is_zero")]
     pub media_processing: Option<MediaProcessing>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speech_metadata: Option<SpeechMetadata>,

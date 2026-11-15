@@ -131,6 +131,31 @@ pub enum Error {
     /// or `RefreshSession`).
     #[error(transparent)]
     Transport(BoxError),
+    /// conversion.go `ToMCPTool`: the declaration's Gemini `parameters` could not be converted to
+    /// JSON Schema.
+    #[error(
+        "mcptoolset: convert parameters schema for tool {}: {reason}",
+        gadk_agent::go_quote(name)
+    )]
+    ToMcpParametersSchema {
+        /// The tool name.
+        name: String,
+        /// Go's wrapped error text.
+        reason: String,
+    },
+    /// conversion.go `ToMCPTool`: the input schema is not a JSON object, or its top-level type
+    /// excludes `"object"` (Go `objectInputSchema`'s texts, e.g. `schema type "string" is not
+    /// "object"`).
+    #[error(
+        "mcptoolset: input schema for tool {}: {reason}",
+        gadk_agent::go_quote(name)
+    )]
+    ToMcpInputSchema {
+        /// The tool name.
+        name: String,
+        /// Go's wrapped error text.
+        reason: String,
+    },
     /// Close errors joined as Go `errors.Join` does (newline-separated).
     #[error("{}", .0.iter().map(|e| e.to_string()).collect::<Vec<_>>().join("\n"))]
     Close(Vec<Error>),

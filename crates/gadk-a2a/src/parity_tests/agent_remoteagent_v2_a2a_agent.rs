@@ -2562,7 +2562,7 @@ mod remote_runs {
     }
 
     #[tokio::test]
-    async fn test_remote_agent_error_event_if_no_compatible_transport() {
+    async fn test_remote_agent_error_if_no_compatible_transport() {
         let executor = a2a_event_replay(vec![a2a::StreamResponse::Message(agent_msg(vec![
             a2a::Part::text("will not be invoked!"),
         ]))]);
@@ -2582,27 +2582,23 @@ mod remote_runs {
         })
         .unwrap();
         let ic = invocation_context(
-            "TestRemoteAgent_ErrorEventIfNoCompatibleTransport",
+            "TestRemoteAgent_ErrorIfNoCompatibleTransport",
             remote.clone(),
             vec![user_hello()],
             StreamingMode::Sse,
         )
         .await;
         let (events, err) = run_and_collect(ic, &remote).await;
-        assert!(err.is_none(), "agent.Run() error = {err:?}");
-        assert_eq!(events.len(), 1, "{events:?}");
         assert!(
-            events[0]
-                .response
-                .error_message
-                .contains("no compatible transports found"),
-            "event.ErrorMessage = {}",
-            events[0].response.error_message
+            err.as_ref()
+                .is_some_and(|e| e.to_string().contains("no compatible transports found")),
+            "agent.Run() error = {err:?}, want to contain \"no compatible transports found\""
         );
+        assert!(events.is_empty(), "len(events) = {}, want 0", events.len());
     }
 
     #[tokio::test]
-    async fn test_remote_agent_error_event_on_server_error() {
+    async fn test_remote_agent_error_on_server_error() {
         let executor = MockExecutor {
             execute: Some(Arc::new(|_| {
                 futures::stream::once(async { Err(a2a::A2AError::internal("mockExecutor failed")) })
@@ -2613,19 +2609,187 @@ mod remote_runs {
         let server = start_a2a_server(executor).await;
         let remote = new_a2a_remote_agent("a2a agent", &server.url);
         let ic = invocation_context(
-            "TestRemoteAgent_ErrorEventOnServerError",
+            "TestRemoteAgent_ErrorOnServerError",
             remote.clone(),
             vec![user_hello()],
             StreamingMode::Sse,
         )
         .await;
         let (events, err) = run_and_collect(ic, &remote).await;
-        assert!(err.is_none(), "agent.Run() error = {err:?}");
-        assert_eq!(events.len(), 1, "{events:?}");
+        assert!(err.is_some(), "agent.Run() error = nil, want non-nil");
+        assert!(events.is_empty(), "len(events) = {}, want 0", events.len());
+    }
+
+    #[tokio::test]
+    async fn test_remote_agent_after_request_callback_gets_nil_event_on_default_converter_error() {
+        struct Case {
+            name: &'static str,
+            events: Vec<a2a::StreamResponse>,
+            executor_err: Option<&'static str>,
+            part_converter: Option<crate::convert::A2APartConverter>,
+        }
+        let failing: crate::convert::A2APartConverter =
+            Arc::new(|_event, _part| Box::pin(async { Err(Error::msg("unsupported part")) }));
+        let cases = vec![
+            Case {
+                name: "transport error",
+                events: vec![],
+                executor_err: Some("mock executor error"),
+                part_converter: None,
+            },
+            Case {
+                name: "conversion error",
+                events: vec![a2a::StreamResponse::Message(agent_msg(vec![
+                    a2a::Part::text("hello"),
+                ]))],
+                executor_err: None,
+                part_converter: Some(failing),
+            },
+        ];
+        for tc in cases {
+            let name = tc.name;
+            let events = tc.events;
+            let executor_err = tc.executor_err;
+            let executor = MockExecutor {
+                execute: Some(Arc::new(move |_| {
+                    let mut items: Vec<Result<a2a::StreamResponse, a2a::A2AError>> =
+                        events.iter().cloned().map(Ok).collect();
+                    if let Some(msg) = executor_err {
+                        items.push(Err(a2a::A2AError::internal(msg)));
+                    }
+                    futures::stream::iter(items).boxed()
+                })),
+                cancel: None,
+            };
+            let server = start_a2a_server(executor).await;
+
+            let calls = Arc::new(Mutex::new(Vec::<(bool, bool)>::new()));
+            let seen = Arc::clone(&calls);
+            let remote = new_a2a(A2AConfig {
+                name: "a2a".into(),
+                agent_card: Some(jsonrpc_card(&server.url)),
+                a2a_part_converter: tc.part_converter,
+                after_request_callbacks: vec![after(move |_, resp, err| {
+                    seen.lock().push((resp.is_some(), err.is_some()));
+                    Ok(None)
+                })],
+                ..Default::default()
+            })
+            .unwrap();
+            let ic = invocation_context(
+                "TestRemoteAgent_AfterRequestCallbackGetsNilEventOnDefaultConverterError",
+                remote.clone(),
+                vec![user_hello()],
+                StreamingMode::Sse,
+            )
+            .await;
+            let (_, err) = run_and_collect(ic, &remote).await;
+            assert!(
+                err.is_some(),
+                "{name}: agent.Run() error = nil, want non-nil"
+            );
+            let calls = calls.lock().clone();
+            assert_eq!(calls.len(), 1, "{name}: callback calls = {calls:?}, want 1");
+            let (got_event, got_err) = calls[0];
+            assert!(got_err, "{name}: callback err = nil, want non-nil");
+            assert!(!got_event, "{name}: callback event is set, want nil");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_remote_agent_error_if_agent_card_resolution_fails() {
+        let remote = new_a2a(A2AConfig {
+            name: "a2a".into(),
+            agent_card_provider: Some(Arc::new(|| {
+                Box::pin(async { Err(Error::msg("connection refused")) })
+            })),
+            ..Default::default()
+        })
+        .unwrap();
+        let ic = invocation_context(
+            "TestRemoteAgent_ErrorIfAgentCardResolutionFails",
+            remote.clone(),
+            vec![user_hello()],
+            StreamingMode::Sse,
+        )
+        .await;
+        let (events, err) = run_and_collect(ic, &remote).await;
         assert!(
-            !events[0].response.error_message.is_empty(),
-            "event.ErrorMessage empty, want non-empty"
+            err.as_ref().is_some_and(|e| e
+                .to_string()
+                .contains("agent card resolution failed: connection refused")),
+            "agent.Run() error = {err:?}, want agent card resolution failure"
         );
+        assert!(events.is_empty(), "len(events) = {}, want 0", events.len());
+    }
+
+    #[tokio::test]
+    async fn test_remote_agent_error_if_message_creation_fails() {
+        let executor = MockExecutor {
+            execute: Some(Arc::new(|_| {
+                panic!("remote agent was called, want the request to fail before sending")
+            })),
+            cancel: None,
+        };
+        let server = start_a2a_server(executor).await;
+        let failing: crate::convert::GenAIPartConverter =
+            Arc::new(|_event, _part| Box::pin(async { Err(Error::msg("unsupported part")) }));
+        let remote = new_a2a(A2AConfig {
+            name: "a2a".into(),
+            agent_card: Some(jsonrpc_card(&server.url)),
+            genai_part_converter: Some(failing),
+            ..Default::default()
+        })
+        .unwrap();
+
+        // A scoped dispatch seeding its input from UserContent propagates a part conversion
+        // error from new_message, as the resume path does. The path that builds the message
+        // from session history logs and skips the part instead.
+        let ic = scoped_context(
+            "a2a",
+            "workflow/node@1",
+            Some(Content::from_text("seeded node input", ROLE_USER)),
+            vec![],
+        )
+        .await;
+        let (events, err) = run_and_collect(ic, &remote).await;
+        assert!(
+            err.as_ref()
+                .is_some_and(|e| e.to_string().contains("message creation failed")),
+            "agent.Run() error = {err:?}, want message creation failure"
+        );
+        assert!(events.is_empty(), "len(events) = {}, want 0", events.len());
+    }
+
+    #[tokio::test]
+    async fn test_remote_agent_error_if_default_conversion_fails() {
+        let executor = a2a_event_replay(vec![a2a::StreamResponse::Message(agent_msg(vec![
+            a2a::Part::text("hello"),
+        ]))]);
+        let server = start_a2a_server(executor).await;
+        let failing: crate::convert::A2APartConverter =
+            Arc::new(|_event, _part| Box::pin(async { Err(Error::msg("unsupported part")) }));
+        let remote = new_a2a(A2AConfig {
+            name: "a2a".into(),
+            agent_card: Some(jsonrpc_card(&server.url)),
+            a2a_part_converter: Some(failing),
+            ..Default::default()
+        })
+        .unwrap();
+        let ic = invocation_context(
+            "TestRemoteAgent_ErrorIfDefaultConversionFails",
+            remote.clone(),
+            vec![user_hello()],
+            StreamingMode::Sse,
+        )
+        .await;
+        let (events, err) = run_and_collect(ic, &remote).await;
+        assert!(
+            err.as_ref()
+                .is_some_and(|e| e.to_string().contains("failed to convert a2aEvent")),
+            "agent.Run() error = {err:?}, want conversion failure"
+        );
+        assert!(events.is_empty(), "len(events) = {}, want 0", events.len());
     }
 
     /// Go `newA2AClient(t, server)`: a plain a2a-rs JSON-RPC client.

@@ -71,9 +71,8 @@ impl Session {
         if self.id.is_empty() {
             return Err("session_id is empty in received session".into());
         }
-        if self.updated_at == 0 {
-            return Err("updated_at is empty".into());
-        }
+        // `updated_at` is not checked (Go #1870): `updated_at == 0` never caught an unset time,
+        // but rejected every last update in the first second of 1970.
         Ok(())
     }
 }
@@ -170,9 +169,7 @@ mod tests {
             "session_id is empty in received session"
         );
         s.id = "s".into();
-        assert_eq!(s.validate().unwrap_err(), "updated_at is empty");
-        s.updated_at = 1;
-        assert!(s.validate().is_ok());
+        assert!(s.validate().is_ok(), "updated_at 0 is a valid last update");
     }
 
     #[test]

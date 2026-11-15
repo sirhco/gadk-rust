@@ -40,7 +40,7 @@
             "application/json"
           ],
           "X-Goog-Api-Client": [
-            "gccl-invocation-id/{{IDEMPOTENCY_TOKEN_1}} gccl-attempt-count/1 gl-go/{{GO_VERSION}} gccl/1.69.0"
+            "gccl-invocation-id/{{IDEMPOTENCY_TOKEN_1}} gccl-attempt-count/1 gl-go/{{GO_VERSION}} gccl/1.70.0"
           ],
           "X-Goog-Gcs-Idempotency-Token": [
             "{{IDEMPOTENCY_TOKEN_1}}"
@@ -101,7 +101,7 @@
             "application/octet-stream"
           ],
           "X-Goog-Api-Client": [
-            "gl-go/{{GO_VERSION}} gdcl/0.304.0 gccl-invocation-id/{{IDEMPOTENCY_TOKEN_2}} gccl-attempt-count/1"
+            "gl-go/{{GO_VERSION}} gdcl/0.310.0 gccl-invocation-id/{{IDEMPOTENCY_TOKEN_2}} gccl-attempt-count/1"
           ],
           "X-Goog-Gcs-Idempotency-Token": [
             "{{IDEMPOTENCY_TOKEN_2}}"
@@ -148,7 +148,7 @@
             "application/octet-stream"
           ],
           "X-Goog-Api-Client": [
-            "gl-go/{{GO_VERSION}} gdcl/0.304.0 gccl-invocation-id/{{IDEMPOTENCY_TOKEN_2}} gccl-attempt-count/2"
+            "gl-go/{{GO_VERSION}} gdcl/0.310.0 gccl-invocation-id/{{IDEMPOTENCY_TOKEN_2}} gccl-attempt-count/2"
           ],
           "X-Goog-Gcs-Idempotency-Token": [
             "{{IDEMPOTENCY_TOKEN_2}}"
@@ -198,7 +198,7 @@
             "application/octet-stream"
           ],
           "X-Goog-Api-Client": [
-            "gl-go/{{GO_VERSION}} gdcl/0.304.0 gccl-invocation-id/{{IDEMPOTENCY_TOKEN_3}} gccl-attempt-count/1"
+            "gl-go/{{GO_VERSION}} gdcl/0.310.0 gccl-invocation-id/{{IDEMPOTENCY_TOKEN_3}} gccl-attempt-count/1"
           ],
           "X-Goog-Gcs-Idempotency-Token": [
             "{{IDEMPOTENCY_TOKEN_3}}"

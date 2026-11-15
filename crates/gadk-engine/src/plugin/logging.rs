@@ -35,6 +35,13 @@ const NAME: &str = "logging_plugin";
 type ContentResult = BoxFuture<'static, Result<Option<Content>, AgentError>>;
 type ResponseResult = BoxFuture<'static, Result<Option<LlmResponse>, AgentError>>;
 type MapResult = BoxFuture<'static, Result<Option<Map<String, Value>>, AgentError>>;
+type ArgsMapResult = BoxFuture<
+    'static,
+    (
+        Map<String, Value>,
+        Result<Option<Map<String, Value>>, AgentError>,
+    ),
+>;
 
 /// Port of Go `loggingplugin.New("")`: logs invocation activity through `tracing` at INFO under
 /// target `gadk_engine::plugin::logging`. Go's `MustNew` and custom name are not ported.
@@ -125,9 +132,9 @@ pub fn logging_plugin() -> Plugin {
     let before_tool: BeforeToolCallback = {
         let p = p.clone();
         Arc::new(
-            move |ctx: Context, tool: Arc<dyn Tool>, args: Map<String, Value>| -> MapResult {
+            move |ctx: Context, tool: Arc<dyn Tool>, args: Map<String, Value>| -> ArgsMapResult {
                 p.before_tool(&ctx, &*tool, &args);
-                Box::pin(ready(Ok(None)))
+                Box::pin(ready((args, Ok(None))))
             },
         )
     };
@@ -167,6 +174,8 @@ pub fn logging_plugin() -> Plugin {
         after_run_callback: Some(after_run),
         before_agent_callback: Some(before_agent),
         after_agent_callback: Some(after_agent),
+        // Go's logging plugin registers no OnAgentErrorCallback.
+        on_agent_error_callback: None,
         before_model_callback: Some(before_model),
         after_model_callback: Some(after_model),
         on_model_error_callback: Some(on_model_error),

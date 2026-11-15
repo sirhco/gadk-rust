@@ -33,19 +33,24 @@ use gadk_agent::{
 };
 use gadk_genai::{Content, FunctionCall, FunctionResponse, Part};
 use gadk_model::LlmResponse;
-use gadk_session::{Event, EventActions, ToolConfirmation};
+use gadk_session::{Event, EventActions, ToolConfirmation, toolauth};
 use serde_json::{Map, Value};
 use tracing::Instrument;
 
 use crate::{
-    llm::{flow::Flow, live::session::LiveSessionImpl},
+    llm::{
+        flow::Flow, live::session::LiveSessionImpl,
+        processors::output_schema::SET_MODEL_RESPONSE_TOOL_NAME,
+    },
     telemetry::{
         attrs::{
             SpanError, start_execute_tool_span, trace_merged_tool_calls_result, trace_tool_result,
         },
         merged_tool_calls_span,
     },
-    tool::utils::{function_calls, generate_function_call_id},
+    tool::utils::{
+        function_calls, function_responses, generate_function_call_id, model_error_text,
+    },
     workflow::route::go_quote,
 };
 
@@ -79,7 +84,7 @@ pub(crate) async fn handle_function_calls(
     handle_function_calls_with(ctx, flow, tools, function_call_event, filters, None).await
 }
 
-/// Port of base_flow.go:1330 `(*Flow).handleFunctionCalls`, minus live (`liveSess` is always nil
+/// Port of base_flow.go:1501 `(*Flow).handleFunctionCalls`, minus live (`liveSess` is always nil
 /// in 1b). Go takes the `*model.LLMResponse`; Rust takes the event carrying it (C5 D5 signature).
 /// `filters` (adk-python's call-ID filter; Go has a TODO) keeps only calls whose ID is in the set.
 ///
@@ -105,7 +110,7 @@ pub(crate) async fn handle_function_calls_with(
     .await
 }
 
-/// Port of Go handleFunctionCalls with its `liveSess` argument set (base_flow.go:1330): the live
+/// Port of Go handleFunctionCalls with its `liveSess` argument set (base_flow.go:1501): the live
 /// streaming-tool and `stop_streaming` branches use `live`. No filters, no confirmations (Go's live
 /// flow passes nil).
 pub(crate) async fn handle_function_calls_live(
@@ -127,7 +132,7 @@ pub(crate) async fn handle_function_calls_live(
     .await
 }
 
-/// Port of base_flow.go:1330 `(*Flow).handleFunctionCalls`. Go takes the `*model.LLMResponse`;
+/// Port of base_flow.go:1501 `(*Flow).handleFunctionCalls`. Go takes the `*model.LLMResponse`;
 /// Rust takes the event carrying it (C5 D5 signature). `filters` (adk-python's call-ID filter; Go
 /// has a TODO) keeps only calls whose ID is in the set. `live` is Go's `liveSess` argument (`None`
 /// outside live mode).
@@ -267,7 +272,7 @@ impl Drop for FinishOnDrop {
     }
 }
 
-/// The body of Go's per-call task closure (base_flow.go:1350-1525).
+/// The body of Go's per-call task closure (base_flow.go:1521-1701).
 #[allow(clippy::too_many_arguments)]
 async fn run_one_call(
     ctx: InvocationContext,
@@ -343,7 +348,14 @@ async fn run_one_call(
     {
         return None;
     }
-    let result = result.unwrap_or_default();
+    // Go 1ced38ba: a nil result reaches the model as `{"result": null}`, as adk-python wraps a
+    // tool's `None`. Divergence (ledger 1b): a Rust tool's nil result is the empty map (see
+    // above), so a tool that returns an empty object (Go: a non-nil empty map, sent as `{}`) is
+    // wrapped too; `set_model_response`, whose result is the model's own arguments, keeps `{}`.
+    let mut result = result.unwrap_or_default();
+    if result.is_empty() && fc.name != SET_MODEL_RESPONSE_TOOL_NAME {
+        result.insert("result".to_owned(), Value::Null);
+    }
 
     let mut parts = vec![Part {
         function_response: Some(FunctionResponse {
@@ -410,13 +422,16 @@ async fn run_streaming(
     while let Some(chunk) = stream.next().await {
         match chunk {
             Ok(c) => out.push_str(&c),
-            Err(e) => return error_map(&wrap_confirmation_error(tool.name(), e).to_string()),
+            Err(e) => {
+                let e = wrap_confirmation_error(tool.name(), e);
+                return error_map(&model_error_text(tool.name(), &e).0);
+            }
         }
     }
     Map::from_iter([("result".to_owned(), Value::String(out))])
 }
 
-/// Go streaming branch with a live session (base_flow.go:1383-1426): answers at once with the
+/// Go streaming branch with a live session (base_flow.go:1560-1600): answers at once with the
 /// pending status and streams in a spawned task that outlives the call. Each chunk goes back to the
 /// model as user content through `live.send`. The task stops on cancellation (`stop_streaming`,
 /// session teardown, or the invocation's token) and unregisters before cancelling its scope.
@@ -524,7 +539,7 @@ fn error_map(msg: &str) -> Map<String, Value> {
     Map::from_iter([("error".to_owned(), Value::String(msg.to_owned()))])
 }
 
-/// Port of base_flow.go:1218 fakeTool.
+/// Port of base_flow.go:1389 fakeTool.
 struct FakeTool {
     name: String,
 }
@@ -541,7 +556,7 @@ impl Tool for FakeTool {
     }
 }
 
-/// Port of base_flow.go:1229 newToolNotFoundError (text verbatim, Python format).
+/// Port of base_flow.go:1400 newToolNotFoundError (text verbatim, Python format).
 fn new_tool_not_found_error(tool_name: &str, available_tools: &[String]) -> ToolError {
     let joined = available_tools.join(", ");
     ToolError::Execution(
@@ -563,7 +578,7 @@ Suggested fixes:
     )
 }
 
-/// Port of base_flow.go:1533 runOnToolErrorCallbacks: plugins first, then the agent callbacks.
+/// Port of base_flow.go:1711 runOnToolErrorCallbacks: plugins first, then the agent callbacks.
 async fn run_on_tool_error_callbacks(
     cbs: &ToolCallbacks,
     tool_ctx: &Context,
@@ -584,29 +599,35 @@ async fn run_on_tool_error_callbacks(
     invoke_on_tool_error_callbacks(cbs, tool_ctx, &tool, args, err).await
 }
 
-/// Port of base_flow.go:1544 `(*Flow).callTool`. Callback errors (`AgentError`) become
+/// Port of base_flow.go:1722 `(*Flow).callTool`. Callback errors (`AgentError`) become
 /// `ToolError` so a single "current error" flows through the on-error and after callbacks, as
 /// Go's untyped `error` does.
+///
+/// `args` is the call's own copy of the model's arguments (Go e0cbfd30 `cloneArgs`; the caller
+/// passes a clone, so the function call event keeps the model's arguments). The before-tool
+/// callbacks (plugins, then the agent's) hand it back possibly edited, and the tool, the
+/// on-tool-error and the after-tool callbacks get the edited arguments.
 pub(crate) async fn call_tool(
     cbs: &ToolCallbacks,
     tool_ctx: Context,
     tool: Arc<dyn Tool>,
-    args: Map<String, Value>,
+    mut args: Map<String, Value>,
 ) -> Option<Map<String, Value>> {
     let pm = tool_ctx.plugin_manager();
     let mut response: Option<Map<String, Value>> = None;
     let mut err: Option<Arc<ToolError>> = None;
     if let Some(pm) = &pm {
-        match pm
-            .run_before_tool(tool_ctx.clone(), tool.clone(), args.clone())
-            .await
-        {
+        let (a, res) = pm
+            .run_before_tool(tool_ctx.clone(), tool.clone(), args)
+            .await;
+        args = a;
+        match res {
             Ok(r) => response = r,
             Err(e) => err = Some(to_tool_error(e)),
         }
     }
     if response.is_none() && err.is_none() {
-        (response, err) = invoke_before_tool_callbacks(cbs, &tool_ctx, &tool, &args).await;
+        (args, response, err) = invoke_before_tool_callbacks(cbs, &tool_ctx, &tool, args).await;
     }
     if response.is_none()
         && err.is_none()
@@ -672,7 +693,7 @@ pub(crate) async fn call_tool(
     }
 
     match err {
-        Some(e) => Some(error_map(&e.to_string())),
+        Some(e) => Some(error_map(&model_error_text(tool.name(), &e).0)),
         None => response,
     }
 }
@@ -728,24 +749,31 @@ fn to_tool_error(e: AgentError) -> Arc<ToolError> {
     }
 }
 
-/// Port of base_flow.go:1591 invokeBeforeToolCallbacks.
+/// Port of base_flow.go:1803 invokeBeforeToolCallbacks: the arguments are threaded through
+/// every callback (Go's one shared copy, e0cbfd30) and always handed back.
 async fn invoke_before_tool_callbacks(
     cbs: &ToolCallbacks,
     tool_ctx: &Context,
     tool: &Arc<dyn Tool>,
-    args: &Map<String, Value>,
-) -> (Option<Map<String, Value>>, Option<Arc<ToolError>>) {
+    mut args: Map<String, Value>,
+) -> (
+    Map<String, Value>,
+    Option<Map<String, Value>>,
+    Option<Arc<ToolError>>,
+) {
     for cb in &cbs.before {
-        match cb(tool_ctx.clone(), tool.clone(), args.clone()).await {
-            Err(e) => return (None, Some(to_tool_error(e))),
-            Ok(Some(r)) => return (Some(r), None),
+        let (a, res) = cb(tool_ctx.clone(), tool.clone(), args).await;
+        args = a;
+        match res {
+            Err(e) => return (args, None, Some(to_tool_error(e))),
+            Ok(Some(r)) => return (args, Some(r), None),
             Ok(None) => {}
         }
     }
-    (None, None)
+    (args, None, None)
 }
 
-/// Port of base_flow.go:1606 invokeAfterToolCallbacks: with no callback answering, the inputs
+/// Port of base_flow.go:1818 invokeAfterToolCallbacks: with no callback answering, the inputs
 /// are returned unchanged.
 async fn invoke_after_tool_callbacks(
     cbs: &ToolCallbacks,
@@ -773,7 +801,7 @@ async fn invoke_after_tool_callbacks(
     (result, err)
 }
 
-/// Port of base_flow.go:1622 invokeOnToolErrorCallbacks: with no callback answering, the
+/// Port of base_flow.go:1834 invokeOnToolErrorCallbacks: with no callback answering, the
 /// original error is returned.
 async fn invoke_on_tool_error_callbacks(
     cbs: &ToolCallbacks,
@@ -792,7 +820,7 @@ async fn invoke_on_tool_error_callbacks(
     (None, Some(err))
 }
 
-/// Port of base_flow.go:1638 mergeParallelFunctionResponseEvents. The first non-`None` event
+/// Port of base_flow.go:1850 mergeParallelFunctionResponseEvents. The first non-`None` event
 /// becomes the merged result: its parts are those of every event in slot order and its actions
 /// the fold of every event's actions.
 pub(crate) fn merge_parallel_function_response_events(
@@ -831,7 +859,8 @@ pub(crate) fn merge_parallel_function_response_events(
     Ok(Some(result))
 }
 
-/// Port of base_flow.go:1672 mergeEventActions (adk-python merge_parallel_function_response_events).
+/// Port of base_flow.go:1884 mergeEventActions (adk-python merge_parallel_function_response_events).
+/// Each parallel call's confirmation and credential requests are kept under its own call ID.
 pub(crate) fn merge_event_actions(
     base: Option<EventActions>,
     other: Option<EventActions>,
@@ -860,10 +889,12 @@ pub(crate) fn merge_event_actions(
     }
     base.requested_tool_confirmations
         .extend(other.requested_tool_confirmations);
+    base.requested_auth_configs
+        .extend(other.requested_auth_configs);
     Some(base)
 }
 
-/// Port of base_flow.go:1706 mergeArtifactDeltas: prefers higher versions (a deliberate
+/// Port of base_flow.go:1924 mergeArtifactDeltas: prefers higher versions (a deliberate
 /// divergence from adk-python's last-write-wins).
 fn merge_artifact_deltas(
     dst: Option<BTreeMap<String, i64>>,
@@ -876,7 +907,7 @@ fn merge_artifact_deltas(
     dst
 }
 
-/// Port of base_flow.go:1720 deepMergeMap.
+/// Port of base_flow.go:1938 deepMergeMap.
 fn deep_merge_map(mut dst: Map<String, Value>, src: Map<String, Value>) -> Map<String, Value> {
     for (k, v) in src {
         match (dst.get_mut(&k), v) {
@@ -892,7 +923,7 @@ fn deep_merge_map(mut dst: Map<String, Value>, src: Map<String, Value>) -> Map<S
     dst
 }
 
-/// Port of base_flow.go:1288 displayableToolResultText: the tool result as text for a
+/// Port of base_flow.go:1459 displayableToolResultText: the tool result as text for a
 /// skip-summarization event, or `None` for results with nothing worth showing (errors, empty or
 /// null results). A single plain-text `"result"` is shown as-is; anything else as JSON (sorted
 /// keys, not HTML-escaped: Go `SetEscapeHTML(false)`).
@@ -965,6 +996,74 @@ pub(crate) fn generate_request_confirmation_event(
     ev.response = LlmResponse {
         content: Some(Content {
             role: "model".into(),
+            parts,
+        }),
+        ..Default::default()
+    };
+    ev.long_running_tool_ids = long_running_tool_ids;
+    Some(ev)
+}
+
+/// Port of functions.go generateAuthEvent: the event that asks the client for the credentials
+/// the tools in `function_response_event` requested (its `requested_auth_configs`), or `None`
+/// if they requested none. It makes one `adk_request_credential` call per credential key, for
+/// the first tool that asked for it in the order of the responses, which is the order the calls
+/// were made in. A request with no key is never merged with another, as in adk-python.
+///
+/// Go returns an error when a request cannot be encoded; a [`toolauth::Config`] always encodes
+/// (its unknown keys are kept as valid JSON text), so this cannot fail.
+pub(crate) fn generate_auth_event(
+    ctx: &InvocationContext,
+    function_response_event: &Event,
+) -> Option<Event> {
+    let requests = &function_response_event.actions.requested_auth_configs;
+    if requests.is_empty() {
+        return None;
+    }
+    let mut parts = Vec::new();
+    let mut long_running_tool_ids = Vec::new();
+    let mut seen_keys = HashSet::new();
+    for fr in function_responses(function_response_event.response.content.as_ref()) {
+        let Some(cfg) = requests.get(&fr.id) else {
+            continue;
+        };
+        if seen_keys.contains(cfg.credential_key.as_str()) {
+            continue;
+        }
+        if !cfg.credential_key.is_empty() {
+            seen_keys.insert(cfg.credential_key.as_str());
+        }
+        let args = toolauth::ToolArguments {
+            function_call_id: fr.id.clone(),
+            auth_config: cfg.clone(),
+            extra: toolauth::Extra::new(),
+        };
+        let args = match serde_json::to_value(&args) {
+            Ok(Value::Object(m)) => m,
+            _ => Map::new(),
+        };
+        let id = generate_function_call_id(ctx.platform());
+        long_running_tool_ids.push(id.clone());
+        parts.push(Part {
+            function_call: Some(FunctionCall {
+                id,
+                name: toolauth::REQUEST_CREDENTIAL_FUNCTION_CALL_NAME.to_owned(),
+                args,
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    let mut ev = Event::new(ctx.platform(), ctx.invocation_id());
+    ev.author = ctx.agent().name().to_owned();
+    ev.branch = ctx.branch();
+    // adk-python gives the request the role of the tool responses, which is user.
+    ev.response = LlmResponse {
+        content: Some(Content {
+            role: "user".into(),
             parts,
         }),
         ..Default::default()
@@ -1466,9 +1565,14 @@ mod tests {
         let seen: Arc<Mutex<Option<Arc<ToolError>>>> = Arc::new(Mutex::new(None));
         let before: BeforeToolCallback = {
             let original = original.clone();
-            Arc::new(move |_, _, _| {
+            Arc::new(move |_, _, args| {
                 let original = original.clone();
-                Box::pin(async move { Err(AgentError::Other(Box::new(SharedToolError(original)))) })
+                Box::pin(async move {
+                    (
+                        args,
+                        Err(AgentError::Other(Box::new(SharedToolError(original)))),
+                    )
+                })
             })
         };
         let after: AfterToolCallback = {
@@ -1490,6 +1594,111 @@ mod tests {
         assert!(
             Arc::ptr_eq(&seen, &original),
             "after-tool got a new Arc: {seen:?}"
+        );
+    }
+
+    /// Go e0cbfd30: the plugin and agent before-tool callbacks share one copy of the arguments,
+    /// so a plugin's edit reaches the agent's callback, and both edits reach the tool, the
+    /// on-tool-error and the after-tool callbacks.
+    #[tokio::test]
+    async fn before_tool_arg_edits_reach_the_tool_and_later_callbacks() {
+        use std::sync::Mutex;
+
+        use gadk_agent::{OnToolErrorCallback, Plugin, PluginConfig, PluginManager};
+
+        struct ArgsTool(Mutex<Option<Value>>);
+        impl Tool for ArgsTool {
+            fn name(&self) -> &str {
+                "t"
+            }
+            fn description(&self) -> &str {
+                "records its args and fails"
+            }
+            fn as_runnable(&self) -> Option<&dyn RunnableTool> {
+                Some(self)
+            }
+            fn as_any(&self) -> &dyn Any {
+                self
+            }
+        }
+        #[async_trait]
+        impl RunnableTool for ArgsTool {
+            async fn run(&self, _: Context, args: Value) -> Result<Map<String, Value>, ToolError> {
+                *self.0.lock().unwrap() = Some(args);
+                Err(ToolError::InvalidArgument("boom".into()))
+            }
+        }
+
+        let plugin_before: BeforeToolCallback = Arc::new(|_, _, mut args| {
+            args.insert("p".into(), json!(1));
+            Box::pin(async move { (args, Ok(None)) })
+        });
+        let pm = PluginManager::new(
+            vec![Plugin::new(PluginConfig {
+                name: "edit".into(),
+                before_tool_callback: Some(plugin_before),
+                ..Default::default()
+            })],
+            std::time::Duration::from_secs(1),
+        )
+        .unwrap();
+        let agent_seen: Arc<Mutex<Option<Map<String, Value>>>> = Arc::default();
+        let error_seen: Arc<Mutex<Option<Map<String, Value>>>> = Arc::default();
+        let after_seen: Arc<Mutex<Option<Map<String, Value>>>> = Arc::default();
+        let before: BeforeToolCallback = {
+            let seen = agent_seen.clone();
+            Arc::new(move |_, _, mut args| {
+                *seen.lock().unwrap() = Some(args.clone());
+                args.insert("a".into(), json!(2));
+                Box::pin(async move { (args, Ok(None)) })
+            })
+        };
+        let on_error: OnToolErrorCallback = {
+            let seen = error_seen.clone();
+            Arc::new(move |_, _, args, _| {
+                *seen.lock().unwrap() = Some(args);
+                Box::pin(async { Ok(None) })
+            })
+        };
+        let after: AfterToolCallback = {
+            let seen = after_seen.clone();
+            Arc::new(move |_, _, args, _, _| {
+                *seen.lock().unwrap() = Some(args);
+                Box::pin(async { Ok(None) })
+            })
+        };
+        let cbs = ToolCallbacks {
+            before: vec![before],
+            after: vec![after],
+            on_error: vec![on_error],
+        };
+        let tool = Arc::new(ArgsTool(Mutex::new(None)));
+        let ictx = InvocationContext::builder()
+            .agent(
+                agent::new(AgentConfig {
+                    name: "a".into(),
+                    ..Default::default()
+                })
+                .unwrap(),
+            )
+            .plugin_manager(Arc::new(pm))
+            .build_invocation();
+        let model_args = Map::from_iter([("m".to_owned(), json!(0))]);
+        let resp = call_tool(&cbs, ictx.into_context(), tool.clone(), model_args.clone()).await;
+        assert_eq!(resp, Some(error_map("boom")));
+        assert_eq!(
+            agent_seen.lock().unwrap().clone(),
+            json!({"m": 0, "p": 1}).as_object().cloned()
+        );
+        let edited = json!({"m": 0, "p": 1, "a": 2});
+        assert_eq!(tool.0.lock().unwrap().clone(), Some(edited.clone()));
+        assert_eq!(
+            error_seen.lock().unwrap().clone(),
+            edited.as_object().cloned()
+        );
+        assert_eq!(
+            after_seen.lock().unwrap().clone(),
+            edited.as_object().cloned()
         );
     }
 }

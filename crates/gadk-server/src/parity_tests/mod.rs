@@ -21,6 +21,7 @@
 mod internal_originguard_originguard;
 mod server_adkrest_internal_models_event;
 mod server_adkrest_internal_models_event_actions;
+mod server_adkrest_internal_models_session;
 mod server_adkrest_internal_routers_auth;
 mod server_adkrest_internal_services_agentgraphgenerator;
 mod server_adkrest_internal_services_debugtelemetry;

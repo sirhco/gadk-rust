@@ -38,6 +38,7 @@ mod deadlines;
 mod deferred;
 mod helpers;
 pub(super) mod plugin_level;
+mod sanitization;
 
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -88,6 +89,13 @@ pub(super) async fn resolve(
     )
     .await;
 }
+
+/// Go `pathSegmentHashSuffix` and the #2018 size constants (ADK-Go `0990f9e`).
+pub(super) use crate::offload::uploads::path_segment_hash_suffix;
+pub(super) use crate::offload::{
+    MAX_GCS_PREFIX_BYTES, MAX_GCS_REWRITTEN_PREFIX_BYTES, MAX_PATH_SEGMENT_BYTES,
+    PATH_SEGMENT_HASH_SUFFIX_LEN,
+};
 
 /// Go `&BatchProcessor{config: config, queue: make(chan map[string]any, 4)}`.
 pub(super) fn bare(config: Config) -> Arc<BatchProcessor> {
@@ -636,6 +644,27 @@ fn test_is_precondition_failed() {
 
 #[test]
 fn test_gcs_object_path() {
+    fn h(s: impl AsRef<str>) -> String {
+        path_segment_hash_suffix(s.as_ref())
+    }
+    let unsafe_want = format!(
+        "2026-03-04/a_b_c{}/x_y{}____{}_c0_p0.txt",
+        h("a/b c"),
+        h("x\ny"),
+        h("é?*")
+    );
+    let tilde_want = format!(
+        "_team\\prod/v_1{}/2026-03-04/trace/span_event_c0_p0.txt",
+        h("~team\\prod/v~1")
+    );
+    let acme_want = format!(
+        "_well-known/acme-challenge/x{}/2026-03-04/trace/span_event_c0_p0.txt",
+        h(".well-known/acme-challenge/x")
+    );
+    let control_want = format!(
+        "logs_x{}/2026-03-04/trace/span_event_c0_p0.txt",
+        h("logs\nx")
+    );
     let ts = utc(2026, 3, 4, 5, 6, 7, 0);
     let eastern = FixedOffset::west_opt(5 * 3600).unwrap();
     let late = eastern
@@ -652,7 +681,7 @@ fn test_gcs_object_path() {
         usize,
         &str,
         &str,
-    ); 8] = [
+    ); 17] = [
         (
             "all parts",
             "",
@@ -723,8 +752,8 @@ fn test_gcs_object_path() {
             ".jpg",
             "2026-03-04/trace/span_event_c12_p345.jpg",
         ),
-        // The three runes of "é?*" each become one underscore. Between "x_y" and "c0" are the
-        // separator, those three and the underscore that introduces the content ordinal.
+        // Unsafe runes are replaced with underscores and disambiguated with a deterministic
+        // SHA-256 suffix of the raw identifier.
         (
             "unsafe characters are replaced",
             "",
@@ -733,7 +762,97 @@ fn test_gcs_object_path() {
             0,
             0,
             ".txt",
-            "2026-03-04/a_b_c/x_y_____c0_p0.txt",
+            &unsafe_want,
+        ),
+        (
+            "dot-relative and empty inner prefix segments are preserved",
+            "../a/../b/./c//",
+            ts,
+            ["trace", "span", "event"],
+            0,
+            0,
+            ".txt",
+            "../a/../b/./c/2026-03-04/trace/span_event_c0_p0.txt",
+        ),
+        (
+            "dot-only prefix is preserved after slash trim",
+            "./..",
+            ts,
+            ["trace", "span", "event"],
+            0,
+            0,
+            ".txt",
+            "./../2026-03-04/trace/span_event_c0_p0.txt",
+        ),
+        (
+            "backslashes in prefix are preserved",
+            "team\\prod/v1",
+            ts,
+            ["trace", "span", "event"],
+            0,
+            0,
+            ".txt",
+            "team\\prod/v1/2026-03-04/trace/span_event_c0_p0.txt",
+        ),
+        (
+            "tildes in prefix are rewritten with hash suffix",
+            "~team\\prod/v~1",
+            ts,
+            ["trace", "span", "event"],
+            0,
+            0,
+            ".txt",
+            &tilde_want,
+        ),
+        (
+            "non-matching .well-known prefix is preserved",
+            ".well-known/acme-challenge-x",
+            ts,
+            ["trace", "span", "event"],
+            0,
+            0,
+            ".txt",
+            ".well-known/acme-challenge-x/2026-03-04/trace/span_event_c0_p0.txt",
+        ),
+        (
+            "triple-dot prefix segment is preserved",
+            "a/.../b",
+            ts,
+            ["trace", "span", "event"],
+            0,
+            0,
+            ".txt",
+            "a/.../b/2026-03-04/trace/span_event_c0_p0.txt",
+        ),
+        (
+            "valid prefixes with spaces, equals, and unicode are preserved",
+            "tenant=acme/logs v1/テナント",
+            ts,
+            ["trace", "span", "event"],
+            0,
+            0,
+            ".txt",
+            "tenant=acme/logs v1/テナント/2026-03-04/trace/span_event_c0_p0.txt",
+        ),
+        (
+            "reserved acme-challenge prefix is rewritten",
+            ".well-known/acme-challenge/x",
+            ts,
+            ["trace", "span", "event"],
+            0,
+            0,
+            ".txt",
+            &acme_want,
+        ),
+        (
+            "control characters in prefix are rewritten",
+            "logs\nx",
+            ts,
+            ["trace", "span", "event"],
+            0,
+            0,
+            ".txt",
+            &control_want,
         ),
     ];
     for (name, prefix, ts, [trace, span, event], content_ord, part_idx, ext, want) in tests {

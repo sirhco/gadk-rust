@@ -248,6 +248,8 @@ impl ContextBuilder {
             sub_scheduler: None,
             output_for_ancestors: None,
             enclosing_path: String::new(),
+            inherited_plugins: None,
+            graph_resume_done: false,
         })
     }
 

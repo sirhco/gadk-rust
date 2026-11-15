@@ -46,7 +46,7 @@ fn obj(v: Value) -> Map<String, Value> {
     v.as_object().cloned().unwrap()
 }
 
-fn calls(pairs: [(i64, i64); 3]) -> LlmResponse {
+fn calls(pairs: [(i64, i64); 3], model_version: &str) -> LlmResponse {
     LlmResponse {
         content: Some(Content::from_parts(
             pairs
@@ -56,6 +56,7 @@ fn calls(pairs: [(i64, i64); 3]) -> LlmResponse {
             ROLE_MODEL,
         )),
         finish_reason: Some(FinishReason::Stop),
+        model_version: model_version.into(),
         ..Default::default()
     }
 }
@@ -71,7 +72,7 @@ fn responses(sums: [i64; 3]) -> LlmResponse {
     }
 }
 /// Final text; `pro` appends the empty (thought-signature-only) part gemini-3.1-pro returns.
-fn answer(t: &str, pro: bool) -> LlmResponse {
+fn answer(t: &str, pro: bool, model_version: &str) -> LlmResponse {
     let mut parts = vec![Part::from_text(t)];
     if pro {
         parts.push(Part::default());
@@ -79,6 +80,7 @@ fn answer(t: &str, pro: bool) -> LlmResponse {
     LlmResponse {
         content: Some(Content::from_parts(parts, ROLE_MODEL)),
         finish_reason: Some(FinishReason::Stop),
+        model_version: model_version.into(),
         ..Default::default()
     }
 }
@@ -104,12 +106,12 @@ fn expected(model: &str) -> Vec<LlmResponse> {
         other => panic!("unknown model {other}"),
     };
     vec![
-        calls([(2, 3), (4, 5), (6, 7)]),
+        calls([(2, 3), (4, 5), (6, 7)], model),
         responses([5, 9, 13]),
-        answer(t1, pro),
-        calls([(10, 20), (40, 50), (60, 70)]),
+        answer(t1, pro, model),
+        calls([(10, 20), (40, 50), (60, 70)], model),
         responses([30, 90, 130]),
-        answer(t2, pro),
+        answer(t2, pro, model),
     ]
 }
 

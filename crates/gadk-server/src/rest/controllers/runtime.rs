@@ -29,7 +29,7 @@ use gadk_engine::runner::{PluginConfig, RunOptions, Runner, RunnerConfig};
 use gadk_memory::MemoryService;
 use gadk_platform::{Platform, go_quote};
 use gadk_session::compaction::Config as CompactionConfig;
-use gadk_session::{GetRequest, SessionService};
+use gadk_session::{GetRequest, SessionError, SessionService};
 use http::header::{CACHE_CONTROL, CONNECTION, CONTENT_TYPE};
 use http::{HeaderValue, Method, StatusCode};
 use tokio::sync::Semaphore;
@@ -173,8 +173,8 @@ impl RuntimeApiController {
         }
     }
 
-    /// Go `RunHandler` (through `NewErrorHandler`): the run's events as a JSON array (`null`
-    /// when the run yields none, as Go encodes a nil slice).
+    /// Go `RunHandler` (through `NewErrorHandler`): the run's events as a JSON array (`[]`
+    /// when the run yields none).
     pub async fn run_handler(&self, req: Request) -> Response {
         match self.run(req).await {
             Ok(resp) => resp,
@@ -194,12 +194,11 @@ impl RuntimeApiController {
             return Ok(resp);
         }
         let session_events = self.run_agent(run_agent_request).await?;
-        let events: Option<Vec<Event>> = (!session_events.is_empty()).then(|| {
-            session_events
-                .iter()
-                .map(Event::from_session_event)
-                .collect()
-        });
+        // An empty list, not `null`, for a run that produced no events: clients expect a list.
+        let events: Vec<Event> = session_events
+            .iter()
+            .map(Event::from_session_event)
+            .collect();
         Ok(encode_json_response(&events, StatusCode::OK))
     }
 
@@ -268,10 +267,7 @@ impl RuntimeApiController {
             )
             .await
         {
-            return http_error(
-                StatusCode::NOT_FOUND,
-                &format!("failed to find the session: {err}"),
-            );
+            return http_error(err.status, &format!("failed to find the session: {err}"));
         }
         let (runner, run_config) = match self.get_runner(&run_agent_request) {
             Ok(r) => r,
@@ -297,13 +293,19 @@ impl RuntimeApiController {
         resp
     }
 
-    /// Go `validateSessionExists`: 404 `failed to get session: <err>`.
+    /// Go `validateSessionExists`: answers before a run starts when the session is missing —
+    /// `failed to get session: <err>`, 404 when the service reports the session missing or the
+    /// request does not fully name it, else 500. With `auto_create_session` the runner creates
+    /// a missing session, so there is no check.
     async fn validate_session_exists(
         &self,
         app_name: &str,
         user_id: &str,
         session_id: &str,
     ) -> Result<(), StatusError> {
+        if self.auto_create_session {
+            return Ok(());
+        }
         self.session_service
             .get(GetRequest {
                 app_name: app_name.to_owned(),
@@ -314,8 +316,19 @@ impl RuntimeApiController {
             .await
             .map(|_| ())
             .map_err(|err| {
+                // A session the service reports missing, or one the request does not fully
+                // name, is the client's 404; a service that failed to answer is the server's.
+                let status = if matches!(err, SessionError::NotFound)
+                    || app_name.is_empty()
+                    || user_id.is_empty()
+                    || session_id.is_empty()
+                {
+                    StatusCode::NOT_FOUND
+                } else {
+                    StatusCode::INTERNAL_SERVER_ERROR
+                };
                 StatusError::new(
-                    StatusCode::NOT_FOUND,
+                    status,
                     format!(
                         "failed to get session: {}",
                         session_error_text(&err, session_id, false)

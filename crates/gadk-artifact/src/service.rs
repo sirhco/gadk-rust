@@ -20,6 +20,8 @@ use chrono::{DateTime, Utc};
 use gadk_genai::Part;
 use serde_json::{Map, Value};
 
+use crate::artifact_util::is_artifact_ref;
+
 /// Errors returned by an [`ArtifactService`].
 #[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
@@ -147,8 +149,17 @@ pub struct SaveRequest {
 }
 
 impl SaveRequest {
-    /// Port of Go SaveRequest.Validate.
+    /// Port of Go SaveRequest.Validate. A part must carry text or inline data: an
+    /// `artifact://` reference part is refused here, as every backend but the in-memory one
+    /// relies on.
     pub fn validate(&self) -> Result<(), ArtifactError> {
+        self.validate_with(false)
+    }
+
+    /// Port of Go SaveRequest.validate: the shared validation, with `allow_ref` tolerating an
+    /// `artifact://` reference part. Only [`crate::InMemoryArtifactService`] understands
+    /// references, so it is the sole caller that sets it.
+    pub(crate) fn validate_with(&self, allow_ref: bool) -> Result<(), ArtifactError> {
         let mut missing_fields = validate_required_strings(&file_fields(
             &self.app_name,
             &self.user_id,
@@ -162,6 +173,7 @@ impl SaveRequest {
         if let Some(part) = &self.part
             && part.text.is_empty()
             && part.inline_data.is_none()
+            && !(allow_ref && is_artifact_ref(Some(part)))
         {
             return Err(ArtifactError::InvalidRequest(
                 "invalid save request: Part.InlineData or Part.Text has to be set".into(),

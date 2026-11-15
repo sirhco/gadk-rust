@@ -135,8 +135,8 @@ pub(crate) fn resolve_project(
     Ok(project.to_owned())
 }
 
-/// Go `resolveResource`: Go's default resource ← `gcp.project_id` and, with cloud export on,
-/// the GCP detector's resource ← the configured resource.
+/// Go `resolveResource`: Go's default resource ← `gcp.project_id` (only for a known project,
+/// Go #2082) and, with cloud export on, the GCP detector's resource ← the configured resource.
 pub(crate) async fn resolve_resource(
     cfg: &Config,
     env: &dyn EnvProvider,
@@ -145,13 +145,11 @@ pub(crate) async fn resolve_resource(
     let r = go_default_resource(env);
 
     // Go `resource.New(ctx, WithAttributes(gcp.project_id), WithDetectors(gcp.NewDetector()))`.
-    let mut gcp_resource = new_with_attributes(
-        "",
-        [KeyValue::new(
-            "gcp.project_id",
-            cfg.gcp_resource_project.clone(),
-        )],
-    );
+    // Only a known project is recorded, as in adk-python: an empty one would still be merged
+    // over the default resource and blank a gcp.project_id set in OTEL_RESOURCE_ATTRIBUTES.
+    let project_attrs = (!cfg.gcp_resource_project.is_empty())
+        .then(|| KeyValue::new("gcp.project_id", cfg.gcp_resource_project.clone()));
+    let mut gcp_resource = new_with_attributes("", project_attrs);
     if cfg.otel_to_cloud {
         let detected = match detector.detect().await {
             Ok(detected) => detected,
@@ -401,7 +399,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resource_without_cloud_export_has_an_empty_gcp_project_and_no_detection() {
+    async fn resource_without_cloud_export_has_no_gcp_project_and_no_detection() {
         let cfg = config_from_opts(&[]);
         let r = resolve_resource(
             &cfg,
@@ -410,7 +408,8 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(attr(&r, "gcp.project_id").as_deref(), Some(""));
+        // Go #2082: no gcp.project_id when no resource project is known.
+        assert_eq!(attr(&r, "gcp.project_id"), None);
         assert_eq!(attr(&r, "cloud.provider"), None);
         assert_eq!(attr(&r, "telemetry.sdk.language").as_deref(), Some("rust"));
         assert_eq!(r.schema_url(), Some(SCHEMA_URL));
@@ -691,8 +690,9 @@ mod tests {
             .resource
             .clone()
             .unwrap();
+        // No resource project is configured, so no gcp.project_id (Go #2082).
         assert!(
-            resource
+            !resource
                 .attributes
                 .iter()
                 .any(|kv| kv.key == "gcp.project_id")

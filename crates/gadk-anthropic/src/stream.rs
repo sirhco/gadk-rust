@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Streaming (port of ADK-Go `stream.go` `generateStreaming` and anthropic-sdk-go v1.81.0
+//! Streaming (port of ADK-Go `stream.go` `generateStreaming` and anthropic-sdk-go v1.84.0
 //! `Message.Accumulate` and `ssestream.Stream.Next`).
 
 use std::collections::{BTreeMap, VecDeque};
@@ -28,71 +28,11 @@ use crate::error::{AnthropicError, api_error_from_response};
 use crate::response::convert_message_to_llm_response;
 use crate::wire::{ContentBlock, Message, StreamEvent};
 
-/// The SSE event names anthropic-sdk-go v1.81.0's `ssestream.Stream.Next` decodes as a stream
-/// event (`completion` and the names of its second `case`); `ping` and any other name, or no
-/// name, are skipped, and `error` ends the stream.
-const DECODED_EVENT_NAMES: &[&str] = &[
-    "completion",
-    "message_start",
-    "message_delta",
-    "message_stop",
-    "content_block_start",
-    "content_block_delta",
-    "content_block_stop",
-    "message",
-    "user.message",
-    "user.interrupt",
-    "user.tool_confirmation",
-    "user.custom_tool_result",
-    "user.tool_result",
-    "agent.message",
-    "agent.thinking",
-    "agent.tool_use",
-    "agent.tool_result",
-    "agent.mcp_tool_use",
-    "agent.mcp_tool_result",
-    "agent.custom_tool_use",
-    "agent.thread_context_compacted",
-    "session.status_running",
-    "session.status_idle",
-    "session.status_rescheduled",
-    "session.status_terminated",
-    "session.error",
-    "session.deleted",
-    "session.updated",
-    "span.model_request_start",
-    "span.model_request_end",
-    "span.outcome_evaluation_start",
-    "span.outcome_evaluation_ongoing",
-    "span.outcome_evaluation_end",
-    "user.define_outcome",
-    "agent.thread_message_received",
-    "agent.thread_message_sent",
-    "agent.session_thread_message_received",
-    "agent.session_thread_message_sent",
-    "session.thread_created",
-    "session.thread_status_created",
-    "session.thread_status_running",
-    "session.thread_status_idle",
-    "session.thread_status_rescheduled",
-    "session.thread_status_terminated",
-    "event_start",
-    "event_delta",
-    "system.message",
-    "workflow_run.created",
-    "workflow_run.status_running",
-    "workflow_run.status_idle",
-    "workflow_run.status_ended",
-    "workflow_run.error",
-    "workflow_run.phase_started",
-    "workflow_run.phase_ended",
-];
-
 /// Accumulates one streamed message: fed each [`SseEvent`], it returns the partial responses to
 /// yield; [`finish`](Self::finish) returns the aggregated final response.
 ///
-/// Events are selected by their SSE `event:` name as the SDK's `ssestream` does (`ping` and
-/// unknown names are skipped); an `error` event becomes the [`ApiError`](crate::ApiError) of
+/// Events are selected by their SSE `event:` name as the SDK's `ssestream` does (`ping`, an
+/// absent or empty name and empty data are skipped; every other name decodes); an `error` event becomes the [`ApiError`](crate::ApiError) of
 /// [`crate::error::api_error_from_response`] with this response's status and `request-id`.
 pub(crate) struct StreamAccumulator {
     /// Go `unwrapOutput`.
@@ -137,8 +77,16 @@ impl StreamAccumulator {
                     event.data.as_bytes(),
                 )));
             }
-            Some(name) if DECODED_EVENT_NAMES.contains(&name) => {}
-            _ => return Ok(Vec::new()),
+            // anthropic-sdk-go v1.84.0 `ssestream.Stream.Next`: `ping` and an absent or empty
+            // event name are skipped.
+            None | Some("" | "ping") => return Ok(Vec::new()),
+            // Any other name decodes (v1.84.0 dropped the old allow-list of names)...
+            Some(_) => {}
+        }
+        // ...unless its data is empty (`len(TrimSuffix(data, "\n")) == 0`; `data` here has no
+        // trailing newline).
+        if event.data.is_empty() {
+            return Ok(Vec::new());
         }
         let ev: StreamEvent = serde_json::from_str(&event.data)
             .map_err(|err| AnthropicError::request_failed(err.to_string()))?;
@@ -225,7 +173,7 @@ fn thought(text: &str) -> Part {
     }
 }
 
-/// Port of anthropic-sdk-go v1.81.0 `(*Message).Accumulate` over the fields gadk reads; the
+/// Port of anthropic-sdk-go v1.84.0 `(*Message).Accumulate` over the fields gadk reads; the
 /// error is the SDK's text. Citations (`citations_delta`) and the SDK's raw-JSON bookkeeping
 /// are not modelled.
 fn accumulate(acc: &mut Message, event: &StreamEvent) -> Result<(), String> {
@@ -886,24 +834,26 @@ mod tests {
     }
 
     #[test]
-    fn ping_unknown_and_unnamed_events_are_skipped() {
+    fn ping_unnamed_and_empty_data_events_are_skipped() {
         let mut acc = StreamAccumulator::new(false, 200, "");
         let start = r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":"x"}}"#;
         for ev in [
             named("ping", r#"{"type":"ping"}"#),
-            named("something_new", start),
             SseEvent {
                 event: None,
                 data: start.to_string(),
             },
+            named("", start),
+            // Empty data is skipped whatever the name.
+            named("message_start", ""),
             // Skipped before decoding, so invalid data does not matter.
             named("ping", "not json"),
         ] {
             assert_eq!(acc.push(ev).unwrap(), Vec::<LlmResponse>::new());
         }
         assert!(acc.acc.content.is_empty());
-        // A decoded name selects decoding; the data's own `type` drives accumulation.
-        let got = acc.push(named("message", start)).unwrap();
+        // Any other name decodes (v1.84.0); the data's own `type` drives accumulation.
+        let got = acc.push(named("something_new", start)).unwrap();
         assert_eq!(got.len(), 1);
         assert_eq!(acc.acc.content.len(), 1);
     }

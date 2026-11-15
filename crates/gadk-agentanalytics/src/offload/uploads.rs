@@ -36,14 +36,18 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 use tokio::time::Instant;
 
+use sha2::{Digest, Sha256};
+
 use super::{
-    FALLBACK_EXTENSION, MEDIA_OFFLOADED_TEXT, MIME_EXTENSIONS, MISSING_EVENT_ID, MISSING_SPAN_ID,
-    MISSING_TRACE_ID, OffloaderPanicError, OwnedUploadError, TEXT_PREVIEW_RUNES,
-    TEXT_PREVIEW_SUFFIX, UploadSentinel,
+    FALLBACK_EXTENSION, MAX_GCS_OBJECT_NAME_BYTES, MAX_GCS_PREFIX_BYTES,
+    MAX_GCS_REWRITTEN_PREFIX_BYTES, MAX_PATH_SEGMENT_BYTES, MEDIA_OFFLOADED_TEXT, MIME_EXTENSIONS,
+    MISSING_EVENT_ID, MISSING_SPAN_ID, MISSING_TRACE_ID, OffloaderPanicError, OwnedUploadError,
+    PATH_SEGMENT_HASH_SUFFIX_LEN, TEXT_PREVIEW_RUNES, TEXT_PREVIEW_SUFFIX, UploadSentinel,
 };
 use crate::batch_processor::BatchProcessor;
 use crate::config::{
-    DEFAULT_GCS_MAX_CONCURRENT_UPLOADS, GCS_UPLOAD_TIMEOUT, GcsContentOffloader, GcsUploadRequest,
+    Config, DEFAULT_GCS_MAX_CONCURRENT_UPLOADS, GCS_UPLOAD_TIMEOUT, GcsContentOffloader,
+    GcsUploadRequest,
 };
 use crate::context::{Context, ContextError};
 use crate::error::Error;
@@ -58,6 +62,7 @@ use crate::row::{
     DeferredRowUploads, DeferredUpload, QueuedRow, Row, RowExt, RowValue, SharedSummaryBuilder,
     apply_summary_to_row, from_json_map,
 };
+use crate::views::ascii_equal_fold;
 
 /// Go `eventIDField`.
 const EVENT_ID_FIELD: &str = "event_id";
@@ -535,15 +540,21 @@ impl BatchProcessor {
         }
     }
 
-    /// Go `objectPath(row, u)`: [`gcs_object_path`] with `gcs_path_prefix`, the row's
-    /// timestamp (now when it has none), ids and the payload's extension.
+    /// Go `objectPath(row, u)`: [`gcs_object_path_from_clean_prefix`] with the effective
+    /// prefix resolved at construction (cleaned per call when unresolved, as Go's struct
+    /// literals are), the row's timestamp (now when it has none), ids and the payload's
+    /// extension.
     pub(crate) fn object_path(&self, row: &Row, u: &PendingUpload) -> String {
         let ts = row
             .timestamp(TIMESTAMP_FIELD)
             .filter(|ts| Some(*ts) != go_zero_time())
             .unwrap_or_else(Utc::now);
-        gcs_object_path(
-            &self.config.gcs_path_prefix,
+        let clean_prefix = match &self.effective_gcs_path_prefix {
+            Some(p) => std::borrow::Cow::Borrowed(p.as_str()),
+            None => std::borrow::Cow::Owned(clean_gcs_prefix(&self.config.gcs_path_prefix)),
+        };
+        gcs_object_path_from_clean_prefix(
+            &clean_prefix,
             ts,
             row.str("trace_id").unwrap_or_default(),
             row.str("span_id").unwrap_or_default(),
@@ -847,26 +858,181 @@ pub(crate) fn is_safe_extension(ext: &str) -> bool {
     ext[1..].chars().all(|c| c.is_ascii_alphanumeric())
 }
 
-/// Go `pathSegment(id, fallback)`: `id` with every char but ASCII letters, digits, `-`, `_`
-/// and `.` replaced by `_`, or `fallback` when `id` is empty or only dots.
+/// Go `pathSegmentHashSuffix(s)`: `~` and the 64 lowercase hex digits of the SHA-256 digest
+/// of `s`. `~` lies outside the unchanged identifier alphabet (`[A-Za-z0-9._-]`), so hashed
+/// outputs occupy a namespace of their own.
+pub(crate) fn path_segment_hash_suffix(s: &str) -> String {
+    use std::fmt::Write as _;
+    let sum = Sha256::digest(s.as_bytes());
+    let mut out = String::with_capacity(PATH_SEGMENT_HASH_SUFFIX_LEN);
+    out.push('~');
+    for b in sum {
+        let _ = write!(out, "{b:02x}");
+    }
+    out
+}
+
+/// Go `truncateWithHash(base, raw, maxBytes)`: `base` cut to at most
+/// `max_bytes - PATH_SEGMENT_HASH_SUFFIX_LEN` bytes on a char boundary, followed by
+/// [`path_segment_hash_suffix`] of `raw`. Callers pass `max_bytes ≥ PATH_SEGMENT_HASH_SUFFIX_LEN`.
+fn truncate_with_hash(base: &str, raw: &str, max_bytes: usize) -> String {
+    let suffix = path_segment_hash_suffix(raw);
+    let mut limit = max_bytes.saturating_sub(suffix.len());
+    let mut base = base;
+    if base.len() > limit {
+        while limit > 0 && !base.is_char_boundary(limit) {
+            limit -= 1;
+        }
+        base = &base[..limit];
+    }
+    format!("{base}{suffix}")
+}
+
+/// Go `pathSegment(id, fallback)`: an id of at most [`MAX_PATH_SEGMENT_BYTES`] ASCII letters,
+/// digits, `-`, `_` and `.` that is not only dots is returned unchanged; an empty id returns
+/// `fallback`; an id of only dots returns `fallback` with the `~<sha256>` suffix of `id`; any
+/// other id has every char outside that set (including `~`) replaced by `_` and is cut to fit
+/// [`MAX_PATH_SEGMENT_BYTES`] with the `~<sha256>` suffix of the raw id appended.
 pub(crate) fn path_segment(id: &str, fallback: &str) -> String {
-    if id.trim_matches('.').is_empty() {
+    if id.is_empty() {
         return fallback.to_owned();
     }
-    id.chars()
+    if id.trim_matches('.').is_empty() {
+        return truncate_with_hash(fallback, id, MAX_PATH_SEGMENT_BYTES);
+    }
+    let mut altered = false;
+    let sanitized: String = id
+        .chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') {
                 c
             } else {
+                altered = true;
                 '_'
+            }
+        })
+        .collect();
+    if !altered && sanitized.len() <= MAX_PATH_SEGMENT_BYTES {
+        return sanitized;
+    }
+    truncate_with_hash(&sanitized, id, MAX_PATH_SEGMENT_BYTES)
+}
+
+/// Go `isUnsafeGCSPrefixRune(r)`: a control character (U+0000–U+001F, U+007F–U+009F) or the
+/// Unicode line / paragraph separator (U+2028, U+2029).
+pub(crate) fn is_unsafe_gcs_prefix_rune(r: char) -> bool {
+    r < '\u{20}' || ('\u{7f}'..='\u{9f}').contains(&r) || r == '\u{2028}' || r == '\u{2029}'
+}
+
+/// Go `hasReservedACMEPrefix(s)`: the first two `/`-separated segments of `s` are,
+/// case-insensitively, `.well-known` and `acme-challenge`.
+fn has_reserved_acme_prefix(s: &str) -> bool {
+    let Some((seg0, rest)) = s.split_once('/') else {
+        return false;
+    };
+    if !ascii_equal_fold(".well-known", seg0) {
+        return false;
+    }
+    let seg1 = rest.split_once('/').map_or(rest, |(seg1, _)| seg1);
+    ascii_equal_fold("acme-challenge", seg1)
+}
+
+/// Go `cleanGCSPrefix(prefix)`: the object name prefix for a configured `GCSPathPrefix` (see
+/// [`Config::gcs_path_prefix`](crate::config::Config::gcs_path_prefix)).
+pub(crate) fn clean_gcs_prefix(prefix: &str) -> String {
+    clean_gcs_prefix_with_reason(prefix).0
+}
+
+/// Go `cleanGCSPrefixWithReason(prefix)`: the effective prefix and, when it was rewritten, the
+/// `; `-joined reasons. A Rust `&str` is valid UTF-8, so Go's "contains invalid UTF-8" reason
+/// cannot occur.
+pub(crate) fn clean_gcs_prefix_with_reason(prefix: &str) -> (String, String) {
+    let trimmed = prefix.trim_matches('/');
+    if trimmed.is_empty() {
+        return (String::new(), String::new());
+    }
+    let mut has_control = false;
+    let mut has_tilde = false;
+    let mut cleaned: String = trimmed
+        .chars()
+        .map(|r| {
+            if r == '~' {
+                has_tilde = true;
+                '_'
+            } else if is_unsafe_gcs_prefix_rune(r) {
+                has_control = true;
+                '_'
+            } else {
+                r
+            }
+        })
+        .collect();
+    let has_reserved_acme = has_reserved_acme_prefix(&cleaned);
+    if has_reserved_acme {
+        let rest = cleaned
+            .split_once('/')
+            .map(|(_, rest)| rest.to_owned())
+            .unwrap_or_default();
+        cleaned = format!("_well-known/{rest}");
+    }
+    let mut reasons: Vec<String> = Vec::new();
+    if has_control {
+        reasons.push("contains control or line-separator character".to_owned());
+    }
+    if has_tilde {
+        reasons.push("contains reserved '~'".to_owned());
+    }
+    if has_reserved_acme {
+        reasons.push("starts with reserved .well-known/acme-challenge prefix".to_owned());
+    }
+    if trimmed.len() > MAX_GCS_PREFIX_BYTES {
+        reasons.push(format!("exceeds {MAX_GCS_PREFIX_BYTES} bytes"));
+    }
+    if reasons.is_empty() {
+        return (cleaned, String::new());
+    }
+    (
+        truncate_with_hash(&cleaned, trimmed, MAX_GCS_REWRITTEN_PREFIX_BYTES),
+        reasons.join("; "),
+    )
+}
+
+/// Go `resolveGCSPathPrefix(c)`: [`clean_gcs_prefix`] of `c.gcs_path_prefix`, logging a
+/// constant-format warning with the rewrite reason and byte counts (never the prefix text)
+/// when it had to be rewritten.
+pub(crate) fn resolve_gcs_path_prefix(c: &Config) -> String {
+    let trimmed = c.gcs_path_prefix.trim_matches('/');
+    let (cleaned, reason) = clean_gcs_prefix_with_reason(&c.gcs_path_prefix);
+    if !reason.is_empty() {
+        c.logf(format_args!(
+            "agentanalytics: WARNING: Config.GCSPathPrefix ({} raw bytes, {} trimmed bytes) was rewritten ({} effective bytes): {reason}",
+            c.gcs_path_prefix.len(),
+            trimmed.len(),
+            cleaned.len(),
+        ));
+    }
+    cleaned
+}
+
+/// Go `sanitizeExtension(ext)`: `ext` with every [`is_unsafe_gcs_prefix_rune`] char, `/`, `\\`
+/// and `~` replaced by `_` (a Rust `&str` has no invalid bytes for Go's `ToValidUTF8`).
+fn sanitize_extension(ext: &str) -> String {
+    ext.chars()
+        .map(|r| {
+            if is_unsafe_gcs_prefix_rune(r) || matches!(r, '/' | '\\' | '~') {
+                '_'
+            } else {
+                r
             }
         })
         .collect()
 }
 
 /// Go `gcsObjectPath(prefix, ts, traceID, spanID, eventID, contentOrd, partIdx, ext)`:
-/// `[prefix/]<UTC date>/<trace id>/<span id>_<event id>_c<content>_p<part><ext>`.
+/// `[prefix/]<UTC date>/<trace id>/<span id>_<event id>_c<content>_p<part><ext>` with the
+/// prefix cleaned by [`clean_gcs_prefix`] (see [`gcs_object_path_from_clean_prefix`]).
 #[allow(clippy::too_many_arguments)]
+#[cfg_attr(not(test), allow(dead_code))] // Go keeps it; the plugin calls the clean-prefix form
 pub(crate) fn gcs_object_path(
     prefix: &str,
     ts: DateTime<Utc>,
@@ -877,10 +1043,37 @@ pub(crate) fn gcs_object_path(
     part_idx: usize,
     ext: &str,
 ) -> String {
+    gcs_object_path_from_clean_prefix(
+        &clean_gcs_prefix(prefix),
+        ts,
+        trace_id,
+        span_id,
+        event_id,
+        content_ord,
+        part_idx,
+        ext,
+    )
+}
+
+/// Go `gcsObjectPathFromCleanPrefix(...)`: the object name for an already-cleaned prefix. A
+/// name is returned as is only when it fits [`MAX_GCS_OBJECT_NAME_BYTES`] and its extension is
+/// empty or [`is_safe_extension`]; a longer name with a safe extension is cut before the
+/// extension and gets the `~<sha256>` suffix of the whole name; a name with any other extension
+/// always ends in that hash (its readable part with the extension sanitized).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn gcs_object_path_from_clean_prefix(
+    clean_prefix: &str,
+    ts: DateTime<Utc>,
+    trace_id: &str,
+    span_id: &str,
+    event_id: &str,
+    content_ord: usize,
+    part_idx: usize,
+    ext: &str,
+) -> String {
     let mut out = String::new();
-    let p = prefix.trim_matches('/');
-    if !p.is_empty() {
-        out.push_str(p);
+    if !clean_prefix.is_empty() {
+        out.push_str(clean_prefix);
         out.push('/');
     }
     out.push_str(&format!(
@@ -890,7 +1083,16 @@ pub(crate) fn gcs_object_path(
         path_segment(span_id, MISSING_SPAN_ID),
         path_segment(event_id, MISSING_EVENT_ID),
     ));
-    out
+    let safe_ext = is_safe_extension(ext);
+    if out.len() <= MAX_GCS_OBJECT_NAME_BYTES && (ext.is_empty() || safe_ext) {
+        return out;
+    }
+    let stem = &out[..out.len() - ext.len()];
+    if safe_ext && ext.len() < MAX_GCS_OBJECT_NAME_BYTES - PATH_SEGMENT_HASH_SUFFIX_LEN {
+        return truncate_with_hash(stem, &out, MAX_GCS_OBJECT_NAME_BYTES - ext.len()) + ext;
+    }
+    let readable = format!("{stem}{}", sanitize_extension(ext));
+    truncate_with_hash(&readable, &out, MAX_GCS_OBJECT_NAME_BYTES)
 }
 
 /// Go `safeUploadErrorSummary(err)`: diagnostic metadata of `err` that never shows a custom

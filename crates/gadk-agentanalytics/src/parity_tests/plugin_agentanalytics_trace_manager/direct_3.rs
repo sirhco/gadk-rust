@@ -178,6 +178,7 @@ async fn on_event(p: &Plugin, run: &MockRun, ev: Event) {
 async fn before_tool(p: &Plugin, ctx: Context, t: &Arc<dyn Tool>, args: Map<String, Value>) {
     p.before_tool_callback().unwrap()(ctx, t.clone(), args)
         .await
+        .1
         .unwrap();
 }
 

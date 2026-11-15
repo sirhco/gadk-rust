@@ -23,12 +23,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::time::Duration;
 
-use chrono::{TimeZone, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use gadk_genai::{Content, Part};
 use gadk_platform::Platform;
 use gadk_session::{
     CreateRequest, Event, EventActions, EventCompaction, GetRequest, InMemorySessionService,
-    NodeInfo, RequestInput, Session, SessionService, ToolConfirmation,
+    ListRequest, NodeInfo, RequestInput, Session, SessionService, ToolConfirmation,
 };
 use serde_json::{Map, Value, json};
 
@@ -508,6 +508,48 @@ async fn test_in_memory_service_append_event_copies_compaction() {
     );
 }
 
+// TestInMemoryService_AppendEvent_CopiesRequestedAuthConfigs pins that a write to the map the
+// caller passed in does not reach the stored event.
+#[tokio::test]
+async fn test_in_memory_service_append_event_copies_requested_auth_configs() {
+    let service = InMemorySessionService::new();
+    let sess = create(&service, "app", "user").await;
+    let api_key = gadk_session::toolauth::Scheme {
+        r#type: gadk_session::toolauth::SchemeType::API_KEY,
+        r#in: "header".into(),
+        name: "X-Key".into(),
+        ..Default::default()
+    };
+    let config = |key: &str| gadk_session::toolauth::Config {
+        auth_scheme: api_key.clone(),
+        credential_key: key.into(),
+        ..Default::default()
+    };
+    let mut event = Event {
+        id: "e1".into(),
+        author: "agent".into(),
+        ..Default::default()
+    };
+    event.actions.requested_auth_configs = BTreeMap::from([("call-1".into(), config("k1"))]);
+    service
+        .append_event(sess.as_ref(), &mut event)
+        .await
+        .unwrap();
+
+    event
+        .actions
+        .requested_auth_configs
+        .insert("call-2".into(), config("k2"));
+
+    let got = get(&service, sess.as_ref()).await;
+    let stored = &got.events()[0].actions.requested_auth_configs;
+    assert!(
+        !stored.contains_key("call-2") && stored.len() == 1,
+        "stored RequestedAuthConfigs has {} entries, want only call-1: the caller's write reached the stored event",
+        stored.len()
+    );
+}
+
 type ActionWrite = fn(&mut Event);
 
 // In Go this guards a fatal concurrent map read/write: `Session.Events` hands out the live
@@ -791,4 +833,151 @@ async fn get_applies_num_recent_events_before_after_like_go() {
         .unwrap();
     let ids: Vec<String> = got.events().into_iter().map(|e| e.id).collect();
     assert_eq!(ids, vec!["4".to_string()]);
+}
+
+/// A service whose clock the test moves: Go passes a time provider per call through ctx; gadk
+/// sets one on the service's Platform and moves the shared instant between calls.
+fn clocked() -> (
+    InMemorySessionService,
+    Arc<parking_lot::Mutex<DateTime<Utc>>>,
+) {
+    let now = Arc::new(parking_lot::Mutex::new(Utc.timestamp_opt(0, 0).unwrap()));
+    let clock = now.clone();
+    let svc =
+        InMemorySessionService::with_platform(Platform::default().with_time(move || *clock.lock()));
+    (svc, now)
+}
+
+async fn create_with_id(svc: &InMemorySessionService, user: &str, id: &str) -> Arc<dyn Session> {
+    svc.create(CreateRequest {
+        app_name: "app".into(),
+        user_id: user.into(),
+        session_id: Some(id.into()),
+        ..Default::default()
+    })
+    .await
+    .unwrap()
+}
+
+// parity: adapted: Go injects the create time per call via ctx; gadk uses one service Platform whose clock the test moves
+#[tokio::test]
+async fn test_in_memory_service_list_ordered_by_last_update_time() {
+    let (svc, clock) = clocked();
+    let base = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+    let mut created = BTreeMap::new();
+    for (i, id) in ["a", "b", "c"].into_iter().enumerate() {
+        *clock.lock() = base + chrono::Duration::seconds(i as i64);
+        created.insert(id, create_with_id(&svc, "u", id).await);
+    }
+    // Make the oldest session the most recently active one.
+    let mut ev = Event::new(&Platform::default(), "inv");
+    ev.timestamp = base + chrono::Duration::minutes(1);
+    svc.append_event(created["a"].as_ref(), &mut ev)
+        .await
+        .unwrap();
+
+    let got: Vec<String> = svc
+        .list(ListRequest {
+            app_name: "app".into(),
+            user_id: "u".into(),
+        })
+        .await
+        .unwrap()
+        .iter()
+        .map(|s| s.id().to_string())
+        .collect();
+    assert_eq!(
+        got,
+        ["b", "c", "a"],
+        "List() session order (oldest update first)"
+    );
+}
+
+// TestInMemoryService_Get_AfterWithOutOfOrderTimestamps checks the After filter when events were
+// not appended in timestamp order. An event carries the time it was created, or one its producer
+// set, not the time it was appended.
+#[tokio::test]
+async fn test_in_memory_service_get_after_with_out_of_order_timestamps() {
+    let svc = InMemorySessionService::new();
+    let created = create_with_id(&svc, "user", "s").await;
+    let base = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+    // Minutes after base, in append order.
+    for minute in [10, 40, 20, 30, 50, 60, 70] {
+        let mut event = Event {
+            id: format!("e{minute}"),
+            author: "agent".into(),
+            timestamp: base + chrono::Duration::minutes(minute),
+            ..Default::default()
+        };
+        svc.append_event(created.as_ref(), &mut event)
+            .await
+            .unwrap();
+    }
+
+    let cases: [(&str, usize, &[&str]); 3] = [
+        ("after only", 0, &["e40", "e30", "e50", "e60", "e70"]),
+        (
+            "with num recent events",
+            6,
+            &["e40", "e30", "e50", "e60", "e70"],
+        ),
+        // The trim runs before the filter, in append order, so e40 falls out of a five-event
+        // window even though it is at or after After.
+        (
+            "num recent events trims first",
+            5,
+            &["e30", "e50", "e60", "e70"],
+        ),
+    ];
+    for (name, num_recent_events, want) in cases {
+        let got = svc
+            .get(GetRequest {
+                app_name: "app".into(),
+                user_id: "user".into(),
+                session_id: "s".into(),
+                num_recent_events,
+                after: Some(base + chrono::Duration::minutes(25)),
+            })
+            .await
+            .unwrap();
+        let ids: Vec<String> = got.events().into_iter().map(|e| e.id).collect();
+        assert_eq!(ids, want, "{name}: Get() event IDs");
+    }
+}
+
+// Port of ADK-Go `session/inmemory_internal_test.go` TestCompareByLastUpdate. Go tests the
+// comparator directly because List scans a map ordered by (app, user, session), so ties already
+// arrive in tie-break order there; that holds for gadk's BTreeMap too.
+// parity: adapted: gadk has no compareByLastUpdate; the order is checked through List across users, with the create times set on the service's moved clock
+#[tokio::test]
+async fn test_compare_by_last_update() {
+    let (svc, clock) = clocked();
+    let base = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+    // At time 0, u2/a ties with u1/a and u1/b. Its session ID sorts before u1/b's but its user
+    // ID after, so only user ID then session ID gives the want.
+    for (user, id, d) in [
+        ("u2", "x", chrono::Duration::minutes(1)),
+        ("u2", "a", chrono::Duration::zero()),
+        ("u1", "b", chrono::Duration::zero()),
+        ("u1", "c", chrono::Duration::hours(1)),
+        ("u1", "a", chrono::Duration::zero()),
+    ] {
+        *clock.lock() = base + d;
+        create_with_id(&svc, user, id).await;
+    }
+    let got: Vec<String> = svc
+        .list(ListRequest {
+            app_name: "app".into(),
+            user_id: String::new(),
+        })
+        .await
+        .unwrap()
+        .iter()
+        .map(|s| format!("{}/{}", s.user_id(), s.id()))
+        .collect();
+    assert_eq!(
+        got,
+        ["u1/a", "u1/b", "u2/a", "u2/x", "u1/c"],
+        "List() ordered by last update, user ID, session ID"
+    );
 }

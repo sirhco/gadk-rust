@@ -62,7 +62,7 @@ pub(crate) enum GoKind {
     Bytes,
     /// `json.RawMessage`: empty → nil (dropped); otherwise the JSON text verbatim.
     RawMessage,
-    /// `time.Time`: integer Unix seconds (`UnixMilli() / 1000`).
+    /// `time.Time`: Unix seconds with microseconds (`float64(UnixMicro()) / 1e6`).
     Time,
     /// A struct value, by Go type name (`pkg.Type`, a [`GoStruct::go_type`]).
     Struct(&'static str),
@@ -454,15 +454,15 @@ fn int_of(v: &Value) -> i64 {
     }
 }
 
-/// Go `t.UnixMilli() / 1000` of a `time.Time` held as RFC 3339 text (Go's zero time when
-/// absent).
-fn time_secs(v: Option<&Value>) -> i64 {
+/// Go `float64(t.UnixMicro()) / 1e6` of a `time.Time` held as RFC 3339 text (Go's zero time
+/// when absent): Unix seconds keeping the fractional microseconds.
+fn time_secs(v: Option<&Value>) -> f64 {
     match v {
         Some(Value::String(s)) => chrono::DateTime::parse_from_rfc3339(s)
-            .map(|t| t.timestamp_millis() / 1000)
-            .unwrap_or(ZERO_TIME_SECS),
-        Some(Value::Number(n)) => n.as_i64().unwrap_or(ZERO_TIME_SECS),
-        _ => ZERO_TIME_SECS,
+            .map(|t| t.timestamp_micros() as f64 / 1e6)
+            .unwrap_or(ZERO_TIME_SECS as f64),
+        Some(Value::Number(n)) => n.as_f64().unwrap_or(ZERO_TIME_SECS as f64),
+        _ => ZERO_TIME_SECS as f64,
     }
 }
 
@@ -517,7 +517,7 @@ fn convert_kind(
             GoValue::String(v.and_then(Value::as_str).unwrap_or_default().to_owned())
         }
         GoKind::RawMessage => GoValue::Null,
-        GoKind::Time => GoValue::Int(time_secs(v)),
+        GoKind::Time => GoValue::Float(time_secs(v)),
         GoKind::Struct(name) => return convert_struct_in(shapes, shapes.get(name)?, v, path),
         GoKind::Pointer(inner) => match v {
             None => GoValue::Null,
@@ -918,13 +918,14 @@ mod tests {
         ev
     }
 
-    /// The Go event line (ADK-Go `bb1fd51a`, `helper.EmitJSON` of the same `session.Event`):
-    /// durations in nanoseconds, `civil.Date` as a struct, `float32` widened, `time.Time` as
-    /// Unix seconds, zero numbers and named strings kept, jsonschema `type`/`items` dropped,
+    /// The Go event line (ADK-Go `bb1fd51a`, `helper.EmitJSON` of the same `session.Event`;
+    /// the timestamp as ADK-Go `0990f9e2` writes it, #2199): durations in nanoseconds,
+    /// `civil.Date` as a struct, `float32` widened, `time.Time` as Unix seconds with
+    /// microseconds, zero numbers and named strings kept, jsonschema `type`/`items` dropped,
     /// `json.RawMessage` compacted and HTML-escaped, map `nil` kept as `null`. Go writes every
     /// `<` and `>` (here only inside strings) as `\u003c` / `\u003e`; [`go_event_line`] puts
     /// them back.
-    const GO_EVENT_LINE: &str = r#"{"actions":{"artifact_delta":{"f":2},"state_delta":{"k":"v"}},"author":"a","avg_logprobs":0,"citation_metadata":{"citations":[{"end_index":0,"publication_date":{"day":2,"month":1,"year":2024},"start_index":0,"title":"t"}]},"content":{"parts":[{"media_processing":"","text":"x","video_metadata":{"end_offset":2000000000,"fps":2.5,"start_offset":1500000000}},{"audio_transcription":{"end_offset":250000000,"start_offset":0,"text":"a"},"media_processing":""}],"role":"model"},"custom_metadata":{"f":1.5,"n":1,"nil":null,"s":"<x>"},"finish_reason":"STOP","grounding_metadata":{"grounding_chunks":[{"maps":{"route":{"duration":90500000000}}}]},"id":"e1","input_transcription":{"end_offset":0,"start_offset":1500000000,"text":"hi"},"invocation_id":"inv","logprobs_result":{"chosen_candidates":[{"log_probability":0.10000000149011612,"token":"tok","token_id":0}]},"long_running_tool_ids":["t1"],"requested_input":{"interrupt_id":"i","response_schema":{"default":{"a":"<b>"},"properties":{"p":{"description":"d"}},"required":["p"]}},"timestamp":1767323045}"#;
+    const GO_EVENT_LINE: &str = r#"{"actions":{"artifact_delta":{"f":2},"state_delta":{"k":"v"}},"author":"a","avg_logprobs":0,"citation_metadata":{"citations":[{"end_index":0,"publication_date":{"day":2,"month":1,"year":2024},"start_index":0,"title":"t"}]},"content":{"parts":[{"media_processing":"","text":"x","video_metadata":{"end_offset":2000000000,"fps":2.5,"start_offset":1500000000}},{"audio_transcription":{"end_offset":250000000,"start_offset":0,"text":"a"},"media_processing":""}],"role":"model"},"custom_metadata":{"f":1.5,"n":1,"nil":null,"s":"<x>"},"finish_reason":"STOP","grounding_metadata":{"grounding_chunks":[{"maps":{"route":{"duration":90500000000}}}]},"id":"e1","input_transcription":{"end_offset":0,"start_offset":1500000000,"text":"hi"},"invocation_id":"inv","logprobs_result":{"chosen_candidates":[{"log_probability":0.10000000149011612,"token":"tok","token_id":0}]},"long_running_tool_ids":["t1"],"requested_input":{"interrupt_id":"i","response_schema":{"default":{"a":"<b>"},"properties":{"p":{"description":"d"}},"required":["p"]}},"timestamp":1767323045.999}"#;
 
     /// [`GO_EVENT_LINE`] with Go's HTML escaping.
     fn go_event_line() -> String {
@@ -1005,7 +1006,7 @@ mod tests {
         assert_eq!(err("x,string"), "duplicate name");
     }
 
-    /// A Go struct `struct { X uint32 }` (no `uint` field is reachable at `bb1fd51a`).
+    /// A Go struct `struct { X uint32 }` (no `uint` field is reachable at `0990f9e2`).
     const UINT_SHAPE: GoStruct = GoStruct {
         go_type: "helper.U",
         fields: &[GoField {
@@ -1105,7 +1106,7 @@ mod tests {
                 v.as_str().filter(|s| !s.is_empty()).map(|_| v.clone())
             }
             GoKind::Time => {
-                let t = DateTime::<Utc>::from_timestamp(v.as_i64()?, 0)?;
+                let t = DateTime::<Utc>::from_timestamp_micros((v.as_f64()? * 1e6).round() as i64)?;
                 Some(Value::String(gadk_platform::go_format_rfc3339_nano(&t)))
             }
             GoKind::Struct(t) => Some(Value::Object(unsnake_struct(

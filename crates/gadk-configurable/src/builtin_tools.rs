@@ -136,8 +136,8 @@ pub(crate) async fn google_maps_grounding(
 }
 
 /// Go `AgentTool`: `args is nil`, `agent not found in args`, `parentPath not found in context`,
-/// `config_path not found in args`; resolves the agent relative to the context's parent path
-/// and wraps it in `agenttool.New` with `skip_summarization`.
+/// `config_path not found in args`; resolves the agent inside the context's config directory
+/// (Go's `parentPath` value) and wraps it in `agenttool.New` with `skip_summarization`.
 pub(crate) async fn agent_tool(
     registry: Registry,
     ctx: ToolCtx,
@@ -151,14 +151,14 @@ pub(crate) async fn agent_tool(
         return Err(ConfigError::msg("agent not found in args"));
     };
     let skip_summarization = skip_summarization(a);
-    let Some(parent_path) = ctx.parent_path.clone() else {
+    let Some(config_dir) = ctx.parent_path.clone() else {
         return Err(ConfigError::msg("parentPath not found in context"));
     };
     let Some(config_path) = go_string(map_get(a, "config_path")) else {
         return Err(ConfigError::msg("config_path not found in args"));
     };
     let ag = registry
-        .resolve_agent_reference_with_ctx(&ctx, &parent_path, &config_path)
+        .resolve_agent_reference_with_ctx(&ctx, &config_dir, &config_path)
         .await?;
     Ok(AgentTool::new(
         ag,
@@ -412,7 +412,7 @@ mod tests {
     }
 
     fn parent_ctx() -> ToolCtx {
-        LoadCtx::default().with_parent_path(std::path::Path::new("/agents/root_agent.yaml"))
+        LoadCtx::default().with_parent_path(std::path::Path::new("/agents"))
     }
 
     async fn tool_err(
@@ -666,7 +666,7 @@ mod tests {
     #[tokio::test]
     async fn agent_tool_wraps_the_referenced_agent() {
         let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().join("root_agent.yaml");
+        let root = dir.path().to_path_buf();
         std::fs::write(
             dir.path().join("sub.yaml"),
             "agent_class: Fake\nname: helper\n",
@@ -700,7 +700,8 @@ mod tests {
         .await;
         assert_eq!(
             got,
-            "absolute paths are not allowed in AgentTool config_path: /abs/sub.yaml"
+            "config reference \"/abs/sub.yaml\": path is not a relative path inside the base \
+             directory: rel path is not local"
         );
     }
 

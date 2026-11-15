@@ -28,8 +28,8 @@ use parking_lot::Mutex;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
-use crate::workflow::scheduler::is_cancelled;
 use crate::workflow::scheduler::test_support::*;
+use crate::workflow::scheduler::{is_cancelled, is_deadline_exceeded};
 use crate::workflow::{
     Node, NodeConfig, ParallelWorker, RetryConfig, default_retry_config, function_node,
 };
@@ -436,6 +436,201 @@ async fn test_parallel_worker_cancel_during_retry_delay() {
         !events.iter().any(|e| e.output.is_some()),
         "expected no final result to be yielded when cancelled mid-retry"
     );
+}
+
+/// Port of Go ignoresCancellation: waits for its context to end and then succeeds, like a wrapped
+/// node that does not check ctx.Err().
+fn ignores_cancellation(started: Option<tokio::sync::mpsc::Sender<()>>) -> Arc<dyn Node> {
+    function_node::<Value, Value, _, _>(
+        "ignores_cancellation",
+        move |ctx: Context, input: Value| {
+            let started = started.clone();
+            async move {
+                if let Some(tx) = started {
+                    let _ = tx.send(()).await;
+                }
+                ctx.cancellation_token().cancelled().await;
+                Ok(input)
+            }
+        },
+        NodeConfig::default(),
+    )
+}
+
+/// Runs `pw` over `input` on a spawned task (Go's draining goroutine): the last error and the last
+/// non-nil output.
+fn spawn_run(
+    pw: Arc<dyn Node>,
+    ctx: Context,
+    input: Value,
+) -> tokio::task::JoinHandle<(Option<AgentError>, Option<Value>)> {
+    tokio::spawn(async move {
+        let mut s = pw.run(ctx, input);
+        let (mut got_err, mut got_output) = (None, None);
+        while let Some(item) = s.next().await {
+            match item {
+                Err(e) => got_err = Some(e),
+                Ok(ev) => {
+                    if let Some(out) = ev.output.filter(|v| !v.is_null()) {
+                        got_output = Some(out);
+                    }
+                }
+            }
+        }
+        (got_err, got_output)
+    })
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn test_parallel_worker_cancel_during_dispatch() {
+    // With maxConcurrency 1, items 2 and 3 are still waiting for a slot when the caller cancels.
+    // The dispatch loop skips them without reporting an error, and item 1 succeeds, so no worker
+    // reports a failure.
+    let (started_tx, mut started_rx) = tokio::sync::mpsc::channel::<()>(1);
+    let wrapped = ignores_cancellation(Some(started_tx));
+    let pw: Arc<dyn Node> =
+        ParallelWorker::new("parallel", wrapped, 1, NodeConfig::default()).expect("new");
+    let token = CancellationToken::new();
+    let run = spawn_run(pw, cancellable_ctx(&token), json!([1, 2, 3]));
+    started_rx.recv().await;
+    token.cancel();
+    let (got_err, got_output) = tokio::time::timeout(Duration::from_secs(2), run)
+        .await
+        .expect("timeout waiting for cancellation during dispatch to complete")
+        .expect("run task");
+    assert!(
+        got_err.as_ref().is_some_and(is_cancelled),
+        "Run() error = {got_err:?}, want context.Canceled"
+    );
+    assert_eq!(got_output, None, "Run() yielded output, want none");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn test_parallel_worker_cancel_after_dispatch() {
+    // Every item is running when the caller cancels, and each one then returns no output and no
+    // error. No item is skipped at dispatch and no worker reports a failure.
+    let (started_tx, mut started_rx) = tokio::sync::mpsc::channel::<()>(3);
+    let wrapped = function_node::<Value, Value, _, _>(
+        "no_output_on_cancel",
+        move |ctx: Context, _input: Value| {
+            let tx = started_tx.clone();
+            async move {
+                let _ = tx.send(()).await;
+                ctx.cancellation_token().cancelled().await;
+                Ok(Value::Null)
+            }
+        },
+        NodeConfig::default(),
+    );
+    let pw: Arc<dyn Node> =
+        ParallelWorker::new("parallel", wrapped, 0, NodeConfig::default()).expect("new");
+    let token = CancellationToken::new();
+    let run = spawn_run(pw, cancellable_ctx(&token), json!([1, 2, 3]));
+    for _ in 0..3 {
+        started_rx.recv().await;
+    }
+    token.cancel();
+    let (got_err, got_output) = tokio::time::timeout(Duration::from_secs(2), run)
+        .await
+        .expect("timeout waiting for cancellation after dispatch to complete")
+        .expect("run task");
+    assert!(
+        got_err.as_ref().is_some_and(is_cancelled),
+        "Run() error = {got_err:?}, want context.Canceled"
+    );
+    assert_eq!(got_output, None, "Run() yielded output, want none");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn test_parallel_worker_failure_before_cancel_is_returned() {
+    // Item 1 fails and cancels item 2. The caller cancels only after that, while item 2 is still
+    // running, so the failure has to win over ctx.Err(). Item 1 fails only once item 2 has
+    // started, because the dispatch loop skips any item it has not reached by then.
+    let (item2_started, saw_fail_fast, release) = (Gate::new(), Gate::new(), Gate::new());
+    let (i2, sf, rel) = (
+        Arc::clone(&item2_started),
+        Arc::clone(&saw_fail_fast),
+        Arc::clone(&release),
+    );
+    let wrapped = function_node::<i64, i64, _, _>(
+        "fails_then_cancels",
+        move |ctx: Context, input: i64| {
+            let (i2, sf, rel) = (Arc::clone(&i2), Arc::clone(&sf), Arc::clone(&rel));
+            async move {
+                if input == 1 {
+                    i2.wait().await;
+                    return Err(test_err("boom"));
+                }
+                i2.release();
+                ctx.cancellation_token().cancelled().await;
+                sf.release();
+                rel.wait().await;
+                Ok(input)
+            }
+        },
+        NodeConfig::default(),
+    );
+    let pw: Arc<dyn Node> =
+        ParallelWorker::new("parallel", wrapped, 0, NodeConfig::default()).expect("new");
+    let token = CancellationToken::new();
+    let run = spawn_run(pw, cancellable_ctx(&token), json!([1, 2]));
+    tokio::time::timeout(Duration::from_secs(2), saw_fail_fast.wait())
+        .await
+        .expect("timeout waiting for item 1's failure to cancel item 2");
+    token.cancel();
+    release.release();
+    let (got_err, _) = tokio::time::timeout(Duration::from_secs(2), run)
+        .await
+        .expect("timeout waiting for Run to return")
+        .expect("run task");
+    assert!(
+        got_err.as_ref().is_some_and(|e| e.to_string() == "boom"),
+        "Run() error = {got_err:?}, want boom"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn test_parallel_worker_timeout_during_dispatch_in_workflow() {
+    // The node timeout cancels the ParallelWorker while the workflow's own context stays live, so
+    // the scheduler is not draining and would pass a partial result on to the caller. Whether it
+    // does depends on a select in runNode, so the scenario runs several times.
+    for _ in 0..20 {
+        let items_node = function_node::<Value, Value, _, _>(
+            "items",
+            |_c: Context, _i: Value| async move { Ok(json!([1, 2, 3])) },
+            NodeConfig::default(),
+        );
+        let pw: Arc<dyn Node> = ParallelWorker::new(
+            "parallel",
+            ignores_cancellation(None),
+            1,
+            NodeConfig {
+                timeout: Some(Duration::from_millis(10)),
+                ..NodeConfig::default()
+            },
+        )
+        .expect("new");
+        let w = must_new(chain(&[&start(), &items_node, &pw]));
+        let mut s = w.run(mock_ctx());
+        let mut got_err = None;
+        while let Some(item) = s.next().await {
+            match item {
+                Err(e) => got_err = Some(e),
+                Ok(ev) => {
+                    if let Some(Value::Array(items)) = &ev.output {
+                        assert!(
+                            !items.iter().any(Value::is_null),
+                            "workflow yielded partial ParallelWorker output {items:?} after the node timed out"
+                        );
+                    }
+                }
+            }
+        }
+        assert!(
+            got_err.as_ref().is_some_and(is_deadline_exceeded),
+            "workflow error = {got_err:?}, want context.DeadlineExceeded"
+        );
+    }
 }
 
 /// Port of Go delayedMultiOutputTestNode: signals start, waits for its item's release, then

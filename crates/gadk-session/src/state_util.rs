@@ -24,6 +24,8 @@ use crate::error::SessionError;
 use crate::event::Event;
 use crate::service::{KEY_PREFIX_APP, KEY_PREFIX_TEMP, KEY_PREFIX_USER};
 
+pub use crate::requested_auth::check_requested_auth_configs;
+
 type StateMap = Map<String, Value>;
 
 /// Go `sessionutils.ExtractStateDeltas`: splits a delta into app, user (both with their

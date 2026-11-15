@@ -206,6 +206,15 @@ async fn test_file_system_source_load_instructions() {
             None,
         ),
         (
+            "Trims surrounding whitespace",
+            source(&[(
+                "test-skill/SKILL.md",
+                "---\nname: test-skill\ndescription: test\n---\n\n  # Math\n\n  - Add numbers.\n\n",
+            )]),
+            "# Math\n\n  - Add numbers.",
+            None,
+        ),
+        (
             "Name mismatch",
             source(&[(
                 "test-skill/SKILL.md",

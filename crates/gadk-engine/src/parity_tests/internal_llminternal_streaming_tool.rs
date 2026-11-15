@@ -193,6 +193,58 @@ async fn test_handle_function_calls_streaming() {
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
+struct NoArgs {}
+
+#[tokio::test]
+async fn test_handle_function_calls_streaming_tool_errors() {
+    type Handler = fn(
+        Context,
+        NoArgs,
+    )
+        -> futures::stream::BoxStream<'static, Result<String, gadk_agent::ToolError>>;
+    let panics: Handler = |_, _| {
+        Box::pin(futures::stream::poll_fn(
+            |_| -> std::task::Poll<Option<Result<String, gadk_agent::ToolError>>> {
+                panic!("boom")
+            },
+        ))
+    };
+    let errors: Handler = |_, _| {
+        Box::pin(futures::stream::iter([Err(
+            gadk_agent::ToolError::Execution("order not found".into()),
+        )]))
+    };
+    let cases: [(&str, Handler, &str); 2] = [
+        (
+            "panic is hidden from the model",
+            panics,
+            "Invoking `test_stream()` failed with an internal error.",
+        ),
+        (
+            "returned error reaches the model",
+            errors,
+            "order not found",
+        ),
+    ];
+    for (name, handler, want) in cases {
+        let stream_tool: Arc<dyn Tool> =
+            StreamingFunctionTool::new(FunctionToolConfig::new("test_stream", ""), handler)
+                .unwrap();
+        let tools = HashMap::from([("test_stream".to_owned(), stream_tool)]);
+        let call_ev = call_event(&[("call_1", "test_stream", json!({}))]);
+        let merged = handle_function_calls(&inv_ctx(), &Flow::default(), &tools, &call_ev, None)
+            .await
+            .unwrap_or_else(|e| panic!("{name}: handleFunctionCalls error: {e}"))
+            .expect("non-None merged event");
+        assert_eq!(
+            single_response(&merged).get("error"),
+            Some(&json!(want)),
+            "{name}: FunctionResponse error"
+        );
+    }
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
 #[allow(dead_code)] // Go's handler ignores DelayMS too; the field only shapes the schema.
 struct DelayArgs {
     delay_ms: i64,
@@ -294,4 +346,106 @@ async fn test_handle_function_calls_live_control_plane() {
         .await
         .expect("drainer ends once the session is closed")
         .unwrap();
+}
+
+/// Go argsCapturingStreamTool: sends the args RunStream is called with to `got_args`.
+struct ArgsCapturingStreamTool {
+    got_args: tokio::sync::mpsc::UnboundedSender<Value>,
+}
+
+impl Tool for ArgsCapturingStreamTool {
+    fn name(&self) -> &str {
+        "capture_stream"
+    }
+    fn description(&self) -> &str {
+        "captures its args"
+    }
+    fn declaration(&self) -> Option<gadk_genai::FunctionDeclaration> {
+        Some(gadk_genai::FunctionDeclaration {
+            name: self.name().into(),
+            description: self.description().into(),
+            ..Default::default()
+        })
+    }
+    fn as_streaming(&self) -> Option<&dyn gadk_agent::StreamingTool> {
+        Some(self)
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+impl gadk_agent::StreamingTool for ArgsCapturingStreamTool {
+    fn run_stream(
+        &self,
+        _ctx: Context,
+        args: Value,
+    ) -> futures::stream::BoxStream<'static, Result<String, gadk_agent::ToolError>> {
+        let _ = self.got_args.send(args);
+        Box::pin(futures::stream::empty())
+    }
+}
+
+/// A live-mode call without args reaches the streaming tool as an empty map.
+// parity: adapted: a gadk FunctionCall's args are a map (Rust has no nil map), so "no args" is the empty map.
+#[tokio::test]
+async fn test_handle_function_calls_no_args_reach_live_streaming_tool_as_empty_map() {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let st: Arc<dyn Tool> = Arc::new(ArgsCapturingStreamTool { got_args: tx });
+    let tools = HashMap::from([("capture_stream".to_owned(), st)]);
+    let call_ev = call_event(&[("call_1", "capture_stream", json!({}))]);
+    let (live_tx, _live_rx) = tokio::sync::mpsc::unbounded_channel();
+    let live: Arc<dyn LiveSession> = Arc::new(MockLiveSession { tx: live_tx });
+    handle_function_calls_live(&inv_ctx(), &Flow::default(), &tools, &call_ev, live)
+        .await
+        .unwrap();
+    let got = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+        .await
+        .expect("streaming tool was not run")
+        .expect("streaming tool was not run");
+    assert_eq!(got, json!({}), "live streaming tool args");
+}
+
+/// Go noRunTool: neither a function tool nor a streaming one.
+struct NoRunTool;
+
+impl Tool for NoRunTool {
+    fn name(&self) -> &str {
+        "no_run"
+    }
+    fn description(&self) -> &str {
+        "has no Run method"
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+/// A call without args to a tool that cannot be run reaches the on-tool-error callback as an
+/// empty map.
+// parity: adapted: a gadk FunctionCall's args are a map (Rust has no nil map), so "no args" is the empty map.
+#[tokio::test]
+async fn test_handle_function_calls_no_args_reach_on_tool_error_for_non_function_tool() {
+    let got_args = Arc::new(parking_lot::Mutex::new(
+        None::<serde_json::Map<String, Value>>,
+    ));
+    let g = got_args.clone();
+    let flow = Flow {
+        on_tool_error_callbacks: vec![Arc::new(move |_, _, args, _| {
+            *g.lock() = Some(args);
+            Box::pin(async { Ok(Some(json!({"handled": true}).as_object().cloned().unwrap())) })
+        })],
+        ..Default::default()
+    };
+    let tools: HashMap<String, Arc<dyn Tool>> =
+        HashMap::from([("no_run".to_owned(), Arc::new(NoRunTool) as Arc<dyn Tool>)]);
+    let call_ev = call_event(&[("call_1", "no_run", json!({}))]);
+    handle_function_calls(&inv_ctx(), &flow, &tools, &call_ev, None)
+        .await
+        .unwrap();
+    let got = got_args
+        .lock()
+        .clone()
+        .expect("on-tool-error callback not called");
+    assert_eq!(got, serde_json::Map::new(), "on-tool-error args");
 }

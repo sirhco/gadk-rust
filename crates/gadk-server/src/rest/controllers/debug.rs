@@ -22,6 +22,7 @@ use gadk_agent::Loader;
 use gadk_session::{Event, GetRequest, SessionService};
 use http::{Method, StatusCode};
 use serde::Serialize;
+use serde_json::Value;
 
 use super::DotGraph;
 use super::handlers::{forbid_unless_can_act_as, path_vars, session_error_text};
@@ -83,7 +84,8 @@ impl DebugApiController {
         let wanted = spans.iter().find(|s| {
             s.attributes
                 .get(OPERATION_NAME_ATTRIBUTE)
-                .is_some_and(|op| WANTED_OPERATIONS.contains(&op.as_str()))
+                .and_then(Value::as_str)
+                .is_some_and(|op| WANTED_OPERATIONS.contains(&op))
         });
         match wanted {
             Some(span) => encode_json_response(&convert_event_span(span), StatusCode::OK),
@@ -199,6 +201,7 @@ enum FlatValue<'a> {
     Str(&'a str),
     Int(i64),
     Logs(&'a [DebugLog]),
+    Attribute(&'a Value),
 }
 
 /// Go `convertEventSpan`: the span fields and its attributes in one object (keys sorted, an
@@ -214,7 +217,7 @@ fn convert_event_span(span: &DebugSpan) -> BTreeMap<&str, FlatValue<'_>> {
         ("logs", FlatValue::Logs(&span.logs)),
     ]);
     for (k, v) in &span.attributes {
-        flat.insert(k.as_str(), FlatValue::Str(v));
+        flat.insert(k.as_str(), FlatValue::Attribute(v));
     }
     flat
 }

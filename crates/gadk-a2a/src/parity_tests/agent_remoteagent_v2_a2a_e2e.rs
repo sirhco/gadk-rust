@@ -42,6 +42,8 @@ use super::agent_remoteagent_v2_a2a_agent::harness::{
     A2AStream, MockExecutor, TestA2AServer, jsonrpc_card, new_a2a_remote_agent, start_a2a_server,
     status_update, submitted_task,
 };
+use super::server_adka2a_v2_executor::session_service;
+use crate::convert::get_a2a_task_info;
 use crate::convert::{
     ADK_EXTENSION_URI, is_partial, to_a2a_meta_key, to_a2a_parts, to_genai_parts,
     without_partial_artifacts,
@@ -601,6 +603,139 @@ async fn test_a2_a_input_required() {
     }
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn test_a2_a_runner_resumes_mixed_function_responses() {
+    for name in ["peer-first", "local-first"] {
+        let peer = new_input_requesting_agent("peer", new_long_running_tool());
+        let server =
+            start_a2a_server(new_agent_executor(peer, None, OutputMode::ArtifactPerRun)).await;
+        let client = new_a2a_client(&server).await;
+
+        let remote = new_a2a_remote_agent("remote", &server.url);
+        let store: Arc<dyn SessionService> = Arc::new(InMemorySessionService::new());
+        let created = store
+            .create(gadk_session::CreateRequest {
+                app_name: "local".into(),
+                user_id: "user".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let mut cfg = runner_config(remote, Arc::clone(&store));
+        cfg.app_name = "local".into();
+        let runner = gadk_engine::runner::Runner::new(cfg).unwrap();
+        let config = RunConfig {
+            streaming_mode: StreamingMode::None,
+            ..Default::default()
+        };
+
+        let mut task_id = String::new();
+        let mut pending: Option<FunctionResponse> = None;
+        let mut stream = runner.run(
+            "user",
+            created.id(),
+            Some(Content::from_text("perform task", gadk_genai::ROLE_USER)),
+            config.clone(),
+            gadk_engine::runner::RunOptions::default(),
+        );
+        while let Some(item) = stream.next().await {
+            let event = item.unwrap_or_else(|err| panic!("{name}: initial Run() error = {err}"));
+            assert!(
+                event.response.error_message.is_empty(),
+                "{name}: initial Run() reported error: {}",
+                event.response.error_message
+            );
+            let (id, _) = get_a2a_task_info(&event);
+            if !id.is_empty() {
+                task_id = id;
+            }
+            for response in function_responses(event.response.content.as_ref()) {
+                if response.name == APPROVAL_TOOL_NAME {
+                    pending = Some(response.clone());
+                }
+            }
+        }
+        drop(stream);
+        let Some(pending) = pending.filter(|_| !task_id.is_empty()) else {
+            panic!("{name}: initial Run() did not expose a pending remote tool and task");
+        };
+        let get_task = |id: String| a2a::GetTaskRequest {
+            id,
+            history_length: None,
+            tenant: None,
+        };
+        let before = client.get_task(&get_task(task_id.clone())).await;
+        assert!(
+            before
+                .as_ref()
+                .is_ok_and(|t| t.status.state == a2a::TaskState::InputRequired),
+            "{name}: initial remote task is not input-required: {before:?}"
+        );
+
+        let mut local = Part::from_function_response("local_tool", obj(json!({"ok": true})));
+        if let Some(fr) = local.function_response.as_mut() {
+            fr.id = "fc-local".into();
+        }
+        let mut parts = vec![create_long_running_tool_approval(&pending), local];
+        if name == "local-first" {
+            parts.swap(0, 1);
+        }
+        let mut failures = Vec::new();
+        let mut completed = false;
+        let mut stream = runner.run(
+            "user",
+            created.id(),
+            Some(Content::from_parts(parts, gadk_genai::ROLE_USER)),
+            config,
+            gadk_engine::runner::RunOptions::default(),
+        );
+        while let Some(item) = stream.next().await {
+            let event = match item {
+                Ok(event) => event,
+                Err(err) => {
+                    failures.push(format!("resume Run() error = {err}"));
+                    break;
+                }
+            };
+            if !event.response.error_message.is_empty() {
+                failures.push(format!(
+                    "resume Run() reported error: {}",
+                    event.response.error_message
+                ));
+            }
+            if let Some(content) = &event.response.content {
+                completed = completed
+                    || content
+                        .parts
+                        .iter()
+                        .any(|p| p.text == MODEL_TEXT_TASK_COMPLETE);
+            }
+        }
+        drop(stream);
+        if !completed {
+            failures.push("Runner did not receive the remote task's completion result".into());
+        }
+        let after = client.get_task(&get_task(task_id.clone())).await.unwrap();
+        if after.status.state != a2a::TaskState::Completed {
+            failures.push(format!(
+                "original remote task state = {:?}, want Completed",
+                after.status.state
+            ));
+        }
+        // Go's deferred cleanup: cancel the remote task unless it finished.
+        if !after.status.state.is_terminal() {
+            let _ = client
+                .cancel_task(&a2a::CancelTaskRequest {
+                    id: task_id.clone(),
+                    metadata: None,
+                    tenant: None,
+                })
+                .await;
+        }
+        assert!(failures.is_empty(), "{name}: {failures:#?}");
+    }
+}
+
 /// Go `assertADKExtensionMeta`.
 fn assert_adk_extension_meta(
     subject: &str,
@@ -737,7 +872,7 @@ async fn test_a2_a_multi_hop_input_required() {
                 TRANSFER_TOOL_NAME,
                 obj(json!({"agent_name": REMOTE_AGENT_NAME})),
             ),
-            Part::from_function_response(TRANSFER_TOOL_NAME, Map::new()),
+            Part::from_function_response(TRANSFER_TOOL_NAME, obj(json!({"result": null}))),
             Part::from_text(MODEL_TEXT_REQUIRES_APPROVAL),
         ]
     };
@@ -1187,6 +1322,7 @@ async fn test_a2_a_single_hop_final_response() {
     struct Case {
         name: &'static str,
         agent: Arc<dyn Agent>,
+        session_service: Option<Arc<dyn SessionService>>,
         want_artifact_parts: Vec<a2a::Part>,
         want_state: a2a::TaskState,
         want_status_contain: &'static str,
@@ -1221,6 +1357,7 @@ async fn test_a2_a_single_hop_final_response() {
                     text_event("I am boop. We are here to help!", false, false),
                 ],
             ),
+            session_service: None,
             want_state: a2a::TaskState::Completed,
             want_artifact_parts: vec![
                 text_part("Hello, I am beep!"),
@@ -1235,6 +1372,7 @@ async fn test_a2_a_single_hop_final_response() {
                 vec![text_event("Hello, I am beep!", false, false)],
                 vec![text_event("I am boop. We are here to help!", false, false)],
             ),
+            session_service: None,
             want_state: a2a::TaskState::Completed,
             want_artifact_parts: vec![
                 text_part("Hello, I am beep!"),
@@ -1246,11 +1384,13 @@ async fn test_a2_a_single_hop_final_response() {
         Case {
             name: "internal error",
             agent: new_agent(AgentConfig {
+                name: "internal_error".into(),
                 run: Some(Arc::new(|_ic| futures::stream::empty().boxed())),
                 ..Default::default()
             })
             .unwrap(),
-            want_status_contain: "app_name and user_id are required, got app_name: ",
+            session_service: Some(session_service(true)),
+            want_status_contain: "failed to create a session: session creation failed",
             want_state: a2a::TaskState::Failed,
             want_artifact_parts: vec![],
             want_partial: false,
@@ -1269,6 +1409,7 @@ async fn test_a2_a_single_hop_final_response() {
                 ),
             )
             .await,
+            session_service: None,
             want_status_contain: "Model Failed!",
             want_state: a2a::TaskState::Failed,
             want_artifact_parts: vec![],
@@ -1281,6 +1422,7 @@ async fn test_a2_a_single_hop_final_response() {
                 after_model_failing_after(2, Err("connection error!")),
             )
             .await,
+            session_service: None,
             want_status_contain: "connection error!",
             want_state: a2a::TaskState::Failed,
             want_artifact_parts: vec![],
@@ -1290,7 +1432,7 @@ async fn test_a2_a_single_hop_final_response() {
 
     for tc in cases {
         let name = tc.name;
-        let executor = new_agent_executor(tc.agent, None, OutputMode::ArtifactPerRun);
+        let executor = new_agent_executor(tc.agent, tc.session_service, OutputMode::ArtifactPerRun);
         let server = start_a2a_server(executor).await;
         let client = new_a2a_client(&server).await;
         let msg = new_message(

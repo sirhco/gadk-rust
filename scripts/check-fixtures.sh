@@ -18,7 +18,7 @@
 # the launcher probe (scripts/gen-go-launcher) wrote exactly 70 web, 15 console and 34 CLI fixtures
 # under crates/gadk-launcher/testdata/{wire,console,cli}/; the replay's declared deltas
 # (*.deltas.json) are not counted.
-# 5c: the Agent Engine probe (scripts/gen-go-agentengine) wrote exactly 29 server fixtures under
+# 5c: the Agent Engine probe (scripts/gen-go-agentengine) wrote exactly 30 server fixtures under
 # crates/gadk-server/testdata/agentengine/ and 13 launcher fixtures under
 # crates/gadk-launcher/testdata/agentengine/ (declared deltas, *.deltas.json, not counted); when
 # go and ADK-Go are present, its --shapes generator reproduces
@@ -50,6 +50,9 @@
 # the hand-written mod.rs aside). The generator builds with its own Cargo.lock into
 # $GEN_STORAGEPB_TARGET_DIR (default: target/gen-storagepb in the repo); the check is skipped with
 # a note when cargo is missing or the generator's crates cannot be fetched (offline).
+# 8a: every probe was re-run at ADK-Go 0990f9e2 (docs/parity/ADK_GO_COMMIT); no count changed
+# (the changed goldens and their causes are in docs/parity/8a-bug-report.md, "Go output changed"), and
+# encode_shapes.rs grew from 78 structs / 349 fields to 88 / 435.
 set -euo pipefail
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 go="${ADK_GO_DIR:-$repo/../adk-go}"
@@ -147,7 +150,7 @@ for spec in wire:70 console:15 cli:34; do
 done
 
 agentengine_counts=""
-for spec in gadk-server:29 gadk-launcher:13; do
+for spec in gadk-server:30 gadk-launcher:13; do
   dir="$repo/crates/${spec%%:*}/testdata/agentengine"
   want="${spec#*:}"
   got="$(find "$dir" -type f -name '*.json' ! -name '*.deltas.json' | wc -l | tr -d ' ')"

@@ -33,6 +33,65 @@ use super::internal_llminternal_contents_processor_compaction::{
 use crate::compaction::runtime;
 use crate::llm::{IncludeContents, LlmAgentConfig};
 
+/// The metadata-only parts of Go 6caa3b85's rows: (row label, part). None of them carries
+/// anything a model can read.
+fn metadata_only_parts() -> Vec<(&'static str, Part)> {
+    vec![
+        ("empty", Part::default()),
+        (
+            "signature-only",
+            Part {
+                thought_signature: vec![1u8, 2].into(),
+                ..Default::default()
+            },
+        ),
+        (
+            "metadata-only",
+            Part {
+                part_metadata: json!({"source": "test"}).as_object().cloned().unwrap(),
+                ..Default::default()
+            },
+        ),
+        (
+            "video metadata-only",
+            Part {
+                video_metadata: Some(gadk_genai::VideoMetadata {
+                    end_offset: chrono::TimeDelta::seconds(1),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        ),
+        (
+            "media resolution-only",
+            Part {
+                media_resolution: Some(gadk_genai::PartMediaResolution {
+                    level: Some(gadk_genai::PartMediaResolutionLevel::MediaResolutionHigh),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        ),
+        (
+            "media processing-only",
+            Part {
+                media_processing: Some(gadk_genai::MediaProcessing::Static),
+                ..Default::default()
+            },
+        ),
+        (
+            "speech metadata-only",
+            Part {
+                speech_metadata: Some(gadk_genai::SpeechMetadata {
+                    speaker: "speaker".into(),
+                    style: "calm".into(),
+                }),
+                ..Default::default()
+            },
+        ),
+    ]
+}
+
 fn thought(t: &str) -> Part {
     Part {
         text: t.into(),
@@ -71,13 +130,20 @@ async fn test_contents_request_processor_foreign_thoughts() {
         thought_signature: vec![4u8, 5].into(),
         ..Default::default()
     };
-    let cases: Vec<(&str, &str, Vec<Part>, Vec<Content>)> = vec![
-        (
-            "thought-only foreign event is omitted",
-            "otherAgent",
-            vec![thought("private reasoning")],
-            vec![],
-        ),
+    let metadata_rows: Vec<(String, Part)> = metadata_only_parts()
+        .into_iter()
+        .map(|(label, part)| (format!("{label} foreign part is omitted"), part))
+        .collect();
+    let mut cases: Vec<(&str, &str, Vec<Part>, Vec<Content>)> = vec![(
+        "thought-only foreign event is omitted",
+        "otherAgent",
+        vec![thought("private reasoning")],
+        vec![],
+    )];
+    for (name, part) in &metadata_rows {
+        cases.push((name.as_str(), "otherAgent", vec![part.clone()], vec![]));
+    }
+    cases.extend(vec![
         (
             "mixed foreign event retains public parts",
             "otherAgent",
@@ -110,7 +176,7 @@ async fn test_contents_request_processor_foreign_thoughts() {
                 ROLE_MODEL,
             )],
         ),
-    ];
+    ]);
     for (name, author, parts, tail) in cases {
         let user = text_event("user", 1, "request");
         let mut state_delta = serde_json::Map::new();
@@ -250,6 +316,7 @@ async fn test_contents_request_processor_foreign_thought_current_turn() {
         thought: true,
         ..Default::default()
     };
+    let metadata: Vec<Part> = metadata_only_parts().into_iter().map(|(_, p)| p).collect();
     let cases = vec![
         Case {
             name: "foreign text thought does not start a turn",
@@ -264,6 +331,69 @@ async fn test_contents_request_processor_foreign_thought_current_turn() {
             name: "foreign empty thought does not start a turn",
             author: "otherAgent",
             parts: vec![empty_thought.clone()],
+            successive_thought: false,
+            summary: false,
+            keep_current_user: true,
+            want_tail: vec![],
+        },
+        Case {
+            name: "foreign empty part does not start a turn",
+            author: "otherAgent",
+            parts: vec![metadata[0].clone()],
+            successive_thought: false,
+            summary: false,
+            keep_current_user: true,
+            want_tail: vec![],
+        },
+        Case {
+            name: "foreign signature-only part does not start a turn",
+            author: "otherAgent",
+            parts: vec![metadata[1].clone()],
+            successive_thought: false,
+            summary: false,
+            keep_current_user: true,
+            want_tail: vec![],
+        },
+        Case {
+            name: "foreign metadata-only part does not start a turn",
+            author: "otherAgent",
+            parts: vec![metadata[2].clone()],
+            successive_thought: false,
+            summary: false,
+            keep_current_user: true,
+            want_tail: vec![],
+        },
+        Case {
+            name: "foreign video metadata-only part does not start a turn",
+            author: "otherAgent",
+            parts: vec![metadata[3].clone()],
+            successive_thought: false,
+            summary: false,
+            keep_current_user: true,
+            want_tail: vec![],
+        },
+        Case {
+            name: "foreign media resolution-only part does not start a turn",
+            author: "otherAgent",
+            parts: vec![metadata[4].clone()],
+            successive_thought: false,
+            summary: false,
+            keep_current_user: true,
+            want_tail: vec![],
+        },
+        Case {
+            name: "foreign media processing-only part does not start a turn",
+            author: "otherAgent",
+            parts: vec![metadata[5].clone()],
+            successive_thought: false,
+            summary: false,
+            keep_current_user: true,
+            want_tail: vec![],
+        },
+        Case {
+            name: "foreign speech metadata-only part does not start a turn",
+            author: "otherAgent",
+            parts: vec![metadata[6].clone()],
             successive_thought: false,
             summary: false,
             keep_current_user: true,

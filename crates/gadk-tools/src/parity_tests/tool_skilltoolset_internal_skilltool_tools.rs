@@ -128,7 +128,7 @@ async fn test_list_skills() {
     let result = run(&tool, json!({})).await.expect("tool.Run failed");
 
     let want = json!({
-        "skills": "<available_skills>\n<skill>\n<name>\nskill1\n</name>\n<description>\ndescription1\n</description>\n</skill>\n<skill>\n<name>\nskill2\n</name>\n<description>\ndescription2\n</description>\n</skill>\n</available_skills>",
+        "result": "<available_skills>\n<skill>\n<name>\nskill1\n</name>\n<description>\ndescription1\n</description>\n</skill>\n<skill>\n<name>\nskill2\n</name>\n<description>\ndescription2\n</description>\n</skill>\n</available_skills>",
     });
     assert_eq!(Value::Object(result), want, "result mismatch");
 }
@@ -200,7 +200,7 @@ fn declarations_match_go() {
     let cases: [(Arc<dyn Tool>, &str); 3] = [
         (
             list_skills(source.clone()).unwrap(),
-            r#"{"description":"Lists all available skills with their names and descriptions.","name":"list_skills","parametersJsonSchema":{"type":"object","additionalProperties":false},"responseJsonSchema":{"type":["null","object"],"properties":{"skills":{"type":"string"}},"required":["skills"],"additionalProperties":false}}"#,
+            r#"{"description":"Lists all available skills with their names and descriptions.","name":"list_skills","parametersJsonSchema":{"type":"object","additionalProperties":false},"responseJsonSchema":{"type":["null","object"],"properties":{"result":{"type":"string"}},"required":["result"],"additionalProperties":false}}"#,
         ),
         (
             load_skill(source.clone()).unwrap(),

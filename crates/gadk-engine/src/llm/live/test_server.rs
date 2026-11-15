@@ -121,8 +121,18 @@ pub(crate) struct FakeLiveServer {
     conns: Arc<Mutex<Vec<AbortHandle>>>,
 }
 
+/// Go startLiveServerWithSetup's `onSetup func(connNum int, frame []byte)`: receives each
+/// connection's setup frame before setupComplete is sent.
+pub(crate) type OnSetup = Arc<dyn Fn(usize, String) + Send + Sync>;
+
 impl FakeLiveServer {
     pub(crate) async fn start(serve: ServeConn) -> FakeLiveServer {
+        Self::start_with_setup(Arc::new(|_, _| {}), serve).await
+    }
+
+    /// Go startLiveServerWithSetup: [`start`](Self::start) plus `on_setup`, which receives each
+    /// connection's setup frame before setupComplete is sent.
+    pub(crate) async fn start_with_setup(on_setup: OnSetup, serve: ServeConn) -> FakeLiveServer {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let conn_count = Arc::new(AtomicUsize::new(0));
@@ -133,16 +143,20 @@ impl FakeLiveServer {
                 let Ok((tcp, _)) = listener.accept().await else {
                     return;
                 };
-                let (count, serve) = (count.clone(), serve.clone());
+                let (count, serve, on_setup) = (count.clone(), serve.clone(), on_setup.clone());
                 let task = tokio::spawn(async move {
                     let Ok(ws) = tokio_tungstenite::accept_async(tcp).await else {
                         return;
                     };
                     let n = count.fetch_add(1, Ordering::SeqCst) + 1;
                     let mut conn = FakeConn { ws };
-                    if conn.read_data().await.is_none() {
+                    let Some(setup) = conn.read_data().await else {
                         return;
-                    }
+                    };
+                    on_setup(
+                        n,
+                        setup.into_text().map(|t| t.to_string()).unwrap_or_default(),
+                    );
                     if !conn.write_text(SETUP_COMPLETE).await {
                         return;
                     }
@@ -197,8 +211,13 @@ impl FakeLiveServer {
     /// Go `genai.NewClient(…Backend: BackendGeminiAPI, APIKey: "test-api-key", BaseURL: ws://…)`
     /// wrapped in fakeLiveModel (name "test-live-model"): a real `GeminiModel` pointed at the fake.
     pub(crate) async fn model(&self) -> Arc<dyn Llm> {
+        self.model_named("test-live-model").await
+    }
+
+    /// [`model`](Self::model) with the given model name (Go namedFakeLiveModel).
+    pub(crate) async fn model_named(&self, name: &str) -> Arc<dyn Llm> {
         GeminiModel::new(
-            "test-live-model",
+            name,
             ClientConfig {
                 backend: Some(Backend::GeminiApi),
                 api_key: Some("test-api-key".into()),

@@ -54,6 +54,7 @@ pub(crate) mod branch;
 pub(crate) mod dynamic_scheduler;
 pub(crate) mod failure_inventory;
 pub(crate) mod graph;
+pub(crate) mod model_output_schema;
 pub(crate) mod persistence;
 pub(crate) mod resume;
 pub(crate) mod scheduler;

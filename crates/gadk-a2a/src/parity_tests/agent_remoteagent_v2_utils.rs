@@ -41,14 +41,48 @@ use crate::remoteagent::history::{
     unmatched_function_response_text,
 };
 
-/// Go `newTestInvocationContext`: a session holding `events` and an agent named `agent_name`.
+/// Go `anonymousAgent` (#2124): reports an empty name. `new_agent` rejects one, but a wrapper that
+/// overrides `name` can still run with it.
+struct AnonymousAgent(Arc<dyn gadk_agent::Agent>);
+
+impl gadk_agent::Agent for AnonymousAgent {
+    fn name(&self) -> &str {
+        ""
+    }
+    fn description(&self) -> &str {
+        self.0.description()
+    }
+    fn sub_agents(&self) -> &[Arc<dyn gadk_agent::Agent>] {
+        self.0.sub_agents()
+    }
+    fn run(&self, ctx: InvocationContext) -> gadk_agent::EventStream {
+        self.0.run(ctx)
+    }
+    fn agent_state(&self) -> &gadk_agent::AgentState {
+        self.0.agent_state()
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+/// Go `newTestInvocationContext`: a session holding `events` and an agent named `agent_name`
+/// (an empty name: an `anonymous` agent wrapped to report `""`).
 async fn new_test_invocation_context(agent_name: &str, events: Vec<Event>) -> InvocationContext {
     let (_, session) = prepare_session("test", events).await;
-    let agent = new_agent(AgentConfig {
-        name: agent_name.to_owned(),
+    let name = if agent_name.is_empty() {
+        "anonymous"
+    } else {
+        agent_name
+    };
+    let mut agent = new_agent(AgentConfig {
+        name: name.to_owned(),
         ..Default::default()
     })
     .unwrap();
+    if agent_name.is_empty() {
+        agent = Arc::new(AnonymousAgent(agent));
+    }
     InvocationContext::builder()
         .agent(agent)
         .session(session)
@@ -227,6 +261,63 @@ async fn test_get_user_function_call_at() {
         let ictx = new_test_invocation_context(remote, tc.events).await;
         let got = get_user_function_call_at(&ictx.session().events(), tc.at_index, remote, "");
         assert_eq!(got.is_some(), tc.success, "{}: got {got:?}", tc.name);
+    }
+}
+
+#[tokio::test]
+async fn test_get_user_function_call_at_mixed_response_tasks() {
+    const REMOTE: &str = "remote-agent";
+    let remote_call = |id: &str, task_id: &str| {
+        let mut event = event_from_parts(REMOTE, vec![call(id, "")]);
+        event.response.custom_metadata = to_custom_metadata(task_id, "remote-context");
+        event
+    };
+    let mut cached_call = event_from_parts(REMOTE, vec![call("reused", "")]);
+    cached_call.response.custom_metadata = obj(json!({BEFORE_RUN_REPLY_KEY: true}));
+    let cases = vec![
+        (
+            "first matching response keeps task priority",
+            vec![
+                remote_call("first", "first-task"),
+                remote_call("second", "second-task"),
+                event_from_parts(
+                    "user",
+                    vec![
+                        response("first", "", json!({})),
+                        response("second", "", json!({})),
+                    ],
+                ),
+            ],
+            "first-task",
+        ),
+        (
+            "cached response does not hide later peer response",
+            vec![
+                remote_call("reused", "completed-task"),
+                remote_call("current", "current-task"),
+                cached_call,
+                event_from_parts(
+                    "user",
+                    vec![
+                        response("reused", "", json!({})),
+                        response("current", "", json!({})),
+                    ],
+                ),
+            ],
+            "current-task",
+        ),
+    ];
+    for (name, events, want_task_id) in cases {
+        let ictx = new_test_invocation_context(REMOTE, events).await;
+        let events = ictx.session().events();
+        let last = isize::try_from(events.len()).unwrap() - 1;
+        let Some(got) = get_user_function_call_at(&events, last, REMOTE, "") else {
+            panic!("{name}: get_user_function_call_at() = None, want a peer response");
+        };
+        assert!(
+            got.task_id == want_task_id && got.context_id == "remote-context",
+            "{name}: mixed responses selected the wrong remote task or context: {got:?}"
+        );
     }
 }
 

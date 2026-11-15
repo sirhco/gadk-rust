@@ -337,6 +337,7 @@ async fn test_to_session_event() {
             Some(Event {
                 actions: EventActions {
                     escalate: true,
+                    skip_summarization: true,
                     ..Default::default()
                 },
                 ..agent_event(LlmResponse {
@@ -531,6 +532,19 @@ async fn test_to_session_event() {
             None,
         ),
         (
+            "non-final task status update with an empty message is skipped",
+            status_update(
+                tid,
+                cid,
+                status(
+                    a2a::TaskState::Working,
+                    Some(a2a::Message::new(a2a::Role::Agent, vec![])),
+                ),
+                None,
+            ),
+            None,
+        ),
+        (
             "task status failed with single-part message",
             status_update(
                 tid,
@@ -600,13 +614,19 @@ async fn test_to_session_event() {
                 ),
                 None,
             ),
-            Some(agent_event(LlmResponse {
-                content: model_content(vec![text("failed with an error")]),
-                error_message: "failed with an error".into(),
-                custom_metadata: task_meta(tid, cid),
-                turn_complete: true,
-                ..Default::default()
-            })),
+            Some(Event {
+                actions: EventActions {
+                    skip_summarization: true,
+                    ..Default::default()
+                },
+                ..agent_event(LlmResponse {
+                    content: model_content(vec![text("failed with an error")]),
+                    error_message: "failed with an error".into(),
+                    custom_metadata: task_meta(tid, cid),
+                    turn_complete: true,
+                    ..Default::default()
+                })
+            }),
         ),
         (
             "completed task with single-part text status",
@@ -620,12 +640,18 @@ async fn test_to_session_event() {
                 ),
                 None,
             ),
-            Some(agent_event(LlmResponse {
-                content: model_content(vec![text("failed with an error")]),
-                custom_metadata: task_meta(tid, cid),
-                turn_complete: true,
-                ..Default::default()
-            })),
+            Some(Event {
+                actions: EventActions {
+                    skip_summarization: true,
+                    ..Default::default()
+                },
+                ..agent_event(LlmResponse {
+                    content: model_content(vec![text("failed with an error")]),
+                    custom_metadata: task_meta(tid, cid),
+                    turn_complete: true,
+                    ..Default::default()
+                })
+            }),
         ),
         (
             "failed task with a multi-part status",
@@ -645,13 +671,22 @@ async fn test_to_session_event() {
                 ),
                 None,
             ),
-            Some(agent_event(LlmResponse {
-                error_message: "failed with an error".into(),
-                content: model_content(vec![text("failed with an error"), text("extra details")]),
-                custom_metadata: task_meta(tid, cid),
-                turn_complete: true,
-                ..Default::default()
-            })),
+            Some(Event {
+                actions: EventActions {
+                    skip_summarization: true,
+                    ..Default::default()
+                },
+                ..agent_event(LlmResponse {
+                    error_message: "failed with an error".into(),
+                    content: model_content(vec![
+                        text("failed with an error"),
+                        text("extra details"),
+                    ]),
+                    custom_metadata: task_meta(tid, cid),
+                    turn_complete: true,
+                    ..Default::default()
+                })
+            }),
         ),
         (
             "failed task status with a multi-part status",
@@ -863,4 +898,73 @@ fn test_transfer_to_agent_from_meta() {
         transfer_to_agent_from_meta(meta.as_ref()),
         Some("a-2".to_owned())
     );
+}
+
+/// Go checks that a peer's empty text part, which adk-python sends for a model's empty text
+/// part, does not fail the whole event.
+#[tokio::test]
+async fn test_to_session_event_empty_text_part() {
+    let agent = new_agent(AgentConfig {
+        name: AGENT_NAME.into(),
+        ..Default::default()
+    })
+    .unwrap();
+    let ctx = ContextBuilder::new().agent(agent).build_invocation();
+    let input =
+        a2a::StreamResponse::Message(message(vec![a2a::Part::text("foo"), a2a::Part::text("")]));
+    let got = to_session_event(&ctx, &input).await;
+    assert!(got.is_ok(), "to_session_event() error = {got:?}, want Ok");
+    let got = got.unwrap().unwrap();
+    let parts = got.response.content.map(|c| c.parts).unwrap_or_default();
+    assert_eq!(parts, vec![text("foo"), text("")]);
+}
+
+/// Go pins that a completed, failed or canceled task is the remote agent's final response even
+/// when its artifacts replay the tool calls the peer made; rejected and auth-required tasks are
+/// not final (adk-python's `convert_a2a_task_to_event` states).
+#[tokio::test]
+async fn test_to_session_event_final_response_by_task_state() {
+    let tool_parts = || {
+        let call = a2a::Part {
+            metadata: meta(json!({ (to_a2a_meta_key("type")): "function_call" })),
+            ..a2a::Part::data(
+                json!({"id": "call-1", "name": "get_weather", "args": {"city": "Warsaw"}}),
+            )
+        };
+        let resp = a2a::Part {
+            metadata: meta(json!({ (to_a2a_meta_key("type")): "function_response" })),
+            ..a2a::Part::data(
+                json!({"id": "call-1", "name": "get_weather", "response": {"temp": "20C"}}),
+            )
+        };
+        vec![call, resp, a2a::Part::text("It is 20C in Warsaw.")]
+    };
+    let cases = [
+        (a2a::TaskState::Completed, true),
+        (a2a::TaskState::Failed, true),
+        (a2a::TaskState::Canceled, true),
+        (a2a::TaskState::Rejected, false),
+        (a2a::TaskState::AuthRequired, false),
+        (a2a::TaskState::Working, false),
+    ];
+    for (state, want_final) in cases {
+        let ctx = invocation_context();
+        let input = task(
+            &a2a::new_task_id(),
+            &a2a::new_context_id(),
+            vec![artifact(&a2a::new_artifact_id(), tool_parts())],
+            status(state.clone(), None),
+            None,
+        );
+        let got = to_session_event(&ctx, &input).await.unwrap();
+        let Some(got) = got else {
+            panic!("{state:?}: to_session_event() = None, want an event");
+        };
+        assert_eq!(
+            got.is_final_response(),
+            want_final,
+            "{state:?}: is_final_response() (skip_summarization = {})",
+            got.actions.skip_summarization
+        );
+    }
 }

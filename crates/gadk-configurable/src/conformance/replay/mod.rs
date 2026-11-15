@@ -102,7 +102,11 @@ pub fn new(allowed_base_dir: impl Into<PathBuf>) -> Plugin {
         let p = Arc::clone(&p);
         Arc::new(move |ctx, tool, args| {
             let p = Arc::clone(&p);
-            async move { p.before_tool(&ctx, tool, &args).await }.boxed()
+            async move {
+                let res = p.before_tool(&ctx, tool, &args).await;
+                (args, res)
+            }
+            .boxed()
         })
     };
     Plugin::new(PluginConfig {
@@ -1189,12 +1193,14 @@ mod tests {
             args("1"),
         )
         .await
+        .1
         .unwrap();
         assert_eq!(got, Some(json!({"r": "one"}).as_object().unwrap().clone()));
         (plugin.after_run_callback().unwrap())(inv.clone()).await;
         let err =
             (plugin.before_tool_callback().unwrap())(ctx, TestTool::new("t", false), args("1"))
                 .await
+                .1
                 .unwrap_err();
         assert_eq!(
             err.to_string(),

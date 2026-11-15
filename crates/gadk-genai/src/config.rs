@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Generation config types (port of genai v1.75.0 `types.go`).
+//! Generation config types (port of genai v1.77.0 `types.go`).
 
 use crate::content::Content;
 use crate::schema::Schema;
@@ -466,4 +466,23 @@ pub struct GenerateContentConfig {
     pub continuation_token: Option<Bytes>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub automatic_continuation: Option<bool>,
+    /// Optional. Configuration for persisting output assets to external storage (genai
+    /// v1.77.0; Vertex AI only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation_output_config: Option<GenerationOutputConfig>,
+    /// Optional. Configures the logging behavior for a given request; takes precedence over
+    /// the project-level logging config (genai v1.77.0; Gemini API only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub store: Option<bool>,
+}
+
+/// Port of genai types.go `GenerationOutputConfig` (v1.77.0). Configuration for persisting
+/// output assets to external storage.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerationOutputConfig {
+    /// Optional. The Cloud Storage URI prefix or directory where generated media assets
+    /// should be written (e.g. `"gs://my-bucket/prefix/"`). Supported URI schemes: `"gs://"`.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub output_uri_prefix: String,
 }

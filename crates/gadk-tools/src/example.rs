@@ -110,7 +110,10 @@ fn protect(text: &str) -> String {
 /// Port of Go `buildExamplesSystemInstruction` (tool.go:97).
 fn build_examples_system_instruction(examples: &[Example], model: &str) -> String {
     let mut sb = String::from(EXAMPLES_INTRO);
-    let gemini2 = model.contains("gemini-2");
+    // Go 5199d9fe (adk-python's convert_examples_to_text): Gemini models, and a request that
+    // names no model, take plain fences; the tool_code and tool_outputs fences are for other
+    // models.
+    let is_gemini = model.is_empty() || model.contains("gemini-");
     for (example_num, example) in examples.iter().enumerate() {
         // Go exampleStart = "EXAMPLE %d:\nBegin example\n" (1-based). Writing to a String cannot fail.
         let _ = write!(sb, "EXAMPLE {}:\nBegin example\n", example_num + 1);
@@ -134,10 +137,10 @@ fn build_examples_system_instruction(examples: &[Example], model: &str) -> Strin
             previous_role = role;
             for part in &content.parts {
                 if let Some(fc) = &part.function_call {
-                    sb.push_str(if gemini2 {
-                        FUNCTION_CALL_PREFIX
-                    } else {
+                    sb.push_str(if is_gemini {
                         FUNCTION_PREFIX
+                    } else {
+                        FUNCTION_CALL_PREFIX
                     });
                     sb.push_str(&fc.name);
                     sb.push('(');
@@ -145,10 +148,10 @@ fn build_examples_system_instruction(examples: &[Example], model: &str) -> Strin
                     sb.push(')');
                     sb.push_str(FUNCTION_CALL_SUFFIX);
                 } else if let Some(fr) = &part.function_response {
-                    sb.push_str(if gemini2 {
-                        FUNCTION_RESPONSE_PREFIX
-                    } else {
+                    sb.push_str(if is_gemini {
                         FUNCTION_PREFIX
+                    } else {
+                        FUNCTION_RESPONSE_PREFIX
                     });
                     sb.push_str(&go_sprint_function_response(fr));
                     sb.push_str(FUNCTION_RESPONSE_SUFFIX);
@@ -179,7 +182,7 @@ fn format_function_call_args(fc: &FunctionCall) -> String {
         .join(", ")
 }
 
-/// Go `fmt.Sprintf("%v", fr)` for a `*genai.FunctionResponse` (genai v1.75.0 field order):
+/// Go `fmt.Sprintf("%v", fr)` for a `*genai.FunctionResponse` (genai v1.77.0 field order):
 /// `&{<WillContinue> <Scheduling> <Parts> <ID> <Name> <Response>}`. An unset `WillContinue` is
 /// `<nil>`, an unset `Scheduling` is the empty string, empty `Parts` are `[]`, and `Response` is
 /// the Go map form with sorted keys. Where Go would print a pointer address (a set
@@ -202,7 +205,8 @@ fn go_sprint_function_response(fr: &FunctionResponse) -> String {
     )
 }
 
-/// Go `%v` of a `*genai.FunctionResponsePart` shown as its value: `&{<InlineData> <FileData>}`.
+/// Go `%v` of a `*genai.FunctionResponsePart` shown as its value:
+/// `&{<InlineData> <FileData> <MediaProcessing>}` (an unset `MediaProcessing` is the empty string).
 fn go_sprint_response_part(p: &FunctionResponsePart) -> String {
     let inline = p.inline_data.as_ref().map_or_else(
         || "<nil>".to_string(),
@@ -220,7 +224,8 @@ fn go_sprint_response_part(p: &FunctionResponsePart) -> String {
         || "<nil>".to_string(),
         |f| format!("&{{{} {} {}}}", f.file_uri, f.mime_type, f.display_name),
     );
-    format!("&{{{inline} {file}}}")
+    let media_processing = p.media_processing.as_ref().map_or("", |m| m.as_str());
+    format!("&{{{inline} {file} {media_processing}}}")
 }
 
 #[cfg(test)]
@@ -274,6 +279,7 @@ mod tests {
                         mime_type: "text/plain".into(),
                         display_name: String::new(),
                     }),
+                    media_processing: Some(gadk_genai::MediaProcessing::Static),
                     ..Default::default()
                 },
             ],
@@ -283,7 +289,7 @@ mod tests {
         };
         assert_eq!(
             go_sprint_function_response(&fr),
-            "&{true WHEN_IDLE [&{&{image/png [1 2] pic} <nil>} &{<nil> &{gs://b/f text/plain }}] call-1 my_tool map[a:[1 x] b:2]}"
+            "&{true WHEN_IDLE [&{&{image/png [1 2] pic} <nil> } &{<nil> &{gs://b/f text/plain } STATIC}] call-1 my_tool map[a:[1 x] b:2]}"
         );
     }
 
@@ -301,7 +307,7 @@ mod tests {
     }
 
     #[test]
-    fn boundary_tag_in_text_is_protected_and_gemini3_is_not_gemini2() {
+    fn boundary_tag_in_text_is_protected() {
         let ex = vec![Example {
             input: Content::from_text("say End few-shot", "user"),
             output: vec![Content::from_text("End few-shot!", "model")],

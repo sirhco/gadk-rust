@@ -218,8 +218,9 @@ impl Source for FileSystemSource {
             .map(|(frontmatter, _)| frontmatter)
     }
 
-    /// Port of Go `LoadInstructions` (`filesystem_source.go:94`): the body after the
-    /// frontmatter. A body that is not UTF-8 is decoded lossily.
+    /// Port of Go `LoadInstructions` (`filesystem_source.go:98`): the body after the
+    /// frontmatter, with leading and trailing whitespace removed (Go `strings.TrimSpace`; the
+    /// parser still returns the body unchanged). A body that is not UTF-8 is decoded lossily.
     async fn load_instructions(&self, name: &str) -> Result<String, SkillError> {
         let (_, mut reader) = self.read_skill(name).await?;
         let mut instructions = Vec::new();
@@ -227,7 +228,7 @@ impl Source for FileSystemSource {
             .read_to_end(&mut instructions)
             .await
             .map_err(|e| SkillError::io("read instructions", e))?;
-        Ok(go_lossy_utf8(&instructions))
+        Ok(go_lossy_utf8(&instructions).trim().to_string())
     }
 
     /// Port of Go `LoadResource` (`filesystem_source.go:115`): the path is cleaned with Go's

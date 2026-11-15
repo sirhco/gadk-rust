@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use gadk_agent::{AgentConfig, InvocationContext, new_agent};
-use gadk_genai::{Content, Part, ROLE_MODEL};
+use gadk_genai::{Content, FileData, Part, ROLE_MODEL};
 use gadk_platform::Platform;
 use gadk_session::{Event, EventActions, zero_time};
 use serde_json::{Map, Value};
@@ -129,6 +129,18 @@ fn thought(text: &str) -> Part {
     Part {
         text: text.into(),
         thought: true,
+        ..Default::default()
+    }
+}
+
+/// The `gs://bucket/chart.png` file part of Go's "around a file part" case.
+fn chart_part() -> Part {
+    Part {
+        file_data: Some(FileData {
+            file_uri: "gs://bucket/chart.png".into(),
+            mime_type: "image/png".into(),
+            ..Default::default()
+        }),
         ..Default::default()
     }
 }
@@ -357,10 +369,61 @@ async fn test_a2_a_agent_run_processor_aggregate_partial() {
                 completed_event(vec![]),
             ],
         ),
+        (
+            "thought and text each streamed in several chunks",
+            vec![
+                artifact_update("a1", true, false, thought_part("think")),
+                artifact_update("a1", true, false, thought_part("ing")),
+                new_update("a1", "Hel"),
+                new_update("a1", "lo"),
+                completed(),
+            ],
+            vec![
+                event(true, false, vec![thought("think")]),
+                event(true, false, vec![thought("ing")]),
+                partial("Hel"),
+                partial("lo"),
+                non_partial(vec![thought("thinking"), Part::from_text("Hello")]),
+                completed_event(vec![]),
+            ],
+        ),
+        (
+            "text streamed in several chunks around a file part",
+            vec![
+                new_update("a1", "Hel"),
+                new_update("a1", "lo"),
+                artifact_update(
+                    "a1",
+                    true,
+                    false,
+                    a2a::Part::url("gs://bucket/chart.png").with_media_type("image/png"),
+                ),
+                new_update("a1", "wor"),
+                new_update("a1", "ld"),
+                completed(),
+            ],
+            vec![
+                partial("Hel"),
+                partial("lo"),
+                event(true, false, vec![chart_part()]),
+                partial("wor"),
+                partial("ld"),
+                non_partial(vec![
+                    Part::from_text("Hello"),
+                    chart_part(),
+                    Part::from_text("world"),
+                ]),
+                completed_event(vec![]),
+            ],
+        ),
     ];
 
     for (name, events, want) in cases {
-        let agent = new_agent(AgentConfig::default()).unwrap();
+        let agent = new_agent(AgentConfig {
+            name: "test".into(),
+            ..Default::default()
+        })
+        .unwrap();
         let ctx = InvocationContext::builder().agent(agent).build_invocation();
         let request = a2a::SendMessageRequest {
             message: a2a::Message::new(a2a::Role::User, vec![]),
@@ -391,3 +454,5 @@ async fn test_a2_a_agent_run_processor_aggregate_partial() {
         pretty_assertions::assert_eq!(got, want, "{name}");
     }
 }
+
+// parity: skipped TestA2AAgentRunProcessor_updateAggregationDoesNotRecopyText: Go counts heap allocations with testing.AllocsPerRun; Rust has no per-test allocation counter, and the aggregation appends with String::push_str (amortized growth, no recopy)

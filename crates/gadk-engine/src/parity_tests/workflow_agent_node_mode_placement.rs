@@ -483,28 +483,6 @@ async fn test_agent_node_declared_single_turn_with_explicit_include_contents_kee
 
 // parity: skipped TestAgentNode_UnrecognisedIncludeContents_DoesNotDefeatThePlacement: Go IncludeContents is an unvalidated string; Rust's IncludeContents is a closed enum, so a misspelled value cannot be constructed
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn test_agent_node_unnamed_agent_is_still_placed_single_turn() {
-    let model = CapturingLlm::new();
-    let a = llm(LlmAgentConfig {
-        model: Some(model.clone() as Arc<dyn Llm>),
-        ..Default::default()
-    });
-    assert_eq!(a.name(), "", "precondition: agent name, want empty");
-    let wf = single_node_workflow(&a);
-    run_workflow(
-        &wf,
-        &new_mode_test_ctx(&a, vec![prior_event("user", "EARLIER_TURN", "user")]).await,
-    )
-    .await;
-    let got = model.got().expect("model was never called");
-    assert!(
-        !contents_contain(&got.contents, "EARLIER_TURN"),
-        "nameless agent at a single_turn node saw conversation history; contents = {:?}",
-        got.contents
-    );
-}
-
 #[tokio::test]
 async fn test_agent_node_placement_survives_a_transfer_round_trip() {
     let m = RoundTripLlm::new(vec![

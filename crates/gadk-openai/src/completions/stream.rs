@@ -14,7 +14,7 @@
 // limitations under the License.
 
 //! Chat Completions stream translation (port of ADK-Go `internal/completions/stream.go`, with
-//! the parts of openai-go v3.82.0's `ChatCompletionAccumulator` it relies on).
+//! the parts of openai-go v3.91.1's `ChatCompletionAccumulator` it relies on).
 
 use gadk_genai::{GenerateContentResponse, Part};
 

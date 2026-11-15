@@ -71,9 +71,8 @@ impl Loader for SingleLoader {
 
 /// Port of Go `agent.NewMultiLoader`: a loader serving a root agent and further agents by name.
 ///
-/// Agents are kept in registration order (root first), which is the order of
-/// [`Loader::list_agents`] and of the not-found error's list; Go iterates a map there, so its
-/// order is unspecified.
+/// [`Loader::list_agents`] and the not-found error's list name the agents (root included) sorted
+/// alphabetically (Go #2164).
 pub struct MultiLoader {
     agents: Vec<(String, Arc<dyn Agent>)>,
     root: Arc<dyn Agent>,
@@ -96,7 +95,9 @@ impl MultiLoader {
 
 impl Loader for MultiLoader {
     fn list_agents(&self) -> Vec<String> {
-        self.agents.iter().map(|(name, _)| name.clone()).collect()
+        let mut names: Vec<String> = self.agents.iter().map(|(name, _)| name.clone()).collect();
+        names.sort();
+        names
     }
 
     fn load_agent(&self, name: &str) -> Result<Arc<dyn Agent>, LoaderError> {

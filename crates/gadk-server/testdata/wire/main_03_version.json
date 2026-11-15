@@ -15,7 +15,7 @@
         "application/json; charset=UTF-8"
       ]
     ],
-    "body": "{\"version\":\"2.7.0\",\"language\":\"go\",\"language_version\":\"go1.27.2\"}\n"
+    "body": "{\"version\":\"2.7.1\",\"language\":\"go\",\"language_version\":\"go1.27.2\"}\n"
   },
   "compare": "json_key_set"
 }

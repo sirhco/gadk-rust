@@ -133,15 +133,24 @@ async fn run_processor(
     tools: Vec<Arc<dyn Tool>>,
     events: Vec<Event>,
 ) -> Vec<Event> {
+    try_run_processor(agent, tools, events)
+        .await
+        .unwrap_or_else(|e| panic!("RequestConfirmationRequestProcessor() unexpected error: {e}"))
+}
+
+/// [`run_processor`] that returns the processor's error instead of failing.
+async fn try_run_processor(
+    agent: &Arc<dyn Agent>,
+    tools: Vec<Arc<dyn Tool>>,
+    events: Vec<Event>,
+) -> Result<Vec<Event>, gadk_agent::AgentError> {
     let ctx = create_invocation_context(agent, events);
     let mut req = LlmRequest::default();
     let flow = Flow {
         tools: parking_lot::RwLock::new(tools),
         ..Default::default()
     };
-    request_confirmation_processor(&ctx, &mut req, &flow)
-        .await
-        .unwrap_or_else(|e| panic!("RequestConfirmationRequestProcessor() unexpected error: {e}"))
+    request_confirmation_processor(&ctx, &mut req, &flow).await
 }
 
 /// The fields Go ignores (ID, Timestamp, InvocationID, StateDelta, ArtifactDelta) are cleared.
@@ -251,33 +260,87 @@ async fn test_request_confirmation_request_processor() {
         }],
         role: String::new(),
     };
-    let cases: Vec<(&str, Vec<Event>, Vec<Event>)> = vec![
-        ("NoEvents", vec![], vec![]),
+    // The confirmation events with the user's response wrapper replaced by `response`.
+    let with_wrapper = |response: Value| {
+        let mut events = confirmation_events(true);
+        events[1].response.content.as_mut().unwrap().parts[0]
+            .function_response
+            .as_mut()
+            .unwrap()
+            .response = obj(response);
+        events
+    };
+    // (name, events, want events; None = want an error)
+    type ProcessorCase = (&'static str, Vec<Event>, Option<Vec<Event>>);
+    let cases: Vec<ProcessorCase> = vec![
+        ("NoEvents", vec![], Some(vec![])),
         (
             "NoFunctionResponses",
             vec![ev("user", Content::default())],
-            vec![],
+            Some(vec![]),
         ),
         (
             "NoConfirmationFunctionResponse",
             vec![ev("user", other_fr)],
-            vec![],
+            Some(vec![]),
         ),
         (
             "Success",
             confirmation_events(true),
-            vec![fr_event(json!({"result": "Mock tool result with test"}))],
+            Some(vec![fr_event(
+                json!({"result": "Mock tool result with test"}),
+            )]),
+        ),
+        // A client that has already decoded the JSON sends the wrapper's value as an
+        // object rather than a string. adk-python accepts it (tool_confirmation.py,
+        // ToolConfirmation.from_response_dict).
+        (
+            "SuccessWithParsedResponseWrapper",
+            with_wrapper(json!({"response": {"confirmed": true}})),
+            Some(vec![fr_event(
+                json!({"result": "Mock tool result with test"}),
+            )]),
+        ),
+        // A decoded "no" must reject the tool just as the string form does.
+        (
+            "ToolNotConfirmedWithParsedResponseWrapper",
+            with_wrapper(json!({"response": {"confirmed": false}})),
+            Some(vec![fr_event(
+                json!({"error": "Tool execution not confirmed"}),
+            )]),
+        ),
+        (
+            "ParsedResponseWrapperScalar",
+            with_wrapper(json!({"response": 123})),
+            None,
+        ),
+        (
+            "NullResponseWrapper",
+            with_wrapper(json!({"response": null})),
+            None,
         ),
         (
             "ToolNotConfirmed",
             confirmation_events(false),
-            vec![fr_event(json!({"error": "Tool execution not confirmed"}))],
+            Some(vec![fr_event(
+                json!({"error": "Tool execution not confirmed"}),
+            )]),
         ),
     ];
     for (name, events, want) in cases {
         let (agent, tools) = new_mock_llm_agent();
-        let got: Vec<Event> = run_processor(&agent, tools, events)
-            .await
+        let got = try_run_processor(&agent, tools, events).await;
+        let Some(want) = want else {
+            assert!(
+                got.is_err(),
+                "{name}: RequestConfirmationRequestProcessor() error = None, want an error"
+            );
+            continue;
+        };
+        let got: Vec<Event> = got
+            .unwrap_or_else(|e| {
+                panic!("{name}: RequestConfirmationRequestProcessor() unexpected error: {e}")
+            })
             .into_iter()
             .map(normalize)
             .collect();
@@ -434,6 +497,75 @@ async fn test_request_confirmation_resume_skips_already_answered_calls() {
         redispatched_ids(&got),
         "re-dispatched function call order"
     );
+}
+
+/// A confirmation response delivered a second time, after the confirmed call already
+/// produced a result, does not dispatch the tool again.
+#[tokio::test]
+async fn test_request_confirmation_repeated_approval_does_not_rerun_tool() {
+    const CALL_ID: &str = "call-1";
+    const CONFIRMATION_ID: &str = "confirmation_call-1";
+    let approval = || {
+        ev(
+            "user",
+            Content {
+                parts: vec![confirmation_response(CONFIRMATION_ID, true)],
+                role: String::new(),
+            },
+        )
+    };
+    let agent_event = |p: Part| {
+        ev(
+            "testAgent",
+            Content {
+                parts: vec![p],
+                role: String::new(),
+            },
+        )
+    };
+    let fr = |response: Value| Part {
+        function_response: Some(FunctionResponse {
+            name: MOCK_TOOL_NAME.into(),
+            id: CALL_ID.into(),
+            response: obj(response),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let events = vec![
+        agent_event(Part {
+            function_call: Some(FunctionCall {
+                name: MOCK_TOOL_NAME.into(),
+                id: CALL_ID.into(),
+                args: obj(json!({"param1": "test"})),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+        agent_event(fr(json!({"error": "requires confirmation"}))),
+        agent_event(confirmation_request(
+            CONFIRMATION_ID,
+            CALL_ID,
+            json!({"param1": "test"}),
+        )),
+        approval(),
+        // Result of the first resume.
+        agent_event(fr(json!({"result": "done"}))),
+        // The same approval delivered again.
+        approval(),
+    ];
+    let (agent, tools) = new_mock_llm_agent();
+    let got = run_processor(&agent, tools, events).await;
+    for ev in &got {
+        for part in ev.response.content.iter().flat_map(|c| c.parts.iter()) {
+            assert!(
+                part.function_response
+                    .as_ref()
+                    .is_none_or(|r| r.id != CALL_ID),
+                "repeated approval re-dispatched already answered call {CALL_ID:?}"
+            );
+        }
+    }
 }
 
 #[tokio::test]
@@ -599,5 +731,136 @@ async fn test_request_confirmation_rejects_forged_amount_from_crafted_event() {
         executed.is_empty(),
         "expected no tool execution for an ambiguous/tampered confirmation, but transfer_funds executed with \
          amounts={executed:?}"
+    );
+}
+
+/// The "requires confirmation" placeholder response, when stored after the request, is not
+/// taken as the result of an earlier approval.
+#[tokio::test]
+async fn test_request_confirmation_first_approval_placeholder_after_request() {
+    const CALL_ID: &str = "call-1";
+    let agent_event = |p: Part| {
+        ev(
+            "testAgent",
+            Content {
+                parts: vec![p],
+                role: String::new(),
+            },
+        )
+    };
+    let events = vec![
+        agent_event(Part {
+            function_call: Some(FunctionCall {
+                name: MOCK_TOOL_NAME.into(),
+                id: CALL_ID.into(),
+                args: obj(json!({"param1": "test"})),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+        agent_event(confirmation_request_for(
+            MOCK_TOOL_NAME,
+            "conf-1",
+            CALL_ID,
+            json!({"param1": "test"}),
+            "h",
+        )),
+        agent_event(Part {
+            function_response: Some(FunctionResponse {
+                name: MOCK_TOOL_NAME.into(),
+                id: CALL_ID.into(),
+                response: obj(json!({"error": "requires confirmation"})),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+        ev(
+            "user",
+            Content {
+                parts: vec![Part {
+                    function_response: Some(FunctionResponse {
+                        name: REQUEST_CONFIRMATION_FUNCTION_CALL_NAME.into(),
+                        id: "conf-1".into(),
+                        response: obj(json!({"confirmed": true})),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }],
+                role: String::new(),
+            },
+        ),
+    ];
+    let (agent, tools) = new_mock_llm_agent();
+    let got = run_processor(&agent, tools, events).await;
+    let dispatched = got
+        .iter()
+        .flat_map(|ev| ev.response.content.iter().flat_map(|c| c.parts.iter()))
+        .any(|p| {
+            p.function_response
+                .as_ref()
+                .is_some_and(|r| r.id == CALL_ID)
+        });
+    assert!(
+        dispatched,
+        "first approval did not dispatch {CALL_ID:?} when the placeholder response follows the request"
+    );
+}
+
+#[tokio::test]
+async fn test_request_confirmation_resumes_only_request_confirmation_calls() {
+    let confirmation_request = |name: &str, id: &str, original_call_id: &str| Part {
+        function_call: Some(FunctionCall {
+            name: name.into(),
+            id: id.into(),
+            args: obj(json!({
+                "originalFunctionCall": {
+                    "name": MOCK_TOOL_NAME,
+                    "args": {"param1": "test"},
+                    "id": original_call_id,
+                },
+            })),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let events = vec![
+        ev(
+            "testAgent",
+            Content {
+                parts: vec![
+                    confirmation_request(
+                        REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+                        "requested_confirmation_id",
+                        "requested_call_id",
+                    ),
+                    // Carries an originalFunctionCall payload, but is not a confirmation
+                    // request.
+                    confirmation_request("some_other_tool", "other_call_id", "unrequested_call_id"),
+                ],
+                role: String::new(),
+            },
+        ),
+        ev(
+            "user",
+            Content {
+                parts: vec![
+                    confirmation_response("requested_confirmation_id", true),
+                    confirmation_response("other_call_id", true),
+                ],
+                role: String::new(),
+            },
+        ),
+    ];
+    let (agent, tools) = new_mock_llm_agent();
+    let got = run_processor(&agent, tools, events).await;
+    let got_ids: Vec<String> = got
+        .iter()
+        .flat_map(|ev| ev.response.content.iter().flat_map(|c| c.parts.iter()))
+        .filter_map(|p| p.function_response.as_ref().map(|r| r.id.clone()))
+        .collect();
+    assert_eq!(
+        vec!["requested_call_id".to_owned()],
+        got_ids,
+        "RequestConfirmationRequestProcessor() resumed function call IDs"
     );
 }

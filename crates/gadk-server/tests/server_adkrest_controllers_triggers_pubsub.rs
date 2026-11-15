@@ -409,6 +409,41 @@ async fn test_pub_sub_trigger_handler_zero_max_concurrent_runs_is_unlimited() {
     assert_eq!(resp.status(), 200);
 }
 
+/// Go `TestPubSubTriggerHandler_CancelDuringBackoff`: a request that goes away while the
+/// handler waits out a retry backoff stops the wait, and the run is not retried.
+// parity: adapted: a cancelled request is a dropped handler future in Rust (axum drops it when
+// the client goes away), so no status is written; the test drops it during the one-minute backoff
+// on tokio's paused clock and checks that no retry runs
+#[tokio::test(start_paused = true)]
+async fn test_pub_sub_trigger_handler_cancel_during_backoff() {
+    let runs = Arc::new(Runs::default());
+    let mut cfg = fake_config(mock_agent(
+        vec![Some("429 ResourceExhausted"); 4],
+        runs.clone(),
+    ));
+    cfg.trigger_config = TriggerConfig {
+        max_concurrent_runs: 1,
+        max_retries: 3,
+        base_delay: Duration::from_secs(60),
+        max_delay: Duration::from_secs(60),
+    };
+    let ctrl = PubSubController::new(cfg).unwrap();
+
+    // Cancel once the handler is waiting out the backoff, as when the client goes away during
+    // it.
+    let cancelled = tokio::time::timeout(
+        Duration::from_millis(50),
+        ctrl.pub_sub_trigger_handler(build_pub_sub_request("hello")),
+    )
+    .await;
+    assert!(
+        cancelled.is_err(),
+        "handler answered before its request was cancelled"
+    );
+    tokio::time::sleep(Duration::from_secs(300)).await;
+    assert_eq!(runs.count(), 1, "run attempts");
+}
+
 /// A throttled run is retried after Go's jittered backoff (`base * 2^attempt`, capped, plus up
 /// to half of it), on tokio's clock.
 #[tokio::test(start_paused = true)]

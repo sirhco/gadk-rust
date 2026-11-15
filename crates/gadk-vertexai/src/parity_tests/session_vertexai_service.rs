@@ -36,11 +36,16 @@ const USER_ID: &str = "test-user";
 
 /// The shared-suite cases Go skips for lack of a matching recording (Go `casesWithoutReplay`);
 /// they run on [`FakeAgentEngine`] instead.
-const CASES_WITHOUT_REPLAY: [&str; 2] = [
+const CASES_WITHOUT_REPLAY: [&str; 4] = [
     // Pinned offline in Go by TestAppendEvent_missingSession_wrapsErrNotFound.
     "AppendEvent/when_session_deleted_returns_ErrNotFound",
     // Go's recording predates trimming temp: keys before AppendEvent.
     "StateManagement/temp_state_is_not_persisted",
+    // Pinned offline in Go by TestVertexAiClientRequestedAuthConfigsMatchPython (no recording).
+    "AppendEvent/requested_auth_configs_round_trip",
+    // Pinned offline in Go by TestVertexAiClientRejectsRequestedAuthConfigThatDoesNotEncode and
+    // TestAppendEvent_requestedAuthConfigThatDoesNotDecode_leavesSessionUntouched.
+    "AppendEvent/requested_auth_config_that_does_not_decode_is_refused",
 ];
 
 fn service(url: &str) -> Arc<dyn SessionService> {
@@ -55,6 +60,7 @@ async fn test_vertexai_service() {
     let opts = SuiteOptions {
         supports_user_provided_session_id: true,
         provides_server_assigned_event_id: true,
+        checks_requested_auth_configs: true,
         app_name: Some(ENGINE_ID.to_owned()),
     };
     run_named(opts, |name| {
@@ -77,7 +83,7 @@ async fn test_vertexai_service() {
     .await;
     let replays = replays.lock();
     assert_eq!(replays.len(), 22, "replayed cases");
-    assert_eq!(engines.lock().len(), 2, "cases on FakeAgentEngine");
+    assert_eq!(engines.lock().len(), 4, "cases on FakeAgentEngine");
     let unmatched: Vec<String> = replays
         .iter()
         .flat_map(|(name, replay)| {

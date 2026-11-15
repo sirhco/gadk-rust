@@ -240,3 +240,42 @@ fn test_build_transport() {
     let command = McpTransport::Command(Arc::new(|| tokio::process::Command::new("true")));
     build_transport(&Config::new(command)).unwrap();
 }
+
+#[cfg(unix)]
+// parity: adapted: Go's `Connect` only starts the process; a gadk `TransportFactory::connect` also runs the MCP `initialize` handshake, so the helper is an `sh -c` child (not Go's re-run test binary) that writes its working directory to stderr and exits, and every connect fails the handshake with `connection closed`. The test checks that each of the three connects started the builder's command with its `current_dir` and `stderr`. Go's "first connect runs the caller's own command" check has no counterpart: `McpTransport::Command` is a `CommandBuilder` run on every connect.
+#[tokio::test]
+async fn test_command_transport_reconnect() {
+    use crate::config::default_client_info;
+
+    let dir = tempfile::tempdir().unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let stderr_path = out.path().join("stderr");
+    let stderr = std::fs::File::create(&stderr_path).unwrap();
+    let cwd = dir.path().to_path_buf();
+    let cfg = Config::new(McpTransport::Command(Arc::new(move || {
+        let mut cmd = tokio::process::Command::new("sh");
+        cmd.args(["-c", r#"echo "helper started in $(pwd -P)" >&2"#]);
+        cmd.current_dir(&cwd);
+        cmd.stderr(stderr.try_clone().unwrap());
+        cmd
+    })));
+    let tr = build_transport(&cfg).unwrap();
+    for i in 1..=3 {
+        match tr.connect(default_client_info()).await {
+            Ok(_) => panic!("Connect #{i}: the helper does not speak MCP, want a handshake error"),
+            Err(e) => assert!(
+                e.to_string().contains("connection closed"),
+                "Connect #{i} error = {e}"
+            ),
+        }
+    }
+
+    let got = std::fs::read_to_string(&stderr_path).unwrap();
+    let real_dir = std::fs::canonicalize(dir.path()).unwrap();
+    let want = format!("helper started in {}\n", real_dir.display()).repeat(3);
+    assert_eq!(got, want, "helper output");
+}
+
+// parity: skipped TestCommandTransportReconnectKeepsSettings: gadk's McpTransport::Command is a CommandBuilder run on every connect, so there is no copied exec.Cmd/CommandTransport (Go newCommandTransport/reconnectTransport) whose fields could be dropped
+// parity: skipped TestCommandTransportSpecIsIndependent: gadk keeps no saved copy (Go commandTransport.spec) of the caller's exec.Cmd whose Args/Env/ExtraFiles slices could alias the caller's; the CommandBuilder builds a fresh command per connect
+// parity: skipped TestCommandTransportHelper: the child process of Go's TestCommandTransportReconnect (the test binary re-run with -test.run); the Rust port uses an `sh -c` child instead

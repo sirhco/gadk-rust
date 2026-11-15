@@ -15,7 +15,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-//! Live (bidi WebSocket) connection, pinned to genai v1.75.0 `live.go` / `live_converters.go`
+//! Live (bidi WebSocket) connection, pinned to genai v1.77.0 `live.go` / `live_converters.go`
 //! (Connect, the setup message, Session send/receive) and ADK-Go
 //! `internal/llminternal/googlellm/live_connection.go` (SendHistory, SendContent,
 //! SendRealtime, Recv). Every test runs against an in-process server, for both backends.
@@ -27,7 +27,10 @@ use std::sync::Arc;
 use bytes::Bytes;
 use common::ws::WsServer;
 use gadk_gemini::{ClientConfig, GeminiError, GeminiModel, LiveConnection, MapEnv, RealtimeInput};
-use gadk_genai::{Blob, Content, FunctionResponse, LiveConnectConfig};
+use gadk_genai::{
+    Blob, Content, FunctionResponse, LiveClientContextUpdate, LiveClientContextUpdateTools,
+    LiveConnectConfig,
+};
 use gadk_model::rest::test_util::bearer_credentials;
 use gadk_model::{Backend, HttpOptions, LiveConnErrorKind, Llm, LlmResponse};
 use google_cloud_auth::credentials::Credentials;
@@ -417,14 +420,14 @@ async fn live_send_realtime_mime_detection(#[case] backend: Backend) {
     );
 }
 
-/// The gemini-3.1 special cases of SendHistory / SendContent / SendRealtime: on the Gemini
-/// API, blobs go to `audio`/`video` and single-text content to realtime `text`; history is
-/// never sent (both backends).
+/// The Gemini 3.x Live special cases of SendHistory / SendContent / SendRealtime: on both
+/// backends (Go d8e47448), blobs go to `audio`/`video` and single-text content to realtime
+/// `text`; history is never sent to a gemini-3.1 model.
 #[rstest]
 #[case::gemini_api(Backend::GeminiApi)]
 #[case::vertex_ai(Backend::VertexAi)]
 #[tokio::test]
-async fn live_gemini_31_routing(#[case] backend: Backend) {
+async fn live_gemini_3x_routing(#[case] backend: Backend) {
     let model = "gemini-3.1-flash-live";
     let server = WsServer::start(vec![]).await;
     let conn = connect_with(&server, backend, model, LiveConnectConfig::default()).await;
@@ -445,18 +448,11 @@ async fn live_gemini_31_routing(#[case] backend: Backend) {
         frames[0],
         json!({"setup": {"model": full_model(backend, model)}})
     );
-    let expected = match backend {
-        Backend::GeminiApi => vec![
-            json!({"realtimeInput": {"text": "q"}}),
-            json!({"realtimeInput": {"video": {"data": b64(&PNG), "mimeType": "image/png"}}}),
-            json!({"realtimeInput": {"audio": {"data": b64(&[1]), "mimeType": "audio/pcm"}}}),
-        ],
-        Backend::VertexAi => vec![
-            json!({"clientContent": {"turns": [{"role": "user", "parts": [{"text": "q"}]}], "turnComplete": true}}),
-            json!({"realtimeInput": {"mediaChunks": [{"data": b64(&PNG), "mimeType": "image/png"}]}}),
-            json!({"realtimeInput": {"mediaChunks": [{"data": b64(&[1]), "mimeType": "audio/pcm"}]}}),
-        ],
-    };
+    let expected = vec![
+        json!({"realtimeInput": {"text": "q"}}),
+        json!({"realtimeInput": {"video": {"data": b64(&PNG), "mimeType": "image/png"}}}),
+        json!({"realtimeInput": {"audio": {"data": b64(&[1]), "mimeType": "audio/pcm"}}}),
+    ];
     assert_eq!(frames[1..].to_vec(), expected);
 }
 
@@ -762,4 +758,151 @@ async fn live_connect_live_dial_failure_is_not_resumable(#[case] backend: Backen
         model_err.to_string().starts_with("live error: Connect to "),
         "{model_err}"
     );
+}
+
+// ---- genai v1.77.0: the expected frames and errors are what genai v1.77.0 itself sends
+// (captured from `Live.Connect` / `Session.SendContextUpdate` / `Session.SendToolResponse`
+// against an in-process WebSocket server).
+
+const GEMINI_ONLY: &str = "parameter is only supported in Gemini Developer API mode, not in Gemini Enterprise Agent Platform mode.";
+
+/// genai v1.77.0 `LiveConnectConfig.Labels` go to `setup.labels` on both backends.
+#[rstest]
+#[case::gemini_api(Backend::GeminiApi)]
+#[case::vertex_ai(Backend::VertexAi)]
+#[tokio::test]
+async fn live_setup_labels(#[case] backend: Backend) {
+    let server = WsServer::start(vec![]).await;
+    let cfg = LiveConnectConfig {
+        labels: [("team", "a"), ("env", "dev")]
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect(),
+        ..Default::default()
+    };
+    let _conn = connect_with(&server, backend, "gemini-live-2.5-flash", cfg).await;
+    let frames = server.frames(1).await;
+    assert_eq!(
+        frames[0],
+        json!({"setup": {
+            "labels": {"env": "dev", "team": "a"},
+            "model": full_model(backend, "gemini-live-2.5-flash"),
+        }})
+    );
+}
+
+/// genai v1.77.0 `SendContextUpdate`: the system instruction and each tool go through the
+/// backend's content and tool converters; a set but empty tools wrapper is `{}`; an empty
+/// update is `{}`.
+#[rstest]
+#[case::gemini_api(Backend::GeminiApi)]
+#[case::vertex_ai(Backend::VertexAi)]
+#[tokio::test]
+async fn live_send_context_update_frames(#[case] backend: Backend) {
+    let server = WsServer::start(vec![]).await;
+    let conn = connect(&server, backend).await;
+    let tools: Vec<gadk_genai::Tool> = serde_json::from_value(json!([
+        {"functionDeclarations": [{"name": "f", "description": "d"}]},
+        {"googleSearch": {}},
+    ]))
+    .unwrap();
+    conn.send_context_update(LiveClientContextUpdate {
+        system_instruction: Some(Content::from_text("be brief", "user")),
+        tools: Some(LiveClientContextUpdateTools { tools }),
+    })
+    .await
+    .unwrap();
+    conn.send_context_update(LiveClientContextUpdate {
+        tools: Some(LiveClientContextUpdateTools::default()),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    conn.send_context_update(LiveClientContextUpdate::default())
+        .await
+        .unwrap();
+
+    let frames = server.frames(4).await;
+    assert_eq!(
+        frames[1..].to_vec(),
+        vec![
+            json!({"contextUpdate": {
+                "systemInstruction": {"parts": [{"text": "be brief"}], "role": "user"},
+                "tools": {"tools": [
+                    {"functionDeclarations": [{"description": "d", "name": "f"}]},
+                    {"googleSearch": {}},
+                ]},
+            }}),
+            json!({"contextUpdate": {"tools": {}}}),
+            json!({"contextUpdate": {}}),
+        ]
+    );
+}
+
+/// The context update's tools use `toolTo{Mldev,Vertex}`: `fileSearch` is Gemini API only.
+#[rstest]
+#[case::gemini_api(Backend::GeminiApi)]
+#[case::vertex_ai(Backend::VertexAi)]
+#[tokio::test]
+async fn live_send_context_update_converts_tools(#[case] backend: Backend) {
+    let server = WsServer::start(vec![]).await;
+    let conn = connect(&server, backend).await;
+    let tools: Vec<gadk_genai::Tool> = serde_json::from_value(json!([{"fileSearch": {}}])).unwrap();
+    let got = conn
+        .send_context_update(LiveClientContextUpdate {
+            tools: Some(LiveClientContextUpdateTools { tools }),
+            ..Default::default()
+        })
+        .await;
+    match backend {
+        Backend::GeminiApi => {
+            got.unwrap();
+            let frames = server.frames(2).await;
+            assert_eq!(
+                frames[1],
+                json!({"contextUpdate": {"tools": {"tools": [{"fileSearch": {}}]}}})
+            );
+        }
+        Backend::VertexAi => {
+            let err = got.unwrap_err().to_string();
+            assert!(err.contains(&format!("fileSearch {GEMINI_ONLY}")), "{err}");
+        }
+    }
+}
+
+/// genai v1.77.0 `liveClientToolResponseToVertex`: on Vertex AI a function response's
+/// `willContinue` and a part's `mediaProcessing` are rejected; the Gemini API sends the tool
+/// response as is.
+#[rstest]
+#[case::gemini_api(Backend::GeminiApi)]
+#[case::vertex_ai(Backend::VertexAi)]
+#[tokio::test]
+async fn live_tool_response_vertex_rejects_gemini_only_fields(#[case] backend: Backend) {
+    let server = WsServer::start(vec![]).await;
+    let conn = connect(&server, backend).await;
+    let media = json!({"id": "c1", "name": "f", "response": {"r": 1},
+        "parts": [{"inlineData": {"data": "dg==", "mimeType": "video/mp4"}, "mediaProcessing": "STATIC"}]});
+    let will_continue = json!({"id": "c1", "name": "f", "willContinue": false});
+    let plain = json!({"id": "c1", "name": "f", "response": {"r": 1}, "scheduling": "INTERRUPT"});
+    let mut sent = vec![];
+    for (fr, field) in [
+        (media, Some("mediaProcessing")),
+        (will_continue, Some("willContinue")),
+        (plain, None),
+    ] {
+        let typed: FunctionResponse = serde_json::from_value(fr.clone()).unwrap();
+        let got = conn.send_tool_response(vec![typed]).await;
+        match (backend, field) {
+            (Backend::VertexAi, Some(field)) => {
+                let err = got.unwrap_err().to_string();
+                assert!(err.contains(&format!("{field} {GEMINI_ONLY}")), "{err}");
+            }
+            _ => {
+                got.unwrap();
+                sent.push(json!({"toolResponse": {"functionResponses": [fr]}}));
+            }
+        }
+    }
+    let frames = server.frames(1 + sent.len()).await;
+    assert_eq!(frames[1..].to_vec(), sent);
 }

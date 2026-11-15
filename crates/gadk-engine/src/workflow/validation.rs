@@ -108,8 +108,9 @@ pub(crate) fn validate_unique_names(edges: &[Edge]) -> Result<(), WorkflowError>
 }
 
 /// Port of Go validateStartNodePresent (validation.go:140): at least one edge starts at START.
+/// An empty edge set is valid (Go 6522e5b4): the workflow runs and produces no output.
 pub(crate) fn validate_start_node_present(edges: &[Edge]) -> Result<(), WorkflowError> {
-    if edges.iter().any(|e| is_start(e.from.as_ref())) {
+    if edges.is_empty() || edges.iter().any(|e| is_start(e.from.as_ref())) {
         return Ok(());
     }
     Err(WorkflowError::sentinel(WorkflowErrorKind::NoStartNode))

@@ -25,6 +25,9 @@ use crate::error::OpenAiError;
 pub(crate) enum PartField {
     /// Go `PartFieldMedia`: `InlineData` and `FileData`.
     Media,
+    /// Go `PartFieldCodeExecution`: `ExecutableCode` and `CodeExecutionResult`, which both
+    /// APIs send as text (see [`code_execution_text`]).
+    CodeExecution,
 }
 
 /// Go `FlattenContentText`: the content's text parts joined with `\n`; `None` is `""`. A part
@@ -107,6 +110,7 @@ pub(crate) fn unsupported_payload(part: &Part, emitted: &[PartField]) -> Option<
         speech_metadata,
     } = part;
     let emits_media = emitted.contains(&PartField::Media);
+    let emits_code = emitted.contains(&PartField::CodeExecution);
     // A qualifier is harmless only while nothing is sent for it to qualify: on a part whose
     // media an API emits, no wire field carries it, so it is reported by name.
     let qualifies_sent_media = emits_media && (inline_data.is_some() || file_data.is_some());
@@ -116,8 +120,11 @@ pub(crate) fn unsupported_payload(part: &Part, emitted: &[PartField]) -> Option<
             "MediaResolution",
             qualifies_sent_media && media_resolution.is_some(),
         ),
-        ("CodeExecutionResult", code_execution_result.is_some()),
-        ("ExecutableCode", executable_code.is_some()),
+        (
+            "CodeExecutionResult",
+            !emits_code && code_execution_result.is_some(),
+        ),
+        ("ExecutableCode", !emits_code && executable_code.is_some()),
         ("FileData", !emits_media && file_data.is_some()),
         ("InlineData", !emits_media && inline_data.is_some()),
         (
@@ -137,4 +144,30 @@ pub(crate) fn unsupported_payload(part: &Part, emitted: &[PartField]) -> Option<
     ]
     .into_iter()
     .find_map(|(name, set)| set.then_some(name))
+}
+
+/// Go `CodeExecutionText`: Gemini code-execution parts rendered as the fenced text
+/// adk-python's Responses converter sends, so an OpenAI model sharing the session can read
+/// the code and its output. The fence language is always python, whatever
+/// `ExecutableCode.language` says.
+///
+/// An empty code or output is still rendered: the part is present, and dropping it would
+/// hide that a run happened. A part carrying both fields renders the code first, then the
+/// result. A part with neither is `""`.
+pub(crate) fn code_execution_text(part: &Part) -> String {
+    let mut b = String::new();
+    if let Some(code) = &part.executable_code {
+        b.push_str("Code:```python\n");
+        b.push_str(&code.code);
+        b.push_str("\n```");
+    }
+    if let Some(result) = &part.code_execution_result {
+        if !b.is_empty() {
+            b.push('\n');
+        }
+        b.push_str("Execution Result:```code_output\n");
+        b.push_str(&result.output);
+        b.push_str("\n```");
+    }
+    b
 }

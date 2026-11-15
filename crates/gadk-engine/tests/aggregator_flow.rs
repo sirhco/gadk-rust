@@ -17,7 +17,10 @@
 //! Re-port of the three agent-flow tests of ADK-Go `internal/llminternal/stream_aggregator_test.go`
 //! (TestProgressiveSSEStreamingFunctionCalls, TestProgressiveSSEPreservesPartOrdering,
 //! TestPartialFunctionCallsNotExecutedInNoneStreamingMode) through LlmAgent + TestAgentRunner.
-//! The other aggregator tests live in crates/gadk-model/tests/aggregator.rs (1a).
+//! The other aggregator tests live in crates/gadk-model/tests/aggregator.rs (1a). Also the
+//! event-id tests of ADK-Go 0990f9e (TestProgressiveSSEPartialsShareEventID,
+//! TestProgressiveSSETextStreamSharesEventID, TestCompleteResponsesOfOneModelCallGetDistinctEventIDs,
+//! TestRecoveredModelErrorGetsItsOwnEventID).
 
 use std::any::Any;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -25,7 +28,9 @@ use std::sync::{Arc, Mutex};
 
 use futures::StreamExt;
 use futures::stream::{self, BoxStream};
-use gadk_agent::{Agent, AgentError, Context, RunConfig, StreamingMode, ToolError};
+use gadk_agent::{
+    Agent, AgentError, Context, OnModelErrorCallback, RunConfig, StreamingMode, ToolError,
+};
 use gadk_engine::llm::LlmAgentConfig;
 use gadk_engine::testutil::{TestAgentRunner, collect_events};
 use gadk_engine::tool::{FunctionTool, FunctionToolConfig};
@@ -422,4 +427,223 @@ async fn test_partial_function_calls_not_executed_in_none_streaming_mode() {
         })
         .count();
     assert_eq!(fr_events, 1, "Expected 1 function response event");
+}
+
+#[tokio::test]
+async fn test_progressive_sse_partials_share_event_id() {
+    let agent = weather_agent(
+        "weather_agent",
+        vec![
+            chunk(vec![text_part("Checking weather...", false)], None),
+            chunk(vec![weather_call("Tokyo")], None),
+            chunk(vec![weather_call("New York")], Some(FinishReason::Stop)),
+        ],
+    );
+    let events = run_with_mode(
+        agent,
+        Content::from_text("What is the weather?", ROLE_USER),
+        StreamingMode::Sse,
+    )
+    .await
+    .unwrap();
+
+    // Events 0-2 are the partial chunks of the first model call and event 3 is the
+    // aggregated response that completes them. Event 4 is the function response and event 5
+    // comes from a second model call.
+    assert_eq!(events.len(), 6, "events");
+    for i in 1..=3 {
+        assert_eq!(
+            events[i].id, events[0].id,
+            "events[{i}].ID, want the id of the partial events[0]"
+        );
+    }
+    assert_ne!(
+        events[4].id, events[0].id,
+        "function response events[4].ID, want an id different from the model response"
+    );
+    assert_ne!(
+        events[5].id, events[0].id,
+        "second model call events[5].ID, want an id different from the first call"
+    );
+}
+
+#[tokio::test]
+async fn test_progressive_sse_text_stream_shares_event_id() {
+    let agent = gadk_engine::llm::agent::new(LlmAgentConfig {
+        name: "text_stream_agent".into(),
+        model: Some(Arc::new(StreamingMockModel {
+            stream_chunks: vec![
+                chunk(vec![text_part("Hello ", false)], None),
+                chunk(vec![text_part("world", false)], None),
+                chunk(vec![text_part("!", false)], Some(FinishReason::Stop)),
+            ],
+            call_count: AtomicUsize::new(0),
+        })),
+        ..Default::default()
+    })
+    .unwrap();
+    let events = run_with_mode(
+        agent,
+        Content::from_text("Say hello.", ROLE_USER),
+        StreamingMode::Sse,
+    )
+    .await
+    .unwrap();
+
+    // Three partial chunks, then the aggregated "Hello world!".
+    assert_eq!(events.len(), 4, "events");
+    assert!(
+        !events[3].response.partial,
+        "events[3].Partial = true, want the aggregated final response"
+    );
+    for i in 1..=3 {
+        assert_eq!(
+            events[i].id, events[0].id,
+            "events[{i}].ID, want the id of the partial events[0]"
+        );
+    }
+}
+
+/// Port of Go `twoFinalResponsesModel`: two complete responses from its first call, text and
+/// then a function call, and a closing text from any later call.
+struct TwoFinalResponsesModel {
+    calls: AtomicUsize,
+}
+
+impl Llm for TwoFinalResponsesModel {
+    fn name(&self) -> &str {
+        "two-finals-mock"
+    }
+    fn generate_content(
+        &self,
+        _req: LlmRequest,
+        _stream: bool,
+    ) -> BoxStream<'static, Result<LlmResponse, ModelError>> {
+        let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+        let responses = if call == 1 {
+            vec![
+                Ok(chunk(
+                    vec![text_part("Let me check the weather.", false)],
+                    None,
+                )),
+                Ok(chunk(vec![weather_call("Tokyo")], Some(FinishReason::Stop))),
+            ]
+        } else {
+            vec![Ok(chunk(
+                vec![text_part("Done.", false)],
+                Some(FinishReason::Stop),
+            ))]
+        };
+        stream::iter(responses).boxed()
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+#[tokio::test]
+async fn test_complete_responses_of_one_model_call_get_distinct_event_i_ds() {
+    let tool = FunctionTool::new(
+        FunctionToolConfig::new("get_weather", "get weather for location"),
+        |_ctx: Context, args: GetWeatherArgs| async move {
+            Ok::<_, ToolError>(GetWeatherResult {
+                temperature: 22,
+                condition: "sunny".into(),
+                location: args.location,
+            })
+        },
+    )
+    .unwrap();
+    let agent = gadk_engine::llm::agent::new(LlmAgentConfig {
+        name: "distinct_id_agent".into(),
+        model: Some(Arc::new(TwoFinalResponsesModel {
+            calls: AtomicUsize::new(0),
+        })),
+        tools: vec![tool],
+        ..Default::default()
+    })
+    .unwrap();
+    let events = run_with_mode(
+        agent,
+        Content::from_text("What is the weather?", ROLE_USER),
+        StreamingMode::Sse,
+    )
+    .await
+    .unwrap();
+
+    // The text, the function call, the function response and "Done.".
+    assert_eq!(events.len(), 4, "events");
+    assert_ne!(
+        events[0].id, events[1].id,
+        "text and function call events share an ID, want distinct ids"
+    );
+}
+
+/// Port of Go `errorMidStreamModel`: streams a partial response, then an error, then a
+/// complete response.
+struct ErrorMidStreamModel;
+
+impl Llm for ErrorMidStreamModel {
+    fn name(&self) -> &str {
+        "error-mid-stream-mock"
+    }
+    fn generate_content(
+        &self,
+        _req: LlmRequest,
+        _stream: bool,
+    ) -> BoxStream<'static, Result<LlmResponse, ModelError>> {
+        stream::iter(vec![
+            Ok(LlmResponse {
+                partial: true,
+                ..chunk(vec![text_part("par1", false)], None)
+            }),
+            Err(ModelError::Other("boom".into())),
+            Ok(chunk(
+                vec![text_part("after error", false)],
+                Some(FinishReason::Stop),
+            )),
+        ])
+        .boxed()
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+// parity: adapted: Go's "error with a partial response" case yields a response together with
+// the error; a gadk model stream item is a response or an error, so only the case without a
+// response is expressible.
+#[tokio::test]
+async fn test_recovered_model_error_gets_its_own_event_id() {
+    let recover: OnModelErrorCallback = Arc::new(|_, _, _| {
+        Box::pin(async {
+            Ok(Some(LlmResponse {
+                content: Some(Content::from_text("recovered", ROLE_MODEL)),
+                ..Default::default()
+            }))
+        })
+    });
+    let agent = gadk_engine::llm::agent::new(LlmAgentConfig {
+        name: "recovering_agent".into(),
+        model: Some(Arc::new(ErrorMidStreamModel)),
+        on_model_error_callbacks: vec![recover],
+        ..Default::default()
+    })
+    .unwrap();
+    let events = run_with_mode(
+        agent,
+        Content::from_text("Hi.", ROLE_USER),
+        StreamingMode::Sse,
+    )
+    .await
+    .unwrap();
+
+    // The partial "par1", the recovered response, then "after error". The last two are
+    // saved, so their ids must differ.
+    assert_eq!(events.len(), 3, "events");
+    assert_eq!(part(&events[1], 0).text, "recovered", "events[1] text");
+    assert_ne!(
+        events[2].id, events[1].id,
+        "events[2].ID, want an id different from the recovered events[1]"
+    );
 }

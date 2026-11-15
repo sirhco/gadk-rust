@@ -29,7 +29,6 @@ use gadk_agent::{
 };
 use gadk_session::Event;
 use parking_lot::Mutex;
-use serde_json::{Map, Value};
 
 use super::auth::{
     CallIdentity, CredentialCell, card_fetch_http_client, card_sends_in_clear, credential_scope,
@@ -48,7 +47,7 @@ use super::run_processor::{RunProcessor, converted_view};
 use crate::Error;
 use crate::convert::{
     A2APartConverter, GenAIPartConverter, new_remote_agent_event, stream_meta, stream_task_info,
-    to_adk_meta_key, transfer_to_agent_from_meta,
+    transfer_to_agent_from_meta,
 };
 use crate::error::to_a2a_error;
 
@@ -70,7 +69,10 @@ pub type A2AEventConverter = Arc<
         + Sync,
 >;
 
-/// Go `AfterA2ARequestCallback`: an event replaces the converted one.
+/// Go `AfterA2ARequestCallback`: an event replaces the converted one. The default converter
+/// passes no session event with the error on a transport or conversion failure, so a callback
+/// must check the event before use; an event returned together with an error by a
+/// `before_request_callbacks` entry or a custom `converter` is passed on as is.
 pub type AfterA2ARequestCallback = Arc<
     dyn Fn(
             &Context,
@@ -110,7 +112,8 @@ pub struct A2AConfig {
     pub before_agent_callbacks: Vec<BeforeAgentCallback>,
     /// Go `BeforeRequestCallbacks`.
     pub before_request_callbacks: Vec<BeforeA2ARequestCallback>,
-    /// Go `Converter`; `None` → `to_session_event_with_parts`.
+    /// Go `Converter`; `None` → `to_session_event_with_parts`, and transport and conversion
+    /// errors are returned from the run.
     pub converter: Option<A2AEventConverter>,
     /// Go `AfterRequestCallbacks`.
     pub after_request_callbacks: Vec<AfterA2ARequestCallback>,
@@ -246,7 +249,7 @@ impl RemoteAgent {
             let card = match with_auth_scope(id.clone(), resolve_agent_card(&self.server_config)).await {
                 Ok(card) => card,
                 Err(err) => {
-                    yield Ok(to_error_event(&ctx, &format!("agent card resolution failed: {err}")));
+                    yield Err(agent_error(Error::wrap("agent card resolution failed", err)));
                     return;
                 }
             };
@@ -274,7 +277,7 @@ impl RemoteAgent {
             {
                 Ok(client) => client,
                 Err(err) => {
-                    yield Ok(to_error_event(&ctx, &format!("sender creation failed: {err}")));
+                    yield Err(agent_error(Error::wrap("sender creation failed", err)));
                     return;
                 }
             };
@@ -286,7 +289,7 @@ impl RemoteAgent {
             let msg = match new_message(&ctx, &cfg).await {
                 Ok(msg) => msg,
                 Err(err) => {
-                    yield Ok(to_error_event(&ctx, &format!("message creation failed: {err}")));
+                    yield Err(agent_error(Error::wrap("message creation failed", err)));
                     guard.finish().await;
                     return;
                 }
@@ -700,18 +703,6 @@ pub(crate) async fn new_message(
 /// Go's empty-string-means-absent for message IDs.
 fn non_empty(s: String) -> Option<String> {
     (!s.is_empty()).then_some(s)
-}
-
-/// Go `toErrorEvent`: a turn-complete event carrying `err` as its error message and under
-/// `a2a:error`.
-pub(crate) fn to_error_event(ctx: &InvocationContext, err: &str) -> Event {
-    let mut event = new_remote_agent_event(ctx);
-    event.response.error_message = err.to_owned();
-    let mut meta = Map::new();
-    meta.insert(to_adk_meta_key("error"), Value::String(err.to_owned()));
-    event.response.custom_metadata = meta;
-    event.response.turn_complete = true;
-    event
 }
 
 /// Go `destroy`.

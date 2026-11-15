@@ -632,7 +632,7 @@ async fn test_run_node_with_use_as_output_second_delegation_returns_error() {
     );
     assert_eq!(
         err.to_string(),
-        "workflow: dynamic child orch/c2@1: workflow: parent already has a use_as_output child: orch already delegates to c1"
+        "workflow: dynamic child orch/c2@1: workflow: parent already has a use_as_output delegate: orch already delegates to c1"
     );
 }
 

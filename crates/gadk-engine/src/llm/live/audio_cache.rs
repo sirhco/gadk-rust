@@ -177,10 +177,11 @@ async fn flush_cache(
 
     let sess = ctx.session();
     let artifact_ref = format!(
-        "artifact://{}/{}/{}/_adk_live/{}#{}",
+        "artifact://{}/{}/{}/{}/{}#{}",
         sess.app_name(),
         sess.user_id(),
         sess.id(),
+        gadk_model::LIVE_ARTIFACT_NAMESPACE,
         filename,
         resp.version
     );

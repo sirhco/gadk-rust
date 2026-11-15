@@ -604,10 +604,120 @@ async fn test_model_respects_request_model() {
     }
 }
 
+/// Go `TestModel_GenerateWithoutCandidates`: a response without candidates is converted rather
+/// than failed, with and without streaming.
+#[tokio::test]
+async fn test_model_generate_without_candidates() {
+    let cases = [
+        (
+            "blocked_prompt",
+            r#"{"promptFeedback":{"blockReason":"PROHIBITED_CONTENT","blockReasonMessage":"The prompt was blocked."}}"#,
+            "PROHIBITED_CONTENT",
+            "The prompt was blocked.",
+        ),
+        (
+            "no_prompt_feedback",
+            r#"{"modelVersion":"gemini-2.5-flash"}"#,
+            "",
+            "",
+        ),
+    ];
+    for (name, body, want_code, want_message) in cases {
+        for stream in [false, true] {
+            let http = if stream {
+                FakeHttp::sse(&format!("data: {body}\n\n"))
+            } else {
+                FakeHttp::json(body)
+            };
+            let cfg = ClientConfig {
+                api_key: Some("test-key".into()),
+                http_client: Some(http),
+                env: env(&[]),
+                ..Default::default()
+            };
+            let model = GeminiModel::new("gemini-2.5-flash", cfg).await.unwrap();
+            let req = LlmRequest {
+                contents: text("hello"),
+                ..Default::default()
+            };
+            let mut fin: Option<LlmResponse> = None;
+            let mut s = model.generate_content(req, stream);
+            while let Some(item) = s.next().await {
+                let resp = item.unwrap_or_else(|e| {
+                    panic!("{name}/stream={stream}: GenerateContent() error = {e}")
+                });
+                if !resp.partial {
+                    fin = Some(resp);
+                }
+            }
+            let fin = fin.unwrap_or_else(|| {
+                panic!("{name}/stream={stream}: GenerateContent() yielded no final response")
+            });
+            assert_eq!(
+                (fin.error_code.as_str(), fin.error_message.as_str()),
+                (want_code, want_message),
+                "{name}/stream={stream}: final response error_code, error_message"
+            );
+            assert!(
+                fin.content.as_ref().is_none_or(|c| c.parts.is_empty()),
+                "{name}/stream={stream}: final response has parts, want none"
+            );
+        }
+    }
+}
+
+/// Go `TestModel_MaybeAppendUserContent`. Go calls the unexported `maybeAppendUserContent`
+/// directly; the Rust function is private to the crate, so the same cases go through
+/// `generate_content` and read the `contents` that reach the wire.
+// parity: adapted: the private `maybe_append_user_content` is observed through the request body.
+#[tokio::test]
+async fn test_model_maybe_append_user_content() {
+    let cases = [
+        (
+            "user turn last",
+            vec![Content::from_text("Hello", "user")],
+            vec![json!({"parts": [{"text": "Hello"}], "role": "user"})],
+        ),
+        (
+            "model turn last",
+            vec![
+                Content::from_text("Hello", "user"),
+                Content::from_text("Response", "model"),
+            ],
+            vec![
+                json!({"parts": [{"text": "Hello"}], "role": "user"}),
+                json!({"parts": [{"text": "Response"}], "role": "model"}),
+                json!({"parts": [{"text": CONTINUE_TEXT}], "role": "user"}),
+            ],
+        ),
+    ];
+    for (name, contents, want) in cases {
+        let http = FakeHttp::json(OK_JSON);
+        let model = GeminiModel::new("gemini-2.5-flash", vertex_config(http.clone()))
+            .await
+            .unwrap();
+        let req = LlmRequest {
+            contents,
+            ..Default::default()
+        };
+        for r in model.generate_content(req, false).collect::<Vec<_>>().await {
+            r.unwrap();
+        }
+        let body = http.last_body();
+        assert_eq!(
+            body["contents"].as_array().unwrap(),
+            &want,
+            "{name}: contents on the wire"
+        );
+    }
+}
+
 // ---- extras (not in the Go suite) ----------------------------------------------------
 
+/// An empty unary body (no candidates, no prompt feedback) is an empty turn, not an error
+/// (Go 15e9d4cd: every response goes through `Genai2LLMResponse`).
 #[tokio::test]
-async fn model_empty_candidates_errors() {
+async fn model_empty_candidates_is_an_empty_turn() {
     let http = FakeHttp::json("{}");
     let model = GeminiModel::new("gemini-2.5-flash", vertex_config(http))
         .await
@@ -623,11 +733,9 @@ async fn model_empty_candidates_errors() {
         .collect()
         .await;
     assert_eq!(out.len(), 1);
-    assert!(
-        matches!(out[0], Err(ModelError::EmptyResponse)),
-        "got {:?}",
-        out[0]
-    );
+    let resp = out[0].as_ref().unwrap_or_else(|e| panic!("got error {e}"));
+    assert!(resp.error_code.is_empty() && resp.error_message.is_empty());
+    assert!(resp.content.as_ref().is_none_or(|c| c.parts.is_empty()));
 }
 
 #[tokio::test]

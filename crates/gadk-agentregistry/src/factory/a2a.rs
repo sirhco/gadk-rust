@@ -290,9 +290,19 @@ fn major(version: &str) -> &str {
     version.split('.').next().unwrap_or(version)
 }
 
+/// The major of A2A 0.3 (Go `a2av0.Version`), the only older protocol Go's factory speaks.
+const A2A_V0_MAJOR: &str = "0";
+
 /// The card [`CompatClientProvider`] hands to its factory: every interface whose binding is
-/// `JSONRPC` or `HTTP+JSON` and whose non-empty protocol version's major differs from
-/// `a2a::VERSION`'s gets `protocol_version = a2a::VERSION`; everything else is unchanged.
+/// `JSONRPC` or `HTTP+JSON` and whose protocol version is a 0.x version gets
+/// `protocol_version = a2a::VERSION`; everything else is unchanged, so an interface of an
+/// unknown major (such as 2.0) finds no transport and is refused, as in Go (869020a1).
+///
+/// Divergence (ledger 5c): Go 869020a1 registers a2a-go's `a2av0` transports and speaks the A2A
+/// 0.3 wire format (`A2A-Version: 0.3`, JSON-RPC 0.3 method names, HTTP+JSON under `/v1`) to a
+/// 0.3.x interface (and to a registry record without a version, assumed 0.3.0); a2a-rs has no
+/// A2A 0.3 client transport, so gadk speaks A2A 1.0 to such an interface (`A2A-Version: 1.0`,
+/// 1.0 routes and payloads), which reaches a server that serves 1.0 at that interface.
 pub(crate) fn compat_card(card: &a2a::AgentCard) -> a2a::AgentCard {
     let mut out = card.clone();
     for iface in &mut out.supported_interfaces {
@@ -300,7 +310,7 @@ pub(crate) fn compat_card(card: &a2a::AgentCard) -> a2a::AgentCard {
             || iface.protocol_binding == a2a::TRANSPORT_PROTOCOL_HTTP_JSON;
         if compat_binding
             && !iface.protocol_version.is_empty()
-            && major(&iface.protocol_version) != major(a2a::VERSION)
+            && major(&iface.protocol_version) == A2A_V0_MAJOR
         {
             iface.protocol_version = a2a::VERSION.to_owned();
         }
@@ -308,8 +318,8 @@ pub(crate) fn compat_card(card: &a2a::AgentCard) -> a2a::AgentCard {
     out
 }
 
-/// The remote agent's client provider: Go `a2aClientFactory` (JSON-RPC and REST transports
-/// over the egress client, compat transports for the card's older versions) as a gadk-a2a
+/// The remote agent's client provider: Go `a2aClientFactory` (A2A 1.0 JSON-RPC and REST
+/// transports over the egress client; 0.3 interfaces through [`compat_card`]) as a gadk-a2a
 /// provider.
 pub(crate) struct CompatClientProvider {
     /// `gadk_a2a::remoteagent::new_a2a_client_provider` over an `A2AClientFactory` with the

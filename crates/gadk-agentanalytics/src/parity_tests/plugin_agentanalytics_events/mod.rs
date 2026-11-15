@@ -112,6 +112,7 @@ async fn before_tool(
         .expect("before-tool callback");
     cb(ctx.clone(), Arc::clone(t), args.clone())
         .await
+        .1
         .expect("BeforeToolCallback");
 }
 

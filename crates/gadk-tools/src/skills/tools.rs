@@ -53,7 +53,7 @@ pub(crate) struct ListSkillsArgs {}
 /// Go `ListSkillsResult`.
 #[derive(Debug, Serialize, JsonSchema)]
 pub(crate) struct ListSkillsResult {
-    #[serde(rename = "skills")]
+    #[serde(rename = "result")]
     pub(crate) skills_xml: String,
 }
 
@@ -66,8 +66,8 @@ pub(crate) fn list_skills_input_schema() -> Value {
 pub(crate) fn list_skills_output_schema() -> Value {
     json!({
         "type": ["null", "object"],
-        "properties": {"skills": {"type": "string"}},
-        "required": ["skills"],
+        "properties": {"result": {"type": "string"}},
+        "required": ["result"],
         "additionalProperties": false
     })
 }

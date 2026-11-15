@@ -2,63 +2,10 @@
   "json_body": "A2A answers are a2a-rs's JSON (compact, a2a-rs's key order; Go: a2a-go's, the card pretty-printed), and the card endpoint adds `Cache-Control: max-age=300` and an `ETag` (the card version).",
   "deltas": [
     {
-      "path": "/response/body/result",
-      "fixture": {
-        "task": {
-          "artifacts": [
-            {
-              "artifactId": "<uuid#1>",
-              "parts": [
-                {
-                  "text": "Hello! How can I help?"
-                }
-              ]
-            }
-          ],
-          "contextId": "<uuid#2>",
-          "history": [
-            {
-              "messageId": "msg-1",
-              "parts": [
-                {
-                  "text": "hello"
-                }
-              ],
-              "role": "ROLE_USER"
-            }
-          ],
-          "id": "<uuid#3>",
-          "metadata": {
-            "adk_app_name": "assistant",
-            "adk_session_id": "<uuid#2>",
-            "adk_user_id": "A2A_USER_<uuid#2>",
-            "https://google.github.io/adk-docs/a2a/a2a-extension/": true
-          },
-          "status": {
-            "state": "TASK_STATE_COMPLETED",
-            "timestamp": "<t>"
-          }
-        }
-      },
-      "divergence": "A2A v1 requests without an `A2A-Version` header are refused with JSON-RPC error `-32009` (`version not supported: 0.3`; a2a-rs reads a missing header as 0.3); a2a-go serves them as v1."
-    },
-    {
-      "path": "/response/body/error",
-      "actual": {
-        "code": -32009,
-        "data": [
-          {
-            "@type": "type.googleapis.com/google.rpc.ErrorInfo",
-            "domain": "a2a-protocol.org",
-            "metadata": {
-              "timestamp": "<t>"
-            },
-            "reason": "VERSION_NOT_SUPPORTED"
-          }
-        ],
-        "message": "version not supported: 0.3"
-      },
-      "divergence": "A2A v1 requests without an `A2A-Version` header are refused with JSON-RPC error `-32009` (`version not supported: 0.3`; a2a-rs reads a missing header as 0.3); a2a-go serves them as v1."
+      "path": "/response/body/error/message",
+      "fixture": "this version is not supported: requested \"0.3\", served \"1.0\"",
+      "actual": "version not supported: 0.3",
+      "divergence": "A2A v1 requests without an `A2A-Version` header are refused with a2a-rs's JSON-RPC error message `version not supported: 0.3` (a2a-go v2.7.0: `this version is not supported: requested \"0.3\", served \"1.0\"`)."
     }
   ]
 }

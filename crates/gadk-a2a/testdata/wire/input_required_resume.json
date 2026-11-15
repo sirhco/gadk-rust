@@ -16,7 +16,7 @@
         "name": "approver",
         "skills": [
           {
-            "description": "Requests approval before acting. Ask for approval first.",
+            "description": "Requests approval before acting.",
             "id": "approver",
             "name": "model",
             "tags": [
@@ -286,7 +286,9 @@
         {
           "events": [
             {
-              "actions": {},
+              "actions": {
+                "skipSummarization": true
+              },
               "author": "remote",
               "content": {
                 "parts": [
@@ -614,7 +616,7 @@
         "name": "approver",
         "skills": [
           {
-            "description": "Requests approval before acting. Ask for approval first.",
+            "description": "Requests approval before acting.",
             "id": "approver",
             "name": "model",
             "tags": [
@@ -780,7 +782,7 @@
                 },
                 "headers": {
                   "A2a-Version": "1.0",
-                  "Accept": "application/json",
+                  "Accept": "application/a2a+json, application/json",
                   "Content-Type": "application/json"
                 },
                 "method": "POST",
@@ -857,7 +859,7 @@
                   }
                 },
                 "headers": {
-                  "Content-Type": "application/json"
+                  "Content-Type": "application/a2a+json"
                 },
                 "status": 200
               }
@@ -876,7 +878,9 @@
         {
           "events": [
             {
-              "actions": {},
+              "actions": {
+                "skipSummarization": true
+              },
               "author": "remote",
               "content": {
                 "parts": [
@@ -1049,7 +1053,7 @@
                 },
                 "headers": {
                   "A2a-Version": "1.0",
-                  "Accept": "application/json",
+                  "Accept": "application/a2a+json, application/json",
                   "Content-Type": "application/json"
                 },
                 "method": "POST",
@@ -1155,7 +1159,7 @@
                   }
                 },
                 "headers": {
-                  "Content-Type": "application/json"
+                  "Content-Type": "application/a2a+json"
                 },
                 "status": 200
               }
@@ -1839,7 +1843,7 @@
             },
             "headers": {
               "A2a-Version": "1.0",
-              "Accept": "application/json",
+              "Accept": "application/a2a+json, application/json",
               "Content-Type": "application/json"
             },
             "method": "POST",
@@ -1916,7 +1920,7 @@
               }
             },
             "headers": {
-              "Content-Type": "application/json"
+              "Content-Type": "application/a2a+json"
             },
             "status": 200
           }
@@ -1938,7 +1942,7 @@
             },
             "headers": {
               "A2a-Version": "1.0",
-              "Accept": "application/json",
+              "Accept": "application/a2a+json, application/json",
               "Content-Type": "application/json"
             },
             "method": "POST",
@@ -2063,7 +2067,7 @@
               }
             },
             "headers": {
-              "Content-Type": "application/json"
+              "Content-Type": "application/a2a+json"
             },
             "status": 200
           }
@@ -2098,7 +2102,7 @@
             },
             "headers": {
               "A2a-Version": "1.0",
-              "Accept": "application/json",
+              "Accept": "application/a2a+json, application/json",
               "Content-Type": "application/json"
             },
             "method": "POST",
@@ -2255,7 +2259,7 @@
               }
             },
             "headers": {
-              "Content-Type": "application/json"
+              "Content-Type": "application/a2a+json"
             },
             "status": 200
           }
@@ -2265,7 +2269,7 @@
             "body": null,
             "headers": {
               "A2a-Version": "1.0",
-              "Accept": "application/json"
+              "Accept": "application/a2a+json, application/json"
             },
             "method": "GET",
             "path": "/rest/tasks/<task-1>"
@@ -2419,7 +2423,7 @@
               }
             },
             "headers": {
-              "Content-Type": "application/json"
+              "Content-Type": "application/a2a+json"
             },
             "status": 200
           }

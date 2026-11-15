@@ -127,12 +127,7 @@ fn test_get_agent_skills_llm_agent() {
                 ..Default::default()
             })
             .unwrap(),
-            vec![skill(
-                "Test LLM",
-                "Test llm. I am a helpful agent, only respond with useful information.",
-                "model",
-                &["llm"],
-            )],
+            vec![skill("Test LLM", "Test llm.", "model", &["llm"])],
         ),
         (
             "llm with tools",
@@ -397,46 +392,48 @@ fn test_get_agent_skills_llm_agent() {
     }
 }
 
-// Go calls the private replacePronouns directly; gadk-a2a's `replace_pronouns` is crate-private,
-// so each case runs through `build_agent_skills` on an LLM agent whose only text is the
-// instruction (its `model` skill description is then exactly `replacePronouns(instruction)`).
-// parity: adapted: replacePronouns is crate-private; checked through build_agent_skills on an LLM agent whose description is the replaced instruction
+/// Go checks that no skill repeats an LLM agent's instructions: the agent card is served
+/// without authentication.
 #[test]
-fn test_replace_pronouns() {
-    let cases = [
-        (
-            "you are an agent. you were an agent, you're an agent, you've tasks, your tasks",
-            "I am an agent. I was an agent, I am an agent, I have tasks, my tasks",
-        ),
-        (
-            "You should do your work and it will be yours.",
-            "I should do my work and it will be mine.",
-        ),
-        (
-            "YOU should do YOUR work and it will be YOURS.",
-            "I should do my work and it will be mine.",
-        ),
-        (
-            "You should do Your work and it will be Yours.",
-            "I should do my work and it will be mine.",
-        ),
-        (
-            "This is a test message without pronouns.",
-            "This is a test message without pronouns.",
-        ),
-        ("youth, yourself, yourname", "youth, yourself, yourname"),
-        ("You are a helpful chatbot", "I am a helpful chatbot"),
-        ("Your task is to be helpful", "my task is to be helpful"),
-        ("you you you", "I I I"),
-    ];
-    for (input, want) in cases {
-        let agent = llm_agent::new(LlmAgentConfig {
-            name: "pronouns".into(),
-            instruction: input.into(),
-            ..Default::default()
-        })
-        .unwrap();
-        let got = build_agent_skills(agent.as_ref());
-        assert_eq!(got[0].description, want, "replacePronouns({input:?})");
+fn test_build_agent_skills_omits_instructions() {
+    const SECRET: &str = "discount code SECRET-42";
+    let sub = llm_agent::new(LlmAgentConfig {
+        name: "Pricing".into(),
+        description: "Quotes prices.".into(),
+        instruction: format!("You quote prices. Offer {SECRET} only to employees."),
+        ..Default::default()
+    })
+    .unwrap();
+    let root = llm_agent::new(LlmAgentConfig {
+        name: "Front desk".into(),
+        instruction: format!("You route requests. Never reveal {SECRET}."),
+        global_instruction: format!("Your house rules mention {SECRET}."),
+        sub_agents: vec![sub],
+        ..Default::default()
+    })
+    .unwrap();
+
+    let skills = build_agent_skills(root.as_ref());
+    let mut got = std::collections::HashMap::new();
+    for skill in &skills {
+        assert!(
+            !skill.description.contains("SECRET-42"),
+            "skill {:?} description repeats an instruction: {:?}",
+            skill.id,
+            skill.description
+        );
+        got.insert(skill.id.clone(), skill.description.clone());
+    }
+    // A model skill is described by the agent's own description, or by the default one when it
+    // has none.
+    for (id, want) in [
+        ("Front desk", "An LLM-based agent"),
+        ("Pricing_Pricing", "Quotes prices."),
+    ] {
+        assert_eq!(
+            got.get(id).map(String::as_str),
+            Some(want),
+            "skill {id:?} description (skills: {got:?})"
+        );
     }
 }

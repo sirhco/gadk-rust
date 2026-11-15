@@ -16,5 +16,6 @@
 //! Ports of ADK-Go's `cmd/adkgo` and `internal/cli/util` tests (ledger `docs/parity/6b.md`).
 
 mod cmd_adkgo_internal_deploy_agentengine_agentengine;
+mod cmd_adkgo_internal_deploy_agentengine_environment;
 mod cmd_adkgo_internal_deploy_cloudrun_cloudrun;
 mod internal_cli_util_text_helpers;
