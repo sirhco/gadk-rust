@@ -25,7 +25,9 @@
 // Table tests hold heterogeneous tuples.
 #![allow(clippy::type_complexity)]
 
+mod credentials;
 mod redaction;
+mod summary_caps;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -1462,6 +1464,7 @@ fn test_parts_collector_offloading() {
     }
 }
 
+// parity: adapted: Go's "Cloud Storage file with invalid UTF-8 in the URI" case has no Rust input (a &str is valid UTF-8)
 #[test]
 fn test_parts_collector_file_data_object_refs() {
     struct Case {
@@ -1530,6 +1533,7 @@ fn test_parts_collector_file_data_object_refs() {
             want_ref: None,
             want_truncated: true,
         },
+        // skipped case: "Cloud Storage file with invalid UTF-8 in the URI" — a Rust &str is valid UTF-8.
         Case {
             name: "no URI",
             offload: true,

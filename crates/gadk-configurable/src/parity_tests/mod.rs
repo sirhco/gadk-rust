@@ -20,7 +20,9 @@
 //! `fn test_<snake of TestName>` (`go_test_to_rust`).
 
 mod internal_configurable_configurable_utils;
+mod internal_configurable_configurable_utils_windows;
 mod internal_configurable_configurable_workflow;
+mod internal_configurable_configurable_workflow_ref;
 mod internal_configurable_conformance_recordplugin_record_plugin;
 mod internal_configurable_conformance_recordplugin_yaml_clean;
 mod internal_configurable_conformance_replayplugin_replay_plugin;
