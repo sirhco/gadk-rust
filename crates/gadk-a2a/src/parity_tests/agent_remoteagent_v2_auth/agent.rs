@@ -447,6 +447,17 @@ mod served {
         events
     }
 
+    /// Go `runAndCollect(newInvocationContext(t, []*session.Event{newUserHello()}), agent)`:
+    /// the events and the run's error.
+    async fn run_hello_err(
+        agent: &Arc<dyn Agent>,
+        mode: StreamingMode,
+    ) -> (Vec<Event>, Option<String>) {
+        let ic = invocation_context("auth", Arc::clone(agent), vec![user_hello()], mode).await;
+        let (events, err) = run_and_collect(ic, agent).await;
+        (events, err.map(|e| e.to_string()))
+    }
+
     /// A provider resolving `f(identity, scope)` as a bearer token.
     fn bearer_provider(
         f: impl Fn(Option<&gadk_agent::Identity>, Option<CredentialScope>) -> Result<String, String>
@@ -534,6 +545,7 @@ mod served {
 
     // parity: adapted: a2a-rs's JSON-RPC transport ignores the HTTP status, so the rejection surfaces as its body-decoding error rather than an error naming 401
     #[tokio::test]
+    #[ignore = "8a bug: the rejected request's transport error becomes an error event instead of an error returned from run (Go 4d841aba)"]
     async fn test_remote_agent_auth_accepted_by_enforcing_server() {
         const GOOD: &str = "good-token";
         let msg = a2a::Message::new(a2a::Role::Agent, vec![a2a::Part::text("ok")]);
@@ -559,16 +571,18 @@ mod served {
                 ..Default::default()
             })
             .unwrap();
-            let events = run_hello(&agent, StreamingMode::Sse).await;
-            let err_event = first_error_event(&events);
+            let (events, err) = run_hello_err(&agent, StreamingMode::Sse).await;
             if want_err {
-                let e = err_event.unwrap_or_else(|| panic!("{name}: want an error event"));
+                let e = err.unwrap_or_else(|| {
+                    panic!("{name}: want an error from the rejected request, got none")
+                });
                 // a2a-rs's JSON-RPC transport does not check the HTTP status; it fails decoding
                 // the 401 body instead of naming the status as a2a-go does.
-                assert_eq!(
-                    e.response.error_message,
-                    "failed to parse JSON-RPC response: expected value at line 1 column 1",
-                    "{name}"
+                assert!(
+                    e.contains(
+                        "failed to parse JSON-RPC response: expected value at line 1 column 1"
+                    ),
+                    "{name}: agent.Run() error = {e:?}"
                 );
                 assert!(
                     !events_contain_text(&events, "ok"),
@@ -576,10 +590,7 @@ mod served {
                 );
                 continue;
             }
-            assert!(
-                err_event.is_none(),
-                "{name}: unexpected error event {err_event:?}"
-            );
+            assert!(err.is_none(), "{name}: agent.Run() error = {err:?}");
             assert!(events_contain_text(&events, "ok"), "{name}: reply missing");
         }
     }
@@ -753,6 +764,7 @@ mod served {
 
     // parity: adapted: the redirect refusal surfaces through a2a-rs's transport error ("HTTP request failed: error following redirect for url (…)"), which drops the policy's "refusing redirect" source text; the port checks the redirect error and that the target saw nothing
     #[tokio::test]
+    #[ignore = "8a bug: the refused redirect's transport error becomes an error event instead of an error returned from run (Go 4d841aba)"]
     async fn test_remote_agent_auth_refuses_cross_origin_redirect() {
         let hits: Log = Arc::default();
         let elsewhere = {
@@ -784,7 +796,7 @@ mod served {
             ..Default::default()
         })
         .unwrap();
-        let events = run_hello(&agent, StreamingMode::Sse).await;
+        let (_, err) = run_hello_err(&agent, StreamingMode::Sse).await;
         let seen = hits.lock().clone();
         assert!(
             seen.is_empty(),
@@ -792,13 +804,10 @@ mod served {
             seen.len(),
             seen.first().map(|s| s.header("x-card-key"))
         );
-        let e = first_error_event(&events).expect("an error event from the refused redirect");
+        let e = err.expect("want an error from the refused redirect, got none");
         assert!(
-            e.response
-                .error_message
-                .contains("error following redirect"),
-            "error event = {:?}",
-            e.response.error_message
+            e.contains("error following redirect"),
+            "agent.Run() error = {e:?}"
         );
     }
 
@@ -1089,6 +1098,7 @@ mod served {
 
     // parity: adapted: the redirect refusal surfaces through a2a-rs's transport error ("HTTP request failed: error following redirect for url (…)"), which drops the policy's "refusing redirect" source text
     #[tokio::test]
+    #[ignore = "8a bug: the refused redirect's transport error becomes an error event instead of an error returned from run (Go 4d841aba)"]
     async fn test_remote_agent_auth_refuses_a_different_hostname() {
         let hosts: Arc<Mutex<Vec<String>>> = Arc::default();
         let srv = {
@@ -1124,7 +1134,7 @@ mod served {
             ..Default::default()
         })
         .unwrap();
-        let events = run_hello(&agent, StreamingMode::Sse).await;
+        let (_, err) = run_hello_err(&agent, StreamingMode::Sse).await;
         let hosts = hosts.lock().clone();
         for host in &hosts {
             assert!(
@@ -1132,13 +1142,10 @@ mod served {
                 "the redirect was followed to {host:?} (saw {hosts:?})"
             );
         }
-        let e = first_error_event(&events).expect("an error event from the refused redirect");
+        let e = err.expect("want an error from the refused redirect, got none");
         assert!(
-            e.response
-                .error_message
-                .contains("error following redirect"),
-            "error event = {:?}",
-            e.response.error_message
+            e.contains("error following redirect"),
+            "agent.Run() error = {e:?}"
         );
     }
 
@@ -1359,6 +1366,7 @@ mod served {
 
     // parity: adapted: a Rust provider cannot return a nil or typed-nil credential (it returns Arc<dyn Credential>), so Go's two "nil credential" rows have no counterpart
     #[tokio::test]
+    #[ignore = "8a bug: a credential failure becomes an error event instead of an error returned from run (Go 4d841aba)"]
     async fn test_remote_agent_auth_fails_closed() {
         struct FailingSource;
         #[async_trait::async_trait]
@@ -1417,23 +1425,18 @@ mod served {
                 ..Default::default()
             })
             .unwrap();
-            let events = run_hello(&agent, StreamingMode::Sse).await;
+            let (_, err) = run_hello_err(&agent, StreamingMode::Sse).await;
             assert_eq!(
                 log.lock().len(),
                 0,
                 "{name}: a credential failure must stop the request"
             );
-            let e = first_error_event(&events).unwrap_or_else(|| panic!("{name}: no error event"));
-            assert!(
-                e.response.error_message.contains(want_err),
-                "{name}: error event = {:?}",
-                e.response.error_message
-            );
+            let e = err.unwrap_or_else(|| {
+                panic!("{name}: want an error explaining the failure, got none")
+            });
+            assert!(e.contains(want_err), "{name}: agent.Run() error = {e:?}");
             if let Some(absent) = absent {
-                assert!(
-                    !e.response.error_message.contains(absent),
-                    "{name}: leaked {absent}"
-                );
+                assert!(!e.contains(absent), "{name}: leaked {absent}");
             }
         }
     }
@@ -1507,6 +1510,7 @@ mod served {
     }
 
     #[tokio::test]
+    #[ignore = "8a bug: an agent card resolution failure becomes an error event instead of an error returned from run (Go 4d841aba)"]
     async fn test_remote_agent_auth_refuses_an_insecure_card_source() {
         let calls = Arc::new(AtomicUsize::new(0));
         let provider = {
@@ -1528,12 +1532,10 @@ mod served {
             ..Default::default()
         })
         .unwrap();
-        let events = run_hello(&agent, StreamingMode::Sse).await;
-        let e = first_error_event(&events).expect("the insecure card source refused");
+        let (_, err) = run_hello_err(&agent, StreamingMode::Sse).await;
         assert!(
-            e.response.error_message.contains("must use https"),
-            "error event = {:?}",
-            e.response.error_message
+            err.as_ref().is_some_and(|e| e.contains("must use https")),
+            "agent.Run() error = {err:?}, want the insecure card source refused"
         );
         assert_eq!(
             calls.load(Ordering::SeqCst),

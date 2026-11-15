@@ -35,7 +35,10 @@ use gadk_server::rest::controllers::{RuntimeApiController, RuntimeApiControllerC
 use gadk_server::rest::testutil::wire_scenario::scenario_loader;
 use gadk_server::rest::testutil::{FakeSessionService, SessionKey, TestSession};
 use gadk_session::compaction::Config as CompactionConfig;
-use gadk_session::{CreateRequest, Event, InMemorySessionService, SessionService};
+use gadk_session::{
+    CreateRequest, DeleteRequest, Event, GetRequest, InMemorySessionService, ListRequest,
+    SessionError, SessionService,
+};
 use http::{Method, StatusCode};
 use serde_json::Value;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
@@ -229,6 +232,74 @@ async fn test_run_sse_handler() {
     }
 }
 
+/// Go `json.Marshal(models.RunAgentRequest{AppName: "testApp", UserId: "testUser", SessionId:
+/// session_id, Streaming: streaming, NewMessage: <user "Hello">})`.
+fn run_body(session_id: &str, streaming: bool) -> String {
+    let streaming = if streaming {
+        r#","streaming":true"#
+    } else {
+        ""
+    };
+    format!(
+        r#"{{"appName":"testApp","userId":"testUser","sessionId":"{session_id}","newMessage":{{"parts":[{{"text":"Hello"}}],"role":"user"}}{streaming}}}"#
+    )
+}
+
+/// Go `controller.RunSSEHandler` when `streaming`, else `NewErrorHandler(controller.RunHandler)`.
+async fn run_or_sse(controller: &RuntimeApiController, streaming: bool, body: &str) -> Response {
+    if streaming {
+        controller
+            .run_sse_handler(post("/run", body, Some("testUser")))
+            .await
+    } else {
+        controller
+            .run_handler(post("/run", body, Some("testUser")))
+            .await
+    }
+}
+
+#[tokio::test]
+#[ignore = "8a bug: with auto_create_session, /run and /run_sse still answer 404 for a missing session (validate_session_exists runs first); Go f6da03ab (#2106) skips the check"]
+async fn test_run_handlers_auto_create_session() {
+    // (name, streaming, autoCreateSession, wantStatus, wantSession)
+    let cases = [
+        ("run creates the session", false, true, 200, true),
+        ("run_sse creates the session", true, true, 200, true),
+        ("run without auto-create", false, false, 404, false),
+        ("run_sse without auto-create", true, false, 404, false),
+    ];
+    for (name, streaming, auto_create_session, want_status, want_session) in cases {
+        let sessions = Arc::new(InMemorySessionService::new());
+        let mut cfg = RuntimeApiControllerConfig::new(sessions.clone());
+        cfg.agent_loader = Some(Arc::new(SingleLoader::new(test_agent(
+            "testApp",
+            vec![Ok("Hello")],
+        ))));
+        cfg.sse_timeout = Timeout::After(Duration::from_secs(10));
+        cfg.auto_create_session = auto_create_session;
+        let controller = RuntimeApiController::new(cfg);
+
+        let resp = run_or_sse(&controller, streaming, &run_body("newSession", streaming)).await;
+        let (status, _, body) = parts(resp).await;
+
+        assert_eq!(status, want_status, "{name}: body: {body}");
+        let got = sessions
+            .get(GetRequest {
+                app_name: "testApp".into(),
+                user_id: "testUser".into(),
+                session_id: "newSession".into(),
+                ..Default::default()
+            })
+            .await;
+        assert_eq!(
+            got.is_ok(),
+            want_session,
+            "{name}: session exists after the run (Get: {:?})",
+            got.err()
+        );
+    }
+}
+
 #[tokio::test]
 // parity: adapted: decodeRequestBody is private, so the body goes through /run: a decoded
 // request reaches the session lookup (404 from the empty fake) instead of failing to decode (400)
@@ -309,6 +380,37 @@ async fn test_new_runtime_api_controller_carries_compaction() {
 }
 
 #[tokio::test]
+#[ignore = "8a bug: /run answers `null` for a run that yields no events; Go 0159a2e7 (#2090) answers `[]`"]
+async fn test_run_handler_no_events_returns_empty_list() {
+    let sessions = Arc::new(InMemorySessionService::new());
+    sessions
+        .create(CreateRequest {
+            app_name: "testApp".into(),
+            user_id: "testUser".into(),
+            session_id: Some("testSession".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let mut cfg = RuntimeApiControllerConfig::new(sessions);
+    cfg.agent_loader = Some(Arc::new(SingleLoader::new(test_agent(
+        "testApp",
+        Vec::new(),
+    ))));
+    let controller = RuntimeApiController::new(cfg);
+
+    let (status, _, body) = parts(
+        controller
+            .run_handler(post("/run", &run_body("testSession", false), None))
+            .await,
+    )
+    .await;
+
+    assert_eq!(status, 200, "body: {body}");
+    assert_eq!(body.trim(), "[]");
+}
+
+#[tokio::test]
 async fn test_run_live_handler_uses_configured_check_origin() {
     let seen_origin = Arc::new(parking_lot::Mutex::new(None::<String>));
     let mut cfg = RuntimeApiControllerConfig::new(Arc::new(InMemorySessionService::new()));
@@ -341,6 +443,105 @@ async fn test_run_live_handler_uses_configured_check_origin() {
         "CheckOrigin was not called, want the upgrader to use it"
     );
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+}
+
+/// Go `failingGetSessionService`: a session service whose `Get` fails for a reason other than
+/// a missing session.
+struct FailingGetSessionService(InMemorySessionService);
+
+#[async_trait::async_trait]
+impl SessionService for FailingGetSessionService {
+    async fn create(
+        &self,
+        req: CreateRequest,
+    ) -> Result<Arc<dyn gadk_session::Session>, SessionError> {
+        self.0.create(req).await
+    }
+    async fn get(&self, _req: GetRequest) -> Result<Arc<dyn gadk_session::Session>, SessionError> {
+        Err(SessionError::Backend("session store unavailable".into()))
+    }
+    async fn list(
+        &self,
+        req: ListRequest,
+    ) -> Result<Vec<Arc<dyn gadk_session::Session>>, SessionError> {
+        self.0.list(req).await
+    }
+    async fn delete(&self, req: DeleteRequest) -> Result<(), SessionError> {
+        self.0.delete(req).await
+    }
+    async fn append_event(
+        &self,
+        session: &dyn gadk_session::Session,
+        event: &mut Event,
+    ) -> Result<(), SessionError> {
+        self.0.append_event(session, event).await
+    }
+}
+
+/// (name, streaming, sessionService, sessionID, wantStatus)
+type LookupCase = (
+    &'static str,
+    bool,
+    Arc<dyn SessionService>,
+    &'static str,
+    u16,
+);
+
+#[tokio::test]
+#[ignore = "8a bug: a session service failure other than NotFound answers 404 on /run and /run_sse; Go 8ce8f01c (#2107) answers 500"]
+async fn test_run_handlers_session_lookup_status() {
+    let in_memory = || -> Arc<dyn SessionService> { Arc::new(InMemorySessionService::new()) };
+    let failing = || -> Arc<dyn SessionService> {
+        Arc::new(FailingGetSessionService(InMemorySessionService::new()))
+    };
+    let cases: Vec<LookupCase> = vec![
+        (
+            "run, missing session",
+            false,
+            in_memory(),
+            "testSession",
+            404,
+        ),
+        (
+            "run_sse, missing session",
+            true,
+            in_memory(),
+            "testSession",
+            404,
+        ),
+        // The services reject an empty ID with a validation error rather than
+        // session.ErrNotFound; a request that names no session is still a 404.
+        ("run, no session ID", false, in_memory(), "", 404),
+        ("run_sse, no session ID", true, in_memory(), "", 404),
+        (
+            "run, failing session service",
+            false,
+            failing(),
+            "testSession",
+            500,
+        ),
+        (
+            "run_sse, failing session service",
+            true,
+            failing(),
+            "testSession",
+            500,
+        ),
+    ];
+    for (name, streaming, session_service, session_id, want_status) in cases {
+        let mut cfg = RuntimeApiControllerConfig::new(session_service);
+        cfg.agent_loader = Some(Arc::new(SingleLoader::new(test_agent(
+            "testApp",
+            Vec::new(),
+        ))));
+        cfg.sse_timeout = Timeout::After(Duration::from_secs(10));
+        let controller = RuntimeApiController::new(cfg);
+
+        let resp = run_or_sse(&controller, streaming, &run_body(session_id, streaming)).await;
+        let (status, _, body) = parts(resp).await;
+
+        assert_eq!(status, want_status, "{name}: body: {body}");
+    }
 }
 
 // ---- Focused wire checks (ADK-Go fixtures; the full replay is tests/wire.rs) ----

@@ -20,13 +20,18 @@
 mod triggers_support;
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::body::Body;
 use axum::extract::DefaultBodyLimit;
+use futures::StreamExt as _;
+use gadk_agent::{AgentConfig, new_agent};
 use gadk_server::rest::testutil::FakeSessionService;
-use gadk_server::rest::triggers::EventarcController;
+use gadk_server::rest::triggers::{EventarcController, TriggerConfig};
+use gadk_session::Event;
 use pretty_assertions::assert_eq;
 use serde_json::{Value, json};
+use tokio::sync::{Semaphore, mpsc};
 use tower::ServiceExt;
 use triggers_support::{Runs, fake_config, mock_agent, post, read};
 
@@ -296,4 +301,138 @@ async fn test_eventarc_binary_mode_rejects_oversized_body() {
         ),
         "oversized binary-mode body"
     );
+}
+
+/// Go `buildEventarcRequest`: a structured-mode CloudEvent carrying a Pub/Sub
+/// messagePublished payload whose message data is `data`.
+fn build_eventarc_request(data: &str) -> http::Request<Body> {
+    use base64::Engine as _;
+    let payload = format!(
+        r#"{{"message": {{"data": "{}"}}}}"#,
+        base64::engine::general_purpose::STANDARD.encode(data)
+    );
+    let body = serde_json::to_vec(&json!({
+        "data": serde_json::from_str::<Value>(&payload).unwrap(),
+        "id": "1234-5678",
+        "source": "//pubsub.googleapis.com/projects/test-project/topics/test-topic",
+        "specversion": "1.0",
+        "type": "google.cloud.pubsub.topic.v1.messagePublished",
+    }))
+    .unwrap();
+    post(
+        "/apps/test-agent/triggers/eventarc",
+        &[("content-type", "application/cloudevents+json")],
+        body,
+    )
+}
+
+/// Go `blockingEventarcAgent`: each run signals `started` and then holds until `release` gives
+/// it a permit, so a test can count runs in flight.
+fn blocking_eventarc_agent(
+    started: mpsc::UnboundedSender<()>,
+    release: Arc<Semaphore>,
+) -> Arc<dyn gadk_agent::Agent> {
+    new_agent(AgentConfig {
+        name: "test-agent".into(),
+        run: Some(Arc::new(move |_ctx| {
+            let started = started.clone();
+            let release = release.clone();
+            futures::stream::once(async move {
+                started.send(()).unwrap();
+                let _permit = release.acquire().await.unwrap();
+                Ok(Event {
+                    id: "success-event".into(),
+                    ..Default::default()
+                })
+            })
+            .boxed()
+        })),
+        ..Default::default()
+    })
+    .unwrap()
+}
+
+/// Go `TestEventarcTriggerHandler_NonPositiveMaxConcurrentRunsIsUnlimited`: zero or a negative
+/// limit means no limit, so three requests are in flight at once.
+// parity: adapted: tokio's paused clock stands in for Go's 2 s wall-clock wait
+#[tokio::test(start_paused = true)]
+async fn test_eventarc_trigger_handler_non_positive_max_concurrent_runs_is_unlimited() {
+    for max_runs in [0, -1] {
+        const REQUESTS: usize = 3;
+        let (started_tx, mut started) = mpsc::unbounded_channel::<()>();
+        let release = Arc::new(Semaphore::new(0));
+        let mut cfg = fake_config(blocking_eventarc_agent(started_tx, release.clone()));
+        cfg.trigger_config = TriggerConfig {
+            max_concurrent_runs: max_runs,
+            ..triggers_support::DEFAULT_TRIGGER_CONFIG
+        };
+        let ctrl = Arc::new(EventarcController::new(cfg).unwrap());
+
+        let mut tasks = Vec::new();
+        for _ in 0..REQUESTS {
+            let ctrl = ctrl.clone();
+            tasks.push(tokio::spawn(async move {
+                read(
+                    ctrl.eventarc_trigger_handler(build_eventarc_request("hello"))
+                        .await,
+                )
+                .await
+            }));
+        }
+        for i in 0..REQUESTS {
+            tokio::time::timeout(Duration::from_secs(2), started.recv())
+                .await
+                .unwrap_or_else(|_| {
+                    panic!(
+                        "only {i} of {REQUESTS} runs in flight; MaxConcurrentRuns={max_runs} must mean no limit"
+                    )
+                });
+        }
+        release.add_permits(REQUESTS);
+        for (i, task) in tasks.into_iter().enumerate() {
+            let (code, body) = task.await.unwrap();
+            assert_eq!(code, 200, "request {i}: want 200. Body: {body}");
+        }
+    }
+}
+
+/// Go `TestEventarcTriggerHandler_EnforcesMaxConcurrentRuns`.
+// parity: adapted: tokio's paused clock stands in for Go's wall-clock waits (2 s, 250 ms)
+#[tokio::test(start_paused = true)]
+async fn test_eventarc_trigger_handler_enforces_max_concurrent_runs() {
+    const LIMIT: usize = 2;
+    let (started_tx, mut started) = mpsc::unbounded_channel::<()>();
+    let release = Arc::new(Semaphore::new(0));
+    let mut cfg = fake_config(blocking_eventarc_agent(started_tx, release.clone()));
+    cfg.trigger_config = TriggerConfig {
+        max_concurrent_runs: LIMIT as i32,
+        ..triggers_support::DEFAULT_TRIGGER_CONFIG
+    };
+    let ctrl = Arc::new(EventarcController::new(cfg).unwrap());
+
+    let mut tasks = Vec::new();
+    for _ in 0..=LIMIT {
+        let ctrl = ctrl.clone();
+        tasks.push(tokio::spawn(async move {
+            ctrl.eventarc_trigger_handler(build_eventarc_request("hello"))
+                .await
+        }));
+    }
+
+    for i in 0..LIMIT {
+        tokio::time::timeout(Duration::from_secs(2), started.recv())
+            .await
+            .unwrap_or_else(|_| panic!("only {i} of {LIMIT} runs started"));
+    }
+    // The (LIMIT+1)th request must be blocked on the semaphore, not running.
+    if tokio::time::timeout(Duration::from_millis(250), started.recv())
+        .await
+        .is_ok()
+    {
+        panic!("a run beyond MaxConcurrentRuns={LIMIT} started; limit not enforced");
+    }
+    release.add_permits(LIMIT + 1);
+    for task in tasks {
+        task.await.unwrap();
+    }
 }

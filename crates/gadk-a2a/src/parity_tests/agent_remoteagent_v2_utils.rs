@@ -231,6 +231,64 @@ async fn test_get_user_function_call_at() {
 }
 
 #[tokio::test]
+#[ignore = "8a bug: get_user_function_call_at reads only the first function response of a mixed user event and stops at a BeforeRun-cached call (Go 7c87fdff tries every response, skipping the cached one)"]
+async fn test_get_user_function_call_at_mixed_response_tasks() {
+    const REMOTE: &str = "remote-agent";
+    let remote_call = |id: &str, task_id: &str| {
+        let mut event = event_from_parts(REMOTE, vec![call(id, "")]);
+        event.response.custom_metadata = to_custom_metadata(task_id, "remote-context");
+        event
+    };
+    let mut cached_call = event_from_parts(REMOTE, vec![call("reused", "")]);
+    cached_call.response.custom_metadata = obj(json!({BEFORE_RUN_REPLY_KEY: true}));
+    let cases = vec![
+        (
+            "first matching response keeps task priority",
+            vec![
+                remote_call("first", "first-task"),
+                remote_call("second", "second-task"),
+                event_from_parts(
+                    "user",
+                    vec![
+                        response("first", "", json!({})),
+                        response("second", "", json!({})),
+                    ],
+                ),
+            ],
+            "first-task",
+        ),
+        (
+            "cached response does not hide later peer response",
+            vec![
+                remote_call("reused", "completed-task"),
+                remote_call("current", "current-task"),
+                cached_call,
+                event_from_parts(
+                    "user",
+                    vec![
+                        response("reused", "", json!({})),
+                        response("current", "", json!({})),
+                    ],
+                ),
+            ],
+            "current-task",
+        ),
+    ];
+    for (name, events, want_task_id) in cases {
+        let ictx = new_test_invocation_context(REMOTE, events).await;
+        let events = ictx.session().events();
+        let last = isize::try_from(events.len()).unwrap() - 1;
+        let Some(got) = get_user_function_call_at(&events, last, REMOTE, "") else {
+            panic!("{name}: get_user_function_call_at() = None, want a peer response");
+        };
+        assert!(
+            got.task_id == want_task_id && got.context_id == "remote-context",
+            "{name}: mixed responses selected the wrong remote task or context: {got:?}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn test_to_missing_remote_session_parts() {
     let remote = "remote-agent";
     let mut with_context = event_from_parts(remote, vec![text("hi")]);

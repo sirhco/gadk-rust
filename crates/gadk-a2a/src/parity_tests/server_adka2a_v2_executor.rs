@@ -87,7 +87,9 @@ impl SessionService for TestSessionService {
     }
 }
 
-fn session_service(create_err: bool) -> Arc<dyn SessionService> {
+/// Go `testSessionService` (shared with `agent_remoteagent_v2_a2a_e2e`'s
+/// `failingCreateSessionService`, which fails every `Create` with the same text).
+pub(super) fn session_service(create_err: bool) -> Arc<dyn SessionService> {
     Arc::new(TestSessionService {
         inner: InMemorySessionService::new(),
         create_err,
@@ -532,6 +534,23 @@ async fn test_executor_cancel() {
         panic!("cancel() = {:?}, want a status update", got[0]);
     };
     assert_eq!(event.status.state, a2a::TaskState::Canceled);
+}
+
+#[tokio::test]
+#[ignore = "8a bug: Executor::cancel yields a canceled status update for an empty task id; Go 58429928 yields only an error"]
+async fn test_executor_cancel_without_task_id() {
+    let executor = Executor::new(ExecutorConfig::default());
+    let mut ctx = request(&task_info(), None, false);
+    ctx.task_id = String::new();
+
+    let got: Vec<_> = executor.cancel(ctx).collect().await;
+    let errors = got.iter().filter(|item| item.is_err()).count();
+    let events = got.len() - errors;
+    assert!(
+        errors > 0,
+        "cancel() error = nil, want an error for a missing task ID (got {got:?})"
+    );
+    assert_eq!(events, 0, "cancel() produced {events} events, want 0");
 }
 
 #[tokio::test]
