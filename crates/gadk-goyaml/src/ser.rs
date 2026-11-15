@@ -100,7 +100,7 @@ impl Serialize for Handoff<'_> {
 
 impl Serialize for Document {
     /// Go encodes a `yaml.Node` value through `nodev`; through gadk-goyaml's serializer the
-    /// subtree is handed over by [`crate::node::DOCUMENT_MARKER`]. Other serde formats see
+    /// subtree is handed over by `crate::node::DOCUMENT_MARKER`. Other serde formats see
     /// unit.
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_newtype_struct(DOCUMENT_MARKER, &Handoff::Document(self))

@@ -19,13 +19,13 @@
 //! the roots, gadk serde types go through gadk-goyaml with default `Options` (Go's lowercased
 //! keys). Nothing outside `gonode` uses its items directly.
 //!
-//! Encoding builds the nodes directly ([`encode_recordings`]): the recording types by their
+//! Encoding builds the nodes directly (`encode_recordings`): the recording types by their
 //! yaml tags, the roots below them (`model.LLMRequest`, `model.LLMResponse`,
 //! `genai.FunctionCall`, `genai.FunctionResponse`) through the shapes table of
 //! [`super::fixups`], fed with gadk serde's JSON. gadk serde writes genai's whole-second
 //! duration strings, so the exact `TimeDelta`s are laid over the JSON first
-//! ([`overlay_content`] and friends: a JSON integer of nanoseconds). Decoding uses private
-//! serde mirrors with Go's type names ([`RecordingsDe`]).
+//! (`overlay_content` and friends: a JSON integer of nanoseconds). Decoding uses private
+//! serde mirrors with Go's type names (`RecordingsDe`).
 
 use chrono::TimeDelta;
 use gadk_genai::{

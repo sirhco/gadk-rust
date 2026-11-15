@@ -85,9 +85,9 @@ pub(crate) fn apply_remote_agent_options(opts: &[RemoteAgentOption]) -> EgressCo
 
 impl Client {
     /// Go `RemoteAgent`: resolves the registered A2A agent `name` (full resource name) into a
-    /// gadk remote agent usable as a sub-agent: [`Client::get_agent`], [`agent_card`], then
+    /// gadk remote agent usable as a sub-agent: [`Client::get_agent`], `agent_card`, then
     /// `gadk_a2a::remoteagent::new_a2a` with the cleaned name, the card's description, the card,
-    /// and a [`CompatClientProvider`] over the option's client (or a default one, never the
+    /// and a `CompatClientProvider` over the option's client (or a default one, never the
     /// registry's) and the option's headers.
     pub async fn remote_agent(
         &self,

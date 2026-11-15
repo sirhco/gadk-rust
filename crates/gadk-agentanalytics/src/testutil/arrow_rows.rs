@@ -78,7 +78,7 @@ fn request_schema(req: &AppendRowsRequest) -> Result<Schema, String> {
 }
 
 /// The record batches of `req` decoded under its writer schema (made nullable, see
-/// [`relaxed`]).
+/// `relaxed`).
 ///
 /// # Errors
 ///

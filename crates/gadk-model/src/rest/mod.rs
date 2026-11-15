@@ -24,7 +24,7 @@
 //!   type and text.
 //! - [`googleapi`]: Go's `*googleapi.Error` ([`googleapi::ApiError`]) and
 //!   `googleapi.CheckResponse` ([`googleapi::check_response`]) for the Google REST clients.
-//! - Feature `test-util` adds [`test_util`]: a scripted in-process `HttpClient` and a
+//! - Feature `test-util` adds `test_util`: a scripted in-process `HttpClient` and a
 //!   127.0.0.1 fake server.
 
 mod error;

@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `plugin/agentanalytics/gcs_offloader.go`: [`uploads`] (the upload
+//! Port of ADK-Go `plugin/agentanalytics/gcs_offloader.go`: `uploads` (the upload
 //! orchestration of a batch, `impl BatchProcessor`) and [`gcs`] (`gcsOffloader`, the Cloud
 //! Storage [`GcsContentOffloader`](crate::config::GcsContentOffloader)). This module holds what
 //! both use: the constants of `gcs_offloader.go` and its error types (`offloaderPanicError`,

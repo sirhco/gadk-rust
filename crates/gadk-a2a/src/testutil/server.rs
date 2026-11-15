@@ -54,7 +54,7 @@ impl Drop for SpawnedServer {
 
 /// Serves `executor` with `card` on an ephemeral loopback port.
 ///
-/// The served card is `card` with [`BASE_PLACEHOLDER`] in its interface URLs replaced by the
+/// The served card is `card` with `BASE_PLACEHOLDER` in its interface URLs replaced by the
 /// server's base URL (`"<base>"`); a card without interfaces gets Go's `newCard` pair, JSON-RPC at
 /// `<base>/jsonrpc` and HTTP+JSON at `<base>/rest`. The request handler declares the card's
 /// capabilities (a2a-rs refuses streaming unless they declare it).

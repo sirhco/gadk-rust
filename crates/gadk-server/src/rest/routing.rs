@@ -129,7 +129,7 @@ struct Entry {
     service: RouteService,
 }
 
-/// A registered route as [`RouteTable::walk`] reports it (Go `mux.Router.Walk`).
+/// A registered route as `RouteTable::walk` reports it (Go `mux.Router.Walk`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RouteInfo {
     /// The route's name.

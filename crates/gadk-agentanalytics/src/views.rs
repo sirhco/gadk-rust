@@ -290,7 +290,7 @@ pub(crate) static EVENT_VIEW_SPECS: &[EventViewSpec] = &[
 
 impl Config {
     /// Go `Config.ViewDefinitions()`: the `CREATE OR REPLACE VIEW` statements for this config,
-    /// one per view in [`EVENT_VIEW_SPECS`] order, honoring `view_prefix` (empty means `"v"`)
+    /// one per view in `EVENT_VIEW_SPECS` order, honoring `view_prefix` (empty means `"v"`)
     /// and `payload_column_denylist`. Errors for an invalid identifier or a view name equal
     /// (case-insensitively) to the table name.
     pub fn view_definitions(&self) -> Result<Vec<ViewDefinition>, Error> {
@@ -636,7 +636,7 @@ impl ViewRunner for BigQueryViewRunner {
 }
 
 /// Go `syncAnalyticsViews(ctx, runner, defs, logf)`: runs every definition (each under its own
-/// [`VIEW_DDL_TIMEOUT`]); a conflict counts as created; stops when `ctx` ends; joins the errors.
+/// `VIEW_DDL_TIMEOUT`); a conflict counts as created; stops when `ctx` ends; joins the errors.
 /// `logf` (Go's non-nil `logf`, a non-default logger) gets each failure that is not a
 /// cancellation and the pass summary.
 pub async fn sync_analytics_views(

@@ -51,7 +51,7 @@ impl Registry {
     }
 
     /// Go `RegisterNodeFunction` with a `func(agent.Context, string) (string, error)`:
-    /// registered through [`cast_node_function`]'s `fmt.Sprint` coercion; overwrites.
+    /// registered through `cast_node_function`'s `fmt.Sprint` coercion; overwrites.
     pub fn register_string_node_function(&self, name: &str, f: StrNodeFn) {
         // Go: configurable_workflow.go RegisterNodeFunction
         self.register_node_function(name, cast_node_function(f));

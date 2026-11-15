@@ -155,10 +155,10 @@ pub(crate) const STREAM_METHODS: [(&str, &str); 2] = [
 /// Go `NewHandler`: validates `cfg.compaction` against the loader's root agent
 /// (`compactionvalidate::against_root_agent`, error returned unwrapped), builds the two
 /// controllers (non-streaming: the four session methods; streaming: `async_stream_query` and
-/// `streaming_agent_run_with_events`) on a strict-slash `WebRouter` ([`routes::router`]), and
+/// `streaming_agent_run_with_events`) on a strict-slash `WebRouter` (`routes::router`), and
 /// logs `Supported methods:` then one line per [`list_class_methods`] entry, taken from the
-/// handlers' own [`MethodHandler::metadata`](method::MethodHandler::metadata) (Go
-/// `log.Println(<json.Encoder output>)`, see [`metadata::structpb_json`]).
+/// handlers' own `MethodHandler::metadata` (Go
+/// `log.Println(<json.Encoder output>)`, see `metadata::structpb_json`).
 ///
 /// `sse_write_timeout`: zero means 120 s, negative means no write deadline. Go's
 /// `config.Validate()` is the caller's (the launcher runs `Config::validate` first).

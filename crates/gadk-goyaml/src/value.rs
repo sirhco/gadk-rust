@@ -731,7 +731,7 @@ impl<'de> Visitor<'de> for GoValueVisitor {
 
 impl<'de> Deserialize<'de> for GoValue {
     /// Through gadk-goyaml: exactly what yaml.v3 decodes into `interface{}` (via
-    /// [`GO_VALUE_MARKER`]); through other formats: built from their data model.
+    /// `GO_VALUE_MARKER`); through other formats: built from their data model.
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         deserializer.deserialize_newtype_struct(GO_VALUE_MARKER, GoValueVisitor)
     }

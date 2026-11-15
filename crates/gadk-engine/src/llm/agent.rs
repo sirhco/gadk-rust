@@ -16,7 +16,7 @@
 //! Port of ADK-Go agent/llmagent/llmagent.go (New, installTaskTools, run, RunLive,
 //! maybeSaveOutputToState) and the wrappedSession type of agent/llmagent/llm_agent_wrapper.go.
 //!
-//! `RunLive` is [`LlmLive`], installed as `AgentState.live`. `FindAgent` is covered by the
+//! `RunLive` is `LlmLive`, installed as `AgentState.live`. `FindAgent` is covered by the
 //! `Agent::find_agent` provided method; `RunNode` is replaced by explicit `run_llm_agent_as_node` calls.
 
 use std::any::Any;

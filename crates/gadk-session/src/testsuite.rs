@@ -18,8 +18,8 @@
 //! A reusable, backend-agnostic conformance suite for [`SessionService`] implementations
 //! (port of ADK-Go `session/sessiontestsuite`).
 //!
-//! Enabled by the `testsuite` feature. Call [`run`] from a backend's tests with a factory
-//! that returns a fresh service, or [`run_named`] when the factory needs the case name (to
+//! Enabled by the `testsuite` feature. Call [`run`](crate::testsuite::run) from a backend's tests with a factory
+//! that returns a fresh service, or [`run_named`](crate::testsuite::run_named) when the factory needs the case name (to
 //! pick a per-case recording, for example).
 
 use std::collections::BTreeMap;

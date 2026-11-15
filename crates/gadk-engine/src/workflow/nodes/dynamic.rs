@@ -14,7 +14,7 @@
 // limitations under the License.
 
 //! Port of Go workflow/dynamic_node.go: a node whose body schedules children at run time with
-//! [`run_node`](crate::workflow::run_node).
+//! [`run_node`](fn@crate::workflow::run_node).
 
 use std::any::Any;
 use std::future::Future;

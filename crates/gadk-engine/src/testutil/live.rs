@@ -17,7 +17,7 @@
 //! `newFakeLiveServer`, and for the fake server of internal/llminternal/base_flow_live_test.go
 //! where no socket is needed), plus the responses Go's fake Live server messages decode to.
 //!
-//! A [`ScriptedLiveLlm`] connection yields its scripted responses in order, then parks until the
+//! A [`ScriptedLiveLlm`](crate::testutil::live::ScriptedLiveLlm) connection yields its scripted responses in order, then parks until the
 //! flow closes it, as Go's fake server writes its messages and then reads until the client
 //! closes the connection.
 

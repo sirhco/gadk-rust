@@ -40,13 +40,13 @@
 //! schemas, table creation and additive schema upgrade, the per-event-type analytics views, the
 //! content formatter and redaction, and a BigQuery REST admin client. The transports (7b-2): rows
 //! ([`row`]), the generated BigQuery Storage Write API ([`storagepb`]), the gapic write client,
-//! Arrow record batches and the stream writer ([`write`]), the [`BatchProcessor`]
+//! Arrow record batches and the stream writer ([`write`](mod@crate::write)), the [`BatchProcessor`]
 //! ([`batch_processor`]) and the GCS content offloader with its upload orchestration
 //! ([`offload`]).
 //!
 //! Exported Go entry points: the plugin constructors above, `AsBigQueryAgentAnalyticsPlugin`,
 //! `DefaultConfig` ([`Config::default`]), `EventsSchema` ([`events_schema`]), `ArrowSchema`
-//! ([`arrow_schema`]), `SerializedArrowSchema` ([`serialized_arrow_schema`]),
+//! ([`arrow_schema`](fn@arrow_schema)), `SerializedArrowSchema` ([`serialized_arrow_schema`]),
 //! `Config.ViewDefinitions` ([`Config::view_definitions`]), `FormatContentParts`
 //! ([`format_content_parts`]), `SmartTruncate` ([`smart_truncate`]) and the `Event*` row types
 //! ([`event_types`]). Table creation and schema upgrade are [`ensure_table_and_schema`] over

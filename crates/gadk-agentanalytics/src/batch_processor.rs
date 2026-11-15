@@ -18,7 +18,7 @@
 //! bounded drain and finalization, drop counters, the pending-upload byte budget, and the
 //! estimated-size splitting and serialized-size halving of batches into AppendRows requests.
 //! The upload orchestration (`gcs_offloader.go`) is `impl BatchProcessor` in
-//! [`crate::offload::uploads`]; the stream is [`crate::write::stream_writer`].
+//! `crate::offload::uploads`; the stream is [`crate::write::stream_writer`].
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
@@ -162,7 +162,7 @@ pub struct BatchProcessor {
 
 impl BatchProcessor {
     /// Go `NewBatchProcessor(ctx, writeClient, streamName, config)`: applies the defaults,
-    /// validates the config ([`crate::validate::validate_config`]), and with exactly-once
+    /// validates the config (`crate::validate::validate_config`), and with exactly-once
     /// delivery and a client creates the committed stream under `ctx` bounded by the rotate
     /// timeout. Later work keeps only `ctx`'s values (`without_cancel`).
     ///

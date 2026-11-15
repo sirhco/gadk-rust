@@ -500,7 +500,7 @@ impl<'de> Visitor<'de> for DocumentVisitor {
 
 impl<'de> Deserialize<'de> for Document {
     /// A `Document` field receives the raw sub-node (Go's `yaml.Node` field) through
-    /// [`crate::node::DOCUMENT_MARKER`].
+    /// `crate::node::DOCUMENT_MARKER`.
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         deserializer.deserialize_newtype_struct(DOCUMENT_MARKER, DocumentVisitor)
     }

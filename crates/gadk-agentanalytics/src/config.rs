@@ -35,7 +35,7 @@ use crate::context::Context;
 use crate::error::{BoxError, Error};
 
 /// The version of the events table schema written by this plugin and stored under the
-/// [`SCHEMA_VERSION_KEY`] table label (Go `SchemaVersion`). It matches adk-python's.
+/// `SCHEMA_VERSION_KEY` table label (Go `SchemaVersion`). It matches adk-python's.
 pub const SCHEMA_VERSION: &str = "2";
 /// The BigQuery table label key that records the schema version (Go `schemaVersionKey`).
 pub(crate) const SCHEMA_VERSION_KEY: &str = "adk_schema_version";

@@ -172,7 +172,7 @@ impl fmt::Display for BigQueryError {
 
 /// The crate's error. `Display` is the Go error's `Error()` text; [`Error::Wrapped`] and
 /// [`Error::Joined`] keep Go's `%w` / `errors.Join` chains so [`Error::is_context`],
-/// [`has_error_code`] and [`status_code`] see what Go's `errors.Is` / `errors.As` see.
+/// `has_error_code` and `status_code` see what Go's `errors.Is` / `errors.As` see.
 #[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

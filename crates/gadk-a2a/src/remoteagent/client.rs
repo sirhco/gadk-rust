@@ -80,7 +80,7 @@ const A2A_RS_NO_COMPATIBLE_TRANSPORT: &str =
 ///
 /// The default factory is a2a-go's default (Go `a2aclient.NewFromCard`): JSON-RPC and REST
 /// transports over an HTTP client with a 3 min timeout and no credential. The remote agent
-/// passes [`auth_client_factory`] when `A2AConfig.auth` is set, as Go `NewA2A` passes a factory
+/// passes `auth_client_factory` when `A2AConfig.auth` is set, as Go `NewA2A` passes a factory
 /// over `authHTTPClient`.
 pub fn new_a2a_client_provider(
     factory: Option<Arc<a2a_client::A2AClientFactory>>,

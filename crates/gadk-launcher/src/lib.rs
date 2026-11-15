@@ -17,7 +17,7 @@
 //!
 //! A [`Launcher`] parses ADK-Go's command lines and runs one [`SubLauncher`]: the interactive
 //! `console`, or the `web` server with its sub-launchers (`api`, `a2a`, `webui`, `pubsub`,
-//! `eventarc`). [`full::new`] and [`prod::new`] are ADK-Go's presets; [`universal`] routes the
+//! `eventarc`). [`full::new`] and `prod::new` are ADK-Go's presets; [`universal`] routes the
 //! first argument to a sub-launcher. Flags, help, error, log and console text are ADK-Go's.
 //!
 //! Features: `web` (the web server and the REST API sub-launcher), `a2a`, `webui`, `triggers`,

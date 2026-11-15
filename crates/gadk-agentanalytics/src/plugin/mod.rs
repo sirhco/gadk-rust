@@ -18,12 +18,12 @@
 //! plugin, `pluginState`, `BigQueryAgentAnalyticsPlugin`, `AsBigQueryAgentAnalyticsPlugin`,
 //! `DropStats`, `analyticsPlugin`, `eventData`, `closeWriteClient`, `validateEventFilterLists`,
 //! the `CloseFunc`) and `views.go`'s plugin state (`SyncViews`, the view gate, async view
-//! creation). The callbacks are [`callbacks`], rows [`rows`], filters and the log / write entry
-//! points [`filter`], the ADK version [`version`]; the session-event signal rows are
-//! [`crate::events`].
+//! creation). The callbacks are `callbacks`, rows `rows`, filters and the log / write entry
+//! points `filter`, the ADK version `version`; the session-event signal rows are
+//! `crate::events`.
 //!
 //! Constructors return a [`gadk_agent::Plugin`] (Go `*baseplugin.Plugin`); its typed state slot
-//! (`PluginConfig::state`, R1(e)) holds the [`PluginState`] that
+//! (`PluginConfig::state`, R1(e)) holds the `PluginState` that
 //! [`as_bigquery_agent_analytics_plugin`] recovers (Go's weak-pointer registry).
 
 pub(crate) mod callbacks;
@@ -458,7 +458,7 @@ impl BigQueryAgentAnalyticsPlugin {
     }
 
     /// Go `SyncViews(ctx)`: creates or updates the analytics views now (see
-    /// [`PluginState::sync_views`]).
+    /// `PluginState::sync_views`).
     ///
     /// # Errors
     ///

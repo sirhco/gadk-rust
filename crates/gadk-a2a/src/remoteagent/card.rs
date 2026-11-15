@@ -62,9 +62,9 @@ const DEFAULT_CARD_FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 /// A file source is read and parsed. An http(s) source is fetched with `GET <source><path>`
 /// (a2a-go `agentcard.Resolver` URL rules, `opts.request_headers` attached); inside an auth scope
 /// that carries a card-fetch client (Go `CardFetchClientFrom`) the source must be https or
-/// loopback http ([`require_secure_card_source`], checked before any request), that client sends
+/// loopback http (`require_secure_card_source`, checked before any request), that client sends
 /// it, and the scope's credential is applied. Every interface of a fetched card must share the source's
-/// origin ([`validate_card_interface_origins`]).
+/// origin (`validate_card_interface_origins`).
 pub fn new_agent_card_provider(
     source: impl Into<String>,
     opts: CardResolveOptions,

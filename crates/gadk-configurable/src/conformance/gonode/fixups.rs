@@ -21,8 +21,8 @@
 //!
 //! The tables themselves ([`SHAPES`], [`FIXUPS`], [`JSONSCHEMA_FIELDS`], [`ROOTS`]) are
 //! generated from the probe's `fixups.json` into [`super::shapes`]. This file holds their
-//! types and lookups, the encoder that applies them ([`Builder`]: class 0 GoShape zero-fill
-//! and the leaf classes), and the decoder's inverse fixups ([`invert`]).
+//! types and lookups, the encoder that applies them (`Builder`: class 0 GoShape zero-fill
+//! and the leaf classes), and the decoder's inverse fixups (`invert`).
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;

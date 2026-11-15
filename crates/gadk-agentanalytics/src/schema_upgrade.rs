@@ -177,7 +177,7 @@ pub async fn ensure_table_and_schema(
 }
 
 /// Go `maybeUpgradeSchema`: adds the missing columns of `desired` with an etag-guarded update
-/// (re-reading after a precondition failure up to [`MAX_PRECONDITION_RETRIES`] times), writing
+/// (re-reading after a precondition failure up to `MAX_PRECONDITION_RETRIES` times), writing
 /// nothing when every column already matches.
 pub async fn maybe_upgrade_schema(
     ctx: &Context,

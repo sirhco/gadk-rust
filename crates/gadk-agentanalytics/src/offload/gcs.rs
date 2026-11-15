@@ -391,7 +391,7 @@ impl GcsContentOffloader for GcsOffloader {
     /// # Errors
     ///
     /// Go's owned upload error `failed to write the Cloud Storage object: <err>`
-    /// ([`crate::offload::OwnedUploadError`]).
+    /// (`crate::offload::OwnedUploadError`).
     async fn upload_content(&self, ctx: &Context, req: GcsUploadRequest) -> Result<String, Error> {
         match self.write_object(ctx, &req).await {
             Err(err) if !is_precondition_failed(&err) => Err(OwnedUploadError::wrap(Error::wrap(

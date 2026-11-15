@@ -14,7 +14,7 @@
 // limitations under the License.
 
 //! Port of ADK-Go `plugin/agentanalytics/schema.go`: the events table's BigQuery schema
-//! ([`events_schema`]) and Arrow schema ([`arrow_schema`], [`serialized_arrow_schema`]), their
+//! ([`events_schema`]) and Arrow schema ([`arrow_schema`](fn@arrow_schema), [`serialized_arrow_schema`]), their
 //! payload-column projections, and the additive schema merge ([`upgrade_table_schema`],
 //! [`SchemaMismatchError`]).
 //!
@@ -542,7 +542,7 @@ pub fn project_events_schema(denied: &BTreeSet<String>) -> Schema {
         .collect()
 }
 
-/// Go `projectArrowSchema(denied)`: [`arrow_schema`] without the denied top-level columns.
+/// Go `projectArrowSchema(denied)`: [`arrow_schema`](fn@arrow_schema) without the denied top-level columns.
 pub fn project_arrow_schema(denied: &BTreeSet<String>) -> ::arrow_schema::Schema {
     let schema = arrow_schema();
     if denied.is_empty() {
@@ -557,7 +557,7 @@ pub fn project_arrow_schema(denied: &BTreeSet<String>) -> ::arrow_schema::Schema
     ::arrow_schema::Schema::new(fields)
 }
 
-/// Go `SerializedArrowSchema()`: [`arrow_schema`] as an Arrow IPC stream (schema message then
+/// Go `SerializedArrowSchema()`: [`arrow_schema`](fn@arrow_schema) as an Arrow IPC stream (schema message then
 /// the end-of-stream marker, as Go's `ipc.NewWriter` + `Close`).
 pub fn serialized_arrow_schema() -> Result<Vec<u8>, Error> {
     serialize_arrow_schema(&arrow_schema())

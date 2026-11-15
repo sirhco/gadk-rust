@@ -19,7 +19,7 @@
 //! schema `false` as `{not: {}}`. Nothing outside `gonode` uses its items directly.
 //!
 //! [`reshape`] ports jsonschema-go's `(*Schema).UnmarshalJSON` field assignment: it returns an
-//! object keyed by the `Schema` fields' YAML keys, which the [`super::fixups::Builder`] then
+//! object keyed by the `Schema` fields' YAML keys, which the `super::fixups::Builder` then
 //! encodes with the `jsonschema.Schema` shape (Go field order, zero-fill); nested schemas stay
 //! JSON and are reshaped when the builder reaches them.
 

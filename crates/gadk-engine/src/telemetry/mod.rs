@@ -16,7 +16,7 @@
 //! `tracing` spans with the names and attributes of Go `internal/telemetry` (`telemetry.go`,
 //! `node_tracing.go`, `compaction.go`). No OpenTelemetry: the static span name is Go's operation
 //! and `otel.name` Go's full span name; every other field is an OTel attribute (plan decision
-//! D6; structured values per [`converters`]). All spans are `INFO`. A `tracing` span records only
+//! D6; structured values per `converters`). All spans are `INFO`. A `tracing` span records only
 //! the fields it declares, so each constructor declares every attribute Go may set on it later
 //! as `Empty`, plus `otel.status_code` and `error.message` (Go's span status and description).
 //!

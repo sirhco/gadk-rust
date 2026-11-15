@@ -432,7 +432,7 @@ impl SubLauncher for ConsoleLauncher {
         "runs an agent in console mode.".to_owned()
     }
 
-    /// Go `Run` over the process's telemetry globals (see [`ConsoleLauncher::run_in`]).
+    /// Go `Run` over the process's telemetry globals (see `ConsoleLauncher::run_in`).
     async fn run(&self, cancel: CancellationToken, config: Config) -> Result<(), Error> {
         self.run_in(cancel, config, telemetry::Globals::process())
             .await

@@ -69,8 +69,8 @@ pub(crate) fn apply_mcp_toolset_options(opts: &[McpToolsetOption]) -> EgressConf
 
 impl Client {
     /// Go `MCPToolset`: resolves the registered MCP server `name` (full resource name) into a
-    /// streamable-HTTP MCP toolset: [`Client::get_mcp_server`], [`mcp_endpoint_uri`] (none →
-    /// [`Error::NoEndpoint`]), [`Client::egress`], [`Client::mcp_config`], `gadk_mcp::new`.
+    /// streamable-HTTP MCP toolset: [`Client::get_mcp_server`], `mcp_endpoint_uri` (none →
+    /// [`Error::NoEndpoint`]), `Client::egress`, `Client::mcp_config`, `gadk_mcp::new`.
     /// Close the toolset as `gadk_mcp::McpToolset::close` describes.
     pub async fn mcp_toolset(
         &self,
