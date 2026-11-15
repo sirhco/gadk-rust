@@ -23,18 +23,20 @@
 //! then each parent; the [`SpanRecord`] methods of the same names start from a record whose guard
 //! the caller holds (as `open_call_owners_locked`'s `ignore` gets it) and lock only its parents.
 //! Never call either while holding the guard of a parent of the start record.
-//! Cause mapping (R3): a cancelled token is Go's `context.Canceled` (`CancelSource::check`);
-//! Go's bare `context.DeadlineExceeded` (agent timeout) is not distinguishable in gadk
-//! (ledgered); the errgroup cause is 7b-3b.
+//! Cause mapping (R3): `CancelSource::check` reads Go's `context.Cause` of the callback's
+//! context when asked — a plain cancel is Go's `context.Canceled`, an agent or node timeout Go's
+//! `context.DeadlineExceeded`, a ParallelAgent sibling's error (Go's errgroup cause) that
+//! error.
 
 use std::error::Error as StdError;
 use std::fmt;
 
 use super::TraceError;
 use super::invocation::InvocationState;
-use super::span::{ERRGROUP_CREATOR, SpanKind, SpanRecord, SpanRef, parallel_branch};
+use super::span::{SpanKind, SpanRecord, SpanRef, parallel_branch};
 use crate::context::ContextError;
 use crate::error::Error;
+use gadk_agent::fiber::ERRGROUP_CREATOR;
 
 impl SpanRef {
     /// Go `wasCanceled`.
@@ -97,12 +99,8 @@ impl SpanRecord {
     }
 
     /// Go `rawContextFailureCause`: [`SpanRecord::failure_cause`] unless it is bare
-    /// `context.DeadlineExceeded`.
+    /// `context.DeadlineExceeded` (a workflow node or agent timeout).
     pub(crate) fn raw_context_failure_cause(&self) -> Option<TraceError> {
-        // Divergence (ledger 7b-3a): Go excludes the bare `context.DeadlineExceeded` of a
-        // workflow node timeout; a gadk `CancellationToken` carries no cause, so only a test
-        // cause (`CallbackCtx::with_cancel_cause`) can be one, and an agent timeout is never
-        // told apart from a cancellation.
         self.failure_cause()
             .filter(|c| !matches!(**c, Error::Context(ContextError::DeadlineExceeded)))
     }
@@ -120,7 +118,7 @@ impl SpanRecord {
             return self.branch != p.branch;
         }
         p.is_parallel
-            && self.origin.started_by(ERRGROUP_CREATOR, Some(&p))
+            && self.origin.started_by(ERRGROUP_CREATOR, p.goroutine_id)
             && p.children.contains(&self.name)
             && self.branch == parallel_branch(&p, &self.name)
     }
@@ -255,7 +253,7 @@ mod tests {
         if canceled {
             token.cancel();
         }
-        Some(CancelSource { token, cause })
+        Some(CancelSource::of_token(token, cause))
     }
 
     fn record(kind: SpanKind, parent: Option<&SpanRef>, branch: &str) -> SpanRecord {

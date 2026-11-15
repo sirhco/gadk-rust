@@ -69,6 +69,21 @@ pub(crate) fn bg() -> CallbackCtx {
     CallbackCtx::background()
 }
 
+/// Go `&endedContext{Context: ctx, end: true}`: a context whose `Ended` reports true, as for an
+/// activation that a `BeforeAgentCallback` answered. The ADK context runs an agent of its own
+/// name, so it reads as no running agent's (Go's `endedContext` shows none), and it cannot be
+/// cancelled, as Go's `context.Background()` it wraps.
+pub(crate) fn ended_ctx() -> CallbackCtx {
+    let adk = Context::builder()
+        .agent(crate::trace::testkit::custom("ended-context", vec![]))
+        .build();
+    adk.end_invocation();
+    CallbackCtx {
+        adk: Some(adk),
+        ..CallbackCtx::default()
+    }
+}
+
 /// Go `errors.New(text)` as the trace manager keeps errors.
 pub(crate) fn err(text: &str) -> TraceError {
     Arc::new(Error::msg(text))

@@ -1372,8 +1372,6 @@ async fn test_runner_non_task_mode_finish_task_tool() {
     }
 }
 
-// parity: skipped TestRunner_FinishTaskWithReusedCallIDEndsTheRunOnTheEventPath: deferred to 7b-3b (workflow node run: run_llm_agent_as_node is crate-private and node paths are reset)
-
 // parity: adapted: Go's `context.WithCancelCause(ctx)` + `cancel(runErr)` is a child cancellation
 // token cancelled on the first error (a gadk token carries no cause; spec R3).
 #[tokio::test]
