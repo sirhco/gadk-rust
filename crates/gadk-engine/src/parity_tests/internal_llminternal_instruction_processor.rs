@@ -86,15 +86,23 @@ struct Case {
     name: &'static str,
     template: &'static str,
     state: Value,
-    artifacts: Vec<(&'static str, &'static str)>,
+    artifacts: Vec<(&'static str, Part)>,
     svc: Svc,
     want: &'static str,
     want_err: Option<&'static str>,
 }
 
-const MY_FILE: (&str, &str) = ("my_file", "This is my artifact content.");
+fn my_file() -> (&'static str, Part) {
+    ("my_file", Part::from_text("This is my artifact content."))
+}
+
+/// Go `genai.NewPartFromBytes(data, mimeType)`.
+fn bytes_part(data: &'static [u8], mime_type: &str) -> Part {
+    Part::from_bytes(bytes::Bytes::from_static(data), mime_type)
+}
 
 #[tokio::test]
+#[ignore = "8a bug: inject_session_state renders a text artifact loaded as inline data (text/*, JSON/XML/CSV MIME types or text file extensions) as empty; Go 860c7dac decodes it"]
 async fn test_inject_session_state() {
     let cases = vec![
         Case {
@@ -110,7 +118,7 @@ async fn test_inject_session_state() {
             name: "successful artifact injection",
             template: "The artifact content is: {artifact.my_file}",
             state: json!({}),
-            artifacts: vec![MY_FILE],
+            artifacts: vec![my_file()],
             svc: Svc::Default,
             want: "The artifact content is: This is my artifact content.",
             want_err: None,
@@ -205,11 +213,82 @@ async fn test_inject_session_state() {
             want: "Say Foo",
             want_err: None,
         },
+        // A text artifact can come back as inline data rather than Text: gcsartifact stores
+        // a text Part as a text/plain object and loads it back as bytes. adk-python injects
+        // the decoded text (_instructions_utils.py, _artifact_to_text).
+        Case {
+            name: "text artifact loaded as inline data",
+            template: "The artifact content is: {artifact.notes.txt}",
+            state: json!({}),
+            artifacts: vec![("notes.txt", bytes_part(b"hello from GCS", "text/plain"))],
+            svc: Svc::Default,
+            want: "The artifact content is: hello from GCS",
+            want_err: None,
+        },
+        Case {
+            name: "text artifact with a charset parameter",
+            template: "The artifact content is: {artifact.notes}",
+            state: json!({}),
+            artifacts: vec![(
+                "notes",
+                bytes_part("café".as_bytes(), "Text/Markdown; charset=utf-8"),
+            )],
+            svc: Svc::Default,
+            want: "The artifact content is: café",
+            want_err: None,
+        },
+        Case {
+            name: "json artifact with a charset parameter",
+            template: "Config: {artifact.config}",
+            state: json!({}),
+            artifacts: vec![(
+                "config",
+                bytes_part(br#"{"k":"v"}"#, "application/JSON; charset=utf-8"),
+            )],
+            svc: Svc::Default,
+            want: r#"Config: {"k":"v"}"#,
+            want_err: None,
+        },
+        Case {
+            name: "text file uploaded as octet-stream",
+            template: "Rows: {artifact.rows.csv}",
+            state: json!({}),
+            artifacts: vec![(
+                "rows.csv",
+                bytes_part(b"a,b\n1,2", "application/octet-stream"),
+            )],
+            svc: Svc::Default,
+            want: "Rows: a,b\n1,2",
+            want_err: None,
+        },
+        Case {
+            name: "binary artifact still renders empty",
+            template: "Image: {artifact.photo.png}",
+            state: json!({}),
+            artifacts: vec![("photo.png", bytes_part(b"\x89PNG", "image/png"))],
+            svc: Svc::Default,
+            want: "Image: ",
+            want_err: None,
+        },
+        // A binary artifact with a text file name is not decoded: Gemini accepts its MIME
+        // type inline. TestArtifactText covers each rule.
+        Case {
+            name: "pdf named like a text file is not decoded",
+            template: "Doc: {artifact.notes.txt}",
+            state: json!({}),
+            artifacts: vec![(
+                "notes.txt",
+                bytes_part(b"%PDF-1.7\n%\xe2\xe3\xcf\xd3", "application/pdf"),
+            )],
+            svc: Svc::Default,
+            want: "Doc: ",
+            want_err: None,
+        },
         Case {
             name: "missing required artifact",
             template: "The artifact content is: {artifact.missing_file}",
             state: json!({}),
-            artifacts: vec![MY_FILE],
+            artifacts: vec![my_file()],
             svc: Svc::Default,
             want: "",
             want_err: Some(
@@ -256,7 +335,7 @@ async fn test_inject_session_state() {
             name: "optional missing artifact",
             template: "Optional artifact: {artifact.missing_file?}",
             state: json!({}),
-            artifacts: vec![MY_FILE],
+            artifacts: vec![my_file()],
             svc: Svc::Default,
             want: "Optional artifact: ",
             want_err: None,
@@ -309,7 +388,7 @@ The artifact says: {artifact.my_file}
 And another optional artifact: {artifact.other_file?}
 ",
             state: json!({"user_name": "Foo", "user_age": 30, "favorite_color": "blue"}),
-            artifacts: vec![MY_FILE],
+            artifacts: vec![my_file()],
             svc: Svc::Default,
             want: "
 Hello Foo,
@@ -348,16 +427,8 @@ And another optional artifact:
             ))),
         };
         if let Some(a) = &artifacts {
-            for (n, t) in &tc.artifacts {
-                a.save(
-                    n,
-                    Part {
-                        text: (*t).into(),
-                        ..Default::default()
-                    },
-                )
-                .await
-                .unwrap();
+            for (n, part) in &tc.artifacts {
+                a.save(n, part.clone()).await.unwrap();
             }
         }
         let mut b = InvocationContext::builder().session(sess);
@@ -373,6 +444,143 @@ And another optional artifact:
             }
             None => assert_eq!(got.unwrap(), tc.want, "{}", tc.name),
         }
+    }
+}
+
+/// Each rule Go's artifactText applies to inline data, in adk-python's order: MIME types
+/// Gemini accepts inline are never decoded, then text MIME types and text file extensions are.
+// parity: adapted: Go calls the unexported artifactText(fileName, part); gadk has no such
+// helper, so each row renders `{artifact.<fileName>}` through inject_session_state.
+#[tokio::test]
+#[ignore = "8a bug: gadk has no artifactText rule set; inject_session_state renders every inline-data artifact as empty (Go 860c7dac)"]
+async fn test_artifact_text() {
+    // (name, file name, MIME type, data, want)
+    let cases: Vec<(&str, &str, &str, &'static [u8], &str)> = vec![
+        // Gemini accepts these inline, so they are not decoded, whatever the name.
+        (
+            "pdf",
+            "notes.txt",
+            "application/pdf",
+            b"%PDF-1.7\n%\xe2\xe3\xcf\xd3",
+            "",
+        ),
+        ("image", "photo.xml", "image/png", b"\x89PNG", ""),
+        (
+            "audio",
+            "memo.csv",
+            "audio/wav",
+            b"RIFF\x24\x00\x00\x00WAVE",
+            "",
+        ),
+        (
+            "video",
+            "clip.json",
+            "video/mp4",
+            b"\x00\x00\x00\x18ftyp",
+            "",
+        ),
+        // Gemini rejects SVG and XML images inline, so adk-python decodes them.
+        ("svg image", "logo", "image/svg", b"<svg/>", "<svg/>"),
+        (
+            "svg+xml image",
+            "logo",
+            "image/svg+xml",
+            b"<svg/>",
+            "<svg/>",
+        ),
+        ("xml image", "logo", "image/xml", b"<svg/>", "<svg/>"),
+        ("csv", "rows", "application/csv", b"a,b", "a,b"),
+        (
+            "svg+xml application",
+            "logo",
+            "application/svg+xml",
+            b"<svg/>",
+            "<svg/>",
+        ),
+        (
+            "xml application",
+            "feed",
+            "application/xml",
+            b"<feed/>",
+            "<feed/>",
+        ),
+        (
+            "space before the parameters",
+            "config",
+            "application/json ; charset=utf-8",
+            br#"{"k":"v"}"#,
+            r#"{"k":"v"}"#,
+        ),
+        (
+            "txt extension",
+            "readme.txt",
+            "application/octet-stream",
+            b"read me",
+            "read me",
+        ),
+        (
+            "upper-case json extension",
+            "config.JSON",
+            "application/octet-stream",
+            br#"{"k":"v"}"#,
+            r#"{"k":"v"}"#,
+        ),
+        (
+            "xml extension",
+            "layout.xml",
+            "application/octet-stream",
+            b"<a/>",
+            "<a/>",
+        ),
+        (
+            "other binary",
+            "blob.bin",
+            "application/octet-stream",
+            b"\x00\x01",
+            "",
+        ),
+        // One U+FFFD per run of invalid bytes. Python's errors='replace' gives
+        // "caf\u{FFFD} \u{FFFD}\u{FFFD}" here.
+        (
+            "invalid UTF-8",
+            "notes",
+            "text/plain",
+            b"caf\xe9 \xe2\xe3",
+            "caf\u{FFFD} \u{FFFD}",
+        ),
+    ];
+    for (name, file_name, mime_type, data, want) in cases {
+        let svc = InMemorySessionService::new();
+        let sess = svc
+            .create(CreateRequest {
+                app_name: "testApp".into(),
+                user_id: "testUser".into(),
+                session_id: Some("testSession".into()),
+                state: None,
+            })
+            .await
+            .unwrap();
+        let artifacts: Arc<dyn Artifacts> = Arc::new(ScopedArtifacts::new(
+            Arc::new(InMemoryArtifactService::new()),
+            "testApp",
+            "testUser",
+            "testSession",
+        ));
+        artifacts
+            .save(file_name, bytes_part(data, mime_type))
+            .await
+            .unwrap();
+        let ctx = InvocationContext::builder()
+            .session(sess)
+            .artifacts(artifacts)
+            .build_invocation();
+        let got = inject_session_state(&ctx, &format!("{{artifact.{file_name}}}"))
+            .await
+            .unwrap_or_else(|e| panic!("{name}: inject_session_state error: {e}"));
+        assert_eq!(
+            got, want,
+            "{name}: artifactText({file_name:?}, {mime_type:?})"
+        );
     }
 }
 

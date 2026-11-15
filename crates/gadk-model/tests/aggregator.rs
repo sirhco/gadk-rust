@@ -400,6 +400,134 @@ fn test_progressive_sse_preserves_thought_signature() {
     assert_eq!(parts[0].thought_signature, sig);
 }
 
+/// A thought signature streamed on a text chunk stays on the part the chunks are merged
+/// into, as adk-python's StreamingResponseAggregator keeps it.
+#[test]
+#[ignore = "8a bug: StreamingResponseAggregator::flush_text_buffer_to_sequence drops the thought signature streamed on a text chunk (Go 28201d64 keeps the first one on the merged part)"]
+fn test_text_thought_signature_survives_merge() {
+    fn text_chunk(
+        text: &str,
+        thought: bool,
+        signature: &'static str,
+        finish_reason: Option<FinishReason>,
+    ) -> GenerateContentResponse {
+        let part = Part {
+            thought_signature: Bytes::from_static(signature.as_bytes()),
+            ..text_part(text, thought)
+        };
+        chunk_with(vec![part], finish_reason)
+    }
+    fn signed_text(text: &str, thought: bool, signature: &'static str) -> Part {
+        Part {
+            thought_signature: Bytes::from_static(signature.as_bytes()),
+            ..text_part(text, thought)
+        }
+    }
+    let call_chunk = || {
+        chunk_with(
+            vec![fc_part(FunctionCall {
+                name: "lookup".into(),
+                args: args(&[("q", json!("dog"))]),
+                ..Default::default()
+            })],
+            Some(FinishReason::Stop),
+        )
+    };
+    let stop = Some(FinishReason::Stop);
+    let cases: Vec<(&str, Vec<GenerateContentResponse>, Vec<Part>)> = vec![
+        (
+            "signature_on_first_chunk",
+            vec![
+                text_chunk("At minute 5 ", false, "text-signature", None),
+                text_chunk("the presenter speaks.", false, "", stop.clone()),
+            ],
+            vec![signed_text(
+                "At minute 5 the presenter speaks.",
+                false,
+                "text-signature",
+            )],
+        ),
+        (
+            "signature_on_later_chunk",
+            vec![
+                text_chunk("At minute 5 ", false, "", None),
+                text_chunk(
+                    "the presenter speaks.",
+                    false,
+                    "late-signature",
+                    stop.clone(),
+                ),
+            ],
+            vec![signed_text(
+                "At minute 5 the presenter speaks.",
+                false,
+                "late-signature",
+            )],
+        ),
+        (
+            "first_signature_of_a_run_wins",
+            vec![
+                text_chunk("At minute 5 ", false, "first-signature", None),
+                text_chunk(
+                    "the presenter speaks.",
+                    false,
+                    "second-signature",
+                    stop.clone(),
+                ),
+            ],
+            vec![signed_text(
+                "At minute 5 the presenter speaks.",
+                false,
+                "first-signature",
+            )],
+        ),
+        (
+            "thought_and_answer_keep_their_own_signatures",
+            vec![
+                text_chunk("Let me check.", true, "thought-signature", None),
+                text_chunk("It is a dog.", false, "answer-signature", stop.clone()),
+            ],
+            vec![
+                signed_text("Let me check.", true, "thought-signature"),
+                signed_text("It is a dog.", false, "answer-signature"),
+            ],
+        ),
+        (
+            // The function call still gets the signature too, as it did before the text
+            // part kept it.
+            "signed_text_then_unsigned_call",
+            vec![
+                text_chunk("Let me look.", false, "text-signature", None),
+                call_chunk(),
+            ],
+            vec![
+                signed_text("Let me look.", false, "text-signature"),
+                Part {
+                    function_call: Some(FunctionCall {
+                        name: "lookup".into(),
+                        args: args(&[("q", json!("dog"))]),
+                        ..Default::default()
+                    }),
+                    thought_signature: Bytes::from_static(b"text-signature"),
+                    ..Default::default()
+                },
+            ],
+        ),
+    ];
+    for (name, chunks, want) in cases {
+        let mut agg = StreamingResponseAggregator::new();
+        process_all(&mut agg, chunks);
+        let final_response = agg
+            .close()
+            .unwrap_or_else(|| panic!("{name}: expected a final aggregated response, got None"));
+        assert_eq!(
+            want,
+            final_response.content.unwrap().parts,
+            "{name}: aggregated parts mismatch"
+        );
+    }
+}
+
 #[test]
 fn test_progressive_sse_handles_empty_function_call() {
     let mut agg = StreamingResponseAggregator::new();
@@ -489,6 +617,71 @@ fn test_streaming_fc_chunk_with_will_continue_but_no_partial_args() {
         Bytes::from_static(b"test_sig_123")
     );
     assert_eq!(fc.args.get("document"), Some(&json!("Once upon a time...")));
+}
+
+#[test]
+#[ignore = "8a bug: StreamingResponseAggregator does not give a nameless continuation chunk of a streamed function call the call's id (Go 3188db98)"]
+fn test_streaming_function_call_continuation_carries_call_id() {
+    let cases = [
+        (
+            "closing chunk with partial args",
+            FunctionCall {
+                partial_args: vec![pa_str("$.y", "val2")],
+                will_continue: Some(false),
+                ..Default::default()
+            },
+        ),
+        (
+            "closing chunk that only ends the call",
+            FunctionCall {
+                will_continue: Some(false),
+                ..Default::default()
+            },
+        ),
+        ("empty closing chunk", FunctionCall::default()),
+    ];
+    for (name, closing) in cases {
+        let mut agg = StreamingResponseAggregator::new();
+        let chunks = vec![
+            chunk_with(
+                vec![fc_part(FunctionCall {
+                    name: "my_tool".into(),
+                    id: "explicit_fc_id_123".into(),
+                    partial_args: vec![pa_str("$.x", "val1")],
+                    will_continue: Some(true),
+                    ..Default::default()
+                })],
+                None,
+            ),
+            chunk_with(vec![fc_part(closing)], Some(FinishReason::Stop)),
+        ];
+        let partials = process_all(&mut agg, chunks);
+        let final_response = agg.close();
+
+        assert_eq!(partials.len(), 2, "{name}: partial responses");
+        for (i, resp) in partials.iter().enumerate() {
+            let got = &resp.content.as_ref().unwrap().parts[0]
+                .function_call
+                .as_ref()
+                .unwrap()
+                .id;
+            assert_eq!(
+                got, "explicit_fc_id_123",
+                "{name}: partial response {i} function call ID"
+            );
+        }
+        let final_response =
+            final_response.unwrap_or_else(|| panic!("{name}: Close() = None, want a response"));
+        let got = &final_response.content.as_ref().unwrap().parts[0]
+            .function_call
+            .as_ref()
+            .unwrap()
+            .id;
+        assert_eq!(
+            got, "explicit_fc_id_123",
+            "{name}: aggregated function call ID"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -938,6 +1131,81 @@ fn test_usage_metadata_retained_when_later_chunk_has_no_usage_metadata() {
     assert_eq!(got.total_token_count, usage_metadata.total_token_count);
 }
 
+/// The aggregated response reports the model version of the stream's last chunk, as a
+/// non-streamed response does and as adk-python's StreamingResponseAggregator.close does.
+#[test]
+#[ignore = "8a bug: StreamingResponseAggregator::close leaves model_version empty (Go 8be9129e copies the last chunk's ModelVersion)"]
+fn test_close_keeps_model_version() {
+    let mut agg = StreamingResponseAggregator::new();
+    let model_version = "gemini-2.5-flash-001";
+    let chunks = vec![
+        GenerateContentResponse {
+            candidates: vec![Candidate {
+                content: Some(Content::from_text("Hello", ROLE_MODEL)),
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+        GenerateContentResponse {
+            candidates: vec![Candidate {
+                content: Some(Content::from_text(" world", ROLE_MODEL)),
+                finish_reason: Some(FinishReason::Stop),
+                ..Default::default()
+            }],
+            model_version: model_version.into(),
+            ..Default::default()
+        },
+    ];
+    process_all(&mut agg, chunks);
+
+    let final_response = agg
+        .close()
+        .expect("expected a final aggregated response, got None");
+    assert_eq!(final_response.model_version, model_version);
+}
+
+/// A later chunk with usage metadata overwrites an earlier one.
+#[test]
+fn test_usage_metadata_updated_by_later_chunk_with_value() {
+    let mut agg = StreamingResponseAggregator::new();
+    let chunk1 = GenerateContentResponse {
+        candidates: vec![Candidate {
+            content: model_content(vec![text_part("Hello", false)]),
+            ..Default::default()
+        }],
+        usage_metadata: Some(GenerateContentResponseUsageMetadata {
+            total_token_count: 100,
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    // Updated (cumulative) usage, as typically sent by Gemini.
+    let chunk2 = GenerateContentResponse {
+        candidates: vec![Candidate {
+            content: model_content(vec![text_part(" world", false)]),
+            finish_reason: Some(FinishReason::Stop),
+            ..Default::default()
+        }],
+        usage_metadata: Some(GenerateContentResponseUsageMetadata {
+            total_token_count: 200,
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    process_all(&mut agg, vec![chunk1, chunk2]);
+
+    let final_response = agg
+        .close()
+        .expect("expected a final aggregated response, got None");
+    let usage = final_response
+        .usage_metadata
+        .expect("UsageMetadata should not be None");
+    assert_eq!(
+        usage.total_token_count, 200,
+        "expected TotalTokenCount=200 (from last chunk)"
+    );
+}
+
 #[test]
 fn test_finish_reason_unexpected_tool_call_preserves_error_code() {
     let mut agg = StreamingResponseAggregator::new();
@@ -1100,3 +1368,59 @@ fn test_process_response_nil_candidate() {
         }
     }
 }
+
+/// Part-level sibling of the nil-candidate regression above: a degenerate part in a chunk
+/// is skipped like the empty part the filter already targets, and skipping it leaves the
+/// aggregation of the surrounding text parts undisturbed ("a", nil, "b" stays one part).
+// parity: adapted: a Go nil `*genai.Part` has no Rust counterpart; the degenerate part is
+// `Part::default()`, the empty part the aggregator filters.
+#[test]
+fn test_process_response_nil_part() {
+    let cases = [
+        (
+            "nil first",
+            vec![Part::default(), Part::from_text("kept")],
+            "kept",
+        ),
+        (
+            "nil last",
+            vec![Part::from_text("kept"), Part::default()],
+            "kept",
+        ),
+        (
+            "text on both sides aggregates across the nil",
+            vec![Part::from_text("a"), Part::default(), Part::from_text("b")],
+            "ab",
+        ),
+    ];
+    for (name, parts, want_text) in cases {
+        let mut agg = StreamingResponseAggregator::new();
+        let chunk = GenerateContentResponse {
+            candidates: vec![Candidate {
+                content: Some(Content {
+                    parts,
+                    role: String::new(),
+                }),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        for item in agg.process_response(chunk) {
+            if let Err(err) = item {
+                panic!("{name}: ProcessResponse yielded error: {err}");
+            }
+        }
+        let response = agg.close();
+        let parts = response
+            .as_ref()
+            .and_then(|r| r.content.as_ref())
+            .map(|c| c.parts.clone())
+            .unwrap_or_default();
+        assert!(
+            parts.len() == 1 && parts[0].text == want_text,
+            "{name}: aggregated response = {response:?}, want the single text part {want_text:?}"
+        );
+    }
+}
+
+// parity: skipped TestStreamingResponseAggregatorDoesNotRecopyText: measures Go runtime.MemStats allocation growth of strings.Builder vs string concatenation; gadk's String::push_str buffer is amortized linear by construction and Rust has no per-test allocation counter

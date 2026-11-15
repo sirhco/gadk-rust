@@ -571,7 +571,14 @@ mod flow {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn test_run_live_ceiling_ignores_consumer_latency() {
-        let server = FakeLiveServer::start(serve(|_n: usize, _conn: FakeConn| async {})).await;
+        // One turnComplete frame per connection, so each connection produces exactly one
+        // event. The frame has no content, so it does not reset the consecutive budget.
+        let server = FakeLiveServer::start(serve(|_n: usize, mut conn: FakeConn| async move {
+            let _ = conn
+                .write_text(r#"{"serverContent":{"turnComplete":true}}"#)
+                .await;
+        }))
+        .await;
         // maxAttempts well above maxTotal, so the ceiling is what fires.
         let mut p = test_live_reconnect_policy(100, 3);
         p.healthy_uptime = Duration::from_millis(20);

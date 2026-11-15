@@ -370,6 +370,468 @@ async fn test_contents_request_processor_include_contents_none_ignores_sibling_b
     assert_eq!(vec![text("good morning", ROLE_USER)], got);
 }
 
+/// An event with nothing for the model to read, such as another agent's reply that carried
+/// only grounding metadata or an error, cannot start the current turn: the user input before
+/// it must stay in the request.
+#[tokio::test]
+#[ignore = "8a bug: IncludeContents::None starts the current turn at another agent's reply with nothing to read (grounding-only, error-only or partless; Go fc6de07d skips such a pivot)"]
+async fn test_contents_request_processor_include_contents_none_skips_empty_pivot() {
+    let cases = vec![
+        (
+            "grounding-only reply",
+            LlmResponse {
+                grounding_metadata: Some(gadk_genai::GroundingMetadata {
+                    web_search_queries: vec!["X".into()],
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        ),
+        (
+            "error reply",
+            LlmResponse {
+                error_code: "UNAVAILABLE".into(),
+                error_message: "model unavailable".into(),
+                ..Default::default()
+            },
+        ),
+        (
+            "reply with no parts",
+            LlmResponse {
+                content: Some(Content {
+                    role: ROLE_MODEL.into(),
+                    parts: vec![],
+                }),
+                ..Default::default()
+            },
+        ),
+    ];
+    for (name, reply) in cases {
+        let events = vec![
+            ev("user", text("Find X", ROLE_USER)),
+            Event {
+                author: "researcher".into(),
+                response: reply,
+                ..Default::default()
+            },
+        ];
+        let summarizer = llm_agent(LlmAgentConfig {
+            name: "summarizer".into(),
+            include_contents: IncludeContents::None,
+            ..Default::default()
+        });
+        let ctx = ctx_builder(&summarizer, events).build_invocation();
+        let got = run_contents(&ctx)
+            .await
+            .unwrap_or_else(|e| panic!("{name}: ContentsRequestProcessor() error = {e}"));
+        assert_eq!(vec![text("Find X", ROLE_USER)], got, "{name}");
+    }
+}
+
+/// A tool result the caller posts back does not start the current turn. A long-running tool
+/// is finished by running the agent again with its result as the new, user-authored message.
+/// Anchoring there would cut the call the result answers out of the request. Mirrors
+/// adk-python's `_is_submitted_tool_result` in `_get_current_turn_contents`.
+#[tokio::test]
+#[ignore = "8a bug: IncludeContents::None starts the current turn at a user-posted tool result, cutting out the call it answers (Go e847ba7d anchors at the user message that led to the call)"]
+async fn test_contents_request_processor_include_contents_none_submitted_tool_result() {
+    const AGENT_NAME: &str = "testAgent";
+    let call_c =
+        |id: &str| Content::from_parts(vec![fc_part(id, "long_job", json!({}))], ROLE_MODEL);
+    let result_c = |id: &str, response: Value| {
+        Content::from_parts(vec![fr_part(id, "long_job", response)], ROLE_USER)
+    };
+    let start = text("start the job", ROLE_USER);
+    let call = call_c("call-1");
+    let result = result_c("call-1", json!({"status": "done"}));
+    let call_without_id = call_c("");
+    let result_without_id = result_c("", json!({"status": "done"}));
+    let orphan = result_c("no-such-call", json!({"status": "done"}));
+    let question = text("is it done yet?", ROLE_USER);
+    let not_yet = text("not yet", ROLE_MODEL);
+    let earlier = text("hello", ROLE_USER);
+    let earlier_reply = text("hi, what should I run?", ROLE_MODEL);
+    // A tool that asks for confirmation answers with an error, the agent asks the user, and
+    // the user's approval comes back as a function response.
+    let confirmation_error = result_c("call-1", json!({"error": "confirmation required"}));
+    let confirmation_request = Content::from_parts(
+        vec![fc_part(
+            "confirm-1",
+            REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+            json!({}),
+        )],
+        ROLE_MODEL,
+    );
+    let approval = Content::from_parts(
+        vec![fr_part(
+            "confirm-1",
+            REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+            json!({"confirmed": true}),
+        )],
+        ROLE_USER,
+    );
+    let e = |author: &str, c: &Content| {
+        let mut out = ev(author, c.clone());
+        if author == AGENT_NAME {
+            out.long_running_tool_ids = c
+                .parts
+                .iter()
+                .filter_map(|p| p.function_call.as_ref().map(|fc| fc.id.clone()))
+                .collect();
+        }
+        out
+    };
+    let cases: Vec<(&str, Vec<Event>, Vec<Content>)> = vec![
+        (
+            "result right after the call",
+            vec![e("user", &start), e(AGENT_NAME, &call), e("user", &result)],
+            vec![start.clone(), call.clone(), result.clone()],
+        ),
+        (
+            "user turn while the tool was pending",
+            vec![
+                e("user", &start),
+                e(AGENT_NAME, &call),
+                e("user", &question),
+                e(AGENT_NAME, &not_yet),
+                e("user", &result),
+            ],
+            vec![start.clone(), call.clone(), result.clone()],
+        ),
+        (
+            // A finished turn ahead of the call: the anchor is the user message that led to
+            // the call, not the first event.
+            "earlier turn ahead of the call",
+            vec![
+                e("user", &earlier),
+                e(AGENT_NAME, &earlier_reply),
+                e("user", &start),
+                e(AGENT_NAME, &call),
+                e("user", &question),
+                e(AGENT_NAME, &not_yet),
+                e("user", &result),
+            ],
+            vec![start.clone(), call.clone(), result.clone()],
+        ),
+        (
+            // Full-history mode pairs a call and a result that both lack an ID, so none mode
+            // reaches back to such a call too.
+            "call and result without IDs",
+            vec![
+                e("user", &start),
+                e(AGENT_NAME, &call_without_id),
+                e("user", &question),
+                e(AGENT_NAME, &not_yet),
+                e("user", &result_without_id),
+            ],
+            vec![
+                start.clone(),
+                call_without_id.clone(),
+                result_without_id.clone(),
+            ],
+        ),
+        (
+            "tool resumed after the user confirms it",
+            vec![
+                e("user", &start),
+                e(AGENT_NAME, &call),
+                e(AGENT_NAME, &confirmation_error),
+                e(AGENT_NAME, &confirmation_request),
+                e("user", &approval),
+                e(AGENT_NAME, &result),
+            ],
+            vec![start.clone(), call.clone(), result.clone()],
+        ),
+        (
+            "result with no call stays out of the anchor search",
+            vec![
+                e("user", &start),
+                e(AGENT_NAME, &call),
+                e("user", &question),
+                e("user", &orphan),
+            ],
+            vec![question.clone()],
+        ),
+    ];
+    for (name, events, want) in cases {
+        let agent = llm_agent(LlmAgentConfig {
+            name: AGENT_NAME.into(),
+            include_contents: IncludeContents::None,
+            ..Default::default()
+        });
+        let ctx = ctx_builder(&agent, events).build_invocation();
+        let got = run_contents(&ctx)
+            .await
+            .unwrap_or_else(|e| panic!("{name}: ContentsRequestProcessor() error = {e}"));
+        assert_eq!(with_continuation(want), got, "{name}: contents");
+    }
+}
+
+/// The parent's transfer_to_agent call and response do not start the current turn of the
+/// agent it hands over to. Anchoring there would leave the user's request out of that agent's
+/// prompt. Mirrors adk-python's `_is_direct_transfer` in `_get_current_turn_contents`. With
+/// nothing earlier to start the turn, the latest hand-over still starts it.
+#[tokio::test]
+#[ignore = "8a bug: IncludeContents::None starts the current turn at the parent's transfer_to_agent hand-over, leaving the user's request out (Go 86620857 looks past hand-overs)"]
+async fn test_contents_request_processor_include_contents_none_transferred_from_parent() {
+    const PARENT_NAME: &str = "coordinator";
+    const AGENT_NAME: &str = "geography";
+    let question = text("What is the capital of France?", ROLE_USER);
+    let transfer_call_part = fc_part(
+        "call-1",
+        "transfer_to_agent",
+        json!({"agent_name": AGENT_NAME}),
+    );
+    let transfer_call = Content::from_parts(vec![transfer_call_part.clone()], ROLE_MODEL);
+    let text_then_transfer_call = Content::from_parts(
+        vec![Part::from_text("Handing over."), transfer_call_part],
+        ROLE_MODEL,
+    );
+    let transfer_response = Content::from_parts(
+        vec![fr_part("call-1", "transfer_to_agent", json!({}))],
+        ROLE_USER,
+    );
+    let own_call = Content::from_parts(
+        vec![fc_part("call-2", "lookup", json!({"country": "France"}))],
+        ROLE_MODEL,
+    );
+    let own_response = Content::from_parts(
+        vec![fr_part("call-2", "lookup", json!({"capital": "Paris"}))],
+        ROLE_USER,
+    );
+    let user_event = ev("user", question.clone());
+    let transfer_call_event = ev(PARENT_NAME, transfer_call);
+    let transfer_response_event = {
+        let mut out = ev(PARENT_NAME, transfer_response);
+        out.actions.transfer_to_agent = AGENT_NAME.into();
+        out
+    };
+    // An earlier turn ahead of the request. It stays out of the prompt, so a test passes only
+    // if the turn starts at the request, not at the first event of the session.
+    let earlier_answer_event = ev(AGENT_NAME, text("Madrid.", ROLE_MODEL));
+    let earlier_turn = vec![
+        ev("user", text("What is the capital of Spain?", ROLE_USER)),
+        earlier_answer_event.clone(),
+    ];
+    let own_transfer_call = Content::from_parts(
+        vec![fc_part(
+            "call-4",
+            "transfer_to_agent",
+            json!({"agent_name": "history"}),
+        )],
+        ROLE_MODEL,
+    );
+    let own_transfer_error = Content::from_parts(
+        vec![fr_part(
+            "call-4",
+            "transfer_to_agent",
+            json!({"error": "agent history not found"}),
+        )],
+        ROLE_USER,
+    );
+    // A custom tool that hands over by setting Actions.TransferToAgent, with a call and
+    // response named something other than transfer_to_agent.
+    let handoff_call = Content::from_parts(
+        vec![fc_part("call-3", "handoff", json!({"to": AGENT_NAME}))],
+        ROLE_MODEL,
+    );
+    let handoff_response =
+        Content::from_parts(vec![fr_part("call-3", "handoff", json!({}))], ROLE_USER);
+    // The transfer itself stays in the prompt, as context from another agent.
+    let transfer_call_context = for_context(
+        r#"[coordinator] called tool `transfer_to_agent` with parameters: {"agent_name":"geography"}"#,
+    );
+    let transfer_response_context =
+        for_context("[coordinator] `transfer_to_agent` tool returned result: {}");
+    let with_earlier_turn = |events: Vec<Event>| {
+        let mut out = earlier_turn.clone();
+        out.extend(events);
+        out
+    };
+    let router_event = {
+        let mut out = ev(
+            "router",
+            Content::from_parts(
+                vec![Part {
+                    text: "Routing elsewhere.".into(),
+                    thought: true,
+                    ..Default::default()
+                }],
+                ROLE_MODEL,
+            ),
+        );
+        out.actions.transfer_to_agent = "history".into();
+        out
+    };
+    let handoff_response_event = {
+        let mut out = ev(PARENT_NAME, handoff_response);
+        out.actions.transfer_to_agent = AGENT_NAME.into();
+        out
+    };
+    // (name, events, placed single turn, want)
+    let cases: Vec<(&str, Vec<Event>, bool, Vec<Content>)> = vec![
+        (
+            "transfer is the latest event",
+            with_earlier_turn(vec![
+                user_event.clone(),
+                transfer_call_event.clone(),
+                transfer_response_event.clone(),
+            ]),
+            false,
+            vec![
+                question.clone(),
+                transfer_call_context.clone(),
+                transfer_response_context.clone(),
+            ],
+        ),
+        (
+            // The call is not the event's first part.
+            "parent writes text before the transfer call",
+            with_earlier_turn(vec![
+                user_event.clone(),
+                ev(PARENT_NAME, text_then_transfer_call),
+                transfer_response_event.clone(),
+            ]),
+            false,
+            vec![
+                question.clone(),
+                Content::from_parts(
+                    vec![
+                        Part::from_text("For context:"),
+                        Part::from_text("[coordinator] said: Handing over."),
+                        Part::from_text(
+                            r#"[coordinator] called tool `transfer_to_agent` with parameters: {"agent_name":"geography"}"#,
+                        ),
+                    ],
+                    ROLE_USER,
+                ),
+                transfer_response_context.clone(),
+            ],
+        ),
+        (
+            // The transfer is no longer the latest event on the agent's next model call,
+            // after its own tool call.
+            "agent's own tool call after the transfer",
+            with_earlier_turn(vec![
+                user_event.clone(),
+                transfer_call_event.clone(),
+                transfer_response_event.clone(),
+                ev(AGENT_NAME, own_call.clone()),
+                ev(AGENT_NAME, own_response.clone()),
+            ]),
+            false,
+            vec![
+                question.clone(),
+                transfer_call_context.clone(),
+                transfer_response_context.clone(),
+                own_call.clone(),
+                own_response.clone(),
+            ],
+        ),
+        (
+            // The session has no user event, so nothing ahead of the hand-over starts a turn.
+            // The turn starts at the latest hand-over, as before hand-overs were skipped, so
+            // the agent's own earlier answer stays out.
+            "no user event in the session",
+            vec![
+                earlier_answer_event.clone(),
+                transfer_call_event.clone(),
+                transfer_response_event.clone(),
+            ],
+            false,
+            vec![transfer_response_context.clone()],
+        ),
+        (
+            // A later hand-over the agent cannot see, here one whose only part is a thought
+            // that foreign conversion drops, is not the hand-over the turn falls back to. The
+            // checks that hide an event from the agent run before the skip.
+            "hand-over the agent cannot see after the hand-over",
+            vec![
+                earlier_answer_event.clone(),
+                transfer_call_event.clone(),
+                transfer_response_event.clone(),
+                router_event,
+            ],
+            false,
+            vec![transfer_response_context.clone()],
+        ),
+        (
+            // The agent's own transfer_to_agent call never starts its turn, so the turn does
+            // not fall back to it either. Here the agent named an unknown agent and is called
+            // again with the error.
+            "agent's own failed transfer after the hand-over",
+            vec![
+                earlier_answer_event.clone(),
+                transfer_call_event.clone(),
+                transfer_response_event.clone(),
+                ev(AGENT_NAME, own_transfer_call.clone()),
+                ev(AGENT_NAME, own_transfer_error.clone()),
+            ],
+            false,
+            vec![
+                transfer_response_context.clone(),
+                own_transfer_call,
+                own_transfer_error,
+            ],
+        ),
+        (
+            // The response is skipped through Actions.TransferToAgent alone. The call is not
+            // named transfer_to_agent, so it starts the turn, as in adk-python.
+            "custom tool hands over through Actions.TransferToAgent",
+            with_earlier_turn(vec![
+                user_event.clone(),
+                ev(PARENT_NAME, handoff_call),
+                handoff_response_event,
+            ]),
+            false,
+            vec![
+                for_context(
+                    r#"[coordinator] called tool `handoff` with parameters: {"to":"geography"}"#,
+                ),
+                for_context("[coordinator] `handoff` tool returned result: {}"),
+            ],
+        ),
+        (
+            "single_turn placement with IncludeContents unset",
+            with_earlier_turn(vec![
+                user_event.clone(),
+                transfer_call_event.clone(),
+                transfer_response_event.clone(),
+            ]),
+            true,
+            vec![
+                question.clone(),
+                transfer_call_context.clone(),
+                transfer_response_context.clone(),
+            ],
+        ),
+    ];
+    for (name, events, placed_single_turn, want) in cases {
+        let agent = llm_agent(LlmAgentConfig {
+            name: AGENT_NAME.into(),
+            include_contents: if placed_single_turn {
+                IncludeContents::Unset
+            } else {
+                IncludeContents::None
+            },
+            ..Default::default()
+        });
+        let mut ctx = ctx_builder(&agent, events).build_invocation();
+        if placed_single_turn {
+            ctx = crate::llm::mode::with_bound_mode(
+                &ctx,
+                AGENT_NAME,
+                agent.agent_state(),
+                Mode::SingleTurn,
+            );
+        }
+        let got = run_contents(&ctx)
+            .await
+            .unwrap_or_else(|e| panic!("{name}: ContentsRequestProcessor() error = {e}"));
+        assert_eq!(want, got, "{name}: contents");
+    }
+}
+
 #[tokio::test]
 async fn test_contents_request_processor_strict_isolation_filter_excludes_foreign_scope() {
     const MY_SCOPE: &str = "task-mine";
@@ -527,7 +989,20 @@ fn fr_part(id: &str, name: &str, response: Value) -> Part {
     }
 }
 
+/// A part referring to a file (Go `&genai.Part{FileData: &genai.FileData{FileURI, MIMEType}}`).
+fn file_part(uri: &str, mime_type: &str) -> Part {
+    Part {
+        file_data: Some(gadk_genai::FileData {
+            file_uri: uri.into(),
+            mime_type: mime_type.into(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
 #[tokio::test]
+#[ignore = "8a bug: the contents processor keeps internal artifact://…/_adk_live/… parts (and a foreign event made only of them becomes a bare \"For context:\" turn); Go 22ff1839 drops them"]
 async fn test_contents_request_processor() {
     const AGENT_NAME: &str = "testAgent";
     let transcription = |author: &str, input: bool, t: &str, finished: bool| {
@@ -582,6 +1057,122 @@ async fn test_contents_request_processor() {
             "",
             vec![ev("anotherAgent", text("Foreign message", ROLE_MODEL))],
             vec![for_context("[anotherAgent] said: Foreign message")],
+        ),
+        (
+            "FilterAdkLiveArtifacts",
+            "",
+            "",
+            vec![ev(
+                "user",
+                Content::from_parts(
+                    vec![
+                        Part::from_text("Some text"),
+                        file_part("artifact://app/user/session/_adk_live/audio.pcm#1", ""),
+                    ],
+                    ROLE_USER,
+                ),
+            )],
+            vec![Content::from_parts(
+                vec![Part::from_text("Some text")],
+                ROLE_USER,
+            )],
+        ),
+        (
+            // The audio cache manager writes an event whose only part is the internal
+            // reference, so the whole content has to go.
+            "FilterAdkLiveArtifactOnlyContent",
+            "",
+            "",
+            vec![
+                ev("user", text("before", ROLE_USER)),
+                ev(
+                    "user",
+                    Content::from_parts(
+                        vec![file_part(
+                            "artifact://app/user/session/_adk_live/adk_live_audio_storage_input_audio_1700000000000.pcm#0",
+                            "audio/pcm",
+                        )],
+                        ROLE_USER,
+                    ),
+                ),
+                ev("user", text("after", ROLE_USER)),
+            ],
+            vec![text("before", ROLE_USER), text("after", ROLE_USER)],
+        ),
+        (
+            // With SaveLiveBlob on, the output-audio event is authored by the agent that
+            // spoke, so another agent sees it as a foreign event. ConvertForeignEvent must
+            // not turn it into a bare "For context:" turn: an event whose only parts are
+            // internal live refs has to behave as if it were not in the session at all.
+            "DropForeignAdkLiveArtifactOnlyContent",
+            "",
+            "",
+            vec![
+                ev("user", text("hi", ROLE_USER)),
+                ev(
+                    "otherAgent",
+                    Content::from_parts(
+                        vec![file_part(
+                            "artifact://app/user/session/_adk_live/adk_live_audio_storage_output_audio_1700000000000.pcm#0",
+                            "audio/pcm",
+                        )],
+                        ROLE_MODEL,
+                    ),
+                ),
+            ],
+            vec![text("hi", ROLE_USER)],
+        ),
+        (
+            // A foreign event that also says something keeps the spoken part and loses only
+            // the internal ref.
+            "FilterForeignAdkLiveArtifactKeepsText",
+            "",
+            "",
+            vec![ev(
+                "otherAgent",
+                Content::from_parts(
+                    vec![
+                        Part::from_text("here is the summary"),
+                        file_part(
+                            "artifact://app/user/session/_adk_live/adk_live_audio_storage_output_audio_1700000000000.pcm#0",
+                            "audio/pcm",
+                        ),
+                    ],
+                    ROLE_MODEL,
+                ),
+            )],
+            vec![for_context("[otherAgent] said: here is the summary")],
+        ),
+        (
+            // A user-visible artifact outside the _adk_live namespace stays.
+            "KeepNonLiveArtifactRefs",
+            "",
+            "",
+            vec![ev(
+                "user",
+                Content::from_parts(
+                    vec![
+                        Part::from_text("look at this"),
+                        file_part(
+                            "artifact://app/user/session/report.pdf#1",
+                            "application/pdf",
+                        ),
+                        file_part("gs://bucket/recording.mp3", "audio/mp3"),
+                    ],
+                    ROLE_USER,
+                ),
+            )],
+            vec![Content::from_parts(
+                vec![
+                    Part::from_text("look at this"),
+                    file_part(
+                        "artifact://app/user/session/report.pdf#1",
+                        "application/pdf",
+                    ),
+                    file_part("gs://bucket/recording.mp3", "audio/mp3"),
+                ],
+                ROLE_USER,
+            )],
         ),
         (
             "ExcludeToolConfirmation",

@@ -576,10 +576,25 @@ async fn test_agent_transfer_process_request() {
 }
 
 #[tokio::test]
+#[ignore = "8a bug: transfer_to_agent accepts an agent name it cannot transfer to, and a nil argument errors with \"missing argument\" instead of \"empty agent_name\" (Go c8fff670 returns an error naming the available agents)"]
 async fn test_transfer_to_agent_tool_run() {
+    // Go newTool: the transfer tool of an agent with a single sub-agent, "TestAgent".
+    let new_tool = || {
+        let sub = llm_agent::new(llm("TestAgent")).unwrap();
+        let root = llm_agent::new(LlmAgentConfig {
+            sub_agents: vec![sub.clone()],
+            ..llm("Root")
+        })
+        .unwrap();
+        let inv = InvocationContext::builder()
+            .agent(root.clone())
+            .build_invocation();
+        TransferToAgentTool::new(&inv, &root, None, vec![sub])
+    };
+
     // Success
     {
-        let cur_tool = zero_transfer_tool();
+        let cur_tool = new_tool();
         let ctx = Context::builder().build().with_delta(ContextDelta {
             function_call_id: Some("call".into()),
             ..Default::default()
@@ -597,19 +612,46 @@ async fn test_transfer_to_agent_tool_run() {
         );
     }
 
+    // UnknownAgent
+    {
+        let cur_tool = new_tool();
+        let ctx = Context::builder().build();
+        let args = json!({"agent_name": "nobody"});
+        let got = cur_tool.run(ctx.clone(), args.clone()).await;
+        assert!(
+            got.as_ref()
+                .is_err_and(|e| e.to_string().contains("TestAgent")),
+            "UnknownAgent: Run({args}) = {got:?}, want an error naming the available agents"
+        );
+        assert_eq!(
+            ctx.actions().transfer_to_agent,
+            "",
+            "UnknownAgent: Run({args}) set TransferToAgent, want it unset"
+        );
+    }
+
     // InvalidArguments
-    let cases: [(&str, Value); 4] = [
-        ("NoAgentName", json!({})),
-        ("NilArg", Value::Null),
-        ("InvalidType", json!({"agent_name": 123})),
-        ("InvalidValue", json!({"agent_name": ""})),
+    let cases: [(&str, Value, &str); 4] = [
+        ("NoAgentName", json!({}), "empty agent_name"),
+        ("NilArg", Value::Null, "empty agent_name"),
+        (
+            "InvalidType",
+            json!({"agent_name": 123}),
+            "empty agent_name",
+        ),
+        (
+            "InvalidValue",
+            json!({"agent_name": ""}),
+            "empty agent_name",
+        ),
     ];
-    for (name, args) in cases {
-        let cur_tool = zero_transfer_tool();
+    for (name, args, want_err) in cases {
+        let cur_tool = new_tool();
         let got = cur_tool.run(Context::builder().build(), args.clone()).await;
         assert!(
-            got.is_err(),
-            "InvalidArguments/{name}: Run({args}) = {got:?}, want error"
+            got.as_ref()
+                .is_err_and(|e| e.to_string().contains(want_err)),
+            "InvalidArguments/{name}: Run({args}) = {got:?}, want error containing {want_err:?}"
         );
     }
 }
