@@ -61,8 +61,8 @@
         "<date>"
       ]
     ],
-    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"task\":{\"id\":\"<uuid-1>\",\"artifacts\":[{\"artifactId\":\"<uuid-2>\",\"parts\":[{\"text\":\"Hello! How can I help?\"}]}],\"contextId\":\"<uuid-3>\",\"history\":[{\"messageId\":\"msg-1\",\"parts\":[{\"text\":\"hello\"}],\"role\":\"ROLE_USER\"}],\"metadata\":{\"adk_app_name\":\"assistant\",\"adk_session_id\":\"<uuid-3>\",\"adk_user_id\":\"A2A_USER_<uuid-3>\",\"https://google.github.io/adk-docs/a2a/a2a-extension/\":true},\"status\":{\"state\":\"TASK_STATE_COMPLETED\",\"timestamp\":\"<t>\"}}}}\n",
-    "body_length": null,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32009,\"message\":\"this version is not supported: requested \\\"0.3\\\", served \\\"1.0\\\"\",\"data\":[{\"@type\":\"type.googleapis.com/google.rpc.ErrorInfo\",\"domain\":\"a2a-protocol.org\",\"metadata\":{\"timestamp\":\"<t>\"},\"reason\":\"VERSION_NOT_SUPPORTED\"}]}}\n",
+    "body_length": 297,
     "body_sha256": null,
     "base_href": null
   },

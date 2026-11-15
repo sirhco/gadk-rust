@@ -4,7 +4,7 @@
 `docs/parity/ADK_GO_COMMIT`) computes and sends, as fixtures for `gadk-agentanalytics`. Sub-project
 7b-1 (spec R1–R9): the `Config` defaults, the BigQuery and Arrow events schemas, the analytics view
 SQL, the content formatter and redaction outputs over a corpus, and the BigQuery REST requests the
-`cloud.google.com/go/bigquery` v1.79.0 client sends for table creation, schema upgrade and view DDL.
+`cloud.google.com/go/bigquery` v1.85.0 client sends for table creation, schema upgrade and view DDL.
 Sub-project 7b-2 (transports): Arrow record batches, AppendRows requests, the gapic BigQuery Write
 client's per-RPC metadata and retries, the Cloud Storage offloader's requests, `validateConfig`,
 CRC32C and the pure helpers of `gcs_offloader.go` (see "7b-2 fixture formats" below). Sub-project
@@ -366,7 +366,7 @@ Every `Other` value is a type Go's type assertions reject everywhere (a scalar c
 
 ### gapic/
 
-The real `bqstorage.BigQueryWriteClient` (bigquery v1.79.0, `option.WithGRPCConn` to a grpc-go
+The real `bqstorage.BigQueryWriteClient` (bigquery v1.85.0, `option.WithGRPCConn` to a grpc-go
 server on `127.0.0.1:0` serving a recording `BigQueryWrite` fake).
 
 - `call_options.json` — `{about, <RPC>: {timeout_ns, retry: {codes, initial_ns, max_ns,
@@ -409,7 +409,7 @@ server on `127.0.0.1:0` serving a recording `BigQueryWrite` fake).
 
 One document per scenario, `gcs/<name>.json`: `newGCSOffloader(ctx, "test-bucket",
 option.WithEndpoint(server+"/storage/v1/"), option.WithoutAuthentication())` (cloud.google.com/go/
-storage v1.69.0, `STORAGE_EMULATOR_HOST` empty), one `UploadContent(ctx, GCSUploadRequest{Path,
+storage v1.70.0, `STORAGE_EMULATOR_HOST` empty), one `UploadContent(ctx, GCSUploadRequest{Path,
 Data, ContentType})`, then `Close()`, against an `httptest` server answering each request in order.
 
 ```

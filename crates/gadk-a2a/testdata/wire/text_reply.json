@@ -16,7 +16,7 @@
         "name": "assistant",
         "skills": [
           {
-            "description": "Answers greetings. Answer briefly.",
+            "description": "Answers greetings.",
             "id": "assistant",
             "name": "model",
             "tags": [
@@ -37,7 +37,9 @@
         {
           "events": [
             {
-              "actions": {},
+              "actions": {
+                "skipSummarization": true
+              },
               "author": "remote",
               "content": {
                 "parts": [
@@ -300,7 +302,7 @@
                 },
                 "headers": {
                   "A2a-Version": "1.0",
-                  "Accept": "text/event-stream",
+                  "Accept": "text/event-stream, application/json",
                   "Content-Type": "application/json"
                 },
                 "method": "POST",
@@ -447,7 +449,7 @@
         "name": "assistant",
         "skills": [
           {
-            "description": "Answers greetings. Answer briefly.",
+            "description": "Answers greetings.",
             "id": "assistant",
             "name": "model",
             "tags": [
@@ -468,7 +470,9 @@
         {
           "events": [
             {
-              "actions": {},
+              "actions": {
+                "skipSummarization": true
+              },
               "author": "remote",
               "content": {
                 "parts": [
@@ -550,7 +554,7 @@
                 },
                 "headers": {
                   "A2a-Version": "1.0",
-                  "Accept": "application/json",
+                  "Accept": "application/a2a+json, application/json",
                   "Content-Type": "application/json"
                 },
                 "method": "POST",
@@ -595,7 +599,7 @@
                   }
                 },
                 "headers": {
-                  "Content-Type": "application/json"
+                  "Content-Type": "application/a2a+json"
                 },
                 "status": 200
               }
@@ -718,7 +722,7 @@
                 },
                 "headers": {
                   "A2a-Version": "1.0",
-                  "Accept": "text/event-stream",
+                  "Accept": "text/event-stream, application/json",
                   "Content-Type": "application/json"
                 },
                 "method": "POST",
@@ -994,7 +998,7 @@
             },
             "headers": {
               "A2a-Version": "1.0",
-              "Accept": "text/event-stream",
+              "Accept": "text/event-stream, application/json",
               "Content-Type": "application/json"
             },
             "method": "POST",
@@ -1205,7 +1209,7 @@
             },
             "headers": {
               "A2a-Version": "1.0",
-              "Accept": "application/json",
+              "Accept": "application/a2a+json, application/json",
               "Content-Type": "application/json"
             },
             "method": "POST",
@@ -1250,7 +1254,7 @@
               }
             },
             "headers": {
-              "Content-Type": "application/json"
+              "Content-Type": "application/a2a+json"
             },
             "status": 200
           }
@@ -1260,7 +1264,7 @@
             "body": null,
             "headers": {
               "A2a-Version": "1.0",
-              "Accept": "application/json"
+              "Accept": "application/a2a+json, application/json"
             },
             "method": "GET",
             "path": "/rest/tasks/<task-1>"
@@ -1302,7 +1306,7 @@
               }
             },
             "headers": {
-              "Content-Type": "application/json"
+              "Content-Type": "application/a2a+json"
             },
             "status": 200
           }
@@ -1322,7 +1326,7 @@
             },
             "headers": {
               "A2a-Version": "1.0",
-              "Accept": "text/event-stream",
+              "Accept": "text/event-stream, application/json",
               "Content-Type": "application/json"
             },
             "method": "POST",
@@ -1439,7 +1443,7 @@
             },
             "headers": {
               "A2a-Version": "1.0",
-              "Accept": "application/json",
+              "Accept": "application/a2a+json, application/json",
               "Content-Type": "application/json"
             },
             "method": "POST",
@@ -1485,7 +1489,7 @@
               }
             },
             "headers": {
-              "Content-Type": "application/json"
+              "Content-Type": "application/a2a+json"
             },
             "status": 200
           }

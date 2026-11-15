@@ -15,7 +15,7 @@
         "application/json; charset=UTF-8"
       ]
     ],
-    "body": "{\"end_time\":1794340393283708542,\"gcp.vertex.agent.event_id\":\"00000000-0000-4000-8000-000000000015\",\"gen_ai.operation.name\":\"execute_tool\",\"gen_ai.tool.call.id\":\"adk-00000000-0000-4000-8000-000000000013\",\"gen_ai.tool.description\":\"Saves a note as the artifact note.txt.\",\"gen_ai.tool.name\":\"save_note\",\"logs\":[],\"name\":\"execute_tool save_note\",\"parent_span_id\":\"97a36a32fcd68634\",\"span_id\":\"2c56345643616816\",\"start_time\":1794340393283623000,\"trace_id\":\"75135f4b3dc6a14e644f493bd00d7eef\"}\n"
+    "body": "{\"end_time\":1794719776642523042,\"gcp.vertex.agent.event_id\":\"00000000-0000-4000-8000-000000000015\",\"gen_ai.operation.name\":\"execute_tool\",\"gen_ai.tool.call.id\":\"adk-00000000-0000-4000-8000-000000000013\",\"gen_ai.tool.description\":\"Saves a note as the artifact note.txt.\",\"gen_ai.tool.name\":\"save_note\",\"logs\":[],\"name\":\"execute_tool save_note\",\"parent_span_id\":\"bf2ebc98cd44d4ba\",\"span_id\":\"b6f369cb9a944811\",\"start_time\":1794719776642413000,\"trace_id\":\"ad583920231cb755482736e30e466328\"}\n"
   },
   "compare": "debug_trace"
 }

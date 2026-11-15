@@ -16,7 +16,7 @@
         "name": "weather",
         "skills": [
           {
-            "description": "Reports the weather. Use get_weather to answer.",
+            "description": "Reports the weather.",
             "id": "weather",
             "name": "model",
             "tags": [
@@ -464,7 +464,7 @@
                 },
                 "headers": {
                   "A2a-Version": "1.0",
-                  "Accept": "text/event-stream",
+                  "Accept": "text/event-stream, application/json",
                   "Content-Type": "application/json"
                 },
                 "method": "POST",
@@ -847,7 +847,7 @@
         "name": "weather",
         "skills": [
           {
-            "description": "Reports the weather. Use get_weather to answer.",
+            "description": "Reports the weather.",
             "id": "weather",
             "name": "model",
             "tags": [
@@ -1290,7 +1290,7 @@
                 },
                 "headers": {
                   "A2a-Version": "1.0",
-                  "Accept": "text/event-stream",
+                  "Accept": "text/event-stream, application/json",
                   "Content-Type": "application/json"
                 },
                 "method": "POST",
@@ -1638,7 +1638,7 @@
             },
             "headers": {
               "A2a-Version": "1.0",
-              "Accept": "text/event-stream",
+              "Accept": "text/event-stream, application/json",
               "Content-Type": "application/json"
             },
             "method": "POST",
@@ -2126,7 +2126,7 @@
             },
             "headers": {
               "A2a-Version": "1.0",
-              "Accept": "text/event-stream",
+              "Accept": "text/event-stream, application/json",
               "Content-Type": "application/json"
             },
             "method": "POST",
@@ -2451,7 +2451,7 @@
             },
             "headers": {
               "A2a-Version": "1.0",
-              "Accept": "application/json",
+              "Accept": "application/a2a+json, application/json",
               "Content-Type": "application/json"
             },
             "method": "POST",
@@ -2538,7 +2538,7 @@
               }
             },
             "headers": {
-              "Content-Type": "application/json"
+              "Content-Type": "application/a2a+json"
             },
             "status": 200
           }

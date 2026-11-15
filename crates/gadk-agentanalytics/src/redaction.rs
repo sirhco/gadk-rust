@@ -2873,7 +2873,7 @@ mod tests {
     fn golden_text_corpus_matches_go() {
         let corpus = fixture("redaction/text_corpus.json");
         let cases = corpus["cases"].as_array().unwrap();
-        assert_eq!(cases.len(), 1030);
+        assert_eq!(cases.len(), 1341);
         let mut failures = Vec::new();
         for case in cases {
             let input = case["input"].as_str().unwrap();

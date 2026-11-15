@@ -132,7 +132,7 @@ fn format_content_parts_matches_go_corpus() {
 #[test]
 fn smart_truncate_matches_redaction_corpus() {
     let cases = cases("redaction/text_corpus.json");
-    assert_eq!(cases.len(), 1030);
+    assert_eq!(cases.len(), 1341);
     for case in &cases {
         let text = case["input"].as_str().unwrap();
         let (got, truncated) = smart_truncate(text, 100).unwrap();

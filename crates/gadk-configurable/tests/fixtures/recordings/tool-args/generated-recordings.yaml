@@ -48,6 +48,7 @@ recordings:
                         - 104
                         - 105
                     displayname: ""
+                  mediaprocessing: ""
             id: adk-8
             name: long_op
             response: {}

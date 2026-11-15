@@ -883,7 +883,7 @@ type httpCall struct {
 }
 
 // httpRequest returns the HTTP request of an operation, with
-// the headers a2a-go's own client (a2aclient v2.6.0) sends; rpcID is the
+// the headers a2a-go's own client (a2aclient v2.7.0) sends; rpcID is the
 // JSON-RPC request id (the 1-based step number).
 func (b binding) httpRequest(o op, rpcID int) httpCall {
 	if o.kind == "card" {
@@ -891,8 +891,8 @@ func (b binding) httpRequest(o op, rpcID int) httpCall {
 	}
 	version := [2]string{"A2A-Version", "1.0"}
 	ct := [2]string{"Content-Type", "application/json"}
-	acceptJSON := [2]string{"Accept", "application/json"}
-	acceptSSE := [2]string{"Accept", "text/event-stream"}
+	acceptJSON := [2]string{"Accept", "application/a2a+json, application/json"}
+	acceptSSE := [2]string{"Accept", "text/event-stream, application/json"}
 	if b == bindingJSONRPC {
 		method := map[string]string{
 			"send": "SendMessage", "stream": "SendStreamingMessage", "get": "GetTask", "cancel": "CancelTask",
