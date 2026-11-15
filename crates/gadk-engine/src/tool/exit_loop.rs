@@ -49,7 +49,9 @@ pub fn exit_loop() -> Arc<dyn Tool> {
                 a.escalate = true;
                 a.skip_summarization = true;
             });
-            // Go map[string]string{}
+            // Go 1ced38ba returns a nil map[string]string ("nothing"). A Rust result map
+            // cannot be nil, so the empty map stands in for it: the flow wraps a tool's empty
+            // result as {"result": null}, as Go wraps nil.
             Ok::<_, ToolError>(BTreeMap::<String, String>::new())
         },
     );

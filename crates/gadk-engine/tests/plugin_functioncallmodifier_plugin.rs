@@ -500,7 +500,6 @@ fn contentless_model() -> Arc<MockModel> {
 // leaves a response with nothing to rewrite to the rest of the after-model
 // chain, so an agent's own AfterModelCallbacks still see it.
 #[tokio::test]
-#[ignore = "8a bug: FunctionCallModifier after-model returns Ok(Some(resp)) for a content-less response, ending the after-model chain before the agent's callbacks (Go 128135a8 returns nil, nil)"]
 async fn test_after_model_callback_contentless_response_keeps_chain() {
     let plugin = new_function_call_modifier_plugin(FunctionCallModifierConfig {
         predicate: Arc::new(|_: &str| true),

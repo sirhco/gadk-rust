@@ -52,17 +52,23 @@ impl Tool for PreloadMemoryTool {
         "Preloads relevant memory for the current user."
     }
 
-    /// Port of Go `preloadMemoryTool.ProcessRequest` (tool.go:73). Only the first user part is
-    /// used as the query. A missing user content, missing parts or empty text is a no-op.
+    /// Port of Go `preloadMemoryTool.ProcessRequest` (tool.go:73). The query is every non-empty
+    /// text part of the user content joined with spaces (Go ff9e77c5; thought parts included,
+    /// as in Go). A missing user content or an empty query is a no-op.
     async fn process_request(&self, ctx: &Context, req: &mut LlmRequest) -> Result<(), ToolError> {
-        let Some(query) = ctx
-            .user_content()
-            .and_then(|c| c.parts.first())
-            .map(|p| p.text.clone())
-            .filter(|t| !t.is_empty())
-        else {
+        let Some(content) = ctx.user_content() else {
             return Ok(());
         };
+        let query = content
+            .parts
+            .iter()
+            .filter(|p| !p.text.is_empty())
+            .map(|p| p.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        if query.is_empty() {
+            return Ok(());
+        }
         let resp = ctx
             .search_memory(&query)
             .await

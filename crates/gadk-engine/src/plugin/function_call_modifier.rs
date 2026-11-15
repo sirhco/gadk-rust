@@ -117,10 +117,9 @@ fn strip_args(
         return (resp, Err(model_error_into_agent(err)));
     }
     if resp.content.as_ref().is_none_or(|c| c.parts.is_empty()) {
-        // Go: return llmResponse, nil. That is a non-nil response, which ends Go's after-model
-        // chain (plugin_manager.go RunAfterModelCallback).
-        let same = resp.clone();
-        return (resp, Ok(Some(same)));
+        // Go 128135a8: return nil, nil, leaving a content-less response to the rest of the
+        // after-model chain (the agent's own callbacks included).
+        return (resp, Ok(None));
     }
 
     let state = ctx.state();
@@ -199,12 +198,13 @@ mod tests {
 
     // Go returns the response itself when it has no parts, which ends the after-model chain.
     #[tokio::test]
-    async fn after_model_returns_a_partless_response_as_the_replacement() {
+    async fn after_model_leaves_a_partless_response_to_the_chain() {
         let cb = new_function_call_modifier_plugin(cfg())
             .after_model_callback()
             .unwrap();
         let (resp, res) = cb(Context::builder().build(), LlmResponse::default(), None).await;
-        assert_eq!(res.unwrap(), Some(resp));
+        assert_eq!(resp, LlmResponse::default());
+        assert_eq!(res.unwrap(), None);
     }
 
     #[tokio::test]

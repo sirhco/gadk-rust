@@ -243,7 +243,6 @@ fn test_build_transport() {
 
 #[cfg(unix)]
 // parity: adapted: Go's `Connect` only starts the process; a gadk `TransportFactory::connect` also runs the MCP `initialize` handshake, so the helper is an `sh -c` child (not Go's re-run test binary) that writes its working directory to stderr and exits, and every connect fails the handshake with `connection closed`. The test checks that each of the three connects started the builder's command with its `current_dir` and `stderr`. Go's "first connect runs the caller's own command" check has no counterpart: `McpTransport::Command` is a `CommandBuilder` run on every connect.
-#[ignore = "8a bug: CommandFactory::connect (transport.rs) spawns through TokioChildProcess::new, whose builder forces Stdio::inherit() for stderr and drops the CommandBuilder's stderr (Go's CommandTransport keeps cmd.Stderr on every connect)"]
 #[tokio::test]
 async fn test_command_transport_reconnect() {
     use crate::config::default_client_info;

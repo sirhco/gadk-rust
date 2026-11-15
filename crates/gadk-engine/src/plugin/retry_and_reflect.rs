@@ -23,13 +23,15 @@ use std::sync::Arc;
 
 use futures::future::{BoxFuture, ready};
 use gadk_agent::{
-    AfterToolCallback, AgentError, Context, OnToolErrorCallback, Plugin, PluginConfig,
-    SharedToolError, Tool, ToolError,
+    AfterRunCallback, AfterToolCallback, AgentError, Context, InvocationContext,
+    OnToolErrorCallback, Plugin, PluginConfig, SharedToolError, Tool, ToolError,
 };
+use gadk_session::Session;
 use parking_lot::Mutex;
 use serde_json::{Map, Value, json};
 
 use crate::llm::processors::{as_go_floats, go_json_marshal};
+use crate::tool::utils::model_error_text;
 
 /// Go `//go:embed reflection.md` (byte-for-byte copy).
 const REFLECTION_TEMPLATE: &str = include_str!("retry_and_reflect/reflection.md");
@@ -80,7 +82,7 @@ impl Default for RetryAndReflectConfig {
 }
 
 /// Port of Go `retryandreflect.New`: a plugin named `RetryAndReflectPlugin` that registers only
-/// the after-tool and on-tool-error callbacks. A negative `max_retries` is rejected with Go's
+/// the after-tool, on-tool-error and after-run callbacks. A negative `max_retries` is rejected with Go's
 /// text, `maxRetries must be a non-negative integer`.
 pub fn new_retry_and_reflect_plugin(cfg: RetryAndReflectConfig) -> Result<Plugin, AgentError> {
     if cfg.max_retries < 0 {
@@ -91,8 +93,15 @@ pub fn new_retry_and_reflect_plugin(cfg: RetryAndReflectConfig) -> Result<Plugin
     Ok(plugin_for(Arc::new(RetryAndReflect::new(&cfg))))
 }
 
-/// The plugin whose two callbacks share `r`.
+/// The plugin whose three callbacks share `r`.
 fn plugin_for(r: Arc<RetryAndReflect>) -> Plugin {
+    let after_run: AfterRunCallback = {
+        let r = r.clone();
+        Arc::new(move |ictx: InvocationContext| -> BoxFuture<'static, ()> {
+            r.after_run(&ictx);
+            Box::pin(ready(()))
+        })
+    };
     let after_tool: AfterToolCallback = {
         let r = r.clone();
         Arc::new(
@@ -128,6 +137,7 @@ fn plugin_for(r: Arc<RetryAndReflect>) -> Plugin {
         name: NAME.into(),
         after_tool_callback: Some(after_tool),
         on_tool_error_callback: Some(on_tool_error),
+        after_run_callback: Some(after_run),
         ..Default::default()
     })
 }
@@ -220,6 +230,27 @@ impl RetryAndReflect {
         Ok(Some(self.retry_exceeded_msg(tool, args, err)))
     }
 
+    /// Port of plugin.go `afterRun` (7fafcbbc): drops the failure counts of an invocation once
+    /// its run has ended, since nothing reads them afterwards. Every scope but `Global` keys its
+    /// counts by invocation ID. The counts of a run that paused on an unanswered long-running
+    /// call are kept: the run that answers the call reuses the invocation ID and continues the
+    /// same retry budget, as in adk-python.
+    pub(crate) fn after_run(&self, ictx: &InvocationContext) {
+        if self.scope == TrackingScope::Global {
+            return;
+        }
+        let invocation_id = ictx.invocation_id();
+        let tracked = self
+            .scoped_failure_counters
+            .lock()
+            .contains_key(invocation_id);
+        // Most runs record no failure; skip the scan of the session events for them.
+        if !tracked || has_open_long_running_call(&*ictx.session(), invocation_id) {
+            return;
+        }
+        self.scoped_failure_counters.lock().remove(invocation_id);
+    }
+
     /// Go `scopeKey`.
     fn scope_key(&self, ctx: &Context) -> String {
         match self.scope {
@@ -252,18 +283,17 @@ impl RetryAndReflect {
             REFLECTION_TEMPLATE,
             &TemplateData {
                 tool_name: tool.name(),
-                error_details: &format_error_details(err),
+                error_details: &format_error_details(tool, err),
                 args_summary: &format_tool_args(args),
                 retry_count,
                 max_retries: self.max_retries,
             },
         );
-        response_map(err, retry_count, &rendered)
+        response_map(tool, err, retry_count, &rendered)
     }
 
-    /// Go `createToolRetryExceedMsg`. Go-parity note 1: Go never sets `RetryCount` or `MaxRetries`
-    /// in the template data, so the message always says "failed consecutively 0 times". The
-    /// map's `retry_count` is still `max_retries`.
+    /// Go `createToolRetryExceedMsg`: the template's `RetryCount` and `MaxRetries` are both
+    /// `max_retries` (Go 4417f2d4), as is the map's `retry_count`.
     fn retry_exceeded_msg(
         &self,
         tool: &dyn Tool,
@@ -274,13 +304,13 @@ impl RetryAndReflect {
             EXCEEDED_TEMPLATE,
             &TemplateData {
                 tool_name: tool.name(),
-                error_details: &format_error_details(err),
+                error_details: &format_error_details(tool, err),
                 args_summary: &format_tool_args(args),
-                retry_count: 0,
-                max_retries: 0,
+                retry_count: self.max_retries,
+                max_retries: self.max_retries,
             },
         );
-        response_map(err, self.max_retries, &rendered)
+        response_map(tool, err, self.max_retries, &rendered)
     }
 }
 
@@ -315,16 +345,68 @@ fn original_error(err: &Arc<ToolError>) -> AgentError {
     AgentError::Other(Box::new(SharedToolError(Arc::clone(err))))
 }
 
+/// Go `hasOpenLongRunningCall`: whether the invocation has a long-running call that no user
+/// function response has answered yet. A failure response from this plugin also settles the
+/// call, since no answer will follow.
+fn has_open_long_running_call(sess: &dyn Session, invocation_id: &str) -> bool {
+    let mut open: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for ev in sess.events() {
+        if ev.invocation_id != invocation_id {
+            continue;
+        }
+        open.extend(ev.long_running_tool_ids.iter().cloned());
+        let Some(content) = &ev.response.content else {
+            continue;
+        };
+        for fr in content
+            .parts
+            .iter()
+            .filter_map(|p| p.function_response.as_ref())
+        {
+            if fr.id.is_empty() {
+                continue;
+            }
+            if ev.author == "user"
+                || fr.response.get("response_type").and_then(Value::as_str)
+                    == Some(REFLECT_AND_RETRY_RESPONSE_TYPE)
+            {
+                open.remove(&fr.id);
+            }
+        }
+    }
+    !open.is_empty()
+}
+
+/// Go `panicErrorType`: the `error_type` of a recovered tool panic.
+const PANIC_ERROR_TYPE: &str = "panic";
+
+/// Go `modelError`: the type and text of a failed call that the plugin may put in its response,
+/// which the model, the session and REST clients all see. A tool panic, at any wrapping depth,
+/// becomes the type `panic` and a generic message (e83ab5b0), because the panic's own text
+/// carries the panic value.
+fn model_error(tool: &dyn Tool, err: &ToolError) -> (String, String) {
+    match model_error_text(tool.name(), err) {
+        (text, true) => (PANIC_ERROR_TYPE.to_string(), text),
+        (text, false) => (error_type(err).to_string(), text),
+    }
+}
+
 /// The result map shared by the reflection and exceeded outcomes. `reflection_guidance` is the
 /// rendered template trimmed as Go's `strings.TrimSpace` trims it.
-fn response_map(err: &ToolError, retry_count: i32, rendered: &str) -> Map<String, Value> {
+fn response_map(
+    tool: &dyn Tool,
+    err: &ToolError,
+    retry_count: i32,
+    rendered: &str,
+) -> Map<String, Value> {
+    let (err_type, err_details) = model_error(tool, err);
     let mut m = Map::new();
     m.insert(
         "response_type".into(),
         json!(REFLECT_AND_RETRY_RESPONSE_TYPE),
     );
-    m.insert("error_type".into(), json!(error_type(err)));
-    m.insert("error_details".into(), json!(err.to_string()));
+    m.insert("error_type".into(), json!(err_type));
+    m.insert("error_details".into(), json!(err_details));
     m.insert("retry_count".into(), json!(retry_count));
     m.insert("reflection_guidance".into(), json!(rendered.trim()));
     m
@@ -343,9 +425,10 @@ fn error_type(err: &ToolError) -> &'static str {
     }
 }
 
-/// Go `formatErrorDetails`: `"%T: %v"`, with [`error_type`] for `%T`.
-fn format_error_details(err: &ToolError) -> String {
-    format!("{}: {err}", error_type(err))
+/// Go's template `ErrorDetails`: `errType + ": " + errDetails` of [`model_error`].
+fn format_error_details(tool: &dyn Tool, err: &ToolError) -> String {
+    let (err_type, err_details) = model_error(tool, err);
+    format!("{err_type}: {err_details}")
 }
 
 /// Go `formatToolArgs`: `json.MarshalIndent(args, "", "  ")`. Go's nil args map gives `null`; a
@@ -570,7 +653,7 @@ null
         assert_eq!(Value::Object(res), want);
     }
 
-    // Go-parity note 1: "failed consecutively 0 times", whatever max_retries is.
+    // With max_retries 0 the guidance says "failed consecutively 0 times".
     #[test]
     fn exceeded_result_renders_go_template_with_zero_times() {
         let r = RetryAndReflect::new(&RetryAndReflectConfig {
@@ -599,7 +682,7 @@ null
     }
 
     #[test]
-    fn exceeded_after_the_limit_keeps_zero_times_and_reports_max_retries() {
+    fn exceeded_after_the_limit_reports_max_retries_times() {
         let r = RetryAndReflect::new(&RetryAndReflectConfig {
             max_retries: 1,
             ..Default::default()
@@ -612,7 +695,11 @@ null
             .unwrap()
             .unwrap();
         assert_eq!(res["retry_count"], json!(1));
-        assert_eq!(res["reflection_guidance"], json!(WANT_EXCEEDED));
+        // Go 4417f2d4: the template's RetryCount and MaxRetries are max_retries.
+        assert_eq!(
+            res["reflection_guidance"],
+            json!(WANT_EXCEEDED.replace("consecutively 0 times", "consecutively 1 times"))
+        );
     }
 
     #[test]

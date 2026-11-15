@@ -212,7 +212,6 @@ fn test_retry_and_reflect_after_tool_no_reset_on_reflection() {
 }
 
 #[test]
-#[ignore = "8a bug: retry_exceeded_msg renders the exceeded template with RetryCount/MaxRetries 0, so the guidance says \"failed consecutively 0 times\" (Go 4417f2d4 sets both to maxRetries)"]
 fn test_retry_and_reflect_max_retries() {
     let r = plugin_state(2, false, TrackingScope::Invocation);
     let ctx = mock_context("inv1");
@@ -342,7 +341,6 @@ fn panic_error() -> ToolError {
 
 // parity: adapted: Go's PanicError is gadk's ToolError::Panic (text without a stack), and the wrapping fmt.Errorf("%w") is a local Wrapped error inside ToolError::Execution
 #[test]
-#[ignore = "8a bug: RetryAndReflect puts a tool panic's text (the panic value) and type ToolError::Panic in error_details/error_type/reflection_guidance instead of type \"panic\" and \"Invoking `<tool>()` failed with an internal error.\" (Go e83ab5b0)"]
 fn test_retry_and_reflect_tool_panic() {
     // calls is how many times the tool fails; with maxRetries 1 the first
     // failure builds the reflection response and the second the
@@ -445,7 +443,6 @@ struct NoArgs {}
 // the plugin installed, because the plugin answers OnToolError with its own
 // response and so decides on its own what the model sees.
 #[tokio::test]
-#[ignore = "8a bug: RetryAndReflect's reflection response carries a tool panic's text (the panic value) to the model (Go e83ab5b0)"]
 async fn test_tool_panic_through_runner() {
     let panic_tool = FunctionTool::new(
         FunctionToolConfig::new("lookup_order", ""),
@@ -518,12 +515,11 @@ async fn test_tool_panic_through_runner() {
     }
 }
 
-/// Go `r.afterRun(ictx)`. gadk's `RetryAndReflect` has no after-run step yet (Go 7fafcbbc adds
-/// `afterRun` and registers it as the plugin's AfterRunCallback), so this stand-in does what
-/// gadk does today: nothing. The fix task replaces the body with `r.after_run(ictx).await` (or
-/// the sync equivalent it adds).
+/// Go `r.afterRun(ictx)` (7fafcbbc); gadk's `RetryAndReflect::after_run` is synchronous.
 #[allow(clippy::unused_async)]
-async fn after_run(_r: &RetryAndReflect, _ictx: InvocationContext) {}
+async fn after_run(r: &RetryAndReflect, ictx: InvocationContext) {
+    r.after_run(&ictx);
+}
 
 /// Go `newRunContext`: the context of a run of `invocation_id` over a session holding `events`.
 async fn new_run_context(invocation_id: &str, events: Vec<Event>) -> InvocationContext {
@@ -617,7 +613,6 @@ fn function_response_event(
 }
 
 #[tokio::test]
-#[ignore = "8a bug: RetryAndReflect registers no AfterRunCallback, so an ended invocation's failure counts are never dropped (Go 7fafcbbc)"]
 async fn test_retry_and_reflect_after_run_drops_invocation_counts() {
     let p = new_retry_and_reflect_plugin(RetryAndReflectConfig::default())
         .unwrap_or_else(|e| panic!("New() failed: {e}"));
@@ -646,7 +641,6 @@ async fn test_retry_and_reflect_after_run_drops_invocation_counts() {
 }
 
 #[tokio::test]
-#[ignore = "8a bug: RetryAndReflect has no after-run step, so the counts of an ended invocation whose long-running calls are all settled are never dropped (Go 7fafcbbc)"]
 async fn test_retry_and_reflect_after_run_keeps_counts_of_paused_invocation() {
     let cases: Vec<(&str, Vec<Event>, bool)> = vec![
         (
@@ -751,7 +745,6 @@ async fn test_retry_and_reflect_after_run_keeps_global_counts() {
 
 // parity: adapted: gadk's TrackingScope is a closed enum, so only Go's "Invocation" case exists (Go's "" and "INVOCATION" values cannot be built)
 #[tokio::test]
-#[ignore = "8a bug: RetryAndReflect has no after-run step, so an ended invocation's failure counts are never dropped (Go 7fafcbbc)"]
 async fn test_retry_and_reflect_after_run_drops_counts_of_every_per_invocation_scope() {
     let r = plugin_state(3, false, TrackingScope::Invocation);
     let _ = r.on_tool_error(
@@ -805,7 +798,6 @@ impl Session for EventsCountingSession {
 }
 
 #[tokio::test]
-#[ignore = "8a bug: RetryAndReflect has no after-run step, so it never scans the ended invocation's session events (Go 7fafcbbc)"]
 async fn test_retry_and_reflect_after_run_scans_events_only_of_invocation_with_counts() {
     let cases = [
         ("no failure in the ended invocation", "inv2", 0),
@@ -892,7 +884,6 @@ fn bare_call(name: &str) -> Content {
 // invocation ID of the paused run, so it continues that run's retry budget,
 // and the counts are dropped once it ends.
 #[tokio::test]
-#[ignore = "8a bug: RetryAndReflect has no after-run step, so the answering run's failure counts are kept after it ends (Go 7fafcbbc)"]
 async fn test_retry_and_reflect_runner_continues_counts_of_answered_run() {
     let flaky = FunctionTool::new(
         FunctionToolConfig::new("flaky", "fails"),

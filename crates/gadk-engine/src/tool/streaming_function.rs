@@ -29,7 +29,7 @@ use crate::tool::function::{
     FunctionToolConfig, check_args_type, check_args_value, check_confirmation, declaration,
     resolved_schema,
 };
-use crate::tool::utils::{CompiledSchema, convert_with_schema, infer_schema, panic_message};
+use crate::tool::utils::{CompiledSchema, convert_args_with_schema, infer_schema, panic_message};
 
 type ErasedStart = Arc<
     dyn Fn(Context, Value) -> Result<BoxStream<'static, Result<String, ToolError>>, ToolError>
@@ -101,8 +101,8 @@ impl StreamingFunctionTool {
         // The synchronous prelude of Go RunStream: argument checks, conversion, confirmation, handler call.
         let start: ErasedStart = Arc::new(move |ctx: Context, args: Value| {
             check_args_value(&args)?;
-            let input: Args =
-                convert_with_schema(&args, Some(&schema)).map_err(ToolError::InvalidArgument)?;
+            let input: Args = convert_args_with_schema(&args, Some(&schema))
+                .map_err(ToolError::InvalidArgument)?;
             check_confirmation(&ctx, &name, || {
                 provider
                     .as_ref()
