@@ -36,7 +36,11 @@ use super::{RunOptions, Runner, RunnerInner, from_plugin, wrap};
 impl Runner {
     /// Port of Go `(*Runner).RunLive`: starts a live (bidirectional streaming) run of the agent
     /// that should handle the session's next turn. Returns the session to send input on and the
-    /// event stream; dropping the stream cancels the invocation.
+    /// event stream. Dropping the stream at a yield runs the after-run callbacks first, on the
+    /// still-live invocation context, and then cancels the invocation; dropped inside an await,
+    /// it cancels at once. The live session task is detached rather than aborted, so a tool call
+    /// already running finishes on its own (the after-run callbacks do not wait for it, as Go's
+    /// live tool goroutines are not awaited either).
     ///
     /// Must be called inside a Tokio runtime: the live flow spawns tasks. `opts` is accepted for
     /// symmetry with [`Runner::run`] and, as in Go, not applied.

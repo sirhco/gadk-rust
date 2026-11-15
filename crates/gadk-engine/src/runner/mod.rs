@@ -231,7 +231,20 @@ impl Runner {
     }
 
     /// Port of Go `(*Runner).Run`: runs the agent for `msg` (`None` is Go's nil message) in the
-    /// session, yielding its events. Dropping the returned stream cancels the invocation.
+    /// session, yielding its events. Dropping the returned stream ends the invocation as Go's
+    /// `break` / cancelled context does:
+    ///
+    /// - Dropped at a yield (the consumer stopped reading, Go's `break`): work the run had already
+    ///   started — in-flight tool calls, ParallelAgent branches, workflow node tasks — is
+    ///   finished first (each component cancels it plainly and hands it to the invocation's
+    ///   [`gadk_agent::Teardowns`]), then the after-run callbacks run on a spawned task with the
+    ///   invocation's context still live, and only then is the invocation cancelled.
+    /// - Dropped inside an await (Go's caller cancelling its context): the invocation is
+    ///   cancelled at once; started work still finishes before the after-run callbacks, which
+    ///   see the cancellation.
+    ///
+    /// Started work is never aborted, so a tool that ignores cancellation runs to completion and
+    /// delays the after-run callbacks until it returns, as Go's `RunTasks` waits for it.
     ///
     /// With compaction configured, a sliding-window compaction runs after the invocation's
     /// events are persisted: inline when the stream ends (its error, if any, is the last item),

@@ -100,6 +100,18 @@ Upgrade note: 7b-3a adds the public field `gadk_agent::PluginConfig::state` (the
 `as_bigquery_agent_analytics_plugin` reads), so a full `PluginConfig { .. }` literal without
 `..PluginConfig::default()` now needs `state: None`.
 
+Upgrade note (7b-3b, engine-wide; all public API changes are additive): early stop now follows
+Go's unwinding instead of aborting. When a consumer drops a `Runner::run` stream, work the run
+already started (tool calls, ParallelAgent branches, workflow node tasks) is cancelled plainly
+and finished before the after-run callbacks, so a tool that ignores cancellation runs to
+completion and delays after-run until it returns. The live runner detaches its session task, so
+an in-flight live tool call also finishes. New in `gadk-agent`: `fiber`, `CancelCause`,
+`InvocationContext::{cancel_with_cause, cause}`, `Context::context_path`, `CancelGuard::release`,
+`SharedCauseError` and the `teardown` registry (`Teardowns`,
+`InvocationContext::{teardowns, register_teardown, spawn_teardown}`, `ContextBuilder::teardowns`);
+in `gadk-engine`: `llm::run_llm_agent_as_node` and `testutil::live`. Details in
+`docs/parity/7b-3a.md`.
+
 Behavior, SQL, schemas, request bytes and error texts match ADK-Go except for the accepted
 divergences in `docs/parity/7b-1.md`, `docs/parity/7b-2.md` and `docs/parity/7b-3a.md`, each
 annotated in the source with a `// Divergence` comment naming its ledger.
