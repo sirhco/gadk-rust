@@ -78,7 +78,7 @@ pub const DEFAULT_MAX_PAYLOAD_SIZE: i64 = 10 << 20;
 
 /// A Go `time.Duration` setting whose zero value selects a default and whose negative values turn
 /// the feature off ([`ServerConfig::sse_write_timeout`], [`ServerConfig::live_keepalive_timeout`]
-/// and their [`RuntimeApiControllerConfig`](controllers::RuntimeApiControllerConfig) twins).
+/// and their [`RuntimeApiControllerConfig`] twins).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Timeout {
     /// Go zero: the setting's default (`After(Duration::ZERO)` means the same).

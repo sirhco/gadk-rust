@@ -58,6 +58,11 @@ with the `Dockerfile` as a `.tar.gz` → create a Reasoning Engine, or update th
 `--agent_engine_id`, and wait for the operation (at most 45 minutes) → remove the temp dir.
 Credentials are Application Default Credentials (`gcloud auth application-default login`).
 `--mem_deploy` adds a Memory Bank (`--mem_ttl`, `--mem_model`).
+`--env NAME=VALUE` (repeatable) sets the engine's environment on top of the defaults
+`GOOGLE_CLOUD_REGION`, `NUM_WORKERS=1`, `GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY=true` and
+`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true` (`--default_env=false` drops them); an
+update replaces the environment only when `--env` or `--default_env` is given. Values are never
+printed. `agentengine` takes no positional arguments.
 
 ## Notes and limitations
 

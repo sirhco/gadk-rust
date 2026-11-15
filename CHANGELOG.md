@@ -36,6 +36,21 @@ the public API.
   - Anthropic streams decode event names outside the old allow-list, as SDK 1.84.0 does.
   - The A2A server-direction goldens follow a2a-go v2.7.0's headers.
 
+- **8b: three ADK-Go features at the same pin** (`0990f9e`): the telemetry MeterProvider
+  (ba5d42b8, #2042), example providers with a Vertex AI Example Store provider (5d03ab68), and
+  the CLI Agent Engine deployment environment (c7087e3e, #1981). Their Go tests are ported in
+  ledgers 7a, 2a and 6b; `tool/exampletool/vertexai/vertexai_test.go` joins ledger 2a's scope.
+  The Example Store request and response bodies and the Agent Engine environment requests are
+  checked against goldens from the new Go probe `scripts/gen-go-8b`, which
+  `scripts/check-fixtures.sh` re-runs and diffs.
+- **Workspace dependencies (8b):** the `metrics` feature is on for `opentelemetry`,
+  `opentelemetry_sdk`, `opentelemetry-otlp` and `opentelemetry-proto` (0.33.1), and
+  `experimental_metrics_custom_reader` for `opentelemetry_sdk`. No new package enters
+  `Cargo.lock`.
+- **New crate edges (8b):** `gadk-vertexai → gadk-tools` and `gadk-vertexai → gadk-agent` (the
+  Example Store provider implements `gadk_tools::example::Provider`); rule 4c of
+  `scripts/check-workspace-deps.py` allows them.
+
 ### Added
 
 - **The five 8a core features:**
@@ -79,6 +94,41 @@ the public API.
   - `gadk_session::compare_by_last_update`.
   - `InvocationContext::{with_graph_resume_done, graph_resume_done}`.
   - `BoundModes::{with_output_schema, output_schema}`.
+
+- **The three 8b features:**
+  - **MeterProvider** (Go ba5d42b8, #2042): gadk-telemetry builds an OpenTelemetry meter
+    provider.
+    - `gadk_telemetry::with_metric_reader` (Go `WithMetricReaders`) and `with_meter_provider`
+      (Go `WithMeterProvider`).
+    - OTLP/HTTP metrics for `OTEL_EXPORTER_OTLP_ENDPOINT` /
+      `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`; with `with_otel_to_cloud`, export to
+      `telemetry.googleapis.com/v1/metrics` every 5 s.
+    - The readers skip empty collections and never export on shutdown.
+    - With cloud export the resource carries `service.instance.id` (`<uuid hex>-<pid>`).
+    - `Providers::set_global_otel_providers` installs the global meter provider, and
+      `Providers::shutdown` shuts it down.
+    - Exporters are built only for the providers not supplied through `with_*_provider`.
+  - **Example providers** (Go 5d03ab68): the async `gadk_tools::example::Provider` trait and
+    `ExampleToolConfig.provider`. With a provider, the example tool fetches examples for each
+    user query (the non-thought user text joined with spaces, skipped when empty) and wraps
+    provider errors as `exampletool: fetch examples: <err>`.
+  - **Vertex AI Example Store** (Go `tool/exampletool/vertexai`, 5d03ab68):
+    `gadk_vertexai::example_store` (`gadk::vertexai::example_store`, feature `vertexai`) with
+    `ProviderConfig`, `new_provider`, `ExampleStoreError`, `TOP_K` and `SIMILARITY_THRESHOLD`.
+    - The provider searches the store for the top 10 stored-contents examples for each user
+      query and keeps those scoring at least 0.5.
+    - The store name must be a full
+      `projects/{project}/locations/{location}/exampleStores/{example_store}` resource name (no
+      bare-ID fallback, as Go).
+  - **Agent Engine deployment environment** (Go c7087e3e, #1981): `gadk deploy agentengine`
+    accepts repeated `--env NAME=VALUE` and `--default_env` (default true), with ADK-Go's
+    names, help and validation.
+    - `--env entry N …` errors never echo a value.
+    - Create sends the computed `spec.deploymentSpec.env`: the defaults not overridden first,
+      then the `--env` entries in flag order.
+    - Update replaces the environment (mask `spec.deploymentSpec.env`, before
+      `spec.contextSpec`) only when `--env` or `--default_env` is on the command line.
+    - The flags line is no longer printed, since it could contain `--env` values.
 
 ### Upgrade notes
 
@@ -132,6 +182,27 @@ the public API.
     Go's texts (`config reference "<ref>": …`).
   - gadk's old refusal texts are gone.
   - Workflow `.yaml` node references are checked before the node cache.
+
+- **`gadk_tools::example::new` returns a `Result`** (8b; Go `exampletool.New` returns an
+  error). It now returns `Result<Arc<dyn Tool>, ExampleToolError>`: add `?` or handle the error.
+  It fails only when both `examples` and `provider` are set
+  (`ExampleToolError::BothExamplesAndProvider`, `exampletool: cannot specify both Examples and
+  Provider`), including `examples: Some(vec![])`.
+- **`ExampleToolConfig` changes** (8b):
+  - `ExampleToolConfig.examples` is now `Option<Vec<Example>>` (Go's nil versus empty slice):
+    write `examples: Some(vec![...])`.
+  - `ExampleToolConfig` gains `provider: Option<Arc<dyn Provider>>`, so struct literals need
+    `..Default::default()` (or `provider: None`).
+- **`gadk_telemetry::Providers` gains `meter_provider`** (8b): the new public field
+  `meter_provider: Option<SdkMeterProvider>`; struct literals add `meter_provider: None`.
+- **`gadk deploy agentengine` changes** (8b):
+  - `gadk_cli::deploy::agentengine::AgentEngineServiceFlags` gains the public fields
+    `env: Vec<OsString>`, `default_env: bool`, `env_vars: Vec<EnvVar>` and `update_env: bool`.
+    Struct literals must add them or use `..Default::default()`.
+  - `AgentEngineFlags::go_v` is removed (Go removed `fmt.Println(flags)`).
+    `CloudRunFlags::go_v` stays.
+  - A positional argument now fails with `accepts 0 arg(s), received N` (it was ignored).
+    `--default_env false` leaves `false` as a positional; write `--default_env=false`.
 
 ### Behaviour notes
 
@@ -248,6 +319,23 @@ Each of these follows the matching ADK-Go fix; the bug report has the commit and
     - GCS path prefixes are sanitized and object paths are capped (#2018).
     - Response summaries and function names are capped (#2246).
     - JSON-formatter output redacts credential-named types and map keys (#2249).
+
+- **8b divergences:**
+  - Ledger 2a:
+    - The Vertex AI Example Store provider speaks REST v1beta1
+      (`POST /v1beta1/{store}:searchExamples`) instead of Go's gRPC client; the JSON wire is
+      checked against Go goldens.
+    - The Example Store provider has no `Close` (Go's implements `io.Closer`): REST holds no
+      connection, and the provider is released by dropping it.
+  - Ledger 7a:
+    - Without an explicit interval (the OTLP metric reader), opentelemetry_sdk reads
+      `OTEL_METRIC_EXPORT_INTERVAL` from the process environment, not the injected one.
+    - The existing entries now cover metrics: the global meter provider is set; the GCP metric
+      exporter also sends `OTEL_EXPORTER_OTLP_HEADERS` and fails `new` on an invalid quota
+      project header; a periodic reader whose exporter fails to shut down reports
+      `Operation failed: [InternalFailure("Failed to shutdown")]`; the periodic readers also
+      export on the creating Tokio runtime.
+  - Ledger 6b: the `fmt.Println(flags)` entry now covers Cloud Run only.
 
 ## [0.1.0] - 2026-11-14
 
