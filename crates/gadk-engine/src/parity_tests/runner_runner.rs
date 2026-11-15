@@ -562,9 +562,7 @@ fn replacing_plugin(name: &str, returned: Content) -> gadk_agent::Plugin {
 }
 
 #[rstest]
-#[ignore = "8a bug: the runner keeps the inbound message's role instead of making it a user turn (Go #1877 asUserContent)"]
 #[case::empty_role("")]
-#[ignore = "8a bug: the runner keeps the inbound message's role instead of making it a user turn (Go #1877 asUserContent)"]
 #[case::model_role(ROLE_MODEL)]
 #[case::user_role(ROLE_USER)]
 #[tokio::test]
@@ -656,7 +654,6 @@ async fn test_runner_save_input_blobs_does_not_mutate_caller_message() {
 }
 
 #[tokio::test]
-#[ignore = "8a bug: the runner keeps a role-less inbound or on_user_message message's empty role in UserContent and the stored event (Go #1877 asUserContent)"]
 async fn test_runner_inbound_role_normalized_for_context_and_plugin() {
     let got_user_content: Arc<Mutex<Option<Content>>> = Arc::default();
     let seen = got_user_content.clone();
@@ -759,7 +756,6 @@ fn function_call_part(name: &str, args: serde_json::Value) -> Part {
 #[case::legacy_path_call_after_inline_data(false, vec![png_part(), function_call_part("some_tool", serde_json::json!({"key": "value"}))])]
 #[case::node_path_call_after_inline_data(true, vec![png_part(), function_call_part("some_tool", serde_json::json!({"key": "value"}))])]
 #[tokio::test]
-#[ignore = "8a bug: the runner stores and runs a user message carrying a function call instead of failing with \"user message cannot contain function calls\" (Go #2302)"]
 async fn test_runner_rejects_user_function_call(#[case] llm_root: bool, #[case] parts: Vec<Part>) {
     let ran = Arc::new(Mutex::new(false));
     let m = recording_model();
@@ -832,7 +828,6 @@ fn png_part() -> Part {
 
 #[rstest]
 #[case::plugin_removes_the_call(vec![function_call_part("some_tool", serde_json::json!({}))], vec![Part::from_text("from plugin")], false)]
-#[ignore = "8a bug: the runner accepts a user message carrying a function call (Go #2302)"]
 #[case::plugin_adds_a_call(vec![Part::from_text("hi")], vec![function_call_part("some_tool", serde_json::json!({}))], true)]
 #[tokio::test]
 async fn test_runner_user_function_call_checked_after_plugin(
@@ -935,9 +930,7 @@ fn not_found_err() -> SessionError {
 }
 
 #[rstest]
-#[ignore = "8a bug: with auto-create on, the runner creates the session on any get error, not only SessionError::NotFound (Go #1899)"]
 #[case::transient_error_is_returned_without_create(true, transient_err as fn() -> SessionError, 0, Some("connection refused"))]
-#[ignore = "8a bug: with auto-create on, the runner creates the session on any get error, not only SessionError::NotFound (Go #1899)"]
 #[case::unwrapped_not_found_is_returned_without_create(true, plain_not_found_err as fn() -> SessionError, 0, Some("not found"))]
 #[case::wrapped_not_found_creates_once(true, not_found_err as fn() -> SessionError, 1, None)]
 #[case::auto_create_false_returns_not_found(false, not_found_err as fn() -> SessionError, 0, Some("session not found"))]

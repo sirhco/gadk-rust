@@ -168,6 +168,30 @@ impl InvocationContext {
         self.inner().shared.plugin_manager.clone()
     }
 
+    /// Go `plugininternal.WithInheritedPlugins` (#1777): a derived context marked so that the
+    /// next runner started with it (`Runner::run_with_context`) keeps this context's plugin
+    /// manager ([`InvocationContext::plugin_manager`], Go `FromContext`) when that runner has no
+    /// plugins of its own. Only the agent tool sets this mark, for the sub-runner it starts; any
+    /// other runner uses only its own plugins. The receiver is unchanged.
+    pub fn with_inherited_plugins(&self) -> InvocationContext {
+        let mut n = self.inner().clone();
+        n.inherited_plugins = self.plugin_manager();
+        Self::from_inner(n)
+    }
+
+    /// Go `plugininternal.TakeInheritedPlugins` (#1777): the plugin manager marked by
+    /// [`InvocationContext::with_inherited_plugins`] (`None` without a mark) and a derived context
+    /// with the mark cleared, so that the mark applies to one runner only and not to runners
+    /// started further down.
+    pub fn take_inherited_plugins(&self) -> (InvocationContext, Option<Arc<PluginManager>>) {
+        let Some(pm) = self.inner().inherited_plugins.clone() else {
+            return (self.clone(), None);
+        };
+        let mut n = self.inner().clone();
+        n.inherited_plugins = None;
+        (Self::from_inner(n), Some(pm))
+    }
+
     /// The agent tree's parent map, if set.
     pub fn parent_map(&self) -> Option<Arc<ParentMap>> {
         self.inner().shared.parent_map.clone()

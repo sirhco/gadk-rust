@@ -41,14 +41,48 @@ use crate::remoteagent::history::{
     unmatched_function_response_text,
 };
 
-/// Go `newTestInvocationContext`: a session holding `events` and an agent named `agent_name`.
+/// Go `anonymousAgent` (#2124): reports an empty name. `new_agent` rejects one, but a wrapper that
+/// overrides `name` can still run with it.
+struct AnonymousAgent(Arc<dyn gadk_agent::Agent>);
+
+impl gadk_agent::Agent for AnonymousAgent {
+    fn name(&self) -> &str {
+        ""
+    }
+    fn description(&self) -> &str {
+        self.0.description()
+    }
+    fn sub_agents(&self) -> &[Arc<dyn gadk_agent::Agent>] {
+        self.0.sub_agents()
+    }
+    fn run(&self, ctx: InvocationContext) -> gadk_agent::EventStream {
+        self.0.run(ctx)
+    }
+    fn agent_state(&self) -> &gadk_agent::AgentState {
+        self.0.agent_state()
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+/// Go `newTestInvocationContext`: a session holding `events` and an agent named `agent_name`
+/// (an empty name: an `anonymous` agent wrapped to report `""`).
 async fn new_test_invocation_context(agent_name: &str, events: Vec<Event>) -> InvocationContext {
     let (_, session) = prepare_session("test", events).await;
-    let agent = new_agent(AgentConfig {
-        name: agent_name.to_owned(),
+    let name = if agent_name.is_empty() {
+        "anonymous"
+    } else {
+        agent_name
+    };
+    let mut agent = new_agent(AgentConfig {
+        name: name.to_owned(),
         ..Default::default()
     })
     .unwrap();
+    if agent_name.is_empty() {
+        agent = Arc::new(AnonymousAgent(agent));
+    }
     InvocationContext::builder()
         .agent(agent)
         .session(session)

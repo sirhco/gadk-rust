@@ -31,7 +31,10 @@ use gadk_session::{Event, Session};
 use tokio_util::sync::CancellationToken;
 
 use super::compaction::InvocationGuard;
-use super::{RunOptions, Runner, RunnerInner, from_plugin, wrap};
+use super::{
+    ERR_USER_FUNCTION_CALL, RunOptions, Runner, RunnerInner, from_plugin, has_function_call,
+    stamp_timestamp, wrap,
+};
 
 impl Runner {
     /// Port of Go `(*Runner).RunLive`: starts a live (bidirectional streaming) run of the agent
@@ -83,20 +86,26 @@ impl Runner {
             &run_cfg,
             &token,
             false,
+            // Go `r.withPluginManager(ctx)`: `run_live` takes no caller context, so there is no
+            // inheritance mark.
+            this.with_plugin_manager(None),
+            // Go RunLive: NewInvocationContext without an invocation ID or branch.
+            String::new(),
+            String::new(),
         );
 
-        // Go's live early exit: no on_event and no before-run-reply stamp (unlike Runner::run).
-        if let Some(content) = this.plugin_manager.run_before_run(ictx.clone()).await? {
-            let mut event = Event::new(ictx.platform(), ictx.invocation_id());
-            event.author = agent_to_run.name().to_string();
-            event.response.content = Some(content);
-            this.session_service
-                .append_event(&*stored, &mut event)
-                .await
-                .map_err(|e| wrap("failed to add event to session", e))?;
-            let stream =
-                FiberStream::consumer(futures::stream::once(async move { Ok(event) }).boxed());
-            return Ok((Arc::new(ClosedLiveSession), stream.boxed()));
+        // Go #2105: the before-run reply goes through on_event (and is stamped and persisted) as
+        // on Runner::run, and the run through the after-run callbacks.
+        if let Some(event) = this.run_before_run_callback(&ictx).await? {
+            let stream = FiberStream::consumer(early_exit_stream(
+                this.clone(),
+                ictx.clone(),
+                stored.clone(),
+                event,
+                token,
+            ))
+            .boxed();
+            return Ok((Arc::new(ClosedLiveSession), stream));
         }
 
         let (agent_sess, inner) = live.run_live(ictx.clone()).await?;
@@ -116,6 +125,28 @@ impl Runner {
         });
         Ok((session, stream))
     }
+}
+
+/// Go `RunLive`'s `earlyExitIter` (#2105): yields the before-run reply, then runs the after-run
+/// callbacks (deferred: also when the consumer drops the stream at the yield).
+fn early_exit_stream(
+    this: Arc<RunnerInner>,
+    ctx: InvocationContext,
+    stored: Arc<dyn Session>,
+    event: Event,
+    token: CancellationToken,
+) -> EventStream {
+    let cancel_on_drop = token.drop_guard();
+    Box::pin(async_stream::stream! {
+        let mut guard = InvocationGuard::new(this, stored, ctx);
+        guard.cancel_on_drop(cancel_on_drop);
+        guard.no_compaction();
+        guard.defer_after_run();
+        guard.at_yield(true);
+        yield Ok(event);
+        guard.at_yield(false);
+        guard.finish().await;
+    })
 }
 
 /// Go `RunLive`'s `wrappedIter`: plugin `on_event`, chronological buffering of tool calls and
@@ -157,6 +188,7 @@ fn wrap_live_stream(
                     continue;
                 }
             };
+            stamp_timestamp(&ctx, &mut event);
 
             if !event.response.partial
                 && event.node_info.as_ref().is_some_and(|n| n.message_as_output)
@@ -175,6 +207,8 @@ fn wrap_live_stream(
                 }
                 Ok(modified) => event = from_plugin(event, modified, record),
             }
+            // A plugin may have handed back an event without a timestamp.
+            stamp_timestamp(&ctx, &mut event);
 
             let has_transcription = event.response.input_transcription.is_some()
                 || event.response.output_transcription.is_some();
@@ -287,6 +321,10 @@ impl LiveSession for RunnerLiveSession {
     /// Go drops nil parts before forwarding; a Rust `Part` cannot be absent, so the request is
     /// forwarded unchanged.
     async fn send(&self, req: LiveRequest) -> Result<(), AgentError> {
+        // Go #2302: refused before anything is forwarded or stored.
+        if has_function_call(req.content.as_ref()) {
+            return Err(AgentError::other(ERR_USER_FUNCTION_CALL));
+        }
         let content = req.content.clone();
         self.sess.send(req).await?;
 

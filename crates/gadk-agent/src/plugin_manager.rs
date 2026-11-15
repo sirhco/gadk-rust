@@ -18,6 +18,7 @@
 //! Every `run_*` method visits the plugins in registration order. The first callback error is
 //! returned unchanged (no plugin name), and the first `Some` result short-circuits, as in Go.
 
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -26,8 +27,10 @@ use gadk_model::{LlmRequest, LlmResponse, ModelError};
 use gadk_session::Event;
 use serde_json::{Map, Value};
 
+use crate::agent::Agent;
 use crate::context::{Context, InvocationContext};
 use crate::error::{AgentError, ToolError};
+use crate::go_fmt::go_quote;
 use crate::plugin::Plugin;
 use crate::tool::Tool;
 
@@ -55,6 +58,12 @@ impl PluginManager {
             plugins: out,
             close_timeout,
         })
+    }
+
+    /// Go `HasPlugins`: whether any plugin is registered. Go's nil manager is `None` at the call
+    /// site (`pm.is_some_and(|m| m.has_plugins())`).
+    pub fn has_plugins(&self) -> bool {
+        !self.plugins.is_empty()
     }
 
     /// Go `RunOnUserMessageCallback`.
@@ -135,6 +144,30 @@ impl PluginManager {
             }
         }
         Ok(None)
+    }
+
+    /// Go `RunOnAgentErrorCallback`: notifies every plugin, in registration order, that `err`
+    /// escaped `agent`'s run. Best-effort notification: no plugin can suppress the error. A panic
+    /// from one callback is caught (and recorded on the current span as `plugin "<name>"
+    /// OnAgentErrorCallback panicked: <panic>`), so the remaining callbacks still run.
+    pub fn run_on_agent_error(&self, ctx: Context, agent: Arc<dyn Agent>, err: &AgentError) {
+        for p in &self.plugins {
+            let Some(cb) = p.on_agent_error_callback() else {
+                continue;
+            };
+            let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                cb(ctx.clone(), agent.clone(), err);
+            }));
+            if let Err(payload) = res {
+                let msg = format!(
+                    "plugin {} OnAgentErrorCallback panicked: {}",
+                    go_quote(p.name()),
+                    panic_text(&*payload)
+                );
+                // Go `trace.SpanFromContext(cctx).RecordError(...)`: an `exception` event.
+                tracing::error!(exception.message = msg.as_str(), "exception");
+            }
+        }
     }
 
     /// Go `RunBeforeModelCallback`: the request is threaded through every callback and always
@@ -289,4 +322,15 @@ impl PluginManager {
             errors.join(" ")
         )))
     }
+}
+
+/// Go `%v` of a recovered panic value: the `&str` / `String` payload, else a placeholder.
+fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        return (*s).to_owned();
+    }
+    if let Some(s) = payload.downcast_ref::<String>() {
+        return s.clone();
+    }
+    "<non-string panic>".to_owned()
 }

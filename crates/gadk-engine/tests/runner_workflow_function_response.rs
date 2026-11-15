@@ -290,7 +290,6 @@ struct NoArgs {}
 type RootOf2 = fn(Arc<dyn Agent>, Arc<dyn Agent>) -> Arc<dyn Agent>;
 
 #[tokio::test]
-#[ignore = "8a bug: the runner always runs the root agent; a function response is not routed to the calling sub-agent on its branch, so a sibling LLM agent fails on the unmatched response"]
 async fn test_run_function_response_resumes_workflow_sub_agent() {
     let cases: Vec<(&str, RootOf2, &str, usize)> = vec![
         (

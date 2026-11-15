@@ -53,7 +53,6 @@ fn empty_card() -> gadk::a2a::a2a::AgentCard {
 // an empty name, which Vertex AI rejects for the whole request.
 // parity: adapted: Go's `a != nil` check is implied by Result (an Err carries no agent); the remote agent's empty card is decoded JSON
 #[test]
-#[ignore = "8a bug: gadk_agent::new_agent accepts an empty name (Go #2124 rejects it with \"error creating agent: name must not be empty\")"]
 fn test_constructors_reject_empty_name() {
     let tests: Vec<(&str, Build)> = vec![
         ("agent.New", |name| {

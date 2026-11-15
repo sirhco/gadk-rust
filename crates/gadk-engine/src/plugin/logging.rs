@@ -167,6 +167,8 @@ pub fn logging_plugin() -> Plugin {
         after_run_callback: Some(after_run),
         before_agent_callback: Some(before_agent),
         after_agent_callback: Some(after_agent),
+        // Go's logging plugin registers no OnAgentErrorCallback.
+        on_agent_error_callback: None,
         before_model_callback: Some(before_model),
         after_model_callback: Some(after_model),
         on_model_error_callback: Some(on_model_error),

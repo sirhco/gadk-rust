@@ -217,14 +217,24 @@ impl MockCtx {
         }
     }
 
-    /// The agent of the contexts.
+    /// The agent of the contexts. An empty `agent_name` (Go's `noAgentContext`) is an agent that
+    /// reports an empty name: `new_agent` rejects one (Go #2124).
     pub(crate) fn agent(&self) -> Arc<dyn Agent> {
         self.agent.clone().unwrap_or_else(|| {
-            gadk_agent::new_agent(gadk_agent::AgentConfig {
-                name: self.agent_name.clone(),
+            let name = if self.agent_name.is_empty() {
+                "anonymous".to_owned()
+            } else {
+                self.agent_name.clone()
+            };
+            let a = gadk_agent::new_agent(gadk_agent::AgentConfig {
+                name,
                 ..Default::default()
             })
-            .expect("custom agent")
+            .expect("custom agent");
+            if self.agent_name.is_empty() {
+                return Arc::new(AnonymousAgent(a));
+            }
+            a
         })
     }
 
@@ -887,4 +897,29 @@ fn mock_ctx_is_one_activation() {
     assert_eq!(m.context().activation_id(), id);
     assert_eq!(other.context().activation_id(), other_id);
     assert_ne!(MockCtx::new().context().activation_id(), id);
+}
+
+/// An agent reporting an empty name (Go's `noAgentContext` agent; #2124): reports an empty name. `new_agent` rejects one, but a wrapper that
+/// overrides `name` can still run with it.
+pub(crate) struct AnonymousAgent(Arc<dyn gadk_agent::Agent>);
+
+impl gadk_agent::Agent for AnonymousAgent {
+    fn name(&self) -> &str {
+        ""
+    }
+    fn description(&self) -> &str {
+        self.0.description()
+    }
+    fn sub_agents(&self) -> &[Arc<dyn gadk_agent::Agent>] {
+        self.0.sub_agents()
+    }
+    fn run(&self, ctx: InvocationContext) -> gadk_agent::EventStream {
+        self.0.run(ctx)
+    }
+    fn agent_state(&self) -> &gadk_agent::AgentState {
+        self.0.agent_state()
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }

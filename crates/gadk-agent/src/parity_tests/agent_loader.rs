@@ -77,7 +77,6 @@ fn test_duplicate_name() {
 }
 
 #[test]
-#[ignore = "8a bug: MultiLoader::list_agents returns registration order; Go #2164 returns the names sorted"]
 fn test_multi_loader_list_agents_sorted() {
     let names = [
         "transfer_agent",
@@ -103,18 +102,18 @@ fn test_multi_loader_list_agents_sorted() {
 }
 
 #[test]
-fn multi_loader_errors_carry_go_text_and_registration_order() {
+fn multi_loader_errors_carry_go_text_and_sorted_names() {
     let err = MultiLoader::new(test_agent("root"), vec![test_agent("b"), test_agent("b")]).err();
     assert_eq!(err, Some(LoaderError("duplicate agent name: b".into())));
 
     let loader =
         MultiLoader::new(test_agent("root"), vec![test_agent("b"), test_agent("a")]).unwrap();
-    assert_eq!(loader.list_agents(), ["root", "b", "a"]);
+    assert_eq!(loader.list_agents(), ["a", "b", "root"]);
     assert_eq!(loader.load_agent("a").unwrap().name(), "a");
     assert_eq!(loader.root_agent().name(), "root");
     assert_eq!(
         loader.load_agent("zzz").err().unwrap().to_string(),
-        "agent zzz not found. Please specify one of those: [root b a]"
+        "agent zzz not found. Please specify one of those: [a b root]"
     );
 }
 

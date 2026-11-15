@@ -199,7 +199,7 @@ async fn run_parent_with_sub_agent(sub: Arc<dyn Agent>, rec: &Arc<Mutex<Recorded
 }
 
 #[tokio::test]
-#[ignore = "8a bug: AgentTool's sub-runner is built with no plugins and does not inherit the parent run's plugins, so they never see the sub-agent's agent, model and tool callbacks"]
+#[ignore = "8a bug: AgentTool (tool/agent_tool.rs) still starts its sub-runner with Runner::run; Go #1777 starts it with run_with_context(&ctx.with_inherited_plugins(), …) — un-ignore with that change"]
 async fn test_runner_parent_plugins_reach_agent_tool_llm_sub_agent() {
     let sub = llm_agent::new(LlmAgentConfig {
         name: "sub_agent".into(),
@@ -234,7 +234,7 @@ async fn test_runner_parent_plugins_reach_agent_tool_llm_sub_agent() {
 }
 
 #[tokio::test]
-#[ignore = "8a bug: AgentTool's sub-runner is built with no plugins and does not inherit the parent run's plugins, so they never see the sub-agent's tool calls"]
+#[ignore = "8a bug: AgentTool (tool/agent_tool.rs) still starts its sub-runner with Runner::run; Go #1777 starts it with run_with_context(&ctx.with_inherited_plugins(), …) — un-ignore with that change"]
 async fn test_runner_parent_plugins_reach_agent_tool_sequential_sub_agent() {
     let leaf = llm_agent::new(LlmAgentConfig {
         name: "leaf".into(),
@@ -302,7 +302,15 @@ fn judge_plugin(judge: Arc<Runner>, seen: Arc<Mutex<Vec<String>>>, limit: usize)
                     ))),
                 );
             }
-            let mut s = run(&judge, "judge-user", &format!("judge-{n}"), "is this safe?");
+            // Go passes the callback's ctx to the judge runner.
+            let mut s = judge.run_with_context(
+                &ctx,
+                "judge-user",
+                &format!("judge-{n}"),
+                Some(Content::from_text("is this safe?", "user")),
+                RunConfig::default(),
+                RunOptions::default(),
+            );
             while let Some(item) = s.next().await {
                 if let Err(e) = item {
                     return (resp, Err(e));
@@ -328,7 +336,6 @@ fn judge_runner() -> Arc<Runner> {
     Arc::new(runner_with(judge, "judge_app", vec![]))
 }
 
-// parity: adapted: Rust's Runner::run takes no context, so the judge run cannot be handed the callback's context (Go passes ctx)
 #[tokio::test]
 async fn test_runner_plugin_callback_runner_does_not_inherit_plugins() {
     let seen: Arc<Mutex<Vec<String>>> = Arc::default();
@@ -348,7 +355,6 @@ async fn test_runner_plugin_callback_runner_does_not_inherit_plugins() {
     );
 }
 
-// parity: adapted: Rust's Runner::run takes no context, so the tool cannot hand the separate run its context (Go passes ctx)
 #[tokio::test]
 async fn test_runner_separate_runner_does_not_inherit_context_plugins() {
     let rec = Arc::new(Mutex::new(Recorded::default()));
@@ -361,10 +367,17 @@ async fn test_runner_separate_runner_does_not_inherit_context_plugins() {
     let separate = Arc::new(runner_with(separate_agent, "separate_app", vec![]));
     let call_separate = FunctionTool::new(
         FunctionToolConfig::new("call_separate", "runs another runner"),
-        move |_ctx: Context, _a: NoArgs| {
+        move |ctx: Context, _a: NoArgs| {
             let separate = separate.clone();
             async move {
-                let mut s = run(&separate, "u2", "s2", "hi");
+                let mut s = separate.run_with_context(
+                    &ctx,
+                    "u2",
+                    "s2",
+                    Some(Content::from_text("hi", "user")),
+                    RunConfig::default(),
+                    RunOptions::default(),
+                );
                 while let Some(item) = s.next().await {
                     item.map_err(|e| ToolError::Execution(Box::new(e)))?;
                 }
@@ -395,7 +408,6 @@ async fn test_runner_separate_runner_does_not_inherit_context_plugins() {
     );
 }
 
-// parity: adapted: Rust's Runner::run takes no context, so the judge run cannot be handed the callback's context (Go passes ctx)
 #[tokio::test]
 async fn test_runner_judge_inside_agent_tool_sub_run_does_not_inherit_plugins() {
     let seen: Arc<Mutex<Vec<String>>> = Arc::default();
@@ -424,4 +436,80 @@ async fn test_runner_judge_inside_agent_tool_sub_run_does_not_inherit_plugins() 
         !seen.iter().any(|a| a == "judge"),
         "AfterModelCallback saw {seen:?}, want no judge entries"
     );
+}
+
+/// gadk-only guard of the runner side of #1777 (Go `withPluginManager`), independent of the agent
+/// tool: a tool that starts a runner with a context it marked (`with_inherited_plugins`) gets the
+/// calling run's plugins in that runner when it has none of its own; a runner with its own
+/// plugins keeps them, and the run-level callbacks stay with the parent run.
+#[tokio::test]
+async fn run_with_context_inherits_only_a_marked_context_s_plugins() {
+    for own_plugins in [false, true] {
+        let rec = Arc::new(Mutex::new(Recorded::default()));
+        let own = Arc::new(Mutex::new(Recorded::default()));
+        let leaf = llm_agent::new(LlmAgentConfig {
+            name: "leaf".into(),
+            model: Some(ScriptedModel::arc(vec![model_text("leaf done")])),
+            ..Default::default()
+        })
+        .unwrap();
+        let sub_plugins = if own_plugins {
+            vec![recorder_plugin(&own)]
+        } else {
+            vec![]
+        };
+        let sub = Arc::new(runner_with(leaf, "sub_app", sub_plugins));
+        let call_sub = FunctionTool::new(
+            FunctionToolConfig::new("call_sub", "runs the sub-runner like agenttool"),
+            move |ctx: Context, _a: NoArgs| {
+                let sub = sub.clone();
+                async move {
+                    let mut s = sub.run_with_context(
+                        &ctx.with_inherited_plugins(),
+                        "u2",
+                        "s2",
+                        Some(Content::from_text("sub", "user")),
+                        RunConfig::default(),
+                        RunOptions::default(),
+                    );
+                    while let Some(item) = s.next().await {
+                        item.map_err(|e| ToolError::Execution(Box::new(e)))?;
+                    }
+                    Ok::<_, ToolError>("ok".to_string())
+                }
+            },
+        )
+        .unwrap();
+        let parent = llm_agent::new(LlmAgentConfig {
+            name: "parent".into(),
+            model: Some(ScriptedModel::arc(vec![
+                call_content("call_sub", Value::Null),
+                model_text("done"),
+            ])),
+            tools: vec![call_sub],
+            ..Default::default()
+        })
+        .unwrap();
+        let r = runner_with(parent, "app", vec![recorder_plugin(&rec)]);
+        drain_ok(run(&r, "u", "s", "go")).await;
+        let (rec, own) = (rec.lock(), own.lock());
+        if own_plugins {
+            assert_eq!(
+                rec.before_agents,
+                ["parent"],
+                "parent plugin, own-plugins sub-runner"
+            );
+            assert_eq!(own.before_agents, ["leaf"], "sub-runner's own plugin");
+        } else {
+            assert_eq!(
+                rec.before_agents,
+                ["parent", "leaf"],
+                "parent plugin, plugin-less sub-runner"
+            );
+            assert!(rec.before_models.iter().any(|a| a == "leaf"));
+        }
+        // Run-level callbacks stay with the runner that owns the run.
+        assert_eq!(rec.user_msgs, ["go"], "parent OnUserMessageCallback");
+        assert_eq!(rec.before_runs, 1, "parent BeforeRunCallback");
+    }
 }

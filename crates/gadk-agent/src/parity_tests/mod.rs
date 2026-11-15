@@ -20,6 +20,7 @@
 //! Each module's owning task fills it.
 
 mod agent_agent;
+mod agent_agent_on_error;
 mod agent_callback_context_wrapper;
 mod agent_common_context;
 mod agent_common_context_delta;
@@ -35,5 +36,6 @@ mod internal_context_context;
 mod internal_context_from_context;
 mod internal_context_identity_concurrency;
 mod internal_context_identity_mappings;
+mod internal_plugininternal_plugin_manager_context;
 mod plugin_plugin;
 mod tool_context;

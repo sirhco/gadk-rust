@@ -925,7 +925,6 @@ fn new_timed_runner(
 
 // parity: adapted: on_event receives the event by value, so Go's in-place rewrite (`*ev = …; return nil`) only changes the plugin's own copy; the "rewrite" case then stores the agent's original event, which carries no timestamp either
 #[tokio::test]
-#[ignore = "8a bug: run_live stores an event yielded without a timestamp with the zero time (Go #2091 stampTimestamp)"]
 async fn test_runner_run_live_stamps_events_yielded_without_timestamp() {
     let run_time = march(2, 10);
     let own_time = march(1, 9);
@@ -1053,7 +1052,6 @@ async fn test_runner_run_live_stamps_events_yielded_without_timestamp() {
 }
 
 #[tokio::test]
-#[ignore = "8a bug: run_live stores an on_event replacement with the plugin's ID, invocation ID, timestamp and author instead of the original's (Go #2306 fromPlugin)"]
 async fn test_runner_run_live_plugin_replacement_keeps_event_identity() {
     const SESSION_ID: &str = "testSession";
     let run_time = march(2, 10);
@@ -1148,7 +1146,6 @@ async fn test_runner_run_live_plugin_replacement_keeps_event_identity() {
 }
 
 #[tokio::test]
-#[ignore = "8a bug: run_live early exit skips on_event and after_run for a before-run reply (Go #2105)"]
 async fn test_runner_run_live_early_exit_runs_on_event_and_after_run() {
     const SESSION_ID: &str = "testSession";
     let svc: Arc<dyn SessionService> = Arc::new(InMemorySessionService::new());
@@ -1224,7 +1221,6 @@ async fn test_runner_run_live_early_exit_runs_on_event_and_after_run() {
 }
 
 #[tokio::test]
-#[ignore = "8a bug: the live session forwards and stores a user message carrying a function call (Go #2302)"]
 async fn test_runner_run_live_send_rejects_user_function_call() {
     const SESSION_ID: &str = "testSessionUserFunctionCall";
     let svc: Arc<dyn SessionService> = Arc::new(InMemorySessionService::new());
