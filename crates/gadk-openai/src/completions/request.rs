@@ -614,7 +614,7 @@ mod tests {
     }
 
     /// Every message kind, media part and generation field in one request, against the bytes
-    /// ADK-Go's `buildParams` + `json.Marshal` produce for it (openai-go v3.82.0 declaration
+    /// ADK-Go's `buildParams` + `json.Marshal` produce for it (openai-go v3.91.1 declaration
     /// order, Go float formatting, HTML escaping).
     #[test]
     fn full_request_matches_go_bytes() {

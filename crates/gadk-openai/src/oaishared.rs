@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The openai-go v3.82.0 `shared` package types both APIs send (ADK-Go imports it as
+//! The openai-go v3.91.1 `shared` package types both APIs send (ADK-Go imports it as
 //! `oaishared`), and the serde conventions every wire type in this crate follows.
 //!
 //! Request (param) types serialize their fields in openai-go's struct declaration order. Go's
@@ -429,7 +429,7 @@ mod tests {
         serde_json::from_str(s).unwrap()
     }
 
-    /// The coercions openai-go v3.82.0's `apijson` applies (gjson v1.19.0 `Int()`/`Float()`),
+    /// The coercions openai-go v3.91.1's `apijson` applies (gjson v1.19.0 `Int()`/`Float()`),
     /// recorded from Go decoding `openai.CompletionUsage.PromptTokens` (int64) and
     /// `openai.ChatCompletionTokenLogprob.Logprob` (float64) on arm64. The one divergence
     /// pinned here: Go keeps a non-finite float (`1e400` → +Inf, `"inf"` → +Inf); gadk has 0.

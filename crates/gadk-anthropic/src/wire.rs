@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Messages API wire types: the parts of anthropic-sdk-go v1.81.0 (`message.go`) that ADK-Go's
+//! Messages API wire types: the parts of anthropic-sdk-go v1.84.0 (`message.go`) that ADK-Go's
 //! `anthropicmodel` touches.
 //!
 //! Request types serialize their fields in the SDK's struct declaration order, with Go's

@@ -14,7 +14,7 @@
 // limitations under the License.
 
 //! Errors (port of ADK-Go `model/anthropicmodel/errors.go`, plus the parts of anthropic-sdk-go
-//! v1.81.0 `internal/apierror` that decide an error response's type and request ID).
+//! v1.84.0 `internal/apierror` that decide an error response's type and request ID).
 //!
 //! Go's sentinels become [`ErrorKind`]; an [`AnthropicError`] carries the kinds it wraps, in
 //! Go's `%w` order, and renders Go's `Error()` text as its `Display`.

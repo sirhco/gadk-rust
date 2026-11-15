@@ -14,7 +14,7 @@
 // limitations under the License.
 
 //! Errors (port of ADK-Go `model/openaimodel/internal/shared/errors.go` and `errors.go`, plus
-//! openai-go v3.82.0 `internal/apierror`'s `Error()` text).
+//! openai-go v3.91.1 `internal/apierror`'s `Error()` text).
 //!
 //! Go's 26 sentinels become [`ErrorKind`]; an [`OpenAiError`] carries the kinds it wraps, in
 //! Go's `%w` order, and renders Go's `Error()` text as its `Display`. [`OpenAiError::is`]
