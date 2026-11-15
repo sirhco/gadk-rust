@@ -30,6 +30,7 @@ use tokio::task::JoinSet;
 use tracing::Instrument;
 
 use crate::error::{WorkflowError, WorkflowErrorKind};
+use crate::llm::flow::context_err;
 use crate::workflow::branch::derive_sub_branch;
 use crate::workflow::nodes::AgentNode;
 use crate::workflow::scheduler::{record_node_error, start_node_span};
@@ -222,15 +223,6 @@ fn report_failure(first: &Mutex<Option<AgentError>>, ctx: &Context, err: AgentEr
     if g.is_none() {
         *g = Some(err);
         ctx.cancel_with_cause(CancelCause::Canceled);
-    }
-}
-
-/// Go `ctx.Err()` of a cancelled context: `DeadlineExceeded` when its cause is (an enclosing node
-/// timeout), else `Canceled` (Go `Err` is `Canceled` for a cause error too).
-fn context_err(ctx: &Context) -> AgentError {
-    match ctx.cause() {
-        Some(CancelCause::DeadlineExceeded) => AgentError::DeadlineExceeded,
-        _ => AgentError::Cancelled,
     }
 }
 
