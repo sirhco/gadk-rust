@@ -213,7 +213,7 @@ identity) → `RawMessage`; `time.Time` → `Time`; pointer → `Pointer`; `[]by
 array → `Slice`; map (string keys, else fail) → `Map`; struct → `Struct("<type>")`; interface →
 `Interface`; `string` → `String`, another string type → `NamedString`; `bool` → `Bool`; ints →
 `Int`; uints → `Uint`; `float32`/`float64` → `Float32`/`Float64`; anything else fails. At
-`bb1fd51a`: 78 structs, 349 fields. `scripts/check-fixtures.sh` regenerates the file into a
+`0990f9e2`: 88 structs, 435 fields. `scripts/check-fixtures.sh` regenerates the file into a
 temporary directory and `cmp`s it with the checked-in one.
 
 ## Files

@@ -198,6 +198,7 @@ pub static SHAPES: &[Shape] = &[
     Shape { go_type: "genai.FunctionResponsePart", fields: &[
         Field { key: "inlinedata", go_name: "InlineData", json: "inlineData", category: C::Ptr, go_type: "*genai.FunctionResponseBlob", elem: "genai.FunctionResponseBlob", zero: Z::Null },
         Field { key: "filedata", go_name: "FileData", json: "fileData", category: C::Ptr, go_type: "*genai.FunctionResponseFileData", elem: "genai.FunctionResponseFileData", zero: Z::Null },
+        Field { key: "mediaprocessing", go_name: "MediaProcessing", json: "mediaProcessing", category: C::String, go_type: "genai.MediaProcessing", elem: "", zero: Z::EmptyString },
     ] },
     Shape { go_type: "genai.GenerateContentConfig", fields: &[
         Field { key: "httpoptions", go_name: "HTTPOptions", json: "httpOptions", category: C::Ptr, go_type: "*genai.HTTPOptions", elem: "genai.HTTPOptions", zero: Z::Null },
@@ -235,6 +236,8 @@ pub static SHAPES: &[Shape] = &[
         Field { key: "audiotranscriptionconfig", go_name: "AudioTranscriptionConfig", json: "audioTranscriptionConfig", category: C::Ptr, go_type: "*genai.AudioTranscriptionConfig", elem: "genai.AudioTranscriptionConfig", zero: Z::Null },
         Field { key: "continuationtoken", go_name: "ContinuationToken", json: "continuationToken", category: C::Bytes, go_type: "[]uint8", elem: "", zero: Z::EmptySeq },
         Field { key: "automaticcontinuation", go_name: "AutomaticContinuation", json: "automaticContinuation", category: C::Ptr, go_type: "*bool", elem: "", zero: Z::Null },
+        Field { key: "generationoutputconfig", go_name: "GenerationOutputConfig", json: "generationOutputConfig", category: C::Ptr, go_type: "*genai.GenerationOutputConfig", elem: "genai.GenerationOutputConfig", zero: Z::Null },
+        Field { key: "store", go_name: "Store", json: "store", category: C::Ptr, go_type: "*bool", elem: "", zero: Z::Null },
     ] },
     Shape { go_type: "genai.GenerateContentResponseUsageMetadata", fields: &[
         Field { key: "cachetokensdetails", go_name: "CacheTokensDetails", json: "cacheTokensDetails", category: C::Slice, go_type: "[]*genai.ModalityTokenCount", elem: "genai.ModalityTokenCount", zero: Z::EmptySeq },
@@ -258,6 +261,9 @@ pub static SHAPES: &[Shape] = &[
     ] },
     Shape { go_type: "genai.GenerationConfigRoutingConfigManualRoutingMode", fields: &[
         Field { key: "modelname", go_name: "ModelName", json: "modelName", category: C::String, go_type: "string", elem: "", zero: Z::EmptyString },
+    ] },
+    Shape { go_type: "genai.GenerationOutputConfig", fields: &[
+        Field { key: "outputuriprefix", go_name: "OutputURIPrefix", json: "outputUriPrefix", category: C::String, go_type: "string", elem: "", zero: Z::EmptyString },
     ] },
     Shape { go_type: "genai.GoogleMaps", fields: &[
         Field { key: "authconfig", go_name: "AuthConfig", json: "authConfig", category: C::Ptr, go_type: "*genai.AuthConfig", elem: "genai.AuthConfig", zero: Z::Null },

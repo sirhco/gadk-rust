@@ -16,7 +16,7 @@
         "name": "broken",
         "skills": [
           {
-            "description": "Always fails. Fail.",
+            "description": "Always fails.",
             "id": "broken",
             "name": "model",
             "tags": [
@@ -267,7 +267,7 @@
                 },
                 "headers": {
                   "A2a-Version": "1.0",
-                  "Accept": "text/event-stream",
+                  "Accept": "text/event-stream, application/json",
                   "Content-Type": "application/json"
                 },
                 "method": "POST",
@@ -397,7 +397,7 @@
         "name": "broken",
         "skills": [
           {
-            "description": "Always fails. Fail.",
+            "description": "Always fails.",
             "id": "broken",
             "name": "model",
             "tags": [
@@ -497,7 +497,7 @@
                 },
                 "headers": {
                   "A2a-Version": "1.0",
-                  "Accept": "application/json",
+                  "Accept": "application/a2a+json, application/json",
                   "Content-Type": "application/json"
                 },
                 "method": "POST",
@@ -546,7 +546,7 @@
                   }
                 },
                 "headers": {
-                  "Content-Type": "application/json"
+                  "Content-Type": "application/a2a+json"
                 },
                 "status": 200
               }
@@ -635,7 +635,7 @@
                 },
                 "headers": {
                   "A2a-Version": "1.0",
-                  "Accept": "text/event-stream",
+                  "Accept": "text/event-stream, application/json",
                   "Content-Type": "application/json"
                 },
                 "method": "POST",
@@ -839,7 +839,7 @@
             },
             "headers": {
               "A2a-Version": "1.0",
-              "Accept": "text/event-stream",
+              "Accept": "text/event-stream, application/json",
               "Content-Type": "application/json"
             },
             "method": "POST",
@@ -958,7 +958,7 @@
             },
             "headers": {
               "A2a-Version": "1.0",
-              "Accept": "application/json",
+              "Accept": "application/a2a+json, application/json",
               "Content-Type": "application/json"
             },
             "method": "POST",
@@ -1007,7 +1007,7 @@
               }
             },
             "headers": {
-              "Content-Type": "application/json"
+              "Content-Type": "application/a2a+json"
             },
             "status": 200
           }
@@ -1027,7 +1027,7 @@
             },
             "headers": {
               "A2a-Version": "1.0",
-              "Accept": "text/event-stream",
+              "Accept": "text/event-stream, application/json",
               "Content-Type": "application/json"
             },
             "method": "POST",

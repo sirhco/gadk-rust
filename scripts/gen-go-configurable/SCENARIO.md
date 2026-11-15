@@ -15,7 +15,7 @@ cd scripts/gen-go-configurable && go run .
 ```
 
 It prints
-`wrote recordings=44 (replay errors 2) fixups=54 jsonschema_fields=65 shapes=119 shape_paths=217 (self-check 44/44 go numbers, 43/44 json numbers) canonicalize=40 to ../../crates/gadk-configurable/tests/fixtures`.
+`wrote recordings=44 (replay errors 2) fixups=54 jsonschema_fields=65 shapes=120 shape_paths=218 (self-check 44/44 go numbers, 43/44 json numbers) canonicalize=40 to ../../crates/gadk-configurable/tests/fixtures`.
 Flags: `-fixtures DIR` (default `../../crates/gadk-configurable/tests/fixtures`; deletes and
 rewrites `DIR/recordings/`, rewrites `DIR/fixups.json` and `DIR/canonicalize.json`);
 `-vendored adk|probe` prints the vendored declarations (below) from ADK-Go (`$ADK_GO_DIR`, else
@@ -24,7 +24,7 @@ clock, network or host state (temp dirs are created and removed, their paths nev
 output), so every output is byte-identical run to run; `scripts/check-fixtures.sh` reruns it into
 a temp dir and requires an empty `diff -r`, and diffs `-vendored adk` against `-vendored probe`.
 The outputs are identical under the go1.26.10 and go1.27.2 toolchains (module line
-`go 1.26.10`, like the sibling probes); they depend on `encoding/json`, `gopkg.in/yaml.v3` v3.0.1, `google.golang.org/genai` v1.75.0
+`go 1.26.10`, like the sibling probes); they depend on `encoding/json`, `gopkg.in/yaml.v3` v3.0.1, `google.golang.org/genai` v1.77.0
 and `github.com/google/jsonschema-go` v0.4.3 (all pinned by `go.sum`).
 
 ## Vendored code
@@ -51,8 +51,8 @@ All JSON: 2-space indent, no HTML escaping, trailing newline (`json.Encoder` wit
   holding `input.json`, the Go record bytes as `generated-recordings.yaml` (or
   `generated-recordings-sse.yaml` when `streaming_mode` is `sse`: 1 case), `replay.json`, and,
   for the 6 merge cases, `existing.yaml`.
-- `crates/gadk-configurable/tests/fixtures/fixups.json` — 54 fixups, 65 jsonschema fields, 119
-  shapes, 217 shape paths, the shapes self-check result.
+- `crates/gadk-configurable/tests/fixtures/fixups.json` — 54 fixups, 65 jsonschema fields, 120
+  shapes, 218 shape paths, the shapes self-check result.
 - `crates/gadk-configurable/tests/fixtures/canonicalize.json` — 40 rows.
 
 ### input.json

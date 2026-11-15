@@ -2144,6 +2144,10 @@
       "type": "genai.LanguageHints"
     },
     {
+      "path": "LLMRequest.config.generationoutputconfig",
+      "type": "genai.GenerationOutputConfig"
+    },
+    {
       "path": "LLMResponse",
       "type": "model.LLMResponse"
     },
@@ -4097,6 +4101,22 @@
             "tag": "!!null",
             "value": "null"
           }
+        },
+        {
+          "key": "mediaprocessing",
+          "go_name": "MediaProcessing",
+          "json": "mediaProcessing",
+          "category": "string",
+          "go_type": "genai.MediaProcessing",
+          "elem": "",
+          "zero": {
+            "kind": "scalar",
+            "tag": "!!str",
+            "style": [
+              "double"
+            ],
+            "value": ""
+          }
         }
       ]
     },
@@ -4581,6 +4601,32 @@
             "tag": "!!null",
             "value": "null"
           }
+        },
+        {
+          "key": "generationoutputconfig",
+          "go_name": "GenerationOutputConfig",
+          "json": "generationOutputConfig",
+          "category": "ptr",
+          "go_type": "*genai.GenerationOutputConfig",
+          "elem": "genai.GenerationOutputConfig",
+          "zero": {
+            "kind": "scalar",
+            "tag": "!!null",
+            "value": "null"
+          }
+        },
+        {
+          "key": "store",
+          "go_name": "Store",
+          "json": "store",
+          "category": "ptr",
+          "go_type": "*bool",
+          "elem": "",
+          "zero": {
+            "kind": "scalar",
+            "tag": "!!null",
+            "value": "null"
+          }
         }
       ]
     },
@@ -4802,6 +4848,27 @@
           "key": "modelname",
           "go_name": "ModelName",
           "json": "modelName",
+          "category": "string",
+          "go_type": "string",
+          "elem": "",
+          "zero": {
+            "kind": "scalar",
+            "tag": "!!str",
+            "style": [
+              "double"
+            ],
+            "value": ""
+          }
+        }
+      ]
+    },
+    "genai.GenerationOutputConfig": {
+      "go_type": "genai.GenerationOutputConfig",
+      "fields": [
+        {
+          "key": "outputuriprefix",
+          "go_name": "OutputURIPrefix",
+          "json": "outputUriPrefix",
           "category": "string",
           "go_type": "string",
           "elem": "",

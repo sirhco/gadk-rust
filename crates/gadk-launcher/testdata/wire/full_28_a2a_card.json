@@ -46,7 +46,7 @@
       ],
       [
         "Content-Length",
-        "1341"
+        "1287"
       ],
       [
         "Content-Type",
@@ -57,8 +57,8 @@
         "<date>"
       ]
     ],
-    "body": "{\n  \"defaultInputModes\": [\n    \"text/plain\"\n  ],\n  \"defaultOutputModes\": [\n    \"text/plain\"\n  ],\n  \"description\": \"Answers greetings and transfers funds.\",\n  \"name\": \"assistant\",\n  \"version\": \"2.0.0\",\n  \"skills\": [\n    {\n      \"description\": \"Answers greetings and transfers funds. Answer briefly. Use transfer_funds to transfer funds.\",\n      \"id\": \"assistant\",\n      \"name\": \"model\",\n      \"tags\": [\n        \"llm\"\n      ]\n    },\n    {\n      \"description\": \"Transfers funds.\",\n      \"id\": \"assistant-transfer_funds\",\n      \"name\": \"transfer_funds\",\n      \"tags\": [\n        \"llm\",\n        \"tools\"\n      ]\n    }\n  ],\n  \"capabilities\": {\n    \"extensions\": [\n      {\n        \"description\": \"Content is spread across task artifacts and the status message, which carries long-running function calls.\",\n        \"uri\": \"https://google.github.io/adk-docs/a2a/a2a-extension/\"\n      }\n    ],\n    \"pushNotifications\": false,\n    \"streaming\": true\n  },\n  \"supportedInterfaces\": [\n    {\n      \"url\": \"http://localhost:8080/a2a/v1/invoke\",\n      \"protocolBinding\": \"JSONRPC\",\n      \"protocolVersion\": \"1.0\"\n    },\n    {\n      \"url\": \"http://localhost:8080/a2a/invoke\",\n      \"protocolBinding\": \"JSONRPC\",\n      \"protocolVersion\": \"0.3\"\n    }\n  ],\n  \"url\": \"http://localhost:8080/a2a/invoke\",\n  \"protocolVersion\": \"0.3\",\n  \"preferredTransport\": \"JSONRPC\"\n}",
-    "body_length": 1341,
+    "body": "{\n  \"defaultInputModes\": [\n    \"text/plain\"\n  ],\n  \"defaultOutputModes\": [\n    \"text/plain\"\n  ],\n  \"description\": \"Answers greetings and transfers funds.\",\n  \"name\": \"assistant\",\n  \"version\": \"2.0.0\",\n  \"skills\": [\n    {\n      \"description\": \"Answers greetings and transfers funds.\",\n      \"id\": \"assistant\",\n      \"name\": \"model\",\n      \"tags\": [\n        \"llm\"\n      ]\n    },\n    {\n      \"description\": \"Transfers funds.\",\n      \"id\": \"assistant-transfer_funds\",\n      \"name\": \"transfer_funds\",\n      \"tags\": [\n        \"llm\",\n        \"tools\"\n      ]\n    }\n  ],\n  \"capabilities\": {\n    \"extensions\": [\n      {\n        \"description\": \"Content is spread across task artifacts and the status message, which carries long-running function calls.\",\n        \"uri\": \"https://google.github.io/adk-docs/a2a/a2a-extension/\"\n      }\n    ],\n    \"pushNotifications\": false,\n    \"streaming\": true\n  },\n  \"supportedInterfaces\": [\n    {\n      \"url\": \"http://localhost:8080/a2a/v1/invoke\",\n      \"protocolBinding\": \"JSONRPC\",\n      \"protocolVersion\": \"1.0\"\n    },\n    {\n      \"url\": \"http://localhost:8080/a2a/invoke\",\n      \"protocolBinding\": \"JSONRPC\",\n      \"protocolVersion\": \"0.3\"\n    }\n  ],\n  \"url\": \"http://localhost:8080/a2a/invoke\",\n  \"protocolVersion\": \"0.3\",\n  \"preferredTransport\": \"JSONRPC\"\n}",
+    "body_length": 1287,
     "body_sha256": null,
     "base_href": null
   },

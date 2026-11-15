@@ -423,4 +423,4 @@ order and 0.3 union fields gadk does not reproduce).
 
 - `main.go`: the probe and the launched program.
 - `go.mod`, `go.sum`: module `gadk/gen-go-launcher`; `google.golang.org/adk/v2 =>
-  ../../../adk-go` (gorilla/mux v1.8.1 and a2a-go v2.6.0 come from ADK-Go's pins).
+  ../../../adk-go` (gorilla/mux v1.8.1 and a2a-go v2.7.0 come from ADK-Go's pins).

@@ -28,7 +28,7 @@
         "text/event-stream; charset=UTF-8"
       ]
     ],
-    "body": "data: {\"id\":\"00000000-0000-4000-8000-000000000036\",\"invocationId\":\"e-00000000-0000-4000-8000-000000000033\",\"author\":\"assistant\",\"groundingMetadata\":null,\"usageMetadata\":{\"candidatesTokenCount\":5,\"promptTokenCount\":10,\"totalTokenCount\":15},\"finishReason\":\"STOP\",\"actions\":{\"stateDelta\":{},\"artifactDelta\":{}},\"nodeInfo\":{\"path\":\"assistant\"},\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"Hello! How can I help?\"}]}}\n\n"
+    "body": "data: {\"id\":\"00000000-0000-4000-8000-000000000036\",\"timestamp\":1767323062,\"invocationId\":\"e-00000000-0000-4000-8000-000000000033\",\"author\":\"assistant\",\"groundingMetadata\":null,\"usageMetadata\":{\"candidatesTokenCount\":5,\"promptTokenCount\":10,\"totalTokenCount\":15},\"finishReason\":\"STOP\",\"actions\":{\"stateDelta\":{},\"artifactDelta\":{}},\"nodeInfo\":{\"path\":\"assistant\"},\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"Hello! How can I help?\"}]}}\n\n"
   },
   "compare": "sse"
 }

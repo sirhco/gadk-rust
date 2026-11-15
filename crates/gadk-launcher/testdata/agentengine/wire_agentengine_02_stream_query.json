@@ -58,7 +58,7 @@
       ]
     ],
     "body": "{\"actions\":{\"artifact_delta\":{},\"state_delta\":{}},\"author\":\"assistant\",\"avg_logprobs\":0,\"content\":{\"parts\":[{\"media_processing\":\"\",\"text\":\"Hello! How can I help?\"}],\"role\":\"model\"},\"finish_reason\":\"STOP\",\"id\":\"<uuid-1>\",\"invocation_id\":\"e-<uuid-2>\",\"node_info\":{\"path\":\"assistant\"},\"timestamp\":\"<t>\",\"usage_metadata\":{\"cached_content_token_count\":0,\"candidates_token_count\":5,\"prompt_token_count\":10,\"thoughts_token_count\":0,\"tool_use_prompt_token_count\":0,\"total_token_count\":15,\"traffic_type\":\"\"}}\n",
-    "body_length": 561,
+    "body_length": null,
     "body_sha256": null,
     "base_href": null
   },

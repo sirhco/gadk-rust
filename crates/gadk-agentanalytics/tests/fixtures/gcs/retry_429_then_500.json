@@ -58,7 +58,7 @@
             "multipart/related; boundary={{BOUNDARY}}"
           ],
           "X-Goog-Api-Client": [
-            "gccl-invocation-id/{{IDEMPOTENCY_TOKEN_1}} gccl-attempt-count/1 gl-go/{{GO_VERSION}} gccl/1.69.0"
+            "gccl-invocation-id/{{IDEMPOTENCY_TOKEN_1}} gccl-attempt-count/1 gl-go/{{GO_VERSION}} gccl/1.70.0"
           ],
           "X-Goog-Gcs-Idempotency-Token": [
             "{{IDEMPOTENCY_TOKEN_1}}"
@@ -135,7 +135,7 @@
             "multipart/related; boundary={{BOUNDARY}}"
           ],
           "X-Goog-Api-Client": [
-            "gccl-invocation-id/{{IDEMPOTENCY_TOKEN_1}} gccl-attempt-count/2 gl-go/{{GO_VERSION}} gccl/1.69.0"
+            "gccl-invocation-id/{{IDEMPOTENCY_TOKEN_1}} gccl-attempt-count/2 gl-go/{{GO_VERSION}} gccl/1.70.0"
           ],
           "X-Goog-Gcs-Idempotency-Token": [
             "{{IDEMPOTENCY_TOKEN_1}}"
@@ -212,7 +212,7 @@
             "multipart/related; boundary={{BOUNDARY}}"
           ],
           "X-Goog-Api-Client": [
-            "gccl-invocation-id/{{IDEMPOTENCY_TOKEN_1}} gccl-attempt-count/3 gl-go/{{GO_VERSION}} gccl/1.69.0"
+            "gccl-invocation-id/{{IDEMPOTENCY_TOKEN_1}} gccl-attempt-count/3 gl-go/{{GO_VERSION}} gccl/1.70.0"
           ],
           "X-Goog-Gcs-Idempotency-Token": [
             "{{IDEMPOTENCY_TOKEN_1}}"
