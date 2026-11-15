@@ -25,6 +25,7 @@ mod go_json;
 mod http;
 mod jsonpath;
 mod live;
+mod live_artifacts;
 mod llm;
 mod registry;
 pub mod rest;
@@ -40,9 +41,11 @@ pub use http::{
     transport_error_detail,
 };
 pub use live::{LiveConnError, LiveConnErrorKind, LiveConnection, RealtimeInput};
+pub use live_artifacts::{LIVE_ARTIFACT_NAMESPACE, is_internal_live_artifact_part};
 pub use llm::{Backend, ExtrasRequestProvider, HttpOptions, Llm, LlmRequest, LlmResponse};
 pub use registry::*;
 pub use variant::{
-    can_use_output_schema_with_tools, google_variant, is_gemini_api_variant, is_gemini_model,
-    is_gemini1_model, is_gemini2_or_above, is_gemini25_or_lower, needs_output_schema_processor,
+    can_use_output_schema_with_tools, google_variant, is_gemini_3x_live,
+    is_gemini_35_live_translate, is_gemini_api_variant, is_gemini_model, is_gemini1_model,
+    is_gemini2_or_above, is_gemini25_or_lower, needs_output_schema_processor,
 };

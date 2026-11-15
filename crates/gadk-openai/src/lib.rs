@@ -20,6 +20,11 @@
 //! [`ClientConfig::api`] selects the API ([`Api::Responses`] by default). Every
 //! `GenerateContentConfig` field is translated, rejected with an error naming it, or ignored,
 //! per API, as ADK-Go documents in `doc.go`.
+//!
+//! A successful fallback from a `response.completed` conversion failure records the `tracing`
+//! event `openai.terminal_response_conversion_failed` (an OpenTelemetry layer turns it into a
+//! span event) for unsupported output items, unsupported message content, or invalid
+//! function-call arguments. The event carries only an `error.type` category.
 
 mod client;
 mod completions;

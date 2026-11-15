@@ -588,7 +588,6 @@ fn test_build_params_unsupported_part() {
 /// Go `TestBuildParams_CodeExecutionAsText`: a Gemini code-execution turn replayed into an OpenAI
 /// request used to fail the whole request, and now goes out as the fenced text adk-python sends
 /// (ded357e3, #1956).
-#[ignore = "8a bug: responses::request::build_params reports ExecutableCode / CodeExecutionResult as an unsupported content part; Go sends them as fenced text via shared.CodeExecutionText (ded357e3 #1956)"]
 #[test]
 fn test_build_params_code_execution_as_text() {
     let code = |c: &str| Part {
@@ -675,7 +674,6 @@ fn test_build_params_code_execution_as_text() {
 /// `thought_text_riding_on_code_is_still_rejected`): marking the part as a thought drops the
 /// scratchpad and leaves the code, the same split media already gets. Kept out of
 /// `test_build_params_drops_replayed_thoughts`'s table so that table stays a live guard.
-#[ignore = "8a bug: responses::request::build_params still rejects a thought part riding on ExecutableCode as an unsupported content part; Go drops the thought text and sends the code (ded357e3 #1956)"]
 #[test]
 fn test_build_params_drops_replayed_thoughts_thought_text_riding_on_code_drops_only_the_text() {
     let req = request(vec![
@@ -1647,6 +1645,8 @@ const ACCOUNTED_FOR_FIELDS: &[(&str, &str)] = &[
         "FileData",
         "sent as an input_image or input_file naming an upload or a location",
     ),
+    ("ExecutableCode", "sent as a fenced python block"),
+    ("CodeExecutionResult", "sent as a fenced code_output block"),
 ];
 
 fn accounted_for(field: &str) -> Option<&'static str> {
@@ -1692,7 +1692,7 @@ fn test_unsupported_payload_walks_every_part_field() {
     for (field, set) in part_fields() {
         let mut part = Part::default();
         set(&mut part);
-        let got = unsupported_payload(&part, &[PartField::Media]);
+        let got = unsupported_payload(&part, &[PartField::Media, PartField::CodeExecution]);
         if let Some(why) = accounted_for(field) {
             assert_eq!(
                 got, None,

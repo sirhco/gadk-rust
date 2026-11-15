@@ -44,7 +44,7 @@ use crate::shared::config::{
     reject_untranslatable_values,
 };
 use crate::shared::contents::{
-    PartField, flatten_content_text, replayed_reasoning, unsupported_payload,
+    PartField, code_execution_text, flatten_content_text, replayed_reasoning, unsupported_payload,
 };
 use crate::shared::media::{Media, MediaKind, MediaSource, classify_media};
 use crate::shared::schema::{
@@ -164,7 +164,7 @@ fn convert_content(
     let role = normalize_role(&content.role)?;
 
     let mut messages = Vec::new();
-    let mut texts: Vec<&str> = Vec::new();
+    let mut texts: Vec<String> = Vec::new();
     let mut calls = Vec::new();
     // The turn's text and media in arrival order, because a user message that carries media
     // is a list of parts and "describe this:" has to stay ahead of the image it introduces.
@@ -173,11 +173,17 @@ fn convert_content(
     for part in &content.parts {
         // Checked first, so a field this API cannot send is named even when text or a call on
         // the same part would otherwise carry it out unnoticed.
-        if let Some(field) = unsupported_payload(part, &[PartField::Media]) {
+        if let Some(field) =
+            unsupported_payload(part, &[PartField::Media, PartField::CodeExecution])
+        {
             return Err(OpenAiError::plain(format!(
                 "openai: unsupported content part: {field}"
             )));
         }
+        // Code execution has no wire field here. It goes out as the same fenced text the
+        // Responses path sends, so a Gemini turn replayed into this conversation is not
+        // dropped.
+        let code_text = code_execution_text(part);
         // Classified before any of the part is emitted, so media that cannot be labeled fails
         // the request instead of leaving with the text beside it.
         let media = classify_media(part)?;
@@ -194,8 +200,12 @@ fn convert_content(
         // Reasoning and signatures are dropped: Chat Completions has no field for either.
         let send_text = !part.text.is_empty() && !part.thought;
         if send_text {
-            texts.push(&part.text);
+            texts.push(part.text.clone());
             pieces.push(ContentPiece::Text(part.text.clone()));
+        }
+        if !code_text.is_empty() {
+            texts.push(code_text.clone());
+            pieces.push(ContentPiece::Text(code_text.clone()));
         }
         let carries_media = !media.is_empty();
         for m in media {
@@ -206,7 +216,8 @@ fn convert_content(
             calls.push(new_tool_call(tracker, fc)?);
         } else if let Some(fr) = &part.function_response {
             messages.push(new_tool_message(tracker, fr)?);
-        } else if !send_text && !carries_media && !replayed_reasoning(part) {
+        } else if !send_text && code_text.is_empty() && !carries_media && !replayed_reasoning(part)
+        {
             return Err(OpenAiError::plain(
                 "openai: unsupported content part: carries nothing to send",
             ));
@@ -358,7 +369,7 @@ fn normalize_role(role: &str) -> Result<&'static str, OpenAiError> {
 }
 
 /// Go `joinText`: a turn's text parts joined with `\n`, whitespace-only parts dropped.
-fn join_text(texts: &[&str]) -> String {
+fn join_text(texts: &[String]) -> String {
     let mut out = String::new();
     for text in texts {
         if text.trim().is_empty() {

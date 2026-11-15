@@ -124,7 +124,6 @@ async fn run(events: &[&str], stop_early: bool) -> Run {
     out
 }
 
-#[ignore = "8a bug: responses stream finalization recovers from a failed terminal conversion silently; Go records the span event openai.terminal_response_conversion_failed {error.type} (gadk-openai has no tracing; every other assertion of the table passes) (450b4a54 #2056)"]
 #[tokio::test]
 async fn test_model_generate_stream_terminal_conversion_diagnostic() {
     const MESSAGE: &str = r#"{"type":"message","content":[{"type":"output_text","text":"hello"}]}"#;

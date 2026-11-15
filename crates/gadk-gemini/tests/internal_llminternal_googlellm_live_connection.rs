@@ -91,7 +91,6 @@ enum Input {
 }
 
 #[tokio::test]
-#[ignore = "8a bug: LiveConnection routes realtime input and single-text content only for \"gemini-3.1\" models on the Gemini API; Go d8e47448 routes every Gemini 3.x Live model (not Live Translate, on both backends) to audio/video/text, and Live Translate audio to audio"]
 async fn test_live_connection_routes_input_by_model() {
     let audio = || blob(&[1], "audio/pcm;rate=16000");
     let image = || blob(&[2], "image/jpeg");
@@ -224,7 +223,6 @@ async fn test_live_connection_routes_input_by_model() {
 /// and image/* only, so a blob of another type is an error rather than a send on the media
 /// field.
 #[tokio::test]
-#[ignore = "8a bug: LiveConnection::send_realtime sends a non-audio, non-image blob to a Gemini 3.x Live model as mediaChunks; Go d8e47448 sends it on the audio field, which rejects it"]
 async fn test_live_connection_rejects_other_mime_types_on3x_live() {
     let (server, conn) = connect_fake_live(Backend::GeminiApi, "gemini-3.8-live").await;
     assert!(
@@ -260,7 +258,6 @@ fn file_part(uri: &str, mime_type: &str) -> Part {
 /// artifact references, written by the audio cache manager, and cached audio blobs) while
 /// leaving text and ordinary file references untouched.
 #[tokio::test]
-#[ignore = "8a bug: LiveConnection::send_history replays internal artifact://…/_adk_live/… references (Go 22ff1839 drops them)"]
 async fn test_live_connection_send_history_filters_internal_parts() {
     let report = || {
         file_part(
@@ -373,7 +370,6 @@ async fn test_live_connection_send_history_filters_internal_parts() {
 // parity: adapted: Go's history also holds a nil content and a nil part, which Rust cannot
 // express; the rest of the history is kept.
 #[tokio::test]
-#[ignore = "8a bug: LiveConnection::send_history sends a history made only of internal _adk_live references (Go 22ff1839 sends nothing)"]
 async fn test_live_connection_send_history_all_filtered() {
     let (server, conn) = connect_fake_live(Backend::GeminiApi, "gemini-2.0-flash-live-001").await;
     let history = vec![Content::from_parts(
@@ -458,7 +454,6 @@ fn with_usage(mut msg: Value) -> Value {
 }
 
 #[tokio::test]
-#[ignore = "8a bug: LiveConnection::recv drops a server message's usageMetadata (Go f2dc5d3a maps it to the response, responseTokenCount/Details to candidatesTokenCount/Details)"]
 async fn test_live_connection_recv_carries_usage_metadata() {
     let cases: Vec<(&str, Value, LlmResponse)> = vec![
         ("usage only", json!({}), LlmResponse::default()),
@@ -497,7 +492,6 @@ async fn test_live_connection_recv_carries_usage_metadata() {
 /// When a turn ends with buffered transcriptions, the usage stays on the turn-complete
 /// response, which Recv delivers after the transcriptions.
 #[tokio::test]
-#[ignore = "8a bug: LiveConnection::recv drops a server message's usageMetadata, also on the buffered turn-complete response (Go f2dc5d3a)"]
 async fn test_live_connection_recv_keeps_usage_on_buffered_turn_complete() {
     let (_server, conn) = connect_fake_live_serving(vec![
         json!({"serverContent": {"outputTranscription": {"text": "hello"}}}),

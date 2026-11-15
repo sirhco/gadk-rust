@@ -28,8 +28,9 @@
 use std::collections::VecDeque;
 
 use gadk_genai::{
-    Content, FunctionResponse, LiveClientContentInput, LiveClientContextUpdate, LiveConnectConfig,
-    LiveRealtimeInput, LiveServerMessage, LiveToolResponseInput, Part, Transcription,
+    Content, FunctionResponse, GenerateContentResponseUsageMetadata, LiveClientContentInput,
+    LiveClientContextUpdate, LiveConnectConfig, LiveRealtimeInput, LiveServerMessage,
+    LiveToolResponseInput, Part, Transcription, UsageMetadata,
 };
 use gadk_model::{Backend, LlmResponse, ModelError, body_prefix};
 use serde::Serialize;
@@ -391,10 +392,13 @@ impl RecvState {
     }
 
     /// Port of the mapping half of Go `Recv`: one server message to one response. Messages
-    /// without a branch (setupComplete, goAway, usage metadata, ...) map to an empty
-    /// response.
+    /// without a branch (setupComplete, goAway, ...) map to an empty response; a message's
+    /// usage metadata rides on its response (Go f2dc5d3a).
     pub(crate) fn map(&mut self, msg: LiveServerMessage) -> LlmResponse {
-        let mut resp = LlmResponse::default();
+        let mut resp = LlmResponse {
+            usage_metadata: msg.usage_metadata.map(live_usage_metadata),
+            ..LlmResponse::default()
+        };
 
         if let Some(update) = msg.session_resumption_update {
             resp.session_resumption_handle = update.new_handle;
@@ -458,6 +462,27 @@ impl RecvState {
         }
 
         resp
+    }
+}
+
+/// Go `liveUsageMetadata`: the Live API token usage as the usage type [`LlmResponse`] carries.
+/// The Live API names output tokens `responseTokenCount` / `responseTokensDetails` where the
+/// generateContent type calls them `candidatesTokenCount` / `candidatesTokensDetails`
+/// (adk-python maps the fields the same way). `service_tier` has no counterpart and is dropped,
+/// as in Go.
+fn live_usage_metadata(u: UsageMetadata) -> GenerateContentResponseUsageMetadata {
+    GenerateContentResponseUsageMetadata {
+        prompt_token_count: u.prompt_token_count,
+        cached_content_token_count: u.cached_content_token_count,
+        candidates_token_count: u.response_token_count,
+        total_token_count: u.total_token_count,
+        thoughts_token_count: u.thoughts_token_count,
+        tool_use_prompt_token_count: u.tool_use_prompt_token_count,
+        prompt_tokens_details: u.prompt_tokens_details,
+        cache_tokens_details: u.cache_tokens_details,
+        candidates_tokens_details: u.response_tokens_details,
+        tool_use_prompt_tokens_details: u.tool_use_prompt_tokens_details,
+        traffic_type: u.traffic_type,
     }
 }
 

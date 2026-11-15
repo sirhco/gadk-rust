@@ -113,6 +113,31 @@ fn test_is_gemini_model() {
 }
 
 #[test]
+fn test_is_gemini3x_live() {
+    let cases = [
+        ("gemini-3.1-flash-live-preview", true),
+        ("gemini-3.8-live", true),
+        ("models/gemini-3.8-live", true),
+        (
+            "projects/p/locations/l/models/gemini-3.1-flash-live-preview",
+            true,
+        ),
+        ("gemini-3.5-flash-live-preview", true),
+        ("models/gemini-3.5-live-translate-preview", false),
+        ("gemini-3.5-live-translate", false),
+        ("gemini-3.1-pro-preview", false),
+        ("gemini-2.0-flash-live-001", false),
+    ];
+    for (model, want) in cases {
+        assert_eq!(
+            is_gemini_3x_live(model),
+            want,
+            "is_gemini_3x_live({model:?})"
+        );
+    }
+}
+
+#[test]
 fn test_needs_output_schema_processor() {
     let cases = [
         (

@@ -271,7 +271,6 @@ fn test_build_params_multi_turn_history() {
 /// Go `TestBuildParams_CodeExecutionAsText` pins the regression for a Gemini code-execution
 /// turn replayed into a Chat Completions request. The parts used to fail the request; they now
 /// go out as the same fenced text the Responses path sends, rather than being dropped.
-#[ignore = "8a bug: completions::request::build_params reports ExecutableCode / CodeExecutionResult as an unsupported content part; Go sends them as fenced text via shared.CodeExecutionText (ded357e3 #1956)"]
 #[test]
 fn test_build_params_code_execution_as_text() {
     let code = "Code:```python\nprint(1)\n```";
