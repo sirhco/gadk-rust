@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The attempt loop (port of anthropic-sdk-go v1.81.0 `RequestConfig.Execute`/`send` and
-//! openai-go v3.82.0 `RequestConfig.Execute`): headers per attempt, the response-header
+//! The attempt loop (port of anthropic-sdk-go v1.84.0 `RequestConfig.Execute`/`send` and
+//! openai-go v3.91.1 `RequestConfig.Execute`): headers per attempt, the response-header
 //! timeout, retries with backoff, which bodies are read, dropped bodies, and both timeout
 //! models.
 

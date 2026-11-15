@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The SDKs' retry policy (ports of anthropic-sdk-go v1.81.0 and openai-go v3.82.0
+//! The SDKs' retry policy (ports of anthropic-sdk-go v1.84.0 and openai-go v3.91.1
 //! `internal/requestconfig`: `shouldRetry`, `retryHeader`, `shouldRetryDroppedBody`,
 //! `parseRetryAfterHeader`, `retryDelay`).
 
@@ -74,7 +74,7 @@ pub struct RetryPolicy {
 }
 
 impl RetryPolicy {
-    /// anthropic-sdk-go v1.81.0: 2 retries, 8 s backoff cap, any server wait honoured, a
+    /// anthropic-sdk-go v1.84.0: 2 retries, 8 s backoff cap, any server wait honoured, a
     /// dropped body retried.
     pub const ANTHROPIC: Self = Self {
         max_retries: DEFAULT_MAX_RETRIES,
@@ -83,7 +83,7 @@ impl RetryPolicy {
         retry_dropped_body: true,
     };
 
-    /// openai-go v3.82.0: 2 retries, 8 s backoff cap, server waits up to 2 minutes, a dropped
+    /// openai-go v3.91.1: 2 retries, 8 s backoff cap, server waits up to 2 minutes, a dropped
     /// body never retried.
     pub const OPENAI: Self = Self {
         max_retries: DEFAULT_MAX_RETRIES,

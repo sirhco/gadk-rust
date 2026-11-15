@@ -1006,7 +1006,7 @@ mod tests {
         assert_eq!(err("x,string"), "duplicate name");
     }
 
-    /// A Go struct `struct { X uint32 }` (no `uint` field is reachable at `bb1fd51a`).
+    /// A Go struct `struct { X uint32 }` (no `uint` field is reachable at `0990f9e2`).
     const UINT_SHAPE: GoStruct = GoStruct {
         go_type: "helper.U",
         fields: &[GoField {

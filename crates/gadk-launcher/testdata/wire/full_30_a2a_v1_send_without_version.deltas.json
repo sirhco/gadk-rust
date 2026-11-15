@@ -5,7 +5,7 @@
       "path": "/response/body/error/message",
       "fixture": "this version is not supported: requested \"0.3\", served \"1.0\"",
       "actual": "version not supported: 0.3",
-      "divergence": "A2A v1 requests without an `A2A-Version` header are refused with JSON-RPC error `-32009` (`version not supported: 0.3`; a2a-rs reads a missing header as 0.3); a2a-go serves them as v1."
+      "divergence": "A2A v1 requests without an `A2A-Version` header are refused with a2a-rs's JSON-RPC error message `version not supported: 0.3` (a2a-go v2.7.0: `this version is not supported: requested \"0.3\", served \"1.0\"`)."
     }
   ]
 }

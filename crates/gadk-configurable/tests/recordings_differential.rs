@@ -580,7 +580,7 @@ fn render_shapes(fx: &Value) -> String {
 // limitations under the License.
 
 //! GENERATED from `tests/fixtures/fixups.json` (the Go probe `scripts/gen-go-configurable`:
-//! yaml.v3's reflection of genai v1.75.0, ADK-Go's `model` and jsonschema-go v0.4.3) by
+//! yaml.v3's reflection of genai v1.77.0, ADK-Go's `model` and jsonschema-go v0.4.3) by
 //! `tests/recordings_differential.rs` `render_shapes`; do not edit. Regenerate with
 //! `GADK_GONODE_REGEN=1 cargo test -p gadk-configurable --test recordings_differential
 //! shapes_rs_is_generated`.

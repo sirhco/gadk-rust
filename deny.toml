@@ -21,6 +21,11 @@ exceptions = [
     # only (const-random -> tiny-keccak); [graph] checks every target, so the wasm32-only crate
     # is in the graph. CC0-1.0 is a public-domain dedication; scoped to this one crate.
     { allow = ["CC0-1.0"], crate = "tiny-keccak" },
+    # 8a (R13): gadk-memory's port of Go's `runenames` (the `LATIN` script test) reads Unicode
+    # character names through unicode_names2, licensed `(MIT OR Apache-2.0) AND
+    # Unicode-DFS-2016` (the embedded Unicode name data). User-approved; scoped to this crate (its
+    # build-time generator, unicode_names2_generator 4.0.0, is plain `MIT OR Apache-2.0`).
+    { allow = ["Unicode-DFS-2016"], crate = "unicode_names2" },
 ]
 
 [bans]
