@@ -26,6 +26,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt;
+use gadk_agent::fiber::FiberStream;
 use gadk_agent::{
     Agent, AgentError, Context, ContextDelta, EventStream, InvocationContext, Mode, ParentMap,
     Plugin, PluginManager, RunConfig,
@@ -35,7 +36,6 @@ use gadk_platform::Platform;
 use gadk_session::{CreateRequest, Event, EventCompaction, GetRequest, Session, SessionService};
 use serde_json::{Map, Value};
 use tokio_util::sync::CancellationToken;
-use tracing::Instrument;
 
 use crate::llm::agent::underlying_session;
 use crate::llm::mode::resolve_mode;
@@ -177,44 +177,6 @@ pub(crate) enum Processed {
     AppendError(AgentError),
 }
 
-/// Go `defer pluginManager.RunAfterRunCallback(ctx)`: [`AfterRunGuard::finish`] runs it inline on
-/// normal completion; if the stream is dropped first, `Drop` spawns it on the current runtime,
-/// inside the span that was current when the guard was made (the invocation span, as Go's
-/// deferred call runs with the invocation's ctx).
-pub(crate) struct AfterRunGuard {
-    pm: Arc<PluginManager>,
-    ctx: Option<InvocationContext>,
-    span: tracing::Span,
-}
-
-impl AfterRunGuard {
-    pub(crate) fn new(pm: Arc<PluginManager>, ctx: InvocationContext) -> Self {
-        Self {
-            pm,
-            ctx: Some(ctx),
-            span: tracing::Span::current(),
-        }
-    }
-
-    pub(crate) async fn finish(mut self) {
-        if let Some(ctx) = self.ctx.take() {
-            self.pm.run_after_run(ctx).await;
-        }
-    }
-}
-
-impl Drop for AfterRunGuard {
-    fn drop(&mut self) {
-        // The consumer dropped the stream before it ended: Go's defer still runs, so spawn it.
-        if let Some(ctx) = self.ctx.take()
-            && let Ok(handle) = tokio::runtime::Handle::try_current()
-        {
-            let pm = self.pm.clone();
-            handle.spawn(async move { pm.run_after_run(ctx).await }.instrument(self.span.clone()));
-        }
-    }
-}
-
 impl Runner {
     /// Port of Go `runner.New`. Go's nil-agent and nil-service checks have no Rust counterpart.
     pub fn new(cfg: RunnerConfig) -> Result<Runner, AgentError> {
@@ -275,6 +237,10 @@ impl Runner {
     /// events are persisted: inline when the stream ends (its error, if any, is the last item),
     /// or on a spawned task after the after-run callbacks when the stream is dropped early, in
     /// which case its error is logged. Dropping the stream does not cancel that task.
+    ///
+    /// The stream runs on the consumer's fiber ([`FiberStream::consumer`]: the one current at
+    /// its first poll, else a new root it keeps), as Go's iterator runs on the goroutine that
+    /// ranges over it; the after-run callbacks of a stream dropped early re-enter that fiber.
     pub fn run(
         &self,
         user_id: &str,
@@ -285,9 +251,12 @@ impl Runner {
     ) -> EventStream {
         let inner = self.inner.clone();
         let root = inner.root_agent.clone();
-        crate::telemetry::instrumentation::instrument_invocation(root.as_ref(), session_id, || {
-            inner.run_stream(user_id.to_string(), session_id.to_string(), msg, cfg, opts)
-        })
+        let stream = crate::telemetry::instrumentation::instrument_invocation(
+            root.as_ref(),
+            session_id,
+            || inner.run_stream(user_id.to_string(), session_id.to_string(), msg, cfg, opts),
+        );
+        FiberStream::consumer(stream).boxed()
     }
 
     /// Closes every plugin (Go `PluginManager.Close` via the runner).
