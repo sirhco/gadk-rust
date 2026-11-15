@@ -141,6 +141,7 @@ impl std::fmt::Debug for ExampleToolConfig {
 }
 
 /// The error [`new`] returns, with Go's text.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExampleToolError {
     /// Go `New`: both `Examples` and `Provider` are set.

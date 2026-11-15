@@ -538,7 +538,7 @@ fn reader_interval(r: &SharedMetricReader) -> String {
     rest[..end].to_owned()
 }
 
-// parity: adapted: the GCP exporters send to a local OTLP sink (configure_to's endpoints) instead of Go's recording transport, and the production endpoints are checked as constants; the reader's interval is read off its Debug view (Go: MarshalLog by reflection)
+// parity: adapted: the GCP exporters send to a local OTLP sink (configure_to's endpoints) instead of Go's recording transport, and the production endpoints are checked as constants; the reader's interval is read off its Debug view (Go: MarshalLog by reflection); Go wants exactly 1 metrics request, but the reader runs on a real 5 s interval, so a slow run may see a periodic export too: at least 1 before Shutdown, and Shutdown adds none
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_gcp_exporters() {
     assert_eq!(
@@ -611,7 +611,12 @@ async fn test_gcp_exporters() {
     };
     for path in ["/v1/traces", "/v1/metrics"] {
         let got = requests(path);
-        assert_eq!(got.len(), 1, "{path}: requests {:?}", sink.requests());
+        // A periodic metrics export may follow the flush's on a slow run (5 s interval).
+        if path == "/v1/metrics" {
+            assert!(!got.is_empty(), "{path}: requests {:?}", sink.requests());
+        } else {
+            assert_eq!(got.len(), 1, "{path}: requests {:?}", sink.requests());
+        }
         for c in &got {
             assert_eq!(
                 c.headers["authorization"], "Bearer test-token",
@@ -620,24 +625,26 @@ async fn test_gcp_exporters() {
             assert_eq!(c.headers["x-goog-user-project"], QUOTA_PROJECT, "{path}");
         }
     }
-    // The fake collector decodes the metrics export.
-    let export =
-        ExportMetricsServiceRequest::decode(requests("/v1/metrics")[0].body.as_slice()).unwrap();
-    let names: Vec<_> = export
-        .resource_metrics
-        .iter()
-        .flat_map(|rm| &rm.scope_metrics)
-        .flat_map(|sm| &sm.metrics)
-        .map(|m| m.name.clone())
-        .collect();
-    assert_eq!(names, ["test-counter"]);
+    // The fake collector decodes every metrics export.
+    for c in requests("/v1/metrics") {
+        let export = ExportMetricsServiceRequest::decode(c.body.as_slice()).unwrap();
+        let names: Vec<_> = export
+            .resource_metrics
+            .iter()
+            .flat_map(|rm| &rm.scope_metrics)
+            .flat_map(|sm| &sm.metrics)
+            .map(|m| m.name.clone())
+            .collect();
+        assert_eq!(names, ["test-counter"]);
+    }
 
     // Shutdown exports no further metrics.
+    let before = requests("/v1/metrics").len();
     providers.shutdown().await.unwrap();
     assert_eq!(
         requests("/v1/metrics").len(),
-        1,
-        "metric requests after Shutdown, want still 1"
+        before,
+        "metric requests after Shutdown, want still {before}"
     );
 
     // Go's t.Cleanup.

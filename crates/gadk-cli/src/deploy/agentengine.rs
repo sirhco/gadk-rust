@@ -82,8 +82,8 @@ pub struct MemoryBankFlags {
     pub ttl: GoDuration,
 }
 
-/// Go `agentEngineServiceFlags`.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// Go `agentEngineServiceFlags`. `Debug` shows the `--env` names only: values may be secrets.
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct AgentEngineServiceFlags {
     pub name: String,
     pub display_name: String,
@@ -100,6 +100,35 @@ pub struct AgentEngineServiceFlags {
     /// `--env` or `--default_env` was on the command line (Go: cobra `Changed`): an update
     /// replaces the environment.
     pub update_env: bool,
+}
+
+impl std::fmt::Debug for AgentEngineServiceFlags {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Each `--env` entry as its name (the text before the first `=`), value redacted; an
+        // entry without `=` is malformed and could be a bare value, so it is redacted whole.
+        let env: Vec<String> = self
+            .env
+            .iter()
+            .map(|e| {
+                let e = e.to_string_lossy();
+                match e.split_once('=') {
+                    Some((name, _)) => format!("{name}=<redacted>"),
+                    None => "<redacted>".to_owned(),
+                }
+            })
+            .collect();
+        f.debug_struct("AgentEngineServiceFlags")
+            .field("name", &self.name)
+            .field("display_name", &self.display_name)
+            .field("server_port", &self.server_port)
+            .field("agent_engine_id", &self.agent_engine_id)
+            .field("memory_bank", &self.memory_bank)
+            .field("env", &env)
+            .field("default_env", &self.default_env)
+            .field("env_vars", &self.env_vars)
+            .field("update_env", &self.update_env)
+            .finish()
+    }
 }
 
 /// Go `buildFlags`.

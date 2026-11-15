@@ -25,7 +25,7 @@ use gadk_platform::env::MapEnv;
 use pretty_assertions::assert_eq;
 use serde_json::{Value, json};
 
-use super::{ExampleStoreError, ProviderConfig, new_provider};
+use super::{ExampleStoreError, ProviderConfig, golden, new_provider};
 use crate::error::find_vertex_error;
 
 /// The store every test uses (Go `testStoreName`).
@@ -46,14 +46,6 @@ fn config(url: &str) -> ProviderConfig {
         env: Arc::new(MapEnv(HashMap::new())),
         ..Default::default()
     }
-}
-
-/// `testdata/example_store/{stem}.json`.
-fn golden(stem: &str) -> Value {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("testdata/example_store")
-        .join(format!("{stem}.json"));
-    serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
 /// Go's REST `SearchExamples`: `POST /v1beta1/{store}:searchExamples` with the `$alt` query,
@@ -284,5 +276,34 @@ async fn malformed_video_metadata_offset_fails_the_search() {
     assert_eq!(
         err.to_string(),
         r#"vertexai: search examples: google.protobuf.Duration value out of range: "315576000001s""#
+    );
+}
+
+/// A `SearchExamples` call that never answers.
+struct PendingClient;
+
+#[async_trait::async_trait]
+impl super::ExampleStoreClient for PendingClient {
+    async fn search_examples(&self, _req: &Value) -> Result<Value, crate::error::BoxError> {
+        std::future::pending().await
+    }
+}
+
+/// Go passes the invocation context to `SearchExamples`: cancelling it mid-call aborts the call
+/// with `vertexai: search examples: {cause}`.
+#[tokio::test]
+async fn cancelling_the_context_aborts_the_search() {
+    let p =
+        super::new_provider_with_client(&config("http://unused"), Arc::new(PendingClient)).unwrap();
+    let ctx = Context::builder().build();
+    let (got, ()) = tokio::join!(p.examples(&ctx, "query"), async {
+        tokio::task::yield_now().await;
+        ctx.cancel_with_cause(gadk_agent::CancelCause::DeadlineExceeded);
+    });
+    let err = got.unwrap_err();
+    assert!(matches!(err, ToolError::Execution(_)), "{err:?}");
+    assert_eq!(
+        err.to_string(),
+        "vertexai: search examples: context deadline exceeded"
     );
 }

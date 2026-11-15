@@ -41,7 +41,7 @@
 use std::sync::{Arc, LazyLock};
 
 use async_trait::async_trait;
-use gadk_agent::{Context, ToolError};
+use gadk_agent::{CancelCause, Context, ToolError};
 use gadk_genai::{
     Blob, CodeExecutionResult, Content, ExecutableCode, FileData, FunctionCall, FunctionResponse,
     Language, Outcome, Part, ROLE_USER, VideoMetadata,
@@ -67,6 +67,19 @@ use crate::session::convert::{
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests;
 
+/// `testdata/example_store/{stem}.json`, the Go-generated goldens (shared by the wire tests and
+/// the `vertexai_test.go` parity ports).
+#[cfg(test)]
+#[allow(clippy::panic)]
+pub(crate) fn golden(stem: &str) -> Value {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("testdata/example_store")
+        .join(format!("{stem}.json"));
+    let text =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    serde_json::from_str(&text).unwrap_or_else(|e| panic!("parse {}: {e}", path.display()))
+}
+
 /// How many examples a search asks for (Go `topK`).
 pub const TOP_K: i64 = 10;
 
@@ -85,6 +98,7 @@ static EXAMPLE_STORE_NAME_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
 
 /// How a Vertex AI Example Store provider reaches its store (Go `ProviderConfig` plus the
 /// `option.ClientOption`s Go passes to `aiplatform.NewExampleStoreClient`).
+// Divergence (ledger 2a): fields beyond Go's `ExampleStoreName` (`endpoint`, `credentials`, `without_authentication`, `http_client`, `env`) stand in for Go's client options.
 #[derive(Clone)]
 pub struct ProviderConfig {
     /// The store's full resource name (Go `ExampleStoreName`):
@@ -133,6 +147,7 @@ impl std::fmt::Debug for ProviderConfig {
 }
 
 /// Why [`new_provider`] failed, with Go's texts.
+#[non_exhaustive]
 #[derive(Debug)]
 pub enum ExampleStoreError {
     /// The store name does not match Go's `exampleStoreNamePattern`.
@@ -261,12 +276,29 @@ impl Provider for VertexExampleStoreProvider {
     ///
     /// [`ToolError::Execution`] with Go's text `vertexai: search examples: {err}` when the call
     /// fails or the response holds malformed `bytes` or `Duration` text (where Go's protojson
-    /// decoding of the response fails).
-    async fn examples(&self, _ctx: &Context, query: &str) -> Result<Vec<Example>, ToolError> {
+    /// decoding of the response fails), or `vertexai: search examples: {cause}` (wrapping
+    /// [`CancelCause::to_agent_error`]) when `ctx` is cancelled before or during the call (Go
+    /// passes `ctx` to `SearchExamples`, which aborts the RPC).
+    async fn examples(&self, ctx: &Context, query: &str) -> Result<Vec<Example>, ToolError> {
         let req = search_request(&self.store_name, query);
-        self.client
-            .search_examples(&req)
-            .await
+        let token = ctx.cancellation_token();
+        let cancelled = || -> BoxError {
+            Box::new(
+                ctx.cause()
+                    .unwrap_or(CancelCause::Canceled)
+                    .to_agent_error(),
+            )
+        };
+        let result = if token.is_cancelled() {
+            Err(cancelled())
+        } else {
+            tokio::select! {
+                biased;
+                () = token.cancelled() => Err(cancelled()),
+                resp = self.client.search_examples(&req) => resp,
+            }
+        };
+        result
             .and_then(|resp| examples_from_response(&resp).map_err(BoxError::from))
             .map_err(|e| ToolError::Execution(wrap("vertexai: search examples", e)))
     }

@@ -33,11 +33,21 @@ pub const ENV_HELP: &str = "Environment variable NAME=VALUE (repeat --env for ea
 /// Go `--default_env`'s help text.
 pub const DEFAULT_ENV_HELP: &str = "Include GOOGLE_CLOUD_REGION, NUM_WORKERS=1, GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY=true and OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true. Use --default_env=false to omit them. Explicitly setting this flag replaces the environment on update; omit both environment flags to preserve it.";
 
-/// Go `aiplatformpb.EnvVar`: one variable of the deployment environment.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// Go `aiplatformpb.EnvVar`: one variable of the deployment environment. `Debug` shows the
+/// name only: values may be secrets.
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct EnvVar {
     pub name: String,
     pub value: String,
+}
+
+impl std::fmt::Debug for EnvVar {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EnvVar")
+            .field("name", &self.name)
+            .field("value", &format_args!("<redacted>"))
+            .finish()
+    }
 }
 
 impl EnvVar {
@@ -235,5 +245,21 @@ mod tests {
             deployment_spec(&[EnvVar::new("A", "1"), EnvVar::new("_empty", "")]),
             json!({"env": [{"name": "A", "value": "1"}, {"name": "_empty"}]})
         );
+    }
+
+    /// `--env` values may be secrets: `Debug` shows the names only.
+    #[test]
+    fn debug_redacts_env_values() {
+        let mut f = flags(&["API_KEY=s3cret-value", "bare-s3cret-value"], true);
+        f.agent_engine.env_vars = vec![EnvVar::new("API_KEY", "s3cret-value")];
+        let got = format!("{f:?}");
+        assert!(!got.contains("s3cret-value"), "{got}");
+        assert!(got.contains("API_KEY"), "{got}");
+        assert!(
+            got.contains(r#"env: ["API_KEY=<redacted>", "<redacted>"]"#),
+            "{got}"
+        );
+        let got = format!("{:?}", EnvVar::new("TOKEN", "s3cret-value"));
+        assert_eq!(got, r#"EnvVar { name: "TOKEN", value: <redacted> }"#);
     }
 }

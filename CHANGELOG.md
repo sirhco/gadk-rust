@@ -117,13 +117,16 @@ the public API.
     `ProviderConfig`, `new_provider`, `ExampleStoreError`, `TOP_K` and `SIMILARITY_THRESHOLD`.
     - The provider searches the store for the top 10 stored-contents examples for each user
       query and keeps those scoring at least 0.5.
+    - Cancelling the invocation context aborts the search with
+      `vertexai: search examples: <cause>` (Go passes the context to `SearchExamples`).
     - The store name must be a full
       `projects/{project}/locations/{location}/exampleStores/{example_store}` resource name (no
       bare-ID fallback, as Go).
   - **Agent Engine deployment environment** (Go c7087e3e, #1981): `gadk deploy agentengine`
     accepts repeated `--env NAME=VALUE` and `--default_env` (default true), with ADK-Go's
     names, help and validation.
-    - `--env entry N …` errors never echo a value.
+    - `--env entry N …` errors never echo a value, and neither does the `Debug` output of
+      `AgentEngineServiceFlags` or `EnvVar` (names only).
     - Create sends the computed `spec.deploymentSpec.env`: the defaults not overridden first,
       then the `--env` entries in flag order.
     - Update replaces the environment (mask `spec.deploymentSpec.env`, before
@@ -187,7 +190,8 @@ the public API.
   error). It now returns `Result<Arc<dyn Tool>, ExampleToolError>`: add `?` or handle the error.
   It fails only when both `examples` and `provider` are set
   (`ExampleToolError::BothExamplesAndProvider`, `exampletool: cannot specify both Examples and
-  Provider`), including `examples: Some(vec![])`.
+  Provider`), including `examples: Some(vec![])`. `ExampleToolError` (and gadk-vertexai's new
+  `ExampleStoreError`) are `#[non_exhaustive]`: a `match` on them needs a wildcard arm.
 - **`ExampleToolConfig` changes** (8b):
   - `ExampleToolConfig.examples` is now `Option<Vec<Example>>` (Go's nil versus empty slice):
     write `examples: Some(vec![...])`.
@@ -327,6 +331,9 @@ Each of these follows the matching ADK-Go fix; the bug report has the commit and
       checked against Go goldens.
     - The Example Store provider has no `Close` (Go's implements `io.Closer`): REST holds no
       connection, and the provider is released by dropping it.
+    - The Example Store `ProviderConfig` has `endpoint`, `credentials`,
+      `without_authentication`, `http_client` and `env` beside Go's only field
+      (`ExampleStoreName`); they stand in for Go's client options.
   - Ledger 7a:
     - Without an explicit interval (the OTLP metric reader), opentelemetry_sdk reads
       `OTEL_METRIC_EXPORT_INTERVAL` from the process environment, not the injected one.

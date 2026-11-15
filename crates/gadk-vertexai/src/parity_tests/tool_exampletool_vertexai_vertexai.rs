@@ -22,7 +22,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use gadk_agent::{Context, ToolError};
+use gadk_agent::{CancelCause, Context, ToolError};
 use gadk_model::rest::test_util::ScriptedClient;
 use gadk_platform::env::MapEnv;
 use gadk_tools::example::Example;
@@ -32,8 +32,8 @@ use serde_json::{Value, json};
 
 use crate::error::BoxError;
 use crate::example_store::{
-    ExampleStoreClient, ExampleStoreError, ProviderConfig, new_provider, new_provider_with_client,
-    parse_location,
+    ExampleStoreClient, ExampleStoreError, ProviderConfig, golden, new_provider,
+    new_provider_with_client, parse_location,
 };
 
 /// Go `testStoreName`.
@@ -99,16 +99,6 @@ fn config(store_name: &str) -> ProviderConfig {
     }
 }
 
-/// `testdata/example_store/{stem}.json`.
-fn golden(stem: &str) -> Value {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("testdata/example_store")
-        .join(format!("{stem}.json"));
-    let text =
-        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-    serde_json::from_str(&text).unwrap_or_else(|e| panic!("parse {}: {e}", path.display()))
-}
-
 /// Go `json.Marshal([]*exampletool.Example)`: `{"input": Content, "output": [Content…]}`.
 fn examples_json(examples: &[Example]) -> Value {
     Value::Array(
@@ -135,7 +125,7 @@ fn wraps(err: &ToolError, want: &str) -> bool {
     false
 }
 
-// parity: adapted: no nil config or nil client in Rust (those cases are dropped); there is no gRPC dial or Close (ledger 2a divergences), so the regional-endpoint subtest checks the REST URL a ScriptedClient receives (https://{host_url(location)}) and the Close subtest checks the provider releases its client when dropped; the canceled-context checks are dropped (the Provider takes no cancellable context)
+// parity: adapted: no nil config or nil client in Rust (those cases are dropped); there is no gRPC dial or Close (ledger 2a divergences), so the regional-endpoint subtest checks the REST URL a ScriptedClient receives (https://{host_url(location)}) and the Close subtest checks the provider releases its client when dropped; new_provider takes no context, so the detached client-init context check is dropped; the canceled per-call context is a Context cancelled with CancelCause::Canceled and the error text is also checked
 #[tokio::test]
 async fn test_provider_config_validation() {
     // extracts location from valid store resource name
@@ -190,6 +180,19 @@ async fn test_provider_config_validation() {
         examples.len() == 1 && examples[0].output[0].parts[0].text == "world",
         "Examples() = {examples:?}, want 1 example with output 'world'"
     );
+
+    // A canceled per-call context fails SearchExamples.
+    let canceled_ctx = Context::builder().build();
+    canceled_ctx.cancel_with_cause(CancelCause::Canceled);
+    match p.examples(&canceled_ctx, "hi").await {
+        Err(e @ ToolError::Execution(_)) => assert_eq!(
+            e.to_string(),
+            "vertexai: search examples: context canceled",
+            "Examples() with canceled context"
+        ),
+        Err(e) => panic!("Examples() with canceled context error = {e}, want Execution"),
+        Ok(got) => panic!("Examples() with canceled context = {got:?}, want error"),
+    }
 
     // Close delegates to underlying client → dropping the provider releases the client.
     let client = Arc::new(FakeExampleStoreClient::default());
