@@ -102,7 +102,9 @@ impl Node for ParallelWorker {
     /// event carries the per-index outputs. Intermediate wrapped events are suppressed. Each item
     /// task runs on a fresh fiber spawned with [`PARALLEL_WORKER_CREATOR`] (Go's `go
     /// n.runWorker(..)` goroutine; its retries stay on it). Dropping the stream drops the
-    /// `JoinSet`, aborting the workers.
+    /// `JoinSet`, aborting the workers, where Go's `Run` keeps ranging its results until
+    /// `wg.Wait`; the engine never drops it mid-await (the scheduler drains its node tasks), so
+    /// only a direct user of the stream sees the abort.
     fn run(&self, ctx: Context, input: Value) -> EventStream {
         let name = self.base.name().to_string();
         let wrapped = Arc::clone(&self.wrapped);

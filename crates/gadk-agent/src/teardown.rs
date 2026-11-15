@@ -32,6 +32,7 @@
 use std::future::Future;
 use std::sync::Arc;
 
+use futures::FutureExt;
 use tokio::task::JoinHandle;
 use tracing::Instrument;
 
@@ -51,9 +52,23 @@ impl Teardowns {
         Self::default()
     }
 
-    /// Adds a spawned teardown task; [`Teardowns::wait`] awaits it.
+    /// Adds a spawned teardown task; [`Teardowns::wait`] awaits it. Tasks that already finished
+    /// are dropped first (a panic among them is logged as [`Teardowns::wait`] logs it), so a long
+    /// invocation with many early drops does not accumulate finished handles.
     pub fn register(&self, task: JoinHandle<()>) {
-        self.tasks.lock().push(task);
+        let mut tasks = self.tasks.lock();
+        tasks.retain_mut(|h| {
+            if !h.is_finished() {
+                return true;
+            }
+            if let Some(Err(e)) = h.now_or_never()
+                && e.is_panic()
+            {
+                tracing::warn!("adk: a teardown task panicked");
+            }
+            false
+        });
+        tasks.push(task);
     }
 
     /// Awaits every registered task, including tasks registered while waiting (a teardown can
@@ -85,7 +100,9 @@ impl InvocationContext {
     }
 
     /// Hands an already spawned task that finishes started work to the invocation's teardown
-    /// registry; without a registry the task is detached (it still runs to completion).
+    /// registry; without a registry the task is detached (it still runs to completion). A task
+    /// registered after [`Teardowns::wait`] returned (the runner's after-run already started) is
+    /// never awaited: it runs to completion detached.
     pub fn register_teardown(&self, task: JoinHandle<()>) {
         if let Some(t) = self.teardowns() {
             t.register(task);
@@ -117,6 +134,24 @@ mod tests {
     use crate::context::{ContextDelta, InvocationContext};
 
     use super::Teardowns;
+
+    #[tokio::test]
+    async fn register_drops_finished_tasks() {
+        let reg = Teardowns::new();
+        let done = tokio::spawn(async {});
+        while !done.is_finished() {
+            tokio::task::yield_now().await;
+        }
+        reg.register(done);
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+        reg.register(tokio::spawn(async move {
+            let _ = rx.await;
+        }));
+        assert_eq!(reg.tasks.lock().len(), 1, "the finished task was pruned");
+        let _ = tx.send(());
+        reg.wait().await;
+        assert!(reg.is_empty());
+    }
 
     #[tokio::test]
     async fn wait_awaits_tasks_registered_while_waiting() {

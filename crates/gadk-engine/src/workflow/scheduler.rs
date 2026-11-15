@@ -381,7 +381,13 @@ impl Drop for Scheduler {
                 tokio::select! {
                     biased;
                     Some(item) = rx.recv() => release(item),
-                    joined = tasks.join_next() => if joined.is_none() { break },
+                    joined = tasks.join_next() => match joined {
+                        None => break,
+                        Some(Err(e)) if e.is_panic() => {
+                            tracing::warn!("adk: a workflow node task panicked during teardown");
+                        }
+                        Some(_) => {}
+                    },
                 }
             }
             while let Ok(item) = rx.try_recv() {

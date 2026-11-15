@@ -207,7 +207,10 @@ fn run(ctx: InvocationContext) -> EventStream {
             // failed; the first cause wins otherwise.
             funnel_group.cancel_with_cause(CancelCause::Canceled);
             if let Some(p) = panic {
-                let _ = tx.send(SubResult::Panic(p)).await;
+                if tx.send(SubResult::Panic(p)).await.is_err() {
+                    // Stopped early: nobody is left to re-raise it.
+                    tracing::warn!("adk: a parallel agent branch panicked after an early stop");
+                }
                 return;
             }
             let err = first_err.lock().take();

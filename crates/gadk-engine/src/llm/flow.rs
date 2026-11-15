@@ -342,7 +342,9 @@ impl Flow {
             }
             let token = ctx.cancellation_token().clone();
             // An already-ended context skips the model call (and its span); the cancellation
-            // is then handled as one that ends the call below.
+            // is then handled as one that ends the call below. Divergence (ledger 7b-3a): Go
+            // calls the model with the ended context, inside its generate_content span (Rust
+            // models do not observe the context).
             let mut inner = (!token.is_cancelled())
                 .then(|| generate_content(&ctx, model, req.clone(), use_stream));
             loop {

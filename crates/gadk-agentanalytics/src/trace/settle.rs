@@ -1561,8 +1561,13 @@ impl InvocationState {
             if g.kind != SpanKind::Agent {
                 break;
             }
+            // A record that is its own parent is compared with its own guard (never relocked).
             if let Some(p) = g.parent.as_ref()
-                && g.is_node_agent_of(&p.lock())
+                && (if p.ptr_eq(&c) {
+                    g.is_node_agent_of(&g)
+                } else {
+                    g.is_node_agent_of(&p.lock())
+                })
             {
                 return true;
             }

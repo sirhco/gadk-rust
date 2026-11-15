@@ -27,9 +27,9 @@ use std::{
 use futures::{StreamExt, future::BoxFuture};
 use gadk_agent::fiber::{self, Fiber};
 use gadk_agent::{
-    AfterToolCallback, AgentError, BeforeToolCallback, Context, ContextDelta, InvocationContext,
-    LiveRequest, LiveSession, OnToolErrorCallback, REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
-    SharedToolError, Tool, ToolError,
+    AfterToolCallback, AgentError, BeforeToolCallback, CancelGuard, Context, ContextDelta,
+    InvocationContext, LiveRequest, LiveSession, OnToolErrorCallback,
+    REQUEST_CONFIRMATION_FUNCTION_CALL_NAME, SharedToolError, Tool, ToolError,
 };
 use gadk_genai::{Content, FunctionCall, FunctionResponse, Part};
 use gadk_model::LlmResponse;
@@ -133,8 +133,9 @@ pub(crate) async fn handle_function_calls_live(
 /// outside live mode).
 ///
 /// Every call runs as one task on the platform's task runner (Go `platform.RunTasks`); dropping
-/// the returned future lets the tool tasks still running finish (see [`FinishOnDrop`]; a live
-/// streaming tool's spawned task is not one of them: it ends on its cancellation token).
+/// the returned future cancels the calls' scope plainly and lets the tool tasks still running
+/// finish (see [`FinishOnDrop`]; a live streaming tool's spawned task is not one of them: it
+/// ends on its cancellation token).
 async fn handle_function_calls_inner(
     ctx: &InvocationContext,
     flow: &Flow,
@@ -158,13 +159,19 @@ async fn handle_function_calls_inner(
     let slots: Arc<parking_lot::Mutex<Vec<Option<Event>>>> =
         Arc::new(parking_lot::Mutex::new(vec![None; calls.len()]));
     let cbs = flow.tool_callbacks();
+    // The calls run under a scope the dispatch owns: a drop mid-await (Go: the caller's cancel)
+    // cancels it plainly before the calls finish as a teardown; a completed dispatch gives it up
+    // uncancelled (see [`FinishOnDrop`]).
+    let (calls_ctx, calls_scope) = ctx.clone().into_context().with_agent_cancel();
+    let calls_ctx = calls_ctx.as_invocation().clone();
     let mut tasks: Vec<BoxFuture<'static, ()>> = Vec::with_capacity(calls.len());
     for (i, fc) in calls.into_iter().enumerate() {
         let span = match &merged_span {
             Some(m) => m.in_scope(|| start_execute_tool_span(&fc.name, &fc.args)),
             None => start_execute_tool_span(&fc.name, &fc.args),
         };
-        let (ctx, cbs, slots, names) = (ctx.clone(), cbs.clone(), slots.clone(), names.clone());
+        let (ctx, cbs, slots, names) =
+            (calls_ctx.clone(), cbs.clone(), slots.clone(), names.clone());
         let live = live.clone();
         let tool = tools.get(&fc.name).cloned();
         let confirmation = confirmations.and_then(|m| m.get(&fc.id).cloned());
@@ -184,7 +191,7 @@ async fn handle_function_calls_inner(
         Some(s) => Box::pin(run.instrument(s.clone())),
         None => Box::pin(run),
     };
-    FinishOnDrop::new(ctx, run).await;
+    FinishOnDrop::new(ctx, run, calls_scope).await;
     let events = std::mem::take(&mut *slots.lock());
     let merged = merge_parallel_function_response_events(events);
     if let Some(s) = &merged_span {
@@ -200,21 +207,26 @@ async fn handle_function_calls_inner(
 /// Go `platform.RunTasks` blocks until every task completed (platform/exec.go:68), and a Go
 /// consumer that stops reading early unwinds through it on its own goroutine, so the tool calls
 /// in flight finish (after-tool and on-tool-error callbacks included) before the runner's
-/// deferred after-run callbacks. Dropping a Rust future cannot wait: dropped before completion,
-/// this hands the task runner's still-running future (it keeps its tasks running) to the
-/// invocation's teardown registry ([`InvocationContext::spawn_teardown`]) on the fiber and span
-/// it was started in, instead of cancelling the tool tasks.
+/// deferred after-run callbacks. Dropping a Rust future cannot wait, and a drop mid-await stands
+/// for Go's caller cancellation: dropped before completion, this cancels the calls' scope plainly
+/// (a tool that ignores cancellation still runs to completion; none is aborted) and hands the task
+/// runner's still-running future to the invocation's teardown registry
+/// ([`InvocationContext::spawn_teardown`]) on the fiber and span it was started in. Completed, it
+/// gives the scope up uncancelled ([`CancelGuard::release`]): a tool context kept beyond the call
+/// (a live streaming tool's task) stays live until the invocation ends.
 struct FinishOnDrop {
     run: Option<BoxFuture<'static, ()>>,
+    scope: Option<CancelGuard>,
     ctx: InvocationContext,
     fiber: Fiber,
     span: tracing::Span,
 }
 
 impl FinishOnDrop {
-    fn new(ctx: &InvocationContext, run: BoxFuture<'static, ()>) -> Self {
+    fn new(ctx: &InvocationContext, run: BoxFuture<'static, ()>, scope: CancelGuard) -> Self {
         Self {
             run: Some(run),
+            scope: Some(scope),
             ctx: ctx.clone(),
             fiber: fiber::current(),
             span: tracing::Span::current(),
@@ -235,6 +247,9 @@ impl Future for FinishOnDrop {
         let polled = run.as_mut().poll(cx);
         if polled.is_ready() {
             self.run = None;
+            if let Some(scope) = self.scope.take() {
+                scope.release();
+            }
         }
         polled
     }
@@ -243,6 +258,9 @@ impl Future for FinishOnDrop {
 impl Drop for FinishOnDrop {
     fn drop(&mut self) {
         if let Some(run) = self.run.take() {
+            if let Some(scope) = self.scope.take() {
+                scope.cancel();
+            }
             let work = self.fiber.clone().scope(run).instrument(self.span.clone());
             self.ctx.spawn_teardown(work);
         }
@@ -961,7 +979,7 @@ mod tests {
 
     use async_trait::async_trait;
     use futures::future::BoxFuture;
-    use gadk_agent::{AgentConfig, RunnableTool, agent};
+    use gadk_agent::{AgentConfig, CancelCause, RunnableTool, agent};
     use pretty_assertions::assert_eq;
     use serde_json::json;
     use tokio::sync::oneshot;
@@ -1286,10 +1304,9 @@ mod tests {
         );
     }
 
-    /// Sends on drop: observes that a tool task's future was dropped.
     /// Go `platform.RunTasks` waits for every tool task (exec.go:68): dropping the future does
-    /// not cancel a running tool; its task finishes, after-tool callbacks included, as a
-    /// teardown the invocation's registry awaits.
+    /// not abort a running tool (this one ignores cancellation); its task finishes, after-tool
+    /// callbacks included, as a teardown the invocation's registry awaits.
     #[tokio::test]
     async fn dropping_the_future_lets_tool_tasks_finish_as_a_teardown() {
         let (started_tx, started_rx) = oneshot::channel::<()>();
@@ -1352,6 +1369,91 @@ mod tests {
             after_ran.load(std::sync::atomic::Ordering::SeqCst),
             "the dropped call's after-tool callbacks ran before the teardown finished"
         );
+    }
+
+    /// A Rust drop mid-await is a Go caller cancellation: the dropped dispatch cancels its tool
+    /// calls' scope plainly before handing them to the registry, so a tool that waits on its
+    /// context ends and the registry wait (the runner's after-run) does not hang. The
+    /// invocation's own token stays live.
+    #[tokio::test]
+    async fn dropping_the_future_cancels_the_tool_calls_scope_before_teardown() {
+        let (started_tx, started_rx) = oneshot::channel::<()>();
+        let slots = Arc::new(parking_lot::Mutex::new(Some(started_tx)));
+        let cause: Arc<parking_lot::Mutex<Option<CancelCause>>> = Arc::default();
+        let seen = cause.clone();
+        let waiting = FnTool::arc(
+            "wait",
+            Arc::new(move |ctx: Context| {
+                let started = slots.lock().take();
+                let seen = seen.clone();
+                Box::pin(async move {
+                    if let Some(started) = started {
+                        let _ = started.send(());
+                    }
+                    ctx.cancellation_token().cancelled().await;
+                    *seen.lock() = ctx.cause();
+                    Map::new()
+                })
+            }),
+        );
+        let tools = tool_map(vec![waiting]);
+        let reg = Arc::new(gadk_agent::Teardowns::new());
+        let ctx = InvocationContext::builder()
+            .agent(
+                agent::new(AgentConfig {
+                    name: "a".into(),
+                    ..Default::default()
+                })
+                .unwrap(),
+            )
+            .teardowns(reg.clone())
+            .build_invocation();
+        let flow = Flow::default();
+        let call = calls_event(&["wait"]);
+        let mut fut = Box::pin(handle_function_calls(&ctx, &flow, &tools, &call, None));
+        tokio::select! {
+            _ = &mut fut => panic!("handle_function_calls must not complete"),
+            r = started_rx => r.unwrap(),
+        }
+        drop(fut);
+        tokio::time::timeout(std::time::Duration::from_secs(5), reg.wait())
+            .await
+            .expect("the registry wait ends: the dropped dispatch cancelled its tool calls");
+        assert!(matches!(*cause.lock(), Some(CancelCause::Canceled)));
+        assert!(
+            !ctx.cancellation_token().is_cancelled(),
+            "only the dispatch's own scope is cancelled, not the invocation"
+        );
+    }
+
+    /// A dispatch that completes gives its scope up without cancelling it: a tool context kept
+    /// beyond the call (a live streaming tool's task) stays live until the invocation ends.
+    #[tokio::test]
+    async fn completed_dispatch_leaves_the_tool_context_live() {
+        let kept: Arc<parking_lot::Mutex<Option<Context>>> = Arc::default();
+        let keep = kept.clone();
+        let tool = FnTool::arc(
+            "keep",
+            Arc::new(move |ctx: Context| {
+                *keep.lock() = Some(ctx);
+                Box::pin(async { Map::new() })
+            }),
+        );
+        let ctx = ctx();
+        let tools = tool_map(vec![tool]);
+        handle_function_calls(
+            &ctx,
+            &Flow::default(),
+            &tools,
+            &calls_event(&["keep"]),
+            None,
+        )
+        .await
+        .unwrap();
+        let kept = kept.lock().take().unwrap();
+        assert!(!kept.cancellation_token().is_cancelled());
+        ctx.cancel_with_cause(CancelCause::Canceled);
+        assert!(kept.cancellation_token().is_cancelled());
     }
 
     /// Go passes a callback's `err` value onward unchanged: a callback error carrying a
