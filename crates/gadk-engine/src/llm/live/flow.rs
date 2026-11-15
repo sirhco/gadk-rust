@@ -25,6 +25,7 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use futures::StreamExt;
+use gadk_agent::fiber::{self, LIVE_SESSION_CREATOR};
 use gadk_agent::{AgentError, EventStream, InvocationContext, LiveRunConfig, LiveSession, Tool};
 use gadk_genai::{LiveConnectConfig, SessionResumptionConfig};
 use gadk_model::{
@@ -121,12 +122,14 @@ pub(crate) fn run_live(
     let sess = LiveSessionImpl::new();
     let guard = sess.probe().task_guard();
     let task_sess = sess.clone();
-    let task = tokio::spawn(async move {
+    // Go starts the session work on a new goroutine (base_flow.go `go func()`): a fresh fiber
+    // started by this spawn site, child of the caller's.
+    let task = tokio::spawn(fiber::spawn_child(LIVE_SESSION_CREATOR).scope(async move {
         let _guard = guard;
         // Declared after `_guard`, so it runs first; see `Teardown`.
         let _teardown = Teardown(task_sess.clone());
         session_task(flow, model, ctx, live_cfg, task_sess).await;
-    });
+    }));
     let stream = sess.event_stream(Some(task));
     let sess: Arc<dyn LiveSession> = sess;
     Ok((sess, stream))

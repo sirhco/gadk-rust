@@ -21,6 +21,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::StreamExt;
+use gadk_agent::fiber::FiberStream;
 use gadk_agent::{
     AgentError, EventStream, InvocationContext, LiveRequest, LiveRunConfig, LiveSession, RunConfig,
     StreamingMode,
@@ -29,7 +30,8 @@ use gadk_model::LlmResponse;
 use gadk_session::{Event, Session};
 use tokio_util::sync::CancellationToken;
 
-use super::{AfterRunGuard, RunOptions, Runner, RunnerInner, from_plugin, wrap};
+use super::compaction::InvocationGuard;
+use super::{RunOptions, Runner, RunnerInner, from_plugin, wrap};
 
 impl Runner {
     /// Port of Go `(*Runner).RunLive`: starts a live (bidirectional streaming) run of the agent
@@ -38,6 +40,11 @@ impl Runner {
     ///
     /// Must be called inside a Tokio runtime: the live flow spawns tasks. `opts` is accepted for
     /// symmetry with [`Runner::run`] and, as in Go, not applied.
+    ///
+    /// The returned stream runs on the consumer's fiber ([`FiberStream::consumer`]), as Go's
+    /// iterator runs on the goroutine that ranges over it; this function's own work (session
+    /// lookup, before-run callbacks, starting the live flow) runs in the caller's future, as Go's
+    /// `RunLive` runs on the caller's goroutine.
     pub async fn run_live(
         &self,
         user_id: &str,
@@ -83,12 +90,20 @@ impl Runner {
                 .append_event(&*stored, &mut event)
                 .await
                 .map_err(|e| wrap("failed to add event to session", e))?;
-            let stream: EventStream = futures::stream::once(async move { Ok(event) }).boxed();
-            return Ok((Arc::new(ClosedLiveSession), stream));
+            let stream =
+                FiberStream::consumer(futures::stream::once(async move { Ok(event) }).boxed());
+            return Ok((Arc::new(ClosedLiveSession), stream.boxed()));
         }
 
         let (agent_sess, inner) = live.run_live(ictx.clone()).await?;
-        let stream = wrap_live_stream(this.clone(), ictx.clone(), stored.clone(), inner, token);
+        let stream = FiberStream::consumer(wrap_live_stream(
+            this.clone(),
+            ictx.clone(),
+            stored.clone(),
+            inner,
+            token,
+        ))
+        .boxed();
         let session: Arc<dyn LiveSession> = Arc::new(RunnerLiveSession {
             sess: agent_sess,
             runner: this,
@@ -102,6 +117,11 @@ impl Runner {
 /// Go `RunLive`'s `wrappedIter`: plugin `on_event`, chronological buffering of tool calls and
 /// responses while a transcription is in progress, persistence of non-partial events without
 /// inline data, and the EOF flush of buffered events.
+///
+/// An [`InvocationGuard`] without compaction (Go `RunLive` does not compact) owns the deferred
+/// after-run callbacks and the invocation token's cancel-on-drop: a consumer that drops the
+/// stream at a yield (Go `break`) gets the after-run callbacks on its fiber before the token is
+/// cancelled; a drop inside an await (Go's caller cancelling) cancels at once.
 fn wrap_live_stream(
     this: Arc<RunnerInner>,
     ctx: InvocationContext,
@@ -109,14 +129,17 @@ fn wrap_live_stream(
     mut inner: EventStream,
     token: CancellationToken,
 ) -> EventStream {
-    // Dropping the stream cancels the invocation, which stops the live flow. The guard is made
-    // here, not on first poll, so a stream dropped before it is ever polled cancels too.
+    // Dropping the stream cancels the invocation, which stops the live flow. The drop guard is
+    // made here, not on first poll, so a stream dropped before it is ever polled cancels too.
     let cancel_on_drop = token.drop_guard();
     Box::pin(async_stream::stream! {
-        let _cancel_on_drop = cancel_on_drop;
+        // Made at the first poll, inside the consumer's fiber, which its `Drop` re-enters.
+        let mut guard = InvocationGuard::new(this.clone(), stored.clone(), ctx.clone());
+        guard.cancel_on_drop(cancel_on_drop);
+        guard.no_compaction();
         // Go `defer pluginManager.RunAfterRunCallback(iCtx)` inside the iterator: runs once when
         // the stream ends, or (spawned) when the consumer drops it early.
-        let after_run = AfterRunGuard::new(this.plugin_manager.clone(), ctx.clone());
+        guard.defer_after_run();
         let mut buffered: Vec<Event> = Vec::new();
         let mut is_transcribing = false;
 
@@ -124,7 +147,9 @@ fn wrap_live_stream(
             let mut event = match item {
                 Ok(ev) => ev,
                 Err(e) => {
+                    guard.at_yield(true);
                     yield Err(e);
+                    guard.at_yield(false);
                     continue;
                 }
             };
@@ -139,7 +164,9 @@ fn wrap_live_stream(
             let record = event.actions.compaction.clone();
             match this.plugin_manager.run_on_event(ctx.clone(), event.clone()).await {
                 Err(e) => {
+                    guard.at_yield(true);
                     yield Err(e);
+                    guard.at_yield(false);
                     continue;
                 }
                 Ok(modified) => event = from_plugin(event, modified, record),
@@ -161,20 +188,28 @@ fn wrap_live_stream(
             if !event.response.partial && has_transcription {
                 is_transcribing = false;
                 if let Err(e) = this.session_service.append_event(&*stored, &mut event).await {
+                    guard.at_yield(true);
                     yield Err(wrap("failed to add event to session", e));
+                    guard.at_yield(false);
                     continue;
                 }
+                guard.at_yield(true);
                 yield Ok(event);
+                guard.at_yield(false);
                 for mut buffered_event in std::mem::take(&mut buffered) {
                     if let Err(e) = this
                         .session_service
                         .append_event(&*stored, &mut buffered_event)
                         .await
                     {
+                        guard.at_yield(true);
                         yield Err(wrap("failed to add event to session", e));
+                        guard.at_yield(false);
                         continue;
                     }
+                    guard.at_yield(true);
                     yield Ok(buffered_event);
+                    guard.at_yield(false);
                 }
                 continue;
             }
@@ -183,10 +218,14 @@ fn wrap_live_stream(
                 && !has_inline_data(&event)
                 && let Err(e) = this.session_service.append_event(&*stored, &mut event).await
             {
+                guard.at_yield(true);
                 yield Err(wrap("failed to add event to session", e));
+                guard.at_yield(false);
                 continue;
             }
+            guard.at_yield(true);
             yield Ok(event);
+            guard.at_yield(false);
         }
 
         // EOF: flush what is still buffered. Go uses context.WithoutCancel here; a Rust append
@@ -198,13 +237,17 @@ fn wrap_live_stream(
                 .append_event(&*stored, &mut buffered_event)
                 .await
             {
+                guard.at_yield(true);
                 yield Err(wrap("failed to add event to session", e));
+                guard.at_yield(false);
                 continue;
             }
+            guard.at_yield(true);
             yield Ok(buffered_event);
+            guard.at_yield(false);
         }
 
-        after_run.finish().await;
+        guard.finish().await;
     })
 }
 
