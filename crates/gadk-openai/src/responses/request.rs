@@ -35,7 +35,9 @@ use crate::responses::wire::{
     ResponseOutputTextParam,
 };
 use crate::shared::calls::{CallTracker, marshal_function_args, marshal_function_response};
-use crate::shared::contents::{PartField, replayed_reasoning, unsupported_payload};
+use crate::shared::contents::{
+    PartField, code_execution_text, replayed_reasoning, unsupported_payload,
+};
 use crate::shared::media::{Media, MediaKind, MediaSource, classify_media};
 
 /// Go `imageInputDetail`: the detail every image input carries. openai-go drops an unset
@@ -115,11 +117,17 @@ pub(crate) fn convert_contents(
         for part in &content.parts {
             // Reported before anything is emitted, so a field this API cannot send is named
             // even when text or a call rides on the same part. Media is emitted below.
-            if let Some(field) = unsupported_payload(part, &[PartField::Media]) {
+            if let Some(field) =
+                unsupported_payload(part, &[PartField::Media, PartField::CodeExecution])
+            {
                 return Err(OpenAiError::plain(format!(
                     "openai: unsupported content part: {field}"
                 )));
             }
+            // Same fenced text adk-python's Responses converter sends. Chat Completions uses
+            // it too: dropping the parts there would hide the code and its output from the
+            // model.
+            let code_text = code_execution_text(part);
             // Classified before any of it is emitted, for the same reason.
             let media = classify_media(part)?;
             // Text is read independently of a call or a response because one part can carry
@@ -134,6 +142,10 @@ pub(crate) fn convert_contents(
                     dropped_reasoning = true;
                 }
                 normalize_role(role)?;
+            }
+            let has_code_text = !code_text.is_empty();
+            if has_code_text {
+                buffered.push(Buffered::Text(code_text));
             }
             // After the part's own text and before the call below, whose flush carries the
             // media out with it.
@@ -151,7 +163,7 @@ pub(crate) fn convert_contents(
                 items.push(ResponseInputItem::FunctionCallOutput(
                     new_function_response(&mut tracker, fr)?,
                 ));
-            } else if !send_text && !has_media && !replayed_reasoning(part) {
+            } else if !send_text && !has_code_text && !has_media && !replayed_reasoning(part) {
                 // Nothing in the part reaches the request.
                 return Err(OpenAiError::plain(
                     "openai: unsupported content part: carries nothing to send",

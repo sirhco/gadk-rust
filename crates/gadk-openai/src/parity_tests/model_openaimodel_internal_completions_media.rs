@@ -148,7 +148,6 @@ fn test_build_params_media_on_the_wire() {
 /// Go `TestBuildParams_MediaOnTheWire`, case "executable code before an inline image keeps its
 /// order". Kept out of `test_build_params_media_on_the_wire`'s table so that table stays a live
 /// guard while this case waits for the code-execution fix (ded357e3, #1956).
-#[ignore = "8a bug: completions::request::build_params reports ExecutableCode as an unsupported content part; Go sends it as fenced text ahead of the image (ded357e3 #1956)"]
 #[test]
 fn test_build_params_media_on_the_wire_executable_code_before_an_inline_image_keeps_its_order() {
     const PNG: &[u8] = &[0x89, b'P', b'N', b'G'];

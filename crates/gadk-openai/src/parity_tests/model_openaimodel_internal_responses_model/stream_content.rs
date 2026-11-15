@@ -975,7 +975,6 @@ async fn test_model_generate_stream_completed_text_after_empty_function_args() {
 
 /// When the terminal call restates its ID and arguments, an item-ID fallback must not prevent
 /// recovery of text present only in the completed response (a1603c7f, #1897).
-#[ignore = "8a bug: responses stream finalization only tries CompletedContentSupersedes before call adoption; Go retries it after adoption, so text present only in the completed response is lost after an item-ID fallback (a1603c7f #1897)"]
 #[tokio::test]
 async fn test_model_generate_stream_completed_text_after_call_id_fallback() {
     const ADDED_WITHOUT_CALL_ID: &str = r#"{"type":"response.output_item.added","item":{"id":"item_1","type":"function_call","name":"ping"}}"#;

@@ -420,14 +420,14 @@ async fn live_send_realtime_mime_detection(#[case] backend: Backend) {
     );
 }
 
-/// The gemini-3.1 special cases of SendHistory / SendContent / SendRealtime: on the Gemini
-/// API, blobs go to `audio`/`video` and single-text content to realtime `text`; history is
-/// never sent (both backends).
+/// The Gemini 3.x Live special cases of SendHistory / SendContent / SendRealtime: on both
+/// backends (Go d8e47448), blobs go to `audio`/`video` and single-text content to realtime
+/// `text`; history is never sent to a gemini-3.1 model.
 #[rstest]
 #[case::gemini_api(Backend::GeminiApi)]
 #[case::vertex_ai(Backend::VertexAi)]
 #[tokio::test]
-async fn live_gemini_31_routing(#[case] backend: Backend) {
+async fn live_gemini_3x_routing(#[case] backend: Backend) {
     let model = "gemini-3.1-flash-live";
     let server = WsServer::start(vec![]).await;
     let conn = connect_with(&server, backend, model, LiveConnectConfig::default()).await;
@@ -448,18 +448,11 @@ async fn live_gemini_31_routing(#[case] backend: Backend) {
         frames[0],
         json!({"setup": {"model": full_model(backend, model)}})
     );
-    let expected = match backend {
-        Backend::GeminiApi => vec![
-            json!({"realtimeInput": {"text": "q"}}),
-            json!({"realtimeInput": {"video": {"data": b64(&PNG), "mimeType": "image/png"}}}),
-            json!({"realtimeInput": {"audio": {"data": b64(&[1]), "mimeType": "audio/pcm"}}}),
-        ],
-        Backend::VertexAi => vec![
-            json!({"clientContent": {"turns": [{"role": "user", "parts": [{"text": "q"}]}], "turnComplete": true}}),
-            json!({"realtimeInput": {"mediaChunks": [{"data": b64(&PNG), "mimeType": "image/png"}]}}),
-            json!({"realtimeInput": {"mediaChunks": [{"data": b64(&[1]), "mimeType": "audio/pcm"}]}}),
-        ],
-    };
+    let expected = vec![
+        json!({"realtimeInput": {"text": "q"}}),
+        json!({"realtimeInput": {"video": {"data": b64(&PNG), "mimeType": "image/png"}}}),
+        json!({"realtimeInput": {"audio": {"data": b64(&[1]), "mimeType": "audio/pcm"}}}),
+    ];
     assert_eq!(frames[1..].to_vec(), expected);
 }
 

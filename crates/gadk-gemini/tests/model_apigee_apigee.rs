@@ -431,7 +431,6 @@ async fn generate_content_sends_custom_headers() {
     false,
     "https://test.apigee.net/v1/models/gemini-2.5-pro:generateContent"
 )]
-#[ignore = "8a bug: ApigeeModel::generate_content forwards LlmRequest.model (the full `apigee/...` Name()) to the delegate, so the URL carries the apigee/ path; Go trims it to the last path component (71b0761f #2067)"]
 #[tokio::test]
 async fn test_generate_content_with_request_model(
     #[case] model_name: &str,

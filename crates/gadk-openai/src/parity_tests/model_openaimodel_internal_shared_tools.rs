@@ -26,7 +26,6 @@ use crate::shared::tools::ensure_function_tool_only;
 // Go refuses every `genai.Tool` field but `FunctionDeclarations` (275e190e, #1983), so the
 // cases name the fields genai 1.77 added, alone and beside functions, and expect the wrapped
 // `ErrUnsupportedConfigField`.
-#[ignore = "8a bug: shared::tools::ensure_function_tool_only checks a fixed list of eight non-function Tool fields (so FileSearch, ParallelAISearch, MCPServers, ExaAISearch pass) and returns a plain error without the UnsupportedConfigField sentinel; Go refuses every field outside supportedFunctionToolFields with ErrUnsupportedConfigField (275e190e #1983)"]
 #[test]
 fn test_ensure_function_tool_only() {
     let fn_decls = || {

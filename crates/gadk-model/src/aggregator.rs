@@ -46,6 +46,11 @@ pub struct StreamingResponseAggregator {
     sequence: Vec<Part>,
     current_text_buffer: String,
     current_text_is_thought: bool,
+    /// The first thought signature streamed on a chunk of `current_text_buffer`, for the part
+    /// the buffer is flushed into. Unlike adk-python, the same signature is also still carried
+    /// forward to the next function call that has none (`current_thought_signature`), which
+    /// the turn history needs on Vertex AI.
+    current_text_signature: Option<Bytes>,
     finish_reason: Option<FinishReason>,
 
     current_function_name: String,
@@ -123,6 +128,9 @@ impl StreamingResponseAggregator {
                         self.current_text_is_thought = part.thought;
                     }
                     self.current_text_buffer.push_str(&part.text);
+                    if !part.thought_signature.is_empty() && self.current_text_signature.is_none() {
+                        self.current_text_signature = Some(part.thought_signature.clone());
+                    }
                 } else if part.function_call.is_some() {
                     // Handles both streaming (partial) and non-streaming args.
                     self.process_function_call_part(part);
@@ -141,10 +149,11 @@ impl StreamingResponseAggregator {
 
     /// Port of stream_aggregator.go processFunctionCallPart.
     ///
-    /// Takes `part` mutably because, as in Go, a propagated thought signature is written
-    /// into the part itself, which is also the part of the response being yielded.
+    /// Takes `part` mutably because, as in Go, a propagated thought signature and a streamed
+    /// call's id are written into the part itself, which is also the part of the response
+    /// being yielded.
     fn process_function_call_part(&mut self, part: &mut Part) {
-        let Some(fc) = part.function_call.as_ref() else {
+        let Some(fc) = part.function_call.as_mut() else {
             return;
         };
         if !fc.partial_args.is_empty() || fc.will_continue == Some(true) {
@@ -153,8 +162,14 @@ impl StreamingResponseAggregator {
             {
                 self.current_function_thought_signature = Some(part.thought_signature.clone());
             }
-            self.process_streaming_function_call_part(fc.clone());
-        } else if !fc.name.is_empty() {
+            self.process_streaming_function_call_part(fc);
+        } else if fc.name.is_empty() {
+            // A nameless chunk continues the call being streamed, for example by only setting
+            // will_continue to false, so it carries that call's id.
+            if fc.id.is_empty() {
+                fc.id.clone_from(&self.current_function_id);
+            }
+        } else {
             self.flush_text_buffer_to_sequence();
             if part.thought_signature.is_empty()
                 && let Some(sig) = self.current_thought_signature.as_ref()
@@ -168,13 +183,16 @@ impl StreamingResponseAggregator {
 
     /// Port of stream_aggregator.go processStreamingFunctionCallPart.
     ///
-    /// Processes a streaming function call carrying partial arguments.
-    fn process_streaming_function_call_part(&mut self, fc: FunctionCall) {
+    /// Processes a streaming function call carrying partial arguments. A chunk without an id
+    /// is given the streamed call's id, in the yielded part too.
+    fn process_streaming_function_call_part(&mut self, fc: &mut FunctionCall) {
         if !fc.name.is_empty() {
-            self.current_function_name = fc.name;
+            self.current_function_name.clone_from(&fc.name);
         }
-        if !fc.id.is_empty() {
-            self.current_function_id = fc.id;
+        if fc.id.is_empty() {
+            fc.id.clone_from(&self.current_function_id);
+        } else {
+            self.current_function_id.clone_from(&fc.id);
         }
         for arg in &fc.partial_args {
             let Some(segments) = parse_json_path(&arg.json_path) else {
@@ -229,6 +247,7 @@ impl StreamingResponseAggregator {
             self.sequence.push(Part {
                 text: std::mem::take(&mut self.current_text_buffer),
                 thought: self.current_text_is_thought,
+                thought_signature: self.current_text_signature.take().unwrap_or_default(),
                 ..Default::default()
             });
             self.current_text_is_thought = false;
@@ -266,6 +285,7 @@ impl StreamingResponseAggregator {
         } else {
             (response.error_code.clone(), response.error_message.clone())
         };
+        let model_version = response.model_version.clone();
         self.flush_text_buffer_to_sequence();
         self.flush_function_call_to_sequence();
         Some(LlmResponse {
@@ -279,6 +299,7 @@ impl StreamingResponseAggregator {
             error_code,
             error_message,
             finish_reason: self.finish_reason.clone(),
+            model_version,
             ..Default::default()
         })
     }

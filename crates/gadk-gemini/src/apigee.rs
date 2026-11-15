@@ -283,9 +283,15 @@ impl Llm for ApigeeModel {
     /// Delegates to the Gemini model (Go `GenerateContent`).
     fn generate_content(
         &self,
-        req: LlmRequest,
+        mut req: LlmRequest,
         stream: bool,
     ) -> BoxStream<'static, Result<LlmResponse, ModelError>> {
+        // The flow sets req.model to name(), the full "apigee/..." string, and the
+        // delegate prefers req.model over the model ID it was built with. Only the
+        // model ID, the last path component, names a model on the proxy (Go 71b0761f).
+        if let Some(i) = req.model.rfind('/') {
+            req.model = req.model[i + 1..].to_string();
+        }
         self.delegate.generate_content(req, stream)
     }
 

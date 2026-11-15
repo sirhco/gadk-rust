@@ -606,7 +606,6 @@ async fn test_model_respects_request_model() {
 
 /// Go `TestModel_GenerateWithoutCandidates`: a response without candidates is converted rather
 /// than failed, with and without streaming.
-#[ignore = "8a bug: unary GeminiModel fails a candidate-less response with ModelError::EmptyResponse instead of converting PromptFeedback to error_code/error_message (Go 15e9d4cd #2068)"]
 #[tokio::test]
 async fn test_model_generate_without_candidates() {
     let cases = [
@@ -715,8 +714,10 @@ async fn test_model_maybe_append_user_content() {
 
 // ---- extras (not in the Go suite) ----------------------------------------------------
 
+/// An empty unary body (no candidates, no prompt feedback) is an empty turn, not an error
+/// (Go 15e9d4cd: every response goes through `Genai2LLMResponse`).
 #[tokio::test]
-async fn model_empty_candidates_errors() {
+async fn model_empty_candidates_is_an_empty_turn() {
     let http = FakeHttp::json("{}");
     let model = GeminiModel::new("gemini-2.5-flash", vertex_config(http))
         .await
@@ -732,11 +733,9 @@ async fn model_empty_candidates_errors() {
         .collect()
         .await;
     assert_eq!(out.len(), 1);
-    assert!(
-        matches!(out[0], Err(ModelError::EmptyResponse)),
-        "got {:?}",
-        out[0]
-    );
+    let resp = out[0].as_ref().unwrap_or_else(|e| panic!("got error {e}"));
+    assert!(resp.error_code.is_empty() && resp.error_message.is_empty());
+    assert!(resp.content.as_ref().is_none_or(|c| c.parts.is_empty()));
 }
 
 #[tokio::test]

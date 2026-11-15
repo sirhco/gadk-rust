@@ -403,7 +403,6 @@ fn test_progressive_sse_preserves_thought_signature() {
 /// A thought signature streamed on a text chunk stays on the part the chunks are merged
 /// into, as adk-python's StreamingResponseAggregator keeps it.
 #[test]
-#[ignore = "8a bug: StreamingResponseAggregator::flush_text_buffer_to_sequence drops the thought signature streamed on a text chunk (Go 28201d64 keeps the first one on the merged part)"]
 fn test_text_thought_signature_survives_merge() {
     fn text_chunk(
         text: &str,
@@ -620,7 +619,6 @@ fn test_streaming_fc_chunk_with_will_continue_but_no_partial_args() {
 }
 
 #[test]
-#[ignore = "8a bug: StreamingResponseAggregator does not give a nameless continuation chunk of a streamed function call the call's id (Go 3188db98)"]
 fn test_streaming_function_call_continuation_carries_call_id() {
     let cases = [
         (
@@ -1134,7 +1132,6 @@ fn test_usage_metadata_retained_when_later_chunk_has_no_usage_metadata() {
 /// The aggregated response reports the model version of the stream's last chunk, as a
 /// non-streamed response does and as adk-python's StreamingResponseAggregator.close does.
 #[test]
-#[ignore = "8a bug: StreamingResponseAggregator::close leaves model_version empty (Go 8be9129e copies the last chunk's ModelVersion)"]
 fn test_close_keeps_model_version() {
     let mut agg = StreamingResponseAggregator::new();
     let model_version = "gemini-2.5-flash-001";
