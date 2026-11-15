@@ -390,3 +390,93 @@ async fn generate_content_sends_custom_headers() {
         Some("team-a")
     );
 }
+
+/// Go `TestGenerateContentWithRequestModel`: the URL a request is sent to when
+/// `LLMRequest.Model` holds the model's `Name()` (what the LLM flow sets) or another model (what a
+/// `BeforeModelCallback` may set). An empty `request_model` means `Name()`.
+#[rstest]
+#[case::model_id_only(
+    "apigee/gemini-2.5-flash",
+    "",
+    false,
+    "https://test.apigee.net/v1beta/models/gemini-2.5-flash:generateContent"
+)]
+#[case::version_and_model_id(
+    "apigee/v1/gemini-2.5-flash",
+    "",
+    false,
+    "https://test.apigee.net/v1/models/gemini-2.5-flash:generateContent"
+)]
+#[case::gemini_provider_version_and_model_id(
+    "apigee/gemini/v1/gemini-2.5-flash",
+    "",
+    false,
+    "https://test.apigee.net/v1/models/gemini-2.5-flash:generateContent"
+)]
+#[case::vertex_ai_provider_version_and_model_id(
+    "apigee/vertex_ai/v1beta1/gemini-2.5-flash",
+    "",
+    true,
+    "https://test.apigee.net/v1beta1/projects/test-project/locations/test-location/publishers/google/models/gemini-2.5-flash:generateContent"
+)]
+#[case::request_model_differs_from_wrapper_model(
+    "apigee/v1/gemini-2.5-flash",
+    "gemini-2.5-pro",
+    false,
+    "https://test.apigee.net/v1/models/gemini-2.5-pro:generateContent"
+)]
+#[case::request_model_with_apigee_path_differs_from_wrapper_model(
+    "apigee/v1/gemini-2.5-flash",
+    "apigee/v1/gemini-2.5-pro",
+    false,
+    "https://test.apigee.net/v1/models/gemini-2.5-pro:generateContent"
+)]
+#[ignore = "8a bug: ApigeeModel::generate_content forwards LlmRequest.model (the full `apigee/...` Name()) to the delegate, so the URL carries the apigee/ path; Go trims it to the last path component (71b0761f #2067)"]
+#[tokio::test]
+async fn test_generate_content_with_request_model(
+    #[case] model_name: &str,
+    #[case] request_model: &str,
+    #[case] vertex_ai: bool,
+    #[case] want_url: &'static str,
+) {
+    // `GOOGLE_GENAI_USE_VERTEXAI` is set to "" in Go, i.e. unset here.
+    let env = if vertex_ai {
+        env(&[
+            ("GOOGLE_API_KEY", "test-key"),
+            ("GOOGLE_CLOUD_PROJECT", "test-project"),
+            ("GOOGLE_CLOUD_LOCATION", "test-location"),
+        ])
+    } else {
+        env(&[("GOOGLE_API_KEY", "test-key")])
+    };
+    let client = Arc::new(RoundTripFunc::new(
+        vec![want_url],
+        "application/json",
+        r#"{"candidates":[{"content":{"role":"model","parts":[{"text":"Paris"}]},"finishReason":"STOP"}]}"#,
+    ));
+    let cfg = ApigeeConfig {
+        http_client: Some(client.clone()),
+        ..config_with_proxy(env)
+    };
+    let model = ApigeeModel::new(model_name, cfg).await.unwrap();
+    let request_model = if request_model.is_empty() {
+        model.name().to_string()
+    } else {
+        request_model.to_string()
+    };
+    let req = LlmRequest {
+        model: request_model,
+        contents: vec![Content::from_text(
+            "What is the capital of France? One word.",
+            "user",
+        )],
+        ..Default::default()
+    };
+
+    let mut s = model.generate_content(req, false);
+    while let Some(item) = s.next().await {
+        item.unwrap();
+    }
+
+    assert_eq!(*client.urls.lock(), vec![want_url.to_string()]);
+}

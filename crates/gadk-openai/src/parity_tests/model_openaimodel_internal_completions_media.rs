@@ -19,7 +19,7 @@
 //! `map[string]any`: sorted keys, HTML-escaped), so the expected strings are Go's bytes.
 
 use bytes::Bytes;
-use gadk_genai::{Blob, Content, GenerateContentConfig, Part};
+use gadk_genai::{Blob, Content, ExecutableCode, GenerateContentConfig, Part};
 use gadk_model::LlmRequest;
 use pretty_assertions::assert_eq;
 use serde_json::{Value, json};
@@ -142,6 +142,133 @@ fn test_build_params_media_on_the_wire() {
     for (name, parts, want) in tests {
         let got = wire_content(&user_req(parts));
         assert_eq!(got, want, "{name}: content");
+    }
+}
+
+/// Go `TestBuildParams_MediaOnTheWire`, case "executable code before an inline image keeps its
+/// order". Kept out of `test_build_params_media_on_the_wire`'s table so that table stays a live
+/// guard while this case waits for the code-execution fix (ded357e3, #1956).
+#[ignore = "8a bug: completions::request::build_params reports ExecutableCode as an unsupported content part; Go sends it as fenced text ahead of the image (ded357e3 #1956)"]
+#[test]
+fn test_build_params_media_on_the_wire_executable_code_before_an_inline_image_keeps_its_order() {
+    const PNG: &[u8] = &[0x89, b'P', b'N', b'G'];
+    let image = r#"{"image_url":{"detail":"auto","url":"data:image/png;base64,iVBORw=="},"type":"image_url"}"#;
+    let got = wire_content(&user_req(vec![
+        Part {
+            executable_code: Some(ExecutableCode {
+                code: "print(1)".to_string(),
+                ..ExecutableCode::default()
+            }),
+            ..Part::default()
+        },
+        inline_part("image/png", PNG),
+    ]));
+    assert_eq!(
+        got,
+        format!(r#"[{{"text":"Code:```python\nprint(1)\n```","type":"text"}},{image}]"#),
+        "executable code before an inline image keeps its order: content"
+    );
+}
+
+/// Go `TestBuildParams_ToolResponseBeforeMedia`: every tool call is answered before another
+/// user message, whichever order the response and the image arrive in.
+#[test]
+fn test_build_params_tool_response_before_media() {
+    let tests: Vec<(&str, Vec<Part>)> = vec![
+        (
+            "response part first",
+            vec![
+                response_part("c1", "f", json!({"ok": true})),
+                inline_part("image/png", &[1]),
+            ],
+        ),
+        (
+            "media part first",
+            vec![
+                inline_part("image/png", &[1]),
+                response_part("c1", "f", json!({"ok": true})),
+            ],
+        ),
+    ];
+    for (name, parts) in tests {
+        let req = LlmRequest {
+            contents: vec![
+                content("model", vec![call_part("c1", "f", Value::Null)]),
+                content("user", parts),
+            ],
+            ..LlmRequest::default()
+        };
+        let msgs = wire_messages(&request_wire(&req));
+        assert_eq!(msgs.len(), 3, "{name}: got {} messages, want 3", msgs.len());
+        // All tool calls must be answered before another user message.
+        for (i, role) in ["assistant", "tool", "user"].into_iter().enumerate() {
+            assert_eq!(
+                field(&msgs[i], "role"),
+                json!(role),
+                "{name}: message {i} role"
+            );
+        }
+        assert_eq!(
+            field(&msgs[1], "tool_call_id"),
+            json!("c1"),
+            "{name}: tool_call_id"
+        );
+        assert_eq!(
+            field(&msgs[1], "content"),
+            json!(r#"{"ok":true}"#),
+            "{name}: tool content"
+        );
+        assert_eq!(
+            field(&msgs[2], "content"),
+            json!([{
+                "type": "image_url",
+                "image_url": {"url": "data:image/png;base64,AQ==", "detail": "auto"}
+            }]),
+            "{name}: media content"
+        );
+    }
+}
+
+/// Go `TestBuildParams_FunctionCallBeforeMediaRoleError`: a function call in a system or
+/// developer turn is refused whichever order the call and the media arrive in.
+#[test]
+fn test_build_params_function_call_before_media_role_error() {
+    for role in ["system", "developer"] {
+        let tests: Vec<(&str, Vec<Part>)> = vec![
+            (
+                "call part first",
+                vec![
+                    call_part("c1", "f", Value::Null),
+                    inline_part("image/png", &[1]),
+                ],
+            ),
+            (
+                "media part first",
+                vec![
+                    inline_part("image/png", &[1]),
+                    call_part("c1", "f", Value::Null),
+                ],
+            ),
+            (
+                "same part",
+                vec![Part {
+                    inline_data: inline_part("image/png", &[1]).inline_data,
+                    ..call_part("c1", "f", Value::Null)
+                }],
+            ),
+        ];
+        for (name, parts) in tests {
+            let req = LlmRequest {
+                contents: vec![content(role, parts)],
+                ..LlmRequest::default()
+            };
+            let err = build_err(&req);
+            let want = format!("function call in a {role} turn");
+            assert!(
+                err.to_string().contains(&want),
+                "{role}/{name}: buildParams() err = {err:?}, want it to contain {want:?}"
+            );
+        }
     }
 }
 

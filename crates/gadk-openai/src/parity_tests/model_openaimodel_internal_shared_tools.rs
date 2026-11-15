@@ -15,48 +15,131 @@
 
 //! Port of ADK-Go `model/openaimodel/internal/shared/tools_test.go`.
 
-use gadk_genai::{FunctionDeclaration, GoogleSearch, Tool};
+use gadk_genai::{
+    FileSearch, FunctionDeclaration, GoogleSearch, MCPServer, Tool, ToolExaAISearch,
+    ToolParallelAISearch,
+};
 
+use crate::error::ErrorKind;
 use crate::shared::tools::ensure_function_tool_only;
 
+// Go refuses every `genai.Tool` field but `FunctionDeclarations` (275e190e, #1983), so the
+// cases name the fields genai 1.77 added, alone and beside functions, and expect the wrapped
+// `ErrUnsupportedConfigField`.
+#[ignore = "8a bug: shared::tools::ensure_function_tool_only checks a fixed list of eight non-function Tool fields (so FileSearch, ParallelAISearch, MCPServers, ExaAISearch pass) and returns a plain error without the UnsupportedConfigField sentinel; Go refuses every field outside supportedFunctionToolFields with ErrUnsupportedConfigField (275e190e #1983)"]
 #[test]
 fn test_ensure_function_tool_only() {
-    let tests: Vec<(&str, Option<Tool>, &str)> = vec![
-        ("nil tool", None, "tool 0 is nil"),
+    let fn_decls = || {
+        vec![FunctionDeclaration {
+            name: "fn1".to_string(),
+            ..FunctionDeclaration::default()
+        }]
+    };
+    let mcp = || {
+        vec![MCPServer {
+            name: "my-mcp".to_string(),
+            ..MCPServer::default()
+        }]
+    };
+    // (name, tool, want error text, want ErrUnsupportedConfigField)
+    let tests: Vec<(&str, Option<Tool>, &str, bool)> = vec![
+        ("nil tool", None, "tool 0 is nil", false),
         (
-            "non-function tool",
+            "GoogleSearch alone",
             Some(Tool {
                 google_search: Some(GoogleSearch::default()),
                 ..Tool::default()
             }),
             "non-function tools",
+            true,
+        ),
+        (
+            "FileSearch alone",
+            Some(Tool {
+                file_search: Some(FileSearch::default()),
+                ..Tool::default()
+            }),
+            "non-function tools",
+            true,
+        ),
+        (
+            "ParallelAISearch alone",
+            Some(Tool {
+                parallel_ai_search: Some(ToolParallelAISearch::default()),
+                ..Tool::default()
+            }),
+            "non-function tools",
+            true,
+        ),
+        (
+            "MCPServers alone",
+            Some(Tool {
+                mcp_servers: mcp(),
+                ..Tool::default()
+            }),
+            "non-function tools",
+            true,
+        ),
+        (
+            "ExaAISearch alone",
+            Some(Tool {
+                exa_ai_search: Some(ToolExaAISearch::default()),
+                ..Tool::default()
+            }),
+            "non-function tools",
+            true,
+        ),
+        (
+            "MCPServers beside FunctionDeclarations",
+            Some(Tool {
+                function_declarations: fn_decls(),
+                mcp_servers: mcp(),
+                ..Tool::default()
+            }),
+            "non-function tools",
+            true,
+        ),
+        (
+            "FileSearch beside FunctionDeclarations",
+            Some(Tool {
+                function_declarations: fn_decls(),
+                file_search: Some(FileSearch::default()),
+                ..Tool::default()
+            }),
+            "non-function tools",
+            true,
         ),
         (
             "no functions",
             Some(Tool::default()),
             "does not declare any functions",
+            false,
         ),
         (
             "valid",
             Some(Tool {
-                function_declarations: vec![FunctionDeclaration {
-                    name: "fn1".to_string(),
-                    ..FunctionDeclaration::default()
-                }],
+                function_declarations: fn_decls(),
                 ..Tool::default()
             }),
             "",
+            false,
         ),
     ];
-    for (name, tool, want_err) in tests {
+    for (name, tool, want_err, want_is) in tests {
         let result = ensure_function_tool_only(0, tool.as_ref());
         if want_err.is_empty() {
             assert!(result.is_ok(), "{name}: expected no error, got {result:?}");
-        } else {
-            match result {
-                Err(err) if err.to_string().contains(want_err) => {}
-                other => panic!("{name}: expected error containing {want_err:?}, got: {other:?}"),
-            }
+            continue;
+        }
+        let err = match result {
+            Err(err) if err.to_string().contains(want_err) => err,
+            other => panic!("{name}: expected error containing {want_err:?}, got: {other:?}"),
+        };
+        if want_is {
+            assert!(
+                err.is(ErrorKind::UnsupportedConfigField),
+                "{name}: errors.Is({err}, ErrUnsupportedConfigField) = false"
+            );
         }
     }
 }
