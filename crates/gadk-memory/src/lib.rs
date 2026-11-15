@@ -19,4 +19,7 @@ pub mod inmemory;
 pub mod service;
 
 pub use inmemory::InMemoryMemoryService;
-pub use service::{MemoryEntry, MemoryError, MemoryService, SearchRequest, SearchResponse};
+pub use service::{
+    AddEventsRequest, EventAdder, MemoryEntry, MemoryError, MemoryService, SearchRequest,
+    SearchResponse, add_events_to_memory,
+};
