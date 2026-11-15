@@ -15,7 +15,7 @@
 
 //! Parity target for Go artifact/request_validation_test.go.
 
-use gadk_genai::Part;
+use gadk_genai::{FileData, Part};
 use serde_json::Map;
 
 use crate::service::{
@@ -95,6 +95,23 @@ fn test_save_request_validate() {
                 ..full(bytes_part())
             },
             Some("invalid name: filename cannot contain path separators"),
+        ),
+        (
+            // An artifact reference part carries neither text nor inline data. The shared
+            // contract must reject it so backends that don't understand references (e.g. GCS)
+            // keep their behavior; only the in-memory service's Save tolerates it.
+            "Artifact reference part is rejected by the shared contract",
+            SaveRequest {
+                file_name: "alias.txt".into(),
+                ..full(Some(Part {
+                    file_data: Some(FileData {
+                        file_uri: "artifact://apps/MyApp/users/user-123/sessions/sess-abc/artifacts/file.txt/versions/1".into(),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }))
+            },
+            Some("invalid save request: Part.InlineData or Part.Text has to be set"),
         ),
     ];
     for (name, req, want) in cases {

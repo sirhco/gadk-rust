@@ -23,7 +23,11 @@ use gadk_artifact::{
     ArtifactService, ArtifactVersion, GetArtifactVersionRequest, InMemoryArtifactService,
     LoadRequest, SaveRequest,
 };
-use gadk_genai::Part;
+use gadk_genai::{
+    Blob, CodeExecutionResult, ExecutableCode, FileData, FunctionCall, FunctionResponse, Part,
+    PartMediaResolution, PartMediaResolutionLevel, SpeechMetadata, ToolCall, ToolResponse,
+    Transcription, VideoMetadata,
+};
 use gadk_platform::Platform;
 use serde_json::{Map, Value, json};
 
@@ -203,4 +207,242 @@ async fn test_in_memory_canonical_uri_escapes_segments() {
             "{name}: CanonicalURI {got:?} has a query or fragment"
         );
     }
+}
+
+fn alias_save(file_name: &str, part: Part) -> SaveRequest {
+    SaveRequest {
+        app_name: "app".into(),
+        user_id: "u".into(),
+        session_id: "s".into(),
+        file_name: file_name.into(),
+        part: Some(part),
+        ..Default::default()
+    }
+}
+
+async fn alias_load(s: &InMemoryArtifactService, file_name: &str, version: i64) -> Part {
+    s.load(LoadRequest {
+        app_name: "app".into(),
+        user_id: "u".into(),
+        session_id: "s".into(),
+        file_name: file_name.into(),
+        version,
+    })
+    .await
+    .unwrap()
+    .part
+    .unwrap()
+}
+
+// adk-python's InMemoryArtifactService deep-copies the part on save and on load, so a caller that
+// edits a part it saved or loaded cannot rewrite the stored version.
+// parity: adapted: gadk's Save takes the part by value and Load returns an owned part, so the caller edits its own copy (the saved clone, the loaded value)
+#[tokio::test]
+async fn test_in_memory_service_does_not_alias_stored_parts() {
+    let s = InMemoryArtifactService::new();
+    let mut part = Part::from_text("v1");
+    s.save(alias_save("f.txt", part.clone())).await.unwrap();
+    part.text = "edited after save".into();
+
+    let mut got = alias_load(&s, "f.txt", 0).await;
+    assert_eq!(got.text, "v1", "Load() after editing the saved part");
+    got.text = "edited after load".into();
+    assert_eq!(
+        alias_load(&s, "f.txt", 0).await.text,
+        "v1",
+        "Load() after editing a loaded part"
+    );
+}
+
+fn obj_of(v: Value) -> Map<String, Value> {
+    v.as_object().cloned().unwrap()
+}
+
+fn full_part() -> Part {
+    Part {
+        text: "x".into(),
+        inline_data: Some(Blob {
+            data: b"abc".to_vec().into(),
+            mime_type: "text/plain".into(),
+            ..Default::default()
+        }),
+        file_data: Some(FileData {
+            file_uri: "gs://b/o".into(),
+            ..Default::default()
+        }),
+        thought_signature: b"sig".to_vec().into(),
+        video_metadata: Some(VideoMetadata {
+            fps: Some(24.0),
+            start_offset: chrono::TimeDelta::seconds(1),
+            ..Default::default()
+        }),
+        part_metadata: obj_of(json!({"src": {"name": "a"}, "list": [{"n": "1"}]})),
+        media_resolution: Some(PartMediaResolution {
+            level: Some(PartMediaResolutionLevel::MediaResolutionLow),
+            ..Default::default()
+        }),
+        function_call: Some(FunctionCall {
+            name: "fn".into(),
+            args: obj_of(json!({"a": {"b": "c"}})),
+            ..Default::default()
+        }),
+        function_response: Some(FunctionResponse {
+            name: "fn".into(),
+            response: obj_of(json!({"r": ["s"]})),
+            ..Default::default()
+        }),
+        executable_code: Some(ExecutableCode {
+            code: "print(1)".into(),
+            ..Default::default()
+        }),
+        code_execution_result: Some(CodeExecutionResult {
+            output: "1".into(),
+            ..Default::default()
+        }),
+        tool_call: Some(ToolCall {
+            id: "t".into(),
+            args: obj_of(json!({"q": ["a"]})),
+            ..Default::default()
+        }),
+        tool_response: Some(ToolResponse {
+            id: "t".into(),
+            response: obj_of(json!({"r": {"k": "v"}})),
+            ..Default::default()
+        }),
+        audio_transcription: Some(Transcription {
+            text: "hello".into(),
+            ..Default::default()
+        }),
+        speech_metadata: Some(SpeechMetadata {
+            speaker: "s".into(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
+/// Edits every member of a part built by `full_part` in place.
+fn mutate_full_part(p: &mut Part) {
+    let blob = p.inline_data.as_mut().unwrap();
+    let mut data = blob.data.to_vec();
+    data[0] = b'X';
+    blob.data = data.into();
+    blob.mime_type = "edited".into();
+    p.file_data.as_mut().unwrap().file_uri = "edited".into();
+    let mut sig = p.thought_signature.to_vec();
+    sig[0] = b'X';
+    p.thought_signature = sig.into();
+    let vm = p.video_metadata.as_mut().unwrap();
+    vm.fps = Some(60.0);
+    vm.start_offset = chrono::TimeDelta::hours(1);
+    p.part_metadata["src"]["name"] = json!("b");
+    p.part_metadata["list"][0]["n"] = json!("2");
+    p.media_resolution.as_mut().unwrap().level =
+        Some(PartMediaResolutionLevel::MediaResolutionHigh);
+    p.function_call.as_mut().unwrap().args["a"]["b"] = json!("edited");
+    p.function_response.as_mut().unwrap().response["r"][0] = json!("edited");
+    p.executable_code.as_mut().unwrap().code = "edited".into();
+    p.code_execution_result.as_mut().unwrap().output = "edited".into();
+    p.tool_call.as_mut().unwrap().args["q"][0] = json!("edited");
+    p.tool_response.as_mut().unwrap().response["r"]["k"] = json!("edited");
+    p.audio_transcription.as_mut().unwrap().text = "edited".into();
+    p.speech_metadata.as_mut().unwrap().speaker = "edited".into();
+}
+
+// parity: adapted: gadk's Save takes the part by value and Load returns an owned part, so the caller edits its own copy (the saved clone, the loaded value)
+#[tokio::test]
+async fn test_in_memory_service_does_not_alias_stored_part_fields() {
+    let s = InMemoryArtifactService::new();
+
+    // edit after save
+    let mut part = full_part();
+    s.save(alias_save("f.bin", part.clone())).await.unwrap();
+    mutate_full_part(&mut part);
+    assert_eq!(
+        alias_load(&s, "f.bin", 0).await,
+        full_part(),
+        "edit after save: Load() after editing the saved part"
+    );
+
+    // edit after load
+    mutate_full_part(&mut alias_load(&s, "f.bin", 0).await);
+    assert_eq!(
+        alias_load(&s, "f.bin", 0).await,
+        full_part(),
+        "edit after load: Load() after editing a loaded part"
+    );
+
+    // edit after versioned load: two versions, so version 1 takes the explicit-version path.
+    s.save(alias_save("f.bin", Part::from_text("v2")))
+        .await
+        .unwrap();
+    mutate_full_part(&mut alias_load(&s, "f.bin", 1).await);
+    assert_eq!(
+        alias_load(&s, "f.bin", 1).await,
+        full_part(),
+        "edit after versioned load: Load(Version: 1) after editing a version-1 load"
+    );
+}
+
+// The case from the review of the first version of Go's copy, where only some of the pointer
+// members of genai.Part were detached.
+// parity: adapted: gadk's Save takes the part by value, so the caller edits the copy it kept (Go edits the pointed-to FPS, metadata map and resolution)
+#[tokio::test]
+async fn test_in_memory_service_review_repro() {
+    let s = InMemoryArtifactService::new();
+    let mut p = Part {
+        text: "x".into(),
+        video_metadata: Some(VideoMetadata {
+            fps: Some(24.0),
+            ..Default::default()
+        }),
+        part_metadata: obj_of(json!({"src": {"name": "a"}})),
+        media_resolution: Some(PartMediaResolution {
+            level: Some(PartMediaResolutionLevel::MediaResolutionLow),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    s.save(SaveRequest {
+        app_name: "a".into(),
+        user_id: "u".into(),
+        session_id: "s".into(),
+        file_name: "f".into(),
+        part: Some(p.clone()),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    p.video_metadata.as_mut().unwrap().fps = Some(60.0);
+    p.part_metadata["src"]["name"] = json!("b");
+    p.media_resolution.as_mut().unwrap().level =
+        Some(PartMediaResolutionLevel::MediaResolutionHigh);
+
+    let got = s
+        .load(LoadRequest {
+            app_name: "a".into(),
+            user_id: "u".into(),
+            session_id: "s".into(),
+            file_name: "f".into(),
+            version: 0,
+        })
+        .await
+        .unwrap()
+        .part
+        .unwrap();
+    assert_eq!(
+        got.video_metadata.unwrap().fps,
+        Some(24.0),
+        "VideoMetadata.FPS"
+    );
+    assert_eq!(
+        got.part_metadata["src"]["name"],
+        json!("a"),
+        "PartMetadata[src][name]"
+    );
+    assert_eq!(
+        got.media_resolution.unwrap().level,
+        Some(PartMediaResolutionLevel::MediaResolutionLow),
+        "MediaResolution.Level"
+    );
 }
