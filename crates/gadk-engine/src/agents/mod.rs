@@ -15,6 +15,7 @@
 
 //! Workflow-backed agents (port of ADK-Go `agent/workflowagent` and `agent/workflowagents`).
 
+pub(crate) mod graph_resume;
 pub mod loop_agent;
 pub mod parallel_agent;
 pub mod sequential_agent;

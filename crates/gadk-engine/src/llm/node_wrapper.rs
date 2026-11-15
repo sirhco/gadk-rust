@@ -192,16 +192,21 @@ pub(crate) fn process_llm_agent_output(
         .filter(|p| !p.thought)
         .map(|p| p.text.as_str())
         .collect();
+    // Go's `parsed` map is non-nil only for a reply that parsed to a JSON object; a literal
+    // `null` reply validates as a nil map (gadk's validator maps it to an empty map).
+    let mut parsed = false;
     let output = match &state.cfg.output_schema {
         Some(_) if text.trim().is_empty() => None,
-        Some(schema) => Some(Value::Object(
-            validate_output_schema(&text, schema).map_err(|e| {
+        Some(schema) => {
+            let map = validate_output_schema(&text, schema).map_err(|e| {
                 AgentError::other(format!(
                     "LlmAgent {} output validation failed: {e}",
                     go_quote(agent.name())
                 ))
-            })?,
-        )),
+            })?;
+            parsed = !matches!(serde_json::from_str::<Value>(&text), Ok(Value::Null));
+            Some(Value::Object(map))
+        }
         None => Some(Value::String(text)),
     };
     if !state.cfg.output_key.is_empty()
@@ -213,6 +218,12 @@ pub(crate) fn process_llm_agent_output(
             .insert(state.cfg.output_key.clone(), o.clone());
     }
     ev.output = output;
+    // Go #2291 (67fc01b1): the runner drops the output of an event flagged MessageAsOutput, which
+    // would discard a parsed value, so a parsed reply skips the flag. An unparsed (no schema or
+    // blank) or null reply keeps it, so the reply text stays the node output once stored.
+    if parsed {
+        return Ok(());
+    }
     ev.node_info
         .get_or_insert_with(NodeInfo::default)
         .message_as_output = true;
@@ -560,13 +571,26 @@ fn run_task(agent: Arc<dyn Agent>, ic: InvocationContext) -> EventStream {
             if let Some(args) = pending.as_ref()
                 && is_finish_task_success_fr(&ev)
             {
-                ev.output = Some(if wrapper_key.is_empty() {
+                let output = if wrapper_key.is_empty() {
                     Value::Object(args.clone())
                 } else {
                     args.get(&wrapper_key)
                         .cloned()
                         .unwrap_or_else(|| Value::Object(args.clone()))
-                });
+                };
+                // Go 8c2e2e2a (#1977): the accepted finish_task output is the task agent's
+                // result, so it goes to output_key (Go outputKeyOf: "" for a non-LLM agent; a
+                // null output, Go's nil, is not written).
+                if let Some(key) = reveal(agent.as_ref())
+                    .map(|s| s.cfg.output_key.clone())
+                    .filter(|k| !k.is_empty() && !output.is_null())
+                {
+                    ev.actions
+                        .state_delta
+                        .get_or_insert_with(Map::new)
+                        .insert(key, output.clone());
+                }
+                ev.output = Some(output);
                 yield Ok(ev);
                 return;
             }

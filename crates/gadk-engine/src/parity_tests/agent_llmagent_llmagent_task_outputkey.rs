@@ -127,7 +127,6 @@ async fn test_task_agent_text_turn_does_not_write_output_key() {
 /// terminal event's Output: the value under the wrapper key for a wrapped primitive, otherwise
 /// the args map.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "8a bug: run_task (llm/node_wrapper.rs, not owned by the D2b fix task) does not write the accepted finish_task output to output_key (Go #1977)"]
 async fn test_task_agent_finish_task_writes_output_key() {
     let cases = [
         (
@@ -262,7 +261,6 @@ async fn test_sequential_parent_task_child_leaves_output_key_unset() {
 /// method, so runTask runs and OutputKey holds the finish_task output, unlike under a
 /// SequentialAgent.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "8a bug: run_task (llm/node_wrapper.rs, not owned by the D2b fix task) does not write the accepted finish_task output to output_key (Go #1977)"]
 async fn test_workflow_agent_dispatched_task_writes_output_key() {
     let task_llm = ScriptedLlm::new(vec![fc_resp(
         "finish-1",

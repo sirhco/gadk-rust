@@ -149,7 +149,7 @@ impl WorkflowError {
             K::ParallelHitlUnsupported => "workflow: parallel HITL is not supported",
             K::InputValidation => "workflow: input validation failed",
             K::OutputValidation => "output validation failed",
-            K::OutputAlreadyDelegated => "workflow: parent already has a use_as_output child",
+            K::OutputAlreadyDelegated => "workflow: parent already has a use_as_output delegate",
             K::MultipleOutputs => {
                 "workflow: node produced multiple events with output values; only one event per execution can carry output"
             }

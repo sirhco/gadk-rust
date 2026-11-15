@@ -78,7 +78,6 @@ enum ToolsCase {
     Some("add"),
     Some("The user wants to add two numbers, and the calculator tool has an 'add' skill that can perform this operation. Providing the request as '2+2' and explicitly setting the skill_id to 'add' should allow the calculator to correctly perform the addition.")
 )]
-#[ignore = "8a bug: transfer_to_agent's empty result is sent as {} instead of {\"result\": null} (Go #2281)"]
 #[case::transfer_to_agent_tool(
     fixture!("transfer_to_agent_tool"),
     ToolsCase::None,

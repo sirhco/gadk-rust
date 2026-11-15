@@ -192,6 +192,22 @@ impl InvocationContext {
         (Self::from_inner(n), Some(pm))
     }
 
+    /// Go `utils.WithGraphResumeDone` (51bc7ec5, #2188): a derived context marked so that
+    /// resuming a nested graph workflow is done for it and every context derived from it (a loop
+    /// agent runs its later passes with it: only the first pass narrows to the sub-agents holding
+    /// the callers of the user's function responses). The receiver is unchanged.
+    pub fn with_graph_resume_done(&self) -> InvocationContext {
+        let mut n = self.inner().clone();
+        n.graph_resume_done = true;
+        Self::from_inner(n)
+    }
+
+    /// Whether the context is marked by [`InvocationContext::with_graph_resume_done`] (Go
+    /// `ctx.Value(graphResumeDoneKey{}) != nil`).
+    pub fn graph_resume_done(&self) -> bool {
+        self.inner().graph_resume_done
+    }
+
     /// The agent tree's parent map, if set.
     pub fn parent_map(&self) -> Option<Arc<ParentMap>> {
         self.inner().shared.parent_map.clone()
@@ -355,5 +371,37 @@ mod tests {
                 .compaction_runtime()
                 .is_none()
         );
+    }
+
+    /// Go `WithGraphResumeDone` is a context value: every context derived from a marked one,
+    /// fresh invocations included, carries it; the receiver stays unmarked.
+    #[test]
+    fn graph_resume_done_is_inherited_by_every_derivation() {
+        let ctx = InvocationContext::builder().build_invocation();
+        assert!(!ctx.graph_resume_done());
+        let done = ctx.with_graph_resume_done();
+        assert!(done.graph_resume_done());
+        assert!(!ctx.graph_resume_done(), "the receiver is unchanged");
+        let derived = [
+            done.with_delta(ContextDelta {
+                branch: Some("a.b".into()),
+                ..Default::default()
+            }),
+            done.with_delta(ContextDelta {
+                fresh_invocation: true,
+                ..Default::default()
+            }),
+            done.clone()
+                .into_context()
+                .with_delta(ContextDelta {
+                    function_call_id: Some("fc".into()),
+                    ..Default::default()
+                })
+                .as_invocation()
+                .clone(),
+        ];
+        for d in &derived {
+            assert!(d.graph_resume_done());
+        }
     }
 }

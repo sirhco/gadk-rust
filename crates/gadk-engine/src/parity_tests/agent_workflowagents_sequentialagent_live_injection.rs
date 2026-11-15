@@ -172,7 +172,6 @@ async fn system_instruction(agent: Arc<dyn Agent>) -> Result<String, AgentError>
 // immutable config, so the port reads the instruction the request processor builds from it (a
 // provider error is wrapped there, so it is matched by text; a Rust provider has no partial result).
 #[tokio::test]
-#[ignore = "8a bug: the instructions processor (llm/processors/instructions.rs, not owned by the D2b fix task) ignores the live task_completed suffix when an InstructionProvider is set (Go dd39c80a appends it to the provider's result)"]
 async fn test_sequential_agent_run_live_appends_completion_instruction_to_provider() {
     for (name, result, err, want) in [
         (

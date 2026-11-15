@@ -446,7 +446,6 @@ async fn test_run_function_response_inside_graph_workflow_resumes_workflow() {
 type RootOfMany = fn(Vec<Arc<dyn Agent>>) -> Arc<dyn Agent>;
 
 #[tokio::test]
-#[ignore = "8a bug: sequential/parallel/loop agents re-run every sub-agent on an adk_request_input response instead of narrowing to the graph workflow holding the caller, so a sibling LLM agent fails on the unmatched response"]
 async fn test_run_function_response_skips_siblings_of_graph_workflow() {
     let cases: Vec<(&str, RootOfMany, bool)> = vec![
         (
@@ -525,7 +524,6 @@ async fn test_run_function_response_skips_siblings_of_graph_workflow() {
 type LoopRoot = fn(Arc<dyn Agent>, Arc<dyn Agent>) -> Arc<dyn Agent>;
 
 #[tokio::test]
-#[ignore = "8a bug: composite agents do not narrow to the graph workflow holding the caller on a resume, so the loop runs the sibling on its first pass too"]
 async fn test_run_function_response_narrows_only_first_loop_pass() {
     let cases: Vec<(&str, LoopRoot)> = vec![
         ("loop", |o, wf| looped("root", 2, vec![o, wf])),
@@ -610,7 +608,6 @@ type SelectRoot =
 type SelectCase = (&'static str, SelectRoot, Vec<Part>, Vec<&'static str>, i32);
 
 #[tokio::test]
-#[ignore = "8a bug: composite agents do not narrow to the sub-agents holding the callers of the responses, so the sibling runs on the resume turn"]
 async fn test_run_function_responses_select_every_caller() {
     const EXTERNAL_CALL_ID: &str = "external-call";
     let first_part = |c: Content| -> Part { c.parts.into_iter().next().unwrap() };
@@ -733,7 +730,6 @@ async fn test_run_function_responses_select_every_caller() {
 }
 
 #[tokio::test]
-#[ignore = "8a bug: the contents processor fails with \"no function call event found\" on the user's answer to another agent's call instead of showing it as context"]
 async fn test_run_function_response_reaches_llm_agent_after_workflow() {
     for silent in [true, false] {
         let name = if silent {

@@ -576,7 +576,6 @@ async fn test_agent_transfer_process_request() {
 }
 
 #[tokio::test]
-#[ignore = "8a bug: transfer_to_agent accepts an agent name it cannot transfer to, and a nil argument errors with \"missing argument\" instead of \"empty agent_name\" (Go c8fff670 returns an error naming the available agents)"]
 async fn test_transfer_to_agent_tool_run() {
     // Go newTool: the transfer tool of an agent with a single sub-agent, "TestAgent".
     let new_tool = || {

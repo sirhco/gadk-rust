@@ -99,6 +99,10 @@ pub(crate) struct ContextInner {
     /// runner started with this context keeps (`None`: no mark, or a cleared one). Every
     /// derivation copies it.
     pub(crate) inherited_plugins: Option<Arc<PluginManager>>,
+    /// Go `utils.WithGraphResumeDone`'s context value (51bc7ec5, #2188): resuming a nested graph
+    /// workflow is done for this context and every context derived from it, so composite agents
+    /// run all their sub-agents. Every derivation copies it.
+    pub(crate) graph_resume_done: bool,
 }
 
 /// Go `agent.ReadonlyContext`: read-only access to the invocation's values.

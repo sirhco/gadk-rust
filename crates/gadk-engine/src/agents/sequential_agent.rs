@@ -28,6 +28,7 @@ use gadk_agent::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::agents::graph_resume::graph_resume_indexes;
 use crate::llm::state::reveal;
 use crate::runner::wrap;
 use crate::tool::{FunctionTool, FunctionToolConfig};
@@ -65,7 +66,12 @@ pub fn new(cfg: SequentialAgentConfig) -> Result<Arc<dyn Agent>, AgentError> {
 /// Port of Go (*sequentialAgent).Run.
 fn run(ctx: InvocationContext) -> EventStream {
     Box::pin(async_stream::stream! {
-        let subs: Vec<Arc<dyn Agent>> = ctx.agent().sub_agents().to_vec();
+        let mut subs: Vec<Arc<dyn Agent>> = ctx.agent().sub_agents().to_vec();
+        // Go 51bc7ec5 (#2188): resuming a nested graph workflow starts from the sub-agent
+        // holding the lowest-indexed caller.
+        if let Some(&first) = graph_resume_indexes(&ctx).as_ref().and_then(|ix| ix.first()) {
+            subs.drain(..first);
+        }
         for sub in subs {
             let mut s = sub.run(ctx.clone());
             while let Some(item) = s.next().await {

@@ -85,9 +85,12 @@ async fn append_agent_instructions(
     state: &LlmAgentState,
 ) -> Result<(), AgentError> {
     if let Some(provider) = &state.cfg.instruction_provider {
-        let instruction = provider(ctx.as_readonly().clone())
+        let mut instruction = provider(ctx.as_readonly().clone())
             .await
             .map_err(|e| wrap_err("failed to evaluate instruction provider", e))?;
+        // Go dd39c80a (#2079): the live task_completed suffix wraps the provider, as in
+        // adk-python's _append_instruction (the provider's text is not templated).
+        instruction.push_str(state.instruction_suffix.read().as_str());
         append_instructions(req, &[instruction.as_str()]);
         return Ok(());
     }
@@ -440,10 +443,10 @@ mod tests {
         assert_eq!(system_instruction_for(a).await, "\nsuffix");
     }
 
-    /// Go appendInstructions uses the provider's output alone; State.Instruction (and so the suffix)
-    /// is ignored.
+    /// Go dd39c80a: State.Instruction is ignored with a provider, but the live suffix wraps the
+    /// provider's output.
     #[tokio::test]
-    async fn live_instruction_suffix_is_ignored_with_an_instruction_provider() {
+    async fn live_instruction_suffix_is_appended_to_an_instruction_provider() {
         let provider: InstructionProvider =
             Arc::new(|_ctx| Box::pin(async { Ok::<_, AgentError>("from provider".to_string()) }));
         let a = llm_agent::new(LlmAgentConfig {
@@ -458,6 +461,6 @@ mod tests {
             .instruction_suffix
             .write()
             .push_str("\nsuffix");
-        assert_eq!(system_instruction_for(a).await, "from provider");
+        assert_eq!(system_instruction_for(a).await, "from provider\nsuffix");
     }
 }

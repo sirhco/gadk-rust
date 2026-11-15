@@ -856,7 +856,6 @@ async fn test_a2_a_task_carries_adk_extension_meta_when_streaming() {
 
 // parity: adapted: ADK-Go keeps a status message in a task's history when the status changes; a2a-rs's task store keeps the user messages only, so the history comparison checks the user messages
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "8a bug: transfer_to_agent's empty result is sent as `{}` instead of `{\"result\": null}` (Go 1ced38ba)"]
 async fn test_a2_a_multi_hop_input_required() {
     const REMOTE_AGENT_NAME: &str = "remote-agent-B";
     struct Case {
