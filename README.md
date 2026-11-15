@@ -13,6 +13,7 @@ functionality beyond ADK-Go will follow.
 - Pinned ADK-Go commit: [`docs/parity/ADK_GO_COMMIT`](docs/parity/ADK_GO_COMMIT)
 - Rust: edition 2024, MSRV 1.95 (developed on the toolchain in `rust-toolchain.toml`)
 - License: Apache-2.0 (see [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE))
+- Changes: [`CHANGELOG.md`](CHANGELOG.md)
 
 ## Quick start
 
