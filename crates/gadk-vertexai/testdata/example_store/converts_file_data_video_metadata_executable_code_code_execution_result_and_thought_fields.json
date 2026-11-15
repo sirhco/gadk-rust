@@ -1,0 +1,121 @@
+{
+  "name": "converts file data, video metadata, executable code, code execution result, and thought fields",
+  "query": "query",
+  "request": {
+    "storedContentsExampleParameters": {
+      "contentSearchKey": {
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "query"
+              }
+            ]
+          }
+        ],
+        "searchKeyGenerationMethod": {
+          "lastEntry": {}
+        }
+      }
+    },
+    "exampleStore": "projects/p/locations/l/exampleStores/s",
+    "topK": "10"
+  },
+  "response": {
+    "results": [
+      {
+        "example": {
+          "storedContentsExample": {
+            "searchKey": "search key",
+            "contentsExample": {
+              "expectedContents": [
+                {
+                  "content": {
+                    "role": "model",
+                    "parts": [
+                      {
+                        "fileData": {
+                          "mimeType": "video/mp4",
+                          "fileUri": "gs://bucket/clip.mp4"
+                        },
+                        "videoMetadata": {
+                          "startOffset": "5s",
+                          "endOffset": "15s"
+                        }
+                      },
+                      {
+                        "executableCode": {
+                          "language": 1,
+                          "code": "print(42)"
+                        }
+                      },
+                      {
+                        "codeExecutionResult": {
+                          "outcome": 1,
+                          "output": "42\n"
+                        }
+                      },
+                      {
+                        "text": "reasoning step",
+                        "thought": true,
+                        "thoughtSignature": "c2lnLTE="
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "similarityScore": 1
+      }
+    ]
+  },
+  "examples": [
+    {
+      "input": {
+        "parts": [
+          {
+            "text": "search key"
+          }
+        ],
+        "role": "user"
+      },
+      "output": [
+        {
+          "parts": [
+            {
+              "fileData": {
+                "fileUri": "gs://bucket/clip.mp4",
+                "mimeType": "video/mp4"
+              },
+              "videoMetadata": {
+                "endOffset": "15s",
+                "startOffset": "5s"
+              }
+            },
+            {
+              "executableCode": {
+                "code": "print(42)",
+                "language": "PYTHON"
+              }
+            },
+            {
+              "codeExecutionResult": {
+                "outcome": "OUTCOME_OK",
+                "output": "42\n"
+              }
+            },
+            {
+              "text": "reasoning step",
+              "thought": true,
+              "thoughtSignature": "c2lnLTE="
+            }
+          ],
+          "role": "model"
+        }
+      ]
+    }
+  ]
+}

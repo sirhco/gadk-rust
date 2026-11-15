@@ -1,0 +1,85 @@
+{
+  "name": "converts function response part",
+  "query": "query",
+  "request": {
+    "storedContentsExampleParameters": {
+      "contentSearchKey": {
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "query"
+              }
+            ]
+          }
+        ],
+        "searchKeyGenerationMethod": {
+          "lastEntry": {}
+        }
+      }
+    },
+    "exampleStore": "projects/p/locations/l/exampleStores/s",
+    "topK": "10"
+  },
+  "response": {
+    "results": [
+      {
+        "example": {
+          "storedContentsExample": {
+            "searchKey": "search key",
+            "contentsExample": {
+              "expectedContents": [
+                {
+                  "content": {
+                    "role": "user",
+                    "parts": [
+                      {
+                        "functionResponse": {
+                          "id": "call-1",
+                          "name": "get_weather",
+                          "response": {
+                            "temperature": 12
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "similarityScore": 1
+      }
+    ]
+  },
+  "examples": [
+    {
+      "input": {
+        "parts": [
+          {
+            "text": "search key"
+          }
+        ],
+        "role": "user"
+      },
+      "output": [
+        {
+          "parts": [
+            {
+              "functionResponse": {
+                "id": "call-1",
+                "name": "get_weather",
+                "response": {
+                  "temperature": 12
+                }
+              }
+            }
+          ],
+          "role": "user"
+        }
+      ]
+    }
+  ]
+}
