@@ -120,7 +120,6 @@ async fn foreign_thought_request_contents(
 }
 
 #[tokio::test]
-#[ignore = "8a bug: convert_foreign_event keeps a foreign part that carries only metadata (empty, signature, part/video/speech metadata, media resolution or processing), so it reaches the request and starts a turn; Go 6caa3b85 omits it"]
 async fn test_contents_request_processor_foreign_thoughts() {
     let public_part = Part {
         inline_data: Some(Blob {
@@ -303,7 +302,6 @@ async fn test_contents_request_processor_foreign_thought_compaction_hole() {
 }
 
 #[tokio::test]
-#[ignore = "8a bug: convert_foreign_event keeps a foreign part that carries only metadata (empty, signature, part/video/speech metadata, media resolution or processing), so it reaches the request and starts a turn; Go 6caa3b85 omits it"]
 async fn test_contents_request_processor_foreign_thought_current_turn() {
     struct Case {
         name: &'static str,

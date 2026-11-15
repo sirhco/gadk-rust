@@ -241,7 +241,6 @@ impl Llm for SingleCallModel {
 
 // parity: adapted: a Rust tool's "nil" result is the empty map (Rust has no nil map), as in the rows below.
 #[tokio::test]
-#[ignore = "8a bug: a tool that returns nothing gets a function response of {} instead of {\"result\": null} (Go 1ced38ba wraps a nil result after the callbacks)"]
 async fn test_handle_function_calls_fr_skip_gates() {
     // (name, defers, long_running, tool_result, want_event_count, want_fr_event_index, want_response)
     type GateCase = (

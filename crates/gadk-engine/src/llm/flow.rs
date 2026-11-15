@@ -35,7 +35,9 @@ use serde_json::{Map, Value};
 
 use crate::{
     llm::{
-        functions::{generate_request_confirmation_event, handle_function_calls},
+        functions::{
+            generate_auth_event, generate_request_confirmation_event, handle_function_calls,
+        },
         live::reconnect::LiveReconnectPolicy,
         processors::{
             output_schema::{
@@ -46,7 +48,7 @@ use crate::{
         transfer::transfer_target_agents,
     },
     telemetry::{attrs::GenerateContentParams, instrumentation::instrument_generate_content},
-    tool::utils::{function_calls, populate_client_function_call_id},
+    tool::utils::{function_calls, function_responses, populate_client_function_call_id},
     workflow::route::go_quote,
 };
 
@@ -173,6 +175,7 @@ impl Flow {
                     model: model.name().to_owned(),
                     ..Default::default()
                 };
+                let mut preprocess_yielded_final_response = false;
                 {
                     // Go yields each processor's events as they are produced, so they are in the
                     // session before a later processor (contents) reads it; regression:
@@ -180,10 +183,20 @@ impl Flow {
                     // from the confirmation processor and must reach the same step's request).
                     let mut pre = self.preprocess(&ctx, &mut req);
                     while let Some(ev) = pre.next().await {
-                        yield ev?;
+                        let ev = ev?;
+                        if !function_responses(ev.response.content.as_ref()).is_empty()
+                            && ev.is_final_response()
+                        {
+                            preprocess_yielded_final_response = true;
+                        }
+                        yield ev;
                     }
                 }
-                if ctx.ended() {
+                // Go 074b0879: a preprocessor can run a tool itself, such as a call resumed after
+                // confirmation. When that tool's response is final, because the tool set
+                // skip_summarization, the turn ends there, as it does when the tool runs after a
+                // model call.
+                if ctx.ended() || preprocess_yielded_final_response {
                     break 'step;
                 }
 
@@ -242,9 +255,13 @@ impl Flow {
                 while let Some(item) = responses.next().await {
                     let (mut resp, event_id) = item?;
                     self.postprocess(&ctx, &req, &mut resp)?;
-                    // Skip a response with no content, no error code and no interruption (the code
-                    // executor relies on this to trigger another loop).
-                    if resp.content.is_none() && resp.error_code.is_empty() && !resp.interrupted {
+                    // Skip a response with no content, error code, interruption or grounding
+                    // metadata (the code executor relies on this to trigger another loop).
+                    if resp.content.is_none()
+                        && resp.error_code.is_empty()
+                        && !resp.interrupted
+                        && resp.grounding_metadata.is_none()
+                    {
                         continue;
                     }
                     let tools = tools_from_request(&req)?;
@@ -257,9 +274,15 @@ impl Flow {
                         continue;
                     };
                     let confirmation_ev = generate_request_confirmation_event(&ctx, &model_ev, &fr_ev);
-                    // Function responses before confirmation requests, so consumers that pause for
-                    // approval still persist completed tool results.
+                    // Function responses before confirmation and credential requests, so consumers
+                    // that pause for the user still persist completed tool results (Go
+                    // yieldWithAuthRequest: asking the user to sign in ends the invocation).
+                    let auth_ev = generate_auth_event(&ctx, &fr_ev);
                     yield fr_ev.clone();
+                    if let Some(a) = auth_ev {
+                        ctx.end_invocation();
+                        yield a;
+                    }
                     if let Some(c) = confirmation_ev {
                         yield c;
                     }
@@ -402,7 +425,7 @@ impl Flow {
                 // `*LLMResponse` when no callback replaces it.
                 let (resp, res) = self.run_after_model_callbacks(&ctx, resp, &actions).await;
                 match res? {
-                    Some(r) => yield (r, event_id),
+                    Some(r) => yield (inherit_model_fields(&resp, r), event_id),
                     None => yield (resp, event_id),
                 }
                 // Go's model returns after yielding `ctx.Err()`: a callback's reply ends the call.
@@ -487,6 +510,24 @@ impl Flow {
             .into_iter()
             .find(|a| a.name() == name)
     }
+}
+
+/// Port of base_flow.go inheritModelFields (6ae94e12): carries the fields that describe the
+/// model call, rather than the response content, from a response onto the after-model
+/// callback's replacement for it. A partial original keeps its replacement partial, a response
+/// that ended the turn keeps its replacement ending it, and the original's usage metadata fills
+/// a replacement that has none.
+fn inherit_model_fields(original: &LlmResponse, mut replacement: LlmResponse) -> LlmResponse {
+    if original.partial {
+        replacement.partial = true;
+    }
+    if original.turn_complete {
+        replacement.turn_complete = true;
+    }
+    if replacement.usage_metadata.is_none() {
+        replacement.usage_metadata = original.usage_metadata.clone();
+    }
+    replacement
 }
 
 /// Go `icontext.NewCallbackContextWithDelta`: a callback context recording into `actions`.
@@ -604,8 +645,11 @@ pub(crate) fn is_thought_only_turn(ev: Option<&Event>) -> bool {
 
 /// Port of base_flow.go:1090 generateContent: the model call inside
 /// `telemetry.InstrumentGenerateContent`'s `generate_content` span, which covers only the model
-/// call (callbacks and plugins stay outside it). Each item reserves one event ID (Go
-/// newResponseWithEventID).
+/// call (callbacks and plugins stay outside it). Each item carries an event ID (Go 3188db98):
+/// the partial chunks of a streamed response share one ID with the response that completes
+/// them. A complete response ends the ID, and so does an error, because an on-model-error
+/// callback may turn it into a saved event. A new ID is drawn when the next item arrives, never
+/// ahead of one.
 pub(crate) fn generate_content(
     ctx: &InvocationContext,
     model: Arc<dyn Llm>,
@@ -620,9 +664,19 @@ pub(crate) fn generate_content(
     };
     let platform = ctx.platform().clone();
     instrument_generate_content(params, req, move |req| {
+        let mut event_id = String::new();
         model
             .generate_content(req, stream)
-            .map(move |item| (item, platform.new_uuid()))
+            .map(move |item| {
+                if event_id.is_empty() {
+                    event_id = platform.new_uuid();
+                }
+                let id = match &item {
+                    Ok(r) if r.partial => event_id.clone(),
+                    _ => std::mem::take(&mut event_id),
+                };
+                (item, id)
+            })
             .boxed()
     })
 }

@@ -374,7 +374,6 @@ async fn test_contents_request_processor_include_contents_none_ignores_sibling_b
 /// only grounding metadata or an error, cannot start the current turn: the user input before
 /// it must stay in the request.
 #[tokio::test]
-#[ignore = "8a bug: IncludeContents::None starts the current turn at another agent's reply with nothing to read (grounding-only, error-only or partless; Go fc6de07d skips such a pivot)"]
 async fn test_contents_request_processor_include_contents_none_skips_empty_pivot() {
     let cases = vec![
         (
@@ -433,7 +432,6 @@ async fn test_contents_request_processor_include_contents_none_skips_empty_pivot
 /// Anchoring there would cut the call the result answers out of the request. Mirrors
 /// adk-python's `_is_submitted_tool_result` in `_get_current_turn_contents`.
 #[tokio::test]
-#[ignore = "8a bug: IncludeContents::None starts the current turn at a user-posted tool result, cutting out the call it answers (Go e847ba7d anchors at the user message that led to the call)"]
 async fn test_contents_request_processor_include_contents_none_submitted_tool_result() {
     const AGENT_NAME: &str = "testAgent";
     let call_c =
@@ -572,7 +570,6 @@ async fn test_contents_request_processor_include_contents_none_submitted_tool_re
 /// prompt. Mirrors adk-python's `_is_direct_transfer` in `_get_current_turn_contents`. With
 /// nothing earlier to start the turn, the latest hand-over still starts it.
 #[tokio::test]
-#[ignore = "8a bug: IncludeContents::None starts the current turn at the parent's transfer_to_agent hand-over, leaving the user's request out (Go 86620857 looks past hand-overs)"]
 async fn test_contents_request_processor_include_contents_none_transferred_from_parent() {
     const PARENT_NAME: &str = "coordinator";
     const AGENT_NAME: &str = "geography";
@@ -1002,7 +999,6 @@ fn file_part(uri: &str, mime_type: &str) -> Part {
 }
 
 #[tokio::test]
-#[ignore = "8a bug: the contents processor keeps internal artifact://…/_adk_live/… parts (and a foreign event made only of them becomes a bare \"For context:\" turn); Go 22ff1839 drops them"]
 async fn test_contents_request_processor() {
     const AGENT_NAME: &str = "testAgent";
     let transcription = |author: &str, input: bool, t: &str, finished: bool| {

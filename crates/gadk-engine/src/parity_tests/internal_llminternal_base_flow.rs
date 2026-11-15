@@ -182,7 +182,6 @@ fn check_panic_callback_errs(
 }
 
 #[tokio::test]
-#[ignore = "8a bug: call_tool sends a tool panic's text to the model; Go e83ab5b0 replaces it with \"Invoking `<tool>()` failed with an internal error.\" (also through a wrapping on-tool-error callback)"]
 async fn test_call_tool() {
     let panic_tool = crate::tool::FunctionTool::new(
         crate::tool::FunctionToolConfig::new("panicTool", ""),
@@ -721,6 +720,21 @@ fn ad(kv: &[(&str, i64)]) -> Option<BTreeMap<String, i64>> {
     Some(kv.iter().map(|(k, v)| (k.to_string(), *v)).collect())
 }
 
+/// `call ID → toolauth::Config{CredentialKey: key}` (Go `map[string]toolauth.Config`).
+fn auth(kv: &[(&str, &str)]) -> BTreeMap<String, gadk_session::toolauth::Config> {
+    kv.iter()
+        .map(|(id, key)| {
+            (
+                id.to_string(),
+                gadk_session::toolauth::Config {
+                    credential_key: key.to_string(),
+                    ..Default::default()
+                },
+            )
+        })
+        .collect()
+}
+
 /// (name, base, other, want).
 type MergeCase = (
     &'static str,
@@ -1000,8 +1014,41 @@ fn test_merge_event_actions() {
                 ..d()
             }),
         ),
+        (
+            // Each parallel call records its own request under its own call ID, and the user has
+            // to answer all of them.
+            "requested auth configs from both calls kept",
+            Some(EventActions {
+                requested_auth_configs: auth(&[("call-a", "key-a")]),
+                ..d()
+            }),
+            Some(EventActions {
+                requested_auth_configs: auth(&[("call-b", "key-b")]),
+                ..d()
+            }),
+            Some(EventActions {
+                requested_auth_configs: auth(&[("call-a", "key-a"), ("call-b", "key-b")]),
+                ..d()
+            }),
+        ),
+        (
+            "requested auth configs kept when only the later call asks",
+            Some(EventActions {
+                state_delta: sd(json!({"key1": "value1"})),
+                ..d()
+            }),
+            Some(EventActions {
+                requested_auth_configs: auth(&[("call-b", "key-b")]),
+                ..d()
+            }),
+            Some(EventActions {
+                state_delta: sd(json!({"key1": "value1"})),
+                requested_auth_configs: auth(&[("call-b", "key-b")]),
+                ..d()
+            }),
+        ),
     ];
-    assert_eq!(cases.len(), 18);
+    assert_eq!(cases.len(), 20);
     for (name, base, other, want) in cases {
         assert_eq!(merge_event_actions(base, other), want, "{name}");
     }
@@ -1527,7 +1574,6 @@ async fn test_run_thought_only_turn_count_resets() {
 /// A response without content is dropped unless it carries something the caller needs, such
 /// as grounding metadata from a search tool.
 #[tokio::test]
-#[ignore = "8a bug: Flow::run drops a model response that carries only grounding metadata (Go fc6de07d keeps it)"]
 async fn test_run_keeps_grounding_only_response() {
     let grounding = gadk_genai::GroundingMetadata {
         web_search_queries: vec!["test query".into()],
@@ -1736,7 +1782,6 @@ async fn test_tool_processor_re_evaluates_toolsets_each_step() {
 // gadk model stream cannot; Go's erroring row yields a response with its error, a gadk stream
 // item is one or the other, so the error item stands alone.
 #[tokio::test]
-#[ignore = "8a bug: flow::generate_content draws a fresh event id for every model stream item; Go 3188db98 shares one id across partials and the response that completes them, and ends it at an error"]
 async fn test_generate_content_draws_one_id_per_event() {
     let text = |s: &str, partial: bool| -> Result<LlmResponse, ModelError> {
         Ok(LlmResponse {

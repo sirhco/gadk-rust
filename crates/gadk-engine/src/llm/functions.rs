@@ -33,19 +33,22 @@ use gadk_agent::{
 };
 use gadk_genai::{Content, FunctionCall, FunctionResponse, Part};
 use gadk_model::LlmResponse;
-use gadk_session::{Event, EventActions, ToolConfirmation};
+use gadk_session::{Event, EventActions, ToolConfirmation, toolauth};
 use serde_json::{Map, Value};
 use tracing::Instrument;
 
 use crate::{
-    llm::{flow::Flow, live::session::LiveSessionImpl},
+    llm::{
+        flow::Flow, live::session::LiveSessionImpl,
+        processors::output_schema::SET_MODEL_RESPONSE_TOOL_NAME,
+    },
     telemetry::{
         attrs::{
             SpanError, start_execute_tool_span, trace_merged_tool_calls_result, trace_tool_result,
         },
         merged_tool_calls_span,
     },
-    tool::utils::{function_calls, generate_function_call_id},
+    tool::utils::{function_calls, function_responses, generate_function_call_id},
     workflow::route::go_quote,
 };
 
@@ -343,7 +346,14 @@ async fn run_one_call(
     {
         return None;
     }
-    let result = result.unwrap_or_default();
+    // Go 1ced38ba: a nil result reaches the model as `{"result": null}`, as adk-python wraps a
+    // tool's `None`. Divergence (ledger 1b): a Rust tool's nil result is the empty map (see
+    // above), so a tool that returns an empty object (Go: a non-nil empty map, sent as `{}`) is
+    // wrapped too; `set_model_response`, whose result is the model's own arguments, keeps `{}`.
+    let mut result = result.unwrap_or_default();
+    if result.is_empty() && fc.name != SET_MODEL_RESPONSE_TOOL_NAME {
+        result.insert("result".to_owned(), Value::Null);
+    }
 
     let mut parts = vec![Part {
         function_response: Some(FunctionResponse {
@@ -410,7 +420,10 @@ async fn run_streaming(
     while let Some(chunk) = stream.next().await {
         match chunk {
             Ok(c) => out.push_str(&c),
-            Err(e) => return error_map(&wrap_confirmation_error(tool.name(), e).to_string()),
+            Err(e) => {
+                let e = wrap_confirmation_error(tool.name(), e);
+                return error_map(&model_error_text(tool.name(), &e));
+            }
         }
     }
     Map::from_iter([("result".to_owned(), Value::String(out))])
@@ -672,9 +685,52 @@ pub(crate) async fn call_tool(
     }
 
     match err {
-        Some(e) => Some(error_map(&e.to_string())),
+        Some(e) => Some(error_map(&model_error_text(tool.name(), &e))),
         None => response,
     }
+}
+
+/// Port of Go toolinternal.ModelErrorText (e83ab5b0): the text a tool error reaches the model,
+/// the session and REST clients as. A tool panic ([`ToolError::Panic`], found anywhere in the
+/// error's chain, also behind a callback that wrapped it) becomes a generic message, so the
+/// panic value stays out of the function response; callbacks still get the full error. Any
+/// other error keeps its text.
+pub(crate) fn model_error_text(tool_name: &str, err: &ToolError) -> String {
+    if is_tool_panic(err) {
+        return format!("Invoking `{tool_name}()` failed with an internal error.");
+    }
+    err.to_string()
+}
+
+/// Go `errors.AsType[*toolinternal.PanicError](err)`: walks the chain, stepping into the
+/// wrappers whose inner error is not their `source()` (a transparent [`ToolError::Execution`],
+/// [`AgentError::Other`] / [`AgentError::Workflow`], and [`SharedToolError`]).
+fn is_tool_panic(err: &ToolError) -> bool {
+    let mut cur: Option<&(dyn std::error::Error + 'static)> = Some(err);
+    while let Some(e) = cur {
+        if let Some(t) = e.downcast_ref::<ToolError>() {
+            match t {
+                ToolError::Panic(_) => return true,
+                ToolError::Execution(inner) => {
+                    cur = Some(&**inner);
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        if let Some(AgentError::Other(inner) | AgentError::Workflow(inner)) =
+            e.downcast_ref::<AgentError>()
+        {
+            cur = Some(&**inner);
+            continue;
+        }
+        if let Some(shared) = e.downcast_ref::<SharedToolError>() {
+            cur = Some(&*shared.0);
+            continue;
+        }
+        cur = e.source();
+    }
+    false
 }
 
 /// Go `fmt.Errorf("error tool %q %w", name, tool.ErrConfirmation{Required,Rejected})`
@@ -832,6 +888,7 @@ pub(crate) fn merge_parallel_function_response_events(
 }
 
 /// Port of base_flow.go:1672 mergeEventActions (adk-python merge_parallel_function_response_events).
+/// Each parallel call's confirmation and credential requests are kept under its own call ID.
 pub(crate) fn merge_event_actions(
     base: Option<EventActions>,
     other: Option<EventActions>,
@@ -860,6 +917,8 @@ pub(crate) fn merge_event_actions(
     }
     base.requested_tool_confirmations
         .extend(other.requested_tool_confirmations);
+    base.requested_auth_configs
+        .extend(other.requested_auth_configs);
     Some(base)
 }
 
@@ -965,6 +1024,74 @@ pub(crate) fn generate_request_confirmation_event(
     ev.response = LlmResponse {
         content: Some(Content {
             role: "model".into(),
+            parts,
+        }),
+        ..Default::default()
+    };
+    ev.long_running_tool_ids = long_running_tool_ids;
+    Some(ev)
+}
+
+/// Port of functions.go generateAuthEvent: the event that asks the client for the credentials
+/// the tools in `function_response_event` requested (its `requested_auth_configs`), or `None`
+/// if they requested none. It makes one `adk_request_credential` call per credential key, for
+/// the first tool that asked for it in the order of the responses, which is the order the calls
+/// were made in. A request with no key is never merged with another, as in adk-python.
+///
+/// Go returns an error when a request cannot be encoded; a [`toolauth::Config`] always encodes
+/// (its unknown keys are kept as valid JSON text), so this cannot fail.
+pub(crate) fn generate_auth_event(
+    ctx: &InvocationContext,
+    function_response_event: &Event,
+) -> Option<Event> {
+    let requests = &function_response_event.actions.requested_auth_configs;
+    if requests.is_empty() {
+        return None;
+    }
+    let mut parts = Vec::new();
+    let mut long_running_tool_ids = Vec::new();
+    let mut seen_keys = HashSet::new();
+    for fr in function_responses(function_response_event.response.content.as_ref()) {
+        let Some(cfg) = requests.get(&fr.id) else {
+            continue;
+        };
+        if seen_keys.contains(cfg.credential_key.as_str()) {
+            continue;
+        }
+        if !cfg.credential_key.is_empty() {
+            seen_keys.insert(cfg.credential_key.as_str());
+        }
+        let args = toolauth::ToolArguments {
+            function_call_id: fr.id.clone(),
+            auth_config: cfg.clone(),
+            extra: toolauth::Extra::new(),
+        };
+        let args = match serde_json::to_value(&args) {
+            Ok(Value::Object(m)) => m,
+            _ => Map::new(),
+        };
+        let id = generate_function_call_id(ctx.platform());
+        long_running_tool_ids.push(id.clone());
+        parts.push(Part {
+            function_call: Some(FunctionCall {
+                id,
+                name: toolauth::REQUEST_CREDENTIAL_FUNCTION_CALL_NAME.to_owned(),
+                args,
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    let mut ev = Event::new(ctx.platform(), ctx.invocation_id());
+    ev.author = ctx.agent().name().to_owned();
+    ev.branch = ctx.branch();
+    // adk-python gives the request the role of the tool responses, which is user.
+    ev.response = LlmResponse {
+        content: Some(Content {
+            role: "user".into(),
             parts,
         }),
         ..Default::default()

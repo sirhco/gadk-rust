@@ -430,7 +430,6 @@ async fn test_partial_function_calls_not_executed_in_none_streaming_mode() {
 }
 
 #[tokio::test]
-#[ignore = "8a bug: the LLM flow gives each event of one SSE model call a fresh id; Go 3188db98 keeps one id across a call's partial events and the aggregated response that completes them"]
 async fn test_progressive_sse_partials_share_event_id() {
     let agent = weather_agent(
         "weather_agent",
@@ -469,7 +468,6 @@ async fn test_progressive_sse_partials_share_event_id() {
 }
 
 #[tokio::test]
-#[ignore = "8a bug: the LLM flow gives each partial text event of one SSE model call a fresh id; Go 3188db98 keeps one id across the call's partials and its aggregated response"]
 async fn test_progressive_sse_text_stream_shares_event_id() {
     let agent = gadk_engine::llm::agent::new(LlmAgentConfig {
         name: "text_stream_agent".into(),

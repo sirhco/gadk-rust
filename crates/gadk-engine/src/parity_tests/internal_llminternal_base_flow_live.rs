@@ -344,7 +344,6 @@ async fn test_run_live_close_stops_idle_session() {
 /// Which server messages become events. The fake server always sends setupComplete first,
 /// which carries nothing and so must never surface as an event.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "8a bug: run_live yields an event for a live response that carries nothing (setupComplete, empty serverContent); Go 8cddb9d4 skips it"]
 async fn test_run_live_skips_empty_responses() {
     let cases: Vec<(&str, &'static str, Option<gadk_model::LlmResponse>)> = vec![
         ("empty server content", r#"{"serverContent":{}}"#, None),
@@ -548,7 +547,6 @@ async fn next_function_response(stream: &mut EventStream) {
 // observable checks: the user send and the tool response both reach the wire, response after
 // input, on one connection.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "8a bug: run_live's consumer loop writes a tool response on the connection itself, so it can overtake user input queued on the sender task (intermittent); Go 33a587e2 sends it through the sender"]
 async fn test_run_live_tool_response_shares_sender_goroutine() {
     const TOOL_CALL: &str =
         r#"{"toolCall":{"functionCalls":[{"id":"t1","name":"slow_tool","args":{}}]}}"#;
@@ -778,7 +776,6 @@ async fn test_run_live_tool_response_clears_pending_send() {
 /// The token usage the Live API reports reaches the event RunLive yields, with the Live API's
 /// response token count mapped to CandidatesTokenCount.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "8a bug: the live connection drops a server message's usageMetadata, so run_live events carry no usage (Go f2dc5d3a maps it, responseTokenCount to candidatesTokenCount)"]
 async fn test_run_live_events_carry_usage_metadata() {
     const TURN_WITH_USAGE: &str = r#"{"serverContent":{"turnComplete":true},"usageMetadata":{"promptTokenCount":174,"responseTokenCount":146,"totalTokenCount":320}}"#;
     let server = FakeLiveServer::start(serve(|_n: usize, mut conn: FakeConn| async move {
@@ -902,4 +899,51 @@ async fn test_run_live_keeps_resumption_handle_out_of_caller_config() {
         handle, "",
         "caller's SessionResumption.Handle, want it left empty"
     );
+}
+
+#[test]
+fn test_is_empty_live_response() {
+    use crate::llm::live::flow::is_empty_live_response;
+    use gadk_model::LlmResponse;
+    let cases = [
+        ("zero value", LlmResponse::default(), true),
+        (
+            "partial only",
+            LlmResponse {
+                partial: true,
+                ..Default::default()
+            },
+            true,
+        ),
+        (
+            "content",
+            LlmResponse {
+                content: Some(Content {
+                    role: "model".into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            false,
+        ),
+        (
+            "error code",
+            LlmResponse {
+                error_code: "RESOURCE_EXHAUSTED".into(),
+                ..Default::default()
+            },
+            false,
+        ),
+        (
+            "grounding metadata",
+            LlmResponse {
+                grounding_metadata: Some(Default::default()),
+                ..Default::default()
+            },
+            false,
+        ),
+    ];
+    for (name, resp, want) in cases {
+        assert_eq!(is_empty_live_response(&resp), want, "{name}");
+    }
 }
