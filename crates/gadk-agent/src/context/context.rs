@@ -23,9 +23,11 @@ use std::time::Duration;
 use gadk_memory::SearchResponse;
 use gadk_session::{EventActions, Session, SessionError, State, ToolConfirmation};
 use serde_json::Value;
-use tokio_util::sync::CancellationToken;
 
 use crate::context::builder::ContextBuilder;
+use crate::context::cancel::{CancelCause, CancelScope};
+// Keeps the public path `gadk_agent::context::context::CancelGuard` (the type moved to `cancel.rs`).
+pub use crate::context::cancel::CancelGuard;
 use crate::context::delta::ContextDelta;
 use crate::context::invocation::InvocationContext;
 use crate::error::{AgentError, ToolError};
@@ -158,32 +160,43 @@ impl Context {
         &self.ic
     }
 
-    /// Go `WithAgentCancel`: the same fields (the end flag shared) with a child cancellation token.
+    /// Go `WithAgentCancel`: the same fields (the end flag shared) with a child cancel scope over a
+    /// child cancellation token.
     pub fn with_agent_cancel(&self) -> (Context, CancelGuard) {
-        let token = self.cancellation_token().child_token();
+        let scope = CancelScope::child(&self.inner().cancel_scope);
         let mut inner = self.inner().clone();
-        inner.cancellation_token = token.clone();
+        inner.cancel_scope = scope.clone();
         (
             InvocationContext::from_inner(inner).into_context(),
-            CancelGuard { token, timer: None },
+            CancelGuard {
+                scope: Some(scope),
+                timer: None,
+            },
         )
     }
 
     /// Go `WithAgentTimeout`: as [`Context::with_agent_cancel`], plus a timer task that cancels the
-    /// child after `timeout` (immediately for a zero duration). Outside a Tokio runtime the timeout is
-    /// not enforced (a `tracing::warn!` says so).
+    /// child with cause `DeadlineExceeded` after `timeout` (at once for a zero duration, Go
+    /// `WithTimeout(0)`). The timer ends early when the child is cancelled otherwise. Outside a
+    /// Tokio runtime a non-zero timeout is not enforced (a `tracing::warn!` says so).
     pub fn with_agent_timeout(&self, timeout: Duration) -> (Context, CancelGuard) {
         let (ctx, mut guard) = self.with_agent_cancel();
+        let Some(scope) = guard.scope.clone() else {
+            return (ctx, guard);
+        };
         if timeout.is_zero() {
-            guard.token.cancel();
+            scope.cancel_with_cause(CancelCause::DeadlineExceeded);
             return (ctx, guard);
         }
         match tokio::runtime::Handle::try_current() {
             Ok(h) => {
-                let t = guard.token.clone();
                 guard.timer = Some(h.spawn(async move {
-                    tokio::time::sleep(timeout).await;
-                    t.cancel();
+                    tokio::select! {
+                        () = tokio::time::sleep(timeout) => {
+                            scope.cancel_with_cause(CancelCause::DeadlineExceeded);
+                        }
+                        () = scope.token.cancelled() => {}
+                    }
                 }));
             }
             Err(_) => tracing::warn!(
@@ -192,36 +205,18 @@ impl Context {
         }
         (ctx, guard)
     }
-}
 
-/// Cancels its child token when dropped or when [`CancelGuard::cancel`] is called (Go
-/// `context.CancelFunc`); keep it alive while the derived context is used.
-pub struct CancelGuard {
-    token: CancellationToken,
-    timer: Option<tokio::task::JoinHandle<()>>,
-}
-
-impl CancelGuard {
-    /// Cancels the derived context's token.
-    pub fn cancel(&self) {
-        self.token.cancel()
-    }
-}
-
-impl Drop for CancelGuard {
-    fn drop(&mut self) {
-        self.token.cancel();
-        if let Some(t) = self.timer.take() {
-            t.abort();
+    /// Go `contextPath` (plugin/agentanalytics): this context's workflow node path if non-empty,
+    /// else the path of the context the nearest fresh invocation forked from (Go walks the
+    /// `context.Context` chain through `NewInvocationContext(parentCtx, …)`). [`Context::path`]
+    /// is unchanged.
+    pub fn context_path(&self) -> String {
+        let inner = self.inner();
+        if inner.path.is_empty() {
+            inner.enclosing_path.clone()
+        } else {
+            inner.path.clone()
         }
-    }
-}
-
-impl std::fmt::Debug for CancelGuard {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CancelGuard")
-            .field("cancelled", &self.token.is_cancelled())
-            .finish_non_exhaustive()
     }
 }
 

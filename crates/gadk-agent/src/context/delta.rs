@@ -32,6 +32,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::agent::Agent;
 use crate::context::activation::ActivationId;
+use crate::context::cancel::CancelScope;
 use crate::context::readonly::ContextInner;
 use crate::mode::BoundModes;
 use crate::scheduler::DynamicSubScheduler;
@@ -110,6 +111,15 @@ impl ContextInner {
             || d.cancellation_token.is_some()
             || d.bound_modes.is_some();
         let mut n = self.clone();
+        if d.fresh_invocation || d.fresh_end_flag {
+            // Go contextPath walks the context.Context chain through NewInvocationContext(parentCtx,
+            // …) to the parent's path: record it before any reset.
+            n.enclosing_path = if self.path.is_empty() {
+                self.enclosing_path.clone()
+            } else {
+                self.path.clone()
+            };
+        }
         if forks_invocation {
             // Go WithICDelta copies the invocationContext struct, endInvocation included; a fresh
             // invocation (Go NewInvocationContext) starts not ended. Each new flag is a new
@@ -147,7 +157,8 @@ impl ContextInner {
             n.user_content = v.map(Arc::new);
         }
         if let Some(v) = d.cancellation_token {
-            n.cancellation_token = v;
+            // A raw token starts a parentless cancel scope.
+            n.cancel_scope = CancelScope::root(v);
         }
         if let Some(v) = d.bound_modes {
             n.bound_modes = v;
@@ -320,5 +331,85 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(derived.live_session_resumption_handle(), "new");
+    }
+
+    #[test]
+    fn context_path_is_the_own_path_else_the_path_a_fresh_invocation_forked_from() {
+        let root = InvocationContext::builder()
+            .agent(named_agent("root"))
+            .build();
+        assert_eq!(root.context_path(), "");
+        // Go PromoteWithDelta before RunLLMAgentAsNode: the promoted path reaches the forked task
+        // agent's contexts through NewInvocationContext(parentCtx, …).
+        let promoted = root.with_delta(ContextDelta {
+            path: Some("wf@1/task@1".into()),
+            ..Default::default()
+        });
+        let task = promoted.with_delta(ContextDelta {
+            fresh_invocation: true,
+            agent: Some(named_agent("task")),
+            ..Default::default()
+        });
+        assert_eq!(task.path(), "", "path() is unchanged");
+        assert_eq!(task.context_path(), "wf@1/task@1");
+        // Go WithDelta copies (callback / tool contexts, agent swaps, cancel scopes) keep it.
+        let tool = task.with_delta(ContextDelta {
+            function_call_id: Some("fc".into()),
+            branch: Some("b".into()),
+            ..Default::default()
+        });
+        let (cancellable, _g) = tool.with_agent_cancel();
+        assert_eq!(cancellable.context_path(), "wf@1/task@1");
+        // A nested fresh fork from a pathless context keeps the enclosing path.
+        let nested = cancellable.with_delta(ContextDelta {
+            fresh_invocation: true,
+            ..Default::default()
+        });
+        assert_eq!(nested.context_path(), "wf@1/task@1");
+        // An own path wins; a fork from it records it.
+        let own = nested.with_delta(ContextDelta {
+            path: Some("inner@1".into()),
+            ..Default::default()
+        });
+        assert_eq!(own.context_path(), "inner@1");
+        let forked = own.with_delta(ContextDelta {
+            fresh_invocation: true,
+            ..Default::default()
+        });
+        assert_eq!(forked.context_path(), "inner@1");
+    }
+
+    #[test]
+    fn fresh_end_flag_records_the_enclosing_path_too() {
+        // Go agent_node.go:146: AgentNode::run forks with NewInvocationContext(ctx, …).
+        let node = InvocationContext::builder()
+            .build()
+            .with_delta(ContextDelta {
+                path: Some("wf@1/agent@1".into()),
+                ..Default::default()
+            });
+        let run = node.with_delta(ContextDelta {
+            fresh_end_flag: true,
+            ..Default::default()
+        });
+        assert_eq!(run.context_path(), "wf@1/agent@1");
+        // A later reset (fresh invocation) still reaches it.
+        let inner = run.with_delta(ContextDelta {
+            fresh_invocation: true,
+            ..Default::default()
+        });
+        assert_eq!(inner.context_path(), "wf@1/agent@1");
+        // A plain delta that clears the path does not record anything.
+        let cleared = InvocationContext::builder()
+            .build()
+            .with_delta(ContextDelta {
+                path: Some("x".into()),
+                ..Default::default()
+            });
+        let cleared = cleared.with_delta(ContextDelta {
+            path: Some(String::new()),
+            ..Default::default()
+        });
+        assert_eq!(cleared.context_path(), "");
     }
 }
