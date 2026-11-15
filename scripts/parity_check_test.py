@@ -1598,25 +1598,28 @@ ADK_GO = pathlib.Path(os.environ.get("ADK_GO_DIR", HERE.parent.parent / "adk-go"
 
 @unittest.skipUnless((ADK_GO / "agent/agent_test.go").is_file(), "ADK-Go checkout not found")
 class RealTreeTest(unittest.TestCase):
-    def test_1b_count_is_739(self):
+    def test_1b_count_is_894(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/1b.md")
-        self.assertEqual((len(in_scope), len(deferred)), (137, 0))
-        self.assertEqual(pc.count(ADK_GO, in_scope), 739)
+        self.assertEqual((len(in_scope), len(deferred)), (157, 0))
+        self.assertEqual(pc.count(ADK_GO, in_scope), 894)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "1b"), [])
         self.assertEqual(deferred, {})
 
-    def test_1b_live_count_is_31(self):
+    def test_1b_live_count_is_53(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/1b-live.md")
         self.assertEqual(in_scope, [
             "agent/workflowagents/sequentialagent/live_injection_test.go",
             "internal/llminternal/audio_cache_manager_test.go",
+            "internal/llminternal/base_flow_live_config_test.go",
             "internal/llminternal/base_flow_live_test.go",
+            "internal/llminternal/googlellm/live_artifacts_test.go",
+            "internal/llminternal/googlellm/live_connection_test.go",
             "internal/llminternal/live_injection_test.go",
             "internal/llminternal/live_reconnect_test.go",
             "runner/live_runner_test.go",
         ])
         self.assertEqual(deferred, {})
-        self.assertEqual(pc.count(ADK_GO, in_scope), 31)
+        self.assertEqual(pc.count(ADK_GO, in_scope), 53)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "1b-live"), [])
 
     def test_1c_count_is_190(self):
@@ -1646,7 +1649,7 @@ class RealTreeTest(unittest.TestCase):
         self.assertEqual(pc.count(ADK_GO, in_scope), 190)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "1c"), [])
 
-    def test_2a_count_is_148(self):
+    def test_2a_count_is_162(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/2a.md")
         self.assertEqual(in_scope, [
             "examples/toolsearch/main_test.go",
@@ -1655,6 +1658,7 @@ class RealTreeTest(unittest.TestCase):
             "plugin/functioncallmodifier/integration_test.go",
             "plugin/functioncallmodifier/plugin_test.go",
             "plugin/retryandreflect/plugin_test.go",
+            "tool/exampletool/example_test.go",
             "tool/exampletool/tool_test.go",
             "tool/geminitool/enterprise_web_search_test.go",
             "tool/geminitool/tool_test.go",
@@ -1672,7 +1676,7 @@ class RealTreeTest(unittest.TestCase):
             "tool/toolsearch/toolsearch_test.go",
         ])
         self.assertEqual(deferred, {})
-        self.assertEqual(pc.count(ADK_GO, in_scope), 148)
+        self.assertEqual(pc.count(ADK_GO, in_scope), 162)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "2a"), [])
         # tool/toolutils stays a 1b file.
         in_1b, _ = pc.parse_header(HERE.parent / "docs/parity/1b.md")
@@ -1704,39 +1708,41 @@ class RealTreeTest(unittest.TestCase):
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "2b"), [])
         self.assertIn("FuzzRedact", pc.go_tests(ADK_GO, "auth/gcp/redact_fuzz_test.go"))
 
-    def test_2c_count_is_47(self):
+    def test_2c_count_is_59(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/2c.md")
         self.assertEqual(in_scope, [
             "tool/mcptoolset/auth_session_test.go",
             "tool/mcptoolset/client_cancellation_test.go",
             "tool/mcptoolset/client_test.go",
+            "tool/mcptoolset/conversion_test.go",
+            "tool/mcptoolset/prefix_test.go",
             "tool/mcptoolset/set_test.go",
             "tool/mcptoolset/tool_test.go",
             "tool/mcptoolset/tracking_test.go",
             "tool/mcptoolset/transport_config_test.go",
         ])
         self.assertEqual(deferred, {})
-        self.assertEqual(pc.count(ADK_GO, in_scope), 47)
+        self.assertEqual(pc.count(ADK_GO, in_scope), 59)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "2c"), [])
         for f in in_scope:
             self.assertEqual([t for t in pc.go_tests(ADK_GO, f) if t.startswith("Fuzz")], [], f)
 
-    def test_3a_count_is_28(self):
+    def test_3a_count_is_29(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/3a.md")
         self.assertEqual(in_scope, [
             "model/anthropicmodel/anthropicmodel_test.go",
             "model/apigee/apigee_test.go",
         ])
         self.assertEqual(deferred, {})
-        self.assertEqual(pc.count(ADK_GO, in_scope), 28)
+        self.assertEqual(pc.count(ADK_GO, in_scope), 29)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "3a"), [])
         self.assertEqual(len(pc.go_tests(ADK_GO, "model/anthropicmodel/anthropicmodel_test.go")), 21)
 
-    def test_3b_count_is_217(self):
+    def test_3b_count_is_225(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/3b.md")
-        self.assertEqual(len(in_scope), 19)
+        self.assertEqual(len(in_scope), 20)
         self.assertEqual(deferred, {})
-        self.assertEqual(pc.count(ADK_GO, in_scope), 217)
+        self.assertEqual(pc.count(ADK_GO, in_scope), 225)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "3b"), [])
         fuzz = [t for f in in_scope for t in pc.go_tests(ADK_GO, f) if t.startswith("Fuzz")]
         self.assertEqual(fuzz, ["FuzzFailedResponseError", "FuzzClipServerText"])
@@ -1749,11 +1755,11 @@ class RealTreeTest(unittest.TestCase):
                 fuzz = [t for t in pc.go_tests(ADK_GO, f) if t.startswith("Fuzz")]
                 self.assertEqual(fuzz, [], f"{name}: {f}")
 
-    def test_1a_header_has_13_files(self):
+    def test_1a_header_has_14_files(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/1a.md")
-        self.assertEqual((len(in_scope), deferred), (13, {}))
+        self.assertEqual((len(in_scope), deferred), (14, {}))
 
-    def test_4a_count_is_15(self):
+    def test_4a_count_is_21(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/4a.md")
         self.assertEqual(in_scope, [
             "session/database/compaction_test.go",
@@ -1761,7 +1767,7 @@ class RealTreeTest(unittest.TestCase):
             "session/database/session_test.go",
         ])
         self.assertEqual(deferred, {})
-        self.assertEqual(pc.count(ADK_GO, in_scope), 15)
+        self.assertEqual(pc.count(ADK_GO, in_scope), 21)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "4a"), [])
 
     def test_4b_count_is_16(self):
@@ -1774,7 +1780,7 @@ class RealTreeTest(unittest.TestCase):
         self.assertEqual(pc.count(ADK_GO, in_scope), 16)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "4b"), [])
 
-    def test_4c_count_is_35(self):
+    def test_4c_count_is_41(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/4c.md")
         self.assertEqual(in_scope, [
             "session/vertexai/append_event_temp_state_test.go",
@@ -1788,41 +1794,41 @@ class RealTreeTest(unittest.TestCase):
             "session/vertexai/vertexai_test.go",
         ])
         self.assertEqual(deferred, {})
-        self.assertEqual(pc.count(ADK_GO, in_scope), 35)
+        self.assertEqual(pc.count(ADK_GO, in_scope), 41)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "4c"), [])
 
-    def test_5a_count_is_246(self):
+    def test_5a_count_is_269(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/5a.md")
-        self.assertEqual(len(in_scope), 42)
+        self.assertEqual(len(in_scope), 43)
         self.assertNotIn("agent/loader_test.go", in_scope)
         self.assertEqual(deferred, {})
-        self.assertEqual(pc.count(ADK_GO, in_scope), 246)
+        self.assertEqual(pc.count(ADK_GO, in_scope), 269)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "5a"), [])
 
-    def test_5b_count_is_145(self):
+    def test_5b_count_is_158(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/5b.md")
         self.assertEqual(len(in_scope), 16)
         self.assertEqual(sorted({f.split("/")[0] for f in in_scope}), ["agent", "internal", "server"])
         self.assertEqual(list(deferred), ["agent/remoteagent/a2a_agent_compat_test.go"])
-        self.assertEqual(pc.count(ADK_GO, in_scope), 145)
+        self.assertEqual(pc.count(ADK_GO, in_scope), 158)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "5b"), [])
 
-    def test_5c_count_is_62(self):
+    def test_5c_count_is_64(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/5c.md")
         self.assertEqual(len(in_scope), 11)
         self.assertEqual(sorted({f.split("/")[0] for f in in_scope}), ["agentregistry", "server"])
         self.assertEqual(deferred, {})
-        self.assertEqual(pc.count(ADK_GO, in_scope), 62)
+        self.assertEqual(pc.count(ADK_GO, in_scope), 64)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "5c"), [])
 
-    def test_7a_count_is_86(self):
+    def test_7a_count_is_95(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/7a.md")
         self.assertEqual(len(in_scope), 13)
         self.assertEqual(sorted({f.split("/")[0] for f in in_scope}), ["contrib", "telemetry"])
         self.assertEqual(deferred, {})
-        self.assertEqual(pc.count(ADK_GO, in_scope), 86)
+        self.assertEqual(pc.count(ADK_GO, in_scope), 95)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "7a"), [])
-        self.assertEqual(len(pc.go_tests(ADK_GO, "telemetry/telemetry_test.go")), 6)
+        self.assertEqual(len(pc.go_tests(ADK_GO, "telemetry/telemetry_test.go")), 15)
 
     def test_6_count_is_90(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/6.md")
@@ -1847,10 +1853,12 @@ class RealTreeTest(unittest.TestCase):
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "6c-1"), [])
         self.assertEqual([len(pc.go_tests(ADK_GO, f)) for f in in_scope], [29, 11, 1, 1, 5, 0])
 
-    def test_6c_2_count_is_19(self):
+    def test_6c_2_count_is_34(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/6c-2.md")
         self.assertEqual(in_scope, [
             "internal/configurable/configurable_utils_test.go",
+            "internal/configurable/configurable_utils_windows_test.go",
+            "internal/configurable/configurable_workflow_ref_test.go",
             "internal/configurable/configurable_workflow_test.go",
             "internal/configurable/conformance/recordplugin/record_plugin_test.go",
             "internal/configurable/conformance/recordplugin/yaml_clean_test.go",
@@ -1859,16 +1867,16 @@ class RealTreeTest(unittest.TestCase):
             "internal/configurable/conformance/replayplugin/yaml_utils_test.go",
         ])
         self.assertEqual(deferred, {})
-        self.assertEqual(pc.count(ADK_GO, in_scope), 19)
+        self.assertEqual(pc.count(ADK_GO, in_scope), 34)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "6c-2"), [])
-        self.assertEqual([len(pc.go_tests(ADK_GO, f)) for f in in_scope], [4, 7, 1, 2, 1, 2, 2])
+        self.assertEqual([len(pc.go_tests(ADK_GO, f)) for f in in_scope], [12, 2, 5, 7, 1, 2, 1, 2, 2])
         self.assertEqual(
             pc.target_name("internal/configurable/conformance/recordplugin/yaml_clean_test.go"),
             "internal_configurable_conformance_recordplugin_yaml_clean",
         )
         self.assertIn("6c-2", pc.GENERATED_LEDGERS)
 
-    def test_7b_1_count_is_55(self):
+    def test_7b_1_count_is_67(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/7b-1.md")
         self.assertEqual(in_scope, [
             "plugin/agentanalytics/json_formatter_test.go",
@@ -1879,6 +1887,7 @@ class RealTreeTest(unittest.TestCase):
             "plugin/agentanalytics/arrow_test_helper_test.go",
             "plugin/agentanalytics/batch_processor_test.go",
             "plugin/agentanalytics/bigquery_agent_analytics_plugin_test.go",
+            "plugin/agentanalytics/doc_test.go",
             "plugin/agentanalytics/events_test.go",
             "plugin/agentanalytics/gcs_offloader_test.go",
             "plugin/agentanalytics/late_callbacks_test.go",
@@ -1886,8 +1895,8 @@ class RealTreeTest(unittest.TestCase):
             "plugin/agentanalytics/race_test.go",
             "plugin/agentanalytics/trace_manager_test.go",
         ])
-        self.assertEqual(pc.count(ADK_GO, in_scope), 55)
-        self.assertEqual([len(pc.go_tests(ADK_GO, f)) for f in in_scope], [29, 11, 15])
+        self.assertEqual(pc.count(ADK_GO, in_scope), 67)
+        self.assertEqual([len(pc.go_tests(ADK_GO, f)) for f in in_scope], [41, 11, 15])
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "7b-1"), [])
         # Every agentanalytics test file is in scope or deferred.
         go_files = sorted("plugin/agentanalytics/" + f.name
@@ -1900,7 +1909,7 @@ class RealTreeTest(unittest.TestCase):
         self.assertIn("7b-1", pc.GENERATED_LEDGERS)
         self.assertEqual(pc.check_1b(ADK_GO, HERE.parent, HERE.parent / "docs/parity/7b-1.md", name="7b-1"), [])
 
-    def test_7b_2_count_is_171(self):
+    def test_7b_2_count_is_176(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/7b-2.md")
         self.assertEqual(in_scope, [
             "plugin/agentanalytics/batch_processor_test.go",
@@ -1909,14 +1918,15 @@ class RealTreeTest(unittest.TestCase):
         self.assertEqual(sorted(deferred), [
             "plugin/agentanalytics/arrow_test_helper_test.go",
             "plugin/agentanalytics/bigquery_agent_analytics_plugin_test.go",
+            "plugin/agentanalytics/doc_test.go",
             "plugin/agentanalytics/events_test.go",
             "plugin/agentanalytics/late_callbacks_test.go",
             "plugin/agentanalytics/norace_test.go",
             "plugin/agentanalytics/race_test.go",
             "plugin/agentanalytics/trace_manager_test.go",
         ])
-        self.assertEqual(pc.count(ADK_GO, in_scope), 171)
-        self.assertEqual([len(pc.go_tests(ADK_GO, f)) for f in in_scope], [75, 96])
+        self.assertEqual(pc.count(ADK_GO, in_scope), 176)
+        self.assertEqual([len(pc.go_tests(ADK_GO, f)) for f in in_scope], [75, 101])
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "7b-2"), [])
         # 7b-1's in-scope files are ledgered there, not here: the two ledgers' in-scope lists
         # are disjoint, and with 7b-2's deferred block they name every agentanalytics test
@@ -1935,19 +1945,21 @@ class RealTreeTest(unittest.TestCase):
              "crates/gadk-agentanalytics/src/parity_tests/plugin_agentanalytics_gcs_offloader/mod.rs"),
         ]:
             self.assertEqual(pc.find_target(HERE.parent, f), (target, []))
-        # All 171 ported (ported or adapted): 129 in 7b-2, and the 42 that 7b-2 deferred to 7b-3
-        # because they need the plugin, in 7b-3a.
+        # All 176 ported (ported or adapted): 129 in 7b-2, the 42 that 7b-2 deferred to 7b-3
+        # because they need the plugin, in 7b-3a, and the 5 gcs_offloader_test.go tests ADK-Go
+        # 0990f9e added (8a).
         rows = pc.parse_rows(HERE.parent / "docs/parity/7b-2.md")
-        self.assertEqual(len(rows), 171)
-        self.assertEqual(sum(r[2].startswith("ported") for r in rows), 171)
+        self.assertEqual(len(rows), 176)
+        self.assertEqual(sum(r[2].startswith("ported") for r in rows), 176)
         self.assertEqual([r for r in rows if r[2] == "skipped"], [])
         self.assertIn("7b-2", pc.GENERATED_LEDGERS)
         self.assertEqual(pc.check_1b(ADK_GO, HERE.parent, HERE.parent / "docs/parity/7b-2.md", name="7b-2"), [])
 
-    def test_7b_3a_count_is_338(self):
+    def test_7b_3a_count_is_352(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/7b-3a.md")
         self.assertEqual(in_scope, [
             "plugin/agentanalytics/bigquery_agent_analytics_plugin_test.go",
+            "plugin/agentanalytics/doc_test.go",
             "plugin/agentanalytics/events_test.go",
             "plugin/agentanalytics/late_callbacks_test.go",
             "plugin/agentanalytics/trace_manager_test.go",
@@ -1962,8 +1974,8 @@ class RealTreeTest(unittest.TestCase):
             "plugin/agentanalytics/schema_upgrade_test.go",
             "plugin/agentanalytics/views_test.go",
         ])
-        self.assertEqual(pc.count(ADK_GO, in_scope), 338)
-        self.assertEqual([len(pc.go_tests(ADK_GO, f)) for f in in_scope], [61, 18, 14, 245])
+        self.assertEqual(pc.count(ADK_GO, in_scope), 352)
+        self.assertEqual([len(pc.go_tests(ADK_GO, f)) for f in in_scope], [61, 14, 18, 14, 245])
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "7b-3a"), [])
         # The three agentanalytics ledgers' in-scope lists are disjoint and name every Go test
         # file of the package with tests; with 7b-3a's deferred block, every test file.
@@ -1991,13 +2003,15 @@ class RealTreeTest(unittest.TestCase):
              "crates/gadk-agentanalytics/src/parity_tests/plugin_agentanalytics_trace_manager/mod.rs"),
         ]:
             self.assertEqual(pc.find_target(HERE.parent, f), (target, []))
-        # All 338 ported (73 adapted): 239 in 7b-3a (59 adapted) and the 99 trace_manager_test.go
-        # tests that need goroutine attribution in 7b-3b (14 adapted), none skipped.
+        # 351 of 352 ported (78 adapted): 239 in 7b-3a, the 99 trace_manager_test.go tests that
+        # need goroutine attribution in 7b-3b, and (8a) 13 of doc_test.go's 14; its
+        # TestDocGo_ParityBulletsReferenceExistingTests (a Go AST check of doc.go) is skipped.
         rows = pc.parse_rows(HERE.parent / "docs/parity/7b-3a.md")
-        self.assertEqual(len(rows), 338)
-        self.assertEqual(sum(r[2].startswith("ported") for r in rows), 338)
-        self.assertEqual(sum(r[2].startswith("ported (adapted: ") for r in rows), 73)
-        self.assertEqual([r for r in rows if r[2] == "skipped"], [])
+        self.assertEqual(len(rows), 352)
+        self.assertEqual(sum(r[2].startswith("ported") for r in rows), 351)
+        self.assertEqual(sum(r[2].startswith("ported (adapted: ") for r in rows), 78)
+        self.assertEqual([r[:2] for r in rows if r[2] == "skipped"], [
+            ("plugin/agentanalytics/doc_test.go", "TestDocGo_ParityBulletsReferenceExistingTests")])
         # 7b-3b: the 99 attribution ports sit in the attr_*.rs files by group (deferred.rs is gone):
         # A 5, B/F/H 14, C 7, D 18 + 18, E 18, G 19.
         attr = collections.Counter(
@@ -2015,15 +2029,16 @@ class RealTreeTest(unittest.TestCase):
         self.assertIn("7b-3a", pc.GENERATED_LEDGERS)
         self.assertEqual(pc.check_1b(ADK_GO, HERE.parent, HERE.parent / "docs/parity/7b-3a.md", name="7b-3a"), [])
 
-    def test_6b_count_is_40(self):
+    def test_6b_count_is_44(self):
         in_scope, deferred = pc.parse_header(HERE.parent / "docs/parity/6b.md")
         self.assertEqual(in_scope, [
             "cmd/adkgo/internal/deploy/agentengine/agentengine_test.go",
+            "cmd/adkgo/internal/deploy/agentengine/environment_test.go",
             "cmd/adkgo/internal/deploy/cloudrun/cloudrun_test.go",
             "internal/cli/util/text_helpers_test.go",
         ])
         self.assertEqual(deferred, {})
-        self.assertEqual(pc.count(ADK_GO, in_scope), 40)
+        self.assertEqual(pc.count(ADK_GO, in_scope), 44)
         self.assertEqual(pc.check_header(ADK_GO, in_scope, deferred, "6b"), [])
 
 class DefaultAdkGoTest(unittest.TestCase):

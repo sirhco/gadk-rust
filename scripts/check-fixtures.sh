@@ -51,7 +51,7 @@
 # $GEN_STORAGEPB_TARGET_DIR (default: target/gen-storagepb in the repo); the check is skipped with
 # a note when cargo is missing or the generator's crates cannot be fetched (offline).
 # 8a: every probe was re-run at ADK-Go 0990f9e2 (docs/parity/ADK_GO_COMMIT); no count changed
-# (the changed goldens and their causes are in docs/parity/8a-bug-report/T1-probes.md), and
+# (the changed goldens and their causes are in docs/parity/8a-bug-report.md, "Go output changed"), and
 # encode_shapes.rs grew from 78 structs / 349 fields to 88 / 435.
 set -euo pipefail
 repo="$(cd "$(dirname "$0")/.." && pwd)"
