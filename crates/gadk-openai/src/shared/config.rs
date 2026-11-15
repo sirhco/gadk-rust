@@ -260,6 +260,8 @@ pub(crate) fn config_fields(
         audio_transcription_config,
         continuation_token,
         automatic_continuation,
+        generation_output_config,
+        store,
     } = cfg;
     vec![
         ("HTTPOptions", http_options.is_some()),
@@ -313,6 +315,8 @@ pub(crate) fn config_fields(
         ),
         ("ContinuationToken", continuation_token.is_some()),
         ("AutomaticContinuation", automatic_continuation.is_some()),
+        ("GenerationOutputConfig", generation_output_config.is_some()),
+        ("Store", store.is_some()),
     ]
 }
 
@@ -497,10 +501,12 @@ mod tests {
     #[test]
     fn config_fields_list_every_field_in_genai_order() {
         let fields = config_fields(&GenerateContentConfig::default(), None);
-        assert_eq!(fields.len(), 35);
+        assert_eq!(fields.len(), 37);
         assert!(fields.iter().all(|(_, set)| !set));
         assert_eq!(fields[0].0, "HTTPOptions");
         assert_eq!(fields[34].0, "AutomaticContinuation");
+        assert_eq!(fields[35].0, "GenerationOutputConfig");
+        assert_eq!(fields[36].0, "Store");
         let set: Vec<&str> = config_fields(
             &GenerateContentConfig {
                 top_k: Some(0.0),
@@ -542,5 +548,34 @@ mod tests {
             err.to_string(),
             "openai: unsupported generation config field: TopK"
         );
+    }
+
+    /// genai v1.77.0 fields are refused by name like every other field not supported.
+    #[test]
+    fn genai_v1_77_config_fields_are_unsupported() {
+        for (cfg, field) in [
+            (
+                GenerateContentConfig {
+                    generation_output_config: Some(Default::default()),
+                    ..GenerateContentConfig::default()
+                },
+                "GenerationOutputConfig",
+            ),
+            (
+                GenerateContentConfig {
+                    store: Some(false),
+                    ..GenerateContentConfig::default()
+                },
+                "Store",
+            ),
+        ] {
+            let err =
+                reject_unsupported_config_fields(&cfg, None, SUPPORTED_CONFIG_FIELDS).unwrap_err();
+            assert!(err.is(ErrorKind::UnsupportedConfigField));
+            assert_eq!(
+                err.to_string(),
+                format!("openai: unsupported generation config field: {field}")
+            );
+        }
     }
 }

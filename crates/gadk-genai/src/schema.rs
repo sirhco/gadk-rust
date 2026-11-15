@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! OpenAPI-subset schema (port of genai v1.75.0 `types.go` `Schema`).
+//! OpenAPI-subset schema (port of genai v1.77.0 `types.go` `Schema`).
 
 use crate::serde_util::is_zero;
 use serde::{Deserialize, Serialize};

@@ -16,8 +16,9 @@
 //! Live wire messages.
 //!
 //! Outgoing: the client envelope (genai `LiveClientMessage`) with the converters of genai
-//! v1.75.0 `live_converters.go` (`liveConnectParametersTo{Mldev,Vertex}`,
-//! `liveClientMessageTo{Mldev,Vertex}`, `liveSendRealtimeInputParametersTo{Mldev,Vertex}`)
+//! v1.77.0 `live_converters.go` (`liveConnectParametersTo{Mldev,Vertex}`,
+//! `liveClientMessageTo{Mldev,Vertex}`, `liveClientContextUpdateTo{Mldev,Vertex}`,
+//! `liveClientToolResponseToVertex`, `liveSendRealtimeInputParametersTo{Mldev,Vertex}`)
 //! and the `toLiveClientMessage` methods of `types.go`.
 //!
 //! Incoming: genai `Session.Receive` decoding (with `liveServerMessageFromVertex`) and the
@@ -27,8 +28,8 @@
 use std::collections::VecDeque;
 
 use gadk_genai::{
-    Content, FunctionResponse, LiveClientContentInput, LiveConnectConfig, LiveRealtimeInput,
-    LiveServerMessage, LiveToolResponseInput, Part, Transcription,
+    Content, FunctionResponse, LiveClientContentInput, LiveClientContextUpdate, LiveConnectConfig,
+    LiveRealtimeInput, LiveServerMessage, LiveToolResponseInput, Part, Transcription,
 };
 use gadk_model::{Backend, LlmResponse, ModelError, body_prefix};
 use serde::Serialize;
@@ -37,8 +38,8 @@ use serde_json::Value;
 use super::live_other;
 use crate::error::GeminiError;
 use crate::request::{
-    Obj, as_obj, content, convert_list, convert_obj, copy, reject, safety_setting_mldev,
-    speech_config_vertex, to_value, tool,
+    Obj, as_obj, content, convert_list, convert_obj, copy, function_response_vertex, reject,
+    safety_setting_mldev, speech_config_vertex, to_value, tool,
 };
 
 /// genai `LiveClientMessage`: exactly one field is set per message. Fields hold the
@@ -54,6 +55,8 @@ struct LiveClientMessage {
     realtime_input: Option<Obj>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_response: Option<Obj>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    context_update: Option<Obj>,
 }
 
 impl LiveClientMessage {
@@ -165,6 +168,7 @@ pub(crate) fn setup_message(
     if let Some(v) = get(&from, "translationConfig") {
         set_generation(&mut setup, "translationConfig", v.clone());
     }
+    copy(&from, &mut setup, &["labels"]);
 
     LiveClientMessage {
         setup: Some(setup),
@@ -199,11 +203,57 @@ pub(crate) fn client_content_message(
     .to_json()
 }
 
-/// genai `SendToolResponse`: `LiveSendToolResponseParameters.toLiveClientMessage`; the tool
-/// response is copied unconverted.
-pub(crate) fn tool_response_message(input: &LiveToolResponseInput) -> Result<String, GeminiError> {
+/// genai `SendToolResponse`: `LiveSendToolResponseParameters.toLiveClientMessage`. The
+/// Gemini API copies the tool response unconverted; Vertex AI applies
+/// `liveClientToolResponseToVertex` (each function response through
+/// `functionResponseToVertex`).
+pub(crate) fn tool_response_message(
+    backend: Backend,
+    input: &LiveToolResponseInput,
+) -> Result<String, GeminiError> {
+    let from = as_obj(&to_value(input)?);
+    let tool_response = match backend {
+        Backend::GeminiApi => from,
+        Backend::VertexAi => {
+            let mut to = Obj::new();
+            convert_list(
+                &from,
+                &mut to,
+                "functionResponses",
+                function_response_vertex,
+            )?;
+            to
+        }
+    };
     LiveClientMessage {
-        tool_response: Some(as_obj(&to_value(input)?)),
+        tool_response: Some(tool_response),
+        ..Default::default()
+    }
+    .to_json()
+}
+
+/// genai `SendContextUpdate` (v1.77.0): `liveClientContextUpdateTo{Mldev,Vertex}` with
+/// `liveClientContextUpdateToolsTo{Mldev,Vertex}`. The system instruction goes through
+/// `contentTo*`, each tool through `toolTo*`; a set but empty tools wrapper stays `{}`.
+pub(crate) fn context_update_message(
+    backend: Backend,
+    input: &LiveClientContextUpdate,
+) -> Result<String, GeminiError> {
+    let from = as_obj(&to_value(input)?);
+    let mut to = Obj::new();
+    if let Some(v) = get(&from, "systemInstruction") {
+        to.insert(
+            "systemInstruction".into(),
+            Value::Object(content(&as_obj(v), backend)?),
+        );
+    }
+    convert_obj(&from, &mut to, "tools", |tools| {
+        let mut out = Obj::new();
+        convert_list(tools, &mut out, "tools", |t| tool(t, backend))?;
+        Ok(out)
+    })?;
+    LiveClientMessage {
+        context_update: Some(to),
         ..Default::default()
     }
     .to_json()

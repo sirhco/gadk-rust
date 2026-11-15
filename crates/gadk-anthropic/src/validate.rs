@@ -126,6 +126,8 @@ pub(crate) fn validate_generate_content_config(
         audio_transcription_config,
         continuation_token,
         automatic_continuation: _, // ignored by design
+        generation_output_config,
+        store,
     } = cfg;
 
     if let Some(si) = system_instruction {
@@ -253,6 +255,12 @@ pub(crate) fn validate_generate_content_config(
     }
     if continuation_token.as_ref().is_some_and(|t| !t.is_empty()) {
         return Err(invalid_config("ContinuationToken is not supported"));
+    }
+    if generation_output_config.is_some() {
+        return Err(invalid_config("GenerationOutputConfig is not supported"));
+    }
+    if store.is_some() {
+        return Err(invalid_config("Store is not supported"));
     }
     // AutomaticContinuation is ignored by design.
     Ok(())

@@ -17,7 +17,7 @@
 //!
 //! Ports genai `models.go` `generateContentParametersToMldev` /
 //! `generateContentParametersToVertex` with their config, content, part, tool, tool-config,
-//! safety-setting, image-config and speech-config converters (genai v1.75.0), and ADK-Go
+//! safety-setting, image-config and speech-config converters (genai v1.77.0), and ADK-Go
 //! `model/gemini/gemini.go` `preserveEmptyTextThoughtSignatureParts`.
 
 use gadk_genai::{Content, GenerateContentConfig};
@@ -298,6 +298,15 @@ fn generate_content_config(
     copy(from, parent, &["serviceTier"]);
     copy(from, &mut to, &["audioTranscriptionConfig"]);
     copy(from, parent, &["continuationToken"]);
+    if vertex {
+        if let Some(v) = from.get("generationOutputConfig").filter(|v| !v.is_null()) {
+            parent.insert("outputConfig".into(), v.clone());
+        }
+        reject(from, &["store"], backend)?;
+    } else {
+        reject(from, &["generationOutputConfig"], backend)?;
+        copy(from, parent, &["store"]);
+    }
     Ok(to)
 }
 
@@ -339,11 +348,16 @@ fn part(from: &Obj, backend: Backend) -> Result<Obj, ModelError> {
         })?,
         Backend::VertexAi => copy(from, &mut to, &["functionCall"]),
     }
+    match backend {
+        Backend::GeminiApi => copy(from, &mut to, &["functionResponse"]),
+        Backend::VertexAi => {
+            convert_obj(from, &mut to, "functionResponse", function_response_vertex)?
+        }
+    }
     copy(
         from,
         &mut to,
         &[
-            "functionResponse",
             "inlineData",
             "text",
             "thought",
@@ -360,6 +374,23 @@ fn part(from: &Obj, backend: Backend) -> Result<Obj, ModelError> {
         &mut to,
         &["audioTranscription", "mediaProcessing", "speechMetadata"],
     );
+    Ok(to)
+}
+
+/// Port of `functionResponseToVertex` (with `functionResponsePartToVertex`), genai v1.77.0:
+/// `willContinue` and a part's `mediaProcessing` are Gemini API only.
+pub(crate) fn function_response_vertex(from: &Obj) -> Result<Obj, ModelError> {
+    let backend = Backend::VertexAi;
+    reject(from, &["willContinue"], backend)?;
+    let mut to = Obj::new();
+    copy(from, &mut to, &["scheduling"]);
+    convert_list(from, &mut to, "parts", |p| {
+        let mut out = Obj::new();
+        copy(p, &mut out, &["inlineData", "fileData"]);
+        reject(p, &["mediaProcessing"], backend)?;
+        Ok(out)
+    })?;
+    copy(from, &mut to, &["id", "name", "response"]);
     Ok(to)
 }
 

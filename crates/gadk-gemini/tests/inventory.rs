@@ -23,9 +23,11 @@ fn inventory_paths_exist() {
     let _ = std::mem::size_of::<Option<gadk_genai::ActivityStart>>();
     let _ = |e: gadk_model::ModelError| matches!(e, gadk_model::ModelError::Api { .. });
     let _ = std::mem::size_of::<Option<gadk_genai::AudioTranscriptionConfig>>();
+    let _ = std::mem::size_of::<Option<gadk_genai::AutomaticActivityDetection>>();
     let _ = std::mem::size_of::<Option<gadk_model::Backend>>();
     let _ = gadk_model::Backend::GeminiApi;
     let _ = gadk_model::Backend::VertexAi;
+    let _ = gadk_genai::Behavior::NonBlocking;
     let _ = std::mem::size_of::<Option<gadk_genai::Blob>>();
     let _ = std::mem::size_of::<Option<gadk_genai::BlockedReason>>();
     let _ = gadk_genai::BlockedReason::Blocklist;
@@ -44,6 +46,7 @@ fn inventory_paths_exist() {
     let _ = std::mem::size_of::<Option<gadk_genai::CodeExecutionResult>>();
     let _ = std::mem::size_of::<Option<gadk_genai::ComputerUse>>();
     let _ = std::mem::size_of::<Option<gadk_genai::Content>>();
+    let _ = gadk_genai::EndSensitivity::High;
     let _ = std::mem::size_of::<Option<gadk_genai::EnterpriseWebSearch>>();
     let _ = std::mem::size_of::<Option<gadk_genai::ExecutableCode>>();
     let _ = std::mem::size_of::<Option<gadk_genai::ExternalAPI>>();
@@ -94,6 +97,7 @@ fn inventory_paths_exist() {
     let _ = std::mem::size_of::<Option<gadk_genai::GenerateImagesConfig>>();
     let _ = std::mem::size_of::<Option<gadk_genai::GenerateImagesResponse>>();
     let _ = std::mem::size_of::<Option<gadk_genai::GenerationConfigRoutingConfig>>();
+    let _ = std::mem::size_of::<Option<gadk_genai::GenerationOutputConfig>>();
     let _ = std::mem::size_of::<Option<gadk_genai::GoogleMaps>>();
     let _ = std::mem::size_of::<Option<gadk_genai::GoogleSearch>>();
     let _ = std::mem::size_of::<Option<gadk_genai::GoogleSearchRetrieval>>();
@@ -126,7 +130,9 @@ fn inventory_paths_exist() {
     let _ = std::mem::size_of::<Option<gadk_genai::LogprobsResultCandidate>>();
     let _ = std::mem::size_of::<Option<gadk_genai::LogprobsResultTopCandidates>>();
     let _ = std::mem::size_of::<Option<gadk_genai::MCPServer>>();
+    let _ = gadk_genai::MediaModality::Audio;
     let _ = gadk_genai::MediaModality::Text;
+    let _ = gadk_genai::MediaProcessing::Static;
     let _ = gadk_genai::MediaResolution::High;
     let _ = gadk_genai::MediaResolution::Low;
     let _ = std::mem::size_of::<Option<gadk_genai::Modality>>();
@@ -199,14 +205,20 @@ fn inventory_paths_exist() {
     let _ = std::mem::size_of::<Option<gadk_genai::ToolExaAISearch>>();
     let _ = std::mem::size_of::<Option<gadk_genai::ToolParallelAISearch>>();
     let _ = std::mem::size_of::<Option<gadk_genai::ToolResponse>>();
+    let _ = gadk_genai::TrafficType::OnDemand;
     let _ = std::mem::size_of::<Option<gadk_genai::Transcription>>();
     let _ = std::mem::size_of::<Option<gadk_genai::Type>>();
     let _ = gadk_genai::Type::Array;
     let _ = gadk_genai::Type::Boolean;
     let _ = gadk_genai::Type::Integer;
+    let _ = gadk_genai::Type::Null;
     let _ = gadk_genai::Type::Number;
     let _ = gadk_genai::Type::Object;
     let _ = gadk_genai::Type::String;
+    let _ = gadk_genai::Type::Unspecified;
     let _ = std::mem::size_of::<Option<gadk_genai::URLContext>>();
+    let _ = std::mem::size_of::<Option<gadk_genai::UsageMetadata>>();
+    let _ = std::mem::size_of::<Option<gadk_genai::VertexRAGStore>>();
+    let _ = std::mem::size_of::<Option<gadk_genai::VertexRAGStoreRAGResource>>();
     let _ = std::mem::size_of::<Option<gadk_genai::VideoMetadata>>();
 }

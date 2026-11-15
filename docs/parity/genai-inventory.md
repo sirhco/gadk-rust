@@ -1,6 +1,6 @@
 # genai inventory — identifiers referenced by ADK-Go
 
-Generated from `grep -rhoE 'genai\.[A-Z][A-Za-z0-9]+' --include='*.go' ../adk-go | sort -u` against genai v1.75.0.
+Generated from `grep -rhoE 'genai\.[A-Z][A-Za-z0-9]+' --include='*.go' ../adk-go | sort -u` with `../adk-go` at ADK-Go `0990f9e`, against genai v1.77.0.
 
 | genai identifier | kind | Rust path | note |
 |---|---|---|---|
@@ -8,10 +8,12 @@ Generated from `grep -rhoE 'genai\.[A-Z][A-Za-z0-9]+' --include='*.go' ../adk-go
 | ActivityStart | struct | gadk_genai::ActivityStart | |
 | APIError | client | gadk_model::ModelError::Api | |
 | AudioTranscriptionConfig | struct | gadk_genai::AudioTranscriptionConfig | |
+| AutomaticActivityDetection | struct | gadk_genai::AutomaticActivityDetection | |
 | Backend | client | gadk_model::Backend | |
 | BackendGeminiAPI | client | gadk_model::Backend::GeminiApi | |
 | BackendUnspecified | client | N/A — `Option<Backend>::None` | |
 | BackendVertexAI | client | gadk_model::Backend::VertexAi | |
+| BehaviorNonBlocking | enum value | gadk_genai::Behavior::NonBlocking | serializes "NON_BLOCKING" |
 | Blob | struct | gadk_genai::Blob | |
 | BlockedReason | enum | gadk_genai::BlockedReason | string_enum! with Unknown(String) |
 | BlockedReasonBlocklist | enum value | gadk_genai::BlockedReason::Blocklist | serializes "BLOCKLIST" |
@@ -30,6 +32,7 @@ Generated from `grep -rhoE 'genai\.[A-Z][A-Za-z0-9]+' --include='*.go' ../adk-go
 | CodeExecutionResult | struct | gadk_genai::CodeExecutionResult | |
 | ComputerUse | struct | gadk_genai::ComputerUse | |
 | Content | struct | gadk_genai::Content | |
+| EndSensitivityHigh | enum value | gadk_genai::EndSensitivity::High | serializes "END_SENSITIVITY_HIGH" |
 | EnterpriseWebSearch | struct | gadk_genai::EnterpriseWebSearch | |
 | ExecutableCode | struct | gadk_genai::ExecutableCode | |
 | ExternalAPI | struct | gadk_genai::ExternalAPI | |
@@ -80,6 +83,7 @@ Generated from `grep -rhoE 'genai\.[A-Z][A-Za-z0-9]+' --include='*.go' ../adk-go
 | GenerateImagesConfig | struct | gadk_genai::GenerateImagesConfig | |
 | GenerateImagesResponse | struct | gadk_genai::GenerateImagesResponse | |
 | GenerationConfigRoutingConfig | struct | gadk_genai::GenerationConfigRoutingConfig | |
+| GenerationOutputConfig | struct | gadk_genai::GenerationOutputConfig | |
 | GoogleMaps | struct | gadk_genai::GoogleMaps | |
 | GoogleSearch | struct | gadk_genai::GoogleSearch | |
 | GoogleSearchRetrieval | struct | gadk_genai::GoogleSearchRetrieval | |
@@ -104,6 +108,7 @@ Generated from `grep -rhoE 'genai\.[A-Z][A-Za-z0-9]+' --include='*.go' ../adk-go
 | LanguagePython | enum value | gadk_genai::Language::Python | serializes "PYTHON" |
 | LanguageUnspecified | enum value | gadk_genai::Language::Unspecified | serializes "LANGUAGE_UNSPECIFIED" |
 | LiveClientContentInput | struct (alias of LiveSendClientContentParameters) | gadk_genai::LiveClientContentInput | |
+| LiveClientMessage | struct | N/A — the client wire envelope is private to gadk-gemini (`live::messages`) | ADK-Go uses it only in `live_connection_test.go` to decode sent frames |
 | LiveConnectConfig | struct | gadk_genai::LiveConnectConfig | |
 | LiveRealtimeInput | struct (alias of LiveSendRealtimeInputParameters) | gadk_genai::LiveRealtimeInput | |
 | LiveToolResponseInput | struct (alias of LiveSendToolResponseParameters) | gadk_genai::LiveToolResponseInput | |
@@ -111,7 +116,9 @@ Generated from `grep -rhoE 'genai\.[A-Z][A-Za-z0-9]+' --include='*.go' ../adk-go
 | LogprobsResultCandidate | struct | gadk_genai::LogprobsResultCandidate | |
 | LogprobsResultTopCandidates | struct | gadk_genai::LogprobsResultTopCandidates | |
 | MCPServer | struct | gadk_genai::MCPServer | |
+| MediaModalityAudio | enum value | gadk_genai::MediaModality::Audio | serializes "AUDIO" |
 | MediaModalityText | enum value | gadk_genai::MediaModality::Text | serializes "TEXT" |
+| MediaProcessingStatic | enum value | gadk_genai::MediaProcessing::Static | serializes "STATIC" |
 | MediaResolutionHigh | enum value | gadk_genai::MediaResolution::High | serializes "MEDIA_RESOLUTION_HIGH" |
 | MediaResolutionLow | enum value | gadk_genai::MediaResolution::Low | serializes "MEDIA_RESOLUTION_LOW" |
 | Modality | enum | gadk_genai::Modality | string_enum! with Unknown(String) |
@@ -145,7 +152,6 @@ Generated from `grep -rhoE 'genai\.[A-Z][A-Za-z0-9]+' --include='*.go' ../adk-go
 | PartMediaResolutionLevelMediaResolutionHigh | enum value | gadk_genai::PartMediaResolutionLevel::MediaResolutionHigh | serializes "MEDIA_RESOLUTION_HIGH" |
 | PartMediaResolutionLevelMediaResolutionLow | enum value | gadk_genai::PartMediaResolutionLevel::MediaResolutionLow | serializes "MEDIA_RESOLUTION_LOW" |
 | ProactivityConfig | struct | gadk_genai::ProactivityConfig | |
-| Ptr | client | N/A — Rust uses `Some(v)` | |
 | RAGChunk | struct | gadk_genai::RAGChunk | |
 | RAGChunkPageSpan | struct | gadk_genai::RAGChunkPageSpan | |
 | RealtimeInputConfig | struct | gadk_genai::RealtimeInputConfig | |
@@ -184,13 +190,19 @@ Generated from `grep -rhoE 'genai\.[A-Z][A-Za-z0-9]+' --include='*.go' ../adk-go
 | ToolExaAISearch | struct | gadk_genai::ToolExaAISearch | |
 | ToolParallelAISearch | struct | gadk_genai::ToolParallelAISearch | |
 | ToolResponse | struct | gadk_genai::ToolResponse | |
+| TrafficTypeOnDemand | enum value | gadk_genai::TrafficType::OnDemand | serializes "ON_DEMAND" |
 | Transcription | struct | gadk_genai::Transcription | |
 | Type | enum | gadk_genai::Type | string_enum! with Unknown(String) |
 | TypeArray | enum value | gadk_genai::Type::Array | serializes "ARRAY" |
 | TypeBoolean | enum value | gadk_genai::Type::Boolean | serializes "BOOLEAN" |
 | TypeInteger | enum value | gadk_genai::Type::Integer | serializes "INTEGER" |
+| TypeNULL | enum value | gadk_genai::Type::Null | serializes "NULL" |
 | TypeNumber | enum value | gadk_genai::Type::Number | serializes "NUMBER" |
 | TypeObject | enum value | gadk_genai::Type::Object | serializes "OBJECT" |
 | TypeString | enum value | gadk_genai::Type::String | serializes "STRING" |
+| TypeUnspecified | enum value | gadk_genai::Type::Unspecified | serializes "TYPE_UNSPECIFIED" |
 | URLContext | struct | gadk_genai::URLContext | |
+| UsageMetadata | struct | gadk_genai::UsageMetadata | |
+| VertexRAGStore | struct | gadk_genai::VertexRAGStore | |
+| VertexRAGStoreRAGResource | struct | gadk_genai::VertexRAGStoreRAGResource | |
 | VideoMetadata | struct | gadk_genai::VideoMetadata | |

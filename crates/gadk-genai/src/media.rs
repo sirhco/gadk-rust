@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! File and image types (port of genai v1.75.0 `types.go`).
+//! File and image types (port of genai v1.77.0 `types.go`).
 
 use crate::serde_util::{base64_bytes, i64_string_opt, is_zero};
 use bytes::Bytes;

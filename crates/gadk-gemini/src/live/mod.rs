@@ -15,7 +15,7 @@
 
 //! The Live (bidi streaming) connection over a WebSocket, for the Gemini API and Vertex AI.
 //!
-//! Ports genai v1.75.0 `live.go` (`Live.Connect`, `Session` send/receive) and ADK-Go
+//! Ports genai v1.77.0 `live.go` (`Live.Connect`, `Session` send/receive) and ADK-Go
 //! `internal/llminternal/googlellm/live_connection.go` (`LiveConnection`).
 
 mod messages;
@@ -30,7 +30,8 @@ use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use gadk_genai::{
     ActivityEnd, ActivityStart, Content, FunctionResponse, LiveClientContentInput,
-    LiveConnectConfig, LiveRealtimeInput, LiveServerMessage, LiveToolResponseInput, Part,
+    LiveClientContextUpdate, LiveConnectConfig, LiveRealtimeInput, LiveServerMessage,
+    LiveToolResponseInput, Part,
 };
 pub use gadk_model::RealtimeInput;
 use gadk_model::{Backend, LiveConnError, LiveConnErrorKind, LlmResponse};
@@ -500,7 +501,19 @@ impl LiveConnection {
         let input = LiveToolResponseInput {
             function_responses: responses,
         };
-        self.write(messages::tool_response_message(&input)?).await
+        self.write(messages::tool_response_message(self.backend, &input)?)
+            .await
+    }
+
+    /// genai `SendContextUpdate` (v1.77.0, preview): updates the system instruction and/or
+    /// the tools of the current session. Only the fields that are set are updated; the
+    /// update is processed in order with the rest of the inputs.
+    pub async fn send_context_update(
+        &self,
+        input: LiveClientContextUpdate,
+    ) -> Result<(), GeminiError> {
+        self.write(messages::context_update_message(self.backend, &input)?)
+            .await
     }
 
     /// Port of Go `Recv`: the next response. `None` when the stream ended without a close
