@@ -94,18 +94,19 @@ pub use gadk_session as session;
 /// feature (feature `database`, not on by default; re-export of `gadk-session-database`).
 #[cfg(feature = "database")]
 pub use gadk_session_database as session_database;
-/// OpenTelemetry export, as ADK-Go's `telemetry` package: tracer and logger providers from
-/// options and the environment (OTLP/HTTP, export to `telemetry.googleapis.com`, the GCP resource
-/// detector) and the `tracing` layer that exports gadk's ADK spans and log records through them
-/// (feature `telemetry`, not on by default, enabled by `launcher`; re-export of `gadk-telemetry`).
+/// OpenTelemetry export, as ADK-Go's `telemetry` package: tracer, logger and meter providers
+/// from options and the environment (OTLP/HTTP, export to `telemetry.googleapis.com`, the GCP
+/// resource detector) and the `tracing` layer that exports gadk's ADK spans and log records
+/// through them (feature `telemetry`, not on by default, enabled by `launcher`; re-export of
+/// `gadk-telemetry`).
 #[cfg(feature = "telemetry")]
 pub use gadk_telemetry as telemetry;
 /// Built-in tools that need no authentication: the Gemini built-ins, artifact and memory tools,
 /// the example tool, tool search, the skills toolset and the `toolauth` wire model (re-export of
 /// `gadk-tools`).
 pub use gadk_tools as tools;
-/// Sessions and memory in a Vertex AI Agent Engine (feature `vertexai`, not on by default;
-/// re-export of `gadk-vertexai`).
+/// Sessions and memory in a Vertex AI Agent Engine and an example provider backed by a Vertex AI
+/// Example Store (feature `vertexai`, not on by default; re-export of `gadk-vertexai`).
 #[cfg(feature = "vertexai")]
 pub use gadk_vertexai as vertexai;
 
