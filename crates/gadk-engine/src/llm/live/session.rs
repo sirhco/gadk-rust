@@ -144,6 +144,18 @@ impl LiveSessionImpl {
         self.push(Err(err)).await
     }
 
+    /// Queues `req` on Go's `inputCh` for a sender task without waiting for it to be taken (the
+    /// live flow's function responses, Go 33a587e2): it is sent after the requests queued before
+    /// it. `false` once the session is done.
+    pub(crate) async fn queue_input(&self, req: LiveRequest) -> bool {
+        let (ack_tx, _ack_rx) = oneshot::channel();
+        tokio::select! {
+            biased;
+            _ = self.done.cancelled() => false,
+            sent = self.input_tx.send((req, ack_tx)) => sent.is_ok(),
+        }
+    }
+
     /// The receiving side of Go's `inputCh` for one connection's sender task: the next request
     /// (acknowledged, so the caller's `send` returns), or `None` once `conn_token` or `done` is
     /// cancelled. Requests not yet taken stay queued for the next connection's sender.

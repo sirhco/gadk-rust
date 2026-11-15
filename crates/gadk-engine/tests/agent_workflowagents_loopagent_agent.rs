@@ -35,7 +35,7 @@ use gadk_model::{Llm, LlmRequest, LlmResponse, ModelError};
 use gadk_platform::Platform;
 use gadk_session::{CreateRequest, Event, EventActions, InMemorySessionService, SessionService};
 use pretty_assertions::assert_eq;
-use serde_json::Map;
+use serde_json::{Map, Value};
 
 /// Go FakeLLM: a function call to `exampleFunction` on the first turn, then "hello <id>".
 struct FakeLlm {
@@ -201,6 +201,7 @@ struct NewCase {
     want_events: Vec<Event>,
 }
 
+// parity: adapted: Go's tool returns a non-nil empty map (sent as {}); a gadk tool's empty result is Go's nil and is sent as {"result": null} (ledger 1b divergence)
 #[tokio::test]
 async fn test_new_loop_agent() {
     let call = || {
@@ -211,7 +212,10 @@ async fn test_new_loop_agent() {
     };
     let response = || {
         Content::from_parts(
-            vec![Part::from_function_response("exampleFunction", Map::new())],
+            vec![Part::from_function_response(
+                "exampleFunction",
+                Map::from_iter([("result".to_owned(), Value::Null)]),
+            )],
             ROLE_USER,
         )
     };

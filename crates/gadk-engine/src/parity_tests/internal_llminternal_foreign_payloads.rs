@@ -138,7 +138,6 @@ fn foreign_event(parts: Vec<Part>) -> Event {
 }
 
 #[test]
-#[ignore = "8a bug: convert_foreign_event relays a foreign event's metadata-only parts (empty, signature, part/video/speech metadata, media resolution or processing) beside its payload; Go 6caa3b85 keeps only the payload"]
 fn test_convert_foreign_event_retains_payload_parts() {
     for (payload_name, payload) in payloads() {
         for signed in [false, true] {

@@ -22,7 +22,7 @@ use pretty_assertions::assert_eq;
 use serde_json::json;
 
 use crate::llm::processors::contents::{
-    build_contents_current_turn_context_only, build_contents_default,
+    build_contents_current_turn_context_only, build_contents_default, is_tool_sub_branch_event,
 };
 
 fn sub_branch_event(author: &str, branch: &str, content: Content) -> Event {
@@ -37,10 +37,82 @@ fn sub_branch_event(author: &str, branch: &str, content: Content) -> Event {
     }
 }
 
+#[test]
+fn test_is_tool_sub_branch_event() {
+    let ids = std::collections::HashSet::from(["fc1".to_owned()]);
+    // (name, agent branch, event branch, agent name, want)
+    let cases = [
+        (
+            "root agent, tool branch",
+            "",
+            "translator@fc1",
+            "coordinator",
+            true,
+        ),
+        (
+            "root agent, nested below tool branch",
+            "",
+            "translator@fc1.inner@1",
+            "coordinator",
+            true,
+        ),
+        (
+            "branched agent, tool branch below it",
+            "wf.coord@1",
+            "wf.coord@1.translator@fc1",
+            "coordinator",
+            true,
+        ),
+        (
+            "own branch carries a call id",
+            "translator@fc1",
+            "translator@fc1",
+            "translator",
+            false,
+        ),
+        (
+            "own events below own branch",
+            "",
+            "translator@fc1",
+            "translator",
+            false,
+        ),
+        (
+            "workflow node branch keyed by counter",
+            "",
+            "worker@1",
+            "coordinator",
+            false,
+        ),
+        ("unknown id", "", "translator@fc2", "coordinator", false),
+        ("no run id", "", "parallel.a", "coordinator", false),
+        (
+            "event on an ancestor branch",
+            "parent.translator@fc1",
+            "parent",
+            "coordinator",
+            false,
+        ),
+        ("unbranched event", "", "", "coordinator", false),
+    ];
+    for (name, agent_branch, event_branch, agent_name, want) in cases {
+        // Go subBranchEvent("x", branch, nil): no content.
+        let ev = Event {
+            author: "x".into(),
+            branch: event_branch.into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            is_tool_sub_branch_event(agent_branch, &ev, agent_name, &ids),
+            want,
+            "{name}: isToolSubBranchEvent({agent_branch:?}, branch {event_branch:?}, {agent_name:?})"
+        );
+    }
+}
+
 /// A root agent that ran a single_turn sub-agent as a tool gets only the tool's function
 /// response, not the sub-agent's own transcript from the tool's sub-branch.
 #[test]
-#[ignore = "8a bug: the contents processor shows a tool sub-agent's transcript from its <agent>@<call id> sub-branch to the calling agent, and in current-turn mode it starts the turn there; Go ab78c5ae skips tool sub-branch events"]
 fn test_build_contents_skips_tool_sub_branch_events() {
     let call = Content::from_parts(
         vec![Part {

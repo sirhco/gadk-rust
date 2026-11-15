@@ -196,7 +196,6 @@ async fn test_handle_function_calls_streaming() {
 struct NoArgs {}
 
 #[tokio::test]
-#[ignore = "8a bug: a streaming tool's panic text reaches the model; Go e83ab5b0 replaces it with \"Invoking `<tool>()` failed with an internal error.\""]
 async fn test_handle_function_calls_streaming_tool_errors() {
     type Handler = fn(
         Context,

@@ -106,12 +106,24 @@ pub(crate) fn collect_resume_batches(
     agent_name: &str,
     events: &[Event],
 ) -> Result<Vec<ResumeBatch>, AgentError> {
-    let Some((confirmation_responses, confirmation_event_index)) = confirmation_responses(events)?
-    else {
+    let Some(confirmation_responses) = confirmation_responses(events)? else {
         return Ok(Vec::new());
     };
     if confirmation_responses.is_empty() {
         return Ok(Vec::new());
+    }
+
+    // Call ID → index of the latest event holding a response to it, and confirmation-call ID →
+    // index of the user's first answer to it (Go 550bb4c2).
+    let mut response_latest_index: HashMap<&str, usize> = HashMap::new();
+    let mut first_answer_index: HashMap<&str, usize> = HashMap::new();
+    for (idx, ev) in events.iter().enumerate() {
+        for resp in function_responses(ev.response.content.as_ref()) {
+            response_latest_index.insert(resp.id.as_str(), idx);
+            if ev.author == "user" && resp.name == REQUEST_CONFIRMATION_FUNCTION_CALL_NAME {
+                first_answer_index.entry(resp.id.as_str()).or_insert(idx);
+            }
+        }
     }
 
     // Detect tampered confirmations before resuming any tool: a confirmation-call ID that
@@ -155,7 +167,12 @@ pub(crate) fn collect_resume_batches(
         }
         let mut to_resume: HashMap<String, (ToolConfirmation, FunctionCall)> = HashMap::new();
         let mut resume_order: Vec<String> = Vec::new();
+        let mut confirmation_id_by_call_id: HashMap<String, &str> = HashMap::new();
         for fc in calls {
+            // Only a confirmation request resumes a call (Go 51e8fe4c).
+            if fc.name != REQUEST_CONFIRMATION_FUNCTION_CALL_NAME {
+                continue;
+            }
             let Some(confirmation) = confirmation_responses.get(&fc.id) else {
                 continue;
             };
@@ -168,25 +185,28 @@ pub(crate) fn collect_resume_batches(
             if !to_resume.contains_key(&original.id) {
                 resume_order.push(original.id.clone());
             }
+            confirmation_id_by_call_id.insert(original.id.clone(), fc.id.as_str());
             to_resume.insert(original.id.clone(), (confirmation.clone(), original));
         }
         if to_resume.is_empty() {
             continue;
         }
 
-        // Remove the tools that have already been answered after the confirmation event.
-        for later in events[confirmation_event_index + 1..].iter().rev() {
-            let responses = function_responses(later.response.content.as_ref());
-            if responses.is_empty() {
-                continue;
-            }
-            for resp in responses {
-                to_resume.remove(&resp.id);
-            }
-            if to_resume.is_empty() {
-                break;
-            }
-        }
+        // Remove the tools that already have a result stored after the user's first answer to
+        // the confirmation (repeated approvals). The "requires confirmation" placeholder
+        // response is stored before that answer, and may sort after the request, so it must not
+        // count.
+        to_resume.retain(|call_id, _| {
+            let first_answer = confirmation_id_by_call_id
+                .get(call_id)
+                .and_then(|c| first_answer_index.get(c))
+                .copied()
+                .unwrap_or(0);
+            let start = k.max(first_answer);
+            !response_latest_index
+                .get(call_id.as_str())
+                .is_some_and(|&idx| idx > start)
+        });
         if to_resume.is_empty() {
             continue;
         }
@@ -218,12 +238,9 @@ pub(crate) fn collect_resume_batches(
 /// Confirmation-call ID → the user's decision.
 type ConfirmationResponses = HashMap<String, ToolConfirmation>;
 
-/// The confirmation responses of the latest user event, keyed by confirmation-call ID, and that
-/// event's index. `None` when the latest user event carries no function response (Go returns
-/// early).
-fn confirmation_responses(
-    events: &[Event],
-) -> Result<Option<(ConfirmationResponses, usize)>, AgentError> {
+/// The confirmation responses of the latest user event, keyed by confirmation-call ID. `None`
+/// when the latest user event carries no function response (Go returns early).
+fn confirmation_responses(events: &[Event]) -> Result<Option<ConfirmationResponses>, AgentError> {
     let Some(k) = events.iter().rposition(|e| e.author == "user") else {
         return Ok(None);
     };
@@ -239,14 +256,20 @@ fn confirmation_responses(
         }
         let tc: ToolConfirmation = match fr.response.get("response") {
             // ADK web client sends a request always encapsulated in a 'response' key.
+            // A client that has already decoded that JSON sends the decoded value instead, which
+            // adk-python accepts too (Go 0d95aed4).
             Some(resp) if fr.response.len() == 1 => {
-                let Value::String(json) = resp else {
-                    return Err(AgentError::other(format!(
-                        "error 'response' key found but value is not a string for confirmation function response for event id {}",
-                        go_quote(&event.id)
-                    )));
+                let decoded = match resp {
+                    Value::String(json) => serde_json::from_str(json),
+                    Value::Null => {
+                        return Err(AgentError::other(format!(
+                            "error 'response' key found but value is null for confirmation function response for event id {}",
+                            go_quote(&event.id)
+                        )));
+                    }
+                    v => serde_json::from_value(v.clone()),
                 };
-                serde_json::from_str(json).map_err(|e| {
+                decoded.map_err(|e| {
                     wrap_err(
                         format!(
                             "error 'response' key found but failed unmarshalling confirmation function response for event id {}",
@@ -268,7 +291,7 @@ fn confirmation_responses(
         };
         out.insert(fr.id.clone(), tc);
     }
-    Ok(Some((out, k)))
+    Ok(Some(out))
 }
 
 #[cfg(test)]
@@ -429,10 +452,13 @@ mod tests {
         bad.function_response.as_mut().unwrap().response =
             json!({"response": 1}).as_object().unwrap().clone();
         let events = vec![event("user", "user", vec![bad])];
+        // Go 0d95aed4: a decoded value is accepted; a scalar does not decode.
         let err = collect_resume_batches(AGENT, &events).unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "error 'response' key found but value is not a string for confirmation function response for event id \"\""
+        assert!(
+            err.to_string().starts_with(
+                "error 'response' key found but failed unmarshalling confirmation function response for event id \"\": "
+            ),
+            "{err}"
         );
     }
 

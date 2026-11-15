@@ -102,7 +102,6 @@ fn bytes_part(data: &'static [u8], mime_type: &str) -> Part {
 }
 
 #[tokio::test]
-#[ignore = "8a bug: inject_session_state renders a text artifact loaded as inline data (text/*, JSON/XML/CSV MIME types or text file extensions) as empty; Go 860c7dac decodes it"]
 async fn test_inject_session_state() {
     let cases = vec![
         Case {
@@ -452,7 +451,6 @@ And another optional artifact:
 // parity: adapted: Go calls the unexported artifactText(fileName, part); gadk has no such
 // helper, so each row renders `{artifact.<fileName>}` through inject_session_state.
 #[tokio::test]
-#[ignore = "8a bug: gadk has no artifactText rule set; inject_session_state renders every inline-data artifact as empty (Go 860c7dac)"]
 async fn test_artifact_text() {
     // (name, file name, MIME type, data, want)
     let cases: Vec<(&str, &str, &str, &'static [u8], &str)> = vec![

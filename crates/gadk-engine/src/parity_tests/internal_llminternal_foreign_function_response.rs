@@ -42,9 +42,10 @@ fn on_branch(branch: &str, mut ev: Event) -> Event {
     ev
 }
 
+/// The role is kept as given (`Content::from_parts` would turn an empty role into "user").
 fn call_with_role(role: &str, id: &str) -> Content {
-    Content::from_parts(
-        vec![Part {
+    Content {
+        parts: vec![Part {
             function_call: Some(FunctionCall {
                 id: id.into(),
                 name: "adk_request_input".into(),
@@ -53,8 +54,8 @@ fn call_with_role(role: &str, id: &str) -> Content {
             }),
             ..Default::default()
         }],
-        role,
-    )
+        role: role.into(),
+    }
 }
 
 fn call(id: &str) -> Content {
@@ -97,7 +98,6 @@ fn start() -> Content {
 /// its call is missing from the history: it is dropped mid-history and fails the request when
 /// it is the last event.
 #[test]
-#[ignore = "8a bug: a user's function response to another agent's call stays a raw response (dropped mid-history, orphaned at the end); Go dba8afa2 shows it as \"For context:\""]
 fn test_build_contents_user_response_to_other_agent_call_is_context() {
     let done = context(&["[d] said: done"]);
     // (name, branch, events, want)
@@ -207,7 +207,6 @@ fn test_build_contents_user_response_to_other_agent_call_is_context() {
 /// Text sent in the same message as the answer to another agent's call arrives as context with
 /// it, whether the agent gets its history or only the current turn.
 #[test]
-#[ignore = "8a bug: text sent with the answer to another agent's call stays a raw user turn instead of \"For context:\" (Go dba8afa2)"]
 fn test_build_contents_user_text_with_response_to_other_agent_call() {
     let answer = Content::from_parts(
         vec![Part::from_text("note"), response_part("b1")],
@@ -241,7 +240,6 @@ fn test_build_contents_user_text_with_response_to_other_agent_call() {
 /// response in the suffix pairs with the call before it the same way as when the whole session
 /// is built.
 #[test]
-#[ignore = "8a bug: a response in a built suffix does not pair with another agent's call before the suffix (Go dba8afa2 records calls from the whole session)"]
 fn test_build_contents_response_in_suffix_to_other_agent_call_before_it() {
     let ev =
         |author: &str, branch: &str, content: Content| on_branch(branch, event(author, content));

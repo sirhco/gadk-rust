@@ -21,7 +21,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use futures::future::BoxFuture;
 use gadk_agent::{AgentError, InvocationContext, Mode, REQUEST_CONFIRMATION_FUNCTION_CALL_NAME};
 use gadk_genai::{Content, Part};
-use gadk_model::{LlmRequest, LlmResponse};
+use gadk_model::{LlmRequest, LlmResponse, is_internal_live_artifact_part};
 use gadk_session::Event;
 use serde_json::{Map, Value};
 
@@ -36,6 +36,7 @@ use crate::{
         mode::{bound_mode, mode_for},
         processors::{go_json_marshal, go_quote_list, wrap_err},
         state::reveal,
+        transfer::TRANSFER_TO_AGENT_TOOL_NAME,
     },
     tool::utils::{
         content, event_belongs_to_branch, function_calls, function_responses,
@@ -147,29 +148,48 @@ pub(crate) fn build_contents_default_with_call_source(
 ) -> Result<Vec<Content>, AgentError> {
     // Keep the contents and the function calls and responses visible to the current agent.
     let mut filtered: Vec<Event> = Vec::new();
+    let call_ids = function_call_ids(all_events);
+    // Whether the agent sees `ev` at all: it has content (or a transcription or compaction
+    // summary), and it is on the agent's branch, not on a tool sub-branch below it, in its
+    // isolation scope (an exact match), and not excluded. Compaction events are exempt from the
+    // content check: they carry their summary on the compaction record, and `apply` below
+    // expands them into content.
+    let visible = |ev: &Event| {
+        !is_empty_event(ev)
+            && event_belongs_to_branch(branch, &ev.branch)
+            && !is_tool_sub_branch_event(branch, ev, agent_name, &call_ids)
+            && ev.isolation_scope == isolation_scope
+            && !should_exclude_event(ev)
+    };
+    // The author of the latest visible call with each ID, filled in as the events are read so a
+    // response pairs with the call before it (Go dba8afa2). When `events` is a suffix of
+    // `all_events`, as for the compaction token estimate, the calls before the suffix are
+    // recorded first, so a response in the suffix pairs the same way it does when the whole
+    // session is built.
+    let mut call_authors: HashMap<String, String> = HashMap::new();
+    if let Some(first) = events.first()
+        && let Some(start) = all_events
+            .iter()
+            .position(|e| std::ptr::eq(e, first) || e == first)
+    {
+        for ev in &all_events[..start] {
+            if visible(ev) {
+                record_call_authors(&mut call_authors, ev);
+            }
+        }
+    }
     for ev in events {
-        // Skip events without content or role, UNLESS they carry transcriptions.
-        // Compaction events are exempt: they carry their summary on the compaction record
-        // rather than on their content, and `apply` below expands them into content.
-        let no_content = content(ev).is_none_or(|c| c.role.is_empty() || c.parts.is_empty());
-        if no_content
-            && ev.response.input_transcription.is_none()
-            && ev.response.output_transcription.is_none()
-            && !has_usable_summary(ev)
-        {
+        if !visible(ev) {
             continue;
         }
-        if !event_belongs_to_branch(branch, &ev.branch) {
-            continue;
-        }
-        // Isolation scope is an exact match.
-        if ev.isolation_scope != isolation_scope {
-            continue;
-        }
-        if should_exclude_event(ev) {
-            continue;
-        }
-        if is_other_agent_reply(agent_name, ev) && !has_usable_summary(ev) {
+        // A function response to a call another agent made is that agent's exchange, so it is
+        // presented as context like the call itself, as in adk-python's _get_contents. A
+        // response pairs with the latest visible call before it, so a later call that reuses
+        // the ID does not turn the agent's own finished exchange into context.
+        let foreign = is_other_agent_reply(agent_name, ev)
+            || answers_other_agent_call(agent_name, ev, &call_authors);
+        record_call_authors(&mut call_authors, ev);
+        if foreign && !has_usable_summary(ev) {
             // None signals the foreign event is dropped (e.g. a thought-only turn).
             if let Some(converted) = convert_foreign_event(ev) {
                 filtered.push(converted);
@@ -242,8 +262,11 @@ pub(crate) fn build_contents_default_with_call_source(
         let Some(mut c) = ev.response.content else {
             continue;
         };
-        // Gemini 3 in streaming returns a last response with an empty part; filter it out.
-        c.parts.retain(|p| *p != Part::default());
+        // Gemini 3 in streaming returns a last response with an empty part; filter it out. The
+        // live audio cache records its blobs as artifact:// refs that are ADK bookkeeping, not
+        // conversation content; replaying one fails the request (Go 22ff1839).
+        c.parts
+            .retain(|p| *p != Part::default() && !is_internal_live_artifact_part(p));
         if c.parts.is_empty() {
             continue;
         }
@@ -589,6 +612,13 @@ pub(crate) fn merge_function_response_events(events: &[Event]) -> Result<Event, 
 
 /// Port of contents_processor.go:757 buildContentsCurrentTurnContextOnly: contents for the
 /// current turn only, which starts at the latest visible event from the user or another agent.
+///
+/// A tool result the caller posted back (a long-running tool's, say) is not a turn start, and
+/// the turn reaches back to the call it answers, past any user turn sent while the tool was
+/// pending (Go e847ba7d). A `transfer_to_agent` hand-over continues the turn of the request it
+/// hands over, so it does not start the turn either (Go 86620857); with no earlier turn start,
+/// the turn starts at the latest hand-over. An event with nothing to read (Go fc6de07d) or on a
+/// tool's sub-branch (Go ab78c5ae) cannot start the turn.
 pub(crate) fn build_contents_current_turn_context_only(
     agent_name: &str,
     branch: &str,
@@ -597,14 +627,49 @@ pub(crate) fn build_contents_current_turn_context_only(
     is_single_turn: bool,
     user_content: Option<&Content>,
 ) -> Result<Vec<Content>, AgentError> {
+    // The IDs of every call in the session, an empty one included: full-history mode pairs a
+    // result and a call that both lack an ID, so this mode tracks them too.
+    let all_call_ids: HashSet<&str> = events
+        .iter()
+        .flat_map(|e| function_calls(content(e)))
+        .map(|c| c.id.as_str())
+        .collect();
+    let sub_branch_call_ids = function_call_ids(events);
+    let mut unanswered: HashSet<&str> = HashSet::new();
+    // The latest hand-over skipped as a turn start below, if any.
+    let mut handover: Option<usize> = None;
     for i in (0..events.len()).rev() {
         let event = &events[i];
+        for call in function_calls(content(event)) {
+            unanswered.remove(call.id.as_str());
+        }
         // A sibling branch's event is not part of this agent's current turn.
         if !event_belongs_to_branch(branch, &event.branch) {
             continue;
         }
+        // A tool's sub-branch event is skipped in the contents, so it cannot start the turn
+        // either: it would cut off the call and the response that came before it.
+        if is_tool_sub_branch_event(branch, event, agent_name, &sub_branch_call_ids) {
+            continue;
+        }
         // An out-of-scope event is invisible to the agent, so it cannot start its turn.
         if event.isolation_scope != isolation_scope {
+            continue;
+        }
+        if is_submitted_tool_result(event) {
+            for r in function_responses(content(event)) {
+                if all_call_ids.contains(r.id.as_str()) {
+                    unanswered.insert(r.id.as_str());
+                }
+            }
+            continue;
+        }
+        if !unanswered.is_empty() {
+            continue;
+        }
+        // An event that gives the model nothing to read is left out of the contents, so it
+        // cannot start the turn either: it would slice out the input before it.
+        if is_empty_event(event) {
             continue;
         }
         let foreign = is_other_agent_reply(agent_name, event);
@@ -612,17 +677,35 @@ pub(crate) fn build_contents_current_turn_context_only(
         if foreign && !has_usable_summary(event) && convert_foreign_event(event).is_none() {
             continue;
         }
-        if event.author == "user" || foreign {
-            return build_contents_default_with_call_source(
-                agent_name,
-                branch,
-                isolation_scope,
-                &events[i..],
-                events,
-                is_single_turn,
-                user_content,
-            );
+        if event.author != "user" && !foreign {
+            continue;
         }
+        if is_direct_transfer(event) {
+            handover.get_or_insert(i);
+            continue;
+        }
+        return build_contents_default_with_call_source(
+            agent_name,
+            branch,
+            isolation_scope,
+            &events[i..],
+            events,
+            is_single_turn,
+            user_content,
+        );
+    }
+    // With no earlier turn start, the turn starts at the latest hand-over. Falling back to the
+    // whole session instead would show the agent its own earlier turns.
+    if let Some(h) = handover {
+        return build_contents_default_with_call_source(
+            agent_name,
+            branch,
+            isolation_scope,
+            &events[h..],
+            events,
+            is_single_turn,
+            user_content,
+        );
     }
     build_contents_default(
         agent_name,
@@ -634,9 +717,103 @@ pub(crate) fn build_contents_current_turn_context_only(
     )
 }
 
+/// Port of contents_processor.go isEmptyEvent: `ev` gives the model nothing to read (no content
+/// with a role and parts, no transcription and no usable compaction summary).
+fn is_empty_event(ev: &Event) -> bool {
+    content(ev).is_none_or(|c| c.role.is_empty() || c.parts.is_empty())
+        && ev.response.input_transcription.is_none()
+        && ev.response.output_transcription.is_none()
+        && !has_usable_summary(ev)
+}
+
+/// Port of contents_processor.go isSubmittedToolResult: a tool result the caller posted back as
+/// a user-authored function response.
+fn is_submitted_tool_result(ev: &Event) -> bool {
+    ev.author == "user" && !function_responses(content(ev)).is_empty()
+}
+
+/// Port of contents_processor.go isDirectTransfer: a `transfer_to_agent` call or the response
+/// that carries out the transfer.
+fn is_direct_transfer(ev: &Event) -> bool {
+    !ev.actions.transfer_to_agent.is_empty()
+        || function_calls(content(ev))
+            .iter()
+            .any(|c| c.name == TRANSFER_TO_AGENT_TOOL_NAME)
+}
+
 /// Port of contents_processor.go isOtherAgentReply.
 fn is_other_agent_reply(current_agent_name: &str, ev: &Event) -> bool {
     ev.author != current_agent_name && ev.author != "user"
+}
+
+/// Port of contents_processor.go recordCallAuthors: `ev`'s author is the author of each function
+/// call with an ID in `ev`. A call without one is skipped, so a response without an ID never
+/// matches it.
+fn record_call_authors(authors: &mut HashMap<String, String>, ev: &Event) {
+    for call in function_calls(content(ev)) {
+        if !call.id.is_empty() {
+            authors.insert(call.id.clone(), ev.author.clone());
+        }
+    }
+}
+
+/// Port of contents_processor.go answersOtherAgentCall: `ev` holds a function response to a call
+/// that an agent other than `current_agent_name` made.
+fn answers_other_agent_call(
+    current_agent_name: &str,
+    ev: &Event,
+    call_authors: &HashMap<String, String>,
+) -> bool {
+    function_responses(content(ev)).iter().any(|r| {
+        call_authors
+            .get(&r.id)
+            .is_some_and(|a| a != current_agent_name && a != "user")
+    })
+}
+
+/// Port of tool_sub_branch.go functionCallIDs: the non-empty IDs of the function calls in
+/// `events`.
+pub(crate) fn function_call_ids(events: &[Event]) -> HashSet<String> {
+    events
+        .iter()
+        .flat_map(|e| function_calls(content(e)))
+        .filter(|c| !c.id.is_empty())
+        .map(|c| c.id.clone())
+        .collect()
+}
+
+/// Port of tool_sub_branch.go isToolSubBranchEvent (Go ab78c5ae): `ev` was published by a tool
+/// on a sub-branch below `agent_branch`, such as a single_turn sub-agent run on
+/// `<agent>@<function_call_id>`. The calling agent gets the tool's function response, so these
+/// events are not part of its context.
+///
+/// Every segment below `agent_branch` is checked, so events nested further down a tool's
+/// sub-branch are skipped too. A segment naming `agent_name` is the agent's own branch and is
+/// not skipped. A segment keyed by a run counter is a workflow node's branch and is not skipped
+/// either, unless a function call in the session has an ID equal to that counter.
+pub(crate) fn is_tool_sub_branch_event(
+    agent_branch: &str,
+    ev: &Event,
+    agent_name: &str,
+    call_ids: &HashSet<String>,
+) -> bool {
+    if ev.branch.is_empty() {
+        return false;
+    }
+    let base: Vec<&str> = if agent_branch.is_empty() {
+        Vec::new()
+    } else {
+        agent_branch.split('.').collect()
+    };
+    let segments: Vec<&str> = ev.branch.split('.').collect();
+    if segments.len() <= base.len() || segments[..base.len()] != base[..] {
+        return false;
+    }
+    segments[base.len()..].iter().any(|segment| {
+        segment
+            .rfind('@')
+            .is_some_and(|i| call_ids.contains(&segment[i + 1..]) && &segment[..i] != agent_name)
+    })
 }
 
 /// Go `stringify` (contents_processor.go:855) of a function-call args or function-response map.
@@ -652,8 +829,9 @@ fn stringify_map(m: &Map<String, Value>) -> String {
 }
 
 /// Port of contents_processor.go:798 ConvertForeignEvent: presents another agent's event as
-/// user context. Thought parts are omitted. Returns `Some(ev.clone())` for a content-less event
-/// and `None` to drop it (a thought-only foreign turn).
+/// user context. Thought parts, internal live-artifact refs (Go 22ff1839) and standalone metadata
+/// (Go 6caa3b85) are omitted. Returns `Some(ev.clone())` for a content-less event and `None` to
+/// drop it (a foreign turn with no remaining payload).
 pub(crate) fn convert_foreign_event(ev: &Event) -> Option<Event> {
     let Some(c) = content(ev).filter(|c| !c.parts.is_empty()) else {
         return Some(ev.clone());
@@ -662,6 +840,12 @@ pub(crate) fn convert_foreign_event(ev: &Event) -> Option<Event> {
     for p in &c.parts {
         // Never replay another agent's private reasoning.
         if p.thought {
+            continue;
+        }
+        // The live audio cache authors its blob events as the agent that spoke. Skipping the
+        // refs here, rather than only after conversion, lets an event whose only parts are
+        // internal refs convert to `None` instead of a bare "For context:" turn.
+        if is_internal_live_artifact_part(p) {
             continue;
         }
         if !p.text.is_empty() {
@@ -681,8 +865,16 @@ pub(crate) fn convert_foreign_event(ev: &Event) -> Option<Event> {
                 fr.name,
                 stringify_map(&fr.response)
             )));
-        } else {
-            // Fall back to the original part for non-text, non-function parts.
+        } else if p.inline_data.is_some()
+            || p.file_data.is_some()
+            || p.executable_code.is_some()
+            || p.code_execution_result.is_some()
+            || p.tool_call.is_some()
+            || p.tool_response.is_some()
+            || p.audio_transcription.is_some()
+        {
+            // Keep Go's server-tool and transcript parts alongside Python's media/code payloads.
+            // Standalone metadata has no relay payload.
             parts.push(p.clone());
         }
     }

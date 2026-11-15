@@ -210,7 +210,6 @@ fn confirmation_response(id: &str, confirmed: bool) -> Part {
 }
 
 #[tokio::test]
-#[ignore = "8a bug: the confirmation response wrapper only accepts a JSON string; a decoded object {\"response\": {\"confirmed\": ...}} is not resumed (Go 0d95aed4 accepts it and rejects scalars and null)"]
 async fn test_request_confirmation_request_processor() {
     let confirmation_events = |confirmed: bool| {
         vec![
@@ -503,7 +502,6 @@ async fn test_request_confirmation_resume_skips_already_answered_calls() {
 /// A confirmation response delivered a second time, after the confirmed call already
 /// produced a result, does not dispatch the tool again.
 #[tokio::test]
-#[ignore = "8a bug: a repeated approval re-runs a confirmed tool whose result is already in the session (Go 550bb4c2 skips calls answered after the approval)"]
 async fn test_request_confirmation_repeated_approval_does_not_rerun_tool() {
     const CALL_ID: &str = "call-1";
     const CONFIRMATION_ID: &str = "confirmation_call-1";
@@ -809,7 +807,6 @@ async fn test_request_confirmation_first_approval_placeholder_after_request() {
 }
 
 #[tokio::test]
-#[ignore = "8a bug: the confirmation processor resumes any call whose args carry originalFunctionCall, not only adk_request_confirmation calls (Go 51e8fe4c)"]
 async fn test_request_confirmation_resumes_only_request_confirmation_calls() {
     let confirmation_request = |name: &str, id: &str, original_call_id: &str| Part {
         function_call: Some(FunctionCall {

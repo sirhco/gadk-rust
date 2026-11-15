@@ -278,7 +278,6 @@ async fn test_parallel_function_calls_with_partial_hitl() {
 /// must not be called again to summarize it. adk-python stops on the same condition
 /// (base_llm_flow.py, _run_one_step_async, preprocess_yielded_final_response).
 #[tokio::test]
-#[ignore = "8a bug: a final response event yielded by preprocessing (a confirmed tool that sets skip_summarization) does not end the step; the flow calls the model again (Go 074b0879)"]
 async fn test_confirmed_tool_with_skip_summarization_ends_the_turn() {
     let secure_tool = FunctionTool::new(
         FunctionToolConfig {

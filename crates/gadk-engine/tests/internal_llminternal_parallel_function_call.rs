@@ -171,7 +171,6 @@ impl Seen {
 #[case::replay_gemini_3_flash_preview("gemini-3-flash-preview", concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/internal/llminternal/testdata/TestParallelFunctionCalls_test_parallel_function_calls_gemini-3-flash-preview.httprr"))]
 #[case::replay_gemini_3_1_pro_preview("gemini-3.1-pro-preview", concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/internal/llminternal/testdata/TestParallelFunctionCalls_test_parallel_function_calls_gemini-3.1-pro-preview.httprr"))]
 #[tokio::test]
-#[ignore = "8a bug: the aggregated SSE response drops the model version (StreamingResponseAggregator::close; Go 8be9129e)"]
 async fn test_parallel_function_calls(#[case] model_name: &str, #[case] fixture: &str) {
     let gemini = gemini_test_model(model_name, fixture).await;
     let sum_tool = FunctionTool::new(

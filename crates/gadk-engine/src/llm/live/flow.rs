@@ -17,7 +17,7 @@
 //! session task preprocesses the request, connects, and runs the connect/reconnect loop; each
 //! connection has a reader task and a sender task feeding one consumer loop.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::error::Error;
 use std::fmt;
 use std::sync::Arc;
@@ -26,10 +26,13 @@ use std::time::{Duration, Instant};
 
 use futures::StreamExt;
 use gadk_agent::fiber::{self, LIVE_SESSION_CREATOR};
-use gadk_agent::{AgentError, EventStream, InvocationContext, LiveRunConfig, LiveSession, Tool};
+use gadk_agent::{
+    AgentError, EventStream, InvocationContext, LiveRequest, LiveRunConfig, LiveSession, Tool,
+};
 use gadk_genai::{LiveConnectConfig, SessionResumptionConfig};
 use gadk_model::{
-    Backend, LiveConnError, LiveConnection, Llm, LlmRequest, ModelError, RealtimeInput,
+    Backend, LiveConnError, LiveConnection, Llm, LlmRequest, LlmResponse, ModelError,
+    RealtimeInput, is_gemini_3x_live,
 };
 use gadk_session::Event;
 use tokio::sync::mpsc;
@@ -164,7 +167,7 @@ async fn session_task(
         }
     }
 
-    // Go-parity note 5: exactly the seven fields Go copies.
+    // Go-parity note 5: exactly the fields Go copies.
     let gen_cfg = req.config.clone().unwrap_or_default();
     let mut connect_cfg = LiveConnectConfig {
         response_modalities: live_cfg.response_modalities.clone(),
@@ -174,8 +177,18 @@ async fn session_task(
         session_resumption: live_cfg.session_resumption.clone(),
         input_audio_transcription: live_cfg.input_audio_transcription.clone(),
         output_audio_transcription: live_cfg.output_audio_transcription.clone(),
+        realtime_input_config: live_cfg.realtime_input_config.clone(),
         ..Default::default()
     };
+    // Go b5cec673: affective dialog and proactivity stay unset for the models
+    // `is_gemini_3x_live` matches (affective dialog is not supported on them; proactive audio is
+    // always on or not supported). Live Translate is excluded by it and still gets both.
+    if !is_gemini_3x_live(model.name()) {
+        if live_cfg.enable_affective_dialog {
+            connect_cfg.enable_affective_dialog = Some(true);
+        }
+        connect_cfg.proactivity = live_cfg.proactivity.clone();
+    }
 
     let policy = flow.live_reconnect.clone().unwrap_or_default();
     let ctx_token = ctx.cancellation_token().clone();
@@ -292,6 +305,13 @@ async fn session_task(
             return;
         }
 
+        // Go 33a587e2: a function response awaiting delivery to the model, queued on the
+        // session's input channel so the sender task is the connection's only writer (a write
+        // from this loop could overtake user input queued there). While one is pending, the
+        // events that arrive are held in order; errors are handled at once.
+        let mut pending_send: Option<LiveRequest> = None;
+        let mut held: VecDeque<Box<Event>> = VecDeque::new();
+
         let (tx, mut rx) = mpsc::channel::<ConnMsg>(1);
         let mut tasks = JoinSet::new();
         tasks.spawn(reader(
@@ -311,15 +331,31 @@ async fn session_task(
         ));
 
         let outcome = 'consume: loop {
-            let msg = tokio::select! {
-                m = rx.recv() => m,
-                _ = sess.done().cancelled() => break 'consume Outcome::Stop,
-                _ = ctx_token.cancelled() => {
-                    sess.push_error(AgentError::Cancelled).await;
-                    break 'consume Outcome::Stop;
-                }
+            let held_ev = if pending_send.is_none() {
+                held.pop_front()
+            } else {
+                None
+            };
+            let msg = match held_ev {
+                Some(ev) => Some(ConnMsg::Event(ev)),
+                None => tokio::select! {
+                    queued = queue_pending(&sess, pending_send.clone()) => {
+                        if !queued {
+                            break 'consume Outcome::Stop;
+                        }
+                        pending_send = None;
+                        continue 'consume;
+                    }
+                    m = rx.recv() => m,
+                    _ = sess.done().cancelled() => break 'consume Outcome::Stop,
+                    _ = ctx_token.cancelled() => {
+                        sess.push_error(AgentError::Cancelled).await;
+                        break 'consume Outcome::Stop;
+                    }
+                },
             };
             match msg {
+                Some(ConnMsg::Event(ev)) if pending_send.is_some() => held.push_back(ev),
                 Some(ConnMsg::Event(ev)) => {
                     let mut ev = *ev;
                     let has_calls = !function_calls(ev.response.content.as_ref()).is_empty();
@@ -402,12 +438,13 @@ async fn session_task(
                                     tokio::time::sleep(TASK_COMPLETED_GRACE).await;
                                     break 'consume Outcome::Stop;
                                 }
-                                // Send the function response back to the model.
-                                if let Some(c) = content
-                                    && let Err(e) = conn.send_content(c).await
-                                {
-                                    sess.push_error(conn_err(e)).await;
-                                    break 'consume Outcome::Stop;
+                                // Queue the function response for the sender task, the
+                                // connection's only writer.
+                                if let Some(c) = content {
+                                    pending_send = Some(LiveRequest {
+                                        content: Some(c),
+                                        realtime_input: None,
+                                    });
                                 }
                             }
                         }
@@ -447,6 +484,31 @@ async fn session_task(
             Outcome::Reconnect => is_reconnect = true,
         }
     }
+}
+
+/// Queues `req` on the session's input channel for the sender task (Go `inputCase <- inputReq`);
+/// never completes without a request, so a select branch over it stays idle. `false` once the
+/// session is done.
+async fn queue_pending(sess: &LiveSessionImpl, req: Option<LiveRequest>) -> bool {
+    match req {
+        Some(req) => sess.queue_input(req).await,
+        None => std::future::pending().await,
+    }
+}
+
+/// Port of base_flow.go isEmptyLiveResponse (Go 8cddb9d4): `r` carries nothing worth an event,
+/// as the response built from the Live API's setupComplete does. adk-python's live flow skips
+/// the same responses.
+pub(crate) fn is_empty_live_response(r: &LlmResponse) -> bool {
+    r.content.is_none()
+        && r.error_code.is_empty()
+        && !r.interrupted
+        && !r.turn_complete
+        && r.input_transcription.is_none()
+        && r.output_transcription.is_none()
+        && r.usage_metadata.is_none()
+        && r.session_resumption_handle.is_empty()
+        && r.grounding_metadata.is_none()
 }
 
 /// Reports `err` to the consumer, stamped now; gives up when the connection is torn down.
@@ -496,6 +558,9 @@ async fn reader(
                         .cache_output(ctx.platform(), &blob.data, &blob.mime_type);
                 }
             }
+        }
+        if is_empty_live_response(&resp) {
+            continue;
         }
         // Go-parity note 4: author and response only (no branch).
         let mut ev = Event::new(ctx.platform(), ctx.invocation_id());

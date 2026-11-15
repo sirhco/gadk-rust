@@ -152,7 +152,6 @@ async fn live_setup_fields(
 /// RealtimeInputConfig, EnableAffectiveDialog and Proactivity from LiveRunConfig reach the
 /// setup message, and the last two are left out for the models IsGemini3xLive matches.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "8a bug: run_live does not send LiveRunConfig's realtimeInputConfig, enableAffectiveDialog and proactivity in the setup message, nor leave the last two out for Gemini 3.x Live (Go b5cec673)"]
 async fn test_run_live_sends_live_run_config_fields() {
     let live = || LiveRunConfig {
         realtime_input_config: Some(RealtimeInputConfig {
