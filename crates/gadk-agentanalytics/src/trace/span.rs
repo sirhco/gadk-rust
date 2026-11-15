@@ -307,8 +307,9 @@ impl SpanRecord {
     }
 
     /// Go `endedWithRun(runner)`: false whenever the parent's `goroutine_id` is 0, i.e.
-    /// always in 7b-3a (the body is ported whole). Locks the records above `self` one pair at
-    /// a time (never `self`, whose guard the caller holds).
+    /// always in 7b-3a (the body is ported whole). Locks the records above `self` one at a
+    /// time (never `self`, whose guard the caller holds): each step reads `a` into a
+    /// [`JoinView`] before it locks `a`'s parent (R10).
     pub(crate) fn ended_with_run(&self, runner: &str) -> bool {
         let Some(mut a_ref) = self.parent.clone() else {
             return false;
@@ -327,14 +328,17 @@ impl SpanRecord {
             }
         }
         loop {
-            let Some(p_ref) = a_ref.lock().parent.clone() else {
+            let (a, a_has_activation, parent) = {
+                let g = a_ref.lock();
+                (JoinView::of(&g), g.activation.is_some(), g.parent.clone())
+            };
+            let Some(p_ref) = parent else {
                 return false;
             };
             {
-                let a = a_ref.lock();
                 let p = p_ref.lock();
                 if p.kind == SpanKind::Invocation {
-                    return a.name == runner && a.activation.is_some() && a.goroutine_id != 0;
+                    return a.name == runner && a_has_activation && a.goroutine_id != 0;
                 }
                 if p.kind != SpanKind::Agent
                     || a.goroutine_id == 0
@@ -368,15 +372,41 @@ impl SpanRecord {
     }
 }
 
-/// Go `(p *spanRecord).joinsOnceReturned(c)` (attribution).
-#[allow(dead_code)] // consumer: 7b-3b (goroutine attribution)
-pub(crate) fn joins_once_returned(p: &SpanRef, c: &SpanRef) -> bool {
-    let (p, c) = (p.lock(), c.lock());
-    joins_once_returned_records(&p, &c)
+/// The fields of a child record `c` that Go's `p.joins(c, …)` and `p.joinsOnceReturned(c)`
+/// read, taken while only `c` is locked: the walks up a parent chain never hold a parent's
+/// guard while locking its child (R10), so a record met again on the walk is never locked
+/// twice.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct JoinView {
+    pub(crate) goroutine_id: u64,
+    pub(crate) origin: GoroutineOrigin,
+    pub(crate) attempt: AttemptSite,
+    pub(crate) name: String,
+    pub(crate) branch: String,
 }
 
-/// [`joins_once_returned`] over locked records.
-pub(crate) fn joins_once_returned_records(p: &SpanRecord, c: &SpanRecord) -> bool {
+impl JoinView {
+    /// The join fields of `c`.
+    pub(crate) fn of(c: &SpanRecord) -> JoinView {
+        JoinView {
+            goroutine_id: c.goroutine_id,
+            origin: c.origin.clone(),
+            attempt: c.attempt,
+            name: c.name.clone(),
+            branch: c.branch.clone(),
+        }
+    }
+}
+
+/// Go `(p *spanRecord).joinsOnceReturned(c)` (attribution). Locks `c`, then `p`, never both.
+#[allow(dead_code)] // consumer: 7b-3b (goroutine attribution)
+pub(crate) fn joins_once_returned(p: &SpanRef, c: &SpanRef) -> bool {
+    let c = JoinView::of(&c.lock());
+    joins_once_returned_records(&p.lock(), &c)
+}
+
+/// [`joins_once_returned`] over the locked parent and the child's [`JoinView`].
+pub(crate) fn joins_once_returned_records(p: &SpanRecord, c: &JoinView) -> bool {
     joins_records(p, c, false)
         || (p.is_parallel
             && p.goroutine_id != 0
@@ -387,15 +417,16 @@ pub(crate) fn joins_once_returned_records(p: &SpanRecord, c: &SpanRecord) -> boo
 }
 
 /// Go `(p *spanRecord).joins(c, reported)` (attribution; with zero goroutine information only
-/// the `completed` / `runDone` and parallel-branch fallbacks apply).
+/// the `completed` / `runDone` and parallel-branch fallbacks apply). Locks `c`, then `p`,
+/// never both.
 #[allow(dead_code)] // consumer: 7b-3b (goroutine attribution)
 pub(crate) fn joins(p: &SpanRef, c: &SpanRef, reported: bool) -> bool {
-    let (p, c) = (p.lock(), c.lock());
-    joins_records(&p, &c, reported)
+    let c = JoinView::of(&c.lock());
+    joins_records(&p.lock(), &c, reported)
 }
 
-/// [`joins`] over locked records.
-pub(crate) fn joins_records(p: &SpanRecord, c: &SpanRecord, reported: bool) -> bool {
+/// [`joins`] over the locked parent and the child's [`JoinView`].
+pub(crate) fn joins_records(p: &SpanRecord, c: &JoinView, reported: bool) -> bool {
     if !p.propagates_child_error || p.goroutine_id == 0 || c.goroutine_id == 0 {
         return false;
     }

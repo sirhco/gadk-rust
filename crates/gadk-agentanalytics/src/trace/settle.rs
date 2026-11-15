@@ -44,8 +44,8 @@ use super::invocation::{
 };
 use super::manager::TraceManager;
 use super::span::{
-    AttemptSite, NodeRunKey, RetiredCause, RowSpan, SCHEDULER_CREATOR, SpanKind, SpanRecord,
-    SpanRef, UnclosedAgentSpan, joins_records, latency_of, parallel_branch,
+    AttemptSite, JoinView, NodeRunKey, RetiredCause, RowSpan, SCHEDULER_CREATOR, SpanKind,
+    SpanRecord, SpanRef, UnclosedAgentSpan, joins_records, latency_of, parallel_branch,
 };
 use super::{CallbackCtx, Identity, NO_FRAME, TraceError, llm_key, tool_key_call};
 use crate::context::ContextError;
@@ -1641,7 +1641,8 @@ impl InvocationState {
         failures
     }
 
-    /// Go `reportedOverLocked(i)`.
+    /// Go `reportedOverLocked(i)`. Locks one record at a time: the child's [`JoinView`] is
+    /// read before its parent is locked (R10).
     pub(crate) fn reported_over_locked(&self, i: usize) -> HashSet<String> {
         let subtree = self.subtree_locked(i);
         let mut over = HashSet::from([self.agent_stack[i].lock().span_id.clone()]);
@@ -1664,9 +1665,10 @@ impl InvocationState {
             let mut c = d.clone();
             let mut p = parent;
             while let Some(pr) = p {
+                let cv = JoinView::of(&c.lock());
                 let (is_over, next) = {
                     let pg = pr.lock();
-                    if pg.kind != SpanKind::Agent || !joins_records(&pg, &c.lock(), true) {
+                    if pg.kind != SpanKind::Agent || !joins_records(&pg, &cv, true) {
                         break;
                     }
                     (pg.run_done || over.contains(&pg.span_id), pg.parent.clone())
@@ -1683,7 +1685,8 @@ impl InvocationState {
     }
 
     /// Go `canSettleInSubtreeLocked(rootIdx, d, curGoid, since)` (attribution: with no
-    /// goroutine information every activation counts as over, Go `:3913`).
+    /// goroutine information every activation counts as over, Go `:3913`). Locks one record at
+    /// a time, as [`InvocationState::reported_over_locked`] (R10).
     pub(crate) fn can_settle_in_subtree_locked(
         &self,
         root_idx: usize,
@@ -1703,12 +1706,13 @@ impl InvocationState {
         };
         let mut c = d.clone();
         while let Some(pr) = p {
+            let cv = JoinView::of(&c.lock());
             let next = {
                 let pg = pr.lock();
                 if pg.kind != SpanKind::Agent {
                     break;
                 }
-                if !joins_records(&pg, &c.lock(), false) {
+                if !joins_records(&pg, &cv, false) {
                     return false;
                 }
                 if pg.run_done || returned_here(&pg) {
@@ -2456,5 +2460,129 @@ mod tests {
         assert!(w.lock().node_runs.is_empty());
         // With zero attribution, nothing was restarted.
         assert!(tm.end_restarted_node_runs(&bg, &wf_id).is_empty());
+    }
+
+    /// Runs `f` on its own thread and returns its result, failing the test when it does not
+    /// return within 5 s (a walk that deadlocks on a record lock never returns).
+    fn within_5s<R: Send + 'static>(f: impl FnOnce() -> R + Send + 'static) -> R {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(f());
+        });
+        match rx.recv_timeout(std::time::Duration::from_secs(5)) {
+            Ok(r) => r,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                panic!("deadlock: the attribution walk did not return within 5 s")
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                panic!("the attribution walk panicked")
+            }
+        }
+    }
+
+    /// R10: the attribution walks lock one record at a time, so a chain whose joins must be
+    /// evaluated (a record that is both a `d` and a parent on another `d`'s walk, and a record
+    /// that is its own parent) settles without deadlocking.
+    #[test]
+    fn attribution_walks_lock_one_record_at_a_time() {
+        let clock = ManualClock::new();
+        let tm = manager(&clock);
+        let bg = CallbackCtx::background();
+        for (agent, path) in [("wf", "wf"), ("n", "wf/n"), ("l", "wf/n/l")] {
+            tm.push_agent_span(&bg, &ident("inv", agent, "", path));
+        }
+        let activation = adk_ctx(&custom("n", vec![]), "inv", None).activation_id();
+        let inv = tm.invocation(&bg, &ident("inv", "", "", ""));
+        let (w, n, l) = {
+            let st = inv.mu.lock();
+            let s = &st.agent_stack;
+            let (w, n, l) = (s[1].clone(), s[2].clone(), s[3].clone());
+            {
+                let mut g = w.lock();
+                g.parent = Some(s[0].clone());
+                g.is_workflow = true;
+                g.propagates_child_error = true;
+                g.goroutine_id = 1;
+                g.activation = Some(activation);
+            }
+            {
+                let mut g = n.lock();
+                g.parent = Some(w.clone());
+                g.propagates_child_error = true;
+                g.goroutine_id = 2;
+                g.attempt = AttemptSite::Node;
+                g.activation = Some(activation);
+                g.origin = GoroutineOrigin {
+                    creator: SCHEDULER_CREATOR.into(),
+                    parent: 1,
+                };
+            }
+            {
+                let mut g = l.lock();
+                g.parent = Some(n.clone());
+                g.goroutine_id = 2;
+                g.activation = Some(activation);
+            }
+            (w, n, l)
+        };
+        let ids: Vec<String> = [&w, &n, &l]
+            .iter()
+            .map(|r| r.lock().span_id.clone())
+            .collect();
+        let (over, settles, ends) = within_5s({
+            let (inv, l) = (inv.clone(), l.clone());
+            move || {
+                let st = inv.mu.lock();
+                let call = SpanRecord {
+                    kind: SpanKind::Tool,
+                    parent: Some(l.clone()),
+                    own_activation: true,
+                    ..SpanRecord::default()
+                };
+                (
+                    st.reported_over_locked(1),
+                    st.can_settle_in_subtree_locked(1, &l, 0, NO_FRAME),
+                    (call.ended_with_run("wf"), call.ended_with_run("other")),
+                )
+            }
+        });
+        // `n` joins the workflow agent (scheduler origin) and is over with it; `l` joins `n`
+        // (same goroutine) and is over because `n` is.
+        assert_eq!(over, ids.iter().cloned().collect::<HashSet<_>>());
+        // The scheduler is still waiting on the node: not settled until the workflow agent ran.
+        assert!(!settles);
+        // The call's activation ran on the runner's agent's run: `l` → `n` (same goroutine) →
+        // `wf` (joins once returned) → the invocation.
+        assert_eq!(ends, (true, false));
+        w.lock().run_done = true;
+        let settles = within_5s({
+            let (inv, l) = (inv.clone(), l.clone());
+            move || {
+                inv.mu
+                    .lock()
+                    .can_settle_in_subtree_locked(1, &l, 0, NO_FRAME)
+            }
+        });
+        assert!(settles);
+
+        // A record that is its own parent: the walk compares it with itself.
+        let a = {
+            let st = inv.mu.lock();
+            let a = st.agent_stack[1].clone();
+            a.lock().run_done = false;
+            a.lock().parent = Some(a.clone());
+            a
+        };
+        let settles = within_5s({
+            let (inv, a) = (inv.clone(), a.clone());
+            move || {
+                inv.mu
+                    .lock()
+                    .can_settle_in_subtree_locked(1, &a, 0, NO_FRAME)
+            }
+        });
+        // It joins itself, has not run, and is the subtree's root.
+        assert!(!settles);
+        a.lock().parent = None;
     }
 }
