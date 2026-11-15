@@ -56,6 +56,16 @@ fn test_match_type() {
             false,
         ),
         (
+            "nil value not nullable",
+            Value::Null,
+            Some(Schema {
+                nullable: Some(false),
+                ..ty(Type::String)
+            }),
+            false,
+            false,
+        ),
+        (
             "nil value nullable",
             Value::Null,
             Some(Schema {
