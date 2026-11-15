@@ -17,12 +17,13 @@
 //! `docs/parity/7b-1.md`), 7b-2's (`batch_processor_test.go`, `gcs_offloader_test.go`;
 //! ledger `docs/parity/7b-2.md`) and 7b-3a's (`bigquery_agent_analytics_plugin_test.go`,
 //! `events_test.go`, `late_callbacks_test.go`, `trace_manager_test.go`; ledger
-//! `docs/parity/7b-3a.md`): one module per Go file, named by `scripts/parity-check`'s
-//! `target_name` (`plugin/agentanalytics/views_test.go` → `plugin_agentanalytics_views`),
-//! holding `fn test_<snake of TestName>` (`go_test_to_rust`).
+//! `docs/parity/7b-3a.md`) and 8a's (`doc_test.go`): one module per Go file, named by
+//! `scripts/parity-check`'s `target_name` (`plugin/agentanalytics/views_test.go` →
+//! `plugin_agentanalytics_views`), holding `fn test_<snake of TestName>` (`go_test_to_rust`).
 
 mod plugin_agentanalytics_batch_processor;
 pub(crate) mod plugin_agentanalytics_bigquery_agent_analytics_plugin;
+mod plugin_agentanalytics_doc;
 mod plugin_agentanalytics_events;
 mod plugin_agentanalytics_gcs_offloader;
 mod plugin_agentanalytics_json_formatter;
