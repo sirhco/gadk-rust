@@ -14,7 +14,7 @@
 // limitations under the License.
 
 //! The OpenAI transport: request headers, the request body, and the reply, sent through
-//! [`gadk_model::rest`] with openai-go v3.82.0's retry policy and ADK-Go's call deadline
+//! [`gadk_model::rest`] with openai-go v3.91.1's retry policy and ADK-Go's call deadline
 //! (port of openai-go `RequestConfig.Execute`'s OpenAI specifics and `packages/ssestream`).
 
 use std::collections::BTreeMap;
@@ -141,7 +141,7 @@ impl OpenAiClient {
     /// The headers of one attempt, in openai-go's order (a later step replaces an earlier
     /// one's values for the same name):
     /// 1. `Accept: application/json`, `Content-Type: application/json`, `User-Agent` =
-    ///    [`gadk_platform::tracking_header`] (openai-go sends `OpenAI/Go 3.82.0`);
+    ///    [`gadk_platform::tracking_header`] (openai-go sends `OpenAI/Go 3.91.1`);
     /// 2. the environment's headers (`OpenAI-Organization`, `OpenAI-Project`,
     ///    `OPENAI_CUSTOM_HEADERS`);
     /// 3. [`ClientConfig::headers`];
@@ -779,7 +779,7 @@ mod tests {
         );
     }
 
-    /// openai-go v3.82.0's texts for the same bodies (`json.NewDecoder(…).Decode`).
+    /// openai-go v3.91.1's texts for the same bodies (`json.NewDecoder(…).Decode`).
     #[test]
     fn decode_body_follows_openai_go() {
         #[derive(serde::Deserialize, Debug)]

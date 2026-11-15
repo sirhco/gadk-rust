@@ -14,7 +14,7 @@
 // limitations under the License.
 
 //! The Messages transport: endpoints, request headers, and the request body, sent through
-//! [`gadk_model::rest`] with anthropic-sdk-go v1.81.0's retry policy and per-attempt timeouts
+//! [`gadk_model::rest`] with anthropic-sdk-go v1.84.0's retry policy and per-attempt timeouts
 //! (port of `RequestConfig.Execute`'s Anthropic specifics and `vertex.WithCredentials`'s URL
 //! rules).
 
@@ -211,7 +211,7 @@ impl Transport {
     /// values for the same name):
     /// 1. `Accept: application/json`, `Anthropic-Version`, `Content-Type: application/json`;
     /// 2. `user-agent` set to `gadk_platform::tracking_header()` (the Go SDK sends
-    ///    `Anthropic/Go 1.81.0`; ADK-Go overrides it only on Vertex); Anthropic: `x-api-key` and/or `Authorization: Bearer` (SDK
+    ///    `Anthropic/Go 1.84.0`; ADK-Go overrides it only on Vertex); Anthropic: `x-api-key` and/or `Authorization: Bearer` (SDK
     ///    `WithAPIKey` / `WithAuthToken`); Vertex: `x-goog-api-client` set to the tracking value
     ///    too;
     /// 3. [`headers`](Self::headers) (Go's `option.WithHeader`, applied after the above);
@@ -706,7 +706,7 @@ mod tests {
             let tracking = gadk_platform::tracking_header();
             let mut want = BASE_HEADERS.to_vec();
             want.extend_from_slice(auth);
-            // gadk's User-Agent (the Go SDK sends `Anthropic/Go 1.81.0` here).
+            // gadk's User-Agent (the Go SDK sends `Anthropic/Go 1.84.0` here).
             want.push(("user-agent", tracking.as_str()));
             assert_eq!(sorted(&got), pairs(&want), "{name}");
             for name in ["x-api-key", "authorization"] {

@@ -14,7 +14,7 @@
 // limitations under the License.
 
 //! Client configuration (port of ADK-Go `model/openaimodel/openaimodel.go`'s `ClientConfig`
-//! and `API`, plus openai-go v3.82.0's `DefaultClientOptions` environment defaults).
+//! and `API`, plus openai-go v3.91.1's `DefaultClientOptions` environment defaults).
 
 use std::fmt;
 use std::str::FromStr;
