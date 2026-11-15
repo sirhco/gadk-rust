@@ -153,7 +153,6 @@ fn stored(id: SessionKey, s: Value) -> TestSession {
 }
 
 #[tokio::test]
-#[ignore = "8a bug: the testutil FakeSessionService reports a missing session as SessionError::Backend(\"not found\") (500); Go ca7db168 (#1899) makes the fake wrap session.ErrNotFound (404)"]
 async fn test_get_session() {
     let id = test_id();
     struct Case {
@@ -1049,7 +1048,6 @@ fn scenario_platform() -> Platform {
 /// Replays `main_05` … `main_11` and `main_66` (session create with and without an ID, get,
 /// list, PATCH with an event from the request platform, the scoped-key refusal, the missing
 /// session, delete) and compares status, headers and body bytes with ADK-Go's.
-#[ignore = "8a bug: REST events lack timestamp (Go #1870) and session List is not ordered by last update time ascending (Go #1919)"]
 #[tokio::test]
 async fn session_handlers_match_go_wire_fixtures() {
     let platform = scenario_platform();

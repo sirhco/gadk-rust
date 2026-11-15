@@ -545,7 +545,6 @@ mod served {
 
     // parity: adapted: a2a-rs's JSON-RPC transport ignores the HTTP status, so the rejection surfaces as its body-decoding error rather than an error naming 401
     #[tokio::test]
-    #[ignore = "8a bug: the rejected request's transport error becomes an error event instead of an error returned from run (Go 4d841aba)"]
     async fn test_remote_agent_auth_accepted_by_enforcing_server() {
         const GOOD: &str = "good-token";
         let msg = a2a::Message::new(a2a::Role::Agent, vec![a2a::Part::text("ok")]);
@@ -764,7 +763,6 @@ mod served {
 
     // parity: adapted: the redirect refusal surfaces through a2a-rs's transport error ("HTTP request failed: error following redirect for url (…)"), which drops the policy's "refusing redirect" source text; the port checks the redirect error and that the target saw nothing
     #[tokio::test]
-    #[ignore = "8a bug: the refused redirect's transport error becomes an error event instead of an error returned from run (Go 4d841aba)"]
     async fn test_remote_agent_auth_refuses_cross_origin_redirect() {
         let hits: Log = Arc::default();
         let elsewhere = {
@@ -1098,7 +1096,6 @@ mod served {
 
     // parity: adapted: the redirect refusal surfaces through a2a-rs's transport error ("HTTP request failed: error following redirect for url (…)"), which drops the policy's "refusing redirect" source text
     #[tokio::test]
-    #[ignore = "8a bug: the refused redirect's transport error becomes an error event instead of an error returned from run (Go 4d841aba)"]
     async fn test_remote_agent_auth_refuses_a_different_hostname() {
         let hosts: Arc<Mutex<Vec<String>>> = Arc::default();
         let srv = {
@@ -1366,7 +1363,6 @@ mod served {
 
     // parity: adapted: a Rust provider cannot return a nil or typed-nil credential (it returns Arc<dyn Credential>), so Go's two "nil credential" rows have no counterpart
     #[tokio::test]
-    #[ignore = "8a bug: a credential failure becomes an error event instead of an error returned from run (Go 4d841aba)"]
     async fn test_remote_agent_auth_fails_closed() {
         struct FailingSource;
         #[async_trait::async_trait]
@@ -1510,7 +1506,6 @@ mod served {
     }
 
     #[tokio::test]
-    #[ignore = "8a bug: an agent card resolution failure becomes an error event instead of an error returned from run (Go 4d841aba)"]
     async fn test_remote_agent_auth_refuses_an_insecure_card_source() {
         let calls = Arc::new(AtomicUsize::new(0));
         let provider = {

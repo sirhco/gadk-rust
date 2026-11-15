@@ -604,7 +604,6 @@ async fn test_a2_a_input_required() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "8a bug: a resume whose user event carries the peer's response after another function response does not resume the remote task (get_user_function_call_at reads only the first response; Go 7c87fdff)"]
 async fn test_a2_a_runner_resumes_mixed_function_responses() {
     for name in ["peer-first", "local-first"] {
         let peer = new_input_requesting_agent("peer", new_long_running_tool());

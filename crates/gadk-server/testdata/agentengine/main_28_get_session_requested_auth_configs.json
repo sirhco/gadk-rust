@@ -1,0 +1,82 @@
+{
+  "name": "main_28_get_session_requested_auth_configs",
+  "config": "main",
+  "kind": "exchange",
+  "seed": {
+    "user_id": "u1",
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "event": {
+      "id": "auth-request",
+      "invocationId": "e-auth",
+      "author": "assistant",
+      "timestamp": "2026-01-02T03:05:00.123456Z",
+      "content": {
+        "role": "model",
+        "parts": [
+          {
+            "text": "Please sign in."
+          }
+        ]
+      },
+      "actions": {
+        "requestedAuthConfigs": {
+          "call-1": {
+            "authScheme": {
+              "type": "oauth2",
+              "flows": {
+                "authorizationCode": {
+                  "authorizationUrl": "https://idp.example/auth",
+                  "tokenUrl": "https://idp.example/token",
+                  "scopes": {
+                    "files": "Read files"
+                  }
+                }
+              }
+            },
+            "rawAuthCredential": {
+              "authType": "oauth2",
+              "oauth2": {
+                "clientId": "app",
+                "clientSecret": "s3cret"
+              }
+            },
+            "exchangedAuthCredential": {
+              "authType": "http",
+              "http": {
+                "scheme": "bearer",
+                "credentials": {
+                  "token": "tk"
+                }
+              }
+            },
+            "credentialKey": "drive"
+          }
+        }
+      }
+    }
+  },
+  "request": {
+    "method": "POST",
+    "target": "/reasoning_engine",
+    "headers": [
+      [
+        "Content-Type",
+        "application/json"
+      ]
+    ],
+    "body": "{\"class_method\":\"async_get_session\",\"input\":{\"session_id\":\"00000000-0000-4000-8000-000000000001\",\"user_id\":\"u1\"}}"
+  },
+  "response": {
+    "status": 200,
+    "headers": [
+      [
+        "Content-Type",
+        "text/plain; charset=utf-8"
+      ]
+    ],
+    "body": "{\"output\":{\"user_id\":\"u1\",\"last_update_time\":1767323100.123456,\"app_name\":\"test-engine\",\"id\":\"00000000-0000-4000-8000-000000000001\",\"state\":{},\"events\":[{\"content\":{\"parts\":[{\"text\":\"Please sign in.\"}],\"role\":\"model\"},\"id\":\"auth-request\",\"timestamp\":\"2026-01-02T03:05:00.123456Z\",\"invocationId\":\"e-auth\",\"author\":\"assistant\",\"actions\":{\"requestedAuthConfigs\":{\"call-1\":{\"authScheme\":{\"type\":\"oauth2\",\"flows\":{\"authorizationCode\":{\"authorizationUrl\":\"https://idp.example/auth\",\"tokenUrl\":\"https://idp.example/token\",\"scopes\":{\"files\":\"Read files\"}}}},\"rawAuthCredential\":{\"authType\":\"oauth2\",\"oauth2\":{\"clientId\":\"app\",\"clientSecret\":\"s3cret\",\"tokenEndpointAuthMethod\":\"client_secret_basic\"}},\"exchangedAuthCredential\":{\"authType\":\"http\",\"http\":{\"scheme\":\"bearer\",\"credentials\":{\"token\":\"tk\"}}},\"credentialKey\":\"drive\"}}}}]}}\n"
+  },
+  "log": "",
+  "methods": null,
+  "compare": "exact"
+}

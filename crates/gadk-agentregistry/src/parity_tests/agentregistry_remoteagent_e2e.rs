@@ -281,25 +281,18 @@ async fn test_remote_agent_e2_e() {
 /// Go `TestRemoteAgent_OnTheWire`: what a registry record puts on the wire. A versionless
 /// record speaks 0.3 (`A2A-Version: 0.3`, the HTTP+JSON binding under the 0.3 `/v1` prefix); an
 /// explicit 1.0 record speaks 1.0; on both versions the caller's egress headers reach the server.
-// parity: adapted: the A2A endpoint is a recording stub answering 500 (gadk has no A2A 0.3 server; Go's canned 0.3/1.0 servers only answer "pong", which the test discards), so the run's error is ignored
+// parity: adapted: the A2A endpoint is a recording stub answering 500 (gadk has no A2A 0.3 server; Go's canned 0.3/1.0 servers only answer "pong", which the test discards), so the run's error is ignored; a versionless record speaks A2A 1.0 (`A2A-Version: 1.0`, 1.0 routes), not Go's 0.3, because a2a-rs has no A2A 0.3 client transport (divergence, ledger 5c)
 #[tokio::test]
-#[ignore = "8a bug: a versionless (0.3.0) registry record is rewritten to A2A 1.0 and sent with A2A-Version 1.0 and 1.0 routes (Go 869020a1 speaks A2A 0.3 to 0.3 interfaces)"]
 async fn test_remote_agent_on_the_wire() {
     let tests = [
         (
             "HTTP_JSON without version",
             "HTTP_JSON",
             "",
-            A2A_V0_VERSION,
-            "/v1/message:send",
+            a2a::VERSION,
+            "/message:send",
         ),
-        (
-            "JSONRPC without version",
-            "JSONRPC",
-            "",
-            A2A_V0_VERSION,
-            "/",
-        ),
+        ("JSONRPC without version", "JSONRPC", "", a2a::VERSION, "/"),
         (
             "HTTP_JSON 1.0",
             "HTTP_JSON",

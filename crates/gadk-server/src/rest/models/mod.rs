@@ -19,6 +19,7 @@
 //! leaves its zero value, as Go's decoder does.
 
 mod event;
+mod redact;
 mod runtime;
 mod session;
 mod triggers;

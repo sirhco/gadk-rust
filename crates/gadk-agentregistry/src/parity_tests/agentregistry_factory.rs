@@ -484,7 +484,6 @@ async fn test_remote_agent_integration() {
 /// version than the SDK's current one still yields a client; a version with no registered
 /// transport, such as a future major, is refused rather than mapped onto one.
 #[tokio::test]
-#[ignore = "8a bug: compat_card rewrites any non-1.x JSONRPC/HTTP+JSON interface version (e.g. 2.0) to 1.0, so an unknown major yields a client (Go 869020a1 registers only 1.0 and 0.3 transports)"]
 async fn test_a2_a_client_factory_compat_protocol_version() {
     let tests = [
         (

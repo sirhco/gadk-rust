@@ -537,7 +537,6 @@ async fn test_executor_cancel() {
 }
 
 #[tokio::test]
-#[ignore = "8a bug: Executor::cancel yields a canceled status update for an empty task id; Go 58429928 yields only an error"]
 async fn test_executor_cancel_without_task_id() {
     let executor = Executor::new(ExecutorConfig::default());
     let mut ctx = request(&task_info(), None, false);

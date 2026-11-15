@@ -265,7 +265,6 @@ async fn test_get_user_function_call_at() {
 }
 
 #[tokio::test]
-#[ignore = "8a bug: get_user_function_call_at reads only the first function response of a mixed user event and stops at a BeforeRun-cached call (Go 7c87fdff tries every response, skipping the cached one)"]
 async fn test_get_user_function_call_at_mixed_response_tasks() {
     const REMOTE: &str = "remote-agent";
     let remote_call = |id: &str, task_id: &str| {

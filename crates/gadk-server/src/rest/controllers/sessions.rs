@@ -74,7 +74,16 @@ impl SessionsApiController {
             Ok(c) => c,
             Err(e) => return http_error(StatusCode::BAD_REQUEST, &e),
         };
-        match self.create_session(sid, create).await {
+        // Convert every event before creating anything, so an event the request cannot carry
+        // is a 400 with no session left behind, rather than a 500 after the session is stored.
+        let mut events = Vec::new();
+        for (i, event) in create.events.unwrap_or_default().iter().enumerate() {
+            match event.to_session_event() {
+                Ok(event) => events.push(event),
+                Err(e) => return http_error(StatusCode::BAD_REQUEST, &format!("events[{i}]: {e}")),
+            }
+        }
+        match self.create_session(sid, create.state, events).await {
             Ok(s) => encode_json_response(&s, StatusCode::OK),
             Err(e) => http_error(StatusCode::INTERNAL_SERVER_ERROR, &e),
         }
@@ -84,7 +93,8 @@ impl SessionsApiController {
     async fn create_session(
         &self,
         sid: SessionId,
-        create: CreateSessionRequest,
+        state: Option<Map<String, Value>>,
+        events: Vec<gadk_session::Event>,
     ) -> Result<Session, String> {
         let session = self
             .service
@@ -92,12 +102,11 @@ impl SessionsApiController {
                 app_name: sid.app_name,
                 user_id: sid.user_id,
                 session_id: Some(sid.id).filter(|id| !id.is_empty()),
-                state: create.state,
+                state,
             })
             .await
             .map_err(|e| e.to_string())?;
-        for event in create.events.unwrap_or_default() {
-            let mut event = event.to_session_event();
+        for mut event in events {
             self.service
                 .append_event(&*session, &mut event)
                 .await

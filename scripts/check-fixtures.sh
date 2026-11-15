@@ -18,7 +18,7 @@
 # the launcher probe (scripts/gen-go-launcher) wrote exactly 70 web, 15 console and 34 CLI fixtures
 # under crates/gadk-launcher/testdata/{wire,console,cli}/; the replay's declared deltas
 # (*.deltas.json) are not counted.
-# 5c: the Agent Engine probe (scripts/gen-go-agentengine) wrote exactly 29 server fixtures under
+# 5c: the Agent Engine probe (scripts/gen-go-agentengine) wrote exactly 30 server fixtures under
 # crates/gadk-server/testdata/agentengine/ and 13 launcher fixtures under
 # crates/gadk-launcher/testdata/agentengine/ (declared deltas, *.deltas.json, not counted); when
 # go and ADK-Go are present, its --shapes generator reproduces
@@ -150,7 +150,7 @@ for spec in wire:70 console:15 cli:34; do
 done
 
 agentengine_counts=""
-for spec in gadk-server:29 gadk-launcher:13; do
+for spec in gadk-server:30 gadk-launcher:13; do
   dir="$repo/crates/${spec%%:*}/testdata/agentengine"
   want="${spec#*:}"
   got="$(find "$dir" -type f -name '*.json' ! -name '*.deltas.json' | wc -l | tr -d ' ')"

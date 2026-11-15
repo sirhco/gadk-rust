@@ -216,7 +216,8 @@ impl SessionService for FakeSessionService {
         };
         match self.sessions.lock().get(&key) {
             Some(s) => Ok(Arc::new(s.clone())),
-            None => Err(backend("not found")),
+            // Go wraps `session.ErrNotFound`, as the real services do.
+            None => Err(SessionError::NotFound),
         }
     }
 
@@ -422,7 +423,7 @@ mod tests {
             .await
             .err()
             .unwrap();
-        assert_eq!(err.to_string(), "not found");
+        assert!(matches!(err, SessionError::NotFound), "{err:?}");
     }
 
     #[tokio::test]

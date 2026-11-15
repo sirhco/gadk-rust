@@ -259,7 +259,6 @@ async fn run_or_sse(controller: &RuntimeApiController, streaming: bool, body: &s
 }
 
 #[tokio::test]
-#[ignore = "8a bug: with auto_create_session, /run and /run_sse still answer 404 for a missing session (validate_session_exists runs first); Go f6da03ab (#2106) skips the check"]
 async fn test_run_handlers_auto_create_session() {
     // (name, streaming, autoCreateSession, wantStatus, wantSession)
     let cases = [
@@ -317,7 +316,7 @@ async fn test_decode_request_body_accepts_function_call_event_id() {
     let (status, _, got) = parts(controller.run_handler(post("/run", body, None)).await).await;
     assert_eq!(
         (status, got.as_str()),
-        (404, "failed to get session: not found\n")
+        (404, "failed to get session: session not found: \"s\"\n")
     );
 }
 
@@ -380,7 +379,6 @@ async fn test_new_runtime_api_controller_carries_compaction() {
 }
 
 #[tokio::test]
-#[ignore = "8a bug: /run answers `null` for a run that yields no events; Go 0159a2e7 (#2090) answers `[]`"]
 async fn test_run_handler_no_events_returns_empty_list() {
     let sessions = Arc::new(InMemorySessionService::new());
     sessions
@@ -488,7 +486,6 @@ type LookupCase = (
 );
 
 #[tokio::test]
-#[ignore = "8a bug: a session service failure other than NotFound answers 404 on /run and /run_sse; Go 8ce8f01c (#2107) answers 500"]
 async fn test_run_handlers_session_lookup_status() {
     let in_memory = || -> Arc<dyn SessionService> { Arc::new(InMemorySessionService::new()) };
     let failing = || -> Arc<dyn SessionService> {
