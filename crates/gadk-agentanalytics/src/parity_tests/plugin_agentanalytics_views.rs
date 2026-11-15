@@ -1039,6 +1039,7 @@ async fn test_views_json_paths_match_emitted_payloads() {
             q_args(),
         )
         .await
+        .1
         .map(drop));
         add((p.after_tool_callback().unwrap())(
             m_cctx.clone(),
@@ -1055,6 +1056,7 @@ async fn test_views_json_paths_match_emitted_payloads() {
             q_args(),
         )
         .await
+        .1
         .map(drop));
         add((p.on_tool_error_callback().unwrap())(
             m_cctx.clone(),

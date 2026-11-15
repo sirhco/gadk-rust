@@ -476,8 +476,8 @@ async fn test_handle_function_calls_no_args_reach_tool_as_empty_map() {
         model: Some(Arc::new(NoArgsCallModel::new("record"))),
         tools: vec![rec.clone() as Arc<dyn Tool>],
         before_tool_callbacks: vec![Arc::new(move |_, _, args| {
-            *b.lock().unwrap() = Some(args);
-            Box::pin(async { Ok(None) })
+            *b.lock().unwrap() = Some(args.clone());
+            Box::pin(async move { (args, Ok(None)) })
         })],
         after_tool_callbacks: vec![Arc::new(move |_, _, args, _, _| {
             *a.lock().unwrap() = Some(args);

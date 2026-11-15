@@ -425,7 +425,7 @@ where
 {
     Arc::new(move |ctx, tool, args| {
         let out = f(&ctx, tool.name(), &args);
-        Box::pin(async move { out })
+        Box::pin(async move { (args, out) })
     })
 }
 

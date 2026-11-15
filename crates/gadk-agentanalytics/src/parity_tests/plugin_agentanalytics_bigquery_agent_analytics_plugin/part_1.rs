@@ -780,7 +780,8 @@ async fn test_callbacks_write_rows() {
             Arc::clone(&lookup_tool),
             tool_args.clone(),
         )
-        .await,
+        .await
+        .1,
     );
     errs.add(
         (p.after_tool_callback().unwrap())(
@@ -1189,7 +1190,11 @@ async fn test_sensitive_key_redaction() {
         .clone();
         let p = &tp.plugin;
         let mut errs = CallbackErrors::default();
-        errs.add((p.before_tool_callback().unwrap())(m.context(), fake_tool("lookup"), args).await);
+        errs.add(
+            (p.before_tool_callback().unwrap())(m.context(), fake_tool("lookup"), args)
+                .await
+                .1,
+        );
         let uri_part = Part {
             file_data: Some(FileData {
                 mime_type: "image/png".into(),
@@ -1286,7 +1291,9 @@ async fn test_sensitive_key_redaction_go_names_and_state_prefixes() {
     let p = &tp.plugin;
     let mut errs = CallbackErrors::default();
     errs.add(
-        (p.before_tool_callback().unwrap())(m.context(), fake_tool("lookup"), args.clone()).await,
+        (p.before_tool_callback().unwrap())(m.context(), fake_tool("lookup"), args.clone())
+            .await
+            .1,
     );
     errs.add(
         (p.after_tool_callback().unwrap())(m.context(), fake_tool("lookup"), args, result, None)
@@ -1352,7 +1359,8 @@ async fn test_credentials_envelope_is_redacted_whole() {
     let mut errs = CallbackErrors::default();
     errs.add(
         (p.before_tool_callback().unwrap())(m.context(), fake_tool("assume_role"), args.clone())
-            .await,
+            .await
+            .1,
     );
     errs.add(
         (p.after_tool_callback().unwrap())(
@@ -1401,6 +1409,7 @@ async fn test_tool_args_unloggable_values_keep_the_row() {
         .clone();
     (tp.plugin.before_tool_callback().unwrap())(m.context(), fake_tool("lookup"), args)
         .await
+        .1
         .unwrap_or_else(|e| panic!("BeforeToolCallback error: {e}"));
     after_run(&tp, &m).await;
 
@@ -1738,7 +1747,9 @@ async fn test_event_filtering_denylist_overrides_allowlist() {
         .1,
     );
     errs.add(
-        (p.before_tool_callback().unwrap())(m.context(), fake_tool("lookup"), Map::new()).await,
+        (p.before_tool_callback().unwrap())(m.context(), fake_tool("lookup"), Map::new())
+            .await
+            .1,
     );
     errs.check();
     after_run(&tp, &m).await;
@@ -2164,7 +2175,8 @@ async fn test_tool_failure_writes_error_rows() {
     let mut errs = CallbackErrors::default();
     errs.add(
         (p.before_tool_callback().unwrap())(m.context(), Arc::clone(&lookup_tool), args.clone())
-            .await,
+            .await
+            .1,
     );
     errs.add(
         (p.on_tool_error_callback().unwrap())(

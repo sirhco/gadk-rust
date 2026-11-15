@@ -647,9 +647,9 @@ fn rand_number_tool() -> Arc<dyn gadk_agent::Tool> {
 }
 
 fn before_tool(result: Option<Value>) -> BeforeToolCallback {
-    Arc::new(move |_ctx, _tool, _args| {
+    Arc::new(move |_ctx, _tool, args| {
         let out = result.clone().map(obj);
-        Box::pin(async move { Ok(out) })
+        Box::pin(async move { (args, Ok(out)) })
     })
 }
 fn after_tool(result: Option<Value>) -> AfterToolCallback {

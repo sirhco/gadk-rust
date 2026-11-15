@@ -115,7 +115,11 @@ pub fn new(allowed_base_dir: impl Into<PathBuf>) -> Plugin {
         Arc::new(
             move |ctx: Context, tool: Arc<dyn Tool>, args: Map<String, Value>| {
                 let p = p.clone();
-                async move { p.before_tool(&ctx, tool.as_ref(), &args) }.boxed()
+                async move {
+                    let r = p.before_tool(&ctx, tool.as_ref(), &args);
+                    (args, r)
+                }
+                .boxed()
             },
         )
     };
@@ -1479,6 +1483,7 @@ mod tests {
                 });
                 (plugin.before_tool_callback().unwrap())(tctx.clone(), tool.clone(), Map::new())
                     .await
+                    .1
                     .unwrap();
                 tokio::task::yield_now().await;
                 (plugin.after_tool_callback().unwrap())(tctx, tool, Map::new(), Map::new(), None)

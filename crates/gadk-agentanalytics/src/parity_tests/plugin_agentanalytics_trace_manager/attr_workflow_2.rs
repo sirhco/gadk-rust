@@ -1579,8 +1579,8 @@ async fn test_runner_calls_without_callbacks_hold_no_completed_runs() {
         plugin_named(
             "tool-guardrail",
             gadk_agent::PluginConfig {
-                before_tool_callback: Some(Arc::new(|_ctx, _tool, _args| {
-                    async { Err(AgentError::other("tool blocked")) }.boxed()
+                before_tool_callback: Some(Arc::new(|_ctx, _tool, args| {
+                    async move { (args, Err(AgentError::other("tool blocked"))) }.boxed()
                 })),
                 ..Default::default()
             },

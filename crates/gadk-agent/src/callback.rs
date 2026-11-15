@@ -88,13 +88,24 @@ pub type OnModelErrorCallback = Arc<
 
 /// Called before a tool runs. If it returns `Some` result or an error, the remaining callbacks and
 /// the tool call are skipped and the returned result is used as the tool result.
+///
+/// The arguments (possibly edited) are always handed back, mirroring [`BeforeModelCallback`]: Go
+/// gives the callbacks and the tool one copy of the call's arguments (e0cbfd30), so an edit made
+/// by a callback that returns `(nil, nil)` reaches the later callbacks, the tool, and the
+/// on-tool-error and after-tool callbacks. The function call event keeps the model's arguments.
+/// Return the received arguments unchanged when there is nothing to edit.
 pub type BeforeToolCallback = Arc<
     dyn Fn(
             Context,
             Arc<dyn Tool>,
             Map<String, Value>,
-        ) -> BoxFuture<'static, Result<Option<Map<String, Value>>, AgentError>>
-        + Send
+        ) -> BoxFuture<
+            'static,
+            (
+                Map<String, Value>,
+                Result<Option<Map<String, Value>>, AgentError>,
+            ),
+        > + Send
         + Sync,
 >;
 

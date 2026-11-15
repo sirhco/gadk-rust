@@ -339,6 +339,7 @@ async fn test_doc_parity_paused_long_running_tool_writes_two_tool_completed_rows
         args.clone(),
     )
     .await
+    .1
     .unwrap_or_else(|e| panic!("BeforeToolCallback() error: {e}"));
     (tp.plugin.after_tool_callback().unwrap())(
         tool_ctx.context(),

@@ -230,21 +230,29 @@ impl PluginManager {
         Ok(None)
     }
 
-    /// Go `RunBeforeToolCallback`.
+    /// Go `RunBeforeToolCallback`: the arguments are threaded through every callback (Go passes
+    /// one argument map that callbacks may edit in place, e0cbfd30) and always handed back.
     pub async fn run_before_tool(
         &self,
         ctx: Context,
         tool: Arc<dyn Tool>,
-        args: Map<String, Value>,
-    ) -> Result<Option<Map<String, Value>>, AgentError> {
+        mut args: Map<String, Value>,
+    ) -> (
+        Map<String, Value>,
+        Result<Option<Map<String, Value>>, AgentError>,
+    ) {
         for p in &self.plugins {
-            if let Some(cb) = p.before_tool_callback()
-                && let Some(r) = cb(ctx.clone(), tool.clone(), args.clone()).await?
-            {
-                return Ok(Some(r));
+            if let Some(cb) = p.before_tool_callback() {
+                let (a, res) = cb(ctx.clone(), tool.clone(), args).await;
+                args = a;
+                match res {
+                    Err(e) => return (args, Err(e)),
+                    Ok(Some(r)) => return (args, Ok(Some(r))),
+                    Ok(None) => {}
+                }
             }
         }
-        Ok(None)
+        (args, Ok(None))
     }
 
     /// Go `RunAfterToolCallback`.

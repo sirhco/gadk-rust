@@ -193,7 +193,9 @@ async fn before_tool(
     let Value::Object(args) = args else {
         panic!("args must be an object")
     };
-    (plugin.before_tool_callback().unwrap())(cb_context(session), tool, args).await
+    (plugin.before_tool_callback().unwrap())(cb_context(session), tool, args)
+        .await
+        .1
 }
 
 async fn before_model_callback_with_matching_recording_returns_recorded_response() {

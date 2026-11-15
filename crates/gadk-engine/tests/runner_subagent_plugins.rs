@@ -145,9 +145,9 @@ fn recorder_plugin(rec: &Arc<Mutex<Recorded>>) -> Plugin {
     );
     Plugin::new(AgentPluginConfig {
         name: "recorder".into(),
-        before_tool_callback: Some(Arc::new(move |_ctx, tl: Arc<dyn Tool>, _args| {
+        before_tool_callback: Some(Arc::new(move |_ctx, tl: Arc<dyn Tool>, args| {
             r1.lock().before_tools.push(tl.name().to_string());
-            Box::pin(async { Ok(None) })
+            Box::pin(async move { (args, Ok(None)) })
         })),
         before_agent_callback: Some(Arc::new(move |ctx: Context| {
             r2.lock().before_agents.push(ctx.agent_name());

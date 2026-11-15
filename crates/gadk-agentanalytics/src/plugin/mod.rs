@@ -1198,7 +1198,10 @@ mod tests {
         let cfg = super::callbacks::callbacks_config("t", &c.plugin);
         let before_tool = cfg.before_tool_callback.unwrap();
         let tool: Arc<dyn Tool> = Arc::new(PanickingTool);
-        let out = before_tool(mctx.context(), tool, Map::new()).await.unwrap();
+        let out = before_tool(mctx.context(), tool, Map::new())
+            .await
+            .1
+            .unwrap();
         assert!(out.is_none());
         assert!(c.take_rows().is_empty());
         let stats = c.plugin.processor.as_ref().unwrap().drop_stats();

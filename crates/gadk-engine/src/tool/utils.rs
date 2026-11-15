@@ -535,8 +535,9 @@ pub(crate) fn model_error_text(tool_name: &str, err: &gadk_agent::ToolError) -> 
 }
 
 /// Whether a [`ToolError::Panic`](gadk_agent::ToolError::Panic) is anywhere in `err`'s chain.
-/// Transparent layers (`ToolError::Execution`, `SharedToolError`, `AgentError::Other`) forward
-/// `source()` past their inner error, so the walk descends into them directly.
+/// Transparent layers (`ToolError::Execution`, `SharedToolError`, `AgentError::Other` /
+/// `AgentError::Workflow`) forward `source()` past their inner error, so the walk descends into
+/// them directly.
 fn chain_has_panic(err: &(dyn std::error::Error + 'static)) -> bool {
     use gadk_agent::{AgentError, SharedToolError, ToolError};
     let mut cur: Option<&(dyn std::error::Error + 'static)> = Some(err);
@@ -549,7 +550,9 @@ fn chain_has_panic(err: &(dyn std::error::Error + 'static)) -> bool {
             }
         } else if let Some(shared) = e.downcast_ref::<SharedToolError>() {
             Some(&*shared.0)
-        } else if let Some(AgentError::Other(inner)) = e.downcast_ref::<AgentError>() {
+        } else if let Some(AgentError::Other(inner) | AgentError::Workflow(inner)) =
+            e.downcast_ref::<AgentError>()
+        {
             Some(&**inner)
         } else {
             e.source()
