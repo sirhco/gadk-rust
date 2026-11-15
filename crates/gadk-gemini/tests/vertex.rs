@@ -15,7 +15,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-//! Vertex AI request URLs and authentication, pinned to genai v1.75.0: `tModel`
+//! Vertex AI request URLs and authentication, pinned to genai v1.77.0: `tModel`
 //! (`transformer.go`), `createAPIURL` (`api_client.go`) and the endpoint ladder in
 //! `NewClient` (`client.go`).
 

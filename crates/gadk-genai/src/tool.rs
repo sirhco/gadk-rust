@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Tool and tool-config types (port of genai v1.75.0 `types.go`).
+//! Tool and tool-config types (port of genai v1.77.0 `types.go`).
 
 use crate::schema::Schema;
 use crate::serde_util::{go_duration, is_zero};

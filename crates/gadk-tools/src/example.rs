@@ -179,7 +179,7 @@ fn format_function_call_args(fc: &FunctionCall) -> String {
         .join(", ")
 }
 
-/// Go `fmt.Sprintf("%v", fr)` for a `*genai.FunctionResponse` (genai v1.75.0 field order):
+/// Go `fmt.Sprintf("%v", fr)` for a `*genai.FunctionResponse` (genai v1.77.0 field order):
 /// `&{<WillContinue> <Scheduling> <Parts> <ID> <Name> <Response>}`. An unset `WillContinue` is
 /// `<nil>`, an unset `Scheduling` is the empty string, empty `Parts` are `[]`, and `Response` is
 /// the Go map form with sorted keys. Where Go would print a pointer address (a set
@@ -202,7 +202,8 @@ fn go_sprint_function_response(fr: &FunctionResponse) -> String {
     )
 }
 
-/// Go `%v` of a `*genai.FunctionResponsePart` shown as its value: `&{<InlineData> <FileData>}`.
+/// Go `%v` of a `*genai.FunctionResponsePart` shown as its value:
+/// `&{<InlineData> <FileData> <MediaProcessing>}` (an unset `MediaProcessing` is the empty string).
 fn go_sprint_response_part(p: &FunctionResponsePart) -> String {
     let inline = p.inline_data.as_ref().map_or_else(
         || "<nil>".to_string(),
@@ -220,7 +221,8 @@ fn go_sprint_response_part(p: &FunctionResponsePart) -> String {
         || "<nil>".to_string(),
         |f| format!("&{{{} {} {}}}", f.file_uri, f.mime_type, f.display_name),
     );
-    format!("&{{{inline} {file}}}")
+    let media_processing = p.media_processing.as_ref().map_or("", |m| m.as_str());
+    format!("&{{{inline} {file} {media_processing}}}")
 }
 
 #[cfg(test)]
@@ -274,6 +276,7 @@ mod tests {
                         mime_type: "text/plain".into(),
                         display_name: String::new(),
                     }),
+                    media_processing: Some(gadk_genai::MediaProcessing::Static),
                     ..Default::default()
                 },
             ],
@@ -283,7 +286,7 @@ mod tests {
         };
         assert_eq!(
             go_sprint_function_response(&fr),
-            "&{true WHEN_IDLE [&{&{image/png [1 2] pic} <nil>} &{<nil> &{gs://b/f text/plain }}] call-1 my_tool map[a:[1 x] b:2]}"
+            "&{true WHEN_IDLE [&{&{image/png [1 2] pic} <nil> } &{<nil> &{gs://b/f text/plain } STATIC}] call-1 my_tool map[a:[1 x] b:2]}"
         );
     }
 

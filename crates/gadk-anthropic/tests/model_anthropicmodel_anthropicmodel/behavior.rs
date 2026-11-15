@@ -38,8 +38,8 @@ use gadk_anthropic::{
 use gadk_genai::{
     AudioTranscriptionConfig, ComputerUse, Content, EnterpriseWebSearch, FileSearch, FinishReason,
     FunctionCall, FunctionCallingConfig, FunctionDeclaration, FunctionResponse,
-    GenerateContentConfig, GenerationConfigRoutingConfig, GoogleMaps, GoogleSearch,
-    GoogleSearchRetrieval, ImageConfig, MCPServer, MediaResolution, ModelArmorConfig,
+    GenerateContentConfig, GenerationConfigRoutingConfig, GenerationOutputConfig, GoogleMaps,
+    GoogleSearch, GoogleSearchRetrieval, ImageConfig, MCPServer, MediaResolution, ModelArmorConfig,
     ModelSelectionConfig, Part, ROLE_MODEL, ROLE_USER, Retrieval, RetrievalConfig, SafetySetting,
     Schema, ServiceTier, SpeechConfig, ThinkingConfig, ThinkingLevel, Tool, ToolCodeExecution,
     ToolConfig, ToolExaAISearch, ToolParallelAISearch, Type, URLContext,
@@ -684,6 +684,22 @@ fn rejected_cases() -> Vec<RejectedCase> {
             }),
             "ContinuationToken is not supported",
         ),
+        rejected(
+            "generation_output_config",
+            cfg_request(GenerateContentConfig {
+                generation_output_config: Some(GenerationOutputConfig::default()),
+                ..gcc()
+            }),
+            "GenerationOutputConfig is not supported",
+        ),
+        rejected(
+            "store",
+            cfg_request(GenerateContentConfig {
+                store: Some(true),
+                ..gcc()
+            }),
+            "Store is not supported",
+        ),
     ]
 }
 
@@ -696,7 +712,7 @@ async fn test_generate_content_config_validation() {
     let m = new_model(MODEL, anthropic_config(&srv.url())).await;
 
     let cases = rejected_cases();
-    assert_eq!(cases.len(), 35, "Go's rejectedCases has 35 entries");
+    assert_eq!(cases.len(), 37, "Go's rejectedCases has 37 entries");
     for tc in cases {
         let Some(req) = tc.req else {
             assert!(
@@ -1229,6 +1245,8 @@ fn generate_content_config_fields(cfg: &GenerateContentConfig) -> Vec<FieldRow> 
         audio_transcription_config: _,
         continuation_token: _,
         automatic_continuation: _,
+        generation_output_config: _,
+        store: _,
     } = cfg;
     vec![
         ("system_instruction", "SystemInstruction", Honored),
@@ -1273,6 +1291,12 @@ fn generate_content_config_fields(cfg: &GenerateContentConfig) -> Vec<FieldRow> 
         ),
         ("continuation_token", "ContinuationToken", Rejected),
         ("automatic_continuation", "AutomaticContinuation", Ignored),
+        (
+            "generation_output_config",
+            "GenerationOutputConfig",
+            Rejected,
+        ),
+        ("store", "Store", Rejected),
     ]
 }
 
@@ -1412,6 +1436,8 @@ const GO_GENERATE_CONTENT_CONFIG: GoTable = &[
     ("AudioTranscriptionConfig", Rejected),
     ("AutomaticContinuation", Ignored),
     ("ContinuationToken", Rejected),
+    ("GenerationOutputConfig", Rejected),
+    ("Store", Rejected),
 ];
 
 const GO_HTTP_OPTIONS: GoTable = &[
@@ -1679,6 +1705,20 @@ fn rejected_field_samples() -> Vec<(String, LlmRequest, String)> {
             "ContinuationToken",
             cfg_request(GenerateContentConfig {
                 continuation_token: Some(Bytes::from_static(b"t")),
+                ..gcc()
+            }),
+        ),
+        (
+            "GenerationOutputConfig",
+            cfg_request(GenerateContentConfig {
+                generation_output_config: Some(Default::default()),
+                ..gcc()
+            }),
+        ),
+        (
+            "Store",
+            cfg_request(GenerateContentConfig {
+                store: Some(true),
                 ..gcc()
             }),
         ),

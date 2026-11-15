@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Live API types (port of genai v1.75.0 `types.go`).
+//! Live API types (port of genai v1.77.0 `types.go`).
 
 use crate::config::{
     AudioTranscriptionConfig, InteractionStatus, MediaResolution, Modality, SafetySetting,
@@ -26,6 +26,7 @@ use crate::tool::Tool;
 use bytes::Bytes;
 use chrono::TimeDelta;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 crate::string_enum!(
     /// Port of genai `TurnCompleteReason`. The reason why the turn is complete.
@@ -462,6 +463,34 @@ pub struct LiveConnectConfig {
     pub safety_settings: Vec<SafetySetting>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub translation_config: Option<TranslationConfig>,
+    /// Optional. Labels with user-defined metadata for the session (genai v1.77.0).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub labels: BTreeMap<String, String>,
+}
+
+/// Port of genai types.go `LiveClientContextUpdateTools` (v1.77.0). A wrapper around the
+/// list of tools: an unset [`LiveClientContextUpdate::tools`] keeps the previous tools,
+/// a set one (even with an empty list) replaces them.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveClientContextUpdateTools {
+    /// Optional. The list of tools the model may use to generate the next response.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<Tool>,
+}
+
+/// Port of genai types.go `LiveClientContextUpdate` (v1.77.0). Updates to the context of
+/// the current session: only fields that are set are updated, in order with the rest of
+/// the inputs.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveClientContextUpdate {
+    /// Optional. Updated system instruction; overrides the setup's system instruction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_instruction: Option<Content>,
+    /// Optional. An updated list of tools; replaces the previously provided tools.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<LiveClientContextUpdateTools>,
 }
 
 /// Port of genai types.go `LiveSendClientContentParameters`. Parameters for sending client

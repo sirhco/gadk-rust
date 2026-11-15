@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! gadk-genai: Gemini-compatible content and config types (port of google.golang.org/genai v1.75.0).
+//! gadk-genai: Gemini-compatible content and config types (port of google.golang.org/genai v1.77.0).
 mod config;
 mod content;
 mod enums;

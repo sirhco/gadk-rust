@@ -23,6 +23,7 @@ fn inventory_types_exist() {
     let _: Option<gadk_genai::ActivityEnd> = None;
     let _: Option<gadk_genai::ActivityStart> = None;
     let _: Option<gadk_genai::AudioTranscriptionConfig> = None;
+    let _: Option<gadk_genai::AutomaticActivityDetection> = None;
     let _: Option<gadk_genai::Blob> = None;
     let _: Option<gadk_genai::BlockedReason> = None;
     let _: Option<gadk_genai::Candidate> = None;
@@ -54,6 +55,7 @@ fn inventory_types_exist() {
     let _: Option<gadk_genai::GenerateImagesConfig> = None;
     let _: Option<gadk_genai::GenerateImagesResponse> = None;
     let _: Option<gadk_genai::GenerationConfigRoutingConfig> = None;
+    let _: Option<gadk_genai::GenerationOutputConfig> = None;
     let _: Option<gadk_genai::GoogleMaps> = None;
     let _: Option<gadk_genai::GoogleSearch> = None;
     let _: Option<gadk_genai::GoogleSearchRetrieval> = None;
@@ -112,6 +114,9 @@ fn inventory_types_exist() {
     let _: Option<gadk_genai::Transcription> = None;
     let _: Option<gadk_genai::Type> = None;
     let _: Option<gadk_genai::URLContext> = None;
+    let _: Option<gadk_genai::UsageMetadata> = None;
+    let _: Option<gadk_genai::VertexRAGStore> = None;
+    let _: Option<gadk_genai::VertexRAGStoreRAGResource> = None;
     let _: Option<gadk_genai::VideoMetadata> = None;
 }
 
@@ -159,6 +164,11 @@ fn inventory_enum_values_serialize_as_listed() {
     assert_eq!(
         gadk_genai::BlockedReason::Unspecified.as_str(),
         "BLOCKED_REASON_UNSPECIFIED"
+    );
+    assert_eq!(gadk_genai::Behavior::NonBlocking.as_str(), "NON_BLOCKING");
+    assert_eq!(
+        gadk_genai::EndSensitivity::High.as_str(),
+        "END_SENSITIVITY_HIGH"
     );
     assert_eq!(gadk_genai::FinishReason::Blocklist.as_str(), "BLOCKLIST");
     assert_eq!(
@@ -246,7 +256,9 @@ fn inventory_enum_values_serialize_as_listed() {
         gadk_genai::Language::Unspecified.as_str(),
         "LANGUAGE_UNSPECIFIED"
     );
+    assert_eq!(gadk_genai::MediaModality::Audio.as_str(), "AUDIO");
     assert_eq!(gadk_genai::MediaModality::Text.as_str(), "TEXT");
+    assert_eq!(gadk_genai::MediaProcessing::Static.as_str(), "STATIC");
     assert_eq!(
         gadk_genai::MediaResolution::High.as_str(),
         "MEDIA_RESOLUTION_HIGH"
@@ -278,10 +290,13 @@ fn inventory_enum_values_serialize_as_listed() {
         gadk_genai::ThinkingLevel::Unspecified.as_str(),
         "THINKING_LEVEL_UNSPECIFIED"
     );
+    assert_eq!(gadk_genai::TrafficType::OnDemand.as_str(), "ON_DEMAND");
     assert_eq!(gadk_genai::Type::Array.as_str(), "ARRAY");
     assert_eq!(gadk_genai::Type::Boolean.as_str(), "BOOLEAN");
     assert_eq!(gadk_genai::Type::Integer.as_str(), "INTEGER");
+    assert_eq!(gadk_genai::Type::Null.as_str(), "NULL");
     assert_eq!(gadk_genai::Type::Number.as_str(), "NUMBER");
     assert_eq!(gadk_genai::Type::Object.as_str(), "OBJECT");
     assert_eq!(gadk_genai::Type::String.as_str(), "STRING");
+    assert_eq!(gadk_genai::Type::Unspecified.as_str(), "TYPE_UNSPECIFIED");
 }

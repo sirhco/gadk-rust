@@ -16,6 +16,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 //! Request body construction: port of genai `generateContentParametersTo{Mldev,Vertex}`.
+//! The genai v1.77.0 cases expect the bodies and errors genai v1.77.0 itself produces
+//! (captured from `Models.GenerateContent` against a recording HTTP client).
 
 use gadk_gemini::internal::build_request_body;
 use gadk_genai::*;
@@ -158,4 +160,143 @@ fn extras_provider_runs_before_signature_rule() {
     )
     .unwrap();
     assert_eq!(got["contents"][0]["parts"][0]["text"], json!(""));
+}
+
+const GEMINI_ONLY: &str = "parameter is only supported in Gemini Developer API mode, not in Gemini Enterprise Agent Platform mode.";
+const VERTEX_ONLY: &str = "parameter is only supported in Gemini Enterprise Agent Platform mode, not in Gemini Developer API mode.";
+
+fn hi() -> Vec<Content> {
+    text("hi")
+}
+
+/// genai v1.77.0 `store`: copied to the request root on the Gemini API (false included),
+/// rejected on Vertex AI.
+#[test]
+fn store_is_gemini_api_only() {
+    for store in [true, false] {
+        let c = GenerateContentConfig {
+            store: Some(store),
+            ..Default::default()
+        };
+        assert_eq!(
+            body(Backend::GeminiApi, &hi(), &c),
+            json!({"contents": [{"parts": [{"text": "hi"}], "role": "user"}], "generationConfig": {}, "store": store})
+        );
+        assert_eq!(
+            err(Backend::VertexAi, &hi(), &c),
+            format!("store {GEMINI_ONLY}")
+        );
+    }
+}
+
+/// genai v1.77.0 `generationOutputConfig`: becomes the request's `outputConfig` on Vertex
+/// AI (an empty config included), rejected on the Gemini API.
+#[test]
+fn generation_output_config_is_vertex_only() {
+    for (goc, want) in [
+        (
+            GenerationOutputConfig {
+                output_uri_prefix: "gs://b/p/".into(),
+            },
+            json!({"outputUriPrefix": "gs://b/p/"}),
+        ),
+        (GenerationOutputConfig::default(), json!({})),
+    ] {
+        let c = GenerateContentConfig {
+            generation_output_config: Some(goc),
+            ..Default::default()
+        };
+        assert_eq!(
+            body(Backend::VertexAi, &hi(), &c),
+            json!({"contents": [{"parts": [{"text": "hi"}], "role": "user"}], "generationConfig": {}, "outputConfig": want})
+        );
+        assert_eq!(
+            err(Backend::GeminiApi, &hi(), &c),
+            format!("generationOutputConfig {VERTEX_ONLY}")
+        );
+    }
+}
+
+fn function_response_content(fr: Value) -> Vec<Content> {
+    vec![content_of(
+        json!({"role": "user", "parts": [{"functionResponse": fr}]}),
+    )]
+}
+
+fn content_of(v: Value) -> Content {
+    serde_json::from_value(v).unwrap()
+}
+
+/// genai v1.77.0 `functionResponsePartToVertex`: a function-response part's
+/// `mediaProcessing` is sent on the Gemini API and rejected on Vertex AI.
+#[test]
+fn function_response_part_media_processing_is_gemini_api_only() {
+    let fr = json!({
+        "id": "c1", "name": "f", "response": {"ok": true},
+        "parts": [{"inlineData": {"data": "dg==", "mimeType": "video/mp4"}, "mediaProcessing": "AGENTIC"}],
+    });
+    let contents = function_response_content(fr.clone());
+    let typed = &contents[0].parts[0]
+        .function_response
+        .as_ref()
+        .unwrap()
+        .parts[0];
+    assert_eq!(typed.media_processing, Some(MediaProcessing::Agentic));
+    assert_eq!(
+        body(
+            Backend::GeminiApi,
+            &contents,
+            &GenerateContentConfig::default()
+        ),
+        json!({"contents": [{"parts": [{"functionResponse": fr}], "role": "user"}], "generationConfig": {}})
+    );
+    assert_eq!(
+        err(
+            Backend::VertexAi,
+            &contents,
+            &GenerateContentConfig::default()
+        ),
+        format!("mediaProcessing {GEMINI_ONLY}")
+    );
+}
+
+/// genai v1.77.0 `functionResponseToVertex`: `willContinue` is rejected on Vertex AI before
+/// the parts are converted; the Gemini API copies the function response as is.
+#[test]
+fn function_response_will_continue_is_gemini_api_only() {
+    let fr = json!({"name": "f", "parts": [{"mediaProcessing": "STATIC"}], "willContinue": true});
+    let contents = function_response_content(fr.clone());
+    assert_eq!(
+        body(
+            Backend::GeminiApi,
+            &contents,
+            &GenerateContentConfig::default()
+        ),
+        json!({"contents": [{"parts": [{"functionResponse": fr}], "role": "user"}], "generationConfig": {}})
+    );
+    assert_eq!(
+        err(
+            Backend::VertexAi,
+            &contents,
+            &GenerateContentConfig::default()
+        ),
+        format!("willContinue {GEMINI_ONLY}")
+    );
+}
+
+/// A function response without Gemini-only fields is sent unchanged by both backends.
+#[test]
+fn function_response_plain_is_unchanged() {
+    let fr = json!({
+        "id": "c1", "name": "f", "response": {"ok": true}, "scheduling": "WHEN_IDLE",
+        "parts": [{"fileData": {"fileUri": "gs://b/v.mp4", "mimeType": "video/mp4"}}],
+    });
+    let contents = function_response_content(fr.clone());
+    for backend in [Backend::GeminiApi, Backend::VertexAi] {
+        assert_eq!(
+            body(backend, &contents, &GenerateContentConfig::default()),
+            json!({"contents": [{"parts": [{"functionResponse": fr}], "role": "user"}], "generationConfig": {}}),
+            "{backend:?}"
+        );
+    }
 }
