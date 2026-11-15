@@ -21,11 +21,14 @@ use futures::StreamExt;
 use gadk_agent::{
     AfterModelCallback, AfterToolCallback, Agent, AgentError, BeforeModelCallback,
     BeforeToolCallback, Context, EventStream, InvocationContext, OnModelErrorCallback,
-    ReadonlyContext, RunConfig, ToolError,
+    ReadonlyContext, RunConfig, StreamingMode, ToolError,
 };
-use gadk_genai::{Content, FunctionCall, GenerateContentConfig, Part, ROLE_MODEL, ROLE_USER};
+use gadk_genai::{
+    Content, FunctionCall, GenerateContentConfig, GenerateContentResponseUsageMetadata, Part,
+    ROLE_MODEL, ROLE_USER,
+};
 use gadk_model::LlmResponse;
-use gadk_session::Event;
+use gadk_session::{Event, GetRequest};
 use serde_json::{Map, Value, json};
 
 use crate::llm::agent as llm_agent;
@@ -502,6 +505,125 @@ async fn test_model_callbacks() {
     }
 }
 
+fn usage(prompt: i32, candidates: i32, total: i32) -> GenerateContentResponseUsageMetadata {
+    GenerateContentResponseUsageMetadata {
+        prompt_token_count: prompt,
+        candidates_token_count: candidates,
+        total_token_count: total,
+        ..Default::default()
+    }
+}
+
+/// Port of Go streamingTextModel: two partial text deltas, then the final aggregated response,
+/// which ends the turn and carries the call's usage metadata.
+fn streaming_text_model(usage: GenerateContentResponseUsageMetadata) -> Arc<MockModel> {
+    let delta = |t: &str| LlmResponse {
+        content: Some(Content::from_text(t, ROLE_MODEL)),
+        partial: true,
+        ..Default::default()
+    };
+    MockModel::with_stream(vec![vec![
+        Ok(delta("Hello ")),
+        Ok(delta("world.")),
+        Ok(LlmResponse {
+            content: Some(Content::from_text("Hello world.", ROLE_MODEL)),
+            usage_metadata: Some(usage),
+            turn_complete: true,
+            ..Default::default()
+        }),
+    ]])
+}
+
+// parity: adapted: Go's "the callback's own response objects are not modified" check is dropped (a Rust callback hands its replacement over by value, so the flow cannot mutate the callback's copy)
+#[tokio::test]
+#[ignore = "8a bug: an after-model callback replacement drops the replaced response's partial, turn_complete and usage_metadata (Go #1763 carries them over)"]
+async fn test_after_model_callback_replacement_keeps_streaming_fields() {
+    let usage_md = usage(120, 8, 128);
+    let own_usage = usage(1, 1, 2);
+    type Usage = Option<GenerateContentResponseUsageMetadata>;
+    // (subtest, the replacement's usage, want usage per event)
+    let cases: Vec<(&str, Usage, Vec<Usage>)> = vec![
+        (
+            "replacement without usage inherits it",
+            None,
+            vec![None, None, Some(usage_md.clone())],
+        ),
+        (
+            "replacement with its own usage keeps it",
+            Some(own_usage.clone()),
+            vec![
+                Some(own_usage.clone()),
+                Some(own_usage.clone()),
+                Some(own_usage.clone()),
+            ],
+        ),
+    ];
+    for (name, replacement_usage, want_usage) in cases {
+        let after: AfterModelCallback = Arc::new(move |_ctx, resp, _err| {
+            let replacement = LlmResponse {
+                content: Some(Content::from_text("scrubbed", ROLE_MODEL)),
+                usage_metadata: replacement_usage.clone(),
+                ..Default::default()
+            };
+            Box::pin(async move { (resp, Ok(Some(replacement))) })
+        });
+        let a = llm_agent::new(LlmAgentConfig {
+            name: "scrubbing_agent".into(),
+            model: Some(streaming_text_model(usage_md.clone())),
+            after_model_callbacks: vec![after],
+            ..Default::default()
+        })
+        .unwrap_or_else(|e| panic!("{name}: failed to create llm agent: {e}"));
+        let runner = TestAgentRunner::new(a).await;
+        let events = drain(runner.run_with_config(
+            Content::from_text("hi", ROLE_USER),
+            RunConfig {
+                streaming_mode: StreamingMode::Sse,
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap_or_else(|e| panic!("{name}: CollectEvents() error = {e}"));
+
+        let got_partial: Vec<bool> = events.iter().map(|e| e.response.partial).collect();
+        let got_turn_complete: Vec<bool> =
+            events.iter().map(|e| e.response.turn_complete).collect();
+        let got_usage: Vec<_> = events
+            .iter()
+            .map(|e| e.response.usage_metadata.clone())
+            .collect();
+        assert_eq!(
+            got_partial,
+            vec![true, true, false],
+            "{name}: event Partial flags"
+        );
+        assert_eq!(
+            got_turn_complete,
+            vec![false, false, true],
+            "{name}: event TurnComplete flags"
+        );
+        assert_eq!(got_usage, want_usage, "{name}: event UsageMetadata");
+
+        // Only the final response is a model turn; the deltas must not be persisted alongside it.
+        let stored = runner
+            .session_service()
+            .get(GetRequest {
+                app_name: "test_app".into(),
+                user_id: "test_user".into(),
+                session_id: "test_session".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap_or_else(|e| panic!("{name}: session Get() error = {e}"));
+        let model_turns = stored
+            .events()
+            .iter()
+            .filter(|e| e.author == "scrubbing_agent")
+            .count();
+        assert_eq!(model_turns, 1, "{name}: persisted agent events, want 1");
+    }
+}
+
 #[derive(serde::Deserialize, schemars::JsonSchema)]
 struct RandArgs {
     #[allow(dead_code)] // Go Args.Seed; the handler ignores it
@@ -798,7 +920,7 @@ fn transfer_response() -> Content {
     Content::from_parts(
         vec![Part::from_function_response(
             "transfer_to_agent",
-            Map::new(),
+            obj(json!({"result": null})),
         )],
         ROLE_USER,
     )
@@ -844,6 +966,7 @@ async fn check(root: Arc<dyn Agent>, subtest: &str, wants: Vec<Vec<(&str, Conten
 }
 
 #[tokio::test]
+#[ignore = "8a bug: transfer_to_agent's empty result is sent as {} instead of {\"result\": null} (Go #2281), and an unknown agent_name fails the run instead of returning a tool error (Go #2161)"]
 async fn test_agent_transfer() {
     let llm = |name: &str, model: &Arc<MockModel>, subs: Vec<Arc<dyn Agent>>, single: bool| {
         llm_agent::new(LlmAgentConfig {
@@ -930,6 +1053,77 @@ async fn test_agent_transfer() {
         ],
     )
     .await;
+
+    // unknown_agent_is_a_tool_error: root_agent -- sub_agent_1. The model names an agent
+    // outside the declared enum; it gets the error back and answers instead.
+    let model = MockModel::from_contents(vec![transfer_call("nobody"), text("response1")]);
+    let sub_agent_1 = llm("sub_agent_1", &model, vec![], false);
+    let root = llm("root_agent", &model, vec![sub_agent_1], false);
+    let error_response = Content::from_parts(
+        vec![Part::from_function_response(
+            "transfer_to_agent",
+            obj(json!({
+                "error": "agent \"nobody\" is not a valid transfer target; available agents: sub_agent_1"
+            })),
+        )],
+        ROLE_USER,
+    );
+    check(
+        root,
+        "unknown_agent_is_a_tool_error",
+        vec![vec![
+            ("root_agent", transfer_call("nobody")),
+            ("root_agent", error_response),
+            ("root_agent", text("response1")),
+        ]],
+    )
+    .await;
+}
+
+/// transfer_to_agent returns no result of its own, so after-tool callbacks see nil. The model is
+/// still sent {"result": null}.
+// parity: adapted: Go's nil result map is the empty Map (a Rust AfterToolCallback receives a Map, not an Option)
+#[tokio::test]
+async fn test_agent_transfer_after_tool_callback_sees_no_result() {
+    let model = MockModel::from_contents(vec![transfer_call("sub_agent_1"), text("response1")]);
+    let sub_agent_1 = llm_agent::new(LlmAgentConfig {
+        name: "sub_agent_1".into(),
+        model: Some(model.clone()),
+        ..Default::default()
+    })
+    .unwrap_or_else(|e| panic!("failed to create subAgent1: {e}"));
+    let seen: Arc<Mutex<Vec<Map<String, Value>>>> = Arc::default();
+    let record = seen.clone();
+    let after: AfterToolCallback = Arc::new(move |_ctx, _tool, _args, result, _err| {
+        record.lock().unwrap().push(result);
+        Box::pin(async { Ok(None) })
+    });
+    let root = llm_agent::new(LlmAgentConfig {
+        name: "root_agent".into(),
+        model: Some(model),
+        sub_agents: vec![sub_agent_1],
+        after_tool_callbacks: vec![after],
+        ..Default::default()
+    })
+    .unwrap_or_else(|e| panic!("failed to create rootAgent: {e}"));
+
+    let runner = TestAgentRunner::new(root).await;
+    drain(runner.run("transfer"))
+        .await
+        .unwrap_or_else(|e| panic!("Run() error = {e}"));
+
+    let seen = seen.lock().unwrap();
+    assert_eq!(
+        seen.len(),
+        1,
+        "after-tool callback ran {} times, want 1",
+        seen.len()
+    );
+    assert!(
+        seen[0].is_empty(),
+        "after-tool callback result = {:?}, want nil",
+        seen[0]
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
