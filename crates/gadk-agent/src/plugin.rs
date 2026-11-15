@@ -23,7 +23,8 @@ use futures::FutureExt;
 use crate::callback::{
     AfterAgentCallback, AfterModelCallback, AfterRunCallback, AfterToolCallback,
     BeforeAgentCallback, BeforeModelCallback, BeforeRunCallback, BeforeToolCallback, CloseFn,
-    OnEventCallback, OnModelErrorCallback, OnToolErrorCallback, OnUserMessageCallback,
+    OnAgentErrorCallback, OnEventCallback, OnModelErrorCallback, OnToolErrorCallback,
+    OnUserMessageCallback,
 };
 
 /// Go `plugin.Config`: a plugin's name and callbacks.
@@ -43,6 +44,8 @@ pub struct PluginConfig {
     pub before_agent_callback: Option<BeforeAgentCallback>,
     /// See [`AfterAgentCallback`].
     pub after_agent_callback: Option<AfterAgentCallback>,
+    /// See [`OnAgentErrorCallback`].
+    pub on_agent_error_callback: Option<OnAgentErrorCallback>,
     /// See [`BeforeModelCallback`].
     pub before_model_callback: Option<BeforeModelCallback>,
     /// See [`AfterModelCallback`].
@@ -113,6 +116,11 @@ impl Plugin {
     /// The plugin's after-agent callback.
     pub fn after_agent_callback(&self) -> Option<AfterAgentCallback> {
         self.cfg.after_agent_callback.clone()
+    }
+
+    /// The plugin's on-agent-error callback (Go `Plugin.OnAgentErrorCallback`).
+    pub fn on_agent_error_callback(&self) -> Option<OnAgentErrorCallback> {
+        self.cfg.on_agent_error_callback.clone()
     }
 
     /// The plugin's before-model callback.

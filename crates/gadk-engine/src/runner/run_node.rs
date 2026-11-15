@@ -21,8 +21,8 @@ use std::sync::Arc;
 
 use futures::StreamExt;
 use gadk_agent::{
-    Agent, AgentError, AgentType, EventStream, InvocationContext, Mode, RunConfig, Teardowns,
-    run_limits,
+    Agent, AgentError, AgentType, EventStream, InvocationContext, Mode, PluginManager, RunConfig,
+    Teardowns, run_limits,
 };
 use gadk_genai::{Content, FunctionResponse};
 use gadk_session::{Event, Session};
@@ -56,7 +56,10 @@ fn root_workflow_name(app_name: &str, a: &dyn Agent) -> String {
 
 impl RunnerInner {
     /// Port of Go runner/run_node.go `(*Runner).newNodeInvocationContext`; the agent path
-    /// (runner.go:678-706) builds the same context inline and uses it too.
+    /// (runner.go:678-706) builds the same context inline and uses it too. `invocation_id`
+    /// empty mints a fresh one (Go `NewInvocationContext`); `branch` is the agent path's route
+    /// to a calling sub-agent (empty otherwise).
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn new_invocation_context(
         &self,
         stored: &Arc<dyn Session>,
@@ -65,13 +68,15 @@ impl RunnerInner {
         cfg: &RunConfig,
         token: &CancellationToken,
         compaction: bool,
+        plugins: Arc<PluginManager>,
+        mut invocation_id: String,
+        branch: String,
     ) -> InvocationContext {
         // Go runconfig.ToContext(ctx, &RunConfig{MaxLLMCalls: ResolveMaxLLMCalls(..)}): one
         // budget for the whole invocation.
         let limiter = Arc::new(run_limits::LlmCallLimiter::new(
             run_limits::resolve_max_llm_calls(cfg.max_llm_calls),
         ));
-        let mut invocation_id = resolve_invocation_id(Some(&**stored), msg.as_ref());
         if invocation_id.is_empty() {
             invocation_id = format!("e-{}", self.platform.new_uuid());
         }
@@ -83,8 +88,10 @@ impl RunnerInner {
             .run_config(cfg.clone())
             .llm_call_limiter(limiter)
             .platform(self.platform.clone())
-            .plugin_manager(self.plugin_manager.clone())
+            // Go `r.withPluginManager(ctx)`: the caller resolved it.
+            .plugin_manager(plugins)
             .parent_map(self.parents.clone())
+            .branch(branch)
             .cancellation_token(token.clone())
             // Started work a dropped component hands over; awaited before the after-run
             // callbacks (see `InvocationGuard`).
@@ -124,8 +131,10 @@ impl RunnerInner {
 
 /// Port of Go runner/run_node.go `(*Runner).runNode`: wraps `agent_to_run`
 /// in a START -> node workflow and runs or resumes it.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn run_node(
     inner: Arc<RunnerInner>,
+    plugins: Arc<PluginManager>,
     stored: Arc<dyn Session>,
     agent_to_run: Arc<dyn Agent>,
     root_mode: Mode,
@@ -153,7 +162,21 @@ pub(super) fn run_node(
         let token = CancellationToken::new();
         let cancel_on_drop = token.clone().drop_guard();
         // The user content is the workflow's seed input.
-        let ictx = inner.new_invocation_context(&stored, agent_to_run.clone(), msg.clone(), &cfg, &token, true);
+        // Go: answers to calls from several invocations resume the first call's invocation here
+        // (adk-go accepts resume messages adk-python rejects, so runs that resume today keep
+        // working).
+        let (invocation_id, _) = resolve_invocation_id(Some(&*stored), msg.as_ref());
+        let ictx = inner.new_invocation_context(
+            &stored,
+            agent_to_run.clone(),
+            msg.clone(),
+            &cfg,
+            &token,
+            true,
+            plugins,
+            invocation_id,
+            String::new(),
+        );
         // Go runner.go:610 binds the ROOT agent's placement on the context handed to runNode.
         let ictx = with_bound_mode(
             &ictx,
@@ -329,22 +352,33 @@ fn waiting_interrupt_ids(state: &RunState) -> HashSet<String> {
         .collect()
 }
 
-/// Port of Go runner/run_node.go `resolveInvocationID`: the invocation ID of the event holding the
-/// call that the first answerable function response in `msg` answers, so a HITL resume shares
-/// its pause's invocation; `""` otherwise.
-pub(super) fn resolve_invocation_id(sess: Option<&dyn Session>, msg: Option<&Content>) -> String {
+/// Port of Go runner/run_node.go `resolveInvocationID` (#2312): the invocation ID of the event
+/// holding the first answered call found in history, so a HITL resume shares its pause's
+/// invocation (`""` for a fresh turn or when no answered call is in history), and whether the
+/// answered calls belong to more than one invocation.
+pub(super) fn resolve_invocation_id(
+    sess: Option<&dyn Session>,
+    msg: Option<&Content>,
+) -> (String, bool) {
     let (Some(sess), Some(msg)) = (sess, msg) else {
-        return String::new();
+        return (String::new(), false);
     };
+    let mut id: Option<String> = None;
+    let mut spans_invocations = false;
     for fr in function_responses(Some(msg)) {
         if fr.id.is_empty() {
             continue;
         }
-        if let Some(ev) = find_event_by_function_call_id(Some(sess), &fr.id) {
-            return ev.invocation_id;
+        let Some(ev) = find_event_by_function_call_id(Some(sess), &fr.id) else {
+            continue;
+        };
+        match &id {
+            None => id = Some(ev.invocation_id),
+            Some(first) if *first != ev.invocation_id => spans_invocations = true,
+            Some(_) => {}
         }
     }
-    String::new()
+    (id.unwrap_or_default(), spans_invocations)
 }
 
 /// Port of Go runner/run_node.go `findEventByFunctionCallID`: the most recent event carrying a

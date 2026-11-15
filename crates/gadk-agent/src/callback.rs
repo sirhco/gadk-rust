@@ -25,6 +25,7 @@ use gadk_model::{LlmRequest, LlmResponse, ModelError};
 use gadk_session::Event;
 use serde_json::{Map, Value};
 
+use crate::agent::Agent;
 use crate::context::{Context, InvocationContext};
 use crate::error::{AgentError, ToolError};
 use crate::tool::Tool;
@@ -148,6 +149,23 @@ pub type BeforeRunCallback = Arc<
 
 /// Invoked after a run completes.
 pub type AfterRunCallback = Arc<dyn Fn(InvocationContext) -> BoxFuture<'static, ()> + Send + Sync>;
+
+/// Invoked when an error escapes an agent's run (Go `plugin.OnAgentErrorCallback`, #2229/#2260).
+///
+/// Notification only: the callbacks of every plugin run in registration order, synchronously,
+/// before the error is yielded, and the error is yielded to the caller unchanged. The agent is the
+/// one that failed (identify it by [`Agent::name`]). The context is a callback context for the
+/// invocation whose actions are discarded: state changes made through it are not persisted, and
+/// artifact saves through it are written but no artifact delta records them.
+///
+/// A panicking callback is caught, so the remaining callbacks still run and the original error is
+/// still yielded; the panic is recorded on the agent's span. The error is compared against the
+/// failing agent's own context: when that context is cancelled, an error that is (or wraps)
+/// [`AgentError::Cancelled`], [`AgentError::DeadlineExceeded`] or the context's cancel cause is
+/// not reported. Errors that escape while the context is live are reported. Parallel sub-agents may
+/// invoke callbacks concurrently. An error from a sub-agent is reported once for each ancestor as
+/// it propagates. A live run (`run_live`) does not invoke this callback.
+pub type OnAgentErrorCallback = Arc<dyn Fn(Context, Arc<dyn Agent>, &AgentError) + Send + Sync>;
 
 /// A plugin's close function (Go `plugin.Config.CloseFunc`).
 pub type CloseFn = Arc<dyn Fn() -> BoxFuture<'static, Result<(), AgentError>> + Send + Sync>;

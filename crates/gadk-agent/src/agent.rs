@@ -29,8 +29,8 @@ use tracing::Instrument;
 
 use crate::callback::{AfterAgentCallback, BeforeAgentCallback};
 use crate::context::delta::new_actions;
-use crate::context::{Context, ContextDelta, InvocationContext};
-use crate::error::{AgentError, EventStream, wrap};
+use crate::context::{CancelCause, Context, ContextDelta, InvocationContext, SharedCauseError};
+use crate::error::{AgentError, EventStream, chain_any, wrap};
 use crate::fiber;
 use crate::live::LiveSession;
 use crate::state::{AgentState, AgentType};
@@ -139,7 +139,8 @@ impl CustomAgent {
     }
 }
 
-/// Go `agent.New`: an agent with custom logic defined by `cfg.run`.
+/// Go `agent.New`: an agent with custom logic defined by `cfg.run`. Fails when `cfg.name` is
+/// empty or a sub-agent appears more than once in `cfg.sub_agents`.
 pub fn new(cfg: AgentConfig) -> Result<Arc<dyn Agent>, AgentError> {
     new_with_state(
         cfg,
@@ -155,6 +156,13 @@ pub fn new(cfg: AgentConfig) -> Result<Arc<dyn Agent>, AgentError> {
 /// [`new`] with engine-owned state (the engine's agent constructors).
 #[doc(hidden)]
 pub fn new_with_state(cfg: AgentConfig, state: AgentState) -> Result<Arc<dyn Agent>, AgentError> {
+    // Go #2124: under an agent tool or as a transfer target, an empty name puts an empty function
+    // name or enum value in the parent's model request, which Vertex AI rejects.
+    if cfg.name.is_empty() {
+        return Err(AgentError::Config(
+            "error creating agent: name must not be empty".to_owned(),
+        ));
+    }
     let mut seen = HashSet::new();
     for sub in &cfg.sub_agents {
         if !seen.insert(Arc::as_ptr(sub).cast::<()>() as usize) {
@@ -345,7 +353,10 @@ async fn step(mut st: RunState) -> Option<(Result<Event, AgentError>, RunState)>
                     }
                     Ok(None) => {}
                     // Go yields (nil, err) and keeps going if the caller does.
-                    Err(e) => st.pending.push_back(Err(e)),
+                    Err(e) => {
+                        run_on_agent_error_callbacks(&st.ctx, &e);
+                        st.pending.push_back(Err(e));
+                    }
                 }
                 // The ended check runs after the consumer took the pending item, as in Go.
                 st.phase = Phase::StartMain;
@@ -357,10 +368,14 @@ async fn step(mut st: RunState) -> Option<(Result<Event, AgentError>, RunState)>
                 match st.agent.run.clone() {
                     // Matches adk-python: an agent without a run function is built fine and fails
                     // when run.
-                    None => st.pending.push_back(Err(AgentError::Config(format!(
-                        "agent {} has no Run function",
-                        go_quote(&st.agent.name)
-                    )))),
+                    None => {
+                        let e = AgentError::Config(format!(
+                            "agent {} has no Run function",
+                            go_quote(&st.agent.name)
+                        ));
+                        run_on_agent_error_callbacks(&st.ctx, &e);
+                        st.pending.push_back(Err(e));
+                    }
                     Some(run) => st.phase = Phase::Main(run(st.ctx.as_invocation().clone())),
                 }
             }
@@ -373,6 +388,7 @@ async fn step(mut st: RunState) -> Option<(Result<Event, AgentError>, RunState)>
                     return track(st, Ok(ev));
                 }
                 Some(Err(e)) => {
+                    run_on_agent_error_callbacks(&st.ctx, &e);
                     st.phase = Phase::Main(inner);
                     return track(st, Err(e));
                 }
@@ -387,11 +403,54 @@ async fn step(mut st: RunState) -> Option<(Result<Event, AgentError>, RunState)>
             Phase::After => match run_after_agent_callbacks(&st.agent, &st.ctx).await {
                 Ok(Some(ev)) => st.pending.push_back(Ok(ev)),
                 Ok(None) => {}
-                Err(e) => st.pending.push_back(Err(e)),
+                Err(e) => {
+                    run_on_agent_error_callbacks(&st.ctx, &e);
+                    st.pending.push_back(Err(e));
+                }
             },
             Phase::Done => return None,
         }
     }
+}
+
+/// Port of Go `runOnAgentErrorCallbacks` (#2229, #2260): notifies the plugins that `err` escaped
+/// the agent's run. Notification only: the caller still yields `err`. When the agent's own context
+/// is cancelled, an error that is (or wraps) `Cancelled`, `DeadlineExceeded` or the context's
+/// cancel cause is not reported, since it cannot be told apart from an echo of the cancellation;
+/// errors that escape while the context is live are reported.
+fn run_on_agent_error_callbacks(ctx: &Context, err: &AgentError) {
+    if let Some(cause) = ctx.cause()
+        && is_cancellation_echo(err, &cause)
+    {
+        return;
+    }
+    let Some(pm) = ctx.plugin_manager() else {
+        return;
+    };
+    // Go NewCallbackContext(ctx, nil): fresh actions nobody persists.
+    let cb_ctx = ctx.with_delta(ContextDelta {
+        actions: Some(new_actions()),
+        ..Default::default()
+    });
+    pm.run_on_agent_error(cb_ctx, ctx.agent(), err);
+}
+
+/// Go `errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+/// errors.Is(err, context.Cause(ctx))`.
+fn is_cancellation_echo(err: &AgentError, cause: &CancelCause) -> bool {
+    chain_any(err, &|e| {
+        if matches!(
+            e.downcast_ref::<AgentError>(),
+            Some(AgentError::Cancelled | AgentError::DeadlineExceeded)
+        ) {
+            return true;
+        }
+        let CancelCause::Error(c) = cause else {
+            return false;
+        };
+        e.downcast_ref::<SharedCauseError>()
+            .is_some_and(|s| Arc::ptr_eq(&s.0, c))
+    })
 }
 
 /// Go `getAuthorForEvent`.

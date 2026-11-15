@@ -824,7 +824,6 @@ fn event_has_text(ev: &Event, text: &str) -> bool {
 
 // parity: adapted: on_event receives the event by value, so Go's in-place rewrite (`*ev = …; return nil`) only changes the plugin's own copy and the agent's original event (also without a timestamp) is stored
 #[tokio::test]
-#[ignore = "8a bug: the runner stores an event yielded or returned by on_event without a timestamp with the zero time (Go #2091 stampTimestamp)"]
 async fn test_runner_stamps_events_yielded_without_timestamp() {
     let run_time = march(2, 10);
     let own_time = march(1, 9);
@@ -952,7 +951,6 @@ async fn test_runner_stamps_events_yielded_without_timestamp() {
 }
 
 #[tokio::test]
-#[ignore = "8a bug: the runner stores and streams an on_event replacement with the plugin's ID, invocation ID, timestamp and author instead of the original's (Go #2306 fromPlugin)"]
 async fn test_runner_plugin_replacement_keeps_event_identity() {
     let run_time = march(2, 10);
     let plugin_time = march(3, 11);
@@ -1041,7 +1039,6 @@ async fn test_runner_plugin_replacement_keeps_event_identity() {
 
 // parity: adapted: Rust plugins hand back an owned Event, so the runner cannot write to the plugin's shared replacement; the guard checks the shared value and that each stored copy carries its original's identity
 #[tokio::test]
-#[ignore = "8a bug: the runner stores an on_event replacement without the original event's ID and author (Go #2306 fromPlugin)"]
 async fn test_runner_plugin_shared_replacement_is_not_modified() {
     let run_time = march(2, 10);
     let svc: Arc<dyn SessionService> = Arc::new(InMemorySessionService::new());
@@ -1098,7 +1095,6 @@ async fn test_runner_plugin_shared_replacement_is_not_modified() {
 
 // parity: adapted: on_event receives the event by value, so Go's in-place rewrite only changes the plugin's own copy; that case then stores the runner's own reply, which already has a timestamp
 #[tokio::test]
-#[ignore = "8a bug: the runner stores a before-run reply replaced by on_event with the plugin's ID, invocation ID, zero timestamp and empty author (Go #2306/#2091)"]
 async fn test_runner_stamps_before_run_replacement() {
     let run_time = march(2, 10);
     let plugin_time = march(3, 11);
@@ -1270,7 +1266,6 @@ async fn test_runner_function_responses_resume_their_invocation(
 }
 
 #[rstest::rstest]
-#[ignore = "8a bug: on the agent path the runner resumes the first call's invocation for answers to calls of two invocations instead of starting a new one (Go #2312)"]
 #[case::agent_path_calls_of_two_invocations(new_caller_root as fn() -> Arc<dyn Agent>, &["fc-1a", "fc-2"])]
 #[case::agent_path_unknown_calls(new_caller_root as fn() -> Arc<dyn Agent>, &["no-such-fc"])]
 #[case::node_path_unknown_calls(new_permissive_agent as fn() -> Arc<dyn Agent>, &["no-such-fc"])]
