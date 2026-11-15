@@ -43,7 +43,9 @@ fn error_stream(err: AgentError) -> EventStream {
     Box::pin(futures::stream::once(async move { Err(err) }))
 }
 
-/// Port of Go llmagent.RunLLMAgentAsNode. Not async (C4): every branch returns a lazy stream.
+/// Port of Go `llmagent.RunLLMAgentAsNode`, the entry point a custom node wrapping an LLM agent
+/// calls to run it as a workflow node (re-exported as `gadk_engine::llm::run_llm_agent_as_node`).
+/// Not async (C4): every branch returns a lazy stream.
 ///
 /// The mode is the one this invocation bound for the agent, else its declaration, else chat.
 /// single_turn seeds `input` as a user event (never persisted) and post-processes the model reply
@@ -51,11 +53,7 @@ fn error_stream(err: AgentError) -> EventStream {
 /// the outer task-delegation dispatch loop. Go's nil-context, nil-session and "tool or callback
 /// context" error branches have no Rust counterpart: a `Context` is never null, `ctx.session()`
 /// always returns a session, and every `Context` supports `with_delta`.
-pub(crate) fn run_llm_agent_as_node(
-    ctx: Context,
-    agent: Arc<dyn Agent>,
-    input: Value,
-) -> EventStream {
+pub fn run_llm_agent_as_node(ctx: Context, agent: Arc<dyn Agent>, input: Value) -> EventStream {
     if reveal(agent.as_ref()).is_none() {
         return error_stream(AgentError::other(format!(
             "RunLLMAgentAsNode: {} is not an LlmAgent",
