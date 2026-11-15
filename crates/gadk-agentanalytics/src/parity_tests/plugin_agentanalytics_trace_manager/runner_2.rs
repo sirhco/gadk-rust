@@ -35,14 +35,6 @@ use crate::parity_tests::plugin_agentanalytics_bigquery_agent_analytics_plugin::
 use crate::row::Row;
 use crate::trace::testkit::sequential;
 
-/// A model answering "never sent" once.
-fn never_sent() -> Arc<dyn gadk_model::Llm> {
-    scripted_llm(vec![Ok(LlmResponse {
-        content: Some(text_content("model", "never sent")),
-        ..Default::default()
-    })])
-}
-
 #[tokio::test]
 async fn test_runner_prior_plugin_answers_only_child_emits_invocation_completed_ok() {
     for (name, drain) in [
@@ -1130,16 +1122,6 @@ async fn test_runner_progress_event_without_content() {
             agent_error_counts(&rows)
         );
     }
-}
-
-/// Go `newCacheHitAgent(t)`: an LLM agent `cached` that its BeforeAgentCallback answers.
-fn new_cache_hit_agent() -> Arc<dyn gadk_agent::Agent> {
-    llm_agent(LlmAgentConfig {
-        name: "cached".into(),
-        model: Some(never_sent()),
-        before_agent_callbacks: vec![answering_before_agent(text_content("model", "cache hit"))],
-        ..Default::default()
-    })
 }
 
 /// Go's `guard`: a custom agent that drains `cached` without forwarding its events.

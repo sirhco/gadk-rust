@@ -419,8 +419,8 @@ fn start_live_streaming(
     let session = live.as_any().downcast_ref::<LiveSessionImpl>();
     if let Some(s) = session {
         s.register_streaming_tool(&name, &call_id, token.clone());
-        // R9: a teardown that already drained the registry (dropping the event stream aborts the
-        // session task while this tool task may still be mid-poll on another worker) would never
+        // R9: a teardown that already drained the registry (dropping the event stream cancels
+        // `done` while this tool task may still be mid-poll on another worker) would never
         // cancel this entry. Teardown cancels `done` before taking the registry lock to drain, so
         // seeing `done` cancelled here means the drain may have missed us: cancel ourselves.
         if s.done().is_cancelled() {

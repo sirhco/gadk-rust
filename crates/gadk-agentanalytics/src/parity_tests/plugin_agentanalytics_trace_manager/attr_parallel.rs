@@ -22,7 +22,7 @@
 //! poll (so on the reader's fiber), [`Yield::item`] returns once the reader polls again, and a
 //! reader that stops drops the body (Go's `yield` returning false; the body's drop guards stand
 //! for its `defer`s). Go's `<-ctx.Done(); yield(nil, ctx.Err())` waits on the context's token and
-//! yields [`ctx_err`].
+//! yields [`ctx_err`](super::attr_support::ctx_err).
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -47,8 +47,9 @@ use parking_lot::Mutex;
 use serde_json::{Map, Value, json};
 
 use super::attr_support::{
-    Gate, context_canceled_on_done_llm, go, new_parallel_agent, stream_then_wait_llm,
-    then_wait_for_cancel, wait_then_stream_partial_llm,
+    ERR_SIBLING_FAILED, Gate, context_canceled_on_done_llm, ctx_err, event_on_branch, go,
+    new_parallel_agent, run_unjoined_late_child, stream_then_wait_llm, then_wait_for_cancel,
+    wait_then_stream_partial_llm, within,
 };
 use super::runner_support::*;
 use crate::event_types::*;
@@ -60,12 +61,6 @@ type Item = Result<Event, AgentError>;
 
 /// A builder of a test agent (Go's `func(t *testing.T) agent.Agent` table fields).
 type NewAgent = fn() -> Arc<dyn Agent>;
-
-/// Go's `time.After(10 * time.Second)` guards.
-const TEN_SECONDS: Duration = Duration::from_secs(10);
-
-/// Go `errSiblingFailed`.
-const ERR_SIBLING_FAILED: &str = "guardrail rejected the request";
 
 /// Go's `yield` of an `iter.Seq2[*session.Event, error]` body run by [`seq`].
 #[derive(Clone, Default)]
@@ -149,36 +144,14 @@ where
     .expect("custom agent")
 }
 
-/// Go `ctx.Err()` of an ended agent context: `context.DeadlineExceeded` on a deadline, else
-/// `context.Canceled` (an errgroup cause still reads `context canceled`).
-fn ctx_err(ctx: &InvocationContext) -> AgentError {
-    match ctx.cause() {
-        Some(CancelCause::DeadlineExceeded) => AgentError::DeadlineExceeded,
-        _ => AgentError::Cancelled,
-    }
-}
-
 /// Go `<-ctx.Done()`.
 async fn done(ctx: &InvocationContext) {
     ctx.cancellation_token().cancelled().await;
 }
 
-/// Go `select { case <-g: return true; case <-time.After(10 * time.Second): return false }`.
-async fn wait_for(g: &Gate) -> bool {
-    tokio::time::timeout(TEN_SECONDS, g.wait()).await.is_ok()
-}
-
-/// Go `session.NewEvent(ctx, ctx.InvocationID())` with `Author` and `Branch` set.
-fn event_of(ctx: &InvocationContext, author: &str) -> Event {
-    let mut ev = new_event(ctx);
-    ev.author = author.into();
-    ev.branch = ctx.branch();
-    ev
-}
-
-/// [`event_of`] with `Content: textContent("model", text)`.
+/// [`event_on_branch`] with `Content: textContent("model", text)`.
 fn text_event(ctx: &InvocationContext, author: &str, text: &str) -> Event {
-    let mut ev = event_of(ctx, author);
+    let mut ev = event_on_branch(ctx, author);
     ev.response.content = Some(text_content("model", text));
     ev
 }
@@ -190,17 +163,17 @@ fn final_event(ctx: &InvocationContext, author: &str, text: &str) -> Event {
     ev
 }
 
-/// [`event_of`] with `Partial: true` and, if any, `Content: textContent("model", text)`.
+/// [`event_on_branch`] with `Partial: true` and, if any, `Content: textContent("model", text)`.
 fn partial_event(ctx: &InvocationContext, author: &str, text: Option<&str>) -> Event {
-    let mut ev = event_of(ctx, author);
+    let mut ev = event_on_branch(ctx, author);
     ev.response.partial = true;
     ev.response.content = text.map(|t| text_content("model", t));
     ev
 }
 
-/// [`event_of`] with `Actions.StateDelta: delta`.
+/// [`event_on_branch`] with `Actions.StateDelta: delta`.
 fn state_event(ctx: &InvocationContext, author: &str, delta: Value) -> Event {
-    let mut ev = event_of(ctx, author);
+    let mut ev = event_on_branch(ctx, author);
     ev.actions.state_delta = delta.as_object().cloned();
     ev
 }
@@ -259,14 +232,6 @@ where
             ..Default::default()
         },
     )
-}
-
-/// `RunConfig{StreamingMode: agent.StreamingModeSSE}`.
-fn sse() -> RunConfig {
-    RunConfig {
-        streaming_mode: gadk_agent::StreamingMode::Sse,
-        ..Default::default()
-    }
 }
 
 /// Go `for _, err := range r.Run(…, "go", cfg) { if err != nil { gotErr = err; if stopAtError {
@@ -347,28 +312,9 @@ fn transfer_root(par: Arc<dyn Agent>) -> Arc<dyn Agent> {
     })
 }
 
-/// Go `requireChildStartedAfterPartialStop(t, attempt)`.
-async fn require_child_started_after_partial_stop<F, Fut>(attempt: F)
-where
-    F: Fn() -> Fut,
-    Fut: Future<Output = Vec<Row>>,
-{
-    const MAX_ATTEMPTS: usize = 20;
-    for _ in 0..MAX_ATTEMPTS {
-        let rows = attempt().await;
-        require_invocation_completed_ok(&rows);
-        if rows_of_type(&rows, EVENT_AGENT_STARTING)
-            .iter()
-            .any(|r| agent_of(r) == "child")
-        {
-            return;
-        }
-    }
-    panic!("child never started after partial stop across {MAX_ATTEMPTS} attempts");
-}
-
-/// Go `newStreamingAuthor(t, child, withContent)`.
-fn new_streaming_author(child: Arc<dyn Agent>, with_content: bool) -> Arc<dyn Agent> {
+/// Go `newStreamingAuthor(t, child, withContent)` as a `go_agent` (`attr_workflow_1`'s twin runs
+/// on `go_iter`).
+fn new_streaming_author_via_go_agent(child: Arc<dyn Agent>, with_content: bool) -> Arc<dyn Agent> {
     let run_child = child.clone();
     go_agent("author", vec![child], move |ctx, y| {
         let child = run_child.clone();
@@ -594,7 +540,7 @@ fn branch_failure_cases() -> Vec<BranchFailureCase> {
                 new_parallel_agent(
                     "par_root",
                     vec![
-                        new_streaming_author(worker, false),
+                        new_streaming_author_via_go_agent(worker, false),
                         new_custom_failer(ready),
                     ],
                 )
@@ -700,19 +646,6 @@ async fn check_branch_failure_case(tc: &BranchFailureCase, stop_at_error: bool) 
     }
 }
 
-/// Go `newCacheHitAgent(t)`: an LLM agent `cached` that its BeforeAgentCallback answers.
-fn new_cache_hit_agent() -> Arc<dyn Agent> {
-    llm_agent(LlmAgentConfig {
-        name: "cached".into(),
-        model: Some(scripted_llm(vec![Ok(LlmResponse {
-            content: Some(text_content("model", "never sent")),
-            ..Default::default()
-        })])),
-        before_agent_callbacks: vec![answering_before_agent(text_content("model", "cache hit"))],
-        ..Default::default()
-    })
-}
-
 /// A before-agent callback that runs `f` and answers `text`.
 fn answering_after(f: impl Fn() + Send + Sync + 'static, text: &str) -> BeforeAgentCallback {
     let content = text_content("model", text);
@@ -749,7 +682,7 @@ fn new_branch_a(child_started: Gate, done_gate: Gate, with_event: bool) -> Arc<d
         move |ctx, y| {
             let child_started = child_started.clone();
             async move {
-                if !wait_for(&child_started).await {
+                if !within(&child_started).await {
                     y.item(Err(AgentError::other("cached_child did not start")))
                         .await;
                     return;
@@ -773,7 +706,7 @@ fn wait_tool(tool_started: Gate, parent_done: Gate) -> Arc<dyn gadk_agent::Tool>
             let (tool_started, parent_done) = (tool_started.clone(), parent_done.clone());
             async move {
                 tool_started.close();
-                if wait_for(&parent_done).await {
+                if within(&parent_done).await {
                     Ok(json!({"ok": true}).as_object().cloned().unwrap())
                 } else {
                     Err(ToolError::Execution("parent did not end".into()))
@@ -807,97 +740,6 @@ async fn run_until_done_of(r: &gadk_engine::Runner, author: &str) {
     .await;
     assert!(errs.is_empty(), "runner.Run error: {errs:?}");
     assert!(saw_done, "the run ended without the {author}'s answer");
-}
-
-/// Go `runUnjoinedLateChild(t, build)`.
-async fn run_unjoined_late_child(
-    build: impl FnOnce(Arc<dyn Agent>, AfterAgentCallback) -> Arc<dyn Agent>,
-) {
-    let tp = setup_test_plugin().await;
-    let (entered, launcher_done, parent_done, child_done) =
-        (Gate::new(), Gate::new(), Gate::new(), Gate::new());
-    let child = go_agent_with(
-        "cached_child",
-        vec![],
-        vec![answering_after(
-            {
-                let entered = entered.clone();
-                move || entered.close()
-            },
-            "cached",
-        )],
-        vec![],
-        |_ctx, _y| async {},
-    );
-    let launcher = go_agent_with(
-        "launcher",
-        vec![],
-        vec![],
-        vec![{
-            let (launcher_done, entered) = (launcher_done.clone(), entered.clone());
-            Arc::new(move |_ctx: gadk_agent::Context| {
-                let (launcher_done, entered) = (launcher_done.clone(), entered.clone());
-                Box::pin(async move {
-                    launcher_done.close();
-                    wait_for(&entered).await;
-                    Ok(None)
-                }) as BoxFuture<'static, Result<Option<Content>, AgentError>>
-            })
-        }],
-        {
-            let (parent_done, child_done) = (parent_done.clone(), child_done.clone());
-            move |ctx, y| {
-                let (child, launcher_done, parent_done, child_done) = (
-                    child.clone(),
-                    launcher_done.clone(),
-                    parent_done.clone(),
-                    child_done.clone(),
-                );
-                async move {
-                    let run_ctx = ctx.clone();
-                    drop(go(async move {
-                        let _close = Defer(Some(move || child_done.close()));
-                        if !wait_for(&launcher_done).await {
-                            return;
-                        }
-                        let mut events = child.run(run_ctx);
-                        while events.next().await.is_some() {
-                            wait_for(&parent_done).await;
-                        }
-                    }));
-                    y.item(Ok(text_event(&ctx, "launcher", "launched"))).await;
-                }
-            }
-        },
-    );
-    let root = build(
-        launcher,
-        after_agent(move || {
-            parent_done.close();
-            None
-        }),
-    );
-    let (_, errs) = run_turn(
-        &new_test_runner(root, vec![tp.plugin.clone()]),
-        "u1",
-        "s1",
-        "go",
-        RunConfig::default(),
-    )
-    .await;
-    assert!(errs.is_empty(), "runner.Run error: {errs:?}");
-    assert!(wait_for(&child_done).await, "child did not exit");
-    let rows = RowCursor::default()
-        .collect(&tp, until_invocation_end)
-        .await;
-    require_invocation_completed_ok(&rows);
-    let n = rows_of_type(&rows, EVENT_AGENT_ERROR).len();
-    assert_eq!(
-        n,
-        0,
-        "got {n} AGENT_ERROR rows, want 0; counts: {:?}",
-        agent_error_counts(&rows)
-    );
 }
 
 #[tokio::test]
@@ -1725,7 +1567,7 @@ async fn test_trace_manager_cached_child_stop_before_parent_retires() {
                             .await;
                         // Wait until the sibling branch's tool call has started so call.seq <
                         // cached.seq holds and keeps cached on agentStack when parent retires.
-                        if !wait_for(&tool_started).await {
+                        if !within(&tool_started).await {
                             y.item(Err(AgentError::other("the wait tool did not start")))
                                 .await;
                             return;
@@ -1796,7 +1638,7 @@ async fn test_trace_manager_cached_child_retired_while_other_branch_tool_runs() 
                         }
                     }
                     // The parent ends only once the other branch's tool call is open.
-                    if !wait_for(&tool_started).await {
+                    if !within(&tool_started).await {
                         y.item(Err(AgentError::other("the wait tool did not start")))
                             .await;
                     }
@@ -1838,7 +1680,7 @@ async fn test_trace_manager_cross_branch_tool_runs_cached_child() {
                         return Err(ToolError::Execution(Box::new(e)));
                     }
                 }
-                if wait_for(&branch_a_done).await {
+                if within(&branch_a_done).await {
                     Ok(json!({"ok": true}).as_object().cloned().unwrap())
                 } else {
                     Err(ToolError::Execution("branch_a did not end".into()))
@@ -1938,7 +1780,7 @@ async fn test_trace_manager_contentless_event_cancel_and_sibling_failure_end_inv
                     } else {
                         fail_now.close();
                     }
-                    if !wait_for(&resumed).await {
+                    if !within(&resumed).await {
                         held_too_long.store(true, Ordering::SeqCst);
                     }
                 }
@@ -1990,7 +1832,7 @@ fn answering_and_failing() -> (Arc<dyn Agent>, Arc<dyn Agent>) {
         async move {
             y.item(Ok(text_event(&ctx, "failing", "failing branch answer")))
                 .await;
-            wait_for(&answered).await;
+            within(&answered).await;
             y.item(Err(AgentError::other("branch failed after answering")))
                 .await;
         }
@@ -2148,7 +1990,7 @@ async fn test_failed_parallel_agent_recovered_by_after_agent_callback_with_concu
                     (run_par.clone(), guard_started.clone(), sibling_open.clone());
                 async move {
                     guard_started.close();
-                    if !wait_for(&sibling_open).await {
+                    if !within(&sibling_open).await {
                         y.item(Err(AgentError::other("sibling never opened"))).await;
                         return;
                     }
@@ -2169,7 +2011,7 @@ async fn test_failed_parallel_agent_recovered_by_after_agent_callback_with_concu
             let (sibling_open, guard_recovered) = (sibling_open.clone(), guard_recovered.clone());
             async move {
                 sibling_open.close();
-                if !wait_for(&guard_recovered).await {
+                if !within(&guard_recovered).await {
                     y.item(Err(AgentError::other("guard never recovered")))
                         .await;
                     return;
@@ -2209,7 +2051,7 @@ async fn test_failed_parallel_agent_recovered_by_after_agent_callback_with_concu
             let sibling_ctx = ctx.clone();
             let failed = tx.clone();
             let s = go(async move {
-                if !wait_for(&guard_started).await {
+                if !within(&guard_started).await {
                     let _ = failed
                         .send((Err(AgentError::other("guard never started")), None))
                         .await;

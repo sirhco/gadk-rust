@@ -31,9 +31,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt;
-use gadk_agent::{
-    Agent, AgentError, ContextDelta, InvocationContext, RunConfig, StreamingMode, Tool,
-};
+use gadk_agent::{Agent, AgentError, ContextDelta, InvocationContext, RunConfig, Tool};
 use gadk_engine::llm::LlmAgentConfig;
 use gadk_genai::{FunctionCall, Part};
 use gadk_model::{LlmResponse, ModelError};
@@ -44,16 +42,20 @@ use super::attr_support::{
     Gate, context_canceled_on_done_llm, goroutine_id, on_test_goroutine, self_canceling_stream_llm,
     stream_then_wait_llm, then_wait_for_cancel,
 };
-use super::direct_support::{bg, ended_ctx};
+use super::direct_support::{
+    bg, check_late_record_dropped, ended_ctx, late_review_agent, late_review_stack,
+    late_review_trace,
+};
 use super::runner_support::{
     RowCursor, calls, custom_agent, failing_llm, final_text, fn_llm, function_call_part,
-    function_tool, llm_agent, partial_text, plugin_named, run_until, scripted_llm,
+    function_tool, llm_agent, partial_text, plugin_named,
+    require_completed_with_handled_agent_error, run_until, scripted_llm, sse,
 };
 use crate::event_types::*;
 use crate::parity_tests::plugin_agentanalytics_bigquery_agent_analytics_plugin::support::{
-    agent_error_counts, default_config, event_types, must_latency, new_test_runner,
-    new_trace_only_plugin, only_row_of_type, place_of, require_invocation_completed_ok,
-    rows_of_type, run_turn, setup_test_plugin, str_col, text_content, until_invocation_end,
+    agent_error_counts, default_config, event_types, new_test_runner, new_trace_only_plugin,
+    only_row_of_type, require_invocation_completed_ok, rows_of_type, run_turn, setup_test_plugin,
+    str_col, text_content, until_invocation_end,
 };
 use crate::plugin::AnalyticsPlugin;
 use crate::plugin::callbacks::callbacks_config;
@@ -67,39 +69,6 @@ use crate::trace::{
 // ---------------------------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------------------------
-
-/// Go `requireCompletedWithHandledAgentError(t, rows, agentName, wantErr)` (as in `direct_3`).
-fn require_completed_with_handled_agent_error(rows: &[Row], agent_name: &str, want_err: &str) {
-    assert!(
-        rows_of_type(rows, EVENT_INVOCATION_ERROR).is_empty(),
-        "got INVOCATION_ERROR, want INVOCATION_COMPLETED; event types: {:?}",
-        event_types(rows)
-    );
-    let inv_row = only_row_of_type(rows, EVENT_INVOCATION_COMPLETED);
-    assert_eq!(
-        str_col(&inv_row, "status"),
-        "OK",
-        "INVOCATION_COMPLETED status"
-    );
-    let err_row = only_row_of_type(rows, EVENT_AGENT_ERROR);
-    assert_eq!(str_col(&err_row, "agent"), agent_name, "AGENT_ERROR agent");
-    let start = rows_of_type(rows, EVENT_AGENT_STARTING)
-        .into_iter()
-        .find(|r| str_col(r, "agent") == agent_name)
-        .unwrap_or_else(|| {
-            panic!(
-                "no AGENT_STARTING row of {agent_name:?}; event types: {:?}",
-                event_types(rows)
-            )
-        });
-    assert_eq!(place_of(&err_row), place_of(&start), "AGENT_ERROR place");
-    must_latency(&err_row);
-    let msg = str_col(&err_row, "error_message");
-    assert!(
-        msg.contains(want_err),
-        "AGENT_ERROR error_message = {msg:?}, want it to contain {want_err:?}"
-    );
-}
 
 /// A model response calling `name` with ID `id` and `args` (Go `&genai.FunctionCall{ID, Name,
 /// Args}` in a model content).
@@ -141,14 +110,6 @@ fn new_helper_coordinator(helper_model: Arc<dyn gadk_model::Llm>) -> Arc<dyn Age
     })
 }
 
-/// `RunConfig{StreamingMode: StreamingModeSSE}`.
-fn sse() -> RunConfig {
-    RunConfig {
-        streaming_mode: StreamingMode::Sse,
-        ..Default::default()
-    }
-}
-
 /// Whether `item` is a partial event of `author`.
 fn is_partial_of(item: &Result<gadk_session::Event, AgentError>, author: &str) -> bool {
     matches!(item, Ok(ev) if ev.response.partial && ev.author == author)
@@ -187,68 +148,6 @@ async fn wait_for_after_runs(tm: &TraceManager) {
     })
     .await
     .expect("the after-run callbacks of the stopped runs did not end the runs");
-}
-
-/// Go `lateReviewTrace(t, tm, invID)` (as in `direct_4`).
-fn late_review_trace(tm: &TraceManager, inv: &str) -> Arc<InvocationTrace> {
-    let st = tm.mu.lock();
-    st.completed
-        .get(inv)
-        .and_then(|c| c.late.clone())
-        .unwrap_or_else(|| panic!("completed run {inv:?} has no late state"))
-}
-
-/// Go `lateReviewStack(t, tm, invID)` (as in `direct_4`).
-fn late_review_stack(tm: &TraceManager, inv: &str) -> Vec<String> {
-    let late = late_review_trace(tm, inv);
-    let st = late.mu.lock();
-    st.agent_stack[1..]
-        .iter()
-        .map(|r| r.lock().name.clone())
-        .collect()
-}
-
-/// Go `lateReviewAgent(t, tm, invID, name)` (as in `direct_4`).
-fn late_review_agent(tm: &TraceManager, inv: &str, name: &str) -> SpanRef {
-    let late = late_review_trace(tm, inv);
-    let st = late.mu.lock();
-    st.agent_stack[1..]
-        .iter()
-        .find(|r| r.lock().name == name)
-        .cloned()
-        .unwrap_or_else(|| panic!("no activation {name:?} on the late agentStack of {inv:?}"))
-}
-
-/// Go `checkLateRecordDropped(t, late, rec)` (as in `direct_4`).
-fn check_late_record_dropped(late: &InvocationTrace, rec: &SpanRef) {
-    let st = late.mu.lock();
-    let r = rec.lock();
-    assert!(
-        !st.agent_stack.iter().any(|s| s.is_record(&r)),
-        "activation {:?} is still on the late agentStack",
-        r.name
-    );
-    assert!(
-        r.canceled.is_none(),
-        "retired late activation {:?} keeps the context of its callback",
-        r.name
-    );
-    assert!(
-        r.ended.is_none() && r.activation.is_none(),
-        "retired late activation {:?} keeps its InvocationContext",
-        r.name
-    );
-    assert!(
-        r.parent.is_none(),
-        "retired late activation {:?} keeps the span that it ran under",
-        r.name
-    );
-    assert!(
-        r.retired_causes.is_empty(),
-        "retired late activation {:?} keeps a failure cause ({:?})",
-        r.name,
-        r.first_retired_cause()
-    );
 }
 
 // ---------------------------------------------------------------------------------------------

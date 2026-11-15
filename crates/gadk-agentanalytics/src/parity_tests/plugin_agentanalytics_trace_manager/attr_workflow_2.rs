@@ -27,8 +27,10 @@
 //! - `ctx.Value(concurrentFailRunKey{})` = [`is_fail_run`]: a task-local set around the failing
 //!   activation's goroutine (gadk contexts carry no values; the model and the callbacks of that
 //!   run are polled on that task);
-//! - `ctx.Err()` = [`ctx_err`]; `contextPath(ctx)` = `Context::context_path`;
-//! - `select { case <-ch: case <-time.After(10 * time.Second): }` = [`wait_10s`].
+//! - `ctx.Err()` = [`ctx_err`](super::attr_support::ctx_err); `contextPath(ctx)` =
+//!   `Context::context_path`;
+//! - `select { case <-ch: case <-time.After(10 * time.Second): }` =
+//!   [`within`](super::attr_support::within).
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -42,8 +44,8 @@ use std::time::Duration;
 use futures::future::BoxFuture;
 use futures::{FutureExt, StreamExt};
 use gadk_agent::{
-    Agent, AgentConfig, AgentError, BeforeAgentCallback, CancelCause, Context, ContextDelta,
-    EventStream, InvocationContext, RunConfig, Tool, ToolError,
+    Agent, AgentConfig, AgentError, BeforeAgentCallback, Context, ContextDelta, EventStream,
+    InvocationContext, RunConfig, Tool, ToolError,
 };
 use gadk_engine::RunOptions;
 use gadk_engine::llm::{LlmAgentConfig, Mode, run_llm_agent_as_node};
@@ -58,8 +60,8 @@ use serde_json::{Map, Value, json};
 use tokio::sync::{mpsc, oneshot};
 
 use super::attr_support::{
-    Gate, agent_node, blocking_llm, finish_task_llm, flaky_on_first_pass_llm, go,
-    new_parallel_agent, start, workflow_agent,
+    CloseOnDrop, Gate, agent_node, blocking_llm, ctx_err, edge, finish_task_llm,
+    flaky_on_first_pass_llm, go, new_parallel_agent, start, within, workflow_agent,
 };
 use super::runner_support::*;
 use crate::event_types::*;
@@ -72,23 +74,6 @@ use crate::trace::{
 };
 
 type Item = Result<Event, AgentError>;
-
-/// Go `time.After(10 * time.Second)` in the tests' selects.
-const WAIT: Duration = Duration::from_secs(10);
-
-/// Go `select { case <-ch: case <-time.After(10 * time.Second): }`: whether `g` closed in time.
-async fn wait_10s(g: &Gate) -> bool {
-    tokio::time::timeout(WAIT, g.wait()).await.is_ok()
-}
-
-/// Go `defer close(ch)` (or `defer once.Do(func() { close(ch) })`): closes the gate when dropped.
-struct CloseOnDrop(Gate);
-
-impl Drop for CloseOnDrop {
-    fn drop(&mut self) {
-        self.0.close();
-    }
-}
 
 /// Go's `yield` of an iterator body run by [`generator`].
 struct Yield(mpsc::UnboundedSender<(Item, oneshot::Sender<()>)>);
@@ -141,14 +126,6 @@ where
         }
     })
     .boxed()
-}
-
-/// Go `ctx.Err()` of a context that ended: `context.DeadlineExceeded` or `context.Canceled`.
-fn ctx_err(ctx: &InvocationContext) -> AgentError {
-    match ctx.cause() {
-        Some(CancelCause::DeadlineExceeded) => AgentError::DeadlineExceeded,
-        _ => AgentError::Cancelled,
-    }
 }
 
 /// A before- or after-agent callback (the two Go types share one signature).
@@ -231,7 +208,7 @@ fn wait_node(ready: Gate, never: &'static str) -> Arc<dyn Node> {
         move |_: Context, _: Value| {
             let ready = ready.clone();
             async move {
-                if wait_10s(&ready).await {
+                if within(&ready).await {
                     Ok("c".to_owned())
                 } else {
                     Err(AgentError::other(never))
@@ -240,15 +217,6 @@ fn wait_node(ready: Gate, never: &'static str) -> Arc<dyn Node> {
         },
         NodeConfig::default(),
     )
-}
-
-/// Go `workflow.Edge{From: from, To: to}`.
-fn edge(from: &Arc<dyn Node>, to: &Arc<dyn Node>) -> Edge {
-    Edge {
-        from: from.clone(),
-        to: to.clone(),
-        route: None,
-    }
 }
 
 /// The workflow `root` in which two join nodes route (`workflow.Default`) to the agent node `x`:
@@ -425,7 +393,7 @@ async fn test_runner_workflow_root_contentless_partial_stopped_after_sibling_nod
         if ev.response.partial {
             partial_delivered.close();
             assert!(
-                wait_10s(&waiter_started).await,
+                within(&waiter_started).await,
                 "waiter did not start before consumer stop"
             );
             saw_partial = true;
@@ -503,7 +471,7 @@ async fn test_trace_manager_retired_peer_trailer_does_not_clear_open_failing_pee
             async move {
                 if n == 2 {
                     both.close();
-                } else if !wait_10s(&both).await {
+                } else if !within(&both).await {
                     return Err(ModelError::Other(
                         "timed out waiting for peer model call".into(),
                     ));
@@ -519,7 +487,7 @@ async fn test_trace_manager_retired_peer_trailer_does_not_clear_open_failing_pee
                 }
                 // Succeeding peer: wait for the failing peer to be ready, then return success
                 // so it can retire while the failing peer is still open.
-                if !wait_10s(&ready).await {
+                if !within(&ready).await {
                     return Err(ModelError::Other(
                         "timed out waiting for failing activation".into(),
                     ));
@@ -666,7 +634,7 @@ async fn test_trace_manager_retired_peer_trailer_does_not_clear_open_failing_pee
         );
         // Verify the trailer was delivered.
         assert!(
-            wait_10s(&trailer_delivered).await,
+            within(&trailer_delivered).await,
             "{name}: peer trailer was never delivered"
         );
     }
@@ -724,7 +692,7 @@ fn fan_out_twice(
                     while let Some(item) = events.next().await {
                         item?;
                         let Some(w) = &wait else { continue };
-                        if !wait_10s(w).await {
+                        if !within(w).await {
                             return Err(AgentError::other(
                                 "the second run never entered its BeforeAgentCallback",
                             ));
@@ -734,7 +702,7 @@ fn fan_out_twice(
                 };
                 let first = go(run_child(child.clone(), ctx.clone(), Some(second_entered)));
                 let second = go(async move {
-                    if !wait_10s(&entered).await {
+                    if !within(&entered).await {
                         return Err(AgentError::other(
                             "first run never entered its BeforeAgentCallback",
                         ));
@@ -826,10 +794,10 @@ async fn test_concurrency_race_function_node_returns_before_unjoined_cached_chil
                     let _done = CloseOnDrop(child_done);
                     let mut events = child.run(ctx.as_invocation().clone());
                     while events.next().await.is_some() {
-                        wait_10s(&root_done).await;
+                        within(&root_done).await;
                     }
                 });
-                if !wait_10s(&entered).await {
+                if !within(&entered).await {
                     return Err(AgentError::other(
                         "child did not enter its BeforeAgentCallback",
                     ));
@@ -853,7 +821,7 @@ async fn test_concurrency_race_function_node_returns_before_unjoined_cached_chil
 
     let errs = run_errors(root, &tp, "go").await;
     assert!(errs.is_empty(), "runner.Run error: {errs:?}");
-    assert!(wait_10s(&child_done).await, "child did not exit");
+    assert!(within(&child_done).await, "child did not exit");
     let rows = RowCursor::default()
         .collect(&tp, until_invocation_end)
         .await;
@@ -895,14 +863,14 @@ async fn test_concurrency_race_routed_node_started_again_while_running() {
                 if n == 1 {
                     fs.close();
                     ctx.end_invocation();
-                    wait_10s(&se).await;
+                    within(&se).await;
                 }
                 if !y.send(Ok(answer(&ctx, "child", "answer"))).await || n > 2 {
                     return;
                 }
                 let n = usize::try_from(n).unwrap();
                 yielded[n - 1].close();
-                wait_10s(&yielded[2 - n]).await;
+                within(&yielded[2 - n]).await;
             })
         },
     );
@@ -992,7 +960,7 @@ async fn test_concurrency_race_function_node_resumes_child_after_nested_run() {
                     return;
                 }
                 ctx.end_invocation();
-                wait_10s(&oe).await;
+                within(&oe).await;
             }
             .boxed()
         })),
@@ -1034,7 +1002,7 @@ async fn test_concurrency_race_function_node_resumes_child_after_nested_run() {
         move |ctx| {
             let nd = nd.clone();
             generator(move |y| async move {
-                if !wait_10s(&nd).await {
+                if !within(&nd).await {
                     y.send(Err(AgentError::other(
                         "the nested run of child never ended",
                     )))
@@ -1157,7 +1125,7 @@ async fn test_concurrency_race_reported_node_outcome_does_not_end_running_run() 
                     1 => {
                         rp.close();
                         ctx.end_invocation();
-                        wait_10s(&sa).await;
+                        within(&sa).await;
                     }
                     2 => sa.close(),
                     _ => {}
@@ -1250,7 +1218,7 @@ async fn test_concurrency_race_finish_task_ends_the_run_that_made_the_call() {
                 if !second {
                     return Ok(None);
                 }
-                wait_10s(&fc).await;
+                within(&fc).await;
                 Ok(Some(text_content("model", "cached")))
             }
         })],
@@ -1282,7 +1250,7 @@ async fn test_concurrency_race_finish_task_ends_the_run_that_made_the_call() {
             };
             go(run_task.clone()(results.clone()));
             go(async move {
-                wait_10s(&model_called).await;
+                within(&model_called).await;
                 run_task(results).await;
             });
             let mut reading = true;
@@ -1342,7 +1310,7 @@ async fn test_runner_reported_node_outcome_before_delayed_response_emits_no_agen
             let (runs, rp, ss, fa) = (runs.clone(), rp.clone(), ss2.clone(), fa.clone());
             generator(move |y| async move {
                 if runs.fetch_add(1, Ordering::SeqCst) != 0 {
-                    wait_10s(&fa).await;
+                    within(&fa).await;
                     return;
                 }
                 let _answered = CloseOnDrop(fa);
@@ -1354,7 +1322,7 @@ async fn test_runner_reported_node_outcome_before_delayed_response_emits_no_agen
                     return;
                 }
                 rp.close();
-                wait_10s(&ss).await;
+                within(&ss).await;
                 y.send(Ok(answer(&ctx, "child", "answer"))).await;
             })
         },
@@ -1815,7 +1783,7 @@ async fn test_runner_unjoined_sub_agent_call_outlives_after_run() {
 
         release.close();
         assert!(
-            wait_10s(&done).await,
+            within(&done).await,
             "{name}: the unjoined sub-agent never finished"
         );
         let active = tm.mu.lock().invocations.contains_key(&inv_id);
@@ -1894,7 +1862,7 @@ async fn test_runner_reported_node_outcome_before_delayed_response_call_in_fligh
                 move |_, _| {
                     let ss = ss.clone();
                     async move {
-                        if wait_10s(&ss).await {
+                        if within(&ss).await {
                             Ok(json!({"waited": true}).as_object().cloned().unwrap())
                         } else {
                             Err(ToolError::Execution(
@@ -1930,7 +1898,7 @@ async fn test_runner_reported_node_outcome_before_delayed_response_call_in_fligh
                 let (runs, rp, fd, sub) = (runs.clone(), rp.clone(), fd.clone(), sub.clone());
                 generator(move |y| async move {
                     if runs.fetch_add(1, Ordering::SeqCst) != 0 {
-                        wait_10s(&fd).await;
+                        within(&fd).await;
                         return;
                     }
                     let _done = CloseOnDrop(fd);

@@ -39,7 +39,10 @@ use parking_lot::Mutex;
 use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
 
-use super::direct_support::{MockRun, bg, ended_ctx, err, invocation_of, open_spans};
+use super::direct_support::{
+    MockRun, bg, check_late_record_dropped, ended_ctx, err, invocation_of, late_review_agent,
+    late_review_stack, late_review_trace, open_spans,
+};
 use crate::event_types::EVENT_AGENT_COMPLETED;
 use crate::parity_tests::plugin_agentanalytics_bigquery_agent_analytics_plugin::support::{
     event_types, rows_of_type, setup_test_plugin, until_invocation_end,
@@ -147,68 +150,6 @@ fn late_review_ended(tm: &TraceManager, inv: &str) {
     let live = ident(inv, "live_agent", "", "");
     tm.invocation_span(&bg(), &live, None);
     tm.end_invocation(&bg(), &live);
-}
-
-/// Go `lateReviewTrace(t, tm, invID)`: the late state of the completed run `inv`.
-fn late_review_trace(tm: &TraceManager, inv: &str) -> Arc<InvocationTrace> {
-    let st = tm.mu.lock();
-    st.completed
-        .get(inv)
-        .and_then(|c| c.late.clone())
-        .unwrap_or_else(|| panic!("completed run {inv:?} has no late state"))
-}
-
-/// Go `lateReviewStack(t, tm, invID)`: the names of the activations on the late agent stack.
-fn late_review_stack(tm: &TraceManager, inv: &str) -> Vec<String> {
-    let late = late_review_trace(tm, inv);
-    let st = late.mu.lock();
-    st.agent_stack[1..]
-        .iter()
-        .map(|r| r.lock().name.clone())
-        .collect()
-}
-
-/// Go `lateReviewAgent(t, tm, invID, name)`: the record of the late activation `name`.
-fn late_review_agent(tm: &TraceManager, inv: &str, name: &str) -> SpanRef {
-    let late = late_review_trace(tm, inv);
-    let st = late.mu.lock();
-    st.agent_stack[1..]
-        .iter()
-        .find(|r| r.lock().name == name)
-        .cloned()
-        .unwrap_or_else(|| panic!("no activation {name:?} on the late agentStack of {inv:?}"))
-}
-
-/// Go `checkLateRecordDropped(t, late, rec)`.
-fn check_late_record_dropped(late: &InvocationTrace, rec: &SpanRef) {
-    let st = late.mu.lock();
-    let r = rec.lock();
-    assert!(
-        !st.agent_stack.iter().any(|s| s.is_record(&r)),
-        "activation {:?} is still on the late agentStack",
-        r.name
-    );
-    assert!(
-        r.canceled.is_none(),
-        "retired late activation {:?} keeps the context of its callback",
-        r.name
-    );
-    assert!(
-        r.ended.is_none() && r.activation.is_none(),
-        "retired late activation {:?} keeps its InvocationContext",
-        r.name
-    );
-    assert!(
-        r.parent.is_none(),
-        "retired late activation {:?} keeps the span that it ran under",
-        r.name
-    );
-    assert!(
-        r.retired_causes.is_empty(),
-        "retired late activation {:?} keeps a failure cause ({:?})",
-        r.name,
-        r.first_retired_cause()
-    );
 }
 
 /// `end.span_id == start.span_id && end.latency != nil`.

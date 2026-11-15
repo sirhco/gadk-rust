@@ -14,6 +14,15 @@
 // limitations under the License.
 
 //! gadk-agent: the agent API — Agent, contexts, tools, callbacks, plugins (port of ADK-Go agent/, tool/, plugin/).
+//!
+//! Beside Go's API it carries what stands in for Go's goroutines and contexts:
+//! [`fiber`] (fiber ids, spawn origins and attempt sites the engine sets where Go starts a
+//! goroutine; read by the analytics plugin's goroutine attribution), cancel causes
+//! ([`CancelCause`], [`InvocationContext::cancel_with_cause`] / [`InvocationContext::cause`]: Go's
+//! `context.Cause`, with `DeadlineExceeded` for agent timeouts), [`Context::context_path`] (Go's
+//! `contextPath`) and the per-invocation teardown registry [`Teardowns`], through which work a
+//! component was dropped with finishes before the runner's after-run callbacks, as Go's
+//! synchronous unwinding on early stop.
 
 pub mod agent;
 pub mod callback;

@@ -35,26 +35,17 @@ use gadk_agent::fiber::{
 };
 use gadk_agent::{Agent, AgentConfig, AgentError, BeforeAgentCallback, Context, InvocationContext};
 use gadk_engine::llm::LlmAgentConfig;
-use gadk_engine::workflow::{Edge, JoinNode, Node, NodeConfig, ParallelWorker, function_node};
+use gadk_engine::workflow::{JoinNode, Node, NodeConfig, ParallelWorker, function_node};
 use parking_lot::Mutex;
 use serde_json::Value;
 
-use super::attr_support::{agent_node, go, on_test_goroutine, start};
+use super::attr_support::{agent_node, edge, go, on_test_goroutine, start};
 use super::runner_support::{
     app_runner, final_text, llm_agent, new_event, run_until_error, scripted_llm, text_content,
 };
 
 /// The bit of a fallback fiber id (a tokio task id, `gadk_agent::fiber::current`).
 const FALLBACK_BIT: u64 = 1 << 63;
-
-/// An unconditional edge (Go `workflow.Edge{From, To}`).
-fn edge(from: &Arc<dyn Node>, to: &Arc<dyn Node>) -> Edge {
-    Edge {
-        from: from.clone(),
-        to: to.clone(),
-        route: None,
-    }
-}
 
 /// A before-agent callback that runs `f` with the agent's name (Go's `record` callbacks).
 fn recording(f: impl Fn(&str) + Send + Sync + 'static) -> BeforeAgentCallback {
@@ -102,8 +93,8 @@ fn answering_agent(
     .expect("custom agent")
 }
 
-/// Go `drain(seq)`: the first error of `a`'s run in `ctx`, if any.
-async fn drain(a: &Arc<dyn Agent>, ctx: InvocationContext) -> Result<(), AgentError> {
+/// Go `first_run_error(seq)`: the first error of `a`'s run in `ctx`, if any.
+async fn first_run_error(a: &Arc<dyn Agent>, ctx: InvocationContext) -> Result<(), AgentError> {
     let mut events = a.run(ctx);
     while let Some(item) = events.next().await {
         item?;
@@ -328,7 +319,7 @@ async fn test_attempt_site_of_trace() {
     for site in [AttemptSite::Node, AttemptSite::Worker] {
         let ctx = run_ctx(&leaf);
         Fiber::root()
-            .scope(fiber::with_attempt(site, drain(&leaf, ctx)))
+            .scope(fiber::with_attempt(site, first_run_error(&leaf, ctx)))
             .await
             .unwrap();
         assert_eq!(take(&sites), vec![("leaf".into(), Some(site))], "{site:?}");
@@ -336,7 +327,10 @@ async fn test_attempt_site_of_trace() {
 
     // "function node" / "goroutine of the runner": nothing marked, no attempt.
     let ctx = run_ctx(&leaf);
-    Fiber::root().scope(drain(&leaf, ctx)).await.unwrap();
+    Fiber::root()
+        .scope(first_run_error(&leaf, ctx))
+        .await
+        .unwrap();
     assert_eq!(
         take(&sites),
         vec![("leaf".into(), None)],
@@ -345,7 +339,7 @@ async fn test_attempt_site_of_trace() {
 
     // "incomplete trace" / "empty trace": no fiber, so with_attempt marks nothing.
     let ctx = run_ctx(&leaf);
-    fiber::with_attempt(AttemptSite::Node, drain(&leaf, ctx))
+    fiber::with_attempt(AttemptSite::Node, first_run_error(&leaf, ctx))
         .await
         .unwrap();
     assert_eq!(take(&sites), vec![("leaf".into(), None)], "no fiber");
@@ -354,7 +348,10 @@ async fn test_attempt_site_of_trace() {
     let outer = answering_agent("outer", vec![leaf.clone()], vec![record.clone()]);
     let ctx = run_ctx(&outer);
     Fiber::root()
-        .scope(fiber::with_attempt(AttemptSite::Node, drain(&outer, ctx)))
+        .scope(fiber::with_attempt(
+            AttemptSite::Node,
+            first_run_error(&outer, ctx),
+        ))
         .await
         .unwrap();
     assert_eq!(
@@ -373,7 +370,7 @@ async fn test_attempt_site_of_trace() {
         Arc::new(move |ctx: Context| {
             let (sites, leaf) = (sites.clone(), leaf.clone());
             async move {
-                drain(&leaf, ctx.as_invocation().clone()).await?;
+                first_run_error(&leaf, ctx.as_invocation().clone()).await?;
                 sites
                     .lock()
                     .push(("caller".into(), fiber::current_attempt()));
@@ -385,7 +382,10 @@ async fn test_attempt_site_of_trace() {
     let caller = answering_agent("caller", vec![], vec![nested_in_callback]);
     let ctx = run_ctx(&caller);
     Fiber::root()
-        .scope(fiber::with_attempt(AttemptSite::Node, drain(&caller, ctx)))
+        .scope(fiber::with_attempt(
+            AttemptSite::Node,
+            first_run_error(&caller, ctx),
+        ))
         .await
         .unwrap();
     assert_eq!(
@@ -418,11 +418,11 @@ async fn test_attempt_site_of_trace() {
     fiber
         .clone()
         .scope(fiber::with_attempt(AttemptSite::Worker, async {
-            drain(&body, c1).await.unwrap();
-            drain(&body, c2).await.unwrap();
+            first_run_error(&body, c1).await.unwrap();
+            first_run_error(&body, c2).await.unwrap();
         }))
         .await;
-    fiber.scope(drain(&body, c3)).await.unwrap();
+    fiber.scope(first_run_error(&body, c3)).await.unwrap();
     assert_eq!(
         take(&sites),
         vec![
@@ -472,11 +472,11 @@ async fn test_attempt_sites_match_adk() {
             let (fn_child, nested_child) = (fn_child.clone(), nested_child.clone());
             async move {
                 let ic = ctx.as_invocation().clone();
-                drain(&fn_child, ic.clone()).await?;
+                first_run_error(&fn_child, ic.clone()).await?;
                 let mut outer = nested_child.run(ic.clone());
                 while let Some(item) = outer.next().await {
                     item?;
-                    drain(&nested_child, ic.clone()).await?;
+                    first_run_error(&nested_child, ic.clone()).await?;
                 }
                 Ok::<_, AgentError>("fn")
             }
@@ -500,7 +500,7 @@ async fn test_attempt_sites_match_adk() {
         move |ctx: Context, _in: Value| {
             let item_child = item_child.clone();
             async move {
-                drain(&item_child, ctx.as_invocation().clone()).await?;
+                first_run_error(&item_child, ctx.as_invocation().clone()).await?;
                 Ok::<_, AgentError>("item_fn")
             }
         },
