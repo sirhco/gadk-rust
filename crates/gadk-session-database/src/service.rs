@@ -397,6 +397,12 @@ impl SessionService for DatabaseSessionService {
         if event.response.partial {
             return Ok(());
         }
+        // A stored request that does not decode would fail every later read of the session.
+        // Checked before the local session takes the event.
+        gadk_session::state_util::check_requested_auth_configs(
+            &event.actions.requested_auth_configs,
+        )
+        .map_err(|e| errors::message(format!("cannot append event: {e}")))?;
         // Give the event an identity if it arrived without one, as the in-memory service does.
         if event.id.is_empty() {
             event.id = self.platform.new_uuid();

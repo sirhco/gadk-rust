@@ -20,6 +20,7 @@ mod error;
 mod event;
 mod inmemory;
 mod legacy;
+mod requested_auth;
 mod service;
 pub mod state_util;
 mod tool_confirmation;

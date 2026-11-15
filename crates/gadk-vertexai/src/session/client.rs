@@ -377,6 +377,11 @@ impl SessionClient {
         if event.response.partial {
             return Ok(());
         }
+        // A stored request that does not decode would fail every later read of the session.
+        gadk_session::state_util::check_requested_auth_configs(
+            &event.actions.requested_auth_configs,
+        )
+        .map_err(|e| session_error(wrap("error appending event", e)))?;
         let name = self.session_name(app_name, session_id)?;
         let body = event_to_session_event(event).map_err(session_error)?;
         self.client

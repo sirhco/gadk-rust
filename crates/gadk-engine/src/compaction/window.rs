@@ -24,8 +24,8 @@ use gadk_session::{Event, EventCompaction, EventRef};
 use super::apply::{CoverIndex, has_compaction, has_usable_summary, truncate_to_ref};
 use crate::tool::utils::{content, function_calls, function_responses};
 
-/// Length of Go longestSelfContainedPrefix's result: the longest cut that leaves no call or
-/// confirmation open and does not split a group of events sharing a timestamp.
+/// Length of Go longestSelfContainedPrefix's result: the longest cut that leaves no call, or
+/// request to the user (a tool confirmation or a credential request), open and does not split a group of events sharing a timestamp.
 pub(crate) fn self_contained_len(events: &[Event]) -> usize {
     let mut open: HashSet<String> = HashSet::new();
     let mut safe = 0;
@@ -38,6 +38,9 @@ pub(crate) fn self_contained_len(events: &[Event]) -> usize {
             open.insert(call_obligation_key(call, i));
         }
         for id in ev.actions.requested_tool_confirmations.keys() {
+            open.insert(id.clone());
+        }
+        for id in ev.actions.requested_auth_configs.keys() {
             open.insert(id.clone());
         }
         if open.is_empty() && tie_safe_cut(events, i + 1) {
@@ -270,6 +273,7 @@ pub(crate) fn skip_blocked_head(window: Vec<Event>) -> Vec<Event> {
         if function_calls(content(prev)).is_empty()
             && function_responses(content(prev)).is_empty()
             && prev.actions.requested_tool_confirmations.is_empty()
+            && prev.actions.requested_auth_configs.is_empty()
         {
             continue;
         }
@@ -297,6 +301,9 @@ pub(crate) fn open_call_ids(events: &[Event]) -> HashSet<String> {
             open.insert(call_obligation_key(call, i));
         }
         for id in ev.actions.requested_tool_confirmations.keys() {
+            open.insert(id.clone());
+        }
+        for id in ev.actions.requested_auth_configs.keys() {
             open.insert(id.clone());
         }
     }

@@ -174,6 +174,17 @@ pub(crate) fn confirmation_event(id: &str, invocation_id: &str, ts: i64, call_id
     ev
 }
 
+/// Go withAuthRequest: attaches a credential request for `call_id` to `ev` (a tool puts the
+/// request on its own response for that call).
+pub(crate) fn with_auth_request(mut ev: Event, call_id: &str) -> Event {
+    ev.actions.requested_auth_configs = [(
+        call_id.to_owned(),
+        gadk_session::toolauth::Config::default(),
+    )]
+    .into();
+    ev
+}
+
 /// Go compactionEvent: a stored record at `ts` covering `[start, end]` except `excluded`;
 /// author "user", invocation "compaction-<id>", no content of its own.
 pub(crate) fn compaction_event(

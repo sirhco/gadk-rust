@@ -37,6 +37,7 @@ fn suite_options() -> SuiteOptions {
     SuiteOptions {
         supports_user_provided_session_id: true,
         provides_server_assigned_event_id: false,
+        checks_requested_auth_configs: true,
         app_name: None,
     }
 }

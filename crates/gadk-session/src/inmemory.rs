@@ -30,7 +30,10 @@ use crate::service::{
     CreateRequest, DeleteRequest, GetRequest, KEY_PREFIX_APP, KEY_PREFIX_USER, ListRequest,
     Session, SessionService, State, compare_by_last_update,
 };
-use crate::state_util::{extract_state_deltas, merge_states, require, trim_temp_delta_state};
+use crate::state_util::{
+    check_requested_auth_configs, extract_state_deltas, merge_states, require,
+    trim_temp_delta_state,
+};
 
 type StateMap = Map<String, Value>;
 /// `(app_name, user_id, session_id)`, ordered like Go's `ordered.Encode` key.
@@ -291,6 +294,10 @@ impl SessionService for InMemorySessionService {
         if event.response.partial {
             return Ok(());
         }
+        // A backend that persists events could not read this request back, so this one
+        // refuses it too.
+        check_requested_auth_configs(&event.actions.requested_auth_configs)
+            .map_err(|e| SessionError::Backend(format!("cannot append event: {e}").into()))?;
         // Give the event an identity if it arrived without one, the same way a missing
         // session ID is filled in on create.
         if event.id.is_empty() {

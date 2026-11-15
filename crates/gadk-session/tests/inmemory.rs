@@ -508,6 +508,48 @@ async fn test_in_memory_service_append_event_copies_compaction() {
     );
 }
 
+// TestInMemoryService_AppendEvent_CopiesRequestedAuthConfigs pins that a write to the map the
+// caller passed in does not reach the stored event.
+#[tokio::test]
+async fn test_in_memory_service_append_event_copies_requested_auth_configs() {
+    let service = InMemorySessionService::new();
+    let sess = create(&service, "app", "user").await;
+    let api_key = gadk_session::toolauth::Scheme {
+        r#type: gadk_session::toolauth::SchemeType::API_KEY,
+        r#in: "header".into(),
+        name: "X-Key".into(),
+        ..Default::default()
+    };
+    let config = |key: &str| gadk_session::toolauth::Config {
+        auth_scheme: api_key.clone(),
+        credential_key: key.into(),
+        ..Default::default()
+    };
+    let mut event = Event {
+        id: "e1".into(),
+        author: "agent".into(),
+        ..Default::default()
+    };
+    event.actions.requested_auth_configs = BTreeMap::from([("call-1".into(), config("k1"))]);
+    service
+        .append_event(sess.as_ref(), &mut event)
+        .await
+        .unwrap();
+
+    event
+        .actions
+        .requested_auth_configs
+        .insert("call-2".into(), config("k2"));
+
+    let got = get(&service, sess.as_ref()).await;
+    let stored = &got.events()[0].actions.requested_auth_configs;
+    assert!(
+        !stored.contains_key("call-2") && stored.len() == 1,
+        "stored RequestedAuthConfigs has {} entries, want only call-1: the caller's write reached the stored event",
+        stored.len()
+    );
+}
+
 type ActionWrite = fn(&mut Event);
 
 // In Go this guards a fatal concurrent map read/write: `Session.Events` hands out the live

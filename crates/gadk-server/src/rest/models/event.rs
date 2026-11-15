@@ -207,6 +207,8 @@ impl Event {
             skip_summarization: self.actions.skip_summarization,
             transfer_to_agent: self.actions.transfer_to_agent.clone(),
             requested_tool_confirmations: self.actions.requested_tool_confirmations.clone(),
+            // Go `ToSessionEvent` ignores requestedAuthConfigs inbound (#2114).
+            requested_auth_configs: Default::default(),
             compaction: None,
         };
         ev

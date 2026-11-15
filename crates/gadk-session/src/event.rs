@@ -334,6 +334,15 @@ pub struct EventActions {
     pub artifact_delta: Option<BTreeMap<String, i64>>,
     /// Tool confirmations requested, keyed by function call ID.
     pub requested_tool_confirmations: BTreeMap<String, ToolConfirmation>,
+    /// The credential requests that tools made in this event, keyed by function call ID, since
+    /// one function response event can answer several calls (ADK-Go `RequestedAuthConfigs`).
+    ///
+    /// Session services persist a request and the Agent Engine server sends it to clients
+    /// unredacted, so it must not carry the secrets the tool was configured with: store the
+    /// output of [`crate::toolauth::Config::without_secrets`]. The in-memory, database and
+    /// Vertex AI session services refuse to append an event whose request does not decode as a
+    /// [`crate::toolauth::Config`] (see [`crate::state_util::check_requested_auth_configs`]).
+    pub requested_auth_configs: BTreeMap<String, crate::toolauth::Config>,
     /// If true, the model is not called to summarize the function response.
     pub skip_summarization: bool,
     /// If set, the event transfers to the named agent.
@@ -349,6 +358,7 @@ const ACTIONS_KEYS: &[&str] = &[
     "stateDelta",
     "artifactDelta",
     "requestedToolConfirmations",
+    "requestedAuthConfigs",
     "skipSummarization",
     "transferToAgent",
     "escalate",
@@ -365,6 +375,9 @@ impl Serialize for EventActions {
                 "requestedToolConfirmations",
                 &self.requested_tool_confirmations,
             )?;
+        }
+        if !self.requested_auth_configs.is_empty() {
+            m.serialize_entry("requestedAuthConfigs", &self.requested_auth_configs)?;
         }
         if self.skip_summarization {
             m.serialize_entry("skipSummarization", &true)?;
@@ -394,6 +407,7 @@ struct EventActionsWire {
     state_delta: Option<Map<String, Value>>,
     artifact_delta: Option<BTreeMap<String, i64>>,
     requested_tool_confirmations: BTreeMap<String, ToolConfirmation>,
+    requested_auth_configs: BTreeMap<String, crate::toolauth::Config>,
     skip_summarization: bool,
     transfer_to_agent: String,
     escalate: bool,
@@ -411,6 +425,7 @@ impl<'de> Deserialize<'de> for EventActions {
             state_delta: w.state_delta,
             artifact_delta: w.artifact_delta,
             requested_tool_confirmations: w.requested_tool_confirmations,
+            requested_auth_configs: w.requested_auth_configs,
             skip_summarization: w.skip_summarization,
             transfer_to_agent: w.transfer_to_agent,
             escalate: w.escalate,

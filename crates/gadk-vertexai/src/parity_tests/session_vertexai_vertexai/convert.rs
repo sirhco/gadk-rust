@@ -611,15 +611,14 @@ fn test_event_actions_converters() {
             let actions = actions_from_wire(Some(&json!({
                 "stateDelta": {"user:theme": "dark"},
                 "artifactDelta": {"chart.html": 3, "table.csv": 7}
-            })));
+            })))
+            .unwrap_or_else(|e| panic!("{name}: actions_from_wire() failed: {e}"));
             assert_eq!(actions, want, "{name}: actions mismatch");
         }),
         ("aiplatform to session nil actions", |name| {
-            assert_eq!(
-                actions_from_wire(None),
-                EventActions::default(),
-                "{name}: actions mismatch"
-            );
+            let actions = actions_from_wire(None)
+                .unwrap_or_else(|e| panic!("{name}: actions_from_wire() failed: {e}"));
+            assert_eq!(actions, EventActions::default(), "{name}: actions mismatch");
         }),
     ];
     for (name, run) in cases {
