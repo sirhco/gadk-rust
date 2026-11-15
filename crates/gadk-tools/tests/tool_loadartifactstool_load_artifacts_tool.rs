@@ -167,7 +167,6 @@ fn is_not_found(err: &ToolError) -> bool {
 
 // parity: adapted: Go's []string and []any argument values are both JSON arrays in Rust
 #[tokio::test]
-#[ignore = "8a bug: load_artifacts Run returns ToolError::InvalidArgument for a non-list / non-string / null artifact_names instead of Go's {\"error\": \"'artifact_names' must be a list of strings.\", \"error_code\": \"INVALID_ARGUMENTS\"} result (f1f0d2de)"]
 async fn test_load_artifacts_tool_run() {
     let tool = load_artifacts::new();
     let tc = create_tool_context();

@@ -32,9 +32,13 @@ use crate::error::Error;
 use crate::format::format_mcp_content;
 
 /// Go `mcpTool`: an MCP server tool. Its declaration carries the server's input and output
-/// schemas unchanged; running it calls `tools/call` on the toolset's session.
+/// schemas unchanged; running it calls `tools/call` on the toolset's session, with the server's
+/// tool name even when the toolset exposes it under a prefix ([`Config::prefix`](crate::Config::prefix)).
 pub struct McpTool {
+    /// The exposed name (Go `name`): the server's name, or `<prefix>_<name>`.
     name: String,
+    /// The server's name (Go `originalName`), sent in `tools/call`.
+    original_name: String,
     description: String,
     declaration: FunctionDeclaration,
     client: Arc<dyn McpClient>,
@@ -71,6 +75,7 @@ impl McpTool {
             ..Default::default()
         };
         Self {
+            original_name: name.clone(),
             name,
             description,
             declaration,
@@ -79,6 +84,18 @@ impl McpTool {
             provider,
             metadata,
         }
+    }
+
+    /// The server's tool name (Go `originalName`).
+    pub(crate) fn original_name(&self) -> &str {
+        &self.original_name
+    }
+
+    /// Go `set.Tools` with a `ToolNamePrefix`: the tool and its declaration take `name`; calls
+    /// still use the server's name.
+    pub(crate) fn expose_as(&mut self, name: String) {
+        self.declaration.name.clone_from(&name);
+        self.name = name;
     }
 
     /// Go's `fmt.Errorf("… %w", err)` texts reach the flow as `ToolError::Execution` sources.
@@ -178,7 +195,8 @@ impl RunnableTool for McpTool {
             }
         }
 
-        let mut params = CallToolRequestParams::new(self.name.clone());
+        // Go (#1821): the server is called with its own name, not the exposed one.
+        let mut params = CallToolRequestParams::new(self.original_name.clone());
         // rmcp's `arguments` is a JSON object; a non-object `args` (never produced by the flow,
         // which decodes function-call args as an object) is sent as no arguments.
         if let Value::Object(arguments) = args {

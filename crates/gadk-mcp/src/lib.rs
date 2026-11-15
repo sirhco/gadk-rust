@@ -35,11 +35,17 @@
 //! headers (`user-agent`, `x-goog-api-client`) and, with auth, the credential's headers.
 //! Go's legacy SSE client transport has no rmcp counterpart and is not ported.
 //!
+//! [`Config::prefix`] exposes every tool of a toolset as `<prefix>_<name>`, so two servers'
+//! same-named tools can serve one agent; the server is still called with its own name.
+//! [`to_mcp_tool`] goes the other way: it turns a gadk tool into an MCP tool definition for an
+//! MCP server.
+//!
 //! Close a toolset with [`McpToolset::close`] when it is no longer used; dropping it cancels its
 //! sessions without waiting.
 
 mod client;
 mod config;
+mod conversion;
 mod error;
 mod format;
 mod go_mime;
@@ -59,6 +65,7 @@ pub use client::{CallContext, McpClient};
 pub use config::{
     CommandBuilder, Config, McpTransport, MetadataProvider, TransportFactory, new, serve_client,
 };
+pub use conversion::to_mcp_tool;
 pub use error::{BoxError, Error};
 pub use format::format_mcp_content;
 pub use rmcp;

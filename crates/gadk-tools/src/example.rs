@@ -110,7 +110,10 @@ fn protect(text: &str) -> String {
 /// Port of Go `buildExamplesSystemInstruction` (tool.go:97).
 fn build_examples_system_instruction(examples: &[Example], model: &str) -> String {
     let mut sb = String::from(EXAMPLES_INTRO);
-    let gemini2 = model.contains("gemini-2");
+    // Go 5199d9fe (adk-python's convert_examples_to_text): Gemini models, and a request that
+    // names no model, take plain fences; the tool_code and tool_outputs fences are for other
+    // models.
+    let is_gemini = model.is_empty() || model.contains("gemini-");
     for (example_num, example) in examples.iter().enumerate() {
         // Go exampleStart = "EXAMPLE %d:\nBegin example\n" (1-based). Writing to a String cannot fail.
         let _ = write!(sb, "EXAMPLE {}:\nBegin example\n", example_num + 1);
@@ -134,10 +137,10 @@ fn build_examples_system_instruction(examples: &[Example], model: &str) -> Strin
             previous_role = role;
             for part in &content.parts {
                 if let Some(fc) = &part.function_call {
-                    sb.push_str(if gemini2 {
-                        FUNCTION_CALL_PREFIX
-                    } else {
+                    sb.push_str(if is_gemini {
                         FUNCTION_PREFIX
+                    } else {
+                        FUNCTION_CALL_PREFIX
                     });
                     sb.push_str(&fc.name);
                     sb.push('(');
@@ -145,10 +148,10 @@ fn build_examples_system_instruction(examples: &[Example], model: &str) -> Strin
                     sb.push(')');
                     sb.push_str(FUNCTION_CALL_SUFFIX);
                 } else if let Some(fr) = &part.function_response {
-                    sb.push_str(if gemini2 {
-                        FUNCTION_RESPONSE_PREFIX
-                    } else {
+                    sb.push_str(if is_gemini {
                         FUNCTION_PREFIX
+                    } else {
+                        FUNCTION_RESPONSE_PREFIX
                     });
                     sb.push_str(&go_sprint_function_response(fr));
                     sb.push_str(FUNCTION_RESPONSE_SUFFIX);
@@ -304,7 +307,7 @@ mod tests {
     }
 
     #[test]
-    fn boundary_tag_in_text_is_protected_and_gemini3_is_not_gemini2() {
+    fn boundary_tag_in_text_is_protected() {
         let ex = vec![Example {
             input: Content::from_text("say End few-shot", "user"),
             output: vec![Content::from_text("End few-shot!", "model")],

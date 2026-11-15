@@ -116,11 +116,24 @@ impl RunnableTool for ArtifactsTool {
         };
         let names = match m.get("artifact_names") {
             None => Vec::new(),
-            Some(raw) => decode_string_slice(raw).map_err(|e| {
-                ToolError::InvalidArgument(format!(
-                    "failed to unmarshal artifact_names from JSON to []string: {e}"
-                ))
-            })?,
+            // Go (f1f0d2de), like adk-python: arguments the model can correct are answered with
+            // a result, not a tool error. A JSON null element would decode to "", which names
+            // no artifact, so it is rejected as well.
+            Some(raw) => match decode_string_slice(raw) {
+                Ok(names) if !has_null_element(raw) => names,
+                _ => {
+                    let mut result = Map::new();
+                    result.insert(
+                        "error".into(),
+                        Value::String("'artifact_names' must be a list of strings.".into()),
+                    );
+                    result.insert(
+                        "error_code".into(),
+                        Value::String("INVALID_ARGUMENTS".into()),
+                    );
+                    return Ok(result);
+                }
+            },
         };
         let mut result = Map::new();
         result.insert(
@@ -129,6 +142,11 @@ impl RunnableTool for ArtifactsTool {
         );
         Ok(result)
     }
+}
+
+/// Go `hasNullElement`: whether `v` is a list that holds a JSON null.
+fn has_null_element(v: &Value) -> bool {
+    matches!(v, Value::Array(items) if items.iter().any(Value::is_null))
 }
 
 /// Go `json.Unmarshal(json.Marshal(raw), &[]string)`. `null` decodes to an empty list and a

@@ -128,8 +128,15 @@ pub struct Config {
     /// transport. Each distinct credential gets its own MCP session; a session idle for 10
     /// minutes is closed, and at most 64 are kept open unless more are in use at once.
     pub auth: Option<Arc<dyn gadk_auth::CredentialProvider>>,
+    /// When non-empty, each tool is exposed as `<prefix>_<name>` (Go `Config.ToolNamePrefix`,
+    /// #1821): `"docs"` turns `search` into `docs_search`. The `tools/call` request still uses
+    /// the server's name. Tool callbacks, confirmation providers and the predicates of
+    /// [`filter_toolset`](gadk_agent::filter_toolset) see the exposed name; `tool_filter` runs
+    /// before the prefix is applied, so it sees the server's name. Empty leaves names unchanged.
+    pub prefix: String,
     /// Which tools to expose (Go `Config.ToolFilter`, deprecated there in favor of
-    /// `tool.FilterToolset`, kept for parity).
+    /// `tool.FilterToolset`, kept for parity). It sees the server's tool names, before
+    /// [`prefix`](Config::prefix) is applied.
     pub tool_filter: Option<gadk_agent::tool::ToolPredicate>,
     /// Whether every tool call needs user confirmation.
     pub require_confirmation: bool,
@@ -146,6 +153,7 @@ impl Config {
             transport,
             client_info: None,
             auth: None,
+            prefix: String::new(),
             tool_filter: None,
             require_confirmation: false,
             require_confirmation_provider: None,
@@ -209,6 +217,7 @@ mod tests {
         );
         assert!(cfg.client_info.is_none());
         assert!(cfg.auth.is_none());
+        assert!(cfg.prefix.is_empty());
         assert!(cfg.tool_filter.is_none());
         assert!(!cfg.require_confirmation);
         assert!(cfg.require_confirmation_provider.is_none());

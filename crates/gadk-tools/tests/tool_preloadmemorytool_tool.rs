@@ -133,7 +133,6 @@ struct Case {
 
 // parity: adapted: Go's nil *genai.Part entries become empty Parts because a Rust part list cannot hold nil
 #[tokio::test]
-#[ignore = "8a bug: preload_memory ProcessRequest searches only the first user part's text; Go joins every non-empty text part with spaces (ff9e77c5)"]
 async fn test_preload_memory_tool_process_request() {
     let cases = vec![
         Case {

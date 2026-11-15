@@ -124,7 +124,6 @@ const HI_HELLO_INSTRUCT: &str = concat!(
 
 // parity: adapted: Go's mockToolContext becomes a built Context carrying only the user content; NilFirstPart uses an empty Part because a Rust part list cannot hold nil; New's never-returned error is dropped; Go's t.Run subtests report every mismatch, so the Rust loop collects them and fails once
 #[tokio::test]
-#[ignore = "8a bug: example tool picks fences by model.contains(\"gemini-2\"); Go (5199d9fe) gives Gemini models and an empty model plain fences and other models tool_code/tool_outputs (cases FunctionCallExample_Gemini2, FunctionCallExample_NonGemini, TextAndFunctionCallResponse)"]
 async fn test_example_tool_process_request() {
     let cases = vec![
         Case {

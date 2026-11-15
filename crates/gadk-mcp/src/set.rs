@@ -32,6 +32,7 @@ use crate::tool::McpTool;
 /// [`new`](crate::new); close it with [`close`](McpToolset::close).
 pub struct McpToolset {
     client: Arc<dyn SessionClient>,
+    prefix: String,
     tool_filter: Option<ToolPredicate>,
     require_confirmation: bool,
     require_confirmation_provider: Option<ConfirmationProvider>,
@@ -43,6 +44,7 @@ impl McpToolset {
     pub(crate) fn from_parts(client: Arc<dyn SessionClient>, cfg: &Config) -> Self {
         Self {
             client,
+            prefix: cfg.prefix.clone(),
             tool_filter: cfg.tool_filter.clone(),
             require_confirmation: cfg.require_confirmation,
             require_confirmation_provider: cfg.require_confirmation_provider.clone(),
@@ -93,7 +95,7 @@ impl Toolset for McpToolset {
     }
 
     /// Go `Tools`: every server tool (all pages, server order) as an [`McpTool`](crate::McpTool),
-    /// filtered by `tool_filter`. Listing stops with [`Error::Cancelled`] when `ctx`'s
+    /// filtered by `tool_filter`, then renamed `<prefix>_<name>` when `prefix` is set. Listing stops with [`Error::Cancelled`] when `ctx`'s
     /// invocation is cancelled; a listing error reaches the caller as
     /// [`ToolError::Execution`] with the crate [`Error`] as its source.
     ///
@@ -109,20 +111,24 @@ impl Toolset for McpToolset {
         let client: Arc<dyn McpClient> = self.client.clone();
         let mut adk_tools: Vec<Arc<dyn Tool>> = Vec::with_capacity(mcp_tools.len());
         for mcp_tool in mcp_tools {
-            let tool: Arc<dyn Tool> = Arc::new(McpTool::new(
+            let mut tool = McpTool::new(
                 mcp_tool,
                 client.clone(),
                 self.require_confirmation,
                 self.require_confirmation_provider.clone(),
                 self.metadata_provider.clone(),
-            ));
-            // Go filters the converted tool, so the predicate sees the ADK tool.
+            );
+            // Go filters the converted tool, so the predicate sees the ADK tool, under its
+            // server name (the prefix is applied after the filter).
             if let Some(filter) = &self.tool_filter
-                && !filter(ctx, tool.as_ref())
+                && !filter(ctx, &tool)
             {
                 continue;
             }
-            adk_tools.push(tool);
+            if !self.prefix.is_empty() {
+                tool.expose_as(format!("{}_{}", self.prefix, tool.original_name()));
+            }
+            adk_tools.push(Arc::new(tool));
         }
         Ok(adk_tools)
     }

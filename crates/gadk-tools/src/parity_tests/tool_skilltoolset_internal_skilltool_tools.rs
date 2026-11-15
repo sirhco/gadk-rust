@@ -107,7 +107,6 @@ async fn run(
 }
 
 #[tokio::test]
-#[ignore = "8a bug: list_skills returns its XML under \"skills\"; Go (8ed375d1) answers under \"result\" (skills/tools.rs ListSkillsResult serde rename)"]
 async fn test_list_skills() {
     let source = MockSource {
         frontmatters: vec![
@@ -196,7 +195,6 @@ async fn test_load_skill_resource() {
 /// for the same tool (generated from ADK-Go at the pinned commit with `json.Marshal` of
 /// `Declaration()`).
 #[test]
-#[ignore = "8a bug: list_skills response schema names the property \"skills\"; Go (8ed375d1) declares \"result\""]
 fn declarations_match_go() {
     let source: Arc<dyn Source> = Arc::new(MockSource::default());
     let cases: [(Arc<dyn Tool>, &str); 3] = [

@@ -242,7 +242,6 @@ async fn test_agent_tool_run_successful() {
 // declaration advertises, as adk-python's AgentTool does with
 // _get_input_schema.
 #[tokio::test]
-#[ignore = "8a bug: AgentTool::run reads the input schema only of an LLM agent (reveal), so a sequential agent's call is validated for 'request' instead of its first sub-agent's InputSchema (Go 31111f89)"]
 async fn test_agent_tool_run_composite_agent_input_schema() {
     let input_schema = schema_props(&[("is_magic", Type::Boolean)], &["is_magic"]);
     let cases = [
@@ -349,7 +348,6 @@ fn calculator(parts: Vec<Part>) -> Arc<dyn Agent> {
 }
 
 #[tokio::test]
-#[ignore = "8a bug: AgentTool::run returns {} instead of {\"result\": \"\"} when the sub-agent reply has no text (Go a8a9b936)"]
 async fn test_agent_tool_run_code_parts() {
     let cases: Vec<(&str, Vec<Part>, Value)> = vec![
         (
@@ -472,7 +470,6 @@ async fn test_agent_tool_run_filters_thought_parts() {
 }
 
 #[tokio::test]
-#[ignore = "8a bug: AgentTool::run returns {} instead of {\"result\": \"\"} when the sub-agent reply has no text (Go a8a9b936)"]
 async fn test_agent_tool_run_all_thought_parts_returns_empty() {
     let model = MockModel::from_contents_streaming(
         vec![model_content(vec![thought("Just thinking...")])],
@@ -489,7 +486,6 @@ async fn test_agent_tool_run_all_thought_parts_returns_empty() {
 // A reply without text is an empty result even when the agent has an output
 // schema, where adk-python validates the empty text and raises.
 #[tokio::test]
-#[ignore = "8a bug: AgentTool::run returns {} instead of {\"result\": \"\"} when the sub-agent reply has no text (Go a8a9b936)"]
 async fn test_agent_tool_run_all_thought_parts_returns_empty_with_output_schema() {
     let output_schema = schema_props(&[("is_valid", Type::Boolean)], &["is_valid"]);
     let model = MockModel::from_contents_streaming(
@@ -528,7 +524,6 @@ async fn test_agent_tool_run_filters_thought_parts_with_output_schema() {
 }
 
 #[tokio::test]
-#[ignore = "8a bug: AgentTool::run returns {} instead of {\"result\": \"\"} when the sub-agent reply has no text (Go a8a9b936)"]
 async fn test_agent_tool_run_empty_model_response() {
     let model = MockModel::from_contents(vec![model_content(vec![])]);
     let tool = AgentTool::new(create_agent_with_model(None, None, model), None);
@@ -540,7 +535,6 @@ async fn test_agent_tool_run_empty_model_response() {
 }
 
 #[tokio::test]
-#[ignore = "8a bug: AgentTool::run returns {} instead of {\"result\": \"\"} when the sub-agent yields no content (Go a8a9b936)"]
 async fn test_agent_tool_run_no_content_returns_empty_result() {
     let child = gadk_agent::new_agent(AgentConfig {
         name: "silent".into(),
@@ -653,7 +647,6 @@ fn child_agent(
 }
 
 #[tokio::test]
-#[ignore = "8a bug: AgentTool::run ignores long-running calls left unanswered by the sub-run (no pending-ID tracking, no 'unresolved long-running tool calls' error, SkipSummarization not cleared) (Go f25d1424)"]
 async fn test_agent_tool_run_pending_confirmation_returns_error() {
     let ran = Arc::new(AtomicBool::new(false));
     let transfer = transfer_like_tool(
@@ -728,7 +721,6 @@ async fn test_agent_tool_run_answered_long_running_call_succeeds() {
 // With SkipSummarization, the pending-call error must still go back to the
 // parent model instead of ending the parent's turn on an empty response.
 #[tokio::test]
-#[ignore = "8a bug: AgentTool::run ignores long-running calls left unanswered by the sub-run, so the parent model never gets the pending-call error (Go f25d1424)"]
 async fn test_agent_tool_run_skip_summarization_pending_error_reaches_parent() {
     let transfer = transfer_like_tool(
         "transfer",
@@ -848,7 +840,6 @@ async fn test_agent_tool_run_streamed_args_answered_long_running_call_succeeds()
 // Skipping partial chunks must not drop the final event's ID when a streamed
 // long-running call is never answered.
 #[tokio::test]
-#[ignore = "8a bug: AgentTool::run ignores long-running calls left unanswered by the sub-run (no 'unresolved long-running tool calls' error) (Go f25d1424)"]
 async fn test_agent_tool_run_streamed_args_unanswered_long_running_call_returns_error() {
     let start = transfer_like_tool("start_job", "Starts a job.", false, true, None, None);
     let model = MockModel::from_contents_streaming(streamed_start_job_call(), 2);
@@ -869,7 +860,6 @@ async fn test_agent_tool_run_streamed_args_unanswered_long_running_call_returns_
 // With SkipSummarization, invalid arguments must not end the parent turn: the
 // error goes back to the parent model so it can retry with corrected args.
 #[tokio::test]
-#[ignore = "8a bug: AgentTool::run sets SkipSummarization before validating the arguments, so an argument error ends the parent's turn (Go 4cc7ce5f)"]
 async fn test_agent_tool_run_skip_summarization_not_set_on_invalid_args() {
     let input_schema = schema_props(
         &[("city", Type::String), ("days", Type::Integer)],

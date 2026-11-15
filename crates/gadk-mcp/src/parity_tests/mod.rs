@@ -20,6 +20,7 @@
 mod tool_mcptoolset_auth_session;
 mod tool_mcptoolset_client;
 mod tool_mcptoolset_client_cancellation;
+mod tool_mcptoolset_conversion;
 mod tool_mcptoolset_tool;
 mod tool_mcptoolset_tracking;
 mod tool_mcptoolset_transport_config;
