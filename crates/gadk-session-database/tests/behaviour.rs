@@ -33,7 +33,7 @@ use gadk_session_database::DatabaseSessionService;
 use serde_json::{Map, json};
 
 #[tokio::test]
-async fn sqlite_delete_leaves_events_like_go() {
+async fn sqlite_delete_removes_events_like_go() {
     let svc = memory_service().await;
     let s = svc
         .create(CreateRequest {
@@ -68,8 +68,8 @@ async fn sqlite_delete_leaves_events_like_go() {
         .unwrap();
     assert_eq!(
         (sessions, events),
-        (0, 1),
-        "ADK-Go on sqlite keeps the deleted session's events"
+        (0, 0),
+        "ADK-Go deletes the session's events explicitly (#1774), even with sqlite foreign keys off"
     );
 }
 

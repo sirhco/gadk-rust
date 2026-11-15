@@ -196,6 +196,23 @@ pub(crate) async fn update_session(c: &mut Conn, row: &SessionRow) -> sqlx::Resu
         .execute(&mut *c).await.map(|_| ())
 }
 
+pub(crate) async fn delete_session_events(
+    c: &mut Conn,
+    app_name: &str,
+    user_id: &str,
+    session_id: &str,
+) -> sqlx::Result<()> {
+    sqlx::query(
+        "DELETE FROM \"events\" WHERE \"app_name\" = $1 AND \"user_id\" = $2 AND \"session_id\" = $3",
+    )
+    .bind(app_name)
+    .bind(user_id)
+    .bind(session_id)
+    .execute(&mut *c)
+    .await
+    .map(|_| ())
+}
+
 pub(crate) async fn delete_session(
     c: &mut Conn,
     app_name: &str,

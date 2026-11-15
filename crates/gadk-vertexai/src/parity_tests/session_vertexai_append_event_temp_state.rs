@@ -166,7 +166,6 @@ async fn test_append_event_strips_temp_keys_from_raw_event() {
 // Agent Engine, so they are absent from the created session and every later read of it.
 // AppendEvent already trims them from state deltas; adk-python drops them in create_session too.
 // parity: adapted: the CreateSession payload is read from the fake's recorded request body (Go's fake stores the RPC's session); the caller's map is checked on the clone it kept
-#[ignore = "8a bug: SessionClient::create_session sends CreateRequest.state with its temp: keys as sessionState, so they reach Agent Engine and the created session (Go #2100 0c109f7d)"]
 #[tokio::test]
 async fn test_create_drops_temp_keys_from_initial_state() {
     let cases: [(&str, Value, Option<Value>); 2] = [

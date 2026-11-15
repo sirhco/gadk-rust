@@ -818,7 +818,6 @@ async fn create_with_id(svc: &InMemorySessionService, user: &str, id: &str) -> A
 }
 
 // parity: adapted: Go injects the create time per call via ctx; gadk uses one service Platform whose clock the test moves
-#[ignore = "8a bug: InMemorySessionService::list returns sessions in (app, user, id) key order, not by last update time ascending (Go #1919 8be7e250)"]
 #[tokio::test]
 async fn test_in_memory_service_list_ordered_by_last_update_time() {
     let (svc, clock) = clocked();
@@ -855,7 +854,6 @@ async fn test_in_memory_service_list_ordered_by_last_update_time() {
 // TestInMemoryService_Get_AfterWithOutOfOrderTimestamps checks the After filter when events were
 // not appended in timestamp order. An event carries the time it was created, or one its producer
 // set, not the time it was appended.
-#[ignore = "8a bug: InMemorySessionService::get binary-searches `after` (partition_point) over events kept in append order, so out-of-order timestamps drop events at or after After or keep ones before it (Go #2089 10395f01)"]
 #[tokio::test]
 async fn test_in_memory_service_get_after_with_out_of_order_timestamps() {
     let svc = InMemorySessionService::new();
@@ -909,7 +907,6 @@ async fn test_in_memory_service_get_after_with_out_of_order_timestamps() {
 // comparator directly because List scans a map ordered by (app, user, session), so ties already
 // arrive in tie-break order there; that holds for gadk's BTreeMap too.
 // parity: adapted: gadk has no compareByLastUpdate; the order is checked through List across users, with the create times set on the service's moved clock
-#[ignore = "8a bug: InMemorySessionService::list does not order by last update time, then user ID, then session ID (Go #1919 8be7e250)"]
 #[tokio::test]
 async fn test_compare_by_last_update() {
     let (svc, clock) = clocked();

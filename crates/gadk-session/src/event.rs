@@ -307,6 +307,11 @@ impl Event {
             .unwrap_or_default();
         let has_function_calls = parts.iter().any(|p| p.function_call.is_some());
         let has_function_responses = parts.iter().any(|p| p.function_response.is_some());
+        // A complete error event ends the turn even when it carries a function response or a
+        // code execution result; only a function call keeps it open.
+        if !self.response.error_code.is_empty() && !self.response.partial && !has_function_calls {
+            return true;
+        }
         let has_trailing_code_execution_result = parts
             .last()
             .is_some_and(|p| p.code_execution_result.is_some());

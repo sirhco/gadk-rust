@@ -88,7 +88,6 @@ fn test_local_session_events_concurrent_append() {
 }
 
 // parity: adapted: gadk has no sortSessionsByLastUpdate; a fake ListSessions answers the sessions in Go's input order and the test checks the order List returns
-#[ignore = "8a bug: SessionClient::list_sessions returns sessions in RPC order, not by last update time, then user ID, then session ID (Go #1919 8be7e250)"]
 #[tokio::test]
 async fn test_sort_sessions_by_last_update() {
     let engine = "projects/test-project/locations/us-central1/reasoningEngines/123";

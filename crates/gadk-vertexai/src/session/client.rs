@@ -22,7 +22,8 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use gadk_platform::go_quote;
 use gadk_session::{
-    CreateRequest, DeleteRequest, Event, GetRequest, ListRequest, SessionError, zero_time,
+    CreateRequest, DeleteRequest, Event, GetRequest, KEY_PREFIX_TEMP, ListRequest, SessionError,
+    zero_time,
 };
 use http::Method;
 use regex::Regex;
@@ -127,8 +128,17 @@ impl SessionClient {
         if !req.user_id.is_empty() {
             session.insert("userId".into(), Value::String(req.user_id.clone()));
         }
-        if let Some(state) = req.state.as_ref().filter(|s| !s.is_empty()) {
-            let state = to_struct(&Value::Object(state.clone()))
+        // temp: keys belong to a single invocation and are never stored, so they are dropped
+        // here as AppendEvent trims them from every state delta (Go #2100).
+        let state: Map<String, Value> = req
+            .state
+            .iter()
+            .flatten()
+            .filter(|(k, _)| !k.starts_with(KEY_PREFIX_TEMP))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        if !state.is_empty() {
+            let state = to_struct(&Value::Object(state))
                 .map_err(|e| session_error(wrap("failed to convert state to structpb", e)))?;
             session.insert("sessionState".into(), state);
         }
@@ -296,7 +306,7 @@ impl SessionClient {
             )
             .await
             .map_err(|e| session_error(wrap("error creating session list", e)))?;
-        items
+        let mut sessions = items
             .iter()
             .map(|s| {
                 let id = session_id_by_session_name(str_field(s, "name"))?;
@@ -310,7 +320,11 @@ impl SessionClient {
                 ))
             })
             .collect::<Result<Vec<_>, String>>()
-            .map_err(|e| session_error(wrap("error creating session list", e)))
+            .map_err(|e| session_error(wrap("error creating session list", e)))?;
+        // Go sortSessionsByLastUpdate (#1919): the ListSessions RPC has no ordering guarantee of
+        // its own.
+        sessions.sort_by(|a, b| gadk_session::compare_by_last_update(a, b));
+        Ok(sessions)
     }
 
     /// Go `deleteSession`: the `getSession` ownership check (a missing session, or another

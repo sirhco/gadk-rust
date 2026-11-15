@@ -158,6 +158,19 @@ impl Tx {
         dispatch!(&mut self.inner, update_session(row))
     }
 
+    /// Deletes every event of one session (Go #1774: not left to ON DELETE CASCADE).
+    pub(crate) async fn delete_session_events(
+        &mut self,
+        app_name: &str,
+        user_id: &str,
+        session_id: &str,
+    ) -> sqlx::Result<()> {
+        dispatch!(
+            &mut self.inner,
+            delete_session_events(app_name, user_id, session_id)
+        )
+    }
+
     pub(crate) async fn delete_session(
         &mut self,
         app_name: &str,

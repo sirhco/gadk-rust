@@ -480,7 +480,6 @@ async fn test_database_service_append_event_locks_shared_state_rows() {
 
 // The test database is SQLite without foreign keys enforced, so the ON DELETE CASCADE on events
 // is not applied and only an explicit delete removes them.
-#[ignore = "8a bug: DatabaseSessionService::delete deletes only the session row; with sqlite foreign keys off its events stay behind (Go #1774 7af0f5f0 deletes them explicitly)"]
 #[tokio::test]
 async fn test_database_service_delete_removes_session_events() {
     let svc = memory_service().await;
@@ -552,7 +551,6 @@ async fn test_database_service_delete_removes_session_events() {
 
 // Create writes the same shared rows as AppendEvent, so it needs the same locks.
 // parity: adapted: a statement log (feature testutil) records what Go's gorm callbacks record; sqlite has no FOR UPDATE, but the log records the locked read Go requests
-#[ignore = "8a bug: DatabaseSessionService::create reads the app/user state rows without the insert-on-conflict-do-nothing + select-for-update lock AppendEvent takes (Go #1930 2f3b2c23)"]
 #[tokio::test]
 async fn test_database_service_create_locks_shared_state_rows() {
     let cases: [(&str, Option<Value>, &[&str]); 5] = [
@@ -703,7 +701,6 @@ async fn list_keys(svc: &DatabaseSessionService, user: &str) -> Vec<String> {
 }
 
 // parity: adapted: Go injects the create time per call via ctx; gadk uses one service Platform whose clock the test moves
-#[ignore = "8a bug: DatabaseSessionService::list returns rows in storage order, not ordered by last update time ascending (Go #1919 8be7e250)"]
 #[tokio::test]
 async fn test_database_service_list_ordered_by_last_update_time() {
     let (svc, clock) = clocked().await;
@@ -741,7 +738,6 @@ async fn test_database_service_list_orders_mixed_offsets_by_instant() {
     );
 }
 
-#[ignore = "8a bug: DatabaseSessionService::list does not break update-time ties by user ID, then session ID (Go #1919 8be7e250)"]
 #[tokio::test]
 async fn test_database_service_list_tie_breaks_by_user_then_id() {
     let (svc, clock) = clocked().await;

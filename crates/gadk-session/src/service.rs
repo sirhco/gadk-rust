@@ -44,6 +44,10 @@ pub trait SessionService: Send + Sync {
     /// another user).
     async fn get(&self, req: GetRequest) -> Result<Arc<dyn Session>, SessionError>;
     /// Lists sessions; an empty result when there are none.
+    ///
+    /// The sessions are ordered by last update time ascending, so the last session is the most
+    /// recently active one. Sessions with equal update times are ordered by user ID, then by
+    /// session ID (see [`compare_by_last_update`]).
     async fn list(&self, req: ListRequest) -> Result<Vec<Arc<dyn Session>>, SessionError>;
     /// Deletes a session; a no-op when it does not exist.
     async fn delete(&self, req: DeleteRequest) -> Result<(), SessionError>;
@@ -75,6 +79,15 @@ pub trait Session: Send + Sync {
     fn last_update_time(&self) -> DateTime<Utc>;
     /// Downcasting support for implementations.
     fn as_any(&self) -> &dyn std::any::Any;
+}
+
+/// The order [`SessionService::list`] documents: last update time ascending, ties by user ID,
+/// then session ID (ADK-Go `compareByLastUpdate`). Use it with a stable sort.
+pub fn compare_by_last_update(a: &dyn Session, b: &dyn Session) -> std::cmp::Ordering {
+    a.last_update_time()
+        .cmp(&b.last_update_time())
+        .then_with(|| a.user_id().cmp(b.user_id()))
+        .then_with(|| a.id().cmp(b.id()))
 }
 
 /// A key-value store (ADK-Go `session.State`).
