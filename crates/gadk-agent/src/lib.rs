@@ -19,6 +19,7 @@ pub mod agent;
 pub mod callback;
 pub mod context;
 pub mod error;
+pub mod fiber;
 mod go_fmt;
 pub mod live;
 pub mod loader;
