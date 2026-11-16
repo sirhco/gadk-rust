@@ -30,6 +30,7 @@ members = [
   "crates/gadk-agentanalytics",
   "crates/gadk-prompts",
   "crates/gadk-prompts-firestore",
+  "crates/gadk-prompts-cli",
   "crates/gadk",
 ]
 
@@ -72,6 +73,8 @@ gadk-configurable = { path = "crates/gadk-configurable", version = "0.1.0" }
 gadk-agentanalytics = { path = "crates/gadk-agentanalytics", version = "0.1.0" }
 gadk-prompts = { path = "crates/gadk-prompts", version = "0.1.0" }
 gadk-prompts-firestore = { path = "crates/gadk-prompts-firestore", version = "0.1.0" }
+gadk-prompts-cli = { path = "crates/gadk-prompts-cli", version = "0.1.0" }
+similar = "2.7.0"
 tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
 tokio-util = "0.7.20"
 futures = "0.3.34"

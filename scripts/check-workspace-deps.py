@@ -120,6 +120,7 @@ ALLOWED = {
                             "gadk-session"},
     "gadk-prompts": {"gadk-agent", "gadk-engine"},
     "gadk-prompts-firestore": {"gadk-prompts", "gadk-model", "gadk-platform"},
+    "gadk-prompts-cli": {"gadk-prompts", "gadk-prompts-firestore"},
     "gadk": {"gadk-genai", "gadk-platform", "gadk-model", "gadk-session", "gadk-gemini",
              "gadk-agent", "gadk-engine", "gadk-tools", "gadk-auth", "gadk-mcp", "gadk-artifact",
              "gadk-memory", "gadk-anthropic", "gadk-openai", "gadk-session-database",
@@ -130,7 +131,8 @@ ALLOWED = {
 OPTIONAL = {("gadk-engine", "gadk-gemini"), ("gadk-engine", "gadk-httprr"), ("gadk-a2a", "gadk-server"),
             ("gadk-launcher", "gadk-server"), ("gadk-launcher", "gadk-a2a"),
             ("gadk-agentregistry", "gadk-a2a"), ("gadk-agentregistry", "gadk-mcp"),
-            ("gadk", "gadk-telemetry"), ("gadk", "gadk-agentanalytics")}
+            ("gadk", "gadk-telemetry"), ("gadk", "gadk-agentanalytics"),
+            ("gadk-prompts-cli", "gadk-prompts-firestore")}
 FACADE = "gadk"  # no crate may dev-depend on the façade
 ENGINE_DEPENDENTS = ("gadk", "gadk-tools", "gadk-server", "gadk-a2a", "gadk-launcher",
                      "gadk-agentregistry", "gadk-telemetry", "gadk-configurable",
