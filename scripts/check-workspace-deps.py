@@ -119,6 +119,7 @@ ALLOWED = {
     "gadk-agentanalytics": {"gadk-agent", "gadk-engine", "gadk-genai", "gadk-model", "gadk-platform",
                             "gadk-session"},
     "gadk-prompts": {"gadk-agent", "gadk-engine"},
+    "gadk-prompts-firestore": {"gadk-prompts", "gadk-model", "gadk-platform"},
     "gadk": {"gadk-genai", "gadk-platform", "gadk-model", "gadk-session", "gadk-gemini",
              "gadk-agent", "gadk-engine", "gadk-tools", "gadk-auth", "gadk-mcp", "gadk-artifact",
              "gadk-memory", "gadk-anthropic", "gadk-openai", "gadk-session-database",
