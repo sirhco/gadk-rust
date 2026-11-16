@@ -72,6 +72,7 @@ impl CloudLoggingExporter {
         let mut cur = head.clone().into_bytes();
         let mut count = 0usize;
         for (record, _) in batch.iter() {
+            // Serializing a `Value` cannot fail (its map keys are always strings).
             let Ok(entry) = serde_json::to_vec(&api_entry(record, &self.target, now)) else {
                 continue;
             };
@@ -105,8 +106,7 @@ impl CloudLoggingExporter {
         if status.is_success() {
             return Ok(());
         }
-        let body = response.body();
-        let excerpt = String::from_utf8_lossy(&body[..body.len().min(BODY_EXCERPT)]).into_owned();
+        let excerpt = body_excerpt(response.body());
         Err(OTelSdkError::InternalFailure(format!(
             "cloud logging: entries:write: HTTP {}: {excerpt}",
             status.as_u16()
@@ -126,6 +126,16 @@ impl LogExporter for CloudLoggingExporter {
         first_err.map_or(Ok(()), Err)
     }
 }
+
+/// At most [`BODY_EXCERPT`] bytes of `body`, decoded lossily and cut at a character boundary.
+fn body_excerpt(body: &[u8]) -> String {
+    // Lossy decoding never shrinks the input, so the first `BODY_EXCERPT + 4` bytes cover
+    // every character that can end within `BODY_EXCERPT` decoded bytes.
+    let mut text = String::from_utf8_lossy(&body[..body.len().min(BODY_EXCERPT + 4)]).into_owned();
+    text.truncate(text.floor_char_boundary(BODY_EXCERPT));
+    text
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -270,6 +280,24 @@ mod tests {
         assert!(text.contains("HTTP 403"), "{text}");
         assert!(text.contains(&"e".repeat(BODY_EXCERPT)), "{text}");
         assert!(!text.contains(&"e".repeat(BODY_EXCERPT + 1)), "{text}");
+    }
+
+    #[tokio::test]
+    async fn the_body_excerpt_ends_on_a_whole_character() {
+        // "a" then 2-byte characters: byte 1024 falls inside the character at 1023..1025.
+        let body = format!("a{}", "é".repeat(3_000));
+        assert!(!body.is_char_boundary(BODY_EXCERPT));
+        let client = FakeClient::new(500, body.as_bytes());
+        let records = vec![record(|_| {})];
+        let err = exporter(&client, "")
+            .export(LogBatch::new(&refs(&records)))
+            .await
+            .unwrap_err();
+        let text = err.to_string();
+        let excerpt = text.split_once("HTTP 500: ").unwrap().1;
+        assert!(excerpt.len() <= BODY_EXCERPT, "{}", excerpt.len());
+        assert_eq!(excerpt, &body[..BODY_EXCERPT - 1]);
+        assert!(!excerpt.contains('\u{FFFD}'), "{excerpt}");
     }
 
     #[tokio::test]
