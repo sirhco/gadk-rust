@@ -53,6 +53,12 @@ the public API.
 
 ### Added
 
+- Prompt registry: `gadk-prompts` (versioned, labelled prompts; `FileStore`; `PromptRegistry`
+  with polling refresh, `InstructionProvider`s rendered with session-state templating, a
+  `render_prompt` span and refresh metrics), `gadk-prompts-firestore` (Firestore REST store) and
+  the `gadk-prompts` CLI (`gadk-prompts-cli`). Façade features `prompts` and
+  `prompts-firestore` (not in `default`).
+- `gadk_engine::llm::inject_session_state`: session-state templating for instruction providers.
 - **The five 8a core features:**
   - **Agent error callback** (Go #2229, #2260):
     - `gadk_agent::PluginConfig.on_agent_error_callback`, of type `OnAgentErrorCallback`.

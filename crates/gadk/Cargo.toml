@@ -26,6 +26,10 @@ openai = ["dep:gadk-openai"]
 database = ["dep:gadk-session-database"]
 # Artifacts in Google Cloud Storage (gadk-artifact-gcs); not in `default`.
 gcs = ["dep:gadk-artifact-gcs"]
+# Versioned prompt registry (gadk-prompts); not in `default`.
+prompts = ["dep:gadk-prompts"]
+# The prompt registry's Firestore store (gadk-prompts-firestore); not in `default`.
+prompts-firestore = ["prompts", "dep:gadk-prompts-firestore"]
 # Sessions and memory in a Vertex AI Agent Engine (gadk-vertexai); not in `default`.
 vertexai = ["dep:gadk-vertexai"]
 # The ADK REST API server with inbound authn/authz (gadk-server); not in `default`.
@@ -80,6 +84,8 @@ gadk-launcher = { workspace = true, optional = true }
 gadk-telemetry = { workspace = true, optional = true }
 gadk-agentregistry = { workspace = true, optional = true }
 gadk-agentanalytics = { workspace = true, optional = true }
+gadk-prompts = { workspace = true, optional = true }
+gadk-prompts-firestore = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
@@ -90,6 +96,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 schemars = { workspace = true }
 pretty_assertions = { workspace = true }
+# The prompts façade test serves an empty FileStore from a temporary directory.
+tempfile = { workspace = true }
 # The MCP tests replay Gemini recordings (gemini_test_model) against in-process MCP servers
 # (gadk_mcp::testutil); the mcp example builds its weather server with rmcp's macros.
 gadk-engine = { workspace = true, features = ["testutil"] }
@@ -238,3 +246,7 @@ required-features = ["telemetry"]
 [[test]]
 name = "facade_agentanalytics"
 required-features = ["agentanalytics"]
+
+[[test]]
+name = "prompts_facade"
+required-features = ["prompts-firestore"]

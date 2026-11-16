@@ -13,6 +13,8 @@ workspace = true
 [[bin]]
 name = "gadk-prompts"
 path = "src/main.rs"
+# Not documented: the bin shares its doc output path with the gadk-prompts library.
+doc = false
 
 [features]
 default = ["firestore"]
