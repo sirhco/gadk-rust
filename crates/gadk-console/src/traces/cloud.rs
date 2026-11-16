@@ -34,6 +34,7 @@ use super::{
     LogEntry, LogSet, RawSpan, Service, SourceError, TraceDetail, TraceId, TracePage, TraceQuery,
     TraceSource, TraceSummary, excerpt, span_id_hex,
 };
+use crate::url::percent_encode;
 
 const TRACE_BASE: &str = "https://cloudtrace.googleapis.com";
 const LOGGING_BASE: &str = "https://logging.googleapis.com";
@@ -445,19 +446,6 @@ fn rfc3339(t: DateTime<Utc>) -> String {
 /// A v1 filter value: double-quoted, with `\` and `"` backslash-escaped.
 fn quote(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
-}
-
-/// Percent-encodes every byte except the RFC 3986 unreserved characters.
-fn percent_encode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
-            out.push(char::from(b));
-        } else {
-            out.push_str(&format!("%{b:02X}"));
-        }
-    }
-    out
 }
 
 #[cfg(test)]

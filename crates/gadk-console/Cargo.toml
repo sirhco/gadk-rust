@@ -10,6 +10,10 @@ repository.workspace = true
 [lints]
 workspace = true
 
+[[bin]]
+name = "gadk-console"
+path = "src/main.rs"
+
 [dependencies]
 gadk-model = { workspace = true, features = ["gcp-auth"] }
 gadk-prompts = { workspace = true }

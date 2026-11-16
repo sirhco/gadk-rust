@@ -21,6 +21,7 @@ use maud::{Markup, html};
 
 use super::layout::{Nav, page};
 use crate::traces::{TimeRange, TracePage, TraceQuery};
+use crate::url::percent_encode;
 
 /// The trace list: filter form, one row per trace, and the next-page link.
 pub(crate) fn render(q: &TraceQuery, list: &TracePage) -> Markup {
@@ -84,17 +85,4 @@ fn next_href(q: &TraceQuery, token: &str) -> String {
     }
     let _ = write!(href, "&page={}", percent_encode(token));
     href
-}
-
-/// Percent-encodes everything but the RFC 3986 unreserved characters.
-pub(super) fn percent_encode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
-            out.push(char::from(b));
-        } else {
-            let _ = write!(out, "%{b:02X}");
-        }
-    }
-    out
 }

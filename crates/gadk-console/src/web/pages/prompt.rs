@@ -19,11 +19,12 @@ use maud::{Markup, html};
 
 use super::layout::{Nav, page};
 use crate::prompts::{DiffLine, DiffTag, DiffView, PromptDetail, VersionView};
+use crate::url::percent_encode;
 
-/// `/prompts/{name}`, with any `/` in the name sent as `%2F` so the name stays one path
-/// segment (prompt names are `[a-z0-9._-]` segments joined by `/`).
+/// `/prompts/{name}`, with the name percent-encoded so it stays one path segment (prompt
+/// names are `[a-z0-9._-]` segments joined by `/`, so only the `/` becomes `%2F`).
 pub(crate) fn href(name: &str) -> String {
-    format!("/prompts/{}", name.replace('/', "%2F"))
+    format!("/prompts/{}", percent_encode(name))
 }
 
 fn csrf_field(csrf: &str) -> Markup {
