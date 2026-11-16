@@ -23,7 +23,7 @@ use gadk_prompts_firestore::{FirestoreConfig, FirestoreStore};
 /// `FIRESTORE_EMULATOR_HOST=localhost:8080 cargo test -p gadk-prompts-firestore --test live -- --ignored`.
 /// Each scenario uses its own root so runs do not collide.
 #[tokio::test]
-#[ignore = "needs FIRESTORE_EMULATOR_HOST"]
+#[ignore = "needs FIRESTORE_EMULATOR_HOST; run with -- --ignored"]
 async fn live_emulator_contract() {
     assert!(
         std::env::var("FIRESTORE_EMULATOR_HOST").is_ok(),

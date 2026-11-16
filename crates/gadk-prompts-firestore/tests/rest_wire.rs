@@ -68,13 +68,28 @@ fn encodes_doc_ids() {
 }
 
 #[tokio::test]
-async fn slash_names_are_double_escaped_in_url_paths() {
+async fn slash_names_are_single_escaped_in_request_bodies() {
     let fake = fake_firestore::start();
     let s = FirestoreStore::new(config(fake.server.url(), None)).unwrap();
     s.create_version(nv("a/b", "x")).await.unwrap();
     let reqs = fake.requests.lock().unwrap();
-    let get = reqs.iter().find(|r| r.method == "GET").expect("a GET");
-    assert!(get.path.ends_with("/prompts/a%252Fb"), "{}", get.path);
+    // Transactional reads go through batchGet; no request carries a doc id in its URL path.
+    assert!(reqs.iter().all(|r| r.method != "GET"));
+    assert!(
+        reqs.iter().all(|r| !r.path.contains("/prompts/")),
+        "{:?}",
+        reqs.iter().map(|r| &r.path).collect::<Vec<_>>()
+    );
+    let get = reqs
+        .iter()
+        .find(|r| r.path.ends_with(":batchGet"))
+        .expect("a batchGet");
+    let docs = get.json()["documents"].clone();
+    assert!(
+        docs[0].as_str().unwrap().ends_with("/prompts/a%2Fb"),
+        "{docs}"
+    );
+    assert!(get.json()["transaction"].is_string());
     let commit = reqs.iter().find(|r| r.path.ends_with(":commit")).unwrap();
     assert!(
         commit.body_text().contains("/prompts/a%2Fb"),

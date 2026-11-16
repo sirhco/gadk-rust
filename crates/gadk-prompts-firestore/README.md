@@ -43,7 +43,9 @@ with V versions in total, a poll every interval costs roughly P + V reads.
 
 The store's REST semantics (paths, transactions, retries, error mapping) are verified against an
 in-process fake Firestore server. `tests/live.rs` (ignored by default) runs the `PromptStore`
-contract suite against the Firestore emulator when `FIRESTORE_EMULATOR_HOST` is set:
+contract suite against the Firestore emulator when `FIRESTORE_EMULATOR_HOST` is set. The store
+reads inside transactions with `batchGet` (the emulator does not answer transactional
+single-document GETs):
 
 ```sh
 FIRESTORE_EMULATOR_HOST=localhost:8080 cargo test -p gadk-prompts-firestore --test live -- --ignored
