@@ -19,7 +19,7 @@ use std::sync::Arc;
 use gadk_prompts::{FileStore, PromptStore, StoreError};
 
 /// `file://<dir>` or `firestore://<project>/<database>[/<root…>]`.
-pub(crate) fn open(url: &str) -> Result<Arc<dyn PromptStore>, StoreError> {
+pub fn open_store(url: &str) -> Result<Arc<dyn PromptStore>, StoreError> {
     if let Some(dir) = url.strip_prefix("file://") {
         if dir.is_empty() {
             return Err(StoreError::Invalid(

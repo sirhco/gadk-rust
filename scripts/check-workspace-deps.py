@@ -82,7 +82,8 @@
   (REST transport, `gcp-auth`) and `gadk-platform`; `gadk-prompts-cli` on `gadk-prompts` and,
   optionally (feature `firestore`), `gadk-prompts-firestore`. The façade depends on
   `gadk-prompts` and `gadk-prompts-firestore` optionally (features `prompts`,
-  `prompts-firestore`); nothing depends on `gadk-prompts-cli`.
+  `prompts-firestore`); nothing depends on `gadk-prompts-cli` except `gadk-console` (B2), and
+  nothing depends on `gadk-console`.
 """
 import pathlib, sys, tomllib
 
@@ -127,6 +128,7 @@ ALLOWED = {
     "gadk-prompts": {"gadk-agent", "gadk-engine"},
     "gadk-prompts-firestore": {"gadk-prompts", "gadk-model", "gadk-platform"},
     "gadk-prompts-cli": {"gadk-prompts", "gadk-prompts-firestore"},
+    "gadk-console": {"gadk-model", "gadk-prompts", "gadk-prompts-cli"},
     "gadk": {"gadk-genai", "gadk-platform", "gadk-model", "gadk-session", "gadk-gemini",
              "gadk-agent", "gadk-engine", "gadk-tools", "gadk-auth", "gadk-mcp", "gadk-artifact",
              "gadk-memory", "gadk-anthropic", "gadk-openai", "gadk-session-database",
