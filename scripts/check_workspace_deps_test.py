@@ -33,7 +33,7 @@ class EdgeTest(unittest.TestCase):
     def test_agent_dev_dependency_on_engine_is_rejected(self):
         self.edit("gadk-agent", "[dev-dependencies]\n", "[dev-dependencies]\ngadk-engine = { workspace = true }\n")
         errs = cwd.check(self.repo)
-        self.assertTrue(any("only gadk, gadk-tools, gadk-server, gadk-a2a, gadk-launcher, gadk-agentregistry, gadk-telemetry, gadk-configurable and gadk-agentanalytics may depend on gadk-engine" in e for e in errs), errs)
+        self.assertTrue(any("only gadk, gadk-tools, gadk-server, gadk-a2a, gadk-launcher, gadk-agentregistry, gadk-telemetry, gadk-configurable, gadk-agentanalytics and gadk-prompts may depend on gadk-engine" in e for e in errs), errs)
 
     def test_tools_dev_dependency_on_engine_is_allowed(self):
         text = (self.repo / "crates/gadk-tools/Cargo.toml").read_text()

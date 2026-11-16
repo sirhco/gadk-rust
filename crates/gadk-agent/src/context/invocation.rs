@@ -72,6 +72,13 @@ impl InvocationContext {
         }
     }
 
+    /// The invocation context a [`ReadonlyContext`] views, sharing its state (no copy). For
+    /// gadk's own crates (e.g. templating an instruction provider's output); not a stable API.
+    #[doc(hidden)]
+    pub fn from_readonly(ctx: &ReadonlyContext) -> Self {
+        Self { ro: ctx.clone() }
+    }
+
     pub(crate) fn inner(&self) -> &ContextInner {
         &self.ro.inner
     }

@@ -50,9 +50,22 @@ the public API.
 - **New crate edges (8b):** `gadk-vertexai → gadk-tools` and `gadk-vertexai → gadk-agent` (the
   Example Store provider implements `gadk_tools::example::Provider`); rule 4c of
   `scripts/check-workspace-deps.py` allows them.
+- **Workspace dependencies (prompt registry):** `arc-swap` (1.9.5, the registry's snapshot
+  swap) and `similar` (2.7.0, `gadk-prompts diff`) are new workspace dependencies.
+- **New crate edges (prompt registry):** `gadk-prompts → gadk-agent, gadk-engine` (the tenth
+  crate that may depend on `gadk-engine`); `gadk-prompts-firestore → gadk-prompts, gadk-model,
+  gadk-platform`; `gadk-prompts-cli → gadk-prompts` and, optionally (feature `firestore`),
+  `gadk-prompts-firestore`. The façade depends on `gadk-prompts` and `gadk-prompts-firestore`
+  optionally; `scripts/check-workspace-deps.py` allows these edges.
 
 ### Added
 
+- Prompt registry: `gadk-prompts` (versioned, labelled prompts; `FileStore`; `PromptRegistry`
+  with polling refresh, `InstructionProvider`s rendered with session-state templating, a
+  `render_prompt` span and refresh metrics), `gadk-prompts-firestore` (Firestore REST store) and
+  the `gadk-prompts` CLI (`gadk-prompts-cli`). Façade features `prompts` and
+  `prompts-firestore` (not in `default`).
+- `gadk_engine::llm::inject_session_state`: session-state templating for instruction providers.
 - **The five 8a core features:**
   - **Agent error callback** (Go #2229, #2260):
     - `gadk_agent::PluginConfig.on_agent_error_callback`, of type `OnAgentErrorCallback`.

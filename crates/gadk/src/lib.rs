@@ -84,6 +84,27 @@ pub use gadk_model as model;
 #[cfg(feature = "openai")]
 pub use gadk_openai as openai;
 pub use gadk_platform as platform;
+/// The prompt registry: versioned, labelled prompts and instruction providers (feature
+/// `prompts`, not on by default; re-export of `gadk-prompts`). The Firestore store is
+/// `prompts_firestore`.
+///
+/// ```no_run
+/// # #[cfg(feature = "prompts-firestore")]
+/// # async fn demo() -> Result<(), Box<dyn std::error::Error>> {
+/// use std::sync::Arc;
+/// let store = gadk::prompts_firestore::FirestoreStore::new(gadk::prompts_firestore::FirestoreConfig {
+///     project: "my-project".into(),
+///     ..Default::default()
+/// })?;
+/// let registry = gadk::prompts::PromptRegistry::builder(Arc::new(store)).load().await?;
+/// # let _ = registry; Ok(()) }
+/// ```
+#[cfg(feature = "prompts")]
+pub use gadk_prompts as prompts;
+/// The prompt registry's store in Google Cloud Firestore (feature `prompts-firestore`, not on by
+/// default; re-export of `gadk-prompts-firestore`).
+#[cfg(feature = "prompts-firestore")]
+pub use gadk_prompts_firestore as prompts_firestore;
 /// The ADK REST API server (`server::rest`) with inbound authentication (`server::authn`) and
 /// authorization (`server::authz`), wire-compatible with an ADK-Go server (feature `server`, not
 /// on by default; re-export of `gadk-server`).

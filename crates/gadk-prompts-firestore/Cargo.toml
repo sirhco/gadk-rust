@@ -1,0 +1,27 @@
+[package]
+name = "gadk-prompts-firestore"
+description = "Firestore store for gadk-prompts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+gadk-prompts = { workspace = true }
+gadk-model = { workspace = true, features = ["gcp-auth"] }
+gadk-platform = { workspace = true }
+google-cloud-auth = { workspace = true }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+chrono = { workspace = true }
+http = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+gadk-prompts = { workspace = true, features = ["testsuite"] }
+gadk-model = { workspace = true, features = ["test-util"] }
+tokio = { workspace = true, features = ["test-util"] }
