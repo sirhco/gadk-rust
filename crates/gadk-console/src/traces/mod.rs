@@ -234,7 +234,6 @@ pub fn span_id_hex(decimal: &str) -> Option<String> {
 pub(crate) const EXCERPT_LIMIT: usize = 1024;
 
 /// At most 1,024 bytes of `body` (lossy UTF-8), cut on a char boundary.
-#[allow(dead_code)] // removed in Task 8 (cloud.rs uses it from Task 3)
 pub(crate) fn excerpt(body: &[u8]) -> String {
     // Lossy decoding never shrinks the input, so the first `EXCERPT_LIMIT + 4` bytes cover
     // every character that can end within `EXCERPT_LIMIT` decoded bytes.
