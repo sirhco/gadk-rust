@@ -42,17 +42,6 @@ fn url_seg(id: &str) -> String {
     id.replace('%', "%25")
 }
 
-fn url_query(v: &str) -> String {
-    v.bytes()
-        .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                (b as char).to_string()
-            }
-            _ => format!("%{b:02X}"),
-        })
-        .collect()
-}
-
 /// Prompts in Firestore. See the crate docs for the layout.
 pub struct FirestoreStore {
     client: Client,
@@ -164,22 +153,40 @@ impl FirestoreStore {
         }
     }
 
+    /// Reads `doc` inside transaction `tx` with `:batchGet` (the Firestore emulator never
+    /// answers a transactional single-document GET).
     async fn get(
         &self,
         doc: &str,
         tx: &str,
     ) -> Result<Option<serde_json::Map<String, Value>>, CallError> {
-        let path = format!("{}?transaction={}", url_doc(doc), url_query(tx));
-        match self.client.call(Method::GET, &path, None).await {
-            Ok(v) => Ok(Some(
-                v.get("fields")
-                    .and_then(Value::as_object)
-                    .cloned()
-                    .unwrap_or_default(),
-            )),
-            Err(CallError::NotFound) => Ok(None),
-            Err(e) => Err(e),
+        let v = self
+            .client
+            .call(
+                Method::POST,
+                &format!("{}:batchGet", self.db),
+                Some(json!({"documents": [doc], "transaction": tx})),
+            )
+            .await?;
+        let decode = |m: &str| CallError::Store(StoreError::Decode(format!("batchGet: {m}")));
+        let items = v
+            .as_array()
+            .ok_or_else(|| decode("response is not an array"))?;
+        for it in items {
+            if let Some(found) = it.get("found") {
+                return Ok(Some(
+                    found
+                        .get("fields")
+                        .and_then(Value::as_object)
+                        .cloned()
+                        .unwrap_or_default(),
+                ));
+            }
+            if it.get("missing").is_some() {
+                return Ok(None);
+            }
         }
+        Err(decode("no found or missing item"))
     }
 }
 

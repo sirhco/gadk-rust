@@ -13,7 +13,7 @@
 // limitations under the License.
 
 //! A stateful in-memory Firestore REST v1 fake: documents, optimistic read-write
-//! transactions, runQuery, and injectable commit aborts.
+//! transactions (reads via batchGet), runQuery, and injectable commit aborts.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -113,6 +113,33 @@ pub fn start() -> Fake {
             }
             return FakeResponse::json(json!({"writeResults": []}).to_string());
         }
+        if path.ends_with(":batchGet") {
+            let body = req.json();
+            let tx = body["transaction"].as_str().map(str::to_owned);
+            let mut out = Vec::new();
+            for name in body["documents"].as_array().cloned().unwrap_or_default() {
+                let name = name.as_str().unwrap_or_default().to_owned();
+                let current = s.docs.get(&name).cloned();
+                if let Some(tx) = &tx
+                    && let Some(reads) = s.txs.get_mut(tx)
+                {
+                    reads.insert(name.clone(), current.as_ref().map_or(0, |d| d.1));
+                }
+                out.push(match current {
+                    Some((fields, _)) => json!({
+                        "found": {
+                            "name": name,
+                            "fields": fields,
+                            "createTime": "2026-11-15T00:00:00Z",
+                            "updateTime": "2026-11-15T00:00:00Z",
+                        },
+                        "readTime": "2026-11-15T00:00:00Z",
+                    }),
+                    None => json!({"missing": name, "readTime": "2026-11-15T00:00:00Z"}),
+                });
+            }
+            return FakeResponse::json(Value::Array(out).to_string());
+        }
         if let Some(parent) = path.strip_suffix(":runQuery") {
             let parent = decode_path(parent);
             let from = &req.json()["structuredQuery"]["from"][0];
@@ -140,19 +167,17 @@ pub fn start() -> Fake {
             return FakeResponse::json(Value::Array(out).to_string());
         }
         if req.method == "GET" {
-            let name = decode_path(path);
-            let tx = req
+            // The Firestore emulator never answers a transactional GET; fail loudly so a
+            // regression back to it is caught here.
+            if req
                 .query
                 .as_deref()
-                .and_then(|q| q.strip_prefix("transaction="))
-                .map(decode_path);
-            let current = s.docs.get(&name).cloned();
-            if let Some(tx) = tx
-                && let Some(reads) = s.txs.get_mut(&tx)
+                .is_some_and(|q| q.contains("transaction="))
             {
-                reads.insert(name.clone(), current.as_ref().map_or(0, |d| d.1));
+                return err(400, "UNSUPPORTED");
             }
-            return match current {
+            let name = decode_path(path);
+            return match s.docs.get(&name) {
                 Some((fields, _)) => {
                     FakeResponse::json(json!({"name": name, "fields": fields}).to_string())
                 }
