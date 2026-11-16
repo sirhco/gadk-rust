@@ -20,7 +20,7 @@ use http::StatusCode;
 use maud::{Markup, html};
 
 use super::layout::{self, Nav};
-use crate::traces::SourceError;
+use crate::traces::{SourceError, excerpt};
 
 /// <div class="banner error">: text, then (when hint) <p class="hint">hint</p>.
 pub(crate) fn banner(text: &str, hint: Option<&str>) -> Markup {
@@ -73,9 +73,17 @@ pub(crate) fn store_status(e: &StoreError) -> StatusCode {
     }
 }
 
-/// The error page for a store failure: `store_status(e)`, text e.to_string(), nav Prompts.
+/// The error page for a store failure: `store_status(e)`, nav Prompts. The text is
+/// `e.to_string()`, except `Http`, whose upstream body is cut to an excerpt of at most
+/// 1,024 bytes.
 pub(crate) fn store_error(e: &StoreError) -> Response {
-    error_page(store_status(e), Nav::Prompts, &e.to_string(), None)
+    let text = match e {
+        StoreError::Http { status, body } => {
+            format!("http {status}: {}", excerpt(body.as_bytes()))
+        }
+        _ => e.to_string(),
+    };
+    error_page(store_status(e), Nav::Prompts, &text, None)
 }
 
 #[cfg(test)]
@@ -205,5 +213,22 @@ mod tests {
             html.contains(r#"<a class="active" href="/prompts">"#),
             "{html}"
         );
+    }
+
+    #[tokio::test]
+    async fn store_http_error_carries_only_an_excerpt_of_the_body() {
+        let mut upstream = "x".repeat(2000);
+        upstream.push_str("END-OF-UPSTREAM-BODY");
+        let resp = store_error(&StoreError::Http {
+            status: 503,
+            body: upstream,
+        });
+        assert_eq!(resp.status(), StatusCode::BAD_GATEWAY);
+        let html = body(resp).await;
+        assert!(!html.contains("END-OF-UPSTREAM-BODY"), "{html}");
+        let start = html.find("<p>http 503: ").unwrap() + "<p>http 503: ".len();
+        let len = html[start..].find("</p>").unwrap();
+        assert!(len <= 1024, "excerpt is {len} bytes");
+        assert_eq!(len, 1024);
     }
 }

@@ -155,6 +155,22 @@ mod tests {
         let req = Request::get("/").body(Body::empty()).unwrap();
         assert_eq!(send(fresh(), req).await.0, StatusCode::MISDIRECTED_REQUEST);
 
+        for host in [
+            format!("LOCALHOST:{PORT}"),
+            format!("localhost.:{PORT}"),
+            format!("127.0.0.1:{PORT}.evil"),
+        ] {
+            let req = Request::get("/")
+                .header(HOST, host.as_str())
+                .body(Body::empty())
+                .unwrap();
+            assert_eq!(
+                send(fresh(), req).await.0,
+                StatusCode::MISDIRECTED_REQUEST,
+                "{host}"
+            );
+        }
+
         let req = Request::get("/")
             .header(HOST, format!("localhost:{PORT}"))
             .body(Body::empty())
@@ -170,6 +186,15 @@ mod tests {
 
         let (status, _, _) = post_form(fresh(), "/", "", Some("http://evil.example")).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
+
+        for origin in [
+            "null".to_owned(),
+            format!("http://127.0.0.1:{PORT}/"),
+            format!("https://127.0.0.1:{PORT}"),
+        ] {
+            let (status, _, _) = post_form(fresh(), "/", "", Some(&origin)).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{origin}");
+        }
 
         let (status, _, _) = post_form(fresh(), "/", "", Some("http://127.0.0.1:9999")).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
