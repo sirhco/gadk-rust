@@ -28,7 +28,7 @@ pub enum StoreError {
     #[error("not found: {name}{}", if selector.is_empty() { String::new() } else { format!("@{selector}") })]
     NotFound { name: String, selector: String },
     /// A compare-and-set or concurrent write lost: `expected` was required, `actual` was found.
-    #[error("conflict: expected {expected:?}, found {actual:?}")]
+    #[error("{}", conflict_message(*expected, *actual))]
     Conflict {
         expected: Option<u32>,
         actual: Option<u32>,
@@ -45,6 +45,21 @@ pub enum StoreError {
     /// Stored data that cannot be decoded.
     #[error("decode: {0}")]
     Decode(String),
+}
+
+/// `conflict: expected v1, found unset`; `conflict: concurrent write; retry` when neither side
+/// is known (a lost transaction).
+fn conflict_message(expected: Option<u32>, actual: Option<u32>) -> String {
+    let show = |v: Option<u32>| v.map_or_else(|| "unset".to_owned(), |n| format!("v{n}"));
+    if expected.is_none() && actual.is_none() {
+        "conflict: concurrent write; retry".to_owned()
+    } else {
+        format!(
+            "conflict: expected {}, found {}",
+            show(expected),
+            show(actual)
+        )
+    }
 }
 
 /// Where prompts are kept. Implementations must make `create_version`, `set_label` and
@@ -69,4 +84,18 @@ pub trait PromptStore: Send + Sync {
     ) -> Result<(), StoreError>;
     /// Removes `label`. Unknown name or label: `NotFound`.
     async fn remove_label(&self, name: &str, label: &Label) -> Result<(), StoreError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::StoreError;
+
+    #[test]
+    fn conflict_display() {
+        let c = |expected, actual| StoreError::Conflict { expected, actual }.to_string();
+        assert_eq!(c(Some(1), Some(2)), "conflict: expected v1, found v2");
+        assert_eq!(c(None, Some(1)), "conflict: expected unset, found v1");
+        assert_eq!(c(Some(3), None), "conflict: expected v3, found unset");
+        assert_eq!(c(None, None), "conflict: concurrent write; retry");
+    }
 }

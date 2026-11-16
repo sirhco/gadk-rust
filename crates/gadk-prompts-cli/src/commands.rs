@@ -33,7 +33,8 @@ fn req<'a>(m: &'a ArgMatches, k: &str) -> &'a str {
 }
 
 fn parse_version(s: &str) -> Result<u32, StoreError> {
-    s.trim_start_matches('v')
+    s.strip_prefix('v')
+        .unwrap_or(s)
         .parse()
         .map_err(|_| StoreError::Invalid(format!("bad version {s:?}")))
 }

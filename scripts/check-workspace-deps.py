@@ -77,7 +77,7 @@
   `gadk-genai`, `gadk-model` (REST transport, `gcp-auth`), `gadk-platform` and `gadk-session`
   (the `user:` / `app:` / `temp:` key prefixes); it never depends on `gadk-engine`, and only the
   façade depends on it, optionally (feature `agentanalytics`).
-- prompts: `gadk-prompts` depends on exactly `gadk-agent` and `gadk-engine` (the ninth crate that
+- prompts: `gadk-prompts` depends on exactly `gadk-agent` and `gadk-engine` (the tenth crate that
   may depend on `gadk-engine`); `gadk-prompts-firestore` on exactly `gadk-prompts`, `gadk-model`
   (REST transport, `gcp-auth`) and `gadk-platform`; `gadk-prompts-cli` on `gadk-prompts` and,
   optionally (feature `firestore`), `gadk-prompts-firestore`. The façade depends on

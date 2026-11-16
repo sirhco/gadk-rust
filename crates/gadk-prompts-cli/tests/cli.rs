@@ -153,6 +153,16 @@ async fn cli_end_to_end() {
     assert_eq!(r.code, 2);
     let r = cli(p, &["promote", "p", "9", "--label", "production"], "").await;
     assert_eq!(r.code, 2);
+    let r = cli(p, &["promote", "p", "vvv1", "--label", "production"], "").await;
+    assert_eq!(r.code, 1, "{}", r.stderr);
+    assert!(r.stderr.contains("bad version"), "{}", r.stderr);
+    let r = cli(p, &["promote", "p", "v1", "--label", "canary"], "").await;
+    assert_eq!(
+        (r.code, r.stdout.as_str()),
+        (0, "p canary -> v1\n"),
+        "{}",
+        r.stderr
+    );
     let r = cli(p, &["list", "--bogus"], "").await;
     assert_eq!(r.code, 1);
     let r = cli(p, &["push", "Bad Name"], "x").await;

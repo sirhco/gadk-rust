@@ -26,7 +26,9 @@ let provider = registry
   `Selector::Latest`.
 - `PromptRegistryBuilder::refresh_interval` sets the polling interval
   (`DEFAULT_REFRESH_INTERVAL` by default, `Duration::ZERO` to disable background refresh);
-  `meter_provider` sets where the refresh metrics go.
+  `meter_provider` sets where the refresh metrics go. Without it the instruments bind to the
+  global meter provider at `load()` time, so build the registry after installing telemetry
+  providers, or pass `meter_provider`.
 - Feature `testsuite`: `gadk_prompts::testsuite::run`, the `PromptStore` contract tests, for
   other store implementations.
 

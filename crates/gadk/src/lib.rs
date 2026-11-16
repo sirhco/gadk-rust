@@ -84,7 +84,9 @@ pub use gadk_model as model;
 #[cfg(feature = "openai")]
 pub use gadk_openai as openai;
 pub use gadk_platform as platform;
-/// Prompt registry (feature `prompts`; the Firestore store needs `prompts-firestore`).
+/// The prompt registry: versioned, labelled prompts and instruction providers (feature
+/// `prompts`, not on by default; re-export of `gadk-prompts`). The Firestore store is
+/// `prompts_firestore`.
 ///
 /// ```no_run
 /// # #[cfg(feature = "prompts-firestore")]

@@ -50,6 +50,13 @@ the public API.
 - **New crate edges (8b):** `gadk-vertexai → gadk-tools` and `gadk-vertexai → gadk-agent` (the
   Example Store provider implements `gadk_tools::example::Provider`); rule 4c of
   `scripts/check-workspace-deps.py` allows them.
+- **Workspace dependencies (prompt registry):** `arc-swap` (1.9.5, the registry's snapshot
+  swap) and `similar` (2.7.0, `gadk-prompts diff`) are new workspace dependencies.
+- **New crate edges (prompt registry):** `gadk-prompts → gadk-agent, gadk-engine` (the tenth
+  crate that may depend on `gadk-engine`); `gadk-prompts-firestore → gadk-prompts, gadk-model,
+  gadk-platform`; `gadk-prompts-cli → gadk-prompts` and, optionally (feature `firestore`),
+  `gadk-prompts-firestore`. The façade depends on `gadk-prompts` and `gadk-prompts-firestore`
+  optionally; `scripts/check-workspace-deps.py` allows these edges.
 
 ### Added
 

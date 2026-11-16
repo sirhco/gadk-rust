@@ -105,12 +105,19 @@ impl PromptRegistryBuilder {
     }
 
     /// Records the registry's metrics through `provider` instead of the global meter provider.
+    ///
+    /// Without it the instruments bind to the global meter provider when [`load`](Self::load)
+    /// runs, so a provider installed globally afterwards never sees them: build the registry
+    /// after installing telemetry providers, or pass the provider here.
     pub fn meter_provider<P: MeterProvider + ?Sized>(mut self, provider: &P) -> Self {
         self.meter = Some(provider.meter("gadk.prompts"));
         self
     }
 
     /// Loads the store once and starts the refresh task (when the interval is non-zero).
+    ///
+    /// The metric instruments are created here, from the [`meter_provider`](Self::meter_provider)
+    /// or else the global meter provider as it is at this moment.
     ///
     /// # Errors
     ///
