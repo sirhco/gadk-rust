@@ -45,10 +45,10 @@ mod test_support;
 
 pub use bridge::OtelBridge;
 pub use config::{
-    GoogleCredentials, TelemetryOption, with_gcp_quota_project, with_gcp_resource_project,
-    with_google_credentials, with_log_record_processors, with_logger_provider, with_meter_provider,
-    with_metric_reader, with_otel_to_cloud, with_resource, with_span_processors,
-    with_tracer_provider,
+    GoogleCredentials, TelemetryOption, with_cloud_log_name, with_cloud_logging_stdout,
+    with_gcp_quota_project, with_gcp_resource_project, with_google_credentials,
+    with_log_record_processors, with_logger_provider, with_meter_provider, with_metric_reader,
+    with_otel_to_cloud, with_resource, with_span_processors, with_tracer_provider,
 };
 pub use error::Error;
 pub use http_client::RuntimeHttpClient;
