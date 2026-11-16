@@ -1,0 +1,41 @@
+[package]
+name = "gadk-prompts"
+description = "Versioned, labelled prompt registry for gadk agents"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# Reusable PromptStore contract tests (gadk_prompts::testsuite::run).
+testsuite = []
+
+[dependencies]
+gadk-agent = { workspace = true }
+gadk-engine = { workspace = true }
+arc-swap = { workspace = true }
+async-trait = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde-saphyr = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+futures = { workspace = true }
+opentelemetry = { workspace = true }
+tokio-util = { workspace = true }
+
+[dev-dependencies]
+gadk-prompts = { path = ".", features = ["testsuite"] }
+gadk-engine = { workspace = true, features = ["testutil"] }
+gadk-genai = { workspace = true }
+gadk-session = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }

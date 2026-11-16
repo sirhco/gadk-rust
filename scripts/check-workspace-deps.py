@@ -9,8 +9,8 @@
   `optional = true`.
 - A gadk-* dev-dependency is the crate itself or a crate that does not (transitively, via
   ALLOWED) depend on it, and never `gadk`.
-- Only `gadk`, `gadk-tools`, (5a) `gadk-server`, (5b) `gadk-a2a`, (6) `gadk-launcher` and (6c-2)
-  `gadk-configurable` may depend on `gadk-engine`, and only `gadk` may dev-depend on
+- Only `gadk`, `gadk-tools`, (5a) `gadk-server`, (5b) `gadk-a2a`, (6) `gadk-launcher`, (6c-2)
+  `gadk-configurable` and `gadk-prompts` may depend on `gadk-engine`, and only `gadk` may dev-depend on
   `gadk-tools` (2a: gadk-tools builds on the engine's public API; its tests use the engine's
   `testutil` feature; 6c-2: `gadk-configurable` has a normal `gadk-tools` edge).
 - 2b: `gadk-auth` depends on exactly `gadk-agent` and `gadk-platform` (never `gadk-engine` or
@@ -118,6 +118,7 @@ ALLOWED = {
                           "gadk-session", "gadk-tools"},
     "gadk-agentanalytics": {"gadk-agent", "gadk-engine", "gadk-genai", "gadk-model", "gadk-platform",
                             "gadk-session"},
+    "gadk-prompts": {"gadk-agent", "gadk-engine"},
     "gadk": {"gadk-genai", "gadk-platform", "gadk-model", "gadk-session", "gadk-gemini",
              "gadk-agent", "gadk-engine", "gadk-tools", "gadk-auth", "gadk-mcp", "gadk-artifact",
              "gadk-memory", "gadk-anthropic", "gadk-openai", "gadk-session-database",
@@ -132,7 +133,7 @@ OPTIONAL = {("gadk-engine", "gadk-gemini"), ("gadk-engine", "gadk-httprr"), ("ga
 FACADE = "gadk"  # no crate may dev-depend on the façade
 ENGINE_DEPENDENTS = ("gadk", "gadk-tools", "gadk-server", "gadk-a2a", "gadk-launcher",
                      "gadk-agentregistry", "gadk-telemetry", "gadk-configurable",
-                     "gadk-agentanalytics")  # the only crates that may depend on gadk-engine
+                     "gadk-agentanalytics", "gadk-prompts")  # the only crates that may depend on gadk-engine
 TOOLS_DEPENDENT = "gadk"  # the only crate that may depend on gadk-tools
 OPENAI_DEPENDENT = "gadk"  # the only crate that may depend on gadk-openai (3b)
 LICENSE_OVERRIDES = {"gadk-goyaml": "Apache-2.0 AND MIT"}  # 6c-1: libyaml-derived files stay MIT
@@ -189,7 +190,7 @@ def check(repo):
             if d == name:
                 continue
             if d == "gadk-engine" and name not in ENGINE_DEPENDENTS:
-                errs.append(f"{rel}: only gadk, gadk-tools, gadk-server, gadk-a2a, gadk-launcher, gadk-agentregistry, gadk-telemetry, gadk-configurable and gadk-agentanalytics may depend on gadk-engine (dev-dependency)")
+                errs.append(f"{rel}: only gadk, gadk-tools, gadk-server, gadk-a2a, gadk-launcher, gadk-agentregistry, gadk-telemetry, gadk-configurable, gadk-agentanalytics and gadk-prompts may depend on gadk-engine (dev-dependency)")
             elif d == "gadk-tools" and name != TOOLS_DEPENDENT:
                 errs.append(f"{rel}: only {TOOLS_DEPENDENT} may depend on gadk-tools (dev-dependency)")
             elif d == "gadk-openai" and name != OPENAI_DEPENDENT:

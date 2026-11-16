@@ -1839,6 +1839,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "gadk-prompts"
+version = "0.1.0"
+dependencies = [
+ "arc-swap",
+ "async-trait",
+ "chrono",
+ "futures",
+ "gadk-agent",
+ "gadk-engine",
+ "gadk-genai",
+ "gadk-prompts",
+ "gadk-session",
+ "opentelemetry",
+ "opentelemetry_sdk",
+ "serde",
+ "serde-saphyr",
+ "serde_json",
+ "sha2 0.11.1",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "gadk-server"
 version = "0.1.0"
 dependencies = [
