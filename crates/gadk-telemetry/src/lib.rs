@@ -27,6 +27,7 @@
 //! that runtime ends.
 
 mod bridge;
+mod cloud_logging;
 mod config;
 mod credentials;
 mod error;
