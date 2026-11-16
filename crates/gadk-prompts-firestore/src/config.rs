@@ -21,10 +21,9 @@ use gadk_platform::env::{EnvProvider, ProcessEnv};
 use google_cloud_auth::credentials::Credentials;
 
 pub(crate) const DEFAULT_ENDPOINT: &str = "https://firestore.googleapis.com";
-pub(crate) const SCOPES: [&str; 2] = [
-    "https://www.googleapis.com/auth/datastore",
-    "https://www.googleapis.com/auth/cloud-platform",
-];
+// cloud-platform covers Firestore, and user ADC (`gcloud auth application-default login`)
+// cannot be up-scoped: asking for any extra scope fails the token refresh with `invalid_scope`.
+pub(crate) const SCOPES: [&str; 1] = ["https://www.googleapis.com/auth/cloud-platform"];
 
 /// Where and how to reach Firestore.
 #[derive(Clone)]
