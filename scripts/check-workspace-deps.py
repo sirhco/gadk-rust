@@ -77,6 +77,12 @@
   `gadk-genai`, `gadk-model` (REST transport, `gcp-auth`), `gadk-platform` and `gadk-session`
   (the `user:` / `app:` / `temp:` key prefixes); it never depends on `gadk-engine`, and only the
   façade depends on it, optionally (feature `agentanalytics`).
+- prompts: `gadk-prompts` depends on exactly `gadk-agent` and `gadk-engine` (the ninth crate that
+  may depend on `gadk-engine`); `gadk-prompts-firestore` on exactly `gadk-prompts`, `gadk-model`
+  (REST transport, `gcp-auth`) and `gadk-platform`; `gadk-prompts-cli` on `gadk-prompts` and,
+  optionally (feature `firestore`), `gadk-prompts-firestore`. The façade depends on
+  `gadk-prompts` and `gadk-prompts-firestore` optionally (features `prompts`,
+  `prompts-firestore`); nothing depends on `gadk-prompts-cli`.
 """
 import pathlib, sys, tomllib
 
@@ -125,14 +131,16 @@ ALLOWED = {
              "gadk-agent", "gadk-engine", "gadk-tools", "gadk-auth", "gadk-mcp", "gadk-artifact",
              "gadk-memory", "gadk-anthropic", "gadk-openai", "gadk-session-database",
              "gadk-artifact-gcs", "gadk-vertexai", "gadk-server", "gadk-a2a", "gadk-launcher",
-             "gadk-agentregistry", "gadk-telemetry", "gadk-agentanalytics"},
+             "gadk-agentregistry", "gadk-telemetry", "gadk-agentanalytics", "gadk-prompts",
+             "gadk-prompts-firestore"},
 }
 # (crate, dependency) normal edges that must be `optional = true`.
 OPTIONAL = {("gadk-engine", "gadk-gemini"), ("gadk-engine", "gadk-httprr"), ("gadk-a2a", "gadk-server"),
             ("gadk-launcher", "gadk-server"), ("gadk-launcher", "gadk-a2a"),
             ("gadk-agentregistry", "gadk-a2a"), ("gadk-agentregistry", "gadk-mcp"),
             ("gadk", "gadk-telemetry"), ("gadk", "gadk-agentanalytics"),
-            ("gadk-prompts-cli", "gadk-prompts-firestore")}
+            ("gadk-prompts-cli", "gadk-prompts-firestore"), ("gadk", "gadk-prompts"),
+            ("gadk", "gadk-prompts-firestore")}
 FACADE = "gadk"  # no crate may dev-depend on the façade
 ENGINE_DEPENDENTS = ("gadk", "gadk-tools", "gadk-server", "gadk-a2a", "gadk-launcher",
                      "gadk-agentregistry", "gadk-telemetry", "gadk-configurable",
