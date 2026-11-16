@@ -32,6 +32,9 @@ use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::trace::{BatchSpanProcessor, SdkTracerProvider};
 use tokio::runtime::Handle;
 
+use crate::cloud_logging::api::CloudLoggingExporter;
+use crate::cloud_logging::stdout::StdoutJsonExporter;
+use crate::cloud_logging::{CloudLogTarget, LOGS_STDOUT_ENV};
 use crate::config::{
     Config, GoogleCredentials, SharedLogProcessor, SharedMetricReader, SharedSpanProcessor,
     TelemetryOption, config_from_opts,
@@ -52,12 +55,13 @@ pub(crate) const GCP_METRICS_ENDPOINT: &str = "https://telemetry.googleapis.com/
 /// Go `gcpMetricExportInterval`.
 const GCP_METRIC_EXPORT_INTERVAL: Duration = Duration::from_secs(5);
 
-/// The endpoints the GCP exporters send to: [`GcpEndpoints::TELEMETRY_API`] in production; tests
-/// point them at a local OTLP sink.
+/// The endpoints the GCP exporters send to (Cloud Trace, Cloud Monitoring and Cloud Logging):
+/// [`GcpEndpoints::TELEMETRY_API`] in production; tests point them at a local sink.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct GcpEndpoints<'a> {
     pub(crate) traces: &'a str,
     pub(crate) metrics: &'a str,
+    pub(crate) logs: &'a str,
 }
 
 impl GcpEndpoints<'static> {
@@ -65,6 +69,7 @@ impl GcpEndpoints<'static> {
     pub(crate) const TELEMETRY_API: Self = Self {
         traces: GCP_TRACES_ENDPOINT,
         metrics: GCP_METRICS_ENDPOINT,
+        logs: crate::cloud_logging::ENTRIES_WRITE_ENDPOINT,
     };
 }
 
@@ -304,7 +309,7 @@ pub(crate) fn configure_exporters(
     };
     let mut exp = otlp_exporters(env, own)?;
     if cfg.otel_to_cloud {
-        exp.add(gcp_exporters(cfg, own, gcp)?);
+        exp.add(gcp_exporters(cfg, own, env, gcp)?);
     }
     Ok(exp)
 }
@@ -372,12 +377,14 @@ fn otlp_exporters(env: &dyn EnvProvider, own: OwnProviders) -> Result<Exporters,
     Ok(exp)
 }
 
-/// Go `gcpExporters`: the GCP span exporter and, on a 5 s reader, the GCP metric exporter, both
-/// with the credentials and the quota project header. Golang OTel exporter to CloudLogging is
-/// not yet available.
+/// The Google Cloud exporters: the span exporter and, on a 5 s reader, the metric exporter, both
+/// with the credentials and the quota project header; and the log exporter — Cloud Logging's
+/// `entries:write` API, or structured JSON on stdout with [`crate::with_cloud_logging_stdout`]
+/// or `GADK_TELEMETRY_LOGS_STDOUT`.
 fn gcp_exporters(
     cfg: &Config,
     own: OwnProviders,
+    env: &dyn EnvProvider,
     gcp: GcpEndpoints<'_>,
 ) -> Result<Exporters, String> {
     let mut exp = Exporters::default();
@@ -396,8 +403,31 @@ fn gcp_exporters(
             interval: Some(GCP_METRIC_EXPORT_INTERVAL),
         });
     }
-    // TODO log exporter
+    if own.logger {
+        let target = CloudLogTarget::new(
+            &cfg.gcp_resource_project,
+            &cfg.cloud_log_name,
+            cfg.resource.as_ref(),
+        );
+        let processor = if cfg.cloud_logging_stdout || logs_stdout_env(env) {
+            BatchLogProcessor::builder(StdoutJsonExporter::stdout(target)).build()
+        } else {
+            let client: Arc<dyn opentelemetry_http::HttpClient> = Arc::new(
+                gcp_client(cfg)
+                    .map_err(|e| format!("failed to create Cloud Logging exporter: {e}"))?,
+            );
+            BatchLogProcessor::builder(CloudLoggingExporter::new(client, target, gcp.logs)).build()
+        };
+        exp.log_processors
+            .push(SharedLogProcessor::new(Box::new(processor)));
+    }
     Ok(exp)
+}
+
+/// Whether `GADK_TELEMETRY_LOGS_STDOUT` is `1` or `true` (case-insensitive).
+fn logs_stdout_env(env: &dyn EnvProvider) -> bool {
+    let v = trimmed_var(env, LOGS_STDOUT_ENV);
+    v == "1" || v.eq_ignore_ascii_case("true")
 }
 
 /// The OTLP/HTTP endpoint of one signal, as Go's `otlptracehttp` / `otlploghttp` read it: the
@@ -562,8 +592,8 @@ mod tests {
 
     use super::*;
     use crate::config::{
-        config_from_opts, with_gcp_quota_project, with_gcp_resource_project,
-        with_google_credentials, with_otel_to_cloud, with_resource,
+        config_from_opts, with_cloud_log_name, with_cloud_logging_stdout, with_gcp_quota_project,
+        with_gcp_resource_project, with_google_credentials, with_otel_to_cloud, with_resource,
     };
     use crate::gcp_detector::PartialResource;
     use crate::providers::Providers;
@@ -809,7 +839,90 @@ mod tests {
         assert_eq!(attr(&r, "cloud.provider").as_deref(), Some("gcp"));
         // The GCP span exporter's batch processor.
         assert_eq!(cfg.span_processors.len(), 1);
-        assert!(cfg.log_processors.is_empty());
+        // The Cloud Logging exporter's batch processor.
+        assert_eq!(cfg.log_processors.len(), 1);
+    }
+
+    fn cloud_cfg(extra: Vec<TelemetryOption>) -> Config {
+        let mut opts = vec![
+            with_otel_to_cloud(true),
+            with_google_credentials(cloud_credentials("p")),
+            with_gcp_quota_project("p"),
+        ];
+        opts.extend(extra);
+        config_from_opts(&opts)
+    }
+
+    #[tokio::test]
+    async fn cloud_export_adds_the_api_log_exporter() {
+        let cfg = cloud_cfg(vec![]);
+        let exp =
+            configure_exporters(&cfg, env(&[]).as_ref(), GcpEndpoints::TELEMETRY_API).unwrap();
+        assert_eq!(exp.log_processors.len(), 1);
+    }
+
+    /// A config whose only `gcp_client` call is the API log exporter's, and whose quota project
+    /// is not a valid header value: building the API exporter fails, building stdout does not.
+    fn bad_quota_cfg(extra: Vec<TelemetryOption>) -> Config {
+        let mut opts = vec![
+            with_otel_to_cloud(true),
+            with_google_credentials(cloud_credentials("p")),
+            with_gcp_quota_project("bad\nvalue"),
+            crate::config::with_tracer_provider(SdkTracerProvider::builder().build()),
+            crate::config::with_meter_provider(SdkMeterProvider::builder().build()),
+        ];
+        opts.extend(extra);
+        config_from_opts(&opts)
+    }
+
+    #[tokio::test]
+    async fn the_stdout_option_and_env_var_skip_the_api_exporter() {
+        for (opts, vars) in [
+            (
+                vec![with_cloud_logging_stdout()],
+                Vec::<(&str, &str)>::new(),
+            ),
+            (vec![], vec![("GADK_TELEMETRY_LOGS_STDOUT", "1")]),
+            (vec![], vec![("GADK_TELEMETRY_LOGS_STDOUT", "TRUE")]),
+        ] {
+            let cfg = bad_quota_cfg(opts);
+            let exp = configure_exporters(&cfg, env(&vars).as_ref(), GcpEndpoints::TELEMETRY_API)
+                .unwrap();
+            assert_eq!(exp.log_processors.len(), 1);
+        }
+        for vars in [vec![], vec![("GADK_TELEMETRY_LOGS_STDOUT", "0")]] {
+            let cfg = bad_quota_cfg(vec![]);
+            let err = configure_exporters(&cfg, env(&vars).as_ref(), GcpEndpoints::TELEMETRY_API)
+                .unwrap_err();
+            assert!(
+                err.contains("failed to create Cloud Logging exporter"),
+                "{err}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_supplied_logger_provider_disables_both_log_exporters() {
+        for extra in [vec![], vec![with_cloud_logging_stdout()]] {
+            let mut extra = extra;
+            extra.push(crate::config::with_logger_provider(
+                SdkLoggerProvider::builder().build(),
+            ));
+            let cfg = cloud_cfg(extra);
+            let exp =
+                configure_exporters(&cfg, env(&[]).as_ref(), GcpEndpoints::TELEMETRY_API).unwrap();
+            assert!(exp.log_processors.is_empty());
+        }
+    }
+
+    #[test]
+    fn the_cloud_log_options_set_the_config() {
+        let cfg = config_from_opts(&[with_cloud_log_name("agents"), with_cloud_logging_stdout()]);
+        assert_eq!(cfg.cloud_log_name, "agents");
+        assert!(cfg.cloud_logging_stdout);
+        let cfg = config_from_opts(&[]);
+        assert_eq!(cfg.cloud_log_name, "");
+        assert!(!cfg.cloud_logging_stdout);
     }
 
     #[test]

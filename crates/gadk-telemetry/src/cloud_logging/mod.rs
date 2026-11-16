@@ -16,9 +16,6 @@
 //! ([`entry`]), oversize handling ([`truncate`]), the `entries:write` exporter ([`api`]) and
 //! the structured-JSON stdout exporter ([`stdout`]).
 
-// Wired into `setup::gcp_exporters` by plan Task 4, which removes this allow.
-#![allow(dead_code)]
-
 use std::collections::BTreeMap;
 
 use opentelemetry_sdk::Resource;

@@ -46,7 +46,7 @@ use prost::Message as _;
 use regex::Regex;
 
 use crate::config::{
-    GoogleCredentials, SharedMetricReader, TelemetryOption, config_from_opts,
+    GoogleCredentials, SharedMetricReader, TelemetryOption, config_from_opts, with_cloud_log_name,
     with_gcp_quota_project, with_gcp_resource_project, with_google_credentials,
     with_log_record_processors, with_logger_provider, with_meter_provider, with_metric_reader,
     with_otel_to_cloud, with_resource, with_span_processors, with_tracer_provider,
@@ -552,6 +552,7 @@ async fn test_gcp_exporters() {
     let sink = Sink::start().await;
     let traces = format!("{}/v1/traces", sink.url);
     let metrics = format!("{}/v1/metrics", sink.url);
+    let logs = format!("{}/v2/entries:write", sink.url);
     let creds = GoogleCredentials {
         credentials: Some(fake_credentials(&[("authorization", "Bearer test-token")])),
         project_id: RESOURCE_PROJECT.to_owned(),
@@ -570,10 +571,12 @@ async fn test_gcp_exporters() {
             with_otel_to_cloud(true),
             with_google_credentials(creds),
             with_gcp_quota_project(QUOTA_PROJECT),
+            with_cloud_log_name("a/b"),
         ],
         GcpEndpoints {
             traces: &traces,
             metrics: &metrics,
+            logs: &logs,
         },
     )
     .await
@@ -589,27 +592,34 @@ async fn test_gcp_exporters() {
     let providers = new_internal(&cfg);
     let tp = providers.tracer_provider.clone().unwrap();
     let mp = providers.meter_provider.clone().unwrap();
+    let lp = providers.logger_provider.clone().unwrap();
     tp.tracer("test-tracer").start("test-span").end();
     mp.meter("test-meter")
         .u64_counter("test-counter")
         .build()
         .add(1, &[]);
+    let logger = lp.logger("test-logger");
+    let mut record = logger.create_log_record();
+    record.set_body(AnyValue::from("test-log"));
+    logger.emit(record);
     // The SDK's flushes block until their export, which runs on this runtime's other worker.
     tokio::task::spawn_blocking(move || {
         tp.force_flush().expect("failed to flush spans");
         mp.force_flush().expect("failed to flush metrics");
+        lp.force_flush().expect("failed to flush logs");
     })
     .await
     .unwrap();
 
-    // Requests per endpoint; both exporters share the client, so headers are checked on each.
+    // Requests per endpoint; every GCP exporter's client sends the credentials and quota
+    // project headers, so they are checked on each.
     let requests = |path: &str| -> Vec<_> {
         sink.requests()
             .into_iter()
             .filter(|c| c.path == path)
             .collect()
     };
-    for path in ["/v1/traces", "/v1/metrics"] {
+    for path in ["/v1/traces", "/v1/metrics", "/v2/entries:write"] {
         let got = requests(path);
         // A periodic metrics export may follow the flush's on a slow run (5 s interval).
         if path == "/v1/metrics" {
@@ -625,6 +635,17 @@ async fn test_gcp_exporters() {
             assert_eq!(c.headers["x-goog-user-project"], QUOTA_PROJECT, "{path}");
         }
     }
+    // The configured log name reaches the request (spec R2).
+    let log_body: serde_json::Value =
+        serde_json::from_slice(&requests("/v2/entries:write")[0].body).unwrap();
+    assert_eq!(
+        log_body["logName"],
+        serde_json::json!(format!("projects/{RESOURCE_PROJECT}/logs/a%2Fb"))
+    );
+    assert_eq!(
+        log_body["entries"][0]["jsonPayload"]["body"],
+        serde_json::json!("test-log")
+    );
     // The fake collector decodes every metrics export.
     for c in requests("/v1/metrics") {
         let export = ExportMetricsServiceRequest::decode(c.body.as_slice()).unwrap();
@@ -944,19 +965,19 @@ async fn test_configure_exporters() {
             "OTEL_EXPORTER_OTLP_ENDPOINT and otel_to_cloud",
             [OTLP, "", "", ""],
             true,
-            [2, 1, 2],
+            [2, 2, 2],
         ),
         case(
             "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT and otel_to_cloud",
             ["", TRACES, "", ""],
             true,
-            [2, 0, 1],
+            [2, 1, 1],
         ),
         case(
             "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT and otel_to_cloud",
             ["", "", "", LOGS],
             true,
-            [1, 1, 1],
+            [1, 2, 1],
         ),
         // Nothing is built for a supplied provider: it would ignore it, and an
         // unregistered periodic reader reports an error on every tick.
@@ -966,7 +987,7 @@ async fn test_configure_exporters() {
                 "OTEL_EXPORTER_OTLP_ENDPOINT, otel_to_cloud and WithTracerProvider",
                 [OTLP, "", "", ""],
                 true,
-                [0, 1, 2],
+                [0, 2, 2],
             )
         },
         Case {
@@ -984,7 +1005,7 @@ async fn test_configure_exporters() {
                 "OTEL_EXPORTER_OTLP_ENDPOINT, otel_to_cloud and WithMeterProvider",
                 [OTLP, "", "", ""],
                 true,
-                [2, 1, 0],
+                [2, 2, 0],
             )
         },
     ];
