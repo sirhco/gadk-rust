@@ -28,6 +28,8 @@ pub(crate) mod node_wrapper;
 pub(crate) mod output_schema_binding;
 pub use node_wrapper::run_llm_agent_as_node;
 pub(crate) mod processors;
+mod templating;
+pub use templating::inject_session_state;
 pub(crate) mod state;
 pub(crate) mod transfer;
 
