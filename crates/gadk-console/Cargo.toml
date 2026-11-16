@@ -33,6 +33,8 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+# Builds the fake HTTP client's `BodyStream` in the cloud.rs tests.
+futures = { workspace = true }
 tower = { workspace = true, features = ["util"] }
 tempfile = { workspace = true }
 gadk-telemetry = { workspace = true }

@@ -1592,6 +1592,7 @@ dependencies = [
  "bytes",
  "chrono",
  "clap",
+ "futures",
  "gadk-model",
  "gadk-prompts",
  "gadk-prompts-cli",
