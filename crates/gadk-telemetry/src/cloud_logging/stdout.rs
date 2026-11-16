@@ -24,8 +24,8 @@ use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::logs::{LogBatch, LogExporter};
 use parking_lot::Mutex;
 
-use super::CloudLogTarget;
 use super::entry::stdout_line;
+use super::{CloudLogTarget, WARN_TARGET};
 
 /// Writes each record as one JSON line.
 pub(crate) struct StdoutJsonExporter {
@@ -57,7 +57,8 @@ impl StdoutJsonExporter {
     }
 
     /// Renders the batch into one buffer and writes it under the lock. The first failing write
-    /// returns `Err`; later failures return `Ok` until a write succeeds again.
+    /// returns `Err` and warns on [`WARN_TARGET`]; later failures return `Ok` until a write
+    /// succeeds again.
     pub(crate) fn write_batch(&self, batch: &LogBatch<'_>, now: SystemTime) -> OTelSdkResult {
         let mut buf = Vec::new();
         for (record, _) in batch.iter() {
@@ -78,9 +79,13 @@ impl StdoutJsonExporter {
                 self.failing.store(false, Ordering::SeqCst);
                 Ok(())
             }
-            Err(e) if !self.failing.swap(true, Ordering::SeqCst) => Err(
-                OTelSdkError::InternalFailure(format!("cloud logging stdout: {e}")),
-            ),
+            Err(e) if !self.failing.swap(true, Ordering::SeqCst) => {
+                let err = OTelSdkError::InternalFailure(format!("cloud logging stdout: {e}"));
+                // The SDK drops export results off the `force_flush` path, so the first failure
+                // is also a `tracing` warning (the I/O error only, never record content).
+                tracing::warn!(target: WARN_TARGET, "{err}");
+                Err(err)
+            }
             Err(_) => Ok(()),
         }
     }
@@ -107,7 +112,7 @@ mod tests {
 
     use super::*;
     use crate::cloud_logging::CloudLogTarget;
-    use crate::cloud_logging::test_records::{record, refs};
+    use crate::cloud_logging::test_records::{Warnings, record, refs};
 
     /// A writer into a shared buffer that fails while `fail` is set.
     #[derive(Clone, Default)]
@@ -208,5 +213,28 @@ mod tests {
         assert_eq!(buf.lines().len(), 1);
         buf.fail.store(true, Ordering::SeqCst);
         assert!(exp.export(LogBatch::new(&refs(&records))).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn a_failing_writer_warns_once_until_a_write_succeeds() {
+        let warnings = Warnings::default();
+        let _guard = warnings.capture();
+        let buf = Buf::default();
+        let exp = exporter(&buf);
+        let records = vec![record(|r| r.set_body(AnyValue::String("secret".into())))];
+        buf.fail.store(true, Ordering::SeqCst);
+        let _ = exp.export(LogBatch::new(&refs(&records))).await;
+        let first = warnings.take();
+        assert_eq!(first.len(), 1, "{first:?}");
+        assert!(first[0].contains("disk full"), "{first:?}");
+        assert!(!first[0].contains("secret"), "{first:?}");
+        let _ = exp.export(LogBatch::new(&refs(&records))).await;
+        assert!(warnings.take().is_empty());
+        buf.fail.store(false, Ordering::SeqCst);
+        exp.export(LogBatch::new(&refs(&records))).await.unwrap();
+        assert!(warnings.take().is_empty());
+        buf.fail.store(true, Ordering::SeqCst);
+        let _ = exp.export(LogBatch::new(&refs(&records))).await;
+        assert_eq!(warnings.take().len(), 1);
     }
 }

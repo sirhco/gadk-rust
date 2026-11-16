@@ -20,7 +20,10 @@ the public API.
 - `with_otel_to_cloud(true)` now also exports log records (to Cloud Logging); before, only spans
   and metrics were exported. To opt out, supply a logger provider with `with_logger_provider`;
   note that a supplied logger provider also turns off the OTLP log exporter
-  (`OTEL_EXPORTER_OTLP_*ENDPOINT`), as it always has.
+  (`OTEL_EXPORTER_OTLP_*ENDPOINT`), as it always has. Log export needs the Cloud Logging API
+  enabled and `logging.logEntries.create` (for example `roles/logging.logWriter`) on the
+  identity; a failed export is reported once as a `tracing` warning (target
+  `gadk_telemetry::cloud_logging`) until a later export succeeds.
 
 ## [0.1.0] - 2026-11-15
 

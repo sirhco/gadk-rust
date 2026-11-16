@@ -37,6 +37,10 @@ pub(crate) const ENTRY_LIMIT: usize = 256_000;
 /// The largest `entries:write` request body this exporter sends (bytes; Cloud Logging's limit
 /// is 10 MB).
 pub(crate) const REQUEST_LIMIT: usize = 9_000_000;
+/// The `tracing` target of the exporters' failure warnings. It is not gadk-engine's
+/// `LOG_TARGET`, the only target the `OtelBridge` turns into log records, so a warning is never
+/// exported again (no recursion through a failing exporter).
+pub(crate) const WARN_TARGET: &str = "gadk_telemetry::cloud_logging";
 /// Env var that selects the stdout exporter (`1` or `true`, case-insensitive).
 pub(crate) const LOGS_STDOUT_ENV: &str = "GADK_TELEMETRY_LOGS_STDOUT";
 

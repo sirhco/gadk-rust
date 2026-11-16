@@ -16,6 +16,7 @@
 
 use std::fmt;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 
 use opentelemetry_http::{Bytes, HttpClient, Request};
@@ -24,7 +25,7 @@ use opentelemetry_sdk::logs::{LogBatch, LogExporter};
 use serde_json::Value;
 
 use super::entry::api_entry;
-use super::{CloudLogTarget, REQUEST_LIMIT};
+use super::{CloudLogTarget, REQUEST_LIMIT, WARN_TARGET};
 
 /// At most this many response-body bytes appear in an export error.
 pub(crate) const BODY_EXCERPT: usize = 1024;
@@ -34,6 +35,9 @@ pub(crate) struct CloudLoggingExporter {
     client: Arc<dyn HttpClient>,
     target: CloudLogTarget,
     endpoint: String,
+    /// Set by a failed export, cleared by a successful one: only the first of a run of failures
+    /// warns.
+    failing: AtomicBool,
 }
 
 impl fmt::Debug for CloudLoggingExporter {
@@ -55,6 +59,7 @@ impl CloudLoggingExporter {
             client,
             target,
             endpoint: endpoint.into(),
+            failing: AtomicBool::new(false),
         }
     }
 
@@ -123,7 +128,21 @@ impl LogExporter for CloudLoggingExporter {
                 first_err.get_or_insert(e);
             }
         }
-        first_err.map_or(Ok(()), Err)
+        match first_err {
+            None => {
+                self.failing.store(false, Ordering::SeqCst);
+                Ok(())
+            }
+            Some(err) => {
+                // The SDK drops export results off the `force_flush` path, so the first of a run
+                // of failures is also a `tracing` warning. The error holds only the status and
+                // body excerpt or the transport error, never record content.
+                if !self.failing.swap(true, Ordering::SeqCst) {
+                    tracing::warn!(target: WARN_TARGET, "{err}");
+                }
+                Err(err)
+            }
+        }
     }
 }
 
@@ -139,6 +158,7 @@ fn body_excerpt(body: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU16, Ordering};
 
     use async_trait::async_trait;
     use opentelemetry::logs::{AnyValue, LogRecord as _};
@@ -150,11 +170,11 @@ mod tests {
 
     use super::*;
     use crate::cloud_logging::ENTRY_LIMIT;
-    use crate::cloud_logging::test_records::{record, refs};
+    use crate::cloud_logging::test_records::{Warnings, record, refs};
 
     #[derive(Debug)]
     struct FakeClient {
-        status: u16,
+        status: AtomicU16,
         body: Vec<u8>,
         requests: Mutex<Vec<Request<Bytes>>>,
     }
@@ -162,7 +182,7 @@ mod tests {
     impl FakeClient {
         fn new(status: u16, body: &[u8]) -> Arc<Self> {
             Arc::new(Self {
-                status,
+                status: AtomicU16::new(status),
                 body: body.to_vec(),
                 requests: Mutex::default(),
             })
@@ -181,7 +201,7 @@ mod tests {
         async fn send_bytes(&self, request: Request<Bytes>) -> Result<Response<Bytes>, HttpError> {
             self.requests.lock().push(request);
             Ok(Response::builder()
-                .status(self.status)
+                .status(self.status.load(Ordering::SeqCst))
                 .body(Bytes::from(self.body.clone()))?)
         }
     }
@@ -308,5 +328,30 @@ mod tests {
             .await
             .unwrap();
         assert!(client.requests.lock().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_failing_write_warns_once_until_a_write_succeeds() {
+        let warnings = Warnings::default();
+        let _guard = warnings.capture();
+        let client = FakeClient::new(403, b"permission denied");
+        let exp = exporter(&client, "");
+        let records = vec![record(|r| r.set_body(AnyValue::String("secret".into())))];
+        assert!(exp.export(LogBatch::new(&refs(&records))).await.is_err());
+        let first = warnings.take();
+        assert_eq!(first.len(), 1, "{first:?}");
+        assert!(
+            first[0].contains("HTTP 403: permission denied"),
+            "{first:?}"
+        );
+        assert!(!first[0].contains("secret"), "{first:?}");
+        assert!(exp.export(LogBatch::new(&refs(&records))).await.is_err());
+        assert!(warnings.take().is_empty());
+        client.status.store(200, Ordering::SeqCst);
+        exp.export(LogBatch::new(&refs(&records))).await.unwrap();
+        assert!(warnings.take().is_empty());
+        client.status.store(500, Ordering::SeqCst);
+        assert!(exp.export(LogBatch::new(&refs(&records))).await.is_err());
+        assert_eq!(warnings.take().len(), 1);
     }
 }

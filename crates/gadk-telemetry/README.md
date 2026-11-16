@@ -11,6 +11,11 @@ With `with_otel_to_cloud(true)`:
 - log records go to Cloud Logging (`logging.googleapis.com/v2/entries:write`), unless you
   supply your own logger provider with `with_logger_provider`.
 
+Log export through the API needs the Cloud Logging API enabled on the project and
+`logging.logEntries.create` (for example `roles/logging.logWriter`) on the identity. A failed
+export is reported once as a `tracing` warning under the target `gadk_telemetry::cloud_logging`,
+then not again until a later export succeeds.
+
 Log records carry prompts, completions and tool payloads only when content capture is on
 (`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`). Turning it on sends that content to
 Cloud Logging and is billed as Cloud Logging ingestion.
