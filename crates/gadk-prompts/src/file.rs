@@ -55,11 +55,36 @@ impl PromptFile {
 /// serialised per prompt by an exclusive `<file>.lock`; a lock left by a crashed writer must be
 /// removed by hand (the timeout error names it). For many concurrent writers prefer a
 /// transactional store.
+///
+/// `load_all` re-parses only files whose (mtime, length, inode) changed since the previous call.
+/// Every write renames a new file into place, so on unix the inode changes even when a rewrite
+/// keeps the length within one mtime tick; elsewhere the inode is taken as 0 and the check falls
+/// back to (mtime, length).
 #[derive(Debug)]
 pub struct FileStore {
     root: PathBuf,
-    /// (mtime, len, parsed file) per path, from the previous `load_all`.
-    cache: Mutex<HashMap<PathBuf, (SystemTime, u64, PromptFile)>>,
+    /// (file key, parsed file) per path, from the previous `load_all`.
+    cache: Mutex<HashMap<PathBuf, (FileKey, PromptFile)>>,
+}
+
+/// What identifies an unchanged file between two `load_all` calls: (mtime, length, inode).
+type FileKey = (SystemTime, u64, u64);
+
+#[cfg(unix)]
+fn inode(md: &std::fs::Metadata) -> u64 {
+    std::os::unix::fs::MetadataExt::ino(md)
+}
+
+#[cfg(not(unix))]
+fn inode(_md: &std::fs::Metadata) -> u64 {
+    0
+}
+
+/// `path` with `suffix` appended to its final component (lossless for non-UTF-8 paths).
+fn sidecar(path: &Path, suffix: &str) -> PathBuf {
+    let mut s = path.as_os_str().to_owned();
+    s.push(suffix);
+    PathBuf::from(s)
 }
 
 impl FileStore {
@@ -97,7 +122,7 @@ impl FileStore {
             // std, not tokio::fs: no blocking-pool hop, so paused-time tests stay deterministic.
             std::fs::create_dir_all(dir).map_err(|e| io(dir, e))?;
         }
-        let lock = PathBuf::from(format!("{}.lock", path.display()));
+        let lock = sidecar(&path, ".lock");
         let started = tokio::time::Instant::now();
         let mut backoff = Duration::from_millis(10);
         loop {
@@ -149,7 +174,7 @@ fn read_file(path: &Path) -> Result<Option<PromptFile>, StoreError> {
 
 fn write_atomic(path: &Path, doc: &PromptFile) -> Result<(), StoreError> {
     let yaml = serde_saphyr::to_string(doc).map_err(|e| StoreError::Decode(e.to_string()))?;
-    let tmp = PathBuf::from(format!("{}.tmp", path.display()));
+    let tmp = sidecar(path, ".tmp");
     std::fs::write(&tmp, yaml).map_err(|e| io(&tmp, e))?;
     std::fs::rename(&tmp, path).map_err(|e| io(path, e))
 }
@@ -199,16 +224,20 @@ impl PromptStore for FileStore {
                 continue;
             };
             let md = std::fs::metadata(&path).map_err(|e| io(&path, e))?;
-            let key = (md.modified().map_err(|e| io(&path, e))?, md.len());
+            let key: FileKey = (
+                md.modified().map_err(|e| io(&path, e))?,
+                md.len(),
+                inode(&md),
+            );
             let doc = match cache.get(&path) {
-                Some((m, l, doc)) if (*m, *l) == key => doc.clone(),
+                Some((k, doc)) if *k == key => doc.clone(),
                 _ => match read_file(&path)? {
                     Some(doc) => doc,
                     None => continue,
                 },
             };
             snap.prompts.insert(name, doc.entry());
-            next.insert(path, (key.0, key.1, doc));
+            next.insert(path, (key, doc));
         }
         *cache = next;
         Ok(snap)
@@ -362,6 +391,38 @@ mod tests {
         assert_eq!(s.load_all().await.unwrap().prompts["p"].versions.len(), 2);
         std::fs::remove_file(dir.path().join("p.yaml")).unwrap();
         assert!(s.load_all().await.unwrap().prompts.is_empty());
+    }
+
+    /// A same-length rewrite within one mtime tick (here: mtime restored by hand) is still seen,
+    /// because the atomic rename gives the file a new inode.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn file_store_same_length_label_move_is_seen() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = FileStore::new(dir.path());
+        s.create_version(nv("a")).await.unwrap();
+        s.create_version(nv("b")).await.unwrap();
+        let prod = Label::production();
+        s.set_label("p", &prod, 1, None).await.unwrap();
+        let path = dir.path().join("p.yaml");
+        let before = std::fs::metadata(&path).unwrap();
+        assert_eq!(
+            s.load_all().await.unwrap().prompts["p"].labels.get(&prod),
+            Some(&1)
+        );
+        s.set_label("p", &prod, 2, Some(Some(1))).await.unwrap();
+        let file = std::fs::File::options().write(true).open(&path).unwrap();
+        file.set_modified(before.modified().unwrap()).unwrap();
+        drop(file);
+        let after = std::fs::metadata(&path).unwrap();
+        assert_eq!(
+            (after.modified().unwrap(), after.len()),
+            (before.modified().unwrap(), before.len())
+        );
+        assert_eq!(
+            s.load_all().await.unwrap().prompts["p"].labels.get(&prod),
+            Some(&2)
+        );
     }
 
     #[tokio::test]
