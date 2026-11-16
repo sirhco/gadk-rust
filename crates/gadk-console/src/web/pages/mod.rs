@@ -13,3 +13,10 @@
 // limitations under the License.
 
 //! HTML pages rendered with maud.
+
+pub(crate) mod error;
+pub(crate) mod layout;
+pub(crate) mod prompt;
+pub(crate) mod prompts;
+pub(crate) mod trace;
+pub(crate) mod traces;
