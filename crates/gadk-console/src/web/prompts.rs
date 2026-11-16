@@ -30,6 +30,7 @@ use super::pages::error::{banner, error_page, store_error, store_status};
 use super::pages::layout::{self, Nav};
 use super::pages::{prompt, prompts};
 use crate::prompts::{diff_view, prompt_detail, prompt_rows, version_view};
+use crate::traces::excerpt;
 
 const NO_STORE: &str = "No prompt store configured (start with --store)";
 
@@ -155,7 +156,8 @@ fn detail_page(
 }
 
 /// After a failed label write: the detail page with the error banner and the R10 status,
-/// or the plain error page when the prompt itself cannot be shown.
+/// or the plain error page when the prompt itself cannot be shown. An `Http` body in the
+/// banner is cut to an excerpt of at most 1,024 bytes.
 async fn write_failed(state: &AppState, name: &str, e: &StoreError) -> Response {
     let Some(store) = &state.store else {
         return no_store_404();
@@ -166,7 +168,14 @@ async fn write_failed(state: &AppState, name: &str, e: &StoreError) -> Response 
     if prompt_detail(&snap, name).is_none() {
         return store_error(e);
     }
-    let error = banner(&e.to_string(), None);
+    // An upstream body is cut to an excerpt of at most 1,024 bytes, as in `store_error`.
+    let text = match e {
+        StoreError::Http { status, body } => {
+            format!("http {status}: {}", excerpt(body.as_bytes()))
+        }
+        _ => e.to_string(),
+    };
+    let error = banner(&text, None);
     detail_page(
         state,
         &snap,
@@ -752,5 +761,71 @@ mod tests {
             body.contains(r#"<form method="get" action="/prompts/greet""#),
             "{body}"
         );
+    }
+
+    /// Loads from a `FileStore`; every label write fails with a large `StoreError::Http`.
+    struct HttpFailStore {
+        inner: Arc<FileStore>,
+        body: String,
+    }
+
+    #[async_trait::async_trait]
+    impl PromptStore for HttpFailStore {
+        async fn load_all(&self) -> Result<gadk_prompts::PromptSnapshot, gadk_prompts::StoreError> {
+            self.inner.load_all().await
+        }
+        async fn create_version(
+            &self,
+            new: NewVersion,
+        ) -> Result<gadk_prompts::PromptVersion, gadk_prompts::StoreError> {
+            self.inner.create_version(new).await
+        }
+        async fn set_label(
+            &self,
+            _name: &str,
+            _label: &Label,
+            _version: u32,
+            _expected: Option<Option<u32>>,
+        ) -> Result<(), gadk_prompts::StoreError> {
+            Err(gadk_prompts::StoreError::Http {
+                status: 500,
+                body: self.body.clone(),
+            })
+        }
+        async fn remove_label(
+            &self,
+            _name: &str,
+            _label: &Label,
+        ) -> Result<(), gadk_prompts::StoreError> {
+            Err(gadk_prompts::StoreError::Http {
+                status: 500,
+                body: self.body.clone(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn store_http_error_banner_is_capped() {
+        const MARKER: &str = "END-OF-UPSTREAM-BODY";
+        let (_dir, inner) = seeded().await;
+        let body = format!("{}{MARKER}", "x".repeat(2000));
+        let store: Arc<dyn PromptStore> = Arc::new(HttpFailStore { inner, body });
+        let state = state(Arc::new(FakeSource::new()), Some(store));
+        for (path, form) in [
+            ("/prompts/greet/labels", set_body("canary", "1", "")),
+            (
+                "/prompts/greet/labels/staging/delete",
+                format!("csrf={CSRF}"),
+            ),
+        ] {
+            let (status, _, html) = post_form(state.clone(), path, &form, Some(ORIGIN)).await;
+            assert_eq!(status, StatusCode::BAD_GATEWAY, "{path}");
+            assert!(!html.contains(MARKER), "{path}: {html}");
+            assert!(html.contains("<h1>greet</h1>"), "{path}: the detail page");
+            let start = html.find("<p>http 500: ").expect("http banner") + "<p>http 500: ".len();
+            let len = html[start..].find("</p>").expect("banner end");
+            assert!(len <= 1024, "{path}: banner body is {len} bytes");
+            assert!(len > 0, "{path}");
+        }
     }
 }
