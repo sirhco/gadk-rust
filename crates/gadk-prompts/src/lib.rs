@@ -15,10 +15,26 @@
 //! Versioned, labelled prompts for gadk agents.
 //!
 //! A [`PromptStore`] keeps immutable [`PromptVersion`]s and movable [`Label`]s; [`FileStore`]
-//! keeps them in YAML files.
+//! keeps them in YAML files. A [`PromptRegistry`] serves them from a refreshing in-memory
+//! snapshot, and [`PromptInstruction`] renders one as an agent instruction.
+//!
+//! ```no_run
+//! # async fn demo() -> Result<(), Box<dyn std::error::Error>> {
+//! use std::sync::Arc;
+//! use gadk_prompts::{FileStore, Label, PromptRegistry, Selector};
+//! let registry = PromptRegistry::builder(Arc::new(FileStore::new("prompts"))).load().await?;
+//! let provider = registry
+//!     .instruction("support-triage", Selector::Label(Label::production()))
+//!     .with_fallback("You are a helpful support agent.")
+//!     .into_provider();
+//! # let _ = provider; Ok(()) }
+//! ```
 
 mod file;
+mod metrics;
 mod model;
+mod provider;
+mod registry;
 mod snapshot;
 mod store;
 
@@ -26,6 +42,8 @@ pub use file::FileStore;
 pub use model::{
     Label, NewVersion, PromptVersion, Selector, VersionMeta, content_hash, validate_name,
 };
+pub use provider::PromptInstruction;
+pub use registry::{DEFAULT_REFRESH_INTERVAL, PromptRegistry, PromptRegistryBuilder};
 pub use snapshot::{PromptEntry, PromptSnapshot};
 pub use store::{PromptStore, StoreError};
 
