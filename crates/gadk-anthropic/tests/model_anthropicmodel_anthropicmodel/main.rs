@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Parity target for ADK-Go `model/anthropicmodel/anthropicmodel_test.go` (a directory target:
-//! `scripts/parity-check` scans every `.rs` file here). One module per porting task:
+//! Port of ADK-Go `model/anthropicmodel/anthropicmodel_test.go` (a directory target: every
+//! `.rs` file here). One module per porting task:
 //! `generate`, `new_model`, `tools_thinking`, `content`,
 //! `behavior`; `harness` holds the shared test helpers.
 

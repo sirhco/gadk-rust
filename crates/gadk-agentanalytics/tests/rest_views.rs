@@ -16,7 +16,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 //! `BigQueryViewRunner::run_view_ddl` (Go `bqViewRunner.RunViewDDL`, spec R6) over every view
-//! scenario `scripts/gen-go-agentanalytics` recorded from Go (`tests/fixtures/wire/view_*.json`):
+//! scenario the Go probe recorded from Go (`tests/fixtures/wire/view_*.json`):
 //! a `FakeServer` answers Go's canned responses in order (`{{JOB_ID}}` replaced by the job ID
 //! the client sent), the runner is built as the probe built Go's (`call.runner`: project,
 //! dataset, a live client or a dropped one) and run once with `call.view_name` / `call.query`.

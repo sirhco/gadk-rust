@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Ports of ADK-Go's `cmd/adkgo` and `internal/cli/util` tests (ledger `docs/parity/6b.md`).
+//! Ports of ADK-Go's `cmd/adkgo` and `internal/cli/util` tests (ledger 6b).
 
 mod cmd_adkgo_internal_deploy_agentengine_agentengine;
 mod cmd_adkgo_internal_deploy_agentengine_environment;

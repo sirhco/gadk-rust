@@ -112,7 +112,7 @@ pub(crate) mod replay {
     use crate::rest::testutil::wire_scenario::{assistant_agent, fixed_platform};
 
     /// Response headers the fixtures leave out (server-owned). Dropping the framing headers
-    /// hides two divergences the replay cannot see (ledgered in `docs/parity/5c.md`): a stream
+    /// hides two divergences the replay cannot see (ledgered in 5c): a stream
     /// with no line is Go's `Content-Length: 0` but gadk's empty chunked body, and a session
     /// body over 2048 bytes is chunked in Go but has a `Content-Length` here.
     const SERVER_HEADERS: [&str; 3] = ["date", "content-length", "transfer-encoding"];
@@ -336,7 +336,7 @@ pub(crate) mod replay {
         names
     }
 
-    /// Every server fixture `scripts/gen-go-agentengine` recorded from ADK-Go (30, spec R19), replayed in
+    /// Every server fixture the Go probe recorded from ADK-Go (30, spec R19), replayed in
     /// file-name order through the real handlers, one handler per configuration (`main_*`,
     /// then `small_*`), so later requests see earlier state and draw later clock and UUID
     /// values exactly as in the probe.

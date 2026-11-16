@@ -15,7 +15,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-//! Replays every Cloud Storage upload `scripts/gen-go-agentanalytics` recorded from ADK-Go's
+//! Replays every Cloud Storage upload the Go probe recorded from ADK-Go's
 //! `gcsOffloader` (`tests/fixtures/gcs/*.json`, spec R11): a `FakeServer` answers the canned
 //! responses in order (`{{SERVER}}` replaced by its URL), `GcsOffloader::upload_content` runs
 //! the scenario's call, and every request must be Go's — method, path, raw query, headers

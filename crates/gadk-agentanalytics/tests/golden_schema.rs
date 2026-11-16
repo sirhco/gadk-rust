@@ -14,7 +14,7 @@
 // limitations under the License.
 
 //! Golden tests of `schema.rs` (ADK-Go `plugin/agentanalytics/schema.go`) against the
-//! `scripts/gen-go-agentanalytics` probe fixtures: `schema/events_schema.json`,
+//! Go probe fixtures: `schema/events_schema.json`,
 //! `schema/projections.json` (spec R2) and `arrow/` (spec R3).
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]

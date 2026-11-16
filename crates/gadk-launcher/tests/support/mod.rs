@@ -14,9 +14,9 @@
 // limitations under the License.
 
 //! Test support shared by the wire replay (`tests/wire_replay.rs`) and the crate's own fixture
-//! tests (included there as `crate::test_support`): the probe's fixtures
-//! (`scripts/gen-go-launcher/SCENARIO.md`), its normalizations N1–N7, raw HTTP exchanges, the
-//! declared deltas, and the probe's scripted `assistant` agent.
+//! tests (included there as `crate::test_support`): the fixtures recorded from ADK-Go by the Go
+//! probe, its normalizations N1–N7, raw HTTP exchanges, the declared deltas, and the probe's
+//! scripted `assistant` agent.
 //!
 //! It names no gadk-launcher item, so it compiles both inside the crate and as part of an
 //! integration test.
@@ -457,7 +457,7 @@ pub fn headers_as_object(response: &mut Value) {
 
 /// One declared delta: at `path` (a JSON pointer into the comparison document, `*` matching
 /// every member or element), Go's value `fixture` (absent: Go has none there) is gadk's
-/// `actual` (absent: gadk has none); `divergence` cites a `docs/parity/6.md` line.
+/// `actual` (absent: gadk has none); `divergence` cites a `testdata/DIVERGENCES.md` line.
 #[derive(Debug, Clone)]
 pub struct Delta {
     pub path: Vec<String>,

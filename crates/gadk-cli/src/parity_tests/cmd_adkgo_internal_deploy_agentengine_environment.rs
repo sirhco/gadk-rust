@@ -23,7 +23,7 @@
 //! `cargo metadata` call on the recording runner (target resolution is compute's first step
 //! after the environment). Go's gRPC fake Reasoning Engine service is gadk-model's REST
 //! `FakeServer`, and the requests are compared with Go goldens
-//! (`testdata/environment/<scenario>.json`, `scripts/gen-go-8b`).
+//! (`testdata/environment/<scenario>.json`, recorded from ADK-Go).
 
 use std::ffi::OsString;
 use std::fs;

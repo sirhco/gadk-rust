@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Ports of yaml.v3 v3.0.1's test files (ledger `docs/parity/6c-1.md`): one module per Go
+//! Ports of yaml.v3 v3.0.1's test files (ledger 6c-1): one module per Go
 //! file, `yaml_v3_<file>`, holding `fn test_<snake of TestName>` (and
 //! `example_unmarshal_embedded`).
 

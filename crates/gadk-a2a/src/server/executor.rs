@@ -53,7 +53,7 @@ use crate::remoteagent::{A2AClient, A2AServerConfig, ClientContext};
 
 /// Bounds each child-task `CancelTask` of the server cleanup (the `CancelTask` call with its
 /// credential resolution; creating the client, `create_a2a_client`, is not bounded). Go's server
-/// path has no bound (a declared divergence, docs/parity/5b.md); the 5 s value is that of Go's
+/// path has no bound (a declared divergence, ledger 5b); the 5 s value is that of Go's
 /// remote-agent `cleanupTimeout` (agent/remoteagent/v2/a2a_agent.go), which bounds the remote
 /// agent's own cleanup cancel.
 #[cfg(feature = "client")]

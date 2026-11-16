@@ -109,23 +109,21 @@ an in-flight live tool call also finishes. New in `gadk-agent`: `fiber`, `Cancel
 `InvocationContext::{cancel_with_cause, cause}`, `Context::context_path`, `CancelGuard::release`,
 `SharedCauseError` and the `teardown` registry (`Teardowns`,
 `InvocationContext::{teardowns, register_teardown, spawn_teardown}`, `ContextBuilder::teardowns`);
-in `gadk-engine`: `llm::run_llm_agent_as_node` and `testutil::live`. Details in
-`docs/parity/7b-3a.md`.
+in `gadk-engine`: `llm::run_llm_agent_as_node` and `testutil::live`.
 
 Behavior, SQL, schemas, request bytes and error texts match ADK-Go except for the accepted
-divergences in `docs/parity/7b-1.md`, `docs/parity/7b-2.md` and `docs/parity/7b-3a.md`, each
-annotated in the source with a `// Divergence` comment naming its ledger.
+divergences, each annotated in the source with a `// Divergence` comment naming its ledger
+(7b-1, 7b-2 or 7b-3a).
 
 ## Tests and goldens
 
 - Unit tests per module and ports of `json_formatter_test.go`, `schema_upgrade_test.go` and
-  `views_test.go` (55 Go tests) in `src/parity_tests/` (ledger `docs/parity/7b-1.md`, checked by
-  `python3 scripts/parity-check --ledger 7b-1`), and of `batch_processor_test.go` and
-  `gcs_offloader_test.go` (171 Go tests, all ported — 42 of them in 7b-3a; ledger
-  `docs/parity/7b-2.md`, `--ledger 7b-2`), and of `bigquery_agent_analytics_plugin_test.go`,
+  `views_test.go` (55 Go tests) in `src/parity_tests/` (7b-1), and of `batch_processor_test.go`
+  and `gcs_offloader_test.go` (171 Go tests, all ported — 42 of them in 7b-3a; 7b-2), and of
+  `bigquery_agent_analytics_plugin_test.go`,
   `events_test.go`, `late_callbacks_test.go` and `trace_manager_test.go` (338 Go tests, all
   ported — the 99 trace-manager tests that need goroutine attribution in 7b-3b, in the
-  `attr_*` files; ledger `docs/parity/7b-3a.md`, `--ledger 7b-3a`).
+  `attr_*` files; 7b-3a).
 - `tests/golden_*.rs` compare the config projection, the BigQuery and Arrow schemas (decoded IPC
   streams), the view SQL and the formatter and redaction corpus with ADK-Go's outputs;
   `tests/rest_wire.rs`, `tests/rest_schema_upgrade.rs` and `tests/rest_views.rs` replay the REST
@@ -136,13 +134,9 @@ annotated in the source with a `// Divergence` comment naming its ledger.
   GCS uploads (multipart, resumable, 412, retries, errors); `tests/golden_plugin_rows.rs` runs
   the probe's scripted runner scenarios through a gadk `Runner` with the plugin and compares
   every row with the rows ADK-Go's plugin wrote.
-- The fixtures in `tests/fixtures/` are written by the Go probe `scripts/gen-go-agentanalytics`
-  (an overlay test in a temporary copy of ADK-Go's `plugin/agentanalytics`; its `SCENARIO.md`
-  documents the corpus and formats). Regenerate with `scripts/gen-go-agentanalytics/run.sh`
-  and update the counts in `scripts/check-fixtures.sh` if fixtures were added;
-  `ADK_GO_DIR=… scripts/check-fixtures.sh` asserts the counts and, when `go` is on `PATH`, reruns
-  the probe (the output must be identical); it also regenerates `storagepb` into a temporary
-  directory and diffs it (skipped when cargo cannot fetch the generator's crates).
+- The fixtures in `tests/fixtures/` were recorded from ADK-Go by a Go probe (an overlay test in
+  a temporary copy of ADK-Go's `plugin/agentanalytics`) during the port; they are committed
+  and not regenerated.
 
 ## License
 

@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Ports of ADK-Go's `internal/configurable` test files (ledger `docs/parity/6c-2.md`): one
-//! module per Go file, named by `scripts/parity-check`'s `target_name`
+//! Ports of ADK-Go's `internal/configurable` test files (ledger 6c-2): one
+//! module per Go file, named after the Go file's path
 //! (`internal/configurable/conformance/recordplugin/yaml_clean_test.go` →
 //! `internal_configurable_conformance_recordplugin_yaml_clean`), holding
 //! `fn test_<snake of TestName>` (`go_test_to_rust`).

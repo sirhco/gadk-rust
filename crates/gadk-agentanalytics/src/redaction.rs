@@ -2775,7 +2775,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------------------------
-    // Golden: the probe's redaction fixtures (scripts/gen-go-agentanalytics, T2).
+    // Golden: the probe's redaction fixtures (recorded from ADK-Go, T2).
     // -----------------------------------------------------------------------------------------
 
     fn fixture(rel: &str) -> Value {

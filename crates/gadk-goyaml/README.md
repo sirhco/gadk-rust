@@ -21,8 +21,7 @@ the internal `gadk-configurable` (6c-2: configurable agents and the conformance 
   only when the field names already are Go-default keys (lowercase, no `_`) or the variant is in
   `verbatim_structs`; prefer externally tagged enums.
 - Node trees, error texts and emitted bytes match yaml.v3 v3.0.1 except for the accepted
-  divergences listed in `docs/parity/6c-1.md`, each annotated `// Divergence (ledger 6c-1)` in
-  the source.
+  divergences, each annotated `// Divergence (ledger 6c-1)` in the source.
 
 ## Nesting depth
 
@@ -36,15 +35,11 @@ a ledgered divergence.
 
 ## Tests and goldens
 
-- Unit tests per module, and ports of yaml.v3's test files in `src/parity_tests/` (ledger
-  `docs/parity/6c-1.md`, checked by `python3 scripts/parity-check --ledger 6c-1`).
+- Unit tests per module, and ports of yaml.v3's test files in `src/parity_tests/` (6c-1).
 - `tests/` replays the goldens in `testdata/golden/` (parse, emit, `interface{}` values, serde
   encode/decode/round trip, and the seeded differential corpus).
-- The goldens are written by the Go probe `scripts/gen-go-goyaml` (yaml.v3 v3.0.1); its
-  `SCENARIO.md` documents the corpus and the golden format. To regenerate them, run
-  `cd scripts/gen-go-goyaml && go run .` and update the counts in `scripts/check-fixtures.sh`
-  if cases were added. `scripts/check-fixtures.sh` asserts the counts and, when `go` is on
-  `PATH`, reruns the probe and requires identical output.
+- The goldens were recorded from yaml.v3 v3.0.1 by a Go probe during the port; they are
+  committed and not regenerated.
 
 ## License
 

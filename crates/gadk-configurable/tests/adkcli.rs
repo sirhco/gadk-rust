@@ -16,7 +16,7 @@
 //! Go-generated case.
 //!
 //! The expected stdout/stderr texts were captured once from ADK-Go's own binary
-//! (`go build ./cmd/internal/adkcli` at `docs/parity/ADK_GO_COMMIT`) run over the same trees
+//! (`go build ./cmd/internal/adkcli` at ADK-Go `0990f9e`) run over the same trees
 //! (built by the same steps, with `GOOGLE_API_KEY=fake-key`, stdin `/dev/null`, `$PWD` set to
 //! the symlinked spelling of the working directory), with the tree root replaced by `{root}`
 //! and Go's `log` timestamps by `<ts>`.

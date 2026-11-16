@@ -645,7 +645,7 @@ mod tests {
     }
 
     // ---- Function outputs (expected values from Go: a `go test -overlay` probe calling the
-    // functions of functions.go at ADK_GO_COMMIT) ----
+    // functions of functions.go at ADK-Go `0990f9e`) ----
 
     #[tokio::test]
     async fn validate_email_and_get_user_id() {

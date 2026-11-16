@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Replay of the REST wire scenarios `scripts/gen-go-agentanalytics` recorded from Go's
+//! Replay of the REST wire scenarios the Go probe recorded from Go's
 //! `cloud.google.com/go/bigquery` v1.79.0 client (`tests/fixtures/wire/*.json`): a `FakeServer`
 //! answering a scenario's canned responses in order, the client Go's probe built, and the
 //! comparison of a Rust request with Go's recorded one. Shared by `tests/rest_wire.rs`,

@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `plugin/agentanalytics/views_test.go` (ledger `docs/parity/7b-1.md`).
+//! Port of ADK-Go `plugin/agentanalytics/views_test.go` (ledger 7b-1).
 //! Go's `fakeViewRunner` / `recordingLogger` are `bigquery::fake::{FakeViewRunner,
 //! RecordingLogger}`; Go's `mockTransport` HTTP client is a `FakeServer` behind the client's
 //! endpoint. The SQL-evaluation helpers of the Go file (`extractExtraProjections`,

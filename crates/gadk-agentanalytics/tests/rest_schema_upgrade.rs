@@ -16,7 +16,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 //! Runs ADK-Go `ensureTableAndSchema` / `maybeUpgradeSchema` (`schema_upgrade.go`) end to end
-//! over the REST client (spec R4, R9): for every table scenario `scripts/gen-go-agentanalytics`
+//! over the REST client (spec R4, R9): for every table scenario the Go probe
 //! recorded (`tests/fixtures/wire/*.json` whose `call.fn` is not a view runner), a
 //! `FakeServer` answers Go's canned responses in order and the real
 //! [`ensure_table_and_schema`] (or `TableOps::metadata` + [`maybe_upgrade_schema`] for

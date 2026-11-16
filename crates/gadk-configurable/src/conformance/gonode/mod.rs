@@ -156,7 +156,7 @@ mod tests {
         assert_eq!(terr.unwrap().errors.len(), 1);
     }
 
-    /// Go `yaml.Unmarshal` into `recording.Recordings` (probe at `docs/parity/ADK_GO_COMMIT`):
+    /// Go `yaml.Unmarshal` into `recording.Recordings` (probe at ADK-Go `0990f9e`):
     /// an invalid `!!binary` scalar aborts with yaml.v3's error at a `[]byte` position (also as
     /// an element of a `[]byte` sequence) and at a `civil.Date` one, despite the earlier type
     /// error; a valid one at a `[]byte` position is a type error.

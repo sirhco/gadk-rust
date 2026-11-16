@@ -15,10 +15,10 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-//! Replays the ADK-Go wire fixtures (`testdata/wire`, written by `scripts/gen-go-adkrest`)
+//! Replays the ADK-Go wire fixtures (`testdata/wire`, recorded by the Go probe)
 //! against `Server::router()` on a real loopback socket: one server per configuration, the
 //! requests in file-name order, the response read as raw bytes (headers as they arrive on the
-//! wire), compared in each fixture's mode (`scripts/gen-go-adkrest/SCENARIO.md`).
+//! wire), compared in each fixture's mode.
 
 use std::collections::BTreeMap;
 use std::net::SocketAddr;

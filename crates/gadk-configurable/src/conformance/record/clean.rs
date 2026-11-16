@@ -696,7 +696,7 @@ mod tests {
     }
 
     // The expected outputs below are Go's: the same input through the vendored
-    // `cleanYAMLNode` (scripts/gen-go-configurable) and yaml.v3.
+    // `cleanYAMLNode` (in the Go probe) and yaml.v3.
     const PRUNE_IN: &str = r#"a: null
 b: ~
 c: "null"

@@ -14,8 +14,8 @@
 // limitations under the License.
 
 //! Ports of ADK-Go's `model/openaimodel/internal/*` tests (package-internal, so they live in
-//! the crate), one module per Go file (`parity-check` targets
-//! `src/parity_tests/<target>.rs`), except `responses/request_test.go` and
+//! the crate), one module per Go file
+//! (`src/parity_tests/<target>.rs`), except `responses/request_test.go` and
 //! `responses/model_test.go`, which are directory targets
 //! (`src/parity_tests/<target>/mod.rs` plus one module per group of tests). `support` is the
 //! shared harness (D6).

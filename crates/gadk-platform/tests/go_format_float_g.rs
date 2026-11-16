@@ -13,7 +13,7 @@
 // limitations under the License.
 
 //! `go_format_float_g` against Go's `strconv.FormatFloat(f, 'g', -1, 32|64)`: replays
-//! `testdata/go_format_float_g.json`, written by `scripts/gen-go-goyaml` (spec R9).
+//! `testdata/go_format_float_g.json`, recorded from Go by the Go probe (spec R9).
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -37,11 +37,7 @@ fn row_value(bits: u64, x: &str) -> f64 {
 #[test]
 fn go_format_float_g_matches_go_table() {
     let rows: Vec<Value> = serde_json::from_str(TABLE).expect("table is JSON");
-    assert_eq!(
-        rows.len(),
-        3729,
-        "row count (check-fixtures.sh counts it too)"
-    );
+    assert_eq!(rows.len(), 3729, "row count");
     let mut failures = Vec::new();
     for row in &rows {
         let bits = row["bits"].as_u64().expect("bits");

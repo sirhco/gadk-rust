@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `plugin/agentanalytics/gcs_offloader_test.go` (ledger `docs/parity/7b-2.md`).
+//! Port of ADK-Go `plugin/agentanalytics/gcs_offloader_test.go` (ledger 7b-2).
 //! Go's `fakeOffloader`, `imageContent(s)` and `queuedRow` are the batch-processor ports'
 //! `support` items; Go's `&BatchProcessor{config: …}` literals are `BatchProcessor::bare`;
 //! Go's `fakeStorage` is a `FakeServer` handler; Go's gRPC servers are hooks on the in-process

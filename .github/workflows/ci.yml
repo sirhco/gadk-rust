@@ -10,13 +10,6 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
-        with:
-          repository: google/adk-go
-          path: adk-go
-          fetch-depth: 0
-      - name: Pin adk-go
-        run: git -C adk-go checkout "$(cat docs/parity/ADK_GO_COMMIT)"
       - uses: dtolnay/rust-toolchain@master
         with: { toolchain: "1.99.1", components: "rustfmt, clippy" }
       - uses: Swatinem/rust-cache@v2
@@ -28,15 +21,10 @@ jobs:
         run: cargo test --workspace --all-features
       - name: deny
         uses: EmbarkStudios/cargo-deny-action@v2
-      - name: parity
+      - name: workspace deps
         run: |
-          (cd adk-go && go mod download go.opentelemetry.io/contrib/detectors/gcp gopkg.in/yaml.v3)
-          ADK_GO_DIR=adk-go python3 scripts/parity-check --ledger all
-          ADK_GO_DIR=adk-go python3 scripts/parity_check_test.py
           python3 scripts/check-workspace-deps.py
           python3 scripts/check_workspace_deps_test.py
-      - name: fixtures
-        run: ADK_GO_DIR=adk-go scripts/check-fixtures.sh
   msrv:
     runs-on: ubuntu-latest
     timeout-minutes: 45

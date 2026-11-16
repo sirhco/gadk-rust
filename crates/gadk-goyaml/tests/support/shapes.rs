@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Rust mirrors of the probe's serde shapes (`scripts/gen-go-goyaml/shapes.go`), their
+//! Rust mirrors of the Go probe's serde shapes (its `shapes.go`), their
 //! [`Options`] (the Go `yaml` tags), and the value Go holds for every serde golden case
 //! ([`ShapeValue::expected`]).
 //!

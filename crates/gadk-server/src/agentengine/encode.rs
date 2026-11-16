@@ -19,7 +19,7 @@
 //! Go's `ConvertSnake` walks a value by reflection; serde output cannot recover what it reads
 //! (pointer vs value, `omitempty`, named string types, `time.Time`, `[]byte`, `float32`), so the
 //! walk is driven by Go's struct shapes ([`GoStruct`], generated into
-//! [`encode_shapes`](super::encode_shapes) by `scripts/gen-go-agentengine --shapes`) and each
+//! [`encode_shapes`](super::encode_shapes) from ADK-Go by the Go probe) and each
 //! Rust type that reaches an NDJSON line implements [`GoSnake`] over its shape.
 //!
 //! Each [`GoSnake`] impl walks its Go shape over the Rust value's serde output (Go's JSON keys,

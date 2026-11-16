@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The probe's *Config projection* (`scripts/gen-go-agentanalytics` `zzConfigProjection`, see
-//! `SCENARIO.md` § config/) for the Rust [`Config`], and the reverse: a `Config` built from a
+//! The Go probe's *Config projection* (its `zzConfigProjection`, the format of
+//! `tests/fixtures/config/`) for the Rust [`Config`], and the reverse: a `Config` built from a
 //! projection. Shared by `tests/golden_config.rs` (public API) and the crate-internal
 //! `golden_apply_defaults` unit tests, which include this file with `#[path]`; the including
 //! module brings `Config`, `ClientOptions`, `Context`, `Error`, `GcsContentOffloader`,

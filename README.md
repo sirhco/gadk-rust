@@ -6,11 +6,10 @@ workflows, live (bidirectional streaming) sessions, persistent sessions and memo
 API server, the Agent2Agent (A2A) protocol, a launcher and a deploy CLI, and OpenTelemetry and
 BigQuery observability.
 
-The first goal is **parity with ADK-Go**: the same behaviour, wire formats, error texts and
-outputs, checked against ADK-Go's own tests (see [Parity with ADK-Go](#parity-with-adk-go)). New
-functionality beyond ADK-Go will follow.
+gadk started as a parity port of ADK-Go (final parity commit `0990f9e`): the same behaviour, wire
+formats, error texts and outputs, checked against ADK-Go's own tests (see
+[Parity with ADK-Go](#parity-with-adk-go)). New functionality beyond ADK-Go will follow.
 
-- Pinned ADK-Go commit: [`docs/parity/ADK_GO_COMMIT`](docs/parity/ADK_GO_COMMIT)
 - Rust: edition 2024, MSRV 1.95 (developed on the toolchain in `rust-toolchain.toml`)
 - License: Apache-2.0 (see [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE))
 - Changes: [`CHANGELOG.md`](CHANGELOG.md)
@@ -129,25 +128,11 @@ deprecated.
 
 ## Parity with ADK-Go
 
-The port was built in sub-projects, and each one has a ledger in [`docs/parity/`](docs/parity/).
-A ledger lists every in-scope ADK-Go test, the Rust test that ports it (or why it is skipped),
-and the accepted divergences: places where gadk deliberately behaves differently from Go. Each
-divergence is marked in the source with `// Divergence (ledger <name>)`.
-
-- `scripts/parity-check` checks the ledgers against the pinned ADK-Go checkout. Ported tests carry
-  `// parity:` annotations, and the ledger rows are generated from them.
-- Go probes in `scripts/gen-go-*` run ADK-Go itself to record golden fixtures: wire exchanges,
-  rows, YAML bytes and CLI output. `scripts/check-fixtures.sh` checks the fixture counts and,
-  when `go` is installed, re-runs the probes and requires identical output.
-- [`docs/parity/genai-inventory.md`](docs/parity/genai-inventory.md) tracks the ported
-  `google.golang.org/genai` surface.
-
-Run the checks against an ADK-Go checkout (by default the sibling `../adk-go`):
-
-```sh
-ADK_GO_DIR=../adk-go python3 scripts/parity-check --ledger all
-ADK_GO_DIR=../adk-go scripts/check-fixtures.sh
-```
+The port was built in sub-projects against ADK-Go commit `0990f9e`. ADK-Go's in-scope tests were
+ported to Rust and remain part of the test suite (`src/parity_tests/` and `tests/` in each
+crate), alongside golden fixtures recorded from ADK-Go itself: wire exchanges, rows, YAML bytes
+and CLI output. Places where gadk deliberately behaves differently from Go are marked in the
+source with `// Divergence (ledger <name>)`.
 
 ## Development
 
@@ -161,7 +146,6 @@ cargo test --workspace --all-features
 cargo deny check
 cargo +1.95 build --workspace --all-features     # MSRV
 python3 scripts/check-workspace-deps.py && python3 scripts/check_workspace_deps_test.py
-python3 scripts/parity_check_test.py
 RUSTDOCFLAGS="-D rustdoc::broken_intra_doc_links -D rustdoc::private_intra_doc_links" \
   cargo doc --workspace --no-deps --all-features
 ```

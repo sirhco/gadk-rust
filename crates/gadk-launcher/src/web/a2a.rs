@@ -361,7 +361,7 @@ mod tests {
     /// The fixed `golog` clock of these tests.
     const TS: &str = "2009/11/10 23:00:00 ";
 
-    /// The Go probe's `assistant` (Task 2, `scripts/gen-go-launcher`): its names, description,
+    /// The Go probe's `assistant` (Task 2): its names, description,
     /// instruction and tool reach the card; its model answers `Hello! How can I help?` once.
     fn assistant() -> Arc<dyn Agent> {
         let model = MockModel::from_contents(vec![Content::from_text(

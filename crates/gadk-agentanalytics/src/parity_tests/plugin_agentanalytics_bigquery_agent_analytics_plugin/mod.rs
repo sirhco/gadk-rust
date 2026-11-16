@@ -14,7 +14,7 @@
 // limitations under the License.
 
 //! Port of ADK-Go `plugin/agentanalytics/bigquery_agent_analytics_plugin_test.go` (ledger
-//! `docs/parity/7b-3a.md`): 61 Go tests, split by the Go file's order into [`part_1`] (the first
+//! ledger 7b-3a): 61 Go tests, split by the Go file's order into [`part_1`] (the first
 //! 30), [`part_2`] (the next 18) and [`part_3`] (the last 13), with the Go file's own helpers
 //! they share in [`helpers`]. [`support`] holds the Go test helpers that
 //! every 7b-3a port shares (Go's `mockInvocationContext`, `fakeBigQueryWriteServer`, the

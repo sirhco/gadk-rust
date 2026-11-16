@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `plugin/agentanalytics/schema_upgrade_test.go` (ledger `docs/parity/7b-1.md`).
+//! Port of ADK-Go `plugin/agentanalytics/schema_upgrade_test.go` (ledger 7b-1).
 //!
 //! Go's `mockTableOps` is [`MockTableOps`] (`bigquery::fake`); Go's `*googleapi.Error{Code}` is
 //! [`FakeError::Api`] and `status.Error(codes.X, …)` is [`FakeError::Status`] (the crate

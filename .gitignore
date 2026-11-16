@@ -24,7 +24,6 @@ rustc-ice-*.txt
 #.idea/
 .orchestration/
 .agent-memory/
-/scripts/gen-go-events/gen-go-events
 __pycache__/
 docs/orchestration/
 .pytest_cache/

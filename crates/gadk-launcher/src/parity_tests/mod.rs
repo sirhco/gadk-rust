@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Ports of ADK-Go's launcher tests that reach crate-private code (ledger `docs/parity/6.md`).
+//! Ports of ADK-Go's launcher tests that reach crate-private code (ledger 6).
 
 mod cmd_launcher_console_compaction;
 mod cmd_launcher_console_hitl;
