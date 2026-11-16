@@ -17,16 +17,18 @@
 //!
 //! [`new`] builds the OpenTelemetry SDK tracer, logger and meter providers ([`Providers`]) from
 //! [`TelemetryOption`]s and the environment, as Go's `telemetry.New`: OTLP/HTTP exporters when
-//! `OTEL_EXPORTER_OTLP_*ENDPOINT` is set, export to `telemetry.googleapis.com` with
-//! [`with_otel_to_cloud`], the resource from Go's default resource, the GCP project and the GCP
-//! resource detector ([`gcp_detector`]). [`Providers::layer`] is the `tracing` layer
-//! ([`OtelBridge`]) that exports gadk's ADK spans and log records through those providers.
+//! `OTEL_EXPORTER_OTLP_*ENDPOINT` is set, with [`with_otel_to_cloud`] export of traces and
+//! metrics to `telemetry.googleapis.com` and of log records to Cloud Logging, the resource from
+//! Go's default resource, the GCP project and the GCP resource detector ([`gcp_detector`]).
+//! [`Providers::layer`] is the `tracing` layer ([`OtelBridge`]) that exports gadk's ADK spans and
+//! log records through those providers.
 //!
 //! Every exporter sends through [`RuntimeHttpClient`], which runs each request on the Tokio
 //! runtime that built the providers: shut the providers down ([`Providers::shutdown`]) before
 //! that runtime ends.
 
 mod bridge;
+mod cloud_logging;
 mod config;
 mod credentials;
 mod error;
@@ -44,10 +46,10 @@ mod test_support;
 
 pub use bridge::OtelBridge;
 pub use config::{
-    GoogleCredentials, TelemetryOption, with_gcp_quota_project, with_gcp_resource_project,
-    with_google_credentials, with_log_record_processors, with_logger_provider, with_meter_provider,
-    with_metric_reader, with_otel_to_cloud, with_resource, with_span_processors,
-    with_tracer_provider,
+    GoogleCredentials, TelemetryOption, with_cloud_log_name, with_cloud_logging_stdout,
+    with_gcp_quota_project, with_gcp_resource_project, with_google_credentials,
+    with_log_record_processors, with_logger_provider, with_meter_provider, with_metric_reader,
+    with_otel_to_cloud, with_resource, with_span_processors, with_tracer_provider,
 };
 pub use error::Error;
 pub use http_client::RuntimeHttpClient;

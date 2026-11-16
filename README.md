@@ -114,7 +114,7 @@ The `gadk` crate re-exports the member crates as modules (`gadk::agent`, `gadk::
 | `gadk-launcher` | Console and web launchers, web UI, triggers | `cmd/launcher` |
 | `gadk-cli` | `gadk` deploy CLI (Cloud Run, Agent Engine) | `cmd/adkgo` |
 | `gadk-agentregistry` | Agent Registry client | `agentregistry` |
-| `gadk-telemetry` | OpenTelemetry providers, OTLP and GCP export | `telemetry` |
+| [`gadk-telemetry`](crates/gadk-telemetry/README.md) | OpenTelemetry providers, OTLP and GCP export (Cloud Trace, Cloud Monitoring, Cloud Logging) | `telemetry` |
 | `gadk-agentanalytics` | BigQuery Agent Analytics plugin ([README](crates/gadk-agentanalytics/README.md)) | `plugin/agentanalytics` |
 | `gadk-goyaml` | Byte-identical port of `gopkg.in/yaml.v3` (internal) ([README](crates/gadk-goyaml/README.md)) | `gopkg.in/yaml.v3` |
 | `gadk-configurable` | YAML agent configs, conformance record/replay, `adkcli` (internal) ([README](crates/gadk-configurable/README.md)) | `internal/configurable`, `cmd/internal/adkcli` |

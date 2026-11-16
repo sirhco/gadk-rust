@@ -7,6 +7,24 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-telemetry` exports log records to Cloud Logging with `with_otel_to_cloud(true)`, each
+  entry correlated with its Cloud Trace span (`trace`, `spanId`, `traceSampled`). New options
+  `with_cloud_log_name` (default `gadk`) and `with_cloud_logging_stdout()` /
+  `GADK_TELEMETRY_LOGS_STDOUT` (structured JSON on stdout instead of the API). Entries over
+  256,000 bytes are shortened and marked `gadk.truncated`.
+
+### Changed
+
+- `with_otel_to_cloud(true)` now also exports log records (to Cloud Logging); before, only spans
+  and metrics were exported. To opt out, supply a logger provider with `with_logger_provider`;
+  note that a supplied logger provider also turns off the OTLP log exporter
+  (`OTEL_EXPORTER_OTLP_*ENDPOINT`), as it always has. Log export needs the Cloud Logging API
+  enabled and `logging.logEntries.create` (for example `roles/logging.logWriter`) on the
+  identity; a failed export is reported once as a `tracing` warning (target
+  `gadk_telemetry::cloud_logging`) until a later export succeeds.
+
 ## [0.1.0] - 2026-11-15
 
 The first version: a Rust port of ADK-Go (main `0990f9e`, 2026-11-13) aimed at behaviour, wire

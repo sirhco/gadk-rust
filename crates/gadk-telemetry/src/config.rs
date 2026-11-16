@@ -72,6 +72,8 @@ enum Opt {
     TracerProvider(SdkTracerProvider),
     LoggerProvider(SdkLoggerProvider),
     MeterProvider(SdkMeterProvider),
+    CloudLogName(String),
+    CloudLoggingStdout,
 }
 
 /// Go `WithOtelToCloud`: enables or disables exporting telemetry to GCP.
@@ -144,6 +146,19 @@ pub fn with_meter_provider(provider: SdkMeterProvider) -> TelemetryOption {
     TelemetryOption(Opt::MeterProvider(provider))
 }
 
+/// The Cloud Logging log ID that log records are written to with cloud export on (default
+/// `gadk`).
+pub fn with_cloud_log_name(name: impl Into<String>) -> TelemetryOption {
+    TelemetryOption(Opt::CloudLogName(name.into()))
+}
+
+/// With cloud export on, writes log records to stdout as structured JSON lines (for platforms
+/// whose logging agent collects stdout) instead of calling the Cloud Logging API. The env var
+/// `GADK_TELEMETRY_LOGS_STDOUT` (`1` or `true`) does the same.
+pub fn with_cloud_logging_stdout() -> TelemetryOption {
+    TelemetryOption(Opt::CloudLoggingStdout)
+}
+
 /// Go's unexported `config`.
 #[derive(Debug, Default)]
 pub(crate) struct Config {
@@ -158,6 +173,8 @@ pub(crate) struct Config {
     pub(crate) tracer_provider: Option<SdkTracerProvider>,
     pub(crate) logger_provider: Option<SdkLoggerProvider>,
     pub(crate) meter_provider: Option<SdkMeterProvider>,
+    pub(crate) cloud_log_name: String,
+    pub(crate) cloud_logging_stdout: bool,
 }
 
 /// Go `configFromOpts`. No gadk option can fail, so Go's `failed to apply option: %w` never
@@ -177,6 +194,8 @@ pub(crate) fn config_from_opts(opts: &[TelemetryOption]) -> Config {
             Opt::TracerProvider(v) => cfg.tracer_provider = Some(v.clone()),
             Opt::LoggerProvider(v) => cfg.logger_provider = Some(v.clone()),
             Opt::MeterProvider(v) => cfg.meter_provider = Some(v.clone()),
+            Opt::CloudLogName(v) => cfg.cloud_log_name.clone_from(v),
+            Opt::CloudLoggingStdout => cfg.cloud_logging_stdout = true,
         }
     }
     cfg
