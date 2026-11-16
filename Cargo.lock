@@ -1865,6 +1865,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "gadk-prompts-cli"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "clap",
+ "gadk-prompts",
+ "gadk-prompts-firestore",
+ "serde_json",
+ "similar",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "gadk-prompts-firestore"
 version = "0.1.0"
 dependencies = [
