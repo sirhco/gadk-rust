@@ -21,13 +21,14 @@ use std::sync::Arc;
 
 use crate::traces::CloudTraceSource;
 
-#[allow(dead_code)] // removed in Task 8 once the web layer uses it
+mod cli;
 mod model;
-#[allow(dead_code)] // removed in Task 8
 mod prompts;
 pub mod traces;
-#[allow(dead_code)] // removed in Task 8
+mod url;
 mod web;
+
+pub use cli::parse_args;
 
 /// Console settings (from the command line).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,7 +63,7 @@ pub struct Bound {
 }
 
 impl Bound {
-    /// The bound address (127.0.0.1:<port>), the real port when the config said 0.
+    /// The bound address (`127.0.0.1:<port>`), the real port when the config said 0.
     pub fn local_addr(&self) -> SocketAddr {
         self.addr
     }
@@ -75,7 +76,7 @@ impl Bound {
     }
 }
 
-/// Opens the store (if any), binds 127.0.0.1:<port>, builds the router.
+/// Opens the store (if any), binds `127.0.0.1:<port>`, builds the router.
 ///
 /// The trace source builds its ADC credentials on the first GCP call, so binding needs none.
 pub async fn bind(cfg: ConsoleConfig) -> Result<Bound, ConsoleError> {

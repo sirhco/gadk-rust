@@ -20,9 +20,9 @@ use serde_json::{Map, Value, json};
 
 use super::error::banner;
 use super::layout::{Nav, page};
-use super::traces::percent_encode;
 use crate::model::{AttachedLogs, SpanRow, prompt_link};
 use crate::traces::{LogEntry, SourceError, TraceId};
+use crate::url::percent_encode;
 
 /// Payload texts longer than this many chars render collapsed (R6).
 pub(crate) const PAYLOAD_LIMIT: usize = 4096;

@@ -26,11 +26,10 @@ use serde::Deserialize;
 
 use super::AppState;
 use super::guard::check_csrf;
-use super::pages::error::{banner, error_page, store_error, store_status};
+use super::pages::error::{banner, error_page, store_error, store_status, store_text};
 use super::pages::layout::{self, Nav};
 use super::pages::{prompt, prompts};
 use crate::prompts::{diff_view, prompt_detail, prompt_rows, version_view};
-use crate::traces::excerpt;
 
 const NO_STORE: &str = "No prompt store configured (start with --store)";
 
@@ -168,14 +167,7 @@ async fn write_failed(state: &AppState, name: &str, e: &StoreError) -> Response 
     if prompt_detail(&snap, name).is_none() {
         return store_error(e);
     }
-    // An upstream body is cut to an excerpt of at most 1,024 bytes, as in `store_error`.
-    let text = match e {
-        StoreError::Http { status, body } => {
-            format!("http {status}: {}", excerpt(body.as_bytes()))
-        }
-        _ => e.to_string(),
-    };
-    let error = banner(&text, None);
+    let error = banner(&store_text(e), None);
     detail_page(
         state,
         &snap,

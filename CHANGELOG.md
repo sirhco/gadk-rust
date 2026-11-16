@@ -14,6 +14,16 @@ the public API.
   `with_cloud_log_name` (default `gadk`) and `with_cloud_logging_stdout()` /
   `GADK_TELEMETRY_LOGS_STDOUT` (structured JSON on stdout instead of the API). Entries over
   256,000 bytes are shortened and marked `gadk.truncated`.
+- `gadk-console`, a local web console (`gadk-console --project <p> [--store <url>] [--port <n>]
+  [--log-id <id>]`, on 127.0.0.1:8765 by default). It lists Cloud Trace traces (filter by time
+  range, root span name, agent and session), shows each trace as a span waterfall with its
+  Cloud Logging entries attached by span id, links `render_prompt` spans to their prompt
+  version, and browses a `gadk-prompts` store (file or Firestore): versions, diffs, and setting
+  or removing labels. Loopback only, with Host, Origin, CSRF and CSP checks; it needs
+  `roles/cloudtrace.user` and `roles/logging.viewer`. See
+  [its README](crates/gadk-console/README.md).
+- `gadk-prompts-cli` exports `open_store`, which opens a store from a `file://` or
+  `firestore://` URL as `--store` does.
 
 ### Changed
 

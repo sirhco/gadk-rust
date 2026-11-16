@@ -73,17 +73,21 @@ pub(crate) fn store_status(e: &StoreError) -> StatusCode {
     }
 }
 
-/// The error page for a store failure: `store_status(e)`, nav Prompts. The text is
-/// `e.to_string()`, except `Http`, whose upstream body is cut to an excerpt of at most
-/// 1,024 bytes.
-pub(crate) fn store_error(e: &StoreError) -> Response {
-    let text = match e {
+/// The text shown for a store failure: `e.to_string()`, except `Http`, whose upstream body
+/// is cut to an excerpt of at most 1,024 bytes.
+pub(crate) fn store_text(e: &StoreError) -> String {
+    match e {
         StoreError::Http { status, body } => {
             format!("http {status}: {}", excerpt(body.as_bytes()))
         }
         _ => e.to_string(),
-    };
-    error_page(store_status(e), Nav::Prompts, &text, None)
+    }
+}
+
+/// The error page for a store failure: `store_status(e)`, nav Prompts, text
+/// [`store_text`].
+pub(crate) fn store_error(e: &StoreError) -> Response {
+    error_page(store_status(e), Nav::Prompts, &store_text(e), None)
 }
 
 #[cfg(test)]
@@ -92,7 +96,7 @@ mod tests {
     use http::StatusCode;
     use http::header::CONTENT_TYPE;
 
-    use super::{banner, source_error, store_error, store_status};
+    use super::{banner, source_error, store_error, store_status, store_text};
     use crate::traces::{Service, SourceError};
 
     async fn body(resp: axum::response::Response) -> String {
@@ -230,5 +234,25 @@ mod tests {
         let len = html[start..].find("</p>").unwrap();
         assert!(len <= 1024, "excerpt is {len} bytes");
         assert_eq!(len, 1024);
+    }
+
+    #[test]
+    fn store_text_excerpts_only_http_bodies() {
+        assert_eq!(
+            store_text(&StoreError::Http {
+                status: 503,
+                body: "unavailable".into(),
+            }),
+            "http 503: unavailable"
+        );
+        let long = store_text(&StoreError::Http {
+            status: 500,
+            body: format!("{}END", "y".repeat(2000)),
+        });
+        assert_eq!(long, format!("http 500: {}", "y".repeat(1024)));
+        let invalid = StoreError::Invalid("bad label".into());
+        assert_eq!(store_text(&invalid), invalid.to_string());
+        let io = StoreError::Io("z".repeat(2000));
+        assert_eq!(store_text(&io), io.to_string());
     }
 }
