@@ -38,6 +38,11 @@ use serde_json::{Value, json};
 const LOG_ID: &str = "gadk-live-test";
 const TRACE: &str = "0af7651916cd43dd8448eb211c80319c";
 const SPAN: &str = "b7ad6b7169203331";
+/// How long to wait for the written entry to become readable. `entries:list` is eventually
+/// consistent: an entry usually appears within seconds but has been seen to take over a minute.
+const READ_BACK_DEADLINE: Duration = Duration::from_secs(180);
+/// Pause between `entries:list` polls.
+const POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "writes to a real Cloud Logging project; set GADK_CLOUD_LOGGING_PROJECT"]
@@ -83,7 +88,7 @@ async fn live_entries_write_round_trip() {
     let client = reqwest::Client::new();
     let filter =
         format!(r#"logName="projects/{project}/logs/{LOG_ID}" AND jsonPayload.body="{marker}""#);
-    let deadline = Instant::now() + Duration::from_secs(60);
+    let deadline = Instant::now() + READ_BACK_DEADLINE;
     let entry = loop {
         let mut headers = credential_headers(&creds).await.unwrap();
         // User ADC may already carry its own quota project: replace it, never send two.
@@ -111,9 +116,9 @@ async fn live_entries_write_round_trip() {
         }
         assert!(
             Instant::now() < deadline,
-            "entry {marker} not found within 60 s"
+            "entry {marker} not readable within {READ_BACK_DEADLINE:?}"
         );
-        tokio::time::sleep(Duration::from_secs(3)).await;
+        tokio::time::sleep(POLL_INTERVAL).await;
     };
     assert_eq!(
         entry["trace"],
