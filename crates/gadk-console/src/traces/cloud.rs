@@ -43,6 +43,8 @@ const SCOPE: &str = "https://www.googleapis.com/auth/cloud-platform";
 const LIST_PAGE_SIZE: u32 = 50;
 /// Log entries kept per trace (and the Logging page size).
 const MAX_LOG_ENTRIES: usize = 1000;
+/// Logging pages fetched per trace before the entries are marked truncated.
+const MAX_LOG_PAGES: usize = 20;
 /// Whole-request timeout of the production HTTP client.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 const ERROR_INFO: &str = "type.googleapis.com/google.rpc.ErrorInfo";
@@ -214,6 +216,9 @@ impl CloudTraceSource {
     }
 
     /// Up to [`MAX_LOG_ENTRIES`] entries of trace `id`, oldest first.
+    ///
+    /// Paging stops after [`MAX_LOG_PAGES`] pages or when a page token repeats
+    /// the previous one; either stop marks the entries truncated.
     async fn logs(&self, id: &TraceId) -> Result<LogSet, SourceError> {
         let p = &self.project;
         let filter = format!(
@@ -231,6 +236,8 @@ impl CloudTraceSource {
         let mut entries = Vec::new();
         let mut token: Option<String> = None;
         let mut dropped = false;
+        let mut cut_short = false;
+        let mut pages = 0;
         loop {
             let mut body = first.clone();
             if let Some(t) = &token {
@@ -239,6 +246,7 @@ impl CloudTraceSource {
             let raw = self
                 .call(Service::Logging, Method::POST, &url, Some(&body))
                 .await?;
+            pages += 1;
             let page: EntriesPage = decode(Service::Logging, &raw)?;
             for e in page.entries {
                 if entries.len() == MAX_LOG_ENTRIES {
@@ -252,12 +260,19 @@ impl CloudTraceSource {
                     payload: e.json_payload.unwrap_or(Value::Null),
                 });
             }
-            token = page.next_page_token.filter(|t| !t.is_empty());
+            let next = page.next_page_token.filter(|t| !t.is_empty());
+            let repeated = next.is_some() && next == token;
+            token = next;
             if entries.len() >= MAX_LOG_ENTRIES || token.is_none() {
                 break;
             }
+            if repeated || pages >= MAX_LOG_PAGES {
+                cut_short = true;
+                break;
+            }
         }
-        let truncated = dropped || (entries.len() == MAX_LOG_ENTRIES && token.is_some());
+        let truncated =
+            dropped || cut_short || (entries.len() == MAX_LOG_ENTRIES && token.is_some());
         Ok(LogSet { entries, truncated })
     }
 }
@@ -1019,6 +1034,32 @@ mod tests {
         assert_eq!(logs.entries.len(), 1000);
         assert_eq!(logs.entries[999].payload, json!({"i": 999}));
         assert!(logs.truncated);
+    }
+
+    #[tokio::test]
+    async fn logs_stop_when_the_page_token_repeats() {
+        let mut replies = vec![ok(json!({"traceId": ID}))];
+        replies.extend((0..25).map(|_| ok(entries_page(0, 0, Some("same")))));
+        let http = FakeHttp::new(replies);
+        let logs = source(http.clone()).get(&id()).await.unwrap().logs.unwrap();
+        assert!(logs.entries.is_empty());
+        assert!(logs.truncated);
+        assert_eq!(
+            http.uris().len(),
+            3,
+            "stop after the second Logging request"
+        );
+    }
+
+    #[tokio::test]
+    async fn logs_stop_at_the_page_cap() {
+        let mut replies = vec![ok(json!({"traceId": ID}))];
+        replies.extend((0..25).map(|i| ok(entries_page(0, 0, Some(&format!("t{i}"))))));
+        let http = FakeHttp::new(replies);
+        let logs = source(http.clone()).get(&id()).await.unwrap().logs.unwrap();
+        assert!(logs.entries.is_empty());
+        assert!(logs.truncated);
+        assert_eq!(http.uris().len(), 1 + 20, "exactly 20 Logging requests");
     }
 
     #[tokio::test]

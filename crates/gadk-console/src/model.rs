@@ -148,10 +148,10 @@ pub(crate) fn attach_logs(spans: &[RawSpan], entries: Vec<LogEntry>) -> Attached
     out
 }
 
-/// ("greet", 3) when span.name starts with "render_prompt" and labels prompt.name and
-/// prompt.version (a u32) are present.
+/// ("greet", 3) when span.name is "render_prompt" or starts with "render_prompt " and labels
+/// prompt.name and prompt.version (a u32) are present.
 pub(crate) fn prompt_link(span: &RawSpan) -> Option<(String, u32)> {
-    if !span.name.starts_with("render_prompt") {
+    if span.name != "render_prompt" && !span.name.starts_with("render_prompt ") {
         return None;
     }
     let name = span.labels.get("prompt.name")?;
@@ -419,6 +419,15 @@ mod tests {
     fn prompt_link_rejects_a_wrong_name_prefix() {
         let s = named(
             "invoke render_prompt",
+            &[("prompt.name", "greet"), ("prompt.version", "3")],
+        );
+        assert_eq!(prompt_link(&s), None);
+    }
+
+    #[test]
+    fn prompt_link_needs_the_whole_render_prompt_word() {
+        let s = named(
+            "render_promptly",
             &[("prompt.name", "greet"), ("prompt.version", "3")],
         );
         assert_eq!(prompt_link(&s), None);

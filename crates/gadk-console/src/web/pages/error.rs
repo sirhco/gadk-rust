@@ -73,14 +73,15 @@ pub(crate) fn store_status(e: &StoreError) -> StatusCode {
     }
 }
 
-/// The text shown for a store failure: `e.to_string()`, except `Http`, whose upstream body
-/// is cut to an excerpt of at most 1,024 bytes.
+/// The text shown for a store failure: `Http` is `http {status}: ` plus an excerpt of at most
+/// 1,024 bytes of the upstream body; every other variant is `e.to_string()` cut to an excerpt
+/// of at most 1,024 bytes.
 pub(crate) fn store_text(e: &StoreError) -> String {
     match e {
         StoreError::Http { status, body } => {
             format!("http {status}: {}", excerpt(body.as_bytes()))
         }
-        _ => e.to_string(),
+        _ => excerpt(e.to_string().as_bytes()),
     }
 }
 
@@ -237,7 +238,7 @@ mod tests {
     }
 
     #[test]
-    fn store_text_excerpts_only_http_bodies() {
+    fn store_text_is_capped_for_every_variant() {
         assert_eq!(
             store_text(&StoreError::Http {
                 status: 503,
@@ -253,6 +254,8 @@ mod tests {
         let invalid = StoreError::Invalid("bad label".into());
         assert_eq!(store_text(&invalid), invalid.to_string());
         let io = StoreError::Io("z".repeat(2000));
-        assert_eq!(store_text(&io), io.to_string());
+        let text = store_text(&io);
+        assert!(text.len() <= 1024, "io text is {} bytes", text.len());
+        assert!(io.to_string().starts_with(&text));
     }
 }

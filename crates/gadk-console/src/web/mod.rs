@@ -91,7 +91,10 @@ mod tests {
     use std::sync::Arc;
 
     use axum::body::Body;
-    use http::header::{CONTENT_SECURITY_POLICY, CONTENT_TYPE, HOST, LOCATION};
+    use http::header::{
+        CACHE_CONTROL, CONTENT_SECURITY_POLICY, CONTENT_TYPE, HOST, LOCATION, ORIGIN,
+        X_CONTENT_TYPE_OPTIONS,
+    };
     use http::{Request, StatusCode};
 
     use super::guard::CSP;
@@ -216,6 +219,8 @@ mod tests {
             let (_, headers, _) = get(fresh(), path).await;
             assert_eq!(headers.get_all(CONTENT_SECURITY_POLICY).iter().count(), 1);
             assert_eq!(headers[CONTENT_SECURITY_POLICY], expected, "{path}");
+            assert_eq!(headers[X_CONTENT_TYPE_OPTIONS], "nosniff", "{path}");
+            assert_eq!(headers[CACHE_CONTROL], "no-store", "{path}");
         }
         let req = Request::get("/")
             .header(HOST, "other:1")
@@ -224,5 +229,61 @@ mod tests {
         let (status, headers, _) = send(fresh(), req).await;
         assert_eq!(status, StatusCode::MISDIRECTED_REQUEST);
         assert_eq!(headers[CONTENT_SECURITY_POLICY], expected);
+        assert_eq!(headers[X_CONTENT_TYPE_OPTIONS], "nosniff");
+        assert_eq!(headers[CACHE_CONTROL], "no-store");
+    }
+
+    fn on_port(port: u16) -> super::AppState {
+        super::AppState { port, ..fresh() }
+    }
+
+    fn get_with_host(host: &str) -> Request<Body> {
+        Request::get("/")
+            .header(HOST, host)
+            .body(Body::empty())
+            .unwrap()
+    }
+
+    fn post_with(host: &str, origin: &str) -> Request<Body> {
+        Request::post("/")
+            .header(HOST, host)
+            .header(ORIGIN, origin)
+            .body(Body::empty())
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn port_80_accepts_port_less_host_and_origin() {
+        for host in ["127.0.0.1", "localhost", "127.0.0.1:80", "localhost:80"] {
+            let (status, _, _) = send(on_port(80), get_with_host(host)).await;
+            assert_eq!(status, StatusCode::SEE_OTHER, "{host}");
+        }
+        let (status, _, _) = send(on_port(80), get_with_host("127.0.0.1:8765")).await;
+        assert_eq!(status, StatusCode::MISDIRECTED_REQUEST);
+
+        for origin in [
+            "http://127.0.0.1",
+            "http://localhost",
+            "http://127.0.0.1:80",
+        ] {
+            // Past the guard: routing answers (no POST route at /).
+            let (status, _, _) = send(on_port(80), post_with("127.0.0.1", origin)).await;
+            assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED, "{origin}");
+        }
+        let (status, _, _) = send(on_port(80), post_with("127.0.0.1", "http://evil")).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn port_less_host_and_origin_are_rejected_off_port_80() {
+        for host in ["127.0.0.1", "localhost"] {
+            let (status, _, _) = send(fresh(), get_with_host(host)).await;
+            assert_eq!(status, StatusCode::MISDIRECTED_REQUEST, "{host}");
+        }
+        let host = format!("127.0.0.1:{PORT}");
+        for origin in ["http://127.0.0.1", "http://localhost"] {
+            let (status, _, _) = send(fresh(), post_with(&host, origin)).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{origin}");
+        }
     }
 }

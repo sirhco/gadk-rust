@@ -59,6 +59,8 @@ The console is for one developer on their own machine:
   defence).
 - Every POST needs an `Origin` of `http://127.0.0.1:<port>` or `http://localhost:<port>` and a
   per-process random CSRF token from the page, or it gets 403.
+- With `--port 80`, the port-less `Host` (`127.0.0.1`, `localhost`) and `Origin`
+  (`http://127.0.0.1`, `http://localhost`) that browsers send for the default port are accepted too.
 - Every response carries
   `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; frame-ancestors 'none'; form-action 'self'`,
   and all trace and log text is HTML-escaped.

@@ -34,7 +34,6 @@ serde_json = { workspace = true }
 similar = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
-tracing = { workspace = true }
 
 [dev-dependencies]
 # Builds the fake HTTP client's `BodyStream` in the cloud.rs tests.

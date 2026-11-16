@@ -14,7 +14,7 @@
 
 //! The trace source seam and the trace types the pages render.
 
-pub mod cloud;
+mod cloud;
 pub use cloud::CloudTraceSource;
 
 use std::collections::BTreeMap;
