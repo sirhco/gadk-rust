@@ -18,8 +18,9 @@ the public API.
 ### Changed
 
 - `with_otel_to_cloud(true)` now also exports log records (to Cloud Logging); before, only spans
-  and metrics were exported. Supply a logger provider with `with_logger_provider` to keep the
-  old behaviour.
+  and metrics were exported. To opt out, supply a logger provider with `with_logger_provider`;
+  note that a supplied logger provider also turns off the OTLP log exporter
+  (`OTEL_EXPORTER_OTLP_*ENDPOINT`), as it always has.
 
 ## [0.1.0] - 2026-11-15
 

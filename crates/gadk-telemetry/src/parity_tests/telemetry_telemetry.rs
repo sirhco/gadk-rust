@@ -611,7 +611,8 @@ async fn test_gcp_exporters() {
     .await
     .unwrap();
 
-    // Requests per endpoint; both exporters share the client, so headers are checked on each.
+    // Requests per endpoint; every GCP exporter's client sends the credentials and quota
+    // project headers, so they are checked on each.
     let requests = |path: &str| -> Vec<_> {
         sink.requests()
             .into_iter()

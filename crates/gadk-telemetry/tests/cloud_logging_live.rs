@@ -25,10 +25,14 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use gadk_model::gcp_auth::{adc_credentials, credential_headers};
 use gadk_telemetry::{
-    new, with_cloud_log_name, with_gcp_quota_project, with_gcp_resource_project, with_otel_to_cloud,
+    new, with_cloud_log_name, with_gcp_quota_project, with_gcp_resource_project,
+    with_meter_provider, with_otel_to_cloud, with_tracer_provider,
 };
 use opentelemetry::logs::{AnyValue, LogRecord as _, Logger as _, LoggerProvider as _, Severity};
 use opentelemetry::trace::{SpanId, TraceFlags, TraceId};
+use opentelemetry_sdk::metrics::SdkMeterProvider;
+use opentelemetry_sdk::trace::SdkTracerProvider;
+use reqwest::header::{HeaderName, HeaderValue};
 use serde_json::{Value, json};
 
 const LOG_ID: &str = "gadk-live-test";
@@ -51,6 +55,9 @@ async fn live_entries_write_round_trip() {
         with_gcp_resource_project(project.clone()),
         with_gcp_quota_project(project.clone()),
         with_cloud_log_name(LOG_ID),
+        // Supplied providers: only the log exporter talks to GCP.
+        with_tracer_provider(SdkTracerProvider::builder().build()),
+        with_meter_provider(SdkMeterProvider::builder().build()),
     ])
     .await
     .unwrap();
@@ -78,11 +85,15 @@ async fn live_entries_write_round_trip() {
         format!(r#"logName="projects/{project}/logs/{LOG_ID}" AND jsonPayload.body="{marker}""#);
     let deadline = Instant::now() + Duration::from_secs(60);
     let entry = loop {
-        let headers = credential_headers(&creds).await.unwrap();
-        let resp: Value = client
+        let mut headers = credential_headers(&creds).await.unwrap();
+        // User ADC may already carry its own quota project: replace it, never send two.
+        headers.insert(
+            HeaderName::from_static("x-goog-user-project"),
+            HeaderValue::from_str(&project).unwrap(),
+        );
+        let resp = client
             .post("https://logging.googleapis.com/v2/entries:list")
             .headers(headers)
-            .header("x-goog-user-project", &project)
             .json(&json!({
                 "resourceNames": [format!("projects/{project}")],
                 "filter": filter,
@@ -90,12 +101,11 @@ async fn live_entries_write_round_trip() {
             }))
             .send()
             .await
-            .unwrap()
-            .error_for_status()
-            .unwrap()
-            .json()
-            .await
             .unwrap();
+        let status = resp.status();
+        let text = resp.text().await.unwrap();
+        assert!(status.is_success(), "entries:list: {status}: {text}");
+        let resp: Value = serde_json::from_str(&text).unwrap();
         if let Some(e) = resp["entries"].as_array().and_then(|a| a.first()) {
             break e.clone();
         }
