@@ -15,7 +15,7 @@
 
 //! Golden tests of `write/arrow_batch.rs` (ADK-Go `plugin/agentanalytics/batch_processor.go`
 //! `buildRecordBatch`, `serializeRecord`, `estimateRowBytes`, `splitBatchByEstimatedBytes`)
-//! against the `scripts/gen-go-agentanalytics` probe fixtures `record_batch/` (spec R3): Go's
+//! against the Go probe fixtures `record_batch/` (spec R3): Go's
 //! and Rust's record batch IPC messages are decoded and compared, as are the size estimates and
 //! the split chunk lengths.
 

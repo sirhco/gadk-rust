@@ -539,8 +539,8 @@ fn take_or(slot: &Mutex<Option<InputLines>>, default: impl FnOnce() -> InputLine
     lock(slot).take().unwrap_or_else(default)
 }
 
-/// The console against the Go probe's console fixtures (`testdata/console`, format in
-/// `scripts/gen-go-launcher/SCENARIO.md`): the probe's agent and scripted model
+/// The console against the Go probe's console fixtures (`testdata/console`, recorded from
+/// ADK-Go): the probe's agent and scripted model
 /// (`test_support::probe_agent`) give the same stdout bytes and no log output.
 #[cfg(test)]
 mod tests {

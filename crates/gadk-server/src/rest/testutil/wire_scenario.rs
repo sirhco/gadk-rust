@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The Go wire probe's scenario (`scripts/gen-go-adkrest/SCENARIO.md`): the fixed clock and
+//! The Go wire probe's scenario: the fixed clock and
 //! UUID providers, the scripted models, the sample agents and the three server configurations
 //! whose answers `testdata/wire` records. `tests/wire.rs` replays the fixtures against
 //! [`wire_server`]; the controller tests reuse the agents.

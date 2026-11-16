@@ -15,7 +15,7 @@
 
 //! An in-process a2a-rs server (`DefaultRequestHandler` + `InMemoryTaskStore` + the JSON-RPC and
 //! REST routers + a static card) on an ephemeral loopback listener, laid out like the Go probe
-//! (`scripts/gen-go-a2a`): the card at `/.well-known/agent-card.json`, JSON-RPC at `/jsonrpc`,
+//! that recorded the ADK-Go fixtures: the card at `/.well-known/agent-card.json`, JSON-RPC at `/jsonrpc`,
 //! REST under `/rest`.
 
 use std::net::Ipv4Addr;

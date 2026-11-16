@@ -57,9 +57,8 @@
 //! The `gadk` façade re-exports this crate as `gadk::agentanalytics` (feature `agentanalytics`).
 //! Feature `testutil` adds the in-memory fakes of `bigquery::fake`, the in-process BigQuery
 //! Write server `testutil::fake_write_server`, the Arrow row decoder `testutil::arrow_rows` and
-//! the probe's row specs. Behavior matches ADK-Go except for the divergences listed in
-//! `docs/parity/7b-1.md`, `docs/parity/7b-2.md` and `docs/parity/7b-3a.md`, each annotated where
-//! it lives.
+//! the probe's row specs. Behavior matches ADK-Go except for the accepted divergences, each
+//! annotated where it lives (`// Divergence`).
 
 #![forbid(unsafe_code)]
 

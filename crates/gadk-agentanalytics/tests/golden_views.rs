@@ -13,7 +13,7 @@
 // limitations under the License.
 
 //! Golden tests for `Config::view_definitions` (spec R5) against the Go probe's
-//! `tests/fixtures/views/view_definitions.json` (written by `scripts/gen-go-agentanalytics`):
+//! `tests/fixtures/views/view_definitions.json` (recorded from ADK-Go):
 //! every view name, event type and `CREATE OR REPLACE VIEW` statement is byte-equal to Go's, and
 //! every error text equals Go's `err.Error()`.
 //!

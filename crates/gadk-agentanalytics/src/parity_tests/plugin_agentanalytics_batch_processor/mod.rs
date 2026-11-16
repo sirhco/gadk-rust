@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `plugin/agentanalytics/batch_processor_test.go` (ledger `docs/parity/7b-2.md`),
+//! Port of ADK-Go `plugin/agentanalytics/batch_processor_test.go` (ledger 7b-2),
 //! with the `arrow_test_helper_test.go` helpers it uses ([`support`]). Go's `mockStream` is
 //! `write::stream_writer::tests::MockStream` (injected into `stream_writer.state.stream`), Go's
 //! gRPC servers are hooks on the in-process `FakeWriteServer`, and time is tokio's paused clock

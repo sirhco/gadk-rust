@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `plugin/agentanalytics/json_formatter_test.go` (ledger `docs/parity/7b-1.md`).
+//! Port of ADK-Go `plugin/agentanalytics/json_formatter_test.go` (ledger 7b-1).
 //! The redaction tests of that file (`TestSanitizeURI`, `TestRedactErrorMessage`,
 //! `TestSanitizeRawText`) are in `redaction.rs`.
 //!

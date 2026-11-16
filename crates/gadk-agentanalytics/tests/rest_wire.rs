@@ -15,7 +15,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-//! Replays every REST wire scenario `scripts/gen-go-agentanalytics` recorded from Go's
+//! Replays every REST wire scenario the Go probe recorded from Go's
 //! `cloud.google.com/go/bigquery` v1.79.0 client (`tests/fixtures/wire/*.json`, spec R9): a
 //! `FakeServer` answers the canned responses in order (with `{{JOB_ID}}` replaced by the job
 //! ID the client sent), and the Rust client is driven through the same client calls Go made —

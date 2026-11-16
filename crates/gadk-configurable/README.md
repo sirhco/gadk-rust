@@ -19,8 +19,8 @@ re-exports it.
 - `conformance/gonode/` builds the yaml.v3 node tree Go's `node.Encode(&recordings)` builds from
   gadk's serde types (through `gadk-goyaml`), with the type-path fixups and Go struct shapes the
   probe generates (`gonode/shapes.rs` is generated, see below), and decodes it back.
-- Behavior, file bytes, error texts and stdout match ADK-Go except for the accepted divergences
-  in `docs/parity/6c-2.md`, each annotated `// Divergence (ledger 6c-2)` in the source.
+- Behavior, file bytes, error texts and stdout match ADK-Go except for the accepted divergences,
+  each annotated `// Divergence (ledger 6c-2)` in the source.
 
 ## adkcli
 
@@ -39,21 +39,17 @@ directory.
 ## Tests and goldens
 
 - Unit tests per module and ports of the 7 Go test files (19 tests) in `src/parity_tests/`
-  (ledger `docs/parity/6c-2.md`, checked by `python3 scripts/parity-check --ledger 6c-2`).
+  (6c-2).
 - `tests/recordings_differential.rs` replays the Go probe's corpus in `tests/fixtures/`
   (44 recording cases: record bytes, replay decoding or Go's decode error, round trip; the fixup
   table and shapes against `fixups.json`; `canonicalize.json` for replay matching).
 - `tests/plugins_integration.rs` runs both plugins under a runner against Go-written goldens in
   `tests/fixtures/integration/`; `tests/adkcli.rs` checks the binary's stdout, stderr and exit
   codes against texts captured from Go's `adkcli`, and a REST-mode replay.
-- The fixtures are written by the Go probe `scripts/gen-go-configurable` (its `SCENARIO.md`
-  documents the corpus and format). Regenerate with `cd scripts/gen-go-configurable && go run .`
-  (from the main checkout, so `../../../adk-go` is ADK-Go), then regenerate `gonode/shapes.rs`
-  with `GADK_GONODE_REGEN=1 cargo test -p gadk-configurable --test recordings_differential
-  shapes_rs_is_generated_from_fixture` and update the counts in `scripts/check-fixtures.sh` if cases were
-  added. `ADK_GO_DIR=… scripts/check-fixtures.sh` asserts the counts and, when `go` is on `PATH`,
-  reruns the probe (output must be identical) and diffs the probe's vendored ADK-Go declarations
-  against ADK-Go's.
+- The fixtures were recorded from ADK-Go by a Go probe during the port; they are committed and
+  not regenerated. `gonode/shapes.rs` is generated from `tests/fixtures/fixups.json`: regenerate
+  it with `GADK_GONODE_REGEN=1 cargo test -p gadk-configurable --test recordings_differential
+  shapes_rs_is_generated_from_fixture`.
 
 ## License
 

@@ -146,6 +146,17 @@ the public API.
       `spec.contextSpec`) only when `--env` or `--default_env` is on the command line.
     - The flags line is no longer printed, since it could contain `--env` values.
 
+### Removed
+
+- **ADK-Go porting tooling.** The port is complete (final parity commit `0990f9e`), so the
+  Go-side tooling is gone: the Go probes that recorded the golden fixtures (`scripts/gen-go-*`),
+  `scripts/parity-check` and its test, the parity ledgers and pin in `docs/parity/`,
+  `scripts/check-fixtures.sh`, `scripts/gen-inventory-test.py`, and the CI `google/adk-go`
+  checkout with its parity and fixtures steps. The Rust tests (including the ported ADK-Go tests
+  in `src/parity_tests/`) and every committed fixture and golden are unchanged. The launcher's
+  accepted divergences, which `tests/wire_replay.rs` checks every `.deltas.json` against, now
+  live in `crates/gadk-launcher/testdata/DIVERGENCES.md`.
+
 ### Upgrade notes
 
 - **New public fields.** These structs are not `#[non_exhaustive]`, so a struct literal that

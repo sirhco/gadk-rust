@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Golden loaders (format: `scripts/gen-go-goyaml/SCENARIO.md`): the probe's parse, differential and serde goldens
+//! Golden loaders (in the Go probe's format): the probe's parse, differential and serde goldens
 //! as Rust values; [`NodeDump`] ⇄ [`Document`] conversion and a comparison of a document
 //! against a dump that names the first differing path and field; [`ValueDump`] ⇄ [`GoValue`].
 
@@ -27,7 +27,7 @@ use gadk_goyaml::{Document, GoValue, Kind, NodeData, NodeId, Style};
 use serde::Deserialize;
 use serde::de::Error as _;
 
-/// Golden counts the probe writes (`scripts/check-fixtures.sh` asserts the same).
+/// Golden counts the probe wrote.
 pub const PARSE_GOLDEN_COUNT: usize = 625;
 /// Differential goldens: 32 seeds × 20 cases.
 pub const DIFF_GOLDEN_COUNT: usize = 640;

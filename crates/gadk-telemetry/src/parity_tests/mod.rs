@@ -14,7 +14,7 @@
 // limitations under the License.
 
 //! Ports of ADK-Go's `telemetry` tests and of the contrib GCP detector's tests
-//! (`go.opentelemetry.io/contrib/detectors/gcp` v1.47.0, ledger `docs/parity/7a.md`). A contrib
+//! (`go.opentelemetry.io/contrib/detectors/gcp` v1.47.0, ledger 7a). A contrib
 //! test file `<path>_test.go` is ported to `contrib_detectors_gcp_<path with _>.rs` (Go file
 //! names with `-` keep it, loaded with `#[path]`).
 

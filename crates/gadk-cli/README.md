@@ -4,7 +4,7 @@
 `internal/cli/util`. It deploys a gadk agent, a Cargo binary target, to Cloud Run or to Vertex AI
 Agent Engine with ADK-Go's flags, checks, generated Dockerfile `CMD`, `gcloud` invocations,
 Reasoning Engine requests and console output. Where gadk differs from ADK-Go, the difference is
-listed in `docs/parity/6b.md`.
+annotated in the source with `// Divergence (ledger 6b)`.
 
 ## Install
 

@@ -13,8 +13,7 @@
 // limitations under the License.
 
 //! Golden tests of the plugin's rows (spec R6) against the Go probe's
-//! `tests/fixtures/plugin/*.json` (written by `scripts/gen-go-agentanalytics`, rules in its
-//! `SCENARIO.md` "7b-3a plugin row goldens"): each scenario runs through a gadk `Runner` with
+//! `tests/fixtures/plugin/*.json` (recorded from ADK-Go's plugin): each scenario runs through a gadk `Runner` with
 //! the plugin installed (scripted model, function tools, a custom agent emitting scripted
 //! events, a confirmation tool), the plugin is closed, the rows the fake BigQuery Write server
 //! received are decoded, converted and normalized as Go's probe does, and compared with Go's

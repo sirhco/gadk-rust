@@ -15,7 +15,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-//! R18: event JSON written by ADK-Go (`scripts/gen-go-events`) decodes into
+//! R18: event JSON written by ADK-Go (via the Go probe) decodes into
 //! a gadk-session `Event` and re-encodes to the same JSON value.
 
 use chrono::{DateTime, Utc};

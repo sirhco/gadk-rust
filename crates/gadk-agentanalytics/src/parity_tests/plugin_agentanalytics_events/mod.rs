@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `plugin/agentanalytics/events_test.go` (ledger `docs/parity/7b-3a.md`): 18
+//! Port of ADK-Go `plugin/agentanalytics/events_test.go` (ledger 7b-3a): 18
 //! Go tests, split into [`direct`] (tests that call the plugin's callbacks and helpers
 //! directly) and [`runner`] (tests that run agents through a gadk `Runner`). Go's load-memory tool
 //! is a fake tool reporting `ToolOriginKind::Local` (gadk-tools is a `gadk`-only dependency;

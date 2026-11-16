@@ -514,7 +514,7 @@ impl From<RestError> for OpenAiError {
 
 /// Go `encoding/json`'s text for a serde_json error, where a Go test asserts it (P3): a
 /// truncated document is `unexpected end of JSON input`; every other error keeps serde_json's
-/// wording (an accepted divergence, `docs/parity/3b.md`).
+/// wording (an accepted divergence, ledger 3b).
 pub(crate) fn go_json_error(err: &serde_json::Error) -> String {
     if err.is_eof() {
         "unexpected end of JSON input".to_string()

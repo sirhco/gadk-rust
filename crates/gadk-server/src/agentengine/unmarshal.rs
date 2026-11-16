@@ -106,7 +106,7 @@ pub(crate) fn go_unmarshal<T: DeserializeOwned>(
 /// that gadk's serde-based decoders (REST, A2A, the session loaders) materialize, and every
 /// request-derived value stays shallow enough for the recursive clone, convert and drop past
 /// this crate on a 2 MiB stack. Go's `encoding/json` allows 10000: a ledgered divergence
-/// (`docs/parity/5c.md`, Agent Engine server and Workspace JSON depth).
+/// (ledger 5c, Agent Engine server and Workspace JSON depth).
 pub(crate) const MAX_DEPTH: usize = 127;
 
 /// The maximum nesting depth of `payload`'s arrays and objects (brackets inside strings not

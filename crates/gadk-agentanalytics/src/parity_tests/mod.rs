@@ -14,11 +14,11 @@
 // limitations under the License.
 
 //! Ports of ADK-Go's `plugin/agentanalytics` test files in 7b-1's scope (ledger
-//! `docs/parity/7b-1.md`), 7b-2's (`batch_processor_test.go`, `gcs_offloader_test.go`;
-//! ledger `docs/parity/7b-2.md`) and 7b-3a's (`bigquery_agent_analytics_plugin_test.go`,
+//! ledger 7b-1), 7b-2's (`batch_processor_test.go`, `gcs_offloader_test.go`;
+//! ledger 7b-2) and 7b-3a's (`bigquery_agent_analytics_plugin_test.go`,
 //! `events_test.go`, `late_callbacks_test.go`, `trace_manager_test.go`; ledger
-//! `docs/parity/7b-3a.md`) and 8a's (`doc_test.go`): one module per Go file, named by
-//! `scripts/parity-check`'s `target_name` (`plugin/agentanalytics/views_test.go` →
+//! ledger 7b-3a) and 8a's (`doc_test.go`): one module per Go file, named by
+//! the Go file's path (`plugin/agentanalytics/views_test.go` →
 //! `plugin_agentanalytics_views`), holding `fn test_<snake of TestName>` (`go_test_to_rust`).
 
 mod plugin_agentanalytics_batch_processor;

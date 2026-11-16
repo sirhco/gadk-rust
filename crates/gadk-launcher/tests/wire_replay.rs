@@ -13,11 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Wire, console and CLI replay (spec R18): every fixture `scripts/gen-go-launcher` recorded from
-//! ADK-Go's `full` and `prod` launchers (`testdata/{wire,console,cli}`) is replayed against
-//! gadk-launcher's presets exactly as `scripts/gen-go-launcher/SCENARIO.md` ("Replay") describes,
+//! Wire, console and CLI replay (spec R18): every fixture recorded from ADK-Go's `full` and
+//! `prod` launchers (`testdata/{wire,console,cli}`) is replayed against gadk-launcher's presets,
 //! with the probe's agent, and compared after the normalizations N1–N7 and the fixture's declared
-//! deltas (`<name>.deltas.json`, each citing a `docs/parity/6.md` divergence; format in
+//! deltas (`<name>.deltas.json`, each citing a `testdata/DIVERGENCES.md` divergence; format in
 //! `support::Deltas`).
 //!
 //! Process fixtures run `execute(token, config, args)` with stdin from the fixture, stdout
@@ -29,7 +28,7 @@
 //! The servers whose `api` sub-launcher adds a telemetry layer find the global `tracing`
 //! subscriber this test installs first (a process can have only one, and which server would
 //! install it first is up to the test order), so they log that they keep it: declared in their
-//! startup deltas (ledger: telemetry keeps an existing global subscriber).
+//! startup deltas (divergence: telemetry keeps an existing global subscriber).
 
 #![cfg(all(feature = "full", feature = "prod"))]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -326,11 +325,11 @@ async fn wire_fixtures_replay() {
 }
 
 /// Every deltas file belongs to a fixture, and every divergence it cites is a line of the
-/// ledger's accepted divergences (`docs/parity/6.md`).
+/// accepted divergences (`testdata/DIVERGENCES.md`).
 #[test]
 fn every_delta_cites_a_ledger_divergence() {
     let ledger = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/parity/6.md"),
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/DIVERGENCES.md"),
     )
     .unwrap();
     let divergences: Vec<&str> = ledger
@@ -361,7 +360,7 @@ fn every_delta_cites_a_ledger_divergence() {
                 let text = divergence.as_str().unwrap();
                 assert!(
                     divergences.contains(&text),
-                    "{dir}/{file}: {text:?} is not a divergence line of docs/parity/6.md"
+                    "{dir}/{file}: {text:?} is not a divergence line of testdata/DIVERGENCES.md"
                 );
             }
         }

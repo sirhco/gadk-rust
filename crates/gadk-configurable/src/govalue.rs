@@ -164,7 +164,7 @@ pub fn go_sprint(v: &GoValue) -> String {
 ///
 /// Go orders the types by their `*rtype` addresses, an artifact of the linker; the order
 /// here — `string`, `uint64`, `int`, `float64`, `bool`, `time.Time` — is the one observed in
-/// Go's `adkcli` (and a standalone yaml.v3 program) at `docs/parity/ADK_GO_COMMIT`. Keys that
+/// Go's `adkcli` (and a standalone yaml.v3 program) at ADK-Go `0990f9e`. Keys that
 /// cannot occur in a yaml.v3 map (sequences, maps) sort last.
 fn go_fmtsort_interface_cmp(a: &GoValue, b: &GoValue) -> Ordering {
     // Go: internal/fmtsort/sort.go compare (reflect.Interface)
@@ -337,7 +337,7 @@ mod tests {
     }
 
     /// Go's `fmt.Sprint` of the yaml.v3-decoded mapping (captured from Go's `adkcli` as the
-    /// McpToolset `server_params.args[0]` error, at `docs/parity/ADK_GO_COMMIT`): nil, then
+    /// McpToolset `server_params.args[0]` error, at ADK-Go `0990f9e`): nil, then
     /// strings, uint64, int (numeric: 9 before 10), float64 (NaN, -Inf first), bool, time.Time.
     #[test]
     fn go_sprint_orders_interface_keys_like_fmtsort() {

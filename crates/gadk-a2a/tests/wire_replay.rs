@@ -13,10 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Wire replay (spec R14): replays the ADK-Go A2A wire fixtures of `scripts/gen-go-a2a`
-//! (`testdata/wire/<scenario>.json`) against gadk-a2a, both directions, exactly as
-//! `scripts/gen-go-a2a/SCENARIO.md` ("Normalization", "Replay") describes, and compares after
-//! applying the scenario's declared deltas (`testdata/wire/<scenario>.deltas.json`).
+//! Wire replay (spec R14): replays the A2A wire fixtures recorded from ADK-Go by the Go probe
+//! (`testdata/wire/<scenario>.json`) against gadk-a2a, both directions, normalized as the probe
+//! recorded them, and compares after applying the scenario's declared deltas
+//! (`testdata/wire/<scenario>.deltas.json`).
 //!
 //! - Server direction: each server unit's requests are sent, raw, to a gadk-a2a
 //!   [`Executor`] behind a2a-rs's JSON-RPC and REST routers (the probe's layout), recorded by
@@ -31,7 +31,7 @@
 //! `unit` is `server.jsonrpc`, `server.rest` or `client.<name>`; `path` a JSON pointer into the
 //! normalized unit whose segments may be `*` (every array element or object member); `fixture`
 //! is Go's value there (absent = Go has no such key) and `actual` gadk-a2a's (absent = gadk-a2a
-//! has no such key); `divergence` cites the `docs/parity/5b.md` line. Each delta must match at
+//! has no such key); `divergence` cites a ledger 5b line. Each delta must match at
 //! least one location, holding exactly `fixture`, or the replay fails.
 
 #![cfg(all(feature = "server", feature = "client"))]

@@ -14,8 +14,8 @@
 // limitations under the License.
 
 //! 7b-2 test support (feature `testutil`): the in-process BigQuery Write fake
-//! ([`fake_write_server`]) and the probe's *row specs* (`scripts/gen-go-agentanalytics`
-//! `SCENARIO.md` § 7b-2 fixture formats → Row specs) as [`Row`]s.
+//! ([`fake_write_server`]) and the Go probe's *row specs* (the fixtures' row format) as
+//! [`Row`]s.
 
 use serde_json::Value;
 

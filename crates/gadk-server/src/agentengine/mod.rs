@@ -22,7 +22,7 @@
 
 pub(crate) mod controller;
 pub(crate) mod encode;
-// Generated (`scripts/gen-go-agentengine --shapes`); its own fixed layout, diffed by check-fixtures.sh.
+// Generated from ADK-Go by the Go probe; its own fixed layout.
 #[rustfmt::skip]
 pub(crate) mod encode_shapes;
 pub(crate) mod metadata;

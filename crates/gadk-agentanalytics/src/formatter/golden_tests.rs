@@ -14,7 +14,7 @@
 // limitations under the License.
 
 //! Golden tests of the formatter against the Go probe's `tests/fixtures/formatter/` corpus
-//! (`scripts/gen-go-agentanalytics`, formats in its `SCENARIO.md`). The parts collector,
+//! (recorded from ADK-Go). The parts collector,
 //! summaries and the `redact = false` entry points are crate-internal, so these run as unit
 //! tests; `tests/golden_formatter.rs` checks the public `smart_truncate` /
 //! `format_content_parts` (redaction on) and the redaction corpus's `SmartTruncate100`.

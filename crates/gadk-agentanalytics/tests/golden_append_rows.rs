@@ -16,7 +16,7 @@
 //! Golden tests of `write/stream_writer.rs`'s AppendRows requests (ADK-Go
 //! `plugin/agentanalytics/batch_processor.go` `newAppendRowsRequestLocked`,
 //! `serializedRequestSize`, `streamWriterTraceIDForVersion`) against the
-//! `scripts/gen-go-agentanalytics` probe fixtures `append_rows/` (spec R5): built from Go's own
+//! Go probe fixtures `append_rows/` (spec R5): built from Go's own
 //! writer schema and batch bytes with the probe's trace id, a request encodes to Go's bytes
 //! exactly (so its size is Go's `serializedRequestSize`); with gadk's trace id the size moves
 //! by the trace id's length only; built from Rust's schema and record batch it decodes to the

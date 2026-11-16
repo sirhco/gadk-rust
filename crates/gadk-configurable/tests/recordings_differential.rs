@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Differential tests against the Go probe's recording corpus (`tests/fixtures/`, written by
-//! `scripts/gen-go-configurable`): Rust record bytes equal Go's, Rust replay decoding equals
+//! Differential tests against the Go probe's recording corpus (`tests/fixtures/`, recorded
+//! from ADK-Go): Rust record bytes equal Go's, Rust replay decoding equals
 //! Go's expected values (or Go's decode error), record → replay round trips, and the type-path
 //! fixup table equals the probe's reflection-generated table.
 //!
@@ -579,7 +579,7 @@ fn render_shapes(fx: &Value) -> String {
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! GENERATED from `tests/fixtures/fixups.json` (the Go probe `scripts/gen-go-configurable`:
+//! GENERATED from `tests/fixtures/fixups.json` (recorded by the Go probe from
 //! yaml.v3's reflection of genai v1.77.0, ADK-Go's `model` and jsonschema-go v0.4.3) by
 //! `tests/recordings_differential.rs` `render_shapes`; do not edit. Regenerate with
 //! `GADK_GONODE_REGEN=1 cargo test -p gadk-configurable --test recordings_differential

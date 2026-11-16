@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `plugin/agentanalytics/trace_manager_test.go` (ledger `docs/parity/7b-3a.md`):
+//! Port of ADK-Go `plugin/agentanalytics/trace_manager_test.go` (ledger 7b-3a):
 //! 245 Go tests. The tests that need no runner (direct trace-manager and plugin-callback tests)
 //! are in [`direct_1`] … [`direct_4`], with their helpers in [`direct_support`]; the
 //! runner-level tests in [`runner_1`] and [`runner_2`], with their helpers in

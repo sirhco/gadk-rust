@@ -15,8 +15,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-//! Every `gadk_genai::` path listed in `docs/parity/genai-inventory.md` exists
-//! (generated from that table).
+//! Every ported `gadk_genai::` path of the `google.golang.org/genai` surface exists.
 
 #[test]
 fn inventory_types_exist() {

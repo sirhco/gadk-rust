@@ -14,7 +14,7 @@
 // limitations under the License.
 
 //! Ports of ADK-Go `tool/exampletool/vertexai/vertexai_test.go`, driven by the Go-generated
-//! goldens in `testdata/example_store/` (`scripts/gen-go-8b`): each golden holds the
+//! goldens in `testdata/example_store/`: each golden holds the
 //! `SearchExamplesRequest` Go built, the response its fake returned (protojson, enum numbers)
 //! and the examples Go mapped it to (`json.Marshal`).
 
