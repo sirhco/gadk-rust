@@ -33,8 +33,13 @@ pub struct FirestoreConfig {
     pub project: String,
     /// The database ID (`(default)` by default).
     pub database: String,
-    /// A document path (even number of segments, e.g. `envs/prod`) under which the `prompts`
-    /// collection lives; `None` or empty for the database root.
+    /// A document path (even number of segments, each `[A-Za-z0-9._-]+` and not `.` / `..`,
+    /// e.g. `envs/prod`) under which the `prompts` collection lives; `None` or empty for the
+    /// database root.
+    ///
+    /// Every registry refresh reads every prompt and every version under the root. With an
+    /// empty root the versions query scans every `versions` collection in the database (other
+    /// data's included, billed before it is filtered out), so prefer a dedicated non-empty root.
     pub root: Option<String>,
     /// `scheme://host[:port]`; `None` uses `http://{FIRESTORE_EMULATOR_HOST}` when set, else
     /// `https://firestore.googleapis.com`.

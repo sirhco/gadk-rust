@@ -94,17 +94,64 @@ impl Client {
         }
     }
 
-    /// `method` on `{base}{path}` (`path` already URL-escaped), JSON body if any.
+    /// `method` on `{base}{path}` (`path` already URL-escaped), JSON body if any. A non-2xx
+    /// reply is classified for the transactional paths: 404 / `NOT_FOUND` → `NotFound`; 409 /
+    /// `ABORTED` / `FAILED_PRECONDITION` → `Aborted`; anything else → `Http`.
     pub(crate) async fn call(
         &self,
         method: Method,
         path: &str,
         body: Option<Value>,
     ) -> Result<Value, CallError> {
+        match self
+            .send(method, path, body)
+            .await
+            .map_err(CallError::Store)?
+        {
+            Ok(v) => Ok(v),
+            Err((status, text)) => {
+                let code = serde_json::from_slice::<Value>(text.as_bytes())
+                    .ok()
+                    .and_then(|v| {
+                        v.pointer("/error/status")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                    })
+                    .unwrap_or_default();
+                Err(match (status, code.as_str()) {
+                    (404, _) | (_, "NOT_FOUND") => CallError::NotFound,
+                    (409, _) | (_, "ABORTED" | "FAILED_PRECONDITION") => CallError::Aborted,
+                    _ => CallError::Store(StoreError::Http { status, body: text }),
+                })
+            }
+        }
+    }
+
+    /// Like [`call`](Self::call), but every non-2xx reply is `Http { status, body }` with the
+    /// server's body kept (a missing database, a required index, …), for reads that are not
+    /// part of a transaction.
+    pub(crate) async fn call_unclassified(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<Value>,
+    ) -> Result<Value, StoreError> {
+        self.send(method, path, body)
+            .await?
+            .map_err(|(status, body)| StoreError::Http { status, body })
+    }
+
+    /// The decoded 2xx body, or `(status, body)` for a non-2xx reply.
+    async fn send(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<Value>,
+    ) -> Result<Result<Value, (u16, String)>, StoreError> {
         let url = format!("{}{path}", self.base);
         let uri: Uri = url
             .parse()
-            .map_err(|e| CallError::Store(StoreError::Invalid(format!("url {url}: {e}"))))?;
+            .map_err(|e| StoreError::Invalid(format!("url {url}: {e}")))?;
         let bytes = body.map(|b| Bytes::from(b.to_string())).unwrap_or_default();
         let headers = Headers {
             credentials: self.credentials.clone(),
@@ -114,30 +161,18 @@ impl Client {
             .transport
             .send_method(method, &uri, bytes, false, &headers, CallTimeout::None)
             .await
-            .map_err(|e| CallError::Store(StoreError::Io(e.to_string())))?;
+            .map_err(|e| StoreError::Io(e.to_string()))?;
         let RestReply::Read(parts, body) = reply else {
-            return Err(CallError::Store(StoreError::Decode(
-                "unexpected streaming reply".into(),
-            )));
+            return Err(StoreError::Decode("unexpected streaming reply".into()));
         };
-        let status = parts.status.as_u16();
         if parts.status.is_success() {
             return serde_json::from_slice(&body)
-                .map_err(|e| CallError::Store(StoreError::Decode(e.to_string())));
+                .map(Ok)
+                .map_err(|e| StoreError::Decode(e.to_string()));
         }
-        let text = String::from_utf8_lossy(&body).into_owned();
-        let code = serde_json::from_slice::<Value>(&body)
-            .ok()
-            .and_then(|v| {
-                v.pointer("/error/status")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned)
-            })
-            .unwrap_or_default();
-        Err(match (status, code.as_str()) {
-            (404, _) | (_, "NOT_FOUND") => CallError::NotFound,
-            (409, _) | (_, "ABORTED" | "FAILED_PRECONDITION") => CallError::Aborted,
-            _ => CallError::Store(StoreError::Http { status, body: text }),
-        })
+        Ok(Err((
+            parts.status.as_u16(),
+            String::from_utf8_lossy(&body).into_owned(),
+        )))
     }
 }

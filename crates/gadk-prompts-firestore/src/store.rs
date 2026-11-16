@@ -81,13 +81,28 @@ impl FirestoreStore {
     ///
     /// # Errors
     ///
-    /// `Invalid` for an empty project or an odd-segment root; `Io` when Application Default
+    /// `Invalid` for an empty project, or a root with an odd number of segments or a segment
+    /// outside `[A-Za-z0-9._-]+` (or `.` / `..`); `Io` when Application Default
     /// Credentials are needed and cannot be resolved.
     pub fn new(config: FirestoreConfig) -> Result<Self, StoreError> {
         if config.project.is_empty() {
             return Err(StoreError::Invalid("firestore: project is required".into()));
         }
         let root_path = config.root.as_deref().unwrap_or("").trim_matches('/');
+        if !root_path.is_empty()
+            && let Some(bad) = root_path.split('/').find(|seg| {
+                seg.is_empty()
+                    || *seg == "."
+                    || *seg == ".."
+                    || !seg
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+            })
+        {
+            return Err(StoreError::Invalid(format!(
+                "firestore root {root_path:?}: segment {bad:?} must match [A-Za-z0-9._-]+ and not be `.` or `..`"
+            )));
+        }
         if !root_path.is_empty() && !root_path.split('/').count().is_multiple_of(2) {
             return Err(StoreError::Invalid(format!(
                 "firestore root {root_path:?} must be a document path (an even number of segments)"
@@ -198,14 +213,12 @@ impl PromptStore for FirestoreStore {
         let path = format!("{}:runQuery", url_doc(&parent));
         let prompts = self
             .client
-            .call(Method::POST, &path, Some(q("prompts", false)))
-            .await
-            .map_err(|e| self.map("", e))?;
+            .call_unclassified(Method::POST, &path, Some(q("prompts", false)))
+            .await?;
         let versions = self
             .client
-            .call(Method::POST, &path, Some(q("versions", true)))
-            .await
-            .map_err(|e| self.map("", e))?;
+            .call_unclassified(Method::POST, &path, Some(q("versions", true)))
+            .await?;
         let mut snap = PromptSnapshot::default();
         let mut by_doc: BTreeMap<String, String> = BTreeMap::new(); // prompt doc name -> prompt name
         for (doc, fields) in docs(prompts) {

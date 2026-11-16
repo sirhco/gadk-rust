@@ -159,3 +159,55 @@ fn odd_segment_root_is_invalid() {
     let r = FirestoreStore::new(config("http://127.0.0.1:1".into(), Some("envs/prod")));
     assert!(r.is_ok());
 }
+
+#[test]
+fn bad_root_segments_are_invalid() {
+    for root in [
+        "envs/../x",
+        "./prod",
+        "envs/pr od",
+        "envs/pr%2Fod",
+        "envs/pr?od",
+        "envs//prod/x",
+        "envs/prød",
+    ] {
+        let r = FirestoreStore::new(config("http://127.0.0.1:1".into(), Some(root)));
+        assert!(matches!(r, Err(StoreError::Invalid(_))), "{root}");
+    }
+    for root in ["envs/prod", "a.b/c_d-1", "/envs/prod/"] {
+        let r = FirestoreStore::new(config("http://127.0.0.1:1".into(), Some(root)));
+        assert!(r.is_ok(), "{root}");
+    }
+}
+
+#[tokio::test]
+async fn load_all_missing_database_is_http_404_with_body() {
+    let body = r#"{"error":{"code":404,"status":"NOT_FOUND","message":"The database (default) does not exist for project proj"}}"#;
+    let server = FakeServer::always(FakeResponse::json_status(404, body));
+    let s = FirestoreStore::new(config(server.url(), Some("envs/prod"))).unwrap();
+    match s.load_all().await {
+        Err(StoreError::Http {
+            status: 404,
+            body: b,
+        }) => {
+            assert!(b.contains("does not exist"), "{b}");
+        }
+        other => panic!("want Http 404, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn load_all_failed_precondition_is_http_400_with_body() {
+    let body = r#"{"error":{"code":400,"status":"FAILED_PRECONDITION","message":"The query requires an index. You can create it here: https://console.firebase.google.com/x"}}"#;
+    let server = FakeServer::always(FakeResponse::json_status(400, body));
+    let s = FirestoreStore::new(config(server.url(), None)).unwrap();
+    match s.load_all().await {
+        Err(StoreError::Http {
+            status: 400,
+            body: b,
+        }) => {
+            assert!(b.contains("The query requires an index"), "{b}");
+        }
+        other => panic!("want Http 400, got {other:?}"),
+    }
+}

@@ -20,7 +20,6 @@ bytes = { workspace = true }
 chrono = { workspace = true }
 http = { workspace = true }
 serde_json = { workspace = true }
-tokio = { workspace = true }
 
 [dev-dependencies]
 gadk-prompts = { workspace = true, features = ["testsuite"] }
