@@ -17,6 +17,8 @@
 mod commands;
 mod store_url;
 
+pub use store_url::open_store;
+
 use std::io::{Read, Write};
 
 use clap::{Arg, ArgAction, Command};
@@ -123,7 +125,7 @@ pub async fn run(
             .get_one::<String>("store")
             .cloned()
             .ok_or_else(|| StoreError::Invalid("--store is required".into()))?;
-        let store = store_url::open(&url)?;
+        let store = store_url::open_store(&url)?;
         commands::dispatch(&*store, &m, stdin, stdout).await
     }
     .await;
