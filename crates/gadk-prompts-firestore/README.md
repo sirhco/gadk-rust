@@ -48,5 +48,16 @@ reads inside transactions with `batchGet` (the emulator does not answer transact
 single-document GETs):
 
 ```sh
-FIRESTORE_EMULATOR_HOST=localhost:8080 cargo test -p gadk-prompts-firestore --test live -- --ignored
+FIRESTORE_EMULATOR_HOST=localhost:8080 cargo test -p gadk-prompts-firestore --test live live_emulator_contract -- --ignored
 ```
+
+`live_project_contract` runs the same suite against a real project with Application Default
+Credentials (it refuses to run while `FIRESTORE_EMULATOR_HOST` is set;
+`GADK_FIRESTORE_DATABASE` defaults to `(default)`):
+
+```sh
+GADK_FIRESTORE_PROJECT=my-project cargo test -p gadk-prompts-firestore --test live live_project_contract -- --ignored
+```
+
+It leaves documents under `runs/gadk-test-*` (each scenario's root is printed as `root: …`);
+delete them afterwards.
