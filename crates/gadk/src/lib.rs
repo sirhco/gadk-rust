@@ -45,8 +45,8 @@ pub mod agentengine {
 }
 /// The Agent Registry client: list and resolve registered agents, MCP servers and endpoints,
 /// and use them as a remote A2A agent (`remote_agent`, feature `a2a` of the crate) or an MCP
-/// toolset (`mcp_toolset`, feature `mcp`) (feature `agentregistry`, not on by default; re-export
-/// of `gadk-agentregistry`).
+/// toolset (`mcp_toolset`, feature `mcp`). Feature `agentregistry`, not on by default; re-export
+/// of `gadk-agentregistry`.
 #[cfg(feature = "agentregistry")]
 pub use gadk_agentregistry as agentregistry;
 /// Claude models on the Anthropic Messages API and on Vertex AI (feature `anthropic`, not on

@@ -152,5 +152,5 @@ Conventions:
 
 ## License
 
-Apache-2.0. gadk contains code derived from ADK-Go (Apache-2.0) and vendors the ADK web UI and
-googleapis protocol buffers; see [`NOTICE`](NOTICE).
+Apache-2.0. gadk contains code derived from ADK-Go and the Google Gen AI Go SDK (both Apache-2.0)
+and vendors the ADK web UI and googleapis protocol buffers; see [`NOTICE`](NOTICE).

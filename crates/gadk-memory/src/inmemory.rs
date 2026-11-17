@@ -34,8 +34,8 @@ use crate::service::{
 /// The most entries a search returns.
 const MAX_SEARCH_RESULTS: usize = 10;
 
-/// A session bucket within a user scope. The default bucket, for events
-/// added with no session ID, never equals the key of a session, even one whose ID is `""`.
+/// A session bucket within a user scope. The default bucket, for events added with no session
+/// ID, never equals the key of a session, even one whose ID is `""`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum SessionKey {
     Default,
@@ -64,9 +64,9 @@ struct UserMemories {
 }
 
 impl UserMemories {
-    /// Creates bucket `key` if absent. A new bucket
-    /// takes the next position in the session order even when nothing is stored in it, as in
-    /// Python's dict, and replacing a bucket keeps its position.
+    /// Creates bucket `key` if absent. A new bucket takes the next position in the session order
+    /// even when nothing is stored in it, as in Python's dict, and replacing a bucket keeps its
+    /// position.
     fn ensure_bucket(&mut self, key: &SessionKey) -> &mut Vec<StoredValue> {
         if !self.sessions.contains_key(key) {
             self.session_order.push(key.clone());
@@ -121,10 +121,9 @@ impl std::fmt::Debug for InMemoryMemoryService {
     }
 }
 
-/// The stored form of `event`, or `None` for an event that has no
-/// content or no part, which is neither stored nor reserves its ID. An event with parts but no
-/// searchable words, such as a blob-only event, is stored so that its ID blocks later
-/// duplicates; search skips it.
+/// The stored form of `event`, or `None` for an event that has no content or no part, which is
+/// neither stored nor reserves its ID. An event with parts but no searchable words, such as a
+/// blob-only event, is stored so that its ID blocks later duplicates; search skips it.
 fn build_value(event: Event) -> Option<StoredValue> {
     let content = event.response.content.filter(|c| !c.parts.is_empty())?;
 
@@ -277,9 +276,9 @@ impl EventAdder for InMemoryMemoryService {
     }
 }
 
-/// The lowercased `\w+` tokens of the NFC form of `text`, as
-/// adk-python's `_extract_words_lower` does. Combining marks are not word characters, so after
-/// NFC a mark that composes nowhere separates words.
+/// The lowercased `\w+` tokens of the NFC form of `text`, as adk-python's
+/// `_extract_words_lower` does. Combining marks are not word characters, so after NFC a mark that
+/// composes nowhere separates words.
 ///
 /// `to_lowercase` is full Unicode case mapping.
 fn extract_words_lower(text: &str) -> HashSet<String> {
@@ -290,10 +289,10 @@ fn extract_words_lower(text: &str) -> HashSet<String> {
         .collect()
 }
 
-/// The words an event can be matched on, the tokens of
-/// [`extract_words_lower`] plus, for each non-ASCII token, its runs of Latin and of non-Latin
-/// characters. Japanese and Chinese are written without spaces, so in 私はPythonを使う the run
-/// `python` becomes a word of its own.
+/// The words an event can be matched on, the tokens of [`extract_words_lower`]
+/// plus, for each non-ASCII token, its runs of Latin and of non-Latin characters. Japanese and
+/// Chinese are written without spaces, so in 私はPythonを使う the run `python` becomes a word of
+/// its own.
 fn extract_searchable_words(text: &str) -> HashSet<String> {
     let mut words = extract_words_lower(text);
     let mut runs = Vec::new();

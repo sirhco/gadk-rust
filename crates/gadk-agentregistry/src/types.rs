@@ -79,7 +79,7 @@ pub struct Skill {
         skip_serializing_if = "String::is_empty"
     )]
     pub id: String,
-    /// Resource name.
+    /// Skill name.
     #[serde(
         default,
         deserialize_with = "null_default",

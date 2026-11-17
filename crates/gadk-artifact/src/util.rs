@@ -35,8 +35,7 @@ pub fn validation_failed(err: ArtifactError) -> ArtifactError {
     }
 }
 
-/// Whether `file_name` names a user-scoped artifact (it
-/// starts with `user:`).
+/// Whether `file_name` names a user-scoped artifact (it starts with `user:`).
 pub fn file_has_user_namespace(file_name: &str) -> bool {
     file_name.starts_with("user:")
 }

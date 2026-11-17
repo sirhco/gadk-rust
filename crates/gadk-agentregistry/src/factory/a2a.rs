@@ -267,7 +267,7 @@ fn zero_fill(obj: &mut Map<String, Value>, zeros: &[(&str, Value)]) {
     }
 }
 
-/// Converts registry skills as A2A skills (none → empty).
+/// Converts registry skills into A2A skills (none → empty).
 pub(crate) fn to_a2a_skills(skills: &[Skill]) -> Vec<a2a::AgentSkill> {
     skills
         .iter()
