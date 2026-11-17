@@ -13,9 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The periodic metric reader telemetry setup builds (port of ADK-Go
-//! `telemetry/metric_reader.go`): an SDK [`PeriodicReader`] that doesn't export on shutdown and
-//! exports nothing while no instrument has recorded.
+//! The periodic metric reader telemetry setup builds: an SDK [`PeriodicReader`] that doesn't
+//! export on shutdown and exports nothing while no instrument has recorded.
 
 use std::fmt;
 use std::sync::Arc;
@@ -29,9 +28,9 @@ use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
 use opentelemetry_sdk::metrics::reader::MetricReader;
 use opentelemetry_sdk::metrics::{InstrumentKind, PeriodicReader, Pipeline, Temporality};
 
-/// Go `newPeriodicReader`: a reader over an SDK [`PeriodicReader`] which doesn't export on
-/// shutdown, and which exports nothing while no instrument has recorded. `interval` is Go's
-/// `sdkmetric.WithInterval`; `None` keeps the SDK's (`OTEL_METRIC_EXPORT_INTERVAL`, else 60 s).
+/// A reader over an SDK [`PeriodicReader`] which doesn't export on
+/// shutdown, and which exports nothing while no instrument has recorded. `interval` is the
+/// export interval; `None` keeps the SDK's (`OTEL_METRIC_EXPORT_INTERVAL`, else 60 s).
 pub(crate) fn new_periodic_reader<E: PushMetricExporter>(
     exporter: E,
     interval: Option<Duration>,
@@ -41,7 +40,7 @@ pub(crate) fn new_periodic_reader<E: PushMetricExporter>(
         exporter,
         drop_exports: Arc::clone(&drop_exports),
     };
-    // Divergence (ledger 7a): without `interval`, opentelemetry_sdk reads
+    // Without `interval`, opentelemetry_sdk reads
     // `OTEL_METRIC_EXPORT_INTERVAL` from the process environment, not the injected one.
     let mut builder = PeriodicReader::builder(guarded);
     if let Some(interval) = interval {
@@ -64,7 +63,7 @@ thread_local! {
         const { std::cell::Cell::new(0) };
 }
 
-/// Go `noFinalExportReader`: wraps the SDK [`PeriodicReader`] so it doesn't export on shutdown.
+/// Wraps the SDK [`PeriodicReader`] so it doesn't export on shutdown.
 /// Every [`MetricReader`] method delegates to it; the shutdowns set the guarded exporter's flag
 /// first. The exporter is shared through an `Arc<AtomicBool>` because
 /// [`PeriodicReader::builder`] takes ownership of it.
@@ -74,7 +73,7 @@ pub(crate) struct NoFinalExportReader<E: PushMetricExporter> {
     interval: Option<Duration>,
 }
 
-/// The reader's logging view (Go `PeriodicReader.MarshalLog`), the only place its interval shows.
+/// The reader's logging view, the only place its interval shows.
 impl<E: PushMetricExporter> fmt::Debug for NoFinalExportReader<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("NoFinalExportReader")
@@ -111,7 +110,7 @@ impl<E: PushMetricExporter> MetricReader for NoFinalExportReader<E> {
     }
 }
 
-/// Go `guardedExporter`: a wrapper over a [`PushMetricExporter`] that discards an empty
+/// A wrapper over a [`PushMetricExporter`] that discards an empty
 /// collection, and every collection once `drop_exports` is set.
 pub(crate) struct GuardedExporter<E> {
     exporter: E,

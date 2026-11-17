@@ -13,10 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The telemetry error: `Display` is ADK-Go's error text, `%w` chains included.
+//! The telemetry error: `Display` is byte-identical to ADK's telemetry error text, wrapped
+//! error chains included.
 
-/// A telemetry setup or shutdown failure (Go's `error` values from `telemetry`); `Display` is
-/// Go's text.
+/// A telemetry setup or shutdown failure; `Display` is
+/// byte-identical to ADK's telemetry error text.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{0}")]
 pub struct Error(String);

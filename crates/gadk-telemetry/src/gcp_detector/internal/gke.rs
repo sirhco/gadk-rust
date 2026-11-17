@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of `internal/gke.go`: Kubernetes Engine, including the Compute API host type.
+//! Kubernetes Engine, including the Compute API host type.
 
 use gadk_model::gcp_auth::credential_headers;
 use http::HeaderMap;
@@ -23,34 +23,34 @@ use super::detector::{Detector, DetectorError};
 use crate::credentials::find_default_credentials;
 use crate::gcp_detector::metadata::transport_text;
 
-/// Go `k8sServiceHostEnv`.
+/// The environment variable set on Kubernetes pods.
 const K8S_SERVICE_HOST_ENV: &str = "KUBERNETES_SERVICE_HOST";
-/// Go `clusterNameMetadataAttr`.
+/// The metadata attribute holding the cluster name.
 const CLUSTER_NAME_METADATA_ATTR: &str = "cluster-name";
-/// Go `clusterLocationMetadataAttr`.
+/// The metadata attribute holding the cluster location.
 const CLUSTER_LOCATION_METADATA_ATTR: &str = "cluster-location";
 
-/// Go `computeInstancesGetScope`.
+/// The OAuth scope the Compute API `instances.get` call needs.
 pub(super) const COMPUTE_INSTANCES_GET_SCOPE: &str =
     "https://www.googleapis.com/auth/compute.readonly";
 
-/// Go `defaultComputeBaseURL`.
+/// The default Compute API base URL.
 pub(super) const DEFAULT_COMPUTE_BASE_URL: &str = "https://compute.googleapis.com/compute/v1";
 
-/// Go `LocationType`.
+/// Whether a location is a zone or a region.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LocationType {
-    /// Go `UndefinedLocation`.
+    /// The location is neither.
     #[default]
     UndefinedLocation,
-    /// Go `Zone`.
+    /// A zone.
     Zone,
-    /// Go `Region`.
+    /// A region.
     Region,
 }
 
 impl Detector {
-    /// Go `onGKE`: `KUBERNETES_SERVICE_HOST` is set and the `cluster-location` attribute is
+    /// Whether `KUBERNETES_SERVICE_HOST` is set and the `cluster-location` attribute is
     /// readable.
     pub(super) async fn on_gke(&self) -> bool {
         // Check if we are on k8s first.
@@ -65,7 +65,7 @@ impl Detector {
             .is_ok()
     }
 
-    /// Go `GKEHostID`: GCE's host ID.
+    /// The host ID: GCE's host ID.
     ///
     /// # Errors
     ///
@@ -74,7 +74,7 @@ impl Detector {
         self.gce_host_id().await
     }
 
-    /// Go `GKEClusterName`: the `cluster-name` attribute.
+    /// The cluster name: the `cluster-name` attribute.
     ///
     /// # Errors
     ///
@@ -86,11 +86,11 @@ impl Detector {
             .await?)
     }
 
-    /// Go `GKEHostType`: the instance's machine type from the Compute API `instances.get`.
+    /// The host type: the instance's machine type from the Compute API `instances.get`.
     ///
     /// # Errors
     ///
-    /// [`DetectorError`], including Go's `compute instances.get returned <status>`.
+    /// [`DetectorError`], including `compute instances.get returned <status>`.
     pub async fn gke_host_type(&self) -> Result<String, DetectorError> {
         let project_id = self.project_id().await?;
         let zone = self.metadata.zone().await?;
@@ -101,7 +101,7 @@ impl Detector {
         Ok(last_path_segment(&machine_type).to_owned())
     }
 
-    /// Go `computeInstanceMachineType`.
+    /// Fetches the instance's machine type from the Compute API.
     async fn compute_instance_machine_type(
         &self,
         project_id: &str,
@@ -128,8 +128,8 @@ impl Detector {
             .await
             .map_err(|e| DetectorError::Other(transport_text(&url, &e)))?;
         let status = res.status();
-        // Divergence (ledger 7a): the reason is the status code's canonical reason (empty for a
-        // code without one: `499 `); Go's `res.Status` is the server's own reason phrase.
+        // The reason is the status code's canonical reason (empty for a
+        // code without one: `499 `).
         if !status.is_success() {
             return Err(DetectorError::Other(format!(
                 "compute instances.get returned {} {}",
@@ -150,8 +150,7 @@ impl Detector {
         Ok(machine_type)
     }
 
-    /// Go `computeHTTPClient`: the injected client as is, else Go's
-    /// `google.DefaultClient(ctx, computeInstancesGetScope)` — gadk's ADC
+    /// The injected client as is, else gadk's ADC
     /// ([`find_default_credentials`]) whose headers authenticate this request.
     async fn compute_http_client(
         &self,
@@ -172,12 +171,12 @@ impl Detector {
         Ok((reqwest::Client::new(), headers))
     }
 
-    /// Go `GKEAvailabilityZoneOrRegion`: the `cluster-location` attribute and whether it is a
+    /// The `cluster-location` attribute and whether it is a
     /// zone or a region.
     ///
     /// # Errors
     ///
-    /// [`DetectorError`], including Go's `unrecognized format for cluster location: <loc>`.
+    /// [`DetectorError`], including `unrecognized format for cluster location: <loc>`.
     pub async fn gke_availability_zone_or_region(
         &self,
     ) -> Result<(String, LocationType), DetectorError> {
@@ -195,7 +194,7 @@ impl Detector {
     }
 }
 
-/// Go `lastPathSegment`.
+/// The last `/`-separated segment of `s`.
 pub(super) fn last_path_segment(s: &str) -> &str {
     let s = s.trim_end_matches('/');
     match s.rfind('/') {
@@ -204,7 +203,8 @@ pub(super) fn last_path_segment(s: &str) -> &str {
     }
 }
 
-/// Go `url.PathEscape`: every byte but `A-Z a-z 0-9 - _ . ~ $ & + : = @` as uppercase `%XX`.
+/// Percent-escapes a path segment: every byte but `A-Z a-z 0-9 - _ . ~ $ & + : = @` as
+/// uppercase `%XX`.
 fn path_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
@@ -217,14 +217,13 @@ fn path_escape(s: &str) -> String {
     out
 }
 
-/// Go `json.NewDecoder(res.Body).Decode(&struct{ MachineType string \`json:"machineType"\` })`:
-/// the first JSON value's `machineType` (key matched case-insensitively, `null` skipped), with
-/// Go's type-mismatch and EOF texts. Syntax errors carry serde_json's text.
+/// Reads `machineType` from the first JSON value of a response body:
+/// the key is matched case-insensitively, `null` is skipped; the type-mismatch and EOF texts are
+/// byte-identical to ADK's. Syntax errors carry serde_json's text.
 ///
-/// Divergence (ledger 7a): JSON syntax-error texts are serde_json's, not Go's `encoding/json`
-/// `*json.SyntaxError` texts. serde_json's map keeps one value per key (the document's last) and
+/// serde_json's map keeps one value per key (the document's last) and
 /// iterates keys in sorted order, so of keys differing only in case (`MachineType`,
-/// `machineType`) the last in sorted order wins; Go's last in the document does.
+/// `machineType`) the last in sorted order wins.
 fn decode_machine_type(body: &[u8]) -> Result<String, String> {
     let value = match serde_json::Deserializer::from_slice(body)
         .into_iter::<Value>()
@@ -263,7 +262,7 @@ fn decode_machine_type(body: &[u8]) -> Result<String, String> {
     }
 }
 
-/// Go's `UnmarshalTypeError.Value` names.
+/// The JSON type name used in type-mismatch errors.
 fn json_kind(v: &Value) -> &'static str {
     match v {
         Value::Null => "null",

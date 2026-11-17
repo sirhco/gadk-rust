@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The three context types (port of ADK-Go `agent/context.go` and `internal/context`).
+//! The three context types: read-only, invocation and full agent context.
 
 pub mod activation;
 pub mod builder;

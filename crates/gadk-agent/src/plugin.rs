@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Plugins (port of Go `plugin/plugin.go`).
+//! Plugins: a plugin's name, callbacks and close function.
 
 use std::any::Any;
 use std::sync::Arc;
@@ -27,7 +27,7 @@ use crate::callback::{
     OnUserMessageCallback,
 };
 
-/// Go `plugin.Config`: a plugin's name and callbacks.
+/// A plugin's name and callbacks.
 #[derive(Clone, Default)]
 pub struct PluginConfig {
     /// The plugin's name, unique among the registered plugins.
@@ -58,22 +58,21 @@ pub struct PluginConfig {
     pub after_tool_callback: Option<AfterToolCallback>,
     /// See [`OnToolErrorCallback`].
     pub on_tool_error_callback: Option<OnToolErrorCallback>,
-    /// Go `CloseFunc`: called when the plugin manager closes.
+    /// Called when the plugin manager closes.
     pub close: Option<CloseFn>,
-    /// Typed plugin state, read back with [`Plugin::state`] (Go keeps it in the closure's
-    /// receiver and recovers it with a type assertion, e.g. `plugin/agentanalytics`
-    /// `AsBigQueryAgentAnalyticsPlugin`).
+    /// Typed plugin state, read back with [`Plugin::state`] (e.g. the agent-analytics plugin
+    /// keeps its handle here).
     pub state: Option<Arc<dyn Any + Send + Sync>>,
 }
 
-/// Go `plugin.Plugin`.
+/// A plugin: its name, callbacks and typed state.
 #[derive(Clone)]
 pub struct Plugin {
     cfg: Arc<PluginConfig>,
 }
 
 impl Plugin {
-    /// Go `plugin.New` (which never fails): a missing close function becomes a no-op, so `close()`
+    /// Builds a plugin (never fails): a missing close function becomes a no-op, so `close()`
     /// is always `Some`.
     pub fn new(mut cfg: PluginConfig) -> Plugin {
         if cfg.close.is_none() {
@@ -118,7 +117,7 @@ impl Plugin {
         self.cfg.after_agent_callback.clone()
     }
 
-    /// The plugin's on-agent-error callback (Go `Plugin.OnAgentErrorCallback`).
+    /// The plugin's on-agent-error callback.
     pub fn on_agent_error_callback(&self) -> Option<OnAgentErrorCallback> {
         self.cfg.on_agent_error_callback.clone()
     }
@@ -153,7 +152,7 @@ impl Plugin {
         self.cfg.on_tool_error_callback.clone()
     }
 
-    /// The plugin's close function; always `Some` (Go `Plugin.Close`).
+    /// The plugin's close function; always `Some`.
     pub fn close(&self) -> Option<CloseFn> {
         self.cfg.close.clone()
     }

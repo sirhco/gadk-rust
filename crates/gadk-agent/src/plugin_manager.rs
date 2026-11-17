@@ -13,10 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The plugin manager (port of Go `internal/plugininternal/plugin_manager.go`).
+//! The plugin manager: runs plugin callbacks around invocations, agents, models and tools.
 //!
 //! Every `run_*` method visits the plugins in registration order. The first callback error is
-//! returned unchanged (no plugin name), and the first `Some` result short-circuits, as in Go.
+//! returned unchanged (no plugin name), and the first `Some` result short-circuits.
 
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
@@ -34,7 +34,7 @@ use crate::go_fmt::go_quote;
 use crate::plugin::Plugin;
 use crate::tool::Tool;
 
-/// Go `plugininternal.PluginManager`.
+/// The registered plugins and the bound on closing them.
 #[derive(Debug)]
 pub struct PluginManager {
     plugins: Vec<Plugin>,
@@ -42,7 +42,7 @@ pub struct PluginManager {
 }
 
 impl PluginManager {
-    /// Go `NewPluginManager`/`registerPlugin`: fails only on a duplicate plugin name.
+    /// Registers `plugins` in order; fails only on a duplicate plugin name.
     pub fn new(plugins: Vec<Plugin>, close_timeout: Duration) -> Result<Self, AgentError> {
         let mut out: Vec<Plugin> = Vec::with_capacity(plugins.len());
         for p in plugins {
@@ -60,13 +60,13 @@ impl PluginManager {
         })
     }
 
-    /// Go `HasPlugins`: whether any plugin is registered. Go's nil manager is `None` at the call
+    /// Whether any plugin is registered. A missing manager is `None` at the call
     /// site (`pm.is_some_and(|m| m.has_plugins())`).
     pub fn has_plugins(&self) -> bool {
         !self.plugins.is_empty()
     }
 
-    /// Go `RunOnUserMessageCallback`.
+    /// Runs the on-user-message callbacks; the first `Some` content replaces the user message.
     pub async fn run_on_user_message(
         &self,
         ctx: InvocationContext,
@@ -82,7 +82,7 @@ impl PluginManager {
         Ok(None)
     }
 
-    /// Go `RunBeforeRunCallback`.
+    /// Runs the before-run callbacks; the first `Some` content ends the run early.
     pub async fn run_before_run(
         &self,
         ctx: InvocationContext,
@@ -97,7 +97,7 @@ impl PluginManager {
         Ok(None)
     }
 
-    /// Go `RunAfterRunCallback`: every plugin's callback, in order.
+    /// Runs the after-run callbacks: every plugin's callback, in order.
     pub async fn run_after_run(&self, ctx: InvocationContext) {
         for p in &self.plugins {
             if let Some(cb) = p.after_run_callback() {
@@ -106,7 +106,7 @@ impl PluginManager {
         }
     }
 
-    /// Go `RunOnEventCallback`.
+    /// Runs the on-event callbacks; the first `Some` event replaces the event.
     pub async fn run_on_event(
         &self,
         ctx: InvocationContext,
@@ -122,7 +122,7 @@ impl PluginManager {
         Ok(None)
     }
 
-    /// Go `RunBeforeAgentCallback`.
+    /// Runs the before-agent callbacks; the first `Some` content skips the agent run.
     pub async fn run_before_agent(&self, ctx: Context) -> Result<Option<Content>, AgentError> {
         for p in &self.plugins {
             if let Some(cb) = p.before_agent_callback()
@@ -134,7 +134,7 @@ impl PluginManager {
         Ok(None)
     }
 
-    /// Go `RunAfterAgentCallback`.
+    /// Runs the after-agent callbacks; the first `Some` content is returned as the agent's output.
     pub async fn run_after_agent(&self, ctx: Context) -> Result<Option<Content>, AgentError> {
         for p in &self.plugins {
             if let Some(cb) = p.after_agent_callback()
@@ -146,7 +146,7 @@ impl PluginManager {
         Ok(None)
     }
 
-    /// Go `RunOnAgentErrorCallback`: notifies every plugin, in registration order, that `err`
+    /// Notifies every plugin, in registration order, that `err`
     /// escaped `agent`'s run. Best-effort notification: no plugin can suppress the error. A panic
     /// from one callback is caught (and recorded on the current span as `plugin "<name>"
     /// OnAgentErrorCallback panicked: <panic>`), so the remaining callbacks still run.
@@ -164,13 +164,13 @@ impl PluginManager {
                     go_quote(p.name()),
                     panic_text(&*payload)
                 );
-                // Go `trace.SpanFromContext(cctx).RecordError(...)`: an `exception` event.
+                // An `exception` event on the current span.
                 tracing::error!(exception.message = msg.as_str(), "exception");
             }
         }
     }
 
-    /// Go `RunBeforeModelCallback`: the request is threaded through every callback and always
+    /// Runs the before-model callbacks: the request is threaded through every callback and always
     /// handed back.
     pub async fn run_before_model(
         &self,
@@ -191,8 +191,8 @@ impl PluginManager {
         (req, Ok(None))
     }
 
-    /// Go `RunAfterModelCallback`: the response is threaded through every callback (Go passes
-    /// one `*model.LLMResponse` that callbacks may edit in place) and always handed back.
+    /// Runs the after-model callbacks: the response is threaded through every callback (each sees
+    /// the previous callback's response) and always handed back.
     pub async fn run_after_model(
         &self,
         ctx: Context,
@@ -213,7 +213,7 @@ impl PluginManager {
         (resp, Ok(None))
     }
 
-    /// Go `RunOnModelErrorCallback`.
+    /// Runs the on-model-error callbacks; the first `Some` response replaces the failed call.
     pub async fn run_on_model_error(
         &self,
         ctx: Context,
@@ -230,8 +230,8 @@ impl PluginManager {
         Ok(None)
     }
 
-    /// Go `RunBeforeToolCallback`: the arguments are threaded through every callback (Go passes
-    /// one argument map that callbacks may edit in place, e0cbfd30) and always handed back.
+    /// Runs the before-tool callbacks: the arguments are threaded through every callback (each
+    /// sees the previous callback's arguments) and always handed back.
     pub async fn run_before_tool(
         &self,
         ctx: Context,
@@ -255,7 +255,7 @@ impl PluginManager {
         (args, Ok(None))
     }
 
-    /// Go `RunAfterToolCallback`.
+    /// Runs the after-tool callbacks; the first `Some` result replaces the tool's result.
     pub async fn run_after_tool(
         &self,
         ctx: Context,
@@ -281,7 +281,7 @@ impl PluginManager {
         Ok(None)
     }
 
-    /// Go `RunOnToolErrorCallback`.
+    /// Runs the on-tool-error callbacks; the first `Some` result replaces the failed call.
     pub async fn run_on_tool_error(
         &self,
         ctx: Context,
@@ -299,10 +299,10 @@ impl PluginManager {
         Ok(None)
     }
 
-    /// Go `Close`: closes every plugin, collecting `error closing plugin '<name>': <err>`, and
-    /// returns `failed to close plugins: [e1 e2 …]` (Go `%v` of `[]error`). A `close_timeout` above
+    /// Closes every plugin, collecting `error closing plugin '<name>': <err>`, and
+    /// returns `failed to close plugins: [e1 e2 …]`. A `close_timeout` above
     /// zero bounds each close function (an elapsed one records `close timed out after
-    /// {close_timeout:?}`); zero means no bound (Go never applies one).
+    /// {close_timeout:?}`); zero means no bound.
     pub async fn close(&self) -> Result<(), AgentError> {
         let mut errors: Vec<String> = Vec::new();
         for p in &self.plugins {
@@ -332,7 +332,7 @@ impl PluginManager {
     }
 }
 
-/// Go `%v` of a recovered panic value: the `&str` / `String` payload, else a placeholder.
+/// The `&str` / `String` payload of a recovered panic, else a placeholder.
 fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
     if let Some(s) = payload.downcast_ref::<&str>() {
         return (*s).to_owned();

@@ -13,10 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Captures the version of the compiler building gadk-cli, the analogue of Go's
-//! `runtime.Version()` in the builder-image version chain (R5): the second word of
-//! `$RUSTC --version` (e.g. `1.99.1`) becomes `GADK_CLI_RUSTC_VERSION`. A failure leaves it
-//! empty, which the chain rejects as not a version.
+//! Captures the version of the compiler building gadk-cli for the builder-image version chain:
+//! the second word of `$RUSTC --version` (e.g. `1.99.1`) becomes `GADK_CLI_RUSTC_VERSION`. A
+//! failure leaves it empty, which the chain rejects as not a version.
 
 use std::process::Command;
 

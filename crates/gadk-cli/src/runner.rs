@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The process seam (Go `os/exec` as `cmd/adkgo` uses it): [`Cmd`] is Go's `exec.Cmd` with
-//! `exec.Command`'s `LookPath` and `Cmd.String()`; a [`CommandRunner`] starts it. Production
+//! The process seam: [`Cmd`] is a command with its program looked up in `PATH` and a text form;
+//! a [`CommandRunner`] starts it. Production
 //! uses [`TokioRunner`]; tests inject a recording runner, so no test spawns `gcloud` or `cargo`.
 
 use std::fmt;
@@ -27,12 +27,12 @@ use gadk_platform::env::EnvProvider;
 use gadk_platform::{go_path_join, go_quote};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
-/// Go `exec.ErrNotFound`'s text on Unix.
+/// The error text for a program not found in `PATH`, on Unix.
 const ERR_NOT_FOUND: &str = "executable file not found in $PATH";
-/// Go `exec.ErrDot`'s text.
+/// The error text for an executable found relative to the current directory.
 const ERR_DOT: &str = "cannot run executable found relative to current directory";
 
-/// How a child process ended (Go `os.ProcessState`).
+/// How a child process ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Exit {
     /// It exited with this status.
@@ -42,13 +42,13 @@ pub enum Exit {
 }
 
 impl Exit {
-    /// Go `ProcessState.Success()`.
+    /// Whether the child exited with code 0.
     pub fn success(self) -> bool {
         self == Exit::Code(0)
     }
 
-    /// Go's `*exec.ExitError` text (`ProcessState.String()`): `exit status 1`,
-    /// `signal: killed`.
+    /// The error text of a failed exit: `exit status 1` for an exit code,
+    /// `signal: killed` for a signal; the texts match ADK's deploy tool.
     pub fn go_error(self) -> String {
         match self {
             Exit::Code(code) => format!("exit status {code}"),
@@ -57,9 +57,8 @@ impl Exit {
     }
 }
 
-/// Go `syscall.Signal.String()` for the signals a deploy can meet; others are `signal <n>`.
-// Divergence (ledger 6b): Go names every signal of its table and appends ` (core dumped)`;
-// gadk names the common ones and never reports a core dump.
+/// The name of a signal, for the signals a deploy can meet; others are `signal <n>`.
+// Only the common signals are named and a core dump is never reported.
 fn signal_name(sig: i32) -> String {
     let name = match sig {
         1 => "hangup",
@@ -81,8 +80,8 @@ fn signal_name(sig: i32) -> String {
     name.to_string()
 }
 
-/// A finished child's exit and captured output (Go `cmd.Output()` plus the stderr Go keeps in
-/// `ExitError.Stderr`).
+/// A finished child's exit and captured output (including the stderr kept for a failed
+/// exit).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CmdOutput {
     pub exit: Exit,
@@ -90,23 +89,23 @@ pub struct CmdOutput {
     pub stderr: Vec<u8>,
 }
 
-/// Go `exec.Cmd`, the fields `cmd/adkgo` uses.
+/// A command: the fields the deploy commands use.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cmd {
-    /// Go `Cmd.Path`: the program `LookPath` resolved, or the name as given.
+    /// The program that `PATH` lookup resolved, or the name as given.
     pub path: String,
-    /// Go `Cmd.Args`: the name as given, then the arguments.
+    /// The name as given, then the arguments.
     pub args: Vec<String>,
-    /// Go `Cmd.Dir`: the child's working directory; empty for the caller's.
+    /// The child's working directory; empty for the caller's.
     pub dir: String,
-    /// Go `Cmd.Err`: the `LookPath` failure, returned by `Run` without starting anything.
+    /// The `PATH` lookup failure, returned when run without starting anything.
     pub err: Option<String>,
 }
 
 impl Cmd {
-    /// Go `exec.Command(name, args...)`: a `name` without a `/` is resolved with `LookPath`
-    /// through `PATH` as `env` holds it (an empty `PATH` element is `.`; relative elements are
-    /// checked against `cwd` and, as Go reports `ErrDot`, fail).
+    /// A command for `name`: a `name` without a `/` is looked up in
+    /// `PATH` as `env` holds it (an empty `PATH` element is `.`; relative elements are
+    /// checked against `cwd` and fail, as an executable found relative to the current directory).
     pub fn new(env: &dyn EnvProvider, cwd: &Path, name: &str, args: &[&str]) -> Cmd {
         let mut cmd = Cmd {
             path: name.to_string(),
@@ -128,14 +127,14 @@ impl Cmd {
         cmd
     }
 
-    /// Sets Go `Cmd.Dir`.
+    /// Sets the working directory.
     pub fn with_dir(mut self, dir: impl Into<String>) -> Cmd {
         self.dir = dir.into();
         self
     }
 }
 
-/// Go `Cmd.String()`: the resolved path and the arguments, or (when the lookup failed) the
+/// The command's text: the resolved path and the arguments, or (when the lookup failed) the
 /// name as given and the arguments, space-joined.
 impl fmt::Display for Cmd {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -150,14 +149,15 @@ impl fmt::Display for Cmd {
     }
 }
 
-/// Go `exec.LookPath` on Unix (`lp_unix.go`), returning Go's `(path, err)` pair: `err` is the
-/// `*exec.Error` text, and `path` is set with `ErrDot` as Go sets it.
+/// Looks `file` up in `path_var` like a Unix shell, returning the `(path, err)` pair: `err` is
+/// the lookup error text (`exec: "<file>": <reason>`), and `path` is set when the match is found
+/// relative to the current directory.
 fn look_path(path_var: &str, cwd: &Path, file: &str) -> (String, Option<String>) {
     let exec_error = |e: &str| Some(format!("exec: {}: {e}", go_quote(file)));
     if matches!(file, "" | "." | "..") {
         return (String::new(), exec_error(ERR_NOT_FOUND));
     }
-    // Go `filepath.SplitList("")` is empty.
+    // An empty `PATH` has no elements.
     let dirs: Vec<&str> = if path_var.is_empty() {
         Vec::new()
     } else {
@@ -176,7 +176,7 @@ fn look_path(path_var: &str, cwd: &Path, file: &str) -> (String, Option<String>)
     (String::new(), exec_error(ERR_NOT_FOUND))
 }
 
-/// Go `findExecutable`: a non-directory with an execute permission bit.
+/// Whether `p` is a non-directory with an execute permission bit.
 fn is_executable(p: &Path) -> bool {
     let Ok(meta) = std::fs::metadata(p) else {
         return false;
@@ -195,11 +195,11 @@ fn is_executable(p: &Path) -> bool {
     }
 }
 
-/// Starts processes. `Err` is the text of Go's error from starting the child (`Cmd.Err`
+/// Starts processes. `Err` is the text of the error from starting the child (the lookup failure
 /// for a failed lookup, else the spawn failure); a started child that fails is an `Ok` [`Exit`].
 #[async_trait]
 pub trait CommandRunner: Send + Sync {
-    /// Go `cmd.Run()` with `cmd.Stdout`/`cmd.Stderr` set: runs `cmd` to completion with stdin
+    /// Runs `cmd` to completion with stdin
     /// from the null device, copying its output to `stdout` and `stderr` as it arrives.
     async fn run(
         &self,
@@ -240,8 +240,7 @@ impl CommandRunner for TokioRunner {
     ) -> Result<Exit, String> {
         let mut c = TokioRunner::command(cmd)?;
         c.stdout(Stdio::piped()).stderr(Stdio::piped());
-        // Divergence (ledger 6b): a spawn failure other than the lookup reports Rust's
-        // `io::Error` text, not Go's `fork/exec`/`chdir` `*PathError` text.
+        // A spawn failure other than the lookup reports Rust's `io::Error` text.
         let mut child = c.spawn().map_err(|e| e.to_string())?;
         let (out_pipe, err_pipe) = (child.stdout.take(), child.stderr.take());
         let (copied_out, copied_err) =
@@ -263,7 +262,7 @@ impl CommandRunner for TokioRunner {
     }
 }
 
-/// Copies a child pipe to `w` until end of file (Go's `exec.Cmd` copying goroutine).
+/// Copies a child pipe to `w` until end of file.
 async fn copy_to<R: AsyncRead + Unpin>(
     pipe: Option<R>,
     w: &mut (dyn Write + Send),

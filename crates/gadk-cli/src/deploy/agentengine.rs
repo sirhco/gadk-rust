@@ -13,18 +13,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `cmd/adkgo/internal/deploy/agentengine/agentengine.go`:
 //! `gadk deploy agentengine`.
 //!
-//! The flag structs keep Go's shape (`deployAgentEngineFlags` and its nested structs, field
-//! for field in Go's order); gadk's additions (`bin`, `target`) sit after Go's fields. As Go
-//! since #1981, the flags are not printed: `--env` values may be secrets.
+//! The flag structs keep ADK's shape (the nested flag groups, field for field in ADK's order);
+//! gadk's additions (`bin`, `target`) sit after those fields. The flags are not printed:
+//! `--env` values may be secrets.
 //!
-//! `compute_flags` resolves the Cargo target (R4) where Go splits a `main.go` path, and fixes
-//! the archive root (`-d`, else the Cargo workspace root, R9); the derived fields are set as
-//! Go sets them (`execFile` = the binary, `srcBasePath` = the package directory,
-//! `sourceDir` = the absolute archive root). Vertex AI is reached through
-//! `gadk_vertexai::reasoning_engine` with [`Env::vertex`] (R11).
+//! `compute_flags` resolves the Cargo target where ADK splits an entry-point path, and fixes
+//! the archive root (`-d`, else the Cargo workspace root); the derived fields are set as
+//! ADK sets them (`exec_file` = the binary, `src_base_path` = the package directory,
+//! `source_dir` = the absolute archive root). Vertex AI is reached through
+//! `gadk_vertexai::reasoning_engine` with [`Env::vertex`].
 
 use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
@@ -59,22 +58,22 @@ pub(crate) mod tests;
 
 use environment::{EnvVar, deployment_spec, register_environment_flags};
 
-/// Go `agentEngineOperationTimeout`: the bound on waiting for a create/update operation.
+/// The bound on waiting for a create/update operation.
 pub const AGENT_ENGINE_OPERATION_TIMEOUT: Duration = Duration::from_secs(45 * 60);
 
-/// Go `agentEngineCmd.Short`.
+/// The command's short description.
 pub const SHORT: &str = "Deploys the application to Agent Engine.";
-/// Go `agentEngineCmd.Long`.
+/// The command's long description.
 pub const LONG: &str = "Deploys the application to Agent Engine. It creates a source archive, uploads it to create a Reasoning Engine, and cleans up temporary files.";
 
-/// Go `gCloudFlags`.
+/// The gcloud flags.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GCloudFlags {
     pub region: String,
     pub project_name: String,
 }
 
-/// Go `memoryBankFlags`.
+/// The memory bank flags.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MemoryBankFlags {
     pub deploy: bool,
@@ -82,7 +81,7 @@ pub struct MemoryBankFlags {
     pub ttl: GoDuration,
 }
 
-/// Go `agentEngineServiceFlags`. `Debug` shows the `--env` names only: values may be secrets.
+/// The Agent Engine service flags. `Debug` shows the `--env` names only: values may be secrets.
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct AgentEngineServiceFlags {
     pub name: String,
@@ -90,14 +89,14 @@ pub struct AgentEngineServiceFlags {
     pub server_port: i64,
     pub agent_engine_id: String,
     pub memory_bank: MemoryBankFlags,
-    /// `--env` entries, verbatim (Go `env []string`; unvalidated until
+    /// `--env` entries, verbatim (unvalidated until
     /// [`AgentEngineFlags::environment_variables`]).
     pub env: Vec<OsString>,
     /// `--default_env`.
     pub default_env: bool,
     /// The environment [`AgentEngineFlags::compute_flags`] computed.
     pub env_vars: Vec<EnvVar>,
-    /// `--env` or `--default_env` was on the command line (Go: cobra `Changed`): an update
+    /// `--env` or `--default_env` was on the command line: an update
     /// replaces the environment.
     pub update_env: bool,
 }
@@ -131,7 +130,7 @@ impl std::fmt::Debug for AgentEngineServiceFlags {
     }
 }
 
-/// Go `buildFlags`.
+/// The build flags.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BuildFlags {
     pub temp_dir: String,
@@ -141,7 +140,7 @@ pub struct BuildFlags {
     pub archive_path: String,
 }
 
-/// Go `sourceFlags`.
+/// The source flags.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SourceFlags {
     pub src_base_path: String,
@@ -150,22 +149,22 @@ pub struct SourceFlags {
     pub source_dir: String,
 }
 
-/// Go `deployAgentEngineFlags` plus gadk's `--bin` and the resolved Cargo target.
+/// The flags of `gadk deploy agentengine`, plus gadk's `--bin` and the resolved Cargo target.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AgentEngineFlags {
     pub gcloud: GCloudFlags,
     pub agent_engine: AgentEngineServiceFlags,
     pub build: BuildFlags,
     pub source: SourceFlags,
-    /// gadk's `--bin` (not in Go; not printed).
+    /// gadk's `--bin` (not printed).
     pub bin: String,
-    /// The Cargo target `compute_flags` resolved (not in Go; not printed).
+    /// The Cargo target `compute_flags` resolved (not printed).
     pub target: Option<CargoTarget>,
 }
 
-/// Go `agentEngineCmd` with the flags of its `init`, in Go's order, plus gadk's `--bin`.
+/// The `agentengine` command with its flags, in ADK's order, plus gadk's `--bin`.
 /// Positional arguments are collected (not a clap error) so [`validate_args`] can reject them
-/// with cobra's text.
+/// with ADK's text.
 pub fn command() -> Command {
     let cmd = pflag_command("agentengine")
         .about(SHORT)
@@ -180,15 +179,14 @@ pub fn command() -> Command {
             "Temp dir for build, defaults to os.TempDir() if not specified",
         ))
         .arg(int_flag("server_port", None, "8080", "agentEngine server port"))
-        // Divergence (ledger 6b): `-e` names a Cargo package (Go: "Path to an entry point (go 'main')").
+        // `-e` names a Cargo package.
         .arg(string_flag(
             "entry_point_path",
             Some('e'),
             "",
             "Path to the Cargo package of the entry point (its directory or Cargo.toml), defaults to the current directory",
         ))
-        // Divergence (ledger 6b): the archive root defaults to the Cargo workspace root (Go: the
-        // current working directory).
+        // The archive root defaults to the Cargo workspace root.
         .arg(string_flag(
             "source_dir",
             Some('d'),
@@ -219,7 +217,7 @@ pub fn command() -> Command {
             "Time-To-Live for memories",
         ));
     register_environment_flags(cmd)
-        // Divergence (ledger 6b): gadk-only flag selecting the Cargo binary target.
+        // A gadk-only flag selecting the Cargo binary target.
         .arg(string_flag(
             "bin",
             None,
@@ -229,8 +227,8 @@ pub fn command() -> Command {
         .arg(stray_args())
 }
 
-/// Go `agentEngineCmd.Args` (`cobra.ExactArgs(0)`): any positional argument fails with
-/// cobra's `accepts 0 arg(s), received N`, which does not echo the arguments; runs before
+/// Accepts no positional arguments: any positional argument fails with
+/// `accepts 0 arg(s), received N`, which does not echo the arguments; runs before
 /// anything else.
 pub fn validate_args(m: &ArgMatches) -> Result<(), String> {
     let n = m.get_raw(STRAY_ARGS).map_or(0, |v| v.len());
@@ -240,8 +238,8 @@ pub fn validate_args(m: &ArgMatches) -> Result<(), String> {
     Ok(())
 }
 
-/// The flags of a parsed `agentengine` command (Go: cobra binds them into the package
-/// global); the derived fields are empty until [`AgentEngineFlags::compute_flags`].
+/// The flags of a parsed `agentengine` command;
+/// the derived fields are empty until [`AgentEngineFlags::compute_flags`].
 pub fn from_matches(m: &ArgMatches) -> AgentEngineFlags {
     AgentEngineFlags {
         gcloud: GCloudFlags {
@@ -291,7 +289,7 @@ fn relative_to(path: &Path, root: &Path) -> Option<PathBuf> {
     path.strip_prefix(root).ok().map(Path::to_path_buf)
 }
 
-/// Go protojson's `google.protobuf.Duration`: seconds with 0, 3, 6 or 9 fractional digits and
+/// A `google.protobuf.Duration` in its JSON form: seconds with 0, 3, 6 or 9 fractional digits and
 /// an `s` suffix (`86400s`, `1.500s`, `-0.000000001s`).
 fn protojson_duration(d: GoDuration) -> String {
     let (secs, nanos) = (d.0 / 1_000_000_000, d.0 % 1_000_000_000);
@@ -303,8 +301,8 @@ fn protojson_duration(d: GoDuration) -> String {
     format!("{x}s")
 }
 
-/// Go `op.Wait(waitCtx)` under `context.WithTimeout(ctx, agentEngineOperationTimeout)`,
-/// wrapped as `operation failed: %w`.
+/// Waits for the operation, bounded by [`AGENT_ENGINE_OPERATION_TIMEOUT`],
+/// wrapped as `operation failed: <error>`.
 async fn wait_for_operation(client: &ReasoningEngineClient, op: Value) -> Result<Value, String> {
     match tokio::time::timeout(AGENT_ENGINE_OPERATION_TIMEOUT, client.wait(op)).await {
         Ok(Ok(engine)) => Ok(engine),
@@ -313,13 +311,13 @@ async fn wait_for_operation(client: &ReasoningEngineClient, op: Value) -> Result
     }
 }
 
-/// A string field of a protojson message (`""` when absent, as Go's getters).
+/// A string field of a JSON message (`""` when absent).
 fn str_field<'a>(v: &'a Value, name: &str) -> &'a str {
     v.get(name).and_then(Value::as_str).unwrap_or_default()
 }
 
 impl AgentEngineFlags {
-    /// Go `computeFlags` (R9): the environment (validated first, before any other step),
+    /// Computes the derived flags: the environment (validated first, before any other step),
     /// target resolution, the shell-safe checks, the archive root,
     /// the `agentEngine_<local time>__*` temp dir, the derived paths, the display name and the
     /// `--mem_model` prefix. Every check runs before the temp dir is created.
@@ -333,9 +331,8 @@ impl AgentEngineFlags {
                 let orig = self.source.orig_entry_point_path.clone();
                 self.source.entry_point_path = env.abs(&orig).to_string_lossy().into_owned();
 
-                // Divergence (ledger 6b): Go splits the `main.go` path and strips `.go`; gadk
-                // resolves the Cargo package and binary (R4), the binary standing in for Go's
-                // execFile and the package directory for Go's srcBasePath.
+                // Resolves the Cargo package and binary, the binary standing in for `exec_file`
+                // and the package directory for `src_base_path`.
                 let target = resolve(env, &orig, &self.bin).await?;
                 self.source.src_base_path = target.manifest_dir.to_string_lossy().into_owned();
                 if self.build.exec_path.is_empty() {
@@ -349,8 +346,7 @@ impl AgentEngineFlags {
                         go_quote(&orig)
                     ),
                 )?;
-                // Divergence (ledger 6b): the package name reaches the RUN line's `-p` (Go
-                // has no package name).
+                // The package name reaches the RUN line's `-p`.
                 validate_shell_arg_safe(
                     &target.package,
                     &format!(
@@ -360,8 +356,8 @@ impl AgentEngineFlags {
                 )?;
                 validate_shell_arg_safe(&orig, "--entry_point_path")?;
 
-                // Divergence (ledger 6b): the archive root is `-d` or else the Cargo workspace
-                // root (Go: the working directory), and must contain the workspace root,
+                // The archive root is `-d` or else the Cargo workspace
+                // root, and must contain the workspace root,
                 // whose path below it becomes the builder's WORKDIR.
                 let archive_root = if self.source.source_dir.is_empty() {
                     target.workspace_root.clone()
@@ -384,8 +380,7 @@ impl AgentEngineFlags {
                     self.build.temp_dir = env.temp_dir().to_string_lossy().into_owned();
                 }
                 let absp = env.abs(&self.build.temp_dir);
-                // Divergence (ledger 6b): the wrapped error is Rust's `io::Error` text (Go's
-                // is the `*PathError`, e.g. `mkdir <path>: permission denied`).
+                // The wrapped error is Rust's `io::Error` text.
                 let dir = make_temp(&absp, "agentEngine_", env.time.now()).map_err(|e| {
                     format!(
                         "cannot create a temporary sub directory in '{}': {e}",
@@ -427,13 +422,13 @@ impl AgentEngineFlags {
         .await
     }
 
-    /// Go `cleanTemp`.
+    /// Removes the temp dir.
     pub async fn clean_temp(&self, env: &Env) -> Result<(), String> {
         log_start_stop(&env.out, "Cleaning temp", async |p: Printer| {
             p.print(&[&"Clean temp starting with", &self.build.temp_dir]);
-            // Divergence (ledger 6b): the wrapped error is Rust's `io::Error` text.
+            // The wrapped error is Rust's `io::Error` text.
             match fs::remove_dir_all(&self.build.temp_dir) {
-                // Go `os.RemoveAll`: a missing path is not an error.
+                // A missing path is not an error.
                 Err(e) if e.kind() != ErrorKind::NotFound => Err(format!(
                     "failed to clean temp directory {}: {e}",
                     self.build.temp_dir
@@ -444,7 +439,7 @@ impl AgentEngineFlags {
         .await
     }
 
-    /// The directory archived (Go `createArchive`'s `workspaceRoot`): `source_dir` (absolute
+    /// The directory archived: `source_dir` (absolute
     /// after [`compute_flags`](Self::compute_flags)), else the target's workspace root.
     fn archive_root(&self) -> PathBuf {
         if self.source.source_dir.is_empty() {
@@ -457,9 +452,9 @@ impl AgentEngineFlags {
         }
     }
 
-    /// Go `prepareDockerfile` (R10): reads only the receiver (the builder version from the
+    /// Prepares the Dockerfile: reads only the receiver (the builder version from the
     /// target's workspace, `WORKDIR /app/<workspace root below the archive root>`, `-p
-    /// <package> --bin <execFile>`, `EXPOSE`/`CMD` from `server_port`), written with mode 0600.
+    /// <package> --bin <exec_file>`, `EXPOSE`/`CMD` from `server_port`), written with mode 0600.
     pub async fn prepare_dockerfile(&self, env: &Env) -> Result<(), String> {
         log_start_stop(&env.out, "Preparing Dockerfile", async |p: Printer| {
             p.print(&[&"Writing:", &self.build.dockerfile_build_path]);
@@ -478,8 +473,7 @@ impl AgentEngineFlags {
                 self.agent_engine.server_port,
                 r#", "agentengine""#,
             );
-            // Divergence (ledger 6b): the error is Rust's `io::Error` text (Go: the
-            // `*PathError`, `open <path>: …`).
+            // The error is Rust's `io::Error` text.
             OpenOptions::new()
                 .write(true)
                 .create(true)
@@ -492,13 +486,11 @@ impl AgentEngineFlags {
         .await
     }
 
-    /// Go `createArchive` (R10): the sorted tar.gz of the archive root (without `.git`,
+    /// Creates the archive: the sorted tar.gz of the archive root (without `.git`,
     /// `target`, a nested temp dir and the root `Dockerfile`) with the generated `Dockerfile`
     /// last.
-    // Divergence (ledger 6b): Go runs `tar -czf` through LogCommand (a `Running :` line, tar's
-    // own errors); gadk writes the archive in-process (no `Running :` line, gadk's error texts)
-    // and leaves out a root `Dockerfile` of the source, which Go archives before the generated
-    // one (the later entry wins on extraction).
+    // The archive is written in-process (no `Running :` line, gadk's error texts) and leaves
+    // out a root `Dockerfile` of the source, so only the generated one is archived.
     pub async fn create_archive(&self, env: &Env) -> Result<(), String> {
         log_start_stop(&env.out, "Creating source archive", async |p: Printer| {
             let root = self.archive_root();
@@ -531,7 +523,7 @@ impl AgentEngineFlags {
         .await
     }
 
-    /// Go `memoryBankContextSpec` (R12) as a protojson `ReasoningEngineContextSpec`:
+    /// The memory bank context spec as a `ReasoningEngineContextSpec` in JSON form:
     /// `memoryBankConfig.ttlConfig.defaultTtl` = `--mem_ttl`, and
     /// `memoryBankConfig.generationConfig.model` only for a non-empty `--mem_model`.
     pub fn memory_bank_context_spec(&self) -> Value {
@@ -543,7 +535,7 @@ impl AgentEngineFlags {
         json!({"memoryBankConfig": cfg})
     }
 
-    /// Go `aiplatform.NewReasoningEngineClient(ctx, option.WithEndpoint(<region>-aiplatform…))`
+    /// Builds the Reasoning Engine client for the region's Vertex AI endpoint
     /// with [`Env::vertex`]; ADC reads [`Env::env`] unless the options name an environment.
     fn client(&self, env: &Env) -> Result<ReasoningEngineClient, String> {
         let mut opts: ReasoningEngineOptions = env.vertex.clone();
@@ -554,12 +546,11 @@ impl AgentEngineFlags {
             .map_err(|e| format!("cannot create ReasoningEngineClient: {e}"))
     }
 
-    /// The parts of Go's create and update requests read from disk and the server package:
+    /// The parts of the create and update requests read from disk and the server package:
     /// the `sourceCodeSpec` (inline archive, empty `imageSpec`) and the class methods,
-    /// printing `Methods: <json>` as Go does.
+    /// printing `Methods: <json>`.
     fn source_code_spec_and_methods(&self, p: &Printer) -> Result<(Value, Value), String> {
-        // Divergence (ledger 6b): the wrapped error is Rust's `io::Error` text (Go: the
-        // `*PathError`).
+        // The wrapped error is Rust's `io::Error` text.
         let archive = fs::read(&self.build.archive_path)
             .map_err(|e| format!("cannot read archive file: {e}"))?;
         let methods = gadk_server::agentengine::list_class_methods();
@@ -573,7 +564,7 @@ impl AgentEngineFlags {
         Ok((source_code_spec, Value::from(methods)))
     }
 
-    /// Go `gcloudDeployToAgentEngine` (R11 create): `CreateReasoningEngine` under
+    /// Creates the Reasoning Engine: `CreateReasoningEngine` under
     /// `projects/<p>/locations/<r>`, then the operation awaited for at most 45 minutes.
     pub async fn deploy_to_agent_engine(&self, env: &Env) -> Result<(), String> {
         log_start_stop(&env.out, "Deploying to Agent Engine", async |p: Printer| {
@@ -612,8 +603,8 @@ impl AgentEngineFlags {
         .await
     }
 
-    /// Go `gcloudUpdateAgentEngine` (R11 update): `UpdateReasoningEngine` of
-    /// `projects/<p>/locations/<r>/reasoningEngines/<id>` with Go's update mask in protojson
+    /// Updates the Reasoning Engine: `UpdateReasoningEngine` of
+    /// `projects/<p>/locations/<r>/reasoningEngines/<id>` with the update mask in JSON
     /// form (the environment only when [`AgentEngineServiceFlags::update_env`], before the
     /// memory bank's `spec.contextSpec`), then the operation awaited for at most 45 minutes.
     pub async fn update_agent_engine(&self, env: &Env) -> Result<(), String> {
@@ -638,8 +629,8 @@ impl AgentEngineFlags {
             }
             if self.agent_engine.memory_bank.deploy {
                 engine["contextSpec"] = self.memory_bank_context_spec();
-                // Divergence (ledger 6b): Go's mask path `spec.context_spec` is kept (in
-                // protojson form) although `contextSpec` is a top-level ReasoningEngine field.
+                // The mask path `spec.context_spec` is kept (in JSON form) although `contextSpec`
+                // is a top-level ReasoningEngine field.
                 mask.push("spec.contextSpec");
             }
 
@@ -659,7 +650,7 @@ impl AgentEngineFlags {
         .await
     }
 
-    /// Go `deployOnAgentEngine`: compute → Dockerfile → archive → update|deploy → clean,
+    /// Deploys: compute → Dockerfile → archive → update|deploy → clean,
     /// stopping at the first error (the temp dir is kept).
     pub async fn deploy_on_agent_engine(&mut self, env: &Env) -> Result<(), String> {
         self.compute_flags(env).await?;

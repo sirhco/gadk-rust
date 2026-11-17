@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The full agent context used by callbacks, tools and workflow nodes (port of Go `agent.Context`,
-//! `commonContext` in `agent/common_context.go`, and `internal/context/callback_context.go`).
+//! The full agent context used by callbacks, tools and workflow nodes: an invocation context plus
+//! the node, tool and callback fields.
 
 use std::ops::Deref;
 use std::sync::Arc;
@@ -33,7 +33,7 @@ use crate::context::invocation::InvocationContext;
 use crate::error::{AgentError, ToolError};
 use crate::scheduler::DynamicSubScheduler;
 
-/// Go `agent.Context`: an invocation context plus the node, tool and callback fields.
+/// An invocation context plus the node, tool and callback fields.
 #[derive(Clone)]
 pub struct Context {
     pub(crate) ic: InvocationContext,
@@ -53,7 +53,7 @@ impl Context {
         ContextBuilder::new()
     }
 
-    /// Go `callbackContextState`: `get` reads the actions' `state_delta` first, then the session;
+    /// The callback state: `get` reads the actions' `state_delta` first, then the session;
     /// `set` writes the `state_delta` (when actions exist) and the session state.
     pub fn state(&self) -> Arc<dyn State> {
         Arc::new(CallbackState {
@@ -84,7 +84,7 @@ impl Context {
         }
     }
 
-    /// Go `commonContext.SearchMemory`.
+    /// Searches the invocation's memory service.
     pub async fn search_memory(&self, query: &str) -> Result<SearchResponse, AgentError> {
         let Some(m) = self.memory() else {
             return Err(AgentError::other("memory service is not set"));
@@ -97,7 +97,7 @@ impl Context {
         self.inner().tool_confirmation.clone()
     }
 
-    /// Go `commonContext.RequestConfirmation`: records a pending confirmation for the current tool
+    /// Records a pending confirmation for the current tool
     /// call and sets `skip_summarization` so the agent loop halts until the user responds.
     pub fn request_confirmation(
         &self,
@@ -119,7 +119,7 @@ impl Context {
                     payload,
                 },
             );
-            // SkipSummarization stops the agent loop after this tool call (Go comment).
+            // `skip_summarization` stops the agent loop after this tool call.
             a.skip_summarization = true;
         });
         Ok(())
@@ -160,7 +160,7 @@ impl Context {
         &self.ic
     }
 
-    /// Go `WithAgentCancel`: the same fields (the end flag shared) with a child cancel scope over a
+    /// The same fields (the end flag shared) with a child cancel scope over a
     /// child cancellation token.
     pub fn with_agent_cancel(&self) -> (Context, CancelGuard) {
         let scope = CancelScope::child(&self.inner().cancel_scope);
@@ -175,9 +175,8 @@ impl Context {
         )
     }
 
-    /// Go `WithAgentTimeout`: as [`Context::with_agent_cancel`], plus a timer task that cancels the
-    /// child with cause `DeadlineExceeded` after `timeout` (at once for a zero duration, Go
-    /// `WithTimeout(0)`). The timer ends early when the child is cancelled otherwise. Outside a
+    /// As [`Context::with_agent_cancel`], plus a timer task that cancels the
+    /// child with cause `DeadlineExceeded` after `timeout` (at once for a zero duration).
     /// Tokio runtime a non-zero timeout is not enforced (a `tracing::warn!` says so).
     pub fn with_agent_timeout(&self, timeout: Duration) -> (Context, CancelGuard) {
         let (ctx, mut guard) = self.with_agent_cancel();
@@ -206,10 +205,9 @@ impl Context {
         (ctx, guard)
     }
 
-    /// Go `contextPath` (plugin/agentanalytics): this context's workflow node path if non-empty,
-    /// else the path of the context the nearest fresh invocation forked from (Go walks the
-    /// `context.Context` chain through `NewInvocationContext(parentCtx, …)`). [`Context::path`]
-    /// is unchanged.
+    /// The context path used by agent analytics: this context's workflow node path if non-empty,
+    /// else the path of the context the nearest fresh invocation forked from.
+    /// [`Context::path`] is unchanged.
     pub fn context_path(&self) -> String {
         let inner = self.inner();
         if inner.path.is_empty() {
@@ -220,7 +218,7 @@ impl Context {
     }
 }
 
-/// Go `callbackContextState`.
+/// The callback state.
 struct CallbackState {
     actions: Option<Arc<parking_lot::Mutex<EventActions>>>,
     session: Arc<dyn Session>,

@@ -13,11 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `cmd/adkgo/internal/deploy/agentengine/environment.go`: the Agent Engine
-//! deployment environment (`--env NAME=VALUE`, `--default_env`).
+//! The Agent Engine deployment environment (`--env NAME=VALUE`, `--default_env`).
 //!
-//! `--env` values are kept as [`OsString`]s (Go: the argument bytes) so a value that is not
-//! valid UTF-8 reaches [`AgentEngineFlags::environment_variables`] and gets Go's error text.
+//! `--env` values are kept as [`OsString`]s (the argument bytes) so a value that is not
+//! valid UTF-8 reaches [`AgentEngineFlags::environment_variables`] and gets ADK's error text.
 //! No error names an entry's name or value: a malformed entry may hold a secret.
 
 use std::ffi::OsString;
@@ -28,12 +27,12 @@ use serde_json::{Value, json};
 use super::AgentEngineFlags;
 use crate::flags::bool_flag;
 
-/// Go `--env`'s help text.
+/// The help text of `--env`.
 pub const ENV_HELP: &str = "Environment variable NAME=VALUE (repeat --env for each variable). Overrides a default with the same name. On update, replaces the entire environment, including the defaults unless --default_env=false is set.";
-/// Go `--default_env`'s help text.
+/// The help text of `--default_env`.
 pub const DEFAULT_ENV_HELP: &str = "Include GOOGLE_CLOUD_REGION, NUM_WORKERS=1, GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY=true and OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true. Use --default_env=false to omit them. Explicitly setting this flag replaces the environment on update; omit both environment flags to preserve it.";
 
-/// Go `aiplatformpb.EnvVar`: one variable of the deployment environment. `Debug` shows the
+/// One variable of the deployment environment. `Debug` shows the
 /// name only: values may be secrets.
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct EnvVar {
@@ -59,12 +58,11 @@ impl EnvVar {
     }
 }
 
-/// Go `registerEnvironmentFlags`: pflag `StringArrayVar(&env, "env", nil, …)` (repeatable,
+/// Registers the environment flags: `--env` (repeatable,
 /// one value per occurrence, kept verbatim — no comma splitting) and
-/// `BoolVar(&defaultEnv, "default_env", true, …)` (a value only as `--default_env=<v>`).
+/// `--default_env` (default true; a value only as `--default_env=<v>`).
 pub fn register_environment_flags(cmd: Command) -> Command {
-    // The Go CLI uses repeated --env flags rather than Python's agent_config env_vars, as
-    // requested in google/adk-go#848.
+    // Repeated --env flags are used rather than Python's agent_config env_vars.
     cmd.arg(
         Arg::new("env")
             .long("env")
@@ -78,7 +76,7 @@ pub fn register_environment_flags(cmd: Command) -> Command {
     .arg(bool_flag("default_env", true, DEFAULT_ENV_HELP))
 }
 
-/// Go `environmentNamePattern` `^[a-zA-Z_][a-zA-Z0-9_]*$`.
+/// The pattern of an environment variable name: `^[a-zA-Z_][a-zA-Z0-9_]*$`.
 fn is_environment_name(name: &[u8]) -> bool {
     match name.split_first() {
         Some((first, rest)) => {
@@ -90,7 +88,7 @@ fn is_environment_name(name: &[u8]) -> bool {
 }
 
 impl AgentEngineFlags {
-    /// Go `environmentVariables`: validates every `--env` entry (form `NAME=VALUE`, a name
+    /// Validates every `--env` entry (form `NAME=VALUE`, a name
     /// matching `[a-zA-Z_][a-zA-Z0-9_]*`, no repeated name, a valid UTF-8 value), then returns
     /// the defaults not overridden by an entry (when `--default_env`) followed by the entries
     /// in flag order. Errors name the 1-based entry, never its contents.
@@ -144,8 +142,8 @@ impl AgentEngineFlags {
     }
 }
 
-/// The protojson `ReasoningEngineSpec.DeploymentSpec` holding `vars` as `env` (Go
-/// `&DeploymentSpec{Env: vars}`): protojson leaves out an empty list (`{}`) and an empty
+/// The JSON form of the `ReasoningEngineSpec.DeploymentSpec` holding `vars` as `env`:
+/// an empty list is left out (`{}`) and so is an empty
 /// `value`.
 pub fn deployment_spec(vars: &[EnvVar]) -> Value {
     if vars.is_empty() {

@@ -26,10 +26,10 @@ use http::{HeaderMap, HeaderName, HeaderValue};
 use opentelemetry_http::{Bytes, HttpClient, HttpError, Request, Response};
 use tokio::runtime::Handle;
 
-/// Go's OTLP exporters' default request timeout (`otlptracehttp` `DefaultTimeout`).
+/// The default request timeout of OTLP/HTTP exporters.
 ///
-/// Divergence (ledger 7a): every request has this timeout; `OTEL_EXPORTER_OTLP_TIMEOUT` bounds
-/// only opentelemetry-otlp's retry deadline (Go applies it per request).
+/// Every request has this timeout; `OTEL_EXPORTER_OTLP_TIMEOUT` bounds
+/// only opentelemetry-otlp's retry deadline, not each request.
 const EXPORT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// An OTLP exporter HTTP client on gadk's async reqwest stack.
@@ -37,8 +37,7 @@ const EXPORT_TIMEOUT: Duration = Duration::from_secs(10);
 /// The SDK's batch processors export from their own threads through a plain `block_on`, where
 /// no Tokio reactor runs; `send_bytes` therefore spawns each request onto the runtime captured in
 /// [`RuntimeHttpClient::new`] and waits for it. Each request carries the credentials' headers
-/// (fetched per request, Go's `oauth2.Transport`), then the explicit headers (Go's
-/// `otlptracehttp.WithHeaders`), which replace any header of the same name.
+/// (fetched per request), then the explicit headers, which replace any header of the same name.
 #[derive(Clone)]
 pub struct RuntimeHttpClient {
     client: reqwest::Client,

@@ -13,9 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Activation identity: the gadk stand-in for the pointer identity of Go's per-activation
-//! `invocationContext` (ADK-Go `plugin/agentanalytics/trace_manager.go` `activationKey` /
-//! `isActivationOf` compare the `agent.InvocationContext` a callback runs under).
+//! Activation identity: identifies one activation of an invocation context (one end flag), so
+//! callers can tell whether a callback runs under the same activation as an earlier one.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 

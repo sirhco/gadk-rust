@@ -13,19 +13,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Per-invocation teardown registry: the Rust stand-in for Go's synchronous unwinding when a
-//! consumer stops reading early.
+//! Per-invocation teardown registry: lets work started by a component finish when a consumer
+//! stops reading early.
 //!
-//! In ADK-Go a consumer that `break`s out of a run's iterator unwinds every nested iterator on
-//! its own goroutine before the runner's deferred `RunAfterRunCallback` runs: a parallel agent
-//! acknowledges the event the reader stopped on, cancels its branches and waits for each one's
-//! teardown (parallelagent/agent.go:118-142), a workflow scheduler cancels its nodes and drains
-//! until every node goroutine returned (workflow/scheduler.go:560), and `platform.RunTasks`
-//! waits for every tool task (platform/exec.go:68). Dropping a Rust stream cannot wait, so a
-//! component that owns still-running work cancels it plainly (never aborts it) and hands the
+//! A consumer that stops reading a run's event stream early drops the nested streams, but work
+//! they started (a parallel agent's branches, a workflow scheduler's nodes, tool tasks) must
+//! still finish before the runner's after-run callbacks run. Dropping a Rust stream cannot wait,
+//! so a component that owns still-running work cancels it plainly (never aborts it) and hands the
 //! rest of it to [`Teardowns`] as a spawned task ([`InvocationContext::spawn_teardown`] /
 //! [`InvocationContext::register_teardown`]). The runner's deferred after-run callbacks await
-//! [`Teardowns::wait`] first, so the started work finishes before them, as in Go. A context
+//! [`Teardowns::wait`] first, so the started work finishes before them. A context
 //! without a registry (a stream used outside the runner) detaches the work instead: it still
 //! finishes, nobody waits for it.
 

@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The read-only context view and the shared context state (port of Go
-//! `internal/context/readonly_context.go` and the `invocationContext`/`commonContext` fields).
+//! The read-only context view and the shared context state.
 
 use std::any::Any;
 use std::sync::Arc;
@@ -40,8 +39,8 @@ use crate::run_config::run_limits::LlmCallLimiter;
 use crate::scheduler::DynamicSubScheduler;
 use crate::services::{Artifacts, Memory};
 
-/// Invocation-wide values, fixed when the context is built (Go `invocationContext` fields that no
-/// delta changes, plus the runner's `context.Context` values parentmap/runconfig/plugin manager).
+/// Invocation-wide values, fixed when the context is built (the invocation fields that no
+/// delta changes, plus the runner's parent map, run config and plugin manager).
 /// Every derivation shares this `Arc`, so a `with_delta` context keeps the same `llm_call_limiter`.
 pub(crate) struct Shared {
     pub(crate) invocation_id: String,
@@ -53,7 +52,7 @@ pub(crate) struct Shared {
     pub(crate) parent_map: Option<Arc<ParentMap>>,
     pub(crate) session_service: Option<Arc<dyn SessionService>>,
     pub(crate) llm_call_limiter: Option<Arc<LlmCallLimiter>>,
-    /// The engine's per-invocation compaction runtime (Go `compactionctx.ToContext`). Opaque here:
+    /// The engine's per-invocation compaction runtime. Opaque here:
     /// only the engine downcasts it. Every context derived within one invocation shares it.
     pub(crate) compaction: Option<Arc<dyn Any + Send + Sync>>,
     /// The invocation's teardown registry ([`crate::teardown::Teardowns`]); the runner installs
@@ -65,7 +64,7 @@ pub(crate) struct Shared {
 #[derive(Clone)]
 pub(crate) struct ContextInner {
     pub(crate) shared: Arc<Shared>,
-    // Invocation level (Go invocationContext; a delta touching any of these forks `ended`).
+    // Invocation level (a delta touching any of these forks `ended`).
     pub(crate) session: Arc<dyn Session>,
     pub(crate) agent: Arc<dyn Agent>,
     pub(crate) branch: String,
@@ -74,15 +73,15 @@ pub(crate) struct ContextInner {
     pub(crate) ended: Arc<AtomicBool>,
     /// The identity of `ended`: replaced together with it, never without it.
     pub(crate) activation: ActivationId,
-    /// The context's cancel scope (Go its `context.Context` cancellation and cause); its token is
+    /// The context's cancel scope (cancellation and cause); its token is
     /// the context's cancellation token.
     pub(crate) cancel_scope: Arc<CancelScope>,
     pub(crate) bound_modes: BoundModes,
-    /// Go `InvocationContextParams.LiveSessionResumptionHandle`. One slot per invocation, shared by
+    /// The live session resumption handle. One slot per invocation, shared by
     /// every derived context (the live reader and the reconnect loop run on different tasks);
     /// `ContextDelta::fresh_invocation` installs a new empty slot.
     pub(crate) live_handle: Arc<parking_lot::Mutex<String>>,
-    // Node / tool / callback level (Go commonContext).
+    // Node / tool / callback level.
     pub(crate) resumed_inputs: Option<Arc<Map<String, Value>>>,
     pub(crate) actions: Option<Arc<parking_lot::Mutex<EventActions>>>,
     pub(crate) function_call_id: String,
@@ -91,21 +90,21 @@ pub(crate) struct ContextInner {
     pub(crate) run_id: String,
     pub(crate) sub_scheduler: Option<Arc<dyn DynamicSubScheduler>>,
     pub(crate) output_for_ancestors: Option<Vec<String>>,
-    /// Go `contextPath`'s walk past a fresh invocation context: the path of the context a
+    /// The walk past a fresh invocation context: the path of the context a
     /// `fresh_invocation` / `fresh_end_flag` delta forked from (its own path, else its enclosing
     /// path); every other delta copies it unchanged.
     pub(crate) enclosing_path: String,
-    /// Go `plugininternal.WithInheritedPlugins`'s context value: the plugin manager a plugin-less
+    /// The plugin manager a plugin-less
     /// runner started with this context keeps (`None`: no mark, or a cleared one). Every
     /// derivation copies it.
     pub(crate) inherited_plugins: Option<Arc<PluginManager>>,
-    /// Go `utils.WithGraphResumeDone`'s context value (51bc7ec5, #2188): resuming a nested graph
-    /// workflow is done for this context and every context derived from it, so composite agents
-    /// run all their sub-agents. Every derivation copies it.
+    /// The graph-resume-done mark (`InvocationContext::with_graph_resume_done`): resuming a
+    /// nested graph workflow is done for this context and every context derived from it, so
+    /// composite agents run all their sub-agents. Every derivation copies it.
     pub(crate) graph_resume_done: bool,
 }
 
-/// Go `agent.ReadonlyContext`: read-only access to the invocation's values.
+/// Read-only access to the invocation's values.
 #[derive(Clone)]
 pub struct ReadonlyContext {
     pub(crate) inner: Arc<ContextInner>,
@@ -127,13 +126,12 @@ impl ReadonlyContext {
         self.inner.agent.name().to_string()
     }
 
-    /// Go `ReadonlyState()`: the session's state, without the actions overlay.
+    /// The session's state, without the actions overlay.
     pub fn readonly_state(&self) -> Arc<dyn ReadonlyState> {
         Arc::new(SessionReadonlyState(self.inner.session.clone()))
     }
 
-    /// The session's user id, read from the session on every call, never cached (Go
-    /// `IdentityFromContext`'s "read live" rule).
+    /// The session's user id, read from the session on every call, never cached.
     pub fn user_id(&self) -> &str {
         self.inner.session.user_id()
     }
@@ -148,7 +146,7 @@ impl ReadonlyContext {
         self.inner.session.id()
     }
 
-    /// Go `identityOf` (agent/common_context.go:83): the invocation's identity from one
+    /// The invocation's identity from one
     /// `session` read, then one accessor call per field, so the identity cannot be torn.
     pub fn identity(&self) -> Identity {
         let s = self.inner.session.clone();
@@ -164,7 +162,7 @@ impl ReadonlyContext {
         self.inner.branch.clone()
     }
 
-    /// The invocation's cancellation token (Go's embedded `context.Context` cancellation): the
+    /// The invocation's cancellation token: the
     /// same token [`InvocationContext::cancellation_token`](crate::InvocationContext::cancellation_token)
     /// returns, so a toolset's `tools` can stop when the invocation is cancelled.
     pub fn cancellation_token(&self) -> &CancellationToken {
@@ -172,7 +170,7 @@ impl ReadonlyContext {
     }
 }
 
-/// The session's state seen read-only (Go `ReadonlyContext.ReadonlyState`).
+/// The session's state seen read-only.
 pub(crate) struct SessionReadonlyState(pub(crate) Arc<dyn Session>);
 
 impl ReadonlyState for SessionReadonlyState {

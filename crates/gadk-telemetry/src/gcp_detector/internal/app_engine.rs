@@ -13,33 +13,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of `internal/app_engine.go`: App Engine standard and flexible.
+//! App Engine standard and flexible.
 
 use super::detector::{Detector, DetectorError};
 
-/// Go `gaeServiceEnv`.
+/// The environment variable holding the service name.
 const GAE_SERVICE_ENV: &str = "GAE_SERVICE";
-/// Go `gaeVersionEnv`.
+/// The environment variable holding the service version.
 const GAE_VERSION_ENV: &str = "GAE_VERSION";
-/// Go `gaeInstanceEnv`.
+/// The environment variable holding the service instance.
 const GAE_INSTANCE_ENV: &str = "GAE_INSTANCE";
-/// Go `gaeEnv`.
+/// The environment variable holding the App Engine environment.
 const GAE_ENV: &str = "GAE_ENV";
-/// Go `gaeStandard`.
+/// The `GAE_ENV` value of App Engine standard.
 const GAE_STANDARD: &str = "standard";
 
 impl Detector {
-    /// Go `onAppEngineStandard`: `GAE_ENV` is `standard`.
+    /// Whether `GAE_ENV` is `standard`.
     pub(super) fn on_app_engine_standard(&self) -> bool {
         self.os.var(GAE_ENV).is_some_and(|env| env == GAE_STANDARD)
     }
 
-    /// Go `onAppEngine`: `GAE_SERVICE` is set.
+    /// Whether `GAE_SERVICE` is set.
     pub(super) fn on_app_engine(&self) -> bool {
         self.os.var(GAE_SERVICE_ENV).is_some()
     }
 
-    /// Go `AppEngineServiceName`: `GAE_SERVICE`.
+    /// The service name: `GAE_SERVICE`.
     ///
     /// # Errors
     ///
@@ -50,7 +50,7 @@ impl Detector {
             .ok_or(DetectorError::EnvVarNotFound)
     }
 
-    /// Go `AppEngineServiceVersion`: `GAE_VERSION`.
+    /// The service version: `GAE_VERSION`.
     ///
     /// # Errors
     ///
@@ -61,7 +61,7 @@ impl Detector {
             .ok_or(DetectorError::EnvVarNotFound)
     }
 
-    /// Go `AppEngineServiceInstance`: `GAE_INSTANCE`.
+    /// The service instance: `GAE_INSTANCE`.
     ///
     /// # Errors
     ///
@@ -72,7 +72,7 @@ impl Detector {
             .ok_or(DetectorError::EnvVarNotFound)
     }
 
-    /// Go `AppEngineFlexAvailabilityZoneAndRegion`: GCE's zone and region.
+    /// The flex availability zone and region: GCE's zone and region.
     ///
     /// # Errors
     ///
@@ -84,7 +84,7 @@ impl Detector {
         self.gce_availability_zone_and_region().await
     }
 
-    /// Go `AppEngineStandardAvailabilityZone`: the metadata zone.
+    /// The standard availability zone: the metadata zone.
     ///
     /// # Errors
     ///
@@ -93,7 +93,7 @@ impl Detector {
         Ok(self.metadata.zone().await?)
     }
 
-    /// Go `AppEngineStandardCloudRegion`: `FaaSCloudRegion`.
+    /// The standard cloud region: the FaaS cloud region.
     ///
     /// # Errors
     ///

@@ -13,13 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! gadk-telemetry: OpenTelemetry export for gadk (port of ADK-Go's `telemetry` package).
+//! gadk-telemetry: OpenTelemetry export for gadk.
 //!
 //! [`new`] builds the OpenTelemetry SDK tracer, logger and meter providers ([`Providers`]) from
-//! [`TelemetryOption`]s and the environment, as Go's `telemetry.New`: OTLP/HTTP exporters when
+//! [`TelemetryOption`]s and the environment: OTLP/HTTP exporters when
 //! `OTEL_EXPORTER_OTLP_*ENDPOINT` is set, with [`with_otel_to_cloud`] export of traces and
-//! metrics to `telemetry.googleapis.com` and of log records to Cloud Logging, the resource from
-//! Go's default resource, the GCP project and the GCP resource detector ([`gcp_detector`]).
+//! metrics to `telemetry.googleapis.com` and of log records to Cloud Logging, the default
+//! resource, the GCP project and the GCP resource detector ([`gcp_detector`]).
 //! [`Providers::layer`] is the `tracing` layer ([`OtelBridge`]) that exports gadk's ADK spans and
 //! log records through those providers.
 //!

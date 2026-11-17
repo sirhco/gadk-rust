@@ -13,53 +13,53 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of `internal/faas.go`: Cloud Functions, Cloud Run services, jobs and worker pools.
+//! Cloud Functions, Cloud Run services, jobs and worker pools.
 
 use super::detector::{Detector, DetectorError};
 
-/// Go `cloudFunctionsTargetEnv`.
+/// The environment variable set on Cloud Functions.
 const CLOUD_FUNCTIONS_TARGET_ENV: &str = "FUNCTION_TARGET";
-/// Go `cloudRunConfigurationEnv`.
+/// The environment variable set on Cloud Run.
 const CLOUD_RUN_CONFIGURATION_ENV: &str = "K_CONFIGURATION";
-/// Go `cloudRunJobsEnv`.
+/// The environment variable set on Cloud Run jobs.
 const CLOUD_RUN_JOBS_ENV: &str = "CLOUD_RUN_JOB";
-/// Go `faasServiceEnv`.
+/// The environment variable holding the FaaS service name.
 const FAAS_SERVICE_ENV: &str = "K_SERVICE";
-/// Go `faasRevisionEnv`.
+/// The environment variable holding the FaaS revision.
 const FAAS_REVISION_ENV: &str = "K_REVISION";
-/// Go `cloudRunJobExecutionEnv`.
+/// The environment variable holding the Cloud Run job execution.
 const CLOUD_RUN_JOB_EXECUTION_ENV: &str = "CLOUD_RUN_EXECUTION";
-/// Go `cloudRunJobTaskIndexEnv`.
+/// The environment variable holding the Cloud Run job task index.
 const CLOUD_RUN_JOB_TASK_INDEX_ENV: &str = "CLOUD_RUN_TASK_INDEX";
-/// Go `cloudRunWorkerPoolEnv`.
+/// The environment variable set on Cloud Run worker pools.
 const CLOUD_RUN_WORKER_POOL_ENV: &str = "CLOUD_RUN_WORKER_POOL";
-/// Go `cloudRunRevisionEnv`.
+/// The environment variable holding the Cloud Run revision.
 const CLOUD_RUN_REVISION_ENV: &str = "CLOUD_RUN_REVISION";
-/// Go `regionMetadataAttr`.
+/// The metadata attribute holding the region.
 const REGION_METADATA_ATTR: &str = "instance/region";
 
 impl Detector {
-    /// Go `onCloudFunctions`: `FUNCTION_TARGET` is set.
+    /// Whether `FUNCTION_TARGET` is set.
     pub(super) fn on_cloud_functions(&self) -> bool {
         self.os.var(CLOUD_FUNCTIONS_TARGET_ENV).is_some()
     }
 
-    /// Go `onCloudRun`: `K_CONFIGURATION` is set.
+    /// Whether `K_CONFIGURATION` is set.
     pub(super) fn on_cloud_run(&self) -> bool {
         self.os.var(CLOUD_RUN_CONFIGURATION_ENV).is_some()
     }
 
-    /// Go `onCloudRunJob`: `CLOUD_RUN_JOB` is set.
+    /// Whether `CLOUD_RUN_JOB` is set.
     pub(super) fn on_cloud_run_job(&self) -> bool {
         self.os.var(CLOUD_RUN_JOBS_ENV).is_some()
     }
 
-    /// Go `onCloudRunWorkerPool`: `CLOUD_RUN_WORKER_POOL` is set.
+    /// Whether `CLOUD_RUN_WORKER_POOL` is set.
     pub(super) fn on_cloud_run_worker_pool(&self) -> bool {
         self.os.var(CLOUD_RUN_WORKER_POOL_ENV).is_some()
     }
 
-    /// Go `FaaSName`: `K_SERVICE`, else `CLOUD_RUN_JOB`, else `CLOUD_RUN_WORKER_POOL`.
+    /// The FaaS name: `K_SERVICE`, else `CLOUD_RUN_JOB`, else `CLOUD_RUN_WORKER_POOL`.
     ///
     /// # Errors
     ///
@@ -72,7 +72,7 @@ impl Detector {
             .ok_or(DetectorError::EnvVarNotFound)
     }
 
-    /// Go `FaaSVersion`: `CLOUD_RUN_REVISION`, else `K_REVISION`.
+    /// The FaaS version: `CLOUD_RUN_REVISION`, else `K_REVISION`.
     ///
     /// # Errors
     ///
@@ -84,7 +84,7 @@ impl Detector {
             .ok_or(DetectorError::EnvVarNotFound)
     }
 
-    /// Go `CloudRunJobExecution`: `CLOUD_RUN_EXECUTION`.
+    /// The Cloud Run job execution: `CLOUD_RUN_EXECUTION`.
     ///
     /// # Errors
     ///
@@ -95,7 +95,7 @@ impl Detector {
             .ok_or(DetectorError::EnvVarNotFound)
     }
 
-    /// Go `CloudRunJobTaskIndex`: `CLOUD_RUN_TASK_INDEX`.
+    /// The Cloud Run job task index: `CLOUD_RUN_TASK_INDEX`.
     ///
     /// # Errors
     ///
@@ -106,7 +106,7 @@ impl Detector {
             .ok_or(DetectorError::EnvVarNotFound)
     }
 
-    /// Go `FaaSID`: the instance ID.
+    /// The FaaS ID: the instance ID.
     ///
     /// # Errors
     ///
@@ -115,7 +115,7 @@ impl Detector {
         self.instance_id().await
     }
 
-    /// Go `FaaSCloudRegion`: the last path segment of `instance/region`.
+    /// The FaaS cloud region: the last path segment of `instance/region`.
     ///
     /// # Errors
     ///

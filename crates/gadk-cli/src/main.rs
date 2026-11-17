@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The `gadk` binary: Go `cmd/adkgo/adkgo.go` (`main` → `root.Execute()`).
+//! The `gadk` binary: runs the command line through `gadk_cli::run`.
 
 use std::process::ExitCode;
 

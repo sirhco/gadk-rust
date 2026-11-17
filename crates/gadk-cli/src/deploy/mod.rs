@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `cmd/adkgo/internal/deploy` (`deploy.go`): the `deploy` command, with the
-//! `cloudrun` and `agentengine` subcommands each package's `init` adds.
+//! The `deploy` command, with the
+//! `cloudrun` and `agentengine` subcommands each module's `init` adds.
 
 pub mod agentengine;
 pub mod cloudrun;
@@ -23,14 +23,14 @@ use clap::Command;
 
 use crate::flags::{pflag_command, stray_args};
 
-/// Go `DeployCmd.Short`.
+/// The `deploy` command's short description.
 pub const SHORT: &str = "Makes deployment to various platforms easy";
-/// Go `DeployCmd.Long`.
+/// The `deploy` command's long description.
 pub const LONG: &str = "Please see subcommands for details";
 
-/// Go `DeployCmd`: no flags of its own; positional arguments that name no subcommand are
-/// accepted (Go's `RunE` prints help only when there are none). Subcommands are listed in
-/// cobra's sorted order.
+/// The `deploy` command: no flags of its own; positional arguments that name no subcommand are
+/// accepted (it prints help only when there are none). Subcommands are listed in
+/// sorted order.
 pub fn command() -> Command {
     pflag_command("deploy")
         .about(SHORT)

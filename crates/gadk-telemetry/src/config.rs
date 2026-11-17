@@ -13,9 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Telemetry options (port of ADK-Go `telemetry/config.go`): [`TelemetryOption`] values, applied
+//! Telemetry options: [`TelemetryOption`] values, applied
 //! in order to the private [`Config`] — a later option overrides an earlier one and the processor
-//! options accumulate, as Go's functional options do.
+//! options accumulate.
 
 use std::fmt;
 use std::sync::Arc;
@@ -33,14 +33,13 @@ use opentelemetry_sdk::metrics::{InstrumentKind, Pipeline, SdkMeterProvider, Tem
 use opentelemetry_sdk::trace::{SdkTracerProvider, Span, SpanData, SpanProcessor};
 use parking_lot::RwLock;
 
-/// Go `*google.Credentials`: a token source (`None` is allowed, as Go's tests build
-/// `&google.Credentials{ProjectID: …}`) and the project ID found with it.
+/// Google credentials: a token source (`None` is allowed) and the project ID found with it.
 #[derive(Clone, Default)]
 pub struct GoogleCredentials {
-    /// The credentials that authenticate export requests (Go `TokenSource`); `None` sends
+    /// The credentials that authenticate export requests; `None` sends
     /// requests without credential headers.
     pub credentials: Option<Credentials>,
-    /// Go `ProjectID`: the credentials file's `project_id`, the metadata server's project on
+    /// The project ID: the credentials file's `project_id`, the metadata server's project on
     /// GCE, or empty.
     pub project_id: String,
 }
@@ -54,8 +53,8 @@ impl fmt::Debug for GoogleCredentials {
     }
 }
 
-/// One telemetry option (Go `telemetry.Option`), built by the `with_*` functions. Options are
-/// values: cloning one shares its processors and providers, as Go shares the pointers.
+/// One telemetry option, built by the `with_*` functions. Options are
+/// values: cloning one shares its processors and providers.
 #[derive(Clone, Debug)]
 pub struct TelemetryOption(Opt);
 
@@ -76,32 +75,32 @@ enum Opt {
     CloudLoggingStdout,
 }
 
-/// Go `WithOtelToCloud`: enables or disables exporting telemetry to GCP.
+/// Enables or disables exporting telemetry to GCP.
 pub fn with_otel_to_cloud(value: bool) -> TelemetryOption {
     TelemetryOption(Opt::OtelToCloud(value))
 }
 
-/// Go `WithGcpResourceProject`: the `gcp.project_id` resource attribute.
+/// Sets the `gcp.project_id` resource attribute.
 pub fn with_gcp_resource_project(project: impl Into<String>) -> TelemetryOption {
     TelemetryOption(Opt::GcpResourceProject(project.into()))
 }
 
-/// Go `WithGcpQuotaProject`: the quota project for the telemetry export.
+/// Sets the quota project for the telemetry export.
 pub fn with_gcp_quota_project(project_id: impl Into<String>) -> TelemetryOption {
     TelemetryOption(Opt::GcpQuotaProject(project_id.into()))
 }
 
-/// Go `WithResource`: the OTel resource, merged last (its attributes win).
+/// Sets the OTel resource, merged last (its attributes win).
 pub fn with_resource(resource: Resource) -> TelemetryOption {
     TelemetryOption(Opt::Resource(resource))
 }
 
-/// Go `WithGoogleCredentials`: overrides the Application Default Credentials.
+/// Overrides the Application Default Credentials.
 pub fn with_google_credentials(credentials: GoogleCredentials) -> TelemetryOption {
     TelemetryOption(Opt::GoogleCredentials(credentials))
 }
 
-/// Go `WithSpanProcessors`: registers additional span processors (accumulates).
+/// Registers additional span processors (accumulates).
 pub fn with_span_processors(
     processors: impl IntoIterator<Item = Box<dyn SpanProcessor>>,
 ) -> TelemetryOption {
@@ -113,7 +112,7 @@ pub fn with_span_processors(
     ))
 }
 
-/// Go `WithLogRecordProcessors`: registers additional log processors (accumulates).
+/// Registers additional log processors (accumulates).
 pub fn with_log_record_processors(
     processors: impl IntoIterator<Item = Box<dyn LogProcessor>>,
 ) -> TelemetryOption {
@@ -125,23 +124,22 @@ pub fn with_log_record_processors(
     ))
 }
 
-/// Go `WithMetricReaders`: registers an additional metric reader (accumulates). Go's variadic
-/// option is one option per reader here.
+/// Registers an additional metric reader (accumulates); one option per reader.
 pub fn with_metric_reader<R: MetricReader + 'static>(reader: R) -> TelemetryOption {
     TelemetryOption(Opt::MetricReader(SharedMetricReader::new(reader)))
 }
 
-/// Go `WithTracerProvider`: a preconfigured tracer provider, returned as is by [`crate::new`].
+/// A preconfigured tracer provider, returned as is by [`crate::new`].
 pub fn with_tracer_provider(provider: SdkTracerProvider) -> TelemetryOption {
     TelemetryOption(Opt::TracerProvider(provider))
 }
 
-/// Go `WithLoggerProvider`: a preconfigured logger provider, returned as is by [`crate::new`].
+/// A preconfigured logger provider, returned as is by [`crate::new`].
 pub fn with_logger_provider(provider: SdkLoggerProvider) -> TelemetryOption {
     TelemetryOption(Opt::LoggerProvider(provider))
 }
 
-/// Go `WithMeterProvider`: a preconfigured meter provider, returned as is by [`crate::new`].
+/// A preconfigured meter provider, returned as is by [`crate::new`].
 pub fn with_meter_provider(provider: SdkMeterProvider) -> TelemetryOption {
     TelemetryOption(Opt::MeterProvider(provider))
 }
@@ -159,7 +157,7 @@ pub fn with_cloud_logging_stdout() -> TelemetryOption {
     TelemetryOption(Opt::CloudLoggingStdout)
 }
 
-/// Go's unexported `config`.
+/// The private configuration the options build.
 #[derive(Debug, Default)]
 pub(crate) struct Config {
     pub(crate) otel_to_cloud: bool,
@@ -177,8 +175,7 @@ pub(crate) struct Config {
     pub(crate) cloud_logging_stdout: bool,
 }
 
-/// Go `configFromOpts`. No gadk option can fail, so Go's `failed to apply option: %w` never
-/// occurs.
+/// Applies the options in order. No option can fail.
 pub(crate) fn config_from_opts(opts: &[TelemetryOption]) -> Config {
     let mut cfg = Config::default();
     for TelemetryOption(opt) in opts {
@@ -201,8 +198,8 @@ pub(crate) fn config_from_opts(opts: &[TelemetryOption]) -> Config {
     cfg
 }
 
-/// A span processor shared by every clone of the option that registered it (Go shares the
-/// processor pointer). The SDK needs `&mut` only for `set_resource`, at provider build.
+/// A span processor shared by every clone of the option that registered it. The SDK needs `&mut`
+/// only for `set_resource`, at provider build.
 #[derive(Clone, Debug)]
 pub(crate) struct SharedSpanProcessor(Arc<RwLock<Box<dyn SpanProcessor>>>);
 
@@ -286,8 +283,8 @@ impl LogProcessor for SharedLogProcessor {
     }
 }
 
-/// A metric reader shared by every clone of the option that registered it (Go shares the reader
-/// pointer). Every [`MetricReader`] method takes `&self`, so it delegates through the `Arc`.
+/// A metric reader shared by every clone of the option that registered it. Every
+/// [`MetricReader`] method takes `&self`, so it delegates through the `Arc`.
 #[derive(Clone, Debug)]
 pub(crate) struct SharedMetricReader(Arc<dyn MetricReader>);
 

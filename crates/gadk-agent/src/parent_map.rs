@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The agent tree's parent map (port of Go `internal/agent/parentmap/map.go`).
+//! The agent tree's parent map.
 
 use crate::go_fmt::go_quote;
 use std::collections::HashMap;
@@ -22,7 +22,7 @@ use std::sync::Arc;
 use crate::agent::Agent;
 use crate::error::AgentError;
 
-/// Go `parentmap.Map`: child agent name → parent agent, plus the root.
+/// Child agent name → parent agent, plus the root.
 #[derive(Clone, Default)]
 pub struct ParentMap {
     parents: HashMap<String, Arc<dyn Agent>>,
@@ -47,7 +47,7 @@ impl std::fmt::Debug for ParentMap {
 }
 
 impl ParentMap {
-    /// Go `parentmap.New`: at most one parent per agent, names unique across the tree.
+    /// Builds the map: at most one parent per agent, names unique across the tree.
     pub fn new(root: &Arc<dyn Agent>) -> Result<Self, AgentError> {
         let mut parents = HashMap::new();
         let mut seen: HashMap<usize, String> =
@@ -69,8 +69,7 @@ impl ParentMap {
         self.root.clone()
     }
 
-    /// Go `Map.RootAgent`: follow parents from `cur` to the top. Go's nil-`cur` guard has no Rust
-    /// counterpart (the argument is never null).
+    /// Follows parents from `cur` to the top.
     pub fn root_agent(&self, cur: &Arc<dyn Agent>) -> Arc<dyn Agent> {
         let mut cur = cur.clone();
         while let Some(parent) = self.parents.get(cur.name()) {

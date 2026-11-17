@@ -13,19 +13,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of `internal/bms.go`: Bare Metal Solution.
+//! Bare Metal Solution.
 
 use super::detector::{Detector, DetectorError};
 
-/// Go `bmsProjectIDEnv`.
+/// The environment variable holding the project ID.
 const BMS_PROJECT_ID_ENV: &str = "BMS_PROJECT_ID";
-/// Go `bmsRegionEnv`.
+/// The environment variable holding the region.
 const BMS_REGION_ENV: &str = "BMS_REGION";
-/// Go `bmsInstanceIDEnv`.
+/// The environment variable holding the instance ID.
 const BMS_INSTANCE_ID_ENV: &str = "BMS_INSTANCE_ID";
 
 impl Detector {
-    /// Go `onBareMetalSolution`: `BMS_PROJECT_ID`, `BMS_REGION` and `BMS_INSTANCE_ID` all set
+    /// Whether `BMS_PROJECT_ID`, `BMS_REGION` and `BMS_INSTANCE_ID` are all set
     /// and non-empty.
     pub(super) fn on_bare_metal_solution(&self) -> bool {
         [BMS_PROJECT_ID_ENV, BMS_REGION_ENV, BMS_INSTANCE_ID_ENV]
@@ -33,7 +33,7 @@ impl Detector {
             .all(|key| self.os.var(key).is_some_and(|v| !v.is_empty()))
     }
 
-    /// Go `BareMetalSolutionInstanceID`: `BMS_INSTANCE_ID`.
+    /// The instance ID: `BMS_INSTANCE_ID`.
     ///
     /// # Errors
     ///
@@ -44,7 +44,7 @@ impl Detector {
             .ok_or(DetectorError::EnvVarNotFound)
     }
 
-    /// Go `BareMetalSolutionCloudRegion`: `BMS_REGION`.
+    /// The cloud region: `BMS_REGION`.
     ///
     /// # Errors
     ///
@@ -55,7 +55,7 @@ impl Detector {
             .ok_or(DetectorError::EnvVarNotFound)
     }
 
-    /// Go `BareMetalSolutionProjectID`: `BMS_PROJECT_ID`.
+    /// The project ID: `BMS_PROJECT_ID`.
     ///
     /// # Errors
     ///
