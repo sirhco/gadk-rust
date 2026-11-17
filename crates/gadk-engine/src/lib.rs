@@ -14,11 +14,10 @@
 // limitations under the License.
 
 //! gadk-engine: the LLM agent and flow, workflow engine, workflow agents, runner and built-in
-//! tools (port of ADK-Go `agent/llmagent`, `internal/llminternal`, `workflow`, `runner`, …).
+//! tools.
 //!
-//! Dropping a runner stream early follows Go's unwinding rather than aborting: started work
-//! (tool calls, parallel branches, workflow nodes) finishes before the after-run callbacks — see
-//! [`runner::Runner::run`].
+//! Dropping a runner stream early unwinds rather than aborts: started work (tool calls, parallel
+//! branches, workflow nodes) finishes before the after-run callbacks — see [`runner::Runner::run`].
 
 pub mod agents;
 pub mod compactionvalidate;

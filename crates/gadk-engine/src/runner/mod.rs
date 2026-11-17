@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The runner (port of ADK-Go `runner/runner.go`; context compaction is in `compaction`, live mode is in `live`):
-//! [`Runner`], [`RunnerConfig`], [`PluginConfig`], [`RunOptions`].
+//! The runner (context compaction is in `compaction`, live mode is in `live`): [`Runner`],
+//! [`RunnerConfig`], [`PluginConfig`], [`RunOptions`].
 
 pub(crate) mod agent_node;
 pub(crate) mod compaction;
@@ -43,10 +43,10 @@ use crate::llm::state::reveal;
 use find_agent::find_active_task_isolation_scope;
 use run_node::is_llm_agent;
 
-/// Go `plugininternal.BeforeRunReplyKey`: marks a before-run reply in `custom_metadata`.
+/// The `custom_metadata` key that marks an event as a before-run reply.
 pub const BEFORE_RUN_REPLY_KEY: &str = "adk:before_run_reply";
 
-/// Port of Go `runner.Config`.
+/// Configuration for a [`Runner`].
 #[derive(Clone)]
 pub struct RunnerConfig {
     /// The application name sessions are scoped to.
@@ -68,16 +68,15 @@ pub struct RunnerConfig {
     pub auto_create_session: bool,
     /// Clock and ID source.
     pub platform: Platform,
-    /// Context compaction for the sessions this runner drives (Go `Config.Compaction`); `None`
-    /// disables it. A config without a summarizer gets an [`LlmSummarizer`] over the root
-    /// agent's model, which then has to be an LLM agent.
+    /// Context compaction for the sessions this runner drives; `None` disables it. A config without
+    /// a summarizer gets an [`LlmSummarizer`] over the root agent's model, which then has to be an
+    /// LLM agent.
     ///
     /// [`LlmSummarizer`]: gadk_session::compaction::LlmSummarizer
     pub compaction: Option<gadk_session::compaction::Config>,
 }
 
-/// Port of Go `runner.PluginConfig`: the plugins a [`Runner`] applies and how long it waits for
-/// them to close.
+/// The plugins a [`Runner`] applies and how long it waits for them to close.
 #[derive(Clone, Default)]
 pub struct PluginConfig {
     /// The plugins, in registration order.
@@ -86,8 +85,7 @@ pub struct PluginConfig {
     pub close_timeout: Duration,
 }
 
-/// Port of Go `runner.RunOption`s: `WithStateDelta` → `state_delta`, `WithYieldUserMessage` →
-/// `yield_user_message` (honored by the node path only, as in Go).
+/// Per-run options: `state_delta` and `yield_user_message` (honored by the node path only).
 #[derive(Clone, Default)]
 pub struct RunOptions {
     /// State delta attached to the user message event.
@@ -96,8 +94,7 @@ pub struct RunOptions {
     pub yield_user_message: bool,
 }
 
-/// Port of Go `runner.Runner`: runs the agent tree within a session, persisting events and
-/// driving plugins.
+/// Runs the agent tree within a session, persisting events and driving plugins.
 pub struct Runner {
     inner: Arc<RunnerInner>,
 }
@@ -117,7 +114,7 @@ pub(crate) struct RunnerInner {
     compaction: Option<Arc<gadk_session::compaction::Config>>,
 }
 
-/// Go `fmt.Errorf("<context>: %w", err)`.
+/// An error with a context prefix; displays as `<context>: <source>` and keeps the source chain.
 #[derive(Debug)]
 struct Wrapped {
     context: String,
@@ -136,8 +133,8 @@ impl std::error::Error for Wrapped {
     }
 }
 
-/// Go `fmt.Errorf("<context>: %w", err)`: `to_string()` is Go's `err.Error()` and the source chain
-/// stays walkable (Go `errors.Is`).
+/// Wraps `source` with a context prefix: the message is `<context>: <source>` and the source chain
+/// stays walkable.
 pub(crate) fn wrap(
     context: impl Into<String>,
     source: impl Into<Box<dyn std::error::Error + Send + Sync>>,
@@ -148,7 +145,7 @@ pub(crate) fn wrap(
     }))
 }
 
-/// Go `errors.Is(err, agent.ErrLLMCallsLimitExceeded)`.
+/// Whether `err`, or anything in its source chain, is an LLM-calls-limit error.
 fn is_llm_calls_limit(err: &AgentError) -> bool {
     let mut cur: Option<&(dyn std::error::Error + 'static)> = Some(err);
     while let Some(e) = cur {
@@ -163,10 +160,10 @@ fn is_llm_calls_limit(err: &AgentError) -> bool {
     false
 }
 
-/// Port of Go `fromPlugin`: whatever the plugin returns, the framework's compaction record wins.
-/// A replacement also keeps the identity of the event it replaces (Go #2306): its ID, invocation
-/// ID and timestamp, and its author when the replacement names none; its other fields win as
-/// given. The plugin's own copy is never written to (it handed the replacement over by value).
+/// Whatever the plugin returns, the framework's compaction record wins. A replacement also keeps
+/// the identity of the event it replaces: its ID, invocation ID and timestamp, and its author when
+/// the replacement names none; its other fields win as given. The plugin's own copy is never
+/// written to (it handed the replacement over by value).
 pub(crate) fn from_plugin(
     original: Event,
     modified: Option<Event>,
@@ -187,29 +184,28 @@ pub(crate) fn from_plugin(
     out
 }
 
-/// Port of Go `stampTimestamp` (#2091): an event without a timestamp (an agent yielded one built
-/// without `Event::new`, or a plugin left one without it) gets the time the runner received it,
-/// so a stored event never moves the session's last update time back to year 1.
+/// An event without a timestamp (an agent yielded one built without `Event::new`, or a plugin left
+/// one without it) gets the time the runner received it, so a stored event never moves the
+/// session's last update time back to year 1.
 pub(crate) fn stamp_timestamp(ctx: &InvocationContext, event: &mut Event) {
     if event.timestamp == gadk_session::zero_time() {
         event.timestamp = ctx.platform().now();
     }
 }
 
-/// Go `errUserFunctionCall` (#2302): only a model makes function calls, so storing one from a
-/// user message would put a call no model produced into the history.
+/// The error for a user message containing function calls: only a model makes function calls, so
+/// storing one from a user message would put a call no model produced into the history.
 pub(crate) const ERR_USER_FUNCTION_CALL: &str = "user message cannot contain function calls";
 
-/// Go `len(utils.FunctionCalls(content)) > 0`.
+/// Whether the content holds any function call.
 pub(crate) fn has_function_call(content: Option<&Content>) -> bool {
     !crate::tool::utils::function_calls(content).is_empty()
 }
 
-/// Port of Go `asUserContent` (#1877): the inbound message of a run is a user turn whatever role
-/// the caller (or an `on_user_message` plugin) set, so the role becomes `user`. An empty role
-/// would be skipped when the model request is built, and a `model` role would present the
-/// caller's text as the model's own earlier turn. The caller's message is not modified (it is
-/// handed over by value).
+/// The inbound message of a run is a user turn whatever role the caller (or an `on_user_message`
+/// plugin) set, so the role becomes `user`. An empty role would be skipped when the model request
+/// is built, and a `model` role would present the caller's text as the model's own earlier turn.
+/// The caller's message is not modified (it is handed over by value).
 fn as_user_content(msg: Option<Content>) -> Option<Content> {
     msg.map(|mut m| {
         m.role = gadk_genai::ROLE_USER.to_string();
@@ -228,7 +224,7 @@ pub(crate) enum Processed {
 }
 
 impl Runner {
-    /// Port of Go `runner.New`. Go's nil-agent and nil-service checks have no Rust counterpart.
+    /// Builds a runner from `cfg`.
     pub fn new(cfg: RunnerConfig) -> Result<Runner, AgentError> {
         Self::new_with_summarizer_timeout(cfg, compaction::DEFAULT_SUMMARIZER_TIMEOUT)
     }
@@ -264,8 +260,8 @@ impl Runner {
         })
     }
 
-    /// Port of Go `runner.NewInMemory`: in-memory session, artifact and memory services with
-    /// session auto-creation, for local development and tests.
+    /// In-memory session, artifact and memory services with session auto-creation, for local
+    /// development and tests.
     pub fn in_memory(app_name: &str, agent: Arc<dyn Agent>) -> Result<Runner, AgentError> {
         Runner::new(RunnerConfig {
             app_name: app_name.to_string(),
@@ -280,30 +276,29 @@ impl Runner {
         })
     }
 
-    /// Port of Go `(*Runner).Run`: runs the agent for `msg` (`None` is Go's nil message) in the
-    /// session, yielding its events. Dropping the returned stream ends the invocation as Go's
-    /// `break` / cancelled context does:
+    /// Runs the agent for `msg` (`None` for no new message) in the session, yielding its events.
+    /// Dropping the returned stream ends the invocation, depending on where it is dropped:
     ///
-    /// - Dropped at a yield (the consumer stopped reading, Go's `break`): work the run had already
-    ///   started — in-flight tool calls, ParallelAgent branches, workflow node tasks — is
-    ///   finished first (each component cancels it plainly and hands it to the invocation's
+    /// - Dropped at a yield (the consumer stopped reading): work the run had already started
+    ///   (in-flight tool calls, ParallelAgent branches, workflow node tasks) is finished first
+    ///   (each component cancels it plainly and hands it to the invocation's
     ///   [`gadk_agent::Teardowns`]), then the after-run callbacks run on a spawned task with the
     ///   invocation's context still live, and only then is the invocation cancelled.
-    /// - Dropped inside an await (Go's caller cancelling its context): the invocation is
-    ///   cancelled at once; started work still finishes before the after-run callbacks, which
-    ///   see the cancellation.
+    /// - Dropped inside an await (the run was still waiting on a model call, tool or append): the
+    ///   invocation is cancelled at once; started work still finishes before the after-run
+    ///   callbacks, which see the cancellation.
     ///
     /// Started work is never aborted, so a tool that ignores cancellation runs to completion and
-    /// delays the after-run callbacks until it returns, as Go's `RunTasks` waits for it.
+    /// delays the after-run callbacks until it returns.
     ///
-    /// With compaction configured, a sliding-window compaction runs after the invocation's
-    /// events are persisted: inline when the stream ends (its error, if any, is the last item),
-    /// or on a spawned task after the after-run callbacks when the stream is dropped early, in
-    /// which case its error is logged. Dropping the stream does not cancel that task.
+    /// With compaction configured, a sliding-window compaction runs after the invocation's events
+    /// are persisted: inline when the stream ends (its error, if any, is the last item), or on a
+    /// spawned task after the after-run callbacks when the stream is dropped early, in which case
+    /// its error is logged. Dropping the stream does not cancel that task.
     ///
-    /// The stream runs on the consumer's fiber ([`FiberStream::consumer`]: the one current at
-    /// its first poll, else a new root it keeps), as Go's iterator runs on the goroutine that
-    /// ranges over it; the after-run callbacks of a stream dropped early re-enter that fiber.
+    /// The stream runs on the consumer's fiber ([`FiberStream::consumer`]: the one current at its
+    /// first poll, else a new root it keeps); the after-run callbacks of a stream dropped early
+    /// re-enter that fiber.
     pub fn run(
         &self,
         user_id: &str,
@@ -315,15 +310,14 @@ impl Runner {
         self.run_inner(None, user_id, session_id, msg, cfg, opts)
     }
 
-    /// [`Runner::run`] started from a caller's context (Go `(*Runner).Run(ctx, …)`); only the
-    /// context's plugin-inheritance mark is read (Go #1777, [`InvocationContext::with_inherited_plugins`]).
+    /// [`Runner::run`] started from a caller's context; only the context's plugin-inheritance mark
+    /// is read ([`InvocationContext::with_inherited_plugins`]).
     ///
     /// A runner with no plugins of its own, started with a context the agent tool marked, puts the
     /// marked (calling run's) plugin manager in its invocation context, so those plugins also see
-    /// the sub-run's agents, models and tools. Any other runner uses only its own plugins. The
-    /// mark is taken (Go `TakeInheritedPlugins`), so it applies to this runner only. Run-level
-    /// callbacks (`on_user_message`, `before_run`, `on_event`, `after_run`) always stay with this
-    /// runner's own plugins.
+    /// the sub-run's agents, models and tools. Any other runner uses only its own plugins. The mark
+    /// is taken, so it applies to this runner only. Run-level callbacks (`on_user_message`,
+    /// `before_run`, `on_event`, `after_run`) always stay with this runner's own plugins.
     pub fn run_with_context(
         &self,
         ctx: &InvocationContext,
@@ -366,17 +360,17 @@ impl Runner {
         FiberStream::consumer(stream).boxed()
     }
 
-    /// Closes every plugin (Go `PluginManager.Close` via the runner).
+    /// Closes every plugin.
     pub async fn close(&self) -> Result<(), AgentError> {
         self.inner.plugin_manager.close().await
     }
 }
 
 impl RunnerInner {
-    /// Port of Go `(*Runner).withPluginManager` (#1777): the plugin manager the invocation
-    /// context carries (where tools and callbacks look it up). A runner without plugins keeps
-    /// the `inherited` manager (taken from an agent tool's mark) when that one has plugins;
-    /// otherwise this runner's own. Run-level callbacks always use `self.plugin_manager`.
+    /// The plugin manager the invocation context carries (where tools and callbacks look it up). A
+    /// runner without plugins keeps the `inherited` manager (taken from an agent tool's mark) when
+    /// that one has plugins; otherwise this runner's own. Run-level callbacks always use
+    /// `self.plugin_manager`.
     pub(crate) fn with_plugin_manager(
         &self,
         inherited: Option<Arc<PluginManager>>,
@@ -387,9 +381,9 @@ impl RunnerInner {
         }
     }
 
-    /// The agent path's route for a function response (Go #1808, runner.go `run`): the agent that
-    /// made the call the first response in `msg` answers, its branch, and `true`, when that agent
-    /// is in the tree and not in a graph workflow; else the root, `""` and `false`.
+    /// The agent path's route for a function response: the agent that made the call the first
+    /// response in `msg` answers, its branch, and `true`, when that agent is in the tree and not in
+    /// a graph workflow; else the root, `""` and `false`.
     fn route_function_response(
         &self,
         stored: &dyn Session,
@@ -405,8 +399,7 @@ impl RunnerInner {
         (self.root_agent.clone(), String::new(), false)
     }
 
-    /// Port of Go `(*Runner).isInGraphWorkflow`: whether `a` or one of its ancestors is a graph
-    /// workflow agent.
+    /// Whether `a` or one of its ancestors is a graph workflow agent.
     fn is_in_graph_workflow(&self, a: &Arc<dyn Agent>) -> bool {
         let mut cur = Some(a.clone());
         while let Some(x) = cur {
@@ -418,11 +411,10 @@ impl RunnerInner {
         false
     }
 
-    /// Port of Go `(*Runner).getOrCreateSession` (#1899): with auto-create on, the session is
-    /// created when the session ID is empty (the service generates one; services reject an empty
-    /// ID in `get` with a validation error) or when `get` reports [`SessionError::NotFound`]. Any
-    /// other `get` error is returned as is, so a transient storage failure never replaces an
-    /// existing session.
+    /// With auto-create on, the session is created when the session ID is empty (the service
+    /// generates one; services reject an empty ID in `get` with a validation error) or when `get`
+    /// reports [`SessionError::NotFound`]. Any other `get` error is returned as is, so a transient
+    /// storage failure never replaces an existing session.
     ///
     /// [`SessionError::NotFound`]: gadk_session::SessionError::NotFound
     async fn get_or_create_session(
@@ -460,8 +452,7 @@ impl RunnerInner {
         }
     }
 
-    /// Port of Go `(*Runner).run` (runner.go:547-795): an LlmAgent root takes the node path
-    /// ([`run_node::run_node`]); any other root runs directly.
+    /// An LlmAgent root takes the node path ([`run_node::run_node`]); any other root runs directly.
     fn run_stream(
         self: Arc<Self>,
         plugins: Arc<PluginManager>,
@@ -472,8 +463,8 @@ impl RunnerInner {
         opts: RunOptions,
     ) -> EventStream {
         let this = self;
-        // Go: normalized once, so find_agent_to_run, the invocation context and the stored
-        // event all see the same message.
+        // Normalized once, so find_agent_to_run, the invocation context and the stored event all
+        // see the same message.
         let msg = as_user_content(msg);
         Box::pin(async_stream::stream! {
             let stored = match this.get_or_create_session(&user_id, &session_id).await {
@@ -481,7 +472,7 @@ impl RunnerInner {
                 Err(e) => { yield Err(e); return; }
             };
 
-            // Node path: an LlmAgent root (runner.go:581-642).
+            // Node path: an LlmAgent root.
             if is_llm_agent(&*this.root_agent) {
                 let Some(state) = reveal(&*this.root_agent) else {
                     yield Err(AgentError::Config(format!(
@@ -531,16 +522,15 @@ impl RunnerInner {
                 return;
             }
 
-            // Agent path (runner.go:644-794).
+            // Agent path.
             //
-            // A function response goes back to the agent that made the call, on the branch it
-            // ran on (Go #1808; adk-python find_agent_to_run and restore_branch_from_history):
-            // re-running the root would run agents that never saw the call, and they fail on the
-            // unmatched response. A call made inside a graph workflow is the exception: the root
-            // runs. The first response in the message decides the route.
+            // A function response goes back to the agent that made the call, on the branch it ran
+            // on: re-running the root would run agents that never saw the call, and they fail on
+            // the unmatched response. A call made inside a graph workflow is the exception: the
+            // root runs. The first response in the message decides the route.
             let (agent_to_run, branch, routed_to_caller) = this.route_function_response(&*stored, msg.as_ref());
-            // Go #2312: answers to calls from several invocations start a new invocation when
-            // they go back to the calling agent; otherwise the first call's invocation is kept.
+            // Answers to calls from several invocations start a new invocation when they go back to
+            // the calling agent; otherwise the first call's invocation is kept.
             let (mut invocation_id, spans_invocations) =
                 run_node::resolve_invocation_id(Some(&*stored), msg.as_ref());
             if spans_invocations && routed_to_caller {
@@ -624,9 +614,8 @@ impl RunnerInner {
         })
     }
 
-    /// The per-event pipeline of runner.go:747-777 and run_node.go:202-230: clear a
-    /// message-as-output event's output, run `on_event`, restore the compaction record, persist
-    /// unless partial.
+    /// The per-event pipeline shared by both run paths: clear a message-as-output event's output,
+    /// run `on_event`, restore the compaction record, persist unless partial.
     pub(crate) async fn process_event(
         &self,
         ctx: &InvocationContext,
@@ -664,8 +653,7 @@ impl RunnerInner {
         Processed::Event(Box::new(event))
     }
 
-    /// Port of Go `(*Runner).runBeforeRunCallback`: processes and persists a plugin's
-    /// replacement reply. `Ok(None)` means: run the agent.
+    /// Processes and persists a plugin's replacement reply. `Ok(None)` means: run the agent.
     pub(crate) async fn run_before_run_callback(
         &self,
         ctx: &InvocationContext,
@@ -691,7 +679,7 @@ impl RunnerInner {
             .insert(BEFORE_RUN_REPLY_KEY.to_string(), Value::Bool(true));
         stamp_timestamp(ctx, &mut event);
         if !event.response.partial {
-            // Go appends to ctx.Session(); writers always use the unwrapped session.
+            // Writers always use the unwrapped session.
             let session = underlying_session(&ctx.session());
             self.session_service
                 .append_event(&*session, &mut event)
@@ -701,9 +689,8 @@ impl RunnerInner {
         Ok(Some(event))
     }
 
-    /// Port of Go `(*Runner).appendMessageToSession`: runs `on_user_message`, saves inline blobs
-    /// as artifacts when asked, and appends the user event. `None` (Go's nil message) appends
-    /// nothing.
+    /// Runs `on_user_message`, saves inline blobs as artifacts when asked, and appends the user
+    /// event. `None` (no message) appends nothing.
     pub(crate) async fn append_message_to_session(
         &self,
         mut ctx: Context,
@@ -751,7 +738,7 @@ impl RunnerInner {
                 ));
                 replaced = true;
             }
-            // Go mutates the message in place, which the context's UserContent aliases.
+            // The context's user content is replaced with the modified message.
             if replaced {
                 ctx = ctx.with_delta(ContextDelta {
                     user_content: Some(Some(msg.clone())),

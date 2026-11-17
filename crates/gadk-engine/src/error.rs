@@ -13,62 +13,62 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Workflow errors (port of ADK-Go `workflow/errors.go` and the sentinel errors in
-//! `workflow/validation.go`, `workflow/scheduler.go` and `workflow/resume.go`).
+//! Workflow errors: the sentinel kinds, [`WorkflowError`] and the dynamic child failure
+//! [`NodeRunError`].
 
 use std::sync::Arc;
 
 use gadk_agent::AgentError;
 
-/// Port of the ADK-Go workflow sentinel errors (`workflow.Err*`).
+/// The sentinel kinds of [`WorkflowError`].
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkflowErrorKind {
-    /// Go `ErrNodeFailed`.
+    /// A dynamic child node failed.
     NodeFailed,
-    /// Go `ErrNodeInterrupted`.
+    /// A dynamic child node was interrupted.
     NodeInterrupted,
-    /// Go `ErrNodeWaitingForOutput` (wraps `ErrNodeInterrupted`).
+    /// A dynamic child node is waiting for output; also counts as [`Self::NodeInterrupted`].
     NodeWaitingForOutput,
-    /// Go `ErrInvalidRunNodeContext`.
+    /// `RunNode` was called outside a dynamic node.
     InvalidRunNodeContext,
-    /// Go `ErrInvalidRunID`.
+    /// The run id is invalid.
     InvalidRunId,
-    /// Go `ErrParallelHITLUnsupported`.
+    /// Parallel human-in-the-loop interrupts are not supported.
     ParallelHitlUnsupported,
-    /// Go `ErrInputValidation`.
+    /// Node input failed validation.
     InputValidation,
-    /// Output validation failed (no Go sentinel; Go wraps `ErrNodeFailed`, base_node.go).
+    /// Output validation failed; also counts as [`Self::NodeFailed`].
     OutputValidation,
-    /// Go `ErrOutputAlreadyDelegated`.
+    /// The parent already has a `use_as_output` delegate.
     OutputAlreadyDelegated,
-    /// Go `ErrMultipleOutputs`.
+    /// A node produced more than one event carrying an output value.
     MultipleOutputs,
-    /// Go `ErrMultipleRoutingEvents`.
+    /// A node produced more than one event carrying route tags.
     MultipleRoutingEvents,
-    /// Go `ErrMultipleTerminalOutputs`.
+    /// More than one terminal node produced output.
     MultipleTerminalOutputs,
-    /// Go `ErrDuplicateNodeName`.
+    /// Two nodes share a name.
     DuplicateNodeName,
-    /// Go `ErrNoStartNode`.
+    /// The graph has no start node.
     NoStartNode,
-    /// Go `ErrNodePointsToStart`.
+    /// An edge points to the start node.
     NodePointsToStart,
-    /// Go `ErrDuplicateEdge`.
+    /// The same edge was declared twice.
     DuplicateEdge,
-    /// Go `ErrMultipleDefaultRoutes`.
+    /// A node has more than one default route.
     MultipleDefaultRoutes,
-    /// Go `ErrNodesNotReachable`.
+    /// Some nodes are not reachable from the start node.
     NodesNotReachable,
-    /// Go `ErrUnconditionalCycle`.
+    /// The graph has a cycle of unconditional edges.
     UnconditionalCycle,
-    /// Go `ErrSubWorkflowNameCollision`.
+    /// Two sub-workflows share a name.
     SubWorkflowNameCollision,
-    /// Go `ErrUnsupportedFanIn`.
+    /// Fan-in into a node that is not a join node is not supported.
     UnsupportedFanIn,
-    /// Go `ErrInvalidResumeResponse`.
+    /// A resume response does not match the request's schema.
     InvalidResumeResponse,
-    /// Go `ErrNothingToResume`.
+    /// No waiting node matched the supplied resume responses.
     NothingToResume,
     /// Retries were exhausted (Rust-only kind).
     RetryExhausted,
@@ -78,7 +78,7 @@ pub enum WorkflowErrorKind {
     Other,
 }
 
-/// A workflow error: a sentinel kind, Go's full `err.Error()` text, and an optional cause.
+/// A workflow error: a sentinel kind, its full message text, and an optional cause.
 #[derive(Debug, Clone)]
 pub struct WorkflowError {
     kind: WorkflowErrorKind,
@@ -87,7 +87,7 @@ pub struct WorkflowError {
     node_run: Option<NodeRunError>,
 }
 
-/// Port of Go `workflow.NodeRunError`: a dynamic child run failed. `cause: None` is Go's nil `Cause`.
+/// A dynamic child run failed. `cause: None` means the child reported no cause.
 #[derive(Debug, Clone)]
 pub struct NodeRunError {
     /// The child node's name.
@@ -101,8 +101,8 @@ pub struct NodeRunError {
 }
 
 impl WorkflowError {
-    /// A workflow error of `kind` whose text is `message` (Go's full `err.Error()` text, built by the
-    /// caller, e.g. `"<sentinel>: <detail>"` for Go `fmt.Errorf("%w: %s", ErrX, detail)`).
+    /// A workflow error of `kind` whose text is `message`, the full text built by the caller (e.g.
+    /// `"<sentinel text>: <detail>"`).
     pub fn new(kind: WorkflowErrorKind, message: impl Into<String>) -> Self {
         Self {
             kind,
@@ -112,7 +112,7 @@ impl WorkflowError {
         }
     }
 
-    /// Sets the wrapped cause (Go `%w`); the message is unchanged, since the caller already formatted it.
+    /// Sets the wrapped cause; the message is unchanged, since the caller already formatted it.
     pub fn with_source(mut self, source: AgentError) -> Self {
         self.source = Some(Arc::new(source));
         self
@@ -123,7 +123,9 @@ impl WorkflowError {
         self.kind
     }
 
-    /// Go `errors.Is(err, ErrX)` over the `%w` chains of errors.go and base_node.go.
+    /// Whether this error is of `kind`: its own kind, a kind it implies (`NodeWaitingForOutput`
+    /// implies `NodeInterrupted`, `OutputValidation` implies `NodeFailed`), or the same test on the
+    /// wrapped cause.
     pub fn is(&self, kind: WorkflowErrorKind) -> bool {
         self.kind == kind
             || (self.kind == WorkflowErrorKind::NodeWaitingForOutput
@@ -137,7 +139,7 @@ impl WorkflowError {
                 .is_some_and(|w| w.is(kind))
     }
 
-    /// The verbatim Go `.Error()` text of the sentinel for `kind`.
+    /// The message text of the bare sentinel for `kind`.
     pub fn sentinel_text(kind: WorkflowErrorKind) -> &'static str {
         use WorkflowErrorKind as K;
         match kind {
@@ -176,18 +178,19 @@ impl WorkflowError {
         }
     }
 
-    /// The bare sentinel error of `kind` (Go `workflow.ErrX`).
+    /// The bare sentinel error of `kind`, carrying [`Self::sentinel_text`].
     pub fn sentinel(kind: WorkflowErrorKind) -> Self {
         Self::new(kind, Self::sentinel_text(kind))
     }
 
-    /// The wrapped cause (Go `Unwrap`).
+    /// The wrapped cause, if any.
     pub fn cause(&self) -> Option<&AgentError> {
         self.source.as_deref()
     }
 
-    /// Port of Go `&NodeRunError{..}` (`Error`/`Unwrap`): the kind is the cause's workflow kind, else
-    /// `NodeFailed`.
+    /// A dynamic child run failure: the kind is the cause's workflow kind, else `NodeFailed`; the
+    /// message names the child by path (or by name when the path is empty), followed by the cause,
+    /// or `<nil cause>` when there is none.
     pub fn node_run(info: NodeRunError) -> Self {
         // Before any such error can reach a span's `error.type`.
         crate::telemetry::install_go_error_type_resolver();
@@ -213,14 +216,14 @@ impl WorkflowError {
         }
     }
 
-    /// The dynamic child run failure this error reports (Go `errors.As(err, *NodeRunError)`).
+    /// The dynamic child run failure this error reports, if it is one.
     pub fn node_run_error(&self) -> Option<&NodeRunError> {
         self.node_run.as_ref()
     }
 }
 
-/// The Go `%T` of a [`WorkflowError`] reporting a dynamic child run failure
-/// (`*workflow.NodeRunError`); other errors are not named.
+/// The fixed type name reported as a span's `error.type` for a [`WorkflowError`] that reports a
+/// dynamic child run failure (the literal below); other errors are not named.
 pub(crate) fn go_error_type(err: &(dyn std::error::Error + 'static)) -> Option<&'static str> {
     err.downcast_ref::<WorkflowError>()
         .and_then(WorkflowError::node_run_error)

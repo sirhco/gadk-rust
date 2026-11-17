@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go runner/agent_node.go: any agent as a workflow node, forwarding the agent's events.
+//! Any agent as a workflow node, forwarding the agent's events.
 
 use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
@@ -31,8 +31,8 @@ use crate::tool::utils::function_responses;
 use crate::workflow::{Emit, Node, NodeConfig, dynamic_node};
 use crate::{WorkflowError, WorkflowErrorKind};
 
-/// Port of Go runner/agent_node.go `newAgentNode`: wraps any agent as a dynamic workflow node.
-/// HITL rides on `long_running_tool_ids`: the node parks on them and re-runs on resume.
+/// Wraps any agent as a dynamic workflow node. HITL rides on `long_running_tool_ids`: the node
+/// parks on them and re-runs on resume.
 pub(crate) fn new_agent_node(a: Arc<dyn Agent>) -> Arc<dyn Node> {
     // EmitsOwnSpan: the agent's run already emits invoke_agent, so the scheduler must not add a
     // redundant invoke_node wrapper.
@@ -55,7 +55,7 @@ pub(crate) fn new_agent_node(a: Arc<dyn Agent>) -> Arc<dyn Node> {
     )
 }
 
-/// Go `workflow.ErrNodeInterrupted`.
+/// The [`WorkflowErrorKind::NodeInterrupted`] error that parks a node on a long-running call.
 fn node_interrupted() -> AgentError {
     WorkflowError::new(
         WorkflowErrorKind::NodeInterrupted,
@@ -64,7 +64,7 @@ fn node_interrupted() -> AgentError {
     .into()
 }
 
-/// Port of Go runner/agent_node.go `runAgentNodeBody`: one activation of the wrapped agent.
+/// One activation of the wrapped agent.
 async fn run_agent_node_body(
     a: Arc<dyn Agent>,
     ctx: Context,
@@ -84,8 +84,8 @@ async fn run_agent_node_body(
     }
 }
 
-/// Port of Go runner/agent_node.go `runLlmAgentBody`: drives an LlmAgent through
-/// [`run_llm_agent_as_node`] (mode-aware); a long-running call parks the node.
+/// Drives an LLM agent through [`run_llm_agent_as_node`] (mode-aware); a long-running call parks
+/// the node.
 async fn run_llm_agent_body(
     a: Arc<dyn Agent>,
     ctx: Context,
@@ -114,8 +114,7 @@ async fn run_llm_agent_body(
     Ok(last_output)
 }
 
-/// Port of Go runner/agent_node.go `runGenericAgentBody`: forwards events verbatim, parks on
-/// long-running calls, no output.
+/// Forwards events verbatim, parks on long-running calls, no output.
 async fn run_generic_agent_body(
     a: Arc<dyn Agent>,
     ctx: Context,
@@ -144,8 +143,9 @@ async fn run_generic_agent_body(
     Ok(Value::Null)
 }
 
-/// Port of Go runner/agent_node.go `answeredInterrupts`: the long-running interrupt IDs this
-/// turn's function responses answer. `None` is Go's nil map, `Some(empty)` Go's empty map.
+/// The long-running interrupt IDs this turn's function responses answer. `None` when there is no
+/// session or the turn carries no function responses; `Some` of an empty set when none of the
+/// responses answers a long-running call.
 pub(crate) fn answered_interrupts(
     sess: Option<&dyn Session>,
     user_content: Option<&Content>,
@@ -169,8 +169,7 @@ pub(crate) fn answered_interrupts(
     )
 }
 
-/// Port of Go runner/agent_node.go `resumeUserContent`: only the parts whose function response
-/// ID is in `resolved`; `None` when nothing survives.
+/// Only the parts whose function response ID is in `resolved`; `None` when nothing survives.
 pub(crate) fn resume_user_content(
     user_content: Option<&Content>,
     resolved: &BTreeSet<String>,
@@ -195,9 +194,8 @@ pub(crate) fn resume_user_content(
     })
 }
 
-/// Port of Go runner/agent_node.go `newAgentContext`: overrides Agent and UserContent and resets
-/// Path, RunID and OutputForAncestors for the fresh activation; the node's sub-scheduler is
-/// carried over unchanged.
+/// Overrides the agent and user content and resets the path, run id and output-for-ancestors for
+/// the fresh activation; the node's sub-scheduler is carried over unchanged.
 fn new_agent_context(
     ctx: &Context,
     a: Arc<dyn Agent>,
@@ -215,10 +213,10 @@ fn new_agent_context(
     .clone()
 }
 
-/// Port of Go runner/agent_node.go `inputToUserContent`. Go's `*genai.Content` case is a
-/// Content-shaped object (keys only "parts" (an array) and optionally "role") that deserializes
-/// as Content, passed through unchanged; anything else that is not a string is its Go
-/// `json.Marshal` text.
+/// The user content for a node input. A string becomes a user text turn; a Content-shaped object
+/// (keys only "parts" (an array) and optionally "role") that deserializes as [`Content`] is passed
+/// through unchanged; anything else is its JSON text from [`go_json_marshal`] (sorted keys, no
+/// whitespace, `<`, `>` and `&` escaped). `null` and the empty string give `None`.
 fn input_to_user_content(input: &Value) -> Option<Content> {
     match input {
         Value::Null => None,
