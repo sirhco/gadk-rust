@@ -20,13 +20,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-//! Port of yaml.v3 v3.0.1 `readerc.go`: input decoding (UTF-8 / UTF-16 BOM detection), raw
-//! and working buffer refill, reader errors.
+//! Input decoding (UTF-8 / UTF-16 BOM detection), raw and working buffer refill, reader errors.
 //!
-//! Go's buffers are slices with a fixed capacity (`raw_buffer` 512 bytes, `buffer` 1536 bytes)
-//! whose length moves; here they are `Vec`s whose length follows Go's slice length, and Go's
-//! `cap(...)` is the `INPUT_RAW_BUFFER_SIZE` / `INPUT_BUFFER_SIZE` constant. Indexing past the
-//! length panics in both languages.
+//! The buffers have a fixed capacity (`raw_buffer` 512 bytes, `buffer` 1536 bytes, the
+//! `INPUT_RAW_BUFFER_SIZE` / `INPUT_BUFFER_SIZE` constants) and a moving length: they are `Vec`s
+//! whose length is the amount of valid data. Indexing past the length panics.
 
 use crate::yamlh::{
     INPUT_BUFFER_SIZE, INPUT_RAW_BUFFER_SIZE, YamlEncoding, YamlErrorType, YamlParser,
@@ -39,7 +37,6 @@ fn yaml_parser_set_reader_error(
     offset: usize,
     value: isize,
 ) -> bool {
-    // Go: readerc.go yaml_parser_set_reader_error
     parser.error = YamlErrorType::Reader;
     parser.problem = problem.to_string();
     parser.problem_offset = offset;
@@ -55,7 +52,6 @@ const BOM_UTF16BE: &[u8] = b"\xfe\xff";
 /// Determine the input stream encoding by checking the BOM symbol. If no BOM is found, the
 /// UTF-8 encoding is assumed. Return true on success, false on failure.
 fn yaml_parser_determine_encoding(parser: &mut YamlParser<'_>) -> bool {
-    // Go: readerc.go yaml_parser_determine_encoding
     // Ensure that we had enough bytes in the raw buffer.
     while !parser.eof && parser.raw_buffer.len() - parser.raw_buffer_pos < 3 {
         if !yaml_parser_update_raw_buffer(parser) {
@@ -91,7 +87,6 @@ fn yaml_parser_determine_encoding(parser: &mut YamlParser<'_>) -> bool {
 
 /// Update the raw buffer.
 fn yaml_parser_update_raw_buffer(parser: &mut YamlParser<'_>) -> bool {
-    // Go: readerc.go yaml_parser_update_raw_buffer
     // Return if the raw buffer is full.
     if parser.raw_buffer_pos == 0 && parser.raw_buffer.len() == INPUT_RAW_BUFFER_SIZE {
         return true;
@@ -112,7 +107,7 @@ fn yaml_parser_update_raw_buffer(parser: &mut YamlParser<'_>) -> bool {
     parser.raw_buffer_pos = 0;
 
     // Call the read handler to fill the buffer. The handler gets the free tail of the raw
-    // buffer (Go: `raw_buffer[len:cap]`); the buffer is lent out around the call.
+    // buffer (`raw_buffer[len..capacity]`); the buffer is lent out around the call.
     let Some(read_handler) = parser.read_handler else {
         panic!("read handler must be set");
     };
@@ -123,14 +118,12 @@ fn yaml_parser_update_raw_buffer(parser: &mut YamlParser<'_>) -> bool {
     raw_buffer.truncate(len + size_read);
     parser.raw_buffer = raw_buffer;
     match result {
-        // Go: err == io.EOF.
-        // Divergence (ledger 6c-1): `Ok(0)` is end of input, per `std::io::Read`; Go's handler
-        // signals EOF with `io.EOF` and treats `(0, nil)` as "no data yet", reading again.
+        // `Ok(0)` is end of input, per `std::io::Read`.
         Ok(0) => parser.eof = true,
         Ok(_) => {}
         Err(err) => {
-            // Divergence (ledger 6c-1): the text after `input error: ` is the `std::io::Error`'s
-            // Display: Go's `err.Error()` for a message-only error, Rust's text for an OS error.
+            // The text after `input error: ` is the `std::io::Error`'s `Display`; for an OS
+            // error that is Rust's wording, not the platform's.
             // An `Interrupted` error that reaches here (a handler other than
             // `yaml_reader_read_handler`, which retries it) is an input error too.
             let offset = parser.offset;
@@ -150,21 +143,16 @@ fn yaml_parser_update_raw_buffer(parser: &mut YamlParser<'_>) -> bool {
 ///
 /// The length is supposed to be significantly less that the buffer size.
 pub(crate) fn yaml_parser_update_buffer(parser: &mut YamlParser<'_>, length: usize) -> bool {
-    // Go: readerc.go yaml_parser_update_buffer
     if parser.read_handler.is_none() {
         panic!("read handler must be set");
     }
 
-    // [Go] This function was changed to guarantee the requested length size at EOF.
-    // The fact we need to do this is pretty awful, but the description above implies
-    // for that to be the case, and there are tests
+    // This function guarantees the requested length at EOF (padding with NULs below), as the
+    // description above implies.
 
-    // If the EOF flag is set and the raw buffer is empty, do nothing.
-    //
-    // [Go] ACTUALLY! Read the documentation of this function above. This is just broken. To
-    // return true, we need to have the given length in the buffer. Not doing that means every
-    // single check that calls this function to make sure the buffer has a given length is Go)
-    // panicking; or C) accessing invalid memory. (Go keeps the check with an empty body.)
+    // There is deliberately no early return for "EOF set and raw buffer empty". To return true,
+    // the buffer must hold the given length: otherwise every caller that relies on that length
+    // would panic or read invalid memory.
 
     // Return if the buffer contains enough characters.
     if parser.unread >= length {
@@ -490,11 +478,9 @@ pub(crate) fn yaml_parser_update_buffer(parser: &mut YamlParser<'_>, length: usi
             break;
         }
     }
-    // [Go] Read the documentation of this function above. To return true,
-    // we need to have the given length in the buffer. Not doing that means
-    // every single check that calls this function to make sure the buffer
-    // has a given length is Go) panicking; or C) accessing invalid memory.
-    // This happens here due to the EOF above breaking early.
+    // To return true, the buffer must hold the given length: otherwise every caller that relies
+    // on that length would panic or read invalid memory. This pads it when the EOF above broke
+    // out of the loop early.
     while buffer_len < length {
         parser.buffer[buffer_len] = 0;
         buffer_len += 1;

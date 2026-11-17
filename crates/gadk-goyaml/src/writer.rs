@@ -20,13 +20,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-//! Port of yaml.v3 v3.0.1 `writerc.go`: flushing the emitter buffer to the output.
+//! Flushing the emitter buffer to the output.
 
 use crate::yamlh::{YamlEmitter, YamlErrorType};
 
 /// Set the writer error and return false.
 pub(crate) fn yaml_emitter_set_writer_error(emitter: &mut YamlEmitter<'_>, problem: &str) -> bool {
-    // Go: writerc.go yaml_emitter_set_writer_error
     emitter.error = YamlErrorType::Writer;
     emitter.problem = problem.to_owned();
     false
@@ -34,7 +33,6 @@ pub(crate) fn yaml_emitter_set_writer_error(emitter: &mut YamlEmitter<'_>, probl
 
 /// Flush the output buffer through the write handler (`write error: …` on failure).
 pub(crate) fn yaml_emitter_flush(emitter: &mut YamlEmitter<'_>) -> bool {
-    // Go: writerc.go yaml_emitter_flush
     let Some(write_handler) = emitter.write_handler else {
         panic!("write handler not set");
     };
@@ -49,8 +47,8 @@ pub(crate) fn yaml_emitter_flush(emitter: &mut YamlEmitter<'_>) -> bool {
     let result = write_handler(emitter, &buffer[..emitter.buffer_pos]);
     emitter.buffer = buffer;
     if let Err(err) = result {
-        // Divergence (ledger 6c-1): the text after `write error: ` is the `std::io::Error`'s
-        // Display: Go's `err.Error()` for a message-only error, Rust's text for an OS error.
+        // The text after `write error: ` is the `std::io::Error`'s `Display`; for an OS error
+        // that is Rust's wording, not the platform's.
         return yaml_emitter_set_writer_error(emitter, &format!("write error: {err}"));
     }
     emitter.buffer_pos = 0;
