@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `internal/originguard`: the origin and Host checks in front of every route and the
+//! The origin and Host checks in front of every route and the
 //! WebSocket upgrade's origin check.
 //!
 //! It answers two questions, in this order:
@@ -42,24 +42,23 @@ use super::controllers::CheckOrigin;
 use super::http_error::http_error;
 use crate::mux::{Handler, Request, handler};
 
-/// The error a refused request is answered with (Go `ErrHostNotAllowed`, `ErrOriginNotAllowed`).
-/// Both are safe to show a caller: they name the check that failed and nothing about the
-/// configuration.
+/// The error a refused request is answered with. Both are safe to show a caller: they name the
+/// check that failed and nothing about the configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum GuardError {
-    /// Go `ErrHostNotAllowed`: the Host names a host the server cannot legitimately be reached
+    /// The Host names a host the server cannot legitimately be reached
     /// under, which is what DNS rebinding looks like from the server side.
     #[error("host not allowed")]
     HostNotAllowed,
-    /// Go `ErrOriginNotAllowed`: the Origin is not one the server serves.
+    /// The Origin is not one the server serves.
     #[error("origin not allowed")]
     OriginNotAllowed,
 }
 
-/// Port of Go `originguard.Config`.
+/// The guard's configuration.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Config {
-    /// The address the server binds (Go `BindHost`); a loopback address arms the rebinding
+    /// The address the server binds; a loopback address arms the rebinding
     /// check. Empty: not declared. A wildcard (`""`, `":8080"`, `"0.0.0.0"`, `"[::]"`) says no
     /// more than nothing.
     pub bind_host: String,
@@ -68,19 +67,18 @@ pub(crate) struct Config {
     pub allowed_origins: Vec<String>,
 }
 
-/// The address a connection was accepted on (Go `http.LocalAddrContextKey`), which the origin
-/// rule reads under a wildcard or undeclared bind.
+/// The address a connection was accepted on, which the origin rule reads under a wildcard or
+/// undeclared bind.
 ///
 /// Serve the router with `into_make_service_with_connect_info::<LocalAddr>()` to provide it; a
-/// request without it is treated as Go treats a request that did not come from an
-/// `http.Server` (no accepted address).
+/// request without it has no accepted address.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LocalAddr(pub SocketAddr);
 
 impl Connected<IncomingStream<'_, TcpListener>> for LocalAddr {
     fn connect_info(stream: IncomingStream<'_, TcpListener>) -> Self {
         // An unreadable socket address reads as the unspecified address, which is neither
-        // loopback nor anything an Origin can match (Go: no accepted address).
+        // loopback nor anything an Origin can match.
         LocalAddr(
             stream
                 .io()
@@ -90,10 +88,10 @@ impl Connected<IncomingStream<'_, TcpListener>> for LocalAddr {
     }
 }
 
-/// Go `maxOriginLen`: the longest Origin the guard parses.
+/// The longest Origin the guard parses.
 pub(crate) const MAX_ORIGIN_LEN: usize = 2048;
 
-/// Port of Go `originguard.Policy`: an immutable decision procedure built by [`Policy::new`].
+/// An immutable decision procedure built by [`Policy::new`].
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Policy {
     /// An `"*"` entry: both checks off.
@@ -111,7 +109,7 @@ pub(crate) struct Policy {
 }
 
 impl Policy {
-    /// Go `originguard.New`.
+    /// Builds the policy for `cfg`.
     pub(crate) fn new(cfg: &Config) -> Policy {
         let declared = !cfg.bind_host.is_empty();
         let mut p = Policy {
@@ -141,7 +139,7 @@ impl Policy {
         p
     }
 
-    /// Go `Policy.Check`: whether the request may be served.
+    /// Whether the request may be served.
     pub(crate) fn check(&self, r: &Parts) -> Result<(), GuardError> {
         if self.allow_all {
             return Ok(());
@@ -157,8 +155,7 @@ impl Policy {
         Ok(())
     }
 
-    /// Go `Policy.CheckOrigin`: the WebSocket upgrade's origin check, by [`Policy::check`]'s
-    /// rules.
+    /// The WebSocket upgrade's origin check, by [`Policy::check`]'s rules.
     pub(crate) fn check_origin(&self, r: &Parts) -> bool {
         if self.allow_all {
             return true;
@@ -174,8 +171,8 @@ impl Policy {
         Arc::new(move |parts: &Parts| policy.check_origin(parts))
     }
 
-    /// Go `Policy.Middleware`: [`Policy::check`] on every request before `next` runs; a refused
-    /// request answers 403 `Forbidden: <reason>` in `http.Error` framing.
+    /// Runs [`Policy::check`] on every request before `next`; a refused request answers 403
+    /// `Forbidden: <reason>` in [`http_error`] framing.
     pub(crate) fn middleware(self: &Arc<Self>, next: Handler) -> Handler {
         let policy = Arc::clone(self);
         handler(move |req: Request| {
@@ -191,7 +188,7 @@ impl Policy {
         })
     }
 
-    /// Go `originAllowed`.
+    /// Whether `raw_origin` is one the server serves.
     fn origin_allowed(&self, r: &Parts, raw_origin: &str) -> bool {
         if raw_origin.len() > MAX_ORIGIN_LEN {
             return false;
@@ -209,8 +206,8 @@ impl Policy {
         !request_origin.is_empty() && origin == request_origin
     }
 
-    /// Go `servesOnlyThisMachine`: a declared non-wildcard bind answers outright; otherwise the
-    /// accepted connection stands in.
+    /// Whether the server is reachable from this machine only: a declared non-wildcard bind answers
+    /// outright; otherwise the accepted connection stands in.
     fn serves_only_this_machine(&self, r: &Parts) -> bool {
         if self.bind_declared && !self.bind_wildcard {
             return self.bound_to_loopback;
@@ -218,8 +215,8 @@ impl Policy {
         is_loopback_addr(&server_host(r))
     }
 
-    /// Go `isDNSRebinding`: only a declared loopback bind arms it, and only the real Host
-    /// header counts (a page may set `X-Forwarded-Host` and `Forwarded` freely).
+    /// Whether the request looks like DNS rebinding: only a declared loopback bind arms it, and
+    /// only the real Host header counts (a page may set `X-Forwarded-Host` and `Forwarded` freely).
     fn is_dns_rebinding(&self, r: &Parts) -> bool {
         if !self.bound_to_loopback {
             return false;
@@ -239,13 +236,13 @@ impl Policy {
     }
 }
 
-/// Go `originguard.New(Config{BindHost, AllowedOrigins}).Middleware` as a handler wrapper.
+/// The origin guard as a handler wrapper.
 ///
 /// A request the guard refuses (a rebound Host under a loopback `bind_host`, or an Origin that is
-/// not on `allowed_origins` and either is not the request's own origin or, on a server reached
-/// over loopback, is not a loopback page) answers 403 `Forbidden: host not allowed` / `Forbidden: origin not allowed`
-/// in `http.Error` framing; any other request reaches the wrapped handler. A single `"*"` in
-/// `allowed_origins` turns both checks off. Serve with
+/// not on `allowed_origins` and either is not the request's own origin or, on a server reached over
+/// loopback, is not a loopback page) answers 403 `Forbidden: host not allowed` / `Forbidden: origin
+/// not allowed` in [`http_error`] framing; any other request reaches the wrapped handler. A single
+/// `"*"` in `allowed_origins` turns both checks off. Serve with
 /// `into_make_service_with_connect_info::<`[`LocalAddr`]`>()` so the guard knows the address each
 /// connection was accepted on.
 pub fn origin_guard_middleware(
@@ -259,7 +256,7 @@ pub fn origin_guard_middleware(
     Arc::new(move |next: Handler| policy.middleware(next))
 }
 
-/// Go `originguard.NormalizeOrigin`: `addr` as an RFC 6454 origin (`scheme://host[:port]`,
+/// `addr` as an RFC 6454 origin (`scheme://host[:port]`,
 /// lowercased); a bare host or host:port gets `http://`; `"*"` and `""` pass through, as does
 /// anything that does not parse as a URL with a host.
 pub fn normalize_origin(addr: &str) -> String {
@@ -280,7 +277,7 @@ pub fn normalize_origin(addr: &str) -> String {
     }
 }
 
-/// Go `r.Host`: the request target's authority, else the Host header.
+/// The request's host: the request target's authority, else the Host header.
 fn request_host(r: &Parts) -> String {
     if let Some(a) = r.uri.authority() {
         return a.as_str().to_owned();
@@ -291,7 +288,7 @@ fn request_host(r: &Parts) -> String {
         .unwrap_or_default()
 }
 
-/// Go `Header.Get`: the first value of header `name`, or `""`.
+/// The first value of header `name`, or `""`.
 fn header(r: &Parts, name: &str) -> String {
     r.headers
         .get(name)
@@ -299,7 +296,7 @@ fn header(r: &Parts, name: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Go `serverHost`: the accepted address ([`LocalAddr`]), or `""`.
+/// The accepted address ([`LocalAddr`]), or `""`.
 fn server_host(r: &Parts) -> String {
     r.extensions
         .get::<ConnectInfo<LocalAddr>>()
@@ -307,14 +304,14 @@ fn server_host(r: &Parts) -> String {
         .unwrap_or_default()
 }
 
-/// Go `originHost`: the host of an origin, or `""`.
+/// The host of an origin, or `""`.
 fn origin_host(origin: &str) -> String {
     go_url::parse(origin)
         .map(|u| u.hostname().to_owned())
         .unwrap_or_default()
 }
 
-/// Go `effectiveRequestOrigin`: the origin a browser compares against, honouring `Forwarded`
+/// The origin a browser compares against, honouring `Forwarded`
 /// and `X-Forwarded-*` (lowercased).
 fn effective_request_origin(r: &Parts) -> String {
     if let Some((proto, host)) = forwarded_proto_host(r) {
@@ -334,7 +331,7 @@ fn effective_request_origin(r: &Parts) -> String {
     format!("{}://{}", origin_scheme(&proto), go_to_lower(&host))
 }
 
-/// Go `forwardedProtoHost`: proto and host of the first element of an RFC 7239 `Forwarded`
+/// Proto and host of the first element of an RFC 7239 `Forwarded`
 /// header; both must be present.
 fn forwarded_proto_host(r: &Parts) -> Option<(String, String)> {
     let forwarded = header(r, "forwarded");
@@ -357,14 +354,14 @@ fn forwarded_proto_host(r: &Parts) -> Option<(String, String)> {
     (!proto.is_empty() && !host.is_empty()).then_some((proto, host))
 }
 
-/// Go `requestScheme`: the request target's scheme, else `http`. (gadk has no TLS connection
+/// The request target's scheme, else `http`. (gadk has no TLS connection
 /// state on a request; a TLS front end that wants `https` here sets it on the URI or forwards
 /// `X-Forwarded-Proto`.)
 fn request_scheme(r: &Parts) -> String {
     r.uri.scheme_str().unwrap_or("http").to_owned()
 }
 
-/// Go `originScheme`: a WebSocket scheme as the page's scheme.
+/// A WebSocket scheme as the page's scheme.
 fn origin_scheme(scheme: &str) -> String {
     match go_to_lower(scheme).as_str() {
         "ws" => "http".to_owned(),
@@ -373,7 +370,7 @@ fn origin_scheme(scheme: &str) -> String {
     }
 }
 
-/// Go `firstHeaderValue`: the first comma-separated element of a header, trimmed.
+/// The first comma-separated element of a header, trimmed.
 fn first_header_value(r: &Parts, name: &str) -> String {
     let value = header(r, name);
     value
@@ -384,7 +381,7 @@ fn first_header_value(r: &Parts, name: &str) -> String {
         .to_owned()
 }
 
-/// Go `unquote`: strips one pair of wrapping double quotes.
+/// Strips one pair of wrapping double quotes.
 fn unquote(value: &str) -> &str {
     if value.len() >= 2 && value.starts_with('"') && value.ends_with('"') {
         &value[1..value.len() - 1]
@@ -393,7 +390,7 @@ fn unquote(value: &str) -> &str {
     }
 }
 
-/// Go `isLoopbackAddr`: `host` (with or without a port) names a loopback address.
+/// Whether `host` (with or without a port) names a loopback address.
 fn is_loopback_addr(host: &str) -> bool {
     let bare = bare_host(host);
     if bare.is_empty() {
@@ -405,7 +402,7 @@ fn is_loopback_addr(host: &str) -> bool {
     go_netip::parse_addr(&bare).is_some_and(|a| a.is_loopback())
 }
 
-/// Go `isWildcardAddr`: `host` (with or without a port) names every interface.
+/// Whether `host` (with or without a port) names every interface.
 fn is_wildcard_addr(host: &str) -> bool {
     let bare = bare_host(host);
     if bare.is_empty() {
@@ -414,14 +411,14 @@ fn is_wildcard_addr(host: &str) -> bool {
     go_netip::parse_addr(&bare).is_some_and(|a| a.is_unspecified())
 }
 
-/// Go `bareHost`: lowercased, port and root dot stripped; an unparsable host comes back whole.
+/// Lowercased, port and root dot stripped; an unparsable host comes back whole.
 fn bare_host(host: &str) -> String {
     go_to_lower(strip_port(host))
         .trim_end_matches('.')
         .to_owned()
 }
 
-/// Go `stripPort`: `host` without a valid port, else unchanged.
+/// `host` without a valid port, else unchanged.
 pub(crate) fn strip_port(host: &str) -> &str {
     let (bare, suffix) = if let Some(rest) = host.strip_prefix('[') {
         let Some(end) = rest.find(']') else {
@@ -443,12 +440,11 @@ pub(crate) fn strip_port(host: &str) -> &str {
     }
 }
 
-/// Go `net/netip`'s `ParseAddr` with `IsLoopback`/`IsUnspecified`, as far as the guard reads
-/// them (`net/url` is [`gadk_platform::go_url`]).
+/// IP address parsing with loopback and unspecified tests, as far as the guard reads them.
 pub(crate) mod go_netip {
     use super::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-    /// A Go `netip.Addr`, as far as the guard reads it.
+    /// A parsed IP address.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub(super) enum Addr {
         V4(Ipv4Addr),
@@ -457,7 +453,7 @@ pub(crate) mod go_netip {
     }
 
     impl Addr {
-        /// Go `Addr.IsLoopback` (an IPv4-mapped address is unmapped first).
+        /// Whether the address is loopback (an IPv4-mapped address is unmapped first).
         pub(super) fn is_loopback(self) -> bool {
             match self {
                 Addr::V4(a) => IpAddr::V4(a).is_loopback(),
@@ -468,7 +464,8 @@ pub(crate) mod go_netip {
             }
         }
 
-        /// Go `Addr.IsUnspecified` (exact comparison: a zone or a mapped address is not).
+        /// Whether the address is the unspecified one (exact comparison: a zone or a mapped
+        /// address is not).
         pub(super) fn is_unspecified(self) -> bool {
             match self {
                 Addr::V4(a) => a.is_unspecified(),
@@ -477,7 +474,8 @@ pub(crate) mod go_netip {
         }
     }
 
-    /// Go `netip.ParseAddr`; `None` on error.
+    /// Parses a dotted IPv4 address or an IPv6 address with an optional `%zone`; `None` on error
+    /// (an empty zone is an error).
     pub(super) fn parse_addr(s: &str) -> Option<Addr> {
         for c in s.bytes() {
             match c {

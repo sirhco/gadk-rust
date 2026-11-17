@@ -20,15 +20,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-//! Port of yaml.v3 v3.0.1 `apic.go`: parser and emitter construction, input/output handlers,
-//! settings, event constructors and the token queue insert. The libyaml C code apic.go keeps
-//! commented out (token/document constructors, `yaml_check_utf8`) is not ported.
+//! Parser and emitter construction, input/output handlers, settings, event constructors and the
+//! token queue insert. libyaml's token/document constructors and `yaml_check_utf8` are not
+//! provided: nothing uses them.
 //!
-//! Go's constructors take the event by pointer and overwrite it; the Rust ones take
-//! `&mut YamlEvent` and the byte fields by value (Go shares the caller's slices; every yaml.v3
-//! caller passes a fresh copy). Go's string read handler reads from a borrowed slice
-//! (`YamlParser::input`); Go's string write handler appends to the encoder's `out` through a
-//! pointer, which is the emitter-owned `YamlEmitter::output_buffer` here.
+//! The event constructors overwrite the `&mut YamlEvent` they are given and take the byte
+//! fields by value (every caller passes a fresh copy). The string read handler reads from a
+//! borrowed slice (`YamlParser::input`); the string write handler appends to the
+//! emitter-owned `YamlEmitter::output_buffer`.
 
 use std::io::{Read, Write};
 
@@ -41,9 +40,6 @@ use crate::yamlh::{
 
 /// Insert `token` into the queue at `pos` past the head (`pos < 0` appends).
 pub(crate) fn yaml_insert_token(parser: &mut YamlParser<'_>, pos: isize, token: YamlToken) {
-    // Go: apic.go yaml_insert_token
-    //fmt.Println("yaml_insert_token", "pos:", pos, "typ:", token.typ, "head:", parser.tokens_head, "len:", len(parser.tokens))
-
     // Check if we can move the queue at the beginning of the buffer.
     if parser.tokens_head > 0 && parser.tokens.len() == parser.tokens.capacity() {
         parser.tokens.drain(..parser.tokens_head);
@@ -53,14 +49,13 @@ pub(crate) fn yaml_insert_token(parser: &mut YamlParser<'_>, pos: isize, token: 
         parser.tokens.push(token);
         return;
     }
-    // Go appends, shifts tokens[head+pos:] right by one and stores the token at head+pos.
+    // Shifts tokens[head+pos..] right by one and stores the token at head+pos.
     let at = parser.tokens_head + pos.unsigned_abs();
     parser.tokens.insert(at, token);
 }
 
 /// Create a new parser object.
 pub(crate) fn yaml_parser_initialize(parser: &mut YamlParser<'_>) -> bool {
-    // Go: apic.go yaml_parser_initialize
     *parser = YamlParser {
         raw_buffer: Vec::with_capacity(INPUT_RAW_BUFFER_SIZE),
         buffer: Vec::with_capacity(INPUT_BUFFER_SIZE),
@@ -71,7 +66,6 @@ pub(crate) fn yaml_parser_initialize(parser: &mut YamlParser<'_>) -> bool {
 
 /// Destroy a parser object.
 pub(crate) fn yaml_parser_delete(parser: &mut YamlParser<'_>) {
-    // Go: apic.go yaml_parser_delete
     *parser = YamlParser::default();
 }
 
@@ -80,9 +74,8 @@ pub(crate) fn yaml_string_read_handler(
     parser: &mut YamlParser<'_>,
     buffer: &mut [u8],
 ) -> std::io::Result<usize> {
-    // Go: apic.go yaml_string_read_handler
     if parser.input_pos == parser.input.len() {
-        return Ok(0); // Go: (0, io.EOF)
+        return Ok(0); // end of input
     }
     let rest = &parser.input[parser.input_pos..];
     let n = rest.len().min(buffer.len());
@@ -91,19 +84,17 @@ pub(crate) fn yaml_string_read_handler(
     Ok(n)
 }
 
-/// Reader read handler. Rust's `Interrupted` errors are retried (Go's `io.Reader` has none).
+/// Reader read handler. `Interrupted` errors are retried.
 pub(crate) fn yaml_reader_read_handler(
     parser: &mut YamlParser<'_>,
     buffer: &mut [u8],
 ) -> std::io::Result<usize> {
-    // Go: apic.go yaml_reader_read_handler
     let Some(reader) = parser.input_reader.as_mut() else {
         panic!("read handler called without an input reader");
     };
     loop {
         match reader.read(buffer) {
-            // Divergence (ledger 6c-1): an `ErrorKind::Interrupted` read is retried (Rust-only;
-            // Go's `io.Reader` has no such error) instead of becoming `input error: …`.
+            // An `ErrorKind::Interrupted` read is retried instead of becoming `input error: …`.
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
             other => return other,
         }
@@ -112,7 +103,6 @@ pub(crate) fn yaml_reader_read_handler(
 
 /// Set a string input.
 pub(crate) fn yaml_parser_set_input_string<'r>(parser: &mut YamlParser<'r>, input: &'r [u8]) {
-    // Go: apic.go yaml_parser_set_input_string
     if parser.read_handler.is_some() {
         panic!("must set the input source only once");
     }
@@ -123,7 +113,6 @@ pub(crate) fn yaml_parser_set_input_string<'r>(parser: &mut YamlParser<'r>, inpu
 
 /// Set a file input.
 pub(crate) fn yaml_parser_set_input_reader<'r>(parser: &mut YamlParser<'r>, r: Box<dyn Read + 'r>) {
-    // Go: apic.go yaml_parser_set_input_reader
     if parser.read_handler.is_some() {
         panic!("must set the input source only once");
     }
@@ -132,9 +121,8 @@ pub(crate) fn yaml_parser_set_input_reader<'r>(parser: &mut YamlParser<'r>, r: B
 }
 
 /// Set the source encoding.
-#[allow(dead_code)] // Go declares it; yaml.v3 never calls it.
+#[allow(dead_code)] // Kept for completeness; yaml.v3 never calls it.
 pub(crate) fn yaml_parser_set_encoding(parser: &mut YamlParser<'_>, encoding: YamlEncoding) {
-    // Go: apic.go yaml_parser_set_encoding
     if parser.encoding != YamlEncoding::Any {
         panic!("must set the encoding only once");
     }
@@ -143,7 +131,6 @@ pub(crate) fn yaml_parser_set_encoding(parser: &mut YamlParser<'_>, encoding: Ya
 
 /// Create a new emitter object.
 pub(crate) fn yaml_emitter_initialize(emitter: &mut YamlEmitter<'_>) {
-    // Go: apic.go yaml_emitter_initialize
     *emitter = YamlEmitter {
         buffer: vec![0; OUTPUT_BUFFER_SIZE],
         raw_buffer: Vec::with_capacity(OUTPUT_RAW_BUFFER_SIZE),
@@ -156,16 +143,14 @@ pub(crate) fn yaml_emitter_initialize(emitter: &mut YamlEmitter<'_>) {
 
 /// Destroy an emitter object.
 pub(crate) fn yaml_emitter_delete(emitter: &mut YamlEmitter<'_>) {
-    // Go: apic.go yaml_emitter_delete
     *emitter = YamlEmitter::default();
 }
 
-/// String write handler: appends to `emitter.output_buffer` (Go: `*emitter.output_buffer`).
+/// String write handler: appends to `emitter.output_buffer` .
 pub(crate) fn yaml_string_write_handler(
     emitter: &mut YamlEmitter<'_>,
     buffer: &[u8],
 ) -> std::io::Result<()> {
-    // Go: apic.go yaml_string_write_handler
     emitter.output_buffer.extend_from_slice(buffer);
     Ok(())
 }
@@ -175,7 +160,6 @@ pub(crate) fn yaml_writer_write_handler(
     emitter: &mut YamlEmitter<'_>,
     buffer: &[u8],
 ) -> std::io::Result<()> {
-    // Go: apic.go yaml_writer_write_handler
     let Some(writer) = emitter.output_writer.as_mut() else {
         panic!("write handler called without an output writer");
     };
@@ -184,7 +168,6 @@ pub(crate) fn yaml_writer_write_handler(
 
 /// Set a string output: the emitted text accumulates in `emitter.output_buffer`.
 pub(crate) fn yaml_emitter_set_output_string(emitter: &mut YamlEmitter<'_>) {
-    // Go: apic.go yaml_emitter_set_output_string
     if emitter.write_handler.is_some() {
         panic!("must set the output target only once");
     }
@@ -197,7 +180,6 @@ pub(crate) fn yaml_emitter_set_output_writer<'w>(
     emitter: &mut YamlEmitter<'w>,
     w: Box<dyn Write + 'w>,
 ) {
-    // Go: apic.go yaml_emitter_set_output_writer
     if emitter.write_handler.is_some() {
         panic!("must set the output target only once");
     }
@@ -206,9 +188,8 @@ pub(crate) fn yaml_emitter_set_output_writer<'w>(
 }
 
 /// Set the output encoding.
-#[allow(dead_code)] // Go declares it; yaml.v3 never calls it (encode.go sets emitter fields directly).
+#[allow(dead_code)] // Kept for completeness; the encoder sets emitter fields directly.
 pub(crate) fn yaml_emitter_set_encoding(emitter: &mut YamlEmitter<'_>, encoding: YamlEncoding) {
-    // Go: apic.go yaml_emitter_set_encoding
     if emitter.encoding != YamlEncoding::Any {
         panic!("must set the output encoding only once");
     }
@@ -216,16 +197,14 @@ pub(crate) fn yaml_emitter_set_encoding(emitter: &mut YamlEmitter<'_>, encoding:
 }
 
 /// Set the canonical output style.
-#[allow(dead_code)] // Go declares it; yaml.v3 never calls it (encode.go sets emitter fields directly).
+#[allow(dead_code)] // Kept for completeness; the encoder sets emitter fields directly.
 pub(crate) fn yaml_emitter_set_canonical(emitter: &mut YamlEmitter<'_>, canonical: bool) {
-    // Go: apic.go yaml_emitter_set_canonical
     emitter.canonical = canonical;
 }
 
 /// Set the indentation increment (values outside 2..=9 become 2).
-#[allow(dead_code)] // Go declares it; yaml.v3 never calls it (encode.go sets emitter fields directly).
+#[allow(dead_code)] // Kept for completeness; the encoder sets emitter fields directly.
 pub(crate) fn yaml_emitter_set_indent(emitter: &mut YamlEmitter<'_>, indent: isize) {
-    // Go: apic.go yaml_emitter_set_indent
     let indent = if !(2..=9).contains(&indent) {
         2
     } else {
@@ -235,29 +214,25 @@ pub(crate) fn yaml_emitter_set_indent(emitter: &mut YamlEmitter<'_>, indent: isi
 }
 
 /// Set the preferred line width (negative values become -1, "unlimited").
-#[allow(dead_code)] // Go declares it; yaml.v3 never calls it (encode.go sets emitter fields directly).
+#[allow(dead_code)] // Kept for completeness; the encoder sets emitter fields directly.
 pub(crate) fn yaml_emitter_set_width(emitter: &mut YamlEmitter<'_>, width: isize) {
-    // Go: apic.go yaml_emitter_set_width
     let width = if width < 0 { -1 } else { width };
     emitter.best_width = width;
 }
 
 /// Set if unescaped non-ASCII characters are allowed.
 pub(crate) fn yaml_emitter_set_unicode(emitter: &mut YamlEmitter<'_>, unicode: bool) {
-    // Go: apic.go yaml_emitter_set_unicode
     emitter.unicode = unicode;
 }
 
 /// Set the preferred line break character.
-#[allow(dead_code)] // Go declares it; yaml.v3 never calls it (encode.go sets emitter fields directly).
+#[allow(dead_code)] // Kept for completeness; the encoder sets emitter fields directly.
 pub(crate) fn yaml_emitter_set_break(emitter: &mut YamlEmitter<'_>, line_break: YamlBreak) {
-    // Go: apic.go yaml_emitter_set_break
     emitter.line_break = line_break;
 }
 
 /// Create STREAM-START.
 pub(crate) fn yaml_stream_start_event_initialize(event: &mut YamlEvent, encoding: YamlEncoding) {
-    // Go: apic.go yaml_stream_start_event_initialize
     *event = YamlEvent {
         typ: YamlEventType::StreamStart,
         encoding,
@@ -267,7 +242,6 @@ pub(crate) fn yaml_stream_start_event_initialize(event: &mut YamlEvent, encoding
 
 /// Create STREAM-END.
 pub(crate) fn yaml_stream_end_event_initialize(event: &mut YamlEvent) {
-    // Go: apic.go yaml_stream_end_event_initialize
     *event = YamlEvent {
         typ: YamlEventType::StreamEnd,
         ..YamlEvent::default()
@@ -281,7 +255,6 @@ pub(crate) fn yaml_document_start_event_initialize(
     tag_directives: Vec<YamlTagDirective>,
     implicit: bool,
 ) {
-    // Go: apic.go yaml_document_start_event_initialize
     *event = YamlEvent {
         typ: YamlEventType::DocumentStart,
         version_directive,
@@ -293,7 +266,6 @@ pub(crate) fn yaml_document_start_event_initialize(
 
 /// Create DOCUMENT-END.
 pub(crate) fn yaml_document_end_event_initialize(event: &mut YamlEvent, implicit: bool) {
-    // Go: apic.go yaml_document_end_event_initialize
     *event = YamlEvent {
         typ: YamlEventType::DocumentEnd,
         implicit,
@@ -303,7 +275,6 @@ pub(crate) fn yaml_document_end_event_initialize(event: &mut YamlEvent, implicit
 
 /// Create ALIAS.
 pub(crate) fn yaml_alias_event_initialize(event: &mut YamlEvent, anchor: Vec<u8>) -> bool {
-    // Go: apic.go yaml_alias_event_initialize
     *event = YamlEvent {
         typ: YamlEventType::Alias,
         anchor,
@@ -313,7 +284,7 @@ pub(crate) fn yaml_alias_event_initialize(event: &mut YamlEvent, anchor: Vec<u8>
 }
 
 /// Create SCALAR.
-#[allow(clippy::too_many_arguments)] // Go's signature.
+#[allow(clippy::too_many_arguments)] // One argument per scalar event field.
 pub(crate) fn yaml_scalar_event_initialize(
     event: &mut YamlEvent,
     anchor: Vec<u8>,
@@ -323,7 +294,6 @@ pub(crate) fn yaml_scalar_event_initialize(
     quoted_implicit: bool,
     style: YamlScalarStyle,
 ) -> bool {
-    // Go: apic.go yaml_scalar_event_initialize
     *event = YamlEvent {
         typ: YamlEventType::Scalar,
         anchor,
@@ -345,7 +315,6 @@ pub(crate) fn yaml_sequence_start_event_initialize(
     implicit: bool,
     style: YamlSequenceStyle,
 ) -> bool {
-    // Go: apic.go yaml_sequence_start_event_initialize
     *event = YamlEvent {
         typ: YamlEventType::SequenceStart,
         anchor,
@@ -359,7 +328,6 @@ pub(crate) fn yaml_sequence_start_event_initialize(
 
 /// Create SEQUENCE-END.
 pub(crate) fn yaml_sequence_end_event_initialize(event: &mut YamlEvent) -> bool {
-    // Go: apic.go yaml_sequence_end_event_initialize
     *event = YamlEvent {
         typ: YamlEventType::SequenceEnd,
         ..YamlEvent::default()
@@ -375,7 +343,6 @@ pub(crate) fn yaml_mapping_start_event_initialize(
     implicit: bool,
     style: YamlMappingStyle,
 ) {
-    // Go: apic.go yaml_mapping_start_event_initialize
     *event = YamlEvent {
         typ: YamlEventType::MappingStart,
         anchor,
@@ -388,7 +355,6 @@ pub(crate) fn yaml_mapping_start_event_initialize(
 
 /// Create MAPPING-END.
 pub(crate) fn yaml_mapping_end_event_initialize(event: &mut YamlEvent) {
-    // Go: apic.go yaml_mapping_end_event_initialize
     *event = YamlEvent {
         typ: YamlEventType::MappingEnd,
         ..YamlEvent::default()
@@ -397,7 +363,6 @@ pub(crate) fn yaml_mapping_end_event_initialize(event: &mut YamlEvent) {
 
 /// Destroy an event object.
 pub(crate) fn yaml_event_delete(event: &mut YamlEvent) {
-    // Go: apic.go yaml_event_delete
     *event = YamlEvent::default();
 }
 

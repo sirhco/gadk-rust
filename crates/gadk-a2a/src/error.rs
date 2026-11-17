@@ -13,16 +13,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The crate error (Go's `error` values of `server/adka2a/v2` and `agent/remoteagent/v2`).
+//! The crate error shared by the A2A server and the remote agent.
 
-/// An error from a conversion, the executor or the remote agent. Display texts are Go's.
+/// An error from a conversion, the executor or the remote agent. Display texts match ADK's error
+/// text.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
-    /// A message whose text is Go's verbatim (config validation, card source checks, conversions).
+    /// A message whose text matches ADK's verbatim (config validation, card source checks,
+    /// conversions).
     #[error("{0}")]
     Message(String),
-    /// Go `fmt.Errorf("<prefix>: %w", err)`.
+    /// An error with a context prefix, displayed as `<prefix>: <source>`.
     #[error("{prefix}: {source}")]
     Wrapped {
         /// The text before `: `.
@@ -51,7 +53,7 @@ impl Error {
         Self::Message(text.into())
     }
 
-    /// [`Error::Wrapped`]: Go `fmt.Errorf("<prefix>: %w", source)`.
+    /// [`Error::Wrapped`] displayed as `<prefix>: <source>`.
     pub fn wrap(
         prefix: impl Into<String>,
         source: impl Into<Box<dyn std::error::Error + Send + Sync>>,
@@ -65,9 +67,7 @@ impl Error {
 
 impl From<Error> for a2a::A2AError {
     /// An [`Error::A2A`] is unwrapped. Any other error keeps the code and details of the first
-    /// A2A error in its source chain with its own text (a2a-go's `ToJSONRPCError`: `errors.Is`
-    /// against the code sentinels, `errors.As` for the details, `err.Error()` for the message),
-    /// else it is an internal error with its text.
+    /// A2A error in its source chain with its own text, else it is an internal error with its text.
     fn from(err: Error) -> Self {
         match err {
             Error::A2A(e) => e,

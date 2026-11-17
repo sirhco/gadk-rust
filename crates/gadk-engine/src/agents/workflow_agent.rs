@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go agent/workflowagent: a workflow graph as an agent.
+//! A workflow graph as an agent.
 
 use std::sync::Arc;
 
@@ -30,7 +30,7 @@ use crate::workflow::{
     Edge, RunState, WORKFLOW_INPUT_FUNCTION_CALL_NAME, Workflow, WorkflowOptions,
 };
 
-/// Port of Go workflowagent.Config: the configuration for creating a new workflow agent.
+/// The configuration for creating a new workflow agent.
 #[derive(Clone, Default)]
 pub struct WorkflowAgentConfig {
     /// The agent's (and workflow's) name.
@@ -47,12 +47,12 @@ pub struct WorkflowAgentConfig {
     pub after_agent_callbacks: Vec<AfterAgentCallback>,
 }
 
-/// Port of Go workflowagent.New: a workflow agent. One returned agent can serve many concurrent
-/// sessions: the per-invocation run state is rebuilt from session event history on a resume turn
-/// rather than held on the agent. A paused workflow resumes on a follow-up turn when the user
-/// submits a FunctionResponse targeting the interrupt id emitted by the paused node.
+/// A workflow agent. One returned agent can serve many concurrent sessions: the per-invocation
+/// run state is rebuilt from session event history on a resume turn rather than held on the
+/// agent. A paused workflow resumes on a follow-up turn when the user submits a FunctionResponse
+/// targeting the interrupt id emitted by the paused node.
 pub fn new(cfg: WorkflowAgentConfig) -> Result<Arc<dyn Agent>, AgentError> {
-    // Go: w, err := workflow.New(cfg.Name, cfg.Edges); the error is returned as-is.
+    // A graph that fails validation is reported as-is.
     let wf = Workflow::new(&cfg.name, cfg.edges.clone(), WorkflowOptions::default())?;
     gadk_agent::new_with_state(
         AgentConfig {
@@ -63,8 +63,7 @@ pub fn new(cfg: WorkflowAgentConfig) -> Result<Arc<dyn Agent>, AgentError> {
             after_agent_callbacks: cfg.after_agent_callbacks.clone(),
             run: Some(Arc::new(move |ctx: InvocationContext| run(wf.clone(), ctx))),
         },
-        // Go: state.AgentType = TypeWorkflowAgent (so the agent run opens an
-        // "invoke_workflow <name>" span); state.Config = cfg.
+        // The agent type makes the agent run open an "invoke_workflow <name>" span.
         AgentState {
             agent_type: AgentType::WorkflowAgent,
             config: Some(Arc::new(cfg)),
@@ -74,14 +73,14 @@ pub fn new(cfg: WorkflowAgentConfig) -> Result<Arc<dyn Agent>, AgentError> {
     )
 }
 
-/// Port of Go (*workflowAgent).run: `Workflow::resume` when the inbound user content answers a
-/// previously emitted input request, `Workflow::run` on every other turn.
+/// Runs `Workflow::resume` when the inbound user content answers a previously emitted input
+/// request, `Workflow::run` on every other turn.
 fn run(workflow: Arc<Workflow>, ctx: InvocationContext) -> EventStream {
     Box::pin(async_stream::stream! {
         match detect_resume(&workflow, &ctx) {
             Err(e) => yield Err(e),
             Ok(Some((responses, state))) => {
-                // Go: agent.Promote(ctx).
+                // Resume takes the invocation context as a plain `Context`.
                 let mut s = workflow.resume(ctx.clone().into_context(), state, responses);
                 while let Some(item) = s.next().await {
                     yield item;
@@ -100,8 +99,8 @@ fn run(workflow: Arc<Workflow>, ctx: InvocationContext) -> EventStream {
 /// A resume turn: the responses keyed by interrupt id, and the reconstructed run state.
 type Resume = (Map<String, Value>, RunState);
 
-/// Port of Go (*workflowAgent).detectResume: the responses keyed by interrupt id and the run state
-/// reconstructed from session history when this turn is a resume; `None` for a fresh turn.
+/// The responses keyed by interrupt id and the run state reconstructed from session history when
+/// this turn is a resume; `None` for a fresh turn.
 fn detect_resume(
     workflow: &Workflow,
     ctx: &InvocationContext,
@@ -139,8 +138,8 @@ fn detect_resume(
     Ok(Some((responses, state)))
 }
 
-/// Port of Go decodeWorkflowInputResponse: the user-supplied payload of a FunctionResponse
-/// targeting a workflow input request. Three accepted shapes, in priority order:
+/// The user-supplied payload of a FunctionResponse targeting a workflow input request. Three
+/// accepted shapes, in priority order:
 ///
 /// 1. `{"response": <value>}`: a string value is parsed as JSON and the result returned (the
 ///    string verbatim when it is not valid JSON); any other value is returned as-is.

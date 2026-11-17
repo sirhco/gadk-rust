@@ -13,10 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! [`GoValue`]: what yaml.v3 v3.0.1 decodes into a Go `interface{}` (`decode.go` `scalar`,
-//! `sequence` and `mapping` with an interface target), and the decode of a node into it,
-//! sharing `de.rs`'s [`DecodeState`] (alias limits, merges, type errors). Its `Serialize` impl
-//! (Go's `encoder.marshal` of those values) is in `ser.rs`.
+//! [`GoValue`]: what yaml.v3 decodes a node into when the target has no fixed type (scalars,
+//! sequences and mappings), and the decode of a node into it, sharing `de.rs`'s
+//! [`DecodeState`] (alias limits, merges, type errors). Its `Serialize` impl is in `ser.rs`.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -38,12 +37,12 @@ use crate::node::{Document, Kind, NodeId};
 use crate::resolve::NULL_TAG;
 
 /// The serde newtype-struct name [`GoValue`]'s `Deserialize` impl asks for: gadk-goyaml's
-/// deserializer answers it with the exact value decoded by Go's rules, handed over through a
+/// deserializer answers it with the exact value decoded by yaml.v3's rules, handed over through a
 /// thread-local slot (the `serde_json::RawValue` technique); other deserializers ignore the
 /// name and the value is built from their data model.
 pub(crate) const GO_VALUE_MARKER: &str = "$gadk_goyaml::GoValue";
 
-/// A Go value of dynamic type, as yaml.v3 decodes into `interface{}`.
+/// A dynamically typed YAML value, as yaml.v3 decodes into an untyped target.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub enum GoValue {
     /// `nil`.
@@ -53,16 +52,16 @@ pub enum GoValue {
     Bool(bool),
     /// `int` (64-bit).
     Int(i64),
-    /// `uint64` (integers above `math.MaxInt64`).
+    /// `uint64` (integers above `i64::MAX`).
     Uint(u64),
     /// `float64`.
     Float(f64),
     /// `string` (valid UTF-8), also for `!!binary` whose decoded bytes are valid UTF-8.
     String(String),
-    /// A Go `string` that is not valid UTF-8 (only from `!!binary`).
-    // Divergence (ledger 6c-1): Go yields a `string`; a Rust `String` must be UTF-8.
+    /// A string that is not valid UTF-8 (only from `!!binary`).
+    // yaml.v3 yields a string here; a Rust `String` must be UTF-8, hence a separate variant.
     Bytes(Vec<u8>),
-    /// `time.Time` (an instant with nanoseconds and its offset).
+    /// timestamp (an instant with nanoseconds and its offset).
     Timestamp(DateTime<FixedOffset>),
     /// `[]interface{}`.
     Seq(Vec<GoValue>),
@@ -86,24 +85,22 @@ pub(crate) fn hand_over<'de, V: Visitor<'de>>(v: GoValue, visitor: V) -> Result<
     r
 }
 
-/// Go: `(*decoder).unmarshal(n, out)` with `out` an `interface{}`: the decoded value, or
-/// `None` where Go's `unmarshal` returns `good == false` (the `interface{}` stays nil and
-/// callers skip it, as Go's `sequence`/`mapping` do).
+/// Decodes node `n` into a [`GoValue`]: the decoded value, or `None` where decoding reports
+/// failure (the value stays unset and callers skip it, as sequences and mappings do).
 pub(crate) fn unmarshal_value(
     d: &mut DecodeState<'_>,
     doc: &Document,
     n: NodeId,
 ) -> Result<Option<GoValue>, Error> {
-    // Go: decode.go unmarshal (interface target)
     let entered = d.enter(doc, n)?;
     let result = match entered.node {
         Some(n) => unmarshal_value_entered(d, doc, n),
-        // Go's `document` with other than one content node returns false.
+        // A document without exactly one content node decodes to nothing.
         None => Ok(None),
     };
     let document = entered.document;
     d.leave(entered);
-    // Go's `document` reports success whatever its content's result.
+    // A document reports success whatever its content's result.
     result.map(|v| {
         if document {
             Some(v.unwrap_or_default())
@@ -113,7 +110,7 @@ pub(crate) fn unmarshal_value(
     })
 }
 
-/// The body of Go's `unmarshal` with an `interface{}` target once `n` is neither a document
+/// The body of [`unmarshal_value`] once `n` is neither a document
 /// nor an alias (its counters, aliases and depth already accounted by
 /// [`DecodeState::enter`]).
 pub(crate) fn unmarshal_value_entered(
@@ -121,11 +118,10 @@ pub(crate) fn unmarshal_value_entered(
     doc: &Document,
     n: NodeId,
 ) -> Result<Option<GoValue>, Error> {
-    // Go: decode.go unmarshal (kind switch, interface target)
     let node = &doc[n];
     match node.kind {
-        // Go's `scalar`: a nil resolved value is `null(out)`, which sets the interface to nil
-        // and succeeds; anything else is stored as resolved.
+        // A scalar: a null resolved value sets the target to null and succeeds; anything else
+        // is stored as resolved.
         Kind::Scalar => Ok(Some(resolve_scalar(node)?.1)),
         Kind::Mapping => mapping_value(d, doc, n),
         Kind::Sequence => sequence_value(d, doc, n),
@@ -137,14 +133,12 @@ pub(crate) fn unmarshal_value_entered(
     }
 }
 
-/// Go: `(*decoder).sequence` with an `interface{}` target: a `[]interface{}` of the items
-/// that decoded.
+/// A sequence into a dynamically typed list of the items that decoded.
 fn sequence_value(
     d: &mut DecodeState<'_>,
     doc: &Document,
     n: NodeId,
 ) -> Result<Option<GoValue>, Error> {
-    // Go: decode.go sequence
     let content = &doc[n].content;
     let mut out = Vec::with_capacity(content.len());
     for &item in content {
@@ -155,7 +149,7 @@ fn sequence_value(
     Ok(Some(GoValue::Seq(out)))
 }
 
-/// A Go map being filled: `map[string]interface{}` or `map[interface{}]interface{}`.
+/// A map being filled: with string keys only, or with arbitrary keys.
 enum MapOut {
     Str(Vec<(String, GoValue)>, HashMap<String, usize>),
     Any(Vec<(GoValue, GoValue)>),
@@ -174,7 +168,7 @@ impl MapOut {
         matches!(self, MapOut::Str(..))
     }
 
-    /// Go's `out.MapIndex(k).IsValid()`.
+    /// Whether key `k` is present.
     fn contains(&self, k: &GoValue) -> bool {
         match (self, k) {
             (MapOut::Str(_, index), GoValue::String(s)) => index.contains_key(s),
@@ -183,7 +177,7 @@ impl MapOut {
         }
     }
 
-    /// Go's `out.SetMapIndex(k, v)`: an existing equal key keeps its position.
+    /// Sets key `k`: an existing equal key keeps its position.
     fn insert(&mut self, k: GoValue, v: GoValue) {
         match self {
             MapOut::Str(entries, index) => {
@@ -213,15 +207,13 @@ impl MapOut {
     }
 }
 
-/// Go: `(*decoder).mapping` with an `interface{}` target: the unique-keys check, then a
-/// `map[string]interface{}` when every key is `!!str`/`!!merge` (`isStringMap`), else a
-/// `map[interface{}]interface{}`.
+/// A mapping into a dynamically typed map: the unique-keys check, then a string-keyed map
+/// when every key is `!!str`/`!!merge`, else a map with arbitrary keys.
 fn mapping_value(
     d: &mut DecodeState<'_>,
     doc: &Document,
     n: NodeId,
 ) -> Result<Option<GoValue>, Error> {
-    // Go: decode.go mapping (interface target)
     if !check_unique_keys(d, doc, n) {
         return Ok(None);
     }
@@ -230,15 +222,14 @@ fn mapping_value(
     Ok(Some(out.into_value()))
 }
 
-/// Go: the pair loop of `(*decoder).mapping` with a map target (after the unique-keys check),
-/// then `merge` for a `<<` key.
+/// The pair loop of a mapping into a map (after the unique-keys check), then the merge for a
+/// `<<` key.
 fn mapping_loop(
     d: &mut DecodeState<'_>,
     doc: &Document,
     n: NodeId,
     out: &mut MapOut,
 ) -> Result<(), Error> {
-    // Go: decode.go mapping (map path)
     let mut merged_fields = d.merged_fields.take();
     let mut merge_node = None;
     for pair in doc[n].content.as_chunks::<2>().0 {
@@ -266,7 +257,8 @@ fn mapping_loop(
         }
         match unmarshal_value(d, doc, value)? {
             Some(e) => out.insert(k, e),
-            // Go's `mapIsNew` is false for a map made for an interface target.
+            // A null value is stored for a key not yet present (the map was made for an untyped
+            // target).
             None if doc.short_tag(value) == NULL_TAG && !out.contains(&k) => {
                 out.insert(k, GoValue::Null)
             }
@@ -280,9 +272,9 @@ fn mapping_loop(
     Ok(())
 }
 
-/// Go: `(*decoder).merge` into a map: the keys of `parent` are recorded (decoded as
-/// `interface{}`) unless an enclosing merge already records them, then each merged mapping
-/// is decoded into the same map, skipping recorded keys.
+/// Merges into a map: the keys of `parent` are recorded (decoded as dynamic values)
+/// unless an enclosing merge already records them, then each merged mapping is decoded into the
+/// same map, skipping recorded keys.
 fn merge(
     d: &mut DecodeState<'_>,
     doc: &Document,
@@ -290,7 +282,6 @@ fn merge(
     merge: NodeId,
     out: &mut MapOut,
 ) -> Result<(), Error> {
-    // Go: decode.go merge
     let restore_none = d.merged_fields.is_none();
     if restore_none {
         d.merged_fields = Some(Vec::new());
@@ -340,14 +331,13 @@ fn merge(
     Ok(())
 }
 
-/// Go: `d.unmarshal(n, out)` with `out` a map value (a merged mapping or an alias of one).
+/// Decodes a map value (a merged mapping or an alias of one) into the map.
 fn unmarshal_into_map(
     d: &mut DecodeState<'_>,
     doc: &Document,
     n: NodeId,
     out: &mut MapOut,
 ) -> Result<bool, Error> {
-    // Go: decode.go unmarshal (map target)
     let entered = d.enter(doc, n)?;
     let result = match entered.node {
         Some(m) if doc[m].kind == Kind::Mapping => {
@@ -365,16 +355,17 @@ fn unmarshal_into_map(
     result
 }
 
-/// Go's `fmt.Sprintf("%#v", v)` of a decoded `interface{}` value (used by
-/// `invalid map key: %#v`).
+/// The debug-syntax text of a decoded value, as yaml.v3 embeds it in `invalid map key: …`
+/// errors (`<nil>` for null; see [`write_sharp_v`] for the nested form).
 pub(crate) fn go_sharp_v(v: &GoValue) -> String {
     let mut out = String::new();
     write_sharp_v(&mut out, v, true);
     out
 }
 
-/// Go's `%#v` of `v`; `top` is false for an element held in an `interface{}` slot (`nil`
-/// prints `interface {}(nil)` there).
+/// Writes the debug-syntax text of `v` (`true`, `42`, `"text"`, `map[string]interface {}{…}`,
+/// `[]interface {}{…}`); `top` is false for an element held in a collection (null prints
+/// `interface {}(nil)` there instead of `<nil>`).
 fn write_sharp_v(out: &mut String, v: &GoValue, top: bool) {
     match v {
         GoValue::Null if top => out.push_str("<nil>"),
@@ -397,7 +388,7 @@ fn write_sharp_v(out: &mut String, v: &GoValue, top: bool) {
             out.push('}');
         }
         GoValue::Map(entries) => {
-            // Go's fmt prints maps sorted by key.
+            // Maps print sorted by key.
             let mut sorted: Vec<&(String, GoValue)> = entries.iter().collect();
             sorted.sort_by(|a, b| a.0.cmp(&b.0));
             out.push_str("map[string]interface {}{");
@@ -412,8 +403,8 @@ fn write_sharp_v(out: &mut String, v: &GoValue, top: bool) {
             out.push('}');
         }
         GoValue::MapAny(entries) => {
-            // Go's fmtsort orders interface keys by their dynamic type's descriptor address
-            // first, which no port can reproduce; keys are ordered by kind, then by text.
+            // yaml.v3's order of mixed-type keys depends on type descriptor addresses, which
+            // cannot be reproduced; keys are ordered by kind, then by text.
             let mut sorted: Vec<(String, String)> = entries
                 .iter()
                 .map(|(k, v)| {
@@ -437,7 +428,7 @@ fn write_sharp_v(out: &mut String, v: &GoValue, top: bool) {
     }
 }
 
-/// A sort rank of a key's Go kind for [`write_sharp_v`].
+/// A sort rank of a key's kind for [`write_sharp_v`].
 fn kind_rank(v: &GoValue) -> char {
     match v {
         GoValue::Null => '0',
@@ -452,9 +443,10 @@ fn kind_rank(v: &GoValue) -> char {
     }
 }
 
-/// Go's `time.Time.GoString` (`time.Date(2001, time.December, 14, 21, 59, 43, 0, time.UTC)`).
-/// Go's parser yields `time.UTC` for `Z` and a fixed zone named `""` otherwise (or
-/// `time.Local` when the offset is the machine's; not reproduced).
+/// The debug-syntax text of a timestamp
+/// (a constructor call listing year, month name, day, time of day, nanoseconds and zone). A `Z`
+/// offset prints as the UTC zone and any other as a fixed zone named `""` (a zone equal to the
+/// machine's local one prints as the local zone in yaml.v3; not reproduced).
 fn go_time_string(t: &DateTime<FixedOffset>) -> String {
     const MONTHS: [&str; 12] = [
         "January",
@@ -632,7 +624,7 @@ impl<'de> MapAccess<'de> for InlineEntries {
 }
 
 /// Builds a [`GoValue`]: from the hand-over slot when gadk-goyaml decodes, otherwise from the
-/// deserializer's data model (Go's `interface{}` kinds: integers that fit `int64` as `Int`,
+/// deserializer's data model (integers that fit `i64` as `Int`,
 /// maps with only string keys as `Map`).
 struct GoValueVisitor;
 

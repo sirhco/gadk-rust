@@ -13,40 +13,39 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `launcher.Launcher` and `launcher.SubLauncher`.
+//! The [`Launcher`] and [`SubLauncher`] traits.
 
 use tokio_util::sync::CancellationToken;
 
 use crate::config::Config;
 use crate::error::Error;
 
-/// Go `launcher.Launcher`: parses command-line arguments and runs the matching logic.
+/// Parses command-line arguments and runs the matching logic.
 #[async_trait::async_trait]
 pub trait Launcher: Send {
-    /// Go `Execute(ctx, config, args)`: parses `args` and runs; cancelling `cancel` is Go's
-    /// context cancellation.
+    /// Parses `args` and runs; cancelling `cancel` stops the run.
     async fn execute(
         &mut self,
         cancel: CancellationToken,
         config: Config,
         args: Vec<String>,
     ) -> Result<(), Error>;
-    /// Go `CommandLineSyntax()`: the command-line flags and arguments.
+    /// The command-line flags and arguments.
     fn command_line_syntax(&self) -> String;
 }
 
-/// Go `launcher.SubLauncher`: one mode of operation (`console`, `web`) inside a parent launcher
+/// One mode of operation (`console`, `web`) inside a parent launcher
 /// such as the universal one.
 #[async_trait::async_trait]
 pub trait SubLauncher: Send + Sync {
-    /// Go `Keyword()`: the command-line keyword that selects this sub-launcher.
+    /// The command-line keyword that selects this sub-launcher.
     fn keyword(&self) -> String;
-    /// Go `Parse(args)`: parses this sub-launcher's arguments and returns the unparsed rest.
+    /// Parses this sub-launcher's arguments and returns the unparsed rest.
     fn parse(&mut self, args: Vec<String>) -> Result<Vec<String>, Error>;
-    /// Go `CommandLineSyntax()`: this sub-launcher's flags and arguments.
+    /// This sub-launcher's flags and arguments.
     fn command_line_syntax(&self) -> String;
-    /// Go `SimpleDescription()`: a one-line description.
+    /// A one-line description.
     fn simple_description(&self) -> String;
-    /// Go `Run(ctx, config)`: runs until done or until `cancel` is cancelled.
+    /// Runs until done or until `cancel` is cancelled.
     async fn run(&self, cancel: CancellationToken, config: Config) -> Result<(), Error>;
 }

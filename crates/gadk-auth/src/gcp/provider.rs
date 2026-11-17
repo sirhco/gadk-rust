@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The per-user credential provider (port of ADK-Go `auth/gcp/provider.go`).
+//! The per-user credential provider.
 //!
 //! [`new_provider`] returns a [`CredentialProvider`] that resolves the acting end user's
 //! credential for one [`ProviderScheme`] through the Agent Identity / IAM Connector services,
@@ -56,8 +56,8 @@ use super::client::{
 };
 use super::{Error, ErrorKind};
 
-/// Go `ProviderScheme` (provider.go:33): a GCP auth resource and the access it requests
-/// (adk-python's `GcpAuthProviderScheme`).
+/// A GCP auth resource and the access it requests (the counterpart of adk-python's
+/// `GcpAuthProviderScheme`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProviderScheme {
     /// The full resource name: `projects/*/locations/*/connectors/*` (IAM Connector) or
@@ -70,8 +70,8 @@ pub struct ProviderScheme {
     pub continue_uri: String,
 }
 
-/// Go `ProviderConfig` (provider.go:51). `client: None` builds the ADC client lazily on first
-/// use; `store: None` gives the provider a private `InMemoryCredentialStore`.
+/// The configuration of [`new_provider`]. `client: None` builds the ADC client lazily on first use;
+/// `store: None` gives the provider a private `InMemoryCredentialStore`.
 ///
 /// One store can back several providers: entries are keyed by the app, the end user, and
 /// everything that decides what the service returns (the resource, the scopes, the continue
@@ -99,19 +99,17 @@ impl std::fmt::Debug for ProviderConfig {
     }
 }
 
-/// Go `defaultInitTimeout` (provider.go:135): how long the waiters on one default-client
-/// attempt wait. The build itself cannot be cancelled, so the bound is on the waiting side.
+/// How long the waiters on one default-client attempt wait. The build itself cannot be cancelled,
+/// so the bound is on the waiting side.
 pub(crate) const DEFAULT_INIT_TIMEOUT: Duration = Duration::from_secs(30);
-/// Go `defaultEvictTimeout` (provider.go:141): the bound on a detached store delete.
+/// The bound on a detached store delete.
 pub(crate) const DEFAULT_EVICT_TIMEOUT: Duration = Duration::from_secs(5);
-/// Go `maxCachedLifetime` (provider.go:229): the longest a credential is cached, whatever expiry
-/// the service reports.
+/// The longest a credential is cached, whatever expiry the service reports.
 pub(crate) const MAX_CACHED_LIFETIME: Duration = Duration::from_secs(3600);
-/// Go `refreshCooldown` (provider.go:486): the shortest interval between two forced refreshes
-/// of one credential at the service.
+/// The shortest interval between two forced refreshes of one credential at the service.
 pub(crate) const REFRESH_COOLDOWN: Duration = Duration::from_secs(30);
 
-/// Go `provider.newClient` (no context argument): builds the default client.
+/// Builds the default client.
 pub(crate) type NewClientFn =
     Arc<dyn Fn() -> BoxFuture<'static, Result<Arc<Client>, Error>> + Send + Sync>;
 
@@ -136,23 +134,23 @@ pub(crate) fn default_new_client(adc: AdcSource) -> NewClientFn {
     })
 }
 
-/// Go `provider` (provider.go:233). Tests build one with `build_provider`, set fields, then
-/// wrap it in `Arc`.
+/// The per-user credential provider. Tests build one with `build_provider`, set fields, then wrap
+/// it in `Arc`.
 pub(crate) struct Provider {
     pub(crate) scheme: ProviderScheme,
     pub(crate) store: Arc<dyn CredentialStore>,
-    /// Go `newClient`, `initTimeout` and `evictTimeout` are fields so tests can drive the
+    /// `new_client`, `init_timeout` and `evict_timeout` are fields so tests can drive the
     /// failure and hang paths a real ADC lookup and a real store cannot be made to hit.
     pub(crate) new_client: NewClientFn,
     pub(crate) init_timeout: Duration,
     pub(crate) evict_timeout: Duration,
-    /// The wall clock `cache_until` reads (provider.go:640, `time.Now()`).
+    /// The wall clock `cache_until` reads.
     pub(crate) clock: Arc<dyn gadk_platform::TimeProvider>,
     /// Shared with the spawned init task.
     pub(crate) state: Arc<Mutex<ProviderState>>,
 }
 
-/// Go `provider`'s mutex-guarded fields.
+/// The provider's mutex-guarded fields.
 pub(crate) struct ProviderState {
     /// The configured or published client.
     pub(crate) client: Option<Arc<Client>>,
@@ -160,13 +158,12 @@ pub(crate) struct ProviderState {
     pub(crate) pending: Option<Arc<ClientInit>>,
     /// When each refresh slot was last force-refreshed, for the cooldown.
     pub(crate) refreshed: HashMap<String, Instant>,
-    /// When `refreshed` was last swept; `None` until the first forced refresh (Go's zero time).
+    /// When `refreshed` was last swept; `None` until the first forced refresh.
     pub(crate) refresh_swept: Option<Instant>,
 }
 
-/// Go `clientInit` (provider.go:262): one attempt at building the default client. The
-/// deadline is the attempt's, shared by every waiter, so a caller arriving after it has passed
-/// fails at once.
+/// One attempt at building the default client. The deadline is the attempt's, shared by every
+/// waiter, so a caller arriving after it has passed fails at once.
 pub(crate) struct ClientInit {
     pub(crate) deadline: Instant,
     /// `None` until the attempt lands; then its result, sent exactly once.
@@ -219,7 +216,7 @@ impl ClientInit {
         })
     }
 
-    /// Go `in.result()` after `<-in.done`: `None` while the attempt is still running.
+    /// The attempt's result, or `None` while it is still running.
     fn result(&self) -> Option<Result<Arc<Client>, Error>> {
         self.outcome.borrow().clone()
     }
@@ -236,7 +233,7 @@ impl ClientInit {
     }
 }
 
-/// `new_provider` minus the `Arc` (Go `NewProvider`, provider.go:181).
+/// `new_provider` minus the `Arc`.
 pub(crate) fn build_provider(cfg: ProviderConfig) -> Result<Provider, Error> {
     let name = cfg.scheme.name.as_str();
     if name.is_empty() {
@@ -255,7 +252,7 @@ pub(crate) fn build_provider(cfg: ProviderConfig) -> Result<Provider, Error> {
         .store
         .unwrap_or_else(|| Arc::new(InMemoryCredentialStore::new()));
     Ok(Provider {
-        // Owned: the caller cannot mutate the scopes afterwards (Go's slices.Clone).
+        // Owned: the caller cannot mutate the scopes afterwards.
         scheme: cfg.scheme,
         store,
         new_client: default_new_client(AdcSource::Discover),
@@ -271,10 +268,10 @@ pub(crate) fn build_provider(cfg: ProviderConfig) -> Result<Provider, Error> {
     })
 }
 
-/// Go `NewProvider` (provider.go:181) without the wiring context. Errors: "gcp: NewProvider
-/// requires a scheme Name"; "gcp: NewProvider: <validate_resource error>"; "gcp: NewProvider:
-/// scheme Name %q is neither projects/*/locations/*/connectors/* nor
-/// projects/*/locations/*/authProviders/*". The provider's `as_refreshing()` is `Some`.
+/// Builds the per-user credential provider. Errors: "gcp: NewProvider requires a scheme Name";
+/// "gcp: NewProvider: <validate_resource error>"; "gcp: NewProvider: scheme Name \"NAME\" is
+/// neither projects/*/locations/*/connectors/* nor projects/*/locations/*/authProviders/*". The
+/// provider's `as_refreshing()` is `Some`.
 ///
 /// Building the default client (when `cfg.client` is `None`) happens on first use, not here.
 ///
@@ -285,7 +282,7 @@ pub fn new_provider(cfg: ProviderConfig) -> Result<Arc<dyn CredentialProvider>, 
     build_provider(cfg).map(|p| Arc::new(p) as Arc<dyn CredentialProvider>)
 }
 
-/// Go `cacheUntil` (provider.go:658): the instant up to which a credential expiring at
+/// The instant up to which a credential expiring at
 /// `expires_at` may be cached as of `now`, or `None` when it may not be cached at all (no
 /// expiry, or no more than `EXPIRY_SKEW` left: the store would refuse to serve it). The far end
 /// is clamped to `MAX_CACHED_LIFETIME`, not rejected.
@@ -306,9 +303,9 @@ pub(crate) fn cache_until(
     }
 }
 
-/// Go `refreshSlot` (provider.go:476): what a forced refresh acts on at the service. Coarser
-/// than the cache key on purpose: the app name and the `Client` are cache dimensions the
-/// service never sees, so counting them would multiply the cooldown's bound.
+/// What a forced refresh acts on at the service. Coarser than the cache key on purpose: the app
+/// name and the `Client` are cache dimensions the service never sees, so counting them would
+/// multiply the cooldown's bound.
 pub(crate) fn refresh_slot(user_id: &str, scheme: &ProviderScheme) -> String {
     let mut scopes: Vec<&str> = scheme.scopes.iter().map(String::as_str).collect();
     scopes.sort_unstable();
@@ -320,11 +317,10 @@ pub(crate) fn refresh_slot(user_id: &str, scheme: &ProviderScheme) -> String {
 }
 
 impl Provider {
-    /// Go `resolveClient` (provider.go:672): the configured client, or the default one built
-    /// on first use. Concurrent callers share one attempt and each waits on that attempt's
-    /// remaining bound; a caller with a deadline of its own wraps this in `tokio::time::timeout`.
-    /// A failed attempt is not cached, so the next call retries; a hung one is kept, and its
-    /// client is published the moment it lands.
+    /// The configured client, or the default one built on first use. Concurrent callers share one
+    /// attempt and each waits on that attempt's remaining bound; a caller with a deadline of its
+    /// own wraps this in `tokio::time::timeout`. A failed attempt is not cached, so the next call
+    /// retries; a hung one is kept, and its client is published the moment it lands.
     pub(crate) async fn resolve_client(&self) -> Result<Arc<Client>, Error> {
         let init = {
             let mut state = self.state.lock();
@@ -362,7 +358,7 @@ impl Provider {
         }
     }
 
-    /// provider.go:718.
+    /// The error for a default-client attempt still running past the init timeout.
     fn attempt_exceeded(&self) -> Error {
         Error::with_kind(
             ErrorKind::ClientUnavailable,
@@ -374,7 +370,7 @@ impl Provider {
         )
     }
 
-    /// Go `runInit` (provider.go:733) on a task the provider owns. The builder runs on an inner
+    /// Runs the init on a task the provider owns. The builder runs on an inner
     /// task, so a panic in it (even one raised before its future is first polled) surfaces as a
     /// `JoinError` and becomes this attempt's failure instead of a wedged slot.
     fn spawn_init(&self, init: Arc<ClientInit>) {
@@ -408,9 +404,8 @@ impl Provider {
         });
     }
 
-    /// Go `allowRefresh` (provider.go:502): whether `slot` may be force-refreshed now,
-    /// recording the attempt when it may (whether or not the fetch then succeeds). The map is
-    /// swept at most once per cooldown.
+    /// Whether `slot` may be force-refreshed now, recording the attempt when it may (whether or not
+    /// the fetch then succeeds). The map is swept at most once per cooldown.
     pub(crate) fn allow_refresh(&self, slot: &str) -> bool {
         let now = Instant::now();
         let mut state = self.state.lock();
@@ -434,7 +429,7 @@ impl Provider {
         true
     }
 
-    /// Go `dropEntry` (provider.go:466): deletes `key`'s entry on a spawned task, bounded by
+    /// Deletes `key`'s entry on a spawned task, bounded by
     /// `evict_timeout`. Detached, so a caller who drops its future does not cancel the delete;
     /// bounded, so a store that never answers cannot hold the caller. The store's error is
     /// ignored: nothing here can act on it.
@@ -449,8 +444,8 @@ impl Provider {
     }
 }
 
-/// Go `publish` (provider.go:775): caches a successful client, frees the in-flight slot so a
-/// failed attempt is retried, and releases the waiters, all under the lock.
+/// Caches a successful client, frees the in-flight slot so a failed attempt is retried, and
+/// releases the waiters, all under the lock.
 fn publish(state: &Mutex<ProviderState>, init: &ClientInit, result: Result<Arc<Client>, Error>) {
     let mut state = state.lock();
     if let Ok(client) = &result {
@@ -460,7 +455,7 @@ fn publish(state: &Mutex<ProviderState>, init: &ClientInit, result: Result<Arc<C
     init.publish(result);
 }
 
-/// Go's `%v` of a recovered panic value.
+/// The text of a recovered panic payload (`&str` or `String`; anything else is a placeholder).
 fn panic_text(payload: &(dyn Any + Send)) -> String {
     if let Some(s) = payload.downcast_ref::<&'static str>() {
         (*s).to_string()
@@ -474,10 +469,10 @@ fn panic_text(payload: &(dyn Any + Send)) -> String {
 // ---- Credential and Refresh ----
 
 impl Provider {
-    /// Go `resolve` (provider.go:546): names the acting user's cache entry and the client that
-    /// will fill it. The client is resolved before the cache is read, because the `Client` is
-    /// part of the cache key. A client-init failure is not qualified by resource: it is about
-    /// this process's own credentials, and every provider fails it identically.
+    /// Names the acting user's cache entry and the client that will fill it. The client is resolved
+    /// before the cache is read, because the `Client` is part of the cache key. A client-init
+    /// failure is not qualified by resource: it is about this process's own credentials, and every
+    /// provider fails it identically.
     async fn resolve(&self, cx: &AuthContext) -> Result<(Arc<Client>, CredentialKey), Error> {
         let Some(id) = &cx.identity else {
             return Err(Error::with_kind(
@@ -503,8 +498,8 @@ impl Provider {
         Ok((client, key))
     }
 
-    /// Go `fetch` (provider.go:577): retrieves a credential and caches it, reporting whether
-    /// an entry was written. A non-empty `prior_token` asks for a forced refresh.
+    /// Retrieves a credential and caches it, reporting whether an entry was written. A non-empty
+    /// `prior_token` asks for a forced refresh.
     async fn fetch(
         &self,
         client: &Client,
@@ -524,9 +519,9 @@ impl Provider {
         Ok((retrieval.credential, cached))
     }
 
-    /// Go `cache` (provider.go:625): best-effort, inline on the caller's task (a store write
-    /// failure must not fail auth, and a request that ends first costs the entry rather than
-    /// hanging on the store). Reports whether an entry was written.
+    /// Caches a retrieval: best-effort, inline on the caller's task (a store write failure must not
+    /// fail auth, and a request that ends first costs the entry rather than hanging on the store).
+    /// Reports whether an entry was written.
     async fn cache(&self, key: &CredentialKey, retrieval: &Retrieval) -> bool {
         let Some(expires_at) = cache_until(self.clock.now(), retrieval.expires_at) else {
             return false;
@@ -537,8 +532,8 @@ impl Provider {
             .is_ok()
     }
 
-    /// Go `evictRejected` (provider.go:437): drops `key`'s entry while it still holds the
-    /// refused credential. An entry another request has replaced is left alone.
+    /// Drops `key`'s entry while it still holds the refused credential. An entry another request
+    /// has replaced is left alone.
     async fn evict_rejected(&self, key: &CredentialKey, rejected_token: &str) {
         if self.cached_replacement(key, rejected_token).await.is_some() {
             return;
@@ -546,7 +541,7 @@ impl Provider {
         self.drop_entry(key).await;
     }
 
-    /// Go `cachedReplacement` (provider.go:448): `key`'s cached credential when it can be shown
+    /// `key`'s cached credential when it can be shown
     /// to differ from the rejected one. An entry whose token cannot be read never counts.
     async fn cached_replacement(
         &self,
@@ -562,9 +557,9 @@ impl Provider {
     }
 }
 
-/// Go `credentialToken` (provider.go:597): the token inside a credential this package minted,
-/// unwrapping one `with_headers` layer first (every non-bearer credential is wrapped for the
-/// extra `X-Goog-Api-Key` header). "" for any other type.
+/// The token inside a credential this module minted, unwrapping one `with_headers` layer first
+/// (every non-bearer credential is wrapped for the extra `X-Goog-Api-Key` header). "" for any other
+/// type.
 fn credential_token(cred: &dyn Credential) -> String {
     let cred = cred.inner().unwrap_or(cred);
     if let Some(bearer) = cred.downcast_ref::<Bearer>() {
@@ -578,8 +573,8 @@ fn credential_token(cred: &dyn Credential) -> String {
 
 #[async_trait::async_trait]
 impl CredentialProvider for Provider {
-    /// Go `provider.Credential` (provider.go:329). A store read error is a miss: fall through
-    /// and fetch a fresh credential.
+    /// Resolves the acting user's credential. A store read error is a miss: fall through and fetch
+    /// a fresh credential.
     async fn credential(&self, cx: &AuthContext) -> Result<Arc<dyn Credential>, crate::Error> {
         let (client, key) = self.resolve(cx).await?;
         if let Ok(Some(cred)) = self.store.get(&key).await {
@@ -596,14 +591,14 @@ impl CredentialProvider for Provider {
 
 #[async_trait::async_trait]
 impl RefreshingProvider for Provider {
-    /// Go `provider.Refresh` (provider.go:373). The rejected token is the ask: each service is
-    /// told in its own way (`Request::prior_token`). A cache entry shown to differ from the
-    /// rejected credential means another request refreshed, so it is served instead; and one
-    /// forced refresh per `refresh_slot` per `REFRESH_COOLDOWN` is all a downstream gets. On
-    /// every path that does not produce a replacement the rejected entry is dropped.
+    /// Replaces a rejected credential. The rejected token is the ask: each service is told in its
+    /// own way (`Request::prior_token`). A cache entry shown to differ from the rejected credential
+    /// means another request refreshed, so it is served instead; and one forced refresh per
+    /// `refresh_slot` per `REFRESH_COOLDOWN` is all a downstream gets. On every path that does not
+    /// produce a replacement the rejected entry is dropped.
     ///
-    /// Go's `ctx.Err()` check before the cooldown has no counterpart: a caller that gives up
-    /// drops this future.
+    /// A caller that gives up drops this future, so there is no cancellation check before the
+    /// cooldown.
     async fn refresh(
         &self,
         cx: &AuthContext,

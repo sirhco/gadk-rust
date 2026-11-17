@@ -13,9 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `VertexClient`: one Vertex AI REST call the way Go's generated REST client makes it (`$alt`
-//! query, `x-goog-request-params` routing header, credentials, protojson bodies), list paging,
-//! and long-running-operation polling.
+//! `VertexClient`: one Vertex AI REST call as the API expects it (`$alt` query,
+//! `x-goog-request-params` routing header, credentials, protojson bodies), list paging, and
+//! long-running-operation polling.
 
 use std::time::Duration;
 
@@ -38,13 +38,13 @@ use crate::protojson::{go_escaped_path, go_query_escape, go_values_encode};
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod wire_tests;
 
-/// The query parameter every generated REST method adds (`params.Add("$alt", …)`).
+/// The query parameter every REST call adds.
 const ALT: (&str, &str) = ("$alt", "json;enum-encoding=int");
 
-/// Go's routing header.
+/// The routing header.
 const X_GOOG_REQUEST_PARAMS: HeaderName = HeaderName::from_static("x-goog-request-params");
 
-/// No call is retried: Go's session and memory-bank REST call options are empty. (Operation
+/// No call is retried: the session and memory-bank calls use no retry options. (Operation
 /// polls retry a 503 themselves; see [`VertexClient::get_operation`].)
 const NO_RETRIES: RetryPolicy = RetryPolicy {
     max_retries: 0,
@@ -53,22 +53,20 @@ const NO_RETRIES: RetryPolicy = RetryPolicy {
     retry_dropped_body: false,
 };
 
-/// Go `Operation.WaitWithInterval(…, time.Minute)`: the first pause bound (gax `Backoff`'s
-/// `Initial`).
+/// The first pause bound when waiting for an operation.
 const WAIT_INITIAL: Duration = Duration::from_secs(1);
-/// The wait interval, the pause bound's cap (gax `Backoff`'s `Max`).
+/// The wait interval, the pause bound's cap.
 const WAIT_INTERVAL: Duration = Duration::from_secs(60);
 
-/// longrunning's REST `GetOperation` call options (`defaultOperationsRESTCallOptions`): a
-/// 10 s timeout over the poll and its retries…
+/// The `GetOperation` call options: a 10 s timeout over the poll and its retries…
 const POLL_TIMEOUT: Duration = Duration::from_secs(10);
-/// …and a 503 retried with gax `Backoff{Initial: 500ms, Max: 10s, Multiplier: 2}`.
+/// …and a 503 retried with a backoff of initial 500 ms, max 10 s, multiplier 2.
 const POLL_RETRY_INITIAL: Duration = Duration::from_millis(500);
 /// See [`POLL_RETRY_INITIAL`].
 const POLL_RETRY_MAX: Duration = Duration::from_secs(10);
 
-/// Go gax `Backoff` with multiplier 2: each [`pause`](Self::pause) is uniform in
-/// `[1ns, cur]`, then `cur` doubles up to `max`.
+/// A backoff with multiplier 2: each [`pause`](Self::pause) is uniform in `[1ns, cur]`, then
+/// `cur` doubles up to `max`.
 pub(crate) struct Backoff {
     cur: Duration,
     max: Duration,
@@ -84,7 +82,7 @@ impl Backoff {
         }
     }
 
-    /// gax `Backoff.Pause`: `1 + rand.Int63n(cur)` nanoseconds.
+    /// A random pause of `1 + rand(0..cur)` nanoseconds.
     pub(crate) fn pause(&mut self) -> Duration {
         self.pause_with(|n| rand::random_range(0..n))
     }
@@ -102,7 +100,7 @@ impl Backoff {
 }
 
 /// One attempt's headers: gadk's tracking `User-Agent`, the routing header (when the method
-/// has one), `Content-Type: application/json` (Go sets it on every call, bodiless ones too),
+/// has one), `Content-Type: application/json` (sent on every call, bodiless ones too),
 /// then the credentials' headers (fetched per call, so a refreshed token is used).
 struct CallHeaders<'a> {
     credentials: Option<&'a Credentials>,
@@ -140,8 +138,8 @@ impl RequestHeaders for CallHeaders<'_> {
 pub(crate) struct VertexClient {
     /// Scheme + authority (+ optional path prefix), no trailing `/`.
     base_url: String,
-    /// Scheme + authority only: an operation poll replaces the whole URL path (gax
-    /// `WithPath`), dropping any prefix.
+    /// Scheme + authority only: an operation poll replaces the whole URL path, dropping any
+    /// prefix.
     origin: String,
     credentials: Option<Credentials>,
     transport: RestTransport,
@@ -167,11 +165,11 @@ impl VertexClient {
         }
     }
 
-    /// One call: `{base_url}{go_escaped_path(path)}?{go_values_encode(query + ("$alt",
-    /// "json;enum-encoding=int"))}`, header `x-goog-request-params:
-    /// {routing.0}={go_query_escape(routing.1)}` (none when `routing.0` is empty: Go's list
-    /// methods send none), gadk's tracking `User-Agent`, credential headers, and
-    /// `Content-Type: application/json` (on every call, as Go sets it). `path` is unescaped and
+    /// One call: URL `{base_url}{go_escaped_path(path)}?{query}` where the query is `query`
+    /// plus `$alt=json;enum-encoding=int`, encoded by `go_values_encode`; header
+    /// `x-goog-request-params: {routing.0}={go_query_escape(routing.1)}` (none when `routing.0`
+    /// is empty: the list methods send none), gadk's tracking `User-Agent`, credential headers, and
+    /// `Content-Type: application/json` (on every call). `path` is unescaped and
     /// starts with `/` (`/v1beta1/projects/…:appendEvent`). A 2xx reply is its body as JSON
     /// (`{}` when empty); any other status is `VertexError::from_response`. No retries.
     ///
@@ -201,8 +199,8 @@ impl VertexClient {
     }
 
     /// GETs `path` repeatedly, adding `pageToken` from each page's `nextPageToken` until it is
-    /// empty, and concatenates each page's `items_key` array. Go's list methods
-    /// (`ListSessions`, `ListEvents`) send no routing header: pass `("", "")`.
+    /// empty, and concatenates each page's `items_key` array. The list methods (sessions,
+    /// events) send no routing header: pass `("", "")`.
     ///
     /// # Errors
     ///
@@ -236,11 +234,11 @@ impl VertexClient {
         }
     }
 
-    /// Go `Operation.WaitWithInterval(ctx, resp, time.Minute)`: while `op.done` is not true,
+    /// Waits for a long-running operation: while `op.done` is not true,
     /// GET the operation ([`get_operation`](Self::get_operation)) and, while still not done,
     /// sleep a full-jitter pause (initial 1 s, ×2, cap 60 s; the first poll is immediate). The
-    /// poll path is `/ui/{name}` of the operation as given (Go's `pollPath`); the routing
-    /// header names the latest operation's `name` (Go `op.Name()`). A done operation with
+    /// poll path is `/ui/{name}` of the operation as given; the routing
+    /// header names the latest operation's `name`. A done operation with
     /// `error` is `Err(VertexError::from_operation_error)`, else `Ok(op)`.
     ///
     /// # Errors
@@ -264,9 +262,9 @@ impl VertexClient {
         }
     }
 
-    /// longrunning's REST `GetOperation` with `gax.WithPath(path)`: `GET {origin}{path}` with
+    /// The REST `GetOperation` call: `GET {origin}{path}` with
     /// no query, routing header `name={name}`, under a 10 s deadline over the call and its
-    /// retries; a 503 is retried after a gax pause (500 ms, ×2, cap 10 s). Once the deadline
+    /// retries; a 503 is retried after a pause (500 ms, ×2, cap 10 s). Once the deadline
     /// passes, the poll fails with `context deadline exceeded`.
     async fn get_operation(&self, path: &str, name: &str) -> Result<Value, BoxError> {
         let url = format!("{}{}", self.origin, go_escaped_path(path));
@@ -288,8 +286,7 @@ impl VertexClient {
                         .is_some_and(|v| v.status == 503) =>
                 {
                     let wake = Instant::now() + backoff.pause();
-                    // Past the deadline the next send fails without a request (Go's `Sleep`
-                    // returning `ctx.Err()`).
+                    // Past the deadline the next send fails without a request.
                     tokio::time::sleep_until(wake.min(deadline)).await;
                 }
                 other => return other,

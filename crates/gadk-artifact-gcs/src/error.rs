@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! [`GcsError`] (the storage client's errors) and the Go `%w` wrapping the service builds on top
+//! [`GcsError`] (the storage client's errors) and the prefix-wrapping the service builds on top
 //! of it.
 
 use std::error::Error as StdError;
@@ -25,13 +25,13 @@ use gadk_platform::GoWrapped;
 /// A boxed error cause.
 pub(crate) type BoxError = Box<dyn StdError + Send + Sync>;
 
-/// An error from the storage client (Go's `storage` and `googleapi` errors). It is reachable
+/// An error from the storage client. It is reachable
 /// from an [`ArtifactError::Backend`] through the `source()` chain; [`is_object_not_exist`]
 /// finds [`GcsError::ObjectNotExist`] there.
 #[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 pub enum GcsError {
-    /// The object does not exist (Go `storage.ErrObjectNotExist`; HTTP 404).
+    /// The object does not exist (HTTP 404).
     #[error("storage: object doesn't exist")]
     ObjectNotExist,
     /// A precondition failed (HTTP 412): the object a does-not-exist upload targets exists.
@@ -43,7 +43,7 @@ pub enum GcsError {
         /// The response body.
         body: String,
     },
-    /// Another HTTP error status (Go `googleapi.Error`).
+    /// Another HTTP error status.
     #[error("{}", googleapi_text(*status, message, body))]
     Http {
         /// The HTTP status code.
@@ -64,9 +64,8 @@ pub enum GcsError {
     Other(#[source] BoxError),
 }
 
-/// Go `googleapi.Error.Error()` for an error without details: `googleapi: Error {status}:
-/// {message}`, or `googleapi: got HTTP response code {status} with body: {body}` when there is
-/// no message.
+/// The text of an HTTP error without details: `googleapi: Error {status}: {message}`, or
+/// `googleapi: got HTTP response code {status} with body: {body}` when there is no message.
 fn googleapi_text(status: u16, message: &str, body: &str) -> String {
     if message.is_empty() {
         format!("googleapi: got HTTP response code {status} with body: {body}")
@@ -76,14 +75,12 @@ fn googleapi_text(status: u16, message: &str, body: &str) -> String {
 }
 
 impl GcsError {
-    /// Go `errors.Is(err, storage.ErrObjectNotExist)`: this is [`GcsError::ObjectNotExist`] or
-    /// wraps one.
+    /// Whether this is [`GcsError::ObjectNotExist`] or wraps one.
     pub fn is_object_not_exist(&self) -> bool {
         chain_any(self, is_object_not_exist_error)
     }
 
-    /// Whether a successful response's body failed while being read: Go's reader was created
-    /// and its `io.ReadAll` failed.
+    /// Whether a successful response's body failed while being read.
     pub(crate) fn is_body_read_failure(&self) -> bool {
         matches!(
             self,
@@ -96,8 +93,7 @@ fn is_object_not_exist_error(e: &(dyn StdError + 'static)) -> bool {
     matches!(e.downcast_ref::<GcsError>(), Some(GcsError::ObjectNotExist))
 }
 
-/// Whether `err` or any error in its `source()` chain satisfies `pred` (Go `errors.Is` /
-/// `errors.As`).
+/// Whether `err` or any error in its `source()` chain satisfies `pred`.
 pub(crate) fn chain_any(
     err: &(dyn StdError + 'static),
     pred: impl Fn(&(dyn StdError + 'static)) -> bool,
@@ -112,31 +108,32 @@ pub(crate) fn chain_any(
     false
 }
 
-/// `ArtifactError::Backend` holding Go's `fmt.Errorf("{prefix}: %w", source)`.
+/// An `ArtifactError::Backend` that displays `{prefix}: {source}` and keeps `source` in its
+/// `source()` chain.
 pub(crate) fn backend(prefix: impl Into<String>, source: impl Into<BoxError>) -> ArtifactError {
     ArtifactError::Backend(Box::new(GoWrapped::new(prefix, source)))
 }
 
-/// Go `ErrVersionConflict`: `save` could not claim a new version within its retry budget.
+/// `save` could not claim a new version within its retry budget.
 #[derive(Debug, thiserror::Error)]
 #[error("artifact version conflict")]
 pub(crate) struct VersionConflict;
 
-/// Go `errors.Is(err, ErrVersionConflict)`: `save` gave up because concurrent writers kept
-/// taking the version it picked; the save can be retried.
+/// Whether `save` gave up because concurrent writers kept taking the version it picked; the
+/// save can be retried.
 pub fn is_version_conflict(err: &ArtifactError) -> bool {
     backend_chain_any(err, |e| e.is::<VersionConflict>())
 }
 
-/// Go `errors.Is(err, storage.ErrObjectNotExist)` for a service error: the storage client said
-/// the object does not exist (deleting a missing version, for example). Distinct from
-/// [`ArtifactError::NotFound`], which `load`, `versions` and `get_artifact_version` return.
+/// Whether the storage client said the object does not exist (deleting a missing version, for
+/// example). Distinct from [`ArtifactError::NotFound`], which `load`, `versions` and
+/// `get_artifact_version` return.
 pub fn is_object_not_exist(err: &ArtifactError) -> bool {
     backend_chain_any(err, is_object_not_exist_error)
 }
 
-/// Go `errors.Is` / `errors.As` for a service error: `err` is an [`ArtifactError::Backend`]
-/// some error in whose `source()` chain satisfies `pred`.
+/// Whether `err` is an [`ArtifactError::Backend`] and some error in its `source()` chain
+/// satisfies `pred`.
 pub(crate) fn backend_chain_any(
     err: &ArtifactError,
     pred: impl Fn(&(dyn StdError + 'static)) -> bool,

@@ -13,16 +13,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `internal/configurable/configurable_utils.go` `init()`: the built-in tool factories
-//! (`exit_loop`, `google_search`, `url_context`, `google_maps_grounding`, `AgentTool`,
-//! `LongRunningFunctionTool`, `ExampleTool`) and the `McpToolset` toolset factory. Go's
-//! anonymous factory closures are named after their registered names.
+//! The built-in tool factories (`exit_loop`, `google_search`, `url_context`,
+//! `google_maps_grounding`, `AgentTool`, `LongRunningFunctionTool`, `ExampleTool`) and the
+//! `McpToolset` toolset factory, each named after its registered name.
 //!
-//! Go's type assertions on the yaml-decoded `map[string]any` args map onto [`GoValue`]
-//! variants: `.(map[string]any)` is [`GoValue::Map`] (a map with a non-string key decodes as
-//! `map[interface{}]interface{}` and fails the assertion), `.([]any)` is [`GoValue::Seq`],
-//! `.(string)` is [`GoValue::String`] or [`GoValue::Bytes`], `.(bool)` is [`GoValue::Bool`].
-//! Indexing a nil map or a missing key yields Go's nil, which fails every assertion.
+//! The args of a tool config are a YAML-decoded map, held as [`GoValue`]s, and the factories
+//! check their shape through its variants: a map is [`GoValue::Map`] (a map with a non-string
+//! key does not count as one), a list is [`GoValue::Seq`], a string is [`GoValue::String`] or
+//! [`GoValue::Bytes`], a boolean is [`GoValue::Bool`]. Looking up a key in absent args or a
+//! missing key yields nothing, which fails every such check.
 
 use std::sync::Arc;
 
@@ -38,9 +37,8 @@ use serde::Deserialize;
 use crate::govalue::{go_sprint, go_type_name, go_value_to_json};
 use crate::{ConfigError, GoMap, Registry, ToolCtx, ToolEntry};
 
-/// The built-in factories in Go's `init()` registration order, for [`Registry::new`].
+/// The built-in factories in registration order, for [`Registry::new`].
 pub(crate) fn builtin_tool_factories() -> Vec<(&'static str, ToolEntry)> {
-    // Go: configurable_utils.go init (tool and toolset factories)
     vec![
         (
             "exit_loop",
@@ -79,34 +77,31 @@ pub(crate) fn builtin_tool_factories() -> Vec<(&'static str, ToolEntry)> {
     ]
 }
 
-/// Go `exit_loop`: `exitlooptool.New()`.
+/// The `exit_loop` factory: the engine's exit-loop tool.
 pub(crate) async fn exit_loop(
     _registry: Registry,
     _ctx: ToolCtx,
     _args: Option<GoMap>,
 ) -> Result<Arc<dyn Tool>, ConfigError> {
-    // Go: configurable_utils.go init (exit_loop)
     Ok(gadk_engine::tool::exit_loop())
 }
 
-/// Go `google_search`: `geminitool.GoogleSearch{}`.
+/// The `google_search` factory: the Gemini Google Search tool.
 pub(crate) async fn google_search(
     _registry: Registry,
     _ctx: ToolCtx,
     _args: Option<GoMap>,
 ) -> Result<Arc<dyn Tool>, ConfigError> {
-    // Go: configurable_utils.go init (google_search)
     Ok(Arc::new(gadk_tools::gemini::GoogleSearch))
 }
 
-/// Go `url_context`: `geminitool.New("url_context", "url context", &genai.Tool{URLContext:
-/// &genai.URLContext{}})`.
+/// The `url_context` factory: a Gemini tool named `url_context` (description `url context`)
+/// with URL context enabled.
 pub(crate) async fn url_context(
     _registry: Registry,
     _ctx: ToolCtx,
     _args: Option<GoMap>,
 ) -> Result<Arc<dyn Tool>, ConfigError> {
-    // Go: configurable_utils.go init (url_context)
     Ok(gadk_tools::gemini::new(
         "url_context",
         "url context",
@@ -117,14 +112,13 @@ pub(crate) async fn url_context(
     ))
 }
 
-/// Go `google_maps_grounding`: `geminitool.New("google_maps_grounding", "google maps
-/// grounding", &genai.Tool{GoogleMaps: &genai.GoogleMaps{}})`.
+/// The `google_maps_grounding` factory: a Gemini tool named `google_maps_grounding`
+/// (description `google maps grounding`) with Google Maps enabled.
 pub(crate) async fn google_maps_grounding(
     _registry: Registry,
     _ctx: ToolCtx,
     _args: Option<GoMap>,
 ) -> Result<Arc<dyn Tool>, ConfigError> {
-    // Go: configurable_utils.go init (google_maps_grounding)
     Ok(gadk_tools::gemini::new(
         "google_maps_grounding",
         "google maps grounding",
@@ -135,15 +129,15 @@ pub(crate) async fn google_maps_grounding(
     ))
 }
 
-/// Go `AgentTool`: `args is nil`, `agent not found in args`, `parentPath not found in context`,
-/// `config_path not found in args`; resolves the agent inside the context's config directory
-/// (Go's `parentPath` value) and wraps it in `agenttool.New` with `skip_summarization`.
+/// The `AgentTool` factory. Errors: `args is nil`, `agent not found in args`,
+/// `parentPath not found in context`, `config_path not found in args`. Resolves the agent
+/// inside the context's config directory (the parent path) and wraps it in an [`AgentTool`]
+/// with `skip_summarization`.
 pub(crate) async fn agent_tool(
     registry: Registry,
     ctx: ToolCtx,
     args: Option<GoMap>,
 ) -> Result<Arc<dyn Tool>, ConfigError> {
-    // Go: configurable_utils.go init (AgentTool)
     let Some(args) = args else {
         return Err(ConfigError::msg("args is nil"));
     };
@@ -166,19 +160,18 @@ pub(crate) async fn agent_tool(
     ))
 }
 
-/// Go `AgentTool`'s `a["skip_summarization"].(bool)`, `false` unless it is a bool.
+/// The `skip_summarization` flag of the `agent` args: `false` unless it is a boolean.
 fn skip_summarization(a: &[(String, GoValue)]) -> bool {
     matches!(map_get(a, "skip_summarization"), Some(GoValue::Bool(true)))
 }
 
-/// Go `LongRunningFunctionTool`: `args is nil`, `func not found in args`, resolves `func` with
-/// the same args, `tool '%s' not found` when it names a toolset.
+/// The `LongRunningFunctionTool` factory. Errors: `args is nil`, `func not found in args`;
+/// resolves `func` with the same args, `tool '{name}' not found` when it names a toolset.
 pub(crate) async fn long_running_function_tool(
     registry: Registry,
     ctx: ToolCtx,
     args: Option<GoMap>,
 ) -> Result<Arc<dyn Tool>, ConfigError> {
-    // Go: configurable_utils.go init (LongRunningFunctionTool)
     let Some(map) = &args else {
         return Err(ConfigError::msg("args is nil"));
     };
@@ -194,15 +187,14 @@ pub(crate) async fn long_running_function_tool(
     }
 }
 
-/// Go `ExampleTool`: `args is nil`, `examples not found in args`, `examples is not a list`;
-/// wraps a non-list `output` in a list, round-trips through JSON
-/// (`failed to decode normalized examples: %w`) into `exampletool.Example`s.
+/// The `ExampleTool` factory. Errors: `args is nil`, `examples not found in args`,
+/// `examples is not a list`. Wraps a non-list `output` in a list and round-trips the examples
+/// through JSON (`failed to decode normalized examples: {cause}`) into [`Example`]s.
 pub(crate) async fn example_tool(
     _registry: Registry,
     _ctx: ToolCtx,
     args: Option<GoMap>,
 ) -> Result<Arc<dyn Tool>, ConfigError> {
-    // Go: configurable_utils.go init (ExampleTool)
     let Some(args) = args else {
         return Err(ConfigError::msg("args is nil"));
     };
@@ -221,7 +213,7 @@ pub(crate) async fn example_tool(
     .map_err(ConfigError::other)
 }
 
-/// Go `ExampleTool` step 2: every `map[string]any` item whose `output` is neither nil nor a
+/// Step 2 of the `ExampleTool` factory: every map item whose `output` is neither null nor a
 /// list gets `output: [output]`; other items are left as they are.
 fn normalize_examples(mut items: Vec<GoValue>) -> Vec<GoValue> {
     for item in &mut items {
@@ -239,8 +231,8 @@ fn normalize_examples(mut items: Vec<GoValue>) -> Vec<GoValue> {
     items
 }
 
-/// Go `exampletool.Example` as `json.Unmarshal` fills a `[]*exampletool.Example`
-/// (`json:"input"`, `json:"output"`): a JSON `null` element is a nil pointer.
+/// An [`Example`] as JSON fills it (`input`, `output`): a JSON `null` element is absent and
+/// becomes an empty value.
 #[derive(Deserialize)]
 struct ExampleJson {
     #[serde(default)]
@@ -249,26 +241,23 @@ struct ExampleJson {
     output: Option<Vec<Option<Content>>>,
 }
 
-/// Go `ExampleTool` step 3: `bytes, _ := json.Marshal(examplesSlice)` then
-/// `json.Unmarshal(bytes, &examples)`.
+/// Step 3 of the `ExampleTool` factory: encodes the normalized examples as JSON and decodes
+/// that into [`Example`]s.
 fn decode_examples(normalized: &GoValue) -> Result<Vec<Example>, ConfigError> {
     let wrap = |e: ConfigError| ConfigError::wrap("failed to decode normalized examples", e);
-    // Go ignores json.Marshal's error: the nil bytes then fail to unmarshal.
+    // An encoding failure surfaces as decoding empty input: `unexpected end of JSON input`.
     let Ok(json) = go_value_to_json(normalized) else {
         return Err(wrap(ConfigError::msg("unexpected end of JSON input")));
     };
-    // Divergence (ledger 6c-2): decoding uses gadk-genai's serde, so keys match exactly (Go's
-    // encoding/json also accepts case-insensitive keys) and a type error has serde_json's text
-    // instead of Go's `json: cannot unmarshal …`.
-    // Divergence (ledger 6c-2): an explicit null for a non-pointer field inside an example's
-    // content (`role: ~`, `parts: ~`, a part's `text: ~`) is a no-op in Go's encoding/json but
-    // a serde type error here (nulls are not stripped: free-form maps such as
-    // `FunctionCall.args` keep them).
+    // Decoding uses gadk-genai's serde, so keys match exactly (case-insensitive keys are not
+    // accepted) and a type error has serde_json's text.
+    // An explicit null for a non-optional field inside an example's content (`role: ~`,
+    // `parts: ~`, a part's `text: ~`) is a serde type error (nulls are not stripped: free-form
+    // maps such as `FunctionCall.args` keep them).
     let decoded: Vec<Option<ExampleJson>> =
         serde_json::from_value(json).map_err(|e| wrap(ConfigError::other(e)))?;
-    // Divergence (ledger 6c-2): a null example or null output element is Go's nil pointer, which
-    // panics later in `buildExamplesSystemInstruction`; gadk's `Example` holds values, so it
-    // becomes an empty example or content.
+    // A null example or null output element becomes an empty example or content: gadk's
+    // `Example` holds values, not optional references.
     Ok(decoded
         .into_iter()
         .map(|e| {
@@ -289,19 +278,18 @@ fn decode_examples(normalized: &GoValue) -> Result<Vec<Example>, ConfigError> {
         .collect())
 }
 
-/// Go `McpToolset`: `stdio_connection_params not found in args`,
+/// The `McpToolset` factory. Errors: `stdio_connection_params not found in args`,
 /// `server_params not found in stdio_connection_params`, `command not found in server_params`,
 /// `args not found in server_params`, `tool_filter not found in args`,
-/// `server_params.args[%d]: expected string, got %T (%v)`,
-/// `tool_filter[%d]: expected string, got %T (%v)`; a command transport with a string
-/// predicate filter (`failed to create mcp toolset: %v`).
+/// `server_params.args[{i}]: expected string, got {type} ({value})`,
+/// `tool_filter[{i}]: expected string, got {type} ({value})`. Builds a command transport with a
+/// string predicate filter (`failed to create mcp toolset: {cause}`).
 pub(crate) async fn mcp_toolset(
     _registry: Registry,
     _ctx: ToolCtx,
     args: Option<GoMap>,
 ) -> Result<Arc<dyn Toolset>, ConfigError> {
-    // Go: configurable_utils.go init (McpToolset)
-    // Go indexes the args map without a nil check: a nil map reads nil.
+    // Absent args read as an empty map, so the first lookup reports its own error.
     let args = args.unwrap_or_default();
     let Some(GoValue::Map(stdio_connection_params)) = args.get("stdio_connection_params") else {
         return Err(ConfigError::msg(
@@ -337,8 +325,8 @@ pub(crate) async fn mcp_toolset(
     Ok(Arc::new(mcp_set))
 }
 
-/// Go `McpToolset`'s element loops: each element must be a Go string, else
-/// `<what>[%d]: expected string, got %T (%v)`.
+/// Collects the elements as strings; a non-string element fails with
+/// `<what>[{i}]: expected string, got {type} ({value})`.
 fn string_elements(items: &[GoValue], what: &str) -> Result<Vec<String>, ConfigError> {
     items
         .iter()
@@ -355,8 +343,7 @@ fn string_elements(items: &[GoValue], what: &str) -> Result<Vec<String>, ConfigE
         .collect()
 }
 
-/// Go `&mcp.CommandTransport{Command: exec.Command(command, serverArgsStr...)}`: gadk-mcp
-/// builds a fresh command for every connect.
+/// A command transport builder: gadk-mcp builds a fresh command for every connect.
 fn command_builder(command: String, args: Vec<String>) -> CommandBuilder {
     Arc::new(move || {
         let mut cmd = tokio::process::Command::new(&command);
@@ -365,17 +352,17 @@ fn command_builder(command: String, args: Vec<String>) -> CommandBuilder {
     })
 }
 
-/// Go `m[key]` of a yaml-decoded `map[string]any` (`None` = Go's nil for a missing key).
+/// Looks up `key` in a YAML-decoded map (`None` for a missing key).
 fn map_get<'a>(m: &'a [(String, GoValue)], key: &str) -> Option<&'a GoValue> {
     m.iter().find(|(k, _)| k == key).map(|(_, v)| v)
 }
 
-/// Go `v.(string)`: a yaml-decoded Go string.
+/// A YAML-decoded string, or `None` for any other value.
 fn go_string(v: Option<&GoValue>) -> Option<String> {
     match v? {
         GoValue::String(s) => Some(s.clone()),
-        // Divergence (ledger 6c-2): a non-UTF-8 Go string (only from `!!binary`) is used with
-        // each invalid byte replaced by U+FFFD; Go passes the raw bytes on.
+        // A non-UTF-8 string (only from `!!binary`) is used with each invalid byte replaced
+        // by U+FFFD.
         GoValue::Bytes(b) => Some(String::from_utf8_lossy(b).into_owned()),
         _ => None,
     }

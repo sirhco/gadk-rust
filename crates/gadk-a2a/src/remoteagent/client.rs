@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The A2A client seam (port of ADK-Go `agent/remoteagent/v2/client.go` and the client types of
-//! `internal/agent/remoteagent`).
+//! The A2A client seam: the calls the remote agent makes and the provider that creates a client.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -27,27 +26,27 @@ use gadk_agent::InvocationContext;
 use super::auth::{AuthInterceptor, auth_http_client};
 use crate::Error;
 
-/// Go `A2AClient`: the calls the remote agent makes.
+/// The calls the remote agent makes.
 #[async_trait::async_trait]
 pub trait A2AClient: Send + Sync {
-    /// Go `SendMessage`.
+    /// Sends a message and returns the task or message the peer answers with.
     async fn send_message(
         &self,
         req: &a2a::SendMessageRequest,
     ) -> Result<a2a::SendMessageResponse, a2a::A2AError>;
-    /// Go `SendStreamingMessage`.
+    /// Sends a message and streams the peer's responses.
     async fn send_streaming_message(
         &self,
         req: &a2a::SendMessageRequest,
     ) -> Result<BoxStream<'static, Result<a2a::StreamResponse, a2a::A2AError>>, a2a::A2AError>;
-    /// Go `CancelTask`.
+    /// Cancels a task.
     async fn cancel_task(&self, req: &a2a::CancelTaskRequest) -> Result<a2a::Task, a2a::A2AError>;
-    /// Go `Destroy`.
+    /// Releases the client's resources.
     async fn destroy(&self) -> Result<(), a2a::A2AError>;
 }
 
 /// What a client is created for: an agent invocation, or work detached from one (the server's
-/// child-task cleanup; Go passes the request context).
+/// child-task cleanup).
 #[derive(Clone, Copy)]
 pub enum ClientContext<'a> {
     /// A remote-agent invocation.
@@ -56,10 +55,10 @@ pub enum ClientContext<'a> {
     Detached,
 }
 
-/// Go `A2AClientProvider`.
+/// Creates the [`A2AClient`] for an agent card.
 #[async_trait::async_trait]
 pub trait A2AClientProvider: Send + Sync {
-    /// Go `CreateClient`: a client for the agent `card` describes.
+    /// A client for the agent `card` describes.
     async fn create_client(
         &self,
         cx: ClientContext<'_>,
@@ -67,21 +66,19 @@ pub trait A2AClientProvider: Send + Sync {
     ) -> Result<Arc<dyn A2AClient>, Error>;
 }
 
-/// a2a-go `defaultRequestTimeout`: the timeout of the HTTP client its default JSON-RPC and REST
-/// transports use.
+/// The timeout of the HTTP client the default JSON-RPC and REST transports use.
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(3 * 60);
 
 /// The a2a-rs message for a card no registered transport can serve (a2a-client-lf 0.2.9
-/// `create_from_card`); mapped to a2a-go's text.
+/// `create_from_card`); mapped to the ADK error text.
 const A2A_RS_NO_COMPATIBLE_TRANSPORT: &str =
     "no compatible transport found for agent card interfaces";
 
-/// Go `NewA2AClientProvider(factory)`; `None` → a default `A2AClientFactory`.
+/// A provider that creates clients from `factory`; `None` → a default `A2AClientFactory`.
 ///
-/// The default factory is a2a-go's default (Go `a2aclient.NewFromCard`): JSON-RPC and REST
-/// transports over an HTTP client with a 3 min timeout and no credential. The remote agent
-/// passes `auth_client_factory` when `A2AConfig.auth` is set, as Go `NewA2A` passes a factory
-/// over `authHTTPClient`.
+/// The default factory has JSON-RPC and REST transports over an HTTP client with a 3 min timeout
+/// and no credential. The remote agent passes `auth_client_factory` when `A2AConfig.auth` is
+/// set, a factory over the auth-aware HTTP client.
 pub fn new_a2a_client_provider(
     factory: Option<Arc<a2a_client::A2AClientFactory>>,
 ) -> Arc<dyn A2AClientProvider> {
@@ -89,12 +86,12 @@ pub fn new_a2a_client_provider(
     Arc::new(FactoryClientProvider { factory })
 }
 
-/// a2a-go's default factory: JSON-RPC and REST over one HTTP client with
-/// `defaultRequestTimeout`.
+/// The default factory: JSON-RPC and REST over one HTTP client with
+/// [`DEFAULT_REQUEST_TIMEOUT`].
 fn default_client_factory() -> a2a_client::A2AClientFactory {
     // `build` fails only when reqwest cannot initialize its TLS backend. The fallback is
     // `reqwest::Client::new()`, which panics on that same failure: this panics exactly when
-    // reqwest's own `Client::new` would. `new_a2a_client_provider` (Go `NewA2AClientProvider`)
+    // reqwest's own `Client::new` would. `new_a2a_client_provider`
     // does not return an error, so there is nothing to propagate it through.
     let http = reqwest::Client::builder()
         .timeout(DEFAULT_REQUEST_TIMEOUT)
@@ -103,8 +100,8 @@ fn default_client_factory() -> a2a_client::A2AClientFactory {
     transport_factory(http).build()
 }
 
-/// The factory Go `NewA2A` builds when `A2AConfig.Auth` is set: JSON-RPC and REST over
-/// [`auth_http_client`] (Go `authHTTPClient`), with [`AuthInterceptor`] applying the credential
+/// The factory the remote agent builds when `A2AConfig.auth` is set: JSON-RPC and REST over
+/// [`auth_http_client`], with [`AuthInterceptor`] applying the credential
 /// of the current auth scope to every call. Fails as [`auth_http_client`] does.
 pub(crate) fn auth_client_factory() -> Result<a2a_client::A2AClientFactory, Error> {
     Ok(transport_factory(auth_http_client()?)
@@ -131,7 +128,7 @@ impl A2AClientProvider for FactoryClientProvider {
         _cx: ClientContext<'_>,
         card: &a2a::AgentCard,
     ) -> Result<Arc<dyn A2AClient>, Error> {
-        // a2a-go `Factory.CreateFromCard`'s own checks and texts.
+        // The checks and error texts of an ADK client factory.
         if card.supported_interfaces.is_empty() {
             return Err(Error::msg("agent card has no supported interfaces"));
         }

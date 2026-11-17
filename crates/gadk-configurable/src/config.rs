@@ -13,21 +13,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `internal/configurable/configurable.go` and `configurable_workflow.go`: the yaml-tagged
-//! config structs, decoded by gadk-goyaml with yaml.v3's rules.
+//! The YAML config structs for agents and workflows, decoded by gadk-goyaml with yaml.v3's
+//! rules.
 //!
-//! Go → Rust (the 6c-1 shape rules): every struct's serde name is Go's package-qualified type
-//! name (`configurable.llmAgentYAMLConfig`), so yaml.v3 type errors name it as Go does, and is
-//! listed in [`options`]' `verbatim_structs` (each Go field carries a `yaml:"<key>"` tag equal
-//! to the serde field name); every struct is `#[serde(default)]` (Go zero-fills absent keys);
-//! `*T` is `Option<T>`; Go's embedded `baseAgentConfig` `,inline` is repeated field by field in
-//! each concrete struct, with its `AdditionalProperties map[string]any ,inline` as an
-//! [`InlineMap`] under [`gadk_goyaml::INLINE_FIELD`]; `ConfigPath yaml:"-"` is
-//! `#[serde(skip)]`; `map[string]any` is `Option<GoMap>` (yaml `null` and an absent key stay
-//! Go's nil map, distinct from `{}`); `[]yaml.Node` is `Vec<Document>`. Untagged
-//! `*genai.GenerateContentConfig` decodes into gadk-genai's type with Go's default keys
-//! ([`gadk_goyaml::Options::key_for`]: the field name lowercased, `systeminstruction`).
-//! `omitempty` only affects encoding and is not represented.
+//! Shape rules: every struct's serde name is its package-qualified type name
+//! (`configurable.llmAgentYAMLConfig`), so yaml.v3 type errors name the struct as ADK's own
+//! config loader does, and each is listed in [`options`]' `verbatim_structs` (each field's YAML
+//! key equals the serde field name). Every struct is `#[serde(default)]` (absent keys are
+//! zero-filled); an optional value is `Option<T>`. The fields of the base agent config are
+//! repeated field by field in each concrete agent struct, with the catch-all of unknown keys
+//! as an [`InlineMap`] under [`gadk_goyaml::INLINE_FIELD`]; the config directory is
+//! `#[serde(skip)]`. A free-form map is `Option<GoMap>` (YAML `null` and an absent key are
+//! both `None`, distinct from `{}`), and a list of raw YAML nodes is `Vec<Document>`. The
+//! genai `GenerateContentConfig` is not a config struct: it decodes into gadk-genai's type with
+//! default keys ([`gadk_goyaml::Options::key_for`]: the field name lowercased,
+//! `systeminstruction`). `omitempty` only affects encoding and is not represented.
 
 use std::path::PathBuf;
 use std::sync::LazyLock;
@@ -39,238 +39,236 @@ use serde::de::DeserializeOwned;
 
 use crate::govalue::GoMap;
 
-/// Go `codeConfig`: a reference to a function or callback.
+/// A reference to a function or callback by registered name.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(default, rename = "configurable.codeConfig")]
 pub struct CodeConfig {
-    /// Go `Name yaml:"name"`: the registered name (`my_pkg.security.Check`).
+    /// The `name` key: the registered name (`my_pkg.security.Check`).
     pub name: String,
-    /// Go `Params map[string]any yaml:"params,omitempty"`.
+    /// The `params` key.
     pub params: Option<GoMap>,
 }
 
-/// Go `agentRefConfig`: a reference to a sub-agent.
+/// A reference to a sub-agent.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(default, rename = "configurable.agentRefConfig")]
 pub struct AgentRefConfig {
-    /// Go `ConfigPath yaml:"config_path,omitempty"`: another agent's YAML file.
+    /// The `config_path` key: another agent's YAML file.
     pub config_path: String,
-    /// Go `Code yaml:"code,omitempty"`: an inline code reference (rejected, as in Go).
+    /// The `code` key: an inline code reference (rejected when resolving).
     pub code: String,
 }
 
-/// Go `ToolConfig`: a tool or toolset reference with its arguments.
+/// A tool or toolset reference with its arguments.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(default, rename = "configurable.ToolConfig")]
 pub struct ToolConfig {
-    /// Go `Name yaml:"name"`.
+    /// The `name` key.
     pub name: String,
-    /// Go `Args map[string]any yaml:"args,omitempty"`: `None` is Go's nil map.
+    /// The `args` key: `None` when the key is absent or null (distinct from `{}`).
     pub args: Option<GoMap>,
 }
 
-/// Go `baseAgentConfig`: the fields every agent config shares; [`crate::Registry::from_config`]
+/// The fields every agent config shares; [`crate::Registry::from_config`]
 /// decodes it first to read `agent_class`.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(default, rename = "configurable.baseAgentConfig")]
 pub struct BaseAgentConfig {
-    /// Go `AgentClass yaml:"agent_class"` (empty → `LlmAgent`).
+    /// The `agent_class` key (empty → `LlmAgent`).
     pub agent_class: String,
-    /// Go `Name yaml:"name"`.
+    /// The `name` key.
     pub name: String,
-    /// Go `Description yaml:"description,omitempty"`.
+    /// The `description` key.
     pub description: String,
-    /// Go `SubAgents yaml:"sub_agents,omitempty"`.
+    /// The `sub_agents` key.
     pub sub_agents: Vec<AgentRefConfig>,
-    /// Go `BeforeAgentCallbacks yaml:"before_agent_callbacks,omitempty"`.
+    /// The `before_agent_callbacks` key.
     pub before_agent_callbacks: Vec<CodeConfig>,
-    /// Go `AfterAgentCallbacks yaml:"after_agent_callbacks,omitempty"`.
+    /// The `after_agent_callbacks` key.
     pub after_agent_callbacks: Vec<CodeConfig>,
-    /// Go `ConfigDir yaml:"-"` (0990f9e; was `ConfigPath`): the directory of the config file
-    /// this agent was loaded from, set by the factory after decoding. Every config reference in
-    /// the file must stay inside it. The field keeps its gadk name (a rename would break the
-    /// public API).
+    /// The directory of the config file this agent was loaded from, set by the factory after
+    /// decoding (not read from YAML). Every config reference in the file must stay inside it.
+    /// The field keeps its historical name `config_path` (a rename would break the public API).
     #[serde(skip)]
     pub config_path: PathBuf,
-    /// Go `AdditionalProperties map[string]any yaml:",inline"`: every other key.
+    /// Every other key.
     #[serde(rename = "$gadk_goyaml::inline")]
     pub additional_properties: InlineMap,
 }
 
-/// Go `llmAgentYAMLConfig`: `baseAgentConfig` inline plus the LLM agent's fields.
+/// The LLM agent config: the base agent fields plus the LLM agent's own.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(default, rename = "configurable.llmAgentYAMLConfig")]
 pub struct LlmAgentYamlConfig {
-    /// Inlined `baseAgentConfig.AgentClass`.
+    /// Same as [`BaseAgentConfig::agent_class`].
     pub agent_class: String,
-    /// Inlined `baseAgentConfig.Name`.
+    /// Same as [`BaseAgentConfig::name`].
     pub name: String,
-    /// Inlined `baseAgentConfig.Description`.
+    /// Same as [`BaseAgentConfig::description`].
     pub description: String,
-    /// Inlined `baseAgentConfig.SubAgents`.
+    /// Same as [`BaseAgentConfig::sub_agents`].
     pub sub_agents: Vec<AgentRefConfig>,
-    /// Inlined `baseAgentConfig.BeforeAgentCallbacks`.
+    /// Same as [`BaseAgentConfig::before_agent_callbacks`].
     pub before_agent_callbacks: Vec<CodeConfig>,
-    /// Inlined `baseAgentConfig.AfterAgentCallbacks`.
+    /// Same as [`BaseAgentConfig::after_agent_callbacks`].
     pub after_agent_callbacks: Vec<CodeConfig>,
-    /// Inlined `baseAgentConfig.ConfigDir` (`yaml:"-"`): the config file's directory.
+    /// The config file's directory (not read from YAML); see [`BaseAgentConfig::config_path`].
     #[serde(skip)]
     pub config_path: PathBuf,
-    /// Go `Model yaml:"model"`.
+    /// The `model` key.
     pub model: String,
-    /// Go `Instruction yaml:"instruction"`.
+    /// The `instruction` key.
     pub instruction: String,
-    /// Go `Tools yaml:"tools,omitempty"`.
+    /// The `tools` key.
     pub tools: Vec<ToolConfig>,
-    /// Go `DisallowTransferToPeers yaml:"disallow_transfer_to_peers,omitempty"`.
+    /// The `disallow_transfer_to_peers` key.
     pub disallow_transfer_to_peers: bool,
-    /// Go `DisallowTransferToParent yaml:"disallow_transfer_to_parent,omitempty"`.
+    /// The `disallow_transfer_to_parent` key.
     pub disallow_transfer_to_parent: bool,
-    /// Go `GenerateContentConfig *genai.GenerateContentConfig
-    /// yaml:"generate_content_config,omitempty"` (untagged genai fields: Go default keys).
+    /// The `generate_content_config` key (untagged genai fields use their default keys).
     pub generate_content_config: Option<GenerateContentConfig>,
-    /// Inlined `baseAgentConfig.AdditionalProperties` (`,inline`).
+    /// Same as [`BaseAgentConfig::additional_properties`].
     #[serde(rename = "$gadk_goyaml::inline")]
     pub additional_properties: InlineMap,
 }
 
-/// Go `loopAgentYAMLConfig`.
+/// The loop agent config: the base agent fields plus `max_iterations`.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(default, rename = "configurable.loopAgentYAMLConfig")]
 pub struct LoopAgentYamlConfig {
-    /// Inlined `baseAgentConfig.AgentClass`.
+    /// Same as [`BaseAgentConfig::agent_class`].
     pub agent_class: String,
-    /// Inlined `baseAgentConfig.Name`.
+    /// Same as [`BaseAgentConfig::name`].
     pub name: String,
-    /// Inlined `baseAgentConfig.Description`.
+    /// Same as [`BaseAgentConfig::description`].
     pub description: String,
-    /// Inlined `baseAgentConfig.SubAgents`.
+    /// Same as [`BaseAgentConfig::sub_agents`].
     pub sub_agents: Vec<AgentRefConfig>,
-    /// Inlined `baseAgentConfig.BeforeAgentCallbacks`.
+    /// Same as [`BaseAgentConfig::before_agent_callbacks`].
     pub before_agent_callbacks: Vec<CodeConfig>,
-    /// Inlined `baseAgentConfig.AfterAgentCallbacks`.
+    /// Same as [`BaseAgentConfig::after_agent_callbacks`].
     pub after_agent_callbacks: Vec<CodeConfig>,
-    /// Inlined `baseAgentConfig.ConfigDir` (`yaml:"-"`): the config file's directory.
+    /// The config file's directory (not read from YAML); see [`BaseAgentConfig::config_path`].
     #[serde(skip)]
     pub config_path: PathBuf,
-    /// Go `MaxIterations uint yaml:"max_iterations"` (Go `uint` is 64-bit).
+    /// The `max_iterations` key (64-bit).
     pub max_iterations: u64,
-    /// Inlined `baseAgentConfig.AdditionalProperties` (`,inline`).
+    /// Same as [`BaseAgentConfig::additional_properties`].
     #[serde(rename = "$gadk_goyaml::inline")]
     pub additional_properties: InlineMap,
 }
 
-/// Go `parallelAgentYAMLConfig`.
+/// The parallel agent config: the base agent fields only.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(default, rename = "configurable.parallelAgentYAMLConfig")]
 pub struct ParallelAgentYamlConfig {
-    /// Inlined `baseAgentConfig.AgentClass`.
+    /// Same as [`BaseAgentConfig::agent_class`].
     pub agent_class: String,
-    /// Inlined `baseAgentConfig.Name`.
+    /// Same as [`BaseAgentConfig::name`].
     pub name: String,
-    /// Inlined `baseAgentConfig.Description`.
+    /// Same as [`BaseAgentConfig::description`].
     pub description: String,
-    /// Inlined `baseAgentConfig.SubAgents`.
+    /// Same as [`BaseAgentConfig::sub_agents`].
     pub sub_agents: Vec<AgentRefConfig>,
-    /// Inlined `baseAgentConfig.BeforeAgentCallbacks`.
+    /// Same as [`BaseAgentConfig::before_agent_callbacks`].
     pub before_agent_callbacks: Vec<CodeConfig>,
-    /// Inlined `baseAgentConfig.AfterAgentCallbacks`.
+    /// Same as [`BaseAgentConfig::after_agent_callbacks`].
     pub after_agent_callbacks: Vec<CodeConfig>,
-    /// Inlined `baseAgentConfig.ConfigDir` (`yaml:"-"`): the config file's directory.
+    /// The config file's directory (not read from YAML); see [`BaseAgentConfig::config_path`].
     #[serde(skip)]
     pub config_path: PathBuf,
-    /// Inlined `baseAgentConfig.AdditionalProperties` (`,inline`).
+    /// Same as [`BaseAgentConfig::additional_properties`].
     #[serde(rename = "$gadk_goyaml::inline")]
     pub additional_properties: InlineMap,
 }
 
-/// Go `sequentialAgentYAMLConfig`.
+/// The sequential agent config: the base agent fields only.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(default, rename = "configurable.sequentialAgentYAMLConfig")]
 pub struct SequentialAgentYamlConfig {
-    /// Inlined `baseAgentConfig.AgentClass`.
+    /// Same as [`BaseAgentConfig::agent_class`].
     pub agent_class: String,
-    /// Inlined `baseAgentConfig.Name`.
+    /// Same as [`BaseAgentConfig::name`].
     pub name: String,
-    /// Inlined `baseAgentConfig.Description`.
+    /// Same as [`BaseAgentConfig::description`].
     pub description: String,
-    /// Inlined `baseAgentConfig.SubAgents`.
+    /// Same as [`BaseAgentConfig::sub_agents`].
     pub sub_agents: Vec<AgentRefConfig>,
-    /// Inlined `baseAgentConfig.BeforeAgentCallbacks`.
+    /// Same as [`BaseAgentConfig::before_agent_callbacks`].
     pub before_agent_callbacks: Vec<CodeConfig>,
-    /// Inlined `baseAgentConfig.AfterAgentCallbacks`.
+    /// Same as [`BaseAgentConfig::after_agent_callbacks`].
     pub after_agent_callbacks: Vec<CodeConfig>,
-    /// Inlined `baseAgentConfig.ConfigDir` (`yaml:"-"`): the config file's directory.
+    /// The config file's directory (not read from YAML); see [`BaseAgentConfig::config_path`].
     #[serde(skip)]
     pub config_path: PathBuf,
-    /// Inlined `baseAgentConfig.AdditionalProperties` (`,inline`).
+    /// Same as [`BaseAgentConfig::additional_properties`].
     #[serde(rename = "$gadk_goyaml::inline")]
     pub additional_properties: InlineMap,
 }
 
-/// Go `workflowYAMLConfig` (`configurable_workflow.go`).
+/// The workflow agent config: the base agent fields plus `edges` and `max_concurrency`.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(default, rename = "configurable.workflowYAMLConfig")]
 pub struct WorkflowYamlConfig {
-    /// Inlined `baseAgentConfig.AgentClass`.
+    /// Same as [`BaseAgentConfig::agent_class`].
     pub agent_class: String,
-    /// Inlined `baseAgentConfig.Name`.
+    /// Same as [`BaseAgentConfig::name`].
     pub name: String,
-    /// Inlined `baseAgentConfig.Description`.
+    /// Same as [`BaseAgentConfig::description`].
     pub description: String,
-    /// Inlined `baseAgentConfig.SubAgents`.
+    /// Same as [`BaseAgentConfig::sub_agents`].
     pub sub_agents: Vec<AgentRefConfig>,
-    /// Inlined `baseAgentConfig.BeforeAgentCallbacks`.
+    /// Same as [`BaseAgentConfig::before_agent_callbacks`].
     pub before_agent_callbacks: Vec<CodeConfig>,
-    /// Inlined `baseAgentConfig.AfterAgentCallbacks`.
+    /// Same as [`BaseAgentConfig::after_agent_callbacks`].
     pub after_agent_callbacks: Vec<CodeConfig>,
-    /// Inlined `baseAgentConfig.ConfigDir` (`yaml:"-"`): the config file's directory.
+    /// The config file's directory (not read from YAML); see [`BaseAgentConfig::config_path`].
     #[serde(skip)]
     pub config_path: PathBuf,
-    /// Go `Edges []yaml.Node yaml:"edges"`: each element's root is the edge chain's node.
+    /// The `edges` key: each element's root is the edge chain's node.
     pub edges: Vec<Document>,
-    /// Go `MaxConcurrency int yaml:"max_concurrency,omitempty"`.
+    /// The `max_concurrency` key.
     pub max_concurrency: i64,
-    /// Inlined `baseAgentConfig.AdditionalProperties` (`,inline`).
+    /// Same as [`BaseAgentConfig::additional_properties`].
     #[serde(rename = "$gadk_goyaml::inline")]
     pub additional_properties: InlineMap,
 }
 
-/// Go `functionNodeYAMLConfig`.
+/// A function node of a workflow.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(default, rename = "configurable.functionNodeYAMLConfig")]
 pub struct FunctionNodeYamlConfig {
-    /// Go `Name yaml:"name"`.
+    /// The `name` key.
     pub name: String,
-    /// Go `FuncCode yaml:"func_code"`: a registered node-function name.
+    /// The `func_code` key: a registered node-function name.
     pub func_code: String,
-    /// Go `RerunOnResume *bool yaml:"rerun_on_resume,omitempty"`.
+    /// The `rerun_on_resume` key.
     pub rerun_on_resume: Option<bool>,
-    /// Go `ParallelWorker bool yaml:"parallel_worker,omitempty"`.
+    /// The `parallel_worker` key.
     pub parallel_worker: bool,
 }
 
-/// Go `joinNodeYAMLConfig`.
+/// A join node of a workflow.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(default, rename = "configurable.joinNodeYAMLConfig")]
 pub struct JoinNodeYamlConfig {
-    /// Go `Name yaml:"name"`.
+    /// The `name` key.
     pub name: String,
 }
 
-/// Go `toolNodeYAMLConfig`.
+/// A tool node of a workflow.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(default, rename = "configurable.toolNodeYAMLConfig")]
 pub struct ToolNodeYamlConfig {
-    /// Go `Name yaml:"name"`.
+    /// The `name` key.
     pub name: String,
-    /// Go `ToolCode yaml:"tool_code"`: a registered tool name.
+    /// The `tool_code` key: a registered tool name.
     pub tool_code: String,
-    /// Go `RerunOnResume *bool yaml:"rerun_on_resume,omitempty"`.
+    /// The `rerun_on_resume` key.
     pub rerun_on_resume: Option<bool>,
-    /// Go `ParallelWorker bool yaml:"parallel_worker,omitempty"`.
+    /// The `parallel_worker` key.
     pub parallel_worker: bool,
-    /// Go `Args map[string]any yaml:"args,omitempty"`: `None` is Go's nil map.
+    /// The `args` key: `None` when the key is absent or null (distinct from `{}`).
     pub args: Option<GoMap>,
 }
 
@@ -296,12 +294,12 @@ static OPTIONS: LazyLock<Options> = LazyLock::new(|| Options {
 });
 
 /// The gadk-goyaml options for the config structs: [`VERBATIM_STRUCTS`] verbatim, everything
-/// else (genai types) with Go's default keys.
+/// else (genai types) with their default keys.
 pub fn options() -> &'static Options {
     &OPTIONS
 }
 
-/// Go `yaml.Unmarshal(data, &cfg)` for a config struct.
+/// Decodes YAML into a config struct with yaml.v3's rules ([`options`]).
 pub fn unmarshal<T: DeserializeOwned>(data: &[u8]) -> Result<T, gadk_goyaml::Error> {
     gadk_goyaml::unmarshal(data, options())
 }

@@ -13,9 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `internal/telemetry/telemetrytest/log_digest.go`: one OTel log record as a test
-//! digest sees it. Log records are `tracing` events (plan decision D6); [`LogRecord`] is Go's
-//! `sdklog.Record` reduced to what a digest reads.
+//! One OTel log record as a test digest sees it. Log records are `tracing` events; [`LogRecord`] is
+//! a captured record reduced to what a digest reads.
 
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -25,20 +24,20 @@ use serde_json::Value;
 
 use super::span_digest::{SpanStub, capture, normalize_attribute};
 
-/// One captured log record (Go `sdklog.Record`, reduced to what a digest reads).
+/// One captured log record, reduced to what a digest reads.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct LogRecord {
-    /// Go `EventName()` (the event's `event.name` field).
+    /// The event's `event.name` field.
     pub event_name: String,
-    /// Go `SpanID()`: the span the record was emitted under; `None` outside any span.
+    /// The span the record was emitted under; `None` outside any span.
     pub span_id: Option<u64>,
-    /// Go `telemetry.FromLogValue(Body())` (the event's `otel.log.body` JSON text, parsed).
+    /// The event's `otel.log.body` JSON text, parsed.
     pub body: Value,
-    /// Go `WalkAttributes` (the event's `otel.log.attributes` JSON object, in key order).
+    /// The event's `otel.log.attributes` JSON object, in key order.
     pub attributes: Vec<(String, Value)>,
 }
 
-/// Go `telemetrytest.LogDigest`: a deterministic snapshot of one log record.
+/// A deterministic snapshot of one log record.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LogDigest {
     /// The record's event name.
@@ -51,7 +50,7 @@ pub struct LogDigest {
     pub attributes: BTreeMap<String, Value>,
 }
 
-/// Go `buildLogDigest`.
+/// Builds the deterministic digest of one record.
 pub fn build_log_digest(r: &LogRecord) -> LogDigest {
     LogDigest {
         event_name: r.event_name.clone(),
@@ -64,9 +63,8 @@ pub fn build_log_digest(r: &LogRecord) -> LogDigest {
     }
 }
 
-/// Runs `fut` with a recording subscriber as the thread default (use a current-thread runtime)
-/// and returns its output, the spans it opened and the log records it emitted (Go's span
-/// exporter plus `InMemoryLogExporter`).
+/// Runs `fut` with a recording subscriber as the thread default (use a current-thread runtime) and
+/// returns its output, the spans it opened and the log records it emitted.
 pub async fn capture_logs<F: Future>(fut: F) -> (F::Output, Vec<SpanStub>, Vec<LogRecord>) {
     capture(fut).await
 }

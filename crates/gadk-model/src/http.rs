@@ -83,7 +83,7 @@ pub async fn collect_body(mut body: BodyStream) -> Result<Bytes, ModelError> {
     Ok(buf.freeze())
 }
 
-/// `err` and its sources, joined with `": "` (moved from gadk-anthropic in 3b so every REST
+/// `err` and its sources, joined with `": "` (moved from gadk-anthropic so every REST
 /// provider renders a cause chain the same way).
 pub fn error_chain(err: &(dyn std::error::Error + 'static)) -> String {
     let mut out = err.to_string();
@@ -96,9 +96,8 @@ pub fn error_chain(err: &(dyn std::error::Error + 'static)) -> String {
     out
 }
 
-/// The text of a [`ModelError::Transport`] cause: a `reqwest::Error` loses its URL (Go's
-/// provider error texts carry none), then the source chain is joined with `": "`
-/// ([`error_chain`]).
+/// The text of a [`ModelError::Transport`] cause: a `reqwest::Error` loses its URL, then the
+/// source chain is joined with `": "` ([`error_chain`]).
 pub fn transport_error_detail(err: Box<dyn std::error::Error + Send + Sync>) -> String {
     match err.downcast::<reqwest::Error>() {
         Ok(e) => error_chain(&e.without_url()),

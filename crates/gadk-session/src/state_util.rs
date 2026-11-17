@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Helpers every [`crate::SessionService`] implementation shares (ADK-Go
-//! `internal/sessionutils`, the services' `%q` validation text and Go time formatting).
+//! Helpers every [`crate::SessionService`] implementation shares: state-delta handling, the
+//! required-field check text and RFC 3339 time formatting.
 
 use chrono::{DateTime, Utc};
 use gadk_platform::go_quote;
@@ -28,7 +28,7 @@ pub use crate::requested_auth::check_requested_auth_configs;
 
 type StateMap = Map<String, Value>;
 
-/// Go `sessionutils.ExtractStateDeltas`: splits a delta into app, user (both with their
+/// Splits a delta into app, user (both with their
 /// prefix removed) and session parts; `temp:` keys are dropped. Prefixes do not compose:
 /// `app:temp:x` is app-scoped.
 pub fn extract_state_deltas(delta: &StateMap) -> (StateMap, StateMap, StateMap) {
@@ -45,7 +45,7 @@ pub fn extract_state_deltas(delta: &StateMap) -> (StateMap, StateMap, StateMap) 
     (app, user, session)
 }
 
-/// Go `sessionutils.MergeStates`: session state plus app and user state with their prefixes
+/// Session state plus app and user state with their prefixes
 /// put back.
 pub fn merge_states(
     app_state: Option<&StateMap>,
@@ -62,7 +62,7 @@ pub fn merge_states(
     merged
 }
 
-/// Go `trimTempDeltaState`: a copy of `event` without `temp:` keys in its state delta. A
+/// A copy of `event` without `temp:` keys in its state delta. A
 /// delta whose every key is `temp:` becomes an empty map, not `None`.
 pub fn trim_temp_delta_state(event: &Event) -> Event {
     let mut copy = event.clone();
@@ -74,7 +74,7 @@ pub fn trim_temp_delta_state(event: &Event) -> Event {
 
 /// The services' required-field check: `Ok` when every value is non-empty, else
 /// `InvalidRequest("<a>, <b> are required, got <a>: %q, <b>: %q")` (`is` for one field), with
-/// Go `%q` quoting.
+/// each value quoted by [`gadk_platform::go_quote`].
 pub fn require(fields: &[(&str, &str)]) -> Result<(), SessionError> {
     if fields.iter().all(|(_, v)| !v.is_empty()) {
         return Ok(());
@@ -92,7 +92,8 @@ pub fn require(fields: &[(&str, &str)]) -> Result<(), SessionError> {
     )))
 }
 
-/// Go `t.Format(time.RFC3339Nano)` for a UTC time (`2026-07-17T10:00:00.0015Z`).
+/// Formats a UTC time as RFC 3339 with trailing-zero-trimmed nanoseconds
+/// (`2026-07-17T10:00:00.0015Z`).
 pub fn go_rfc3339_nano(t: &DateTime<Utc>) -> String {
     crate::event::go_time::format(t).unwrap_or_else(|| t.to_rfc3339())
 }

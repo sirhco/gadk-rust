@@ -13,18 +13,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `server/agentengine/internal/helper/encode.go` (`ConvertSnake`) and `emit_json.go`
-//! (`EmitJSON`, `EmitJSONError`).
+//! The NDJSON line encoder of the streaming methods: a snake-case conversion of a value
+//! ([`convert_snake`]) and the line writers [`emit_json`] and [`emit_json_error`].
 //!
-//! Go's `ConvertSnake` walks a value by reflection; serde output cannot recover what it reads
-//! (pointer vs value, `omitempty`, named string types, `time.Time`, `[]byte`, `float32`), so the
-//! walk is driven by Go's struct shapes ([`GoStruct`], generated into
-//! [`encode_shapes`](super::encode_shapes) from ADK-Go by the Go probe) and each
-//! Rust type that reaches an NDJSON line implements [`GoSnake`] over its shape.
+//! The wire format depends on details of an ADK server's struct types that serde output
+//! cannot recover (pointer vs value, `omitempty`, named string types, timestamp, `[]byte`,
+//! `float32`), so the conversion is driven by explicit struct shapes ([`GoStruct`], generated
+//! into [`encode_shapes`](super::encode_shapes)) and each Rust type that reaches an NDJSON line
+//! implements [`GoSnake`] over its shape.
 //!
-//! Each [`GoSnake`] impl walks its Go shape over the Rust value's serde output (Go's JSON keys,
-//! the same names the shapes' tags give): a field the output lacks is Go's zero value for its
-//! kind. The five genai `time.Duration` fields are the exception serde cannot carry (genai
+//! Each [`GoSnake`] impl walks its shape over the Rust value's serde output (the JSON keys are
+//! the same names the shapes' tags give): a field the output lacks is the zero value for its
+//! kind. The five genai duration fields are the exception serde cannot carry (genai
 //! writes whole seconds), so an event's output is patched with their nanoseconds first.
 
 use std::collections::BTreeMap;
@@ -40,31 +40,32 @@ use super::Log;
 use super::encode_shapes;
 use super::models::StreamingAgentRunWithEventsResponse;
 
-/// A Go type as `ConvertSnake` (and `json.Unmarshal`) sees it.
+/// The kind of a shape field's type, as the conversion and the request decoder see it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum GoKind {
-    /// `bool` (or a defined bool type): `v.Bool()`.
+    /// `bool` (or a defined bool type).
     Bool,
-    /// `int`, `int8`…`int64` or a defined int type (`time.Duration`, `time.Month`): `v.Int()`.
+    /// `int`, `int8`…`int64` or a defined int type (a duration or a month).
     Int,
-    /// `uint*`: `ConvertSnake` fails (`unsupported type: uint…`).
+    /// `uint*`: [`convert_snake`] fails (`unsupported type: uint…`).
     Uint,
-    /// `float32`: widened to float64 (`v.Float()`).
+    /// `float32`: widened to float64.
     Float32,
     /// `float64`.
     Float64,
     /// `string`.
     String,
-    /// A defined type over `string` (`genai.Role`, `genai.FinishReason`): returned as is, so
-    /// `addIfNotEmpty` never drops it (an empty one is written `""`).
+    /// A defined type over `string` (`Role`, `FinishReason`): returned as is, so
+    /// `omitempty` never drops it (an empty one is written `""`).
     NamedString,
     /// `[]byte`: standard base64 text.
     Bytes,
-    /// `json.RawMessage`: empty → nil (dropped); otherwise the JSON text verbatim.
+    /// Raw JSON text: empty → nil (dropped); otherwise the JSON text verbatim.
     RawMessage,
-    /// `time.Time`: Unix seconds with microseconds (`float64(UnixMicro()) / 1e6`).
+    /// A timestamp: Unix seconds with microseconds (the microsecond count as a float, divided by
+    /// 1e6).
     Time,
-    /// A struct value, by Go type name (`pkg.Type`, a [`GoStruct::go_type`]).
+    /// A struct value, by its qualified type name (a [`GoStruct::go_type`]).
     Struct(&'static str),
     /// `*T`: nil → nil (always dropped), else `T` at `path + "*"`.
     Pointer(&'static GoKind),
@@ -76,31 +77,31 @@ pub(crate) enum GoKind {
     Interface,
 }
 
-/// One Go struct field (`reflect.StructField`).
+/// One field of a [`GoStruct`] shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct GoField {
-    /// Go field name (`LongRunningToolIDs`).
+    /// The field name (`LongRunningToolIDs`).
     pub(crate) name: &'static str,
     /// The raw `json` tag (`"longRunningToolIds,omitempty"`, `"-"`, or `""` when none), parsed
-    /// by Go `fieldName`/`parseTag` rules at encode time.
+    /// at encode time by [`field_name`].
     pub(crate) tag: &'static str,
-    /// `reflect.StructField.Anonymous`: an embedded struct, flattened into its parent.
+    /// An embedded struct, flattened into its parent.
     pub(crate) embedded: bool,
-    /// Exported (`IsExported`); an unexported field goes through Go `convertValue` / `omitzero`.
+    /// Exported; an unexported field is converted by `convert_value` and never dropped as zero.
     pub(crate) exported: bool,
-    /// `reflect.Type.String()` of the field (`"[]string"`, `"*genai.Content"`,
-    /// `"map[string]interface {}"`): `json.Unmarshal` type-error text.
+    /// The field's type text (`"[]string"`, `"*Content"`, `"map[string]interface {}"`),
+    /// used in the request decoder's type-error text.
     pub(crate) go_type: &'static str,
     /// The field's kind.
     pub(crate) kind: GoKind,
 }
 
-/// One Go struct's shape: its fields in declaration order.
+/// One struct's shape: its fields in declaration order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct GoStruct {
-    /// `reflect.Type.String()` (`"session.Event"`).
+    /// The type name (`"Event"`).
     pub(crate) go_type: &'static str,
-    /// The fields in Go declaration order.
+    /// The fields in declaration order.
     pub(crate) fields: &'static [GoField],
 }
 
@@ -112,16 +113,17 @@ pub(crate) fn shape(go_type: &str) -> Option<&'static GoStruct> {
         .and_then(|i| all.get(i).copied())
 }
 
-/// `ConvertSnake`'s output tree: what `json.Encoder` then writes (objects with sorted keys).
+/// The output tree of [`convert_snake`]: what the JSON encoder then writes (objects with sorted
+/// keys).
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum GoValue {
-    /// Go nil (`null` when it reaches the encoder inside a map or slice).
+    /// Nil (`null` when it reaches the encoder inside a map or slice).
     Null,
     /// `bool`.
     Bool(bool),
-    /// `int64` (Go `v.Int()`).
+    /// `int64`.
     Int(i64),
-    /// `float64` (Go `v.Float()`), written with Go's float text.
+    /// `float64`, written with the JSON encoder's float text.
     Float(f64),
     /// `string`.
     String(String),
@@ -129,8 +131,8 @@ pub(crate) enum GoValue {
     Array(Vec<GoValue>),
     /// `map[string]any`: keys sorted.
     Object(BTreeMap<String, GoValue>),
-    /// `json.RawMessage`: valid JSON text, written compacted with Go's HTML escaping and its
-    /// number text unchanged.
+    /// Raw JSON text: valid JSON text, written compacted with HTML escaping and its number
+    /// text unchanged.
     Raw(String),
 }
 
@@ -142,7 +144,7 @@ impl Serialize for GoValue {
             GoValue::Bool(b) => serializer.serialize_bool(*b),
             GoValue::Int(i) => serializer.serialize_i64(*i),
             GoValue::Float(f) if f.is_finite() => serializer.serialize_f64(*f),
-            // Go `encoding/json`: `json: unsupported value: NaN` (`+Inf`, `-Inf`).
+            // Encoding error text: `json: unsupported value: NaN` (`+Inf`, `-Inf`).
             GoValue::Float(f) => Err(S::Error::custom(format!(
                 "json: unsupported value: {}",
                 if f.is_nan() {
@@ -163,7 +165,7 @@ impl Serialize for GoValue {
     }
 }
 
-/// Go `json.Compact` with `escapeHTML` (what `json.Encoder` does to a `json.RawMessage`):
+/// Compacts JSON text with HTML escaping (what the encoder does to raw JSON text):
 /// whitespace outside strings removed, `<`, `>`, `&`, U+2028 and U+2029 escaped, everything
 /// else (number text, string escapes) unchanged.
 fn compact_html(text: &str) -> String {
@@ -207,29 +209,30 @@ fn compact_html(text: &str) -> String {
     out
 }
 
-/// `ConvertSnake`'s failure (Go's wrapped error text, e.g. `failed to convert regular struct
+/// A conversion failure, with its wrapped error text (e.g. `failed to convert regular struct
 /// field with path: .X err: unsupported type: uint32`).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{0}")]
 pub(crate) struct ConvertError(pub(crate) String);
 
-/// A Rust value that reaches an NDJSON line, converted as Go's `convertSnake(path, "", o)`
-/// converts its Go counterpart.
+/// A Rust value that reaches an NDJSON line, converted over its shape to the value tree the
+/// line is written from.
 pub(crate) trait GoSnake {
-    /// Go `convertSnake(path, …, o)`: `Ok(GoValue::Null)` is Go's nil result.
+    /// Converts the value at `path`; `Ok(GoValue::Null)` is the nil result.
     fn go_snake(&self, path: &str) -> Result<GoValue, ConvertError>;
 }
 
-/// Go `ConvertSnake(o)`: `o.go_snake("")`.
+/// Converts `o` from the root path: `o.go_snake("")`.
 pub(crate) fn convert_snake<T: GoSnake + ?Sized>(o: &T) -> Result<GoValue, ConvertError> {
     o.go_snake("")
 }
 
-/// Go `pathToName`: the paths whose name is not `convertName`'s.
+/// The paths whose name is not the one [`convert_name`] derives.
 const PATH_TO_NAME: [(&str, &str); 1] = [(".LongRunningToolIDs", "long_running_tool_ids")];
 
-/// Go `convertName(path, name)`: the snake-case field name, with Go's `pathToName` exception
-/// (`.LongRunningToolIDs` → `long_running_tool_ids`); byte-exact port (ASCII case rules).
+/// The snake-case field name, with the exception in [`PATH_TO_NAME`]
+/// (`.LongRunningToolIDs` → `long_running_tool_ids`); the case rules are ASCII-only and
+/// byte-exact.
 pub(crate) fn convert_name(path: &str, name: &str) -> String {
     if let Some((_, res)) = PATH_TO_NAME.iter().find(|(p, _)| *p == path) {
         return (*res).to_owned();
@@ -260,7 +263,7 @@ pub(crate) fn convert_name(path: &str, name: &str) -> String {
     b
 }
 
-/// Go `parseTag(tag)`: `(name, omitempty, omitzero, skip)`.
+/// Parses a json tag: `(name, omitempty, omitzero, skip)`.
 fn parse_tag(tag: &str) -> Result<(String, bool, bool, bool), ConvertError> {
     if tag.is_empty() {
         return Ok((String::new(), false, false, false));
@@ -299,7 +302,7 @@ fn parse_tag(tag: &str) -> Result<(String, bool, bool, bool), ConvertError> {
     Ok((name, omit_empty, omit_zero, false))
 }
 
-/// Go `fieldName(name, tag)` / `parseTag`: `(name, omitempty, omitzero, skip)`; a duplicate
+/// The json name of a field and its tag options: `(name, omitempty, omitzero, skip)`; a duplicate
 /// `omitempty`/`omitzero`/name is `Err` (`duplicate omitempty` / `duplicate omitzero` /
 /// `duplicate name`).
 pub(crate) fn field_name(
@@ -315,7 +318,7 @@ pub(crate) fn field_name(
     Ok((new_name, omit_empty, omit_zero, skip))
 }
 
-/// Unix seconds of Go's zero `time.Time` (`0001-01-01T00:00:00Z`).
+/// Unix seconds of the zero timestamp (`0001-01-01T00:00:00Z`).
 const ZERO_TIME_SECS: i64 = -62_135_596_800;
 
 /// Where `GoKind::Struct` names resolve: [`shape`], then `extra` (test-local shapes).
@@ -335,8 +338,8 @@ impl Shapes<'_> {
     }
 }
 
-/// [`convert_struct`] with test-local shapes `extra` also resolvable by name (Go's tests
-/// convert structs declared inside the test function).
+/// [`convert_struct`] with test-local shapes `extra` also resolvable by name (tests convert
+/// structs declared inside the test function).
 #[cfg(test)]
 pub(crate) fn convert_struct_with(
     extra: &[&'static GoStruct],
@@ -347,8 +350,8 @@ pub(crate) fn convert_struct_with(
     convert_struct_in(Shapes { extra }, st, Some(value), path)
 }
 
-/// The value of the Go field `name` in `obj`: its exact key, else (as Go's `json.Unmarshal`
-/// matches names) the first key equal to it ignoring ASCII case (`civil.Date`'s untagged
+/// The value of the field `name` in `obj`: its exact key, else (as the request decoder matches
+/// names) the first key equal to it ignoring ASCII case (`Date`'s untagged
 /// `Year`/`Month`/`Day` against genai's `year`/`month`/`day`).
 fn lookup<'v>(obj: &'v Map<String, Value>, name: &str) -> Option<&'v Value> {
     obj.get(name).or_else(|| {
@@ -358,8 +361,8 @@ fn lookup<'v>(obj: &'v Map<String, Value>, name: &str) -> Option<&'v Value> {
     })
 }
 
-/// Go `convertSnake` of a struct: `value` holds the struct's fields keyed by json name (the
-/// Rust value's serde output); a missing field is Go's zero value for its kind.
+/// Converts a struct: `value` holds the struct's fields keyed by json name (the Rust value's
+/// serde output); a missing field is the zero value for its kind.
 fn convert_struct_in(
     shapes: Shapes<'_>,
     st: &GoStruct,
@@ -407,16 +410,16 @@ fn convert_struct_in(
                 m.insert(new_name, val);
             }
         } else {
-            // Go `val != 0 || !omitZero`: an int64/uint64/float64/string never equals the
-            // untyped int 0, so omitzero never drops.
+            // `omitzero` never drops here: an int64/uint64/float64/string never equals the
+            // untyped int 0 it is compared with.
             m.insert(new_name, convert_value(&f.kind, fv));
         }
     }
     Ok(GoValue::Object(m))
 }
 
-/// Go `addIfNotEmpty`'s type switch: a named string type (through pointers) is not `string`,
-/// so its default branch keeps it.
+/// Whether an empty value of `kind` is still written under `omitempty`: a named string type
+/// (through pointers) is not a plain `string`, so it is kept.
 fn keeps_when_empty(kind: &GoKind) -> bool {
     match kind {
         GoKind::NamedString => true,
@@ -425,7 +428,7 @@ fn keeps_when_empty(kind: &GoKind) -> bool {
     }
 }
 
-/// Go `addIfNotEmpty`'s empties: `map[string]any{}`, `[]any{}`, `false` and `""`.
+/// The values `omitempty` drops: `map[string]any{}`, `[]any{}`, `false` and `""`.
 fn is_empty(val: &GoValue) -> bool {
     match val {
         GoValue::Object(m) => m.is_empty(),
@@ -436,8 +439,8 @@ fn is_empty(val: &GoValue) -> bool {
     }
 }
 
-/// Go `reflect.Value.Int()` of a field held in serde output: a number, a decimal string
-/// (genai's `,string` int64s) or a Go duration string (genai's `time.Duration` text).
+/// The integer value of a field held in serde output: a number, a decimal string (genai's
+/// `,string` int64s) or a duration string (genai's duration text).
 fn int_of(v: &Value) -> i64 {
     match v {
         Value::Number(n) => n
@@ -454,8 +457,8 @@ fn int_of(v: &Value) -> i64 {
     }
 }
 
-/// Go `float64(t.UnixMicro()) / 1e6` of a `time.Time` held as RFC 3339 text (Go's zero time
-/// when absent): Unix seconds keeping the fractional microseconds.
+/// A timestamp held as RFC 3339 text (the zero time when absent) as microseconds since the
+/// epoch / 1e6: Unix seconds keeping the fractional microseconds.
 fn time_secs(v: Option<&Value>) -> f64 {
     match v {
         Some(Value::String(s)) => chrono::DateTime::parse_from_rfc3339(s)
@@ -466,7 +469,7 @@ fn time_secs(v: Option<&Value>) -> f64 {
     }
 }
 
-/// Go `reflect.Kind` text of a `uint*` field type (`unsupported type: uint32`).
+/// The kind name of a `uint*` field type, as in `unsupported type: uint32`.
 fn uint_kind(go_type: &str) -> &str {
     match go_type.find("uint") {
         Some(i) => {
@@ -480,8 +483,7 @@ fn uint_kind(go_type: &str) -> &str {
     }
 }
 
-/// Go `convertSnake(path, …, v)` of a value of `kind`; `v` is the serde output (`None`: absent,
-/// i.e. Go's zero value).
+/// Converts a value of `kind`; `v` is the serde output (`None`: absent, i.e. the zero value).
 fn convert_kind(
     shapes: Shapes<'_>,
     kind: &GoKind,
@@ -490,9 +492,9 @@ fn convert_kind(
     path: &str,
 ) -> Result<GoValue, ConvertError> {
     if *kind == GoKind::RawMessage {
-        // empty → nil; anything present (even `null`) is the JSON text. Divergence (ledger
-        // 5c): the text is re-serialised from serde's `Value` (keys sorted, number text
-        // normalised, e.g. a jsonschema `Default`); Go keeps the author's compacted text.
+        // empty → nil; anything present (even `null`) is the JSON text. The text is
+        // re-serialised from serde's `Value`, so keys are sorted and number text is normalised
+        // (e.g. a jsonschema `Default`).
         return Ok(v.map_or(GoValue::Null, |v| GoValue::Raw(v.to_string())));
     }
     let v = v.filter(|v| !v.is_null());
@@ -505,9 +507,8 @@ fn convert_kind(
                 uint_kind(go_type)
             )));
         }
-        // Divergence (ledger 5c): a NaN or ±Inf float is already `null` in serde's `to_value`
-        // output, so it becomes `0` here (a pointer to it is nil, then dropped); Go fails the
-        // encode with `json: unsupported value: NaN` and logs the error line.
+        // A NaN or ±Inf float is already `null` in serde's `to_value` output, so it becomes `0`
+        // here (a pointer to it is nil, then dropped), so the line is still written.
         GoKind::Float32 => GoValue::Float(
             v.and_then(Value::as_f64)
                 .map_or(0.0, |f| f64::from(f as f32)),
@@ -565,8 +566,8 @@ fn convert_kind(
     })
 }
 
-/// Go `convertValue` of an unexported field: ints and uints as `Int`, floats as `Float`,
-/// strings as `String`; any other kind is the `reflect.Value` itself, which encodes as `{}`.
+/// Converts an unexported field: ints and uints as `Int`, floats as `Float`,
+/// strings as `String`; any other kind is an empty object (`{}`).
 fn convert_value(kind: &GoKind, v: Option<&Value>) -> GoValue {
     let v = v.filter(|v| !v.is_null());
     match kind {
@@ -583,8 +584,8 @@ fn convert_value(kind: &GoKind, v: Option<&Value>) -> GoValue {
     }
 }
 
-/// Go `convertSnake` of a dynamic (`any`) value as `encoding/json` decodes it: objects and
-/// arrays recurse, an integer is `Int`, any other number `Float`.
+/// Converts a dynamic (`any`) value as a JSON decoder would produce it: objects and arrays
+/// recurse, an integer is `Int`, any other number `Float`.
 fn dynamic(v: &Value) -> GoValue {
     match v {
         Value::Null => GoValue::Null,
@@ -604,10 +605,10 @@ fn dynamic_map(m: &Map<String, Value>) -> GoValue {
     GoValue::Object(m.iter().map(|(k, v)| (k.clone(), dynamic(v))).collect())
 }
 
-/// Go `EmitJSON(rw, o)`: one NDJSON line (`json.Encoder` output, i.e. JSON + `\n`, via
-/// `gadk_model::to_go_json`) of `ConvertSnake(o)`. When the conversion fails, Go logs
-/// `Failed to convert: %+v of type %T: %v` (ledgered: the dump is Rust `Debug`) and encodes the
-/// original value: here `o`'s `Serialize`. An encoding failure is
+/// Writes one NDJSON line (the JSON plus `\n`, via `gadk_model::to_go_json`) of
+/// [`convert_snake`]`(o)`. When the conversion fails, it logs
+/// `Failed to convert: <o as Debug> of type <type>: <err>` and encodes the original value
+/// instead, here `o`'s `Serialize`. An encoding failure is
 /// `Err("failed to encode SSE response chunk: <err>")`.
 pub(crate) fn emit_json<T>(o: &T, log: &Log) -> Result<Bytes, String>
 where
@@ -629,7 +630,7 @@ where
     Ok(Bytes::from(line))
 }
 
-/// Go `EmitJSONError(rw, err)`: the line `{"error":"<text>"}` (through the same conversion and
+/// Writes the error line `{"error":"<text>"}` (through the same conversion and
 /// encoder as [`emit_json`]). An encoding failure is `Err("failed to emit error: <err>")`.
 pub(crate) fn emit_json_error(text: &str, log: &Log) -> Result<Bytes, String> {
     let mut json_err = Map::new();
@@ -638,13 +639,13 @@ pub(crate) fn emit_json_error(text: &str, log: &Log) -> Result<Bytes, String> {
 }
 
 impl GoSnake for Map<String, Value> {
-    /// A Go `map[string]any`: keys unchanged, values as decoded JSON.
+    /// A `map[string]any`: keys unchanged, values as decoded JSON.
     fn go_snake(&self, _path: &str) -> Result<GoValue, ConvertError> {
         Ok(dynamic_map(self))
     }
 }
 
-/// Go `time.Duration` nanoseconds (saturating; Go's range is `i64`).
+/// A duration as nanoseconds (saturating to the `i64` range).
 fn nanos(d: TimeDelta) -> i64 {
     d.num_nanoseconds().unwrap_or(if d < TimeDelta::zero() {
         i64::MIN
@@ -653,8 +654,8 @@ fn nanos(d: TimeDelta) -> i64 {
     })
 }
 
-/// Writes `d`'s nanoseconds under `key` of the object `v` (genai's serde text is whole seconds;
-/// Go's `ConvertSnake` reads the `time.Duration` itself).
+/// Writes `d`'s nanoseconds under `key` of the object `v` (genai's serde text is whole seconds,
+/// but the wire value is the duration itself).
 fn set_nanos(v: &mut Value, key: &str, d: TimeDelta) {
     if let Some(o) = v.as_object_mut() {
         o.insert(key.to_owned(), Value::from(nanos(d)));
@@ -694,7 +695,7 @@ fn patch_grounding(g: &GroundingMetadata, v: &mut Value) {
     }
 }
 
-/// The patches of the `model.LLMResponse` fields (flattened into `v`).
+/// The patches of the `LLMResponse` fields (flattened into `v`).
 fn patch_response(r: &LlmResponse, v: &mut Value) {
     if let (Some(c), Some(cv)) = (&r.content, v.get_mut("content")) {
         patch_content(c, cv);
@@ -710,7 +711,7 @@ fn patch_response(r: &LlmResponse, v: &mut Value) {
     }
 }
 
-/// `e`'s serde output (Go `session.Event`'s JSON keys) with the five genai `time.Duration`
+/// `e`'s serde output (the `Event` JSON keys) with the five genai duration
 /// fields as integer nanoseconds, which is what [`convert_struct_in`] walks.
 fn event_value(e: &gadk_session::Event) -> Result<Value, ConvertError> {
     let mut v = serde_json::to_value(e).map_err(|err| ConvertError(err.to_string()))?;
@@ -731,8 +732,8 @@ fn event_value(e: &gadk_session::Event) -> Result<Value, ConvertError> {
 }
 
 impl GoSnake for gadk_session::Event {
-    /// `session.Event` over [`encode_shapes::SESSION_EVENT`](super::encode_shapes::SESSION_EVENT)
-    /// (embedded `model.LLMResponse` flattened, `Timestamp` as Unix seconds, top-level
+    /// `Event` over [`encode_shapes::SESSION_EVENT`](super::encode_shapes::SESSION_EVENT)
+    /// (embedded `LLMResponse` flattened, `Timestamp` as Unix seconds, top-level
     /// `LongRunningToolIDs` → `long_running_tool_ids`).
     fn go_snake(&self, path: &str) -> Result<GoValue, ConvertError> {
         let v = event_value(self)?;
@@ -746,7 +747,7 @@ impl GoSnake for gadk_session::Event {
 }
 
 impl GoSnake for StreamingAgentRunWithEventsResponse {
-    /// `models.StreamingAgentRunWithEventsResponse` over
+    /// `StreamingAgentRunWithEventsResponse` over
     /// [`encode_shapes::MODELS_STREAMING_AGENT_RUN_WITH_EVENTS_RESPONSE`](super::encode_shapes::MODELS_STREAMING_AGENT_RUN_WITH_EVENTS_RESPONSE)
     /// (its events at `.events.[]*`; the json name `longRunningToolIds` is what `convertName`
     /// sees, so it is `long_running_tool_ids` there too).

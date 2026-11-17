@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! [`FakeBucket`]: an in-memory bucket for tests (Go `gcs_test.go`'s `fakeBucket`), and
+//! [`FakeBucket`]: an in-memory bucket for tests, and
 //! [`GcsArtifactService::with_bucket_for_testing`].
 
 use std::collections::BTreeMap;
@@ -49,7 +49,7 @@ struct State {
     metadata_calls: Vec<BTreeMap<String, String>>,
 }
 
-/// An in-memory bucket for tests (feature `testutil`; Go `fakeBucket`). Uploads honour the
+/// An in-memory bucket for tests (feature `testutil`). Uploads honour the
 /// does-not-exist precondition atomically, so concurrent saves race as they do on GCS; hooks
 /// inject errors and record every upload attempt.
 #[derive(Default)]
@@ -71,33 +71,33 @@ impl FakeBucket {
         Self::default()
     }
 
-    /// Go `setNow`: the creation time of objects uploaded from now on.
+    /// Sets the creation time of objects uploaded from now on.
     pub fn set_now(&self, now: impl Fn() -> DateTime<Utc> + Send + Sync + 'static) {
         self.state.lock().now = Some(Arc::new(now));
     }
 
-    /// Go `closeErr`: every upload attempt fails with `err()` (it is still counted and its
+    /// Every upload attempt fails with `err()` (it is still counted and its
     /// metadata recorded).
     pub fn set_write_err(&self, err: impl Fn() -> GcsError + Send + Sync + 'static) {
         self.state.lock().write_err = Some(Arc::new(err));
     }
 
-    /// Go `attrsErr`: every attributes call fails with `err()`.
+    /// Every attributes call fails with `err()`.
     pub fn set_attrs_err(&self, err: impl Fn() -> GcsError + Send + Sync + 'static) {
         self.state.lock().attrs_err = Some(Arc::new(err));
     }
 
-    /// Go `deleteErr`: every delete fails with `err()`.
+    /// Every delete fails with `err()`.
     pub fn set_delete_err(&self, err: impl Fn() -> GcsError + Send + Sync + 'static) {
         self.state.lock().delete_err = Some(Arc::new(err));
     }
 
-    /// Go `closeCalls`: how many uploads were attempted.
+    /// How many uploads were attempted.
     pub fn close_calls(&self) -> usize {
         self.state.lock().close_calls
     }
 
-    /// Go `metadataCalls`: the metadata of every upload attempt, in order.
+    /// The metadata of every upload attempt, in order.
     pub fn metadata_calls(&self) -> Vec<BTreeMap<String, String>> {
         self.state.lock().metadata_calls.clone()
     }
@@ -190,8 +190,7 @@ impl GcsBucket for FakeBucket {
 }
 
 impl GcsArtifactService {
-    /// A service over `bucket` (feature `testutil`; Go `newGCSServiceForTesting`): save retries
-    /// do not wait.
+    /// A service over `bucket` (feature `testutil`): save retries do not wait.
     pub fn with_bucket_for_testing(
         bucket_name: impl Into<String>,
         bucket: Arc<FakeBucket>,

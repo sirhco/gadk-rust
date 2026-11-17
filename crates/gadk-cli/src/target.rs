@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The Cargo target a deploy builds (R4) and the builder image's Rust version (R5): gadk's
-//! replacement for Go's entry-point split and `builderGoVersion`.
+//! The Cargo target a deploy builds and the builder image's Rust version.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -25,14 +24,14 @@ use serde::Deserialize;
 
 use crate::Env;
 
-/// The version of the compiler that built gadk-cli (`build.rs`), Go's `runtime.Version()`
-/// analogue in the R5 chain; empty when `build.rs` could not read it.
+/// The version of the compiler that built gadk-cli (`build.rs`), the third candidate
+/// of the builder-image version chain; empty when `build.rs` could not read it.
 pub const COMPILED_RUSTC_VERSION: &str = env!("GADK_CLI_RUSTC_VERSION");
 
-/// Go `defaultBuilderGoVersion`: the last-resort, rolling builder tag.
+/// The last-resort, rolling builder tag.
 pub const DEFAULT_BUILDER_RUST_VERSION: &str = "latest";
 
-/// The resolved Cargo target (R4).
+/// The resolved Cargo target.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CargoTarget {
     /// The package's name (`cargo build -p`).
@@ -44,7 +43,7 @@ pub struct CargoTarget {
     /// The directory of the package's `Cargo.toml`.
     pub manifest_dir: PathBuf,
     /// The package's `rust_version` as `cargo metadata` reports it (workspace inheritance
-    /// resolved), the R5 chain's second step.
+    /// resolved), the second step of the builder version chain.
     pub rust_version: Option<String>,
     /// The directory of every `path` dependency of every workspace member.
     pub path_dependencies: Vec<PathBuf>,
@@ -82,7 +81,7 @@ struct MetadataDependency {
     path: Option<PathBuf>,
 }
 
-/// Go `%q` of a path.
+/// A path quoted with double quotes.
 fn quote_path(p: &Path) -> String {
     go_quote(&p.to_string_lossy())
 }
@@ -98,14 +97,13 @@ fn same_path(a: &Path, b: &Path) -> bool {
     }
 }
 
-/// R4: resolves `-e/--entry_point_path` (a package directory or its `Cargo.toml`, relative to
+/// Resolves `-e/--entry_point_path` (a package directory or its `Cargo.toml`, relative to
 /// `env.cwd`; empty means `env.cwd`) and `--bin` through
 /// `cargo metadata --format-version 1 --no-deps --manifest-path <dir>/Cargo.toml` on
 /// `env.runner`. Errors (gadk's texts): missing package, zero binaries, unknown `--bin`,
 /// several binaries without `--bin`, no `Cargo.lock` at the workspace root.
-// Divergence (ledger 6b): Go deploys a `main.go` entry point (split into directory and file,
-// `.go` stripped); gadk deploys a Cargo binary target found through `cargo metadata`, with
-// gadk's own error texts (Go has none for these cases) and a required `Cargo.lock`.
+// The deployed entry point is a Cargo binary target found through `cargo metadata`, with a
+// required `Cargo.lock`.
 pub async fn resolve(env: &Env, entry_point: &str, bin: &str) -> Result<CargoTarget, String> {
     let path = env.abs(entry_point);
     let manifest = if path.file_name().is_some_and(|n| n == "Cargo.toml") {
@@ -236,10 +234,9 @@ fn is_within(path: &Path, root: &Path) -> bool {
     }
 }
 
-/// R4: rejects a `path` dependency of a workspace member outside `staged_root` (it would not
+/// Rejects a `path` dependency of a workspace member outside `staged_root` (it would not
 /// be staged).
-// Divergence (ledger 6b): Go has no such check (its build context is a compiled binary, or
-// the whole `--source_dir`); gadk rejects, before the temp dir exists, a build context that
+// The check runs before the temp dir exists and rejects a build context that
 // `cargo build --locked` could not build.
 pub fn check_path_dependencies(target: &CargoTarget, staged_root: &Path) -> Result<(), String> {
     match target
@@ -257,7 +254,7 @@ pub fn check_path_dependencies(target: &CargoTarget, staged_root: &Path) -> Resu
 }
 
 /// The `[toolchain] channel` of `rust-toolchain.toml` contents when it is a version number,
-/// else `""` — Go `goVersionFromModFile`'s analogue. A minimal line reader (no TOML parser):
+/// else `""`. A minimal line reader (no TOML parser):
 /// section headers, `channel = "<v>"` or `'<v>'`, trailing `#` comments.
 pub fn channel_from_toolchain_file(data: &str) -> String {
     let mut in_toolchain = false;
@@ -297,13 +294,11 @@ pub fn channel_from_toolchain_file(data: &str) -> String {
     String::new()
 }
 
-/// R5: `<workspace_root>/rust-toolchain.toml` `[toolchain] channel` → `target.rust_version` →
+/// `<workspace_root>/rust-toolchain.toml` `[toolchain] channel` → `target.rust_version` →
 /// `compiled` (callers pass [`COMPILED_RUSTC_VERSION`]) → [`DEFAULT_BUILDER_RUST_VERSION`];
 /// each candidate is used only when [`is_rust_version`].
-// Divergence (ledger 6b): Go's chain is go.mod `go` → `runtime.Version()` → `latest`; gadk's is
-// rust-toolchain.toml → `rust-version` (as cargo metadata resolves it) → the rustc that
-// compiled gadk → `latest`. The legacy plain-text `rust-toolchain` file is not read (rustup in
-// the builder image still honours it).
+// `rust-version` is as cargo metadata resolves it. The legacy plain-text `rust-toolchain` file
+// is not read (rustup in the builder image still honours it).
 pub fn builder_rust_version(target: &CargoTarget, compiled: &str) -> String {
     if let Ok(data) = fs::read_to_string(target.workspace_root.join("rust-toolchain.toml")) {
         let v = channel_from_toolchain_file(&data);
@@ -322,7 +317,7 @@ pub fn builder_rust_version(target: &CargoTarget, compiled: &str) -> String {
     DEFAULT_BUILDER_RUST_VERSION.to_string()
 }
 
-/// R5: `^[0-9]+(\.[0-9]+){0,2}$`.
+/// A Rust version number: `^[0-9]+(\.[0-9]+){0,2}$`.
 pub fn is_rust_version(s: &str) -> bool {
     let parts: Vec<&str> = s.split('.').collect();
     parts.len() <= 3
@@ -331,9 +326,8 @@ pub fn is_rust_version(s: &str) -> bool {
             .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
 }
 
-/// R5: `rust:<version>-bookworm`, or `rust:bookworm` for `latest`.
-// Divergence (ledger 6b): Go's builder is `golang:<ver>` (with `ENV GOTOOLCHAIN=auto`); gadk's
-// is the Debian 12 `rust:<ver>-bookworm`, matching the `distroless/cc-debian12` runtime.
+/// `rust:<version>-bookworm`, or `rust:bookworm` for `latest`.
+// The Debian 12 `rust:<ver>-bookworm` image matches the `distroless/cc-debian12` runtime.
 pub fn builder_image(version: &str) -> String {
     if version == DEFAULT_BUILDER_RUST_VERSION {
         "rust:bookworm".to_string()

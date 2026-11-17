@@ -19,8 +19,8 @@ use gadk_session::SessionError;
 
 use crate::backend::Backend;
 
-/// One table: its name, the exact `CREATE TABLE` statement ADK-Go's gorm emits for the dialect,
-/// and every column with the type `ADD COLUMN` uses.
+/// One table: its name, the exact `CREATE TABLE` statement for the dialect (the one ADK's
+/// database session service emits), and every column with the type `ADD COLUMN` uses.
 pub(crate) struct TableDef {
     pub(crate) name: &'static str,
     pub(crate) create: &'static str,

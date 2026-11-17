@@ -13,49 +13,51 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A port of Go's `regexp/syntax` parser (`parse.go`), and the few `unicode/utf8` and `strings`
-//! helpers `ranksearch` needs, so that the regex-or-keywords classification, the pattern-size
-//! estimate and the "pattern not run" notes see exactly the parse trees and error codes Go does.
+//! A parser for the regular-expression dialect of ADK's tool search (RE2 syntax with Perl flags),
+//! and the few UTF-8 and string helpers `ranksearch` needs, so that the regex-or-keywords
+//! classification, the pattern-size estimate and the "pattern not run" notes see the same parse
+//! trees and error codes as ADK.
 //!
-//! What is ported:
-//! - `Parse` with all its error codes and `Expr` texts, on byte strings (Go strings may hold
-//!   invalid UTF-8, which Go reports as `invalid UTF-8`);
-//! - the parse-time tree shaping Go's ranksearch inspects: literal concatenation (`maybeConcat`),
-//!   single-rune classes becoming literals, `collapse`, `swapVerticalBar`, `cleanAlt` and the
+//! What is implemented:
+//! - [`parse`] with all its error codes and expression texts, on byte strings (a byte string may
+//!   hold invalid UTF-8, which is reported as `invalid UTF-8`);
+//! - the parse-time tree shaping `ranksearch` inspects: literal concatenation (`maybe_concat`),
+//!   single-rune classes becoming literals, `collapse`, `swap_vertical_bar`, `clean_alt` and the
 //!   four `factor` rounds of an alternation;
-//! - character classes as Go's flat `[lo, hi, lo, hi, ...]` rune vectors, with Go's case folding.
+//! - character classes as flat `[lo, hi, lo, hi, ...]` rune vectors, with simple case folding.
 //!
-//! What is not ported:
-//! - the `Literal` and POSIX-only modes (`ranksearch` parses with `PERL` only; the flag checks are
-//!   kept, so other flag sets parse as Go would apart from `LITERAL`);
+//! What is not implemented:
+//! - the literal and POSIX-only modes (`ranksearch` parses with [`PERL`] only; the flag checks are
+//!   kept, so other flag sets parse as in that dialect apart from `LITERAL`);
 //! - the `expression nests too deeply` and `expression too large` limits, which a query of at most
 //!   200 runes cannot reach (the parse tree is at most a few hundred levels deep and its compiled
-//!   size is far below Go's 3.3 million instructions);
-//! - Go's Unicode tables: `\p{...}` classes and case folding come from `regex-syntax`, so they
-//!   follow its Unicode version, and `\p{...}` names resolve through its general categories and
-//!   scripts, which also accept a few names Go rejects (four-letter script codes such as `Grek`).
+//!   size is far below the 3.3 million instruction limit);
+//! - Unicode tables of its own: `\p{...}` classes and case folding come from `regex-syntax`, so
+//!   they follow its Unicode version, and `\p{...}` names resolve through its general categories
+//!   and scripts, which also accept a few names the dialect rejects (four-letter script codes such
+//!   as `Grek`).
 //!
-//! [`to_hir`] turns a parse tree into a `regex-syntax` HIR with Go's matching semantics (ASCII
-//! `\b`, `\d`, `\s`, `\w` and POSIX classes, `$` as `\z`, case folding already applied), so the
-//! `regex` crate matches what Go's `regexp` would.
+//! [`to_hir`] turns a parse tree into a `regex-syntax` HIR with the dialect's matching semantics
+//! (ASCII `\b`, `\d`, `\s`, `\w` and POSIX classes, `$` as `\z`, case folding already applied), so
+//! the `regex` crate matches what ADK's tool search would.
 
 use regex_syntax::hir::{
     Capture, Class, ClassUnicode, ClassUnicodeRange, Dot, Hir, HirKind, Look, Repetition,
 };
 
-/// Go `unicode.MaxRune`.
+/// The largest rune (the largest Unicode code point).
 const MAX_RUNE: i32 = 0x10_FFFF;
-/// Go `utf8.RuneError`.
+/// The rune that stands for an invalid byte (U+FFFD).
 const RUNE_ERROR: i32 = 0xFFFD;
-/// Go `minFold`: the smallest rune involved in case folding.
+/// The smallest rune involved in case folding.
 const MIN_FOLD: i32 = 0x0041;
-/// Go `maxFold`: the largest rune involved in case folding.
+/// The largest rune involved in case folding.
 const MAX_FOLD: i32 = 0x1_E943;
-/// Ranges up to this many runes are folded rune by rune, in Go's order (see
+/// Ranges up to this many runes are folded rune by rune, in orbit order (see
 /// [`append_folded_range`]).
 const BRUTE_FORCE_FOLD: i32 = 64;
 
-/// Go `syntax.Flags`.
+/// Parse flags.
 pub(crate) type Flags = u16;
 /// Case-insensitive match.
 pub(crate) const FOLD_CASE: Flags = 1 << 0;
@@ -73,11 +75,11 @@ pub(crate) const PERL_X: Flags = 1 << 6;
 pub(crate) const UNICODE_GROUPS: Flags = 1 << 7;
 /// An `EndText` that was `$`, not `\z`.
 pub(crate) const WAS_DOLLAR: Flags = 1 << 8;
-/// Go `syntax.Perl`: as close to Perl as possible. `ranksearch` parses with these flags.
+/// The flags for syntax as close to Perl as possible. `ranksearch` parses with these flags.
 pub(crate) const PERL: Flags = CLASS_NL | ONE_LINE | PERL_X | UNICODE_GROUPS;
 
-/// Go `syntax.Op`, in Go's order (the order matters to `swapVerticalBar` and `factor`). The last
-/// two are Go's parse-stack pseudo-ops.
+/// The operator of a parse-tree node, in an order that matters to `swap_vertical_bar` and
+/// `factor`. The last two are parse-stack pseudo-ops.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Op {
     NoMatch,
@@ -104,14 +106,14 @@ pub(crate) enum Op {
 }
 
 impl Op {
-    /// Go `op >= opPseudo`.
+    /// Whether this is a parse-stack pseudo-op.
     fn is_pseudo(self) -> bool {
         self >= Op::LeftParen
     }
 }
 
-/// A node of a Go parse tree (Go `syntax.Regexp`). `rune` holds a literal's runes, or a class's
-/// ranges as Go's flat `[lo, hi, lo, hi, ...]` vector. Runes are `i32`, as in Go.
+/// A node of a parse tree. `rune` holds a literal's runes, or a class's ranges as a flat
+/// `[lo, hi, lo, hi, ...]` vector. Runes are `i32`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Regexp {
     pub(crate) op: Op,
@@ -138,7 +140,7 @@ impl Regexp {
         }
     }
 
-    /// Go `(*Regexp).Equal`.
+    /// Structural equality of two nodes.
     fn equal(&self, y: &Regexp) -> bool {
         if self.op != y.op {
             return false;
@@ -175,9 +177,9 @@ fn first_sub_equal(x: &Regexp, y: &Regexp) -> bool {
     }
 }
 
-/// Go `syntax.ErrorCode`. Go's `invalid character class` and `expression nests too deeply` are
+/// The reason a parse failed. `invalid character class` and `expression nests too deeply` are
 /// never produced for the queries `ranksearch` parses (see the module docs), so they are absent;
-/// `Large` is produced by `ranksearch` when the `regex` crate refuses a pattern Go would compile.
+/// `Large` is produced by `ranksearch` when the `regex` crate refuses a pattern that parses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ErrorCode {
     InvalidCharRange,
@@ -196,7 +198,7 @@ pub(crate) enum ErrorCode {
 }
 
 impl ErrorCode {
-    /// The Go error-code text.
+    /// The error-code text.
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             ErrorCode::InvalidCharRange => "invalid character class range",
@@ -222,8 +224,7 @@ impl std::fmt::Display for ErrorCode {
     }
 }
 
-/// Go `syntax.Error`: the code and the offending expression, as bytes (Go's `Expr` may hold
-/// invalid UTF-8).
+/// A parse error: the code and the offending expression, as bytes (it may hold invalid UTF-8).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Error {
     pub(crate) code: ErrorCode,
@@ -237,23 +238,23 @@ fn error(code: ErrorCode, expr: &[u8]) -> Error {
     }
 }
 
-/// A char as a Go rune.
+/// A char as a rune.
 pub(crate) fn rune(c: char) -> i32 {
     // A char is at most 0x10FFFF, so it always fits.
     i32::try_from(u32::from(c)).unwrap_or(RUNE_ERROR)
 }
 
-/// A Go rune as a char, if it is a Unicode scalar value.
+/// A rune as a char, if it is a Unicode scalar value.
 fn to_char(r: i32) -> Option<char> {
     u32::try_from(r).ok().and_then(char::from_u32)
 }
 
 // ---------------------------------------------------------------------------------------------
-// Go unicode/utf8 and strings helpers on byte strings.
+// UTF-8 and string helpers on byte strings.
 // ---------------------------------------------------------------------------------------------
 
-/// Go `utf8.DecodeRune`: the first rune of `s` and its width; `(RuneError, 1)` for an invalid
-/// byte and `(RuneError, 0)` for an empty `s`.
+/// Decodes the first rune of `s` and its width; `(RuneError, 1)` for an invalid byte and
+/// `(RuneError, 0)` for an empty `s`.
 pub(crate) fn decode_rune(s: &[u8]) -> (i32, usize) {
     let Some(&b0) = s.first() else {
         return (RUNE_ERROR, 0);
@@ -275,7 +276,8 @@ pub(crate) fn decode_rune(s: &[u8]) -> (i32, usize) {
     }
 }
 
-/// Go `utf8.DecodeLastRune`.
+/// Decodes the last rune of `s` and its width; `(RuneError, 1)` for an invalid byte,
+/// `(RuneError, 0)` for an empty `s`.
 fn decode_last_rune(s: &[u8]) -> (i32, usize) {
     let end = s.len();
     let Some(&last) = s.last() else {
@@ -299,12 +301,12 @@ fn decode_last_rune(s: &[u8]) -> (i32, usize) {
     (r, size)
 }
 
-/// Go `unicode.IsSpace` (the White_Space property, which Rust's `char::is_whitespace` follows).
+/// Whether `r` is white space (the White_Space property, which `char::is_whitespace` follows).
 fn is_space(r: i32) -> bool {
     to_char(r).is_some_and(char::is_whitespace)
 }
 
-/// Go `strings.TrimSpace`. An invalid byte decodes as `RuneError`, which is not a space.
+/// Trims white space from both ends. An invalid byte decodes as `RuneError`, which is not a space.
 pub(crate) fn trim_space(s: &[u8]) -> &[u8] {
     let mut start = 0;
     while start < s.len() {
@@ -325,7 +327,7 @@ pub(crate) fn trim_space(s: &[u8]) -> &[u8] {
     &s[start..end]
 }
 
-/// Go `strings.ContainsFunc(s, unicode.IsSpace)`.
+/// Whether `s` contains any white space.
 pub(crate) fn contains_space(s: &[u8]) -> bool {
     let mut t = s;
     while !t.is_empty() {
@@ -338,7 +340,7 @@ pub(crate) fn contains_space(s: &[u8]) -> bool {
     false
 }
 
-/// Go `utf8.RuneCount`: an invalid byte counts as one rune.
+/// The number of runes in `s`: an invalid byte counts as one rune.
 pub(crate) fn rune_count(s: &[u8]) -> usize {
     let mut t = s;
     let mut n = 0;
@@ -350,7 +352,7 @@ pub(crate) fn rune_count(s: &[u8]) -> usize {
     n
 }
 
-/// Go `strings.ToValidUTF8`: each run of invalid bytes becomes one `replacement`.
+/// Converts `s` to a `String`: each run of invalid bytes becomes one `replacement`.
 pub(crate) fn to_valid_utf8(s: &[u8], replacement: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut invalid = false;
@@ -374,7 +376,7 @@ pub(crate) fn to_valid_utf8(s: &[u8], replacement: &str) -> String {
     out
 }
 
-/// Go `checkUTF8`.
+/// Fails with `invalid UTF-8` when `s` holds an invalid byte.
 fn check_utf8(s: &[u8]) -> Result<(), Error> {
     let mut t = s;
     while !t.is_empty() {
@@ -387,7 +389,7 @@ fn check_utf8(s: &[u8]) -> Result<(), Error> {
     Ok(())
 }
 
-/// Go `nextRune`.
+/// Decodes the next rune, failing with `invalid UTF-8` on an invalid byte.
 fn next_rune(s: &[u8]) -> Result<(i32, &[u8]), Error> {
     let (c, size) = decode_rune(s);
     if c == RUNE_ERROR && size == 1 {
@@ -408,8 +410,8 @@ fn index_of(s: &[u8], sep: &[u8]) -> Option<usize> {
 // Unicode tables and case folding, from regex-syntax.
 // ---------------------------------------------------------------------------------------------
 
-/// The ranges of a `regex-syntax` Unicode property such as `gc=L` or `sc=Greek`, as a Go-layout
-/// rune vector, or `None` if `regex-syntax` does not know the property.
+/// The ranges of a `regex-syntax` Unicode property such as `gc=L` or `sc=Greek`, as a flat rune
+/// vector, or `None` if `regex-syntax` does not know the property.
 pub(crate) fn property_ranges(property: &str) -> Option<Vec<i32>> {
     let hir = regex_syntax::ParserBuilder::new()
         .build()
@@ -425,7 +427,7 @@ pub(crate) fn property_ranges(property: &str) -> Option<Vec<i32>> {
     }
 }
 
-/// Go `inCharClass`: reports whether `r` is in the clean class `class`.
+/// Reports whether `r` is in the clean class `class`.
 pub(crate) fn in_char_class(r: i32, class: &[i32]) -> bool {
     let pairs = class.len() / 2;
     let (mut lo, mut hi) = (0, pairs);
@@ -457,7 +459,7 @@ fn char_ranges(lo: i32, hi: i32) -> Vec<ClassUnicodeRange> {
     out
 }
 
-/// The `(lo, hi)` ranges of a Go-layout class vector.
+/// The `(lo, hi)` ranges of a flat class vector.
 fn pairs(class: &[i32]) -> impl Iterator<Item = (i32, i32)> + '_ {
     class.as_chunks::<2>().0.iter().map(|&[lo, hi]| (lo, hi))
 }
@@ -466,8 +468,8 @@ fn class_unicode(class: &[i32]) -> ClassUnicode {
     ClassUnicode::new(pairs(class).flat_map(|(lo, hi)| char_ranges(lo, hi)))
 }
 
-/// The case-fold orbit of `r` (all runes Go's `unicode.SimpleFold` cycles through from `r`,
-/// `r` included), sorted.
+/// The case-fold orbit of `r` (all runes that simple case folding cycles through from `r`, `r`
+/// included), sorted.
 fn orbit(r: i32) -> Vec<i32> {
     let Some(c) = to_char(r) else {
         return vec![r];
@@ -481,13 +483,12 @@ fn orbit(r: i32) -> Vec<i32> {
         .collect()
 }
 
-/// Go's `unicode.SimpleFold(a) == b && unicode.SimpleFold(b) == a`: `a` and `b` form a two-rune
-/// orbit.
+/// Whether `a` and `b` form a two-rune fold orbit.
 fn fold_pair(a: i32, b: i32) -> bool {
     a != b && orbit(a) == [a.min(b), a.max(b)]
 }
 
-/// Go `minFoldRune`: the smallest rune fold-equivalent to `r`.
+/// The smallest rune fold-equivalent to `r`.
 fn min_fold_rune(r: i32) -> i32 {
     if !(MIN_FOLD..=MAX_FOLD).contains(&r) {
         return r;
@@ -507,15 +508,15 @@ fn fold_closure(class: &[i32]) -> Vec<i32> {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Character classes (Go parse.go).
+// Character classes.
 // ---------------------------------------------------------------------------------------------
 
-/// Go `perl_groups.go`: `\d`, `\s`, `\w`.
+/// The classes of `\d`, `\s` and `\w`.
 const CODE_DIGIT: &[i32] = &[0x30, 0x39];
 const CODE_SPACE: &[i32] = &[0x9, 0xa, 0xc, 0xd, 0x20, 0x20];
 const CODE_WORD: &[i32] = &[0x30, 0x39, 0x41, 0x5a, 0x5f, 0x5f, 0x61, 0x7a];
 
-/// Go `perlGroup`: the sign and class of a Perl class escape.
+/// The sign and class of a Perl class escape.
 fn perl_group(name: &[u8]) -> Option<(i32, &'static [i32])> {
     Some(match name {
         b"\\d" => (1, CODE_DIGIT),
@@ -528,7 +529,7 @@ fn perl_group(name: &[u8]) -> Option<(i32, &'static [i32])> {
     })
 }
 
-/// Go `posixGroup`: the sign and class of a POSIX class name such as `[:alpha:]`.
+/// The sign and class of a POSIX class name such as `[:alpha:]`.
 fn posix_group(name: &[u8]) -> Option<(i32, &'static [i32])> {
     let (sign, base) = match name.strip_prefix(b"[:^") {
         Some(rest) => (-1, rest),
@@ -554,7 +555,8 @@ fn posix_group(name: &[u8]) -> Option<(i32, &'static [i32])> {
     Some((sign, class))
 }
 
-/// Go `appendRange`.
+/// Appends the range `[lo, hi]` to a class vector, merging it into one of the last two ranges when
+/// they touch.
 fn append_range(r: &mut Vec<i32>, lo: i32, hi: i32) {
     let n = r.len();
     for i in [2, 4] {
@@ -575,9 +577,9 @@ fn append_range(r: &mut Vec<i32>, lo: i32, hi: i32) {
     r.push(hi);
 }
 
-/// Go `appendFoldedRange`. Go adds each rune of the range and then its orbit; this does the same
-/// for short ranges, so the (not yet cleaned) vector matches Go's, and adds the folded closure
-/// as ranges for long ones, which gives the same set.
+/// Appends the range `[lo, hi]` and everything fold-equivalent to it. Short ranges add each rune
+/// and then its orbit, so the (not yet cleaned) vector has a fixed order; long ranges add the
+/// folded closure as ranges, which gives the same set.
 fn append_folded_range(r: &mut Vec<i32>, lo: i32, hi: i32) {
     if lo <= MIN_FOLD && hi >= MAX_FOLD {
         // Range is full: folding can't add more.
@@ -601,8 +603,7 @@ fn append_folded_range(r: &mut Vec<i32>, lo: i32, hi: i32) {
     if hi - lo < BRUTE_FORCE_FOLD {
         for c in lo..=hi {
             append_range(r, c, c);
-            // Go: f := SimpleFold(c); for f != c { ...; f = SimpleFold(f) } visits the orbit in
-            // ascending order from c, wrapping around.
+            // The orbit of `c` in ascending order from `c`, wrapping around.
             let o = orbit(c);
             for &f in o
                 .iter()
@@ -621,7 +622,7 @@ fn append_folded_range(r: &mut Vec<i32>, lo: i32, hi: i32) {
     }
 }
 
-/// Go `appendLiteral`.
+/// Appends one rune, with its case-fold orbit when `flags` fold case.
 fn append_literal(r: &mut Vec<i32>, x: i32, flags: Flags) {
     if flags & FOLD_CASE != 0 {
         append_folded_range(r, x, x);
@@ -630,14 +631,14 @@ fn append_literal(r: &mut Vec<i32>, x: i32, flags: Flags) {
     }
 }
 
-/// Go `appendClass`.
+/// Appends every range of the class `x`.
 fn append_class(r: &mut Vec<i32>, x: &[i32]) {
     for (lo, hi) in pairs(x) {
         append_range(r, lo, hi);
     }
 }
 
-/// Go `appendNegatedClass`.
+/// Appends the complement of the class `x`.
 fn append_negated_class(r: &mut Vec<i32>, x: &[i32]) {
     let mut next_lo = 0;
     for (lo, hi) in pairs(x) {
@@ -651,7 +652,7 @@ fn append_negated_class(r: &mut Vec<i32>, x: &[i32]) {
     }
 }
 
-/// Go `cleanClass`: sorts the ranges, merges them, and eliminates duplicates.
+/// Sorts the ranges, merges them, and eliminates duplicates.
 fn clean_class(r: &mut Vec<i32>) {
     let mut ranges: Vec<(i32, i32)> = pairs(r).collect();
     // Sort by lo increasing, hi decreasing to break ties.
@@ -671,7 +672,7 @@ fn clean_class(r: &mut Vec<i32>) {
     }
 }
 
-/// Go `negateClass`.
+/// Replaces a clean class with its complement.
 fn negate_class(r: &mut Vec<i32>) {
     let mut out = Vec::with_capacity(r.len() + 2);
     let mut next_lo = 0;
@@ -689,7 +690,8 @@ fn negate_class(r: &mut Vec<i32>) {
     *r = out;
 }
 
-/// Go `cleanAlt`.
+/// Cleans a class node's ranges, turning a full class into `.` (any char) and a class of all but
+/// `\n` into `.` (any char but newline).
 fn clean_alt(re: &mut Regexp) {
     if re.op == Op::CharClass {
         clean_class(&mut re.rune);
@@ -703,13 +705,13 @@ fn clean_alt(re: &mut Regexp) {
     }
 }
 
-/// Go `isCharClass`: a single-rune literal, a class, `.`, or `(?s:.)`.
+/// Whether `re` is a single-rune literal, a class, `.`, or `(?s:.)`.
 fn is_char_class(re: &Regexp) -> bool {
     re.op == Op::Literal && re.rune.len() == 1
         || matches!(re.op, Op::CharClass | Op::AnyCharNotNl | Op::AnyChar)
 }
 
-/// Go `matchRune`.
+/// Whether the single-char node `re` matches `r`.
 fn match_rune(re: &Regexp, r: i32) -> bool {
     match re.op {
         Op::Literal => re.rune.len() == 1 && re.rune[0] == r,
@@ -720,7 +722,7 @@ fn match_rune(re: &Regexp, r: i32) -> bool {
     }
 }
 
-/// Go `mergeCharClass`: `dst = dst|src`, where `dst.op >= src.op`.
+/// Merges `src` into `dst` (`dst = dst|src`), where `dst.op >= src.op`.
 fn merge_char_class(dst: &mut Regexp, src: &Regexp) {
     match dst.op {
         Op::AnyChar => {}
@@ -754,7 +756,7 @@ fn merge_char_class(dst: &mut Regexp, src: &Regexp) {
     }
 }
 
-/// Go `repeatIsValid`.
+/// Whether the nested repeat counts under `re` multiply to no more than `n`.
 fn repeat_is_valid(re: &Regexp, mut n: i32) -> bool {
     if re.op == Op::Repeat {
         let mut m = re.max;
@@ -774,8 +776,8 @@ fn repeat_is_valid(re: &Regexp, mut n: i32) -> bool {
     re.sub.iter().all(|sub| repeat_is_valid(sub, n))
 }
 
-// ---------------------------------------------------------------------------------------------
-// The parser (Go parse.go).
+// --------------------------------------------------------------------------------------------- The
+// parser.
 // ---------------------------------------------------------------------------------------------
 
 struct Parser<'a> {
@@ -785,7 +787,7 @@ struct Parser<'a> {
     whole_regexp: &'a [u8],
 }
 
-/// Go `syntax.Parse(s, flags)` on a byte string. `ranksearch` passes [`PERL`].
+/// Parses a byte string. `ranksearch` passes [`PERL`].
 pub(crate) fn parse(s: &[u8], flags: Flags) -> Result<Regexp, Error> {
     let mut p = Parser {
         flags,
@@ -907,8 +909,8 @@ pub(crate) fn parse(s: &[u8], flags: Flags) -> Result<Regexp, Error> {
         .ok_or_else(|| error(ErrorCode::MissingParen, s))
 }
 
-/// Go `parseRepeat`: `{min}` (max = min), `{min,}` (max = -1) or `{min,max}`. `None` if `s` is
-/// not of that form; `min == -1` if a number is too big.
+/// Parses `{min}` (max = min), `{min,}` (max = -1) or `{min,max}`. `None` if `s` is not of that
+/// form; `min == -1` if a number is too big.
 fn parse_repeat(s: &[u8]) -> Option<(i32, i32, &[u8])> {
     let s = s.strip_prefix(b"{")?;
     let (mut min, mut s) = parse_int(s)?;
@@ -923,7 +925,7 @@ fn parse_repeat(s: &[u8]) -> Option<(i32, i32, &[u8])> {
                 s = rest;
                 max = m;
                 if max < 0 {
-                    // parseInt found too big a number
+                    // `parse_int` found too big a number
                     min = -1;
                 }
             }
@@ -934,7 +936,7 @@ fn parse_repeat(s: &[u8]) -> Option<(i32, i32, &[u8])> {
     Some((min, max, rest))
 }
 
-/// Go `parseInt`: a decimal integer without leading zeros; -1 if it is too big.
+/// Parses a decimal integer without leading zeros; -1 if it is too big.
 fn parse_int(s: &[u8]) -> Option<(i32, &[u8])> {
     if !s.first()?.is_ascii_digit() {
         return None;
@@ -956,12 +958,12 @@ fn parse_int(s: &[u8]) -> Option<(i32, &[u8])> {
     Some((n, &s[digits..]))
 }
 
-/// Go `isValidCaptureName`: `[A-Za-z0-9_]+`.
+/// Whether `name` is a valid capture name: `[A-Za-z0-9_]+`.
 fn is_valid_capture_name(name: &[u8]) -> bool {
     !name.is_empty() && name.iter().all(|&c| c == b'_' || c.is_ascii_alphanumeric())
 }
 
-/// Go `unhex`.
+/// The value of a hex digit, or -1.
 fn unhex(c: i32) -> i32 {
     match u8::try_from(c) {
         Ok(b @ b'0'..=b'9') => i32::from(b - b'0'),
@@ -971,13 +973,13 @@ fn unhex(c: i32) -> i32 {
     }
 }
 
-/// Go `isalnum`.
+/// Whether `c` is an ASCII letter or digit.
 fn is_alnum(c: i32) -> bool {
     u8::try_from(c).is_ok_and(|b| b.is_ascii_alphanumeric())
 }
 
-/// Go `canonicalName`: a leading uppercase letter, then lowercase letters, without `_`, `-` or
-/// spaces.
+/// Canonicalizes a Unicode table name: a leading uppercase letter, then lowercase letters, without
+/// `_`, `-` or spaces.
 fn canonical_name(name: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(name.len());
     let mut first = true;
@@ -994,8 +996,8 @@ fn canonical_name(name: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Go `unicodeTable`: the table named `name` and its sign. Go's special names are handled here;
-/// general categories and scripts come from `regex-syntax`.
+/// The table named `name` and its sign. The special names (`Any`, `Assigned`, `Ascii`) are handled
+/// here; general categories and scripts come from `regex-syntax`.
 fn unicode_table(name: &[u8]) -> Option<(Vec<i32>, i32)> {
     let name = canonical_name(name);
     match name.as_slice() {
@@ -1004,7 +1006,7 @@ fn unicode_table(name: &[u8]) -> Option<(Vec<i32>, i32)> {
         b"Ascii" => return Some((vec![0, 0x7F], 1)),
         _ => {}
     }
-    // Go's names are letters and digits; regex-syntax would also strip an "is" prefix.
+    // Names are letters and digits; regex-syntax would also strip an "is" prefix.
     if name.is_empty()
         || !name.iter().all(u8::is_ascii_alphanumeric)
         || name.len() >= 2 && name[..2].eq_ignore_ascii_case(b"is")
@@ -1018,8 +1020,8 @@ fn unicode_table(name: &[u8]) -> Option<(Vec<i32>, i32)> {
 }
 
 impl Parser<'_> {
-    /// Go `push`: pushes `re`, turning a single-rune class into a literal and concatenating
-    /// literals incrementally.
+    /// Pushes `re`, turning a single-rune class into a literal and concatenating literals
+    /// incrementally.
     fn push(&mut self, mut re: Regexp) {
         let r = &re.rune;
         if re.op == Op::CharClass && r.len() == 2 && r[0] == r[1] {
@@ -1049,8 +1051,8 @@ impl Parser<'_> {
         self.stack.push(re);
     }
 
-    /// Go `maybeConcat`: merges the top two literals; if `r >= 0`, reuses the freed top node to
-    /// push `r` with `flags` and reports true.
+    /// Merges the top two literals; if `r >= 0`, reuses the freed top node to push `r` with `flags`
+    /// and reports true.
     fn maybe_concat(&mut self, r: i32, flags: Flags) -> bool {
         let n = self.stack.len();
         if n < 2 {
@@ -1077,7 +1079,7 @@ impl Parser<'_> {
         false
     }
 
-    /// Go `literal`.
+    /// Pushes a literal rune.
     fn literal(&mut self, r: i32) {
         let mut re = Regexp::new(Op::Literal);
         re.flags = self.flags;
@@ -1090,15 +1092,15 @@ impl Parser<'_> {
         self.push(re);
     }
 
-    /// Go `op`.
+    /// Pushes a node with operator `op`.
     fn op(&mut self, op: Op) {
         let mut re = Regexp::new(op);
         re.flags = self.flags;
         self.push(re);
     }
 
-    /// Go `repeat`: replaces the top stack element with itself repeated. `before` starts at the
-    /// repetition operator and `after` follows it; returns the updated `after`.
+    /// Replaces the top stack element with itself repeated. `before` starts at the repetition
+    /// operator and `after` follows it; returns the updated `after`.
     fn repeat<'s>(
         &mut self,
         op: Op,
@@ -1151,8 +1153,7 @@ impl Parser<'_> {
             .map_or(0, |i| i + 1)
     }
 
-    /// Go `concat`: replaces the top of the stack (above the topmost `|` or `(`) with its
-    /// concatenation.
+    /// Replaces the top of the stack (above the topmost `|` or `(`) with its concatenation.
     fn concat(&mut self) {
         self.maybe_concat(-1, 0);
         let i = self.above_pseudo();
@@ -1165,12 +1166,11 @@ impl Parser<'_> {
         }
     }
 
-    /// Go `alternate`: replaces the top of the stack (above the topmost `(`) with its
-    /// alternation.
+    /// Replaces the top of the stack (above the topmost `(`) with its alternation.
     fn alternate(&mut self) {
         let i = self.above_pseudo();
         let mut subs = self.stack.split_off(i);
-        // Make sure top class is clean. All the others already are (see swapVerticalBar).
+        // Make sure top class is clean. All the others already are (see `swap_vertical_bar`).
         if let Some(last) = subs.last_mut() {
             clean_alt(last);
         }
@@ -1182,7 +1182,7 @@ impl Parser<'_> {
         }
     }
 
-    /// Go `collapse`: applies `op` to `subs`, hoisting nested nodes of the same op.
+    /// Applies `op` to `subs`, hoisting nested nodes of the same op.
     fn collapse(&mut self, mut subs: Vec<Regexp>, op: Op) -> Regexp {
         if subs.len() == 1 {
             return subs.pop().unwrap_or_else(|| Regexp::new(Op::EmptyMatch));
@@ -1206,7 +1206,7 @@ impl Parser<'_> {
         re
     }
 
-    /// Go `factor`: factors common prefixes from an alternation list.
+    /// Factors common prefixes from an alternation list.
     fn factor(&mut self, sub: Vec<Regexp>) -> Vec<Regexp> {
         if sub.len() < 2 {
             return sub;
@@ -1333,17 +1333,18 @@ impl Parser<'_> {
         out.push(re);
     }
 
-    /// Go `parseVerticalBar`.
+    /// Handles a `|`: finishes the concatenation before it and keeps a vertical bar on the stack.
     fn parse_vertical_bar(&mut self) {
         self.concat();
-        // The concatenation we just parsed is on top of the stack. If it sits above an
-        // opVerticalBar, swap it below. Otherwise, push a new vertical bar.
+        // The concatenation we just parsed is on top of the stack. If it sits above an vertical
+        // bar, swap it below. Otherwise, push a new vertical bar.
         if !self.swap_vertical_bar() {
             self.op(Op::VerticalBar);
         }
     }
 
-    /// Go `swapVerticalBar`.
+    /// Swaps the concatenation on top of the stack below an existing vertical bar, merging adjacent
+    /// single-char alternatives into one class. Reports whether it swapped.
     fn swap_vertical_bar(&mut self) -> bool {
         let n = self.stack.len();
         // If above and below vertical bar are literal or char class, can merge into a single
@@ -1373,7 +1374,7 @@ impl Parser<'_> {
         false
     }
 
-    /// Go `parseRightParen`.
+    /// Handles a `)`: closes the innermost group.
     fn parse_right_paren(&mut self) -> Result<(), Error> {
         self.concat();
         if self.swap_vertical_bar() {
@@ -1403,8 +1404,8 @@ impl Parser<'_> {
         Ok(())
     }
 
-    /// Go `parsePerlFlags`: a flag setting or non-capturing group or both, like `(?i)` or `(?:`
-    /// or `(?i:`, or a named capture. `s` starts with `(?`.
+    /// Parses a flag setting or non-capturing group or both, like `(?i)` or `(?:` or `(?i:`, or a
+    /// named capture. `s` starts with `(?`.
     fn parse_perl_flags<'s>(&mut self, s: &'s [u8]) -> Result<&'s [u8], Error> {
         let t = s;
         let starts_with_p = t.len() > 4 && t[2] == b'P' && t[3] == b'<';
@@ -1491,7 +1492,7 @@ impl Parser<'_> {
         Err(error(ErrorCode::InvalidPerlOp, &s[..s.len() - t.len()]))
     }
 
-    /// The `\` case of Go's parse loop.
+    /// The `\` case of the parse loop.
     fn parse_backslash<'s>(&mut self, t: &'s [u8]) -> Result<&'s [u8], Error> {
         if self.flags & PERL_X != 0 && t.len() >= 2 {
             match t[1] {
@@ -1561,7 +1562,7 @@ impl Parser<'_> {
         Ok(rest)
     }
 
-    /// Go `parsePerlClassEscape`: appends a leading `\d`-style class to `r`.
+    /// Appends a leading `\d`-style class to `r`.
     fn parse_perl_class_escape<'s>(&self, s: &'s [u8], r: &mut Vec<i32>) -> Option<&'s [u8]> {
         if self.flags & PERL_X == 0 || s.len() < 2 || s[0] != b'\\' {
             return None;
@@ -1571,7 +1572,7 @@ impl Parser<'_> {
         Some(&s[2..])
     }
 
-    /// Go `parseNamedClass`: appends a leading `[:alnum:]`-style class to `r`.
+    /// Appends a leading `[:alnum:]`-style class to `r`.
     fn parse_named_class<'s>(
         &self,
         s: &'s [u8],
@@ -1592,7 +1593,7 @@ impl Parser<'_> {
         Ok(Some(rest))
     }
 
-    /// Go `appendGroup`.
+    /// Appends a class group, folding case and negating it as its sign asks.
     fn append_group(&self, r: &mut Vec<i32>, (sign, class): (i32, &[i32])) {
         if self.flags & FOLD_CASE == 0 {
             if sign < 0 {
@@ -1611,7 +1612,7 @@ impl Parser<'_> {
         }
     }
 
-    /// Go `parseUnicodeClass`: appends a leading `\p{Han}`-style class to `r`.
+    /// Appends a leading `\p{Han}`-style class to `r`.
     fn parse_unicode_class<'s>(
         &self,
         s: &'s [u8],
@@ -1671,7 +1672,7 @@ impl Parser<'_> {
         Ok(Some(t))
     }
 
-    /// Go `parseClass`: parses a character class at the start of `s` and pushes it.
+    /// Parses a character class at the start of `s` and pushes it.
     fn parse_class<'s>(&mut self, s: &'s [u8]) -> Result<&'s [u8], Error> {
         let mut t = &s[1..]; // chop [
         let mut sign = 1;
@@ -1786,7 +1787,7 @@ fn flush_char_classes(out: &mut Vec<Regexp>, mut run: Vec<Regexp>) {
     rest.clear();
 }
 
-/// Go `leadingString`: the leading literal string of `re` and its fold flag.
+/// The leading literal string of `re` and its fold flag.
 fn leading_string(re: &Regexp) -> (&[i32], Flags) {
     let re = match re.sub.first() {
         Some(first) if re.op == Op::Concat => first,
@@ -1798,7 +1799,7 @@ fn leading_string(re: &Regexp) -> (&[i32], Flags) {
     (&re.rune, re.flags & FOLD_CASE)
 }
 
-/// Go `removeLeadingString`: removes the first `n` leading runes of `re`.
+/// Removes the first `n` leading runes of `re`.
 fn remove_leading_string(mut re: Regexp, n: usize) -> Regexp {
     if re.op == Op::Concat && !re.sub.is_empty() {
         // Removing a leading string in a concatenation might simplify the concatenation.
@@ -1831,7 +1832,7 @@ fn remove_leading_string(mut re: Regexp, n: usize) -> Regexp {
     re
 }
 
-/// Go `leadingRegexp`: the leading regexp of `re`.
+/// The leading regexp of `re`.
 fn leading_regexp(re: &Regexp) -> Option<&Regexp> {
     if re.op == Op::EmptyMatch {
         return None;
@@ -1847,7 +1848,7 @@ fn leading_regexp(re: &Regexp) -> Option<&Regexp> {
     Some(re)
 }
 
-/// Go `removeLeadingRegexp`: removes the leading regexp of `re`.
+/// Removes the leading regexp of `re`.
 fn remove_leading_regexp(mut re: Regexp) -> Regexp {
     if re.op == Op::Concat && !re.sub.is_empty() {
         re.sub.remove(0);
@@ -1868,7 +1869,7 @@ fn remove_leading_regexp(mut re: Regexp) -> Regexp {
     Regexp::new(Op::EmptyMatch)
 }
 
-/// Go `parseClassChar`.
+/// Parses one char of a class, which may be an escape.
 fn parse_class_char<'s>(s: &'s [u8], whole_class: &[u8]) -> Result<(i32, &'s [u8]), Error> {
     if s.is_empty() {
         return Err(error(ErrorCode::MissingBracket, whole_class));
@@ -1880,7 +1881,7 @@ fn parse_class_char<'s>(s: &'s [u8], whole_class: &[u8]) -> Result<(i32, &'s [u8
     next_rune(s)
 }
 
-/// Go `parseEscape`: parses the escape sequence at the start of `s` and returns its rune.
+/// Parses the escape sequence at the start of `s` and returns its rune.
 fn parse_escape(s: &[u8]) -> Result<(i32, &[u8]), Error> {
     let t = &s[1..];
     if t.is_empty() {
@@ -1973,7 +1974,7 @@ fn parse_escape(s: &[u8]) -> Result<(i32, &[u8]), Error> {
 // Matching: a parse tree as a regex-syntax HIR.
 // ---------------------------------------------------------------------------------------------
 
-/// Converts a Go parse tree to a `regex-syntax` HIR that matches what Go's `regexp` matches:
+/// Converts a parse tree to a `regex-syntax` HIR that matches what ADK's tool search matches:
 /// classes are already case folded by the parser, a case-folded literal becomes a class per rune,
 /// `\b` is the ASCII word boundary, and a rune that is not a Unicode scalar value (a surrogate
 /// written as `\x{D800}`) matches nothing. Feed `to_hir(&re).to_string()` to `regex::Regex::new`.

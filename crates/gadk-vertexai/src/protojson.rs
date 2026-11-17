@@ -13,9 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The protobuf JSON (protojson) and URL details of Go's generated REST client: Timestamp and
-//! bytes encoding, int64 values, the two aiplatform enums the session events carry, and Go's
-//! `url.QueryEscape`, `url.Values.Encode` and `URL.EscapedPath`.
+//! The protobuf JSON (protojson) and URL details of Vertex AI REST calls: Timestamp and bytes
+//! encoding, int64 values, the two aiplatform enums the session events carry, and query and
+//! path escaping.
 
 use base64::Engine as _;
 use base64::engine::general_purpose::{GeneralPurpose, GeneralPurposeConfig};
@@ -23,7 +23,7 @@ use base64::engine::{DecodePaddingMode, general_purpose};
 use chrono::{DateTime, TimeDelta, Utc};
 use serde_json::Value;
 
-/// Go `url.QueryEscape` (shared with the other gadk crates).
+/// Query-component escaping (shared with the other gadk crates).
 pub(crate) use gadk_platform::go_query_escape;
 
 /// The first second protojson accepts: `0001-01-01T00:00:00Z`.
@@ -35,7 +35,7 @@ const MAX_TIMESTAMP_SECONDS: i64 = 253_402_300_799;
 const MAX_DURATION_SECONDS: i64 = 315_576_000_000;
 
 /// protojson `google.protobuf.Timestamp` encoding: RFC 3339 in UTC with `Z`, and 0, 3, 6 or 9
-/// fraction digits (`…:05Z`, `….120Z`, `….123456Z`, `….123456789Z`). Go refuses a time
+/// fraction digits (`…:05Z`, `….120Z`, `….123456Z`, `….123456789Z`). protojson refuses a time
 /// outside years 1–9999; gadk's times are inside it, so this formats whatever it is given.
 pub(crate) fn format_timestamp(t: &DateTime<Utc>) -> String {
     let base = t.format("%Y-%m-%dT%H:%M:%S");
@@ -51,7 +51,7 @@ pub(crate) fn format_timestamp(t: &DateTime<Utc>) -> String {
     }
 }
 
-/// protojson `google.protobuf.Timestamp` decoding: Go `time.Parse(time.RFC3339Nano, s)` (any
+/// protojson `google.protobuf.Timestamp` decoding: an RFC 3339 time with nanoseconds (any
 /// offset; `.` or `,` before the fraction), then protojson's checks — at most 9 fraction
 /// digits after a `.`, and an instant within years 1–9999.
 ///
@@ -79,8 +79,8 @@ pub(crate) fn parse_timestamp(s: &str) -> Result<DateTime<Utc>, String> {
     Ok(t)
 }
 
-/// protojson `google.protobuf.Duration` decoding (`unmarshalDuration` + `parseDuration`), then
-/// Go `Duration.AsDuration` (saturating at the `time.Duration` range). The text is a decimal
+/// protojson `google.protobuf.Duration` decoding, saturating at the range of a signed 64-bit
+/// nanosecond count. The text is a decimal
 /// number of seconds with an `s` suffix: an optional sign, an integer part without leading
 /// zeros, and at most 9 fraction digits (`1s`, `0.1s`, `1.s`, `.1s`, `+1s`, `-.1s`).
 ///
@@ -104,7 +104,7 @@ pub(crate) fn parse_duration(v: &Value) -> Result<TimeDelta, String> {
             "google.protobuf.Duration value out of range: {quoted}"
         ));
     }
-    // Go `AsDuration`: an overflowing value saturates toward the sign of the seconds.
+    // An overflowing value saturates toward the sign of the seconds.
     let nanos_total = secs
         .checked_mul(1_000_000_000)
         .and_then(|d| d.checked_add(nanos))
@@ -167,8 +167,8 @@ pub(crate) fn encode_bytes(b: &[u8]) -> String {
 }
 
 /// protojson `bytes` decoding: the URL-safe alphabet when the text holds `-` or `_`, else the
-/// standard one; unpadded when the length is not a multiple of 4, else padded. Like Go's
-/// decoder it skips `\r` and `\n` and ignores non-zero trailing bits.
+/// standard one; unpadded when the length is not a multiple of 4, else padded. It skips `\r`
+/// and `\n` and ignores non-zero trailing bits.
 ///
 /// # Errors
 ///
@@ -194,10 +194,10 @@ pub(crate) fn decode_bytes(s: &str) -> Result<Vec<u8>, String> {
     engine.decode(cleaned).map_err(|e| e.to_string())
 }
 
-/// aiplatform `ExecutableCode.Language` (aiplatformpb `ExecutableCode_Language_name`).
+/// The numbers and names of the aiplatform `ExecutableCode.Language` enum.
 const LANGUAGES: [(i64, &str); 2] = [(0, "LANGUAGE_UNSPECIFIED"), (1, "PYTHON")];
 
-/// aiplatform `CodeExecutionResult.Outcome` (aiplatformpb `CodeExecutionResult_Outcome_name`).
+/// The numbers and names of the aiplatform `CodeExecutionResult.Outcome` enum.
 const OUTCOMES: [(i64, &str); 4] = [
     (0, "OUTCOME_UNSPECIFIED"),
     (1, "OUTCOME_OK"),
@@ -212,9 +212,8 @@ fn enum_number(table: &[(i64, &str)], name: &str) -> i64 {
         .map_or(0, |(number, _)| *number)
 }
 
-/// An enum field's name from its protojson value: a number (Go `Enum.String()`: the name, or
-/// the decimal number when it has none), a name (kept as it is), or absent / `null` (the zero
-/// value's name).
+/// An enum field's name from its protojson value: a number (its name, or the decimal number
+/// when it has none), a name (kept as it is), or absent / `null` (the zero value's name).
 fn enum_name(table: &[(i64, &str)], v: &Value) -> String {
     let number = match v {
         Value::String(name) => return name.clone(),
@@ -237,7 +236,7 @@ pub(crate) fn language_number(name: &str) -> i64 {
 }
 
 /// The name of an `ExecutableCode.Language` value given as a number or a name; an unknown
-/// number is its decimal string (Go `Enum.String()`).
+/// number is its decimal string.
 pub(crate) fn language_name(v: &Value) -> String {
     enum_name(&LANGUAGES, v)
 }
@@ -249,13 +248,13 @@ pub(crate) fn outcome_number(name: &str) -> i64 {
 }
 
 /// The name of a `CodeExecutionResult.Outcome` value given as a number or a name; an unknown
-/// number is its decimal string (Go `Enum.String()`).
+/// number is its decimal string.
 pub(crate) fn outcome_name(v: &Value) -> String {
     enum_name(&OUTCOMES, v)
 }
 
-/// Go `url.Values.Encode` of the values `pairs` adds in order: keys sorted bytewise, a key's
-/// values in the order added, each `QueryEscape(key)=QueryEscape(value)`, joined by `&`.
+/// Encodes the query `pairs`: keys sorted bytewise, a key's values in the order given, each
+/// `{escaped key}={escaped value}` (query-component escaping), joined by `&`.
 pub(crate) fn go_values_encode(pairs: &[(&str, String)]) -> String {
     let mut sorted: Vec<&(&str, String)> = pairs.iter().collect();
     sorted.sort_by(|a, b| a.0.cmp(b.0)); // stable: values keep their order within a key
@@ -266,9 +265,8 @@ pub(crate) fn go_values_encode(pairs: &[(&str, String)]) -> String {
         .join("&")
 }
 
-/// Go `(*url.URL).EscapedPath` of a URL whose `RawPath` is empty (`escape(path, encodePath)`):
-/// ASCII letters, digits and `-._~$&+,/:;=@` are kept, every other byte becomes `%XX`
-/// (upper-case hex, per UTF-8 byte). The path `*` alone is kept as it is (Go issue 11202).
+/// Escapes a URL path: ASCII letters, digits and `-._~$&+,/:;=@` are kept, every other byte
+/// becomes `%XX` (upper-case hex, per UTF-8 byte). The path `*` alone is kept as it is.
 pub(crate) fn go_escaped_path(path: &str) -> String {
     const UPPER_HEX: &[u8; 16] = b"0123456789ABCDEF";
     if path == "*" {
@@ -305,8 +303,8 @@ pub(crate) fn int64_value(v: &Value) -> Option<i64> {
     }
 }
 
-/// protojson's integer reading of a JSON number's text (`internal/encoding/json`
-/// `parseNumberParts` + `normalizeToIntString`, then `strconv.ParseInt(…, 10, 64)`).
+/// protojson's integer reading of a JSON number's text: the number is normalised to an
+/// integer string (fraction and exponent are folded in) and then parsed as an i64.
 fn go_int_text(s: &str) -> Option<i64> {
     let b = s.as_bytes();
     let mut i = 0;

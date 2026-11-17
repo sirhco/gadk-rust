@@ -13,15 +13,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `cmd/adkgo/internal/deploy/cloudrun/cloudrun.go`: `gadk deploy cloudrun`.
+//! `gadk deploy cloudrun`.
 //!
-//! The flag structs keep Go's shape (`deployCloudRunFlags` and its nested structs, field for
-//! field in Go's order) so [`CloudRunFlags::go_v`] can print Go's `fmt.Println(flags)` line;
-//! gadk's additions (`bin`, `target`) sit after Go's fields and are never printed.
+//! The flag structs keep ADK's shape (the nested flag groups, field for field in ADK's order) so
+//! [`CloudRunFlags::go_v`] can print the one-line flags dump ADK's tool prints; gadk's
+//! additions (`bin`, `target`) sit after those fields and are never printed.
 //!
-//! gadk builds the image remotely from the staged Cargo workspace (`"Staging source"` in Go's
-//! `"Compiling server"` slot) with the two-stage Dockerfile of [`crate::stage::dockerfile`];
-//! the checks, the `CMD` array, the gcloud invocations and the console output are Go's.
+//! gadk builds the image remotely from the staged Cargo workspace (the `"Staging source"` step
+//! takes the slot of ADK's `"Compiling server"`) with the two-stage Dockerfile of
+//! [`crate::stage::dockerfile`]; the checks, the `CMD` array, the gcloud invocations and the
+//! console output follow ADK's.
 
 use std::fmt::Write as _;
 use std::fs::{self, OpenOptions};
@@ -47,14 +48,13 @@ use crate::util::{
     validate_shell_arg_safe,
 };
 
-/// Go `cloudrunCmd.Short`.
+/// The command's short description.
 pub const SHORT: &str = "Deploys the application to cloudrun.";
-/// Go `cloudrunCmd.Long` (tabs and trailing spaces as Go's raw string).
-// Divergence (ledger 6b): the first sentence says the image is built from the staged Cargo
-// workspace (Go: "fed with locally compiled server executable containing Web UI static files").
+/// The command's long description (tabs and trailing spaces preserved).
+// The first sentence says the image is built from the staged Cargo workspace.
 pub const LONG: &str = "Deployment prepares a Dockerfile which builds the server executable from the staged Cargo workspace.\n\tService on Cloudrun is created using this information. \n\tLocal proxy adding authentication is started. \n\t";
 
-/// Go `triggerOIDCFlagNames`: the four OIDC flags whose `Changed` state is recorded.
+/// The four OIDC flags whose passed state is recorded.
 pub const TRIGGER_OIDC_FLAG_NAMES: [&str; 4] = [
     "pubsub_oidc_audience",
     "pubsub_oidc_service_accounts",
@@ -62,14 +62,14 @@ pub const TRIGGER_OIDC_FLAG_NAMES: [&str; 4] = [
     "eventarc_oidc_service_accounts",
 ];
 
-/// Go `gCloudFlags`.
+/// The gcloud flags.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GCloudFlags {
     pub region: String,
     pub project_name: String,
 }
 
-/// Go `triggerConfigFlags`.
+/// The trigger configuration flags.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TriggerConfigFlags {
     pub max_retries: i64,
@@ -78,13 +78,13 @@ pub struct TriggerConfigFlags {
     pub max_runs: i64,
     pub oidc_audience: String,
     pub oidc_service_accounts: String,
-    /// Whether each OIDC flag was on the command line (Go `Changed`), which an empty value
+    /// Whether each OIDC flag was on the command line, which an empty value
     /// alone cannot tell from it being omitted.
     pub oidc_audience_passed: bool,
     pub oidc_service_accounts_passed: bool,
 }
 
-/// Go `cloudRunServiceFlags`.
+/// The Cloud Run service flags.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CloudRunServiceFlags {
     pub service_name: String,
@@ -100,13 +100,13 @@ pub struct CloudRunServiceFlags {
     pub eventarc_trigger: TriggerConfigFlags,
 }
 
-/// Go `localProxyFlags`.
+/// The local proxy flags.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LocalProxyFlags {
     pub port: i64,
 }
 
-/// Go `buildFlags`.
+/// The build flags.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BuildFlags {
     pub temp_dir: String,
@@ -115,14 +115,14 @@ pub struct BuildFlags {
     pub dockerfile_build_path: String,
 }
 
-/// Go `sourceFlags`.
+/// The source flags.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SourceFlags {
     pub src_base_path: String,
     pub entry_point_path: String,
 }
 
-/// Go `deployCloudRunFlags` plus gadk's `--bin` and the resolved Cargo target.
+/// The flags of `gadk deploy cloudrun`, plus gadk's `--bin` and the resolved Cargo target.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CloudRunFlags {
     pub gcloud: GCloudFlags,
@@ -130,13 +130,13 @@ pub struct CloudRunFlags {
     pub proxy: LocalProxyFlags,
     pub build: BuildFlags,
     pub source: SourceFlags,
-    /// gadk's `--bin` (not in Go; not printed).
+    /// gadk's `--bin` (not printed).
     pub bin: String,
-    /// The Cargo target `compute_flags` resolved (not in Go; not printed).
+    /// The Cargo target `compute_flags` resolved (not printed).
     pub target: Option<CargoTarget>,
 }
 
-/// Go `cloudrunCmd` with the flags of its `init`, in Go's order, plus gadk's `--bin`.
+/// The `cloudrun` command with its flags, in ADK's order, plus gadk's `--bin`.
 pub fn command() -> Command {
     pflag_command("cloudrun")
         .about(SHORT)
@@ -152,7 +152,7 @@ pub fn command() -> Command {
         ))
         .arg(int_flag("proxy_port", None, "8081", "Local proxy port"))
         .arg(int_flag("server_port", None, "8080", "Cloudrun server port"))
-        // Divergence (ledger 6b): `-e` names a Cargo package (Go: "Path to an entry point (go 'main')").
+        // `-e` names a Cargo package.
         .arg(string_flag(
             "entry_point_path",
             Some('e'),
@@ -247,7 +247,7 @@ pub fn command() -> Command {
             "",
             "Comma-separated service account emails allowed to call the Eventarc endpoint. Requires --eventarc and --eventarc_oidc_audience. An empty value is refused",
         ))
-        // Divergence (ledger 6b): gadk-only flag selecting the Cargo binary target.
+        // A gadk-only flag selecting the Cargo binary target.
         .arg(string_flag(
             "bin",
             None,
@@ -257,8 +257,8 @@ pub fn command() -> Command {
         .arg(stray_args())
 }
 
-/// The flags of a parsed `cloudrun` command (Go: cobra binds them into the package global),
-/// with Go's `PreRunE` applied (`note_passed_oidc_flags` from [`crate::flags::passed`]).
+/// The flags of a parsed `cloudrun` command, with the passed OIDC flags recorded
+/// (`note_passed_oidc_flags` from [`crate::flags::passed`]).
 pub fn from_matches(m: &ArgMatches) -> CloudRunFlags {
     let trigger = |name: &str| TriggerConfigFlags {
         max_retries: int_value(m, &format!("{name}_max_retries")),
@@ -302,13 +302,12 @@ pub fn from_matches(m: &ArgMatches) -> CloudRunFlags {
         bin: string_value(m, "bin"),
         target: None,
     };
-    // Go `PreRunE`.
+    // Record which OIDC flags were passed.
     f.note_passed_oidc_flags(&|id| passed(m, id));
     f
 }
 
-/// Go `%v` of a `triggerConfigFlags`: durations as their nanosecond count (unexported fields,
-/// so `%v` cannot call `Duration.String()`).
+/// The trigger flags' one-line form: durations as their nanosecond count.
 fn trigger_go_v(t: &TriggerConfigFlags) -> String {
     format!(
         "{{{} {} {} {} {} {} {} {}}}",
@@ -324,9 +323,10 @@ fn trigger_go_v(t: &TriggerConfigFlags) -> String {
 }
 
 impl CloudRunFlags {
-    /// Go `fmt.Println(flags)`'s line without the newline: Go's `%v` of
-    /// `deployCloudRunFlags`, field for field (durations as nanoseconds, derived fields as
-    /// they are now); `bin` and `target` are not printed.
+    /// The one-line form of the flags (without the newline), printed before deploying:
+    /// every flag group in braces in field order, values space-separated (durations as
+    /// nanoseconds, derived fields as they are now), byte-identical to the line ADK's tool
+    /// prints; `bin` and `target` are not printed.
     pub fn go_v(&self) -> String {
         let (g, c, b, s) = (&self.gcloud, &self.cloud_run, &self.build, &self.source);
         format!(
@@ -354,7 +354,7 @@ impl CloudRunFlags {
         )
     }
 
-    /// Go `notePassedOIDCFlags(cmd.Flags().Changed)`.
+    /// Records which OIDC flags were passed on the command line.
     pub fn note_passed_oidc_flags(&mut self, passed: &dyn Fn(&str) -> bool) {
         self.cloud_run.pubsub_trigger.oidc_audience_passed = passed("pubsub_oidc_audience");
         self.cloud_run.pubsub_trigger.oidc_service_accounts_passed =
@@ -364,7 +364,7 @@ impl CloudRunFlags {
             passed("eventarc_oidc_service_accounts");
     }
 
-    /// Go `computeFlags` (R6): Go's checks in Go's order, target resolution, the shell-safe
+    /// Computes the derived flags: the checks in order, target resolution, the shell-safe
     /// checks, then the `cloudrun_<local time>__*` temp dir and the derived paths.
     pub async fn compute_flags(&mut self, env: &Env) -> Result<(), String> {
         log_start_stop(
@@ -397,11 +397,9 @@ impl CloudRunFlags {
                 // see is derived from it.
                 let orig_entry_point_path = self.source.entry_point_path.clone();
 
-                // Divergence (ledger 6b): Go splits the `main.go` path into the build
-                // directory and the file, and strips `.go` into the executable name; gadk
-                // resolves the Cargo target (R4: package, binary, workspace root; its errors
-                // are gadk's) and rejects a `path` dependency outside the staged workspace
-                // root, all before the temp dir is created.
+                // Resolves the Cargo target (package, binary, workspace root; its errors are
+                // gadk's) and rejects a `path` dependency outside the staged workspace root,
+                // all before the temp dir is created.
                 let target = resolve(env, &orig_entry_point_path, &self.bin).await?;
                 check_path_dependencies(&target, &target.workspace_root)?;
                 self.source.src_base_path = target.workspace_root.to_string_lossy().into_owned();
@@ -419,9 +417,8 @@ impl CloudRunFlags {
                         go_quote(&orig_entry_point_path)
                     ),
                 )?;
-                // Divergence (ledger 6b): the package name reaches the builder's
-                // `RUN cargo build -p <package>` line, so it takes the same allowlist (Go has
-                // no package name).
+                // The package name reaches the builder's `RUN cargo build -p <package>` line,
+                // so it takes the same allowlist.
                 validate_shell_arg_safe(
                     &target.package,
                     &format!(
@@ -435,8 +432,7 @@ impl CloudRunFlags {
                     self.build.temp_dir = env.temp_dir().to_string_lossy().into_owned();
                 }
                 let absp = env.abs(&self.build.temp_dir);
-                // Divergence (ledger 6b): the wrapped error is Rust's `io::Error` text (Go's
-                // is the `*PathError`, e.g. `mkdir <path>: permission denied`).
+                // The wrapped error is Rust's `io::Error` text.
                 let dir = make_temp(&absp, "cloudrun_", env.time.now()).map_err(|e| {
                     format!(
                         "cannot create a temporary sub directory in '{}': {e}",
@@ -459,14 +455,12 @@ impl CloudRunFlags {
         .await
     }
 
-    /// `"Staging source"` (in Go's `compileEntryPoint` slot, R8): copies the workspace into
+    /// `"Staging source"`: copies the workspace into
     /// the temp dir and writes a `.gcloudignore` when the copy has none.
-    // Divergence (ledger 6b): Go compiles the entry point locally (`"Compiling server"`,
-    // `CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build`) and uploads the binary; gadk copies the
-    // Cargo workspace root (without `.git`, `target` and a nested temp dir) into the temp dir
-    // for a remote build, and writes a one-comment `.gcloudignore` when the workspace has none,
-    // so `gcloud` does not fall back to `.gitignore` (which may exclude `Cargo.lock`). Its
-    // error texts are gadk's.
+    // The Cargo workspace root is copied (without `.git`, `target` and a nested temp dir)
+    // into the temp dir for a remote build, and a one-comment `.gcloudignore` is written when
+    // the workspace has none, so `gcloud` does not fall back to `.gitignore` (which may exclude
+    // `Cargo.lock`). Its error texts are gadk's.
     pub async fn stage_source(&mut self, env: &Env) -> Result<(), String> {
         log_start_stop(&env.out, "Staging source", async |p: Printer| {
             let Some(target) = &self.target else {
@@ -497,7 +491,7 @@ impl CloudRunFlags {
         .await
     }
 
-    /// Go `prepareDockerfile` (R7): reads only the receiver; the generated `Dockerfile`
+    /// Prepares the Dockerfile: reads only the receiver; the generated `Dockerfile`
     /// replaces any copied root `Dockerfile` (removed first, so a symbolic link is never
     /// followed out of the temp dir).
     pub async fn prepare_dockerfile(&self, env: &Env) -> Result<(), String> {
@@ -551,15 +545,14 @@ impl CloudRunFlags {
                 bin: self.build.exec_file.clone(),
             };
             let content = dockerfile(&builder, c.server_port, &b);
-            // Divergence (ledger 6b): the error is Rust's `io::Error` text after Go's
-            // `open <path>: ` prefix (Go: the `*PathError`).
+            // The error is Rust's `io::Error` text after an `open <path>: ` prefix.
             write_file_0600(Path::new(&self.build.dockerfile_build_path), &content)
                 .map_err(|e| format!("open {}: {e}", self.build.dockerfile_build_path))
         })
         .await
     }
 
-    /// Go `gcloudDeployToCloudRun` (R8).
+    /// Deploys to Cloud Run with `gcloud run deploy`.
     pub async fn gcloud_deploy_to_cloud_run(&self, env: &Env) -> Result<(), String> {
         log_start_stop(&env.out, "Deploying to Cloud Run", async |p: Printer| {
             let params = [
@@ -585,12 +578,12 @@ impl CloudRunFlags {
         .await
     }
 
-    /// Go `cleanTemp`.
+    /// Removes the temp dir.
     pub async fn clean_temp(&self, env: &Env) -> Result<(), String> {
         log_start_stop(&env.out, "Cleaning temp", async |p: Printer| {
             p.print(&[&"Clean temp starting with", &self.build.temp_dir]);
-            // Go `os.RemoveAll`: a missing directory is not an error.
-            // Divergence (ledger 6b): the wrapped error is Rust's `io::Error` text.
+            // A missing directory is not an error.
+            // The wrapped error is Rust's `io::Error` text.
             match fs::remove_dir_all(&self.build.temp_dir) {
                 Err(e) if e.kind() != io::ErrorKind::NotFound => Err(format!(
                     "failed to clean temp directory {}: {e}",
@@ -602,7 +595,7 @@ impl CloudRunFlags {
         .await
     }
 
-    /// Go `runGcloudProxy` (banner and `gcloud run services proxy`).
+    /// Runs the local proxy (banner and `gcloud run services proxy`).
     pub async fn run_gcloud_proxy(&self, env: &Env) -> Result<(), String> {
         log_start_stop(
             &env.out,
@@ -647,11 +640,10 @@ impl CloudRunFlags {
         .await
     }
 
-    /// Go `deployOnCloudRun`: prints [`CloudRunFlags::go_v`], then compute → stage →
+    /// Deploys: prints [`CloudRunFlags::go_v`], then compute → stage →
     /// Dockerfile → deploy → clean → proxy, stopping at the first error (the temp dir is kept).
     pub async fn deploy_on_cloud_run(&mut self, env: &Env) -> Result<(), String> {
-        // Divergence (ledger 6b): Go prints the package global `flags`; gadk prints the
-        // receiver (the same values: cobra parsed into the global the receiver points at).
+        // Prints the receiver's flags.
         env.out.write_str(&format!("{}\n", self.go_v()));
 
         self.compute_flags(env).await?;
@@ -686,7 +678,7 @@ fn nested_exclude(root: &Path, temp: &Path) -> Vec<PathBuf> {
     exclude
 }
 
-/// Go `os.WriteFile(path, data, 0o600)` after removing any existing entry at `path`.
+/// Writes `data` to `path` with mode 0600 after removing any existing entry at `path`.
 fn write_file_0600(path: &Path, data: &str) -> io::Result<()> {
     match fs::symlink_metadata(path) {
         Ok(_) => fs::remove_file(path)?,
@@ -702,7 +694,7 @@ fn write_file_0600(path: &Path, data: &str) -> io::Result<()> {
     file.write_all(data.as_bytes())
 }
 
-/// Go's four `fmt.Fprintf(&b, …)` trigger lines of `prepareDockerfile`.
+/// The four trigger lines of the generated Dockerfile `CMD`.
 fn write_trigger_flags(b: &mut String, t: &TriggerConfigFlags) {
     let _ = write!(b, r#", "--trigger_max_retries", "{}""#, t.max_retries);
     let _ = write!(b, r#", "--trigger_base_delay", "{}""#, t.base_delay);
@@ -710,7 +702,7 @@ fn write_trigger_flags(b: &mut String, t: &TriggerConfigFlags) {
     let _ = write!(b, r#", "--trigger_max_concurrent_runs", "{}""#, t.max_runs);
 }
 
-/// Go `validateServiceName`: rejects a `--service_name` gcloud would parse as a flag.
+/// Rejects a `--service_name` gcloud would parse as a flag.
 pub fn validate_service_name(name: &str) -> Result<(), String> {
     if name.starts_with('-') {
         return Err(format!(
@@ -721,7 +713,7 @@ pub fn validate_service_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Go `validateTriggerOIDC(name, t)`: rejects the trigger's OIDC values the Dockerfile cannot
+/// Rejects the trigger's OIDC values the Dockerfile cannot
 /// carry or the trigger's sublauncher would refuse at startup.
 pub fn validate_trigger_oidc(name: &str, t: &TriggerConfigFlags) -> Result<(), String> {
     let aud_flag = format!("--{name}_oidc_audience");
@@ -768,7 +760,7 @@ pub fn validate_trigger_oidc(name: &str, t: &TriggerConfigFlags) -> Result<(), S
     Ok(())
 }
 
-/// Go `checkOIDCValuesAreNotFlags`: rejects an audience or service account starting with
+/// Rejects an audience or service account starting with
 /// `-`, as when an unset variable makes a flag take the next flag as its value.
 pub fn check_oidc_values_are_not_flags(
     aud_flag: &str,
@@ -800,7 +792,7 @@ pub fn check_oidc_values_are_not_flags(
     Ok(())
 }
 
-/// Go `checkTriggerOIDCEmitted`: rejects OIDC values for a trigger that is not enabled (they
+/// Rejects OIDC values for a trigger that is not enabled (they
 /// are written only after that trigger's keyword).
 pub fn check_trigger_oidc_emitted(
     name: &str,
@@ -815,7 +807,7 @@ pub fn check_trigger_oidc_emitted(
     Ok(())
 }
 
-/// Go `writeOIDCFlags`: the trigger's OIDC flags when set (`compute_flags` has checked that
+/// Writes the trigger's OIDC flags when set (`compute_flags` has checked that
 /// both or neither are).
 pub fn write_oidc_flags(b: &mut String, t: &TriggerConfigFlags) {
     if !t.oidc_audience.is_empty() {
@@ -830,7 +822,7 @@ pub fn write_oidc_flags(b: &mut String, t: &TriggerConfigFlags) {
     }
 }
 
-/// Test fixtures shared by this module's tests and the `cloudrun_test.go` ports: a Cargo
+/// Test fixtures shared by this module's tests: a Cargo
 /// workspace on disk with a [`TestEnv`](crate::testutil::TestEnv) whose runner answers
 /// `cargo metadata` for it.
 #[cfg(test)]

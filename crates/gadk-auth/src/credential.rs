@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Resolved credentials that write themselves onto an outbound request (port of ADK-Go
-//! `auth/credential.go`), and the `oauth2.TokenSource` analogue they mint from.
+//! Resolved credentials that write themselves onto an outbound request, and the [`TokenSource`]
+//! they mint tokens from.
 
 use std::any::Any;
 use std::collections::BTreeMap;
@@ -26,22 +26,22 @@ use http::header::{AUTHORIZATION, HeaderMap, HeaderName, HeaderValue};
 
 use crate::error::{Error, SharedError};
 
-/// Go `Credential` (credential.go:27). Applies itself to request headers. Shared as
-/// `Arc<dyn Credential>`; identity is `Arc::ptr_eq` (D4). `Any` lets the gcp provider read a
-/// token out of a credential (Go's type switch in provider.go `credentialToken`).
+/// A resolved credential that applies itself to request headers. Shared as
+/// `Arc<dyn Credential>`; identity is `Arc::ptr_eq`. `Any` lets the gcp provider read a token out
+/// of a credential.
 #[async_trait::async_trait]
 pub trait Credential: Any + Send + Sync + fmt::Debug {
-    /// Go `Apply`: writes the credential's auth headers onto `headers`.
+    /// Writes the credential's auth headers onto `headers`.
     async fn apply(&self, headers: &mut http::HeaderMap) -> Result<(), Error>;
 
-    /// Go `withHeaders.Unwrap` (credential.go:113); `None` for every other credential.
+    /// The credential a [`with_headers`] wrapper wraps; `None` for every other credential.
     fn inner(&self) -> Option<&dyn Credential> {
         None
     }
 }
 
 impl dyn Credential {
-    /// Go's type assertion `cred.(T)`.
+    /// This credential as a `T`, when it is one.
     pub fn downcast_ref<T: Credential>(&self) -> Option<&T> {
         (self as &dyn Any).downcast_ref()
     }
@@ -52,7 +52,7 @@ fn redacted(secret: &str) -> &str {
     if secret.is_empty() { "" } else { "<redacted>" }
 }
 
-/// `headers.insert(name, value)` (Go `Header.Set` replaces), refusing what `http` refuses.
+/// `headers.insert(name, value)` (replacing any existing value), refusing what `http` refuses.
 fn set_header(
     headers: &mut HeaderMap,
     name: &str,
@@ -68,7 +68,7 @@ fn set_header(
     Ok(())
 }
 
-/// Go `APIKeyCredential` (credential.go:33): sets header `name` to `value`.
+/// An API key credential: sets header `name` to `value`.
 #[derive(Clone, PartialEq, Eq, Default)]
 pub struct ApiKey {
     /// The header name, e.g. `X-Api-Key`.
@@ -77,14 +77,14 @@ pub struct ApiKey {
     pub value: String,
 }
 
-/// Go `BearerCredential` (credential.go:48): `Authorization: Bearer <token>`.
+/// A bearer credential: `Authorization: Bearer <token>`.
 #[derive(Clone, PartialEq, Eq, Default)]
 pub struct Bearer {
     /// The bearer token.
     pub token: String,
 }
 
-/// Go `BasicCredential` (credential.go:62): `Authorization: Basic base64(user:pass)`
+/// A basic-auth credential: `Authorization: Basic base64(user:pass)`
 /// (`base64::engine::general_purpose::STANDARD`). Fails only when both are empty.
 #[derive(Clone, PartialEq, Eq, Default)]
 pub struct Basic {
@@ -94,8 +94,8 @@ pub struct Basic {
     pub password: String,
 }
 
-/// Go `OAuth2Credential` (credential.go:80): `Authorization: <token.token_type()> <access_token>`,
-/// minting a fresh token from `token_source` on each `apply`.
+/// An OAuth2 credential: `Authorization: <token.token_type()> <access_token>`, minting a fresh
+/// token from `token_source` on each `apply`.
 #[derive(Clone)]
 pub struct OAuth2 {
     /// Where each `apply` gets its token.
@@ -196,7 +196,7 @@ impl Credential for OAuth2 {
     }
 }
 
-/// Go `withHeaders` (credential.go:104).
+/// The credential [`with_headers`] returns.
 struct WithHeaders {
     inner: Arc<dyn Credential>,
     headers: BTreeMap<String, String>,
@@ -228,8 +228,8 @@ impl Credential for WithHeaders {
     }
 }
 
-/// Go `WithHeaders` (credential.go:100): applies `inner`, then sets each header, overriding
-/// inner on conflict. The result's `inner()` is `Some(&*inner)` (pointer-equal to `inner`).
+/// Wraps `inner` in a credential that applies `inner`, then sets each header, overriding inner on
+/// conflict. The result's `inner()` is `Some(&*inner)` (pointer-equal to `inner`).
 pub fn with_headers(
     inner: Arc<dyn Credential>,
     headers: BTreeMap<String, String>,
@@ -237,14 +237,14 @@ pub fn with_headers(
     Arc::new(WithHeaders { inner, headers })
 }
 
-/// Go `oauth2.TokenSource`.
+/// A source of OAuth2 tokens.
 #[async_trait::async_trait]
 pub trait TokenSource: Send + Sync {
     /// A valid token; implementations cache and refresh as they see fit.
     async fn token(&self) -> Result<Token, Error>;
 }
 
-/// Go `oauth2.Token` (the two fields Apply reads).
+/// An OAuth2 token: the two fields a credential reads.
 #[derive(Clone, PartialEq, Eq, Default)]
 pub struct Token {
     /// The access token.
@@ -254,8 +254,8 @@ pub struct Token {
 }
 
 impl Token {
-    /// Go `(*oauth2.Token).Type()`: "bearer"/"mac"/"basic" (any case) → "Bearer"/"MAC"/"Basic";
-    /// any other non-empty value as is; empty → "Bearer".
+    /// The type to send in `Authorization`: "bearer"/"mac"/"basic" (any case) →
+    /// "Bearer"/"MAC"/"Basic"; any other non-empty value as is; empty → "Bearer".
     pub fn token_type(&self) -> &str {
         let t = self.token_type.as_str();
         if go_equal_fold_ascii(t, "bearer") {
@@ -272,7 +272,7 @@ impl Token {
     }
 }
 
-/// Go `strings.EqualFold(s, target)` for an all-lowercase ASCII `target`: Unicode simple folding
+/// Case-insensitive equality of `s` with an all-lowercase ASCII `target`: Unicode simple folding
 /// adds exactly two non-ASCII matches for ASCII letters, U+212A KELVIN SIGN (k) and U+017F LATIN
 /// SMALL LETTER LONG S (s).
 fn go_equal_fold_ascii(s: &str, target: &str) -> bool {
@@ -298,7 +298,7 @@ impl fmt::Debug for Token {
     }
 }
 
-/// Go `oauth2.StaticTokenSource`: always returns the same token.
+/// A token source that always returns the same token.
 #[derive(Clone, Debug)]
 pub struct StaticTokenSource(pub Token);
 

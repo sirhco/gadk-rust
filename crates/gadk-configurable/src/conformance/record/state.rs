@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `internal/configurable/conformance/recordplugin/invocation_record_state.go`: the
-//! per-invocation record state (Go's `mu` guards the mutable fields: [`RecordInner`]).
+//! The per-invocation record state (the lock guards the mutable fields:
+//! [`RecordInner`]).
 
 use std::collections::HashMap;
 
@@ -26,35 +26,34 @@ use crate::conformance::recording::{
     ToolRecording,
 };
 
-/// Go `invocationRecordState`.
+/// The record state of one invocation.
 pub(crate) struct InvocationRecordState {
-    /// Go `caseDir`.
+    /// The case directory the recordings are written to.
     pub(crate) case_dir: String,
-    /// Go `userMessageIndex`.
+    /// The index of the user message being recorded.
     pub(crate) user_message_index: i64,
-    /// Go `streamingMode` (`none` by default, `sse` selects the SSE file name).
+    /// The streaming mode (`none` by default, `sse` selects the SSE file name).
     pub(crate) streaming_mode: String,
-    /// Go `mu` and the fields it guards.
+    /// The mutable fields, behind a lock.
     pub(crate) inner: Mutex<RecordInner>,
 }
 
-/// The fields of Go's `invocationRecordState` guarded by `mu`.
+/// The mutable fields of [`InvocationRecordState`], guarded by its lock.
 #[derive(Default)]
 pub(crate) struct RecordInner {
-    /// Go `recordings`: completed recordings of the current turn.
+    /// Completed recordings of the current turn.
     pub(crate) recordings: Vec<Recording>,
-    /// Go `pendingLLMRequest`.
+    /// The LLM request awaiting its responses.
     pub(crate) pending_llm_request: Option<LlmRequestView>,
-    /// Go `pendingLLMResponses`.
+    /// The responses collected for the pending request.
     pub(crate) pending_llm_responses: Vec<LlmResponse>,
-    /// Go `pendingToolCalls`, keyed by function call id.
+    /// The tool calls awaiting their results, keyed by function call id.
     pub(crate) pending_tool_calls: HashMap<String, RecordedFunctionCall>,
 }
 
 impl InvocationRecordState {
-    /// Go `newInvocationRecordState`.
+    /// Creates the state for an invocation.
     pub(crate) fn new(case_dir: String, msg_index: i64, streaming_mode: String) -> Self {
-        // Go: invocation_record_state.go newInvocationRecordState
         InvocationRecordState {
             case_dir,
             user_message_index: msg_index,
@@ -63,23 +62,20 @@ impl InvocationRecordState {
         }
     }
 
-    /// Go `StartLLMRecording`: replaces the pending request and clears pending responses.
+    /// Replaces the pending request and clears pending responses.
     pub(crate) fn start_llm_recording(&self, req: LlmRequestView) {
-        // Go: invocation_record_state.go StartLLMRecording
         let mut inner = self.inner.lock();
         inner.pending_llm_request = Some(req);
         inner.pending_llm_responses = Vec::new();
     }
 
-    /// Go `AppendLLMResponse`.
+    /// Appends a response to the pending ones.
     pub(crate) fn append_llm_response(&self, resp: LlmResponse) {
-        // Go: invocation_record_state.go AppendLLMResponse
         self.inner.lock().pending_llm_responses.push(resp);
     }
 
-    /// Go `CompleteLLMRecording`: appends the LLM recording (no-op without a pending request).
+    /// Appends the LLM recording (no-op without a pending request).
     pub(crate) fn complete_llm_recording(&self, agent_name: &str) {
-        // Go: invocation_record_state.go CompleteLLMRecording
         let mut inner = self.inner.lock();
         let Some(llm_request) = inner.pending_llm_request.take() else {
             return;
@@ -97,23 +93,21 @@ impl InvocationRecordState {
         });
     }
 
-    /// Go `StartToolRecording`.
+    /// Records a tool call as pending under its id.
     pub(crate) fn start_tool_recording(&self, id: &str, fc: RecordedFunctionCall) {
-        // Go: invocation_record_state.go StartToolRecording
         self.inner
             .lock()
             .pending_tool_calls
             .insert(id.to_owned(), fc);
     }
 
-    /// Go `CompleteToolRecording`: appends the tool recording for a pending call `id`.
+    /// Appends the tool recording for a pending call `id`.
     pub(crate) fn complete_tool_recording(
         &self,
         id: &str,
         agent_name: &str,
         resp: RecordedFunctionResponse,
     ) {
-        // Go: invocation_record_state.go CompleteToolRecording
         let mut inner = self.inner.lock();
         let Some(fc) = inner.pending_tool_calls.remove(id) else {
             return;

@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of contrib `detectors/gcp/internal` v1.47.0 (formerly operations-go `detectors/gcp`):
-//! platform detection and the per-platform attribute lookups.
+//! GCP platform detection and the per-platform attribute lookups.
 
 mod app_engine;
 mod bms;

@@ -13,29 +13,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The openai-go v3.91.1 `shared` package types both APIs send (ADK-Go imports it as
-//! `oaishared`), and the serde conventions every wire type in this crate follows.
+//! The shared types both Chat Completions and Responses requests send, and the serde
+//! conventions every wire type in this crate follows.
 //!
-//! Request (param) types serialize their fields in openai-go's struct declaration order. Go's
-//! `param.Opt[T]` is an `Option<T>` skipped when `None`; a plain `omitzero` string or slice is
-//! skipped when empty; a `constant.*` field (`type`, `role`) is a zero-sized [`tag!`] type that
-//! always serializes its one value; a param union (`OfX` fields) is an untagged enum that
-//! serializes as the variant's own JSON. Fields ADK-Go never sets are not modelled: they are
-//! `omitzero` in openai-go, so they never reach the wire. Bodies are written by
-//! [`crate::client::encode_body`] with [`gadk_model::to_go_json`] (Go's float format and HTML
-//! escaping; `serde_json::Map` keys sorted, as Go sorts `map[string]any` keys).
+//! Request (param) types serialize their fields in the API's declaration order. An optional
+//! field is an `Option<T>` skipped when `None`; a plain string or slice is skipped when empty;
+//! a constant field (`type`, `role`) is a zero-sized [`tag!`] type that always serializes its
+//! one value; a union is an untagged enum that serializes as the variant's own JSON. Fields
+//! that are never set are not modelled, so they never reach the wire. Bodies are written by
+//! [`crate::client::encode_body`] with [`gadk_model::to_go_json`] (HTML escaping and
+//! shortest-form floats; `serde_json::Map` keys sorted).
 //!
-//! Response and stream types decode with openai-go `apijson`'s leniency, through the helpers
-//! of [`de`]: a missing, `null` or wrongly typed field is its zero value, and a field ADK-Go
-//! checks with `JSON.X.Valid()` is an `Option` that is `Some` only when the value was present,
-//! non-null and of the right shape. Decode them only from text (`serde_json::from_str` /
+//! Response and stream types decode leniently, through the helpers of [`de`]: a missing,
+//! `null` or wrongly typed field is its zero value, and a field whose presence matters is an
+//! `Option` that is `Some` only when the value was present, non-null and of the right shape.
+//! Decode them only from text (`serde_json::from_str` /
 //! `from_slice`): the helpers read each field as a [`RawValue`](serde_json::value::RawValue).
 
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-/// Declares a zero-sized type that serializes as one constant string: openai-go's
-/// `constant.*` fields (`"type"`, `"role"`), which are always sent.
+/// Declares a zero-sized type that serializes as one constant string: the constant fields
+/// (`"type"`, `"role"`), which are always sent.
 macro_rules! tag {
     ($(#[$m:meta])* $name:ident = $value:literal) => {
         $(#[$m])*
@@ -57,10 +56,10 @@ macro_rules! tag {
 }
 pub(crate) use tag;
 
-/// openai-go `shared.ReasoningEffort`.
+/// The `reasoning.effort` request value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
-#[allow(dead_code)] // D5: openai-go's whole value set; ADK-Go never sends `xhigh` or `max`.
+#[allow(dead_code)] // the whole value set of the API; `xhigh` or `max` is never sent.
 pub(crate) enum ReasoningEffort {
     /// `"none"`.
     None,
@@ -78,10 +77,10 @@ pub(crate) enum ReasoningEffort {
     Max,
 }
 
-/// openai-go `shared.ReasoningSummary`.
+/// The `reasoning.summary` request value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
-#[allow(dead_code)] // D5: openai-go's whole value set; ADK-Go sends only `auto`.
+#[allow(dead_code)] // the whole value set of the API; only `auto` is sent.
 pub(crate) enum ReasoningSummary {
     /// `"auto"`.
     Auto,
@@ -91,9 +90,9 @@ pub(crate) enum ReasoningSummary {
     Detailed,
 }
 
-/// openai-go `shared.ReasoningParam`, the fields ADK-Go sets, in declaration order: `effort,
+/// The reasoning param, the fields set, in declaration order: `effort,
 /// summary` (`context`, `generate_summary` and `mode` are never set). Omitted from a request
-/// when both are `None` ([`is_zero`](Self::is_zero), Go `omitzero`).
+/// when both are `None` ([`is_zero`](Self::is_zero)).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub(crate) struct ReasoningParam {
     /// `effort`.
@@ -105,13 +104,13 @@ pub(crate) struct ReasoningParam {
 }
 
 impl ReasoningParam {
-    /// Go `omitzero`: no field set.
+    /// Whether no field is set.
     pub(crate) fn is_zero(&self) -> bool {
         self.effort.is_none() && self.summary.is_none()
     }
 }
 
-/// openai-go `shared.FunctionDefinitionParam`: `name, strict, description, parameters`.
+/// A function definition: `name, strict, description, parameters`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub(crate) struct FunctionDefinitionParam {
     /// `name` (required, always sent).
@@ -122,7 +121,7 @@ pub(crate) struct FunctionDefinitionParam {
     /// `description`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) description: Option<String>,
-    /// `parameters` (Go `FunctionParameters`, a `map[string]any`; a nil map is omitted, an
+    /// `parameters` (a JSON object; a missing map is omitted, an
     /// empty one is sent as `{}`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) parameters: Option<Map<String, Value>>,
@@ -141,7 +140,7 @@ tag!(
     TextTag = "text"
 );
 
-/// openai-go `shared.ResponseFormatJSONObjectParam`: `type`.
+/// The `json_object` response format: `type`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub(crate) struct ResponseFormatJsonObjectParam {
     /// `type`: `"json_object"`.
@@ -149,7 +148,7 @@ pub(crate) struct ResponseFormatJsonObjectParam {
     pub(crate) kind: JsonObjectTag,
 }
 
-/// openai-go `shared.ResponseFormatTextParam`: `type`.
+/// The `text` response format: `type`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub(crate) struct ResponseFormatTextParam {
     /// `type`: `"text"`.
@@ -157,7 +156,7 @@ pub(crate) struct ResponseFormatTextParam {
     pub(crate) kind: TextTag,
 }
 
-/// openai-go `shared.ResponseFormatJSONSchemaParam`: `json_schema, type` (Chat Completions'
+/// The `json_schema` response format: `json_schema, type` (Chat Completions'
 /// `response_format`).
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub(crate) struct ResponseFormatJsonSchemaParam {
@@ -168,7 +167,7 @@ pub(crate) struct ResponseFormatJsonSchemaParam {
     pub(crate) kind: JsonSchemaTag,
 }
 
-/// openai-go `shared.ResponseFormatJSONSchemaJSONSchemaParam`: `name, strict, description,
+/// The JSON schema of a `json_schema` response format: `name, strict, description,
 /// schema`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub(crate) struct ResponseFormatJsonSchemaJsonSchemaParam {
@@ -180,31 +179,29 @@ pub(crate) struct ResponseFormatJsonSchemaJsonSchemaParam {
     /// `description`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) description: Option<String>,
-    /// `schema` (Go `any`, a `map[string]any`; nil is omitted).
+    /// `schema` (a JSON object; omitted when `None`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) schema: Option<Map<String, Value>>,
 }
 
-/// openai-go `apijson` decoding, field by field.
+/// Lenient decoding, field by field.
 ///
 /// Every helper reads the field's raw JSON text first (so a number like `1e400` that does not
-/// fit an `f64` cannot fail the whole document), then converts it the way `apijson` does:
+/// fit an `f64` cannot fail the whole document), then converts it:
 /// - [`lenient`]: structs, slices and `Option`s. A value of the wrong shape is the zero value
-///   (`None` for an `Option`); a slice with one element of the wrong shape is empty, as Go's.
-/// - [`go_string`]: a string; a number, boolean, object or array is its raw JSON text (Go's
-///   `apijson` copies the raw value into a string field); `null` is `""`.
-/// - [`go_i64`]: gjson `Result.Int()`, which `apijson` stores whatever its error: `true` is 1;
-///   a string goes through gjson's `parseInt` (optional `-`, ASCII digits only, nothing
-///   trimmed, wrapping on overflow as Go's `int64` does), anything else in it is 0; a number
-///   within ±(2^53 − 1) truncates toward zero, a larger one is its raw text through `parseInt`
-///   when that is all digits, else the float converted with Rust's saturating `as` (Go's
-///   `int64(f)` is implementation-defined there: arm64 saturates likewise, amd64 gives
-///   `i64::MIN`); `false`, `null`, objects and arrays are 0.
-/// - [`go_f64`]: gjson `Result.Float()`: `true` is 1; a string or number is Go
-///   `strconv.ParseFloat` ([`go_parse_float`](gadk_model::rest::go_parse_float): nothing trimmed, hexadecimal and underscores
-///   accepted, the value kept on a range error); anything else is 0. One divergence: a
-///   non-finite result (`1e400`, `"inf"`, `"nan"`) is 0 where Go keeps ±Inf/NaN, because it
-///   could not be persisted (serde writes `null`; Go's `json.Marshal` fails).
+///   (`None` for an `Option`); a slice with one element of the wrong shape is empty.
+/// - [`go_string`]: a string; a number, boolean, object or array is its raw JSON text;
+///   `null` is `""`.
+/// - [`go_i64`]: an integer. `true` is 1; a string is parsed as an integer (optional `-`,
+///   ASCII digits only, nothing trimmed, wrapping on overflow), anything else in it is 0; a
+///   number within ±(2^53 − 1) truncates toward zero, a larger one is its raw text parsed as
+///   an integer when that is all digits, else the float converted with Rust's saturating
+///   `as`; `false`, `null`, objects and arrays are 0.
+/// - [`go_f64`]: a float. `true` is 1; a string or number is parsed as a float
+///   ([`go_parse_float`](gadk_model::rest::go_parse_float): nothing trimmed, hexadecimal and
+///   underscores accepted, the value kept on a range error); anything else is 0. A
+///   non-finite result (`1e400`, `"inf"`, `"nan"`) is 0, because it could not be persisted
+///   (serde writes `null`).
 pub(crate) mod de {
     use gadk_model::rest::{GoParseFloatError, go_parse_float};
     use serde::Deserialize;
@@ -238,15 +235,15 @@ pub(crate) mod de {
         Ok(text.to_string())
     }
 
-    /// A raw JSON value as the gjson `Result` types `Int()`/`Float()` tell apart.
+    /// A raw JSON value, classified for the integer and float conversions.
     enum Gjson<'a> {
-        /// `String`, unescaped (`Result.Str`).
+        /// A string, unescaped.
         Str(String),
-        /// `Number`, its raw text (`Result.Raw`).
+        /// A number, its raw text.
         Num(&'a str),
-        /// `True`.
+        /// `true`.
         True,
-        /// `False`, `Null` and `JSON` (an object or array): `Int()`/`Float()` are 0.
+        /// `false`, `null`, an object or an array: the integer and float are 0.
         Other,
     }
 
@@ -259,8 +256,7 @@ pub(crate) mod de {
         }
     }
 
-    /// Go `strconv.ParseFloat(s, 64)`'s value whatever its error, as gjson keeps it (`Num`,
-    /// and `Float()` of a string): ±Inf on a range error, 0 on a syntax error.
+    /// The float value of `s` whatever its error: ±Inf on a range error, 0 on a syntax error.
     fn parse_float_value(s: &str) -> f64 {
         match go_parse_float(s) {
             Ok(v) | Err(GoParseFloatError::Range { value: v }) => v,
@@ -268,8 +264,8 @@ pub(crate) mod de {
         }
     }
 
-    /// gjson `parseInt`: an optional `-` and at least one ASCII digit, nothing else; the
-    /// arithmetic wraps as Go's `int64` does.
+    /// Parses an integer: an optional `-` and at least one ASCII digit, nothing else; the
+    /// arithmetic wraps on overflow.
     fn gjson_parse_int(s: &str) -> Option<i64> {
         let (neg, digits) = match s.strip_prefix('-') {
             Some(rest) => (true, rest),
@@ -288,10 +284,10 @@ pub(crate) mod de {
         Some(if neg { n.wrapping_neg() } else { n })
     }
 
-    /// gjson `safeInt`'s bound: JavaScript's `Number.MAX_SAFE_INTEGER`.
+    /// The bound below which a float is truncated to an integer: 2^53 − 1.
     const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
 
-    /// An integer field (gjson `Result.Int()`).
+    /// An integer field.
     pub(crate) fn go_i64<'de, D: Deserializer<'de>>(d: D) -> Result<i64, D::Error> {
         let raw = raw(d)?;
         Ok(match gjson(raw.get()) {
@@ -304,7 +300,7 @@ pub(crate) mod de {
                 } else if let Some(i) = gjson_parse_int(text) {
                     i
                 } else {
-                    // `as` saturates (Go arm64's `int64(f)`; see the module docs).
+                    // `as` saturates.
                     f as i64
                 }
             }
@@ -312,7 +308,7 @@ pub(crate) mod de {
         })
     }
 
-    /// A float field (gjson `Result.Float()`); a non-finite value is 0 (see the module docs).
+    /// A float field; a non-finite value is 0 (see the module docs).
     pub(crate) fn go_f64<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
         let raw = raw(d)?;
         let f = match gjson(raw.get()) {

@@ -13,8 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Context compaction internals (port of Go internal/compactioninternal and
-//! internal/agent/compactionctx). The public API is `gadk_session::compaction`.
+//! Context compaction internals: sliding-window and tail-retention summarization, applying stored
+//! summaries to a prompt, and the per-invocation runtime. The public API is
+//! `gadk_session::compaction`.
 
 pub(crate) mod apply;
 pub(crate) mod compactor;
@@ -28,10 +29,10 @@ pub(crate) mod window;
 
 use gadk_session::compaction::Config;
 
-/// The error type of the engine's compaction steps (Go `error`).
+/// The error type of the engine's compaction steps.
 pub(crate) type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
-/// Go `fmt.Errorf("<context>: %w", err)`.
+/// An error with added context: displays as `<context>: <err>` and has `err` as its source.
 #[derive(Debug)]
 struct Wrapped {
     context: String,
@@ -50,7 +51,7 @@ impl std::error::Error for Wrapped {
     }
 }
 
-/// Go `fmt.Errorf("<context>: %w", err)`: Display `<context>: <err>`, `source()` = `err`.
+/// Wraps `err` with `context`: Display `<context>: <err>`, `source()` = `err`.
 pub(crate) fn wrap_err(context: impl Into<String>, err: BoxError) -> BoxError {
     Box::new(Wrapped {
         context: context.into(),
@@ -58,23 +59,22 @@ pub(crate) fn wrap_err(context: impl Into<String>, err: BoxError) -> BoxError {
     })
 }
 
-/// Go `errors.New(text)` / `fmt.Errorf` without `%w`.
+/// An error with just a message, no source.
 pub(crate) fn err_text(text: impl Into<String>) -> BoxError {
     text.into().into()
 }
 
-/// Port of Go compactioninternal.HasSlidingWindow.
+/// Whether the config enables sliding-window compaction (a positive `compaction_interval`).
 pub(crate) fn has_sliding_window(cfg: Option<&Config>) -> bool {
     cfg.is_some_and(|c| c.compaction_interval > 0)
 }
 
-/// Port of Go compactioninternal.HasTailRetention.
+/// Whether the config enables tail-retention compaction (a positive `token_threshold`).
 pub(crate) fn has_tail_retention(cfg: Option<&Config>) -> bool {
     cfg.is_some_and(|c| c.token_threshold > 0)
 }
 
-/// Port of Go compactioninternal.ProgressGate: whether another tail-retention compaction in this
-/// invocation can still help.
+/// Decides whether another tail-retention compaction in this invocation can still help.
 pub(crate) trait ProgressGate: Send + Sync {
     /// Whether a compaction may run now.
     fn allow_at(&self) -> bool;

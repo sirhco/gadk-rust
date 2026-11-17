@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go workflow/dynamic_scheduler.go: runs the children a dynamic node schedules with
-//! [`run_node`](crate::workflow::run_node).
+//! Runs the children a dynamic node schedules with [`run_node`](crate::workflow::run_node).
 
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
@@ -44,13 +43,14 @@ use crate::workflow::scheduler::{
 };
 use crate::workflow::{Emit, Node, RunNodeOptions};
 
-/// Port of Go runResult: one child run's outcome, shared by every caller that overlapped it.
+/// One child run's outcome, shared by every caller that overlapped it.
 pub(crate) type RunResult = Result<Value, WorkflowError>;
 
-/// Builds Go's `&NodeRunError{ChildName, ChildPath, RunID, Cause}`. [`WorkflowError::node_run`]
-/// gives it the cause's kind and Go's Error() text "workflow: dynamic child <path>: <cause>";
-/// `node_run_error()` on the result returns the struct (Go `errors.As(&nre)`). The cause is
-/// always a [`WorkflowError`] (see [`to_workflow_error`]) so the kind follows Go's `errors.Is`.
+/// Builds the error of a failed child run, carrying a [`NodeRunError`] (child name, child path,
+/// run id and cause). [`WorkflowError::node_run`] gives it the cause's kind and the text
+/// "workflow: dynamic child <path>: <cause>"; `node_run_error()` on the result returns the
+/// struct. The cause is always a [`WorkflowError`] (see [`to_workflow_error`]) so the kind
+/// follows the cause's.
 pub(crate) fn node_run_error(
     child_name: &str,
     child_path: &str,
@@ -66,7 +66,7 @@ pub(crate) fn node_run_error(
 }
 
 /// A plain cause as a [`WorkflowError`] of kind `Other` (so a NodeRunError around it matches no
-/// workflow sentinel, as Go's `errors.Is` on a plain cause), keeping the original as the source.
+/// workflow sentinel), keeping the original as the source.
 fn to_workflow_error(e: AgentError) -> WorkflowError {
     match workflow_error(&e) {
         Some(w) => w.clone(),
@@ -74,7 +74,7 @@ fn to_workflow_error(e: AgentError) -> WorkflowError {
     }
 }
 
-/// Go `fmt.Errorf("%w: <rest>", ErrNodeFailed, cause)` with `cause` kept as the source.
+/// A `NodeFailed` error with the text `<sentinel text>: <rest>` and `cause` kept as the source.
 fn node_failed(rest: String, cause: AgentError) -> WorkflowError {
     WorkflowError::new(
         WorkflowErrorKind::NodeFailed,
@@ -86,7 +86,7 @@ fn node_failed(rest: String, cause: AgentError) -> WorkflowError {
     .with_source(cause)
 }
 
-/// Go `fmt.Errorf("%w: child did not complete", ErrNodeFailed)`.
+/// A `NodeFailed` error with the text `<sentinel text>: child did not complete`.
 fn did_not_complete() -> WorkflowError {
     WorkflowError::new(
         WorkflowErrorKind::NodeFailed,
@@ -97,8 +97,8 @@ fn did_not_complete() -> WorkflowError {
     )
 }
 
-/// Port of Go outputDelegation: the at-most-one WithUseAsOutput delegation of a parent
-/// activation. `value: Some(..)` is Go's `hasValue` (`Some(Null)` = a delegated nil).
+/// The at-most-one `use_as_output` delegation of a parent activation. `value: Some(..)` means a
+/// value was delegated (`Some(Null)` = a delegated null).
 #[derive(Default)]
 struct OutputDelegation {
     claimed: bool,
@@ -108,7 +108,7 @@ struct OutputDelegation {
 }
 
 impl OutputDelegation {
-    /// Port of Go outputDelegation.reserve: `Err(existing holder)` on conflict.
+    /// Reserves the delegation for a child: `Err(existing holder)` on conflict.
     fn reserve(&mut self, child_path: &str, child_name: &str) -> Result<(), String> {
         if self.claimed && self.child_path != child_path {
             return Err(self.child_name.clone());
@@ -119,7 +119,7 @@ impl OutputDelegation {
         Ok(())
     }
 
-    /// Port of Go outputDelegation.commit: a mismatched path is dropped.
+    /// Stores the delegated value: a mismatched path is dropped.
     fn commit(&mut self, child_path: &str, value: Value) {
         if !self.claimed || self.child_path != child_path {
             return;
@@ -128,12 +128,12 @@ impl OutputDelegation {
     }
 }
 
-/// Port of Go inflightRun: the leader publishes into `tx`; waiters subscribe.
+/// A child run in flight: the leader publishes into `tx`; waiters subscribe.
 struct InflightRun {
     tx: watch::Sender<Option<RunResult>>,
 }
 
-/// The mutex-guarded state of Go dynamicSubScheduler.
+/// The mutex-guarded state of [`DynSubScheduler`].
 #[derive(Default)]
 pub(crate) struct DynState {
     run_count_by_child: HashMap<String, u64>,
@@ -143,18 +143,18 @@ pub(crate) struct DynState {
     pub(crate) failed_paths: HashSet<String>,
 }
 
-/// Port of Go dynamicSubScheduler: runs the children of one dynamic-node activation.
+/// Runs the children of one dynamic-node activation.
 pub(crate) struct DynSubScheduler {
     me: Weak<DynSubScheduler>,
     parent_path: String,
     parent_ctx: Context,
     emit_up: Emit,
     output_for_ancestors: Vec<String>,
-    /// Never held across `.await` (Go: "never held across child.Run").
+    /// Never held across `.await` (nor across a child's run).
     inner: Mutex<DynState>,
 }
 
-/// Port of Go newDynamicSubScheduler (rehydrates the result cache from session history).
+/// Creates the sub-scheduler, rehydrating the result cache from session history.
 pub(crate) fn new_dynamic_sub_scheduler(
     parent: Context,
     parent_path: String,
@@ -172,12 +172,12 @@ pub(crate) fn new_dynamic_sub_scheduler(
     s
 }
 
-/// Port of Go waitsForOutput: the node opts into WaitForOutput.
+/// Whether the node opts into `wait_for_output`.
 pub(crate) fn waits_for_output(node: &dyn Node) -> bool {
     node.config().wait_for_output == Some(true)
 }
 
-/// Port of Go validateCustomRunID: rejects empty ids, purely numeric ids (they collide with the
+/// Validates a custom run id: rejects empty ids, purely numeric ids (they collide with the
 /// auto-counter), and ids containing the path separators `/` and `@`.
 pub(crate) fn validate_custom_run_id(id: &str) -> Result<(), WorkflowError> {
     let s = WorkflowError::sentinel_text(WorkflowErrorKind::InvalidRunId);
@@ -185,7 +185,7 @@ pub(crate) fn validate_custom_run_id(id: &str) -> Result<(), WorkflowError> {
     if id.is_empty() {
         return err(format!("{s}: empty"));
     }
-    // Go isAllDigits: ASCII digits only, as the auto-counter emits.
+    // ASCII digits only, as the auto-counter emits.
     if id.bytes().all(|b| b.is_ascii_digit()) {
         return err(format!(
             "{s}: {} is purely numeric (reserved for auto-counter)",
@@ -202,7 +202,7 @@ pub(crate) fn validate_custom_run_id(id: &str) -> Result<(), WorkflowError> {
 }
 
 /// Publishes "child did not complete" if the leader future is dropped before it published
-/// (Go: the deferred publisher's `!completed` guard), so waiters never hang.
+/// (so waiters never hang).
 struct LeaderGuard<'a> {
     sched: &'a DynSubScheduler,
     child_name: String,
@@ -226,7 +226,7 @@ impl Drop for LeaderGuard<'_> {
     }
 }
 
-/// Removes every cached result at or below `path` (Go invalidateCachePath; called under mu).
+/// Removes every cached result at or below `path` (called with the state locked).
 fn invalidate_cache_path(st: &mut DynState, path: &str) {
     let sub = format!("{path}/");
     st.result_by_path
@@ -234,13 +234,13 @@ fn invalidate_cache_path(st: &mut DynState, path: &str) {
 }
 
 impl DynSubScheduler {
-    /// Test access to the guarded state (Go tests read the fields directly).
+    /// Test access to the guarded state.
     #[cfg(test)]
     pub(crate) fn state(&self) -> parking_lot::MutexGuard<'_, DynState> {
         self.inner.lock()
     }
 
-    /// Port of Go rehydrateCache: repopulates the result cache from this invocation's history so
+    /// Repopulates the result cache from this invocation's history so
     /// a resumed orchestrator serves completed children from cache instead of re-running them.
     fn rehydrate_cache(&self) {
         let invocation_id = self.parent_ctx.invocation_id().to_string();
@@ -301,7 +301,7 @@ impl DynSubScheduler {
         }
     }
 
-    /// Port of Go (*dynamicSubScheduler).runNode: runs `child` once (or shares/replays its
+    /// Runs `child` once (or shares/replays its
     /// outcome) and classifies it: HITL → NodeInterrupted, runtime failure → NodeFailed.
     pub(crate) async fn run_child(
         &self,
@@ -368,8 +368,9 @@ impl DynSubScheduler {
         res
     }
 
-    /// The cache / single-flight half of Go runNode, then the leader's run and publication.
-    /// Returns the outcome and Go's `rawErr` span classification.
+    /// The cache / single-flight half of [`run_child`](Self::run_child), then the leader's run
+    /// and publication. Returns the outcome and the span's control-flow classification of the
+    /// raw error.
     #[allow(clippy::too_many_arguments)]
     async fn lead_or_share(
         &self,
@@ -427,8 +428,7 @@ impl DynSubScheduler {
                 (res.map_err(AgentError::from), control_flow)
             }
             Err(panic) => {
-                // Go: a panic unwinds past the deferred publisher with err == nil and
-                // !completed, which publishes "child did not complete"; the panic propagates.
+                // A panic publishes "child did not complete" to the waiters, then propagates.
                 let res: RunResult =
                     Err(node_run_error(name, child_path, run_id, did_not_complete()));
                 self.publish_outcome(&child_ctx, child_path, &res, FailureInventory::default())
@@ -439,7 +439,8 @@ impl DynSubScheduler {
         }
     }
 
-    /// The deferred block of Go runNode: the child-failure marker, then finishRun.
+    /// The closing step of a child run: the child-failure marker, then
+    /// [`finish_run`](Self::finish_run).
     async fn publish_outcome(
         &self,
         child_ctx: &Context,
@@ -468,9 +469,9 @@ impl DynSubScheduler {
         self.finish_run(child_path, res.clone(), failure_recorded, &inventory);
     }
 
-    /// The child loop of Go runNode (dynamic_scheduler.go:370-520). Returns the outcome, Go's
-    /// `rawErr` classification, and whether the child stream yielded an error (so the failure
-    /// inventory must be snapshotted).
+    /// The child loop of [`run_child`](Self::run_child). Returns the outcome, the span's
+    /// control-flow classification of the raw error, and whether the child stream yielded an error
+    /// (so the failure inventory must be snapshotted).
     #[allow(clippy::too_many_arguments)]
     async fn drive_child(
         &self,
@@ -538,7 +539,7 @@ impl DynSubScheduler {
             if let Some(co) = child_out {
                 let validated = match validate_and_stamp_output(child.as_ref(), co, &mut ev) {
                     Ok(v) => v,
-                    // Go passes the validation error itself as the NodeRunError cause.
+                    // The validation error itself is the NodeRunError cause.
                     Err(e) => return (Err(nre(to_workflow_error(e))), None, false),
                 };
                 out = Some(validated.clone());
@@ -611,7 +612,7 @@ impl DynSubScheduler {
         (Ok(out), None, false)
     }
 
-    /// Port of Go awaitOrLead: `Some(outcome)` (cached, shared from the in-flight leader, or the
+    /// `Some(outcome)` (cached, shared from the in-flight leader, or the
     /// parent's cancellation) or `None` when this caller now leads.
     pub(crate) async fn await_or_lead(
         &self,
@@ -643,7 +644,7 @@ impl DynSubScheduler {
         }
     }
 
-    /// Port of Go finishRun: publishes `res` to the waiters, caches a success, and tracks the
+    /// Publishes `res` to the waiters, caches a success, and tracks the
     /// failed paths.
     pub(crate) fn finish_run(
         &self,
@@ -686,8 +687,8 @@ impl DynSubScheduler {
         }
     }
 
-    /// Port of Go childFailures: a known inventory of the failed and still in-flight child
-    /// paths (sorted for determinism; Go map order is random).
+    /// A known inventory of the failed and still in-flight child paths (sorted for
+    /// determinism).
     pub(crate) fn child_failures(&self) -> FailureInventory {
         let st = self.inner.lock();
         let mut paths: Vec<String> = st
@@ -700,7 +701,7 @@ impl DynSubScheduler {
         FailureInventory { known: true, paths }
     }
 
-    /// Port of Go claimDelegation: reserves the output delegation when `use_as_output`.
+    /// Reserves the output delegation when `use_as_output`.
     fn claim_delegation(
         &self,
         child_path: &str,
@@ -726,12 +727,12 @@ impl DynSubScheduler {
             })
     }
 
-    /// Port of Go commitDelegation.
+    /// Commits the delegated value of the child at `child_path`.
     fn commit_delegation(&self, child_path: &str, value: Value) {
         self.inner.lock().delegation.commit(child_path, value);
     }
 
-    /// Port of Go resolveRunID: a validated custom id, or the next per-child counter value.
+    /// A validated custom id, or the next per-child counter value.
     fn resolve_run_id(&self, child_name: &str, custom: &str) -> Result<String, WorkflowError> {
         if !custom.is_empty() {
             validate_custom_run_id(custom)?;
@@ -749,7 +750,7 @@ impl DynSubScheduler {
 
 #[async_trait::async_trait]
 impl DynamicSubScheduler for DynSubScheduler {
-    /// Port of Go (*dynamicSubScheduler).RunNode: `node` is an `Arc<dyn Node>` and `opts` a
+    /// Runs a child: `node` is an `Arc<dyn Node>` and `opts` a
     /// [`RunNodeOptions`] (boxed as `Any` by [`run_node`](crate::workflow::run_node)).
     async fn run_node(
         &self,

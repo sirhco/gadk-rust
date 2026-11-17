@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The core error type and the consent error (ports every reachable `fmt.Errorf`/`errors.New`
-//! text of ADK-Go `auth/*.go`, and `ConsentRequiredError` of `auth/providers.go`).
+//! The core error type [`Error`] and the consent error [`ConsentRequiredError`]. The `Display`
+//! texts are the ones ADK auth implementations report for the same failures.
 
 use std::fmt;
 use std::sync::Arc;
@@ -38,7 +38,7 @@ impl SharedError {
     }
 }
 
-/// A message-only error (Go `errors.New(msg)`), the payload of `SharedError::from(String)`.
+/// A message-only error, the payload of `SharedError::from(String)`.
 struct Message(String);
 
 impl fmt::Display for Message {
@@ -85,62 +85,62 @@ impl std::error::Error for SharedError {
     }
 }
 
-/// The core error type. Every `Display` equals Go's `Error()` text.
+/// The core error type. Each variant's `Display` text matches ADK's text for that failure.
 #[derive(Debug, Clone, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
-    /// credential.go:41 `APIKeyCredential.Apply`.
+    /// [`ApiKey`](crate::ApiKey) applied with an empty header name.
     #[error("auth: api key credential missing header name")]
     ApiKeyMissingName,
-    /// credential.go:55 `BearerCredential.Apply`.
+    /// [`Bearer`](crate::Bearer) applied with an empty token.
     #[error("auth: bearer credential missing token")]
     BearerMissingToken,
-    /// credential.go:71 `BasicCredential.Apply`.
+    /// [`Basic`](crate::Basic) applied with an empty username and password.
     #[error("auth: basic credential missing username and password")]
     BasicMissingCredentials,
-    /// credential.go:91 `OAuth2Credential.Apply`, `%w` of the token source's error.
+    /// [`OAuth2`](crate::OAuth2) applied, and its token source failed; the source is that error.
     #[error("auth: mint oauth2 token: {0}")]
     MintToken(#[source] Box<Error>),
-    /// providers.go:160 `adcTokenSource`, `%w` of the ADC builder error.
+    /// Application Default Credentials could not be found; the source is the builder's error.
     #[error("auth: find default credentials: {0}")]
     FindDefaultCredentials(#[source] SharedError),
-    /// providers.go:202 `ServiceAccount` (audience set).
+    /// A service-account ID-token source could not be built (an audience was set).
     #[error("auth: id token source: {0}")]
     IdTokenSource(#[source] SharedError),
-    /// providers.go:214 `ServiceAccount` (key, no scopes).
+    /// A service-account key was given without scopes.
     #[error("auth: scopes are required for a service-account access token")]
     ServiceAccountScopesRequired,
-    /// providers.go:218 `ServiceAccount` (key parse/build failure).
+    /// A service-account key could not be parsed or turned into credentials.
     #[error("auth: credentials from json: {0}")]
     CredentialsFromJson(#[source] SharedError),
-    /// providers.go:262-268 `lazyTokenSource` bound. `init_error` is the init's own text, kept
-    /// with Go's `%v` (not wrapped): "…exceeded 30s: context deadline exceeded: <init_error>".
+    /// A lazily initialised token source did not initialise within its bound. `init_error` is the
+    /// init's own text, appended to the message but not wrapped as a source: "…exceeded 30s:
+    /// context deadline exceeded: <init_error>".
     #[error(
         "auth: credential initialization exceeded {}: context deadline exceeded{}",
         gadk_platform::go_format_duration(gadk_platform::GoDuration::from_std(*.bound)),
         .init_error.as_deref().map(|e| format!(": {e}")).unwrap_or_default()
     )]
     InitTimeout {
-        /// The per-attempt bound that fired (Go `initTimeout`).
+        /// The per-attempt bound that fired.
         bound: Duration,
         /// The init's own error text, when it failed past the bound.
         init_error: Option<String>,
     },
-    /// transport.go:70 `Transport.RoundTrip`, `%w` of the provider's error.
+    /// The credential provider failed; the source is the provider's error.
     #[error("auth: resolve credential: {0}")]
     ResolveCredential(#[source] Box<Error>),
-    /// transport.go:137 `applyAndSend`, `%w` of `Apply`'s error.
+    /// The credential could not be applied to the request; the source is the apply error.
     #[error("auth: apply credential: {0}")]
     ApplyCredential(#[source] Box<Error>),
-    /// A header name or value `http::HeaderMap` refuses (Rust-only; Go's `http.Header.Set`
-    /// accepts anything and net/http fails later). The source never carries the value.
+    /// A header name or value `http::HeaderMap` refuses. The source never carries the value.
     #[error("auth: invalid header: {0}")]
     InvalidHeader(#[source] SharedError),
-    /// providers.go:96 `ConsentRequiredError` returned by a provider.
+    /// A provider returned a [`ConsentRequiredError`].
     #[error("{0}")]
     Consent(#[source] ConsentRequiredError),
-    /// Any other error a provider, token source or store returns (Go's bare `error`), including
-    /// a `gcp::Error` (see `From<gcp::Error>`).
+    /// Any other error a provider, token source or store returns, including a `gcp::Error` (see
+    /// `From<gcp::Error>`).
     #[error("{0}")]
     Other(#[source] SharedError),
 }
@@ -163,20 +163,19 @@ impl From<ConsentRequiredError> for Error {
     }
 }
 
-/// providers.go:96-122: interactive, 3-legged OAuth consent is needed before a credential can be
-/// issued. Find it with [`find_consent`] (or `find_consent_in` for a transport error), since a
-/// provider may wrap it.
+/// Interactive, 3-legged OAuth consent is needed before a credential can be issued. Find it with
+/// [`find_consent`] (or `find_consent_in` for a transport error), since a provider may wrap it.
 ///
-/// `Display` is Go's fixed text and never carries the URI: this error becomes a tool's error,
+/// `Display` is a fixed text and never carries the URI: this error becomes a tool's error,
 /// which is fed to the model and persisted in the session. Hand `auth_uri` to the end user and to
 /// nobody else; do not log it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ConsentRequiredError {
-    /// Go `AuthURI`: where the end user grants consent.
+    /// Where the end user grants consent.
     pub auth_uri: String,
-    /// Go `Nonce`: the consent nonce the service issued.
+    /// The consent nonce the service issued.
     pub nonce: String,
-    /// Go `Key`: the credential key the consent completes.
+    /// The credential key the consent completes.
     pub key: String,
 }
 
@@ -188,7 +187,7 @@ impl fmt::Display for ConsentRequiredError {
 
 impl std::error::Error for ConsentRequiredError {}
 
-/// The `errors.As(err, &*ConsentRequiredError)` analogue: walks `err` and its `source()` chain.
+/// Finds a [`ConsentRequiredError`] by walking `err` and its `source()` chain.
 pub fn find_consent<'a>(
     err: &'a (dyn std::error::Error + 'static),
 ) -> Option<&'a ConsentRequiredError> {

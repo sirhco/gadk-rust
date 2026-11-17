@@ -13,9 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The file-system abstraction skill sources read through: [`SkillFs`] (the subset of Go's
-//! `fs.FS` that `NewFileSystemSource` uses), [`DirFs`] (Go `os.DirFS`) and [`MemFs`] (Go
-//! `fstest.MapFS`, also usable for compiled-in skills).
+//! The file-system abstraction skill sources read through: [`SkillFs`] (a read-only,
+//! slash-separated file system), [`DirFs`] (a host directory) and [`MemFs`] (in memory, also usable
+//! for compiled-in skills).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
@@ -32,51 +32,51 @@ use tokio::task::JoinHandle;
 use super::ResourceReader;
 use crate::go_fmt::valid_path;
 
-/// One entry of [`SkillFs::read_dir`] (Go `fs.DirEntry`).
+/// One entry of [`SkillFs::read_dir`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SkillDirEntry {
     /// The entry's base name.
     pub name: String,
-    /// Whether the entry is a directory (Go `DirEntry.IsDir`; a symbolic link is not).
+    /// Whether the entry is a directory (a symbolic link is not).
     pub is_dir: bool,
 }
 
-/// What [`SkillFs::metadata`] reports (Go `fs.FileInfo`, reduced to what skills use).
+/// What [`SkillFs::metadata`] reports, reduced to what skills use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SkillMetadata {
     /// Whether the path is a directory.
     pub is_dir: bool,
 }
 
-/// A read-only, slash-separated file system (Go `fs.FS` as `NewFileSystemSource` uses it).
+/// A read-only, slash-separated file system.
 ///
-/// Paths follow Go's `fs.ValidPath`: unrooted, `/`-separated, no `.`, `..` or empty elements,
-/// with `"."` naming the root. A missing path is `io::ErrorKind::NotFound`.
+/// Paths are unrooted, `/`-separated, no `.`, `..` or empty elements, with `"."` naming the root. A
+/// missing path is `io::ErrorKind::NotFound`.
 #[async_trait]
 pub trait SkillFs: Send + Sync {
-    /// The entries of the directory `path`, sorted by name (Go `fs.ReadDir`).
+    /// The entries of the directory `path`, sorted by name.
     async fn read_dir(&self, path: &str) -> io::Result<Vec<SkillDirEntry>>;
 
-    /// Opens the file `path` for reading (Go `fs.FS.Open`). Opening a directory may succeed
-    /// with a stream whose reads fail, as in Go.
+    /// Opens the file `path` for reading. Opening a directory may succeed with a stream whose reads
+    /// fail.
     async fn open(&self, path: &str) -> io::Result<ResourceReader>;
 
-    /// Describes `path` (Go `fs.Stat`).
+    /// Describes `path`.
     async fn metadata(&self, path: &str) -> io::Result<SkillMetadata>;
 }
 
-/// Go's `*fs.PathError` text: `"<op> <path>: <err>"`.
+/// An I/O error whose text is `"<op> <path>: <err>"`.
 fn path_error(kind: io::ErrorKind, op: &str, path: &str, err: &str) -> io::Error {
     io::Error::new(kind, format!("{op} {path}: {err}"))
 }
 
-/// A [`SkillFs`] over a directory of the host file system (Go `os.DirFS`).
+/// A [`SkillFs`] over a directory of the host file system.
 ///
-/// Every path is checked with Go's `fs.ValidPath` rules first, so absolute paths, `..`
-/// elements and other invalid names fail with `io::ErrorKind::InvalidInput` (on Windows,
-/// paths containing `\` or `:` too). As with `os.DirFS`, symbolic links inside the root are
-/// followed. The blocking file-system calls run on Tokio's blocking pool, so the methods must
-/// be called inside a Tokio runtime; outside one they return an error.
+/// Every path is checked against the [`SkillFs`] path rules first, so absolute paths, `..` elements
+/// and other invalid names fail with `io::ErrorKind::InvalidInput` (on Windows, paths containing
+/// `\` or `:` too). Symbolic links inside the root are followed. The blocking file-system calls run
+/// on Tokio's blocking pool, so the methods must be called inside a Tokio runtime; outside one they
+/// return an error.
 #[derive(Debug, Clone)]
 pub struct DirFs {
     root: PathBuf,
@@ -88,7 +88,7 @@ impl DirFs {
         Self { root: root.into() }
     }
 
-    /// Go `os.DirFS.join`: the host path for a valid `fs` path.
+    /// The host path for a valid path.
     fn host_path(&self, op: &str, path: &str) -> io::Result<PathBuf> {
         let invalid_on_windows = cfg!(windows) && path.contains(['\\', ':']);
         if !valid_path(path) || invalid_on_windows {
@@ -288,8 +288,7 @@ impl AsyncRead for BlockingFileReader {
     }
 }
 
-/// A reader over a directory: every read fails, as reading a directory opened through Go's
-/// `fstest.MapFS` (or `os.DirFS`) does.
+/// A reader over a directory: every read fails, as reading an opened directory does.
 struct DirectoryReader {
     path: String,
 }
@@ -309,11 +308,11 @@ impl AsyncRead for DirectoryReader {
     }
 }
 
-/// An in-memory [`SkillFs`] built from `(path, bytes)` pairs (Go `fstest.MapFS`).
+/// An in-memory [`SkillFs`] built from `(path, bytes)` pairs.
 ///
-/// Directories are implied by the file paths: `a/b/SKILL.md` creates `a` and `a/b`. Paths
-/// that are not Go-`fs.ValidPath` (or are `"."`) are ignored, because Go's `MapFS` can never
-/// open them. Opening or reading through an invalid path reports `NotFound`, as `MapFS` does.
+/// Directories are implied by the file paths: `a/b/SKILL.md` creates `a` and `a/b`. Paths that are
+/// not valid [`SkillFs`] paths (or are `"."`) are ignored, because they can never be opened.
+/// Opening or reading through an invalid path reports `NotFound`.
 #[derive(Debug, Clone, Default)]
 pub struct MemFs {
     files: BTreeMap<String, Arc<[u8]>>,

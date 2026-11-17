@@ -13,9 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `pack_tool`, `tool_from_request` (port of Go `tool/toolutils/toolutils.go`),
-//! `append_instructions` (port of Go `internal/utils/utils.go` `AppendInstructions`) and the tool
-//! confirmation helpers (port of Go `tool/toolconfirmation/tool_confirmation.go`).
+//! `pack_tool`, `tool_from_request`, `append_instructions` and the tool confirmation helpers.
 
 use std::any::Any;
 use std::sync::Arc;
@@ -31,9 +29,9 @@ use crate::error::ToolError;
 use crate::go_fmt::go_quote;
 use crate::tool::Tool;
 
-/// Port of Go `toolutils.PackTool`: register `tool` under its name and append its declaration to
+/// Registers `tool` under its name and appends its declaration to
 /// the first genai Tool that already has function declarations, else to a new one. Called by the
-/// flow's toolPreprocess (`base_flow.go`) for every tool that has a declaration, after all
+/// flow for every tool that has a declaration, after all
 /// request processors.
 ///
 /// The tool is stored as an `Arc<dyn Tool>` boxed in an `Arc<dyn Any>`; read it back with
@@ -48,7 +46,7 @@ pub fn pack_tool(req: &mut LlmRequest, tool: &Arc<dyn Tool>) -> Result<(), ToolE
     }
     req.tools
         .insert(name, Arc::new(tool.clone()) as Arc<dyn Any + Send + Sync>);
-    // Go creates Config even for a tool without a declaration.
+    // The config is created even for a tool without a declaration.
     let config = req
         .config
         .get_or_insert_with(GenerateContentConfig::default);
@@ -77,8 +75,8 @@ pub fn tool_from_request(req: &LlmRequest, name: &str) -> Option<Arc<dyn Tool>> 
         .cloned()
 }
 
-/// Port of Go `utils.AppendInstructions` (`internal/utils/utils.go:138`): appends `instructions`,
-/// joined with `"\n\n"`, to the request's system instruction. The text goes onto the last
+/// Appends `instructions`, joined with `"\n\n"`, to the request's system instruction. The text
+/// goes onto the last
 /// system-instruction part when that part's text is non-empty (separated by `"\n\n"`), otherwise
 /// into a new part; a missing system instruction becomes a new user-role content. An empty
 /// `instructions` slice changes nothing (not even `config`).
@@ -104,14 +102,15 @@ pub fn append_instructions(req: &mut LlmRequest, instructions: &[&str]) {
     si.parts.push(Part::from_text(inst));
 }
 
-/// Go `toolconfirmation.FunctionCallName`.
+/// The function call name of a tool confirmation request.
 pub const REQUEST_CONFIRMATION_FUNCTION_CALL_NAME: &str = "adk_request_confirmation";
 
-/// Port of Go `toolconfirmation.OriginalCallFrom` (error texts verbatim). An empty `args` map
-/// counts as Go's nil functionCall/Args (one check, one message in Go).
+/// Recovers the original function call from a confirmation request's args (error texts are
+/// byte-identical to an ADK server's; see the literals in this function). An empty `args` map
+/// is reported as a missing function call or arguments (one check, one message).
 ///
-/// Go also accepts a `*genai.FunctionCall` value stored directly in `Args`; JSON args can never
-/// hold one, so only the map path is ported.
+/// A function call stored directly in `args` is not accepted: JSON args can only hold an
+/// object, so only the map form is read.
 pub fn original_call_from(fc: &FunctionCall) -> Result<FunctionCall, ToolError> {
     const KEY: &str = "originalFunctionCall";
     if fc.args.is_empty() {
@@ -133,8 +132,7 @@ pub fn original_call_from(fc: &FunctionCall) -> Result<FunctionCall, ToolError> 
             go_type_name(val)
         )));
     };
-    // Go converters.FromMapStructure: mapstructure matches field names case-insensitively
-    // ("ID" → id).
+    // Field names are matched case-insensitively ("ID" → id).
     const FIELDS: [&str; 5] = ["id", "args", "name", "partialArgs", "willContinue"];
     let normalized: Map<String, Value> = raw
         .iter()

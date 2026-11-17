@@ -13,16 +13,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `Debug` for the toolauth models, withholding secrets as Go's `Format`/`LogValue` do (port of
-//! ADK-Go `tool/toolauth/redact.go`).
+//! `Debug` for the toolauth models, withholding secrets.
 //!
 //! The credential types print their secrets as `"<redacted>"`: the fields adk-python marks
 //! `repr=False` in auth_credential.py, every value in `extra` and every value in
 //! `additional_headers`, as its `BaseModelWithConfig.__repr_args__` does. Keys still show, and an
 //! empty secret prints as `""`. Nested values redact themselves. Only the printed text is
-//! redacted; the values keep their secrets. The scheme types hold no secret (Go gives them no
-//! `Format`), so their `Debug` is what `#[derive(Debug)]` would print. `{:?}` and `{:#?}` are
-//! the only Rust forms; Go's `%v %+v %#v %s %q %x` and `slog` all collapse to them.
+//! redacted; the values keep their secrets. The scheme types hold no secret, so their `Debug`
+//! is what `#[derive(Debug)]` would print. `{:?}` and `{:#?}` are the only forms.
 
 use std::collections::BTreeMap;
 use std::fmt::{self, Debug, Formatter};
@@ -33,10 +31,10 @@ use super::credential::{
 use super::schemes::{OAuthFlow, OAuthFlows, Scheme};
 use super::tool::{Config, ToolArguments};
 
-/// Go `redactedText`: printed in place of a secret that is set.
+/// Printed in place of a secret that is set.
 const REDACTED: &str = "<redacted>";
 
-/// Go `redact`: a non-empty string prints as `"<redacted>"`, an empty one as `""`.
+/// A non-empty string prints as `"<redacted>"`, an empty one as `""`.
 struct Secret<'a>(&'a str);
 
 impl Debug for Secret<'_> {
@@ -46,7 +44,7 @@ impl Debug for Secret<'_> {
     }
 }
 
-/// Go `redactValues`: the map with every value printed as `"<redacted>"`, so the keys still show.
+/// The map with every value printed as `"<redacted>"`, so the keys still show.
 struct RedactedValues<'a, V>(&'a BTreeMap<String, V>);
 
 impl<V> Debug for RedactedValues<'_, V> {
@@ -108,7 +106,7 @@ impl Debug for Scheme {
     }
 }
 
-/// Go `HTTPCredentials.Format`: password, token and the values in extra are redacted.
+/// Password, token and the values in extra are redacted.
 impl Debug for HttpCredentials {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("HttpCredentials")
@@ -120,7 +118,7 @@ impl Debug for HttpCredentials {
     }
 }
 
-/// Go `HTTPAuth.Format`: the values in additional headers and extra are redacted.
+/// The values in additional headers and extra are redacted.
 impl Debug for HttpAuth {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("HttpAuth")
@@ -135,7 +133,7 @@ impl Debug for HttpAuth {
     }
 }
 
-/// Go `OAuth2Auth.Format`: client secret, auth response URI, auth code, access, refresh and ID
+/// Client secret, auth response URI, auth code, access, refresh and ID
 /// tokens, code verifier and the values in extra are redacted.
 impl Debug for OAuth2Auth {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -166,7 +164,7 @@ impl Debug for OAuth2Auth {
     }
 }
 
-/// Go `ServiceAccountCredential.Format`: private key ID, private key and the values in extra are
+/// Private key ID, private key and the values in extra are
 /// redacted.
 impl Debug for ServiceAccountCredential {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -190,7 +188,7 @@ impl Debug for ServiceAccountCredential {
     }
 }
 
-/// Go `ServiceAccount.Format`: the values in extra are redacted; the key redacts itself.
+/// The values in extra are redacted; the key redacts itself.
 impl Debug for ServiceAccount {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("ServiceAccount")
@@ -207,7 +205,7 @@ impl Debug for ServiceAccount {
     }
 }
 
-/// Go `Credential.Format`: the API key and the values in extra are redacted; the nested
+/// The API key and the values in extra are redacted; the nested
 /// credentials redact themselves.
 impl Debug for Credential {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -223,7 +221,7 @@ impl Debug for Credential {
     }
 }
 
-/// Go `Config.Format`: the values in extra are redacted; the credentials redact themselves.
+/// The values in extra are redacted; the credentials redact themselves.
 impl Debug for Config {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("Config")
@@ -236,7 +234,7 @@ impl Debug for Config {
     }
 }
 
-/// Go `ToolArguments.Format`: the values in extra are redacted; the config redacts itself.
+/// The values in extra are redacted; the config redacts itself.
 impl Debug for ToolArguments {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("ToolArguments")

@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The IAM Connector `credentials:retrieve` protocol (port of ADK-Go `auth/gcp/connector.go`,
-//! plus its request type from `client.go`). The service wraps its answer in a
+//! The IAM Connector `credentials:retrieve` protocol. The service wraps its answer in a
 //! `google.longrunning.Operation` that it never leaves running: the terminal result is read
 //! inline from `response`/`metadata`, and the `@type` field of those `Any`s is ignored.
 
@@ -29,9 +28,9 @@ use super::client::{
 };
 use super::redact::redacted_for_error;
 
-/// Go `connectorRequest` (client.go:601). The connector takes a boolean where Agent Identity
-/// takes the rejected token (adk-python's generated client sends `force_refresh`). Sending one
-/// service the other's field would leave the refresh unforced, or be rejected as unknown.
+/// The request body. The connector takes a boolean where Agent Identity takes the rejected token
+/// (adk-python's generated client sends `force_refresh`). Sending one service the other's field
+/// would leave the refresh unforced, or be rejected as unknown.
 #[derive(Serialize)]
 pub(crate) struct ConnectorRequest {
     #[serde(rename = "userId", skip_serializing_if = "String::is_empty")]
@@ -44,12 +43,12 @@ pub(crate) struct ConnectorRequest {
     force_refresh: bool,
 }
 
-/// Go `omitempty` on a bool.
+/// Whether a bool is `false`, for `skip_serializing_if`.
 fn is_false(b: &bool) -> bool {
     !*b
 }
 
-/// Go `connectorOperation` (connector.go:28).
+/// The long-running operation the connector answers with.
 #[derive(Default, Deserialize)]
 pub(crate) struct ConnectorOperation {
     #[serde(default, deserialize_with = "go_zero")]
@@ -62,7 +61,7 @@ pub(crate) struct ConnectorOperation {
     error: Option<OperationError>,
 }
 
-/// The operation's `metadata` (connector.go:31).
+/// The operation's `metadata`.
 #[derive(Default, Deserialize)]
 pub(crate) struct OperationMetadata {
     #[serde(default, rename = "consentPending", deserialize_with = "go_object")]
@@ -73,7 +72,7 @@ pub(crate) struct OperationMetadata {
     consent_rejected: Option<Empty>,
 }
 
-/// The operation's `error` (connector.go:36). Go's `int` is 64-bit.
+/// The operation's `error`; `code` is 64-bit.
 #[derive(Default, Deserialize)]
 pub(crate) struct OperationError {
     #[serde(default, deserialize_with = "go_zero")]
@@ -83,13 +82,13 @@ pub(crate) struct OperationError {
 }
 
 impl ConnectorOperation {
-    /// Go `connectorOperation.result` (connector.go:43): `error` first, then a done operation's
-    /// credential, then the metadata arms in Go's order. Anything else is pending: an absent
-    /// or unknown status means "just retry".
+    /// The operation as an outcome: `error` first, then a done operation's credential, then the
+    /// metadata arms (consent required, consent rejected, consent pending). Anything else is
+    /// pending: an absent or unknown status means "just retry".
     pub(crate) fn result(self, req: &Request) -> Result<Outcome, Error> {
         if let Some(err) = self.error {
             if !err.message.is_empty() {
-                // Service text: the same scrub, cap and %q quoting do_post gives a body.
+                // Service text: the same scrub, cap and quoting do_post gives a body.
                 let shown = redacted_for_error(
                     &err.message,
                     &[req.user_id.as_str(), req.continue_uri.as_str()],
@@ -138,7 +137,7 @@ impl ConnectorOperation {
 }
 
 impl Client {
-    /// Go `retrieveConnector` (connector.go:76): posts to
+    /// Posts a retrieval request to
     /// `{connector_url}/v1alpha/{resource}/credentials:retrieve`.
     pub(crate) async fn retrieve_connector(&self, req: &Request) -> Result<Outcome, Error> {
         let url = format!(

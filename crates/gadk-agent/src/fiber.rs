@@ -13,20 +13,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Fibers: the execution identity of agent runs, gadk's substitute for the goroutine identity
-//! ADK-Go's `plugin/agentanalytics/trace_manager.go` reads from `runtime.Stack` —
-//! `currentGoroutine` / `currentGoroutineID` (`:4258-4278`, `:4421-4480`), `goroutineOrigin` /
-//! `startedBy` (`:4280-4295`), the creators `schedulerCreator` / `errgroupCreator` (`:68-76`) and
-//! `attemptSite` / `attemptSiteOfTrace` (`:4296-4412`).
+//! Fibers: the execution identity of agent runs, used by the agent-analytics plugin to tell
+//! concurrent runs apart and to record where each was started. A fiber has an id, an [`Origin`]
+//! (the spawn site that started it and the fiber it was started from) and an attempt slot.
 //!
-//! The engine gives every task on which it starts agent runs concurrently (Go: every goroutine it
-//! starts) a fresh [`Fiber`] with [`spawn_child`], naming the spawn site with one of the creator
-//! constants below; the runner's consumer stream carries one with [`FiberStream::consumer`]. Code
-//! running under a fiber reads it with [`current`]. Agent runs that Go runs as push iterators on
-//! the consumer's goroutine (nested agents, tools, the runner) are polled in the consumer's task
-//! here too, so they share its fiber as they share Go's goroutine.
+//! The engine gives every task on which it starts agent runs concurrently a fresh [`Fiber`] with
+//! [`spawn_child`], naming the spawn site with one of the creator constants below; the runner's
+//! consumer stream carries one with [`FiberStream::consumer`]. Code running under a fiber reads
+//! it with [`current`]. Agent runs that are polled as streams on the consumer's task (nested
+//! agents, tools, the runner) share that task's fiber.
 //!
-//! The attempt site (Go `attemptSite`) is a slot on the fiber: the engine marks one pending
+//! The attempt site is a slot on the fiber: the engine marks one pending
 //! attempt with [`with_attempt`] around a workflow node attempt whose node is an agent node, and
 //! the first agent run started on the fiber while no other agent run is active there claims it for
 //! the duration of its before-agent callbacks ([`current_attempt`]).
@@ -40,24 +37,23 @@ use std::task::{Context as TaskContext, Poll};
 use futures::Stream;
 use parking_lot::Mutex;
 
-/// Go `schedulerCreator`: the spawn site of the task on which a workflow agent's scheduler runs a
+/// The spawn site of the task on which a workflow agent's scheduler runs a
 /// node (gadk-engine `workflow::scheduler` `start_node`).
 pub const SCHEDULER_CREATOR: &str = "gadk_engine::workflow::scheduler::start_node";
-/// Go `errgroupCreator`: the spawn site of a ParallelAgent branch's task (gadk-engine
-/// `agents::parallel_agent`, Go `errgroup.(*Group).Go`).
+/// The spawn site of a ParallelAgent branch's task (gadk-engine
+/// `agents::parallel_agent`).
 pub const ERRGROUP_CREATOR: &str = "gadk_engine::agents::parallel_agent::branch";
-/// The spawn site of a ParallelWorker item's task (gadk-engine `workflow::nodes::parallel_worker`,
-/// Go `(*ParallelWorker).Run`'s `go n.runWorker`); retries of the item stay on it.
+/// The spawn site of a ParallelWorker item's task (gadk-engine
+/// `workflow::nodes::parallel_worker`); retries of the item stay on it.
 pub const PARALLEL_WORKER_CREATOR: &str = "gadk_engine::workflow::nodes::parallel_worker::run";
-/// The spawn site of a live session's task (gadk-engine `llm::live::flow`, Go `base_flow.go`
-/// `RunLive`'s anonymous session goroutine).
+/// The spawn site of a live session's task (gadk-engine `llm::live::flow`).
 pub const LIVE_SESSION_CREATOR: &str = "gadk_engine::llm::live::flow::run_live";
 
 /// The bit that marks a fallback id (a tokio task id, see [`current`]); fiber ids are below it.
 const FALLBACK_BIT: u64 = 1 << 63;
 
-/// The next fiber id: process-wide, starting at 1, never reused (Go: goroutine ids are never
-/// reused). Reaching [`FALLBACK_BIT`] would take 2^63 fibers.
+/// The next fiber id: process-wide, starting at 1, never reused. Reaching
+/// [`FALLBACK_BIT`] would take 2^63 fibers.
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
 tokio::task_local! {
@@ -65,8 +61,8 @@ tokio::task_local! {
     static CURRENT: Arc<FiberState>;
 }
 
-/// Go `goroutineOrigin`: the spawn site that started a fiber and the fiber it was started from.
-/// The zero value (empty creator, parent 0) is Go's unknown origin.
+/// The spawn site that started a fiber and the fiber it was started from.
+/// The zero value (empty creator, parent 0) is an unknown origin.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Origin {
     /// The spawn site: one of this module's creator constants, or empty.
@@ -76,25 +72,24 @@ pub struct Origin {
 }
 
 impl Origin {
-    /// Whether this is Go's zero `goroutineOrigin`.
+    /// Whether this is the zero (unknown) origin.
     pub fn is_zero(&self) -> bool {
         self.creator.is_empty() && self.parent == 0
     }
 
-    /// Go `goroutineOrigin.startedBy`: `creator` started this fiber while running on the fiber
+    /// Whether `creator` started this fiber while running on the fiber
     /// `parent` (never for an unknown parent, 0).
     pub fn started_by(&self, creator: &str, parent: u64) -> bool {
         parent != 0 && self.parent == parent && self.creator == creator
     }
 }
 
-/// Go `attemptSite` (non-`attemptNone` values): the agent run is the agent of a workflow node
-/// attempt, run alone on its fiber.
+/// The agent run is the agent of a workflow node attempt, run alone on its fiber.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AttemptSite {
-    /// Go `attemptNode`: the agent of an agent node started by the workflow scheduler.
+    /// The agent of an agent node started by the workflow scheduler.
     Node,
-    /// Go `attemptWorker`: the agent of an agent node wrapped by a ParallelWorker item attempt.
+    /// The agent of an agent node wrapped by a ParallelWorker item attempt.
     Worker,
 }
 
@@ -106,8 +101,7 @@ struct AttemptSlot {
     /// The claimed site, visible through [`current_attempt`] during the claiming run's
     /// before-agent callbacks.
     current: Option<AttemptSite>,
-    /// The agent runs started and not yet finished on this fiber (Go: `(*agent).Run` frames on
-    /// the goroutine's stack).
+    /// The agent runs started and not yet finished on this fiber.
     active_runs: usize,
 }
 
@@ -130,7 +124,7 @@ impl FiberState {
     }
 }
 
-/// An execution identity (Go: a goroutine): its id, its origin and, for fibers made by this
+/// An execution identity: its id, its origin and, for fibers made by this
 /// module, the attempt slot it shares with every clone and every re-entry.
 #[derive(Debug, Clone)]
 pub struct Fiber {
@@ -183,8 +177,9 @@ impl Fiber {
 
 /// The fiber the running code belongs to: the fiber of the innermost [`Fiber::scope`] or
 /// [`FiberStream`]; else, in a tokio task, a fallback `{ id: (1 << 63) | <task id>, origin: zero }`
-/// with no attempt slot; else `{ id: 0, origin: zero }` (Go's unknown goroutine).
-// Divergence (ledger 7b-3a): fallback ids are tokio task ids, unique only among running tasks, and the id is 0 outside any task or fiber, where Go always has a goroutine id.
+/// with no attempt slot; else `{ id: 0, origin: zero }` (unknown).
+// Fallback ids are tokio task ids, unique only among running tasks, and the id is 0 outside any
+// task or fiber.
 pub fn current() -> Fiber {
     CURRENT
         .try_with(|state| Fiber {
@@ -209,7 +204,7 @@ fn fallback() -> Fiber {
 }
 
 /// A new fiber started by `creator` from the current fiber: a new id and `origin = { creator,
-/// parent: current().id }` (Go: `created by <creator> in goroutine <parent>`).
+/// parent: current().id }`.
 pub fn spawn_child(creator: &'static str) -> Fiber {
     Fiber::with_origin(Origin {
         creator,
@@ -220,7 +215,8 @@ pub fn spawn_child(creator: &'static str) -> Fiber {
 /// A stream polled under a fiber: [`Fiber::instrument`] fixes the fiber when wrapping,
 /// [`FiberStream::consumer`] at the first poll. The fiber is current for every poll, so the
 /// stream keeps it when it is moved to and polled from another task.
-// Divergence (ledger 7b-3a): a started agent stream moved to another task keeps its fiber only when wrapped in a FiberStream, and agent streams polled concurrently in one task share that task's fiber (Go would run them on separate goroutines).
+// A started agent stream moved to another task keeps its fiber only when wrapped in a
+// `FiberStream`, and agent streams polled concurrently in one task share that task's fiber.
 #[derive(Debug)]
 #[must_use = "streams do nothing unless polled"]
 pub struct FiberStream<S> {
@@ -229,7 +225,7 @@ pub struct FiberStream<S> {
 }
 
 impl<S> FiberStream<S> {
-    /// Wraps a consumer stream (Go: the iterator the caller ranges over on its goroutine): the
+    /// Wraps a consumer stream (the one the caller polls): the
     /// first poll adopts the current fiber if one is set, else a new [`Fiber::root`], and every
     /// later poll re-enters it.
     pub fn consumer(stream: S) -> FiberStream<S> {
@@ -304,8 +300,7 @@ impl Drop for PendingAttempt {
 }
 
 /// The attempt site claimed by the agent run whose before-agent callbacks are running on the
-/// current fiber (Go `attemptSiteOfTrace` for a trace taken in `runBeforeAgentCallbacks`), else
-/// `None`.
+/// current fiber (the claim taken for the before-agent callbacks), else
 pub fn current_attempt() -> Option<AttemptSite> {
     CURRENT
         .try_with(|state| state.slot.lock().current)
@@ -313,7 +308,7 @@ pub fn current_attempt() -> Option<AttemptSite> {
         .flatten()
 }
 
-/// Go `attemptSiteOfTrace`'s "`(*agent).Run` exactly once on the stack": registers an agent run on
+/// Registers an agent run on
 /// the current fiber and, if no other agent run is active there, moves the pending attempt to the
 /// current one (else the current one is `None` for this nested run). Dropping the claim restores
 /// the previous current attempt; [`AttemptClaim::into_active_run`] keeps the run registered.

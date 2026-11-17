@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `impl SessionService for DatabaseSessionService` (Go `service.go`), step for step.
+//! `impl SessionService for DatabaseSessionService`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -46,7 +46,7 @@ fn fetched_state(
     }
 }
 
-/// Go `fetchStorageAppState`: the app's state, empty when it has no row.
+/// The app's state, empty when it has no row.
 async fn fetch_app_state(
     tx: &mut Tx,
     app_name: &str,
@@ -59,7 +59,7 @@ async fn fetch_app_state(
     )
 }
 
-/// Go `fetchStorageUserState`.
+/// The user's state, empty when it has no row.
 async fn fetch_user_state(
     tx: &mut Tx,
     app_name: &str,
@@ -73,7 +73,7 @@ async fn fetch_user_state(
     )
 }
 
-/// Go `lockStateRow` for the app row: insert an empty row if absent (on conflict do nothing) so
+/// Locks the app state row: insert an empty row if absent (on conflict do nothing) so
 /// the locked read that follows (`for_update`) finds a row to lock.
 async fn lock_app_state_row(
     tx: &mut Tx,
@@ -90,7 +90,7 @@ async fn lock_app_state_row(
         .map_err(|e| wrap("failed to lock app state", e))
 }
 
-/// Go `lockStateRow` for the user row (see [`lock_app_state_row`]).
+/// Locks the user state row (see [`lock_app_state_row`]).
 async fn lock_user_state_row(
     tx: &mut Tx,
     app_name: &str,
@@ -108,7 +108,7 @@ async fn lock_user_state_row(
         .map_err(|e| wrap("failed to lock user state", e))
 }
 
-/// Go `fetchAllAppStorageUserState`: every user's state for the app, by user ID.
+/// Every user's state for the app, by user ID.
 async fn fetch_all_user_states(
     tx: &mut Tx,
     app_name: &str,
@@ -176,12 +176,13 @@ async fn save_delta(
     saved.map_err(|e| wrap(prefix, e))
 }
 
-/// Go `t.Truncate(time.Microsecond)`.
+/// Truncates `t` to microsecond precision.
 fn truncate_to_micros(t: DateTime<Utc>) -> DateTime<Utc> {
     DateTime::from_timestamp_micros(t.timestamp_micros()).unwrap_or(t)
 }
 
-/// Go `time.UnixMicro(us).Format(time.RFC3339Nano)`, in UTC.
+/// Formats microseconds since the Unix epoch as an RFC 3339 timestamp with up to nanosecond
+/// precision, in UTC.
 fn micros_rfc3339(us: i64) -> String {
     DateTime::from_timestamp_micros(us)
         .map(|t| go_rfc3339_nano(&t))
@@ -209,8 +210,8 @@ impl SessionService for DatabaseSessionService {
             .begin_write(self.log.clone())
             .await
             .map_err(errors::raw)?;
-        // Lock the shared rows this session's state changes, app before user, for the same
-        // reasons and in the same order as `apply_event` (Go #1930).
+        // Lock the shared rows this session's state changes, app before user, in the same order
+        // as `apply_event`.
         if !app_delta.is_empty() {
             lock_app_state_row(&mut tx, &req.app_name, now).await?;
         }
@@ -320,7 +321,7 @@ impl SessionService for DatabaseSessionService {
             .map_err(|e| wrap("database error while fetching session", e))?;
         // Sort here rather than with ORDER BY: SQLite stores update_time as RFC 3339 text with
         // the value's own offset, so it would compare text, not instants, for rows written in
-        // different zones. Same order as `gadk_session::compare_by_last_update` (Go #1919).
+        // different zones. Same order as `gadk_session::compare_by_last_update`.
         rows.sort_by(|a, b| {
             a.update_time
                 .cmp(&b.update_time)
@@ -378,7 +379,7 @@ impl SessionService for DatabaseSessionService {
             .await
             .map_err(errors::raw)?;
         // Delete the events explicitly instead of relying on the ON DELETE CASCADE foreign key:
-        // SQLite enforces foreign keys only when the connection enables them (Go #1774).
+        // SQLite enforces foreign keys only when the connection enables them.
         tx.delete_session_events(&req.app_name, &req.user_id, &req.session_id)
             .await
             .map_err(|e| wrap("database error during session events deletion", e))?;
@@ -418,7 +419,7 @@ impl SessionService for DatabaseSessionService {
                     "unexpected session type: the session was not created by DatabaseSessionService",
                 )
             })?;
-        // Go appends to the caller's session before persisting.
+        // The event is appended to the caller's session before it is persisted.
         sess.append_event(event);
         let trimmed = trim_temp_delta_state(event);
         self.apply_event(sess, &trimmed).await?;
@@ -428,7 +429,7 @@ impl SessionService for DatabaseSessionService {
 }
 
 impl DatabaseSessionService {
-    /// Go `applyEvent`: one transaction that checks staleness, locks and updates the shared
+    /// One transaction that checks staleness, locks and updates the shared
     /// state rows the event changes (app before user), inserts the event and saves the session.
     async fn apply_event(&self, sess: &DatabaseSession, event: &Event) -> Result<(), SessionError> {
         let (app_name, user_id, id) = (sess.app_name(), sess.user_id(), sess.id());

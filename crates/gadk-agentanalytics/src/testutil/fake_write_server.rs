@@ -13,24 +13,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! An in-process BigQuery Storage Write server (feature `testutil`), in the place of the
-//! `grpc.NewServer` fakes of ADK-Go's `batch_processor_test.go` and
-//! `bigquery_agent_analytics_plugin_test.go`'s `fakeBigQueryWriteServer`: the generated tonic
-//! `BigQueryWrite` service, served over an in-memory `tokio::io::duplex` connector (no sockets,
-//! so Tokio's paused time auto-advances while the client waits), with scriptable RPC hooks
-//! (async, so they may block on the test's signals) and recorded requests and metadata.
+//! An in-process BigQuery Storage Write server (feature `testutil`), standing in for a real server:
+//! the generated tonic `BigQueryWrite` service, served over an in-memory `tokio::io::duplex`
+//! connector (no sockets, so Tokio's paused time auto-advances while the client waits), with
+//! scriptable RPC hooks (async, so they may block on the test's signals) and recorded requests and
+//! metadata.
 //!
-//! Defaults (no hook installed): `CreateWriteStream` answers `<parent>/streams/committed-<n>`
-//! with the requested type; `FinalizeWriteStream` answers an empty response; `AppendRows`
-//! answers every request with an empty `AppendRowsResponse` until the client closes the stream
-//! (Go's `fakeBigQueryWriteServer`). Every request is recorded before its hook runs; AppendRows
-//! requests as the hook receives them through [`AppendRowsServerStream::recv`].
+//! Defaults (no hook installed): `CreateWriteStream` answers `<parent>/streams/committed-<n>` with
+//! the requested type; `FinalizeWriteStream` answers an empty response; `AppendRows` answers every
+//! request with an empty `AppendRowsResponse` until the client closes the stream. Every request is
+//! recorded before its hook runs; AppendRows requests as the hook receives them through
+//! [`AppendRowsServerStream::recv`].
 
 //!
-//! A hook that returns ends its RPC (an AppendRows hook: the stream ends with OK or the
-//! returned status, as Go's handler returning). The response headers of an AppendRows stream
-//! are sent as soon as the stream arrives, before the hook runs (grpc-go sends them with the
-//! first response or the status; the client does not wait for them either way).
+//! A hook that returns ends its RPC (an AppendRows hook: the stream ends with OK or the returned
+//! status). The response headers of an AppendRows stream are sent as soon as the stream arrives,
+//! before the hook runs (a real server sends them with the first response or the status; the client
+//! does not wait for them either way).
 
 use std::io;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -85,7 +84,7 @@ pub struct RecordedAppend {
     pub request: AppendRowsRequest,
 }
 
-/// The server half of one AppendRows stream (Go `storagepb.BigQueryWrite_AppendRowsServer`).
+/// The server half of one AppendRows stream.
 pub struct AppendRowsServerStream {
     /// The 1-based number of this stream (in opening order).
     pub stream_no: usize,
@@ -103,8 +102,8 @@ pub(crate) struct StreamInner {
 }
 
 impl AppendRowsServerStream {
-    /// Go `stream.Recv()`: the next request (recorded), `Ok(None)` once the client closed its
-    /// side (Go `io.EOF`), or the stream's error.
+    /// The next request (recorded), `Ok(None)` once the client closed its side, or the stream's
+    /// error.
     ///
     /// # Errors
     ///
@@ -122,7 +121,7 @@ impl AppendRowsServerStream {
         Ok(req)
     }
 
-    /// Go `stream.Send(res)`.
+    /// Sends a response to the client.
     ///
     /// # Errors
     ///
@@ -135,15 +134,13 @@ impl AppendRowsServerStream {
             .map_err(|_| Status::cancelled("context canceled"))
     }
 
-    /// Go `<-stream.Context().Done()`: resolves once the client has canceled or dropped the
-    /// stream.
+    /// Resolves once the client has canceled or dropped the stream.
     pub async fn cancelled(&self) {
         self.inner.responses.closed().await;
     }
 }
 
-/// A `CreateWriteStream` hook (Go: a `CreateWriteStream` method or a unary server
-/// interceptor).
+/// A `CreateWriteStream` hook.
 pub type CreateWriteStreamHook = Arc<
     dyn Fn(UnaryCall<CreateWriteStreamRequest>) -> BoxFuture<'static, Result<WriteStream, Status>>
         + Send
@@ -159,8 +156,8 @@ pub type FinalizeWriteStreamHook = Arc<
         + Sync,
 >;
 
-/// An `AppendRows` hook: serves one whole stream (Go's `AppendRows(stream) error` method);
-/// returning ends the stream with OK or the error's status.
+/// An `AppendRows` hook: serves one whole stream; returning ends the stream with OK or the error's
+/// status.
 pub type AppendRowsHook =
     Arc<dyn Fn(AppendRowsServerStream) -> BoxFuture<'static, Result<(), Status>> + Send + Sync>;
 
@@ -294,13 +291,12 @@ impl FakeWriteServer {
         lock(&self.inner.stream_metadata).clone()
     }
 
-    /// How many AppendRows streams were opened (Go `streamsOpened`).
+    /// How many AppendRows streams were opened.
     pub fn streams_opened(&self) -> usize {
         lock(&self.inner.stream_metadata).len()
     }
 
-    /// Resolves once at least `n` AppendRows requests have been received (Go tests reading
-    /// the `requests` channel).
+    /// Resolves once at least `n` AppendRows requests have been received.
     pub async fn wait_for_append_requests(&self, n: usize) {
         let mut count = self.inner.append_count.subscribe();
         // The sender lives in `self.inner`, so the watch cannot close while we wait.
@@ -353,8 +349,7 @@ fn record<T: Clone>(calls: &Mutex<Vec<UnaryCall<T>>>, request: Request<T>) -> Un
     call
 }
 
-/// Go's default `AppendRows` of `fakeBigQueryWriteServer`: an empty response per request
-/// until the client closes its side.
+/// The default `AppendRows`: an empty response per request until the client closes its side.
 async fn default_append_rows(mut stream: AppendRowsServerStream) -> Result<(), Status> {
     while stream.recv().await?.is_some() {
         stream.send(AppendRowsResponse::default()).await?;
@@ -367,7 +362,7 @@ struct Service {
     shared: Arc<Shared>,
 }
 
-/// grpc-go `UnimplementedBigQueryWriteServer`'s status.
+/// The `Unimplemented` status of a method the fake does not implement.
 fn unimplemented(method: &str) -> Status {
     Status::unimplemented(format!("method {method} not implemented"))
 }

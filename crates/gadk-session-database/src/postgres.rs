@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The PostgreSQL dialect (gorm postgres): DDL with `JSONB` and `timestamptz(6)` columns, SQL
+//! The PostgreSQL dialect: DDL with `JSONB` and `timestamptz(6)` columns, SQL
 //! text, and `SELECT … FOR UPDATE` row locking.
 
 use chrono::{DateTime, Utc};
@@ -26,8 +26,9 @@ use crate::rows::{
     session_row, user_state_row,
 };
 
-/// gorm postgres DDL for ADK-Go's models: `text` strings, `JSONB` for `stateMap`/`dynamicJSON`,
-/// `bytea` for `[]byte`, `timestamptz(6)` for `precision:6` times, `boolean` for `*bool`.
+/// The PostgreSQL DDL of the ADK database session schema: `text` strings, `JSONB` for JSON
+/// columns, `bytea` for binary columns, `timestamptz(6)` for microsecond-precision times and
+/// `boolean` for optional booleans.
 pub(crate) static TABLES: [TableDef; 4] = [
     TableDef {
         name: "sessions",
@@ -103,7 +104,7 @@ pub(crate) async fn connect(url: &str) -> sqlx::Result<PgPool> {
     PgPoolOptions::new().connect(url).await
 }
 
-/// gorm's postgres `AddColumn`.
+/// The `ALTER TABLE … ADD` statement for one column.
 pub(crate) fn add_column_sql(table: &str, column: &str, ty: &str) -> String {
     format!("ALTER TABLE \"{table}\" ADD \"{column}\" {ty}")
 }
@@ -121,7 +122,7 @@ impl ColumnReader for PgRow {
         self.try_get(col)
     }
 
-    /// A `timestamptz` column; NULL is Go's zero time.
+    /// A `timestamptz` column; NULL reads as [`gadk_session::zero_time`].
     fn time(&self, col: &str) -> sqlx::Result<DateTime<Utc>> {
         Ok(self
             .try_get::<Option<DateTime<Utc>>, _>(col)?

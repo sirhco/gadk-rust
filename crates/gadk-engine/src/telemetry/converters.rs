@@ -13,54 +13,52 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `internal/telemetry/converters.go`: [`AttrValue`] is Go's `attribute.Value` (the
-//! OTel attribute and log value model), [`to_log_value`] Go's `toLogValue` and
-//! [`from_log_value`] Go's `FromLogValue`. Go's `any` is a [`serde_json::Value`] here.
+//! Attribute value conversions: [`AttrValue`] is the OTel attribute and log value model,
+//! [`to_log_value`] converts a [`serde_json::Value`] into it and [`from_log_value`] back.
 //!
-//! Recording on a `tracing` span (plan decision D6, extended): a string is recorded as `&str`,
-//! a bool, INT64 and FLOAT64 as their `tracing` primitives, and every structured value (the
-//! slices and maps) as the bytes of its JSON text ([`AttrValue::record`]), so a subscriber reads
-//! a structured attribute from `Visit::record_bytes` and nothing else arrives there. A JSON array
-//! of strings is Go's `STRINGSLICE` (`gen_ai.response.finish_reasons`); any other array is a
-//! `SLICE`.
+//! Recording on a `tracing` span: a string is recorded as `&str`, a bool, INT64 and FLOAT64 as
+//! their `tracing` primitives, and every structured value (the slices and maps) as the bytes of its
+//! JSON text ([`AttrValue::record`]), so a subscriber reads a structured attribute from
+//! `Visit::record_bytes` and nothing else arrives there. A JSON array of strings is a `StringSlice`
+//! (`gen_ai.response.finish_reasons`); any other array is a `Slice`.
 
 use serde_json::{Map, Number, Value};
 
-/// Go `attribute.Value`.
+/// An OTel attribute value.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum AttrValue {
-    /// Go `EMPTY` (the zero `attribute.Value`).
+    /// No value.
     Empty,
-    /// Go `BOOL`.
+    /// A boolean.
     Bool(bool),
-    /// Go `INT64`.
+    /// A 64-bit integer.
     Int64(i64),
-    /// Go `FLOAT64`.
+    /// A 64-bit float.
     Float64(f64),
-    /// Go `STRING`.
+    /// A string.
     String(String),
-    /// Go `BOOLSLICE`.
-    #[cfg_attr(not(test), allow(dead_code))] // Go's typed slices: ADK records none.
+    /// A slice of booleans.
+    #[cfg_attr(not(test), allow(dead_code))] // The typed slices: ADK records none.
     BoolSlice(Vec<bool>),
-    /// Go `INT64SLICE`.
-    #[cfg_attr(not(test), allow(dead_code))] // Go's typed slices: ADK records none.
+    /// A slice of integers.
+    #[cfg_attr(not(test), allow(dead_code))] // The typed slices: ADK records none.
     Int64Slice(Vec<i64>),
-    /// Go `FLOAT64SLICE`.
-    #[cfg_attr(not(test), allow(dead_code))] // Go's typed slices: ADK records none.
+    /// A slice of floats.
+    #[cfg_attr(not(test), allow(dead_code))] // The typed slices: ADK records none.
     Float64Slice(Vec<f64>),
-    /// Go `STRINGSLICE`.
+    /// A slice of strings.
     StringSlice(Vec<String>),
-    /// Go `BYTESLICE`.
-    #[cfg_attr(not(test), allow(dead_code))] // Go's typed slices: ADK records none.
+    /// A slice of bytes.
+    #[cfg_attr(not(test), allow(dead_code))] // The typed slices: ADK records none.
     ByteSlice(Vec<u8>),
-    /// Go `SLICE`.
+    /// A slice of mixed values.
     Slice(Vec<AttrValue>),
-    /// Go `MAP`, in insertion order.
+    /// A map, in insertion order.
     Map(Vec<(String, AttrValue)>),
 }
 
 impl AttrValue {
-    /// Go `attribute.String(k, v)`'s value.
+    /// A string value.
     pub(crate) fn string(s: impl Into<String>) -> Self {
         Self::String(s.into())
     }
@@ -90,9 +88,8 @@ impl AttrValue {
     }
 }
 
-/// Go `toLogValue` for a JSON value (Go's `nil`, `string`, `bool`, `float64`, `int`,
-/// `json.Number`, `[]any` and `map[string]any`). A number goes through [`json_number`], as Go's
-/// decoder with `UseNumber` hands it over.
+/// The log value of a JSON value: `null`, string, bool, number, array or object. A number goes
+/// through [`json_number`].
 pub(crate) fn to_log_value(v: &Value) -> AttrValue {
     match v {
         Value::Null => AttrValue::Empty,
@@ -108,8 +105,8 @@ pub(crate) fn to_log_value(v: &Value) -> AttrValue {
     }
 }
 
-/// Go `toLogValue`'s `json.Number` branch: an integer if `Int64` parses it, else a float if
-/// `Float64` does, else (out of float64 range) the exact JSON text.
+/// The value of a JSON number's text: an integer if it parses as `i64`, else a float if it parses
+/// as a finite `f64`, else (out of float64 range) the exact JSON text as a string.
 pub(crate) fn json_number(text: &str) -> AttrValue {
     if let Ok(i) = text.parse::<i64>() {
         return AttrValue::Int64(i);
@@ -120,8 +117,8 @@ pub(crate) fn json_number(text: &str) -> AttrValue {
     }
 }
 
-/// Go `FromLogValue`. A float that JSON cannot hold (NaN, ±Inf) becomes `null`; a byte slice is
-/// an array of its bytes.
+/// The JSON value of a log value. A float that JSON cannot hold (NaN, ±Inf) becomes `null`; a byte
+/// slice is an array of its bytes.
 pub(crate) fn from_log_value(v: &AttrValue) -> Value {
     fn float(f: f64) -> Value {
         Number::from_f64(f).map_or(Value::Null, Value::Number)

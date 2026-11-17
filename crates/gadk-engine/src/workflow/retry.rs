@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `calculate_delay` and `should_retry` (port of Go workflow/retry.go).
+//! `calculate_delay` and `should_retry`.
 
 use std::time::Duration;
 
@@ -23,11 +23,11 @@ use gadk_platform::Platform;
 use crate::workflow::RetryConfig;
 use crate::workflow::config::default_should_retry;
 
-/// Port of Go CalculateDelay (retry.go:24). `failed_attempts` = times the node has already failed.
+/// The delay before the next attempt. `failed_attempts` = times the node has already failed.
 ///
-/// Go's `rand.Float64()` jitter source is replaced by the platform UUID provider (R12) so runs
-/// under `Platform::deterministic` are reproducible: a jittered delay consumes exactly one UUID,
-/// and a delay with `jitter == 0` consumes none.
+/// The jitter source is the platform UUID provider so runs under `Platform::deterministic` are
+/// reproducible: a jittered delay consumes exactly one UUID, and a delay with `jitter == 0`
+/// consumes none.
 pub fn calculate_delay(cfg: &RetryConfig, failed_attempts: i32, platform: &Platform) -> Duration {
     if failed_attempts <= 0 {
         return Duration::ZERO;
@@ -53,12 +53,12 @@ pub fn calculate_delay(cfg: &RetryConfig, failed_attempts: i32, platform: &Platf
             delay = 0.0;
         }
     }
-    // Go time.Duration(float64) truncates toward zero.
+    // The conversion truncates toward zero.
     Duration::from_nanos(delay as u64)
 }
 
 /// Uniform fraction in [0,1): the first 8 hex digits of `platform.new_uuid()` divided by 2^32
-/// (spec R12).
+/// (the jitter source of [`calculate_delay`]).
 fn jitter_fraction(platform: &Platform) -> f64 {
     let id = platform.new_uuid();
     let hex: String = id
@@ -69,9 +69,8 @@ fn jitter_fraction(platform: &Platform) -> f64 {
     u32::from_str_radix(&hex, 16).map_or(0.0, |n| f64::from(n) / 4_294_967_296.0)
 }
 
-/// Port of Go ShouldRetry (retry.go:57): whether a node should be retried after a failure.
-/// `failed_attempts` is the number of times the node has already failed. Go's nil-config case is
-/// the caller's `Option`.
+/// Whether a node should be retried after a failure. `failed_attempts` is the number of times
+/// the node has already failed. A node without a retry config is the caller's `None`.
 pub fn should_retry(cfg: &RetryConfig, err: &AgentError, failed_attempts: i32) -> bool {
     if cfg.max_attempts <= 1 || failed_attempts >= cfg.max_attempts {
         return false;

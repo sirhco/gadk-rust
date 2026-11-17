@@ -13,16 +13,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `cmd/launcher/web/api`: the sub-launcher that mounts the ADK REST API server
+//! The sub-launcher that mounts the ADK REST API server
 //! (gadk-server's [`Server`]) on the web launcher's router.
 //!
-//! The mount is Go's: CORS headers for the web UI origin and the server-wide allowed origins
-//! (`corsWithArgs`, preflights answered 200 by the middleware), trailing slashes trimmed before
-//! the REST router sees the path (`trimTrailingSlash`), and under a prefix `http.StripPrefix` with
-//! a redirect rewriter that keeps a root-relative `Location` under the prefix and turns 301/302
-//! into 308/307 for a request that is not GET or HEAD. The prefix is mounted segment-aware
-//! (`prefix + "/"` and the bare prefix); an empty or `/` prefix is a catch-all registered after
-//! whatever the other sub-launchers registered first.
+//! The mount adds CORS headers for the web UI origin and the server-wide allowed origins
+//! (`cors_with_args`, preflights answered 200 by the middleware), trims trailing slashes before
+//! the REST router sees the path (`trim_trailing_slash`), and under a prefix strips it
+//! (`strip_prefix`) with a redirect rewriter (`rewrite_redirects`) that keeps a root-relative
+//! `Location` under the prefix and turns 301/302 into 308/307 for a request that is not GET or
+//! HEAD. The prefix is mounted segment-aware (`prefix + "/"` and the bare prefix); an empty or `/`
+//! prefix is a catch-all registered after whatever the other sub-launchers registered first.
 
 use std::io::Write;
 use std::sync::{Arc, Mutex};
@@ -46,13 +46,13 @@ use crate::error::Error;
 use crate::flag_usage::format_flag_usage;
 use crate::web::{Middleware, WebRouter, WebSublauncher, axum_handler};
 
-/// Go `corsAllowMethods`: `apiMethods` joined, the verbs a CORS preflight is told.
+/// The verbs a CORS preflight is told.
 const CORS_ALLOW_METHODS: &str = "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS";
 
-/// Go `Access-Control-Allow-Headers` value.
+/// The `Access-Control-Allow-Headers` value.
 const CORS_ALLOW_HEADERS: &str = "Content-Type, Authorization";
 
-/// Go `api.apiConfig`: the flags' values.
+/// The flags' values.
 struct ApiConfig {
     frontend_address: Flag<String>,
     path_prefix: Flag<String>,
@@ -61,17 +61,17 @@ struct ApiConfig {
     include_debug_api: Flag<bool>,
 }
 
-/// Go `api.apiLauncher`.
+/// The `api` web sub-launcher.
 pub struct ApiLauncher {
-    /// The `web` flag set (Go names the api launcher's set `"web"`). Behind a `Mutex` because a
+    /// The `web` flag set (named `"web"`). Behind a `Mutex` because a
     /// `FlagSet` is `Send` but not `Sync`.
     flags: Mutex<FlagSet>,
     config: ApiConfig,
-    /// Go `config.pathPrefix` after `Parse` normalized it (the flag default until then).
+    /// The path prefix after `Parse` normalized it (the flag default until then).
     path_prefix: String,
 }
 
-/// Go `api.NewLauncher()`.
+/// An `api` launcher with its flags.
 pub fn new() -> ApiLauncher {
     let mut fs = FlagSet::new("web");
     let frontend_address = fs.string(
@@ -114,18 +114,17 @@ pub fn new() -> ApiLauncher {
 }
 
 impl ApiLauncher {
-    /// Replaces where the api flag set writes its errors and usage (Go `fs.SetOutput`; default
+    /// Replaces where the api flag set writes its errors and usage (default
     /// stderr), for tests and the CLI replay.
     pub fn with_flag_output(self, out: Arc<Mutex<dyn Write + Send>>) -> ApiLauncher {
         lock(&self.flags).set_output(out);
         self
     }
 
-    /// The REST server's config from the launcher's `Config` and the flags (Go
-    /// `adkrest.ServerConfig{…}` in `SetupSubrouters`).
+    /// The REST server's config from the launcher's `Config` and the flags.
     fn server_config(&self, config: &Config) -> Result<ServerConfig, ServerError> {
-        // Go passes a nil SessionService through; gadk's server requires one. The web launcher's
-        // `Run` always supplies it (applyServiceDefaults).
+        // The server requires a session service. The web launcher's `Run` always supplies one
+        // (see `apply_service_defaults`).
         let Some(session_service) = config.session_service.clone() else {
             return Err(ServerError("no session service configured".to_owned()));
         };
@@ -154,12 +153,12 @@ impl ApiLauncher {
 }
 
 impl WebSublauncher for ApiLauncher {
-    /// Go `Keyword`.
+    /// The keyword `api`.
     fn keyword(&self) -> String {
         "api".to_owned()
     }
 
-    /// Go `Parse`: the api flags, then the prefix normalized to a leading slash and no trailing
+    /// Parses the api flags, then the prefix normalized to a leading slash and no trailing
     /// slash.
     fn parse(&mut self, args: Vec<String>) -> Result<Vec<String>, Error> {
         let mut fs = lock(&self.flags);
@@ -174,17 +173,17 @@ impl WebSublauncher for ApiLauncher {
         Ok(fs.args())
     }
 
-    /// Go `CommandLineSyntax`.
+    /// The flag usage text.
     fn command_line_syntax(&self) -> String {
         format_flag_usage(&lock(&self.flags))
     }
 
-    /// Go `SimpleDescription`.
+    /// A one-line description.
     fn simple_description(&self) -> String {
         "starts ADK REST API server, accepting origins specified by webui_address (CORS)".to_owned()
     }
 
-    /// Go `SetupSubrouters`: adds the web UI origin to the server-wide allowed origins, builds
+    /// Adds the web UI origin to the server-wide allowed origins, builds
     /// the REST server (which validates the compaction config against the loader's agents), adds
     /// its debug layer to the telemetry layers, and mounts it behind CORS under the prefix.
     fn setup_subrouters(&self, router: &mut WebRouter, config: &mut Config) -> Result<(), Error> {
@@ -200,7 +199,7 @@ impl WebSublauncher for ApiLauncher {
                 source: Box::new(e),
             })?;
 
-        // Go appends the server's span and log processors to TelemetryOptions.
+        // The server's debug layer joins the telemetry layers.
         config
             .telemetry_layers
             .push(Box::new(rest_server.debug_layer()));
@@ -213,7 +212,7 @@ impl WebSublauncher for ApiLauncher {
         Ok(())
     }
 
-    /// Go `UserMessage`.
+    /// The startup lines for this sub-launcher.
     fn user_message(&self, web_url: &str, printer: &mut dyn FnMut(&str)) {
         let prefix = &self.path_prefix;
         printer(&format!(
@@ -231,7 +230,7 @@ impl WebSublauncher for ApiLauncher {
     }
 }
 
-/// Go `time.Duration` → the REST server's [`Timeout`] (zero: default, negative: none).
+/// A flag duration as the REST server's [`Timeout`] (zero: default, negative: none).
 fn go_timeout(d: GoDuration) -> Timeout {
     match d.to_std() {
         None => Timeout::Disabled,
@@ -240,7 +239,7 @@ fn go_timeout(d: GoDuration) -> Timeout {
     }
 }
 
-/// Go `int` (64-bit) into the REST server's `i32` trace capacity, saturating.
+/// A 64-bit flag integer as the REST server's `i32` trace capacity, saturating.
 fn go_int_to_i32(v: i64) -> i32 {
     i32::try_from(v).unwrap_or(if v < 0 { i32::MIN } else { i32::MAX })
 }
@@ -249,7 +248,7 @@ fn lock<T: ?Sized>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Go `corsWithArgs(frontendAddress, allowedOrigins)`.
+/// The CORS middleware for `frontend_address` and `allowed_origins`.
 ///
 /// `Access-Control-Allow-Origin` names the request's `Origin` when it is one of `allowed_origins`,
 /// and `frontend_address` otherwise; a `*` in either makes it `*`. Addresses are normalized with
@@ -281,7 +280,7 @@ pub(crate) fn cors_with_args(frontend_address: &str, allowed_origins: &[String])
         let allowed = Arc::clone(&allowed);
         Arc::new(move |req: Request| {
             let mut allow_origin = origin.as_str().to_owned();
-            // Looked up as sent, not parsed (Go `r.Header.Get("Origin")`).
+            // Looked up as sent, not parsed.
             if let Some(request_origin) = req
                 .headers()
                 .get(ORIGIN)
@@ -300,8 +299,8 @@ pub(crate) fn cors_with_args(frontend_address: &str, allowed_origins: &[String])
                 } else {
                     next(req).await
                 };
-                // gorilla's `Upgrade` hijacks the connection and writes the 101 itself, without
-                // the headers set on `w`.
+                // A WebSocket upgrade hijacks the connection and writes its 101 itself, without
+                // these headers.
                 if resp.status() == StatusCode::SWITCHING_PROTOCOLS {
                     return resp;
                 }
@@ -311,8 +310,8 @@ pub(crate) fn cors_with_args(frontend_address: &str, allowed_origins: &[String])
     })
 }
 
-/// The CORS headers Go sets before calling the handler: a header the handler set itself wins
-/// (Go `Set` replaces), and `Vary: Origin` comes before the handler's own `Vary` values (Go `Add`).
+/// The CORS headers set on the response: a header the handler set itself wins, and
+/// `Vary: Origin` comes before the handler's own `Vary` values.
 fn with_cors_headers(mut resp: Response, allow_origin: &str, vary: bool) -> Response {
     let h = resp.headers_mut();
     if !allow_origin.is_empty()
@@ -344,14 +343,15 @@ fn with_cors_headers(mut resp: Response, allow_origin: &str, vary: bool) -> Resp
     resp
 }
 
-/// Go's `URL.Path` and `URL.RawPath` of a request target's path, as `url.setPath` sets them.
+/// A request target's path as decoded bytes, plus the raw escaped form when it differs from the
+/// default escaping of the decoded path.
 struct GoPath {
     path: Vec<u8>,
     raw_path: String,
 }
 
 impl GoPath {
-    /// `None` when the escapes do not decode (Go's server answered 400 before any handler).
+    /// `None` when the escapes do not decode (a server answers 400 before any handler).
     fn of(uri: &Uri) -> Option<GoPath> {
         let raw = uri.path();
         let path = go_url::unescape_path(raw).ok()?;
@@ -363,7 +363,8 @@ impl GoPath {
         Some(GoPath { path, raw_path })
     }
 
-    /// Go `URL.EscapedPath()`.
+    /// The escaped path: the raw form when it is a valid encoding of the path, else the default
+    /// escaping.
     fn escaped(&self) -> String {
         if !self.raw_path.is_empty()
             && go_url::valid_encoded_path(&self.raw_path)
@@ -397,7 +398,7 @@ impl GoPath {
     }
 }
 
-/// Go `trimTrailingSlash`: drops trailing slashes from the request path before the REST router
+/// Drops trailing slashes from the request path before the REST router
 /// sees it (counted on the escaped path, so an encoded `%2F` is left alone), keeping a rooted path.
 pub(crate) fn trim_trailing_slash(next: Handler) -> Handler {
     Arc::new(move |mut req: Request| {
@@ -406,7 +407,7 @@ pub(crate) fn trim_trailing_slash(next: Handler) -> Handler {
             let mut n = escaped.len() - escaped.trim_end_matches('/').len();
             if n == escaped.len() {
                 // The path is nothing but slashes ("/" or ""): keep one, so the router always
-                // sees a rooted path (Go `n--`, which makes "" -1).
+                // sees a rooted path (`n` drops by one; for "" it wraps to `usize::MAX`).
                 n = n.wrapping_sub(1);
             }
             let changes = !(n == 0 || n == usize::MAX) || p.path.is_empty();
@@ -428,8 +429,8 @@ pub(crate) fn trim_trailing_slash(next: Handler) -> Handler {
     })
 }
 
-/// Go `http.StripPrefix(prefix, h)`: the prefix removed from `Path` and `RawPath`, or Go's
-/// `404 page not found` when either does not start with it.
+/// The prefix removed from the path and the raw path, or a `404 page not found` when either does
+/// not start with it.
 pub(crate) fn strip_prefix(prefix: &str, next: Handler) -> Handler {
     let prefix = prefix.to_owned();
     Arc::new(move |mut req: Request| {
@@ -455,7 +456,7 @@ pub(crate) fn strip_prefix(prefix: &str, next: Handler) -> Handler {
     })
 }
 
-/// Go `rewriteRedirects(pathPrefix, next)` with its `redirectRewriter`: a 3xx response's
+/// A 3xx response's
 /// root-relative `Location` outside the prefix gets the prefix, and for a request that is not GET
 /// or HEAD 301 becomes 308 and 302 becomes 307. Everything else (the body, a streaming response,
 /// a connection upgrade) passes through untouched.
@@ -499,9 +500,9 @@ pub(crate) fn rewrite_redirects(prefix: &str, next: Handler) -> Handler {
     })
 }
 
-/// Go `registerAPIRoutes`: mounts `handler` under `path_prefix`, matching on path only (the REST
+/// Mounts `handler` under `path_prefix`, matching on path only (the REST
 /// router answers a verb it does not serve with an accurate `Allow`). An empty or `/` prefix is a
-/// catch-all route (gorilla `NewRoute().Handler`), so routes registered before it match first;
+/// catch-all route, so routes registered before it match first;
 /// otherwise `prefix + "/"` (first, so the mount root is not answered with an outer StrictSlash
 /// redirect) and the bare prefix, which keeps the mount on segment boundaries.
 pub(crate) fn register_api_routes(router: &mut WebRouter, path_prefix: &str, handler: Handler) {

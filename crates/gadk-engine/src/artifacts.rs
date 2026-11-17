@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Scoped artifacts and the forwarding artifact service (port of Go `internal/artifact`).
+//! Scoped artifacts and the forwarding artifact service for agent contexts.
 
 use std::sync::Arc;
 
@@ -26,7 +26,7 @@ use gadk_artifact::{
 };
 use gadk_genai::Part;
 
-/// Port of Go internal/artifact Artifacts: an [`Artifacts`] scoped to one app/user/session.
+/// An [`Artifacts`] scoped to one app/user/session.
 #[derive(Clone)]
 pub(crate) struct ScopedArtifacts {
     service: Arc<dyn ArtifactService>,
@@ -36,7 +36,7 @@ pub(crate) struct ScopedArtifacts {
 }
 
 impl ScopedArtifacts {
-    /// Go `&artifact.Artifacts{Service, AppName, UserID, SessionID}`.
+    /// Scopes `service` to `app`, `user` and `session`.
     pub(crate) fn new(
         service: Arc<dyn ArtifactService>,
         app: &str,
@@ -54,7 +54,7 @@ impl ScopedArtifacts {
 
 #[async_trait]
 impl Artifacts for ScopedArtifacts {
-    /// Port of Go Artifacts.Save.
+    /// Saves `data` under `name` in this scope.
     async fn save(&self, name: &str, data: Part) -> Result<SaveResponse, AgentError> {
         Ok(self
             .service
@@ -69,12 +69,12 @@ impl Artifacts for ScopedArtifacts {
             .await?)
     }
 
-    /// Port of Go Artifacts.Load.
+    /// Loads the latest version of `name` (version `0` means latest).
     async fn load(&self, name: &str) -> Result<LoadResponse, AgentError> {
         self.load_version(name, 0).await
     }
 
-    /// Port of Go Artifacts.LoadVersion.
+    /// Loads a specific `version` of `name`.
     async fn load_version(&self, name: &str, version: i64) -> Result<LoadResponse, AgentError> {
         Ok(self
             .service
@@ -88,7 +88,7 @@ impl Artifacts for ScopedArtifacts {
             .await?)
     }
 
-    /// Port of Go Artifacts.List.
+    /// Lists the artifacts in this scope.
     async fn list(&self) -> Result<ListResponse, AgentError> {
         Ok(self
             .service
@@ -110,17 +110,16 @@ impl Artifacts for ScopedArtifacts {
     }
 }
 
-/// Port of Go internal/artifact forwardingService: forwards artifact operations to `parent` and
-/// records saves in its event delta.
+/// Forwards artifact operations to `parent` and records saves in its event delta.
 pub(crate) struct ForwardingArtifactService {
     parent: Option<Arc<dyn Artifacts>>,
-    /// Go saveMu: parallel child agents share the parent's event delta. Held across the parent save.
+    /// Parallel child agents share the parent's event delta. Held across the parent save.
     save_lock: tokio::sync::Mutex<()>,
 }
 
-/// Port of Go NewForwardingService: operations fail if `parent` is `None`; delete, versions and
-/// get_artifact_version fail with an unsupported-operation error when the parent exposes no backing
-/// service.
+/// Builds a [`ForwardingArtifactService`]: operations fail if `parent` is `None`; delete, versions
+/// and get_artifact_version fail with an unsupported-operation error when the parent exposes no
+/// backing service.
 pub(crate) fn new_forwarding_service(
     parent: Option<Arc<dyn Artifacts>>,
 ) -> Arc<dyn ArtifactService> {
@@ -130,7 +129,7 @@ pub(crate) fn new_forwarding_service(
     })
 }
 
-/// Go errArtifactServiceNotSet.
+/// The parent artifact service is missing.
 #[derive(Debug, thiserror::Error)]
 enum ForwardingError {
     #[error("parent artifact service is not set")]
@@ -141,7 +140,7 @@ fn not_set() -> ArtifactError {
     ArtifactError::Backend(Box::new(ForwardingError::ParentNotSet))
 }
 
-/// Go `fmt.Errorf("parent artifacts do not expose a backing service: %w", errors.ErrUnsupported)`.
+/// The error for a parent that exposes no backing service: an `Unsupported` I/O error.
 fn unsupported() -> ArtifactError {
     ArtifactError::Backend(Box::new(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
@@ -162,8 +161,8 @@ impl ForwardingArtifactService {
         self.parent.as_ref().ok_or_else(not_set)
     }
 
-    /// Port of Go parentStorage; Go's `Unwrap` loop is folded into `backing_service`, which the
-    /// tracked wrapper delegates.
+    /// The parent's backing storage; wrappers around the parent delegate `backing_service`, so no
+    /// unwrapping is needed.
     fn parent_storage(&self) -> Result<ArtifactBacking, ArtifactError> {
         self.parent()?.backing_service().ok_or_else(unsupported)
     }

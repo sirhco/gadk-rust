@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The Live WebSocket URL and setup model name: port of genai v1.77.0 `live.go`
-//! `Live.Connect` (lines 64–135) and `transformer.go` `tModel` / `tModelFullName`.
+//! The Live WebSocket URL and setup model name.
 
 use gadk_model::Backend;
 use gadk_platform::go_path_join;
@@ -23,13 +22,13 @@ use url::Url;
 use crate::config::{Auth, ResolvedConfig};
 use crate::error::GeminiError;
 
-/// Port of the URL half of genai `Live.Connect`.
+/// The Live WebSocket URL.
 ///
 /// The scheme is the base URL's when it is `ws`/`wss`, else `wss`. Vertex AI uses
 /// `ws/google.cloud.aiplatform.{v}.LlmBidiService/BidiGenerateContent` below the base URL's
 /// path, or the base URL's path itself when there is no project/location (a proxy). The
 /// Gemini API uses `ws/google.ai.generativelanguage.{v}.GenerativeService.BidiGenerateContent`
-/// below the base URL's path. Ephemeral `auth_tokens/` keys are rejected (gadk deviation).
+/// below the base URL's path. Ephemeral `auth_tokens/` keys are rejected.
 pub(crate) fn live_url(resolved: &ResolvedConfig) -> Result<Url, GeminiError> {
     let api_version = &resolved.api_version;
     if api_version.is_empty() {
@@ -48,7 +47,7 @@ pub(crate) fn live_url(resolved: &ResolvedConfig) -> Result<Url, GeminiError> {
         Backend::VertexAi => {
             let has_standard_auth = resolved.project.as_deref().is_some_and(|p| !p.is_empty())
                 && resolved.location.as_deref().is_some_and(|l| !l.is_empty());
-            // genai: `baseURL.String() != ""` always holds once the client is resolved, so
+            // The configured base URL is never empty once the client is resolved, so
             // without standard auth the proxy's own path is used.
             if has_standard_auth {
                 go_path_join(&[
@@ -70,7 +69,7 @@ pub(crate) fn live_url(resolved: &ResolvedConfig) -> Result<Url, GeminiError> {
                     ));
                 }
                 Some(Auth::ApiKey(key)) if !key.is_empty() => {}
-                // genai leaves the URL empty without an API key, and the dial fails.
+                // Without an API key there is no URL, and the dial fails.
                 _ => {
                     return Err(GeminiError::Config(
                         "the Gemini API Live connection requires an API key".into(),
@@ -87,7 +86,7 @@ pub(crate) fn live_url(resolved: &ResolvedConfig) -> Result<Url, GeminiError> {
         }
     };
 
-    // genai builds `url.URL{Scheme, Host, Path}`: user info, query and fragment are dropped.
+    // The URL keeps only scheme, host and path: user info, query and fragment are dropped.
     let host = base
         .host_str()
         .ok_or_else(|| GeminiError::Config(format!("base URL has no host: {base}")))?;
@@ -104,8 +103,8 @@ pub(crate) fn live_url(resolved: &ResolvedConfig) -> Result<Url, GeminiError> {
         .map_err(|e| GeminiError::Config(format!("invalid Live URL: {e}")))
 }
 
-/// Port of genai `tModel` then `tModelFullName`: the `model` of the setup message
-/// (`liveConnectParametersTo*` applies `tModel` again, which leaves the full name as is).
+/// The `model` of the setup message: the full model name (applying the model-name conversion
+/// to it again leaves it as is).
 pub(crate) fn model_full_name(
     resolved: &ResolvedConfig,
     model: &str,

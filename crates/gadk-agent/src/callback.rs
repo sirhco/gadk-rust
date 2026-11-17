@@ -13,9 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Callback types (Go `agent.BeforeAgentCallback`/`AfterAgentCallback` in `agent/agent.go`, the
-//! model/tool callbacks in `agent/llmagent/llmagent.go`, and the plugin callbacks in
-//! `plugin/plugin.go`).
+//! Callback types: the agent callbacks, the model and tool callbacks, and the plugin callbacks.
 
 use std::sync::Arc;
 
@@ -60,10 +58,9 @@ pub type BeforeModelCallback = Arc<
 /// Called after receiving a response from the model. If it returns `Some` response or an error, the
 /// actual model response/error is replaced with the returned response/error.
 ///
-/// The response (possibly edited) is always handed back, mirroring [`BeforeModelCallback`]: Go
-/// passes `*model.LLMResponse`, so an in-place edit made by a callback that returns `(nil, nil)`
-/// reaches the later callbacks and the rest of the flow. Return the received response unchanged
-/// when there is nothing to edit.
+/// The response (possibly edited) is always handed back, mirroring [`BeforeModelCallback`]: an
+/// in-place edit made by a callback that returns `Ok(None)` reaches the later callbacks and the
+/// rest of the flow. Return the received response unchanged when there is nothing to edit.
 pub type AfterModelCallback = Arc<
     dyn Fn(
             Context,
@@ -89,9 +86,9 @@ pub type OnModelErrorCallback = Arc<
 /// Called before a tool runs. If it returns `Some` result or an error, the remaining callbacks and
 /// the tool call are skipped and the returned result is used as the tool result.
 ///
-/// The arguments (possibly edited) are always handed back, mirroring [`BeforeModelCallback`]: Go
-/// gives the callbacks and the tool one copy of the call's arguments (e0cbfd30), so an edit made
-/// by a callback that returns `(nil, nil)` reaches the later callbacks, the tool, and the
+/// The arguments (possibly edited) are always handed back, mirroring [`BeforeModelCallback`]: the
+/// callbacks and the tool get one copy of the call's arguments, so an edit made by a callback
+/// that returns `Ok(None)` reaches the later callbacks, the tool, and the
 /// on-tool-error and after-tool callbacks. The function call event keeps the model's arguments.
 /// Return the received arguments unchanged when there is nothing to edit.
 pub type BeforeToolCallback = Arc<
@@ -161,7 +158,7 @@ pub type BeforeRunCallback = Arc<
 /// Invoked after a run completes.
 pub type AfterRunCallback = Arc<dyn Fn(InvocationContext) -> BoxFuture<'static, ()> + Send + Sync>;
 
-/// Invoked when an error escapes an agent's run (Go `plugin.OnAgentErrorCallback`, #2229/#2260).
+/// Invoked when an error escapes an agent's run.
 ///
 /// Notification only: the callbacks of every plugin run in registration order, synchronously,
 /// before the error is yielded, and the error is yielded to the caller unchanged. The agent is the
@@ -178,5 +175,5 @@ pub type AfterRunCallback = Arc<dyn Fn(InvocationContext) -> BoxFuture<'static, 
 /// it propagates. A live run (`run_live`) does not invoke this callback.
 pub type OnAgentErrorCallback = Arc<dyn Fn(Context, Arc<dyn Agent>, &AgentError) + Send + Sync>;
 
-/// A plugin's close function (Go `plugin.Config.CloseFunc`).
+/// A plugin's close function.
 pub type CloseFn = Arc<dyn Fn() -> BoxFuture<'static, Result<(), AgentError>> + Send + Sync>;

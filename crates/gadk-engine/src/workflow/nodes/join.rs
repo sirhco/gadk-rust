@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `JoinNode` (port of Go workflow/join_node.go).
+//! `JoinNode`: converges multiple branches.
 
 use std::any::Any;
 use std::sync::Arc;
@@ -27,20 +27,20 @@ use crate::error::WorkflowError;
 use crate::workflow::route::go_quote;
 use crate::workflow::{BaseNode, Node, NodeConfig};
 
-/// Port of Go workflow.JoinNode: converges multiple branches, waiting for every predecessor.
+/// Converges multiple branches, waiting for every predecessor.
 pub struct JoinNode {
     pub(crate) base: BaseNode,
 }
 
 impl JoinNode {
-    /// Port of Go NewJoinNode.
+    /// A join node without an input schema.
     pub fn new(name: &str) -> Arc<JoinNode> {
         Arc::new(JoinNode {
             base: BaseNode::new(name, "", NodeConfig::default()),
         })
     }
 
-    /// Port of Go NewJoinNodeWithSchema: a JoinNode whose input is validated against `schema`.
+    /// A JoinNode whose input is validated against `schema`.
     pub fn with_schema(name: &str, schema: Value) -> Result<Arc<JoinNode>, WorkflowError> {
         let base = BaseNode::with_schemas(name, "", Some(schema), None, NodeConfig::default())?;
         Ok(Arc::new(JoinNode { base }))
@@ -63,8 +63,8 @@ impl Node for JoinNode {
     fn output_schema(&self) -> Option<&Value> {
         self.base.output_schema()
     }
-    /// Port of Go (*JoinNode).ValidateInput: validates each predecessor's output individually
-    /// against the input schema; a non-map input falls back to the default validation.
+    /// Validates each predecessor's output individually against the input schema; a non-map input
+    /// falls back to the default validation.
     fn validate_input(&self, input: Value) -> Result<Value, WorkflowError> {
         if self.base.input_schema().is_none() {
             return Ok(input);
@@ -85,7 +85,7 @@ impl Node for JoinNode {
     fn validate_output(&self, v: Value) -> Result<Value, WorkflowError> {
         self.base.validate_output(v)
     }
-    /// Port of Go (*JoinNode).Run: yields the scheduler-aggregated predecessor map as its output.
+    /// Yields the scheduler-aggregated predecessor map as its output.
     fn run(&self, ctx: Context, input: Value) -> EventStream {
         let mut ev = Event::new(ctx.platform(), ctx.invocation_id());
         ev.output = (!input.is_null()).then_some(input);

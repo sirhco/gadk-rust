@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go tool/exitlooptool/tool.go.
+//! The `exit_loop` tool.
 
 use std::any::Any;
 use std::collections::BTreeMap;
@@ -27,15 +27,15 @@ use serde_json::{Map, Value};
 
 use crate::tool::{FunctionTool, FunctionToolConfig};
 
-// Go `struct{}` args. A plain comment: a doc comment would become the schema's `description`,
-// which Go's inferred `struct{}` schema does not have.
+// Empty args struct. A plain comment: a doc comment would become the schema's `description`,
+// which this empty-struct schema does not have.
 #[derive(Deserialize, JsonSchema)]
 struct ExitLoopArgs {}
 
-/// Port of Go exitlooptool.New: a tool that sets `escalate` and `skip_summarization` on the
+/// A tool that sets `escalate` and `skip_summarization` on the
 /// calling tool context's actions, ending the enclosing loop.
 ///
-/// Go returns `(tool.Tool, error)`; construction can fail only if schema inference fails for
+/// Construction can fail only if schema inference fails for
 /// these fixed types, which it never does, so this signature is infallible and the impossible
 /// error is surfaced at call time instead of panicking.
 pub fn exit_loop() -> Arc<dyn Tool> {
@@ -49,9 +49,8 @@ pub fn exit_loop() -> Arc<dyn Tool> {
                 a.escalate = true;
                 a.skip_summarization = true;
             });
-            // Go 1ced38ba returns a nil map[string]string ("nothing"). A Rust result map
-            // cannot be nil, so the empty map stands in for it: the flow wraps a tool's empty
-            // result as {"result": null}, as Go wraps nil.
+            // A Rust result map cannot be nil, so the empty map stands in for "nothing": the
+            // flow wraps a tool's empty result as {"result": null}.
             Ok::<_, ToolError>(BTreeMap::<String, String>::new())
         },
     );
@@ -63,7 +62,7 @@ pub fn exit_loop() -> Arc<dyn Tool> {
     }
 }
 
-/// Stand-in returned only if FunctionTool construction failed; every run reports Go's
+/// Stand-in returned only if FunctionTool construction failed; every run reports the
 /// construction error.
 struct UnavailableExitLoop(String);
 

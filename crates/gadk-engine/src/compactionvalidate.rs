@@ -13,9 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `internal/compactionvalidate`: whether a compaction config can serve the
-//! applications behind a serving surface (the REST server, the trigger controllers), checked by
-//! a dry run of [`Runner::new`] per application rather than by re-implementing its checks.
+//! Whether a compaction config can serve the applications behind a serving surface (the REST
+//! server, the trigger controllers), checked by a dry run of [`Runner::new`] per application
+//! rather than by re-implementing its checks.
 //!
 //! A config can pass [`Config::validate`] and still be unservable: with no summarizer, the
 //! default one needs the root agent's model, and a workflow agent has none. Without this check a
@@ -29,12 +29,11 @@ use gadk_session::compaction::Config;
 
 use crate::runner::{Runner, RunnerConfig};
 
-/// Port of Go `compactionvalidate.AgainstAgents`: whether `cfg` can serve every application
-/// `loader` lists, given the services on `base`.
+/// Whether `cfg` can serve every application `loader` lists, given the services on `base`.
 ///
 /// `None` config is always fine and the loader is then not touched; a `None` loader checks only
 /// the config's shape. An application the loader cannot load is skipped (it fails its own
-/// requests). Applications are checked in the loader's order (Go iterates a map).
+/// requests). Applications are checked in the loader's order.
 pub fn against_agents(
     cfg: Option<&Config>,
     loader: Option<&dyn Loader>,
@@ -54,8 +53,7 @@ pub fn against_agents(
     check(cfg, agents, base)
 }
 
-/// Port of Go `compactionvalidate.AgainstRootAgent`: [`against_agents`] for a surface that serves
-/// only the loader's root agent.
+/// [`against_agents`] for a surface that serves only the loader's root agent.
 pub fn against_root_agent(
     cfg: Option<&Config>,
     root: Option<Arc<dyn Agent>>,
@@ -70,8 +68,8 @@ pub fn against_root_agent(
     check(cfg, agents, base)
 }
 
-/// Go `againstAgents`. Go's `cannot check Compaction without a SessionService` branch has no
-/// counterpart: a [`RunnerConfig`] always carries a session service.
+/// Validates `cfg` and dry-runs [`Runner::new`] for each application. There is no "cannot check
+/// without a session service" case: a [`RunnerConfig`] always carries a session service.
 fn check(
     cfg: &Config,
     agents: Vec<(String, Arc<dyn Agent>)>,

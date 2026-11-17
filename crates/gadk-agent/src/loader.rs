@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `agent/loader.go`: the [`Loader`] a server uses to find the agent behind an
+//! The [`Loader`] a server uses to find the agent behind an
 //! application name, with a single-agent ([`SingleLoader`]) and a multi-agent ([`MultiLoader`])
 //! implementation.
 
@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use crate::agent::Agent;
 
-/// Port of Go `agent.Loader`: resolves application names to agents.
+/// Resolves application names to agents.
 pub trait Loader: Send + Sync {
     /// The names of every agent this loader serves.
     fn list_agents(&self) -> Vec<String>;
@@ -31,12 +31,12 @@ pub trait Loader: Send + Sync {
     fn root_agent(&self) -> Arc<dyn Agent>;
 }
 
-/// A [`Loader`] failure; the text is Go's error text verbatim.
+/// A [`Loader`] failure; the text matches the ADK loader's error text byte for byte.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{0}")]
 pub struct LoaderError(pub String);
 
-/// Port of Go `agent.NewSingleLoader`: a loader serving one root agent, under its own name and
+/// A loader serving one root agent, under its own name and
 /// under the empty name.
 pub struct SingleLoader {
     root: Arc<dyn Agent>,
@@ -69,18 +69,18 @@ impl Loader for SingleLoader {
     }
 }
 
-/// Port of Go `agent.NewMultiLoader`: a loader serving a root agent and further agents by name.
+/// A loader serving a root agent and further agents by name.
 ///
 /// [`Loader::list_agents`] and the not-found error's list name the agents (root included) sorted
-/// alphabetically (Go #2164).
+/// alphabetically.
 pub struct MultiLoader {
     agents: Vec<(String, Arc<dyn Agent>)>,
     root: Arc<dyn Agent>,
 }
 
 impl MultiLoader {
-    /// A loader serving `root` and `agents`; fails when two of them share a name (Go
-    /// `duplicate agent name: <name>`).
+    /// A loader serving `root` and `agents`; fails when two of them share a name
+    /// (`duplicate agent name: <name>`).
     pub fn new(root: Arc<dyn Agent>, agents: Vec<Arc<dyn Agent>>) -> Result<Self, LoaderError> {
         let mut all: Vec<(String, Arc<dyn Agent>)> = vec![(root.name().to_owned(), root.clone())];
         for a in agents {

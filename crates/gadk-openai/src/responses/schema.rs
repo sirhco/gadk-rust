@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The Responses JSON-schema text format (port of ADK-Go `internal/responses/request.go`'s
-//! `newJSONSchemaFormat`).
+//! The Responses JSON-schema text format.
 
 use gadk_genai::GenerateContentConfig;
 
@@ -25,7 +24,7 @@ use crate::shared::schema::{
     enforce_strict_openai_schema, normalize_schema, response_format_name, schema_to_map,
 };
 
-/// Go `newJSONSchemaFormat`: `text.format` for the config's `response_json_schema` (first) or
+/// `text.format` for the config's `response_json_schema` (first) or
 /// `response_schema`, made strict
 /// ([`enforce_strict_openai_schema`](crate::shared::schema::enforce_strict_openai_schema)),
 /// named by [`response_format_name`](crate::shared::schema::response_format_name), `strict:

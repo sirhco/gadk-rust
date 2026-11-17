@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go workflow/function_node.go.
+//! Function nodes: nodes that run a function body.
 
 use std::any::Any;
 use std::future::Future;
@@ -35,11 +35,11 @@ use crate::workflow::route::go_quote;
 use crate::workflow::scheduler::is_kind;
 use crate::workflow::{BaseNode, Node, NodeConfig};
 
-/// Port of the Go `emit func(*session.Event) error` callback: forwards an event to the node's
-/// consumer and resolves once the consumer took it (an error once the consumer is gone).
+/// The callback an emitting node body uses: forwards an event to the node's consumer and
+/// resolves once the consumer took it (an error once the consumer is gone).
 pub type Emit = Arc<dyn Fn(Event) -> BoxFuture<'static, Result<(), AgentError>> + Send + Sync>;
 
-/// What a plain function body produced (Go type-switches on the returned `any`).
+/// What a plain function body produced, by the type it returned.
 pub(crate) enum FnOutput {
     Event(Box<Event>),
     Content(Content),
@@ -59,8 +59,7 @@ enum Body {
     Emitting(EmittingFn),
 }
 
-/// Port of Go workflow.FunctionNode: a node that runs a function. The constructors return it as
-/// `Arc<dyn Node>`.
+/// A node that runs a function. The constructors return it as `Arc<dyn Node>`.
 pub struct FunctionNode {
     base: BaseNode,
     body: Body,
@@ -73,19 +72,19 @@ pub(crate) enum Step<T> {
     Done(T),
 }
 
-/// Failure of [`coerce_input`]; callers format the Go message for their node kind.
+/// Failure of [`coerce_input`]; callers format the message for their node kind.
 pub(crate) enum CoerceError {
     Validation(String),
     Conversion(String),
 }
 
-/// The last path segment of a type name (Go `%T` prints "pkg.Type").
+/// The last path segment of a type name.
 pub(crate) fn short_type_name<T>() -> &'static str {
     let full = std::any::type_name::<T>();
     full.rsplit("::").next().unwrap_or(full)
 }
 
-/// The Go zero value of `In`: `null` when `In` accepts it, else a value synthesized from the
+/// The zero value of `In`: `null` when `In` accepts it, else a value synthesized from the
 /// inferred schema ("" / 0 / false / [] / an object of zero-valued properties).
 pub(crate) fn zero_input<In: DeserializeOwned + JsonSchema>() -> Result<In, String> {
     if let Ok(v) = serde_json::from_value::<In>(Value::Null) {
@@ -123,8 +122,8 @@ fn zero_from_schema(schema: &Value) -> Value {
     }
 }
 
-/// Port of the input-typing half of Go newFunctionNodeWithResolvedSchemas / coerceInput: nil
-/// becomes the zero value; otherwise validate against `schema` (if any), then convert.
+/// Types a node's input: null becomes the zero value; otherwise validate against `schema` (if
+/// any), then convert.
 pub(crate) fn coerce_input<In: DeserializeOwned + JsonSchema>(
     input: Value,
     schema: Option<&CompiledSchema>,
@@ -151,8 +150,8 @@ fn function_input_error<In>(name: &str, e: CoerceError) -> AgentError {
     }
 }
 
-/// The Go type switch on the body's return value: an `Event` is forwarded, a `Content` becomes
-/// the event content, anything else is the event output (`null` = Go nil, no output).
+/// Classifies the body's return value: an `Event` is forwarded, a `Content` becomes the event
+/// content, anything else is the event output (`null` = no output).
 pub(crate) fn to_fn_output<Out: Serialize + 'static>(out: Out) -> Result<FnOutput, AgentError> {
     let any: Box<dyn Any> = Box::new(out);
     let any = match any.downcast::<Event>() {
@@ -171,7 +170,7 @@ pub(crate) fn to_fn_output<Out: Serialize + 'static>(out: Out) -> Result<FnOutpu
     Ok(FnOutput::Value((!v.is_null()).then_some(v)))
 }
 
-/// Go `Schema.Resolve` with the `"resolving <what> schema: %w"` wrap.
+/// Compiles an optional schema; a failure reads `resolving <what> schema: <err>`.
 fn compile(
     schema: Option<Value>,
     what: &str,
@@ -188,7 +187,7 @@ fn compile(
         .transpose()
 }
 
-/// Port of Go newFunctionNodeWithResolvedSchemas.
+/// Builds a plain function node from already-compiled schemas.
 fn new_plain<In, Out, F, Fut>(
     name: &str,
     f: F,
@@ -220,7 +219,7 @@ where
     })
 }
 
-/// Port of Go newEmittingFunctionNodeWithResolvedSchemas.
+/// Builds an emitting function node from already-compiled schemas.
 fn new_emitting<In, Out, F, Fut>(
     name: &str,
     f: F,
@@ -255,7 +254,7 @@ where
     })
 }
 
-/// Port of Go NewFunctionNode: a node that runs `f` on its (converted) input.
+/// A node that runs `f` on its (converted) input.
 pub fn function_node<In, Out, F, Fut>(name: &str, f: F, cfg: NodeConfig) -> Arc<dyn Node>
 where
     In: DeserializeOwned + JsonSchema + Send + 'static,
@@ -266,7 +265,7 @@ where
     new_plain::<In, Out, F, Fut>(name, f, None, None, cfg)
 }
 
-/// Port of Go NewFunctionNodeWithSchema: as [`function_node`], with input and output schemas.
+/// As [`function_node`], with input and output schemas.
 pub fn function_node_with_schema<In, Out, F, Fut>(
     name: &str,
     f: F,
@@ -287,7 +286,7 @@ where
     ))
 }
 
-/// Port of Go NewEmittingFunctionNode: a function node whose body can emit intermediate events
+/// A function node whose body can emit intermediate events
 /// (progress, a RequestInput) through [`Emit`] before returning its output.
 pub fn emitting_function_node<In, Out, F, Fut>(name: &str, f: F, cfg: NodeConfig) -> Arc<dyn Node>
 where
@@ -299,7 +298,7 @@ where
     new_emitting::<In, Out, F, Fut>(name, f, None, None, cfg)
 }
 
-/// Port of Go NewEmittingFunctionNodeWithSchema.
+/// As [`emitting_function_node`], with input and output schemas.
 pub fn emitting_function_node_with_schema<In, Out, F, Fut>(
     name: &str,
     f: F,
@@ -322,7 +321,7 @@ where
 
 /// The serde field names of struct `T` in declaration order (renames applied), read from the
 /// `fields` serde hands to `deserialize_struct`; `None` when `T` does not deserialize as a struct.
-/// Go reflects over the struct fields; serde exposes their names (and order) only this way.
+/// serde exposes the field names (and order) only this way.
 fn struct_field_names<T: DeserializeOwned>() -> Option<&'static [&'static str]> {
     struct Probe(Option<&'static [&'static str]>);
 
@@ -366,12 +365,12 @@ fn struct_field_names<T: DeserializeOwned>() -> Option<&'static [&'static str]> 
     probe.0
 }
 
-/// The Go `state:"node_input"` binding: the property that receives the node's input.
+/// The property that receives the node's input instead of a state value.
 const NODE_INPUT_FIELD: &str = "node_input";
 
-/// Port of Go NewFunctionNodeFromState: a node whose `Params` struct is filled from session
-/// state, one field per state key (Rust names the key with `#[serde(rename = "key")]` where Go
-/// uses the `state:"key"` tag); a field named `node_input` receives the node's input instead.
+/// A node whose `Params` struct is filled from session state, one field per state key (name the
+/// key with `#[serde(rename = "key")]`); a field named `node_input` receives the node's input
+/// instead.
 /// The output schema is inferred from `Out`.
 pub fn function_node_from_state<Params, Out, F, Fut>(
     name: &str,
@@ -395,8 +394,7 @@ where
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
-    // Each value is checked against its field's schema, so a mismatch names the field (Go reads
-    // the field from json.UnmarshalTypeError).
+    // Each value is checked against its field's schema, so a mismatch names the field.
     let mut field_schemas: Vec<(String, Option<Arc<CompiledSchema>>)> = Vec::new();
     for field in fields {
         let compiled = compile(properties.get(*field).cloned(), "input")?;
@@ -487,7 +485,8 @@ impl Node for FunctionNode {
     fn state_field_names(&self) -> Option<&[String]> {
         self.state_field_names.as_deref()
     }
-    /// Port of Go (*FunctionNode).Run / runEmitting.
+    /// Runs the body. A plain body's result becomes one event; an emitting body runs alongside
+    /// the drain of the events it emits.
     fn run(&self, ctx: Context, input: Value) -> EventStream {
         match &self.body {
             Body::Plain(f) => {
@@ -517,9 +516,8 @@ impl Node for FunctionNode {
             Body::Emitting(f) => {
                 let f = Arc::clone(f);
                 Box::pin(async_stream::stream! {
-                    // Port of Go runEmitting + makeEmit: the body runs concurrently with the
-                    // drain of its emitted events; each emit completes after the consumer took
-                    // the event and asked for the next one.
+                    // The body runs concurrently with the drain of its emitted events; each emit
+                    // completes after the consumer took the event and asked for the next one.
                     let (emit, mut rx) = make_emit(&ctx);
                     let mut body = Box::pin(f(ctx.clone(), input, emit));
                     let result = loop {

@@ -13,9 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The `cloud.google.com/go/compute/metadata` v0.10.0 subset the detector and ADC use:
-//! `OnGCE`, `Get`, `ProjectID`, `InstanceName`, `Hostname`, `Zone` and `InstanceAttributeValue`,
-//! with Go's error texts.
+//! The GCE metadata-server client subset the detector and ADC use: `on_gce`, `get`,
+//! `project_id`, `instance_name`, `hostname`, `zone` and `instance_attribute_value`, with error
+//! texts byte-identical to ADK's metadata client.
 
 use std::collections::hash_map::RandomState;
 use std::error::Error as _;
@@ -27,41 +27,40 @@ use std::time::Duration;
 
 use gadk_platform::env::EnvProvider;
 
-/// Go `metadataHostEnv`.
+/// The environment variable that overrides the metadata server host.
 pub const METADATA_HOST_ENV: &str = "GCE_METADATA_HOST";
 
-/// Go `metadataIP`.
+/// The metadata server's IP address.
 pub const METADATA_IP: &str = "169.254.169.254";
 
-/// Go `userAgent`.
+/// The `User-Agent` sent to the metadata server.
 const USER_AGENT: &str = "gcloud-golang/0.1";
 
-/// Go `defaultClient`'s `http.Client.Timeout`.
+/// The request timeout of the default client.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Go `defaultClient`'s dial timeout.
+/// The dial timeout of the default client.
 const DIAL_TIMEOUT: Duration = Duration::from_secs(2);
 
-/// Go `maxRetryAttempts`.
+/// The maximum number of attempts per request.
 const MAX_RETRY_ATTEMPTS: u32 = 5;
 
-/// Go `newRetryer`'s initial backoff.
+/// The initial retry backoff.
 const BACKOFF_INITIAL: Duration = Duration::from_millis(100);
 
-/// Go `newRetryer`'s maximum backoff.
+/// The maximum retry backoff.
 const BACKOFF_MAX: Duration = Duration::from_secs(30);
 
-/// How long `OnGCE` waits for the second probe when the system suggests GCE (Go
-/// `OnGCEWithContext`'s `5*time.Second`).
+/// How long `on_gce` waits for the second probe when the system suggests GCE.
 const TRY_HARDER_WAIT: Duration = Duration::from_secs(5);
 
-/// A metadata lookup failure; `Display` is Go's text.
+/// A metadata lookup failure; `Display` is byte-identical to ADK's text.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum MetadataError {
-    /// Go `NotDefinedError` (HTTP 404): `metadata: GCE metadata "<suffix>" not defined`.
+    /// HTTP 404: `metadata: GCE metadata "<suffix>" not defined`.
     #[error("metadata: GCE metadata \"{0}\" not defined")]
     NotDefined(String),
-    /// Go `*metadata.Error` (any other non-200 status): ``compute: Received <code> `<body>` ``.
+    /// Any other non-200 status: ``compute: Received <code> `<body>` ``.
     #[error("compute: Received {code} `{message}`")]
     Status {
         /// The HTTP status code.
@@ -69,12 +68,12 @@ pub enum MetadataError {
         /// The response body.
         message: String,
     },
-    /// The request failed before a response (Go's transport error).
+    /// The request failed before a response (the transport error).
     #[error("{0}")]
     Transport(String),
 }
 
-/// Go `*metadata.Client`: `GET <base>/computeMetadata/v1/<suffix>` with `Metadata-Flavor: Google`,
+/// A metadata client: `GET <base>/computeMetadata/v1/<suffix>` with `Metadata-Flavor: Google`,
 /// where `<base>` is `http://$GCE_METADATA_HOST` (from the injected environment), else
 /// `http://169.254.169.254`, or the injected base URL.
 #[derive(Clone)]
@@ -85,7 +84,7 @@ pub struct MetadataClient {
 }
 
 impl MetadataClient {
-    /// Go `metadata.NewClient(nil)` reading `GCE_METADATA_HOST` from `env`.
+    /// A client reading `GCE_METADATA_HOST` from `env`.
     pub fn new(env: Arc<dyn EnvProvider>) -> Self {
         Self {
             client: default_http_client(),
@@ -104,11 +103,11 @@ impl MetadataClient {
         }
     }
 
-    /// Go `OnGCE`: `true` when `GCE_METADATA_HOST` is set (non-empty), else the result of
+    /// `true` when `GCE_METADATA_HOST` is set (non-empty), else the result of
     /// probing the metadata server raced with a DNS lookup of `metadata.google.internal.`.
     ///
-    /// Divergence (ledger 7a): with an injected base URL only that URL is probed (no DNS
-    /// lookup). Unlike Go's package-level `OnGCE`, the answer is not cached for the process.
+    /// With an injected base URL only that URL is probed (no DNS
+    /// lookup). The answer is not cached for the process.
     pub async fn on_gce(&self) -> bool {
         if self
             .env
@@ -136,11 +135,11 @@ impl MetadataClient {
                 Ok(Some(Ok(true)))
             );
         }
-        // Dropping the set aborts the slower probe (Go cancels its context).
+        // Dropping the set aborts the slower probe.
         first
     }
 
-    /// Go `GetWithContext`: the untrimmed value at `suffix`, with Go's retries.
+    /// The untrimmed value at `suffix`, with retries.
     ///
     /// # Errors
     ///
@@ -201,14 +200,14 @@ impl MetadataClient {
         }
     }
 
-    /// Go `getTrimmed`.
+    /// The trimmed value at `suffix`.
     async fn get_trimmed(&self, suffix: &str) -> Result<String, MetadataError> {
         self.get(suffix).await.map(|s| s.trim().to_owned())
     }
 
-    /// Go `ProjectIDWithContext`: `project/project-id`, trimmed.
+    /// `project/project-id`, trimmed.
     ///
-    /// Divergence (ledger 7a): Go caches the value for the process; gadk does not.
+    /// The value is not cached.
     ///
     /// # Errors
     ///
@@ -217,7 +216,7 @@ impl MetadataClient {
         self.get_trimmed("project/project-id").await
     }
 
-    /// Go `InstanceNameWithContext`: `instance/name`, trimmed.
+    /// `instance/name`, trimmed.
     ///
     /// # Errors
     ///
@@ -226,7 +225,7 @@ impl MetadataClient {
         self.get_trimmed("instance/name").await
     }
 
-    /// Go `HostnameWithContext`: `instance/hostname`, trimmed.
+    /// `instance/hostname`, trimmed.
     ///
     /// # Errors
     ///
@@ -235,7 +234,7 @@ impl MetadataClient {
         self.get_trimmed("instance/hostname").await
     }
 
-    /// Go `ZoneWithContext`: the last path segment of `instance/zone`, trimmed.
+    /// The last path segment of `instance/zone`, trimmed.
     ///
     /// # Errors
     ///
@@ -248,7 +247,7 @@ impl MetadataClient {
         })
     }
 
-    /// Go `InstanceAttributeValueWithContext`: `instance/attributes/<attr>`, untrimmed.
+    /// `instance/attributes/<attr>`, untrimmed.
     ///
     /// # Errors
     ///
@@ -266,8 +265,7 @@ impl fmt::Debug for MetadataClient {
     }
 }
 
-/// Go `newDefaultHTTPClient(true)`: 2 s dial timeout, 5 s request timeout and no proxy (Go's
-/// transport sets no `Proxy`).
+/// The default HTTP client: 2 s dial timeout, 5 s request timeout and no proxy.
 fn default_http_client() -> reqwest::Client {
     reqwest::Client::builder()
         .connect_timeout(DIAL_TIMEOUT)
@@ -277,7 +275,7 @@ fn default_http_client() -> reqwest::Client {
         .unwrap_or_default()
 }
 
-/// Go `metadataRequestStrategy`: the server answers `GET <url>` with `Metadata-Flavor: Google`.
+/// Whether the server answers `GET <url>` with `Metadata-Flavor: Google`.
 async fn metadata_request_strategy(client: reqwest::Client, url: String) -> bool {
     match client
         .get(&url)
@@ -293,7 +291,7 @@ async fn metadata_request_strategy(client: reqwest::Client, url: String) -> bool
     }
 }
 
-/// Go `dnsRequestStrategy`: `metadata.google.internal.` resolves to the metadata IP.
+/// Whether `metadata.google.internal.` resolves to the metadata IP.
 async fn dns_request_strategy() -> bool {
     let metadata_ip = IpAddr::V4(Ipv4Addr::new(169, 254, 169, 254));
     match tokio::net::lookup_host(("metadata.google.internal.", 0)).await {
@@ -302,10 +300,9 @@ async fn dns_request_strategy() -> bool {
     }
 }
 
-/// Go `systemInfoSuggestsGCE`: Linux reads the DMI product name; other systems say no.
+/// Whether the system suggests GCE: Linux reads the DMI product name; other systems say no.
 ///
-/// Divergence (ledger 7a): Go reads the Windows registry's `SystemProductName`; gadk answers
-/// `false` on Windows (the probes still decide).
+/// On Windows this answers `false` (the probes still decide).
 fn system_info_suggests_gce() -> bool {
     if !cfg!(target_os = "linux") {
         return false;
@@ -315,7 +312,7 @@ fn system_info_suggests_gce() -> bool {
     name == "Google" || name == "Google Compute Engine"
 }
 
-/// Go `metadataRetryer` over `defaultBackoff`.
+/// The retry policy for metadata requests: exponential backoff with jitter.
 struct Retryer {
     attempts: u32,
     cur: Duration,
@@ -329,7 +326,7 @@ impl Retryer {
         }
     }
 
-    /// Go `Retry`: the pause before the next attempt, or `None` to stop.
+    /// The pause before the next attempt, or `None` to stop.
     fn retry(&mut self, retryable: bool) -> Option<Duration> {
         if !retryable || self.attempts == MAX_RETRY_ATTEMPTS {
             return None;
@@ -338,7 +335,7 @@ impl Retryer {
         Some(self.pause())
     }
 
-    /// Go `defaultBackoff.Pause`: uniform in `[1ns, cur]`, then `cur` doubles up to the max.
+    /// The next backoff: uniform in `[1ns, cur]`, then `cur` doubles up to the max.
     fn pause(&mut self) -> Duration {
         let cur = u64::try_from(self.cur.as_nanos())
             .unwrap_or(u64::MAX)
@@ -350,14 +347,13 @@ impl Retryer {
     }
 }
 
-/// Go `shouldRetry` on a status code.
+/// Whether a status code is retried.
 fn should_retry_status(code: u16) -> bool {
     (500..=599).contains(&code) || code == 429
 }
 
-/// Go `shouldRetry` on a transport error: timeouts and temporary socket errors (Go
-/// `Temporary()`: `ECONNRESET`, `ECONNABORTED`, `ETIMEDOUT`), an unexpected EOF, and on Linux
-/// also `ECONNREFUSED` (`retry_linux.go`).
+/// Whether a transport error is retried: timeouts and temporary socket errors (connection
+/// reset, aborted or timed out), an unexpected EOF, and on Linux also connection refused.
 fn should_retry_error(err: &reqwest::Error) -> bool {
     if err.is_timeout() {
         return true;
@@ -379,10 +375,9 @@ fn should_retry_error(err: &reqwest::Error) -> bool {
     false
 }
 
-/// Go's `*url.Error` text, `Get "<url>": <cause>`, with the innermost cause's text.
+/// The transport error text, `Get "<url>": <cause>`, with the innermost cause's text.
 ///
-/// Divergence (ledger 7a): the cause is reqwest's innermost error text, not Go's `net/http`
-/// transport text; only the `Get "<url>": ` shape is Go's.
+/// The cause is reqwest's innermost error text; only the `Get "<url>": ` shape matches ADK's.
 pub(crate) fn transport_text(url: &str, err: &(dyn std::error::Error + 'static)) -> String {
     let mut cause: &(dyn std::error::Error + 'static) = err;
     while let Some(inner) = cause.source() {

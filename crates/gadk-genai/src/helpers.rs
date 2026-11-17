@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Constructors (port of genai `NewPartFrom*`, `NewContentFrom*` and `Text`).
+//! Constructors for [`Part`] and [`Content`] values.
 
 use crate::content::{
     Blob, CodeExecutionResult, Content, ExecutableCode, FileData, FunctionCall, FunctionResponse,
@@ -23,7 +23,7 @@ use crate::media::File;
 use bytes::Bytes;
 use serde_json::{Map, Value};
 
-/// genai `roleString`: the empty role defaults to [`ROLE_USER`].
+/// Resolves a role: the empty role defaults to [`ROLE_USER`].
 fn role_string(role: &str) -> String {
     if role.is_empty() {
         ROLE_USER.to_string()
@@ -33,7 +33,7 @@ fn role_string(role: &str) -> String {
 }
 
 impl Part {
-    /// genai `NewPartFromText`.
+    /// A text part.
     pub fn from_text(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
@@ -41,7 +41,7 @@ impl Part {
         }
     }
 
-    /// genai `NewPartFromBytes`.
+    /// An inline-data part holding `data` with the given MIME type.
     pub fn from_bytes(data: Bytes, mime_type: &str) -> Self {
         Self {
             inline_data: Some(Blob {
@@ -53,7 +53,7 @@ impl Part {
         }
     }
 
-    /// genai `NewPartFromURI`.
+    /// A file-data part referencing `file_uri` with the given MIME type.
     pub fn from_uri(file_uri: &str, mime_type: &str) -> Self {
         Self {
             file_data: Some(FileData {
@@ -65,12 +65,12 @@ impl Part {
         }
     }
 
-    /// genai `NewPartFromFile`: a file-data part from the file's `uri` and `mime_type`.
+    /// A file-data part from the file's `uri` and `mime_type`.
     pub fn from_file(file: &File) -> Self {
         Self::from_uri(&file.uri, &file.mime_type)
     }
 
-    /// genai `NewPartFromFunctionCall`: sets only `name` and `args`.
+    /// A function-call part; sets only `name` and `args`.
     pub fn from_function_call(name: &str, args: Map<String, Value>) -> Self {
         Self {
             function_call: Some(FunctionCall {
@@ -82,7 +82,7 @@ impl Part {
         }
     }
 
-    /// genai `NewPartFromFunctionResponse`: sets only `name` and `response`.
+    /// A function-response part; sets only `name` and `response`.
     pub fn from_function_response(name: &str, response: Map<String, Value>) -> Self {
         Self {
             function_response: Some(FunctionResponse {
@@ -94,7 +94,7 @@ impl Part {
         }
     }
 
-    /// genai `NewPartFromExecutableCode`.
+    /// An executable-code part.
     pub fn from_executable_code(code: &str, language: Language) -> Self {
         Self {
             executable_code: Some(ExecutableCode {
@@ -106,7 +106,7 @@ impl Part {
         }
     }
 
-    /// genai `NewPartFromCodeExecutionResult`.
+    /// A code-execution-result part.
     pub fn from_code_execution_result(outcome: Outcome, output: &str) -> Self {
         Self {
             code_execution_result: Some(CodeExecutionResult {
@@ -120,7 +120,7 @@ impl Part {
 }
 
 impl Content {
-    /// genai `NewContentFromParts`. An empty `role` defaults to [`ROLE_USER`].
+    /// A [`Content`] holding the given parts. An empty `role` defaults to [`ROLE_USER`].
     pub fn from_parts(parts: Vec<Part>, role: &str) -> Self {
         Self {
             parts,
@@ -128,12 +128,12 @@ impl Content {
         }
     }
 
-    /// genai `NewContentFromText`. An empty `role` defaults to [`ROLE_USER`].
+    /// A [`Content`] holding one text part. An empty `role` defaults to [`ROLE_USER`].
     pub fn from_text(text: impl Into<String>, role: &str) -> Self {
         Self::from_parts(vec![Part::from_text(text)], role)
     }
 
-    /// genai `NewContentFromFunctionCall`, taking a built [`FunctionCall`].
+    /// A [`Content`] holding one function-call part, taking a built [`FunctionCall`].
     /// An empty `role` defaults to [`ROLE_USER`].
     pub fn from_function_call(fc: FunctionCall, role: &str) -> Self {
         let part = Part {
@@ -143,7 +143,7 @@ impl Content {
         Self::from_parts(vec![part], role)
     }
 
-    /// genai `NewContentFromFunctionResponse`, taking a built [`FunctionResponse`].
+    /// A [`Content`] holding one function-response part, taking a built [`FunctionResponse`].
     /// An empty `role` defaults to [`ROLE_USER`].
     pub fn from_function_response(fr: FunctionResponse, role: &str) -> Self {
         let part = Part {
@@ -153,22 +153,23 @@ impl Content {
         Self::from_parts(vec![part], role)
     }
 
-    /// genai `NewContentFromBytes`. An empty `role` defaults to [`ROLE_USER`].
+    /// A [`Content`] holding one inline-data part. An empty `role` defaults to [`ROLE_USER`].
     pub fn from_bytes(data: Bytes, mime_type: &str, role: &str) -> Self {
         Self::from_parts(vec![Part::from_bytes(data, mime_type)], role)
     }
 
-    /// genai `NewContentFromURI`. An empty `role` defaults to [`ROLE_USER`].
+    /// A [`Content`] holding one file-data part. An empty `role` defaults to [`ROLE_USER`].
     pub fn from_uri(file_uri: &str, mime_type: &str, role: &str) -> Self {
         Self::from_parts(vec![Part::from_uri(file_uri, mime_type)], role)
     }
 
-    /// genai `NewContentFromExecutableCode`. An empty `role` defaults to [`ROLE_USER`].
+    /// A [`Content`] holding one executable-code part. An empty `role` defaults to [`ROLE_USER`].
     pub fn from_executable_code(code: &str, language: Language, role: &str) -> Self {
         Self::from_parts(vec![Part::from_executable_code(code, language)], role)
     }
 
-    /// genai `NewContentFromCodeExecutionResult`. An empty `role` defaults to [`ROLE_USER`].
+    /// A [`Content`] holding one code-execution-result part. An empty `role` defaults to
+    /// [`ROLE_USER`].
     pub fn from_code_execution_result(outcome: Outcome, output: &str, role: &str) -> Self {
         Self::from_parts(
             vec![Part::from_code_execution_result(outcome, output)],
@@ -177,7 +178,7 @@ impl Content {
     }
 }
 
-/// genai `Text`: a single user [`Content`] holding one text [`Part`].
+/// A single user [`Content`] holding one text [`Part`].
 pub fn text(s: impl Into<String>) -> Vec<Content> {
     vec![Content::from_text(s, ROLE_USER)]
 }

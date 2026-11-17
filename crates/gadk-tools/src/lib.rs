@@ -13,11 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! gadk-tools: ADK-Go's built-in tools that need no authentication (port of ADK-Go
-//! `tool/geminitool`, `tool/loadartifactstool`, `tool/loadmemorytool`, `tool/preloadmemorytool`,
-//! `tool/exampletool`, `tool/toolsearch` with `internal/ranksearch`, and `tool/skilltoolset`). The
-//! auth wire model (Go `tool/toolauth`) now lives in `gadk_session::toolauth`; it is re-exported
-//! here as [`toolauth`] so the `gadk_tools::toolauth` path keeps working.
+//! gadk-tools: the built-in tools that need no authentication: the Gemini native tools
+//! ([`gemini`]), [`load_artifacts`], [`load_memory`], [`preload_memory`], the few-shot
+//! [`example`] tool, the gating [`toolsearch`] toolset and the [`skills`] toolset. The auth wire
+//! model lives in `gadk_session::toolauth`; it is re-exported here as [`toolauth`] so the
+//! `gadk_tools::toolauth` path keeps working.
 
 pub mod example;
 pub mod gemini;

@@ -13,10 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `internal/telemetry/genaimessages.go`: the opt-in message content of the GenAI
-//! semantic conventions (`gen_ai.input.messages`, `gen_ai.output.messages`,
-//! `gen_ai.system_instructions`), recorded as a JSON string in the legacy schema and as a
-//! structured value otherwise, and the schema's finish reasons.
+//! The opt-in message content of the GenAI semantic conventions (`gen_ai.input.messages`,
+//! `gen_ai.output.messages`, `gen_ai.system_instructions`), recorded as a JSON string in the legacy
+//! schema and as a structured value otherwise, and the schema's finish reasons.
 
 use std::borrow::Cow;
 
@@ -29,11 +28,11 @@ use super::attrs::GenerateContentResult;
 use super::converters::{AttrValue, to_log_value};
 use super::env::use_legacy_schema;
 
-/// Go `genAIInputMessages`.
+/// Attribute carrying the input messages.
 pub(crate) const GEN_AI_INPUT_MESSAGES: &str = "gen_ai.input.messages";
-/// Go `genAIOutputMessages`.
+/// Attribute carrying the output messages.
 pub(crate) const GEN_AI_OUTPUT_MESSAGES: &str = "gen_ai.output.messages";
-/// Go `genAISystemInstructions`.
+/// Attribute carrying the system instructions.
 pub(crate) const GEN_AI_SYSTEM_INSTRUCTIONS: &str = "gen_ai.system_instructions";
 
 const PART_TYPE_TEXT: &str = "text";
@@ -47,37 +46,38 @@ const ROLE_USER: &str = "user";
 const ROLE_ASSISTANT: &str = "assistant";
 const ROLE_TOOL: &str = "tool";
 
-/// Go `finishStop`.
+/// Finish reason: the model stopped normally.
 pub(crate) const FINISH_STOP: &str = "stop";
-/// Go `finishLength`.
+/// Finish reason: the output hit the token limit.
 pub(crate) const FINISH_LENGTH: &str = "length";
-/// Go `finishContentFilter`.
+/// Finish reason: the output was filtered.
 pub(crate) const FINISH_CONTENT_FILTER: &str = "content_filter";
-/// Go `finishToolCall`.
+/// Finish reason: the model stopped to call a tool.
 pub(crate) const FINISH_TOOL_CALL: &str = "tool_call";
-/// Go `finishError`.
+/// Finish reason: the call failed.
 pub(crate) const FINISH_ERROR: &str = "error";
 
-/// Go `maxContentAttributeBytes`: stays under Cloud Trace's 64 KiB attribute limit.
+/// The most bytes of JSON one content attribute may hold: stays under Cloud Trace's 64 KiB
+/// attribute limit.
 pub(crate) const MAX_CONTENT_ATTRIBUTE_BYTES: usize = 60 << 10;
 
-/// Go `maxInlineDataBytes`: bounds one inline payload before base64.
+/// The most bytes of one inline payload recorded (before base64).
 pub(crate) const MAX_INLINE_DATA_BYTES: usize = 16 << 10;
 
-/// Go `contentValue`: a message list or a part list.
+/// A content attribute's value: a message list or a part list.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub(crate) enum ContentValue {
-    /// Go `messageList`.
+    /// A list of chat messages.
     Messages(Vec<ChatMessage>),
-    /// Go `partList`.
+    /// A list of parts.
     Parts(Vec<PartValue>),
-    /// Go `rawJSON`: an encoded tool payload ([`tool_payload`]).
+    /// An encoded tool payload ([`tool_payload`]).
     Raw(Value),
 }
 
 impl ContentValue {
-    /// Go `contentValue.value()`.
+    /// The value as an [`AttrValue`].
     pub(crate) fn value(&self) -> AttrValue {
         match self {
             Self::Messages(ms) => AttrValue::Slice(ms.iter().map(ChatMessage::value).collect()),
@@ -87,7 +87,7 @@ impl ContentValue {
     }
 }
 
-/// Go `contentAttr`.
+/// A content attribute: its key and value.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ContentAttr {
     /// The attribute key.
@@ -96,14 +96,14 @@ pub(crate) struct ContentAttr {
     pub(crate) value: ContentValue,
 }
 
-/// Go `chatMessage`: one turn; `finish_reason` only on an output message.
+/// One chat message (a turn); `finish_reason` only on an output message.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct ChatMessage {
-    /// Go `Role`.
+    /// The message role.
     pub(crate) role: String,
-    /// Go `Parts`.
+    /// The message parts.
     pub(crate) parts: Vec<PartValue>,
-    /// Go `FinishReason` (`omitempty` pointer).
+    /// The finish reason; omitted when absent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) finish_reason: Option<String>,
 }
@@ -125,79 +125,79 @@ fn parts_value(ps: &[PartValue]) -> AttrValue {
     AttrValue::Slice(ps.iter().map(PartValue::value).collect())
 }
 
-/// One converted part (Go's `textPart`, `toolCallPart`, `blobPart`, `uriPart`,
-/// `toolResponsePart`); fields serialize in Go's struct order with Go's `omitempty`.
+/// One converted part: text, tool call, blob, URI or tool response. Fields serialize in declaration
+/// order, and empty optional fields are omitted.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub(crate) enum PartValue {
-    /// Go `textPart` (`text` or `reasoning`).
+    /// A text part (`text` or `reasoning`).
     Text {
-        /// Go `Type`.
+        /// The part type.
         #[serde(rename = "type")]
         kind: &'static str,
-        /// Go `Content`.
+        /// The text.
         content: String,
     },
-    /// Go `toolCallPart`.
+    /// A tool call.
     ToolCall {
-        /// Go `Type`.
+        /// The part type.
         #[serde(rename = "type")]
         kind: &'static str,
-        /// Go `ID`.
+        /// The call ID.
         #[serde(skip_serializing_if = "String::is_empty")]
         id: String,
-        /// Go `Name`.
+        /// The tool name.
         name: String,
-        /// Go `Arguments` ([`tool_payload`]).
+        /// The call arguments ([`tool_payload`]).
         arguments: Value,
     },
-    /// Go `blobPart`.
+    /// An inline blob.
     Blob {
-        /// Go `Type`.
+        /// The part type.
         #[serde(rename = "type")]
         kind: &'static str,
-        /// Go `MIMEType`.
+        /// The MIME type.
         #[serde(skip_serializing_if = "String::is_empty")]
         mime_type: String,
-        /// Go `Modality`.
+        /// The modality (`image`, `video`, `audio` or `document`).
         modality: &'static str,
-        /// Go `Content` (base64).
+        /// The payload, base64-encoded.
         content: String,
-        /// Go `Truncated`.
+        /// Whether the payload was cut to the inline-data limit.
         #[serde(skip_serializing_if = "std::ops::Not::not")]
         truncated: bool,
     },
-    /// Go `uriPart`.
+    /// A file referenced by URI.
     Uri {
-        /// Go `Type`.
+        /// The part type.
         #[serde(rename = "type")]
         kind: &'static str,
-        /// Go `MIMEType`.
+        /// The MIME type.
         #[serde(skip_serializing_if = "String::is_empty")]
         mime_type: String,
-        /// Go `Modality`.
+        /// The modality (`image`, `video`, `audio` or `document`).
         modality: &'static str,
-        /// Go `URI`.
+        /// The URI.
         uri: String,
     },
-    /// Go `toolResponsePart`.
+    /// A tool response.
     ToolResponse {
-        /// Go `Type`.
+        /// The part type.
         #[serde(rename = "type")]
         kind: &'static str,
-        /// Go `ID`.
+        /// The call ID.
         #[serde(skip_serializing_if = "String::is_empty")]
         id: String,
-        /// Go `Name`.
+        /// The tool name.
         #[serde(skip_serializing_if = "String::is_empty")]
         name: String,
-        /// Go `Response` ([`tool_payload`]).
+        /// The tool response ([`tool_payload`]).
         response: Value,
     },
 }
 
 impl PartValue {
-    /// Go `<part>.value()`.
+    /// The part as a map [`AttrValue`], with the same fields and omissions as its serialization.
     fn value(&self) -> AttrValue {
         let mut kvs = Vec::new();
         match self {
@@ -268,13 +268,13 @@ impl PartValue {
     }
 }
 
-/// Go `str`: a Rust string is always valid UTF-8, so nothing needs replacing.
+/// A string key-value pair. A Rust string is always valid UTF-8, so nothing needs replacing.
 fn str_kv(k: &str, v: &str) -> (String, AttrValue) {
     (k.to_owned(), AttrValue::string(v))
 }
 
-/// Go `requestContent`: the system instruction and the conversation, in the order sent. User
-/// content, so callers gate it on content capture.
+/// Request content: the system instruction and the conversation, in the order sent. User content,
+/// so callers gate it on content capture.
 pub(crate) fn request_content(req: &LlmRequest) -> Vec<ContentAttr> {
     let mut content = Vec::new();
     if let Some(si) = req
@@ -308,7 +308,7 @@ pub(crate) fn request_content(req: &LlmRequest) -> Vec<ContentAttr> {
     content
 }
 
-/// Go `responseContent`: the legacy schema records the final response (none for a partial one);
+/// Response content: the legacy schema records the final response (none for a partial one);
 /// otherwise every response of the call is one output message.
 pub(crate) fn response_content(r: &GenerateContentResult) -> Vec<ContentAttr> {
     if use_legacy_schema() {
@@ -335,7 +335,7 @@ pub(crate) fn response_content(r: &GenerateContentResult) -> Vec<ContentAttr> {
     }]
 }
 
-/// Go `outputMessage`: a suppressed candidate keeps an empty parts list.
+/// One output message for `resp`: a suppressed candidate keeps an empty parts list.
 fn output_message(resp: &LlmResponse, finish_reason: &str) -> ChatMessage {
     ChatMessage {
         role: ROLE_ASSISTANT.to_owned(),
@@ -348,9 +348,9 @@ fn output_message(resp: &LlmResponse, finish_reason: &str) -> ChatMessage {
     }
 }
 
-/// Go `spanContentAttributes`: the legacy schema records each value's JSON text, the default
-/// one the structured value; a value whose JSON is over [`MAX_CONTENT_ATTRIBUTE_BYTES`] is left
-/// off and reported (Go's `otel.Handle`).
+/// Span content attributes: the legacy schema records each value's JSON text, the default one the
+/// structured value; a value whose JSON is over [`MAX_CONTENT_ATTRIBUTE_BYTES`] is left off and
+/// reported.
 pub(crate) fn span_content_attributes(content: &[ContentAttr]) -> Vec<(&'static str, AttrValue)> {
     let legacy = use_legacy_schema();
     let mut attrs = Vec::new();
@@ -381,18 +381,18 @@ pub(crate) fn span_content_attributes(content: &[ContentAttr]) -> Vec<(&'static 
     attrs
 }
 
-/// Go `eventContentAttributes`: always the structured value.
+/// Log-record content attributes: always the structured value.
 pub(crate) fn event_content_attributes(content: &[ContentAttr]) -> Vec<(&'static str, AttrValue)> {
     content.iter().map(|c| (c.key, c.value.value())).collect()
 }
 
-/// Go `semconvParts`: parts with no mapping are skipped.
+/// Converts parts; parts with no mapping are skipped.
 pub(crate) fn semconv_parts(ps: &[Part]) -> Vec<PartValue> {
     ps.iter().filter_map(semconv_part).collect()
 }
 
-/// Go `semconvPart`: structured variants before text; code execution and provider-side tool
-/// parts are dropped.
+/// Converts one part: structured variants are tried before text; code execution and provider-side
+/// tool parts are dropped.
 pub(crate) fn semconv_part(p: &Part) -> Option<PartValue> {
     if let Some(fc) = &p.function_call {
         return Some(PartValue::ToolCall {
@@ -442,9 +442,8 @@ pub(crate) fn semconv_part(p: &Part) -> Option<PartValue> {
     None
 }
 
-/// Go `toolPayload`: an application tool value; an empty map is Go's nil map (`null`), as
-/// elsewhere in gadk. A `serde_json` value always encodes, so Go's `"<unserializable>"`
-/// placeholder cannot arise.
+/// An application tool value as JSON; an empty map is `null`, as elsewhere in gadk. A `serde_json`
+/// value always encodes, so no unserializable placeholder is needed.
 pub(crate) fn tool_payload(v: &Map<String, Value>) -> Value {
     if v.is_empty() {
         return Value::Null;
@@ -452,8 +451,8 @@ pub(crate) fn tool_payload(v: &Map<String, Value>) -> Value {
     Value::Object(v.clone())
 }
 
-/// Go `encodeInlineData`: standard base64 of at most [`MAX_INLINE_DATA_BYTES`] bytes of
-/// `blob.data`, and whether the payload was cut (gadk-genai's `Blob` serde does the encoding).
+/// Encodes standard base64 of at most [`MAX_INLINE_DATA_BYTES`] bytes of `blob.data`, and whether
+/// the payload was cut (gadk-genai's `Blob` serde does the encoding).
 pub(crate) fn encode_inline_data(blob: &Blob) -> (String, bool) {
     let truncated = blob.data.len() > MAX_INLINE_DATA_BYTES;
     let data = if truncated {
@@ -472,7 +471,7 @@ pub(crate) fn encode_inline_data(blob: &Blob) -> (String, bool) {
     (encoded, truncated)
 }
 
-/// Go `modalityOf`: an IANA MIME type onto the schema's modality enum.
+/// Maps an IANA MIME type onto the schema's modality enum.
 pub(crate) fn modality_of(mime_type: &str) -> &'static str {
     let t = gadk_platform::go_to_lower(mime_type);
     if t.starts_with("image/") {
@@ -486,12 +485,12 @@ pub(crate) fn modality_of(mime_type: &str) -> &'static str {
     }
 }
 
-/// Go `hasFunctionCall`.
+/// Whether the content holds a function call.
 pub(crate) fn has_function_call(c: Option<&Content>) -> bool {
     c.is_some_and(|c| c.parts.iter().any(|p| p.function_call.is_some()))
 }
 
-/// Go `schemaRole`: a turn carrying a tool result is `tool`; `user`/`model` map to
+/// The schema role of a turn: a turn carrying a tool result is `tool`; `user`/`model` map to
 /// `user`/`assistant`; any other role passes through.
 pub(crate) fn schema_role(c: Option<&Content>) -> &str {
     let Some(c) = c else { return ROLE_USER };
@@ -508,7 +507,7 @@ pub(crate) fn schema_role(c: Option<&Content>) -> &str {
     }
 }
 
-/// Go `reportedFinishReason`: [`schema_finish_reason`], or `""` when `resp` reports no reason
+/// The finish reason to report: [`schema_finish_reason`], or `""` when `resp` reports no reason
 /// (`FINISH_REASON_UNSPECIFIED` counts as none). `err` is whether the call failed.
 pub(crate) fn reported_finish_reason(resp: Option<&LlmResponse>, err: bool) -> Cow<'static, str> {
     if !err
@@ -522,7 +521,7 @@ pub(crate) fn reported_finish_reason(resp: Option<&LlmResponse>, err: bool) -> C
     schema_finish_reason(resp, err)
 }
 
-/// Go `schemaFinishReason`: a failed call, an error code or an interruption is `error`; a stop
+/// The schema's finish reason: a failed call, an error code or an interruption is `error`; a stop
 /// carrying a tool call is `tool_call`; a value this mapping does not know is lowercased.
 pub(crate) fn schema_finish_reason(resp: Option<&LlmResponse>, err: bool) -> Cow<'static, str> {
     let Some(resp) = resp else {

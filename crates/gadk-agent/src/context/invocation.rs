@@ -13,9 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The invocation context (port of Go `agent.InvocationContext`, `invocationContext` in
-//! `agent/agent.go`, `internal/context/invocation_context.go`, and `trackedArtifacts` in
-//! `agent/common_context.go`).
+//! The invocation context: the context of one agent invocation, and the artifact wrapper that
+//! records saves into the event actions.
 
 use std::collections::BTreeMap;
 use std::ops::Deref;
@@ -44,7 +43,7 @@ use crate::run_config::RunConfig;
 use crate::run_config::run_limits::LlmCallLimiter;
 use crate::services::{ArtifactBacking, Artifacts, Memory};
 
-/// Go `agent.InvocationContext`: the context of one agent invocation.
+/// The context of one agent invocation.
 #[derive(Clone)]
 pub struct InvocationContext {
     pub(crate) ro: ReadonlyContext,
@@ -88,9 +87,9 @@ impl InvocationContext {
         self.inner().agent.clone()
     }
 
-    /// The artifacts of the session: tracked (records saves into the actions' `artifact_delta`) when
-    /// the context has actions, as Go `NewCallbackContextWithArtifactTracking`/`NewToolContext` do;
-    /// the raw handle otherwise; `None` without an artifact service.
+    /// The artifacts of the session: tracked (records saves into the actions' `artifact_delta`)
+    /// when the context has actions, as for callback and tool contexts; the raw handle otherwise;
+    /// `None` without an artifact service.
     pub fn artifacts(&self) -> Option<Arc<dyn Artifacts>> {
         let raw = self.inner().shared.artifacts.clone()?;
         Some(match &self.inner().actions {
@@ -135,7 +134,7 @@ impl InvocationContext {
         self.inner().activation
     }
 
-    /// Go `commonContext.ResumedInput`: this context's resume input for `interrupt_id`.
+    /// This context's resume input for `interrupt_id`.
     pub fn resumed_input(&self, interrupt_id: &str) -> Option<Value> {
         self.inner()
             .resumed_inputs
@@ -144,12 +143,12 @@ impl InvocationContext {
             .cloned()
     }
 
-    /// The cancellation token (Go's embedded `context.Context` cancellation).
+    /// The cancellation token.
     pub fn cancellation_token(&self) -> &CancellationToken {
         &self.inner().cancel_scope.token
     }
 
-    /// Go `cancel(cause)` of a `context.WithCancelCause` context: cancels this context's own
+    /// Cancels this context's own
     /// cancel scope with `cause`, unless it is already cancelled (first cause wins). Contexts
     /// sharing the scope (every delta but a raw `cancellation_token`, and contexts derived by
     /// [`Context::with_agent_cancel`](crate::Context::with_agent_cancel) from it) are cancelled
@@ -158,7 +157,7 @@ impl InvocationContext {
         self.inner().cancel_scope.cancel_with_cause(cause);
     }
 
-    /// Go `context.Cause`: `None` while the cancellation token is live; else the cause recorded
+    /// The cancel cause: `None` while the cancellation token is live; else the cause recorded
     /// by the nearest cancelled scope walking outward from this context's own (a scope cancelled
     /// only by its parent defers to it), else `Canceled` (e.g. a raw `token.cancel()`).
     pub fn cause(&self) -> Option<CancelCause> {
@@ -175,9 +174,9 @@ impl InvocationContext {
         self.inner().shared.plugin_manager.clone()
     }
 
-    /// Go `plugininternal.WithInheritedPlugins` (#1777): a derived context marked so that the
+    /// A derived context marked so that the
     /// next runner started with it (`Runner::run_with_context`) keeps this context's plugin
-    /// manager ([`InvocationContext::plugin_manager`], Go `FromContext`) when that runner has no
+    /// manager ([`InvocationContext::plugin_manager`]) when that runner has no
     /// plugins of its own. Only the agent tool sets this mark, for the sub-runner it starts; any
     /// other runner uses only its own plugins. The receiver is unchanged.
     pub fn with_inherited_plugins(&self) -> InvocationContext {
@@ -186,7 +185,7 @@ impl InvocationContext {
         Self::from_inner(n)
     }
 
-    /// Go `plugininternal.TakeInheritedPlugins` (#1777): the plugin manager marked by
+    /// Takes the plugin manager marked by
     /// [`InvocationContext::with_inherited_plugins`] (`None` without a mark) and a derived context
     /// with the mark cleared, so that the mark applies to one runner only and not to runners
     /// started further down.
@@ -199,7 +198,7 @@ impl InvocationContext {
         (Self::from_inner(n), Some(pm))
     }
 
-    /// Go `utils.WithGraphResumeDone` (51bc7ec5, #2188): a derived context marked so that
+    /// A derived context marked so that
     /// resuming a nested graph workflow is done for it and every context derived from it (a loop
     /// agent runs its later passes with it: only the first pass narrows to the sub-agents holding
     /// the callers of the user's function responses). The receiver is unchanged.
@@ -209,8 +208,7 @@ impl InvocationContext {
         Self::from_inner(n)
     }
 
-    /// Whether the context is marked by [`InvocationContext::with_graph_resume_done`] (Go
-    /// `ctx.Value(graphResumeDoneKey{}) != nil`).
+    /// Whether the context is marked by [`InvocationContext::with_graph_resume_done`].
     pub fn graph_resume_done(&self) -> bool {
         self.inner().graph_resume_done
     }
@@ -232,7 +230,7 @@ impl InvocationContext {
     }
 
     /// The engine's per-invocation compaction runtime, if compaction is configured
-    /// (engine-internal; Go `compactionctx.FromContext`).
+    /// (engine-internal).
     #[doc(hidden)]
     pub fn compaction_runtime(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
         self.inner().shared.compaction.clone()
@@ -243,13 +241,13 @@ impl InvocationContext {
         &self.inner().bound_modes
     }
 
-    /// Go `InvocationContext.LiveSessionResumptionHandle`: the active live session's resumption
+    /// The active live session's resumption
     /// handle, used to resume a bidirectional streaming session after a reconnect.
     pub fn live_session_resumption_handle(&self) -> String {
         self.inner().live_handle.lock().clone()
     }
 
-    /// Go `InvocationContext.SetLiveSessionResumptionHandle`: stores the latest handle received
+    /// Stores the latest handle received
     /// from the model, visible to every context of this invocation.
     pub fn set_live_session_resumption_handle(&self, handle: &str) {
         *self.inner().live_handle.lock() = handle.to_owned();
@@ -260,7 +258,7 @@ impl InvocationContext {
         Self::from_inner(self.inner().apply(d))
     }
 
-    /// Go `agent.Promote`: the same fields, seen as a [`Context`].
+    /// The same fields, seen as a [`Context`].
     pub fn into_context(self) -> Context {
         Context { ic: self }
     }
@@ -271,14 +269,14 @@ impl InvocationContext {
     }
 }
 
-/// Go `trackedArtifacts`: records each successful save, keeping the highest version per name.
+/// Records each successful save, keeping the highest version per name.
 pub(crate) struct TrackedArtifacts {
     inner: Arc<dyn Artifacts>,
     actions: Arc<parking_lot::Mutex<EventActions>>,
 }
 
 impl TrackedArtifacts {
-    /// Go `newTrackedArtifacts`.
+    /// Wraps `inner`, recording saves into the context's actions.
     pub(crate) fn new(
         inner: Arc<dyn Artifacts>,
         actions: Arc<parking_lot::Mutex<EventActions>>,

@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Identity request processor (port of Go internal/llminternal/identity_request_processor.go).
+//! Identity request processor: tells the model its agent's name and description.
 
 use futures::future::BoxFuture;
 use gadk_agent::tool_util::append_instructions;
@@ -26,8 +26,7 @@ use crate::{
     workflow::route::go_quote,
 };
 
-/// Port of Go identity_request_processor.go:29 identityRequestProcessor: gives the agent its
-/// identity from the framework.
+/// Gives the agent its identity from the framework.
 pub(crate) fn identity_request_processor<'a>(
     ctx: &'a InvocationContext,
     req: &'a mut LlmRequest,
@@ -38,7 +37,7 @@ pub(crate) fn identity_request_processor<'a>(
         if reveal(&*agent).is_none() {
             return Ok(Vec::new());
         }
-        // RESOLVED mode (Go ModeFor).
+        // The RESOLVED mode (see `mode_for`).
         if mode_for(ctx, &*agent) == Mode::SingleTurn {
             return Ok(Vec::new());
         }

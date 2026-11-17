@@ -13,12 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `cmd/launcher/web/agentengine`: the `agentengine` web sub-launcher, serving
+//! The `agentengine` web sub-launcher, serving
 //! [`gadk_server::agentengine`] under `-path_prefix` for Vertex AI Agent Engine.
 //!
-//! The mount is Go's `router.Methods("POST").PathPrefix(prefix).Handler(http.StripPrefix(prefix,
-//! h))`: POST only (another method under the prefix is gorilla's bare 405), and the prefix match
-//! is not segment-aware, as gorilla's `PathPrefix` is not.
+//! The mount matches POST only (another method under the prefix gets a bare 405), and the prefix
+//! match is not segment-aware; the handler sees the path with the prefix stripped.
 
 use std::io::Write;
 use std::sync::{Arc, Mutex};
@@ -34,7 +33,7 @@ use crate::flag_usage::format_flag_usage;
 use crate::web::api::strip_prefix;
 use crate::web::{WebRouter, WebSublauncher};
 
-/// Go `agentEngineConfig`'s flag-backed fields.
+/// The flag-backed settings of the launcher.
 struct AgentEngineFlags {
     /// `-path_prefix` (default `/api`).
     path_prefix: Flag<String>,
@@ -44,18 +43,18 @@ struct AgentEngineFlags {
     sse_write_timeout: Flag<GoDuration>,
 }
 
-/// Go `agentEngineLauncher`.
+/// The `agentengine` web sub-launcher.
 pub struct AgentEngineLauncher {
-    /// The `web` flag set (Go names it `"web"`), behind a `Mutex` as `ApiLauncher`'s is.
+    /// The `web` flag set (named `"web"`), behind a `Mutex` as `ApiLauncher`'s is.
     flags: Mutex<FlagSet>,
     config: AgentEngineFlags,
-    /// Go `config.pathPrefix` after `Parse` normalized it (the flag default until then).
+    /// The path prefix after `Parse` normalized it (the flag default until then).
     path_prefix: String,
-    /// Go `config.agentEngineID`.
+    /// The Agent Engine ID.
     agent_engine_id: String,
 }
 
-/// Go `NewLauncher(agentEngineId)`: the sub-launcher with Go's flags, defaults and usage text.
+/// The sub-launcher for `agent_engine_id`, with its flags, defaults and usage text.
 pub fn new(agent_engine_id: &str) -> AgentEngineLauncher {
     let mut fs = FlagSet::new("web");
     let path_prefix = fs.string(
@@ -87,7 +86,7 @@ pub fn new(agent_engine_id: &str) -> AgentEngineLauncher {
 }
 
 impl AgentEngineLauncher {
-    /// Replaces where the flag set writes its errors and usage (Go `fs.SetOutput`; default
+    /// Replaces where the flag set writes its errors and usage (default
     /// stderr), for tests and the CLI replay.
     pub fn with_flag_output(self, out: Arc<Mutex<dyn Write + Send>>) -> AgentEngineLauncher {
         lock(&self.flags).set_output(out);
@@ -96,11 +95,11 @@ impl AgentEngineLauncher {
 }
 
 /// The handler config from the launcher's `Config` (the web launcher has already defaulted
-/// the services; a missing session service is `Error::Config`), its `log` the launcher's Go
+/// the services; a missing session service is `Error::Config`), its `log` the launcher's
 /// logger.
 pub(crate) fn engine_config(config: &Config) -> Result<AgentEngineConfig, Error> {
-    // Go passes a nil SessionService through; gadk's handler requires one. The web launcher's
-    // `Run` always supplies it (applyServiceDefaults).
+    // The handler requires a session service. The web launcher's `Run` always supplies one
+    // (see `apply_service_defaults`).
     let Some(session_service) = config.session_service.clone() else {
         return Err(Error::Config("no session service configured".to_owned()));
     };
@@ -115,12 +114,12 @@ pub(crate) fn engine_config(config: &Config) -> Result<AgentEngineConfig, Error>
 }
 
 impl WebSublauncher for AgentEngineLauncher {
-    /// Go `Keyword`: `agentengine`.
+    /// The keyword `agentengine`.
     fn keyword(&self) -> String {
         "agentengine".to_owned()
     }
 
-    /// Go `Parse`: the flags (`failed to parse agent engine flags: <err>`), then the prefix
+    /// Parses the flags (`failed to parse agent engine flags: <err>`), then the prefix
     /// with a leading `/` added and one trailing `/` trimmed.
     fn parse(&mut self, args: Vec<String>) -> Result<Vec<String>, Error> {
         let mut fs = lock(&self.flags);
@@ -137,21 +136,20 @@ impl WebSublauncher for AgentEngineLauncher {
         Ok(fs.args())
     }
 
-    /// Go `CommandLineSyntax`: `format_flag_usage` of the flag set.
+    /// The flag usage text (`format_flag_usage` of the flag set).
     fn command_line_syntax(&self) -> String {
         format_flag_usage(&lock(&self.flags))
     }
 
-    /// Go `SimpleDescription`.
+    /// A one-line description.
     fn simple_description(&self) -> String {
         "starts AgentEngine server which serves reasoning engine API while deployed to Agent Engine"
             .to_owned()
     }
 
-    /// Go `SetupSubrouters`: Go's `NewHandler` checks — `Config::validate`, then
-    /// `gadk_server::agentengine::new_handler` — either error answered as
-    /// `agentengine.NewHandler failed: <err>` (`Error::Config`, Go's `%v`), then the handler
-    /// mounted with
+    /// Checks `Config::validate`, then builds the handler with
+    /// `gadk_server::agentengine::new_handler` (either error is answered as
+    /// `Error::Config` carrying the handler-construction error text), then mounts the handler with
     /// `router.handle_prefix(&[Method::POST], prefix, strip_prefix(prefix, handler))`.
     fn setup_subrouters(&self, router: &mut WebRouter, config: &mut Config) -> Result<(), Error> {
         let wrap = |e: &dyn std::fmt::Display| {
@@ -174,8 +172,8 @@ impl WebSublauncher for AgentEngineLauncher {
         Ok(())
     }
 
-    /// Go `UserMessage`: Go's five lines verbatim (the `/api` in the first two is literal, not
-    /// the prefix).
+    /// The five startup lines, as ADK launchers print them (the `/api` in the first two is literal,
+    /// not the prefix).
     fn user_message(&self, web_url: &str, printer: &mut dyn FnMut(&str)) {
         printer(&format!(
             "       agentEngine:  you can access this server locally by {web_url}/api/reasoning_engine"

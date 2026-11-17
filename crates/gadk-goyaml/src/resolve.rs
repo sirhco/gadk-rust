@@ -13,11 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of yaml.v3 v3.0.1 `resolve.go`: implicit tag resolution, short/long tags, `!!binary`
-//! base64 and timestamps. Also home to `encode.go`'s `isBase60Float` / `isOldBool` (the
-//! YAML 1.1 forms `stringv` quotes) and the slices of Go's `strconv` /
-//! `time.Parse` that `resolve` relies on (`ParseInt`, `ParseUint`, `ParseFloat`, the four
-//! `allowedTimestampFormats` layouts).
+//! Implicit tag resolution, short/long tags, `!!binary` base64 and timestamps. Also home to
+//! `is_base60_float` / `is_old_bool` (the YAML 1.1 forms `stringv` quotes) and the number and
+//! time parsing that `resolve` relies on (`parse_int`, `parse_uint`, `parse_float`, and the four
+//! allowed timestamp layouts), written to accept exactly what yaml.v3's parsing accepts.
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
@@ -26,12 +25,11 @@ use chrono::{DateTime, FixedOffset, NaiveDate, TimeZone};
 use crate::error::{Error, failf};
 use crate::value::GoValue;
 
-/// Go: resolve.go `resolveTable` (built in `init`): the class of a scalar's first byte —
-/// `S` sign, `D` digit, `M` in `resolveMap`, `.` float (maybe in the map), 0 otherwise.
+/// The class of a scalar's first byte —
+/// `S` sign, `D` digit, `M` in the lookup map, `.` float (maybe in the map), 0 otherwise.
 const RESOLVE_TABLE: [u8; 256] = resolve_table();
 
 const fn resolve_table() -> [u8; 256] {
-    // Go: resolve.go init
     let mut t = [0u8; 256];
     t[b'+' as usize] = b'S'; // Sign
     t[b'-' as usize] = b'S';
@@ -51,10 +49,8 @@ const fn resolve_table() -> [u8; 256] {
     t
 }
 
-/// Go: resolve.go `resolveMap` (built in `init` from `resolveMapList`): the value and tag of
-/// the scalars resolved by lookup.
+/// The value and tag of the scalars resolved by lookup.
 fn resolve_map(s: &str) -> Option<(GoValue, &'static str)> {
-    // Go: resolve.go init (resolveMapList)
     Some(match s {
         "true" | "True" | "TRUE" => (GoValue::Bool(true), BOOL_TAG),
         "false" | "False" | "FALSE" => (GoValue::Bool(false), BOOL_TAG),
@@ -68,28 +64,28 @@ fn resolve_map(s: &str) -> Option<(GoValue, &'static str)> {
     })
 }
 
-/// Go: `nullTag`.
+/// The `!!null` tag.
 pub(crate) const NULL_TAG: &str = "!!null";
-/// Go: `boolTag`.
+/// The `!!bool` tag.
 pub(crate) const BOOL_TAG: &str = "!!bool";
-/// Go: `strTag`.
+/// The `!!str` tag.
 pub(crate) const STR_TAG: &str = "!!str";
-/// Go: `intTag`.
+/// The `!!int` tag.
 pub(crate) const INT_TAG: &str = "!!int";
-/// Go: `floatTag`.
+/// The `!!float` tag.
 pub(crate) const FLOAT_TAG: &str = "!!float";
-/// Go: `timestampTag`.
+/// The `!!timestamp` tag.
 pub(crate) const TIMESTAMP_TAG: &str = "!!timestamp";
-/// Go: `seqTag`.
+/// The `!!seq` tag.
 pub(crate) const SEQ_TAG: &str = "!!seq";
-/// Go: `mapTag`.
+/// The `!!map` tag.
 pub(crate) const MAP_TAG: &str = "!!map";
-/// Go: `binaryTag`.
+/// The `!!binary` tag.
 pub(crate) const BINARY_TAG: &str = "!!binary";
-/// Go: `mergeTag`.
+/// The `!!merge` tag.
 pub(crate) const MERGE_TAG: &str = "!!merge";
 
-/// The short tags `longTags` / `shortTags` are built from (resolve.go `init`).
+/// The short tags the short/long tag lookups are built from.
 const KNOWN_TAGS: [&str; 10] = [
     NULL_TAG,
     BOOL_TAG,
@@ -103,14 +99,13 @@ const KNOWN_TAGS: [&str; 10] = [
     MERGE_TAG,
 ];
 
-/// Go: `longTagPrefix`.
+/// The prefix of the long form of a tag.
 pub(crate) const LONG_TAG_PREFIX: &str = "tag:yaml.org,2002:";
 
-/// Go: resolve.go `shortTag` — `tag:yaml.org,2002:x` → `!!x`; other tags unchanged.
+/// `tag:yaml.org,2002:x` → `!!x`; other tags unchanged.
 pub(crate) fn short_tag(tag: &str) -> String {
-    // Go: resolve.go shortTag
     if let Some(rest) = tag.strip_prefix(LONG_TAG_PREFIX) {
-        // Go's shortTags map: the known tags' long forms.
+        // The known tags' long forms.
         if let Some(stag) = KNOWN_TAGS.iter().find(|stag| stag[2..] == *rest) {
             return (*stag).to_string();
         }
@@ -119,11 +114,10 @@ pub(crate) fn short_tag(tag: &str) -> String {
     tag.to_string()
 }
 
-/// Go: resolve.go `longTag` — `!!x` → `tag:yaml.org,2002:x`; other tags unchanged.
+/// `!!x` → `tag:yaml.org,2002:x`; other tags unchanged.
 pub(crate) fn long_tag(tag: &str) -> String {
-    // Go: resolve.go longTag
     if let Some(rest) = tag.strip_prefix("!!") {
-        // Go's longTags map: the known tags' long forms.
+        // The known tags' long forms.
         if let Some(stag) = KNOWN_TAGS.iter().find(|stag| **stag == tag) {
             return format!("{LONG_TAG_PREFIX}{}", &stag[2..]);
         }
@@ -132,16 +126,16 @@ pub(crate) fn long_tag(tag: &str) -> String {
     tag.to_string()
 }
 
-/// Go: resolve.go `resolvableTag`.
+/// Whether scalars under `tag` are resolved by their text (empty, `!!str`, `!!bool`, `!!int`,
+/// `!!float`, `!!null`, `!!timestamp`).
 pub(crate) fn resolvable_tag(tag: &str) -> bool {
-    // Go: resolve.go resolvableTag
     matches!(
         tag,
         "" | STR_TAG | BOOL_TAG | INT_TAG | FLOAT_TAG | NULL_TAG | TIMESTAMP_TAG
     )
 }
 
-/// Go: resolve.go `yamlStyleFloat`,
+/// Whether `s` is a YAML-style float,
 /// `^[-+]?(\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?$`.
 fn yaml_style_float(s: &str) -> bool {
     let b = s.as_bytes();
@@ -182,12 +176,11 @@ fn yaml_style_float(s: &str) -> bool {
     i == b.len()
 }
 
-/// Go: resolve.go `resolve` — the resolved short tag and Go value of the scalar text `input`
-/// under `tag` (Go's `interface{}` result as a [`GoValue`]: `nil` → `Null`, `int`/`int64` →
-/// `Int`, `uint64` → `Uint`, `float64` → `Float`, `string` → `String`, `time.Time` →
-/// `Timestamp`). The `Err` is the deferred `failf("cannot decode %s `%s` as a %s", …)`.
+/// The resolved short tag and value of the scalar text `input` under `tag` (as a [`GoValue`]:
+/// null → `Null`, signed integers → `Int`, large unsigned → `Uint`, floats → `Float`, text →
+/// `String`, timestamps → `Timestamp`). The `Err` is the
+/// `cannot decode <tag> `<input>` as a <tag>` failure for an explicit tag the text does not fit.
 pub(crate) fn resolve(tag: &str, input: &str) -> Result<(String, GoValue), Error> {
-    // Go: resolve.go resolve
     let tag = short_tag(tag);
     if !resolvable_tag(&tag) {
         return Ok((tag, GoValue::String(input.to_string())));
@@ -195,12 +188,12 @@ pub(crate) fn resolve(tag: &str, input: &str) -> Result<(String, GoValue), Error
 
     let (rtag, out) = resolve_value(&tag, input);
 
-    // Go's deferred check of the resolved tag against the requested one.
+    // Check the resolved tag against the requested one.
     if tag.is_empty() || tag == rtag || tag == STR_TAG || tag == BINARY_TAG {
         return Ok((rtag.to_string(), out));
     }
     if tag == FLOAT_TAG && rtag == INT_TAG {
-        // Go's `case int64:` / `case int:` (both `GoValue::Int`); a `uint64` falls through.
+        // A signed integer converts; an unsigned one falls through.
         if let GoValue::Int(v) = out {
             return Ok((FLOAT_TAG.to_string(), GoValue::Float(v as f64)));
         }
@@ -213,10 +206,8 @@ pub(crate) fn resolve(tag: &str, input: &str) -> Result<(String, GoValue), Error
     )))
 }
 
-/// The body of Go's `resolve` before its deferred check: `tag` is short and resolvable.
+/// The body of [`resolve`] before the tag check: `tag` is short and resolvable.
 fn resolve_value(tag: &str, input: &str) -> (&'static str, GoValue) {
-    // Go: resolve.go resolve (body)
-
     // Any data is accepted as a !!str or !!binary.
     // Otherwise, the prefix is enough of a hint about what it might be.
     let hint = match input.as_bytes().first() {
@@ -254,8 +245,7 @@ fn resolve_value(tag: &str, input: &str) -> (&'static str, GoValue) {
                 }
 
                 let plain = input.replace('_', "");
-                // Go returns `int(intv)` when it fits an `int`, else `intv`; both are
-                // `GoValue::Int` (Go's `int` is 64-bit).
+                // Whether the value fits a platform `int` or only an `i64`, it is `GoValue::Int`.
                 if let Some(intv) = parse_int(&plain, 0) {
                     return (INT_TAG, GoValue::Int(intv));
                 }
@@ -306,10 +296,9 @@ fn resolve_value(tag: &str, input: &str) -> (&'static str, GoValue) {
     (STR_TAG, GoValue::String(input.to_string()))
 }
 
-/// Go: resolve.go `encodeBase64` — base64 broken into 70-character lines (each followed by a
-/// newline when there is more than one line). `s` is a Go string: any bytes.
+/// Base64 broken into 70-character lines (each followed by a newline when there is more than
+/// one line). `s` is any bytes.
 pub(crate) fn encode_base64(s: &[u8]) -> String {
-    // Go: resolve.go encodeBase64
     const LINE_LEN: usize = 70;
     let encoded = STANDARD.encode(s);
     let enc_len = encoded.len();
@@ -327,9 +316,8 @@ pub(crate) fn encode_base64(s: &[u8]) -> String {
     out
 }
 
-/// Go: resolve.go `allowedTimestampFormats` — a subset of the formats allowed by the regular
-/// expression defined at <http://yaml.org/type/timestamp.html>, each as the chunks Go's
-/// `time.nextStdChunk` splits it into.
+/// The timestamp layouts accepted, a subset of the formats allowed by the regular expression
+/// defined at <http://yaml.org/type/timestamp.html>, each as a list of layout chunks.
 const ALLOWED_TIMESTAMP_FORMATS: [&[Chunk]; 4] = [
     // "2006-1-2T15:4:5.999999999Z07:00": RCF3339Nano with short date fields.
     &[
@@ -386,16 +374,14 @@ const ALLOWED_TIMESTAMP_FORMATS: [&[Chunk]; 4] = [
         Chunk::Literal("-"),
         Chunk::Day,
     ],
-    // Notable exception: time.Parse cannot handle: "2001-12-14 21:59:43.10 -5"
-    // from the set of examples.
+    // Notable exception: "2001-12-14 21:59:43.10 -5" from the set of examples is not
+    // handled by this layout list.
 ];
 
-/// Go: resolve.go `parseTimestamp` — `Some` for the `allowedTimestampFormats`
-/// (no zone = UTC).
+/// `Some` for the allowed timestamp layouts (no zone = UTC).
 pub(crate) fn parse_timestamp(s: &str) -> Option<DateTime<FixedOffset>> {
-    // Go: resolve.go parseTimestamp
     // TODO write code to check all the formats supported by
-    // http://yaml.org/type/timestamp.html instead of using time.Parse.
+    // http://yaml.org/type/timestamp.html instead of using the layout list.
 
     // Quick check: all date formats start with YYYY-.
     let b = s.as_bytes();
@@ -411,10 +397,9 @@ pub(crate) fn parse_timestamp(s: &str) -> Option<DateTime<FixedOffset>> {
         .find_map(|format| time_parse(format, s))
 }
 
-/// Go: encode.go `isBase60Float` — YAML 1.1 base-60 notation, which `stringv` quotes on
+/// YAML 1.1 base-60 notation, which `stringv` quotes on
 /// output (`^[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+(?:\.[0-9_]*)?$`).
 pub(crate) fn is_base60_float(s: &str) -> bool {
-    // Go: encode.go isBase60Float
     // Fast path.
     let b = s.as_bytes();
     let Some(&c) = b.first() else {
@@ -460,10 +445,9 @@ pub(crate) fn is_base60_float(s: &str) -> bool {
     i == b.len()
 }
 
-/// Go: encode.go `isOldBool` — YAML 1.1 bool notation, which `stringv` quotes on output so
+/// YAML 1.1 bool notation, which `stringv` quotes on output so
 /// the output stays valid for YAML 1.1 parsers.
 pub(crate) fn is_old_bool(s: &str) -> bool {
-    // Go: encode.go isOldBool
     matches!(
         s,
         "y" | "Y"
@@ -485,18 +469,18 @@ pub(crate) fn is_old_bool(s: &str) -> bool {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Go's strconv: the ParseInt / ParseUint / ParseFloat behaviour `resolve` depends on (only
-// success matters there, so failures are `None`).
+// Integer and float parsing: the behaviour `resolve` depends on (only success matters there,
+// so failures are `None`).
 // ---------------------------------------------------------------------------------------------
 
-/// Go: strconv `lower` — ASCII lower case of a letter (other bytes garbled harmlessly).
+/// ASCII lower case of a letter (other bytes garbled harmlessly).
 fn lower(c: u8) -> u8 {
     c | (b'x' - b'X')
 }
 
-/// Go: `strconv.ParseUint(s, base, 64)` (`base` 0 or 2..=36); `None` on any error.
+/// Parses an unsigned 64-bit integer (`base` 0 or 2..=36; base 0 honours `0x`/`0o`/`0b`
+/// prefixes and underscores); `None` on any error.
 fn parse_uint(s: &str, base: u32) -> Option<u64> {
-    // Go: strconv/atoi.go ParseUint
     let s0 = s.as_bytes();
     if s0.is_empty() {
         return None;
@@ -556,9 +540,9 @@ fn parse_uint(s: &str, base: u32) -> Option<u64> {
     Some(n)
 }
 
-/// Go: `strconv.ParseInt(s, base, 64)`; `None` on any error.
+/// Parses a signed 64-bit integer like [`parse_uint`], with an optional sign; `None` on any
+/// error.
 fn parse_int(s: &str, base: u32) -> Option<i64> {
-    // Go: strconv/atoi.go ParseInt
     if s.is_empty() {
         return None;
     }
@@ -584,10 +568,9 @@ fn parse_int(s: &str, base: u32) -> Option<i64> {
     }
 }
 
-/// Go: strconv `underscoreOK` — underscores only between digits or between a base prefix
-/// and a digit.
+/// Whether the underscores in `s` are valid: underscores only between digits or between a base
+/// prefix and a digit.
 fn underscore_ok(s: &[u8]) -> bool {
-    // Go: strconv/atoi.go underscoreOK
     // saw tracks the last character (class) we saw:
     // ^ for beginning of number,
     // 0 for a digit or base prefix,
@@ -638,12 +621,11 @@ fn underscore_ok(s: &[u8]) -> bool {
     saw != b'_'
 }
 
-/// Go: `strconv.ParseFloat(s, 64)`; `None` on any error (syntax, or `ErrRange` on overflow).
-/// `resolve` passes only texts that start with `.` or match `yamlStyleFloat`, so a
-/// hexadecimal mantissa (`0x1p-2`) never reaches it; that form is validated as Go does but
-/// not converted (`None`).
+/// Parses a 64-bit float; `None` on any error (syntax, or overflow to infinity). `resolve`
+/// passes only texts that start with `.` or match the YAML-style float pattern, so a
+/// hexadecimal mantissa (`0x1p-2`) never reaches it; that form is validated but not converted
+/// (`None`).
 fn parse_float(s: &str) -> Option<f64> {
-    // Go: strconv/atof.go ParseFloat (atof64)
     if let Some(f) = special(s) {
         return Some(f);
     }
@@ -651,19 +633,18 @@ fn parse_float(s: &str) -> Option<f64> {
     if n != s.len() || hex {
         return None;
     }
-    // Go's decimal conversion is correctly rounded, as is Rust's; underscores were validated.
+    // The decimal conversion is correctly rounded; underscores were validated.
     let f: f64 = s.replace('_', "").parse().ok()?;
     if f.is_infinite() {
-        // Go: ErrRange (the value overflows float64).
+        // Out of range (the value overflows `f64`).
         return None;
     }
     Some(f)
 }
 
-/// Go: strconv `special` — `±Inf`/`±Infinity`/`NaN` (any case) when that is all of `s`
-/// (`ParseFloat` rejects a longer `s`).
+/// `±Inf`/`±Infinity`/`NaN` (any case) when that is all of `s`
+/// (a longer `s` is rejected).
 fn special(s: &str) -> Option<f64> {
-    // Go: strconv/atof.go special
     let b = s.as_bytes();
     let first = *b.first()?;
     let (sign, rest) = match first {
@@ -682,10 +663,9 @@ fn special(s: &str) -> Option<f64> {
     None
 }
 
-/// Go: strconv `readFloat`'s syntax check: `Some((hex, n))` when the first `n` bytes of `s`
-/// form a float (`n` may be short of `s.len()`, which `ParseFloat` rejects).
+/// The float syntax check: `Some((hex, n))` when the first `n` bytes of `s` form a float (`n`
+/// may be short of `s.len()`, which `parse_float` rejects).
 fn read_float(s: &[u8]) -> Option<(bool, usize)> {
-    // Go: strconv/atof.go readFloat
     let mut underscores = false;
     let mut i = 0;
 
@@ -757,41 +737,39 @@ fn read_float(s: &[u8]) -> Option<(bool, usize)> {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Go's time.Parse, for the chunks of `allowedTimestampFormats` (time/format.go).
+// Time parsing for the chunks of the allowed timestamp layouts.
 // ---------------------------------------------------------------------------------------------
 
-/// One element of a Go time layout as `time.nextStdChunk` splits it (only the kinds the
-/// `allowedTimestampFormats` layouts contain).
+/// One element of a time layout (only the kinds the allowed timestamp layouts contain).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Chunk {
-    /// Layout text matched literally (a space matches any run of spaces: Go's `skip`).
+    /// Layout text matched literally (a space matches any run of spaces).
     Literal(&'static str),
-    /// `2006` (`stdLongYear`).
+    /// A four-digit year.
     LongYear,
-    /// `1` (`stdNumMonth`).
+    /// A one- or two-digit month.
     NumMonth,
-    /// `2` (`stdDay`).
+    /// A one- or two-digit day.
     Day,
-    /// `15` (`stdHour`).
+    /// A two-digit hour.
     Hour,
-    /// `4` (`stdMinute`).
+    /// A one- or two-digit minute.
     Minute,
-    /// `5` (`stdSecond`).
+    /// A one- or two-digit second.
     Second,
-    /// `.999999999` (`stdFracSecond9`).
+    /// A fractional second of up to nine digits (`.999999999`).
     FracSecond9,
-    /// `Z07:00` (`stdISO8601ColonTZ`).
+    /// A `Z` or `±hh:mm` zone.
     Iso8601ColonTz,
 }
 
-/// Go: time `isDigit`.
+/// Whether `s[i]` is an ASCII digit.
 fn is_digit(s: &[u8], i: usize) -> bool {
     i < s.len() && s[i].is_ascii_digit()
 }
 
-/// Go: time `getnum` — one or two digits (`fixed`: exactly two).
+/// One or two digits (`fixed`: exactly two).
 fn getnum(s: &[u8], fixed: bool) -> Option<(u32, &[u8])> {
-    // Go: time/format.go getnum
     if !is_digit(s, 0) {
         return None;
     }
@@ -807,7 +785,7 @@ fn getnum(s: &[u8], fixed: bool) -> Option<(u32, &[u8])> {
     ))
 }
 
-/// Go: time `cutspace`.
+/// Strips leading spaces.
 fn cutspace(mut s: &[u8]) -> &[u8] {
     while let [b' ', rest @ ..] = s {
         s = rest;
@@ -815,9 +793,8 @@ fn cutspace(mut s: &[u8]) -> &[u8] {
     s
 }
 
-/// Go: time `skip` — removes `prefix` from `value`, treating runs of spaces as equivalent.
+/// Removes `prefix` from `value`, treating runs of spaces as equivalent.
 fn skip<'a>(mut value: &'a [u8], prefix: &str) -> Option<&'a [u8]> {
-    // Go: time/format.go skip
     let mut prefix = prefix.as_bytes();
     while let Some(&p) = prefix.first() {
         if p == b' ' {
@@ -837,17 +814,16 @@ fn skip<'a>(mut value: &'a [u8], prefix: &str) -> Option<&'a [u8]> {
     Some(value)
 }
 
-/// Go: time `parseNanoseconds` — the fraction `value[1..nbytes]` (at most 9 digits used) in
+/// The fraction `value[1..nbytes]` (at most 9 digits used) in
 /// nanoseconds; `value[0]` is `.` or `,`.
 fn parse_nanoseconds(value: &[u8], nbytes: usize) -> Option<u32> {
-    // Go: time/format.go parseNanoseconds
     if value[0] != b'.' && value[0] != b',' {
         return None;
     }
     let nbytes = nbytes.min(10);
     let digits = &value[1..nbytes];
     if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
-        // Go's atoi fails on an empty or non-digit string.
+        // An empty or non-digit string fails.
         return None;
     }
     let mut ns: u32 = 0;
@@ -862,13 +838,12 @@ fn parse_nanoseconds(value: &[u8], nbytes: usize) -> Option<u32> {
     Some(ns)
 }
 
-/// Go: `time.Parse(layout, value)` for a layout given as its chunks; `None` on any error.
+/// Parses `value` by a layout given as its chunks; `None` on any error.
 fn time_parse(layout: &[Chunk], value: &str) -> Option<DateTime<FixedOffset>> {
-    // Go: time/format.go parse
     let mut value = value.as_bytes();
     let (mut year, mut month, mut day) = (0i32, 0u32, 0u32);
     let (mut hour, mut min, mut sec, mut nsec) = (0u32, 0u32, 0u32, 0u32);
-    // Go's `z` (UTC from `Z`) and `zoneOffset` (-1 = none): `Some(seconds east)`.
+    // The zone offset (`Z` is UTC; none = `None`): `Some(seconds east)`.
     let mut zone_offset: Option<i32> = None;
 
     for (k, chunk) in layout.iter().enumerate() {
@@ -878,7 +853,7 @@ fn time_parse(layout: &[Chunk], value: &str) -> Option<DateTime<FixedOffset>> {
                 if value.len() < 4 || !is_digit(value, 0) {
                     return None;
                 }
-                // Go's atoi of value[0:4] (parseTimestamp checked the four digits).
+                // The year is value[0..4] (parse_timestamp checked the four digits).
                 let p = std::str::from_utf8(&value[..4]).ok()?;
                 year = p.parse().ok()?;
                 value = &value[4..];
@@ -925,7 +900,7 @@ fn time_parse(layout: &[Chunk], value: &str) -> Option<DateTime<FixedOffset>> {
                 // fractional second in the format?
                 if value.len() >= 2 && (value[0] == b'.' || value[0] == b',') && is_digit(value, 1)
                 {
-                    // Go: `_, std, _ = nextStdChunk(layout)`, the next non-literal chunk.
+                    // The next non-literal chunk.
                     let next = layout[k + 1..]
                         .iter()
                         .find(|c| !matches!(c, Chunk::Literal(_)));
@@ -950,7 +925,7 @@ fn time_parse(layout: &[Chunk], value: &str) -> Option<DateTime<FixedOffset>> {
                     continue;
                 }
                 // Take any number of digits, even more than asked for,
-                // because it is what the stdSecond case would do.
+                // because that is what the second chunk accepts.
                 let mut i = 0;
                 while i + 1 < value.len() && value[i + 1].is_ascii_digit() {
                     i += 1;
@@ -993,8 +968,8 @@ fn time_parse(layout: &[Chunk], value: &str) -> Option<DateTime<FixedOffset>> {
     // Validate the day of the month (and build the date).
     let date = NaiveDate::from_ymd_opt(year, month, day)?;
     let datetime = date.and_hms_nano_opt(hour, min, sec, nsec)?;
-    // Divergence (ledger 6c-1): Go accepts zone offsets up to 24:60 (25h); chrono's
-    // `FixedOffset` must be under 24h, so such a timestamp does not resolve here.
+    // yaml.v3 accepts zone offsets up to 24:60 (25h); chrono's `FixedOffset` must be under
+    // 24h, so such a timestamp does not resolve here.
     let offset = FixedOffset::east_opt(zone_offset.unwrap_or(0))?;
     offset.from_local_datetime(&datetime).single()
 }

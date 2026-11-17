@@ -13,17 +13,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! [`OtelBridge`]: the `tracing` layer that exports gadk's ADK spans (the 5a D6 layout) and log
+//! [`OtelBridge`]: the `tracing` layer that exports gadk's ADK spans and log
 //! records through the OpenTelemetry SDK providers.
 //!
-//! Spans and records are what Go's `internal/telemetry` hands its tracer and logger (scope
-//! `gcp.vertex.agent`, Go `systemName`), decoded by [`gadk_engine::telemetry::d6`]:
+//! Spans and records are what the engine's telemetry hands its tracer and logger (scope
+//! `gcp.vertex.agent`, see `SYSTEM_NAME`), decoded by [`gadk_engine::telemetry::d6`]:
 //! - an ADK span starts an SDK span (`Tracer::build_with_context`) under the context of its
 //!   nearest ADK ancestor (non-ADK spans are transparent; none → a new trace); the span's
 //!   registry extensions keep the `opentelemetry::Context` carrying it (an SDK `Span` is not
 //!   `Clone`) and its IDs as a [`SpanIds`], which later layers (the debug store) reuse;
-//! - its start attributes go to the span builder (the sampler sees them, as Go's
-//!   `trace.WithAttributes`); attributes recorded later are merged (a key recorded again keeps
+//! - its start attributes go to the span builder (the sampler sees them);
+//!   attributes recorded later are merged (a key recorded again keeps
 //!   its last value) and set when the span closes, with the status, before it ends;
 //! - a log event on `LOG_TARGET` is an SDK log record carrying the trace context of its nearest
 //!   ADK span.
@@ -45,7 +45,7 @@ use tracing_subscriber::Layer;
 use tracing_subscriber::layer::Context as LayerContext;
 use tracing_subscriber::registry::LookupSpan;
 
-/// Go `internal/telemetry` `systemName`: the instrumentation scope of ADK's tracer and logger.
+/// The instrumentation scope of ADK's tracer and logger.
 const SYSTEM_NAME: &str = "gcp.vertex.agent";
 
 /// Exports every ADK span (a `tracing` span declaring `otel.name`) as an SDK span on the tracer
@@ -72,10 +72,9 @@ impl OtelBridge {
     }
 }
 
-/// Go `tracer()` / `otelLogger()`: scope `gcp.vertex.agent` at the gadk version.
-// Divergence (ledger 7a): Go also sets the scope's schema URL from
-// ADK_TELEMETRY_SCHEMA_VERSION_OPT_IN (1.36.0 legacy, 1.44.0 otherwise); the engine's schema
-// choice is crate-private, so gadk's scope carries no schema URL.
+/// The instrumentation scope `gcp.vertex.agent` at the gadk version.
+// The scope's schema URL is not set: the engine's schema choice
+// (`ADK_TELEMETRY_SCHEMA_VERSION_OPT_IN`: 1.36.0 legacy, 1.44.0 otherwise) is crate-private.
 fn scope() -> InstrumentationScope {
     InstrumentationScope::builder(SYSTEM_NAME)
         .with_version(env!("CARGO_PKG_VERSION"))
@@ -182,7 +181,7 @@ where
         };
         let mut record = logger.create_log_record();
         record.set_event_name(intern(&log.event_name));
-        // Go sets a severity only on its DEBUG records (`log.SeverityDebug`); its other records
+        // A severity is set only on DEBUG records; other records
         // leave it unset.
         if log.level == tracing::Level::DEBUG {
             record.set_severity_number(Severity::Debug);
@@ -195,7 +194,7 @@ where
                 record.add_attribute(key, value);
             }
         }
-        // The trace context of the nearest ADK span the event is emitted under (Go: the span in
+        // The trace context of the nearest ADK span the event is emitted under (the span in
         // the record's context).
         let sc = ctx.event_scope(event).and_then(|mut scope| {
             scope.find_map(|s| {
@@ -218,8 +217,8 @@ where
         let otel_span = state.cx.span();
         // A start attribute recorded again with the same value is already on the span (the SDK
         // appends, it does not replace).
-        // Divergence (ledger 7a): a start attribute recorded again with a different value is
-        // exported twice (Go replaces it); no emitter does this today.
+        // A start attribute recorded again with a different value is
+        // exported twice (the SDK appends); no emitter does this today.
         let start = &state.start;
         otel_span.set_attributes(
             state
@@ -239,41 +238,38 @@ where
     }
 }
 
-/// One decoded D6 attribute as an SDK span attribute.
+/// One decoded `D6Value` attribute as an SDK span attribute.
 fn key_value(key: String, value: D6Value) -> KeyValue {
     KeyValue::new(key, span_value(value))
 }
 
-/// The SDK span value of a decoded D6 attribute. OTel Rust span values are scalars and
+/// The SDK span value of a decoded `D6Value` attribute. OTel Rust span values are scalars and
 /// homogeneous arrays only, so the kinds it cannot hold become strings.
 fn span_value(value: D6Value) -> Value {
     match value {
         D6Value::Str(s) => Value::String(s.into()),
         D6Value::I64(i) => Value::I64(i),
-        // Go's attribute package has no unsigned integer; ADK records none.
-        // Divergence (ledger 7a): a u64 is exported as its decimal text (above `i64::MAX` an
-        // OTel Rust `I64` cannot hold it).
+        // ADK records no unsigned integers. A u64 is exported as its decimal text (above
+        // `i64::MAX` an OTel Rust `I64` cannot hold it).
         D6Value::U64(u) => Value::String(u.to_string().into()),
         D6Value::F64(f) => Value::F64(f),
         D6Value::Bool(b) => Value::Bool(b),
         D6Value::StrSlice(items) => Value::Array(Array::String(
             items.into_iter().map(StringValue::from).collect(),
         )),
-        // Divergence (ledger 7a): Go exports SLICE and MAP attributes as OTLP array and kvlist
-        // values; OTel Rust span attributes cannot hold them, so a structured attribute is its
+        // OTel Rust span attributes cannot hold arrays or maps, so a structured attribute is its
         // JSON text.
         json @ D6Value::Json(_) => Value::String(json.to_json().to_string().into()),
-        // Divergence (ledger 7a): Go exports BYTESLICE as OTLP bytes; OTel Rust span attributes
-        // have no bytes, so the value is its base64 text (Go `attribute.Value.Emit`).
+        // OTel Rust span attributes have no bytes, so the value is its base64 text.
         D6Value::Bytes(b) => Value::String(base64(&b).into()),
     }
 }
 
-/// A JSON value as a log `AnyValue`, as Go's `toLogValue` builds it: a number is an integer when
+/// A JSON value as a log `AnyValue`: a number is an integer when
 /// it fits `i64`, else a float, else its text. OTel Rust's `AnyValue` has no empty value: a
-/// `null` (Go's EMPTY) is `None`, and dropped from maps and lists.
+/// `null` is `None`, and dropped from maps and lists.
 ///
-/// Divergence (ledger 7a): a JSON `null` is dropped (no empty `AnyValue`), and a `null` body
+/// A JSON `null` is dropped (no empty `AnyValue`), and a `null` body
 /// leaves the record without a body.
 fn any_value(value: Json) -> Option<AnyValue> {
     Some(match value {
@@ -297,7 +293,7 @@ fn any_value(value: Json) -> Option<AnyValue> {
 }
 
 /// The process-wide table of log event names: `LogRecord::set_event_name` takes a
-/// `&'static str`, and gadk emits a fixed set of Go event names, each leaked once.
+/// `&'static str`, and gadk emits a fixed set of event names, each leaked once.
 static EVENT_NAMES: LazyLock<Mutex<HashSet<&'static str>>> = LazyLock::new(Mutex::default);
 
 /// `name` as a `&'static str`, from [`EVENT_NAMES`].
@@ -311,8 +307,7 @@ fn intern(name: &str) -> &'static str {
     interned
 }
 
-/// Standard base64 with padding (Go `base64.StdEncoding`, as `attribute.Value.Emit` prints a
-/// BYTESLICE).
+/// Standard base64 with padding, as printed for a bytes attribute.
 fn base64(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);

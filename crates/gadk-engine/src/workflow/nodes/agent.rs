@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `AgentNode` (port of Go workflow/agent_node.go).
+//! `AgentNode`: a graph node that runs an agent.
 
 use std::any::Any;
 use std::sync::Arc;
@@ -36,26 +36,24 @@ use crate::workflow::route::go_quote;
 use crate::workflow::scheduler::message_text;
 use crate::workflow::{BaseNode, Node, NodeConfig};
 
-/// Port of Go workflow.AgentNode: a graph node that runs an agent.
+/// A graph node that runs an agent.
 pub struct AgentNode {
     pub(crate) base: BaseNode,
     pub(crate) agent: Arc<dyn Agent>,
-    /// Go `modelOutputSchema` (be529e7b): the output schema in the form the model is asked to
-    /// answer with, or `None`. `run` binds it per invocation
-    /// ([`crate::llm::output_schema_binding::with_bound_output_schema`]) rather than setting it on
-    /// the agent.
+    /// The output schema in the form the model is asked to answer with, or `None`. `run` binds it
+    /// per invocation ([`crate::llm::output_schema_binding::with_bound_output_schema`]) rather than
+    /// setting it on the agent.
     pub(crate) model_output_schema: Option<Schema>,
 }
 
 impl AgentNode {
-    /// Port of Go NewAgentNode: schemas inferred for `any`, i.e. the empty schema `{}`.
+    /// A node running `agent` with no declared schemas: both are the empty schema `{}`.
     pub fn new(agent: Arc<dyn Agent>, cfg: NodeConfig) -> Result<Arc<AgentNode>, WorkflowError> {
         Self::with_schemas(agent, None, None, cfg)
     }
 
-    /// Port of Go NewAgentNodeWithSchemas / newAgentNodeWithSchemasTyped[any, any]. A missing
-    /// schema is Go's `jsonschema.For[any]`, the empty schema `{}`. (Go's "agent cannot be nil"
-    /// is unreachable: an `Arc` is never null.)
+    /// A node running `agent` with the given input and output schemas. A missing schema is the
+    /// empty schema `{}`.
     pub fn with_schemas(
         agent: Arc<dyn Agent>,
         input: Option<Value>,
@@ -120,7 +118,7 @@ impl Node for AgentNode {
     fn validate_output(&self, v: Value) -> Result<Value, WorkflowError> {
         self.base.validate_output(v)
     }
-    /// Port of Go (*AgentNode).Run: runs the agent on a fresh invocation context over the node's
+    /// Runs the agent on a fresh invocation context over the node's
     /// (input as user content, agent replaced, branch and isolation scope inherited); an
     /// undeclared LlmAgent mode binds to single_turn. Own final model text becomes the output
     /// (except for task-mode agents), and events are stamped with the ctx isolation scope.
@@ -135,11 +133,9 @@ impl Node for AgentNode {
                     return;
                 }
             };
-            // Go's untyped-nil ctx check has no Rust counterpart.
             let declared_mode: Option<Mode> = reveal(agent.as_ref()).map(|s| s.cfg.mode);
-            // A fresh agent context over the node's invocation (Go
-            // internalcontext.NewInvocationContext + agent.NewContext): the Context-level fields
-            // reset, agent and user content replaced, the end flag copied from ctx.Ended().
+            // A fresh agent context over the node's invocation: the Context-level fields reset,
+            // agent and user content replaced, the end flag copied from the node's context.
             let mut delta = ContextDelta {
                 agent: Some(Arc::clone(&agent)),
                 user_content: Some(user_content),
@@ -159,10 +155,9 @@ impl Node for AgentNode {
                 // bound under this agent's own key.
                 let mode = resolve_mode(declared, Mode::SingleTurn);
                 let bound = with_bound_mode(ctx.as_invocation(), agent.name(), agent.agent_state(), mode);
-                // Offer the node's output shape to the model (Go be529e7b). Each request decides
-                // whether to use it, against the mode bound for it and the agent's own setup. A
-                // `None` schema is still bound, so this placement clears one an outer placement
-                // bound.
+                // Offer the node's output shape to the model. Each request decides whether to
+                // use it, against the mode bound for it and the agent's own setup. A `None`
+                // schema is still bound, so this placement clears one an outer placement bound.
                 let bound = with_bound_output_schema(
                     &bound,
                     agent.name(),
@@ -172,13 +167,13 @@ impl Node for AgentNode {
                 delta.bound_modes = Some(bound.bound_modes().clone());
             }
             let ex_ctx = ctx.with_delta(delta);
-            // Go: an agent implementing NodeRunner (LlmAgent) runs via RunNode.
+            // An LLM agent runs through its node entry point.
             let mut events = if declared_mode.is_some() {
                 run_llm_agent_as_node(ex_ctx, Arc::clone(&agent), input)
             } else {
                 agent.run(ex_ctx.as_invocation().clone())
             };
-            // Task-mode LlmAgents set their output via runTask, not model text.
+            // Task-mode LlmAgents set their output through the task run, not model text.
             let synthesize = declared_mode != Some(Mode::Task);
             let scope = ctx.isolation_scope();
             while let Some(item) = events.next().await {
@@ -207,7 +202,7 @@ impl Node for AgentNode {
     }
 }
 
-/// Port of Go synthesizeAgentOutput: a final model response without output gets the concatenated
+/// A final model response without output gets the concatenated
 /// model text as output (empty text is an empty `""` output) and `node_info.message_as_output`.
 /// Long-running-tool events are a pause, not a completion, and are left untouched.
 pub(crate) fn synthesize_agent_output(ev: &mut Event) {
@@ -222,15 +217,15 @@ pub(crate) fn synthesize_agent_output(ev: &mut Event) {
     }
 }
 
-/// Port of Go isOwnAgentEvent: un-authored events count as the node agent's own.
+/// Whether the event is the node agent's own: un-authored events count as its own.
 pub(crate) fn is_own_agent_event(ev: &Event, node_agent_name: &str) -> bool {
     ev.author.is_empty() || ev.author == node_agent_name
 }
 
-/// Port of Go nodeInputToContent: null → none; a string → user text; anything else → its Go
-/// `json.Marshal` text as user text. (Go's `*genai.Content` and `json.Marshaler` cases have no
-/// `Value` counterpart, and marshaling a `Value` cannot fail, so the error branch is unreachable;
-/// the `Result` is kept for the signature.)
+/// The user content for a node's input: null → none; a string → user text; anything else → its
+/// compact JSON text (keys sorted, `<`, `>` and `&` written as Unicode escapes, as
+/// `go_json_marshal` writes it) as user text. Marshaling a `Value` cannot fail, so
+/// the error branch is unreachable; the `Result` is kept for the signature.
 pub(crate) fn node_input_to_content(input: &Value) -> Result<Option<Content>, AgentError> {
     match input {
         Value::Null => Ok(None),

@@ -13,29 +13,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go workflow/model_output_schema.go (be529e7b, #2194): the schema an agent node asks
-//! the model to answer with, derived from the node's resolved output schema.
+//! The schema an agent node asks the model to answer with, derived from the node's resolved
+//! output schema.
 
 use gadk_genai::{Schema, Type};
 use serde_json::{Map, Value};
 
-/// Port of Go modelOutputSchema: the schema an agent node asks the model to answer with, derived
-/// from the node's output schema, or `None` to leave the model unconstrained as it was before
-/// typed nodes passed their schema on.
+/// The schema an agent node asks the model to answer with, derived from the node's output
+/// schema, or `None` to leave the model unconstrained.
 ///
 /// Only a closed, non-null object with at least one property qualifies. A string output sent as
 /// a response schema makes the model answer with a quoted JSON string, and the set_model_response
 /// tool needs object parameters, so primitive, array, map and nullable outputs stay
-/// unconstrained. Every object must also set `additionalProperties` to `false`, as a Go struct
-/// does: set_model_response rejects keys its schema does not list, so an open object would turn
-/// an answer the node accepts into an error.
+/// unconstrained. Every object must also set `additionalProperties` to `false`: set_model_response
+/// rejects keys its schema does not list, so an open object would turn an answer the node
+/// accepts into an error.
 ///
 /// A nullable property (a `"null"` in its type list) keeps `nullable`: set_model_response accepts
 /// a null argument only when its schema is nullable.
 ///
 /// The result is a hint, not the contract: the node still validates the reply against the full
-/// schema. So a schema that `genai.Schema` cannot carry yields `None` rather than an error, and
-/// constructing a node never fails because of it.
+/// schema. So a schema that the model API's [`Schema`] cannot carry yields `None` rather than an
+/// error, and constructing a node never fails because of it.
 pub(crate) fn model_output_schema(resolved: Option<&Value>) -> Option<Schema> {
     let root = resolved?.as_object()?;
     if type_list(root).is_some_and(|ts| ts.iter().any(|t| t == "null")) {
@@ -45,7 +44,7 @@ pub(crate) fn model_output_schema(resolved: Option<&Value>) -> Option<Schema> {
     (s.r#type == Some(Type::Object)).then_some(s)
 }
 
-/// The `"type"` keyword as a list of names when it is an array (Go `Schema.Types`).
+/// The `"type"` keyword as a list of names when it is an array.
 fn type_list(s: &Map<String, Value>) -> Option<Vec<String>> {
     match s.get("type")? {
         Value::Array(ts) => Some(
@@ -57,7 +56,7 @@ fn type_list(s: &Map<String, Value>) -> Option<Vec<String>> {
     }
 }
 
-/// Go genaiTypes.
+/// The model API type for a JSON schema type name; `None` for `"null"` and unknown names.
 fn genai_type(name: &str) -> Option<Type> {
     match name {
         "string" => Some(Type::String),
@@ -70,7 +69,7 @@ fn genai_type(name: &str) -> Option<Type> {
     }
 }
 
-/// Port of Go toGenaiSchema: converts the shape of `s` (types, properties, required fields, array
+/// Converts the shape of `s` (types, properties, required fields, array
 /// items, string enums, title and description). Value constraints (bounds, lengths, pattern) and
 /// annotations (format, default, examples) are dropped. A `"null"` in a type list becomes
 /// `nullable`. `None` for anything else: an untyped (`true` / `{}`) schema, a map or other open
@@ -144,7 +143,7 @@ fn string_keyword(s: &Map<String, Value>, key: &str) -> Option<String> {
     }
 }
 
-/// Port of Go onlyKnownKeywords: whether `s` uses nothing beyond the keywords
+/// Whether `s` uses nothing beyond the keywords
 /// [`to_genai_schema`] converts or deliberately drops, so an unknown keyword is rejected rather
 /// than silently lost. `additionalProperties` is dropped only when it is the false schema; any
 /// other value describes a map.
@@ -191,8 +190,7 @@ fn only_known_keywords(s: &Map<String, Value>) -> bool {
     })
 }
 
-/// Port of Go isFalseSchema: the schema that matches nothing (`false`, or jsonschema-go's
-/// `{"not": {}}`).
+/// Whether `v` is the schema that matches nothing (`false`, or `{"not": {}}`).
 fn is_false_schema(v: &Value) -> bool {
     match v {
         Value::Bool(b) => !b,
@@ -205,7 +203,7 @@ fn is_false_schema(v: &Value) -> bool {
     }
 }
 
-/// Port of Go schemaType: the genai type of `s` and whether it is nullable. A type list may pair
+/// The model API type of `s` and whether it is nullable. A type list may pair
 /// one type with `"null"`; no type, or more than one non-null type, has no genai equivalent.
 fn schema_type(s: &Map<String, Value>) -> Option<(Type, bool)> {
     match s.get("type")? {

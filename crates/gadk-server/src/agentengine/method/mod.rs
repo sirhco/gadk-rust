@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `server/agentengine/controllers/method`: `MethodHandler` and the six methods.
+//! [`MethodHandler`] and the six Agent Engine methods.
 
 pub(crate) mod create_session;
 pub(crate) mod delete_session;
@@ -28,24 +28,23 @@ use serde_json::{Map, Value};
 
 use crate::mux::Response;
 
-/// Go `MethodHandler`: one `class_method` of the Agent Engine API.
+/// One `class_method` of the Agent Engine API.
 #[async_trait::async_trait]
 pub(crate) trait MethodHandler: Send + Sync {
-    /// Go `Name`: the `class_method` it serves.
+    /// The `class_method` it serves.
     fn name(&self) -> &str;
 
-    /// Go `Handle(ctx, rw, payload)`: `payload` is the whole (size-limited) request body.
+    /// Handles one query: `payload` is the whole (size-limited) request body.
     /// `Ok` is the response to send (a streaming body for the stream methods); `Err(text)` is a
-    /// Go handler error, answered 500 `text` and logged `handleQuery failed: text` by the
-    /// controller (only before anything is written, as in Go).
+    /// handler error, answered 500 `text` and logged `handleQuery failed: text` by the
+    /// controller (only before anything is written).
     async fn handle(&self, payload: Bytes) -> Result<Response, String>;
 
-    /// Go `Metadata`: the map Go passes to `structpb.NewStruct` (`api_mode`, `name`,
-    /// `parameters`, `description`).
+    /// The method's metadata map (`api_mode`, `name`, `parameters`, `description`).
     fn metadata(&self) -> Map<String, Value>;
 }
 
-/// Go `Metadata()`'s map: `api_mode`, `name`, `parameters` (a JSON schema) and `description`.
+/// A method's metadata map: `api_mode`, `name`, `parameters` (a JSON schema) and `description`.
 pub(crate) fn method_metadata(
     method_name: &str,
     api_mode: &str,
@@ -63,10 +62,9 @@ pub(crate) fn method_metadata(
     m
 }
 
-/// A plain Go `json.NewEncoder(rw).Encode(v)` response of a session method: 200, the JSON
-/// (`gadk_model::to_go_json`) plus `\n`, `Content-Type: text/plain; charset=utf-8` (Go's
-/// sniffed type; no other headers). An encoding failure is Go's
-/// `json.NewEncoder failed: <err>`.
+/// A plain JSON response of a session method: 200, the JSON (`gadk_model::to_go_json`) plus
+/// `\n`, `Content-Type: text/plain; charset=utf-8` (the type a sniffing server would pick; no
+/// other headers). An encoding failure is the `Err` of the encoder's error text.
 pub(crate) fn encode_plain<T: serde::Serialize>(v: &T) -> Result<Response, String> {
     let mut body = gadk_model::to_go_json(v).map_err(|e| format!("json.NewEncoder failed: {e}"))?;
     body.push(b'\n');
@@ -78,9 +76,9 @@ pub(crate) fn encode_plain<T: serde::Serialize>(v: &T) -> Result<Response, Strin
     Ok(resp)
 }
 
-/// A session service error as the method reports it: Go's in-memory service texts.
-/// `NotFound` gains Go's `: "<session_id>"` suffix (the 5a REST rule) and `InvalidRequest` drops
-/// gadk's `invalid request: ` prefix (Go's error is the bare text); any other error is its
+/// A session service error as the method reports it, using the in-memory service's texts.
+/// `NotFound` gains a `: "<session_id>"` suffix (as in the REST server) and `InvalidRequest`
+/// drops gadk's `invalid request: ` prefix (the bare text is reported); any other error is its
 /// `Display`.
 pub(crate) fn session_error_text(err: &SessionError, session_id: &str) -> String {
     match err {

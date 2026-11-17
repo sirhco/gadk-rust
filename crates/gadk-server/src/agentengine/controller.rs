@@ -12,7 +12,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//! Go `server/agentengine/controllers/agent_engine.go`: `AgentEngineAPIController`.
+//! The Agent Engine API controller: dispatches a query to the method handler it names.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -30,28 +30,26 @@ use super::models::Query;
 use super::unmarshal::go_unmarshal;
 use crate::mux::{Request, Response, WriteDeadline, http_error};
 
-/// Go `defaultSSETimeout`: the write deadline when none is configured.
+/// The write deadline used when none is configured.
 pub(crate) const DEFAULT_SSE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
-/// Go `AgentEngineAPIController`: dispatches a query to the method named by `class_method`.
-/// Go's unused `service` field has no counterpart.
+/// Dispatches a query to the method named by `class_method`.
 pub(crate) struct Controller {
-    /// Go `handlers`: by method name.
+    /// The method handlers, by method name.
     pub(crate) handlers: HashMap<String, Arc<dyn MethodHandler>>,
-    /// Go `maxPayloadSize`: bytes of body read; the rest is silently dropped (`<= 0` reads
+    /// Maximum number of body bytes read; the rest is silently dropped (`<= 0` reads
     /// nothing).
     pub(crate) max_payload_size: i64,
-    /// Go `sseTimeout` after `NewAgentEngineAPIController` replaced zero with 120 s; negative
+    /// The write timeout, after [`Controller::new`] has replaced zero with 120 s; negative
     /// means no write deadline.
     pub(crate) sse_timeout: GoDuration,
-    /// Go `log`.
+    /// Where log lines go.
     pub(crate) log: Log,
 }
 
 impl Controller {
-    /// Go `NewAgentEngineAPIController`: the handlers by name (a repeated name is `Err(name)`,
-    /// Go's `duplicate method name: %v`), and a zero `sse_timeout` replaced by
-    /// [`DEFAULT_SSE_TIMEOUT`].
+    /// Builds a controller: the handlers are keyed by name (a repeated name is `Err(name)`), and
+    /// a zero `sse_timeout` is replaced by [`DEFAULT_SSE_TIMEOUT`].
     pub(crate) fn new(
         sse_timeout: GoDuration,
         max_payload_size: i64,
@@ -79,21 +77,22 @@ impl Controller {
         })
     }
 
-    /// Go `Query`:
+    /// Answers one query:
     /// 1. the request's [`WriteDeadline`](crate::mux::WriteDeadline) is set to now +
-    ///    `sse_timeout`, or cleared (`None`) when it is negative; without the extension Go's
-    ///    `SetWriteDeadline` fails and `SetWriteDeadline failed: feature not supported` is logged;
-    /// 2. a present body (not already at end of stream, Go's `req.Body != http.NoBody`) is read up
+    ///    `sse_timeout`, or cleared (`None`) when it is negative; without the extension
+    ///    `SetWriteDeadline failed: feature not supported` is logged;
+    /// 2. a present body (one not already at end of stream) is read up
     ///    to `max_payload_size` bytes; a read error answers 400
-    ///    `io.ReadAll with LimitReader failed: <err>`; the bytes are decoded as `models.Query` by
-    ///    [`go_unmarshal`](super::unmarshal::go_unmarshal), an error answering 400 with its text;
+    ///    with the body-read error text (see the literal in this function); the bytes are
+    ///    decoded as `Query` by [`go_unmarshal`](super::unmarshal::go_unmarshal), an error
+    ///    answering 400 with its text;
     ///    an absent body leaves `class_method` empty and the payload empty;
     /// 3. the payload goes to the handler named `class_method`: unknown → 500
     ///    `unrecognized class method: <name>`; a handler `Err(text)` → 500 `text`; each 500 is
-    ///    also logged `handleQuery failed: <text>`. Error answers are Go `http.Error`
-    ///    ([`crate::mux::http_error`]).
+    ///    also logged `handleQuery failed: <text>`. Error answers are written by
+    ///    [`crate::mux::http_error`].
     pub(crate) async fn query(&self, req: Request) -> Response {
-        // Go: `time.Now().Add(sseTimeout)` when positive, else the zero time (no deadline). A
+        // Now plus `sse_timeout` when positive, else no deadline. A
         // deadline past `Instant`'s range is no deadline.
         let deadline = match self.sse_timeout.to_std() {
             Some(d) if !d.is_zero() => tokio::time::Instant::now().checked_add(d),
@@ -138,8 +137,7 @@ impl Controller {
     }
 }
 
-/// Go `io.ReadAll(io.LimitReader(body, max))`: at most `max` bytes (none when `max <= 0`), the
-/// rest left unread.
+/// Reads at most `max` bytes of `body` (none when `max <= 0`), leaving the rest unread.
 async fn read_limited(body: Body, max: i64) -> Result<Bytes, axum::Error> {
     let limit = usize::try_from(max).unwrap_or(0);
     let mut out = Vec::new();

@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `cmd/launcher/full`: every sub-launcher.
+//! The `full` preset: every sub-launcher.
 
 use crate::universal::UniversalLauncher;
 use crate::web::a2a;
@@ -21,7 +21,7 @@ use crate::web::api;
 use crate::web::triggers::{eventarc, pubsub};
 use crate::web::webui;
 
-/// Go `full.NewLauncher()` = universal(console, web(webui, a2a, pubsub, eventarc, api)).
+/// The `full` launcher: universal(console, web(webui, a2a, pubsub, eventarc, api)).
 pub fn new() -> UniversalLauncher {
     UniversalLauncher::new(vec![
         Box::new(crate::console::new()),

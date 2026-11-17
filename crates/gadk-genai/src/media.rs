@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! File and image types (port of genai v1.77.0 `types.go`).
+//! File and image types.
 
 use crate::serde_util::{base64_bytes, i64_string_opt, is_zero};
 use bytes::Bytes;
@@ -23,7 +23,7 @@ use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 
 crate::string_enum!(
-    /// Port of genai `PersonGeneration`. Enum that controls the generation of people.
+    /// Enum that controls the generation of people.
     PersonGeneration {
         DontAllow => "DONT_ALLOW",
         AllowAdult => "ALLOW_ADULT",
@@ -32,8 +32,7 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// Port of genai `SafetyFilterLevel`. Enum that controls the safety filter level for
-    /// objectionable content.
+    /// Enum that controls the safety filter level for objectionable content.
     SafetyFilterLevel {
         BlockLowAndAbove => "BLOCK_LOW_AND_ABOVE",
         BlockMediumAndAbove => "BLOCK_MEDIUM_AND_ABOVE",
@@ -43,8 +42,7 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// Port of genai `ImagePromptLanguage`. Enum that specifies the language of the text in the
-    /// prompt.
+    /// Enum that specifies the language of the text in the prompt.
     ImagePromptLanguage {
         Auto => "auto",
         En => "en",
@@ -58,7 +56,7 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// Port of genai `FileState`. State for the lifecycle of a File.
+    /// State for the lifecycle of a File.
     FileState {
         Unspecified => "STATE_UNSPECIFIED",
         Processing => "PROCESSING",
@@ -68,7 +66,7 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// Port of genai `FileSource`. Source of the File.
+    /// Source of the File.
     FileSource {
         Unspecified => "SOURCE_UNSPECIFIED",
         Uploaded => "UPLOADED",
@@ -77,7 +75,7 @@ crate::string_enum!(
     }
 );
 
-/// Port of genai types.go `GenerateImagesConfig`. The configuration for generating images. You
+/// The configuration for generating images. You
 /// can find API default values and more details at Gemini Enterprise Agent Platform:
 /// <https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/imagen-api>.
 /// GeminiAPI: <https://ai.google.dev/gemini-api/docs/imagen#imagen-model>
@@ -120,7 +118,7 @@ pub struct GenerateImagesConfig {
     pub enhance_prompt: bool,
 }
 
-/// Port of genai types.go `Image`. An image.
+/// An image.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Image {
@@ -136,8 +134,7 @@ pub struct Image {
     pub mime_type: String,
 }
 
-/// Port of genai types.go `SafetyAttributes`. Safety attributes of a GeneratedImage or the
-/// user-provided prompt.
+/// Safety attributes of a GeneratedImage or the user-provided prompt.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SafetyAttributes {
@@ -149,7 +146,7 @@ pub struct SafetyAttributes {
     pub content_type: String,
 }
 
-/// Port of genai types.go `GeneratedImage`. An output image.
+/// An output image.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GeneratedImage {
@@ -163,7 +160,7 @@ pub struct GeneratedImage {
     pub enhanced_prompt: String,
 }
 
-/// Port of genai types.go `GenerateImagesResponse`. The output images response.
+/// The output images response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateImagesResponse {
@@ -173,7 +170,7 @@ pub struct GenerateImagesResponse {
     pub positive_prompt_safety_attributes: Option<SafetyAttributes>,
 }
 
-/// Port of genai types.go `FileStatus`. Status of a File that uses a common error model.
+/// Status of a File that uses a common error model.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileStatus {
@@ -185,7 +182,7 @@ pub struct FileStatus {
     pub code: Option<i32>,
 }
 
-/// Port of genai types.go `File`. A file uploaded to the API.
+/// A file uploaded to the API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct File {

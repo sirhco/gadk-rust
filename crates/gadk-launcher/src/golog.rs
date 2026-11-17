@@ -13,10 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go's default `log` logger (`log.Printf`, `log.Println`), writing to an injectable sink.
+//! A line logger in the standard-library style, writing to an injectable sink.
 //!
-//! Every line is `YYYY/MM/DD HH:MM:SS ` (local time, Go `log.LstdFlags`) followed by the message
-//! and a newline when the message does not end with one.
+//! Every line is `YYYY/MM/DD HH:MM:SS ` (local time) followed by the message and a newline when
+//! the message does not end with one.
 
 use std::io::Write;
 use std::sync::{Arc, Mutex};
@@ -24,7 +24,7 @@ use std::sync::{Arc, Mutex};
 type Sink = Arc<Mutex<Box<dyn Write + Send>>>;
 type Clock = Arc<dyn Fn() -> String + Send + Sync>;
 
-/// Go's default `log` logger: `YYYY/MM/DD HH:MM:SS ` (local time) + message + `\n` if missing.
+/// The launcher's logger: `YYYY/MM/DD HH:MM:SS ` (local time) + message + `\n` if missing.
 #[derive(Clone)]
 pub struct Logger {
     sink: Sink,
@@ -37,7 +37,7 @@ impl std::fmt::Debug for Logger {
     }
 }
 
-/// Go `log.LstdFlags` prefix for the current local time.
+/// The `YYYY/MM/DD HH:MM:SS ` prefix for the current local time.
 fn local_prefix() -> String {
     chrono::Local::now()
         .format("%Y/%m/%d %H:%M:%S ")
@@ -45,7 +45,7 @@ fn local_prefix() -> String {
 }
 
 impl Logger {
-    /// Writes to the process's stderr, as Go's default logger does.
+    /// Writes to the process's stderr.
     pub fn stderr() -> Logger {
         Logger::to_writer(std::io::stderr())
     }
@@ -66,9 +66,8 @@ impl Logger {
         }
     }
 
-    /// Go `log.Printf`/`log.Print` with the message already formatted: one write of the prefix,
-    /// the message and a trailing newline when `msg` lacks one. Write errors are ignored, as
-    /// Go's `log.Printf` ignores them.
+    /// Logs a message that is already formatted: one write of the prefix, the message and a
+    /// trailing newline when `msg` lacks one. Write errors are ignored.
     pub fn print(&self, msg: &str) {
         let mut line = (self.clock)();
         line.push_str(msg);
@@ -80,7 +79,7 @@ impl Logger {
         let _ = sink.flush();
     }
 
-    /// Go `log.Println()` with no arguments (prefix + `\n`).
+    /// Logs an empty line (prefix + `\n`).
     pub fn println_empty(&self) {
         self.print("\n");
     }

@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `ParallelWorker` (port of Go workflow/parallel_worker.go).
+//! `ParallelWorker`: runs a wrapped node once per item of a list input.
 
 use std::any::Any;
 use std::sync::Arc;
@@ -36,7 +36,7 @@ use crate::workflow::nodes::AgentNode;
 use crate::workflow::scheduler::{record_node_error, start_node_span};
 use crate::workflow::{BaseNode, Node, NodeConfig, RetryConfig, calculate_delay, should_retry};
 
-/// Port of Go workflow.ParallelWorker: runs a wrapped node once per item of a list input.
+/// Runs a wrapped node once per item of a list input.
 pub struct ParallelWorker {
     pub(crate) base: BaseNode,
     pub(crate) wrapped: Arc<dyn Node>,
@@ -45,9 +45,8 @@ pub struct ParallelWorker {
 }
 
 impl ParallelWorker {
-    /// Port of Go NewParallelWorker. The wrapped node may not carry its own RetryConfig; the
-    /// worker's own RetryConfig is taken out of `cfg` (hidden from the scheduler) and applied per
-    /// item.
+    /// Wraps `wrapped`. The wrapped node may not carry its own RetryConfig; the worker's own
+    /// RetryConfig is taken out of `cfg` (hidden from the scheduler) and applied per item.
     pub fn new(
         name: &str,
         wrapped: Arc<dyn Node>,
@@ -95,16 +94,15 @@ impl Node for ParallelWorker {
     fn validate_output(&self, v: Value) -> Result<Value, WorkflowError> {
         self.base.validate_output(v)
     }
-    /// Port of Go (*ParallelWorker).Run: runs the wrapped node once per list item (at most
+    /// Runs the wrapped node once per list item (at most
     /// `max_concurrency` at a time; 0 = unlimited), each item under its own sub-branch
     /// `<wrapped>@<i+1>` and retried independently under the worker's RetryConfig. The first
     /// non-retryable failure cancels the in-flight siblings and is the node's error; otherwise one
     /// event carries the per-index outputs. Intermediate wrapped events are suppressed. Each item
-    /// task runs on a fresh fiber spawned with [`PARALLEL_WORKER_CREATOR`] (Go's `go
-    /// n.runWorker(..)` goroutine; its retries stay on it). Dropping the stream drops the
-    /// `JoinSet`, aborting the workers, where Go's `Run` keeps ranging its results until
-    /// `wg.Wait`; the engine never drops it mid-await (the scheduler drains its node tasks), so
-    /// only a direct user of the stream sees the abort.
+    /// task runs on a fresh fiber spawned with [`PARALLEL_WORKER_CREATOR`] (its retries stay on
+    /// it). Dropping the stream drops the `JoinSet`, aborting the workers; the engine never drops
+    /// it mid-await (the scheduler drains its node tasks), so only a direct user of the stream
+    /// sees the abort.
     fn run(&self, ctx: Context, input: Value) -> EventStream {
         let name = self.base.name().to_string();
         let wrapped = Arc::clone(&self.wrapped);
@@ -168,7 +166,7 @@ impl Node for ParallelWorker {
                     retry: retry.clone(),
                     first_err: Arc::clone(&first_err),
                 };
-                // Go `go n.runWorker(..)`: a goroutine started by the one running the node.
+                // A fiber started by the one running the node.
                 let worker_fiber = fiber::spawn_child(PARALLEL_WORKER_CREATOR);
                 set.spawn(worker_fiber.scope(job.run(i, item, permit)).in_current_span());
             }
@@ -182,16 +180,16 @@ impl Node for ParallelWorker {
                     }
                     Ok((_, None)) => {}
                     // A panicking worker re-raises into the node's task, where the scheduler turns
-                    // it into the node's failure (Go would crash the process).
+                    // it into the node's failure.
                     Err(e) if e.is_panic() => std::panic::resume_unwind(e.into_panic()),
                     Err(_) => {}
                 }
             }
             drop(guard);
             let mut err = first_err.lock().take();
-            // Go dc44b8c9: items skipped at dispatch, and workers that return without an error
-            // once ctx is done, report no failure. Without this check the node would yield a
-            // partial or post-cancellation result as a success.
+            // Items skipped at dispatch, and workers that return without an error once ctx is
+            // done, report no failure. Without this check the node would yield a partial or
+            // post-cancellation result as a success.
             if err.is_none() && ctx.cancellation_token().is_cancelled() {
                 err = Some(context_err(&ctx));
             }
@@ -209,13 +207,12 @@ impl Node for ParallelWorker {
     }
 }
 
-/// Port of Go extractOutput: the event's output (a `Value::Null` output is Go's nil).
+/// The event's output (a `Value::Null` output counts as none).
 fn extract_output(ev: &Event) -> Option<Value> {
     ev.output.clone().filter(|v| !v.is_null())
 }
 
-/// Port of Go makeWorkerOutputEvent, as the output value it would carry: none, the single
-/// output, or the list of outputs.
+/// The output value of an item's worker event: none, the single output, or the list of outputs.
 fn make_worker_output(mut outputs: Vec<Value>) -> Option<Value> {
     match outputs.len() {
         0 => None,
@@ -224,8 +221,8 @@ fn make_worker_output(mut outputs: Vec<Value>) -> Option<Value> {
     }
 }
 
-/// Port of Go reportFailure (`sync.Once`): the first error wins and cancels the siblings plainly
-/// (Go `cancelFunc()`) through the worker context's cancel scope, which every item context shares.
+/// The first error wins and cancels the siblings plainly through the worker context's cancel
+/// scope, which every item context shares.
 fn report_failure(first: &Mutex<Option<AgentError>>, ctx: &Context, err: AgentError) {
     let mut g = first.lock();
     if g.is_none() {
@@ -234,10 +231,9 @@ fn report_failure(first: &Mutex<Option<AgentError>>, ctx: &Context, err: AgentEr
     }
 }
 
-/// Port of Go (*ParallelWorker).runWrappedOnce: one attempt under its own `invoke_node` span, so
-/// each item and each retry attempt is a distinct span. An `AgentNode`'s attempt is marked as a
-/// worker attempt on the item's fiber (`with_attempt(Worker, ..)`, Go's `attemptWorker`, which
-/// Go's trace manager reads off the goroutine's stack).
+/// One attempt under its own `invoke_node` span, so each item and each retry attempt is a
+/// distinct span. An `AgentNode`'s attempt is marked as a worker attempt on the item's fiber
+/// (`with_attempt(Worker, ..)`), which the trace manager reads to tell worker attempts apart.
 async fn run_wrapped_once(
     wrapped: &Arc<dyn Node>,
     ctx: &Context,
@@ -276,7 +272,7 @@ async fn run_wrapped_attempt(
     res
 }
 
-/// One item's worker (Go runWorker's captured state).
+/// One item's worker and the state it captures.
 struct Worker {
     wrapped: Arc<dyn Node>,
     ctx: Context,
@@ -285,8 +281,8 @@ struct Worker {
 }
 
 impl Worker {
-    /// Port of Go (*ParallelWorker).runWorker. Failures are reported before the semaphore permit
-    /// is released (the permit drops when this returns).
+    /// Runs the item, retrying under the worker's RetryConfig. Failures are reported before the
+    /// semaphore permit is released (the permit drops when this returns).
     async fn run(
         self,
         idx: usize,
@@ -308,8 +304,7 @@ impl Worker {
                         tokio::select! {
                             () = tokio::time::sleep(delay) => continue,
                             () = self.ctx.cancellation_token().cancelled() => {
-                                // Cancellation while parked in the retry delay is a real failure
-                                // (Go `reportFailure(ctx.Err())`).
+                                // Cancellation while parked in the retry delay is a real failure.
                                 report_failure(&self.first_err, &self.ctx, context_err(&self.ctx));
                                 return (idx, None);
                             }

@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `WorkflowNode` (port of Go workflow/workflow_node.go).
+//! `WorkflowNode`: a graph node that runs a nested workflow.
 
 use std::any::Any;
 use std::collections::HashMap;
@@ -32,14 +32,14 @@ use crate::workflow::route::go_quote;
 use crate::workflow::scheduler::{build_nodes_by_name, child_event_output, wf_error};
 use crate::workflow::{BaseNode, Edge, Node, NodeConfig, Workflow, WorkflowOptions};
 
-/// Port of Go workflow.WorkflowNode: a graph node that runs a nested workflow.
+/// A graph node that runs a nested workflow.
 pub struct WorkflowNode {
     pub(crate) base: BaseNode,
     pub(crate) sub_workflow: Arc<Workflow>,
 }
 
 impl WorkflowNode {
-    /// Port of Go NewWorkflowNode: builds the nested workflow named `name` from `edges`.
+    /// Builds the nested workflow named `name` from `edges`.
     pub fn new(name: &str, edges: Vec<Edge>) -> Result<Arc<WorkflowNode>, WorkflowError> {
         let wf = Workflow::new(name, edges, WorkflowOptions::default())?;
         Ok(Arc::new(WorkflowNode {
@@ -71,8 +71,8 @@ impl Node for WorkflowNode {
     fn validate_output(&self, v: Value) -> Result<Value, WorkflowError> {
         self.base.validate_output(v)
     }
-    /// Port of Go (*WorkflowNode).Run: runs the nested workflow, forwarding its events with
-    /// the output stripped, then yields the single terminal output as this node's output.
+    /// Runs the nested workflow, forwarding its events with the output stripped, then yields the
+    /// single terminal output as this node's output.
     fn run(&self, ctx: Context, input: Value) -> EventStream {
         let sub = Arc::clone(&self.sub_workflow);
         let terminals = sub.graph.terminal_node_names();
@@ -86,7 +86,7 @@ impl Node for WorkflowNode {
             while let Some(item) = events.next().await {
                 let mut ev = match item {
                     Err(e) => {
-                        pending_err = Some(e); // Go: last error wins
+                        pending_err = Some(e); // the last error wins
                         // Keep draining so the nested scheduler unwinds.
                         guard.cancel();
                         continue;

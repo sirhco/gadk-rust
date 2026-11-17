@@ -21,8 +21,8 @@ use http::{HeaderMap, HeaderValue};
 
 use crate::config::Auth;
 
-/// The headers that authenticate a request: `x-goog-api-key` for an API key (as genai
-/// `buildRequest`), or the credentials' headers (typically `authorization`).
+/// The headers that authenticate a request: `x-goog-api-key` for an API key,
+/// or the credentials' headers (typically `authorization`).
 pub(crate) async fn auth_headers(auth: &Option<Auth>) -> Result<HeaderMap, ModelError> {
     match auth {
         None => Ok(HeaderMap::new()),

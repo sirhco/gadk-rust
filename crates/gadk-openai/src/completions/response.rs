@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Chat Completions response conversion (port of ADK-Go `internal/completions/response.go`).
+//! Chat Completions response conversion.
 
 use gadk_genai::{
     Candidate, Content, FinishReason, FunctionCall, GenerateContentResponse,
@@ -29,7 +29,7 @@ use crate::error::{ErrorKind, OpenAiError};
 use crate::shared::calls::function_call_args;
 use crate::shared::response::safe_int32;
 
-/// Go `convertCompletion`: the genai response for a Chat Completions response (blocking, and
+/// The genai response for a Chat Completions response (blocking, and
 /// the accumulated snapshot of a stream). `None` is the bare
 /// [`ErrorKind::EmptyResponse`](crate::error::ErrorKind::EmptyResponse); no choices
 /// [`ErrorKind::NoChoices`](crate::error::ErrorKind::NoChoices); a first choice with nothing to
@@ -67,7 +67,7 @@ pub(crate) fn convert_completion(
     })
 }
 
-/// Go `convertMessage`: an assistant message as genai parts. A refusal becomes text, as the
+/// An assistant message as genai parts. A refusal becomes text, as the
 /// Responses path reports a refusal content block, so one model reports a refusal the same way
 /// on either endpoint.
 fn convert_message(msg: &ChatCompletionMessage) -> Result<Vec<Part>, OpenAiError> {
@@ -129,7 +129,7 @@ fn text_part(text: &str) -> Part {
     }
 }
 
-/// Go `finishReason`: `stop`/`tool_calls`/`function_call` → STOP, `length` → MAX_TOKENS,
+/// The finish reason: `stop`/`tool_calls`/`function_call` → STOP, `length` → MAX_TOKENS,
 /// `content_filter` → SAFETY, `""` → FINISH_REASON_UNSPECIFIED, anything else → OTHER.
 pub(crate) fn finish_reason(reason: &str) -> FinishReason {
     match reason {
@@ -144,7 +144,7 @@ pub(crate) fn finish_reason(reason: &str) -> FinishReason {
     }
 }
 
-/// Go `convertUsage`.
+/// Converts the usage.
 pub(crate) fn convert_usage(usage: &CompletionUsage) -> GenerateContentResponseUsageMetadata {
     GenerateContentResponseUsageMetadata {
         prompt_token_count: safe_int32(usage.prompt_tokens),
@@ -166,7 +166,7 @@ fn text_tokens(count: i64) -> ModalityTokenCount {
     }
 }
 
-/// Go `convertLogprobs`: the choice's content logprobs (refusal logprobs left out); `None`
+/// The choice's content logprobs (refusal logprobs left out); `None`
 /// when there are none.
 pub(crate) fn convert_logprobs(logprobs: &ChatCompletionChoiceLogprobs) -> Option<LogprobsResult> {
     if logprobs.content.is_empty() {

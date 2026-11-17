@@ -13,19 +13,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `plugin/agentanalytics/events.go`: tool-origin classification (`toolOriginOf`,
-//! `resolveToolOrigin`, A2A detection, the HITL tool table, configured and resumed tool
-//! origins) and the session-event signal rows (`STATE_DELTA`, `AGENT_TRANSFER`,
-//! `EVENT_COMPACTION`, `AGENT_STATE_CHECKPOINT`, HITL / pause, `A2A_INTERACTION`, `NODE_ERROR`,
-//! `NODE_OUTPUT`, `AGENT_RESPONSE`, user-message signals).
+//! Tool-origin classification (`tool_origin_of`, `resolve_tool_origin`, A2A detection, the HITL
+//! tool table, configured and resumed tool origins) and the session-event signal rows
+//! (`STATE_DELTA`, `AGENT_TRANSFER`, `EVENT_COMPACTION`, `AGENT_STATE_CHECKPOINT`, HITL / pause,
+//! `A2A_INTERACTION`, `NODE_ERROR`, `NODE_OUTPUT`, `AGENT_RESPONSE`, user-message signals).
 //!
-//! Go's reflection over tool and agent values is gadk's typed accessors (R1): a tool's wrappers
-//! are peeled with `Tool::unwrap` (at most [`MAX_UNWRAP_HOPS`] hops), its origin is
+//! Tools and agents are inspected through typed accessors, not reflection: a tool's wrappers are
+//! peeled with `Tool::unwrap` (at most [`MAX_UNWRAP_HOPS`] hops), its origin is
 //! `Tool::origin_kind`, its agent `Tool::origin_agent` and every agent it can hand a call to
 //! `Tool::origin_agents` (a transfer tool's supported agents); an A2A agent is one whose
-//! `agent_state().agent_type` is `AgentType::RemoteAgent`. Go's package / type-name heuristics
-//! for user tools (names containing "skill" / "toolbox") are not reproduced: user tools report
-//! their own origin (the divergence is annotated in [`tool_origin_of`]).
+//! `agent_state().agent_type` is `AgentType::RemoteAgent`. A user tool's origin is never guessed
+//! from its type or package name (such as a name containing "skill" or "toolbox"): a user tool
+//! reports its own origin (see [`tool_origin_of`]).
 
 use std::collections::HashSet;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -56,35 +55,35 @@ use crate::redaction::{
 };
 use crate::trace::{AgentKey, CallbackCtx, Identity, RowSpan};
 
-/// Go `toolOriginLocal`.
+/// The origin of a function tool.
 pub(crate) const TOOL_ORIGIN_LOCAL: &str = "LOCAL";
-/// Go `toolOriginMCP`.
+/// The origin of an MCP tool.
 pub(crate) const TOOL_ORIGIN_MCP: &str = "MCP";
-/// Go `toolOriginTransferAgent`.
+/// The origin of the transfer-to-agent tool.
 pub(crate) const TOOL_ORIGIN_TRANSFER_AGENT: &str = "TRANSFER_AGENT";
-/// Go `toolOriginTransferA2A`.
+/// The origin of a transfer to a remote (A2A) agent.
 pub(crate) const TOOL_ORIGIN_TRANSFER_A2A: &str = "TRANSFER_A2A";
-/// Go `toolOriginSubAgent`.
+/// The origin of a tool that runs a local sub-agent.
 pub(crate) const TOOL_ORIGIN_SUB_AGENT: &str = "SUB_AGENT";
-/// Go `toolOriginA2A`.
+/// The origin of a tool that calls a remote (A2A) agent.
 pub(crate) const TOOL_ORIGIN_A2A: &str = "A2A";
-/// Go `toolOriginToolbox`.
+/// The origin of a toolbox tool.
 pub(crate) const TOOL_ORIGIN_TOOLBOX: &str = "TOOLBOX";
-/// Go `toolOriginSkill`.
+/// The origin of a skill tool.
 pub(crate) const TOOL_ORIGIN_SKILL: &str = "SKILL";
-/// Go `toolOriginUnknown`.
+/// The origin of a tool that declares none.
 pub(crate) const TOOL_ORIGIN_UNKNOWN: &str = "UNKNOWN";
 
-/// Go `hitlCredentialFunctionCallName` (private in gadk-engine's contents processor).
+/// The name of the credential-request function call (private in gadk-engine's contents processor).
 pub(crate) const HITL_CREDENTIAL_FUNCTION_CALL_NAME: &str = "adk_request_credential";
 
-/// Go `maxUnwrapHops`.
+/// The most wrapper hops [`unwrap_tool`] follows.
 pub(crate) const MAX_UNWRAP_HOPS: usize = 8;
 
-/// The name of the transfer tool (Go's literal in `resolveToolOriginForCall`).
+/// The name of the transfer tool.
 const TRANSFER_TO_AGENT_TOOL_NAME: &str = "transfer_to_agent";
 
-/// Go `hitlToolMapping`.
+/// The events and pause kind a human-in-the-loop tool maps to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct HitlToolMapping {
     pub(crate) request_event: &'static str,
@@ -92,9 +91,10 @@ pub(crate) struct HitlToolMapping {
     pub(crate) pause_kind: &'static str,
 }
 
-/// Go `hitlTools[name]`: the credential (`adk_request_credential`), confirmation
+/// The mapping of the credential (`adk_request_credential`), confirmation
 /// (`gadk_agent::REQUEST_CONFIRMATION_FUNCTION_CALL_NAME`) and workflow input
-/// (`gadk_engine::workflow::request_input::WORKFLOW_INPUT_FUNCTION_CALL_NAME`) tools.
+/// (`gadk_engine::workflow::request_input::WORKFLOW_INPUT_FUNCTION_CALL_NAME`) tools; `None` for
+/// any other name.
 pub(crate) fn hitl_tool(name: &str) -> Option<HitlToolMapping> {
     match name {
         HITL_CREDENTIAL_FUNCTION_CALL_NAME => Some(HitlToolMapping {
@@ -116,8 +116,8 @@ pub(crate) fn hitl_tool(name: &str) -> Option<HitlToolMapping> {
     }
 }
 
-/// Go `modelResponseCodes`: the genai finish and blocked reasons Go's genai version lists (its
-/// set, not gadk-genai's: `TOO_MANY_TOOL_CALLS` and `CONTINUATION` are not in it).
+/// The genai finish and blocked reasons that count as model response codes (a fixed set, not
+/// everything gadk-genai lists: `TOO_MANY_TOOL_CALLS` and `CONTINUATION` are not in it).
 const MODEL_RESPONSE_CODES: [&str; 25] = [
     "FINISH_REASON_UNSPECIFIED",
     "STOP",
@@ -146,17 +146,16 @@ const MODEL_RESPONSE_CODES: [&str; 25] = [
     "JAILBREAK",
 ];
 
-/// Go `isModelResponseCode(code)`: a genai finish or blocked reason (trimmed).
+/// Whether `code` is a genai finish or blocked reason (trimmed).
 pub(crate) fn is_model_response_code(code: &str) -> bool {
     MODEL_RESPONSE_CODES.contains(&code.trim())
 }
 
-/// Go `unwrapToolValue`: `t` with its wrappers peeled (`Tool::unwrap`, at most
-/// [`MAX_UNWRAP_HOPS`] hops); `None` when the budget runs out (Go's invalid value).
+/// `t` with its wrappers peeled (`Tool::unwrap`, at most [`MAX_UNWRAP_HOPS`] hops); `None` when the
+/// budget runs out.
 ///
-/// Go spends one hop per `Unwrap()` and stops at the first value that does not unwrap, so a
-/// tool under at most `MAX_UNWRAP_HOPS - 1` wrappers resolves; a cycle exhausts the budget
-/// (Go's visited-pointer check returns the same invalid value earlier).
+/// One hop is spent per wrapper and peeling stops at the first tool that does not unwrap, so a tool
+/// under at most `MAX_UNWRAP_HOPS - 1` wrappers resolves; a cycle exhausts the budget.
 pub(crate) fn unwrap_tool(t: &Arc<dyn Tool>) -> Option<Arc<dyn Tool>> {
     let mut cur = Arc::clone(t);
     for _ in 0..MAX_UNWRAP_HOPS {
@@ -168,16 +167,14 @@ pub(crate) fn unwrap_tool(t: &Arc<dyn Tool>) -> Option<Arc<dyn Tool>> {
     None
 }
 
-/// Go `toolOriginOf(t)`: the origin of the unwrapped tool from its `origin_kind()` (SubAgent →
-/// [`sub_agent_or_a2a`] of its `origin_agent()`).
+/// The origin of the unwrapped tool from its `origin_kind()` (SubAgent → [`sub_agent_or_a2a`] of
+/// its `origin_agent()`).
 pub(crate) fn tool_origin_of(t: &Arc<dyn Tool>) -> &'static str {
     let Some(u) = unwrap_tool(t) else {
         return TOOL_ORIGIN_UNKNOWN;
     };
-    // Divergence (ledger 7b-3a): Go's `classifyADKToolType` classifies by the tool's package
-    // path and type name (and calls any user tool whose package or type name contains
-    // "toolbox" / "skill" TOOLBOX / SKILL); gadk tools declare their kind through
-    // `Tool::origin_kind`, and a user tool that declares none is UNKNOWN (spec R1(b)).
+    // Tools declare their kind through `Tool::origin_kind`; a user tool that declares none is
+    // UNKNOWN, never guessed from its type or package name.
     match u.origin_kind() {
         ToolOriginKind::Unknown => TOOL_ORIGIN_UNKNOWN,
         ToolOriginKind::Local => TOOL_ORIGIN_LOCAL,
@@ -191,7 +188,7 @@ pub(crate) fn tool_origin_of(t: &Arc<dyn Tool>) -> &'static str {
     }
 }
 
-/// Go `subAgentOrA2A(v)`: A2A for a remote agent, else SUB_AGENT.
+/// A2A for a remote agent, else SUB_AGENT.
 pub(crate) fn sub_agent_or_a2a(agent: Option<&Arc<dyn Agent>>) -> &'static str {
     match agent {
         Some(a) if is_remote_a2a_agent(a.as_ref()) => TOOL_ORIGIN_A2A,
@@ -199,19 +196,17 @@ pub(crate) fn sub_agent_or_a2a(agent: Option<&Arc<dyn Agent>>) -> &'static str {
     }
 }
 
-/// Go `isRemoteA2AAgentValue(v)`: the agent's type is `AgentType::RemoteAgent`.
+/// Whether the agent's type is `AgentType::RemoteAgent`.
 pub(crate) fn is_remote_a2a_agent(a: &dyn Agent) -> bool {
     a.agent_state().agent_type == AgentType::RemoteAgent
 }
 
-/// Go `findAgentA2AByName(v, targetName, …)`: `(found, is_a2a)` for the agent named
-/// `target_name` reachable from the unwrapped tool's agents.
+/// `(found, is_a2a)` for the agent named `target_name` reachable from the unwrapped tool's agents.
 ///
-/// Go walks the unwrapped tool's agent fields (`agent`, `supportedAgents`, …) by reflection; a
-/// gadk tool exposes them through `Tool::origin_agents()` (an agent tool's agent, the transfer
+/// A tool exposes its agents through `Tool::origin_agents()` (an agent tool's agent, the transfer
 /// tool's supported agents), searched in order: the agent itself by name, then its tree
-/// (`find_agent`). A panicking `name()`/`find_agent()` reads as no match (Go's `orZero`).
-// Divergence (ledger 7b-3a): Go reflects over the unwrapped tool's `agent` / `supportedAgents` / `SubAgents` / `RootAgent` fields; gadk searches the agents the tool exposes through the typed accessor `Tool::origin_agents()` (R1), so a tool that does not override it is searched through `origin_agent()` only.
+/// (`find_agent`). A tool that does not override `origin_agents` is searched through
+/// `origin_agent()` only. A panicking `name()`/`find_agent()` reads as no match.
 pub(crate) fn find_agent_a2a_by_name(t: &Arc<dyn Tool>, target_name: &str) -> (bool, bool) {
     let Some(u) = unwrap_tool(t) else {
         return (false, false);
@@ -229,9 +224,8 @@ pub(crate) fn find_agent_a2a_by_name(t: &Arc<dyn Tool>, target_name: &str) -> (b
     (false, false)
 }
 
-/// Go `resolveToolOriginForCall(ctx, t, args)`: `tool_origin_of`, else TRANSFER_AGENT for a
-/// tool named `transfer_to_agent`, else UNKNOWN. A panicking tool is UNKNOWN (Go's
-/// `recover`).
+/// `tool_origin_of`, else TRANSFER_AGENT for a tool named `transfer_to_agent`, else UNKNOWN. A
+/// panicking tool is UNKNOWN.
 pub(crate) fn resolve_tool_origin_for_call(
     t: &Arc<dyn Tool>,
     _args: Option<&Map<String, Value>>,
@@ -251,10 +245,9 @@ pub(crate) fn resolve_tool_origin_for_call(
     .unwrap_or(TOOL_ORIGIN_UNKNOWN)
 }
 
-/// Go `configuredToolOrigin(ctx, root, name)`: the origin of the tools named `name` configured
-/// on the LLM agents of `root`'s tree (`gadk_engine::llm::llm_agent_config`), and whether
-/// there are any. Tools of different origins yield UNKNOWN; no such tool yields `("", false)`
-/// (Go's zero string).
+/// The origin of the tools named `name` configured on the LLM agents of `root`'s tree
+/// (`gadk_engine::llm::llm_agent_config`), and whether there are any. Tools of different origins
+/// yield UNKNOWN; no such tool yields `("", false)`.
 pub(crate) fn configured_tool_origin(
     root: Option<&Arc<dyn Agent>>,
     name: &str,
@@ -291,7 +284,7 @@ pub(crate) fn configured_tool_origin(
     (origin, found)
 }
 
-/// Go `scrubTempStateDelta(delta)`: without `temp:` keys; `None` when nothing is left.
+/// The state delta without `temp:` keys; `None` when nothing is left.
 pub(crate) fn scrub_temp_state_delta(delta: &Map<String, Value>) -> Option<Map<String, Value>> {
     let out: Map<String, Value> = delta
         .iter()
@@ -301,7 +294,7 @@ pub(crate) fn scrub_temp_state_delta(delta: &Map<String, Value>) -> Option<Map<S
     (!out.is_empty()).then_some(out)
 }
 
-/// Go `extractA2AMetadata(meta)`: the `a2a:` entries, or `None`.
+/// The `a2a:` entries, or `None`.
 pub(crate) fn extract_a2a_metadata(meta: &Map<String, Value>) -> Option<Map<String, Value>> {
     let out: Map<String, Value> = meta
         .iter()
@@ -311,8 +304,8 @@ pub(crate) fn extract_a2a_metadata(meta: &Map<String, Value>) -> Option<Map<Stri
     (!out.is_empty()).then_some(out)
 }
 
-/// Go `extractAgentStateCheckpoint(meta)`: `Some((state, end_of_agent))` for a checkpoint.
-/// A terminal checkpoint (`end_of_agent` true) is kept without a state (`Value::Null`).
+/// `Some((state, end_of_agent))` for a checkpoint. A terminal checkpoint (`end_of_agent` true) is
+/// kept without a state (`Value::Null`).
 pub(crate) fn extract_agent_state_checkpoint(meta: &Map<String, Value>) -> Option<(Value, bool)> {
     if meta.is_empty() {
         return None;
@@ -332,8 +325,8 @@ pub(crate) fn extract_agent_state_checkpoint(meta: &Map<String, Value>) -> Optio
     Some((state, end_of_agent))
 }
 
-/// Go `epochSeconds(ts)`: seconds since the epoch as a float, or null for the zero time
-/// (`None`, or gadk-session's `zero_time()`).
+/// Seconds since the epoch as a float, or null for the zero time (`None`, or gadk-session's
+/// `zero_time()`).
 pub(crate) fn epoch_seconds(ts: Option<DateTime<Utc>>) -> Value {
     match ts {
         Some(ts) if ts != zero_time() => {
@@ -343,14 +336,13 @@ pub(crate) fn epoch_seconds(ts: Option<DateTime<Utc>>) -> Value {
     }
 }
 
-/// Go `hasActionsCompaction(actions)`.
+/// Whether the actions carry a compaction.
 pub(crate) fn has_actions_compaction(actions: &EventActions) -> bool {
     actions.compaction.is_some()
 }
 
-/// Go `extractEventCompaction(ev, cleanMeta, maxLen, redact)`: `(compaction, truncated,
-/// ok)`, from `actions.compaction`, else from the scrubbed custom metadata's
-/// `adk_compaction` entry.
+/// `(compaction, truncated, ok)`, from `actions.compaction`, else from the scrubbed custom
+/// metadata's `adk_compaction` entry.
 pub(crate) fn extract_event_compaction(
     ev: &Event,
     clean_meta: Option<&Map<String, Value>>,
@@ -370,7 +362,7 @@ pub(crate) fn extract_event_compaction(
     (None, false, false)
 }
 
-/// Go `formatCompactionValue` over the typed `session.EventCompaction` (its struct branch).
+/// The compaction payload of the event's typed `EventCompaction`.
 fn format_actions_compaction(
     c: &EventCompaction,
     max_len: i64,
@@ -378,7 +370,6 @@ fn format_actions_compaction(
 ) -> Option<(Map<String, Value>, bool)> {
     let start = epoch_seconds(Some(c.start_timestamp));
     let end = epoch_seconds(Some(c.end_timestamp));
-    // Go's `case *genai.Content` matches a nil pointer too.
     let (summary, trunc) =
         scrub_compaction_genai_content(c.compacted_content.as_ref(), max_len, redact);
     if start.is_null() && end.is_null() && summary.is_empty() {
@@ -387,8 +378,8 @@ fn format_actions_compaction(
     Some((compaction_payload(start, end, summary), trunc))
 }
 
-/// Go `formatCompactionValue` over a custom-metadata value (its map branch; gadk custom
-/// metadata is JSON, so Go's struct branch for metadata values does not arise).
+/// The compaction payload of a custom-metadata value (custom metadata is JSON, so only an object
+/// can hold one).
 fn format_compaction_value(
     v: &Value,
     max_len: i64,
@@ -427,7 +418,8 @@ fn compaction_payload(start: Value, end: Value, summary: String) -> Map<String, 
     m
 }
 
-/// Go `scrubCompactionGenAIContent(c, maxLen, redact)`.
+/// The text of the compacted content, scrubbed and truncated; the flag tells whether it was
+/// truncated.
 fn scrub_compaction_genai_content(
     c: Option<&Content>,
     max_len: i64,
@@ -441,9 +433,8 @@ fn scrub_compaction_genai_content(
     (scrubbed, trunc || s_trunc)
 }
 
-/// Go `compactionTimestampValue(v)` / `compactionTimestamp(f)` over a JSON value: a number is
-/// epoch seconds already and kept as is, an RFC 3339 string is converted; zero, empty or
-/// unparseable values are null.
+/// A compaction timestamp from a JSON value: a number is epoch seconds already and kept as is, an
+/// RFC 3339 string is converted; zero, empty or unparseable values are null.
 fn compaction_timestamp_value(v: Option<&Value>) -> Value {
     match v {
         Some(Value::Number(n)) if n.as_f64() != Some(0.0) => Value::Number(n.clone()),
@@ -455,8 +446,8 @@ fn compaction_timestamp_value(v: Option<&Value>) -> Value {
     }
 }
 
-/// Go `compactionKeyAliases`: for each payload key, its Go field name and its
-/// `session.EventCompaction` JSON name.
+/// For each payload key, the aliases it may arrive under in custom metadata: the capitalised field
+/// name and the camel-case JSON name.
 const COMPACTION_KEY_ALIASES: [(&str, [&str; 2]); 3] = [
     ("start_timestamp", ["StartTimestamp", "startTimestamp"]),
     ("end_timestamp", ["EndTimestamp", "endTimestamp"]),
@@ -466,8 +457,8 @@ const COMPACTION_KEY_ALIASES: [(&str, [&str; 2]); 3] = [
     ),
 ];
 
-/// Go `normalizeCompactionKeys(m)`: renames alias keys to their payload keys; an existing
-/// payload key wins over its aliases; aliases are always removed.
+/// Renames alias keys to their payload keys; an existing payload key wins over its aliases; aliases
+/// are always removed.
 fn normalize_compaction_keys(m: &mut Map<String, Value>) {
     for (key, aliases) in COMPACTION_KEY_ALIASES {
         for alias in aliases {
@@ -480,7 +471,7 @@ fn normalize_compaction_keys(m: &mut Map<String, Value>) {
     }
 }
 
-/// Go `genaiContentFromMap(m)`: the content a map decodes as, if it has parts.
+/// The content a map decodes as, if it has parts.
 fn genai_content_from_map(m: &Map<String, Value>) -> Option<Content> {
     if !m.contains_key("parts") {
         return None;
@@ -490,14 +481,14 @@ fn genai_content_from_map(m: &Map<String, Value>) -> Option<Content> {
         .filter(|c| !c.parts.is_empty())
 }
 
-/// Go `hasFunctionCall(content)`.
+/// Whether any part of the content is a function call.
 pub(crate) fn has_function_call(content: Option<&Content>) -> bool {
     content.is_some_and(|c| c.parts.iter().any(|p| p.function_call.is_some()))
 }
 
-/// Go `isLoggableFinalAgentResponse(ev)`: a final agent turn that may emit `AGENT_RESPONSE`
-/// once its visible text parts are filtered (skip-summarization events included; partial,
-/// user-authored, compaction, long-running and function-call events excluded).
+/// Whether `ev` is a final agent turn that may emit `AGENT_RESPONSE` once its visible text parts
+/// are filtered (skip-summarization events included; partial, user-authored, compaction,
+/// long-running and function-call events excluded).
 pub(crate) fn is_loggable_final_agent_response(ev: &Event) -> bool {
     let Some(content) = ev.response.content.as_ref() else {
         return false;
@@ -514,13 +505,12 @@ pub(crate) fn is_loggable_final_agent_response(ev: &Event) -> bool {
     is_final_response(ev) || ev.actions.skip_summarization
 }
 
-/// Go `isFinalResponse(ev)`: `false` without content, else `Event::is_final_response` (gadk
-/// parts are never nil, so Go's nil-part filtering has nothing to drop).
+/// `false` without content, else `Event::is_final_response`.
 pub(crate) fn is_final_response(ev: &Event) -> bool {
     ev.response.content.is_some() && ev.is_final_response()
 }
 
-/// Go `filterVisibleTextParts(parts)`: the non-thought parts with text.
+/// The non-thought parts with text.
 pub(crate) fn filter_visible_text_parts(parts: &[Part]) -> Vec<Part> {
     parts
         .iter()
@@ -529,10 +519,9 @@ pub(crate) fn filter_visible_text_parts(parts: &[Part]) -> Vec<Part> {
         .collect()
 }
 
-/// Go `scrubA2ACustomMetadata(meta, allowlist, redact)`: `(kept entries, truncated)`. Only
-/// allowlisted keys and `a2a:` keys are kept; with `redact`, a sensitive key's value (the key
-/// with or without its `a2a:` prefix) is `[REDACTED]` and every other value goes through the
-/// key-based JSON redaction.
+/// `(kept entries, truncated)`. Only allowlisted keys and `a2a:` keys are kept; with `redact`, a
+/// sensitive key's value (the key with or without its `a2a:` prefix) is `[REDACTED]` and every
+/// other value goes through the key-based JSON redaction.
 pub(crate) fn scrub_a2a_custom_metadata(
     meta: &Map<String, Value>,
     allowlist: &CustomMetadataFilter,
@@ -563,7 +552,7 @@ pub(crate) fn scrub_a2a_custom_metadata(
     (Some(out), trunc)
 }
 
-/// Go `nonNilMap(m)` as a JSON value.
+/// A map as a JSON object value.
 fn json_map(m: &Map<String, Value>) -> Value {
     Value::Object(m.clone())
 }
@@ -577,20 +566,20 @@ fn tool_payload(tool_id: &str, tool: Value, key: &str, value: Value) -> Option<P
     Some(Payload::Json(Value::Object(m)))
 }
 
-/// Go `map[string]any{"pause_kind": kind}`.
+/// The extras of a pause row: `{"pause_kind": kind}`.
 fn pause_extras(kind: &str) -> Map<String, Value> {
     let mut m = Map::new();
     m.insert("pause_kind".to_owned(), Value::String(kind.to_owned()));
     m
 }
 
-/// Go's `isNil` of a JSON value: absent or `null`.
+/// Whether a JSON value is absent or `null`.
 fn is_nil_json(v: Option<&Value>) -> bool {
     v.is_none_or(Value::is_null)
 }
 
 impl AnalyticsPlugin {
-    /// Go `resolveToolOrigin(ctx, id, t, args)`: also tells a transfer to a remote agent
+    /// The origin of the tool a call names, also telling a transfer to a remote agent
     /// (TRANSFER_A2A) through the tool's agents and the trace manager's `agent_named`.
     pub(crate) fn resolve_tool_origin(
         &self,
@@ -629,10 +618,9 @@ impl AnalyticsPlugin {
         .unwrap_or(TOOL_ORIGIN_UNKNOWN)
     }
 
-    /// Go `resumedToolOrigin(ctx, name)`: the origin of the tool a resumed function response
-    /// answers, looked up in the runner agent's tree, then the highest known ancestor's.
-    /// Toolset tools are not listed (listing them can do I/O), so they are UNKNOWN, as are
-    /// names shared by tools of different origins.
+    /// The origin of the tool a resumed function response answers, looked up in the runner agent's
+    /// tree, then the highest known ancestor's. Toolset tools are not listed (listing them can do
+    /// I/O), so they are UNKNOWN, as are names shared by tools of different origins.
     pub(crate) fn resumed_tool_origin(&self, ctx: &CallbackCtx, name: &str) -> &'static str {
         if name.is_empty() {
             return TOOL_ORIGIN_UNKNOWN;
@@ -666,9 +654,8 @@ impl AnalyticsPlugin {
         }
     }
 
-    /// Go `emitUserMessageSignalEvents(ctx, id, msg, span)`: HITL completion and resumed
-    /// `TOOL_COMPLETED` rows for the message's function responses (through
-    /// `log_session_span_event`).
+    /// Emits HITL completion and resumed `TOOL_COMPLETED` rows for the message's function responses
+    /// (through `log_session_span_event`).
     pub(crate) fn emit_user_message_signal_events(
         &self,
         ctx: &CallbackCtx,
@@ -725,10 +712,9 @@ impl AnalyticsPlugin {
         }
     }
 
-    /// Go `emitSessionEventSignals(ctx, ev)`: every signal row of a non-partial session event,
-    /// without short-circuiting (through `log_session_event`; places from the trace manager's
-    /// `event_span`). Partial events are ignored: their long-running IDs and state delta are
-    /// repeated on the final aggregated event.
+    /// Emits every signal row of a non-partial session event, without short-circuiting (through
+    /// `log_session_event`; places from the trace manager's `event_span`). Partial events are
+    /// ignored: their long-running IDs and state delta are repeated on the final aggregated event.
     pub(crate) fn emit_session_event_signals(&self, ctx: &CallbackCtx, ev: &Event) {
         if ev.response.partial {
             return;
@@ -739,7 +725,7 @@ impl AnalyticsPlugin {
         {
             id.path = ni.path.clone();
         }
-        // Divergence (ledger 7b-3a): Go dereferences its trace manager unconditionally (a nil manager panics into recoverCallback); gadk uses RowSpan::default() when the plugin has no trace manager.
+        // A plugin without a trace manager uses RowSpan::default().
         let span = self
             .traces
             .as_ref()
@@ -928,10 +914,9 @@ impl AnalyticsPlugin {
         }
     }
 
-    /// Go `emitHITLAndPauseSignals(ctx, id, ev, span, applyEventBase)`: `TOOL_PAUSED` (and the
-    /// HITL request) for each long-running call, HITL requests for the other HITL calls,
-    /// `HITL_INPUT_REQUEST` for a workflow node's requested input, and HITL completions for
-    /// HITL function responses.
+    /// Emits `TOOL_PAUSED` (and the HITL request) for each long-running call, HITL requests for the
+    /// other HITL calls, `HITL_INPUT_REQUEST` for a workflow node's requested input, and HITL
+    /// completions for HITL function responses.
     pub(crate) fn emit_hitl_and_pause_signals(
         &self,
         ctx: &CallbackCtx,

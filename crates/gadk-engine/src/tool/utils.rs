@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go internal/utils and internal/typeutil.
+//! Typed conversion, schema validation, canonical schema JSON and function-call helpers.
 
 use gadk_agent::go_quote;
 use std::sync::Arc;
@@ -26,14 +26,14 @@ use serde_json::{Map, Value};
 
 use crate::llm::processors::{as_go_floats, go_sprint};
 
-/// Go `afFunctionCallIDPrefix`: the prefix of client-generated function call ids.
+/// The prefix of client-generated function call ids.
 pub(crate) const AF_FUNCTION_CALL_ID_PREFIX: &str = "adk-";
 
 // ---------------------------------------------------------------------------------------------
-// internal/typeutil/convert.go
+// Typed conversion and validation
 // ---------------------------------------------------------------------------------------------
 
-/// Port of Go typeutil.schemaExpectsObject on the root of a JSON schema value:
+/// Whether the root of a JSON schema value expects an object:
 /// `"type": "object"` or a `"type"` array containing `"object"`.
 pub(crate) fn schema_expects_object(schema: &Value) -> bool {
     match schema.get("type") {
@@ -43,11 +43,11 @@ pub(crate) fn schema_expects_object(schema: &Value) -> bool {
     }
 }
 
-/// Port of Go typeutil.ConvertToWithJSONSchema: serialize `v`, validate the JSON form (a `null` against an
-/// object schema becomes `{}`), then deserialize.
+/// Serializes `v`, validates the JSON form (a `null` against an object schema becomes `{}`),
+/// then deserializes.
 ///
-/// Rust mapping decision: Go unmarshals the original raw JSON; Rust deserializes the substituted value, so a
-/// tool called with no arguments yields `Args` built from `{}` (Go: the zero struct) instead of a serde error.
+/// The substituted value is the one deserialized, so a tool called with no arguments yields
+/// `Args` built from `{}` instead of a serde error.
 pub(crate) fn convert_with_schema<In: serde::Serialize, Out: serde::de::DeserializeOwned>(
     v: &In,
     schema: Option<&CompiledSchema>,
@@ -62,9 +62,9 @@ pub(crate) fn convert_with_schema<In: serde::Serialize, Out: serde::de::Deserial
     serde_json::from_value(decoded).map_err(|e| e.to_string())
 }
 
-/// [`convert_with_schema`] for a function tool's call arguments: Go's functiontool decodes them
-/// through `json.Marshal`, which writes an integral `float64` without a fraction, so a typed
-/// decode into an integer field accepts it ([`go_marshaled_numbers`]).
+/// [`convert_with_schema`] for a function tool's call arguments: integral floats are first
+/// written as integers, so a typed decode into an integer field accepts them
+/// ([`go_marshaled_numbers`]).
 pub(crate) fn convert_args_with_schema<Out: serde::de::DeserializeOwned>(
     args: &Value,
     schema: Option<&CompiledSchema>,
@@ -72,12 +72,12 @@ pub(crate) fn convert_args_with_schema<Out: serde::de::DeserializeOwned>(
     convert_with_schema(&go_marshaled_numbers(args.clone()), schema)
 }
 
-/// Go's `json.Marshal` → `json.Unmarshal` round trip of numbers: a float64 with an integral value
-/// is written without a fraction (`1`, not `1.0`), so a typed decode into an integer field
-/// accepts it. serde_json keeps a `1.0` float a float, which an `i64` field rejects; such floats
-/// (as streamed partial arguments carry them) become integers here.
+/// Integral float numbers become integers: a float with an integral value is written without a
+/// fraction (`1`, not `1.0`), so a typed decode into an integer field accepts it. serde_json
+/// keeps a `1.0` float a float, which an `i64` field rejects; such floats (as streamed partial
+/// arguments carry them) become integers here.
 fn go_marshaled_numbers(v: Value) -> Value {
-    /// Go's `float64` encoding switches to an exponent from 1e21 on.
+    /// Integral floats below 1e21 become integers; from 1e21 on they stay floats.
     const GO_EXPONENT_FROM: f64 = 1e21;
     match v {
         Value::Number(n) if !n.is_i64() && !n.is_u64() => match n.as_f64() {
@@ -105,7 +105,7 @@ fn go_marshaled_numbers(v: Value) -> Value {
     }
 }
 
-/// Port of Go typeutil.ValidateWithJSONSchema.
+/// Validates the JSON form of `v` against the schema.
 pub(crate) fn validate_with_schema<In: serde::Serialize>(
     v: &In,
     schema: Option<&CompiledSchema>,
@@ -119,13 +119,13 @@ pub(crate) fn validate_with_schema<In: serde::Serialize>(
 }
 
 // ---------------------------------------------------------------------------------------------
-// Schema inference and compilation (Go jsonschema.For[T] + Resolve)
+// Schema inference and compilation
 // ---------------------------------------------------------------------------------------------
 
 fn settings() -> SchemaSettings {
     SchemaSettings::draft2020_12()
         .with(|s| {
-            s.meta_schema = None; // no "$schema" key (Go jsonschema.For emits none)
+            s.meta_schema = None; // no "$schema" key
             s.inline_subschemas = true; // no "$defs"/"$ref" except for recursive types
         })
         .with_transform(RecursiveTransform(
@@ -133,11 +133,11 @@ fn settings() -> SchemaSettings {
         ))
 }
 
-/// Aligns one schemars subschema with the shape Go jsonschema-go (`jsonschema.For`) infers:
-/// - struct schemas forbid unknown keys: an object schema (with `properties`, or a bare `"type": "object"`
-///   from a field-less struct) and no `additionalProperties` gets `"additionalProperties": false`
-///   (jsonschema-go infer.go, `reflect.Struct` case);
-/// - integer/number schemas carry no `format` (schemars adds `"int64"`, `"double"`, …; Go emits none).
+/// Shapes one schemars subschema for tool declarations:
+/// - struct schemas forbid unknown keys: an object schema (with `properties`, or a bare
+///   `"type": "object"` from a field-less struct) and no `additionalProperties` gets
+///   `"additionalProperties": false`;
+/// - integer/number schemas carry no `format` (schemars adds `"int64"`, `"double"`, …).
 ///
 /// Applied to every subschema via [`RecursiveTransform`].
 fn go_schema_shape(schema: &mut schemars::Schema) {
@@ -153,7 +153,7 @@ fn go_schema_shape(schema: &mut schemars::Schema) {
     if numeric {
         obj.remove("format");
     }
-    // A field-less struct (Go `struct{}`) is a bare `{"type": "object"}` in schemars; maps always carry
+    // A field-less struct is a bare `{"type": "object"}` in schemars; maps always carry
     // `additionalProperties`, so a bare object schema is a struct too.
     let is_struct =
         obj.contains_key("properties") || obj.get("type").is_some_and(|t| t == "object");
@@ -162,9 +162,10 @@ fn go_schema_shape(schema: &mut schemars::Schema) {
     }
 }
 
-/// Port of Go jsonschema.For[T] as used by functiontool.resolvedSchema: draft 2020-12, no `$schema`,
-/// inlined subschemas, and the root `title` (schemars' `T::schema_name()`) removed. Nested titles that
-/// derive from doc comments are kept. Deserialize contract (describes what `T` accepts).
+/// The JSON schema for `T` as a function tool declares it: draft 2020-12, no `$schema`,
+/// inlined subschemas, and the root `title` (schemars' `T::schema_name()`) removed. Nested
+/// titles that derive from doc comments are kept. Deserialize contract (describes what `T`
+/// accepts).
 pub(crate) fn infer_schema<T: schemars::JsonSchema>() -> Value {
     let mut schema = settings().into_generator().into_root_schema_for::<T>();
     schema.remove("title");
@@ -181,7 +182,7 @@ pub(crate) fn infer_output_schema<T: schemars::JsonSchema>() -> Value {
     schema.to_value()
 }
 
-/// Port of Go jsonschema.Resolved: a schema compiled once, validated many times.
+/// A schema compiled once, validated many times.
 #[derive(Debug, Clone)]
 pub(crate) struct CompiledSchema {
     schema: Value,
@@ -190,7 +191,7 @@ pub(crate) struct CompiledSchema {
 }
 
 impl CompiledSchema {
-    /// Port of Go Schema.Resolve(nil). `$schema` absent ⇒ draft 2020-12 (jsonschema's default).
+    /// Compiles the schema. `$schema` absent ⇒ draft 2020-12 (jsonschema's default).
     pub(crate) fn new(schema: Value) -> Result<Self, String> {
         let validator = jsonschema::validator_for(&schema).map_err(|e| e.to_string())?;
         Ok(Self {
@@ -199,31 +200,32 @@ impl CompiledSchema {
         })
     }
 
-    /// The schema this was compiled from (Go `Resolved.Schema`).
+    /// The schema this was compiled from.
     pub(crate) fn schema(&self) -> &Value {
         &self.schema
     }
 
-    /// Port of Go Resolved.Validate: the first error's text.
+    /// Validates `v`: the first error's text.
     pub(crate) fn validate(&self, v: &Value) -> Result<(), String> {
         self.validator.validate(v).map_err(|e| e.to_string())
     }
 }
 
 // ---------------------------------------------------------------------------------------------
-// internal/utils/schema_canonical.go
+// Canonical schema JSON
 // ---------------------------------------------------------------------------------------------
 
-/// Go `unorderedArrayKeywords`: JSON Schema keywords whose array value is a set.
+/// JSON Schema keywords whose array value is a set.
 const UNORDERED_ARRAY_KEYWORDS: [&str; 2] = ["required", "type"];
 
-/// Port of Go utils.CanonicalSchemaJSON: the schema re-emitted with object keys sorted (recursively) and the
-/// unordered set keywords (`required`, `type`) sorted, so equivalent schemas canonicalize identically.
+/// The schema re-emitted with object keys sorted (recursively) and the
+/// unordered set keywords (`required`, `type`) sorted, so equivalent schemas canonicalize
+/// identically.
 pub(crate) fn canonical_schema_json(schema: &Value) -> String {
     canonicalize(schema)
 }
 
-/// Port of Go utils.canonicalize: serializes `v` with sorted object keys; arrays keep their order unless
+/// Serializes `v` with sorted object keys; arrays keep their order unless
 /// they are the value of an unordered set keyword.
 pub(crate) fn canonicalize(v: &Value) -> String {
     match v {
@@ -258,7 +260,7 @@ pub(crate) fn canonicalize(v: &Value) -> String {
     }
 }
 
-/// Port of Go utils.canonicalizeUnorderedArray: canonicalized elements sorted by their encoded bytes.
+/// Canonicalized elements sorted by their encoded bytes.
 fn canonicalize_unordered_array(items: &[Value]) -> String {
     let mut encoded: Vec<String> = items.iter().map(canonicalize).collect();
     encoded.sort();
@@ -269,7 +271,7 @@ fn encode_string(s: &str) -> String {
     Value::String(s.to_string()).to_string()
 }
 
-/// Go `json.Marshal(float64)` for the integral values a decoded `any` holds: `123.0` → `123`.
+/// Integral values are written without a fraction: `123.0` → `123`.
 fn encode_number(n: &serde_json::Number) -> String {
     if n.is_i64() || n.is_u64() {
         return n.to_string();
@@ -281,7 +283,7 @@ fn encode_number(n: &serde_json::Number) -> String {
 }
 
 // ---------------------------------------------------------------------------------------------
-// internal/utils/schema_utils.go
+// Schema-based argument validation
 // ---------------------------------------------------------------------------------------------
 
 pub(crate) use gadk_platform::go_type_name;
@@ -290,7 +292,7 @@ fn type_str(schema: &Schema) -> &str {
     schema.r#type.as_ref().map(|t| t.as_str()).unwrap_or("")
 }
 
-/// Port of Go utils.matchType. Go returns (false, err) on an object error; Rust returns Err.
+/// Whether `value` matches the schema's type. An object error returns `Err`.
 pub(crate) fn match_type(
     value: &Value,
     schema: Option<&Schema>,
@@ -334,7 +336,8 @@ pub(crate) fn match_type(
     }
 }
 
-/// Port of Go utils.ValidateMapOnSchema. The schema is a reference, so Go's nil-schema error is unreachable.
+/// Validates `args` against the schema's properties. The schema is a reference, so there is no
+/// nil-schema error.
 pub(crate) fn validate_map_on_schema(
     args: &Map<String, Value>,
     schema: &Schema,
@@ -380,7 +383,8 @@ pub(crate) fn validate_map_on_schema(
     Ok(())
 }
 
-/// Port of Go utils.ValidateOutputSchema. The schema is a reference, so Go's nil-schema error is unreachable.
+/// Parses `output` as JSON and validates it against the schema. The schema is a reference, so
+/// there is no nil-schema error.
 pub(crate) fn validate_output_schema(
     output: &str,
     schema: &Schema,
@@ -389,7 +393,7 @@ pub(crate) fn validate_output_schema(
         serde_json::from_str(output).map_err(|e| format!("failed to parse output JSON: {e}"))?;
     let map = match parsed {
         Value::Object(m) => m,
-        // Go unmarshals `null` into a nil map.
+        // `null` becomes an empty map.
         Value::Null => Map::new(),
         other => {
             let kind = match other {
@@ -408,10 +412,10 @@ pub(crate) fn validate_output_schema(
 }
 
 // ---------------------------------------------------------------------------------------------
-// internal/utils/utils.go
+// Function call ids, content parts and branches
 // ---------------------------------------------------------------------------------------------
 
-/// Port of Go utils.PopulateClientFunctionCallID: assigns a client id to every function call without one.
+/// Assigns a client id to every function call without one.
 pub(crate) fn populate_client_function_call_id(platform: &Platform, c: Option<&mut Content>) {
     let Some(c) = c else { return };
     for fc in c.parts.iter_mut().filter_map(|p| p.function_call.as_mut()) {
@@ -421,12 +425,12 @@ pub(crate) fn populate_client_function_call_id(platform: &Platform, c: Option<&m
     }
 }
 
-/// Port of Go utils.GenerateFunctionCallID.
+/// A new client-generated function call id.
 pub(crate) fn generate_function_call_id(platform: &Platform) -> String {
     format!("{AF_FUNCTION_CALL_ID_PREFIX}{}", platform.new_uuid())
 }
 
-/// Port of Go utils.RemoveClientFunctionCallID: clears client-generated ids on function calls and responses.
+/// Clears client-generated ids on function calls and responses.
 pub(crate) fn remove_client_function_call_id(c: &mut Content) {
     for p in &mut c.parts {
         if let Some(fc) = p.function_call.as_mut()
@@ -442,10 +446,10 @@ pub(crate) fn remove_client_function_call_id(c: &mut Content) {
     }
 }
 
-/// Port of Go utils.Content (shared with `gadk_session::compaction`).
+/// Shared with `gadk_session::compaction`.
 pub(crate) use gadk_session::compaction::content;
 
-/// Port of Go `utils.FunctionCalls`: the function calls of `c`, in order (none for `None`).
+/// The function calls of `c`, in order (none for `None`).
 pub fn function_calls(c: Option<&Content>) -> Vec<&FunctionCall> {
     c.map(|c| {
         c.parts
@@ -456,7 +460,7 @@ pub fn function_calls(c: Option<&Content>) -> Vec<&FunctionCall> {
     .unwrap_or_default()
 }
 
-/// Port of Go utils.FunctionResponses.
+/// The function responses of `c`, in order.
 pub(crate) fn function_responses(c: Option<&Content>) -> Vec<&FunctionResponse> {
     c.map(|c| {
         c.parts
@@ -467,7 +471,7 @@ pub(crate) fn function_responses(c: Option<&Content>) -> Vec<&FunctionResponse> 
     .unwrap_or_default()
 }
 
-/// Port of Go utils.TextParts: the non-empty texts, in part order.
+/// The non-empty texts, in part order.
 pub(crate) fn text_parts(c: Option<&Content>) -> Vec<String> {
     c.map(|c| {
         c.parts
@@ -479,13 +483,13 @@ pub(crate) fn text_parts(c: Option<&Content>) -> Vec<String> {
     .unwrap_or_default()
 }
 
-/// The content's text parts concatenated without a separator (no Go counterpart; plan D5).
-#[allow(dead_code)] // Pinned by plan D5; no Go counterpart and no caller in the 1b port.
+/// The content's text parts concatenated without a separator.
+#[allow(dead_code)] // No caller yet.
 pub(crate) fn content_text(c: &Content) -> String {
     text_parts(Some(c)).concat()
 }
 
-/// Port of Go utils.FunctionDecls.
+/// The function declarations of the config's tools.
 #[cfg(test)]
 pub(crate) fn function_decls(
     c: Option<&gadk_genai::GenerateContentConfig>,
@@ -499,7 +503,7 @@ pub(crate) fn function_decls(
     .unwrap_or_default()
 }
 
-/// Port of Go utils.EventBelongsToBranch: an event belongs to its own branch and every descendant of it.
+/// An event belongs to its own branch and every descendant of it.
 pub(crate) fn event_belongs_to_branch(invocation_branch: &str, event_branch: &str) -> bool {
     invocation_branch.is_empty()
         || event_branch.is_empty()
@@ -507,7 +511,7 @@ pub(crate) fn event_belongs_to_branch(invocation_branch: &str, event_branch: &st
         || invocation_branch.starts_with(&format!("{event_branch}."))
 }
 
-/// The text of a `recover()`ed panic payload (Go `%v`): `&str`/`String` payloads verbatim.
+/// The text of a recovered panic payload: `&str`/`String` payloads verbatim.
 pub(crate) fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
     if let Some(s) = payload.downcast_ref::<&'static str>() {
         (*s).to_string()
@@ -518,10 +522,10 @@ pub(crate) fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
     }
 }
 
-/// Go `toolinternal.ModelErrorText` (e83ab5b0): the text a failed call of the tool named
+/// The text a failed call of the tool named
 /// `tool_name` may show the model, and whether `err` turned out to be a recovered panic. A
-/// [`ToolError::Panic`](gadk_agent::ToolError::Panic) anywhere in the error chain (Go
-/// `errors.AsType[*PanicError]`) gives the generic ``Invoking `<tool>()` failed with an internal
+/// [`ToolError::Panic`](gadk_agent::ToolError::Panic) anywhere in the error chain
+/// gives the generic ``Invoking `<tool>()` failed with an internal
 /// error.``, because the panic's own text carries the panic value; any other error gives its
 /// own text.
 pub(crate) fn model_error_text(tool_name: &str, err: &gadk_agent::ToolError) -> (String, bool) {

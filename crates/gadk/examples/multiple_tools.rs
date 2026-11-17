@@ -13,10 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Using Google Search together with a function tool (port of Go
-//! examples/tools/multipletools/main.go). Gemini does not accept a built-in tool and function
-//! tools in one request, so each kind lives in its own agent, and a root agent calls both
-//! through agent tools. It runs through the launcher, as Go's does.
+//! Using Google Search together with a function tool. Gemini does not accept a built-in tool and
+//! function tools in one request, so each kind lives in its own agent, and a root agent calls both
+//! through agent tools. It runs through the launcher.
 //!
 //! `GOOGLE_API_KEY=... cargo run -p gadk --features launcher --example multiple_tools [console |
 //! web webui api]`, then ask
@@ -34,20 +33,21 @@ use gadk::tools::gemini::GoogleSearch;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// Go `Input`.
+// The input of the `poem` tool (a plain comment: a doc comment would become the schema's
+// description).
 #[derive(Deserialize, JsonSchema)]
 struct PoemInput {
     #[serde(rename = "lineCount")]
     line_count: i64,
 }
 
-/// Go `Output`.
+// The output of the `poem` tool.
 #[derive(Serialize, JsonSchema)]
 struct PoemOutput {
     poem: String,
 }
 
-/// Go's `poem` handler.
+/// The `poem` tool: writes a poem of the requested number of lines.
 async fn poem(_ctx: Context, input: PoemInput) -> Result<PoemOutput, ToolError> {
     let lines = usize::try_from(input.line_count).unwrap_or(0);
     Ok(PoemOutput {
@@ -95,14 +95,14 @@ async fn main() -> anyhow::Result<()> {
         ..Default::default()
     })?;
 
-    // Go also sets OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true so that its launcher's
-    // OpenTelemetry export carries message content; setting the environment is `unsafe` in Rust
-    // 2024, which the workspace forbids: set it in the shell that runs this example.
+    // Set OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true in the shell that runs this
+    // example for the launcher's OpenTelemetry export to carry message content; setting the
+    // environment from code is `unsafe` in Rust 2024, which the workspace forbids.
     let config = Config::new(Arc::new(SingleLoader::new(root_agent)));
     let mut l = full::new();
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let Err(e) = l.execute(CancellationToken::new(), config, args).await {
-        // Go `log.Fatalf("Run failed: %v\n\n%s", err, l.CommandLineSyntax())`.
+        // Print the error and the command-line syntax, then exit.
         Logger::stderr().print(&format!("Run failed: {e}\n\n{}", l.command_line_syntax()));
         std::process::exit(1);
     }

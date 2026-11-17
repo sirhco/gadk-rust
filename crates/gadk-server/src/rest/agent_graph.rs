@@ -13,40 +13,39 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `server/adkrest/internal/services/agentgraphgenerator.go`: the Graphviz DOT text of
-//! an agent tree, byte for byte as gographviz writes it (plan 5a Task 9).
+//! The Graphviz DOT text of an agent tree, in the exact format ADK servers produce for the web
+//! UI's agent graph.
 //!
-//! [`Graph`] ports the part of `github.com/awalterschulze/gographviz` (v2.0.3) the generator uses:
-//! its analysed graph (attributes, nodes, edges, subgraphs and parent/child relations) and the
-//! writer behind `Graph.String()`. The writer emits the graph attributes sorted by name, then
-//! every edge in insertion order, then the subgraphs of the root sorted by name (each with its
-//! attributes, then its children sorted by name, nested subgraphs inline), then every node not
-//! yet written sorted by name. Each statement is `\t<stmt>;\n`, a subgraph statement ends in
-//! `\n}\n` (so it is followed by `;\n`), and the graph ends in `\n}\n`. Names and values are
-//! written as they are; the generator quotes its labels and colors itself.
+//! [`Graph`] is the small graph model the generator needs: attributes, nodes, edges, subgraphs and
+//! parent/child relations, plus the writer that renders it as DOT. The writer emits the graph
+//! attributes sorted by name, then every edge in insertion order, then the subgraphs of the root
+//! sorted by name (each with its attributes, then its children sorted by name, nested subgraphs
+//! inline), then every node not yet written sorted by name. Each statement is `\t<stmt>;\n`, a
+//! subgraph statement ends in `\n}\n` (so it is followed by `;\n`), and the graph ends in `\n}\n`.
+//! Names and values are written as they are; the generator quotes its labels and colors itself.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use gadk_agent::{Agent, AgentType, Tool};
 
-/// Go `DarkGreen`: a highlighted node's color.
+/// A highlighted node's color.
 pub(crate) const DARK_GREEN: &str = "\"#0F5223\"";
-/// Go `LightGreen`: a highlighted edge's color.
+/// A highlighted edge's color.
 pub(crate) const LIGHT_GREEN: &str = "\"#69CB87\"";
-/// Go `LightGray`.
+/// Light gray.
 pub(crate) const LIGHT_GRAY: &str = "\"#cccccc\"";
-/// Go `White`.
+/// White.
 pub(crate) const WHITE: &str = "\"#ffffff\"";
-/// Go `Background`: the dark canvas.
+/// The dark canvas.
 pub(crate) const BACKGROUND: &str = "\"#333537\"";
-/// Go `DarkGray`.
+/// Dark gray.
 pub(crate) const DARK_GRAY: &str = "\"#3c4043\"";
-/// Go `MidGray`.
+/// Mid gray.
 pub(crate) const MID_GRAY: &str = "\"#5f6368\"";
-/// Go `LightBackground`.
+/// The light canvas.
 pub(crate) const LIGHT_BACKGROUND: &str = "\"#ffffff\"";
 
-/// Go `Theme`: the palette an agent graph is drawn with.
+/// The palette an agent graph is drawn with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Theme {
     /// The graph canvas color.
@@ -57,36 +56,36 @@ pub(crate) struct Theme {
     pub cluster_border: &'static str,
 }
 
-/// Go `DarkTheme`: the palette ADK has always drawn with.
+/// The dark palette, ADK's long-standing default.
 pub(crate) const DARK_THEME: Theme = Theme {
     background: BACKGROUND,
     foreground: LIGHT_GRAY,
     cluster_border: WHITE,
 };
 
-/// Go `LightTheme`: the palette for a light-mode page.
+/// The palette for a light-mode page.
 pub(crate) const LIGHT_THEME: Theme = Theme {
     background: LIGHT_BACKGROUND,
     foreground: DARK_GRAY,
     cluster_border: MID_GRAY,
 };
 
-/// Go `ThemeFor`: maps the web UI's `dark_mode` query parameter to a palette.
+/// Maps the web UI's `dark_mode` query parameter to a palette.
 pub(crate) fn theme_for(dark_mode: bool) -> Theme {
     if dark_mode { DARK_THEME } else { LIGHT_THEME }
 }
 
-/// Go `supportedClusterAgents`.
+/// The workflow agent types drawn as clusters.
 const SUPPORTED_CLUSTER_AGENTS: [AgentType; 3] = [
     AgentType::LoopAgent,
     AgentType::SequentialAgent,
     AgentType::ParallelAgent,
 ];
 
-/// gographviz `Attrs`: attribute name to value, iterated sorted by name as the writer does.
+/// Attribute name to value, iterated sorted by name as the writer does.
 pub(crate) type Attrs = BTreeMap<String, String>;
 
-/// gographviz `Edge` (always directed and without ports here).
+/// A directed edge (never with ports).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Edge {
     pub src: String,
@@ -94,21 +93,20 @@ pub(crate) struct Edge {
     pub attrs: Attrs,
 }
 
-/// The analysed graph of gographviz (`gographviz.Graph`) that the generator builds and
-/// serialises.
+/// The graph the generator builds and serialises.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Graph {
-    /// `Graph.Name`.
+    /// The graph's name.
     pub name: String,
-    /// `Graph.Attrs`.
+    /// The graph's attributes.
     pub attrs: Attrs,
-    /// `Nodes.Lookup`.
+    /// Node name to attributes.
     pub nodes: BTreeMap<String, Attrs>,
-    /// `Edges.Edges`, in insertion order.
+    /// The edges, in insertion order.
     pub edges: Vec<Edge>,
-    /// `SubGraphs.SubGraphs`: subgraph name to its attributes.
+    /// Subgraph name to its attributes.
     pub sub_graphs: BTreeMap<String, Attrs>,
-    /// `Relations.ParentToChildren`.
+    /// Parent name to the names of its child nodes and subgraphs.
     pub relations: BTreeMap<String, BTreeSet<String>>,
 }
 
@@ -120,7 +118,7 @@ fn to_attrs(pairs: &[(&str, &str)]) -> Attrs {
 }
 
 impl Graph {
-    /// `NewGraph` followed by `SetName(name)`.
+    /// An empty graph called `name`.
     pub(crate) fn new(name: &str) -> Self {
         Self {
             name: name.to_owned(),
@@ -128,12 +126,12 @@ impl Graph {
         }
     }
 
-    /// `IsNode`.
+    /// Whether `name` is a node.
     pub(crate) fn is_node(&self, name: &str) -> bool {
         self.nodes.contains_key(name)
     }
 
-    /// `IsSubGraph`.
+    /// Whether `name` is a subgraph.
     pub(crate) fn is_sub_graph(&self, name: &str) -> bool {
         self.sub_graphs.contains_key(name)
     }
@@ -142,9 +140,8 @@ impl Graph {
         self.is_sub_graph(name) && name.starts_with("cluster")
     }
 
-    /// `AddAttr`: the root graph's attributes when `graph` is its name, else the subgraph's.
-    /// gographviz fails only for an unknown graph name or attribute name; the generator uses
-    /// neither, so the failure is not modelled.
+    /// Sets an attribute: on the root graph when `graph` is its name, else on that subgraph. An
+    /// unknown graph name is ignored; the generator never passes one.
     fn add_attr(&mut self, graph: &str, field: &str, value: &str) {
         let attrs = if graph == self.name {
             &mut self.attrs
@@ -163,13 +160,14 @@ impl Graph {
             .insert(child.to_owned());
     }
 
-    /// `AddNode`: a node already present has its attributes extended (overwritten per name).
+    /// Adds a node under `parent`: a node already present has its attributes extended (overwritten
+    /// per name).
     pub(crate) fn add_node(&mut self, parent: &str, name: &str, attrs: Attrs) {
         self.nodes.entry(name.to_owned()).or_default().extend(attrs);
         self.add_relation(parent, name);
     }
 
-    /// `AddSubGraph`.
+    /// Adds a subgraph under `parent`.
     pub(crate) fn add_sub_graph(&mut self, parent: &str, name: &str, attrs: Attrs) {
         self.add_relation(parent, name);
         self.sub_graphs.entry(name.to_owned()).or_default();
@@ -178,7 +176,7 @@ impl Graph {
         }
     }
 
-    /// `AddEdge(src, dst, true, attrs)`.
+    /// Adds a directed edge.
     pub(crate) fn add_edge(&mut self, src: &str, dst: &str, attrs: Attrs) {
         self.edges.push(Edge {
             src: src.to_owned(),
@@ -187,7 +185,7 @@ impl Graph {
         });
     }
 
-    /// `Edges.SrcToDsts[src][dst]`.
+    /// The edges from `src` to `dst`.
     #[cfg(test)]
     pub(crate) fn edges_between(&self, src: &str, dst: &str) -> Vec<&Edge> {
         self.edges
@@ -196,7 +194,7 @@ impl Graph {
             .collect()
     }
 
-    /// `Relations.ChildToParents[child]`.
+    /// The parents of `child`.
     #[cfg(test)]
     pub(crate) fn parents_of(&self, child: &str) -> BTreeSet<&str> {
         self.relations
@@ -206,8 +204,8 @@ impl Graph {
             .collect()
     }
 
-    /// gographviz `Graph.String()`: the DOT text, or `error: <err>` when an edge names something
-    /// that is neither a node nor a subgraph.
+    /// The DOT text, or `error: <err>` when an edge names something that is neither a node nor a
+    /// subgraph.
     pub(crate) fn render(&self) -> String {
         match Writer::new(self).write() {
             Ok(s) => s,
@@ -216,7 +214,7 @@ impl Graph {
     }
 }
 
-/// gographviz `ast.AttrList.String()` over a `PutMap`: `[ a=b, c=d ] `, or nothing when empty.
+/// An attribute list, sorted by name: `[ a=b, c=d ] `, or nothing when empty.
 fn attr_list(attrs: &Attrs) -> String {
     if attrs.is_empty() {
         return String::new();
@@ -225,7 +223,7 @@ fn attr_list(attrs: &Attrs) -> String {
     format!("[ {} ] ", list.join(", "))
 }
 
-/// gographviz `ast.StmtList.String()`.
+/// The non-empty statements, each as `\t<stmt>;\n`.
 fn stmt_list(stmts: &[String]) -> String {
     stmts
         .iter()
@@ -234,7 +232,7 @@ fn stmt_list(stmts: &[String]) -> String {
         .collect()
 }
 
-/// gographviz's `writer`.
+/// The DOT writer.
 struct Writer<'g> {
     graph: &'g Graph,
     written: HashSet<String>,
@@ -327,22 +325,21 @@ impl<'g> Writer<'g> {
     }
 }
 
-/// What the generator draws (Go passes `any`): an agent, a tool, or anything else.
+/// What the generator draws: an agent, a tool, or anything else.
 #[derive(Clone, Copy)]
 pub(crate) enum Instance<'a> {
     Agent(&'a dyn Agent),
     Tool(&'a dyn Tool),
-    /// A value that is neither (Go's `default` branches); only the Go tests pass one.
+    /// A value that is neither; only tests pass one.
     #[cfg_attr(not(test), allow(dead_code))]
     Other,
 }
 
-/// The graph a member is drawn "into" (Go's `graph` parameter next to `parentGraph`): the
-/// serialised graph itself at the top level, or a workflow cluster, which in Go is a separate
-/// gographviz graph used only for its name.
+/// The graph a member is drawn "into": the serialised graph itself at the top level, or a
+/// workflow cluster, which is represented only by its name.
 #[derive(Clone, Copy)]
 pub(crate) enum Holder<'a> {
-    /// `graph == parentGraph`.
+    /// The serialised graph itself.
     Parent,
     /// A cluster's name holder.
     Cluster(&'a str),
@@ -357,7 +354,7 @@ impl Holder<'_> {
     }
 }
 
-/// Go `nodeName`.
+/// The node's name: an agent's or tool's name, else `Unknown instance type`.
 pub(crate) fn node_name(instance: Instance<'_>) -> String {
     match instance {
         Instance::Agent(a) => a.name().to_owned(),
@@ -371,7 +368,7 @@ fn cluster_type(agent: &dyn Agent) -> Option<AgentType> {
     SUPPORTED_CLUSTER_AGENTS.contains(&t).then_some(t)
 }
 
-/// Go `nodeCaption`: the quoted label.
+/// The quoted label.
 pub(crate) fn node_caption(instance: Instance<'_>) -> String {
     let caption = match instance {
         Instance::Agent(a) => match cluster_type(a) {
@@ -384,7 +381,7 @@ pub(crate) fn node_caption(instance: Instance<'_>) -> String {
     format!("\"{caption}\"")
 }
 
-/// Go `nodeShape`.
+/// The node shape: `ellipse` for an agent, `box` for a tool, `cylinder` otherwise.
 pub(crate) fn node_shape(instance: Instance<'_>) -> &'static str {
     match instance {
         Instance::Agent(_) => "ellipse",
@@ -393,19 +390,19 @@ pub(crate) fn node_shape(instance: Instance<'_>) -> &'static str {
     }
 }
 
-/// Go `shouldBuildAgentCluster`.
+/// Whether the instance is a workflow agent drawn as a cluster.
 pub(crate) fn should_build_agent_cluster(instance: Instance<'_>) -> bool {
     matches!(instance, Instance::Agent(a) if cluster_type(a).is_some())
 }
 
-/// Go `highlighted`.
+/// Whether `node_name` appears in any highlighted pair.
 pub(crate) fn highlighted(node_name: &str, highlighted_pairs: &[Vec<String>]) -> bool {
     highlighted_pairs
         .iter()
         .any(|pair| pair.iter().any(|n| n == node_name))
 }
 
-/// Go `edgeHighlighted`: `Some(true)` for a pair in this direction, `Some(false)` for a pair in
+/// `Some(true)` for a pair in this direction, `Some(false)` for a pair in
 /// the reverse direction, `None` when the edge is not highlighted.
 pub(crate) fn edge_highlighted(
     from: &str,
@@ -425,7 +422,7 @@ pub(crate) fn edge_highlighted(
     None
 }
 
-/// Go `edgeAnchor`: the node an edge touches, and the cluster to clip it at (`ltail`/`lhead`)
+/// The node an edge touches, and the cluster to clip it at (`ltail`/`lhead`)
 /// when the member is a drawn, non-empty cluster.
 fn edge_anchor(graph: &Graph, instance: Instance<'_>, from_cluster_end: bool) -> (String, String) {
     let Instance::Agent(agent) = instance else {
@@ -454,7 +451,8 @@ fn edge_anchor(graph: &Graph, instance: Instance<'_>, from_cluster_end: bool) ->
     (node_id, cluster_id)
 }
 
-/// Go `drawClusterEdge`.
+/// Draws the edge between two cluster members, clipped at their clusters when they are drawn
+/// clusters.
 fn draw_cluster_edge(
     graph: &mut Graph,
     from: Instance<'_>,
@@ -485,7 +483,7 @@ fn draw_cluster_edge(
     }
 }
 
-/// Go `drawCluster`: draws every member, then the sequential or loop edges between them.
+/// Draws every member, then the sequential or loop edges between them.
 pub(crate) fn draw_cluster(
     parent: &mut Graph,
     cluster: &str,
@@ -536,7 +534,7 @@ pub(crate) fn draw_cluster(
     }
 }
 
-/// Go `drawNode`: a cluster subgraph for a workflow agent, else a node, attached to `holder`.
+/// Draws a cluster subgraph for a workflow agent, else a node, attached to `holder`.
 pub(crate) fn draw_node(
     holder: Holder<'_>,
     parent: &mut Graph,
@@ -586,7 +584,7 @@ pub(crate) fn draw_node(
     }
 }
 
-/// Go `drawEdge`.
+/// Draws the edge from `from` to `to`, highlighted per `highlighted_pairs`.
 pub(crate) fn draw_edge(
     graph: &mut Graph,
     from: &str,
@@ -606,7 +604,7 @@ pub(crate) fn draw_edge(
     graph.add_edge(from, to, attrs);
 }
 
-/// Go `buildGraph`: draws `instance` unless already visited, then an LLM agent's tools and
+/// Draws `instance` unless already visited, then an LLM agent's tools and
 /// every sub-agent.
 pub(crate) fn build_graph(
     holder: Holder<'_>,
@@ -627,9 +625,9 @@ pub(crate) fn build_graph(
         for tool in &tools {
             let tool = Instance::Tool(&**tool);
             draw_node(holder, parent, tool, highlighted_pairs, visited, theme);
-            // parity: Go adds this edge to `graph`, which inside a workflow cluster is the
-            // cluster's name holder and is never serialised: an LLM agent inside a cluster shows
-            // its tool nodes but no edges to them.
+            // Tool edges are drawn only at the top level: the edge would be added to the cluster's
+            // name holder, which is never serialised, so an LLM agent inside a workflow cluster
+            // shows its tool nodes but no edges to them.
             if let Holder::Parent = holder {
                 draw_edge(
                     parent,
@@ -653,14 +651,13 @@ pub(crate) fn build_graph(
     }
 }
 
-/// Go `GetAgentGraph`: the agent tree as Graphviz DOT in the dark theme (the event graph's
-/// palette).
+/// The agent tree as Graphviz DOT in the dark theme (the event graph's palette).
 pub(crate) fn get_agent_graph(agent: &dyn Agent, highlighted_pairs: &[Vec<String>]) -> String {
     get_agent_graph_with_theme(agent, highlighted_pairs, DARK_THEME)
 }
 
-/// Go `GetAgentGraphWithTheme`. Go's error results are unreachable (gographviz fails only on an
-/// unknown graph or attribute name), so the DOT text is returned directly.
+/// The agent tree as Graphviz DOT in `theme`. Rendering cannot fail for a graph built here, so the
+/// DOT text is returned directly.
 pub(crate) fn get_agent_graph_with_theme(
     agent: &dyn Agent,
     highlighted_pairs: &[Vec<String>],
@@ -669,7 +666,7 @@ pub(crate) fn get_agent_graph_with_theme(
     agent_graph(agent, highlighted_pairs, theme).render()
 }
 
-/// The graph `GetAgentGraphWithTheme` builds before serialising it.
+/// The graph [`get_agent_graph_with_theme`] builds before serialising it.
 pub(crate) fn agent_graph(
     agent: &dyn Agent,
     highlighted_pairs: &[Vec<String>],

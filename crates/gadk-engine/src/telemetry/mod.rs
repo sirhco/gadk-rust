@@ -13,20 +13,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `tracing` spans with the names and attributes of Go `internal/telemetry` (`telemetry.go`,
-//! `node_tracing.go`, `compaction.go`). No OpenTelemetry: the static span name is Go's operation
-//! and `otel.name` Go's full span name; every other field is an OTel attribute (plan decision
-//! D6; structured values per `converters`). All spans are `INFO`. A `tracing` span records only
-//! the fields it declares, so each constructor declares every attribute Go may set on it later
-//! as `Empty`, plus `otel.status_code` and `error.message` (Go's span status and description).
+//! The engine's ADK telemetry as `tracing` spans and events: the spans (`invoke_workflow`,
+//! `invoke_node`, `generate_content`, `execute_tool`, `compact_events`; agents' own `invoke_agent`
+//! spans come from gadk-agent) and the OTel log records.
+//! No OpenTelemetry: the static span name is the operation and `otel.name` the full span name;
+//! every other field is an OTel attribute (structured values per `converters`). All spans are
+//! `INFO`. A `tracing` span records only the fields it declares, so each constructor declares every
+//! attribute that may be set on it later as `Empty`, plus `otel.status_code` and `error.message`
+//! (the span status and its description).
 //!
-//! The module is public for [`set_env_provider`], [`LOG_TARGET`] and [`d6`] (the shared decoder
-//! of this layout, plan 7a); everything else stays crate-private.
-//! Submodules (plan 5a): `env` (the process-wide environment provider, Go `logger.go`'s
-//! environment rules), the span attributes of Go `telemetry.go` and friends (`attrs`,
-//! `converters`, `inference`, `instrumentation`, `semconv`, `genai_messages`), the OTel log
-//! records of Go `logger.go` (`logger`), and the test digests of Go `telemetrytest`
-//! (`span_digest`, `log_digest`).
+//! The module is public for [`set_env_provider`], [`LOG_TARGET`] and [`d6`] (the shared decoder of
+//! this layout); everything else stays crate-private. Submodules: `env` (the process-wide
+//! environment provider and its rules), the span attributes (`attrs`, `converters`, `inference`,
+//! `instrumentation`, `semconv`, `genai_messages`), the OTel log records of the legacy schema
+//! (`logger`), and the test digests (`span_digest`, `log_digest`).
 
 pub(crate) mod attrs;
 pub(crate) mod converters;
@@ -52,16 +52,16 @@ use serde_json::Value;
 
 use attrs::SpanError;
 
-/// The `tracing` target of the OTel log records (plan decision D6); a `tracing` layer that
-/// collects them (gadk-server's debug store) filters on it.
+/// The `tracing` target of the OTel log records; a `tracing` layer that collects them
+/// (gadk-server's debug store) filters on it.
 pub const LOG_TARGET: &str = "gadk_engine::telemetry::log";
 
 /// The [`SpanIds`](d6::SpanIds) of the nearest enclosing span (the current span first, then its
 /// ancestors) that carries them in its `tracing` registry extensions — the IDs gadk-telemetry's
-/// bridge leaves on every ADK span it exports. The analytics plugin reads them where Go reads
-/// `trace.SpanContextFromContext(ctx)`. `None` outside any span, when no enclosing span carries
-/// IDs (no bridge installed), or under a subscriber that is not a `tracing_subscriber::Registry`
-/// stack (as `gadk_agent::agent::telemetry::in_workflow_scope`).
+/// bridge leaves on every ADK span it exports. The analytics plugin reads them where it needs the
+/// current trace and span IDs. `None` outside any span, when no enclosing span carries IDs (no
+/// bridge installed), or under a subscriber that is not a `tracing_subscriber::Registry` stack (as
+/// `gadk_agent::agent::telemetry::in_workflow_scope`).
 pub fn current_span_ids() -> Option<d6::SpanIds> {
     let id = tracing::Span::current().id()?;
     tracing::dispatcher::get_default(|d| {
@@ -74,9 +74,9 @@ pub fn current_span_ids() -> Option<d6::SpanIds> {
     })
 }
 
-/// Port of Go startInvokeAgentSpan. Engine-internal: agents' own spans come from
-/// `CustomAgent::run` (gadk-agent), and engine code never wraps `Agent::run` in another one, so
-/// only the span unit tests use it.
+/// The `invoke_agent` span. Engine-internal: agents' own spans come from `CustomAgent::run`
+/// (gadk-agent), and engine code never wraps `Agent::run` in another one, so only the span unit
+/// tests use it.
 #[cfg(test)]
 pub(crate) fn agent_span(agent_name: &str) -> tracing::Span {
     tracing::info_span!(
@@ -87,9 +87,9 @@ pub(crate) fn agent_span(agent_name: &str) -> tracing::Span {
     )
 }
 
-/// Installs, once per process, gadk-engine's resolver of the Go `%T` that spans record as
-/// `error.type` for engine errors gadk-agent cannot see ([`crate::error::go_error_type`]:
-/// `*workflow.NodeRunError`). Called where such an error is built, so it is in place before
+/// Installs, once per process, gadk-engine's resolver of the type name that spans record as
+/// `error.type` for engine errors gadk-agent cannot see ([`crate::error::go_error_type`], which
+/// names dynamic child run failures). Called where such an error is built, so it is in place before
 /// one can reach a span.
 pub(crate) fn install_go_error_type_resolver() {
     static INSTALL: std::sync::Once = std::sync::Once::new();
@@ -98,12 +98,12 @@ pub(crate) fn install_go_error_type_resolver() {
     });
 }
 
-/// Whether the current span is inside an `invoke_workflow` span (Go's `workflowScopeKey`; shared
-/// with gadk-agent's agent spans).
+/// Whether the current span is inside an `invoke_workflow` span (shared with gadk-agent's agent
+/// spans).
 pub(crate) use gadk_agent::agent::telemetry::in_workflow_scope;
 
-/// Port of Go startInvokeWorkflowSpan: `gen_ai.workflow.nested` marks a span started inside
-/// another `invoke_workflow` span (default schema only).
+/// The `invoke_workflow` span: `gen_ai.workflow.nested` marks a span started inside another
+/// `invoke_workflow` span (default schema only).
 pub(crate) fn workflow_span(name: &str, conversation_id: &str) -> tracing::Span {
     use tracing::field::Empty;
     let nested = in_workflow_scope() && !env::use_legacy_schema();
@@ -124,7 +124,7 @@ pub(crate) fn workflow_span(name: &str, conversation_id: &str) -> tracing::Span 
     span
 }
 
-/// Port of Go startInvokeNodeSpan.
+/// The `invoke_node` span.
 pub(crate) fn node_span(node_name: &str, conversation_id: &str) -> tracing::Span {
     use tracing::field::Empty;
     tracing::info_span!(
@@ -139,8 +139,8 @@ pub(crate) fn node_span(node_name: &str, conversation_id: &str) -> tracing::Span
     )
 }
 
-/// The `generate_content` span of Go startGenerateContentSpan, with its start attributes other
-/// than the provider (see [`attrs::start_generate_content_span`]).
+/// The `generate_content` span, with its start attributes other than the provider (see
+/// [`attrs::start_generate_content_span`]).
 pub(crate) fn generate_content_span(model: &str, invocation_id: &str) -> tracing::Span {
     use tracing::field::Empty;
     tracing::info_span!(
@@ -165,8 +165,7 @@ pub(crate) fn generate_content_span(model: &str, invocation_id: &str) -> tracing
     )
 }
 
-/// The `execute_tool` span of Go StartExecuteToolSpan, with its name attributes (see
-/// [`attrs::start_execute_tool_span`]).
+/// The `execute_tool` span, with its name attributes (see [`attrs::start_execute_tool_span`]).
 pub(crate) fn execute_tool_span(tool_name: &str) -> tracing::Span {
     use tracing::field::Empty;
     tracing::info_span!(
@@ -187,8 +186,8 @@ pub(crate) fn execute_tool_span(tool_name: &str) -> tracing::Span {
     )
 }
 
-/// Go `StartTrace(ctx, "execute_tool (merged)")`: the span over parallel tool calls, without
-/// attributes until [`attrs::trace_merged_tool_calls_result`].
+/// The `execute_tool (merged)` span: over parallel tool calls, without attributes until
+/// [`attrs::trace_merged_tool_calls_result`].
 pub(crate) fn merged_tool_calls_span() -> tracing::Span {
     use tracing::field::Empty;
     tracing::info_span!(
@@ -206,10 +205,10 @@ pub(crate) fn merged_tool_calls_span() -> tracing::Span {
     )
 }
 
-/// Emits one OTel log record as the D6 `tracing` event under `parent`: target [`LOG_TARGET`],
-/// fields `event.name`, `otel.log.body` (the JSON text of Go's body; `null` when Go sets none)
-/// and, when there are any, `otel.log.attributes` (a JSON object). Go's DEBUG severity is the
-/// `DEBUG` level, anything else `INFO`.
+/// Emits one OTel log record as a `tracing` event under `parent`: target [`LOG_TARGET`], fields
+/// `event.name`, `otel.log.body` (the JSON text of the body; `null` when it has none) and, when
+/// there are any, `otel.log.attributes` (a JSON object). A `DEBUG` record is emitted at the `DEBUG`
+/// level, anything else at `INFO`.
 pub(crate) fn emit_log_record(
     parent: &tracing::Span,
     level: tracing::Level,
@@ -248,16 +247,16 @@ pub(crate) fn emit_log_record(
     }
 }
 
-/// Go internal/telemetry/compaction.go compactEventsName.
+/// The name of the compaction span.
 const COMPACT_EVENTS: &str = "compact_events";
 
-/// Go telemetry.CompactionTriggerSlidingWindow.
+/// The trigger of a sliding-window compaction.
 pub(crate) const COMPACTION_TRIGGER_SLIDING_WINDOW: &str = "sliding_window";
-/// Go telemetry.CompactionTriggerTokenThreshold.
+/// The trigger of a token-threshold compaction.
 pub(crate) const COMPACTION_TRIGGER_TOKEN_THRESHOLD: &str = "token_threshold";
 
-/// Port of Go telemetry.StartCompactEventsSpanParams. Zero thresholds mean "strategy disabled"
-/// and their attributes are omitted.
+/// The parameters of a `compact_events` span. Zero thresholds mean "strategy disabled" and their
+/// attributes are omitted.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct CompactEventsSpanParams {
     pub(crate) trigger: &'static str,
@@ -272,8 +271,8 @@ pub(crate) struct CompactEventsSpanParams {
     pub(crate) event_retention_size: i32,
 }
 
-/// Port of Go telemetry.GenAISystemAttr: `gcp.vertex_ai` / `gcp.gemini` (semconv v1.36), `None`
-/// for a backend that cannot be named.
+/// The `gen_ai.system` value: `gcp.vertex_ai` / `gcp.gemini` (semconv v1.36), `None` for a backend
+/// that cannot be named.
 pub(crate) fn gen_ai_system(backend: Option<Backend>) -> Option<&'static str> {
     match backend {
         Some(Backend::VertexAi) => Some("gcp.vertex_ai"),
@@ -282,18 +281,18 @@ pub(crate) fn gen_ai_system(backend: Option<Backend>) -> Option<&'static str> {
     }
 }
 
-/// Port of Go epochSeconds: `float64(t.UnixNano()) / float64(time.Second)`.
+/// Seconds since the Unix epoch as a float: nanoseconds since the epoch divided by 1e9.
 pub(crate) fn epoch_seconds(t: DateTime<Utc>) -> f64 {
     match t.timestamp_nanos_opt() {
         Some(n) => n as f64 / 1e9,
-        // Outside UnixNano's range (Go's result is undefined there); never reached for a
-        // recorded bound, which is omitted when zero.
+        // Outside the range of nanoseconds since the epoch: whole seconds plus the sub-second part.
+        // Never reached for a recorded bound, which is omitted when zero.
         None => t.timestamp() as f64 + f64::from(t.timestamp_subsec_nanos()) / 1e9,
     }
 }
 
-/// Port of Go StartCompactEventsSpan: a span named `compact_events` (`otel.name`
-/// `compact_events <trigger>`), a child of the caller's current span.
+/// Starts a span named `compact_events` (`otel.name` `compact_events <trigger>`), a child of the
+/// caller's current span.
 pub(crate) fn compact_events_span(p: &CompactEventsSpanParams) -> tracing::Span {
     use tracing::field::Empty;
     let span = tracing::info_span!(
@@ -346,7 +345,7 @@ pub(crate) fn compact_events_span(p: &CompactEventsSpanParams) -> tracing::Span 
     span
 }
 
-/// Port of Go TraceCompactionResultParams.
+/// The outcome of a compaction, recorded by [`trace_compaction_result`].
 pub(crate) struct CompactionResultParams<'a> {
     pub(crate) result_event: Option<&'a Event>,
     pub(crate) error: Option<&'a (dyn std::error::Error + 'static)>,
@@ -355,12 +354,13 @@ pub(crate) struct CompactionResultParams<'a> {
     pub(crate) usage: Option<&'a GenerateContentResponseUsageMetadata>,
 }
 
-/// Go `RecordError` for an error known only by its text (Go `errors.New`).
+/// Records an error known only by its text on `span`.
 pub(crate) fn record_span_error(span: &tracing::Span, err: &dyn std::fmt::Display) {
     attrs::record_error(span, Some(&SpanError::text(err.to_string())));
 }
 
-/// Port of Go TraceCompactionResult.
+/// Records a compaction's outcome on its span: any error, the decline reason, the usage and the
+/// result event's range.
 pub(crate) fn trace_compaction_result(span: &tracing::Span, p: CompactionResultParams<'_>) {
     if let Some(e) = p.error {
         attrs::record_error(span, Some(&SpanError::new(e)));
@@ -404,13 +404,13 @@ pub(crate) fn trace_compaction_result(span: &tracing::Span, p: CompactionResultP
     }
 }
 
-/// Port of Go TraceCompactionDeclined: a closed span with the same attributes plus the reason.
+/// A closed span with the same attributes plus the reason.
 pub(crate) fn trace_compaction_declined(p: &CompactEventsSpanParams, reason: &str) {
     let span = compact_events_span(p);
     span.record("gen_ai.compaction.declined", reason);
 }
 
-/// Port of Go recordCompactionUsage: output tokens include thoughts, per semconv.
+/// Records the compaction's token usage: output tokens include thoughts, per semconv.
 fn record_compaction_usage(span: &tracing::Span, u: &GenerateContentResponseUsageMetadata) {
     if u.prompt_token_count > 0 {
         span.record("gen_ai.usage.input_tokens", i64::from(u.prompt_token_count));

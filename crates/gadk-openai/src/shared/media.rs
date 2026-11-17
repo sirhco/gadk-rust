@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Media classification both APIs share (port of ADK-Go `internal/shared/media.go`).
+//! Media classification both APIs share.
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
@@ -23,13 +23,13 @@ use gadk_platform::go_to_lower;
 
 use crate::error::{ErrorKind, OpenAiError};
 
-/// Go `fileIDPrefix`: a file URI naming an upload to the provider.
+/// A file URI prefix naming an upload to the provider.
 const FILE_ID_PREFIX: &str = "file-";
 
-/// Go `defaultInlineFilename`: the filename of inline data without a display name.
+/// The filename of inline data without a display name.
 const DEFAULT_INLINE_FILENAME: &str = "inline_data";
 
-/// Go `MediaKind`: what a part's media is, as its MIME type reports it.
+/// What a part's media is, as its MIME type reports it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum MediaKind {
     /// `"image"`: an `image/` type.
@@ -42,7 +42,7 @@ pub(crate) enum MediaKind {
     File,
 }
 
-/// Go `MediaSource`: where the bytes are.
+/// Where the bytes are.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum MediaSource {
     /// `"data"`: raw bytes in the request.
@@ -54,7 +54,7 @@ pub(crate) enum MediaSource {
 }
 
 impl MediaSource {
-    /// Go's string value (error texts print it with `%s`).
+    /// The string value (error texts print it).
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Data => "data",
@@ -64,7 +64,7 @@ impl MediaSource {
     }
 }
 
-/// Go `Media`: a part's `InlineData` or `FileData` reduced to plain values.
+/// A part's `InlineData` or `FileData` reduced to plain values.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Media {
     /// What the MIME type says the media is.
@@ -84,7 +84,7 @@ pub(crate) struct Media {
 }
 
 impl Media {
-    /// Go `Media.DataURL`: `data:<trimmed mime type>;base64,<standard base64>` for inline
+    /// `data:<trimmed mime type>;base64,<standard base64>` for inline
     /// media, `""` otherwise.
     pub(crate) fn data_url(&self) -> String {
         if self.source != MediaSource::Data {
@@ -98,10 +98,10 @@ impl Media {
     }
 }
 
-/// Go `ClassifyMedia`: the part's media, `InlineData` before `FileData`; empty for a part
-/// with none. Inline data without a MIME type is `ErrMediaMIMETypeRequired: inline data`,
-/// without bytes `ErrMediaDataRequired: inline data of type <mime>`; file data without a URI
-/// `ErrMediaURIRequired: file data`, without a MIME type `ErrMediaMIMETypeRequired: file data`.
+/// The part's media, `InlineData` before `FileData`; empty for a part
+/// with none. Inline data without a MIME type is `MediaMimeTypeRequired: inline data`,
+/// without bytes `MediaDataRequired: inline data of type <mime>`; file data without a URI
+/// `MediaUriRequired: file data`, without a MIME type `MediaMimeTypeRequired: file data`.
 pub(crate) fn classify_media(part: &Part) -> Result<Vec<Media>, OpenAiError> {
     let mut out = Vec::new();
     if let Some(blob) = &part.inline_data {
@@ -113,7 +113,7 @@ pub(crate) fn classify_media(part: &Part) -> Result<Vec<Media>, OpenAiError> {
     Ok(out)
 }
 
-/// Go `classifyInlineData`.
+/// Classifies inline data.
 fn classify_inline_data(blob: &Blob) -> Result<Media, OpenAiError> {
     if blob.mime_type.is_empty() {
         return Err(OpenAiError::new(
@@ -142,7 +142,7 @@ fn classify_inline_data(blob: &Blob) -> Result<Media, OpenAiError> {
     })
 }
 
-/// Go `classifyFileData`. The URI is never echoed in an error: it may carry a signature.
+/// Classifies file data. The URI is never echoed in an error: it may carry a signature.
 fn classify_file_data(fd: &FileData) -> Result<Media, OpenAiError> {
     if fd.file_uri.is_empty() {
         return Err(OpenAiError::new(ErrorKind::MediaUriRequired, "file data"));
@@ -169,7 +169,7 @@ fn classify_file_data(fd: &FileData) -> Result<Media, OpenAiError> {
     })
 }
 
-/// Go `mediaKindOf`: the kind by the type's top-level tree, ignoring case, surrounding
+/// The kind by the type's top-level tree, ignoring case, surrounding
 /// whitespace and parameters.
 fn media_kind_of(mime_type: &str) -> MediaKind {
     let essence = go_to_lower(mime_type.trim());

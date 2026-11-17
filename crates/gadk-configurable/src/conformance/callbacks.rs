@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `internal/configurable/conformance/callbacks.go`: the conformance agents' before/after
-//! agent callbacks, registered under `callback_agent_00N.callbacks.*`.
+//! The conformance agents' before/after agent callbacks, registered under
+//! `callback_agent_00N.callbacks.*`.
 
 use std::sync::Arc;
 
@@ -27,25 +27,22 @@ use serde_json::Value;
 
 use crate::{Callback, ConfigError, Registry};
 
-/// Go `beforeAgentCallback1`: sets `before_agent_callback_state_key` to `value1`.
+/// Sets `before_agent_callback_state_key` to `value1`.
 pub(crate) async fn before_agent_callback1(ctx: Context) -> Result<Option<Content>, AgentError> {
-    // Go: callbacks.go beforeAgentCallback1
     ctx.state()
         .set("before_agent_callback_state_key", Value::from("value1"))?;
     Ok(None)
 }
 
-/// Go `beforeAgentCallback2`: appends `+value2` to `before_agent_callback_state_key`
-/// (`state value for 'before_agent_callback_state_key' is not a string, but %T`).
+/// Appends `+value2` to `before_agent_callback_state_key`
+/// (`state value for 'before_agent_callback_state_key' is not a string, but {type}`).
 pub(crate) async fn before_agent_callback2(ctx: Context) -> Result<Option<Content>, AgentError> {
-    // Go: callbacks.go beforeAgentCallback2
     append_value2(&ctx, "before_agent_callback_state_key")
 }
 
-/// Go `shortcutAgentExecution`: sets `conversation_limit_reached` to `True` on the first call,
-/// then answers `Sorry, you have reached the limit of the conversation.` as the model.
+/// Sets `conversation_limit_reached` to `True` on the first call, then answers `Sorry, you
+/// have reached the limit of the conversation.` as the model.
 pub(crate) async fn shortcut_agent_execution(ctx: Context) -> Result<Option<Content>, AgentError> {
-    // Go: callbacks.go shortcutAgentExecution
     let val = match ctx.state().get("conversation_limit_reached") {
         Ok(val) => val,
         Err(SessionError::StateKeyNotExist) => {
@@ -67,23 +64,21 @@ pub(crate) async fn shortcut_agent_execution(ctx: Context) -> Result<Option<Cont
     Ok(None)
 }
 
-/// Go `afterAgentCallback1`: sets `after_agent_callback_state_key` to `value1`.
+/// Sets `after_agent_callback_state_key` to `value1`.
 pub(crate) async fn after_agent_callback1(ctx: Context) -> Result<Option<Content>, AgentError> {
-    // Go: callbacks.go afterAgentCallback1
     ctx.state()
         .set("after_agent_callback_state_key", Value::from("value1"))?;
     Ok(None)
 }
 
-/// Go `afterAgentCallback2`: appends `+value2` to `after_agent_callback_state_key`.
+/// Appends `+value2` to `after_agent_callback_state_key`.
 pub(crate) async fn after_agent_callback2(ctx: Context) -> Result<Option<Content>, AgentError> {
-    // Go: callbacks.go afterAgentCallback2
     append_value2(&ctx, "after_agent_callback_state_key")
 }
 
-/// The shared body of Go `beforeAgentCallback2` / `afterAgentCallback2` (the two Go functions
-/// differ only in the key): `Get` (errors returned as is), the string check with `%T` of the
-/// value, `Set(key, s+"+value2")`.
+/// The shared body of `before_agent_callback2` and `after_agent_callback2` (they differ only
+/// in the key): reads the state value (errors returned as is), checks it is a string (the
+/// error names its type), and stores it with `+value2` appended.
 fn append_value2(ctx: &Context, key: &str) -> Result<Option<Content>, AgentError> {
     let val = ctx.state().get(key)?;
     let Some(s) = val.as_str() else {
@@ -96,10 +91,9 @@ fn append_value2(ctx: &Context, key: &str) -> Result<Option<Content>, AgentError
     Ok(None)
 }
 
-/// Go `RegisterCallbacks`: the five callbacks under their Go names
-/// (`error registering before agent callback 1: %w`, …); stops at the first failure.
+/// Registers the five callbacks under their conformance names
+/// (`error registering before agent callback 1: {cause}`, …); stops at the first failure.
 pub fn register_callbacks(registry: &Registry) -> Result<(), ConfigError> {
-    // Go: callbacks.go RegisterCallbacks
     let callbacks = [
         (
             "callback_agent_001.callbacks.before_agent_callback1",

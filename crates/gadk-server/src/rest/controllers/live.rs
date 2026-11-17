@@ -13,11 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `controllers/runtime.go` `RunLiveHandler` (`/run_live` over WebSocket) with
-//! `acquireLiveSlot`, `applyLiveConnLimits`, `liveDeadline` and `truncateCloseReason`, and of
-//! the parts of gorilla/websocket's `Upgrader` and `Conn` whose behavior a client sees: the
-//! handshake checks and their error responses, the read limit's 1009 close, the close reply, and
-//! read/write deadlines (here `tokio::time` timeouts around each read and write).
+//! The `/run_live` handler: a live agent session over WebSocket, with the concurrent-session cap,
+//! the keepalive limits and the close-reason truncation, and the WebSocket behaviour a client
+//! sees: the handshake checks and their error responses, the read limit's 1009 close, the close
+//! reply, and read/write deadlines (here `tokio::time` timeouts around each read and write).
 
 use std::fmt;
 use std::future::Future;
@@ -47,25 +46,24 @@ use crate::rest::http_error::http_error;
 use crate::rest::models::{Event as ApiEvent, LiveRequest as ApiLiveRequest, RunAgentRequest};
 use crate::rest::routing::{Request, Response, query_get};
 
-/// Go `maxCloseReason`: the longest close reason a control frame carries (a 125-byte payload
-/// less the two-byte code).
+/// The longest close reason a control frame carries (a 125-byte payload less the two-byte code).
 pub(crate) const MAX_CLOSE_REASON: usize = 123;
 
-/// gorilla `writeWait`: the deadline of the read-limit close frame and of the close reply.
+/// The deadline of the read-limit close frame and of the close reply.
 const WRITE_WAIT: Duration = Duration::from_secs(1);
-/// How long Go's `sendClose` waits for the client's close reply.
+/// How long [`send_close`] waits for the client's close reply.
 const CLOSE_DRAIN: Duration = Duration::from_secs(1);
-/// The MIME type Go gives a binary client frame.
+/// The MIME type of a binary client frame.
 const BINARY_AUDIO_MIME_TYPE: &str = "audio/pcm;rate=16000";
-/// gorilla `CloseNormalClosure`.
+/// WebSocket close code: normal closure.
 const CLOSE_NORMAL_CLOSURE: u16 = 1000;
-/// gorilla `CloseGoingAway`.
+/// WebSocket close code: going away.
 const CLOSE_GOING_AWAY: u16 = 1001;
-/// gorilla `CloseNoStatusReceived`: a close frame without a code.
+/// WebSocket close code: no status received (a close frame without a code).
 const CLOSE_NO_STATUS_RECEIVED: u16 = 1005;
-/// gorilla `CloseMessageTooBig`.
+/// WebSocket close code: message too big.
 const CLOSE_MESSAGE_TOO_BIG: u16 = 1009;
-/// gorilla `CloseInternalServerErr`.
+/// WebSocket close code: internal server error.
 const CLOSE_INTERNAL_SERVER_ERR: u16 = 1011;
 // The tungstenite error texts below were checked against tungstenite 0.29.0 (axum 0.8.9's
 // WebSocket backend); gadk-server has no tungstenite dependency to downcast to.
@@ -78,12 +76,11 @@ const SEND_AFTER_CLOSING_ERROR: &str = "Sending after closing is not allowed";
 const ALREADY_CLOSED_ERROR: &str = "Trying to work with closed connection";
 
 impl RuntimeApiController {
-    /// Go `RunLiveHandler` (through `NewErrorHandler`): upgrades to a WebSocket and streams a
-    /// live agent session.
+    /// Upgrades to a WebSocket and streams a live agent session.
     pub async fn run_live_handler(&self, req: Request) -> Response {
         let (mut parts, _body) = req.into_parts();
 
-        // Go `q.Get(name)`, falling back to `q.Get(alt)` when that is empty.
+        // The `name` query parameter, falling back to `alt` when it is empty.
         let query = parts.uri.query().map(str::to_owned);
         let param = |name: &str, alt: &str| {
             let v = query_get(query.as_deref(), name);
@@ -122,13 +119,13 @@ impl RuntimeApiController {
             return upgrade_error(status, reason);
         }
         let Ok(upgrade) = WebSocketUpgrade::from_request_parts(&mut parts, &()).await else {
-            // gorilla's Upgrader fails the same way when the connection cannot be hijacked.
+            // The same failure as an upgrade over a connection that cannot be taken over.
             return upgrade_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "websocket: response does not implement http.Hijacker",
             );
         };
-        // The upgrade bypasses MaxBytesMiddleware; negative turns the limit off.
+        // The upgrade bypasses the request-body limit; negative turns the read limit off.
         let read_limit = usize::try_from(self.max_live_message_bytes)
             .ok()
             .filter(|n| *n > 0)
@@ -149,7 +146,7 @@ impl RuntimeApiController {
         upgrade.on_upgrade(move |ws| live.serve(ws))
     }
 
-    /// Go `acquireLiveSlot`: one of the controller's concurrent live-session slots (`None`
+    /// One of the controller's concurrent live-session slots (`None`
     /// when the controller has no cap), or `Err` when they are all held. Dropping the permit
     /// gives the slot back.
     fn acquire_live_slot(&self) -> Result<Option<OwnedSemaphorePermit>, ()> {
@@ -159,8 +156,7 @@ impl RuntimeApiController {
         }
     }
 
-    /// gorilla `Upgrader.Upgrade`'s handshake checks, in its order: the status and reason of
-    /// the first that fails.
+    /// The WebSocket handshake checks, in order: the status and reason of the first that fails.
     fn check_handshake(&self, parts: &Parts) -> Option<(StatusCode, &'static str)> {
         let h = &parts.headers;
         if !token_list_contains_value(h, CONNECTION.as_str(), "upgrade") {
@@ -210,8 +206,8 @@ impl RuntimeApiController {
         None
     }
 
-    /// Go `getRunner` for a live run, plus `RunLiveHandler`'s close reason: `Err` holds the
-    /// error to log and the reason (`agent … not found for original error: …` when the agent
+    /// The runner for a live run, plus the close reason: `Err` holds the error to log and the
+    /// reason (`agent … not found for original error: …` when the agent
     /// cannot be loaded, else the error itself).
     fn live_runner(&self, app_name: &str) -> Result<Runner, (String, String)> {
         let req = RunAgentRequest {
@@ -236,9 +232,8 @@ impl RuntimeApiController {
     }
 }
 
-/// The response of a failed upgrade: gorilla's `returnError` (`Sec-Websocket-Version: 13` and
-/// `http.Error` with the status text), then `NewErrorHandler`'s `http.Error` of the returned
-/// error, which appends its line to the body already written.
+/// The response of a failed upgrade: `Sec-Websocket-Version: 13` and the status text, followed by
+/// a line `failed to upgrade to websocket: <reason>` in the same plain-text body.
 fn upgrade_error(status: StatusCode, reason: &str) -> Response {
     let text = status.canonical_reason().unwrap_or_default();
     let mut resp = http_error(
@@ -250,7 +245,7 @@ fn upgrade_error(status: StatusCode, reason: &str) -> Response {
     resp
 }
 
-/// gorilla `tokenListContainsValue`: whether a comma-separated token list in any `name` header
+/// Whether a comma-separated token list in any `name` header
 /// holds `value` (ASCII case-insensitive). A header value stops counting at the first item that
 /// is not a single token.
 fn token_list_contains_value(headers: &HeaderMap, name: &str, value: &str) -> bool {
@@ -276,7 +271,7 @@ fn is_token_octet(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b)
 }
 
-/// gorilla `checkSameOrigin`: no `Origin` header, or its host equals the request's `Host`
+/// The default origin check: no `Origin` header, or its host equals the request's `Host`
 /// (ASCII case-insensitive).
 fn check_same_origin(parts: &Parts) -> bool {
     let Some(origin) = parts.headers.get(ORIGIN) else {
@@ -295,7 +290,7 @@ fn check_same_origin(parts: &Parts) -> bool {
     url_host(origin).eq_ignore_ascii_case(&host)
 }
 
-/// Go `url.Parse(s).Host`: the authority after `scheme://`, without user info; empty when `s`
+/// The host of URL `s`: the authority after `scheme://`, without user info; empty when `s`
 /// has no authority.
 fn url_host(s: &str) -> &str {
     let Some(colon) = s.find(':') else {
@@ -308,7 +303,7 @@ fn url_host(s: &str) -> &str {
     authority.rsplit_once('@').map_or(authority, |(_, h)| h)
 }
 
-/// gorilla `isValidChallengeKey`: standard base64 of 16 bytes.
+/// Whether `key` is a valid `Sec-WebSocket-Key`: standard base64 of 16 bytes.
 fn is_valid_challenge_key(key: &str) -> bool {
     !key.is_empty()
         && base64::engine::general_purpose::STANDARD
@@ -316,7 +311,7 @@ fn is_valid_challenge_key(key: &str) -> bool {
             .is_ok_and(|d| d.len() == 16)
 }
 
-/// Go `truncateCloseReason`: `reason` cut to [`MAX_CLOSE_REASON`] bytes on a UTF-8 boundary.
+/// `reason` cut to [`MAX_CLOSE_REASON`] bytes on a UTF-8 boundary.
 pub(crate) fn truncate_close_reason(reason: &str) -> &str {
     if reason.len() <= MAX_CLOSE_REASON {
         return reason;
@@ -328,7 +323,7 @@ pub(crate) fn truncate_close_reason(reason: &str) -> &str {
     &reason[..end]
 }
 
-/// gorilla `FormatCloseMessage` (with the reason truncated as Go's handler does).
+/// A close frame with `code` and `reason`, the reason truncated to [`MAX_CLOSE_REASON`].
 fn close_message(code: u16, reason: &str) -> Message {
     Message::Close(Some(CloseFrame {
         code,
@@ -336,7 +331,7 @@ fn close_message(code: u16, reason: &str) -> Message {
     }))
 }
 
-/// gorilla `CloseError.Error()`: how a client's close frame reads in Go's log line.
+/// How a client's close frame reads in the log line: `websocket: close <code> (<name>)[: <text>]`.
 fn close_error_text(code: u16, text: &str) -> String {
     let name = match code {
         1000 => " (normal)",
@@ -368,12 +363,12 @@ async fn with_deadline<F: Future>(deadline: Option<Instant>, f: F) -> Option<F::
     }
 }
 
-/// Why a write on a live connection failed (the texts stand in for Go's net errors).
+/// Why a write on a live connection failed.
 #[derive(Debug)]
 enum WriteError {
-    /// gorilla `ErrCloseSent`: a close frame already went out.
+    /// A close frame already went out.
     CloseSent,
-    /// The connection was closed (Go's `use of closed network connection`).
+    /// The connection was closed.
     Closed,
     /// The write deadline passed.
     Timeout,
@@ -394,7 +389,7 @@ impl fmt::Display for WriteError {
 
 /// A transport write error as a [`WriteError`]. tungstenite refuses writes once a close frame
 /// went either way (it marks the peer's close while reading it, before the reader can set
-/// `close_sent`); that is gorilla's `ErrCloseSent`, which Go's event loop does not log.
+/// `close_sent`); that is [`WriteError::CloseSent`], which the event loop does not log.
 fn write_error(e: axum::Error) -> WriteError {
     let text = e.to_string();
     if text.contains(SEND_AFTER_CLOSING_ERROR) || text.contains(ALREADY_CLOSED_ERROR) {
@@ -405,25 +400,24 @@ fn write_error(e: axum::Error) -> WriteError {
 }
 
 /// The write half of a live WebSocket, shared by the event loop, the pinger and the reader
-/// (gorilla allows one writer at a time; a write waits for the previous one within its own
-/// deadline, as `WriteControl` does).
+/// (one writer at a time; a write waits for the previous one within its own deadline).
 struct Conn {
     sink: Mutex<SplitSink<WebSocket, Message>>,
-    /// Go `ws.Close()`: every pending and later read or write on the connection fails.
+    /// Set by [`Conn::close`]: every pending and later read or write on the connection fails.
     closed: CancellationToken,
-    /// gorilla `ErrCloseSent`: a close frame (ours or the reply to the client's) went out.
+    /// A close frame (ours or the reply to the client's) went out.
     close_sent: AtomicBool,
     /// `None`: the keepalive is off and no read or write has a deadline.
     keepalive: Option<Duration>,
 }
 
 impl Conn {
-    /// Go `liveDeadline`: the keepalive timeout from now, or no deadline.
+    /// The keepalive timeout from now, or no deadline.
     fn deadline(&self) -> Option<Instant> {
         self.keepalive.map(|t| Instant::now() + t)
     }
 
-    /// Go `ws.Close()`.
+    /// Closes the connection: every pending and later read or write fails.
     fn close(&self) {
         self.closed.cancel();
     }
@@ -436,8 +430,8 @@ impl Conn {
         let is_close = matches!(msg, Message::Close(_));
         let send = async {
             let mut sink = self.sink.lock().await;
-            // gorilla re-checks `writeErr` once it holds the write mutex: a close frame may have
-            // gone out while this write waited for the writer.
+            // Re-check once the sink is held: a close frame may have gone out while this write
+            // waited for the writer.
             if self.close_sent.load(Ordering::SeqCst) {
                 return Err(WriteError::CloseSent);
             }
@@ -452,15 +446,15 @@ impl Conn {
             () = self.closed.cancelled() => Err(WriteError::Closed),
             r = with_deadline(deadline, send) => r.unwrap_or(Err(WriteError::Timeout)),
         };
-        // gorilla reports `ErrCloseSent` ahead of any other failure once a close frame went out
-        // (e.g. a write still waiting for the writer when the reader replied and closed).
+        // Once a close frame went out, `CloseSent` is reported ahead of any other failure (e.g. a
+        // write still waiting for the writer when the reader replied and closed).
         match res {
             Err(_) if self.close_sent.load(Ordering::SeqCst) => Err(WriteError::CloseSent),
             res => res,
         }
     }
 
-    /// gorilla's default close handler: the reply tungstenite queued for the client's close
+    /// The reply tungstenite queued for the client's close
     /// frame goes out now, within [`WRITE_WAIT`].
     async fn send_close_reply(&self) {
         let flush = async {
@@ -490,7 +484,7 @@ struct LiveConn {
 }
 
 impl LiveConn {
-    /// The upgraded half of Go `RunLiveHandler`. Returns once the session is over; the slot
+    /// The upgraded half of the handler. Returns once the session is over; the slot
     /// is released and the socket dropped (closed) last.
     async fn serve(self, ws: WebSocket) {
         let LiveConn {
@@ -527,10 +521,10 @@ impl LiveConn {
     }
 }
 
-/// Go `applyLiveConnLimits`' keepalive (the read limit is set on the upgrade): pings every
-/// `interval` from a task of their own, each within the keepalive deadline. Returns the token
-/// that stops the pinger and the one cancelled once a ping cannot be written in time (Go
-/// `peerGone`; never cancelled when the keepalive is off).
+/// The keepalive (the read limit is set on the upgrade): pings every `interval` from a task of
+/// their own, each within the keepalive deadline. Returns the token that stops the pinger and the
+/// one cancelled once a ping cannot be written in time (never cancelled when the keepalive is
+/// off).
 fn apply_live_conn_limits(
     conn: &Arc<Conn>,
     interval: Option<Duration>,
@@ -563,7 +557,7 @@ fn apply_live_conn_limits(
     (stop, peer_gone)
 }
 
-/// Go `sendClose`: the close frame, then the client's messages until its close reply, an error
+/// The close frame, then the client's messages until its close reply, an error
 /// or [`CLOSE_DRAIN`] (pongs do not extend it).
 async fn send_close(conn: &Conn, stream: &mut SplitStream<WebSocket>, code: u16, reason: &str) {
     let _ = conn.write(close_message(code, reason), None).await;
@@ -581,7 +575,7 @@ async fn send_close(conn: &Conn, stream: &mut SplitStream<WebSocket>, code: u16,
     }
 }
 
-/// Go `RunLiveHandler` from the runner on: the session, the reader task and the event loop.
+/// The handler from the runner on: the session, the reader task and the event loop.
 async fn run_live(
     conn: &Arc<Conn>,
     mut stream: SplitStream<WebSocket>,
@@ -642,8 +636,8 @@ async fn run_live(
 
     write_events(conn, &mut events, app_name).await;
 
-    // Go's deferred calls, last registered first: the AfterFunc's stop, the session's Close,
-    // the pinger's stop (the caller), ws.Close.
+    // Teardown: stop the watcher, drop the event stream, close the session, then close the
+    // connection and wait for the reader. The caller stops the pinger.
     done.cancel();
     let _ = watcher.await;
     drop(events);
@@ -652,7 +646,7 @@ async fn run_live(
     let _ = reader.await;
 }
 
-/// The event loop of Go `RunLiveHandler`: each event as a JSON text frame, an iterator error as
+/// The event loop: each event as a JSON text frame, an iterator error as
 /// a 1011 close frame; the first failure ends it.
 async fn write_events(conn: &Conn, events: &mut EventStream, app_name: &str) {
     while let Some(item) = events.next().await {
@@ -683,7 +677,7 @@ async fn write_events(conn: &Conn, events: &mut EventStream, app_name: &str) {
     }
 }
 
-/// gorilla `WriteJSON` of Go `models.FromSessionEvent`: `json.Encoder` output, newline included.
+/// The event as the API model's JSON text, newline included.
 fn encode_event(event: &gadk_session::Event) -> Result<String, String> {
     let mut json =
         gadk_model::to_go_json(&ApiEvent::from_session_event(event)).map_err(|e| e.to_string())?;
@@ -691,7 +685,7 @@ fn encode_event(event: &gadk_session::Event) -> Result<String, String> {
     String::from_utf8(json).map_err(|e| e.to_string())
 }
 
-/// The reader goroutine of Go `RunLiveHandler`: client frames to the live session until the
+/// The reader task: client frames to the live session until the
 /// client leaves, asks to close, or a send fails; then closes the session.
 async fn read_client(
     conn: Arc<Conn>,
@@ -752,7 +746,7 @@ async fn read_client(
                 }
                 // The keepalive's pong handler pushes the read deadline out.
                 Some(Some(Ok(Message::Pong(_)))) => deadline = conn.deadline(),
-                // tungstenite queues the pong itself (gorilla's default ping handler).
+                // tungstenite queues the pong itself.
                 Some(Some(Ok(Message::Ping(_)))) => {}
                 Some(Some(Ok(m))) => break m,
             }
@@ -771,7 +765,7 @@ async fn read_client(
                 true,
             ),
             Message::Text(text) => {
-                // Divergence (ledger 5a): nesting past 127 is serde's error (Go: 10000); see 5c.md.
+                // Nesting deeper than 127 levels is serde's recursion-limit error.
                 let api: ApiLiveRequest = match serde_json::from_str(text.as_str()) {
                     Ok(r) => r,
                     Err(e) => {
@@ -803,8 +797,8 @@ async fn read_client(
     let _ = session.close().await;
 }
 
-/// Go's mapping of a client `models.LiveRequest` onto `agent.LiveRequest`: the content, and
-/// the first of activity start, activity end and blob as the realtime input.
+/// Maps a client live request onto the agent's: the content, and the first of activity start,
+/// activity end and blob as the realtime input.
 fn live_request(api: ApiLiveRequest) -> AgentLiveRequest {
     let realtime_input = if api.activity_start.is_some() {
         Some(RealtimeInput::ActivityStart)

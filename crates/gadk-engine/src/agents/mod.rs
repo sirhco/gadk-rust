@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Workflow-backed agents (port of ADK-Go `agent/workflowagent` and `agent/workflowagents`).
+//! Workflow-backed agents: the workflow agent and the sequential, parallel and loop agents.
 
 pub(crate) mod graph_resume;
 pub mod loop_agent;

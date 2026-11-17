@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `server/authz/noop.go`.
+//! An [`Authorizer`] that allows everything.
 
 use std::sync::Arc;
 
@@ -22,7 +22,7 @@ use crate::authn::Caller;
 
 struct Noop;
 
-/// Port of Go `authz.NewNoop`: any caller may act as any user.
+/// Any caller may act as any user.
 pub fn noop() -> Arc<dyn Authorizer> {
     Arc::new(Noop)
 }

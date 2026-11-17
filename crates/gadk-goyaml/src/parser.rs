@@ -20,8 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-//! Port of yaml.v3 v3.0.1 `parserc.go`: the event stream from tokens (the parser state
-//! machine, directives, comment events).
+//! The event stream from tokens (the parser state machine, directives, comment events).
 //!
 //! The parser implements the following grammar:
 //!
@@ -63,10 +62,9 @@
 //! flow_mapping_entry   ::= flow_node | KEY flow_node? (VALUE flow_node?)?
 //! ```
 //!
-//! Go's `peek_token` returns a pointer into the token queue (nil on failure); here it returns
-//! whether a token is available and [`token`] reads the queue head, so the parser state can be
-//! mutated while the token's fields (copied out first) are in use. Go's event and token byte
-//! slices are owned `Vec<u8>` copies.
+//! `peek_token` returns whether a token is available and [`token`] reads the queue head, so the
+//! parser state can be mutated while the token's fields (copied out first) are in use. Event
+//! and token byte slices are owned `Vec<u8>` copies.
 
 use crate::emitter::default_tag_directives;
 use crate::scanner::yaml_parser_fetch_more_tokens;
@@ -76,14 +74,13 @@ use crate::yamlh::{
     YamlTokenType, YamlVersionDirective,
 };
 
-/// The token at the head of the queue (Go: the pointer `peek_token` returns). Only valid after
+/// The token at the head of the queue (available after `peek_token`). Only valid after
 /// `peek_token` returned true.
 fn token<'a>(parser: &'a YamlParser<'_>) -> &'a YamlToken {
     &parser.tokens[parser.tokens_head]
 }
 
-/// Go's inline `parser.state = parser.states[len(parser.states)-1]` +
-/// `parser.states = parser.states[:len(parser.states)-1]`.
+/// Pops the state stack into `parser.state`.
 fn pop_state(parser: &mut YamlParser<'_>) {
     let Some(state) = parser.states.pop() else {
         panic!("parser state stack underflow");
@@ -91,8 +88,7 @@ fn pop_state(parser: &mut YamlParser<'_>) {
     parser.state = state;
 }
 
-/// Go's inline `mark := parser.marks[len(parser.marks)-1]` +
-/// `parser.marks = parser.marks[:len(parser.marks)-1]`.
+/// Pops and returns the top of the mark stack.
 fn pop_mark(parser: &mut YamlParser<'_>) -> YamlMark {
     let Some(mark) = parser.marks.pop() else {
         panic!("parser mark stack underflow");
@@ -100,9 +96,8 @@ fn pop_mark(parser: &mut YamlParser<'_>) -> YamlMark {
     mark
 }
 
-/// Peek the next token in the token queue (Go returns nil — here false — on failure).
+/// Peek the next token in the token queue (false on failure).
 fn peek_token(parser: &mut YamlParser<'_>) -> bool {
-    // Go: parserc.go peek_token
     if parser.token_available || yaml_parser_fetch_more_tokens(parser) {
         yaml_parser_unfold_comments(parser);
         return true;
@@ -114,7 +109,6 @@ fn peek_token(parser: &mut YamlParser<'_>) -> bool {
 /// the position of the provided token (the queue head) into the respective top-level comment
 /// slices in the parser.
 fn yaml_parser_unfold_comments(parser: &mut YamlParser<'_>) {
-    // Go: parserc.go yaml_parser_unfold_comments
     let (token_typ, token_index) = {
         let token = token(parser);
         (token.typ, token.start_mark.index)
@@ -153,7 +147,6 @@ fn yaml_parser_unfold_comments(parser: &mut YamlParser<'_>) {
 
 /// Remove the next token from the queue (must be called after peek_token).
 fn skip_token(parser: &mut YamlParser<'_>) {
-    // Go: parserc.go skip_token
     parser.token_available = false;
     parser.tokens_parsed += 1;
     parser.stream_end_produced = parser.tokens[parser.tokens_head].typ == YamlTokenType::StreamEnd;
@@ -163,7 +156,6 @@ fn skip_token(parser: &mut YamlParser<'_>) {
 /// Get the next event. Returns false on error (set on `parser`); after STREAM-END or an error
 /// it keeps returning true with an empty event.
 pub(crate) fn yaml_parser_parse(parser: &mut YamlParser<'_>, event: &mut YamlEvent) -> bool {
-    // Go: parserc.go yaml_parser_parse
     // Erase the event object.
     *event = YamlEvent::default();
 
@@ -185,7 +177,6 @@ fn yaml_parser_set_parser_error(
     problem: &str,
     problem_mark: YamlMark,
 ) -> bool {
-    // Go: parserc.go yaml_parser_set_parser_error
     parser.error = YamlErrorType::Parser;
     parser.problem = problem.to_string();
     parser.problem_mark = problem_mark;
@@ -199,7 +190,6 @@ fn yaml_parser_set_parser_error_context(
     problem: &str,
     problem_mark: YamlMark,
 ) -> bool {
-    // Go: parserc.go yaml_parser_set_parser_error_context
     parser.error = YamlErrorType::Parser;
     parser.context = context.to_string();
     parser.context_mark = context_mark;
@@ -210,7 +200,6 @@ fn yaml_parser_set_parser_error_context(
 
 /// State dispatcher.
 fn yaml_parser_state_machine(parser: &mut YamlParser<'_>, event: &mut YamlEvent) -> bool {
-    // Go: parserc.go yaml_parser_state_machine
     match parser.state {
         YamlParserState::StreamStart => yaml_parser_parse_stream_start(parser, event),
         YamlParserState::ImplicitDocumentStart => {
@@ -273,7 +262,6 @@ fn yaml_parser_state_machine(parser: &mut YamlParser<'_>, event: &mut YamlEvent)
 // stream   ::= STREAM-START implicit_document? explicit_document* STREAM-END
 //              ************
 fn yaml_parser_parse_stream_start(parser: &mut YamlParser<'_>, event: &mut YamlEvent) -> bool {
-    // Go: parserc.go yaml_parser_parse_stream_start
     if !peek_token(parser) {
         return false;
     }
@@ -304,7 +292,6 @@ fn yaml_parser_parse_document_start(
     event: &mut YamlEvent,
     implicit: bool,
 ) -> bool {
-    // Go: parserc.go yaml_parser_parse_document_start
     if !peek_token(parser) {
         return false;
     }
@@ -335,9 +322,9 @@ fn yaml_parser_parse_document_start(
 
         let mut head_comment = Vec::new();
         if !parser.head_comment.is_empty() {
-            // [Go] Scan the header comment backwards, and if an empty line is found, break
-            //      the header so the part before the last empty line goes into the
-            //      document header, while the bottom of it goes into a follow up event.
+            // Scan the header comment backwards, and if an empty line is found, break the
+            // header so the part before the last empty line goes into the document header,
+            // while the bottom of it goes into a follow up event.
             let len = parser.head_comment.len();
             let mut i = len - 1;
             while i > 0 {
@@ -421,7 +408,6 @@ fn yaml_parser_parse_document_start(
 //                                                    ***********
 //
 fn yaml_parser_parse_document_content(parser: &mut YamlParser<'_>, event: &mut YamlEvent) -> bool {
-    // Go: parserc.go yaml_parser_parse_document_content
     if !peek_token(parser) {
         return false;
     }
@@ -446,7 +432,6 @@ fn yaml_parser_parse_document_content(parser: &mut YamlParser<'_>, event: &mut Y
 // explicit_document    ::= DIRECTIVE* DOCUMENT-START block_node? DOCUMENT-END*
 //
 fn yaml_parser_parse_document_end(parser: &mut YamlParser<'_>, event: &mut YamlEvent) -> bool {
-    // Go: parserc.go yaml_parser_parse_document_end
     if !peek_token(parser) {
         return false;
     }
@@ -480,7 +465,6 @@ fn yaml_parser_parse_document_end(parser: &mut YamlParser<'_>, event: &mut YamlE
 }
 
 fn yaml_parser_set_event_comments(parser: &mut YamlParser<'_>, event: &mut YamlEvent) {
-    // Go: parserc.go yaml_parser_set_event_comments
     event.head_comment = std::mem::take(&mut parser.head_comment);
     event.line_comment = std::mem::take(&mut parser.line_comment);
     event.foot_comment = std::mem::take(&mut parser.foot_comment);
@@ -520,7 +504,6 @@ fn yaml_parser_parse_node(
     block: bool,
     indentless_sequence: bool,
 ) -> bool {
-    // Go: parserc.go yaml_parser_parse_node
     if !peek_token(parser) {
         return false;
     }
@@ -661,7 +644,7 @@ fn yaml_parser_parse_node(
         return true;
     }
     if token.typ == YamlTokenType::FlowSequenceStart {
-        // [Go] Some of the events below can be merged as they differ only on style.
+        // Some of the events below could be merged as they differ only on style.
         end_mark = token.end_mark;
         parser.state = YamlParserState::FlowSequenceFirstEntry;
         *event = YamlEvent {
@@ -706,7 +689,7 @@ fn yaml_parser_parse_node(
             style: YamlSequenceStyle::Block as YamlStyle,
             ..YamlEvent::default()
         };
-        // Go: `parser.stem_comment != nil` (only ever set non-empty).
+        // The stem comment is only ever set non-empty.
         if !parser.stem_comment.is_empty() {
             event.head_comment = std::mem::take(&mut parser.stem_comment);
         }
@@ -725,7 +708,7 @@ fn yaml_parser_parse_node(
             style: YamlMappingStyle::Block as YamlStyle,
             ..YamlEvent::default()
         };
-        // Go: `parser.stem_comment != nil` (only ever set non-empty).
+        // The stem comment is only ever set non-empty.
         if !parser.stem_comment.is_empty() {
             event.head_comment = std::mem::take(&mut parser.stem_comment);
         }
@@ -773,7 +756,6 @@ fn yaml_parser_parse_block_sequence_entry(
     event: &mut YamlEvent,
     first: bool,
 ) -> bool {
-    // Go: parserc.go yaml_parser_parse_block_sequence_entry
     if first {
         if !peek_token(parser) {
             return false;
@@ -837,7 +819,6 @@ fn yaml_parser_parse_indentless_sequence_entry(
     parser: &mut YamlParser<'_>,
     event: &mut YamlEvent,
 ) -> bool {
-    // Go: parserc.go yaml_parser_parse_indentless_sequence_entry
     if !peek_token(parser) {
         return false;
     }
@@ -866,7 +847,7 @@ fn yaml_parser_parse_indentless_sequence_entry(
     *event = YamlEvent {
         typ: YamlEventType::SequenceEnd,
         start_mark: token.start_mark,
-        end_mark: token.start_mark, // [Go] Shouldn't this be token.end_mark?
+        end_mark: token.start_mark, // (the start mark, as in libyaml)
         ..YamlEvent::default()
     };
     pop_state(parser);
@@ -880,7 +861,6 @@ fn yaml_parser_parse_indentless_sequence_entry(
 /// would be expected otherwise. To handle this case the previous head comment is moved aside as
 /// the stem comment.
 fn yaml_parser_split_stem_comment(parser: &mut YamlParser<'_>, stem_len: usize) {
-    // Go: parserc.go yaml_parser_split_stem_comment
     if stem_len == 0 {
         return;
     }
@@ -918,7 +898,6 @@ fn yaml_parser_parse_block_mapping_key(
     event: &mut YamlEvent,
     first: bool,
 ) -> bool {
-    // Go: parserc.go yaml_parser_parse_block_mapping_key
     if first {
         if !peek_token(parser) {
             return false;
@@ -933,8 +912,8 @@ fn yaml_parser_parse_block_mapping_key(
     }
 
     let token = token(parser);
-    // [Go] A tail comment was left from the prior mapping value processed. Emit an event
-    //      as it needs to be processed with that value and not the following key.
+    // A tail comment was left from the prior mapping value processed. Emit an event as it
+    // needs to be processed with that value and not the following key.
     if !parser.tail_comment.is_empty() {
         *event = YamlEvent {
             typ: YamlEventType::TailComment,
@@ -1003,7 +982,6 @@ fn yaml_parser_parse_block_mapping_value(
     parser: &mut YamlParser<'_>,
     event: &mut YamlEvent,
 ) -> bool {
-    // Go: parserc.go yaml_parser_parse_block_mapping_value
     if !peek_token(parser) {
         return false;
     }
@@ -1047,7 +1025,6 @@ fn yaml_parser_parse_flow_sequence_entry(
     event: &mut YamlEvent,
     first: bool,
 ) -> bool {
-    // Go: parserc.go yaml_parser_parse_flow_sequence_entry
     if first {
         if !peek_token(parser) {
             return false;
@@ -1123,7 +1100,6 @@ fn yaml_parser_parse_flow_sequence_entry_mapping_key(
     parser: &mut YamlParser<'_>,
     event: &mut YamlEvent,
 ) -> bool {
-    // Go: parserc.go yaml_parser_parse_flow_sequence_entry_mapping_key
     if !peek_token(parser) {
         return false;
     }
@@ -1151,13 +1127,12 @@ fn yaml_parser_parse_flow_sequence_entry_mapping_value(
     parser: &mut YamlParser<'_>,
     event: &mut YamlEvent,
 ) -> bool {
-    // Go: parserc.go yaml_parser_parse_flow_sequence_entry_mapping_value
     if !peek_token(parser) {
         return false;
     }
     let token = token(parser);
-    // Go shadows `token` inside the `if` below, so the empty scalar after it is marked at
-    // this (VALUE or other) token, not at the token peeked inside.
+    // The empty scalar after the `if` below is marked at this (VALUE or other) token, not at
+    // the token peeked inside it.
     let mark = token.start_mark;
     if token.typ == YamlTokenType::Value {
         skip_token(parser);
@@ -1184,7 +1159,6 @@ fn yaml_parser_parse_flow_sequence_entry_mapping_end(
     parser: &mut YamlParser<'_>,
     event: &mut YamlEvent,
 ) -> bool {
-    // Go: parserc.go yaml_parser_parse_flow_sequence_entry_mapping_end
     if !peek_token(parser) {
         return false;
     }
@@ -1192,7 +1166,7 @@ fn yaml_parser_parse_flow_sequence_entry_mapping_end(
     *event = YamlEvent {
         typ: YamlEventType::MappingEnd,
         start_mark: token.start_mark,
-        end_mark: token.start_mark, // [Go] Shouldn't this be end_mark?
+        end_mark: token.start_mark, // (the start mark, as in libyaml)
         ..YamlEvent::default()
     };
     parser.state = YamlParserState::FlowSequenceEntry;
@@ -1216,9 +1190,8 @@ fn yaml_parser_parse_flow_mapping_key(
     event: &mut YamlEvent,
     first: bool,
 ) -> bool {
-    // Go: parserc.go yaml_parser_parse_flow_mapping_key
     if first {
-        // Go does not check for nil here: the FLOW-MAPPING-START token is still the
+        // The result is not checked here: the FLOW-MAPPING-START token is still the
         // available queue head (yaml_parser_parse_node peeked it without skipping).
         peek_token(parser);
         let mark = token(parser).start_mark;
@@ -1298,7 +1271,6 @@ fn yaml_parser_parse_flow_mapping_value(
     event: &mut YamlEvent,
     empty: bool,
 ) -> bool {
-    // Go: parserc.go yaml_parser_parse_flow_mapping_value
     if !peek_token(parser) {
         return false;
     }
@@ -1323,9 +1295,8 @@ fn yaml_parser_parse_flow_mapping_value(
     yaml_parser_process_empty_scalar(event, mark)
 }
 
-/// Generate an empty scalar event (Go also takes the parser, which it does not use).
+/// Generate an empty scalar event.
 fn yaml_parser_process_empty_scalar(event: &mut YamlEvent, mark: YamlMark) -> bool {
-    // Go: parserc.go yaml_parser_process_empty_scalar
     *event = YamlEvent {
         typ: YamlEventType::Scalar,
         start_mark: mark,
@@ -1344,7 +1315,6 @@ fn yaml_parser_process_directives(
     version_directive_ref: Option<&mut Option<YamlVersionDirective>>,
     tag_directives_ref: Option<&mut Vec<YamlTagDirective>>,
 ) -> bool {
-    // Go: parserc.go yaml_parser_process_directives
     let mut version_directive: Option<YamlVersionDirective> = None;
     let mut tag_directives: Vec<YamlTagDirective> = Vec::new();
 
@@ -1414,7 +1384,6 @@ fn yaml_parser_append_tag_directive(
     allow_duplicates: bool,
     mark: YamlMark,
 ) -> bool {
-    // Go: parserc.go yaml_parser_append_tag_directive
     if parser
         .tag_directives
         .iter()
@@ -1426,9 +1395,7 @@ fn yaml_parser_append_tag_directive(
         return yaml_parser_set_parser_error(parser, "found duplicate %TAG directive", mark);
     }
 
-    // [Go] I suspect the copy is unnecessary. This was likely done
-    // because there was no way to track ownership of the data.
-    // (`value` is already an owned copy here.)
+    // (`value` is already an owned copy here, so no further copy is needed.)
     parser.tag_directives.push(value);
     true
 }

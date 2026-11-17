@@ -15,15 +15,11 @@
 
 //! Live wire messages.
 //!
-//! Outgoing: the client envelope (genai `LiveClientMessage`) with the converters of genai
-//! v1.77.0 `live_converters.go` (`liveConnectParametersTo{Mldev,Vertex}`,
-//! `liveClientMessageTo{Mldev,Vertex}`, `liveClientContextUpdateTo{Mldev,Vertex}`,
-//! `liveClientToolResponseToVertex`, `liveSendRealtimeInputParametersTo{Mldev,Vertex}`)
-//! and the `toLiveClientMessage` methods of `types.go`.
+//! Outgoing: the client envelope ([`LiveClientMessage`]) with the converters for the setup,
+//! client-content, tool-response, context-update and realtime-input messages on each backend.
 //!
-//! Incoming: genai `Session.Receive` decoding (with `liveServerMessageFromVertex`) and the
-//! `LlmResponse` mapping of ADK-Go `internal/llminternal/googlellm/live_connection.go`
-//! `Recv`.
+//! Incoming: decoding of one server frame (Vertex AI messages are converted to the Gemini API
+//! shape) and the mapping of server messages to [`LlmResponse`]s.
 
 use std::collections::VecDeque;
 
@@ -43,7 +39,7 @@ use crate::request::{
     safety_setting_mldev, speech_config_vertex, to_value, tool,
 };
 
-/// genai `LiveClientMessage`: exactly one field is set per message. Fields hold the
+/// The client envelope: exactly one field is set per message. Fields hold the
 /// already-converted wire objects.
 #[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -67,7 +63,7 @@ impl LiveClientMessage {
     }
 }
 
-/// genai `setValueByPath(parent, ["setup", "generationConfig", key], v)`.
+/// Sets `["setup"]["generationConfig"][key]` on the setup message.
 fn set_generation(setup: &mut Obj, key: &str, v: Value) {
     if let Value::Object(gc) = setup
         .entry("generationConfig")
@@ -81,9 +77,8 @@ fn get<'a>(from: &'a Obj, key: &str) -> Option<&'a Value> {
     from.get(key).filter(|v| !v.is_null())
 }
 
-/// Port of genai `liveConnectParametersTo{Mldev,Vertex}` with
-/// `liveConnectConfigTo{Mldev,Vertex}` (and `sessionResumptionConfigToMldev`,
-/// `tLiveSpeechConfig`): the JSON text of the `{"setup": ...}` message.
+/// Builds the `{"setup": ...}` message as JSON text, converting the connect config
+/// (including session resumption and the speech config) for the backend.
 pub(crate) fn setup_message(
     backend: Backend,
     model_full_name: &str,
@@ -178,8 +173,8 @@ pub(crate) fn setup_message(
     .to_json()
 }
 
-/// genai `SendClientContent`: `LiveSendClientContentParameters.toLiveClientMessage` (a
-/// missing `turnComplete` means true) then `liveClientContentTo{Mldev,Vertex}`.
+/// Builds a client-content message (a
+/// missing `turnComplete` means true), converting the contents for the backend.
 pub(crate) fn client_content_message(
     backend: Backend,
     input: &LiveClientContentInput,
@@ -204,10 +199,9 @@ pub(crate) fn client_content_message(
     .to_json()
 }
 
-/// genai `SendToolResponse`: `LiveSendToolResponseParameters.toLiveClientMessage`. The
-/// Gemini API copies the tool response unconverted; Vertex AI applies
-/// `liveClientToolResponseToVertex` (each function response through
-/// `functionResponseToVertex`).
+/// Builds a tool-response message. The
+/// Gemini API copies the tool response unconverted; Vertex AI converts each function response
+/// with [`function_response_vertex`].
 pub(crate) fn tool_response_message(
     backend: Backend,
     input: &LiveToolResponseInput,
@@ -233,9 +227,8 @@ pub(crate) fn tool_response_message(
     .to_json()
 }
 
-/// genai `SendContextUpdate` (v1.77.0): `liveClientContextUpdateTo{Mldev,Vertex}` with
-/// `liveClientContextUpdateToolsTo{Mldev,Vertex}`. The system instruction goes through
-/// `contentTo*`, each tool through `toolTo*`; a set but empty tools wrapper stays `{}`.
+/// Builds a context-update message. The system instruction goes through
+/// [`content`], each tool through [`tool`]; a set but empty tools wrapper stays `{}`.
 pub(crate) fn context_update_message(
     backend: Backend,
     input: &LiveClientContextUpdate,
@@ -260,7 +253,8 @@ pub(crate) fn context_update_message(
     .to_json()
 }
 
-/// Port of genai `tAudioBlob` / `tImageBlob`.
+/// Checks that the blob's MIME type has the given prefix (`audio/` or `image/`) and returns a
+/// copy of the blob.
 fn typed_blob(blob: &Value, prefix: &str) -> Result<Value, GeminiError> {
     let mime = blob.get("mimeType").and_then(Value::as_str).unwrap_or("");
     if mime.starts_with(prefix) {
@@ -270,8 +264,8 @@ fn typed_blob(blob: &Value, prefix: &str) -> Result<Value, GeminiError> {
     }
 }
 
-/// genai `SendRealtimeInput` with `liveSendRealtimeInputParametersTo{Mldev,Vertex}` (the
-/// two are identical): `media` becomes `mediaChunks: [media]`, `audio`/`video` are checked
+/// Builds a realtime-input message (the Gemini API and Vertex AI shapes are identical):
+/// `media` becomes `mediaChunks: [media]`, `audio`/`video` are checked
 /// for an `audio/`/`image/` MIME type.
 pub(crate) fn realtime_input_message(input: &LiveRealtimeInput) -> Result<String, GeminiError> {
     let from = as_obj(&to_value(input)?);
@@ -294,8 +288,8 @@ pub(crate) fn realtime_input_message(input: &LiveRealtimeInput) -> Result<String
     .to_json()
 }
 
-/// genai `Session.Receive` decoding of one frame: rejects `error` payloads, applies
-/// `liveServerMessageFromVertex` on Vertex AI (the Gemini API message is used as is).
+/// Decodes one frame: rejects `error` payloads, and converts the message from the Vertex AI
+/// shape on Vertex AI (the Gemini API message is used as is).
 pub(crate) fn decode_server_message(
     backend: Backend,
     data: &[u8],
@@ -319,8 +313,8 @@ pub(crate) fn decode_server_message(
     serde_json::from_value(value).map_err(|e| live_other(format!("invalid server message: {e}")))
 }
 
-/// Port of genai `liveServerMessageFromVertex` (with `usageMetadataFromVertex` and
-/// `voiceActivityFromVertex`).
+/// Converts a Vertex AI server message to the Gemini API shape (including its usage metadata
+/// and voice activity).
 fn server_message_from_vertex(from: &Obj) -> Obj {
     let mut to = Obj::new();
     copy(
@@ -376,7 +370,8 @@ fn server_message_from_vertex(from: &Obj) -> Obj {
     to
 }
 
-/// The `Recv` state of ADK-Go `LiveConnection`: accumulated transcription text and the
+/// The receive state of a [`LiveConnection`](super::LiveConnection): accumulated transcription
+/// text and the
 /// responses queued to be returned before reading the next message.
 #[derive(Debug, Default)]
 pub(crate) struct RecvState {
@@ -386,14 +381,14 @@ pub(crate) struct RecvState {
 }
 
 impl RecvState {
-    /// The next queued response, if any (start of Go `Recv`).
+    /// The next queued response, if any.
     pub(crate) fn pop_buffered(&mut self) -> Option<LlmResponse> {
         self.buffered.pop_front()
     }
 
-    /// Port of the mapping half of Go `Recv`: one server message to one response. Messages
+    /// Maps one server message to one response. Messages
     /// without a branch (setupComplete, goAway, ...) map to an empty response; a message's
-    /// usage metadata rides on its response (Go f2dc5d3a).
+    /// usage metadata rides on its response.
     pub(crate) fn map(&mut self, msg: LiveServerMessage) -> LlmResponse {
         let mut resp = LlmResponse {
             usage_metadata: msg.usage_metadata.map(live_usage_metadata),
@@ -465,11 +460,10 @@ impl RecvState {
     }
 }
 
-/// Go `liveUsageMetadata`: the Live API token usage as the usage type [`LlmResponse`] carries.
+/// The Live API token usage as the usage type [`LlmResponse`] carries.
 /// The Live API names output tokens `responseTokenCount` / `responseTokensDetails` where the
 /// generateContent type calls them `candidatesTokenCount` / `candidatesTokensDetails`
-/// (adk-python maps the fields the same way). `service_tier` has no counterpart and is dropped,
-/// as in Go.
+/// (adk-python maps the fields the same way). `service_tier` has no counterpart and is dropped.
 fn live_usage_metadata(u: UsageMetadata) -> GenerateContentResponseUsageMetadata {
     GenerateContentResponseUsageMetadata {
         prompt_token_count: u.prompt_token_count,
@@ -494,7 +488,7 @@ fn finished(text: String) -> Transcription {
     }
 }
 
-/// The function responses of `content` (Go `SendContent`), when its first part is one.
+/// The function responses of `content`, when its first part is one.
 pub(crate) fn function_responses(content: &Content) -> Option<Vec<FunctionResponse>> {
     content.parts.first()?.function_response.as_ref()?;
     Some(

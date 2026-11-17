@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Authentication schemes (port of ADK-Go `tool/toolauth/auth_schemes.go`).
+//! Authentication schemes.
 //!
 //! The schemes are fastapi's OpenAPI models: each field is read under its exact OpenAPI name
 //! only, so a snake_case spelling of a camelCase field is an unknown key, kept in `extra`.
@@ -30,7 +30,7 @@ use super::model_json::{
     go_string_list, go_string_map, serialize_go,
 };
 
-/// Go `OAuthGrantType` (auth_schemes.go:23); `as_str` is the RFC 6749 wire name.
+/// An OAuth grant type; `as_str` is the RFC 6749 wire name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OAuthGrantType {
     ClientCredentials,
@@ -51,7 +51,8 @@ impl OAuthGrantType {
     }
 }
 
-/// Go `OAuthFlow`. Go field order: authorizationUrl, tokenUrl, refreshUrl, scopes.
+/// One OAuth flow. Fields are written in the order authorizationUrl, tokenUrl, refreshUrl,
+/// scopes.
 #[derive(Clone, Default)]
 pub struct OAuthFlow {
     pub authorization_url: String,
@@ -65,7 +66,7 @@ pub struct OAuthFlow {
 const OAUTH_FLOW_FIELDS: &[&str] = &["authorizationUrl", "tokenUrl", "refreshUrl", "scopes"];
 
 impl GoUnmarshal for OAuthFlow {
-    /// Go `OAuthFlow.UnmarshalJSON`. Which URLs are required depends on the flow, so
+    /// Decodes an [`OAuthFlow`]. Which URLs are required depends on the flow, so
     /// [`OAuthFlows`] checks them.
     fn go_unmarshal(raw: &RawValue) -> Result<Self, String> {
         const T: &str = "OAuthFlow";
@@ -81,7 +82,7 @@ impl GoUnmarshal for OAuthFlow {
 }
 
 impl GoMarshal for OAuthFlow {
-    /// Go `OAuthFlow.MarshalJSON`: empty scopes are written as `{}`, as adk-python writes them.
+    /// Encodes an [`OAuthFlow`]: empty scopes are written as `{}`, as adk-python writes them.
     fn go_marshal(&self) -> String {
         let mut w = ObjectWriter::new();
         if !self.authorization_url.is_empty() {
@@ -120,7 +121,7 @@ impl<'de> Deserialize<'de> for OAuthFlow {
     }
 }
 
-/// Go `OAuthFlows`.
+/// The OAuth flows of a scheme.
 #[derive(Clone, Default)]
 pub struct OAuthFlows {
     pub implicit: Option<OAuthFlow>,
@@ -138,8 +139,8 @@ const OAUTH_FLOWS_FIELDS: &[&str] = &[
 ];
 
 impl OAuthFlows {
-    /// Go `GrantType` (auth_schemes.go): client credentials, authorization code, implicit,
-    /// password, in that order; `None` is Go's "".
+    /// The grant type: client credentials, authorization code, implicit,
+    /// password, in that order; `None` when no flow is set.
     pub fn grant_type(&self) -> Option<OAuthGrantType> {
         if self.client_credentials.is_some() {
             Some(OAuthGrantType::ClientCredentials)
@@ -156,7 +157,7 @@ impl OAuthFlows {
 }
 
 impl GoUnmarshal for OAuthFlows {
-    /// Go `OAuthFlows.UnmarshalJSON`: rejects a flow without the URLs it needs. An empty URL
+    /// Decodes an [`OAuthFlows`]: rejects a flow without the URLs it needs. An empty URL
     /// counts as missing.
     fn go_unmarshal(raw: &RawValue) -> Result<Self, String> {
         const T: &str = "OAuthFlows";
@@ -191,7 +192,7 @@ impl GoUnmarshal for OAuthFlows {
 }
 
 impl GoMarshal for OAuthFlows {
-    /// Go `OAuthFlows.MarshalJSON`.
+    /// Encodes an [`OAuthFlows`].
     fn go_marshal(&self) -> String {
         let mut w = ObjectWriter::new();
         let flows = [
@@ -231,7 +232,7 @@ impl<'de> Deserialize<'de> for OAuthFlows {
     }
 }
 
-/// Go `SchemeType`, an open string ("gcp_provider" and other custom types round-trip).
+/// The type of a scheme, an open string ("gcp_provider" and other custom types round-trip).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SchemeType(Cow<'static, str>);
 
@@ -269,7 +270,7 @@ impl From<String> for SchemeType {
     }
 }
 
-/// A JSON string, as Go writes a `SchemeType`.
+/// A JSON string.
 impl Serialize for SchemeType {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         s.serialize_str(self.as_str())
@@ -282,7 +283,8 @@ impl<'de> Deserialize<'de> for SchemeType {
     }
 }
 
-/// Go `Scheme`. Go field order is the declaration order below (wire names in comments).
+/// An authentication scheme. Fields are written in the declaration order below (wire names in
+/// comments).
 #[derive(Clone, Default)]
 pub struct Scheme {
     pub r#type: SchemeType,                                         // "type"
@@ -324,7 +326,7 @@ const SCHEME_FIELDS: &[&str] = &[
 ];
 
 impl GoUnmarshal for Scheme {
-    /// Go `Scheme.UnmarshalJSON`: does not check that the fields fit the type, and infers a
+    /// Decodes a [`Scheme`]: does not check that the fields fit the type, and infers a
     /// missing type from the fields, as adk-python's models do.
     fn go_unmarshal(raw: &RawValue) -> Result<Self, String> {
         const T: &str = "Scheme";
@@ -377,7 +379,7 @@ impl GoUnmarshal for Scheme {
 }
 
 impl GoMarshal for Scheme {
-    /// Go `Scheme.MarshalJSON`.
+    /// Encodes a [`Scheme`].
     fn go_marshal(&self) -> String {
         let mut w = ObjectWriter::new();
         w.field("type", &go_string(self.r#type.as_str()));

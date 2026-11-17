@@ -154,7 +154,7 @@ fn detail_page(
     )
 }
 
-/// After a failed label write: the detail page with the error banner and the R10 status,
+/// After a failed label write: the detail page with the error banner and the status,
 /// or the plain error page when the prompt itself cannot be shown. An `Http` body in the
 /// banner is cut to an excerpt of at most 1,024 bytes.
 async fn write_failed(state: &AppState, name: &str, e: &StoreError) -> Response {

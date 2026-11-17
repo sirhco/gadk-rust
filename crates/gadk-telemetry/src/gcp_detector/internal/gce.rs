@@ -13,36 +13,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of `internal/gce.go`: Compute Engine.
+//! Compute Engine.
 
 use super::detector::{Detector, DetectorError};
 use super::gke::LocationType;
 use crate::gcp_detector::metadata::MetadataError;
 
-/// Go `machineTypeMetadataAttr`.
+/// The metadata attribute holding the machine type.
 const MACHINE_TYPE_METADATA_ATTR: &str = "instance/machine-type";
 
-/// Go `createdByInstanceAttr`.
+/// The metadata attribute naming the creator of the instance.
 const CREATED_BY_INSTANCE_ATTR: &str = "created-by";
 
-/// Go `ManagedInstanceGroup`.
+/// A managed instance group.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ManagedInstanceGroup {
-    /// Go `Name`.
+    /// The group name.
     pub name: String,
-    /// Go `Location`.
+    /// The group location.
     pub location: String,
-    /// Go `Type`.
+    /// Whether the location is a zone or a region.
     pub location_type: LocationType,
 }
 
 impl Detector {
-    /// Go `onGCE`: `instance/machine-type` is readable.
+    /// Whether `instance/machine-type` is readable.
     pub(super) async fn on_gce(&self) -> bool {
         self.metadata.get(MACHINE_TYPE_METADATA_ATTR).await.is_ok()
     }
 
-    /// Go `GCEHostType`: `instance/machine-type`, untrimmed.
+    /// The host type: `instance/machine-type`, untrimmed.
     ///
     /// # Errors
     ///
@@ -51,7 +51,7 @@ impl Detector {
         Ok(self.metadata.get(MACHINE_TYPE_METADATA_ATTR).await?)
     }
 
-    /// Go `GCEHostID`: the instance ID.
+    /// The host ID: the instance ID.
     ///
     /// # Errors
     ///
@@ -60,7 +60,7 @@ impl Detector {
         self.instance_id().await
     }
 
-    /// Go `GCEHostName`: the instance name.
+    /// The host name: the instance name.
     ///
     /// # Errors
     ///
@@ -69,7 +69,7 @@ impl Detector {
         Ok(self.metadata.instance_name().await?)
     }
 
-    /// Go `GCEInstanceName`: the instance name.
+    /// The instance name.
     ///
     /// # Errors
     ///
@@ -78,7 +78,7 @@ impl Detector {
         Ok(self.metadata.instance_name().await?)
     }
 
-    /// Go `GCEInstanceHostname`: the instance hostname.
+    /// The instance hostname.
     ///
     /// # Errors
     ///
@@ -87,11 +87,11 @@ impl Detector {
         Ok(self.metadata.hostname().await?)
     }
 
-    /// Go `GCEAvailabilityZoneAndRegion`: the zone and its `country-region` prefix.
+    /// The zone and its `country-region` prefix.
     ///
     /// # Errors
     ///
-    /// [`DetectorError`], including Go's `no zone detected from GCE metadata server` and
+    /// [`DetectorError`], including `no zone detected from GCE metadata server` and
     /// `zone was not in the expected format: country-region-zone.  Got <zone>`.
     pub async fn gce_availability_zone_and_region(
         &self,
@@ -112,7 +112,7 @@ impl Detector {
         Ok((zone, region))
     }
 
-    /// Go `GCEManagedInstanceGroup`: the MIG named by the `created-by` attribute, or the
+    /// The managed instance group named by the `created-by` attribute, or the
     /// default (empty) group when there is none.
     ///
     /// # Errors
@@ -134,7 +134,7 @@ impl Detector {
     }
 }
 
-/// Go `createdByMIGRE`
+/// The pattern of the `created-by` attribute of a managed instance group
 /// (`^projects/[^/]+/(zones|regions)/([^/]+)/instanceGroupManagers/([^/]+)$`).
 fn match_created_by_mig(created_by: &str) -> Option<ManagedInstanceGroup> {
     let parts: Vec<&str> = created_by.split('/').collect();

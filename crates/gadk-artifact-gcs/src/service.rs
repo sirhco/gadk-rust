@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! [`GcsArtifactService`] (port of Go `gcsartifact/service.go`).
+//! [`GcsArtifactService`]: the Google Cloud Storage artifact service.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error as StdError;
@@ -35,18 +35,18 @@ use serde_json::{Map, Value};
 use crate::bucket::GcsBucket;
 use crate::error::{BoxError, GcsError, VersionConflict, backend, chain_any};
 
-/// Go `maxSaveAttempts`: how many colliding writers `save` tolerates before it returns the
+/// How many colliding writers `save` tolerates before it returns the
 /// version-conflict error.
 pub(crate) const MAX_SAVE_ATTEMPTS: u32 = 16;
-/// Go `saveRetryBaseDelay`.
+/// The base of the exponential backoff between save attempts.
 pub(crate) const SAVE_RETRY_BASE_DELAY: Duration = Duration::from_millis(10);
-/// Go `saveRetryMaxDelay`.
+/// The cap of the backoff between save attempts.
 pub(crate) const SAVE_RETRY_MAX_DELAY: Duration = Duration::from_secs(1);
 
-/// Go's `sleep` field: waits for the given duration; cancellation is dropping the future.
+/// Waits for the given duration; cancellation is dropping the future.
 pub(crate) type SleepFn = Arc<dyn Fn(Duration) -> BoxFuture<'static, ()> + Send + Sync>;
 
-/// A Google Cloud Storage [`ArtifactService`] (Go `gcsService`).
+/// A Google Cloud Storage [`ArtifactService`].
 ///
 /// GCS cannot list and write atomically, so `save` assigns versions optimistically: it writes
 /// version `max + 1` with a does-not-exist precondition and, when another writer took that
@@ -79,7 +79,7 @@ impl std::fmt::Debug for GcsArtifactService {
     }
 }
 
-/// Go `sleepContext`: waits for `d` (at once when `d` is zero).
+/// Waits for `d` (at once when `d` is zero).
 pub(crate) fn sleep_context(d: Duration) -> BoxFuture<'static, ()> {
     if d.is_zero() {
         return Box::pin(async {});
@@ -87,7 +87,7 @@ pub(crate) fn sleep_context(d: Duration) -> BoxFuture<'static, ()> {
     Box::pin(tokio::time::sleep(d))
 }
 
-/// Go `buildBlobName`: `{app}/{user}/{session}/{file}/{version}`, or
+/// The object name of one version: `{app}/{user}/{session}/{file}/{version}`, or
 /// `{app}/{user}/user/{file}/{version}` for a `user:` file.
 pub(crate) fn build_blob_name(
     app_name: &str,
@@ -103,7 +103,7 @@ pub(crate) fn build_blob_name(
     }
 }
 
-/// Go `buildBlobNamePrefix`: every version of one file.
+/// The object-name prefix of every version of one file.
 pub(crate) fn build_blob_name_prefix(
     app_name: &str,
     user_id: &str,
@@ -117,18 +117,19 @@ pub(crate) fn build_blob_name_prefix(
     }
 }
 
-/// Go `buildSessionPrefix`.
+/// The object-name prefix of a session's artifacts.
 pub(crate) fn build_session_prefix(app_name: &str, user_id: &str, session_id: &str) -> String {
     format!("{app_name}/{user_id}/{session_id}/")
 }
 
-/// Go `buildUserPrefix`. Session ID `user` shares this path with user-scoped artifacts, so the
-/// prefix includes the `user:` file-name namespace to exclude that session's private files.
+/// The object-name prefix of a user's `user:` artifacts. Session ID `user` shares this path with
+/// user-scoped artifacts, so the prefix includes the `user:` file-name namespace to exclude that
+/// session's private files.
 pub(crate) fn build_user_prefix(app_name: &str, user_id: &str) -> String {
     format!("{app_name}/{user_id}/user/user:")
 }
 
-/// Go `backoffDelay`: a full-jitter backoff in `[0, min(10ms << attempt, 1s)]` for the
+/// A full-jitter backoff in `[0, min(10ms << attempt, 1s)]` for the
 /// zero-based retry `attempt`.
 pub(crate) fn backoff_delay(attempt: u32) -> Duration {
     let max = u64::try_from(SAVE_RETRY_MAX_DELAY.as_nanos()).unwrap_or(u64::MAX);
@@ -144,7 +145,7 @@ pub(crate) fn backoff_delay(attempt: u32) -> Duration {
     Duration::from_nanos(rand::random_range(0..=d))
 }
 
-/// Go `isPreconditionFailed`: `err` or an error it wraps is an HTTP 412.
+/// Whether `err` or an error it wraps is an HTTP 412.
 pub(crate) fn is_precondition_failed(err: &(dyn StdError + 'static)) -> bool {
     chain_any(err, |e| {
         matches!(
@@ -154,7 +155,7 @@ pub(crate) fn is_precondition_failed(err: &(dyn StdError + 'static)) -> bool {
     })
 }
 
-/// The object's content type and bytes for `part` (Go `writeArtifact`): the inline data and
+/// The object's content type and bytes for `part`: the inline data and
 /// its MIME type, else the text as `text/plain`.
 fn payload(part: Option<&Part>) -> (String, Bytes) {
     match part {
@@ -167,8 +168,8 @@ fn payload(part: Option<&Part>) -> (String, Bytes) {
     }
 }
 
-/// A failed attributes call: a missing object is [`ArtifactError::NotFound`] (Go wraps
-/// `fs.ErrNotExist`), anything else Go's `could not get blob attributes: …`.
+/// A failed attributes call: a missing object is [`ArtifactError::NotFound`], anything
+/// else a backend error `could not get blob attributes: …`.
 fn attrs_error(err: GcsError) -> ArtifactError {
     if err.is_object_not_exist() {
         ArtifactError::NotFound
@@ -178,8 +179,8 @@ fn attrs_error(err: GcsError) -> ArtifactError {
 }
 
 impl GcsArtifactService {
-    /// Go `writeArtifact`: uploads one version under the does-not-exist precondition. A
-    /// precondition failure surfaces where Go's writer reports it, from `Close`.
+    /// Uploads one version under the does-not-exist precondition. Any failure, a precondition
+    /// failure included, is reported as `failed to close blob writer: …`.
     async fn write_artifact(
         &self,
         blob_name: &str,
@@ -193,7 +194,7 @@ impl GcsArtifactService {
             .map_err(|e| GoWrapped::new("failed to close blob writer", e))
     }
 
-    /// Go `versions` after its validation: every version stored under the file's prefix whose
+    /// Every version stored under the file's prefix whose
     /// last path segment parses as an `i64` (others are skipped); empty when there are none.
     async fn stored_versions(
         &self,
@@ -214,7 +215,7 @@ impl GcsArtifactService {
             .collect())
     }
 
-    /// Go `resolveVersion`: `version`, or the latest stored version when it is 0.
+    /// `version`, or the latest stored version when it is 0.
     async fn resolve_version(
         &self,
         app_name: &str,
@@ -233,7 +234,7 @@ impl GcsArtifactService {
         versions.into_iter().max().ok_or(ArtifactError::NotFound)
     }
 
-    /// Go `fetchFilenamesFromPrefix`: adds the file name (the second-to-last path segment) of
+    /// Adds the file name (the second-to-last path segment) of
     /// every object under `prefix` to `file_names`.
     async fn fetch_filenames_from_prefix(
         &self,
@@ -262,7 +263,7 @@ impl GcsArtifactService {
 
 #[async_trait::async_trait]
 impl ArtifactService for GcsArtifactService {
-    /// Port of Go `gcsService.Save`: each attempt costs one listing plus one upload.
+    /// Saves a new version: each attempt costs one listing plus one upload.
     async fn save(&self, req: SaveRequest) -> Result<SaveResponse, ArtifactError> {
         req.validate().map_err(validation_failed)?;
         let (app_name, user_id, session_id, file_name) =
@@ -314,7 +315,7 @@ impl ArtifactService for GcsArtifactService {
         ))
     }
 
-    /// Port of Go `gcsService.Load`.
+    /// Loads a version (the latest when `req.version` is 0).
     async fn load(&self, req: LoadRequest) -> Result<LoadResponse, ArtifactError> {
         req.validate().map_err(validation_failed)?;
         let version = self
@@ -348,7 +349,7 @@ impl ArtifactService for GcsArtifactService {
         })
     }
 
-    /// Port of Go `gcsService.Delete`: one version, or every version concurrently (the first
+    /// Deletes one version, or every version concurrently (the first
     /// error is returned).
     async fn delete(&self, req: DeleteRequest) -> Result<(), ArtifactError> {
         req.validate().map_err(validation_failed)?;
@@ -379,7 +380,7 @@ impl ArtifactService for GcsArtifactService {
         Ok(())
     }
 
-    /// Port of Go `gcsService.List`: the session's files and the user's `user:` files, sorted
+    /// Lists the session's files and the user's `user:` files, sorted
     /// and without duplicates.
     async fn list(&self, req: ListRequest) -> Result<ListResponse, ArtifactError> {
         req.validate().map_err(validation_failed)?;
@@ -401,7 +402,7 @@ impl ArtifactService for GcsArtifactService {
         })
     }
 
-    /// Port of Go `gcsService.Versions`: [`ArtifactError::NotFound`] when there are none.
+    /// Lists the stored versions: [`ArtifactError::NotFound`] when there are none.
     async fn versions(&self, req: VersionsRequest) -> Result<VersionsResponse, ArtifactError> {
         req.validate().map_err(validation_failed)?;
         let versions = self
@@ -414,7 +415,7 @@ impl ArtifactService for GcsArtifactService {
         Ok(VersionsResponse { versions })
     }
 
-    /// Port of Go `gcsService.GetArtifactVersion`. The canonical URI is always
+    /// Reports the metadata of one version. The canonical URI is always
     /// `gs://{bucket}/{object name}` with the name literal (never the object's media link,
     /// which a consumer handed the URI cannot fetch).
     async fn get_artifact_version(

@@ -15,7 +15,7 @@
 
 //! gadk-agentregistry: a client for the Google Cloud Agent Registry
 //! (`agentregistry.googleapis.com`), a governed catalog of A2A agents, MCP servers, and model
-//! endpoints (port of ADK-Go `agentregistry`).
+//! endpoints.
 //!
 //! This crate provides the client foundation: configuration ([`Config`]), an authenticated REST
 //! transport to the third-party (public) endpoint using Application Default Credentials with mTLS

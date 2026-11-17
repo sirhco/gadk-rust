@@ -13,59 +13,59 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! [`ConfigError`]: the errors of Go `internal/configurable` (`configurable.go`,
-//! `configurable_utils.go`, `configurable_workflow.go`) and of the conformance registration
-//! functions, displayed exactly as Go's `%v` of the corresponding error chain.
+//! [`ConfigError`]: the errors of the configurable-agent loader (agent, tool, callback,
+//! workflow and conformance registration failures), displayed with the exact text ADK's own
+//! loader gives the corresponding error chain.
 //!
-//! Go builds its errors with `errors.New` / `fmt.Errorf` (a leaf: [`ConfigError::Msg`]),
-//! `fmt.Errorf("<context>: %w", err)` (a link: [`ConfigError::Wrap`]), returns `os.ReadFile`'s
-//! `*fs.PathError` as is ([`ConfigError::Path`]), wraps yaml.v3 errors
-//! ([`ConfigError::Yaml`]) and returns other packages' errors unchanged
-//! ([`ConfigError::Other`]). Each variant displays Go's text, so a whole chain displays as Go's
-//! `err.Error()`.
+//! Errors are built from a leaf message ([`ConfigError::Msg`]), a context wrapped around a
+//! cause, displayed `<context>: <cause>` ([`ConfigError::Wrap`]), a file-system failure
+//! ([`ConfigError::Path`], as `open <path>: <errno text>`), a yaml.v3 error
+//! ([`ConfigError::Yaml`]) and another crate's error passed through unchanged
+//! ([`ConfigError::Other`]). Each variant displays that text, so a whole chain displays as one
+//! message.
 
 use std::fmt;
 use std::io;
 use std::path::Path;
 use std::sync::Arc;
 
-/// An error of the configurable-agent loader: `Display` is Go's `%v` text of the whole chain.
+/// An error of the configurable-agent loader: `Display` is the text of the whole chain.
 #[derive(Debug, Clone)]
 pub enum ConfigError {
-    /// Go `errors.New(text)` / `fmt.Errorf` without `%w`: the complete Go text.
+    /// A leaf error: the complete text.
     Msg(String),
-    /// Go `fmt.Errorf("<context>: %w", source)`: displays `<context>: <source>`.
+    /// A context around a cause: displays `<context>: <source>`.
     Wrap {
-        /// The text before `: %w`.
+        /// The text before the cause.
         context: String,
-        /// The wrapped error (Go's `errors.Unwrap`).
+        /// The wrapped error.
         source: Box<ConfigError>,
     },
-    /// Go `*fs.PathError` (`os.ReadFile`, `os.Stat`): displays `<op> <path>: <errno text>`.
+    /// A file-system failure (read, stat): displays `<op> <path>: <errno text>`.
     Path {
         /// The failing operation (`open`, `read`, `stat`).
         op: &'static str,
-        /// The path as Go prints it.
+        /// The path as printed.
         path: String,
-        /// The `io::ErrorKind`, for Go's `os.IsNotExist` checks.
+        /// The `io::ErrorKind`, for not-found checks.
         kind: io::ErrorKind,
-        /// Go's `syscall.Errno` text (`no such file or directory`).
+        /// The OS error text (`no such file or directory`).
         errno: String,
     },
-    /// A yaml.v3 error (`*yaml.TypeError` or a `yaml: …` failure) with yaml.v3's text.
+    /// A yaml.v3 error (a type error or a `yaml: …` failure) with yaml.v3's text.
     Yaml(Arc<gadk_goyaml::Error>),
-    /// Another package's error returned through unchanged (`llmagent.New`, `workflow.New`,
-    /// `gemini.NewModel`, `mcptoolset.New`, `functiontool.New`): its own `Display` is Go's text.
+    /// Another crate's error returned through unchanged (the LLM agent, workflow, Gemini
+    /// model, MCP toolset and function tool constructors): its own `Display` is the text.
     Other(Arc<dyn std::error::Error + Send + Sync>),
 }
 
 impl ConfigError {
-    /// Go `errors.New(text)` / `fmt.Errorf(...)` without `%w`.
+    /// A leaf error with the complete text.
     pub fn msg(text: impl Into<String>) -> ConfigError {
         ConfigError::Msg(text.into())
     }
 
-    /// Go `fmt.Errorf("<context>: %w", source)`.
+    /// A context wrapped around a cause (`<context>: <source>`).
     pub fn wrap(context: impl Into<String>, source: impl Into<ConfigError>) -> ConfigError {
         ConfigError::Wrap {
             context: context.into(),
@@ -73,7 +73,7 @@ impl ConfigError {
         }
     }
 
-    /// Go's `*fs.PathError{Op: op, Path: path, Err: errno}` for an I/O failure on `path`.
+    /// A file-system failure on `path` (`<op> <path>: <errno text>`).
     pub fn path(op: &'static str, path: &Path, err: &io::Error) -> ConfigError {
         ConfigError::Path {
             op,
@@ -83,12 +83,12 @@ impl ConfigError {
         }
     }
 
-    /// Another package's error, returned unchanged (its `Display` is Go's text).
+    /// Another crate's error, returned unchanged (its `Display` is the text).
     pub fn other(err: impl std::error::Error + Send + Sync + 'static) -> ConfigError {
         ConfigError::Other(Arc::new(err))
     }
 
-    /// Go `os.IsNotExist(err)`: a [`ConfigError::Path`] whose kind is `NotFound`.
+    /// Whether this is a [`ConfigError::Path`] whose kind is `NotFound`.
     pub fn is_not_exist(&self) -> bool {
         matches!(self, ConfigError::Path { kind, .. } if *kind == io::ErrorKind::NotFound)
     }
@@ -125,7 +125,7 @@ impl From<gadk_goyaml::Error> for ConfigError {
     }
 }
 
-/// Go's `syscall.Errno.Error()` text (shared with `gadk-a2a`; see [`gadk_platform::go_errno_text`]).
+/// The OS error text (shared with `gadk-a2a`; see [`gadk_platform::go_errno_text`]).
 pub use gadk_platform::go_errno_text;
 
 #[cfg(test)]

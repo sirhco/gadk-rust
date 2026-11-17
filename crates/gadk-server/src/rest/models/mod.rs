@@ -13,10 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The REST API's wire DTOs (port of ADK-Go `server/adkrest/internal/models`), with Go's JSON
-//! names, field order and `omitempty` rules. Request bodies decode with serde (Go's
-//! case-insensitive key matching is not reproduced); a JSON `null` for a non-pointer Go field
-//! leaves its zero value, as Go's decoder does.
+//! The REST API's wire DTOs, with the JSON names, field order and omit-when-empty rules ADK REST
+//! clients expect. Request bodies decode with serde (keys match case-sensitively); a JSON `null`
+//! for a non-optional field leaves its default value.
 
 mod event;
 mod redact;
@@ -37,7 +36,7 @@ pub use triggers::{EventarcTriggerRequest, PubSubTriggerRequest, TriggerResponse
 
 use serde::{Deserialize, Deserializer};
 
-/// Decodes `null` as `T::default()` (Go leaves a non-pointer field at its zero value on `null`).
+/// Decodes `null` as `T::default()`, so a `null` leaves a non-optional field at its default.
 pub(crate) fn null_default<'de, D, T>(d: D) -> Result<T, D::Error>
 where
     D: Deserializer<'de>,

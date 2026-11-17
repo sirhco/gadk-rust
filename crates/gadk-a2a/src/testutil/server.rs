@@ -14,9 +14,8 @@
 // limitations under the License.
 
 //! An in-process a2a-rs server (`DefaultRequestHandler` + `InMemoryTaskStore` + the JSON-RPC and
-//! REST routers + a static card) on an ephemeral loopback listener, laid out like the Go probe
-//! that recorded the ADK-Go fixtures: the card at `/.well-known/agent-card.json`, JSON-RPC at `/jsonrpc`,
-//! REST under `/rest`.
+//! REST routers + a static card) on an ephemeral loopback listener: the card at
+//! `/.well-known/agent-card.json`, JSON-RPC at `/jsonrpc`, REST under `/rest`.
 
 use std::net::Ipv4Addr;
 use std::sync::Arc;
@@ -55,8 +54,8 @@ impl Drop for SpawnedServer {
 /// Serves `executor` with `card` on an ephemeral loopback port.
 ///
 /// The served card is `card` with `BASE_PLACEHOLDER` in its interface URLs replaced by the
-/// server's base URL (`"<base>"`); a card without interfaces gets Go's `newCard` pair, JSON-RPC at
-/// `<base>/jsonrpc` and HTTP+JSON at `<base>/rest`. The request handler declares the card's
+/// server's base URL (`"<base>"`); a card without interfaces gets a JSON-RPC interface at
+/// `<base>/jsonrpc` and an HTTP+JSON one at `<base>/rest`. The request handler declares the card's
 /// capabilities (a2a-rs refuses streaming unless they declare it).
 ///
 /// # Panics

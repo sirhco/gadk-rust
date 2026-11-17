@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Scoped service handles (Go `agent.Artifacts` / `agent.Memory` in `agent/agent.go`).
+//! Scoped service handles: [`Artifacts`] and [`Memory`].
 
 use std::sync::Arc;
 
@@ -23,7 +23,7 @@ use gadk_session::Session;
 use crate::error::AgentError;
 
 /// The service and scope behind a scoped [`Artifacts`] handle. The engine's forwarding service
-/// (Go `internal/artifact` `forwarding.go`) uses it to reach the real `ArtifactService`.
+/// uses it to reach the real `ArtifactService`.
 #[doc(hidden)]
 #[derive(Clone)]
 pub struct ArtifactBacking {
@@ -37,7 +37,7 @@ pub struct ArtifactBacking {
     pub session_id: String,
 }
 
-/// Go `agent.Artifacts`: methods to work with artifacts of the current session.
+/// Methods to work with artifacts of the current session.
 #[async_trait::async_trait]
 pub trait Artifacts: Send + Sync {
     /// Saves `data` as a new version of the artifact `name`.
@@ -47,7 +47,7 @@ pub trait Artifacts: Send + Sync {
     async fn list(&self) -> Result<gadk_artifact::ListResponse, AgentError>;
     /// Loads the latest version of the artifact `name`.
     async fn load(&self, name: &str) -> Result<gadk_artifact::LoadResponse, AgentError>;
-    /// Loads `version` of the artifact `name` (Go takes an `int`).
+    /// Loads `version` of the artifact `name`.
     async fn load_version(
         &self,
         name: &str,
@@ -60,7 +60,7 @@ pub trait Artifacts: Send + Sync {
     }
 }
 
-/// Go `agent.Memory`: access to agent memory across the sessions of the current user.
+/// Access to agent memory across the sessions of the current user.
 #[async_trait::async_trait]
 pub trait Memory: Send + Sync {
     /// Adds `session` to memory.

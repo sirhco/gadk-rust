@@ -12,8 +12,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//! Go `server/agentengine/controllers/method/streaming_agent_run_with_events.go`
-//! (`streaming_agent_run_with_events`, Gemini Enterprise's method).
+//! The `streaming_agent_run_with_events` method (the one Gemini Enterprise invokes).
 
 use bytes::Bytes;
 use gadk_agent::{EventStream, RunConfig, StreamingMode};
@@ -33,20 +32,20 @@ use crate::agentengine::unmarshal::go_unmarshal;
 use crate::agentengine::{AgentEngineConfig, Log};
 use crate::mux::Response;
 
-/// Go `NewStreamingAgentRunWithEventsHandler`'s handler.
+/// Handler for `streaming_agent_run_with_events`.
 pub(crate) struct StreamingAgentRunWithEventsHandler {
-    /// Go `config`.
+    /// Services, loader, plugins, compaction and platform.
     pub(crate) config: AgentEngineConfig,
-    /// Go `agentEngineID`: the runner's and the sessions' app name.
+    /// The runner's and the sessions' app name.
     pub(crate) agent_engine_id: String,
     pub(crate) method_name: String,
     pub(crate) api_mode: String,
-    /// Go `log` (from `config.log`).
+    /// Where log lines go (from `config.log`).
     pub(crate) log: Log,
 }
 
 impl StreamingAgentRunWithEventsHandler {
-    /// Go `NewStreamingAgentRunWithEventsHandler(config, agentEngineID, methodName, apiMode)`.
+    /// A handler serving `method_name` in `api_mode`, running the root agent of `config`.
     pub(crate) fn new(
         config: AgentEngineConfig,
         agent_engine_id: &str,
@@ -63,8 +62,8 @@ impl StreamingAgentRunWithEventsHandler {
         }
     }
 
-    /// Go `streamJSONL`: decodes the request (`json.Unmarshal() failed for
-    /// models.StreamingAgentRunWithEventsRequest: <err>`), its `request_json`
+    /// Decodes the request (a decode error naming
+    /// `StreamingAgentRunWithEventsRequest`), its `request_json`
     /// ([`decode_streaming_agent_run_with_events_request`];
     /// `decodeStreamingAgentRunWithEventsRequest() failed: <err>`), runs
     /// [`Self::ensure_backend_session`] (`s.ensureBackendSession() failed: <err>`), builds the
@@ -109,11 +108,11 @@ impl StreamingAgentRunWithEventsHandler {
         ))
     }
 
-    /// Go `ensureBackendSession`: with a non-empty `requested_session_id`, requires `user_id`
+    /// With a non-empty `requested_session_id`, requires `user_id`
     /// (`user_id is required for backend session handling`), reuses the session when `get`
     /// finds it (setting `req.session_id` to its ID), else creates one for the user
-    /// (`sessionService.Create() failed: <err>`) and sets `req.session_id` to the new ID. Go's
-    /// `session service is required …` branch has no counterpart (the config always has one).
+    /// (`sessionService.Create() failed: <err>`) and sets `req.session_id` to the new ID. The
+    /// config always has a session service, so there is no "service missing" error.
     pub(crate) async fn ensure_backend_session(
         &self,
         req: &mut StreamingAgentRunWithEventsRunRequest,
@@ -153,7 +152,7 @@ impl StreamingAgentRunWithEventsHandler {
         Ok(())
     }
 
-    /// Go `run`: as `StreamQueryHandler::run` with `StreamingMode::None`.
+    /// Runs like `StreamQueryHandler::run` but with `StreamingMode::None`.
     pub(crate) fn run(
         &self,
         req: &StreamingAgentRunWithEventsRunRequest,
@@ -175,8 +174,8 @@ impl StreamingAgentRunWithEventsHandler {
     }
 }
 
-/// Go's per-event `helper.EmitJSON(rw, models.StreamingAgentRunWithEventsResponse{Events:
-/// []*session.Event{event}, SessionID: runReq.SessionID})`: the AgentSpace envelope line.
+/// The per-event line writer: a `StreamingAgentRunWithEventsResponse` holding the one event and
+/// `session_id`, the AgentSpace envelope.
 pub(crate) fn envelope_line(
     session_id: String,
 ) -> impl Fn(&Event, &Log) -> Result<Bytes, String> + Send + 'static {
@@ -192,8 +191,9 @@ pub(crate) fn envelope_line(
     }
 }
 
-/// Go `decodeStreamingAgentRunWithEventsRequest`: `input.request_json` decoded (`go_unmarshal`;
-/// `json.Unmarshal(input.request_json) failed: <err>`), and the session ID it requested.
+/// Decodes `input.request_json` (via `go_unmarshal`; a failure is
+/// the decode error text, see the literal in this function), and returns it with the session ID it
+/// requested.
 pub(crate) fn decode_streaming_agent_run_with_events_request(
     req: &StreamingAgentRunWithEventsRequest,
 ) -> Result<(StreamingAgentRunWithEventsRunRequest, String), String> {
@@ -206,10 +206,10 @@ pub(crate) fn decode_streaming_agent_run_with_events_request(
     Ok((run_req, requested_session_id))
 }
 
-/// Go `Metadata()`'s `description`.
+/// The method's `description` in its metadata.
 const DESCRIPTION: &str = "Streams responses asynchronously from the ADK application.\n\nThis method is primarily meant for invocation from Gemini Enterprise.\n\nArgs:\n    request_json (str):\n        Required. A JSON-encoded request object with:\n        - user_id (str): Required. The user ID to run the agent for.\n        - session_id (str): Optional. The session ID. Gemini Enterprise may\n          send its Discovery Engine session resource on the first turn; later\n          turns should use the backend ADK session ID returned in the response.\n        - message (Content): Required. The user message, using the genai\n          Content JSON shape, for example:\n          {\"role\":\"user\",\"parts\":[{\"text\":\"Hi\"}]}\n\n";
 
-/// Go `Metadata()`'s map for `method_name` / `api_mode` (description text verbatim).
+/// The method's metadata map for `method_name` / `api_mode` (description text verbatim).
 pub(crate) fn metadata(method_name: &str, api_mode: &str) -> Map<String, Value> {
     super::method_metadata(
         method_name,
@@ -235,7 +235,7 @@ impl MethodHandler for StreamingAgentRunWithEventsHandler {
         &self.method_name
     }
 
-    /// Go `Handle`: [`StreamingAgentRunWithEventsHandler::stream_jsonl`], an error wrapped as
+    /// Runs [`StreamingAgentRunWithEventsHandler::stream_jsonl`], an error wrapped as
     /// `s.streamJSONL() failed: <err>`.
     async fn handle(&self, payload: Bytes) -> Result<Response, String> {
         // stream_jsonl fails only before streaming; the controller answers that with a status.

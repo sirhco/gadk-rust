@@ -33,10 +33,10 @@ pub struct SseEvent {
     pub data: String,
 }
 
-/// The line limit of anthropic-sdk-go's SSE decoder: `bufio.MaxScanTokenSize << 9` (32 MiB).
+/// The line limit of the Anthropic SDK's SSE decoder: 32 MiB (`64 KiB << 9`).
 pub const ANTHROPIC_SDK_MAX_LINE: usize = (64 * 1024) << 9;
 
-/// Go `bufio.ErrTooLong`'s text.
+/// The error text for a line over the limit.
 const TOKEN_TOO_LONG: &str = "bufio.Scanner: token too long";
 
 struct Parser {
@@ -44,7 +44,7 @@ struct Parser {
     buf: Vec<u8>,
     /// `buf[..scanned]` holds no `\n`: the next search starts there.
     scanned: usize,
-    /// Go `bufio.Scanner.Buffer`'s max token size, if any.
+    /// The longest line allowed, if any.
     max_line: Option<usize>,
     event: Option<String>,
     data: Vec<String>,
@@ -96,7 +96,7 @@ impl Parser {
         }
     }
 
-    /// Consumes every complete line in the buffer. Returns `false` (Go `bufio.ErrTooLong`) when
+    /// Consumes every complete line in the buffer. Returns `false` (token too long) when
     /// a line with its `\n` does not fit in `max_line` bytes, or the unterminated tail already
     /// fills them.
     fn drain_lines(&mut self) -> bool {
@@ -136,9 +136,9 @@ pub fn sse_events(body: BodyStream) -> BoxStream<'static, Result<SseEvent, Model
     parse(body, None)
 }
 
-/// [`sse_events`] with Go `bufio.Scanner`'s line limit (`Buffer(nil, max_line)`): a line whose
+/// [`sse_events`] with a line limit: a line whose
 /// bytes plus its `\n` exceed `max_line`, or an unterminated tail of `max_line` bytes, ends the
-/// stream with [`ModelError::Other`] `bufio.Scanner: token too long`.
+/// stream with a [`ModelError::Other`] whose text is the `TOKEN_TOO_LONG` literal.
 pub fn sse_events_with_max_line(
     body: BodyStream,
     max_line: usize,

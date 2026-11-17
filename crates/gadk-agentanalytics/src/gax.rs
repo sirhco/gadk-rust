@@ -13,10 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The Google Cloud Go client-library pieces the transports share (ports of gax-go v2
-//! `Backoff` / `Sleep`, `cloud.google.com/go/internal`'s `wrappedCallErr` and the bigquery
-//! client's `randomID`): `bigquery::rest` (`internal.Retry`), `write::gapic` (gax `Invoke`
-//! retries) and `offload::gcs` (gensupport `sendAndRetry` / chunk retries).
+//! The Google Cloud client-library pieces the transports share (gax-style backoff and sleep, the
+//! wrapped retry error and the random IDs): `bigquery::rest` (request retries), `write::gapic`
+//! (call retries) and `offload::gcs` (request and chunk retries).
 
 use std::time::Duration;
 
@@ -25,19 +24,19 @@ use gadk_platform::Platform;
 use crate::context::Context;
 use crate::error::Error;
 
-/// gax `Backoff`'s settings: the pause before retry *n* is `1 + rand(cur)` ns (jittered), then
-/// `cur = min(cur * multiplier, max)`. Zero settings take gax's defaults ([`Pauses::new`]).
+/// Backoff settings: the pause before retry *n* is `1 + rand(cur)` ns (jittered), then
+/// `cur = min(cur * multiplier, max)`. Zero settings take defaults ([`Pauses::new`]).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub(crate) struct Backoff {
-    /// gax `Initial`.
+    /// The first pause's upper bound (1s when zero).
     pub(crate) initial: Duration,
-    /// gax `Max`.
+    /// The cap on the growing bound (30s when zero).
     pub(crate) max: Duration,
-    /// gax `Multiplier`.
+    /// The factor the bound grows by after each pause (2 when below 1).
     pub(crate) multiplier: f64,
 }
 
-/// A running gax `Backoff` (its `cur`).
+/// A running [`Backoff`]: `cur` is the current upper bound of the next pause.
 #[derive(Debug, Clone)]
 pub(crate) struct Pauses {
     backoff: Backoff,
@@ -45,8 +44,8 @@ pub(crate) struct Pauses {
 }
 
 impl Pauses {
-    /// A fresh backoff with gax's defaults for zero settings (`Initial` 1s, `Max` 30s,
-    /// `Multiplier` < 1 → 2).
+    /// A fresh backoff with defaults for zero settings (`initial` 1s, `max` 30s, `multiplier` below
+    /// 1 → 2).
     pub(crate) fn new(mut backoff: Backoff) -> Pauses {
         if backoff.initial.is_zero() {
             backoff.initial = Duration::from_secs(1);
@@ -63,13 +62,13 @@ impl Pauses {
         }
     }
 
-    /// gax `Backoff.Pause()` with `rand(n)` uniform in `[0, n)` (Go `rand.Int63n`).
+    /// The next pause, with `rand(n)` uniform in `[0, n)`.
     pub(crate) fn pause(&mut self) -> Duration {
         self.next(|n| rand::random_range(0..n))
     }
 
-    /// gax `Backoff.Pause()`: `1 + rand(cur)` ns, then `cur` grows as Go's
-    /// `time.Duration(float64(cur) * Multiplier)`, capped at `Max`.
+    /// The next pause: `1 + rand(cur)` ns, then `cur` grows to `cur * multiplier` (as a float,
+    /// truncated to whole nanoseconds), capped at `max`.
     pub(crate) fn next(&mut self, rand: impl FnOnce(u64) -> u64) -> Duration {
         let cur = u64::try_from(self.cur.as_nanos())
             .unwrap_or(u64::MAX)
@@ -81,7 +80,7 @@ impl Pauses {
     }
 }
 
-/// gax-go `Sleep(ctx, d)`: waits `d`, or fails with the context error once `ctx` ends.
+/// Waits `d`, or fails with the context error once `ctx` ends.
 pub(crate) async fn sleep(ctx: &Context, d: Duration) -> Result<(), Error> {
     ctx.run(async {
         tokio::time::sleep(d).await;
@@ -90,8 +89,9 @@ pub(crate) async fn sleep(ctx: &Context, d: Duration) -> Result<(), Error> {
     .await
 }
 
-/// Go `wrappedCallErr{ctxErr, wrappedErr}`: `retry failed with <ctx err>; last error: <err>`,
-/// both errors in its tree (Go's `Is` matches either; `Unwrap` returns the call's error).
+/// The error of a retry loop cut short by its context:
+/// `retry failed with <ctx err>; last error: <err>`, both errors in its tree (a match against
+/// either succeeds).
 pub(crate) fn wrapped_call_err(ctx_err: Error, last: Error) -> Error {
     Error::wrap_text(
         format!("retry failed with {ctx_err}; last error: {last}"),
@@ -99,12 +99,10 @@ pub(crate) fn wrapped_call_err(ctx_err: Error, last: Error) -> Error {
     )
 }
 
-/// Go `randomID()`: 16 random bytes as 32 lower-case hex digits (from a random v4 UUID, whose
-/// version and variant digits are fixed — the ID keeps Go's shape). Also the storage client's
-/// idempotency tokens and the multipart boundary's digits.
+/// A random ID: 32 lower-case hex digits (`^[0-9a-f]{32}$`), from a random v4 UUID, so 6 of the 128
+/// bits are the fixed version and variant digits. Also the storage client's idempotency tokens and
+/// the multipart boundary's digits.
 pub(crate) fn random_id() -> String {
-    // Divergence (ledger 7b-1): Go draws all 128 bits from `crypto/rand`; a v4 UUID fixes 6 of
-    // them. The ID's shape (`^[0-9a-f]{32}$`) is Go's.
     Platform::default().new_uuid().replace('-', "")
 }
 

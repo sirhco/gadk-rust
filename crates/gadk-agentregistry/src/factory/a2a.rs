@@ -13,11 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `agentregistry/factory.go`, A2A part: `RemoteAgent`, `agentCard`, `toA2ASkills` and the
-//! compat transports. a2a-go registers a compat transport per advertised `(binding, version)`;
-//! a2a-client-lf keys transports by `(binding, major version)` with no compat registration, so
-//! [`CompatClientProvider`] rewrites each `JSONRPC` / `HTTP+JSON` interface of another major
-//! version to the crate's current version before handing the card to its factory (ledgered).
+//! [`Client::remote_agent`], the agent-card construction behind it, the registry-skill
+//! conversion and the compat client provider. a2a-client-lf keys transports by
+//! `(binding, major version)` with no compat registration, so [`CompatClientProvider`] rewrites
+//! each `JSONRPC` / `HTTP+JSON` interface of a 0.x version to the crate's current version before
+//! handing the card to its factory.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -36,28 +36,28 @@ use crate::error::Error;
 use crate::resolve::{PROTOCOL_TYPE_A2A_AGENT, TRANSPORT_HTTP_JSON, clean_name, connection_uri};
 use crate::types::{Agent, Skill};
 
-/// Go `cardTypeA2AAgentCard`.
+/// Registry card type of an embedded A2A agent card.
 pub(crate) const CARD_TYPE_A2A_AGENT_CARD: &str = "A2A_AGENT_CARD";
-/// Go `defaultA2AProtocolVersion`.
+/// Protocol version assumed for a registry interface that names none.
 pub(crate) const DEFAULT_A2A_PROTOCOL_VERSION: &str = "0.3.0";
 
-/// Go `RemoteAgentOption`: customizes [`Client::remote_agent`]; applied in order.
+/// Customizes [`Client::remote_agent`]; applied in order.
 #[derive(Debug, Clone)]
 pub enum RemoteAgentOption {
-    /// Go `WithA2AHTTPClient`: the HTTP client used to reach the remote A2A agent (A2A egress
+    /// The HTTP client used to reach the remote A2A agent (A2A egress
     /// is not auto-authenticated). A later one replaces an earlier one.
     HttpClient(reqwest::Client),
-    /// Go `WithA2AHeaders`: headers added to (or overwriting) every A2A request; repeated
+    /// Headers added to (or overwriting) every A2A request; repeated
     /// options accumulate, a later value wins on a key conflict.
     Headers(BTreeMap<String, String>),
 }
 
-/// Go `WithA2AHTTPClient`.
+/// Builds [`RemoteAgentOption::HttpClient`].
 pub fn with_a2a_http_client(client: reqwest::Client) -> RemoteAgentOption {
     RemoteAgentOption::HttpClient(client)
 }
 
-/// Go `WithA2AHeaders`.
+/// Builds [`RemoteAgentOption::Headers`].
 pub fn with_a2a_headers<K, V>(headers: impl IntoIterator<Item = (K, V)>) -> RemoteAgentOption
 where
     K: Into<String>,
@@ -71,7 +71,7 @@ where
     )
 }
 
-/// Go `applyRemoteAgentOptions`.
+/// Resolves the options into one [`EgressConfig`], applied in order.
 pub(crate) fn apply_remote_agent_options(opts: &[RemoteAgentOption]) -> EgressConfig {
     let mut ec = EgressConfig::default();
     for opt in opts {
@@ -84,7 +84,7 @@ pub(crate) fn apply_remote_agent_options(opts: &[RemoteAgentOption]) -> EgressCo
 }
 
 impl Client {
-    /// Go `RemoteAgent`: resolves the registered A2A agent `name` (full resource name) into a
+    /// Resolves the registered A2A agent `name` (full resource name) into a
     /// gadk remote agent usable as a sub-agent: [`Client::get_agent`], `agent_card`, then
     /// `gadk_a2a::remoteagent::new_a2a` with the cleaned name, the card's description, the card,
     /// and a `CompatClientProvider` over the option's client (or a default one, never the
@@ -117,7 +117,7 @@ impl Client {
     }
 }
 
-/// Go `agentCard`: the embedded card (when `card.card_type` is `A2A_AGENT_CARD` and content is
+/// The embedded card (when `card.card_type` is `A2A_AGENT_CARD` and content is
 /// present) or one synthesized from the agent's fields, plus the cleaned agent name.
 pub(crate) fn agent_card(
     info: &Agent,
@@ -195,10 +195,10 @@ pub(crate) fn agent_card(
     Ok((card, agent_name))
 }
 
-/// Go `json.Unmarshal(content, &a2a.AgentCard{})`: Go leaves absent or `null` fields at their
-/// zero value (a `null` document decodes to the zero card), while a2a-lf requires some of them;
-/// those are filled with Go's zero value before decoding, so only a malformed document fails.
-/// Divergence (ledger 5c): keys are matched case-sensitively (Go's `json.Unmarshal` folds case).
+/// Decodes the embedded card JSON into an `AgentCard`. Absent or `null` fields are accepted (a
+/// `null` document decodes to the empty card), although a2a-lf requires some of them, so those
+/// are filled with their empty value before decoding and only a malformed document fails. Keys
+/// are matched case-sensitively.
 fn decode_card(content: &str) -> Result<a2a::AgentCard, serde_json::Error> {
     let mut doc: Value = serde_json::from_str(content)?;
     if doc.is_null() {
@@ -218,10 +218,9 @@ fn decode_card(content: &str) -> Result<a2a::AgentCard, serde_json::Error> {
             ],
         );
         if let Some(Value::Array(ifaces)) = card.get_mut("supportedInterfaces") {
-            // Go `[]*AgentInterface`: a `null` element is a nil pointer, which a2a-go's
-            // factory skips; it cannot reach a client, so it is dropped here. Divergence
-            // (ledger 5c): `[null]` thus leaves no interface and `remote_agent` fails fast with
-            // `has no supported interfaces`; Go builds the agent and fails at invocation.
+            // A `null` element cannot reach a client, so it is dropped here: `[null]` thus
+            // leaves no interface and `remote_agent` fails fast with `has no supported
+            // interfaces`.
             ifaces.retain(|i| !i.is_null());
             for iface in ifaces.iter_mut().filter_map(Value::as_object_mut) {
                 zero_fill(
@@ -256,7 +255,7 @@ fn decode_card(content: &str) -> Result<a2a::AgentCard, serde_json::Error> {
     serde_json::from_value(doc)
 }
 
-/// Sets each absent or `null` key of `obj` to its Go zero value.
+/// Sets each absent or `null` key of `obj` to its empty value.
 fn zero_fill(obj: &mut Map<String, Value>, zeros: &[(&str, Value)]) {
     for (key, zero) in zeros {
         match obj.get(*key) {
@@ -268,7 +267,7 @@ fn zero_fill(obj: &mut Map<String, Value>, zeros: &[(&str, Value)]) {
     }
 }
 
-/// Go `toA2ASkills`: registry skills as A2A skills (none → empty).
+/// Converts registry skills into A2A skills (none → empty).
 pub(crate) fn to_a2a_skills(skills: &[Skill]) -> Vec<a2a::AgentSkill> {
     skills
         .iter()
@@ -290,19 +289,19 @@ fn major(version: &str) -> &str {
     version.split('.').next().unwrap_or(version)
 }
 
-/// The major of A2A 0.3 (Go `a2av0.Version`), the only older protocol Go's factory speaks.
+/// The major version of A2A 0.3, the only older protocol the compat path accepts.
 const A2A_V0_MAJOR: &str = "0";
 
 /// The card [`CompatClientProvider`] hands to its factory: every interface whose binding is
 /// `JSONRPC` or `HTTP+JSON` and whose protocol version is a 0.x version gets
 /// `protocol_version = a2a::VERSION`; everything else is unchanged, so an interface of an
-/// unknown major (such as 2.0) finds no transport and is refused, as in Go (869020a1).
+/// unknown major (such as 2.0) finds no transport and is refused.
 ///
-/// Divergence (ledger 5c): Go 869020a1 registers a2a-go's `a2av0` transports and speaks the A2A
-/// 0.3 wire format (`A2A-Version: 0.3`, JSON-RPC 0.3 method names, HTTP+JSON under `/v1`) to a
-/// 0.3.x interface (and to a registry record without a version, assumed 0.3.0); a2a-rs has no
-/// A2A 0.3 client transport, so gadk speaks A2A 1.0 to such an interface (`A2A-Version: 1.0`,
-/// 1.0 routes and payloads), which reaches a server that serves 1.0 at that interface.
+/// a2a-rs has no A2A 0.3 client transport, so gadk speaks A2A 1.0 (`A2A-Version: 1.0`, 1.0
+/// routes and payloads) to a 0.3.x interface (and to a registry record without a version,
+/// assumed 0.3.0). That reaches a server that serves 1.0 at that interface; a server that
+/// speaks only the 0.3 wire format (`A2A-Version: 0.3`, 0.3 JSON-RPC method names, HTTP+JSON
+/// under `/v1`) is not supported.
 pub(crate) fn compat_card(card: &a2a::AgentCard) -> a2a::AgentCard {
     let mut out = card.clone();
     for iface in &mut out.supported_interfaces {
@@ -318,9 +317,8 @@ pub(crate) fn compat_card(card: &a2a::AgentCard) -> a2a::AgentCard {
     out
 }
 
-/// The remote agent's client provider: Go `a2aClientFactory` (A2A 1.0 JSON-RPC and REST
-/// transports over the egress client; 0.3 interfaces through [`compat_card`]) as a gadk-a2a
-/// provider.
+/// The remote agent's client provider: A2A 1.0 JSON-RPC and REST transports over the egress
+/// client, with 0.3 interfaces handled through [`compat_card`].
 pub(crate) struct CompatClientProvider {
     /// `gadk_a2a::remoteagent::new_a2a_client_provider` over an `A2AClientFactory` with the
     /// JSON-RPC and REST transports on the egress client and a [`HeaderInterceptor`].
@@ -361,11 +359,10 @@ impl A2AClientProvider for CompatClientProvider {
     }
 }
 
-/// Go `headerRoundTripper` for A2A: sets each header on every call (as a2a-client service
-/// params, which its transports send as HTTP headers). Divergence (ledger 5c): a2a-client-lf
-/// appends the params with reqwest's `builder.header`, so a header the transport also sets
-/// (e.g. `Accept`) is sent with two values (Go `Header.Set` replaces it), and a value reqwest
-/// rejects fails the A2A request (MCP skips such a header; Go sends it).
+/// Sets each header on every A2A call (as a2a-client service params, which its transports send
+/// as HTTP headers). a2a-client-lf appends the params with reqwest's `builder.header`, so a
+/// header the transport also sets (e.g. `Accept`) is sent with two values, and a value reqwest
+/// rejects fails the A2A request (the MCP path skips such a header instead).
 pub(crate) struct HeaderInterceptor {
     /// The headers, in key order.
     pub(crate) headers: Vec<(String, String)>,
@@ -379,7 +376,7 @@ impl a2a_client::middleware::CallInterceptor for HeaderInterceptor {
         params: &mut a2a_client::ServiceParams,
     ) -> Result<(), a2a::A2AError> {
         for (name, value) in &self.headers {
-            // Go `Header.Set`: one value, replacing any spelling of the same header name.
+            // One value, replacing any spelling of the same header name.
             params.retain(|k, _| !k.eq_ignore_ascii_case(name));
             params.insert(name.clone(), vec![value.clone()]);
         }

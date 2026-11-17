@@ -13,50 +13,48 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Service-text redaction (port of ADK-Go `auth/gcp/redact.go`).
+//! Service-text redaction.
 //!
 //! This is the scrub: everything that turns service-controlled text into text an error may
 //! carry. It shares `gcp` with the credential client only because the client is its one caller;
 //! nothing in it is specific to GCP.
 //!
-//! Go works on bytes and this port works on `&str`: a service body is decoded with
-//! `String::from_utf8_lossy` before it reaches this module. Every offset this module slices at
-//! is a char boundary: match starts and ends of a non-empty valid-UTF-8 needle, cuts that
-//! [`visible_limit`] backs up to a rune start, and escape boundaries, which are ASCII. The one
-//! Go loop that steps by a single byte (`readableOutsideMarkers`, `i = at + 1`) steps to the
-//! next char boundary instead, which finds the same matches: a needle that is valid UTF-8 can
-//! only start at a char boundary of a valid-UTF-8 haystack. `endOfRun`'s `HasPrefix(ls[k:], lv)`
-//! is tested on `as_bytes()`, where `k` may fall inside a char.
+//! This module works on `&str`: a service body is decoded with `String::from_utf8_lossy` before
+//! it reaches this module. Every offset this module slices at is a char boundary: match starts
+//! and ends of a non-empty valid-UTF-8 needle, cuts that [`visible_limit`] backs up to a char
+//! start, and escape boundaries, which are ASCII. [`readable_outside_markers`] steps to the next
+//! char boundary after a match, which finds every match: a needle that is valid UTF-8 can only
+//! start at a char boundary of a valid-UTF-8 haystack. [`end_of_run`] tests prefixes on
+//! `as_bytes()`, where the position may fall inside a char.
 //!
-//! Every lowering goes through [`go_to_lower`], Go's `strings.ToLower`.
+//! Every lowering goes through [`go_to_lower`].
 
-/// maxErrorBody caps service-controlled text carried into an error.
-pub(crate) const MAX_ERROR_BODY: usize = 1024; // redact.go:29
+/// Caps service-controlled text carried into an error.
+pub(crate) const MAX_ERROR_BODY: usize = 1024;
 /// Replaces service text that could not be shown free of the caller's own identifiers. It
 /// names no secret and is constant, so it leaks nothing itself.
 pub(crate) const WITHHELD_TEXT: &str =
-    "[withheld: could not be shown free of the request's own identifiers]"; // redact.go:33
+    "[withheld: could not be shown free of the request's own identifiers]";
 /// What [`redact`] writes in place of a removed value.
-pub(crate) const REDACTED_MARKER: &str = "[redacted]"; // redact.go:36
-/// Bounds the caller-supplied values this module will match against a response. Above it,
-/// nothing is shown at all: matching costs O(body x value) and half-scrubbing is not an
-/// option, so the bound fails closed. Measured on the raw value while matching runs on the
-/// lowered copy (redact.go:38-61).
-pub(crate) const MAX_SCRUBBABLE_SECRET: usize = 4096; // redact.go:62
-/// Bounds how much of the response the whole-text check reads: the visible window plus room
-/// for one occurrence's escaped spelling. A response running past it is withheld rather than
-/// examined in part (redact.go:126-147).
-pub(crate) const MAX_STRADDLE_WINDOW: usize = MAX_ERROR_BODY + 8 * MAX_SCRUBBABLE_SECRET; // redact.go:148
-/// Bounds [`decode_fully`]. It counts reads; text that needed exactly this many changing
-/// passes is reported unfinished, which is the fail-closed direction (redact.go:307-316).
-pub(crate) const MAX_DECODE_PASSES: usize = 64; // redact.go:317
+pub(crate) const REDACTED_MARKER: &str = "[redacted]";
+/// Bounds the caller-supplied values this module will match against a response. Above it, nothing
+/// is shown at all: matching costs O(body x value) and half-scrubbing is not an option, so the
+/// bound fails closed. Measured on the raw value while matching runs on the lowered copy.
+pub(crate) const MAX_SCRUBBABLE_SECRET: usize = 4096;
+/// Bounds how much of the response the whole-text check reads: the visible window plus room for one
+/// occurrence's escaped spelling. A response running past it is withheld rather than examined in
+/// part.
+pub(crate) const MAX_STRADDLE_WINDOW: usize = MAX_ERROR_BODY + 8 * MAX_SCRUBBABLE_SECRET;
+/// Bounds [`decode_fully`]. It counts reads; text that needed exactly this many changing passes is
+/// reported unfinished, which is the fail-closed direction.
+pub(crate) const MAX_DECODE_PASSES: usize = 64;
 
-/// Go `utf8.UTFMax`.
+/// The longest UTF-8 encoding of a char, in bytes.
 const UTF_MAX: usize = 4;
 
-/// redact.go:107 `redactedForError`. Prepares service-controlled text so that an error may
-/// carry it: the caller's own identifiers removed and the source capped, or, where neither can
-/// be shown to have worked, [`WITHHELD_TEXT`] instead of any of the response.
+/// Prepares service-controlled text so that an error may carry it: the caller's own identifiers
+/// removed and the source capped, or, where neither can be shown to have worked, [`WITHHELD_TEXT`]
+/// instead of any of the response.
 ///
 /// Contract: no secret is recoverable from the returned string by this module's decoder, or
 /// nothing is returned. The choice between the two candidates is made on the OUTPUT, never on
@@ -79,12 +77,12 @@ pub(crate) fn redacted_for_error(s: &str, secrets: &[&str]) -> String {
     WITHHELD_TEXT.to_owned()
 }
 
-/// redact.go:156 `fitsStraddleWindow`: whether the whole-text check can examine `s` whole.
+/// Whether the whole-text check can examine `s` whole.
 fn fits_straddle_window(s: &str) -> bool {
     s.len() <= MAX_STRADDLE_WINDOW
 }
 
-/// redact.go:161 `showable`: scrubs `s` for an error; `None` when the result cannot be shown.
+/// Scrubs `s` for an error; `None` when the result cannot be shown.
 pub(crate) fn showable(s: &str, secrets: &[&str]) -> Option<String> {
     let (out, truncated) = redact_within_limit(s, secrets);
     // Asked of the WHOLE text as well, and only when the cap actually cut: an escaped spelling
@@ -101,10 +99,10 @@ pub(crate) fn showable(s: &str, secrets: &[&str]) -> Option<String> {
     Some(out)
 }
 
-/// redact.go:200 `recoverable`: whether any secret can be read out of `x`, literally or once
-/// this module's decoder has been run over it to a fixpoint. The marker this scrub writes is
-/// excluded by POSITION: an occurrence belongs to us only when every byte of it came from a
-/// marker. Fails closed when either decode cannot finish.
+/// Whether any secret can be read out of `x`, literally or once this module's decoder has been run
+/// over it to a fixpoint. The marker this scrub writes is excluded by POSITION: an occurrence
+/// belongs to us only when every byte of it came from a marker. Fails closed when either decode
+/// cannot finish.
 pub(crate) fn recoverable(x: &str, secrets: &[&str]) -> bool {
     let mut forms: Vec<String> = Vec::new();
     for v in secrets {
@@ -144,8 +142,8 @@ pub(crate) fn recoverable(x: &str, secrets: &[&str]) -> bool {
     false
 }
 
-/// redact.go:250 `markerBytes`: marks every byte of `text` belonging to an occurrence of the
-/// marker, and returns `None` when there is none.
+/// Marks every byte of `text` belonging to an occurrence of the marker, and returns `None` when
+/// there is none.
 fn marker_bytes(text: &str) -> Option<Vec<bool>> {
     let mut i = text.find(REDACTED_MARKER)?;
     let mut ours = vec![false; text.len()];
@@ -159,13 +157,11 @@ fn marker_bytes(text: &str) -> Option<Vec<bool>> {
     Some(ours)
 }
 
-/// redact.go:278 `readableOutsideMarkers`: whether `form` occurs anywhere in `text` other than
-/// wholly inside bytes this scrub wrote. Overlapping occurrences are walked one start at a
-/// time rather than skipped past.
+/// Whether `form` occurs anywhere in `text` other than wholly inside bytes this scrub wrote.
+/// Overlapping occurrences are walked one start at a time rather than skipped past.
 ///
-/// Go steps `i = at + 1`, a byte. Here `i` moves to the next char boundary after `at`, which
-/// skips only positions inside the char at `at`; `form` is non-empty valid UTF-8, so no
-/// occurrence can start there, and the matches found are Go's.
+/// After a match at `at`, `i` moves to the next char boundary, which skips only positions inside
+/// the char at `at`; `form` is non-empty valid UTF-8, so no occurrence can start there.
 fn readable_outside_markers(text: &str, ours: Option<&[bool]>, form: &str) -> bool {
     let mut i = 0;
     while i + form.len() <= text.len() {
@@ -184,8 +180,8 @@ fn readable_outside_markers(text: &str, ours: Option<&[bool]>, form: &str) -> bo
     false
 }
 
-/// redact.go:295 `allOurs`: whether every byte of `[lo, hi)` came from a marker. A text with
-/// no marker in it owns nothing, so nothing is excused.
+/// Whether every byte of `[lo, hi)` came from a marker. A text with no marker in it owns nothing,
+/// so nothing is excused.
 fn all_ours(ours: Option<&[bool]>, lo: usize, hi: usize) -> bool {
     match ours {
         None => false,
@@ -193,9 +189,9 @@ fn all_ours(ours: Option<&[bool]>, lo: usize, hi: usize) -> bool {
     }
 }
 
-/// redact.go:342 `decodeFully`: applies [`unescape_json`] until the text stops changing, and
-/// reports whether it got there within [`MAX_DECODE_PASSES`] reads. `false` means the caller
-/// must treat the text as though a secret were in it.
+/// Applies [`unescape_json`] until the text stops changing, and reports whether it got there within
+/// [`MAX_DECODE_PASSES`] reads. `false` means the caller must treat the text as though a secret
+/// were in it.
 pub(crate) fn decode_fully(s: &str) -> (String, bool) {
     let mut s = s.to_owned();
     for _ in 0..MAX_DECODE_PASSES {
@@ -208,10 +204,9 @@ pub(crate) fn decode_fully(s: &str) -> (String, bool) {
     (s, false)
 }
 
-/// redact.go:379 `unescapeJSON`: decodes the JSON escapes that can hide a caller-supplied value
-/// from a substring scrub (`\uXXXX`, a surrogate pair as one rune, `\/` and `\\`) and leaves
-/// every other one alone, a malformed escape included, which stays verbatim. An unpaired
-/// surrogate becomes U+FFFD, as Go's `strings.Builder.WriteRune` writes it.
+/// Decodes the JSON escapes that can hide a caller-supplied value from a substring scrub (`\uXXXX`,
+/// a surrogate pair as one rune, `\/` and `\\`) and leaves every other one alone, a malformed
+/// escape included, which stays verbatim. An unpaired surrogate becomes U+FFFD.
 pub(crate) fn unescape_json(s: &str) -> String {
     if !s.contains('\\') {
         return s.to_owned();
@@ -233,9 +228,9 @@ pub(crate) fn unescape_json(s: &str) -> String {
             continue;
         }
         let Some(r) = decode_unicode_escape(bytes, i) else {
-            // Not an escape this function decodes, or a malformed one. Either way the bytes
-            // are copied through rather than dropped. Go copies one byte per iteration; every
-            // escape starts with a backslash, so copying up to the next one is the same.
+            // Not an escape this function decodes, or a malformed one. Either way the bytes are
+            // copied through rather than dropped. Every escape starts with a backslash, so the copy
+            // runs up to the next one.
             if bytes[i] == b'\\' {
                 b.push('\\');
                 i += 1;
@@ -262,17 +257,17 @@ pub(crate) fn unescape_json(s: &str) -> String {
     b
 }
 
-/// Widths in bytes of the escapes [`unescape_json`] decodes (redact.go:424-428).
+/// Widths in bytes of the escapes [`unescape_json`] decodes.
 const SHORT_ESCAPE_LEN: usize = 2; // \\ and \/
 const UNICODE_ESCAPE_LEN: usize = 6; // \uXXXX
 const SURROGATE_PAIR_LEN: usize = 2 * UNICODE_ESCAPE_LEN; // \uD83D\uDE00
 
-/// Go `utf16.IsSurrogate`.
+/// Whether `r` is a UTF-16 surrogate code point.
 fn is_surrogate(r: u32) -> bool {
     (0xD800..0xE000).contains(&r)
 }
 
-/// Go `utf16.DecodeRune`, with `None` for its `utf8.RuneError` result.
+/// The char a UTF-16 surrogate pair encodes, or `None` when `r1` and `r2` are not a valid pair.
 fn decode_surrogate_pair(r1: u32, r2: u32) -> Option<char> {
     if (0xD800..0xDC00).contains(&r1) && (0xDC00..0xE000).contains(&r2) {
         char::from_u32((((r1 - 0xD800) << 10) | (r2 - 0xDC00)) + 0x10000)
@@ -281,14 +276,13 @@ fn decode_surrogate_pair(r1: u32, r2: u32) -> Option<char> {
     }
 }
 
-/// redact.go:431 `hasEscape`: whether `s[i..]` begins with a backslash followed by `c`.
+/// Whether `s[i..]` begins with a backslash followed by `c`.
 fn has_escape(s: &[u8], i: usize, c: u8) -> bool {
     i + SHORT_ESCAPE_LEN <= s.len() && s[i] == b'\\' && s[i + 1] == c
 }
 
-/// redact.go:440 `decodeUnicodeEscape`: decodes the `\uXXXX` at `s[i..]`, if that is what is
-/// there. Exactly four hex digits parse, as `strconv.ParseUint(_, 16, 32)` admits: no sign,
-/// no `0x`, no underscores.
+/// Decodes the `\uXXXX` at `s[i..]`, if that is what is there. Exactly four hex digits parse: no
+/// sign, no `0x`, no underscores.
 fn decode_unicode_escape(s: &[u8], i: usize) -> Option<u32> {
     if !has_escape(s, i, b'u') || i + UNICODE_ESCAPE_LEN > s.len() {
         return None;
@@ -300,13 +294,13 @@ fn decode_unicode_escape(s: &[u8], i: usize) -> Option<u32> {
     Some(n)
 }
 
-/// Go `utf8.RuneStart`.
+/// Whether `b` starts a UTF-8 encoded char (is not a continuation byte).
 fn rune_start(b: u8) -> bool {
     b & 0xC0 != 0x80
 }
 
-/// redact.go:454 `visibleLimit`: how many bytes of `s` an error may show, and whether `s` ran
-/// past that. A cut backs up at most `UTF_MAX - 1` bytes to a rune boundary.
+/// How many bytes of `s` an error may show, and whether `s` ran past that. A cut backs up at most
+/// `UTF_MAX - 1` bytes to a rune boundary.
 pub(crate) fn visible_limit(s: &str) -> (usize, bool) {
     const MAX: usize = MAX_ERROR_BODY;
     if s.len() <= MAX {
@@ -319,16 +313,16 @@ pub(crate) fn visible_limit(s: &str) -> (usize, bool) {
         cut -= 1;
         i += 1;
     }
-    // Go's fallback for a body that is not UTF-8. A `&str` always has a rune start within
-    // three bytes, so this never fires here; it is kept so the logic stays Go's.
+    // Fallback for a body that is not UTF-8. A `&str` always has a char start within three bytes,
+    // so this never fires here.
     if !rune_start(b[cut]) {
         cut = MAX;
     }
     (cut, true)
 }
 
-/// redact.go:482 `truncateForError`: caps an error body and reports whether it cut. The text
-/// and the flag come from one place so a caller cannot pair a flag with the wrong string.
+/// Caps an error body and reports whether it cut. The text and the flag come from one place so a
+/// caller cannot pair a flag with the wrong string.
 pub(crate) fn truncate_for_error(s: &str) -> (String, bool) {
     let (cut, truncated) = visible_limit(s);
     if !truncated {
@@ -337,10 +331,10 @@ pub(crate) fn truncate_for_error(s: &str) -> (String, bool) {
     (format!("{}...", &s[..cut]), true)
 }
 
-/// redact.go:520 `redact`: removes caller-supplied values from a service-controlled string,
-/// ignoring case. Where it removes anything, the text it returns is lowercased. Every value is
-/// matched in ONE left-to-right pass; overlapping candidates resolve earliest-first, then
-/// longest. Text with no match is returned untouched; empty values are dropped.
+/// Removes caller-supplied values from a service-controlled string, ignoring case. Where it removes
+/// anything, the text it returns is lowercased. Every value is matched in ONE left-to-right pass;
+/// overlapping candidates resolve earliest-first, then longest. Text with no match is returned
+/// untouched; empty values are dropped.
 pub(crate) fn redact(s: &str, values: &[&str]) -> String {
     let lowered = lowered_values(values);
     if lowered.is_empty() {
@@ -354,9 +348,9 @@ pub(crate) fn redact(s: &str, values: &[&str]) -> String {
     out
 }
 
-/// redact.go:558 `redactWithinLimit`: [`redact`] with the error-body cap applied to the text it
-/// READS rather than to the text it returns, and the result capped on its own length as well,
-/// with one ellipsis however many bounds cut.
+/// [`redact`] with the error-body cap applied to the text it READS rather than to the text it
+/// returns, and the result capped on its own length as well, with one ellipsis however many bounds
+/// cut.
 pub(crate) fn redact_within_limit(s: &str, values: &[&str]) -> (String, bool) {
     let lowered = lowered_values(values);
     if lowered.is_empty() {
@@ -379,8 +373,8 @@ pub(crate) fn redact_within_limit(s: &str, values: &[&str]) -> (String, bool) {
     (out, truncated || over)
 }
 
-/// redact.go:588 `loweredValues`: drops the empty values and lowercases the rest. Dropping the
-/// empty ones is load-bearing: the empty string matches at the cursor forever.
+/// Drops the empty values and lowercases the rest. Dropping the empty ones is load-bearing: the
+/// empty string matches at the cursor forever.
 pub(crate) fn lowered_values(values: &[&str]) -> Vec<String> {
     values
         .iter()
@@ -389,13 +383,13 @@ pub(crate) fn lowered_values(values: &[&str]) -> Vec<String> {
         .collect()
 }
 
-/// redact.go:607 `redactLowered`: the scan over `ls`, already lowered, with `lowered`
-/// non-empty and lowercased. It emits no byte of `ls` at or past `limit`, and reports whether
-/// it wrote a marker. Cost is O(len(ls) x total value length).
+/// The scan over `ls`, already lowered, with `lowered` non-empty and lowercased. It emits no byte
+/// of `ls` at or past `limit`, and reports whether it wrote a marker. Cost is O(len(ls) x total
+/// value length).
 ///
-/// Go's `limit` is an `int` and `limit <= 0` returns `("", false)`; here `0` does. A `limit`
-/// inside a char is lowered to that char's start so no slice can panic; no caller passes one
-/// ([`visible_limit`] and `ls.len()` are char boundaries).
+/// A `limit` of `0` returns `("", false)`. A `limit` inside a char is lowered to that char's start
+/// so no slice can panic; no caller passes one ([`visible_limit`] and `ls.len()` are char
+/// boundaries).
 pub(crate) fn redact_lowered(ls: &str, limit: usize, lowered: &[String]) -> (String, bool) {
     let mut limit = limit.min(ls.len());
     while !ls.is_char_boundary(limit) {
@@ -438,7 +432,7 @@ pub(crate) fn redact_lowered(ls: &str, limit: usize, lowered: &[String]) -> (Str
     (b, true)
 }
 
-/// redact.go:665 `earliestMatch`: the leftmost pending match and, on a tie, the longest, as
+/// The leftmost pending match and, on a tie, the longest, as
 /// `(at, which)`; `None` once every value is exhausted.
 fn earliest_match(next: &[Option<usize>], lowered: &[String]) -> Option<(usize, usize)> {
     let mut best: Option<(usize, usize)> = None;
@@ -457,9 +451,9 @@ fn earliest_match(next: &[Option<usize>], lowered: &[String]) -> Option<(usize, 
     best
 }
 
-/// redact.go:696 `endOfRun`: extends a redacted range while ANY occurrence starts inside it,
-/// scanned position by position, and returns where the run ends. The condition re-reads `end`
-/// each step, so an extension made at `k` is picked up by the same walk.
+/// Extends a redacted range while ANY occurrence starts inside it, scanned position by position,
+/// and returns where the run ends. The condition re-reads `end` each step, so an extension made at
+/// `k` is picked up by the same walk.
 fn end_of_run(ls: &str, at: usize, mut end: usize, lowered: &[String]) -> usize {
     let b = ls.as_bytes();
     let mut k = at + 1;
@@ -474,8 +468,7 @@ fn end_of_run(ls: &str, at: usize, mut end: usize, lowered: &[String]) -> usize 
     end
 }
 
-/// redact.go:710 `advanceMatches`: moves every pending match the cursor has passed forward to
-/// its next occurrence, or retires it.
+/// Moves every pending match the cursor has passed forward to its next occurrence, or retires it.
 fn advance_matches(ls: &str, pos: usize, lowered: &[String], next: &mut [Option<usize>]) {
     for (i, lv) in lowered.iter().enumerate() {
         match next[i] {
@@ -486,7 +479,7 @@ fn advance_matches(ls: &str, pos: usize, lowered: &[String], next: &mut [Option<
     }
 }
 
-/// Go `strings.ToLower` (shared port in gadk-platform). Every lowering above goes through this.
+/// Lowercases a string. Every lowering above goes through this.
 pub(crate) use gadk_platform::go_to_lower;
 
 #[cfg(test)]

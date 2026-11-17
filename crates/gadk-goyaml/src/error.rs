@@ -13,28 +13,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Errors: a port of yaml.v3 v3.0.1 `yaml.go`'s `TypeError`, `fail`/`failf` and `handleErr`.
+//! Errors: the [`Error`] type every fallible operation returns, and the collected
+//! [`TypeError`].
 //!
-//! Go reports failures by panicking with a `yamlError` that `handleErr` turns into the returned
-//! `error`; the port returns [`Error`] values instead. `Display` is exactly Go's `err.Error()`.
+//! Failures are returned as [`Error`] values; `Display` is exactly the text yaml.v3 reports.
 
 use std::fmt;
 
 /// Every error the crate returns. `Display` is the exact text yaml.v3 returns.
 #[derive(Debug)]
 pub enum Error {
-    /// A `failf` error: the complete text including Go's `yaml: ` prefix
+    /// A `failf` error: the complete text including the `yaml: ` prefix
     /// (`yaml: line 1: did not find expected key`, `yaml: unknown anchor 'a' referenced`).
     Syntax(String),
-    /// Go's `*yaml.TypeError`: the collected `line N: cannot unmarshal …` messages.
+    /// The collected `line N: cannot unmarshal …` messages.
     Type(TypeError),
     /// An I/O error, built only by `From<std::io::Error>`: the crate itself never returns it.
-    /// Reader and writer failures surface as `Error::Syntax` texts, as in Go
+    /// Reader and writer failures surface as `Error::Syntax` texts
     /// (`yaml: input error: …`, `yaml: write error: …`).
     Io(std::io::Error),
     /// A serde shape yaml.v3 has no form for (`#[serde(flatten)]`, maps of unknown length, an
-    /// `INLINE_FIELD` that is not an `InlineMap`), or a Go panic text the port returns instead
-    /// of panicking. Displayed verbatim.
+    /// `INLINE_FIELD` that is not an `InlineMap`), or a condition that yaml.v3 reports by
+    /// panicking and this crate returns instead. Displayed verbatim.
     Unsupported(String),
     /// A message raised through `serde::ser::Error::custom` / `serde::de::Error::custom`
     /// (for example serde's `missing field `x``). Displayed verbatim.
@@ -85,7 +85,7 @@ impl serde::de::Error for Error {
     }
 }
 
-/// Go's `yaml.TypeError`: returned when one or more fields in the YAML document cannot be
+/// Returned when one or more fields in the YAML document cannot be
 /// decoded into the requested types.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TypeError {
@@ -95,28 +95,26 @@ pub struct TypeError {
 
 impl fmt::Display for TypeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Go: yaml.go (*TypeError).Error
         write!(f, "yaml: unmarshal errors:\n  {}", self.errors.join("\n  "))
     }
 }
 
 impl std::error::Error for TypeError {}
 
-/// Go's `failf(format, args...)`: an [`Error::Syntax`] with the `yaml: ` prefix.
+/// An [`Error::Syntax`] with the `yaml: ` prefix.
 pub(crate) fn failf(msg: impl fmt::Display) -> Error {
-    // Go: yaml.go failf
     Error::Syntax(format!("yaml: {msg}"))
 }
 
-/// The deepest collection nesting a recursive walk accepts (plan decision D7).
+/// The deepest collection nesting a recursive walk accepts.
 ///
 /// Parsing accepts yaml.v3's 10000 levels (the composer runs on an explicit stack), but every
 /// recursive walk — the node encoder, the serde `Serializer`/`Deserializer` and the `GoValue`
 /// decoder — stops past this many nested sequences/mappings instead of overflowing the
 /// thread's stack. 127 is the workspace-wide nesting policy (serde_json's limit).
 ///
-/// Divergence (ledger 6c-1): Go's growable goroutine stacks let these walks go as deep as the
-/// scanner allows (10000).
+/// yaml.v3 lets these walks go as deep as the scanner allows (10000); a native stack cannot
+/// safely do so, hence this lower limit.
 pub(crate) const MAX_WALK_DEPTH: usize = 127;
 
 /// The error a recursive walk returns when nesting exceeds [`MAX_WALK_DEPTH`]:

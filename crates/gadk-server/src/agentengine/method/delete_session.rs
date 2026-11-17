@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `server/agentengine/controllers/method/delete_session.go` (`async_delete_session`).
+//! The `async_delete_session` method.
 
 use std::sync::Arc;
 
@@ -27,17 +27,19 @@ use crate::agentengine::models::{DeleteSessionRequest, DeleteSessionResponse};
 use crate::agentengine::unmarshal::go_unmarshal;
 use crate::mux::Response;
 
-/// Go `NewDeleteSessionHandler`'s handler. Deletes the session; answers `{"output":""}`. Errors: `json.Unmarshal() failed: <err>`, `g.sessionservice.Delete() failed: <err>`.
+/// Handler for `async_delete_session`. Deletes the session; answers `{"output":""}`.
+/// Errors: the input-decode error and the session-service error, each wrapped with its fixed
+/// text (see the literals in this function).
 pub(crate) struct DeleteSessionHandler {
     pub(crate) session_service: Arc<dyn SessionService>,
-    /// Go `agentEngineID`: the app name of every session call.
+    /// The app name of every session call.
     pub(crate) agent_engine_id: String,
     pub(crate) method_name: String,
     pub(crate) api_mode: String,
 }
 
 impl DeleteSessionHandler {
-    /// Go `NewDeleteSessionHandler(sessionService, agentEngineID, methodName, apiMode)`.
+    /// A handler serving `method_name` in `api_mode` over `session_service`.
     pub(crate) fn new(
         session_service: Arc<dyn SessionService>,
         agent_engine_id: &str,
@@ -53,10 +55,10 @@ impl DeleteSessionHandler {
     }
 }
 
-/// Go `Metadata()`'s `description`.
+/// The method's `description` in its metadata.
 const DESCRIPTION: &str = "Deletes a session for the given user.\n\nArgs:\n    user_id (str):\n        Required. The ID of the user.\n    session_id (str):\n        Required. The ID of the session.\n\nReturns:\n\ton success returns an empty string. On error returns an error message.\n\n";
 
-/// Go `Metadata()`'s map for `method_name` / `api_mode` (description text verbatim).
+/// The method's metadata map for `method_name` / `api_mode` (description text verbatim).
 pub(crate) fn metadata(method_name: &str, api_mode: &str) -> Map<String, Value> {
     super::method_metadata(
         method_name,

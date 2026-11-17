@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Responses response conversion (port of ADK-Go `internal/responses/response.go`).
+//! Responses response conversion.
 
 use gadk_genai::{
     Candidate, Content, FinishReason, FunctionCall, GenerateContentResponse,
@@ -29,7 +29,7 @@ use crate::shared::calls::function_call_args;
 use crate::shared::response::safe_int32;
 use crate::shared::servertext::clip_server_text;
 
-/// Go `convertResponse`: `None` is the bare
+/// Converts a response: `None` is the bare
 /// [`ErrorKind::EmptyResponse`](crate::error::ErrorKind::EmptyResponse); a response that
 /// [`reports_failure`] is [`failed_response_error`]; else one candidate from the output items.
 pub(crate) fn convert_response(
@@ -51,7 +51,8 @@ pub(crate) fn convert_response(
     })
 }
 
-/// Go `reportsFailure`: status `failed`; or no status and a non-blank (clipped) error message
+/// Whether the response reports a failure: status `failed`; or no status and a non-blank
+/// (clipped) error message
 /// or code.
 pub(crate) fn reports_failure(resp: &Response) -> bool {
     match resp.status_str() {
@@ -67,7 +68,7 @@ pub(crate) fn reports_failure(resp: &Response) -> bool {
     }
 }
 
-/// Go `failedResponseError`: [`ErrorKind::ResponseFailed`](crate::error::ErrorKind::ResponseFailed)
+/// Builds the [`ErrorKind::ResponseFailed`](crate::error::ErrorKind::ResponseFailed) error
 /// with the clipped, quoted id, code and message (`openai: response failed (id "…", code
 /// "…"): "…"` and its shorter forms).
 pub(crate) fn failed_response_error(resp: &Response) -> OpenAiError {
@@ -94,7 +95,7 @@ pub(crate) fn failed_response_error(resp: &Response) -> OpenAiError {
     }
 }
 
-/// Go `buildCandidate`.
+/// Builds the candidate from the output items.
 fn build_candidate(resp: &Response) -> Result<Candidate, OpenAiError> {
     let parts = convert_output_items(resp.output_items())?;
     Ok(Candidate {
@@ -110,7 +111,7 @@ fn build_candidate(resp: &Response) -> Result<Candidate, OpenAiError> {
     })
 }
 
-/// A text part (Go `&genai.Part{Text: text, Thought: thought}`).
+/// A text part.
 fn text_part(text: &str, thought: bool) -> Part {
     Part {
         text: text.to_string(),
@@ -119,7 +120,7 @@ fn text_part(text: &str, thought: bool) -> Part {
     }
 }
 
-/// Go `convertOutputItems`: message text and refusals, function calls, and reasoning content
+/// Converts the output items: message text and refusals, function calls, and reasoning content
 /// and summaries as thought parts. No items is
 /// [`ErrorKind::NoOutputItems`](crate::error::ErrorKind::NoOutputItems); no parts
 /// [`ErrorKind::NoTextOrToolContent`](crate::error::ErrorKind::NoTextOrToolContent); an
@@ -176,8 +177,8 @@ pub(crate) fn convert_output_items(items: &[ResponseOutputItem]) -> Result<Vec<P
     Ok(parts)
 }
 
-/// Go `convertFunctionCall`: the function-call part for an output item; undecodable
-/// arguments are `ErrFunctionCallArgs: <err> (name "…", call_id "…")`.
+/// The function-call part for an output item; undecodable
+/// arguments are `ErrorKind::FunctionCallArgs: <err> (name "…", call_id "…")`.
 pub(crate) fn convert_function_call(item: &ResponseOutputItem) -> Result<Part, OpenAiError> {
     // Name the offending call: `convert_output_items` aborts the entire response on the first
     // error, so nothing else identifies it.
@@ -199,15 +200,14 @@ pub(crate) fn convert_function_call(item: &ResponseOutputItem) -> Result<Part, O
     })
 }
 
-/// Go `functionCallArgs`: the arguments of a function-call output item. A JSON string is its
-/// value (Go's `OfString`); any other value is its original bytes (Go's
-/// `JSON.OfResponseToolSearchCallArguments.Raw()`), so a duplicate key resolves last-one-wins
-/// as `encoding/json` does; absent or `null` is no arguments.
+/// The arguments of a function-call output item. A JSON string is its
+/// value; any other value is its original bytes, so a duplicate key resolves last-one-wins;
+/// absent or `null` is no arguments.
 fn function_call_item_args(item: &ResponseOutputItem) -> Result<Map<String, Value>, OpenAiError> {
     let raw = match item.arguments.as_deref().map(|raw| raw.get()) {
         None => String::new(),
         Some(text) if text.starts_with('"') => {
-            // A JSON string; Go's `OfString` holds the same value already unquoted.
+            // A JSON string, unquoted.
             serde_json::from_str::<String>(text).unwrap_or_default()
         }
         Some(text) => text.to_string(),
@@ -215,7 +215,7 @@ fn function_call_item_args(item: &ResponseOutputItem) -> Result<Map<String, Valu
     function_call_args(&raw)
 }
 
-/// Go `finishReason`: from `incomplete_details.reason`, else [`truncated`]; `None` is
+/// The finish reason: from `incomplete_details.reason`, else [`truncated`]; `None` is
 /// FINISH_REASON_UNSPECIFIED.
 pub(crate) fn finish_reason(resp: Option<&Response>, incomplete_event: bool) -> FinishReason {
     let Some(resp) = resp else {
@@ -232,7 +232,7 @@ pub(crate) fn finish_reason(resp: Option<&Response>, incomplete_event: bool) -> 
     }
 }
 
-/// Go `truncated`: whether a turn naming no incomplete reason still ended early.
+/// Whether a turn naming no incomplete reason still ended early.
 pub(crate) fn truncated(resp: &Response, incomplete_event: bool) -> bool {
     if incomplete_event {
         // The event stands in for "response.completed", so its name is the provider's
@@ -250,7 +250,7 @@ pub(crate) fn truncated(resp: &Response, incomplete_event: bool) -> bool {
     }
 }
 
-/// Go `finishMessage`: the provider's own account of why a turn ended (`""` for none).
+/// The provider's own account of why a turn ended (`""` for none).
 pub(crate) fn finish_message(resp: Option<&Response>, incomplete_event: bool) -> String {
     let Some(resp) = resp else {
         return String::new();
@@ -278,7 +278,7 @@ pub(crate) fn finish_message(resp: Option<&Response>, incomplete_event: bool) ->
     String::new()
 }
 
-/// Go `convertUsage`.
+/// Converts the usage.
 pub(crate) fn convert_usage(usage: &ResponseUsage) -> GenerateContentResponseUsageMetadata {
     GenerateContentResponseUsageMetadata {
         prompt_token_count: safe_int32(usage.input_tokens),
@@ -298,7 +298,7 @@ pub(crate) fn convert_usage(usage: &ResponseUsage) -> GenerateContentResponseUsa
     }
 }
 
-/// Go `logprobsFor`: the response's logprobs only when its message text equals `text`;
+/// The response's logprobs only when its message text equals `text`;
 /// `None` response is `None`.
 pub(crate) fn logprobs_for(resp: Option<&Response>, text: &str) -> Option<LogprobsResult> {
     let resp = resp?;
@@ -308,7 +308,7 @@ pub(crate) fn logprobs_for(resp: Option<&Response>, text: &str) -> Option<Logpro
     convert_logprobs(resp.output_items())
 }
 
-/// Go `outputText`: the text of the message items (output text and refusals).
+/// The text of the message items (output text and refusals).
 pub(crate) fn output_text(items: &[ResponseOutputItem]) -> String {
     let mut text = String::new();
     for item in items.iter().filter(|item| item.kind == "message") {
@@ -323,7 +323,7 @@ pub(crate) fn output_text(items: &[ResponseOutputItem]) -> String {
     text
 }
 
-/// Go `convertLogprobs`: the `output_text` logprobs of the message items; `None` when there
+/// The `output_text` logprobs of the message items; `None` when there
 /// are none.
 pub(crate) fn convert_logprobs(items: &[ResponseOutputItem]) -> Option<LogprobsResult> {
     let mut res: Option<LogprobsResult> = None;

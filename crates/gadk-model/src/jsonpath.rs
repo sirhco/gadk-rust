@@ -13,13 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The JSON Path subset used to address streamed function-call arguments
-//! (port of the path helpers in ADK-Go `internal/llminternal/stream_aggregator.go`).
+//! The JSON Path subset used to address streamed function-call arguments.
 
 use serde_json::{Map, Value};
 
-/// Port of stream_aggregator.go pathSegment.
-///
 /// One step of a JSON Path: an object member name, or an array index when `is_index` is set.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PathSegment {
@@ -28,14 +25,10 @@ pub(crate) struct PathSegment {
     pub(crate) is_index: bool,
 }
 
-/// Port of stream_aggregator.go maxPathIndex.
-///
 /// The largest array index a path may address. It bounds the array a single index can grow;
 /// no function call argument list comes close to it.
 const MAX_PATH_INDEX: usize = 1 << 16;
 
-/// Port of stream_aggregator.go parseJSONPath.
-///
 /// Splits the RFC 9535 JSON Path that addresses a streamed argument into its segments. Only
 /// the selectors a normalized path is built from are accepted — `$.name`, `$['name']` and
 /// `$[0]` — because that is all the model produces; anything else, including wildcards,
@@ -73,8 +66,6 @@ pub(crate) fn parse_json_path(json_path: &str) -> Option<Vec<PathSegment>> {
     Some(segments)
 }
 
-/// Port of stream_aggregator.go splitMemberName.
-///
 /// Takes the shorthand member name at the front of a path.
 fn split_member_name(path: &str) -> (&str, &str) {
     match path.find(['.', '[']) {
@@ -83,8 +74,6 @@ fn split_member_name(path: &str) -> (&str, &str) {
     }
 }
 
-/// Port of stream_aggregator.go parseBracketSegment.
-///
 /// Takes the bracketed selector at the front of a path, which is either an array index or a
 /// quoted member name.
 fn parse_bracket_segment(path: &str) -> Option<(PathSegment, &str)> {
@@ -128,8 +117,6 @@ fn parse_bracket_segment(path: &str) -> Option<(PathSegment, &str)> {
     ))
 }
 
-/// Port of stream_aggregator.go parseQuotedName.
-///
 /// Reads a quoted member name, undoing the single-character escapes RFC 9535 defines for one.
 /// Returns the name and the rest of the path after the closing quote.
 fn parse_quoted_name(path: &str) -> Option<(String, &str)> {
@@ -151,7 +138,8 @@ fn parse_quoted_name(path: &str) -> Option<(String, &str)> {
     None
 }
 
-/// Port of stream_aggregator.go unescape.
+/// The character a single-character escape (`\n`, `\'`, ...) stands for, or `None` when `ch`
+/// is not an escape this parser accepts.
 fn unescape(ch: char) -> Option<char> {
     match ch {
         '\'' | '"' | '\\' | '/' => Some(ch),
@@ -164,8 +152,6 @@ fn unescape(ch: char) -> Option<char> {
     }
 }
 
-/// Port of stream_aggregator.go setValueByPath.
-///
 /// Writes `value` at the location `segments` address within `args`, creating the objects and
 /// arrays on the way to it. Function call arguments are a JSON object, so a path that starts
 /// at an array index addresses nothing and leaves `args` unchanged.
@@ -183,8 +169,6 @@ pub(crate) fn set_value_by_path(
     }
 }
 
-/// Port of stream_aggregator.go setInto.
-///
 /// Returns `container` with `value` written at the location `segments` address within it,
 /// which is a new container when the one that is there cannot hold that segment. An array
 /// grows to fit an index, so an argument whose elements arrive out of order keeps the
@@ -217,7 +201,8 @@ fn set_into(container: Value, segments: &[PathSegment], value: Value) -> Value {
     Value::Object(members)
 }
 
-/// Port of stream_aggregator.go descend.
+/// Continues a write below the first of `segments`: writes `value` under `existing` using the
+/// remaining segments, or returns `value` itself when none remain.
 fn descend(existing: Value, segments: &[PathSegment], value: Value) -> Value {
     match segments.get(1..) {
         Some(rest) if !rest.is_empty() => set_into(existing, rest, value),
@@ -225,8 +210,6 @@ fn descend(existing: Value, segments: &[PathSegment], value: Value) -> Value {
     }
 }
 
-/// Port of stream_aggregator.go valueByPath.
-///
 /// Reads the value `segments` address, or `None` when the whole path does not exist.
 pub(crate) fn value_by_path<'a>(
     args: &'a Map<String, Value>,

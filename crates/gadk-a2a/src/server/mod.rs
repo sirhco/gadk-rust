@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Serving a gadk agent over A2A (port of ADK-Go `server/adka2a/v2`): [`Executor`] implements
+//! Serving a gadk agent over A2A: [`Executor`] implements
 //! `a2a_server::AgentExecutor`; [`build_agent_skills`] describes an agent tree for its
 //! `a2a::AgentCard`; [`a2a_identity_layer`] and [`identity_header_resolver`] carry the
 //! authenticated user to the executor.

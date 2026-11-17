@@ -13,9 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The Agent Identity `credentials:retrieve` protocol (port of ADK-Go
-//! `auth/gcp/agentidentity.go`, plus its request type from `client.go`). The response is
-//! synchronous: a closed "result" oneof with no long-running-operation wrapper.
+//! The Agent Identity `credentials:retrieve` protocol. The response is synchronous: a closed
+//! "result" oneof with no long-running-operation wrapper.
 
 use serde::{Deserialize, Serialize};
 
@@ -25,8 +24,8 @@ use super::client::{
     parse_expire_time,
 };
 
-/// Go `agentIdentityRequest` (client.go:594). The auth provider is bound to the URL path, not
-/// the body. Agent Identity takes the rejected token itself as `forceRefreshToken`.
+/// The request body. The auth provider is bound to the URL path, not the body. Agent Identity takes
+/// the rejected token itself as `forceRefreshToken`.
 #[derive(Serialize)]
 pub(crate) struct AgentIdentityRequest {
     #[serde(rename = "userId", skip_serializing_if = "String::is_empty")]
@@ -39,8 +38,7 @@ pub(crate) struct AgentIdentityRequest {
     force_refresh_token: String,
 }
 
-/// Go `agentIdentityResponse` (agentidentity.go:23): the RetrieveCredentialsResponse "result"
-/// oneof.
+/// The response: the RetrieveCredentialsResponse "result" oneof.
 #[derive(Default, Deserialize)]
 pub(crate) struct AgentIdentityResponse {
     #[serde(default, deserialize_with = "go_object")]
@@ -53,7 +51,7 @@ pub(crate) struct AgentIdentityResponse {
     consent_rejected: Option<Empty>,
 }
 
-/// Go `consentDetail` (agentidentity.go:31): the uri-consent payload both services share.
+/// The uri-consent payload both services share.
 #[derive(Default, Deserialize)]
 pub(crate) struct ConsentDetail {
     #[serde(default, rename = "authorizationUri", deserialize_with = "go_zero")]
@@ -63,8 +61,8 @@ pub(crate) struct ConsentDetail {
 }
 
 impl AgentIdentityResponse {
-    /// Go `agentIdentityResponse.result` (agentidentity.go:45): the oneof as an outcome, in Go's
-    /// arm order, or an error when no arm is recognized.
+    /// The oneof as an outcome (checked in the order success, consent required, consent rejected,
+    /// pending), or an error when no arm is recognized.
     ///
     /// The request is unused, and taken anyway to match `ConnectorOperation::result`, which
     /// scrubs caller values out of the service's message. No arm here puts service text in an
@@ -95,7 +93,7 @@ impl AgentIdentityResponse {
 }
 
 impl Client {
-    /// Go `retrieveAgentIdentity` (agentidentity.go:63): posts to
+    /// Posts a retrieval request to
     /// `{agent_identity_url}/v1/{resource}/credentials:retrieve`.
     pub(crate) async fn retrieve_agent_identity(&self, req: &Request) -> Result<Outcome, Error> {
         let url = format!(

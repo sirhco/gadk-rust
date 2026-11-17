@@ -13,37 +13,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The SDKs' retry policy (ports of anthropic-sdk-go v1.84.0 and openai-go v3.91.1
-//! `internal/requestconfig`: `shouldRetry`, `retryHeader`, `shouldRetryDroppedBody`,
-//! `parseRetryAfterHeader`, `retryDelay`).
+//! The retry policy of the official Anthropic and OpenAI SDKs: whether a response is retried,
+//! the `x-should-retry` header, retrying a dropped body, `Retry-After` handling and the
+//! backoff delay.
 
 use std::time::Duration;
 
 use chrono::{DateTime, NaiveDateTime, Utc};
 use http::{HeaderMap, StatusCode};
 
-/// Both SDKs' default retry count (`MaxRetries` 2: up to 3 attempts).
+/// Both SDKs' default retry count (2 retries: up to 3 attempts).
 pub const DEFAULT_MAX_RETRIES: u32 = 2;
 
-/// Both SDKs' backoff cap (anthropic-sdk-go `maxDelay`, openai-go `DefaultMaxServerDelay`).
+/// Both SDKs' backoff cap (8 seconds).
 pub const DEFAULT_MAX_BACKOFF: Duration = Duration::from_secs(8);
 
-/// openai-go's limit on a server-directed wait (`defaultMaxRetryAfterDelay`).
+/// The OpenAI SDK's limit on a server-directed wait (2 minutes).
 pub const DEFAULT_MAX_RETRY_AFTER: Duration = Duration::from_secs(120);
 
-/// The first backoff (SDK `0.5 * time.Second`).
+/// The first backoff (0.5 seconds).
 const INITIAL_BACKOFF: Duration = Duration::from_millis(500);
 
 /// How a server-directed wait (`Retry-After-Ms`, `Retry-After`) is honoured.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RetryAfterRule {
-    /// anthropic-sdk-go: any parsed wait is honoured (a negative or NaN one is zero, `+Inf`
+    /// Anthropic SDK rule: any parsed wait is honoured (a negative or NaN one is zero, `+Inf`
     /// saturates); an unparsable value falls through to the next header, then to backoff.
     Unbounded,
-    /// openai-go: a wait above the limit, or a numeric overflow (`1e400`), stops retrying and
-    /// the response is returned; `NaN`, `±Inf` and negative numbers are skipped (the next
+    /// OpenAI SDK rule: a wait above the limit, or a numeric overflow (`1e400`), stops retrying
+    /// and the response is returned; `NaN`, `±Inf` and negative numbers are skipped (the next
     /// header is tried); a past RFC 1123 date waits zero. `StopAbove(Duration::ZERO)` means
-    /// [`DEFAULT_MAX_RETRY_AFTER`], as Go treats `maxDelay <= 0`.
+    /// [`DEFAULT_MAX_RETRY_AFTER`].
     StopAbove(Duration),
 }
 
@@ -68,13 +68,13 @@ pub struct RetryPolicy {
     /// How `Retry-After-Ms` / `Retry-After` are honoured.
     pub retry_after: RetryAfterRule,
     /// Whether a body that fails while being read (a non-streaming reply, or a final error
-    /// status) is retried per [`should_retry_dropped_body`] (anthropic-sdk-go) or returned as
-    /// it is (openai-go reads bodies only after its loop).
+    /// status) is retried per [`should_retry_dropped_body`] (the Anthropic SDK) or returned as
+    /// it is (the OpenAI SDK reads bodies only after its loop).
     pub retry_dropped_body: bool,
 }
 
 impl RetryPolicy {
-    /// anthropic-sdk-go v1.84.0: 2 retries, 8 s backoff cap, any server wait honoured, a
+    /// The Anthropic SDK's policy: 2 retries, 8 s backoff cap, any server wait honoured, a
     /// dropped body retried.
     pub const ANTHROPIC: Self = Self {
         max_retries: DEFAULT_MAX_RETRIES,
@@ -83,7 +83,7 @@ impl RetryPolicy {
         retry_dropped_body: true,
     };
 
-    /// openai-go v3.91.1: 2 retries, 8 s backoff cap, server waits up to 2 minutes, a dropped
+    /// The OpenAI SDK's policy: 2 retries, 8 s backoff cap, server waits up to 2 minutes, a dropped
     /// body never retried.
     pub const OPENAI: Self = Self {
         max_retries: DEFAULT_MAX_RETRIES,
@@ -92,7 +92,7 @@ impl RetryPolicy {
         retry_dropped_body: false,
     };
 
-    /// SDK `retryDelay` before retry number `retry_count` (0-based): the server's decision
+    /// The delay before retry number `retry_count` (0-based): the server's decision
     /// when [`parse_retry_after`] finds one (`headers` is `None` after a connection error or a
     /// timed-out attempt), else `min(0.5s·2^retry_count, max_backoff)` minus a uniform jitter
     /// in `[0, delay/4)` (`rand`).
@@ -113,7 +113,7 @@ impl RetryPolicy {
     }
 }
 
-/// Go `Header.Get`: the first value of `name`, `""` when absent (or not visible ASCII, which
+/// The first value of `name`, `""` when absent (or not visible ASCII, which
 /// none of the values compared or reported here can match anyway).
 pub fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> &'a str {
     headers
@@ -122,7 +122,7 @@ pub fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> &'a str {
         .unwrap_or("")
 }
 
-/// SDK `retryHeader`: `Some(true)` / `Some(false)` for `x-should-retry: true` / `false`, else
+/// `Some(true)` / `Some(false)` for `x-should-retry: true` / `false`, else
 /// `None`.
 pub fn retry_header(headers: &HeaderMap) -> Option<bool> {
     match header_str(headers, "x-should-retry") {
@@ -132,9 +132,9 @@ pub fn retry_header(headers: &HeaderMap) -> Option<bool> {
     }
 }
 
-/// SDK `shouldRetry` for a received response: the `x-should-retry` header wins, else 408, 409,
+/// Whether a received response is retried: the `x-should-retry` header wins, else 408, 409,
 /// 429 and every status ≥ 500. (A connection error, with no response, is always retried: the
-/// request body is a `Bytes`, which the SDKs' `GetBody` rule always allows to resend.)
+/// request body is a `Bytes`, which can always be resent.)
 pub fn should_retry(status: StatusCode, headers: &HeaderMap) -> bool {
     if let Some(retry) = retry_header(headers) {
         return retry;
@@ -145,28 +145,28 @@ pub fn should_retry(status: StatusCode, headers: &HeaderMap) -> bool {
         || status.as_u16() >= 500
 }
 
-/// anthropic-sdk-go `shouldRetryDroppedBody`: a body that could not be read is retried like a
+/// Whether a body that could not be read is retried: like a
 /// connection error unless the response said `x-should-retry: false`.
 pub fn should_retry_dropped_body(headers: &HeaderMap) -> bool {
     retry_header(headers) != Some(false)
 }
 
-/// Why [`go_parse_float`] rejected its input (Go `strconv.NumError.Err`).
+/// Why [`go_parse_float`] rejected its input.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum GoParseFloatError {
-    /// `strconv.ErrSyntax`.
+    /// The input is not a valid number.
     Syntax,
-    /// `strconv.ErrRange`: the value overflows `f64`; `value` is `±Inf`, as Go returns it.
+    /// The value overflows `f64`; `value` is `±Inf`.
     Range {
         /// `f64::INFINITY` or `f64::NEG_INFINITY`.
         value: f64,
     },
 }
 
-/// Go `strconv.ParseFloat(s, 64)`: decimal and hexadecimal (`0x1.8p1`) forms with Go's
-/// underscore digit separators (`1_000`), and `inf`/`infinity` (any case, optional sign) and
-/// `nan` (any case, no sign). An out-of-range value (`1e400`) is [`GoParseFloatError::Range`]
-/// with `±Inf`, as Go reports `ErrRange`; an underflow is `±0` without an error, as Go's.
+/// Parses an `f64` with the number syntax of the retry headers: decimal and hexadecimal
+/// (`0x1.8p1`) forms with underscore digit separators (`1_000`), and `inf`/`infinity` (any
+/// case, optional sign) and `nan` (any case, no sign). An out-of-range value (`1e400`) is
+/// [`GoParseFloatError::Range`] with `±Inf`; an underflow is `±0` without an error.
 /// Nothing is trimmed.
 pub fn go_parse_float(s: &str) -> Result<f64, GoParseFloatError> {
     if let Some(v) = go_special_float(s) {
@@ -176,7 +176,7 @@ pub fn go_parse_float(s: &str) -> Result<f64, GoParseFloatError> {
     let v = if r.hex {
         go_atof_hex(r.mantissa, r.exp, r.neg, r.trunc)
     } else {
-        // The grammar Go's `readFloat` accepted (sign, digits with at most one dot, at least
+        // The accepted grammar (sign, digits with at most one dot, at least
         // one digit, optional exponent) is the grammar of Rust's `f64::from_str` once the
         // validated underscores are gone, and both round correctly.
         let digits: String = s.chars().filter(|&c| c != '_').collect();
@@ -188,7 +188,7 @@ pub fn go_parse_float(s: &str) -> Result<f64, GoParseFloatError> {
     Ok(v)
 }
 
-/// Go `strconv.special`, matched against the whole input as `ParseFloat` requires.
+/// `inf`, `infinity` and `nan`, matched against the whole input.
 fn go_special_float(s: &str) -> Option<f64> {
     let lower = s.to_ascii_lowercase();
     let (sign, word) = match lower.as_bytes().first() {
@@ -204,7 +204,7 @@ fn go_special_float(s: &str) -> Option<f64> {
     (word == "inf" || word == "infinity").then_some(sign * f64::INFINITY)
 }
 
-/// What Go `strconv.readFloat` read from a whole, valid input.
+/// What [`go_read_float`] read from a whole, valid input.
 struct GoReadFloat {
     mantissa: u64,
     exp: i64,
@@ -213,8 +213,7 @@ struct GoReadFloat {
     hex: bool,
 }
 
-/// Go `strconv.readFloat`, requiring the whole input to be consumed (`ParseFloat`'s syntax
-/// check); `None` is `ErrSyntax`.
+/// Reads a float literal, requiring the whole input to be consumed; `None` is a syntax error.
 fn go_read_float(s: &[u8]) -> Option<GoReadFloat> {
     let mut i = 0;
     let mut neg = false;
@@ -331,7 +330,7 @@ fn go_read_float(s: &[u8]) -> Option<GoReadFloat> {
     })
 }
 
-/// Go `strconv.underscoreOK`: underscores only between digits (or after a base prefix).
+/// Underscores are allowed only between digits (or after a base prefix).
 fn go_underscore_ok(s: &[u8]) -> bool {
     let mut s = s;
     if let Some(b'-' | b'+') = s.first() {
@@ -365,7 +364,7 @@ fn go_underscore_ok(s: &[u8]) -> bool {
     saw != b'_'
 }
 
-/// Go `strconv.atofHex` for `float64` (52 mantissa bits, 11 exponent bits, bias -1023):
+/// Builds an `f64` from a hexadecimal float (52 mantissa bits, 11 exponent bits, bias -1023):
 /// `mantissa * 2^exp`, rounded half to even; an overflow is `±Inf`.
 fn go_atof_hex(mut mantissa: u64, exp: i64, neg: bool, trunc: bool) -> f64 {
     const MANTBITS: u32 = 52;
@@ -414,7 +413,7 @@ fn go_atof_hex(mut mantissa: u64, exp: i64, neg: bool, trunc: bool) -> f64 {
     f64::from_bits(bits)
 }
 
-/// Go `time.Duration(nanos)` followed by anthropic-sdk-go `retryDelay`'s `max(0, d)`: NaN and
+/// Converts nanoseconds to a [`Duration`]: NaN and
 /// negative waits are zero; a wait past `i64::MAX` nanoseconds saturates there.
 fn duration_from_nanos(nanos: f64) -> Duration {
     if nanos.is_nan() || nanos <= 0.0 {
@@ -424,17 +423,14 @@ fn duration_from_nanos(nanos: f64) -> Duration {
     if nanos >= i64::MAX as f64 {
         return Duration::from_nanos(i64::MAX.unsigned_abs());
     }
-    // In range: `as` truncates the fraction, as Go's conversion does.
+    // In range: `as` truncates the fraction.
     Duration::from_nanos(nanos as u64)
 }
 
-/// Close to, not identical to, Go `time.Parse(time.RFC1123, v)` (`Mon, 02 Jan 2006 15:04:05
-/// MST`): the weekday is checked for syntax only, and a zone abbreviation (3 to 5 letters) is
-/// read as UTC, as Go does for `GMT`/`UTC` and for any abbreviation the local zone does not
-/// define. Known differences: case rules (Go matches the weekday case-insensitively and wants
-/// an upper-case zone), the zone shapes Go accepts (`GMT+3`, `ChST`), digit-count rules for the
-/// numeric fields (one-digit forms), and abbreviations of the local zone (Go applies that
-/// zone's offset; gadk reads UTC).
+/// Parses an RFC 1123 date (`Mon, 02 Jan 2006 15:04:05 MST`) leniently: the weekday is checked
+/// for syntax only (one of `Mon`..`Sun`, case-sensitive, not against the date), and the zone is
+/// any 3 to 5 ASCII letters, in any case, read as UTC whatever it names. Numeric offsets and
+/// zone shapes like `GMT+3` are rejected.
 fn parse_rfc1123(v: &str) -> Option<DateTime<Utc>> {
     const WEEKDAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
     let (weekday, rest) = v.split_at_checked(3)?;
@@ -450,17 +446,17 @@ fn parse_rfc1123(v: &str) -> Option<DateTime<Utc>> {
     Some(naive.and_utc())
 }
 
-/// SDK `parseRetryAfterHeader`: `Retry-After-Ms` (float milliseconds), then `Retry-After`
+/// Parses the server-directed wait: `Retry-After-Ms` (float milliseconds), then `Retry-After`
 /// (float seconds, or an RFC 1123 date measured from `now`), under `rule`. `None` when neither
 /// header gives a decision (the caller backs off).
 ///
-/// - [`RetryAfterRule::Unbounded`] (anthropic-sdk-go): the first header that parses as a float
+/// - [`RetryAfterRule::Unbounded`] (Anthropic SDK): the first header that parses as a float
 ///   wins (negative or NaN → zero, `+Inf` saturates at `i64::MAX` ns); a `Retry-After` that is
 ///   not a float is read as a date (a past date → zero).
-/// - [`RetryAfterRule::StopAbove`] (openai-go): an overflowing number (`+Inf` with
-///   `ErrRange`) → [`RetryAfter::Stop`]; `NaN`, `±Inf` and negative numbers are skipped; a
-///   number above the limit → `Stop`, equal to it → the limit; a date at or before `now` → zero,
-///   beyond the limit → `Stop`.
+/// - [`RetryAfterRule::StopAbove`] (OpenAI SDK): an overflowing number (`+Inf` with
+///   [`GoParseFloatError::Range`]) → [`RetryAfter::Stop`]; `NaN`, `±Inf` and negative numbers
+///   are skipped; a number above the limit → `Stop`, equal to it → the limit; a date at or
+///   before `now` → zero, beyond the limit → `Stop`.
 pub fn parse_retry_after(
     headers: &HeaderMap,
     now: DateTime<Utc>,

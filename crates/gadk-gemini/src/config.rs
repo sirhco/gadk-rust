@@ -13,11 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Client configuration and its resolution: a port of genai's `NewInternalAPIClient`
-//! (`google.golang.org/genai@v1.77.0` `client.go`) and `getBaseURL` (`base_url.go`).
+//! Client configuration and its resolution: backend, endpoint and authentication from the
+//! config and the environment, and the base URL.
 //!
-//! Deliberate gadk deviation: Vertex AI never takes an API key (genai's "express mode"),
-//! and ephemeral `auth_tokens/` keys are rejected.
+//! Vertex AI never takes an API key (no "express mode"), and ephemeral `auth_tokens/` keys are
+//! rejected.
 
 use std::fmt;
 use std::sync::Arc;
@@ -34,11 +34,11 @@ pub const CLOUD_PLATFORM_SCOPE: &str = "https://www.googleapis.com/auth/cloud-pl
 const GEMINI_DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com/";
 const VERTEX_GLOBAL_BASE_URL: &str = "https://aiplatform.googleapis.com/";
 
-/// Port of genai's `multiRegionalLocations` (`client.go`).
+/// The multi-regional Vertex AI locations.
 const MULTI_REGIONAL_LOCATIONS: &[&str] = &["us", "eu"];
 
-/// Client configuration (port of genai `ClientConfig`). Unset fields are resolved from the
-/// environment by [`resolve`]. An empty string is treated as unset, as in genai.
+/// Client configuration. Unset fields are resolved from the
+/// environment by [`resolve`]. An empty string is treated as unset.
 #[derive(Clone)]
 pub struct ClientConfig {
     /// Backend; `None` means resolve from `GOOGLE_GENAI_USE_ENTERPRISE` /
@@ -124,13 +124,13 @@ pub struct ResolvedConfig {
     /// auth applies (custom base URL without project, location or key; custom HTTP client).
     pub auth: Option<Auth>,
     /// Whether the caller must build Application Default Credentials with
-    /// [`CLOUD_PLATFORM_SCOPE`] (genai `client.go` ADC condition).
+    /// [`CLOUD_PLATFORM_SCOPE`].
     pub needs_adc: bool,
     /// The HTTP options with `base_url` and `api_version` filled in.
     pub http_options: HttpOptions,
 }
 
-/// Empty string means unset, as in genai.
+/// Empty string means unset.
 fn non_empty(v: &Option<String>) -> String {
     v.clone().unwrap_or_default()
 }
@@ -144,7 +144,7 @@ fn is_true(v: &str) -> bool {
     v == "1" || v == "true"
 }
 
-/// Port of genai `getAPIKeyFromEnv`.
+/// The API key from `GOOGLE_API_KEY`, else `GEMINI_API_KEY`.
 fn api_key_from_env(env: &dyn EnvProvider) -> String {
     let google = env.var("GOOGLE_API_KEY").unwrap_or_default();
     let gemini = env.var("GEMINI_API_KEY").unwrap_or_default();
@@ -154,8 +154,7 @@ fn api_key_from_env(env: &dyn EnvProvider) -> String {
     if !google.is_empty() { google } else { gemini }
 }
 
-/// Port of genai `getBaseURL` (`base_url.go`). genai's process-global `SetDefaultBaseURLs`
-/// overrides are not ported.
+/// The base URL: the configured one, else the backend's base URL environment variable.
 fn base_url_for(backend: Backend, http_options: &HttpOptions, env: &dyn EnvProvider) -> String {
     if let Some(u) = http_options.base_url.as_ref().filter(|u| !u.is_empty()) {
         return u.clone();
@@ -167,9 +166,8 @@ fn base_url_for(backend: Backend, http_options: &HttpOptions, env: &dyn EnvProvi
     env.var(key).unwrap_or_default()
 }
 
-/// Resolves `cfg` into a concrete backend, endpoint and auth, following genai's
-/// `NewInternalAPIClient` step by step. Application Default Credentials are not built here:
-/// when [`ResolvedConfig::needs_adc`] is set the caller builds them.
+/// Resolves `cfg` into a concrete backend, endpoint and auth. Application Default Credentials
+/// are not built here: when [`ResolvedConfig::needs_adc`] is set the caller builds them.
 pub fn resolve(cfg: &ClientConfig) -> Result<ResolvedConfig, GeminiError> {
     let env = cfg.env.as_ref();
     let credentials = cfg.credentials.clone();
@@ -185,7 +183,7 @@ pub fn resolve(cfg: &ClientConfig) -> Result<ResolvedConfig, GeminiError> {
         ));
     }
 
-    // genai maps BackendEnterprise to BackendVertexAI here; gadk has no Enterprise variant.
+    // `GOOGLE_GENAI_USE_ENTERPRISE` selects Vertex AI: there is no separate Enterprise variant.
     let backend = match cfg.backend {
         Some(b) => b,
         None => {

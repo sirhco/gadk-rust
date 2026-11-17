@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `controllers/triggers/pubsub.go`.
+//! The Pub/Sub push trigger controller.
 
 use std::sync::Arc;
 
@@ -32,19 +32,18 @@ use crate::rest::ServerError;
 use crate::rest::models::PubSubTriggerRequest;
 use crate::rest::routing::{Request, Response};
 
-/// Go `pubSubDefaultUserID`: the user of a delivery without a subscription.
+/// The user of a delivery without a subscription.
 const PUB_SUB_DEFAULT_USER_ID: &str = "pubsub-caller";
 
-/// Port of Go `triggers.PubSubController`: handles Pub/Sub push deliveries.
+/// Handles Pub/Sub push deliveries.
 pub struct PubSubController {
     runner: RetriableRunner,
     semaphore: Option<Semaphore>,
 }
 
 impl PubSubController {
-    /// Go `NewPubSubControllerWithConfig`: fails when the compaction config cannot serve the
-    /// loader's apps (the error text is Go's). A non-positive `max_concurrent_runs` means no
-    /// limit.
+    /// Fails when the compaction config cannot serve the loader's apps. A non-positive
+    /// `max_concurrent_runs` means no limit.
     pub fn new(cfg: ControllerConfig) -> Result<Self, ServerError> {
         let max_concurrent_runs = cfg.trigger_config.max_concurrent_runs;
         let runner = RetriableRunner::new(cfg);
@@ -57,7 +56,7 @@ impl PubSubController {
         })
     }
 
-    /// Go `PubSubTriggerHandler`: decodes the push envelope, runs the agent of the `app_name`
+    /// Decodes the push envelope, runs the agent of the `app_name`
     /// path variable with the message as JSON text (user: the subscription, or `pubsub-caller`)
     /// and answers `{"status":"success"}` or `{"status":"<error>"}`.
     pub async fn pub_sub_trigger_handler(&self, req: Request) -> Response {
@@ -120,16 +119,17 @@ impl PubSubController {
     }
 
     /// The trigger endpoint (POST) as an axum `MethodRouter` to mount at a path of the caller's
-    /// choosing with an `{app_name}` parameter (the Go launcher uses
+    /// choosing with an `{app_name}` parameter (the web launcher uses
     /// `/apps/{app_name}/trigger/pubsub`). Other methods answer axum's 405.
     ///
     /// The body is read under the router's `axum::extract::DefaultBodyLimit`; set it explicitly
-    /// where you mount the handler (`DefaultBodyLimit::max(10 << 20)` is the Go launcher's
-    /// 10 MiB), since axum's own default is 2 MB.
+    /// where you mount the handler (`DefaultBodyLimit::max(10 << 20)` is 10 MiB, the REST
+    /// routes' default [`DEFAULT_MAX_PAYLOAD_SIZE`](crate::rest::DEFAULT_MAX_PAYLOAD_SIZE)),
+    /// since axum's own default is 2 MB.
     ///
     /// The handler does not authenticate: it runs the agent as a user ID taken from the
     /// delivery itself, so any caller that reaches it chooses who the agent runs as. Mount it
-    /// behind [`authn::middleware`](crate::authn::middleware) as the Go launcher does, normally
+    /// behind [`authn::middleware`](crate::authn::middleware) as the web launcher does, normally
     /// with [`google_oidc`](crate::authn::google_oidc) so that only an allow-listed service
     /// account may call it:
     ///
@@ -159,10 +159,10 @@ impl PubSubController {
     }
 }
 
-/// Go `messageContentFromPubSub`: the agent's input, Go's `json.Marshal` of
-/// `{"attributes": …, "data": "<decoded data>"}` with empty members left out.
+/// The agent's input: the JSON `{"attributes": …, "data": "<decoded data>"}` with empty members
+/// left out.
 pub(super) fn message_content_from_pub_sub(req: &PubSubTriggerRequest) -> Result<String, String> {
-    /// The marshaled map: fields in Go's sorted key order.
+    /// The message as JSON: fields in sorted key order.
     #[derive(Serialize)]
     struct MessageContent<'a> {
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -186,8 +186,8 @@ pub(super) fn message_content_from_pub_sub(req: &PubSubTriggerRequest) -> Result
         .map_err(|e| format!("failed to marshal agent message: {e}"))
 }
 
-/// Go's `json.Marshal(string(data))` for arbitrary bytes: valid UTF-8 runs escaped as Go's
-/// `encoding/json` escapes them, and `\ufffd` once per byte of each invalid sequence.
+/// `data` as a JSON string: valid UTF-8 runs escaped as [`gadk_model::to_go_json`] escapes them,
+/// and `\ufffd` once per byte of each invalid sequence.
 fn go_json_string(data: &[u8]) -> Result<Box<RawValue>, String> {
     let marshal_err = |e: serde_json::Error| format!("failed to marshal agent message: {e}");
     let mut out = String::from("\"");

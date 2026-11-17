@@ -13,11 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `internal/configurable/conformance/replayplugin/replay_plugin.go`: the conformance replay
-//! plugin (`replay_plugin`), which answers model and tool calls from the case directory's
-//! `generated-recordings.yaml` (named by the session state's `_adk_replay_config`), verifying
-//! each request against the recording. [`normalize`] ports `yaml_utils.go`; `matching` holds
-//! the request/tool-call comparison; `state` the per-invocation state.
+//! The conformance replay plugin (`replay_plugin`), which answers model and tool calls from
+//! the case directory's `generated-recordings.yaml` (named by the session state's
+//! `_adk_replay_config`), verifying each request against the recording. [`normalize`] holds
+//! the YAML node normalization; `matching` the request/tool-call comparison; `state` the
+//! per-invocation state.
 
 pub(crate) mod matching;
 pub mod normalize;
@@ -57,18 +57,16 @@ const REPLAY_CONFIG_KEY: &str = "_adk_replay_config";
 /// The recordings file read from the case directory.
 const RECORDINGS_FILE: &str = "generated-recordings.yaml";
 
-/// Go `replayPlugin`.
+/// The replay plugin's state.
 pub(crate) struct ReplayPlugin {
-    /// Go `mu` + `invocationStates`, keyed by invocation id.
+    /// The invocation states, keyed by invocation id, behind a lock.
     pub(crate) invocation_states: Mutex<HashMap<String, Arc<InvocationReplayState>>>,
-    /// Go `allowedBaseDir`.
+    /// The base directory the replay case directory must lie within.
     pub(crate) allowed_base_dir: PathBuf,
 }
 
-/// Go `New(allowedBaseDir)` (and `MustNew`: Go's `plugin.New` error is always nil): the
-/// `replay_plugin` plugin with before run/model/tool and after run callbacks.
+/// Builds the `replay_plugin` plugin with before run/model/tool and after run callbacks.
 pub fn new(allowed_base_dir: impl Into<PathBuf>) -> Plugin {
-    // Go: replay_plugin.go New
     let p = Arc::new(ReplayPlugin {
         invocation_states: Mutex::new(HashMap::new()),
         allowed_base_dir: allowed_base_dir.into(),
@@ -119,19 +117,19 @@ pub fn new(allowed_base_dir: impl Into<PathBuf>) -> Plugin {
     })
 }
 
-/// A Go error chain as the [`AgentError`] the callbacks return (its `Display` is Go's text).
+/// Wraps a [`ConfigError`] chain as the [`AgentError`] the callbacks return (its `Display` is
+/// the chain's text).
 fn agent_err(err: ConfigError) -> AgentError {
     AgentError::Other(Box::new(err))
 }
 
 impl ReplayPlugin {
-    /// Go `beforeRun`: loads the invocation's replay state when replay mode is on.
+    /// Loads the invocation's replay state when replay mode is on.
     pub(crate) fn before_run(
         &self,
         ctx: &InvocationContext,
     ) -> Result<Option<Content>, AgentError> {
-        // Go: replay_plugin.go beforeRun
-        // (Go's `ctx.Session() == nil` check: a gadk invocation always has a session.)
+        // A gadk invocation always has a session.
         if !self.is_replay_mode_on(ctx.session().state())? {
             return Ok(None);
         }
@@ -139,14 +137,13 @@ impl ReplayPlugin {
         Ok(None)
     }
 
-    /// Go `beforeModel`: the next LLM recording's first response, after verifying the request
-    /// (`no LLM responses found in recording for agent %q`).
+    /// The next LLM recording's first response, after verifying the request
+    /// (`no LLM responses found in recording for agent {name:?}`).
     pub(crate) async fn before_model(
         &self,
         ctx: &Context,
         req: &LlmRequest,
     ) -> Result<Option<LlmResponse>, AgentError> {
-        // Go: replay_plugin.go beforeModel
         if !self.is_replay_mode_on(&*ctx.state())? {
             return Ok(None);
         }
@@ -166,7 +163,7 @@ impl ReplayPlugin {
         }
     }
 
-    /// Go `beforeTool`: the matching tool recording's response; non-agent function tools are
+    /// The matching tool recording's response; non-agent function tools are
     /// still run (errors printed as `Error calling tool: <err>`).
     pub(crate) async fn before_tool(
         &self,
@@ -174,7 +171,6 @@ impl ReplayPlugin {
         tool: Arc<dyn Tool>,
         args: &Map<String, Value>,
     ) -> Result<Option<Map<String, Value>>, AgentError> {
-        // Go: replay_plugin.go beforeTool
         if !self.is_replay_mode_on(&*ctx.state())? {
             return Ok(None);
         }
@@ -187,9 +183,9 @@ impl ReplayPlugin {
             &*tool,
             args,
         )?;
-        // Go's `%T` suffix check for `*agenttool.agentTool`.
+        // An agent tool is recognized by its type.
         if !tool.as_any().is::<AgentTool>() {
-            // TODO (Go): support replay requests and responses from AgentTool.
+            // TODO: support replay requests and responses from AgentTool.
             if let Some(ft) = tool.as_runnable()
                 && let Err(err) = ft.run(ctx.clone(), Value::Object(args.clone())).await
             {
@@ -197,21 +193,18 @@ impl ReplayPlugin {
             }
         }
 
-        // Divergence (ledger 6c-2): Go dereferences a nil `ToolResponse` (panic); gadk treats
-        // a missing tool response like a nil response map (no override).
+        // A missing tool response is treated like a nil response map (no override).
         let Some(response) = recording.tool_response.and_then(|r| r.response) else {
             return Ok(None);
         };
-        // Divergence (ledger 6c-2): a recorded value JSON cannot hold (see `go_map_to_json`) is
-        // an error; Go hands its `map[string]any` back as is.
+        // A recorded value JSON cannot hold (see `go_map_to_json`) is an error.
         go_map_to_json(&response)
             .map(Some)
             .map_err(AgentError::other)
     }
 
-    /// Go `afterRun`: drops the invocation's state.
+    /// Drops the invocation's state.
     pub(crate) fn after_run(&self, ctx: &InvocationContext) {
-        // Go: replay_plugin.go afterRun
         match self.is_replay_mode_on(ctx.session().state()) {
             Ok(true) => {}
             _ => return,
@@ -219,10 +212,9 @@ impl ReplayPlugin {
         self.invocation_states.lock().remove(ctx.invocation_id());
     }
 
-    /// Go `isReplayModeOn`: `invalid path format: %v`,
+    /// `invalid path format: {cause}`,
     /// `replay config error: 'dir' is not within the allowed base directory`.
     pub(crate) fn is_replay_mode_on(&self, session_state: &dyn State) -> Result<bool, AgentError> {
-        // Go: replay_plugin.go isReplayModeOn
         // If the key doesn't exist or there's an error, we treat it as disabled.
         let Ok(config_val) = session_state.get(REPLAY_CONFIG_KEY) else {
             return Ok(false);
@@ -245,18 +237,17 @@ impl ReplayPlugin {
         }
     }
 
-    /// Go's base-directory check shared by `isReplayModeOn` and `loadInvocationState`
-    /// ([`check_within_base_dir`]). Returns `filepath.Abs(caseDir)`.
+    /// The base-directory check shared by `is_replay_mode_on` and `load_invocation_state`
+    /// ([`check_within_base_dir`]). Returns the absolute case directory.
     fn check_within_base_dir(&self, case_dir: &str) -> Result<String, ConfigError> {
         check_within_base_dir(&self.allowed_base_dir, case_dir, "replay").map_err(ConfigError::msg)
     }
 
-    /// Go `getInvocationState`: `replay state not initialized. ensure before_run created it`.
+    /// `replay state not initialized. ensure before_run created it`.
     pub(crate) fn get_invocation_state(
         &self,
         ctx: &Context,
     ) -> Result<Arc<InvocationReplayState>, AgentError> {
-        // Go: replay_plugin.go getInvocationState
         self.invocation_states
             .lock()
             .get(ctx.invocation_id())
@@ -266,14 +257,12 @@ impl ReplayPlugin {
             })
     }
 
-    /// Go `loadInvocationState`: validates `_adk_replay_config`, reads
-    /// `generated-recordings.yaml`, `normalizeYAMLNode`, decodes, assigns per-message LLM
-    /// indices (`-1` for tool recordings).
+    /// Validates `_adk_replay_config`, reads `generated-recordings.yaml`, normalizes the YAML
+    /// node, decodes, assigns per-message LLM indices (`-1` for tool recordings).
     pub(crate) fn load_invocation_state(
         &self,
         ctx: &InvocationContext,
     ) -> Result<Arc<InvocationReplayState>, AgentError> {
-        // Go: replay_plugin.go loadInvocationState
         let invocation_id = ctx.invocation_id().to_owned();
 
         // 1. Extract Configuration
@@ -300,9 +289,9 @@ impl ReplayPlugin {
         };
         let requested_abs_path = self.check_within_base_dir(&case_dir).map_err(agent_err)?;
 
-        // Go accepts an `int` or a `float64` (`int(v)` truncates); both are a JSON number here.
-        // Divergence (ledger 6c-2): Go rejects other numeric types (`int64`, `uint`, …), which a
-        // JSON state value cannot carry; a float out of `int` range saturates.
+        // An `int` or a `float` is accepted (a float truncates); both are a JSON number here.
+        // Other numeric types are rejected, which a JSON state value cannot carry; a float out
+        // of `i64` range saturates.
         let msg_index = match config.get("user_message_index") {
             Some(Value::Number(n)) => match n.as_i64() {
                 Some(i) => i,
@@ -319,7 +308,7 @@ impl ReplayPlugin {
         // 3. Load Recordings File
         let recordings_path = go_path_join(&[requested_abs_path.as_str(), RECORDINGS_FILE]);
 
-        // Check if file exists (Go `os.IsNotExist` of `os.Stat`).
+        // Check if the file exists.
         if let Err(e) = std::fs::metadata(&recordings_path)
             && e.kind() == std::io::ErrorKind::NotFound
         {
@@ -369,15 +358,14 @@ impl ReplayPlugin {
         Ok(state)
     }
 
-    /// Go `verifyAndGetNextLLMRecordingForAgent`: `expected LLM recording for agent '%s' at
-    /// index %d, but found tool recording`, then `verifyLLMRequestMatch`.
+    /// `expected LLM recording for agent '{name}' at index {i}, but found tool recording`,
+    /// then `verify_llm_request_match`.
     pub(crate) async fn verify_and_get_next_llm_recording_for_agent(
         &self,
         state: Arc<InvocationReplayState>,
         agent_name: &str,
         llm_request: &LlmRequest,
     ) -> Result<LlmRecording, AgentError> {
-        // Go: replay_plugin.go verifyAndGetNextLLMRecordingForAgent
         let (current_agent_index, _) = state.get_agent_replay_index(agent_name);
         let expected_recording = get_next_recording_for_agent(state, agent_name).await?;
 
@@ -388,8 +376,7 @@ impl ReplayPlugin {
         };
 
         // Strict verification of LLM request.
-        // Divergence (ledger 6c-2): Go dereferences a nil recorded `llm_request` (panic); gadk
-        // compares against an empty request.
+        // A missing recorded `llm_request` is compared as an empty request.
         let fallback = LlmRequestView::default();
         let expected = llm_recording.llm_request.as_ref().unwrap_or(&fallback);
         verify_llm_request_match(expected, llm_request, agent_name, current_agent_index)
@@ -398,7 +385,7 @@ impl ReplayPlugin {
         Ok(llm_recording)
     }
 
-    /// Go `verifyAndGetNextToolRecordingForAgent`.
+    /// The tool recording for the agent's next call, verified against the live call.
     pub(crate) fn verify_and_get_next_tool_recording_for_agent(
         &self,
         state: &InvocationReplayState,
@@ -406,9 +393,7 @@ impl ReplayPlugin {
         tool: &dyn Tool,
         args: &Map<String, Value>,
     ) -> Result<ToolRecording, AgentError> {
-        // Go: replay_plugin.go verifyAndGetNextToolRecordingForAgent
-        // Divergence (ledger 6c-2): Go dereferences a nil recorded `tool_call` (panic); gadk
-        // compares against an empty call (a tool name mismatch).
+        // A missing recorded `tool_call` is compared as an empty call (a tool name mismatch).
         let fallback = RecordedFunctionCall::default();
         let mut match_fn = |rec: &Recording, inner: &ReplayInner| -> Result<bool, String> {
             let Some(tool_recording) = &rec.tool_recording else {
@@ -444,15 +429,14 @@ impl ReplayPlugin {
     }
 }
 
-/// Go `getNextRecordingForAgent`: the agent's next recording in order (`runtime sent more
-/// requests than expected for agent '%s' at user_message_index %d. Expected %d, but got request
-/// at index %d`), waiting on the condition variable until `curIndex` reaches its index, then
-/// sleeping `index × 10ms`.
+/// The agent's next recording in order (`runtime sent more
+/// requests than expected for agent '{name}' at user_message_index {n}. Expected {i}, but got
+/// request at index {j}`), waiting on the condition variable until `cur_index` reaches its
+/// index, then sleeping `index × 10ms`.
 pub(crate) async fn get_next_recording_for_agent(
     state: Arc<InvocationReplayState>,
     agent_name: &str,
 ) -> Result<Recording, AgentError> {
-    // Go: replay_plugin.go getNextRecordingForAgent
     // Get current agent index
     let (current_agent_index, _) = state.get_agent_replay_index(agent_name);
 
@@ -481,7 +465,7 @@ pub(crate) async fn get_next_recording_for_agent(
 
     // Wait for the current index to match the expected index. This ensures that we process
     // recordings in the expected order, even if agents are executing in parallel. The wait (and
-    // Go's sleep under the lock) runs on a blocking thread, never on a runtime worker.
+    // the sleep under the lock) runs on a blocking thread, never on a runtime worker.
     let index = expected_recording.index;
     let agent = agent_name.to_owned();
     tokio::task::spawn_blocking(move || {
@@ -492,9 +476,9 @@ pub(crate) async fn get_next_recording_for_agent(
                 .wait(inner)
                 .unwrap_or_else(PoisonError::into_inner);
         }
-        // FIXME (Go): remove this sleep, move curIndex++ and state cond.Broadcast() to onEvent
-        // callback. This sleep is here to make the replay deterministic, but it's not ideal.
-        // Go's `time.Sleep` of a negative duration returns at once.
+        // FIXME: remove this sleep, move the `cur_index` increment and the state's condition
+        // broadcast to an on-event callback. This sleep is here to make the replay
+        // deterministic, but it's not ideal. A zero sleep returns at once.
         std::thread::sleep(
             Duration::from_millis(10)
                 .saturating_mul(u32::try_from(index.max(0)).unwrap_or(u32::MAX)),
@@ -512,16 +496,15 @@ pub(crate) async fn get_next_recording_for_agent(
     Ok(expected_recording)
 }
 
-/// Go `getNextToolRecordingForAgent`: the first unconsumed recording of the agent and user
+/// The first unconsumed recording of the agent and user
 /// message that `match_fn` accepts (marked consumed), else the first match error, else
-/// `no matching tool recording found for agent '%s' at user_message_index %d`. `match_fn` runs
-/// under the state's lock (Go reads `agentReplayIndices` there) and receives the guarded fields.
+/// `no matching tool recording found for agent '{name}' at user_message_index {n}`. `match_fn`
+/// runs under the state's lock and receives the guarded fields.
 pub(crate) fn get_next_tool_recording_for_agent(
     state: &InvocationReplayState,
     agent_name: &str,
     match_fn: &mut dyn FnMut(&Recording, &ReplayInner) -> Result<bool, String>,
 ) -> Result<Recording, AgentError> {
-    // Go: replay_plugin.go getNextToolRecordingForAgent
     let mut inner = state.lock();
 
     let mut first_error: Option<String> = None;

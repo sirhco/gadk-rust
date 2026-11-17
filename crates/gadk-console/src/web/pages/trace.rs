@@ -24,7 +24,7 @@ use crate::model::{AttachedLogs, SpanRow, prompt_link};
 use crate::traces::{LogEntry, SourceError, TraceId};
 use crate::url::percent_encode;
 
-/// Payload texts longer than this many chars render collapsed (R6).
+/// Payload texts longer than this many chars render collapsed.
 pub(crate) const PAYLOAD_LIMIT: usize = 4096;
 
 /// A trace's log entries, joined to its spans.
@@ -242,7 +242,7 @@ fn data(id: &TraceId, rows: &[SpanRow], logs: &Result<LogView, SourceError>) -> 
 }
 
 /// JSON text safe inside `<script type="application/json">`: `<`, `>` and `&` become
-/// `\u003c`, `\u003e` and `\u0026` (R12), so no `</script` can appear in it.
+/// `\u003c`, `\u003e` and `\u0026`, so no `</script` can appear in it.
 fn script_json(v: &Value) -> String {
     v.to_string()
         .replace('<', "\\u003c")

@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Thinking, effort and structured output (port of ADK-Go `thinking.go`).
+//! Thinking, effort and structured output.
 
 use gadk_genai::{GenerateContentConfig, ThinkingConfig};
 use gadk_platform::go_to_lower;
@@ -25,10 +25,10 @@ use crate::tools::lowercase_schema_map;
 use crate::validate::invalid_config;
 use crate::wire::{JsonOutputFormat, JsonSchemaTag, OutputConfig, ThinkingConfigParam};
 
-/// The property a non-object output schema is wrapped in (Go `wrappedOutputSchemaKey`).
+/// The property a non-object output schema is wrapped in.
 pub(crate) const WRAPPED_OUTPUT_SCHEMA_KEY: &str = "result";
 
-/// A normalized output schema (Go `buildOutputFormatSchema`'s `map[string]any, bool`).
+/// A normalized output schema and whether it was wrapped.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct OutputSchema {
     /// The schema sent as `output_config.format.schema`.
@@ -38,7 +38,7 @@ pub(crate) struct OutputSchema {
     pub(crate) unwrap: bool,
 }
 
-/// Go `validateThinkingConfig`: rejects `thinking_level` and a missing `thinking_budget`.
+/// Rejects `thinking_level` and a missing `thinking_budget`.
 /// `include_thoughts` is ignored by design (thought parts are always returned when thinking is
 /// active).
 pub(crate) fn validate_thinking_config(tc: Option<&ThinkingConfig>) -> Result<(), AnthropicError> {
@@ -62,13 +62,13 @@ pub(crate) fn validate_thinking_config(tc: Option<&ThinkingConfig>) -> Result<()
     Ok(())
 }
 
-/// Go `isThinkingEnabled`: a budget is set and non-zero.
+/// Whether thinking is enabled: a budget is set and non-zero.
 pub(crate) fn is_thinking_enabled(tc: Option<&ThinkingConfig>) -> bool {
     tc.and_then(|tc| tc.thinking_budget)
         .is_some_and(|budget| budget != 0)
 }
 
-/// Go `buildThinkingParam`: budget 0 → disabled, < 0 → adaptive (summarized), > 0 → enabled
+/// Builds the thinking param: budget 0 → disabled, < 0 → adaptive (summarized), > 0 → enabled
 /// with that budget; `None` without a budget.
 pub(crate) fn build_thinking_param(
     cfg: Option<&GenerateContentConfig>,
@@ -83,7 +83,7 @@ pub(crate) fn build_thinking_param(
     })
 }
 
-/// Go `validateOutputFormatConfig`.
+/// Validates the output format config.
 pub(crate) fn validate_output_format_config(
     cfg: Option<&GenerateContentConfig>,
 ) -> Result<(), AnthropicError> {
@@ -120,8 +120,9 @@ pub(crate) fn validate_output_format_config(
     Ok(())
 }
 
-/// Go `buildOutputFormatSchema`: `None` without a response schema (`response_json_schema`
-/// wins over `response_schema`); errors name the field Go names.
+/// Builds the output schema: `None` without a response schema (`response_json_schema`
+/// wins over `response_schema`); errors name the field (`ResponseJsonSchema` or
+/// `ResponseSchema`).
 pub(crate) fn build_output_format_schema(
     cfg: Option<&GenerateContentConfig>,
 ) -> Result<Option<OutputSchema>, AnthropicError> {
@@ -138,7 +139,7 @@ pub(crate) fn build_output_format_schema(
 
     let value = marshalled
         .map_err(|err| invalid_config(format!("failed to marshal {field_name}: {err}")))?;
-    // Go unmarshals into a map[string]any and rejects a failure or an empty map.
+    // The schema must be a JSON object: a failure or an empty map is rejected.
     let mut schema = match value {
         Value::Object(map) if !map.is_empty() => map,
         _ => {
@@ -183,7 +184,7 @@ pub(crate) fn build_output_format_schema(
     }))
 }
 
-/// Go `rewriteWrappedSchemaRefs`: local `$ref`s point into `#/properties/result`, except
+/// Rewrites the refs of a wrapped schema: local `$ref`s point into `#/properties/result`, except
 /// `$defs`/`definitions`, which are hoisted to the wrapper.
 pub(crate) fn rewrite_wrapped_schema_refs(node: &mut Value) {
     match node {
@@ -211,7 +212,7 @@ fn rewrite_wrapped_schema_map(map: &mut Map<String, Value>) {
     map.values_mut().for_each(rewrite_wrapped_schema_refs);
 }
 
-/// Go `normalizeOutputSchemaObjects`: every `type: object` gets `properties: {}` and
+/// Normalizes the schema objects: every `type: object` gets `properties: {}` and
 /// `additionalProperties: false` when missing.
 pub(crate) fn normalize_output_schema_objects(node: &mut Value) {
     match node {
@@ -232,8 +233,8 @@ fn normalize_output_schema_map(map: &mut Map<String, Value>) {
     map.values_mut().for_each(normalize_output_schema_objects);
 }
 
-/// Go `buildOutputConfigParam`: `output_config` (`None` when neither effort nor a schema is
-/// set) and whether text responses must be unwrapped.
+/// Builds the `output_config`: it is `None` when neither effort nor a schema is
+/// set, and whether text responses must be unwrapped.
 pub(crate) fn build_output_config_param(
     effort: Option<Effort>,
     cfg: Option<&GenerateContentConfig>,

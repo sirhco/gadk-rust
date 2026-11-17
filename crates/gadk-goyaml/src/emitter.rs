@@ -20,8 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-//! Port of yaml.v3 v3.0.1 `emitterc.go`: events to text (the emitter state machine,
-//! indentation, line width, scalar analysis and style selection, comments).
+//! Events to text (the emitter state machine, indentation, line width, scalar analysis and
+//! style selection, comments).
 
 use crate::api::yaml_event_delete;
 use crate::writer::yaml_emitter_flush;
@@ -32,11 +32,8 @@ use crate::yamlh::{
     is_space, width,
 };
 
-/// Go: `default_tag_directives` (parserc.go:1170) — the `!` and `!!` handles every document
-/// knows. Go declares it in parserc.go and the emitter uses it too; the parser shares this
-/// function.
+/// The `!` and `!!` tag handles every document knows. Shared by the emitter and the parser.
 pub(crate) fn default_tag_directives() -> [YamlTagDirective; 2] {
-    // Go: parserc.go default_tag_directives
     [
         YamlTagDirective {
             handle: b"!".to_vec(),
@@ -51,7 +48,6 @@ pub(crate) fn default_tag_directives() -> [YamlTagDirective; 2] {
 
 /// Flush the buffer if needed.
 fn flush(emitter: &mut YamlEmitter<'_>) -> bool {
-    // Go: emitterc.go flush
     if emitter.buffer_pos + 5 >= emitter.buffer.len() {
         return yaml_emitter_flush(emitter);
     }
@@ -60,7 +56,6 @@ fn flush(emitter: &mut YamlEmitter<'_>) -> bool {
 
 /// Put a character to the output buffer.
 fn put(emitter: &mut YamlEmitter<'_>, value: u8) -> bool {
-    // Go: emitterc.go put
     if emitter.buffer_pos + 5 >= emitter.buffer.len() && !yaml_emitter_flush(emitter) {
         return false;
     }
@@ -72,7 +67,6 @@ fn put(emitter: &mut YamlEmitter<'_>, value: u8) -> bool {
 
 /// Put a line break to the output buffer.
 fn put_break(emitter: &mut YamlEmitter<'_>) -> bool {
-    // Go: emitterc.go put_break
     if emitter.buffer_pos + 5 >= emitter.buffer.len() && !yaml_emitter_flush(emitter) {
         return false;
     }
@@ -97,14 +91,13 @@ fn put_break(emitter: &mut YamlEmitter<'_>) -> bool {
     }
     emitter.column = 0;
     emitter.line += 1;
-    // [Go] Do this here and below and drop from everywhere else (see commented lines).
+    // Done here and below rather than everywhere else (see the commented-out lines).
     emitter.indention = true;
     true
 }
 
 /// Copy a character from a string into buffer.
 fn write(emitter: &mut YamlEmitter<'_>, s: &[u8], i: &mut usize) -> bool {
-    // Go: emitterc.go write
     if emitter.buffer_pos + 5 >= emitter.buffer.len() && !yaml_emitter_flush(emitter) {
         return false;
     }
@@ -122,7 +115,6 @@ fn write(emitter: &mut YamlEmitter<'_>, s: &[u8], i: &mut usize) -> bool {
 
 /// Write a whole string into buffer.
 fn write_all(emitter: &mut YamlEmitter<'_>, s: &[u8]) -> bool {
-    // Go: emitterc.go write_all
     let mut i = 0;
     while i < s.len() {
         if !write(emitter, s, &mut i) {
@@ -134,7 +126,6 @@ fn write_all(emitter: &mut YamlEmitter<'_>, s: &[u8]) -> bool {
 
 /// Copy a line break character from a string into buffer.
 fn write_break(emitter: &mut YamlEmitter<'_>, s: &[u8], i: &mut usize) -> bool {
-    // Go: emitterc.go write_break
     if s[*i] == b'\n' {
         if !put_break(emitter) {
             return false;
@@ -149,7 +140,7 @@ fn write_break(emitter: &mut YamlEmitter<'_>, s: &[u8], i: &mut usize) -> bool {
         }
         emitter.column = 0;
         emitter.line += 1;
-        // [Go] Do this here and above and drop from everywhere else (see commented lines).
+        // Done here and above rather than everywhere else (see the commented-out lines).
         emitter.indention = true;
     }
     true
@@ -157,21 +148,18 @@ fn write_break(emitter: &mut YamlEmitter<'_>, s: &[u8], i: &mut usize) -> bool {
 
 /// Set an emitter error and return false.
 fn yaml_emitter_set_emitter_error(emitter: &mut YamlEmitter<'_>, problem: &str) -> bool {
-    // Go: emitterc.go yaml_emitter_set_emitter_error
     emitter.error = YamlErrorType::Emitter;
     emitter.problem = problem.to_owned();
     false
 }
 
-/// Emit an event. Go appends a copy of `*event` to the emitter's queue; the port may take the
-/// event's contents (`std::mem::take`): every caller re-initializes `event` before the next
-/// emit. Returns false on error (set on `emitter`).
+/// Emit an event. The event is queued by moving its contents out (`std::mem::take`): every
+/// caller re-initializes `event` before the next emit. Returns false on error (set on `emitter`).
 pub(crate) fn yaml_emitter_emit(emitter: &mut YamlEmitter<'_>, event: &mut YamlEvent) -> bool {
-    // Go: emitterc.go yaml_emitter_emit
     emitter.events.push(std::mem::take(event));
     while !yaml_emitter_need_more_events(emitter) {
-        // Go works on `&emitter.events[emitter.events_head]`. The port moves the event out of
-        // the queue for the analysis and the state machine, leaving its type behind: the type is
+        // The event is moved out of the queue for the analysis and the state machine, leaving
+        // its type behind: the type is
         // the only field read through the queue while an event is processed
         // (yaml_emitter_need_more_events, yaml_emitter_check_empty_sequence/_mapping,
         // yaml_emitter_check_simple_key).
@@ -195,9 +183,8 @@ pub(crate) fn yaml_emitter_emit(emitter: &mut YamlEmitter<'_>, event: &mut YamlE
         yaml_event_delete(&mut emitter.events[head]);
         emitter.events_head += 1;
     }
-    // Go never shrinks the queue (processed events stay as zero values); dropping them once
-    // all are processed changes nothing observable, as every queue read is relative to
-    // events_head.
+    // Processed events stay in the queue as zero values; dropping them once all are processed
+    // changes nothing observable, as every queue read is relative to events_head.
     if emitter.events_head == emitter.events.len() {
         emitter.events.clear();
         emitter.events_head = 0;
@@ -212,7 +199,6 @@ pub(crate) fn yaml_emitter_emit(emitter: &mut YamlEmitter<'_>, event: &mut YamlE
 ///  - 2 events for SEQUENCE-START
 ///  - 3 events for MAPPING-START
 fn yaml_emitter_need_more_events(emitter: &mut YamlEmitter<'_>) -> bool {
-    // Go: emitterc.go yaml_emitter_need_more_events
     if emitter.events_head == emitter.events.len() {
         return true;
     }
@@ -251,7 +237,6 @@ fn yaml_emitter_append_tag_directive(
     value: &YamlTagDirective,
     allow_duplicates: bool,
 ) -> bool {
-    // Go: emitterc.go yaml_emitter_append_tag_directive
     for i in 0..emitter.tag_directives.len() {
         if value.handle == emitter.tag_directives[i].handle {
             if allow_duplicates {
@@ -261,8 +246,7 @@ fn yaml_emitter_append_tag_directive(
         }
     }
 
-    // [Go] Do we actually need to copy this given garbage collection
-    // and the lack of deallocating destructors?
+    // The copy is kept from libyaml, where the directive must outlive the event.
     let tag_copy = YamlTagDirective {
         handle: value.handle.clone(),
         prefix: value.prefix.clone(),
@@ -277,7 +261,6 @@ fn yaml_emitter_increase_indent(
     flow: bool,
     indentless: bool,
 ) -> bool {
-    // Go: emitterc.go yaml_emitter_increase_indent
     emitter.indents.push(emitter.indent);
     if emitter.indent < 0 {
         if flow {
@@ -286,7 +269,7 @@ fn yaml_emitter_increase_indent(
             emitter.indent = 0;
         }
     } else if !indentless {
-        // [Go] This was changed so that indentations are more regular.
+        // This makes indentations more regular.
         if emitter.states[emitter.states.len() - 1] == YamlEmitterState::BlockSequenceItem {
             // The first indent inside a sequence will just skip the "- " indicator.
             emitter.indent += 2;
@@ -299,8 +282,7 @@ fn yaml_emitter_increase_indent(
     true
 }
 
-/// Go's inline `emitter.indent = emitter.indents[len(emitter.indents)-1]` +
-/// `emitter.indents = emitter.indents[:len(emitter.indents)-1]`.
+/// Pops the indentation stack into `emitter.indent`.
 fn pop_indent(emitter: &mut YamlEmitter<'_>) {
     let Some(indent) = emitter.indents.pop() else {
         panic!("emitter indent stack underflow");
@@ -308,8 +290,7 @@ fn pop_indent(emitter: &mut YamlEmitter<'_>) {
     emitter.indent = indent;
 }
 
-/// Go's inline `emitter.state = emitter.states[len(emitter.states)-1]` +
-/// `emitter.states = emitter.states[:len(emitter.states)-1]`.
+/// Pops the state stack into `emitter.state`.
 fn pop_state(emitter: &mut YamlEmitter<'_>) {
     let Some(state) = emitter.states.pop() else {
         panic!("emitter state stack underflow");
@@ -319,7 +300,6 @@ fn pop_state(emitter: &mut YamlEmitter<'_>) {
 
 /// State dispatcher.
 fn yaml_emitter_state_machine(emitter: &mut YamlEmitter<'_>, event: &YamlEvent) -> bool {
-    // Go: emitterc.go yaml_emitter_state_machine
     match emitter.state {
         YamlEmitterState::StreamStart => yaml_emitter_emit_stream_start(emitter, event),
         YamlEmitterState::FirstDocumentStart => {
@@ -378,7 +358,6 @@ fn yaml_emitter_state_machine(emitter: &mut YamlEmitter<'_>, event: &YamlEvent) 
 
 /// Expect STREAM-START.
 fn yaml_emitter_emit_stream_start(emitter: &mut YamlEmitter<'_>, event: &YamlEvent) -> bool {
-    // Go: emitterc.go yaml_emitter_emit_stream_start
     if event.typ != YamlEventType::StreamStart {
         return yaml_emitter_set_emitter_error(emitter, "expected STREAM-START");
     }
@@ -422,7 +401,6 @@ fn yaml_emitter_emit_document_start(
     event: &YamlEvent,
     first: bool,
 ) -> bool {
-    // Go: emitterc.go yaml_emitter_emit_document_start
     if event.typ == YamlEventType::DocumentStart {
         if let Some(version_directive) = &event.version_directive
             && !yaml_emitter_analyze_version_directive(emitter, version_directive)
@@ -502,7 +480,7 @@ fn yaml_emitter_emit_document_start(
             if !yaml_emitter_write_indicator(emitter, b"---", true, false, false) {
                 return false;
             }
-            // Go: `if emitter.canonical || true` — always.
+            // Always (the canonical-mode condition is always true).
             if !yaml_emitter_write_indent(emitter) {
                 return false;
             }
@@ -542,7 +520,6 @@ fn yaml_emitter_emit_document_start(
 
 /// Expect the root node.
 fn yaml_emitter_emit_document_content(emitter: &mut YamlEmitter<'_>, event: &YamlEvent) -> bool {
-    // Go: emitterc.go yaml_emitter_emit_document_content
     emitter.states.push(YamlEmitterState::DocumentEnd);
 
     if !yaml_emitter_process_head_comment(emitter) {
@@ -562,11 +539,10 @@ fn yaml_emitter_emit_document_content(emitter: &mut YamlEmitter<'_>, event: &Yam
 
 /// Expect DOCUMENT-END.
 fn yaml_emitter_emit_document_end(emitter: &mut YamlEmitter<'_>, event: &YamlEvent) -> bool {
-    // Go: emitterc.go yaml_emitter_emit_document_end
     if event.typ != YamlEventType::DocumentEnd {
         return yaml_emitter_set_emitter_error(emitter, "expected DOCUMENT-END");
     }
-    // [Go] Force document foot separation.
+    // Force document foot separation.
     emitter.foot_indent = 0;
     if !yaml_emitter_process_foot_comment(emitter) {
         return false;
@@ -576,7 +552,7 @@ fn yaml_emitter_emit_document_end(emitter: &mut YamlEmitter<'_>, event: &YamlEve
         return false;
     }
     if !event.implicit {
-        // [Go] Allocate the slice elsewhere.
+        // (libyaml allocated the indicator slice elsewhere.)
         if !yaml_emitter_write_indicator(emitter, b"...", true, false, false) {
             return false;
         }
@@ -599,7 +575,6 @@ fn yaml_emitter_emit_flow_sequence_item(
     first: bool,
     trail: bool,
 ) -> bool {
-    // Go: emitterc.go yaml_emitter_emit_flow_sequence_item
     if first {
         if !yaml_emitter_write_indicator(emitter, b"[", true, true, false) {
             return false;
@@ -684,7 +659,6 @@ fn yaml_emitter_emit_flow_mapping_key(
     first: bool,
     trail: bool,
 ) -> bool {
-    // Go: emitterc.go yaml_emitter_emit_flow_mapping_key
     if first {
         if !yaml_emitter_write_indicator(emitter, b"{", true, true, false) {
             return false;
@@ -763,7 +737,6 @@ fn yaml_emitter_emit_flow_mapping_value(
     event: &YamlEvent,
     simple: bool,
 ) -> bool {
-    // Go: emitterc.go yaml_emitter_emit_flow_mapping_value
     if simple {
         if !yaml_emitter_write_indicator(emitter, b":", false, false, false) {
             return false;
@@ -806,7 +779,6 @@ fn yaml_emitter_emit_block_sequence_item(
     event: &YamlEvent,
     first: bool,
 ) -> bool {
-    // Go: emitterc.go yaml_emitter_emit_block_sequence_item
     if first && !yaml_emitter_increase_indent(emitter, false, false) {
         return false;
     }
@@ -843,7 +815,6 @@ fn yaml_emitter_emit_block_mapping_key(
     event: &YamlEvent,
     first: bool,
 ) -> bool {
-    // Go: emitterc.go yaml_emitter_emit_block_mapping_key
     if first && !yaml_emitter_increase_indent(emitter, false, false) {
         return false;
     }
@@ -859,9 +830,9 @@ fn yaml_emitter_emit_block_mapping_key(
         return false;
     }
     if !emitter.line_comment.is_empty() {
-        // [Go] A line comment was provided for the key. That's unusual as the
-        //      scanner associates line comments with the value. Either way,
-        //      save the line comment and render it appropriately later.
+        // A line comment was provided for the key. That's unusual as the scanner associates
+        // line comments with the value. Either way, save the line comment and render it
+        // appropriately later.
         emitter.key_line_comment = std::mem::take(&mut emitter.line_comment);
     }
     if yaml_emitter_check_simple_key(emitter) {
@@ -883,7 +854,6 @@ fn yaml_emitter_emit_block_mapping_value(
     event: &YamlEvent,
     simple: bool,
 ) -> bool {
-    // Go: emitterc.go yaml_emitter_emit_block_mapping_value
     if simple {
         if !yaml_emitter_write_indicator(emitter, b":", false, false, false) {
             return false;
@@ -897,9 +867,8 @@ fn yaml_emitter_emit_block_mapping_value(
         }
     }
     if !emitter.key_line_comment.is_empty() {
-        // [Go] Line comments are generally associated with the value, but when there's
-        //      no value on the same line as a mapping key they end up attached to the
-        //      key itself.
+        // Line comments are generally associated with the value, but when there's no value on
+        // the same line as a mapping key they end up attached to the key itself.
         if event.typ == YamlEventType::Scalar {
             if emitter.line_comment.is_empty() {
                 // A scalar is coming and it has no line comments by itself yet,
@@ -911,8 +880,8 @@ fn yaml_emitter_emit_block_mapping_value(
             && (event.typ == YamlEventType::MappingStart
                 || event.typ == YamlEventType::SequenceStart)
         {
-            // Go compares the event's style as a sequence style even for a MAPPING-START
-            // (emitterc.go:828); the flow values coincide (2).
+            // The event's style is compared as a sequence style even for a MAPPING-START; the
+            // flow values coincide (2).
             // An indented block follows, so write the comment right now.
             std::mem::swap(&mut emitter.line_comment, &mut emitter.key_line_comment);
             if !yaml_emitter_process_line_comment(emitter) {
@@ -934,10 +903,9 @@ fn yaml_emitter_emit_block_mapping_value(
     true
 }
 
-// Unused in yaml.v3 v3.0.1 as well (declared at emitterc.go:850, never called).
+// Unused in yaml.v3 v3.0.1 as well (declared there, never called).
 #[allow(dead_code)]
 fn yaml_emitter_silent_nil_event(emitter: &YamlEmitter<'_>, event: &YamlEvent) -> bool {
-    // Go: emitterc.go yaml_emitter_silent_nil_event
     event.typ == YamlEventType::Scalar
         && event.implicit
         && !emitter.canonical
@@ -953,7 +921,6 @@ fn yaml_emitter_emit_node(
     mapping: bool,
     simple_key: bool,
 ) -> bool {
-    // Go: emitterc.go yaml_emitter_emit_node
     emitter.root_context = root;
     emitter.sequence_context = sequence;
     emitter.mapping_context = mapping;
@@ -976,7 +943,6 @@ fn yaml_emitter_emit_node(
 
 /// Expect ALIAS.
 fn yaml_emitter_emit_alias(emitter: &mut YamlEmitter<'_>, _event: &YamlEvent) -> bool {
-    // Go: emitterc.go yaml_emitter_emit_alias
     if !yaml_emitter_process_anchor(emitter) {
         return false;
     }
@@ -986,7 +952,6 @@ fn yaml_emitter_emit_alias(emitter: &mut YamlEmitter<'_>, _event: &YamlEvent) ->
 
 /// Expect SCALAR.
 fn yaml_emitter_emit_scalar(emitter: &mut YamlEmitter<'_>, event: &YamlEvent) -> bool {
-    // Go: emitterc.go yaml_emitter_emit_scalar
     if !yaml_emitter_select_scalar_style(emitter, event) {
         return false;
     }
@@ -1009,7 +974,6 @@ fn yaml_emitter_emit_scalar(emitter: &mut YamlEmitter<'_>, event: &YamlEvent) ->
 
 /// Expect SEQUENCE-START.
 fn yaml_emitter_emit_sequence_start(emitter: &mut YamlEmitter<'_>, event: &YamlEvent) -> bool {
-    // Go: emitterc.go yaml_emitter_emit_sequence_start
     if !yaml_emitter_process_anchor(emitter) {
         return false;
     }
@@ -1030,7 +994,6 @@ fn yaml_emitter_emit_sequence_start(emitter: &mut YamlEmitter<'_>, event: &YamlE
 
 /// Expect MAPPING-START.
 fn yaml_emitter_emit_mapping_start(emitter: &mut YamlEmitter<'_>, event: &YamlEvent) -> bool {
-    // Go: emitterc.go yaml_emitter_emit_mapping_start
     if !yaml_emitter_process_anchor(emitter) {
         return false;
     }
@@ -1051,13 +1014,11 @@ fn yaml_emitter_emit_mapping_start(emitter: &mut YamlEmitter<'_>, event: &YamlEv
 
 /// Check if the document content is an empty scalar.
 fn yaml_emitter_check_empty_document(_emitter: &YamlEmitter<'_>) -> bool {
-    // Go: emitterc.go yaml_emitter_check_empty_document
-    false // [Go] Huh?
+    false // Always false: an empty document is never detected here.
 }
 
 /// Check if the next events represent an empty sequence.
 fn yaml_emitter_check_empty_sequence(emitter: &YamlEmitter<'_>) -> bool {
-    // Go: emitterc.go yaml_emitter_check_empty_sequence
     if emitter.events.len() - emitter.events_head < 2 {
         return false;
     }
@@ -1067,7 +1028,6 @@ fn yaml_emitter_check_empty_sequence(emitter: &YamlEmitter<'_>) -> bool {
 
 /// Check if the next events represent an empty mapping.
 fn yaml_emitter_check_empty_mapping(emitter: &YamlEmitter<'_>) -> bool {
-    // Go: emitterc.go yaml_emitter_check_empty_mapping
     if emitter.events.len() - emitter.events_head < 2 {
         return false;
     }
@@ -1077,7 +1037,6 @@ fn yaml_emitter_check_empty_mapping(emitter: &YamlEmitter<'_>) -> bool {
 
 /// Check if the next node can be expressed as a simple key.
 fn yaml_emitter_check_simple_key(emitter: &YamlEmitter<'_>) -> bool {
-    // Go: emitterc.go yaml_emitter_check_simple_key
     let mut length = 0;
     match emitter.events[emitter.events_head].typ {
         YamlEventType::Alias => {
@@ -1115,7 +1074,6 @@ fn yaml_emitter_check_simple_key(emitter: &YamlEmitter<'_>) -> bool {
 
 /// Determine an acceptable scalar style.
 fn yaml_emitter_select_scalar_style(emitter: &mut YamlEmitter<'_>, event: &YamlEvent) -> bool {
-    // Go: emitterc.go yaml_emitter_select_scalar_style
     let no_tag = emitter.tag_data.handle.is_empty() && emitter.tag_data.suffix.is_empty();
     if no_tag && !event.implicit && !event.quoted_implicit {
         return yaml_emitter_set_emitter_error(
@@ -1170,8 +1128,7 @@ fn yaml_emitter_select_scalar_style(emitter: &mut YamlEmitter<'_>, event: &YamlE
 
 /// Write an anchor.
 fn yaml_emitter_process_anchor(emitter: &mut YamlEmitter<'_>) -> bool {
-    // Go: emitterc.go yaml_emitter_process_anchor
-    // Go tests `anchor == nil`; the anchor is only ever set non-empty (analyze_anchor).
+    // An absent anchor is the empty vector; it is only ever set non-empty (analyze_anchor).
     if emitter.anchor_data.anchor.is_empty() {
         return true;
     }
@@ -1191,7 +1148,6 @@ fn yaml_emitter_process_anchor(emitter: &mut YamlEmitter<'_>) -> bool {
 
 /// Write a tag.
 fn yaml_emitter_process_tag(emitter: &mut YamlEmitter<'_>) -> bool {
-    // Go: emitterc.go yaml_emitter_process_tag
     if emitter.tag_data.handle.is_empty() && emitter.tag_data.suffix.is_empty() {
         return true;
     }
@@ -1205,7 +1161,7 @@ fn yaml_emitter_process_tag(emitter: &mut YamlEmitter<'_>) -> bool {
             return false;
         }
     } else {
-        // [Go] Allocate these slices elsewhere.
+        // (libyaml allocated these slices elsewhere.)
         if !yaml_emitter_write_indicator(emitter, b"!<", true, false, false) {
             return false;
         }
@@ -1221,7 +1177,6 @@ fn yaml_emitter_process_tag(emitter: &mut YamlEmitter<'_>) -> bool {
 
 /// Write a scalar.
 fn yaml_emitter_process_scalar(emitter: &mut YamlEmitter<'_>) -> bool {
-    // Go: emitterc.go yaml_emitter_process_scalar
     let value = std::mem::take(&mut emitter.scalar_data.value);
     let allow_breaks = !emitter.simple_key_context;
     let ok = match emitter.scalar_data.style {
@@ -1242,7 +1197,6 @@ fn yaml_emitter_process_scalar(emitter: &mut YamlEmitter<'_>) -> bool {
 
 /// Write a head comment.
 fn yaml_emitter_process_head_comment(emitter: &mut YamlEmitter<'_>) -> bool {
-    // Go: emitterc.go yaml_emitter_process_head_comment
     if !emitter.tail_comment.is_empty() {
         if !yaml_emitter_write_indent(emitter) {
             return false;
@@ -1252,7 +1206,6 @@ fn yaml_emitter_process_head_comment(emitter: &mut YamlEmitter<'_>) -> bool {
             emitter.tail_comment = tail_comment;
             return false;
         }
-        // Go: emitter.tail_comment = emitter.tail_comment[:0] (taken above).
         emitter.foot_indent = emitter.indent;
         if emitter.foot_indent < 0 {
             emitter.foot_indent = 0;
@@ -1270,13 +1223,11 @@ fn yaml_emitter_process_head_comment(emitter: &mut YamlEmitter<'_>) -> bool {
         emitter.head_comment = head_comment;
         return false;
     }
-    // Go: emitter.head_comment = emitter.head_comment[:0] (taken above).
     true
 }
 
 /// Write an line comment.
 fn yaml_emitter_process_line_comment(emitter: &mut YamlEmitter<'_>) -> bool {
-    // Go: emitterc.go yaml_emitter_process_line_comment
     if emitter.line_comment.is_empty() {
         return true;
     }
@@ -1288,13 +1239,11 @@ fn yaml_emitter_process_line_comment(emitter: &mut YamlEmitter<'_>) -> bool {
         emitter.line_comment = line_comment;
         return false;
     }
-    // Go: emitter.line_comment = emitter.line_comment[:0] (taken above).
     true
 }
 
 /// Write a foot comment.
 fn yaml_emitter_process_foot_comment(emitter: &mut YamlEmitter<'_>) -> bool {
-    // Go: emitterc.go yaml_emitter_process_foot_comment
     if emitter.foot_comment.is_empty() {
         return true;
     }
@@ -1306,7 +1255,6 @@ fn yaml_emitter_process_foot_comment(emitter: &mut YamlEmitter<'_>) -> bool {
         emitter.foot_comment = foot_comment;
         return false;
     }
-    // Go: emitter.foot_comment = emitter.foot_comment[:0] (taken above).
     emitter.foot_indent = emitter.indent;
     if emitter.foot_indent < 0 {
         emitter.foot_indent = 0;
@@ -1319,7 +1267,6 @@ fn yaml_emitter_analyze_version_directive(
     emitter: &mut YamlEmitter<'_>,
     version_directive: &YamlVersionDirective,
 ) -> bool {
-    // Go: emitterc.go yaml_emitter_analyze_version_directive
     if version_directive.major != 1 || version_directive.minor != 1 {
         return yaml_emitter_set_emitter_error(emitter, "incompatible %YAML directive");
     }
@@ -1331,7 +1278,6 @@ fn yaml_emitter_analyze_tag_directive(
     emitter: &mut YamlEmitter<'_>,
     tag_directive: &YamlTagDirective,
 ) -> bool {
-    // Go: emitterc.go yaml_emitter_analyze_tag_directive
     let handle = &tag_directive.handle;
     let prefix = &tag_directive.prefix;
     if handle.is_empty() {
@@ -1361,7 +1307,6 @@ fn yaml_emitter_analyze_tag_directive(
 
 /// Check if an anchor is valid.
 fn yaml_emitter_analyze_anchor(emitter: &mut YamlEmitter<'_>, anchor: &[u8], alias: bool) -> bool {
-    // Go: emitterc.go yaml_emitter_analyze_anchor
     if anchor.is_empty() {
         let problem = if alias {
             "alias value must not be empty"
@@ -1389,7 +1334,6 @@ fn yaml_emitter_analyze_anchor(emitter: &mut YamlEmitter<'_>, anchor: &[u8], ali
 
 /// Check if a tag is valid.
 fn yaml_emitter_analyze_tag(emitter: &mut YamlEmitter<'_>, tag: &[u8]) -> bool {
-    // Go: emitterc.go yaml_emitter_analyze_tag
     if tag.is_empty() {
         return yaml_emitter_set_emitter_error(emitter, "tag value must not be empty");
     }
@@ -1409,7 +1353,6 @@ fn yaml_emitter_analyze_tag(emitter: &mut YamlEmitter<'_>, tag: &[u8]) -> bool {
 
 /// Check if a scalar is valid.
 fn yaml_emitter_analyze_scalar(emitter: &mut YamlEmitter<'_>, value: Vec<u8>) -> bool {
-    // Go: emitterc.go yaml_emitter_analyze_scalar
     let mut block_indicators = false;
     let mut flow_indicators = false;
     let mut line_breaks = false;
@@ -1525,7 +1468,8 @@ fn yaml_emitter_analyze_scalar(emitter: &mut YamlEmitter<'_>, value: Vec<u8>) ->
             previous_break = false;
         }
 
-        // [Go]: Why 'z'? Couldn't be the end of the string as that's the loop condition.
+        // The check is `blankz` although this cannot be the end of the string (that is the
+        // loop condition).
         preceded_by_whitespace = is_blankz(value, i);
         i += w;
     }
@@ -1569,11 +1513,10 @@ fn yaml_emitter_analyze_scalar(emitter: &mut YamlEmitter<'_>, value: Vec<u8>) ->
     true
 }
 
-/// Check if the event data is valid. Go aliases the event's comment, anchor and value slices
-/// into the emitter; the port moves the comments and the scalar value out of the (owned,
-/// about-to-be-deleted) event — nothing reads them from the event afterwards.
+/// Check if the event data is valid. The comments and the scalar value are moved out of the
+/// (owned, about-to-be-deleted) event into the emitter; nothing reads them from the event
+/// afterwards.
 fn yaml_emitter_analyze_event(emitter: &mut YamlEmitter<'_>, event: &mut YamlEvent) -> bool {
-    // Go: emitterc.go yaml_emitter_analyze_event
     emitter.anchor_data.anchor = Vec::new();
     emitter.tag_data.handle = Vec::new();
     emitter.tag_data.suffix = Vec::new();
@@ -1634,7 +1577,6 @@ fn yaml_emitter_analyze_event(emitter: &mut YamlEmitter<'_>, event: &mut YamlEve
 
 /// Write the BOM character.
 fn yaml_emitter_write_bom(emitter: &mut YamlEmitter<'_>) -> bool {
-    // Go: emitterc.go yaml_emitter_write_bom
     if !flush(emitter) {
         return false;
     }
@@ -1647,7 +1589,6 @@ fn yaml_emitter_write_bom(emitter: &mut YamlEmitter<'_>) -> bool {
 }
 
 fn yaml_emitter_write_indent(emitter: &mut YamlEmitter<'_>) -> bool {
-    // Go: emitterc.go yaml_emitter_write_indent
     let mut indent = emitter.indent;
     if indent < 0 {
         indent = 0;
@@ -1681,7 +1622,6 @@ fn yaml_emitter_write_indicator(
     is_whitespace: bool,
     is_indention: bool,
 ) -> bool {
-    // Go: emitterc.go yaml_emitter_write_indicator
     if need_whitespace && !emitter.whitespace && !put(emitter, b' ') {
         return false;
     }
@@ -1695,7 +1635,6 @@ fn yaml_emitter_write_indicator(
 }
 
 fn yaml_emitter_write_anchor(emitter: &mut YamlEmitter<'_>, value: &[u8]) -> bool {
-    // Go: emitterc.go yaml_emitter_write_anchor
     if !write_all(emitter, value) {
         return false;
     }
@@ -1705,7 +1644,6 @@ fn yaml_emitter_write_anchor(emitter: &mut YamlEmitter<'_>, value: &[u8]) -> boo
 }
 
 fn yaml_emitter_write_tag_handle(emitter: &mut YamlEmitter<'_>, value: &[u8]) -> bool {
-    // Go: emitterc.go yaml_emitter_write_tag_handle
     if !emitter.whitespace && !put(emitter, b' ') {
         return false;
     }
@@ -1722,7 +1660,6 @@ fn yaml_emitter_write_tag_content(
     value: &[u8],
     need_whitespace: bool,
 ) -> bool {
-    // Go: emitterc.go yaml_emitter_write_tag_content
     if need_whitespace && !emitter.whitespace && !put(emitter, b' ') {
         return false;
     }
@@ -1778,7 +1715,6 @@ fn yaml_emitter_write_plain_scalar(
     value: &[u8],
     allow_breaks: bool,
 ) -> bool {
-    // Go: emitterc.go yaml_emitter_write_plain_scalar
     if !value.is_empty() && !emitter.whitespace && !put(emitter, b' ') {
         return false;
     }
@@ -1839,7 +1775,6 @@ fn yaml_emitter_write_single_quoted_scalar(
     value: &[u8],
     allow_breaks: bool,
 ) -> bool {
-    // Go: emitterc.go yaml_emitter_write_single_quoted_scalar
     if !yaml_emitter_write_indicator(emitter, b"'", true, false, false) {
         return false;
     }
@@ -1901,7 +1836,6 @@ fn yaml_emitter_write_double_quoted_scalar(
     value: &[u8],
     allow_breaks: bool,
 ) -> bool {
-    // Go: emitterc.go yaml_emitter_write_double_quoted_scalar
     let mut spaces = false;
     if !yaml_emitter_write_indicator(emitter, b"\"", true, false, false) {
         return false;
@@ -2018,7 +1952,6 @@ fn yaml_emitter_write_double_quoted_scalar(
 }
 
 fn yaml_emitter_write_block_scalar_hints(emitter: &mut YamlEmitter<'_>, value: &[u8]) -> bool {
-    // Go: emitterc.go yaml_emitter_write_block_scalar_hints
     if is_space(value, 0) || is_break(value, 0) {
         let indent_hint = [b'0' + emitter.best_indent as u8];
         if !yaml_emitter_write_indicator(emitter, &indent_hint, false, false, false) {
@@ -2061,7 +1994,6 @@ fn yaml_emitter_write_block_scalar_hints(emitter: &mut YamlEmitter<'_>, value: &
 }
 
 fn yaml_emitter_write_literal_scalar(emitter: &mut YamlEmitter<'_>, value: &[u8]) -> bool {
-    // Go: emitterc.go yaml_emitter_write_literal_scalar
     if !yaml_emitter_write_indicator(emitter, b"|", true, false, false) {
         return false;
     }
@@ -2098,7 +2030,6 @@ fn yaml_emitter_write_literal_scalar(emitter: &mut YamlEmitter<'_>, value: &[u8]
 }
 
 fn yaml_emitter_write_folded_scalar(emitter: &mut YamlEmitter<'_>, value: &[u8]) -> bool {
-    // Go: emitterc.go yaml_emitter_write_folded_scalar
     if !yaml_emitter_write_indicator(emitter, b">", true, false, false) {
         return false;
     }
@@ -2118,7 +2049,7 @@ fn yaml_emitter_write_folded_scalar(emitter: &mut YamlEmitter<'_>, value: &[u8])
     while i < value.len() {
         if is_break(value, i) {
             if !breaks && !leading_spaces && value[i] == b'\n' {
-                // Go scans from 0 here, not from i (emitterc.go:1946); kept as in Go.
+                // Scans from 0 here, not from i, as libyaml does.
                 let mut k = 0;
                 while is_break(value, k) {
                     k += width(value[k]);
@@ -2159,7 +2090,6 @@ fn yaml_emitter_write_folded_scalar(emitter: &mut YamlEmitter<'_>, value: &[u8])
 }
 
 fn yaml_emitter_write_comment(emitter: &mut YamlEmitter<'_>, comment: &[u8]) -> bool {
-    // Go: emitterc.go yaml_emitter_write_comment
     let mut breaks = false;
     let mut pound = false;
     let mut i = 0;

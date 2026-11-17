@@ -13,52 +13,49 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! gadk-agentanalytics (sub-projects 7b-1, 7b-2, 7b-3a and 7b-3b): a port of ADK-Go's
-//! `plugin/agentanalytics`, the BigQuery Agent Analytics plugin.
+//! gadk-agentanalytics: the BigQuery Agent Analytics plugin.
 //!
-//! The plugin ([`plugin`], 7b-3a) is a [`gadk_agent::Plugin`]: add it to a runner's plugin list
+//! The plugin ([`plugin`]) is a [`gadk_agent::Plugin`]: add it to a runner's plugin list
 //! and every user message, invocation, agent, model call, tool call and session event becomes a
 //! row of the BigQuery events table, written through the BigQuery Storage Write API.
-//! [`new_bigquery_agent_analytics_plugin`] (Go `NewBigQueryAgentAnalyticsPlugin`) takes a
+//! [`new_bigquery_agent_analytics_plugin`] takes a
 //! project, dataset and table with the default [`Config`];
 //! [`new_bigquery_agent_analytics_plugin_with_config`] a whole [`Config`] (a disabled config
-//! gives Go's disabled plugin, which only closes); and
+//! gives a plugin that only closes); and
 //! [`new_bigquery_agent_analytics_plugin_with_clients`] caller-made clients (a
 //! [`BigQueryClient`] for table setup and views, a [`WriteClient`] for the rows). Construction
-//! validates the config with Go's texts, creates or upgrades the table and starts the views in
+//! validates the config, creates or upgrades the table and starts the views in
 //! the background. [`as_bigquery_agent_analytics_plugin`] recovers a constructed plugin's helpers
 //! ([`BigQueryAgentAnalyticsPlugin::drop_stats`],
 //! [`BigQueryAgentAnalyticsPlugin::sync_views`]); the plugin's `close` (run by the runner's
 //! plugin manager) stops the views, drains the batch processor on a task of its own and closes
 //! the clients, once. Callbacks never fail a run: a panic while building a row is recovered and
-//! counted as a dropped row. Rows carry trace and span IDs from the crate's trace manager (Go's
-//! `trace_manager.go`, with its goroutine attribution of workflow nodes, parallel branches and
-//! worker items read from the callback's `gadk_agent::fiber` (7b-3b)) and the session-event
-//! signal rows of Go's `events.go`.
+//! counted as a dropped row. Rows carry trace and span IDs from the crate's trace manager (which
+//! attributes workflow nodes, parallel branches and worker items to fibers read from the
+//! callback's `gadk_agent::fiber`) and the session-event signal rows of the crate's `events`
+//! module.
 //!
-//! The foundations (7b-1): configuration ([`Config`]), the events table's BigQuery and Arrow
+//! The foundations: configuration ([`Config`]), the events table's BigQuery and Arrow
 //! schemas, table creation and additive schema upgrade, the per-event-type analytics views, the
-//! content formatter and redaction, and a BigQuery REST admin client. The transports (7b-2): rows
+//! content formatter and redaction, and a BigQuery REST admin client. The transports: rows
 //! ([`row`]), the generated BigQuery Storage Write API ([`storagepb`]), the gapic write client,
 //! Arrow record batches and the stream writer ([`write`](mod@crate::write)), the [`BatchProcessor`]
 //! ([`batch_processor`]) and the GCS content offloader with its upload orchestration
 //! ([`offload`]).
 //!
-//! Exported Go entry points: the plugin constructors above, `AsBigQueryAgentAnalyticsPlugin`,
-//! `DefaultConfig` ([`Config::default`]), `EventsSchema` ([`events_schema`]), `ArrowSchema`
-//! ([`arrow_schema`](fn@arrow_schema)), `SerializedArrowSchema` ([`serialized_arrow_schema`]),
-//! `Config.ViewDefinitions` ([`Config::view_definitions`]), `FormatContentParts`
-//! ([`format_content_parts`]), `SmartTruncate` ([`smart_truncate`]) and the `Event*` row types
-//! ([`event_types`]). Table creation and schema upgrade are [`ensure_table_and_schema`] over
-//! [`TableOps`]; view creation is [`sync_analytics_views`] over a [`BigQueryViewRunner`]. The
-//! plugin's unexported transports are public here: [`WriteClient`] (Go's gapic
-//! `BigQueryWriteClient`), [`BatchProcessor`] and [`GcsOffloader`].
-//!
+//! Entry points: the plugin constructors above, [`as_bigquery_agent_analytics_plugin`],
+//! [`Config::default`], [`events_schema`], [`arrow_schema`](fn@arrow_schema),
+//! [`serialized_arrow_schema`], [`Config::view_definitions`], [`format_content_parts`],
+//! [`smart_truncate`] and the `EVENT_*` row types ([`event_types`]). Table creation and schema
+//! upgrade are [`ensure_table_and_schema`] over [`TableOps`]; view creation is
+//! [`sync_analytics_views`] over a [`BigQueryViewRunner`]. The transports are public too:
+//! [`WriteClient`] (the BigQuery Write client), [`BatchProcessor`] and [`GcsOffloader`].
+
 //! The `gadk` façade re-exports this crate as `gadk::agentanalytics` (feature `agentanalytics`).
-//! Feature `testutil` adds the in-memory fakes of `bigquery::fake`, the in-process BigQuery
-//! Write server `testutil::fake_write_server`, the Arrow row decoder `testutil::arrow_rows` and
-//! the probe's row specs. Behavior matches ADK-Go except for the accepted divergences, each
-//! annotated where it lives (`// Divergence`).
+//! Feature `testutil` adds the in-memory fakes of `bigquery::fake`, the in-process BigQuery Write
+//! server `testutil::fake_write_server`, the Arrow row decoder `testutil::arrow_rows` and the row
+//! specs of the recorded fixtures. Behavior, SQL, schemas, request bytes and error texts follow
+//! ADK's BigQuery Agent Analytics plugin; the few accepted differences are noted where they live.
 
 #![forbid(unsafe_code)]
 

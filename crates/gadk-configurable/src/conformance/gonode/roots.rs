@@ -12,20 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The hand-written Go-shaped `Serialize`/`Deserialize` impls of the recording types
-//! ([`crate::conformance::recording`]): Go field order, yaml-tagged keys verbatim, `omitempty`
-//! as Go; `LlmRequestView` always emits `model`, `contents`, `config` and `tools` (nil as
-//! `null`, the nil map as `{}`); the recorded function call/response emit every Go field. Below
-//! the roots, gadk serde types go through gadk-goyaml with default `Options` (Go's lowercased
-//! keys). Nothing outside `gonode` uses its items directly.
+//! The hand-written reflection-shaped `Serialize`/`Deserialize` impls of the recording types
+//! ([`crate::conformance::recording`]): declaration field order, yaml-tagged keys verbatim,
+//! `omitempty` honoured; `LlmRequestView` always emits `model`, `contents`, `config` and
+//! `tools` (nil as `null`, the nil map as `{}`); the recorded function call/response emit
+//! every field. Below the roots, gadk serde types go through gadk-goyaml with default
+//! `Options` (lowercased keys). Nothing outside `gonode` uses its items directly.
 //!
 //! Encoding builds the nodes directly (`encode_recordings`): the recording types by their
-//! yaml tags, the roots below them (`model.LLMRequest`, `model.LLMResponse`,
-//! `genai.FunctionCall`, `genai.FunctionResponse`) through the shapes table of
+//! yaml tags, the roots below them (`LLMRequest`, `LLMResponse`,
+//! `FunctionCall`, `FunctionResponse`) through the shapes table of
 //! [`super::fixups`], fed with gadk serde's JSON. gadk serde writes genai's whole-second
 //! duration strings, so the exact `TimeDelta`s are laid over the JSON first
 //! (`overlay_content` and friends: a JSON integer of nanoseconds). Decoding uses private
-//! serde mirrors with Go's type names (`RecordingsDe`).
+//! serde mirrors named after the recorded types (`RecordingsDe`).
 
 use chrono::TimeDelta;
 use gadk_genai::{
@@ -46,7 +46,7 @@ use crate::govalue::GoMap;
 
 type Result<T> = std::result::Result<T, gadk_goyaml::Error>;
 
-/// Go `node.Encode(&recordings)`'s mapping: `recordings:` and each `recording.Recording` by its
+/// The recordings' mapping: `recordings:` and each `Recording` by its
 /// yaml tags (`llm_recording`/`tool_recording` and their fields `omitempty`).
 pub(crate) fn encode_recordings(b: &mut Builder, recs: &Recordings) -> Result<NodeId> {
     let mut items = Vec::with_capacity(recs.recordings.len());
@@ -99,7 +99,7 @@ fn encode_recording(b: &mut Builder, r: &Recording) -> Result<NodeId> {
 }
 
 /// Builds a root struct by its shape: `field(key)` gives a present field's node, `None` takes
-/// Go's zero node.
+/// the field's zero node.
 fn root_struct(
     b: &mut Builder,
     go_type: &str,
@@ -123,7 +123,7 @@ fn root_struct(
     Ok(b.mapping(content))
 }
 
-/// A Go `map[string]any` (`None` = nil, encoded `{}` as Go does).
+/// A free-form map (`None` = nil, encoded `{}`).
 fn go_map(b: &mut Builder, m: Option<&GoMap>) -> Result<Option<NodeId>> {
     match m {
         Some(m) if !m.is_empty() => {
@@ -138,7 +138,7 @@ fn to_json<T: serde::Serialize>(v: &T) -> Result<Value> {
     serde_json::to_value(v).map_err(|e| gadk_goyaml::Error::Custom(e.to_string()))
 }
 
-/// `model.LLMRequest` (untagged: `model`, `contents`, `config`, `tools`).
+/// `LLMRequest` (untagged: `model`, `contents`, `config`, `tools`).
 fn encode_llm_request(b: &mut Builder, req: &LlmRequestView) -> Result<NodeId> {
     root_struct(b, "model.LLMRequest", |b, key| match key {
         "model" if !req.model.is_empty() => b.leaf(&GoValue::String(req.model.clone())).map(Some),
@@ -165,14 +165,14 @@ fn encode_llm_request(b: &mut Builder, req: &LlmRequestView) -> Result<NodeId> {
     })
 }
 
-/// `model.LLMResponse` (JSON-tagged, so gadk serde's names are its fields' JSON names).
+/// `LLMResponse` (JSON-tagged, so gadk serde's names are its fields' JSON names).
 fn encode_llm_response(b: &mut Builder, resp: &LlmResponse) -> Result<NodeId> {
     let mut j = to_json(resp)?;
     overlay_response(&mut j, resp);
     b.struct_node("model.LLMResponse", j.as_object(), Keys::Json)
 }
 
-/// The recorded `genai.FunctionCall`: every Go field.
+/// The recorded `FunctionCall`: every field.
 fn encode_function_call(b: &mut Builder, fc: &RecordedFunctionCall) -> Result<NodeId> {
     root_struct(b, "genai.FunctionCall", |b, key| match key {
         "id" if !fc.id.is_empty() => b.leaf(&GoValue::String(fc.id.clone())).map(Some),
@@ -186,7 +186,7 @@ fn encode_function_call(b: &mut Builder, fc: &RecordedFunctionCall) -> Result<No
     })
 }
 
-/// The recorded `genai.FunctionResponse`: every Go field.
+/// The recorded `FunctionResponse`: every field.
 fn encode_function_response(b: &mut Builder, fr: &RecordedFunctionResponse) -> Result<NodeId> {
     root_struct(b, "genai.FunctionResponse", |b, key| match key {
         "willcontinue" => opt_bool(b, fr.will_continue),
@@ -334,11 +334,11 @@ fn overlay_response(j: &mut Value, r: &LlmResponse) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Decoding: serde mirrors named after Go's types (yaml.v3's type errors name them).
+// Decoding: serde mirrors named after the recorded types (yaml.v3's type errors name them).
 // ---------------------------------------------------------------------------------------------
 
 /// The decode options: the recording types' yaml tags are their serde names verbatim; gadk
-/// types below them keep Go's default lowercased keys.
+/// types below them keep their default lowercased keys.
 pub(crate) fn decode_options() -> Options {
     let mut o = Options::default();
     for s in [
@@ -352,7 +352,7 @@ pub(crate) fn decode_options() -> Options {
     o
 }
 
-/// Go `recording.Recordings`.
+/// The `Recordings` root.
 #[derive(Deserialize, Default)]
 #[serde(rename = "recording.Recordings", default)]
 pub(crate) struct RecordingsDe {
@@ -372,8 +372,8 @@ struct RecordingDe {
 #[serde(rename = "recording.LLMRecording", default)]
 struct LlmRecordingDe {
     llm_request: Option<LlmRequestDe>,
-    // Divergence (ledger 6c-2): Go's `[]*model.LLMResponse` can hold a nil element
-    // (`llm_responses: [null]`); gadk's `Vec<LlmResponse>` cannot represent it.
+    // A nil element of the response list (`llm_responses: [null]`) is representable in the
+    // recorded format; gadk's `Vec<LlmResponse>` cannot represent it.
     llm_responses: Vec<LlmResponse>,
 }
 
@@ -415,7 +415,7 @@ struct FunctionResponseDe {
     response: Option<GoMap>,
 }
 
-/// Go's non-pointer string enum: `""` (and null) is gadk's `None`.
+/// A non-pointer string enum: `""` (and null) is gadk's `None`.
 fn scheduling<'de, D: Deserializer<'de>>(
     d: D,
 ) -> std::result::Result<Option<FunctionResponseScheduling>, D::Error> {
@@ -467,7 +467,7 @@ impl From<RecordingDe> for Recording {
                     response: r.response,
                 }),
             }),
-            // Go `Index int yaml:"-"`: never decoded.
+            // `Index` is never decoded (not a YAML field).
             index: 0,
         }
     }

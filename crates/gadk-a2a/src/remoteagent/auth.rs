@@ -13,15 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Credential scoping and application for A2A calls (port of ADK-Go
-//! `agent/remoteagent/v2/auth.go` and `internal/agent/remoteagent/auth_scope.go`).
+//! Credential scoping and application for A2A calls.
 //!
-//! Go carries the scope, the per-invocation credential cell and the card-fetch client as
-//! `context.Context` values and applies the credential in an `http.RoundTripper`. Here the
-//! [`AUTH_SCOPE`] task-local carries them (plan D3), and the credential is applied by
-//! [`AuthInterceptor`] (every A2A call, through the a2a-rs client's `ServiceParams`) and by
-//! [`apply_credential`] (the agent-card fetch). The single-flight groups Go keeps on its
-//! `authTransport` (one per remote agent) are kept per credential provider value.
+//! The [`AUTH_SCOPE`] task-local carries the scope, the per-invocation credential cell and the
+//! card-fetch client. The credential is applied by [`AuthInterceptor`] (every A2A call, through
+//! the a2a-rs client's `ServiceParams`) and by [`apply_credential`] (the agent-card fetch). The
+//! single-flight groups that collapse concurrent credential steps are kept per credential
+//! provider value.
 
 use std::any::Any;
 use std::collections::HashMap;
@@ -44,13 +42,13 @@ use url::Url;
 use super::card::is_loopback_host;
 use crate::Error;
 
-/// Go `a2aclient.SessionID` as built by `CredentialScope`: the credential cache key of an
-/// (app, user, session, agent) call.
+/// The credential cache key of an (app, user, session, agent) call, as built by
+/// [`credential_scope`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CredentialScope(pub String);
 
-/// Go `CredentialScope(appName, userID, sessionID, agentName)`: the four parts, each
-/// percent-encoded with Go's `url.QueryEscape`, joined with `/`. No two identities produce the
+/// The [`CredentialScope`] of the four parts, each percent-encoded as a URL query component
+/// (a space becomes `+`) and joined with `/`. No two identities produce the
 /// same key; a provider that wants the parts back splits on `/` and query-unescapes each.
 pub fn credential_scope(
     app_name: &str,
@@ -67,8 +65,8 @@ pub fn credential_scope(
     ))
 }
 
-/// The credential scope of the current call (Go `a2aclient.SessionIDFrom(ctx)`), for custom
-/// credential providers; `None` outside a scoped call.
+/// The credential scope of the current call, for custom credential providers; `None` outside a
+/// scoped call.
 pub fn current_credential_scope() -> Option<CredentialScope> {
     AUTH_SCOPE.try_with(|id| id.scope.clone()).ok()
 }
@@ -83,19 +81,19 @@ pub(crate) struct CallIdentity {
     pub identity: Option<gadk_agent::Identity>,
     /// The credential provider.
     pub auth: Arc<dyn gadk_auth::CredentialProvider>,
-    /// Go `WithCardFetchClient`.
+    /// The client that fetches the agent card.
     pub card_fetch_client: Option<reqwest::Client>,
-    /// The per-call credential cell (Go `credentialCell`).
+    /// The per-call credential cell.
     pub(crate) cell: Arc<CredentialCell>,
 }
 
 tokio::task_local! {
-    /// The auth scope of the current remote call (Go `AttachAuthScope`).
+    /// The auth scope of the current remote call.
     pub(crate) static AUTH_SCOPE: CallIdentity;
 }
 
-/// Runs `fut` inside the auth scope `id`; `None` runs it unscoped (Go `OwnsAuthScope == false`),
-/// which leaves any scope the caller is already inside in effect.
+/// Runs `fut` inside the auth scope `id`; `None` runs it unscoped (the remote agent does not own
+/// the auth scope), which leaves any scope the caller is already inside in effect.
 pub(crate) async fn with_auth_scope<F: Future>(id: Option<CallIdentity>, fut: F) -> F::Output {
     match id {
         Some(id) => AUTH_SCOPE.scope(id, fut).await,
@@ -103,7 +101,7 @@ pub(crate) async fn with_auth_scope<F: Future>(id: Option<CallIdentity>, fut: F)
     }
 }
 
-/// The card-fetch client of the current auth scope (Go `CardFetchClientFrom(ctx)`); `None`
+/// The card-fetch client of the current auth scope; `None`
 /// outside a scope or when the scope carries none.
 pub(crate) fn current_card_fetch_client() -> Option<reqwest::Client> {
     AUTH_SCOPE
@@ -112,7 +110,7 @@ pub(crate) fn current_card_fetch_client() -> Option<reqwest::Client> {
         .flatten()
 }
 
-/// Applies the scope's credential to every A2A call (Go `authTransport`): `before` resolves
+/// Applies the scope's credential to every A2A call: `before` resolves
 /// the credential of the current [`AUTH_SCOPE`] and writes its headers into the call's
 /// `ServiceParams`, which the a2a-rs transports send as HTTP headers. Outside a scope it does
 /// nothing. A credential that cannot be resolved or applied fails the call.
@@ -133,10 +131,10 @@ impl a2a_client::middleware::CallInterceptor for AuthInterceptor {
 }
 
 /// Copies `headers` into `params`, each name replacing whatever values `params` held under it
-/// in any letter case (Go `h[k] = v` on a canonical key).
+/// in any letter case.
 ///
-/// `ServiceParams` values are strings, so a value that is not UTF-8 (Go's byte-string header
-/// would carry it) fails the call rather than being sent altered; `params` is then untouched.
+/// `ServiceParams` values are strings, so a value that is not UTF-8 fails the call rather than
+/// being sent altered; `params` is then untouched.
 fn write_service_params(
     params: &mut a2a_client::ServiceParams,
     headers: &HeaderMap,
@@ -178,7 +176,7 @@ pub(crate) async fn apply_credential(headers: &mut HeaderMap) -> Result<(), Erro
         .await
 }
 
-/// Go `authTransport.credential`: the cell's credential, else one resolved from the provider
+/// The cell's credential, else one resolved from the provider
 /// and stored in the cell. A failure is not cached, so the next call tries again.
 async fn resolve_credential(id: &CallIdentity) -> Result<Arc<dyn Credential>, Error> {
     if let Some(cred) = id.cell.get() {
@@ -202,7 +200,7 @@ async fn resolve_credential(id: &CallIdentity) -> Result<Arc<dyn Credential>, Er
 type StepsRegistry = Vec<(Weak<dyn CredentialProvider>, Arc<AuthSteps>)>;
 static STEPS: Mutex<StepsRegistry> = Mutex::new(Vec::new());
 
-/// The groups of `provider` (Go: the `authTransport` built for one remote agent).
+/// The groups of `provider`.
 pub(crate) fn steps_for(provider: &Arc<dyn CredentialProvider>) -> Arc<AuthSteps> {
     let mut all = STEPS.lock();
     all.retain(|(p, _)| p.strong_count() > 0);
@@ -217,7 +215,7 @@ pub(crate) fn steps_for(provider: &Arc<dyn CredentialProvider>) -> Arc<AuthSteps
     steps
 }
 
-/// Go `authTransport`'s `mints` and `applies` groups and its `apply`.
+/// The single-flight groups of one credential provider: token mints and credential applies.
 pub(crate) struct AuthSteps {
     /// OAuth2 token mints.
     pub(crate) mints: MintGroup<String>,
@@ -240,7 +238,7 @@ impl AuthSteps {
         }
     }
 
-    /// Go `authTransport.apply`: writes `cred` onto `h`. A bare OAuth2 credential is minted
+    /// Writes `cred` onto `h`. A bare OAuth2 credential is minted
     /// through the mint group and sent as a bearer token; anything else (an OAuth2 credential
     /// wrapped by `with_headers` included) writes itself through its own `apply` on the apply
     /// group, into a private header map copied onto `h` only once the step has landed. Both
@@ -294,25 +292,26 @@ impl AuthSteps {
     }
 }
 
-/// Go `a2aRequestTimeout`: the a2a client's own default, restated because the auth client is
-/// built explicitly.
+/// The A2A client's default request timeout, restated because the auth client is built
+/// explicitly.
 const A2A_REQUEST_TIMEOUT: Duration = Duration::from_secs(3 * 60);
 
-/// Go `cardFetchTimeout`: the bound a2a-go's default card resolver applies.
+/// The timeout of a card fetch.
 const CARD_FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Go `maxRedirects`: net/http's default cap, which a custom policy replaces.
+/// The redirect cap, which a custom redirect policy replaces.
 const MAX_REDIRECTS: usize = 10;
 
-/// Go `authHTTPClient`: 3 min timeout, Go `checkRedirect` policy, at most 10 redirects.
+/// The HTTP client of the auth path: 3 min timeout, the [`check_redirect`] policy, at most 10
+/// redirects.
 ///
-/// Fails only when reqwest cannot initialize its TLS backend (Go's `http.Client` literal cannot
-/// fail), so [`new_a2a`](super::new_a2a) returns the error instead of panicking.
+/// Fails only when reqwest cannot initialize its TLS backend, so [`new_a2a`](super::new_a2a)
+/// returns the error instead of panicking.
 pub(crate) fn auth_http_client() -> Result<reqwest::Client, Error> {
     http_client(A2A_REQUEST_TIMEOUT)
 }
 
-/// Go `cardFetchHTTPClient`: the RPC client's redirect policy with a 30 s timeout. Fails as
+/// The RPC client's redirect policy with a 30 s timeout. Fails as
 /// [`auth_http_client`] does.
 pub(crate) fn card_fetch_http_client() -> Result<reqwest::Client, Error> {
     http_client(CARD_FETCH_TIMEOUT)
@@ -331,9 +330,9 @@ fn http_client(timeout: Duration) -> Result<reqwest::Client, Error> {
         .map_err(|err| Error::wrap("remoteagent: build the A2A HTTP client", err))
 }
 
-/// Go `checkRedirect`: the hop cap, then the same-credential-target check against the original
+/// The redirect policy: the hop cap, then the same-credential-target check against the original
 /// request and against the hop just taken (`via` is every URL already requested, oldest
-/// first, as reqwest's `Attempt::previous` and Go's `via` both are).
+/// first, as reqwest's `Attempt::previous` is).
 pub(crate) fn check_redirect(next: &Url, via: &[Url]) -> Result<(), Error> {
     if via.len() >= MAX_REDIRECTS {
         return Err(Error::msg(format!(
@@ -352,7 +351,7 @@ pub(crate) fn check_redirect(next: &Url, via: &[Url]) -> Result<(), Error> {
     Ok(())
 }
 
-/// Go `sameCredentialTarget`: the host must be identical, and the scheme may only stay the
+/// The host must be identical, and the scheme may only stay the
 /// same or be upgraded from http to https.
 pub(crate) fn same_credential_target(from: &Url, to: &Url) -> bool {
     if !hostname(from).eq_ignore_ascii_case(hostname(to)) {
@@ -368,7 +367,7 @@ pub(crate) fn same_credential_target(from: &Url, to: &Url) -> bool {
     }
 }
 
-/// Go `url.URL.Hostname`: the host without IPv6 brackets.
+/// The host without IPv6 brackets.
 fn hostname(u: &Url) -> &str {
     let h = u.host_str().unwrap_or("");
     h.strip_prefix('[')
@@ -376,7 +375,7 @@ fn hostname(u: &Url) -> &str {
         .unwrap_or(h)
 }
 
-/// Go `defaultedPort`: the explicit port, else the scheme's default (`""` for neither http
+/// The explicit port, else the scheme's default (`""` for neither http
 /// nor https).
 fn defaulted_port(u: &Url) -> String {
     if let Some(port) = u.port() {
@@ -395,7 +394,7 @@ fn scheme_default_port(scheme: &str) -> &'static str {
     }
 }
 
-/// Go `isDefaultPort`: the port is implicit or names the scheme's default.
+/// The port is implicit or names the scheme's default.
 fn is_default_port(u: &Url) -> bool {
     match u.port() {
         None => true,
@@ -403,14 +402,14 @@ fn is_default_port(u: &Url) -> bool {
     }
 }
 
-/// Go `requestOrigin`: `scheme://host[:port]`.
+/// `scheme://host[:port]`.
 fn request_origin(u: &Url) -> String {
     let port = u.port().map(|p| format!(":{p}")).unwrap_or_default();
     format!("{}://{}{}", u.scheme(), u.host_str().unwrap_or(""), port)
 }
 
-/// Go `cardSendsInClear`: every interface URL of the card that is neither https nor loopback,
-/// in card order. An interface whose URL does not parse (Go `url.Parse`) is skipped.
+/// Every interface URL of the card that is neither https nor loopback,
+/// in card order. An interface whose URL does not parse is skipped.
 pub(crate) fn card_sends_in_clear(card: &a2a::AgentCard) -> Vec<String> {
     card.supported_interfaces
         .iter()
@@ -422,11 +421,11 @@ pub(crate) fn card_sends_in_clear(card: &a2a::AgentCard) -> Vec<String> {
         .collect()
 }
 
-/// Go `oauth2.RetrieveError`: a token endpoint's non-2xx response. A token source that reports
+/// A token endpoint's non-2xx response. A token source that reports
 /// one lets [`redact_token_error`] keep the response body out of the error text.
 #[derive(Clone, Default)]
 pub(crate) struct RetrieveError {
-    /// Go `Response.Status` (`"400 Bad Request"`); `None` = no response.
+    /// The response status (`"400 Bad Request"`); `None` = no response.
     pub status: Option<String>,
     /// The response body.
     pub body: Vec<u8>,
@@ -473,14 +472,13 @@ impl fmt::Debug for RetrieveError {
 
 impl std::error::Error for RetrieveError {}
 
-/// Go `redactedError`: reports `msg` while keeping `cause` reachable through the source chain.
+/// Reports `msg` while keeping `cause` reachable through the source chain.
 struct RedactedError {
     msg: String,
     cause: gadk_auth::Error,
 }
 
-/// Prints `msg` only: the cause holds the unredacted response (Go's `%v` never walks `Unwrap`,
-/// so Go's redaction holds for ordinary logging; this keeps `{:?}` to the same).
+/// Prints `msg` only: the cause holds the unredacted response, so `{:?}` must not reach it.
 impl fmt::Debug for RedactedError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RedactedError")
@@ -501,7 +499,7 @@ impl std::error::Error for RedactedError {
     }
 }
 
-/// Go `redactTokenError`: an error whose chain holds a token endpoint response with a body gets
+/// An error whose chain holds a token endpoint response with a body gets
 /// a message built here, from the status and the RFC 6749 error code only; nothing is copied
 /// from what any wrapper wrote. The original error stays reachable as the source. Any other
 /// error is returned unchanged.
@@ -546,15 +544,15 @@ fn token_response(err: &(dyn std::error::Error + 'static)) -> Option<(String, St
     None
 }
 
-/// Go `mintTimeout`.
+/// The bound on one credential step (a token mint or a credential's own `apply`).
 pub(crate) const MINT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The outcome of one step, shared by every caller waiting on it.
 #[derive(Debug, Clone)]
 pub(crate) enum StepError {
-    /// Go `errors.New(text)`.
+    /// A message.
     Message(String),
-    /// Go `fmt.Errorf("<prefix>: %w", source)`.
+    /// A message prefix wrapping a source error, displayed as `<prefix>: <source>`.
     Wrapped {
         /// The text before `: `.
         prefix: String,
@@ -585,23 +583,23 @@ impl StepError {
 
 type InFlight<T> = Arc<Mutex<HashMap<CredentialScope, Arc<MintCall<T>>>>>;
 
-/// Go `mintGroup[T]`: collapses concurrent requests for one credential scope onto a single
+/// Collapses concurrent requests for one credential scope onto a single
 /// blocking credential step (an OAuth2 token mint, or a credential's own `apply`) and hands the
 /// result to everyone waiting on it. The step runs on its own task, so only the callers' wait is
 /// bounded: by the attempt's deadline ([`MINT_TIMEOUT`] from its start), or by the caller
-/// dropping the future (Go's context cancellation). A second step for the same scope starts only
+/// dropping the future. A second step for the same scope starts only
 /// once the current attempt's deadline has passed; the retired attempt still publishes to
 /// whoever is on it, and never evicts its successor. A failed step is never replayed to a later
 /// request, and a panicking step becomes an error.
 pub(crate) struct MintGroup<T> {
     /// Names the step in errors, e.g. "mint oauth2 token".
     what: &'static str,
-    /// Go `mintTimeout` (a field here so tests need not wait it out).
+    /// The bound on one attempt (a field so tests need not wait it out).
     timeout: Duration,
     in_flight: InFlight<T>,
 }
 
-/// Go `mintCall[T]`: one in-flight step. The outcome is written once, under the group's lock,
+/// One in-flight step. The outcome is written once, under the group's lock,
 /// together with the removal of the group's entry.
 pub(crate) struct MintCall<T> {
     deadline: Instant,
@@ -609,19 +607,19 @@ pub(crate) struct MintCall<T> {
 }
 
 impl<T: Clone> MintCall<T> {
-    /// Go `mintCall.result`: the outcome if it has landed, without blocking.
+    /// The outcome if it has landed, without blocking.
     fn result(&self) -> Option<Result<T, StepError>> {
         self.outcome.borrow().clone()
     }
 }
 
 impl MintGroup<String> {
-    /// Go `newMintGroup`: the group for OAuth2 token mints.
+    /// The group for OAuth2 token mints.
     pub(crate) fn mints() -> Self {
         Self::new("mint oauth2 token", MINT_TIMEOUT)
     }
 
-    /// Go `mintGroup.token`: a fresh access token from `ts` for `scope`.
+    /// A fresh access token from `ts` for `scope`.
     pub(crate) async fn token(
         &self,
         scope: &CredentialScope,
@@ -632,7 +630,7 @@ impl MintGroup<String> {
 }
 
 impl MintGroup<HeaderMap> {
-    /// Go `newApplyGroup`: the group for a credential's own `apply`.
+    /// The group for a credential's own `apply`.
     pub(crate) fn applies() -> Self {
         Self::new("apply auth credential", MINT_TIMEOUT)
     }
@@ -651,7 +649,7 @@ where
         }
     }
 
-    /// Go `mintGroup.do`: runs `step` for `scope`, joining a step already in flight (in which
+    /// Runs `step` for `scope`, joining a step already in flight (in which
     /// case `step` is dropped unpolled), and waits for it bounded by the attempt's deadline.
     pub(crate) async fn run<F>(&self, scope: &CredentialScope, step: F) -> Result<T, Error>
     where
@@ -723,14 +721,14 @@ impl<T: Clone> MintCall<T> {
         self.deadline
     }
 
-    /// Waits until the attempt's outcome has been published (Go `<-call.done`).
+    /// Waits until the attempt's outcome has been published.
     pub(crate) async fn done(&self) {
         let mut rx = self.outcome.subscribe();
         let _ = rx.wait_for(Option::is_some).await;
     }
 }
 
-/// Go `mintGroup.run`: performs one step and publishes its outcome. The entry is removed (only
+/// Performs one step and publishes its outcome. The entry is removed (only
 /// if it is still this attempt's) and the outcome published under the lock.
 async fn publish<T, F>(
     what: &'static str,
@@ -758,7 +756,7 @@ async fn publish<T, F>(
     call.outcome.send_replace(Some(result));
 }
 
-/// Go `%v` of a recovered panic value, for the payloads Rust can name.
+/// The text of a recovered panic payload, for the payloads Rust can name.
 fn panic_text(panic: &(dyn Any + Send)) -> String {
     if let Some(s) = panic.downcast_ref::<&str>() {
         (*s).to_owned()
@@ -769,7 +767,7 @@ fn panic_text(panic: &(dyn Any + Send)) -> String {
     }
 }
 
-/// Go `mintAccessToken`: one access token from `ts`, checked to be sendable as a bearer token.
+/// One access token from `ts`, checked to be sendable as a bearer token.
 async fn mint_access_token(ts: Arc<dyn TokenSource>) -> Result<String, StepError> {
     let tok = ts
         .token()
@@ -780,8 +778,8 @@ async fn mint_access_token(ts: Arc<dyn TokenSource>) -> Result<String, StepError
             "remoteagent: oauth2 token source returned an empty access token".to_owned(),
         ));
     }
-    // `Token::token_type` is Go `Token.Type()`, which yields "Bearer" exactly when the type
-    // equal-folds "bearer" or is empty.
+    // `Token::token_type` yields "Bearer" exactly when the type equal-folds "bearer" or is
+    // empty.
     let ty = tok.token_type();
     if ty != "Bearer" {
         return Err(StepError::Message(format!(
@@ -792,8 +790,8 @@ async fn mint_access_token(ts: Arc<dyn TokenSource>) -> Result<String, StepError
     Ok(tok.access_token)
 }
 
-/// Go `credentialCell`: the credential one invocation resolved. An uncached cell (Go's nil
-/// cell, what a request made outside an invocation gets) holds nothing and ignores writes.
+/// The credential one invocation resolved. An uncached cell (what a request made outside an
+/// invocation gets) holds nothing and ignores writes.
 pub(crate) struct CredentialCell {
     cred: Option<Mutex<Option<Arc<dyn Credential>>>>,
 }
@@ -805,14 +803,14 @@ impl Default for CredentialCell {
 }
 
 impl CredentialCell {
-    /// An empty cell that keeps the first credential set on it (Go `&credentialCell{}`).
+    /// An empty cell that keeps the first credential set on it.
     pub(crate) fn new() -> Self {
         Self {
             cred: Some(Mutex::new(None)),
         }
     }
 
-    /// A cell that never holds a credential (Go's nil `*credentialCell`).
+    /// A cell that never holds a credential.
     // The server cleanup (child-task cancel) is the only non-test caller.
     #[cfg(any(test, feature = "server"))]
     pub(crate) fn uncached() -> Self {

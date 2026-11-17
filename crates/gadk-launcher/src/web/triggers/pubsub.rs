@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `cmd/launcher/web/triggers/pubsub`: the sub-launcher that adds the Pub/Sub push trigger
+//! The sub-launcher that adds the Pub/Sub push trigger
 //! endpoint to the web server.
 
 use std::io::Write;
@@ -27,12 +27,12 @@ use crate::config::Config;
 use crate::error::Error;
 use crate::web::{WebRouter, WebSublauncher};
 
-/// Go `pubsub.pubsubLauncher`.
+/// The `pubsub` web sub-launcher.
 pub struct PubSubLauncher {
     pub(crate) trigger: Trigger,
 }
 
-/// Go `pubsub.NewLauncher()`.
+/// A `pubsub` launcher with its flags.
 pub fn new() -> PubSubLauncher {
     PubSubLauncher {
         trigger: Trigger::new("pubsub", "PubSub"),
@@ -40,7 +40,7 @@ pub fn new() -> PubSubLauncher {
 }
 
 impl PubSubLauncher {
-    /// Replaces where the flag set writes its errors and usage (Go `fs.SetOutput`; default
+    /// Replaces where the flag set writes its errors and usage (default
     /// stderr), for tests and the CLI replay.
     pub fn with_flag_output(mut self, out: Arc<Mutex<dyn Write + Send>>) -> PubSubLauncher {
         self.trigger.set_flag_output(out);

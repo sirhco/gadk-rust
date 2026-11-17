@@ -35,8 +35,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-# The span registry the telemetry reads its workflow scope from (Go's `workflowScopeKey`), and the
-# capture behind `testutil::telemetry`.
+# The span registry the telemetry reads its workflow scope from, and the capture behind
+# `testutil::telemetry`.
 tracing-subscriber = { workspace = true }
 schemars = { workspace = true }
 jsonschema = { workspace = true }

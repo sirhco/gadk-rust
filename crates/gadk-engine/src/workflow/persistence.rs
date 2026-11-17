@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go workflow/persistence.go: the metadata constants and the history attribution used
-//! by the live schedulers, and ReconstructRunState with its scan helpers.
+//! The metadata constants and the history attribution used by the live schedulers, and
+//! `reconstruct_run_state` with its scan helpers.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -30,27 +30,27 @@ use crate::workflow::scheduler::{build_nodes_by_name, child_event_output};
 use crate::workflow::state::{NodeState, NodeStatus, RunState};
 use crate::workflow::{Node, START, Workflow};
 
-/// Go workflowNodeCompletedKey: a successful activation without output records its own event.
+/// Metadata key: a successful activation without output records its own event.
 pub(crate) const WORKFLOW_NODE_COMPLETED_KEY: &str = "adk.workflow.node_completed";
-/// Go workflowBasePathPrefix: `<prefix><workflowName>` records the graph's base path.
+/// Metadata key prefix: `<prefix><workflowName>` records the graph's base path.
 pub(crate) const WORKFLOW_BASE_PATH_PREFIX: &str = "adk.workflow.base_path.";
-/// Go workflowFailedChildPathsKey.
+/// Metadata key: the child paths a failed activation could not vouch for.
 pub(crate) const WORKFLOW_FAILED_CHILD_PATHS_KEY: &str = "adk.workflow.failed_child_paths";
-/// Go workflowNodeOutcomeKey.
+/// Metadata key: the outcome of a node ("failed" or "cancelled").
 pub(crate) const WORKFLOW_NODE_OUTCOME_KEY: &str = "adk.workflow.node_outcome";
-/// Go workflowDelegatedOutputKey.
+/// Metadata key: the output a completion record delegates to its node.
 pub(crate) const WORKFLOW_DELEGATED_OUTPUT_KEY: &str = "adk.workflow.delegated_output";
-/// Go workflowNodeFailureOutcome.
+/// The outcome value of a failed node.
 pub(crate) const WORKFLOW_NODE_FAILURE_OUTCOME: &str = "failed";
-/// Go workflowNodeCancelledOutcome.
+/// The outcome value of a cancelled node.
 pub(crate) const WORKFLOW_NODE_CANCELLED_OUTCOME: &str = "cancelled";
-/// Go workflowNodeFailureCode (legacy marker; Go uses it only in tests too).
+/// The legacy error code marking a failed node (only tests use it).
 #[cfg(test)]
 pub(crate) const WORKFLOW_NODE_FAILURE_CODE: &str = "WorkflowNodeFailed";
-/// Go workflowNodeCancelledCode (legacy marker read from older history).
+/// The legacy error code marking a cancelled node, read from older history.
 pub(crate) const WORKFLOW_NODE_CANCELLED_CODE: &str = "WorkflowNodeCancelled";
 
-/// Port of Go workflowNodeOutcome: "failed", "cancelled" or "".
+/// The outcome an event records: "failed", "cancelled" or "".
 pub(crate) fn workflow_node_outcome(ev: &Event) -> &'static str {
     if let Some(Value::String(o)) = ev.response.custom_metadata.get(WORKFLOW_NODE_OUTCOME_KEY) {
         if o == WORKFLOW_NODE_FAILURE_OUTCOME {
@@ -69,8 +69,8 @@ pub(crate) fn workflow_node_outcome(ev: &Event) -> &'static str {
     ""
 }
 
-/// Port of Go completedDelegatedOutput: `Some(v)` (possibly `Value::Null`, Go nil) when the
-/// event is a completion record carrying the delegated-output key; `None` otherwise.
+/// `Some(v)` (possibly `Value::Null`) when the event is a completion record carrying the
+/// delegated-output key; `None` otherwise.
 pub(crate) fn completed_delegated_output(ev: &Event) -> Option<Value> {
     let md = &ev.response.custom_metadata;
     if md.get(WORKFLOW_NODE_COMPLETED_KEY) != Some(&Value::Bool(true)) {
@@ -79,7 +79,7 @@ pub(crate) fn completed_delegated_output(ev: &Event) -> Option<Value> {
     md.get(WORKFLOW_DELEGATED_OUTPUT_KEY).cloned()
 }
 
-/// Port of Go graphHistoryEvent: strips the recorded workflow base path (or the legacy
+/// Strips the recorded workflow base path (or the legacy
 /// "<workflowName>@1" fallback) from `node_info.path` and every `output_for` entry.
 pub(crate) fn graph_history_event(ev: &Event, workflow_name: &str) -> Event {
     let mut out = ev.clone();
@@ -118,7 +118,7 @@ fn segment_name(seg: &str) -> &str {
     seg.split('@').next().unwrap_or(seg)
 }
 
-/// Port of Go eventNodeName: the first path segment naming a graph node, else the author.
+/// The first path segment naming a graph node, else the author.
 pub(crate) fn event_node_name(
     ev: &Event,
     nodes_by_name: &HashMap<String, Arc<dyn Node>>,
@@ -134,7 +134,7 @@ pub(crate) fn event_node_name(
     ev.author.clone()
 }
 
-/// Port of Go ownPathNodeName: the graph node only when it is the path's last segment.
+/// The graph node only when it is the path's last segment.
 pub(crate) fn own_path_node_name(
     path: &str,
     nodes_by_name: &HashMap<String, Arc<dyn Node>>,
@@ -153,7 +153,8 @@ pub(crate) fn own_path_node_name(
     String::new()
 }
 
-/// Port of Go ownEventNodeName.
+/// The node that emitted the event itself: the path's last segment when it names a graph node,
+/// else the author.
 pub(crate) fn own_event_node_name(
     ev: &Event,
     nodes_by_name: &HashMap<String, Arc<dyn Node>>,
@@ -167,7 +168,7 @@ pub(crate) fn own_event_node_name(
     String::new()
 }
 
-/// Port of Go eventOutputOwners: the emitter's own node plus every `output_for` owner.
+/// The emitter's own node plus every `output_for` owner.
 pub(crate) fn event_output_owners(
     ev: &Event,
     nodes_by_name: &HashMap<String, Arc<dyn Node>>,
@@ -191,7 +192,7 @@ pub(crate) fn event_output_owners(
     owners
 }
 
-/// Port of Go nodeScanState: what the session history says, per node, about a paused run.
+/// What the session history says, per node, about a paused run.
 #[derive(Debug, Default)]
 pub(crate) struct NodeScanState {
     /// The long-running tool ids the node raised (insertion-ordered).
@@ -210,7 +211,7 @@ pub(crate) struct NodeScanState {
 }
 
 impl NodeScanState {
-    /// Port of Go nodeScanState.addInterrupt.
+    /// Records an interrupt id once, keeping insertion order.
     fn add_interrupt(&mut self, id: &str) {
         if self.seen.insert(id.to_string()) {
             self.interrupts.push(id.to_string());
@@ -218,16 +219,16 @@ impl NodeScanState {
     }
 }
 
-/// Go's per-event scan gate: skips partial events and, with a non-empty `invocation_id`, events
+/// The per-event scan gate: skips partial events and, with a non-empty `invocation_id`, events
 /// from other invocations.
 fn in_scope(ev: &Event, invocation_id: &str) -> bool {
     !ev.response.partial && (invocation_id.is_empty() || ev.invocation_id == invocation_id)
 }
 
-/// Port of Go (*Workflow).ReconstructRunState: rebuilds the paused run state by scanning
-/// session history (interrupts raised, the user responses that resolved them, their schemas,
-/// and each node's latest outcome). Go's `(nil, nil)` is `Ok(None)`: no node has interrupt or
-/// failure history. A non-empty `invocation_id` scopes the scan to that invocation.
+/// Rebuilds the paused run state by scanning session history (interrupts raised, the user
+/// responses that resolved them, their schemas, and each node's latest outcome). `Ok(None)`: no
+/// node has interrupt or failure history. A non-empty `invocation_id` scopes the scan to that
+/// invocation.
 pub(crate) fn reconstruct_run_state(
     wf: &Workflow,
     session: &dyn Session,
@@ -275,7 +276,7 @@ pub(crate) fn reconstruct_run_state(
     Ok(Some(state))
 }
 
-/// Port of Go scanHistory: one pass over history giving, per static graph node, the
+/// One pass over history giving, per static graph node, the
 /// long-running interrupts it raised, the user responses that resolved them, each interrupt's
 /// declared response schema, and the latest result or failure.
 pub(crate) fn scan_history(
@@ -352,9 +353,9 @@ pub(crate) fn scan_history(
     scans
 }
 
-/// Port of Go collectNodeOutputs: each graph node's last own or explicitly delegated output
-/// (`Value::Null` is Go's nil, from a no-output completion record), plus the set of nodes that
-/// emitted an event without a subsequent failure.
+/// Each graph node's last own or explicitly delegated output (`Value::Null` comes from a
+/// no-output completion record), plus the set of nodes that emitted an event without a
+/// subsequent failure.
 pub(crate) fn collect_node_outputs(
     events: &[Event],
     nodes_by_name: &HashMap<String, Arc<dyn Node>>,
@@ -420,7 +421,7 @@ pub(crate) fn collect_node_outputs(
     (outputs, completed)
 }
 
-/// Port of Go (*Workflow).buildRunState: interrupted or failed nodes' scans as NodeStates
+/// Interrupted or failed nodes' scans as NodeStates
 /// (names in sorted order, so the first validation error is deterministic). `None` when there
 /// is no interrupt or failure history.
 fn build_run_state(
@@ -453,8 +454,7 @@ fn build_run_state(
     Ok(state)
 }
 
-/// Port of Go unresolvedInterrupts: the raised interrupts no user response resolved yet, in
-/// insertion order.
+/// The raised interrupts no user response resolved yet, in insertion order.
 fn unresolved_interrupts(scan: &NodeScanState) -> Vec<String> {
     scan.interrupts
         .iter()
@@ -463,12 +463,12 @@ fn unresolved_interrupts(scan: &NodeScanState) -> Vec<String> {
         .collect()
 }
 
-/// Port of Go rerunsOnResume: whether the node opted into re-entry mode.
+/// Whether the node opted into re-entry mode.
 fn reruns_on_resume(node: Option<&Arc<dyn Node>>) -> bool {
     node.is_some_and(|n| n.config().rerun_on_resume == Some(true))
 }
 
-/// Port of Go validateResolved: validates each surviving (last-wins) response against its
+/// Validates each surviving (last-wins) response against its
 /// declared schema (ids in sorted order, so the first error is deterministic).
 fn validate_resolved(scan: &NodeScanState) -> Result<Map<String, Value>, WorkflowError> {
     let mut ids: Vec<&String> = scan.resolved.keys().collect();
@@ -493,7 +493,7 @@ fn validate_resolved(scan: &NodeScanState) -> Result<Map<String, Value>, Workflo
     Ok(resumed)
 }
 
-/// Port of Go (*Workflow).inferNodeState. Status priority: unresolved + re-entry + some
+/// Infers a node's state from its scan. Status priority: unresolved + re-entry + some
 /// resolved → Pending (partial resume); unresolved → Waiting; failed → Failed; finished →
 /// Completed; all resolved + re-entry → Pending; all resolved, handoff → Completed with the
 /// response as output.
@@ -551,7 +551,7 @@ fn infer_node_state(
     Ok(ns)
 }
 
-/// Port of Go (*Workflow).predecessorInput: a resuming node's input — a non-START
+/// A resuming node's input — a non-START
 /// predecessor's cached output, else the workflow seed input for a START successor.
 fn predecessor_input(
     wf: &Workflow,
@@ -582,7 +582,7 @@ fn predecessor_input(
     (non_null(node_outputs.get(from)), from.to_string())
 }
 
-/// Port of Go firstUserInput: the text of the first user event (skipping FunctionResponse
+/// The text of the first user event (skipping FunctionResponse
 /// resume turns) in scope; `None` without one.
 pub(crate) fn first_user_input(events: &[Event], invocation_id: &str) -> Option<Value> {
     for ev in events {
@@ -606,18 +606,16 @@ pub(crate) fn first_user_input(events: &[Event], invocation_id: &str) -> Option<
     None
 }
 
-/// Port of Go frPart: the part's FunctionResponse when present and keyed.
+/// The part's FunctionResponse when present and keyed.
 fn fr_part(p: &Part) -> Option<&FunctionResponse> {
     p.function_response.as_ref().filter(|fr| !fr.id.is_empty())
 }
 
-/// Port of Go schemaFromEvent: the response schema for interrupt `id` from the pause event's
-/// RequestedInput. Go (persistence.go:687-691) also takes the `adk_request_input` FunctionCall's
-/// `responseSchema` arg, but only when it is an in-memory `*jsonschema.Schema`. Once history has
-/// been through JSON (a persisted session) that arg is a map, so Go finds no schema there and the
-/// response passes through unvalidated. Rust events hold only JSON, so Go's accepting case can't
-/// be represented, and the persisted behavior is what Rust matches: FunctionCall args are never
-/// read for a schema.
+/// The response schema for interrupt `id` from the pause event's RequestedInput. The
+/// `adk_request_input` FunctionCall's `responseSchema` arg is never read for a schema: once
+/// history has been through JSON (a persisted session) that arg is a plain map, not a schema, so
+/// the response would pass through unvalidated anyway. Events hold only JSON, so this matches
+/// the persisted behavior.
 pub(crate) fn schema_from_event(ev: &Event, id: &str) -> Option<Value> {
     ev.requested_input
         .as_ref()
@@ -625,7 +623,7 @@ pub(crate) fn schema_from_event(ev: &Event, id: &str) -> Option<Value> {
         .and_then(|ri| ri.response_schema.clone())
 }
 
-/// Port of Go unwrapResponse: a sole single-key `result`/`response`/`payload` wrapper is
+/// A sole single-key `result`/`response`/`payload` wrapper is
 /// unwrapped (string values JSON-parsed when possible); anything else passes through.
 pub(crate) fn unwrap_response(data: &Map<String, Value>) -> Value {
     if data.len() != 1 {

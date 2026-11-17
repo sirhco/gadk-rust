@@ -13,12 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `tool/skilltoolset/internal/skilltool`: the `list_skills`, `load_skill` and
-//! `load_skill_resource` tools, and [`skills_to_xml`].
+//! The `list_skills`, `load_skill` and `load_skill_resource` tools, and [`skills_to_xml`].
 //!
-//! Each tool is a [`FunctionTool`] whose input and output schemas are the JSON schemas Go's
-//! `functiontool.New` infers with jsonschema-go from the Go argument and result structs, written
-//! out as literals (schemars would infer different ones).
+//! Each tool is a [`FunctionTool`] whose input and output schemas are written out as JSON literals,
+//! the schemas ADK infers for the same arguments and results (schemars would infer different ones).
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -43,26 +41,26 @@ pub(crate) const LOAD_SKILL_RESOURCE_NAME: &str = "load_skill_resource";
 pub(crate) const LOAD_SKILL_RESOURCE_DESCRIPTION: &str = "Loads a resource file (e.g., from references/ or assets/) associated with the specified skill.";
 
 // ---------------------------------------------------------------------------------------------
-// list_skills (Go list_skills.go)
+// list_skills
 // ---------------------------------------------------------------------------------------------
 
-/// Go `ListSkillsArgs struct{}`.
+/// The arguments of `list_skills`: none.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 pub(crate) struct ListSkillsArgs {}
 
-/// Go `ListSkillsResult`.
+/// The result of `list_skills`.
 #[derive(Debug, Serialize, JsonSchema)]
 pub(crate) struct ListSkillsResult {
     #[serde(rename = "result")]
     pub(crate) skills_xml: String,
 }
 
-/// jsonschema-go's `For[ListSkillsArgs]`.
+/// The input schema of `list_skills`.
 pub(crate) fn list_skills_input_schema() -> Value {
     json!({"type": "object", "additionalProperties": false})
 }
 
-/// jsonschema-go's `For[*ListSkillsResult]`.
+/// The output schema of `list_skills`.
 pub(crate) fn list_skills_output_schema() -> Value {
     json!({
         "type": ["null", "object"],
@@ -72,19 +70,19 @@ pub(crate) fn list_skills_output_schema() -> Value {
     })
 }
 
-/// Port of Go `skilltool.ListSkills`.
+/// Builds the `list_skills` tool.
 pub(crate) fn list_skills(source: Arc<dyn Source>) -> Result<Arc<dyn Tool>, ToolError> {
     let cfg = FunctionToolConfig {
         input_schema: Some(list_skills_input_schema()),
         output_schema: Some(list_skills_output_schema()),
-        // Go classifies a function tool over `skilltool` argument types as `SKILL`.
+        // Skill tools are classified as `SKILL`.
         origin: ToolOriginKind::Skill,
         ..FunctionToolConfig::new(LIST_SKILLS_NAME, LIST_SKILLS_DESCRIPTION)
     };
     FunctionTool::new(cfg, move |_ctx: Context, _args: ListSkillsArgs| {
         let source = source.clone();
         async move {
-            // Go returns the listing error unwrapped.
+            // The listing error is returned unwrapped.
             let skills = source
                 .list_frontmatters()
                 .await
@@ -96,8 +94,8 @@ pub(crate) fn list_skills(source: Arc<dyn Source>) -> Result<Arc<dyn Tool>, Tool
     })
 }
 
-/// Port of Go `skilltool.SkillsToXML` (list_skills.go:56-71): names and descriptions escaped as
-/// Go's `html.EscapeString` does; no trailing newline.
+/// The skills as XML: names and descriptions HTML-escaped (`&`, `'`, `<`, `>` and `"`); no trailing
+/// newline.
 pub(crate) fn skills_to_xml(frontmatters: &[Frontmatter]) -> String {
     let mut sb = String::from("<available_skills>\n");
     for fm in frontmatters {
@@ -115,18 +113,18 @@ pub(crate) fn skills_to_xml(frontmatters: &[Frontmatter]) -> String {
 }
 
 // ---------------------------------------------------------------------------------------------
-// load_skill (Go load_skill.go)
+// load_skill
 // ---------------------------------------------------------------------------------------------
 
-/// Go `LoadSkillArgs`.
+/// The arguments of `load_skill`.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct LoadSkillArgs {
     /// The name of the skill to load.
     pub(crate) name: String,
 }
 
-/// Go `FrontmatterJSON` (JSON key `allowed-tools`; empty optional fields omitted, as Go's
-/// `omitempty`).
+/// A skill's frontmatter as `load_skill` returns it (JSON key `allowed-tools`; empty optional
+/// fields omitted).
 #[derive(Debug, Serialize, JsonSchema)]
 pub(crate) struct FrontmatterJson {
     name: String,
@@ -154,7 +152,7 @@ impl From<Frontmatter> for FrontmatterJson {
     }
 }
 
-/// Go `LoadSkillResult`.
+/// The result of `load_skill`.
 #[derive(Debug, Serialize, JsonSchema)]
 pub(crate) struct LoadSkillResult {
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -165,7 +163,7 @@ pub(crate) struct LoadSkillResult {
     frontmatter: Option<FrontmatterJson>,
 }
 
-/// jsonschema-go's `For[LoadSkillArgs]`.
+/// The input schema of `load_skill`.
 pub(crate) fn load_skill_input_schema() -> Value {
     json!({
         "type": "object",
@@ -177,7 +175,7 @@ pub(crate) fn load_skill_input_schema() -> Value {
     })
 }
 
-/// jsonschema-go's `For[*LoadSkillResult]`.
+/// The output schema of `load_skill`.
 pub(crate) fn load_skill_output_schema() -> Value {
     json!({
         "type": ["null", "object"],
@@ -202,12 +200,12 @@ pub(crate) fn load_skill_output_schema() -> Value {
     })
 }
 
-/// Port of Go `skilltool.LoadSkill`.
+/// Builds the `load_skill` tool.
 pub(crate) fn load_skill(source: Arc<dyn Source>) -> Result<Arc<dyn Tool>, ToolError> {
     let cfg = FunctionToolConfig {
         input_schema: Some(load_skill_input_schema()),
         output_schema: Some(load_skill_output_schema()),
-        // Go classifies a function tool over `skilltool` argument types as `SKILL`.
+        // Skill tools are classified as `SKILL`.
         origin: ToolOriginKind::Skill,
         ..FunctionToolConfig::new(LOAD_SKILL_NAME, LOAD_SKILL_DESCRIPTION)
     };
@@ -217,7 +215,7 @@ pub(crate) fn load_skill(source: Arc<dyn Source>) -> Result<Arc<dyn Tool>, ToolE
     })
 }
 
-/// Port of Go `loadSkill` (load_skill.go).
+/// Runs `load_skill`: loads the skill's frontmatter and instructions.
 async fn run_load_skill(
     source: &dyn Source,
     args: LoadSkillArgs,
@@ -247,10 +245,10 @@ async fn run_load_skill(
 }
 
 // ---------------------------------------------------------------------------------------------
-// load_skill_resource (Go load_skill_resource.go)
+// load_skill_resource
 // ---------------------------------------------------------------------------------------------
 
-/// Go `LoadSkillResourceArgs`.
+/// The arguments of `load_skill_resource`.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct LoadSkillResourceArgs {
     /// The name of the skill.
@@ -259,7 +257,7 @@ pub(crate) struct LoadSkillResourceArgs {
     pub(crate) resource_path: String,
 }
 
-/// Go `LoadSkillResourceResult` (every field `omitempty`).
+/// The result of `load_skill_resource` (every empty field omitted).
 #[derive(Debug, Serialize, JsonSchema)]
 pub(crate) struct LoadSkillResourceResult {
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -270,7 +268,7 @@ pub(crate) struct LoadSkillResourceResult {
     content: String,
 }
 
-/// jsonschema-go's `For[LoadSkillResourceArgs]`.
+/// The input schema of `load_skill_resource`.
 pub(crate) fn load_skill_resource_input_schema() -> Value {
     json!({
         "type": "object",
@@ -286,7 +284,7 @@ pub(crate) fn load_skill_resource_input_schema() -> Value {
     })
 }
 
-/// jsonschema-go's `For[*LoadSkillResourceResult]`.
+/// The output schema of `load_skill_resource`.
 pub(crate) fn load_skill_resource_output_schema() -> Value {
     json!({
         "type": ["null", "object"],
@@ -299,12 +297,12 @@ pub(crate) fn load_skill_resource_output_schema() -> Value {
     })
 }
 
-/// Port of Go `skilltool.LoadSkillResource`.
+/// Builds the `load_skill_resource` tool.
 pub(crate) fn load_skill_resource(source: Arc<dyn Source>) -> Result<Arc<dyn Tool>, ToolError> {
     let cfg = FunctionToolConfig {
         input_schema: Some(load_skill_resource_input_schema()),
         output_schema: Some(load_skill_resource_output_schema()),
-        // Go classifies a function tool over `skilltool` argument types as `SKILL`.
+        // Skill tools are classified as `SKILL`.
         origin: ToolOriginKind::Skill,
         ..FunctionToolConfig::new(LOAD_SKILL_RESOURCE_NAME, LOAD_SKILL_RESOURCE_DESCRIPTION)
     };
@@ -314,9 +312,9 @@ pub(crate) fn load_skill_resource(source: Arc<dyn Source>) -> Result<Arc<dyn Too
     })
 }
 
-/// Port of Go `loadSkillResource` (load_skill_resource.go): reads at most 10 MiB + 1 bytes and
-/// rejects anything over 10 MiB. Go passes the bytes through as a Go string, and
-/// `encoding/json` replaces each invalid byte with U+FFFD; [`go_lossy_utf8`] does the same.
+/// Runs `load_skill_resource`: reads at most 10 MiB + 1 bytes and rejects anything over 10 MiB. The
+/// content is returned as text with each invalid UTF-8 byte replaced by one U+FFFD
+/// ([`go_lossy_utf8`]).
 async fn run_load_skill_resource(
     source: &dyn Source,
     args: LoadSkillResourceArgs,

@@ -173,7 +173,7 @@ impl FakeLiveServer {
         }
     }
 
-    /// The `ws://` base URL the model dials (the 1a Live tests use the same form).
+    /// The `ws://` base URL the model dials (the Live tests use the same form).
     pub(crate) fn base_url(&self) -> String {
         format!("ws://127.0.0.1:{}/", self.port)
     }

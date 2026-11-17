@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! [`ToolServer`]: an rmcp server with fixed tools, and set_test.go's weather server.
+//! [`ToolServer`]: an rmcp server with fixed tools, and a weather server.
 
 use std::borrow::Cow;
 use std::future::Future;
@@ -40,12 +40,11 @@ pub type ToolFuture = BoxFuture<'static, Result<CallToolResult, ErrorData>>;
 pub type ToolHandler =
     Arc<dyn Fn(CallToolRequestParams, RequestContext<RoleServer>) -> ToolFuture + Send + Sync>;
 
-/// Go `mcp.NewServer(&mcp.Implementation{Name, Version}, nil)` plus `mcp.AddTool`: a server whose
-/// `tools/list` returns the added tools in order (one page) and whose `tools/call` runs the
-/// matching handler. Cheap to clone; clones share the tools.
+/// A server whose `tools/list` returns the added tools in order (one page) and whose `tools/call`
+/// runs the matching handler. Cheap to clone; clones share the tools.
 ///
-/// Like go-sdk's server, it speaks the protocol revisions that still have an `initialize`
-/// handshake (up to `2025-11-25`), so streamable HTTP keeps stateful sessions.
+/// It speaks the protocol revisions that still have an `initialize` handshake (up to
+/// `2025-11-25`), so streamable HTTP keeps stateful sessions.
 #[derive(Clone)]
 pub struct ToolServer {
     info: Implementation,
@@ -61,7 +60,7 @@ impl ToolServer {
         }
     }
 
-    /// Go `mcp.AddTool`: adds `tool`, answered by `handler`.
+    /// Adds `tool`, answered by `handler`.
     pub fn tool<H, Fut>(self, tool: Tool, handler: H) -> Self
     where
         H: Fn(CallToolRequestParams, RequestContext<RoleServer>) -> Fut + Send + Sync + 'static,
@@ -73,10 +72,10 @@ impl ToolServer {
         self
     }
 
-    /// Adds set_test.go's `weatherFunc` as tool `name` (an empty `description` is omitted, as
-    /// Go's zero `Description` is): go-sdk's exact input schema for `Input{City}` and output
-    /// schema for `Output{WeatherSummary}`, answering `{"weather_summary": "Today in \"<city>\"
-    /// is sunny"}` as structured content with its JSON text as the content, as go-sdk does.
+    /// Adds a weather tool as `name` (an empty `description` is omitted): the input schema takes a
+    /// `city`, the output schema a `weather_summary`; it answers
+    /// `{"weather_summary": "Today in \"<city>\" is sunny"}` as structured content, with that
+    /// JSON's text as the content.
     pub fn weather(self, name: &str, description: &str) -> Self {
         let description = (!description.is_empty()).then(|| Cow::Owned(description.to_owned()));
         let tool = Tool::new_with_raw(name.to_owned(), description, object(weather_input_schema()))
@@ -127,7 +126,7 @@ impl ServerHandler for ToolServer {
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
-        // go-sdk: an unknown tool is a JSON-RPC invalid-params error.
+        // An unknown tool is a JSON-RPC invalid-params error.
         let Some(handler) = self.handler(&request.name) else {
             return Err(ErrorData::invalid_params(
                 format!("unknown tool {}", gadk_agent::go_quote(&request.name)),
@@ -145,15 +144,15 @@ impl ServerHandler for ToolServer {
     }
 }
 
-/// set_test.go's server: `weather_server` `v1.0.0` with
+/// The weather server: `weather_server` `v1.0.0` with
 /// `.weather("get_weather", "returns weather in the given city")`.
 pub fn weather_server() -> ToolServer {
     ToolServer::new("weather_server", "v1.0.0")
         .weather("get_weather", "returns weather in the given city")
 }
 
-/// go-sdk's inferred schema for `Input{City string `json:"city" jsonschema:"city name"`}`, as
-/// the recorded Gemini requests carry it.
+/// The input schema of the weather tool: a required string `city` ("city name"), as the recorded
+/// Gemini requests carry it.
 fn weather_input_schema() -> Value {
     json!({
         "additionalProperties": false,
@@ -163,8 +162,8 @@ fn weather_input_schema() -> Value {
     })
 }
 
-/// go-sdk's inferred schema for `Output{WeatherSummary string `json:"weather_summary"
-/// jsonschema:"weather summary in the given city"`}`.
+/// The output schema of the weather tool: a required string `weather_summary` ("weather summary in
+/// the given city").
 fn weather_output_schema() -> Value {
     json!({
         "additionalProperties": false,
@@ -186,9 +185,8 @@ fn object(v: Value) -> JsonObject {
     }
 }
 
-/// go-sdk's typed handler around `weatherFunc`: validate the arguments against the input schema
-/// (failures are an `isError` result), then answer the output as structured content and as its
-/// `json.Marshal` text.
+/// The weather tool's handler: validates the arguments against the input schema (failures are an
+/// `isError` result), then answers the output as structured content and as its JSON text.
 fn weather_call(args: JsonObject) -> CallToolResult {
     if let Err(e) = validate_weather_input(&args) {
         return without_is_error(CallToolResult::error(vec![ContentBlock::text(format!(
@@ -203,7 +201,7 @@ fn weather_call(args: JsonObject) -> CallToolResult {
     without_is_error(result)
 }
 
-/// go-sdk sends `isError` only when true (`omitempty`).
+/// Clears `isError` unless it is true, so it is only sent when true.
 fn without_is_error(mut result: CallToolResult) -> CallToolResult {
     if result.is_error != Some(true) {
         result.is_error = None;
@@ -211,8 +209,8 @@ fn without_is_error(mut result: CallToolResult) -> CallToolResult {
     result
 }
 
-/// jsonschema-go's validation of `Input` (texts of its `validate.go`): property types, then
-/// `additionalProperties: false`, then `required`.
+/// Validates the arguments against the input schema, with the schema validator's error texts:
+/// property types, then `additionalProperties: false`, then `required`.
 fn validate_weather_input(args: &JsonObject) -> Result<(), String> {
     if let Some(city) = args.get("city")
         && !city.is_string()
@@ -255,9 +253,9 @@ fn json_type(v: &Value) -> &'static str {
     }
 }
 
-/// Go `json.Marshal` text of `v`: serde's compact form with Go's HTML escaping (`<`, `>`, `&`,
-/// U+2028 and U+2029 as `\u003c`, `\u003e`, `\u0026`, `\u2028`, `\u2029`). Those characters only
-/// occur inside strings, so escaping them in the whole text is exact.
+/// The compact JSON text of `v` with `<`, `>`, `&`, U+2028 and U+2029 escaped as `\u003c`,
+/// `\u003e`, `\u0026`, `\u2028` and `\u2029`. Those characters only occur inside strings, so
+/// escaping them in the whole text is exact.
 fn go_json_text(v: &Value) -> String {
     let mut out = String::new();
     for c in v.to_string().chars() {

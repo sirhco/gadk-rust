@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `plugin/agentanalytics/views.go` without the plugin state (7b-3): the
-//! per-event-type view definitions ([`Config::view_definitions`]), the DDL runner
+//! The per-event-type view definitions ([`Config::view_definitions`]), the DDL runner
 //! ([`ViewRunner`], [`BigQueryViewRunner`]) and [`sync_analytics_views`].
 
 use std::collections::BTreeSet;
@@ -39,13 +38,13 @@ use crate::event_types::{
 use crate::redaction::parse_payload_column_denylist;
 use crate::schema_upgrade::VIEW_TABLE_TYPE;
 
-/// Go `viewDDLTimeout`: each view's DDL gets its own deadline under the pass's context.
+/// Each view's DDL gets its own deadline under the pass's context.
 pub(crate) const VIEW_DDL_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Go `maxBigQueryIdentifierLen`: the longest dataset ID, and table or view name, in bytes.
+/// The longest dataset ID, and table or view name, in bytes.
 pub(crate) const MAX_BIGQUERY_IDENTIFIER_LEN: usize = 1024;
 
-/// A BigQuery view over the events table for one event type (Go `ViewDefinition`).
+/// A BigQuery view over the events table for one event type.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ViewDefinition {
     /// The unqualified view name (for example `v_llm_request`).
@@ -56,7 +55,7 @@ pub struct ViewDefinition {
     pub query: String,
 }
 
-/// Go `viewCommonColumns`: selected by every view (adk-python `_VIEW_COMMON_COLUMNS`).
+/// The columns selected by every view (adk-python `_VIEW_COMMON_COLUMNS`).
 pub(crate) const VIEW_COMMON_COLUMNS: [&str; 13] = [
     "timestamp",
     "event_id",
@@ -73,16 +72,16 @@ pub(crate) const VIEW_COMMON_COLUMNS: [&str; 13] = [
     "is_truncated",
 ];
 
-/// Go `eventViewSpec`: one view's event type and its extra column expressions.
+/// One view's event type and its extra column expressions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct EventViewSpec {
-    /// Go `eventType`.
+    /// The `event_type` the view filters on.
     pub(crate) event_type: &'static str,
-    /// Go `extraCols`: `<expr> AS <name>` SQL expressions.
+    /// The extra columns: `<expr> AS <name>` SQL expressions.
     pub(crate) extra_cols: &'static [&'static str],
 }
 
-/// Go `eventViewSpecs`: the 25 views in Go's (= adk-python `_EVENT_VIEW_DEFS`) order.
+/// The 25 views, in adk-python's `_EVENT_VIEW_DEFS` order.
 pub(crate) static EVENT_VIEW_SPECS: &[EventViewSpec] = &[
     EventViewSpec {
         event_type: EVENT_USER_MESSAGE_RECEIVED,
@@ -235,8 +234,8 @@ pub(crate) static EVENT_VIEW_SPECS: &[EventViewSpec] = &[
             "JSON_VALUE(attributes, '$.adk.source_event_id') AS source_event_id",
         ],
     },
-    // Go: deliberately differs from adk-python's EVENT_COMPACTION projection (which uses bare
-    // CAST(... AS FLOAT64), * 1000000, and TIMESTAMP_MICROS): SAFE_CAST, SAFE_MULTIPLY, and
+    // Deliberately differs from adk-python's EVENT_COMPACTION projection (which uses bare CAST(...
+    // AS FLOAT64), * 1000000, and TIMESTAMP_MICROS): SAFE_CAST, SAFE_MULTIPLY, and
     // SAFE.TIMESTAMP_MICROS yield NULL instead of failing the query on out-of-range numbers, and
     // the COALESCE fallback parses legacy RFC 3339 strings (including 9-digit nanoseconds). Both
     // projections expose the same column names and BigQuery types.
@@ -289,10 +288,9 @@ pub(crate) static EVENT_VIEW_SPECS: &[EventViewSpec] = &[
 ];
 
 impl Config {
-    /// Go `Config.ViewDefinitions()`: the `CREATE OR REPLACE VIEW` statements for this config,
-    /// one per view in `EVENT_VIEW_SPECS` order, honoring `view_prefix` (empty means `"v"`)
-    /// and `payload_column_denylist`. Errors for an invalid identifier or a view name equal
-    /// (case-insensitively) to the table name.
+    /// The `CREATE OR REPLACE VIEW` statements for this config, one per view in `EVENT_VIEW_SPECS`
+    /// order, honoring `view_prefix` (empty means `"v"`) and `payload_column_denylist`. Errors for
+    /// an invalid identifier or a view name equal (case-insensitively) to the table name.
     pub fn view_definitions(&self) -> Result<Vec<ViewDefinition>, Error> {
         let c = self.clone().apply_defaults();
         let denied = parse_payload_column_denylist(&c.payload_column_denylist)?;
@@ -306,7 +304,8 @@ impl Config {
     }
 }
 
-/// Go `viewDefinitionsWithDenied(projectID, datasetID, tableName, viewPrefix, deniedColumns)`.
+/// The view definitions for the given names and denied payload columns (see
+/// [`Config::view_definitions`]).
 pub(crate) fn view_definitions_with_denied(
     project_id: &str,
     dataset_id: &str,
@@ -323,7 +322,7 @@ pub(crate) fn view_definitions_with_denied(
 
     let mut defs = Vec::with_capacity(EVENT_VIEW_SPECS.len());
     for spec in EVENT_VIEW_SPECS {
-        // Go `strings.ToLower` on an ASCII event type.
+        // Event types are ASCII, so ASCII lower-casing is enough.
         let view_name = format!("{view_prefix}_{}", spec.event_type.to_ascii_lowercase());
         if view_name.len() > MAX_BIGQUERY_IDENTIFIER_LEN {
             return Err(Error::msg(format!(
@@ -359,10 +358,10 @@ pub(crate) fn view_definitions_with_denied(
     Ok(defs)
 }
 
-/// Go `strings.EqualFold(ascii, s)` where `ascii` is ASCII (a view name: a validated prefix,
-/// `_` and a lowercased event type). Go compares rune by rune under Unicode simple case
-/// folding; the only non-ASCII runes whose fold orbit holds an ASCII rune are U+212A KELVIN
-/// SIGN (`k`, `K`) and U+017F LATIN SMALL LETTER LONG S (`s`, `S`).
+/// Whether `s` equals the ASCII string `ascii` under Unicode simple case folding (`ascii` is a view
+/// name: a validated prefix, `_` and a lowercased event type). Characters are compared one by one;
+/// the only non-ASCII characters whose fold orbit holds an ASCII character are U+212A KELVIN SIGN
+/// (`k`, `K`) and U+017F LATIN SMALL LETTER LONG S (`s`, `S`).
 pub(crate) fn ascii_equal_fold(ascii: &str, s: &str) -> bool {
     let mut runes = s.chars();
     for a in ascii.bytes() {
@@ -382,8 +381,7 @@ pub(crate) fn ascii_equal_fold(ascii: &str, s: &str) -> bool {
     runes.next().is_none()
 }
 
-/// Go `projectViewColumns`: drops the extra expressions that reference a denied column
-/// (adk-python `_project_view_columns`).
+/// Drops the extra expressions that reference a denied column (adk-python `_project_view_columns`).
 pub(crate) fn project_view_columns(
     extra_cols: &[&'static str],
     denied_columns: &BTreeSet<String>,
@@ -398,8 +396,8 @@ pub(crate) fn project_view_columns(
         .collect()
 }
 
-/// Go `referencesDeniedColumn`: whether the SQL before the last ` AS `, with its string
-/// literals emptied, names a denied column as an identifier token.
+/// Whether the SQL before the last ` AS `, with its string literals emptied, names a denied column
+/// as an identifier token.
 pub(crate) fn references_denied_column(expr: &str, denied_columns: &BTreeSet<String>) -> bool {
     let sql_part = match expr.rfind(" AS ") {
         Some(idx) => &expr[..idx],
@@ -411,9 +409,8 @@ pub(crate) fn references_denied_column(expr: &str, denied_columns: &BTreeSet<Str
         .any(|col| contains_identifier_token(&sql_part, col))
 }
 
-/// Go `stripSQLStringLiterals`: empties every single-quoted SQL string literal (a backslash
-/// inside one escapes the next byte), so identifier scans skip JSON paths such as
-/// `'$.content'`.
+/// Empties every single-quoted SQL string literal (a backslash inside one escapes the next byte),
+/// so identifier scans skip JSON paths such as `'$.content'`.
 pub(crate) fn strip_sql_string_literals(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -439,9 +436,8 @@ pub(crate) fn strip_sql_string_literals(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// Go `containsIdentifierToken`: whether `s` contains `ident` bounded on both sides by a
-/// non-`[A-Za-z0-9_]` byte or the string's ends. Byte-wise like Go, so a match at any byte
-/// offset is found without slicing inside a UTF-8 sequence.
+/// Whether `s` contains `ident` bounded on both sides by a non-`[A-Za-z0-9_]` byte or the string's
+/// ends. Byte-wise, so a match at any byte offset is found without slicing inside a UTF-8 sequence.
 pub(crate) fn contains_identifier_token(s: &str, ident: &str) -> bool {
     if ident.is_empty() {
         return false;
@@ -464,39 +460,39 @@ pub(crate) fn contains_identifier_token(s: &str, ident: &str) -> bool {
     false
 }
 
-/// Go `isIdentChar`: `[A-Za-z0-9_]`.
+/// Whether `b` is in `[A-Za-z0-9_]`.
 pub(crate) fn is_ident_char(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
-/// Go `isValidProjectID`: non-empty `[A-Za-z0-9_.:-]`.
+/// Whether `s` is a valid project ID: non-empty `[A-Za-z0-9_.:-]`.
 pub(crate) fn is_valid_project_id(s: &str) -> bool {
     !s.is_empty()
         && s.bytes()
             .all(|b| is_ident_char(b) || b == b'-' || b == b'.' || b == b':')
 }
 
-/// Go `isValidIdentifier`: non-empty `[A-Za-z0-9_-]`.
+/// Whether `s` is a valid identifier: non-empty `[A-Za-z0-9_-]`.
 pub(crate) fn is_valid_identifier(s: &str) -> bool {
     !s.is_empty() && s.bytes().all(|b| is_ident_char(b) || b == b'-')
 }
 
-/// Go `isValidDatasetID`: 1 to [`MAX_BIGQUERY_IDENTIFIER_LEN`] bytes of `[A-Za-z0-9_]`.
+/// Whether `s` is a valid dataset ID: 1 to [`MAX_BIGQUERY_IDENTIFIER_LEN`] bytes of `[A-Za-z0-9_]`.
 pub(crate) fn is_valid_dataset_id(s: &str) -> bool {
     !s.is_empty() && s.len() <= MAX_BIGQUERY_IDENTIFIER_LEN && s.bytes().all(is_ident_char)
 }
 
-/// Go `unicode.IsLetter` (category L) or `unicode.IsDigit` (category Nd). The categories come
-/// from the `regex` crate's Unicode tables (as `gadk_platform`'s `unicode.IsPrint` port), whose
-/// Unicode version may differ slightly from Go's for newly assigned code points.
+/// A Unicode letter (category L) or digit (category Nd). The categories come from the `regex`
+/// crate's Unicode tables, whose Unicode version may differ slightly from that of an ADK server for
+/// newly assigned code points.
 #[allow(clippy::expect_used)] // constant pattern, cannot fail
 static GO_LETTER_OR_DIGIT: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"^[\p{L}\p{Nd}]$").expect("valid letter/digit regex"));
 
-/// Go `isValidTableName` (Unicode letters and digits, `_`, `-`, space): not blank (Go
-/// `strings.TrimSpace(s) == ""`) and at most [`MAX_BIGQUERY_IDENTIFIER_LEN`] bytes.
+/// Whether `s` is a valid table name (Unicode letters and digits, `_`, `-`, space): not blank
+/// (trimming Unicode White_Space) and at most [`MAX_BIGQUERY_IDENTIFIER_LEN`] bytes.
 pub(crate) fn is_valid_table_name(s: &str) -> bool {
-    // Go `strings.TrimSpace` trims Unicode White_Space, as `str::trim` does.
+    // `str::trim` trims Unicode White_Space.
     if s.trim().is_empty() || s.len() > MAX_BIGQUERY_IDENTIFIER_LEN {
         return false;
     }
@@ -510,8 +506,8 @@ pub(crate) fn is_valid_table_name(s: &str) -> bool {
     })
 }
 
-/// Go `validateViewIdentifiers`: the project ID, dataset ID, table name and view prefix are
-/// checked in that order; the first invalid one is reported with its Go `%q` text.
+/// The project ID, dataset ID, table name and view prefix are checked in that order; the first
+/// invalid one is reported with its quoted text (`go_quote`).
 pub(crate) fn validate_view_identifiers(
     project_id: &str,
     dataset_id: &str,
@@ -545,16 +541,15 @@ pub(crate) fn validate_view_identifiers(
     Ok(())
 }
 
-/// Runs one view's DDL (Go `viewRunner`), so view creation can be tested without BigQuery.
+/// Runs one view's DDL so view creation can be tested without BigQuery.
 #[async_trait::async_trait]
 pub trait ViewRunner: Send + Sync {
-    /// Go `RunViewDDL(ctx, viewName, query)`.
+    /// Runs the DDL `query` that creates the view `view_name`.
     async fn run_view_ddl(&self, ctx: &Context, view_name: &str, query: &str) -> Result<(), Error>;
 }
 
-/// The BigQuery DDL runner (Go `bqViewRunner`). The client is weak (Go `weak.Pointer`): the
-/// plugin keeps it alive; once it is dropped every run fails with Go's "client is not
-/// configured" error.
+/// The BigQuery DDL runner The client is weak: the plugin keeps it alive; once it is dropped every
+/// run fails with the "client is not configured" error.
 #[derive(Debug, Clone)]
 pub struct BigQueryViewRunner {
     pub(crate) client: Weak<BigQueryClient>,
@@ -564,7 +559,7 @@ pub struct BigQueryViewRunner {
 
 impl BigQueryViewRunner {
     /// A runner over `client` for views in `project_id.dataset_id` (an empty project means the
-    /// client's project, Go `client.Dataset`).
+    /// client's project).
     pub fn new(
         client: Weak<BigQueryClient>,
         project_id: impl Into<String>,
@@ -580,10 +575,9 @@ impl BigQueryViewRunner {
 
 #[async_trait::async_trait]
 impl ViewRunner for BigQueryViewRunner {
-    /// Go `bqViewRunner.RunViewDDL`: an existing view with the same query (trimmed) is left
-    /// alone; an existing table of another type is refused (`cannot replace existing BigQuery
-    /// <TYPE> "<view>" with a view`); otherwise a `CREATE OR REPLACE VIEW` query job runs and is
-    /// awaited, and its error returned.
+    /// An existing view with the same query (trimmed) is left alone; an existing table of another
+    /// type is refused (`cannot replace existing BigQuery <TYPE> "<view>" with a view`); otherwise
+    /// a `CREATE OR REPLACE VIEW` query job runs and is awaited, and its error returned.
     async fn run_view_ddl(&self, ctx: &Context, view_name: &str, query: &str) -> Result<(), Error> {
         let Some(client) = self.client.upgrade() else {
             return Err(Error::msg(
@@ -594,13 +588,13 @@ impl ViewRunner for BigQueryViewRunner {
             && !view_name.is_empty()
             && let Some((_, select_body)) = query.split_once(" AS\n")
         {
-            // Go `client.Dataset(datasetID)` is the client's project.
+            // An empty project is the client's project.
             let project_id = if self.project_id.is_empty() {
                 client.project_id()
             } else {
                 self.project_id.as_str()
             };
-            // A failed read is left for the job to decide (Go ignores the error).
+            // A failed read is left for the job to decide.
             if let Ok(md) = client
                 .get_table(ctx, project_id, &self.dataset_id, view_name)
                 .await
@@ -615,7 +609,7 @@ impl ViewRunner for BigQueryViewRunner {
                         go_quote(view_name)
                     )));
                 }
-                // Go `strings.TrimSpace` = `str::trim` (both Unicode White_Space).
+                // Both queries are trimmed of Unicode White_Space.
                 if md.table_type == VIEW_TABLE_TYPE && md.view_query.trim() == select_body.trim() {
                     return Ok(());
                 }
@@ -635,10 +629,9 @@ impl ViewRunner for BigQueryViewRunner {
     }
 }
 
-/// Go `syncAnalyticsViews(ctx, runner, defs, logf)`: runs every definition (each under its own
-/// `VIEW_DDL_TIMEOUT`); a conflict counts as created; stops when `ctx` ends; joins the errors.
-/// `logf` (Go's non-nil `logf`, a non-default logger) gets each failure that is not a
-/// cancellation and the pass summary.
+/// Runs every definition (each under its own `VIEW_DDL_TIMEOUT`); a conflict counts as created;
+/// stops when `ctx` ends; joins the errors. `logf` (a non-default logger) gets each failure that is
+/// not a cancellation and the pass summary.
 pub async fn sync_analytics_views(
     ctx: &Context,
     runner: &dyn ViewRunner,

@@ -13,9 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! An agent that loads and describes artifacts through the `load_artifacts` tool (port of Go
-//! examples/tools/loadartifacts/main.go). The image is compiled in, so the example runs from any
-//! directory (Go reads `animal_picture.png` from the working directory).
+//! An agent that loads and describes artifacts through the `load_artifacts` tool. The image
+//! is compiled in, so the example runs from any directory.
 //!
 //! `GOOGLE_API_KEY=... cargo run -p gadk --example load_artifacts`, then ask
 //! "What artifacts do you have? Describe them.".
@@ -36,7 +35,7 @@ use gadk::session::{CreateRequest, InMemorySessionService, SessionService};
 const USER_ID: &str = "test_user";
 const APP_NAME: &str = "test_app";
 
-/// Go's `animal_picture.png`, byte-for-byte.
+/// The sample image the agent loads, compiled in.
 const ANIMAL_PICTURE: &[u8] = include_bytes!("assets/animal_picture.png");
 
 #[tokio::main]
@@ -110,7 +109,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Go's stdin loop: one line per turn, printing the streamed (partial) model text.
+/// Reads stdin, one line per turn, printing the streamed (partial) model text.
 async fn repl(runner: &Runner, user_id: &str, session_id: &str) -> anyhow::Result<()> {
     let stdin = std::io::stdin();
     loop {

@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A BigQuery REST admin client for the calls ADK-Go's `plugin/agentanalytics` makes through
-//! `cloud.google.com/go/bigquery` (`tables.get` / `insert` / `patch`, query jobs), and (feature
+//! A BigQuery REST admin client for the calls the plugin makes
+//! (`tables.get` / `insert` / `patch`, query jobs), and (feature
 //! `testutil`) the in-memory fakes its tests use.
 
 pub mod rest;

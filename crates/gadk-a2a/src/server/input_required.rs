@@ -13,7 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Input-required handling (port of ADK-Go `server/adka2a/v2/input_required.go`).
+//! Input-required handling: collecting long-running function calls into the input-required
+//! status update, and checking that a resuming message answers them.
 
 use std::collections::HashMap;
 #[cfg(feature = "client")]
@@ -40,18 +41,18 @@ use crate::convert::{
 /// The part metadata key marking the missing-input error part.
 const VALIDATION_ERROR_KEY: &str = "validation_error";
 
-/// Go `inputRequiredProcessor`: collects the long-running function calls (and their interim
+/// Collects the long-running function calls (and their interim
 /// responses) of a run into the input-required status update that ends it.
 pub(crate) struct InputRequiredProcessor {
     task: TaskInfo,
     event: Option<a2a::TaskStatusUpdateEvent>,
     part_converter: Option<GenAIPartConverter>,
-    /// Go `addedParts`: handles possible duplication in partial and non-partial events.
+    /// The parts already collected: handles possible duplication in partial and non-partial events.
     added_parts: Vec<Part>,
 }
 
 impl InputRequiredProcessor {
-    /// Go `newInputRequiredProcessor`.
+    /// A processor for the run of `task`.
     pub(crate) fn new(task: TaskInfo, part_converter: Option<GenAIPartConverter>) -> Self {
         Self {
             task,
@@ -61,13 +62,13 @@ impl InputRequiredProcessor {
         }
     }
 
-    /// Go `inputRequiredProcessor.event`: the input-required status update, once a long-running
+    /// The input-required status update, once a long-running
     /// call was seen.
     pub(crate) fn event(&self) -> Option<&a2a::TaskStatusUpdateEvent> {
         self.event.as_ref()
     }
 
-    /// Go `process`: moves the long-running function calls and responses of `event` into the
+    /// Moves the long-running function calls and responses of `event` into the
     /// input-required status update. Returns the event without those parts when any were
     /// taken (`None` means `event` is unchanged), so they are not duplicated in the response.
     pub(crate) async fn process(&mut self, event: &Event) -> Result<Option<Event>, Error> {
@@ -150,7 +151,7 @@ impl InputRequiredProcessor {
         Ok(Some(modified))
     }
 
-    /// Go `convertParts`.
+    /// Converts `parts` to A2A parts, through the part converter when one is set.
     async fn convert_parts(
         &self,
         event: &Event,
@@ -169,7 +170,7 @@ impl InputRequiredProcessor {
         Ok(converted)
     }
 
-    /// Go `isLongRunningResponse`: a function response to a long-running call of this event or
+    /// A function response to a long-running call of this event or
     /// of a call already in the input-required status message.
     fn is_long_running_response(&self, event: &Event, part: &Part) -> bool {
         let Some(response) = &part.function_response else {
@@ -198,7 +199,7 @@ impl InputRequiredProcessor {
     }
 }
 
-/// Go `HandleInputRequired`: checks whether the input message answers every function call the
+/// Checks whether the input message answers every function call the
 /// previous invocation recorded in the task's input-required status message. When it does not,
 /// the returned event (still input-required, naming the first unanswered call) is the result of
 /// the execution.
@@ -240,8 +241,8 @@ pub async fn handle_input_required(
     Ok(None)
 }
 
-/// Go `subagentTask`: a remote sub-agent's task waiting for input.
-// Used by the cleanup's child-task cancel, which needs the client side (plan D12).
+/// A remote sub-agent's task waiting for input.
+// Used by the cleanup's child-task cancel, which needs the client side.
 #[cfg(feature = "client")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SubagentTask {
@@ -249,9 +250,9 @@ pub(crate) struct SubagentTask {
     pub(crate) task_id: String,
 }
 
-/// Go `getSubagentTasksToCancel`: the remote tasks behind the pending long-running calls of
+/// The remote tasks behind the pending long-running calls of
 /// `status`, found from the newest session event backwards.
-// Used by the cleanup's child-task cancel, which needs the client side (plan D12).
+// Used by the cleanup's child-task cancel, which needs the client side.
 #[cfg(feature = "client")]
 pub(crate) fn get_subagent_tasks_to_cancel(
     status: &a2a::TaskStatus,
@@ -310,9 +311,9 @@ pub(crate) fn get_subagent_tasks_to_cancel(
     Ok(tasks_to_cancel)
 }
 
-/// Go `getPendingLongRunningCallIDs`: the function-call IDs in an input-required status
+/// The function-call IDs in an input-required status
 /// message (none for any other state).
-// Used by the cleanup's child-task cancel, which needs the client side (plan D12).
+// Used by the cleanup's child-task cancel, which needs the client side.
 #[cfg(feature = "client")]
 pub(crate) fn get_pending_long_running_call_ids(
     status: &a2a::TaskStatus,
@@ -331,7 +332,7 @@ pub(crate) fn get_pending_long_running_call_ids(
         .collect())
 }
 
-/// Go `makeInputMissingErrorMessage`: the input-required parts without earlier validation
+/// The input-required parts without earlier validation
 /// errors, plus a validation error naming `call_id`.
 fn make_input_missing_error_message(
     input_required_parts: &[a2a::Part],

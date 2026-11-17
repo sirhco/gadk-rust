@@ -13,10 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of the span attributes of Go `internal/telemetry/telemetry.go`: the start and result
-//! attributes of the `generate_content` and `execute_tool` spans, the merged tool-call span,
-//! `RecordError` and `errorType`, honoring the content-capture mode and the legacy (1.36)
-//! schema switch of [`env`](super::env).
+//! Span attributes: the start and result attributes of the `generate_content` and `execute_tool`
+//! spans, the merged tool-call span, error recording and `error.type`, honoring the content-capture
+//! mode and the legacy (1.36) schema switch of [`env`](super::env).
 
 use std::sync::Arc;
 
@@ -33,28 +32,28 @@ use super::genai_messages::{
 };
 use super::inference::{GEN_AI_PROVIDER_NAME, provider_name};
 
-/// Go `executeToolName`.
+/// The `gen_ai.operation.name` of a tool-call span.
 pub(crate) const EXECUTE_TOOL_NAME: &str = "execute_tool";
-/// Go `mergeToolName`.
+/// The tool name recorded on the merged tool-call span.
 pub(crate) const MERGE_TOOL_NAME: &str = "(merged tools)";
 
-/// Go `gcpVertexAgentToolCallArgsName`.
+/// Attribute carrying a tool call's arguments as JSON (legacy schema).
 pub(crate) const GCP_VERTEX_AGENT_TOOL_CALL_ARGS: &str = "gcp.vertex.agent.tool_call_args";
-/// Go `gcpVertexAgentEventID`.
+/// Attribute carrying the ID of the event a span produced.
 pub(crate) const GCP_VERTEX_AGENT_EVENT_ID: &str = "gcp.vertex.agent.event_id";
-/// Go `gcpVertexAgentToolResponseName`.
+/// Attribute carrying a tool call's response as JSON (legacy schema).
 pub(crate) const GCP_VERTEX_AGENT_TOOL_RESPONSE: &str = "gcp.vertex.agent.tool_response";
-/// Go `gcpVertexAgentInvocationID`.
+/// Attribute carrying the invocation ID.
 pub(crate) const GCP_VERTEX_AGENT_INVOCATION_ID: &str = "gcp.vertex.agent.invocation_id";
-/// Go `genAIUsageCacheReadInputTokens`.
+/// Attribute counting input tokens read from the cache.
 pub(crate) const GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS: &str =
     "gen_ai.usage.cache_read.input_tokens";
-/// Go `genAIUsageReasoningOutputTokens`.
+/// Attribute counting reasoning (thinking) output tokens.
 pub(crate) const GEN_AI_USAGE_REASONING_OUTPUT_TOKENS: &str =
     "gen_ai.usage.reasoning.output_tokens";
-/// Go `genAIToolCallArguments`.
+/// Attribute carrying a tool call's arguments (default schema, with span content capture).
 pub(crate) const GEN_AI_TOOL_CALL_ARGUMENTS: &str = "gen_ai.tool.call.arguments";
-/// Go `genAIToolCallResult`.
+/// Attribute carrying a tool call's result (default schema, with span content capture).
 pub(crate) const GEN_AI_TOOL_CALL_RESULT: &str = "gen_ai.tool.call.result";
 /// semconv `gen_ai.operation.name`.
 pub(crate) const GEN_AI_OPERATION_NAME: &str = "gen_ai.operation.name";
@@ -80,12 +79,12 @@ pub(crate) const SCHEMA_URL_1_36: &str = "https://opentelemetry.io/schemas/1.36.
 /// The default (1.44) schema URL.
 pub(crate) const SCHEMA_URL_1_44: &str = "https://opentelemetry.io/schemas/1.44.0";
 
-/// Go `errorType` and its value for an error that is not a `genai.APIError` (shared with
-/// gadk-agent's agent spans).
+/// [`error_type`] and the fixed type name it gives a plain error that is not an API error (shared
+/// with gadk-agent's agent spans).
 pub(crate) use gadk_agent::agent::telemetry::{GO_ERROR_STRING_TYPE, error_type};
 
-/// Go `schemaURL`: the schema of the tracer and the logger, following the env. `tracing` has no
-/// instrumentation scope, so nothing records it; the debug view does not show it.
+/// The schema of the tracer and the logger, following the env. `tracing` has no instrumentation
+/// scope, so nothing records it; the debug view does not show it.
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn schema_url() -> &'static str {
     if use_legacy_schema() {
@@ -95,13 +94,13 @@ pub(crate) fn schema_url() -> &'static str {
     }
 }
 
-/// An error as a span records it: Go's `err.Error()` (the status description) and
-/// [`error_type`] (`error.type`).
+/// An error as a span records it: its message (the status description) and [`error_type`]
+/// (`error.type`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SpanError {
-    /// Go `err.Error()`.
+    /// The error's message.
     pub(crate) message: String,
-    /// Go `errorType(err)`.
+    /// The `error.type` value.
     pub(crate) error_type: String,
 }
 
@@ -114,7 +113,7 @@ impl SpanError {
         }
     }
 
-    /// The span form of a Go `errors.New(message)`.
+    /// The span form of a plain text error with `message`.
     pub(crate) fn text(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
@@ -123,9 +122,9 @@ impl SpanError {
     }
 }
 
-/// Go `RecordError`: marks `span` failed with `err` (status `ERROR`, the description in
-/// `error.message`, and an error event standing in for OTel's `exception` event) and, in the
-/// default schema, sets `error.type`. `None` records nothing.
+/// Marks `span` failed with `err` (status `ERROR`, the description in `error.message`, and an error
+/// event standing in for OTel's `exception` event) and, in the default schema, sets `error.type`.
+/// `None` records nothing.
 pub(crate) fn record_error(span: &tracing::Span, err: Option<&SpanError>) {
     let Some(err) = err else { return };
     span.record("otel.status_code", "ERROR");
@@ -149,22 +148,22 @@ pub(crate) fn record_attrs(span: &tracing::Span, attrs: &[(&'static str, AttrVal
     }
 }
 
-/// Go `GenerateContentParams` (the request is passed separately).
+/// The parameters of a `generate_content` span (the request is passed separately).
 #[derive(Debug, Clone, Default)]
 pub(crate) struct GenerateContentParams {
-    /// Go `ModelName`.
+    /// The model name.
     pub(crate) model_name: String,
-    /// Go `InvocationID`.
+    /// The invocation ID.
     pub(crate) invocation_id: String,
-    /// Go `Backend` (`None` = `BackendUnspecified`).
+    /// The model backend (`None` when unspecified).
     pub(crate) backend: Option<Backend>,
-    /// Go `Stream`: whether the model was asked to stream.
+    /// Whether the model was asked to stream.
     pub(crate) stream: bool,
 }
 
-/// Go `startGenerateContentSpan`: the invocation ID (read by adk-web), operation, model and, in
-/// the default schema, the provider; the legacy schema with span content capture also records
-/// the request content (the default schema records it through
+/// Starts a `generate_content` span: the invocation ID (read by adk-web), operation, model and, in
+/// the default schema, the provider; the legacy schema with span content capture also records the
+/// request content (the default schema records it through
 /// [`OperationDetails`](super::semconv::OperationDetails)).
 pub(crate) fn start_generate_content_span(
     params: &GenerateContentParams,
@@ -181,22 +180,22 @@ pub(crate) fn start_generate_content_span(
     span
 }
 
-/// Go `generateContentResult`: what a `generate_content` call produced.
+/// What a `generate_content` call produced.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct GenerateContentResult {
-    /// Go `Response`: the latest response of the call.
+    /// The latest response of the call.
     pub(crate) response: Option<Arc<LlmResponse>>,
-    /// Go `EventID`: the event ID reserved for [`Self::response`].
+    /// The event ID reserved for [`Self::response`].
     pub(crate) event_id: String,
-    /// Go `Error`.
+    /// The error the call failed with, if any.
     pub(crate) error: Option<SpanError>,
-    /// Go `Responses`: every response of the call in order, ending with [`Self::response`];
-    /// empty means [`Self::response`] alone. The legacy schema reads only the latter.
+    /// Every response of the call in order, ending with [`Self::response`]; empty means
+    /// [`Self::response`] alone. The legacy schema reads only the latter.
     pub(crate) responses: Vec<Arc<LlmResponse>>,
 }
 
 impl GenerateContentResult {
-    /// Go `responses()`.
+    /// Every response of the call in order, or the latest alone when none were collected.
     pub(crate) fn responses(&self) -> Vec<Arc<LlmResponse>> {
         if self.responses.is_empty()
             && let Some(r) = &self.response
@@ -206,8 +205,7 @@ impl GenerateContentResult {
         self.responses.clone()
     }
 
-    /// Go `usage()`: the latest reported usage (the legacy schema reads only the latest
-    /// response).
+    /// The latest reported usage (the legacy schema reads only the latest response).
     fn usage(&self) -> Option<gadk_genai::GenerateContentResponseUsageMetadata> {
         if use_legacy_schema() {
             return self.response.as_ref()?.usage_metadata.clone();
@@ -219,7 +217,8 @@ impl GenerateContentResult {
     }
 }
 
-/// Go `traceGenerateContentResult`.
+/// Records a `generate_content` result on `span`: the error, the result attributes and, with span
+/// content capture, the response content.
 pub(crate) fn trace_generate_content_result(span: &tracing::Span, r: &GenerateContentResult) {
     record_error(span, r.error.as_ref());
     record_attrs(span, &generate_content_result_attributes(r));
@@ -228,7 +227,7 @@ pub(crate) fn trace_generate_content_result(span: &tracing::Span, r: &GenerateCo
     }
 }
 
-/// Go `generateContentResultAttributes`: the content-free result attributes.
+/// The content-free result attributes.
 pub(crate) fn generate_content_result_attributes(
     r: &GenerateContentResult,
 ) -> Vec<(&'static str, AttrValue)> {
@@ -282,9 +281,8 @@ pub(crate) fn generate_content_result_attributes(
     attrs
 }
 
-/// Go `StartExecuteToolSpan`: the legacy schema records the arguments as JSON; the default one
-/// records them only with span content capture (and not for Go's nil arguments, an empty map
-/// here).
+/// Starts an `execute_tool` span: the legacy schema records the arguments as JSON; the default one
+/// records them only with span content capture and when there are any.
 pub(crate) fn start_execute_tool_span(tool_name: &str, args: &Map<String, Value>) -> tracing::Span {
     let span = super::execute_tool_span(tool_name);
     if use_legacy_schema() {
@@ -304,9 +302,9 @@ pub(crate) fn start_execute_tool_span(tool_name: &str, args: &Map<String, Value>
     span
 }
 
-/// Go `TraceToolResult`: the tool's description and response event; the default schema adds
-/// the call ID and (with span content capture, on success) the response; the legacy one the call
-/// ID and response JSON, `<not specified>` when unknown.
+/// Records a tool call's result: the tool's description and response event; the default schema adds
+/// the call ID and (with span content capture, on success) the response; the legacy one the call ID
+/// and response JSON, `<not specified>` when unknown.
 pub(crate) fn trace_tool_result(
     span: &tracing::Span,
     description: &str,
@@ -358,8 +356,8 @@ pub(crate) fn trace_tool_result(
     record_attrs(span, &attrs);
 }
 
-/// Go `TraceMergedToolCallsResult`: the merged span's result (`fn_response_event` is the merged
-/// response event).
+/// Records the merged tool-call span's result: the merged span's result (`fn_response_event` is the
+/// merged response event).
 pub(crate) fn trace_merged_tool_calls_result(
     span: &tracing::Span,
     fn_response_event: Option<&Event>,
@@ -384,7 +382,8 @@ pub(crate) fn trace_merged_tool_calls_result(
     record_attrs(span, &attrs);
 }
 
-/// Go `safeSerialize`: Go's `json.Marshal` text, `<not serializable>` on failure.
+/// Compact JSON text of `v` (sorted keys, `<`, `>` and `&` escaped), `<not serializable>` on
+/// failure.
 pub(crate) fn safe_serialize<T: Serialize + ?Sized>(v: &T) -> String {
     gadk_model::to_go_json(v)
         .ok()

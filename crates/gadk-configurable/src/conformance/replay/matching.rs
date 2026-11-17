@@ -13,12 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `internal/configurable/conformance/replayplugin/replay_plugin.go`'s request and tool-call
-//! matching: `verifyLLMRequestMatch` (go-cmp with ignored fields and `EquateEmpty`),
-//! `canonicalizeRequestContents`, the JSON-substring regexes, `modifyString`,
-//! `canonicalizeJSONSubstrings`, `verifyToolCallMatch` and `normalizeDescription`. Errors are
-//! Go's texts (the plugin wraps them in `AgentError`); a mismatch's diff body is a gadk
-//! field-path diff instead of go-cmp's (ledgered).
+//! The replay plugin's request and tool-call matching: `verify_llm_request_match` (a
+//! structural comparison with ignored fields and empty-equals-absent), the request-contents
+//! canonicalization, the JSON-substring regexes, `modify_string`,
+//! `canonicalize_json_substrings`, `verify_tool_call_match` and `normalize_description`.
+//! The error texts match ADK's conformance replay (the plugin wraps them in `AgentError`); a
+//! mismatch's diff body is a gadk field-path diff instead of ADK's structural-diff report.
 
 use std::borrow::Cow;
 use std::fmt::Write as _;
@@ -36,15 +36,14 @@ use crate::govalue::{
     GoMap, go_sprint, go_type_name, go_value_to_json, json_map_to_go, json_to_go_value,
 };
 
-/// The description Go forces on the expected `transfer_to_agent` declaration.
+/// The description forced on the expected `transfer_to_agent` declaration.
 const TRANSFER_TO_AGENT_DESCRIPTION: &str = "Transfer the question to another agent.
 This tool hands off control to another agent when it's more suitable to answer the user's question according to the agent's description.";
 
-/// The fields of Go's `model.LLMRequest` that `cmp.Diff` compares (`Tools` is ignored). Go's
-/// `Config.HTTPOptions` has no gadk counterpart (gadk keeps HTTP options on the request; sanitize
-/// clears them on the recorded side), so neither side's HTTP options take part.
-// Divergence (ledger 6c-2): Go compares the live `Config.HTTPOptions` against the recorded nil;
-// gadk's `LlmRequest.http_options` is ignored.
+/// The fields of the LLM request that are compared (`tools` is ignored). The request's
+/// HTTP options have no counterpart here (gadk keeps HTTP options on the request; sanitize
+/// clears them on the recorded side), so neither side's HTTP options take part: the live
+/// request's `http_options` is ignored.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 struct RequestFields {
     model: String,
@@ -53,10 +52,10 @@ struct RequestFields {
 }
 
 impl RequestFields {
-    /// Go's `cmpopts.IgnoreFields` and `EquateEmpty` applied up front: function declarations'
-    /// schemas and config labels cleared, an empty `ContinuationToken` (Go `[]byte`) equal to an
-    /// absent one, and every declaration description normalized (`transfer_to_agent` forced on
-    /// the expected side).
+    /// Ignore-fields and empty-equals-absent applied up front: function declarations'
+    /// schemas and config labels cleared, an empty `ContinuationToken` (a byte slice) equal to
+    /// an absent one, and every declaration description normalized (`transfer_to_agent` forced
+    /// on the expected side).
     fn normalized(
         model: &str,
         contents: &[Content],
@@ -94,21 +93,19 @@ impl RequestFields {
     }
 }
 
-/// Go `verifyLLMRequestMatch`: `LLM request mismatch for agent '%s' (index %d):\n%s` unless the
+/// `LLM request mismatch for agent '{name}' (index {i}):\n{diff}` unless the
 /// requests are equal (ignoring function declarations' schemas, request tools and config
-/// labels, with `EquateEmpty` and normalized descriptions), directly or after
-/// `canonicalizeRequestContents` on both sides.
+/// labels, with empty equal to absent and normalized descriptions), directly or after
+/// `canonicalize_request_contents` on both sides.
 ///
-/// Go normalizes and canonicalizes both requests in place; gadk compares copies.
-// Divergence (ledger 6c-2): Go's in-place edits (descriptions, canonicalized texts) are visible
-// on the live request afterwards; gadk leaves the live request untouched.
+/// Both requests are normalized and canonicalized as copies; the live request is left
+/// untouched.
 pub(crate) fn verify_llm_request_match(
     expected: &LlmRequestView,
     actual: &LlmRequest,
     agent_name: &str,
     agent_index: i64,
 ) -> Result<(), String> {
-    // Go: replay_plugin.go verifyLLMRequestMatch
     let mut exp = RequestFields::normalized(
         &expected.model,
         &expected.contents,
@@ -122,7 +119,7 @@ pub(crate) fn verify_llm_request_match(
         false,
     );
     if exp != act {
-        // If initial comparison fails due to string formatting (e.g., Python vs Go JSON
+        // If initial comparison fails due to string formatting (e.g., different JSON
         // whitespace or quote styles), normalize embedded JSON structures across both expected
         // and actual requests before re-comparing.
         canonicalize_request_contents(&mut exp);
@@ -137,10 +134,9 @@ pub(crate) fn verify_llm_request_match(
     Ok(())
 }
 
-/// Go `canonicalizeRequestContents`: every non-empty text part of the contents and of the
+/// Runs every non-empty text part of the contents and of the
 /// config's system instruction through [`canonicalize_json_substrings`].
 fn canonicalize_request_contents(req: &mut RequestFields) {
-    // Go: replay_plugin.go canonicalizeRequestContents
     for content in &mut req.contents {
         for part in &mut content.parts {
             if !part.text.is_empty() {
@@ -161,28 +157,29 @@ fn canonicalize_request_contents(req: &mut RequestFields) {
     }
 }
 
-// Go's regexes on RE2 semantics: `\s` is `[\t\n\f\r ]` (no `\v`, unlike the regex crate's ASCII
-// `\s`), `\b` is an ASCII word boundary, `(?i)` folds case with Unicode simple folding (both).
-/// Go `dataBlockRegex`: `parameters:` or `result:` followed by a JSON-like object/array.
+// The regexes follow RE2 semantics: `\s` is `[\t\n\f\r ]` (no `\v`, unlike the regex crate's
+// ASCII `\s`), `\b` is an ASCII word boundary, `(?i)` folds case with Unicode simple folding
+// (both).
+/// `parameters:` or `result:` followed by a JSON-like object/array.
 static DATA_BLOCK_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)(parameters|result):[\t\n\f\r ]*([\{\[].*[\}\]])")
         .unwrap_or_else(|e| unreachable!("{e}"))
 });
-/// Go `jsonCandidateRegex`: any standalone or embedded JSON-like object/array.
+/// Any standalone or embedded JSON-like object/array.
 static JSON_CANDIDATE_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"([\{\[].*[\}\]])").unwrap_or_else(|e| unreachable!("{e}")));
-/// Go `quoteRegex`: `'key'` or `'value'`.
+/// `'key'` or `'value'`.
 static QUOTE_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"'([^']*)'").unwrap_or_else(|e| unreachable!("{e}")));
-/// Go `nullRegex`: Python's `None`.
+/// Python's `None`.
 static NULL_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?-u:\b)None(?-u:\b)").unwrap_or_else(|e| unreachable!("{e}")));
-/// Go `boolRegex`: Python's `True` / `False`.
+/// Python's `True` / `False`.
 static BOOL_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?-u:\b)(True|False)(?-u:\b)").unwrap_or_else(|e| unreachable!("{e}"))
 });
 
-/// Go's Python-isms → JSON-isms step: single quotes → double quotes, `None` → `null`,
+/// The Python-isms → JSON-isms step: single quotes → double quotes, `None` → `null`,
 /// `True`/`False` → lowercase.
 fn pythonic_to_json(raw: &str) -> String {
     let normalized = QUOTE_REGEX.replace_all(raw, "\"$1\"");
@@ -192,10 +189,10 @@ fn pythonic_to_json(raw: &str) -> String {
         .into_owned()
 }
 
-/// Go `json.Unmarshal(text, &parsed)` into `any` followed by `json.Marshal(parsed)`: numbers
-/// become `float64`, keys sorted, Go's escaping; `None` where Go's `Unmarshal` fails.
+/// Parses the text as JSON into a dynamic value and marshals it again: numbers
+/// become `float64`, keys sorted, the recorded format's escaping; `None` where parsing fails.
 fn go_json_round_trip(text: &str) -> Option<String> {
-    // Divergence (ledger 6c-2): serde_json refuses nesting deeper than 128 levels, Go's decoder
+    // serde_json refuses nesting deeper than 128 levels, where the recorded format's decoder
     // allows 10000; such text stays as it is here.
     let parsed: Value = serde_json::from_str(&replace_lone_surrogates(text)).ok()?;
     let go = go_value_to_json(&json_to_go_value(&parsed)).ok()?;
@@ -203,8 +200,9 @@ fn go_json_round_trip(text: &str) -> Option<String> {
     String::from_utf8(bytes).ok()
 }
 
-/// Go's JSON decoder turns a `\uXXXX` escape of an unpaired UTF-16 surrogate into U+FFFD;
-/// serde_json rejects it. Rewrites each such escape inside a string literal to `\ufffd`.
+/// The recorded format's JSON decoder turns a `\uXXXX` escape of an unpaired UTF-16 surrogate
+/// into U+FFFD; serde_json rejects it. Rewrites each such escape inside a string literal to
+/// `\ufffd`.
 fn replace_lone_surrogates(text: &str) -> Cow<'_, str> {
     if !text.contains("\\u") {
         return Cow::Borrowed(text);
@@ -258,9 +256,8 @@ fn replace_lone_surrogates(text: &str) -> Cow<'_, str> {
     Cow::Owned(out)
 }
 
-/// Go `modifyString`: canonicalizes the JSON after each `parameters:` / `result:` label.
+/// Canonicalizes the JSON after each `parameters:` / `result:` label.
 pub(crate) fn modify_string(input: &str) -> String {
-    // Go: replay_plugin.go modifyString
     DATA_BLOCK_REGEX
         .replace_all(input, |c: &Captures<'_>| {
             let full_match = &c[0];
@@ -280,10 +277,9 @@ pub(crate) fn modify_string(input: &str) -> String {
         .into_owned()
 }
 
-/// Go `canonicalizeJSONSubstrings`: [`modify_string`], then every JSON-like candidate
-/// re-marshalled with Go's `json.Marshal` (sorted keys, Go escaping).
+/// [`modify_string`], then every JSON-like candidate
+/// re-marshalled (sorted keys, the recorded format's escaping).
 pub(crate) fn canonicalize_json_substrings(input: &str) -> String {
-    // Go: replay_plugin.go canonicalizeJSONSubstrings
     let s = modify_string(input);
     JSON_CANDIDATE_REGEX
         .replace_all(&s, |c: &Captures<'_>| {
@@ -293,9 +289,9 @@ pub(crate) fn canonicalize_json_substrings(input: &str) -> String {
         .into_owned()
 }
 
-/// Go `verifyToolCallMatch`: `tool name mismatch for agent '%s' (index %d): expected '%s', got
-/// '%s'`, `tool args mismatch for agent '%s' (index %d):\n%s` (Go `cmp.Diff` over
-/// yaml-typed recorded args vs the live args as Go's JSON-decoded `map[string]any`).
+/// `tool name mismatch for agent '{name}' (index {i}): expected '{expected}', got
+/// '{actual}'`, `tool args mismatch for agent '{name}' (index {i}):\n{diff}` (a structural
+/// comparison of yaml-typed recorded args against the live args as JSON-decoded maps).
 pub(crate) fn verify_tool_call_match(
     expected: &RecordedFunctionCall,
     tool_name: &str,
@@ -303,15 +299,13 @@ pub(crate) fn verify_tool_call_match(
     agent_name: &str,
     agent_index: i64,
 ) -> Result<(), String> {
-    // Go: replay_plugin.go verifyToolCallMatch
     if expected.name != tool_name {
         return Err(format!(
             "tool name mismatch for agent '{agent_name}' (index {agent_index}): expected '{}', got '{tool_name}'",
             expected.name
         ));
     }
-    // Divergence (ledger 6c-2): gadk's live args are never Go's nil map, so recorded `nil`
-    // args always differ from them (Go: equal only when the live map is nil too).
+    // gadk's live args are never a nil map, so recorded `nil` args always differ from them.
     let actual = json_map_to_go(tool_args);
     let equal = match &expected.args {
         Some(exp) => go_map_eq(exp, &actual),
@@ -326,10 +320,9 @@ pub(crate) fn verify_tool_call_match(
     Ok(())
 }
 
-/// Go `normalizeDescription`: each line trimmed, leading and trailing empty lines dropped.
+/// Each line trimmed, leading and trailing empty lines dropped.
 pub(crate) fn normalize_description(desc: &str) -> String {
-    // Go: replay_plugin.go normalizeDescription
-    // Go strings.TrimSpace and str::trim strip the same set (Unicode White_Space).
+    // `str::trim` strips Unicode White_Space.
     let mut cleaned: Vec<&str> = desc.split('\n').map(str::trim).collect();
     // Remove empty lines at the start and end
     while cleaned.first() == Some(&"") {
@@ -341,15 +334,15 @@ pub(crate) fn normalize_description(desc: &str) -> String {
     cleaned.join("\n")
 }
 
-/// Go `cmp.Equal` of two `map[string]any` without options: same keys, equal values.
+/// Whether two maps are equal without options: same keys, equal values.
 fn go_map_eq(a: &GoMap, b: &GoMap) -> bool {
     a.len() == b.len()
         && a.iter()
             .all(|(k, v)| b.get(k).is_some_and(|w| go_value_eq(v, w)))
 }
 
-/// Go `cmp.Equal` of two yaml/JSON-decoded `any` values: dynamic types must match (`int` and
-/// `float64` differ), floats compare with `==`, `time.Time` with `Equal` (same instant), maps
+/// Whether two yaml/JSON-decoded values are equal: dynamic types must match (`int` and
+/// `float64` differ), floats compare with `==`, timestamps by instant, maps
 /// by key whatever their order.
 fn go_value_eq(a: &GoValue, b: &GoValue) -> bool {
     match (a, b) {
@@ -383,10 +376,9 @@ fn go_value_eq(a: &GoValue, b: &GoValue) -> bool {
     }
 }
 
-// The field-path diff that replaces go-cmp's report in mismatch errors.
-// Divergence (ledger 6c-2): Go's body is `cmp.Diff`'s text; gadk writes one `-<path>: <expected>`
-// / `+<path>: <actual>` line pair per differing leaf (a side's line is left out when the value
-// is absent there).
+// The field-path diff that replaces a structural-diff report in mismatch errors: one
+// `-<path>: <expected>` / `+<path>: <actual>` line pair per differing leaf (a side's line is
+// left out when the value is absent there).
 
 /// The diff body of two unequal requests over their gadk JSON form (serde field names).
 fn request_diff(exp: &RequestFields, act: &RequestFields) -> String {
@@ -439,7 +431,7 @@ fn json_diff(path: &str, exp: Option<&Value>, act: Option<&Value>, out: &mut Str
     }
 }
 
-/// The diff body of unequal tool args (`args["key"][0]` paths, leaves as Go `type(value)`).
+/// The diff body of unequal tool args (`args["key"][0]` paths, leaves as `type(value)`).
 fn args_diff(exp: Option<&GoMap>, act: &GoMap) -> String {
     let mut out = String::new();
     match exp {
@@ -499,7 +491,7 @@ fn go_diff(path: &str, exp: Option<&GoValue>, act: Option<&GoValue>, out: &mut S
     }
 }
 
-/// A leaf as Go `%T(%v)`, strings quoted.
+/// A leaf as `type(value)`, strings quoted.
 fn go_repr(v: &GoValue) -> String {
     match v {
         GoValue::String(s) => gadk_platform::go_quote(s),

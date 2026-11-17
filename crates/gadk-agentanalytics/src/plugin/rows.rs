@@ -13,20 +13,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Rows of ADK-Go `plugin/agentanalytics/bigquery_agent_analytics_plugin.go`: `buildRow`,
-//! `newEventID`, `addContent`, `newPartsCollector`, `jsonColumn`, `attributes` (with the
-//! `otel` section), `adkEnvelope`, `addSourceEvent`, `putNonEmpty`, `parseNodePath`,
-//! `segmentRunID`, `deriveScope`, `sessionMetadata`, `stateSnapshot`, `llmRequestAttributes`,
-//! `llmConfig`, `toolDeclarations`, `llmRequestContent`, `buildLLMRequestContent`,
-//! `buildLLMResponseContent`, `llmResponseAttributes`, `cacheType`, `agentStartingData`,
-//! `agentConfig`, `identityOf`, `contextPath`, `runnerAgentOf`.
+//! Rows of the analytics plugin: `build_row`, `new_event_id`, `add_content`,
+//! `new_parts_collector`, `json_column`, `attributes` (with the `otel` section), `adk_envelope`,
+//! `add_source_event`, `put_non_empty`, `parse_node_path`, `segment_run_id`, `derive_scope`,
+//! `session_metadata`, `state_snapshot`, `llm_request_attributes`, `llm_config`,
+//! `tool_declarations`, `llm_request_content`, `build_llm_request_content`,
+//! `build_llm_response_content`, `llm_response_attributes`, `cache_type`, `agent_starting_data`,
+//! agent config, `identity_of`, context path, `runner_agent_of`.
 //!
-//! Go's reflection over the agent config is `gadk_engine::llm::llm_agent_config` (R1(c)) and
-//! `AgentState.agent_type`; Go's context path is `Context::path()`.
+//! The agent config is read with `gadk_engine::llm::llm_agent_config` and
+//! `AgentState.agent_type`; the context path is `Context::path()`.
 //!
-//! Go's `map[string]any` values that hold typed Go values (`*genai.Schema`, `float32` settings,
-//! `map[string]string` labels, metadata structs) are their sanitized JSON trees here
-//! ([`go_value`]), so the JSON written for them is Go's (a `float32` keeps its 32-bit text).
+//! Typed values in the `attributes` maps (schemas, `f32` settings, label maps, metadata structs)
+//! are their sanitized JSON trees ([`go_value`]), so the JSON written for them matches ADK's (an
+//! `f32` keeps its 32-bit text).
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -60,8 +60,8 @@ use crate::row::{QueuedRow, Row, RowValue, from_json_map};
 use crate::schema::{EVENT_ID_FIELD, TIMESTAMP_FIELD};
 use crate::trace::{CallbackCtx, Identity, Latency};
 
-/// Go's `built` flag and deferred `releaseRowUploads` in `buildRow`: a row whose building
-/// panics after `add_content` reserved upload bytes gives them back.
+/// Gives back the upload bytes `add_content` reserved if building the row panics before it is
+/// marked built.
 struct ReleaseUnlessBuilt<'a> {
     processor: Option<&'a BatchProcessor>,
     row: QueuedRow,
@@ -79,9 +79,8 @@ impl Drop for ReleaseUnlessBuilt<'_> {
 }
 
 impl AnalyticsPlugin {
-    /// Go `buildRow(ctx, id, eventType, d)`: the row of an event (identity, trace and span IDs,
-    /// timestamp, status, error, content via `add_content`, attributes, latency), with its
-    /// upload side channels in the `QueuedRow`.
+    /// The row of an event (identity, trace and span IDs, timestamp, status, error, content via
+    /// `add_content`, attributes, latency), with its upload side channels in the `QueuedRow`.
     pub(crate) fn build_row(
         &self,
         ctx: &CallbackCtx,
@@ -171,8 +170,7 @@ impl AnalyticsPlugin {
         std::mem::take(&mut g.row)
     }
 
-    /// Go `addContent(row, eventType, d)`: the `content` / `content_parts` columns; reports
-    /// truncation.
+    /// Fills the `content` / `content_parts` columns; reports truncation.
     ///
     /// Everything that goes into `row` is detached from the caller's messages; payloads to
     /// offload travel with the row as copies in `QueuedRow::raw_parts`. Synthetic events such
@@ -192,7 +190,7 @@ impl AnalyticsPlugin {
         if payload_is_nil(raw) || (content_denied && parts_denied) {
             return false;
         }
-        // Go `applyContentFormatter`: `formatted` is `None` when the payload is unchanged.
+        // Apply the content formatter: `formatted` is `None` when the payload is unchanged.
         let mut formatted: Option<Payload> = None;
         if let Some(formatter) = &self.config.content_formatter {
             let input = payload_json(raw);
@@ -234,15 +232,14 @@ impl AnalyticsPlugin {
 
         let max_len = self.config.max_content_length();
         let redact = self.config.redact_sensitive_keys();
-        // Go's `defer func() { row[rawPartsKey] = parts.pending }()`: the guard moves the
-        // queued uploads onto the row however this returns, a panic included, so the caller's
-        // guard releases their reserved bytes.
+        // The guard moves the queued uploads onto the row however this returns, a panic
+        // included, so the caller's guard releases their reserved bytes.
         let mut g = PendingPartsGuard {
             parts: (!parts_denied && self.config.log_multi_modal_content())
                 .then(|| self.new_parts_collector(max_len)),
             row,
         };
-        // Go's type switch: `(content, content_truncated, pre_formatted, builder)`.
+        // By payload type: `(content, content_truncated, pre_formatted, builder)`.
         let (content, content_truncated, pre_formatted, builder) = match payload {
             Payload::Content(c) => {
                 if let Some(parts) = g.parts.as_mut() {
@@ -340,7 +337,7 @@ impl AnalyticsPlugin {
         truncated
     }
 
-    /// Go `newPartsCollector(maxLen)`: offloading to Cloud Storage is on if the plugin has an
+    /// A parts collector for `max_len`: offloading to Cloud Storage is on if the plugin has an
     /// offloader.
     pub(crate) fn new_parts_collector(&self, max_len: i64) -> PartsCollector {
         let mut opts = PartsOptions {
@@ -360,8 +357,8 @@ impl AnalyticsPlugin {
         PartsCollector::new(opts)
     }
 
-    /// Go `jsonColumn(v)`: `(text, truncated)` — `v` as the JSON text of a JSON column, with
-    /// truncation and sensitive-key redaction.
+    /// `(text, truncated)` — `v` as the JSON text of a JSON column, with truncation and
+    /// sensitive-key redaction.
     pub(crate) fn json_column(&self, v: &Value) -> (String, bool) {
         match smart_truncate_with(
             v,
@@ -376,10 +373,9 @@ impl AnalyticsPlugin {
         }
     }
 
-    /// Go `attributes(eventID, id, agentName, span, d)`: the `attributes` object — the
-    /// event-specific attributes followed by the common ones — and whether scrubbing
-    /// `custom_metadata` lost content (always false, as Go). `span` is the ADK span the callback
-    /// runs in. Never `None` (the object always has `adk`).
+    /// The `attributes` object — the event-specific attributes followed by the common ones — and
+    /// whether scrubbing `custom_metadata` lost content (always false). `span` is the ADK span
+    /// the callback runs in. Never `None` (the object always has `adk`).
     pub(crate) fn attributes(
         &self,
         event_id: &str,
@@ -431,8 +427,7 @@ impl AnalyticsPlugin {
         (Some(attrs), meta_trunc)
     }
 
-    /// Go `adkEnvelope(eventID, id, agentName, d)`: `attributes.adk`, which identifies the ADK
-    /// objects a row belongs to.
+    /// `attributes.adk`, which identifies the ADK objects a row belongs to.
     pub(crate) fn adk_envelope(
         &self,
         event_id: &str,
@@ -472,12 +467,12 @@ impl AnalyticsPlugin {
     }
 }
 
-/// Go `newEventID()`: a random UUID as 32 lowercase hex digits (adk-python's `uuid4().hex`).
+/// A random UUID as 32 lowercase hex digits (adk-python's `uuid4().hex`).
 pub(crate) fn new_event_id() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
 
-/// Go `addSourceEvent(adk, ev)`.
+/// Adds the identifying fields of the session event `ev` to `adk`.
 pub(crate) fn add_source_event(adk: &mut Map<String, Value>, ev: &Event) {
     put_non_empty(adk, "source_event_id", &ev.id);
     put_non_empty(adk, "branch", &ev.branch);
@@ -519,23 +514,23 @@ pub(crate) fn add_source_event(adk: &mut Map<String, Value>, ev: &Event) {
     }
 }
 
-/// Go `putNonEmpty(m, key, value)`.
+/// Puts `value` under `key` unless it is empty.
 pub(crate) fn put_non_empty(m: &mut Map<String, Value>, key: &str, value: &str) {
     if !value.is_empty() {
         m.insert(key.to_owned(), Value::from(value));
     }
 }
 
-/// Go `putNonEmpty(row, key, value)` on a [`Row`].
+/// Puts `value` under `key` in a [`Row`] unless it is empty.
 fn put_non_empty_row(row: &mut Row, key: &str, value: &str) {
     if !value.is_empty() {
         row.insert(key.to_owned(), RowValue::from(value));
     }
 }
 
-/// Go `parseNodePath(path)`: the run ID of the last segment of a node path
-/// (`parent/name@run_id`) and the run ID of the segment before it (`null` when there is no
-/// parent segment or it has no run ID), as adk-python's `NodeInfo` does.
+/// The run ID of the last segment of a node path (`parent/name@run_id`) and the run ID of the
+/// segment before it (`null` when there is no parent segment or it has no run ID), as
+/// adk-python's `NodeInfo` does.
 pub(crate) fn parse_node_path(path: &str) -> (String, Value) {
     if path.is_empty() {
         return (String::new(), Value::Null);
@@ -552,13 +547,13 @@ pub(crate) fn parse_node_path(path: &str) -> (String, Value) {
     }
 }
 
-/// Go `segmentRunID(segment)`: the text after the last `@`, if any.
+/// The text after the last `@` of `segment`, if any.
 pub(crate) fn segment_run_id(segment: &str) -> Option<String> {
     segment.rfind('@').map(|i| segment[i + 1..].to_owned())
 }
 
-/// Go `deriveScope(scope)`: a scope whose last path segment has the node form `name@run_id`
-/// is a node run, any other scope a function call ID (as adk-python classifies them).
+/// A scope whose last path segment has the node form `name@run_id` is a node run, any other
+/// scope a function call ID (as adk-python classifies them).
 pub(crate) fn derive_scope(scope: &str) -> Map<String, Value> {
     let last = scope.rfind('/').map_or(scope, |i| &scope[i + 1..]);
     let kind = if last.contains('@') {
@@ -572,8 +567,7 @@ pub(crate) fn derive_scope(scope: &str) -> Map<String, Value> {
     m
 }
 
-/// Go `sessionMetadata(id)`: `attributes.session_metadata`. A state whose snapshot panics is
-/// left out (Go `orZero`).
+/// `attributes.session_metadata`. A state whose snapshot panics is left out.
 pub(crate) fn session_metadata(id: &Identity) -> Map<String, Value> {
     let mut md = Map::new();
     md.insert("session_id".to_owned(), Value::from(id.session_id.as_str()));
@@ -589,13 +583,12 @@ pub(crate) fn session_metadata(id: &Identity) -> Map<String, Value> {
     md
 }
 
-/// Go `stateSnapshot(s)` (`None` for a nil state).
+/// A snapshot of the state (`None` for no state).
 pub(crate) fn state_snapshot(s: Option<&Arc<dyn ReadonlyState>>) -> Option<Map<String, Value>> {
     s.map(|s| s.all().into_iter().collect())
 }
 
-/// Go `llmRequestAttributes(req)`: the model, generation settings, labels and tool
-/// declarations of `req`.
+/// The model, generation settings, labels and tool declarations of `req`.
 pub(crate) fn llm_request_attributes(req: &LlmRequest) -> Map<String, Value> {
     let mut attrs = Map::new();
     if !req.model.is_empty() {
@@ -619,8 +612,8 @@ pub(crate) fn llm_request_attributes(req: &LlmRequest) -> Map<String, Value> {
     attrs
 }
 
-/// Go `llmConfig(cfg)`: the generation settings adk-python records, plus the thinking
-/// configuration; unset settings are left out. `None` for a nil config.
+/// The generation settings adk-python records, plus the thinking configuration; unset settings
+/// are left out. `None` for no config.
 pub(crate) fn llm_config(cfg: Option<&GenerateContentConfig>) -> Option<Map<String, Value>> {
     let cfg = cfg?;
     let mut c = Map::new();
@@ -664,16 +657,16 @@ pub(crate) fn llm_config(cfg: Option<&GenerateContentConfig>) -> Option<Map<Stri
     Some(c)
 }
 
-/// Go `putIfSet(m, key, v)`.
+/// Puts `v` under `key` if it is set.
 fn put_if_set<T: Serialize>(m: &mut Map<String, Value>, key: &str, v: Option<&T>) {
     if let Some(v) = v {
         m.insert(key.to_owned(), go_value(v));
     }
 }
 
-/// Go `toolDeclarations(req)`: the tools of `req`, sorted by name, as `{name, description,
-/// parameters}` objects. Descriptions and parameter schemas come from the tool or, failing
-/// that, from its function declaration in the config.
+/// The tools of `req`, sorted by name, as `{name, description, parameters}` objects.
+/// Descriptions and parameter schemas come from the tool or, failing that, from its function
+/// declaration in the config.
 pub(crate) fn tool_declarations(req: &LlmRequest) -> Vec<Map<String, Value>> {
     if req.tools.is_empty() {
         return Vec::new();
@@ -728,10 +721,9 @@ pub(crate) fn tool_declarations(req: &LlmRequest) -> Vec<Map<String, Value>> {
     decls
 }
 
-/// Go `llmRequestContent(req, maxLen, redact, parts)`: `(content, truncated)` — the role and
-/// text summary of each request message and the summary of the system instruction, as
-/// adk-python builds them; `parts` (if any) collects the `content_parts` of the messages, then
-/// those of the system instruction.
+/// `(content, truncated)` — the role and text summary of each request message and the summary
+/// of the system instruction, as adk-python builds them; `parts` (if any) collects the
+/// `content_parts` of the messages, then those of the system instruction.
 #[cfg(test)]
 pub(crate) fn llm_request_content(
     req: &LlmRequest,
@@ -743,10 +735,9 @@ pub(crate) fn llm_request_content(
     (content.unwrap_or_default(), truncated)
 }
 
-/// Go `buildLLMRequestContent(req, maxLen, redact, contentDenied, parts)`: `(content,
-/// truncated, summary builder)`. The content ordinal of a message is its index in
-/// `req.contents`; that of the system instruction is `req.contents.len()`. Never `None`
-/// content (Go returns a non-nil map).
+/// `(content, truncated, summary builder)`. The content ordinal of a message is its index in
+/// `req.contents`; that of the system instruction is `req.contents.len()`. The content is never
+/// `None`.
 pub(crate) fn build_llm_request_content(
     req: &LlmRequest,
     max_len: i64,
@@ -802,10 +793,9 @@ pub(crate) fn build_llm_request_content(
     (Some(content), truncated, Some(b))
 }
 
-/// Go `buildLLMResponseContent(res, maxLen, redact, contentDenied, parts)`: the formatted
-/// response and the token usage, as in adk-python, plus `content_parts` when `parts` is set
-/// (Go's own addition: the text of every offloaded part leaves `content.response`). `None`
-/// content when `res` carries neither.
+/// The formatted response and the token usage, as in adk-python, plus `content_parts` when
+/// `parts` is set (the text of every offloaded part leaves `content.response`). `None` content
+/// when `res` carries neither.
 pub(crate) fn build_llm_response_content(
     res: &LlmResponse,
     max_len: i64,
@@ -858,8 +848,7 @@ pub(crate) fn build_llm_response_content(
     (Some(content), truncated, Some(b))
 }
 
-/// Go `addContent`'s deferred `row[rawPartsKey] = parts.pending`: on drop (a normal return or
-/// an unwind) moves the collector's queued uploads onto the row.
+/// On drop (a normal return or an unwind) moves the collector's queued uploads onto the row.
 struct PendingPartsGuard<'a> {
     row: &'a mut QueuedRow,
     parts: Option<PartsCollector>,
@@ -875,8 +864,7 @@ impl Drop for PendingPartsGuard<'_> {
     }
 }
 
-/// Go's loop over `parts.pending` after collecting: the text of every queued text upload
-/// leaves the summary.
+/// The text of every queued text upload leaves the summary.
 fn omit_pending_text(b: &mut ContentSummaryBuilder, parts: &PartsCollector) {
     for u in &parts.pending {
         if u.is_text {
@@ -885,7 +873,7 @@ fn omit_pending_text(b: &mut ContentSummaryBuilder, parts: &PartsCollector) {
     }
 }
 
-/// Go `llmResponseAttributes(res)`.
+/// The attributes of a model response.
 pub(crate) fn llm_response_attributes(res: &LlmResponse) -> Map<String, Value> {
     let mut attrs = Map::new();
     attrs.insert("partial".to_owned(), Value::Bool(res.partial));
@@ -946,8 +934,8 @@ pub(crate) fn llm_response_attributes(res: &LlmResponse) -> Map<String, Value> {
     attrs
 }
 
-/// Go `cacheType(u)`: `"none"` without cached tokens, `"implicit"` with them (ADK responses
-/// carry no explicit context-cache metadata).
+/// `"none"` without cached tokens, `"implicit"` with them (ADK responses carry no explicit
+/// context-cache metadata).
 pub(crate) fn cache_type(u: Option<&GenerateContentResponseUsageMetadata>) -> String {
     match u {
         Some(u) if u.cached_content_token_count > 0 => "implicit".to_owned(),
@@ -955,10 +943,9 @@ pub(crate) fn cache_type(u: Option<&GenerateContentResponseUsageMetadata>) -> St
     }
 }
 
-/// Go `agentStartingData(a)`: `(content, attributes)` of an `AGENT_STARTING` row, as
-/// adk-python: the static instruction of an LLM agent as content, and its description, model,
-/// sub-agent names and, when an instruction provider builds the instruction,
-/// `instruction_source: "provider"` (with no content).
+/// `(content, attributes)` of an `AGENT_STARTING` row, as adk-python: the static instruction of
+/// an LLM agent as content, and its description, model, sub-agent names and, when an instruction
+/// provider builds the instruction, `instruction_source: "provider"` (with no content).
 pub(crate) fn agent_starting_data(a: &dyn Agent) -> (Option<Value>, Map<String, Value>) {
     let mut attrs = Map::new();
     put_non_empty(&mut attrs, "agent_description", a.description());
@@ -972,9 +959,8 @@ pub(crate) fn agent_starting_data(a: &dyn Agent) -> (Option<Value>, Map<String, 
     if !sub_agents.is_empty() {
         attrs.insert("sub_agents".to_owned(), Value::Array(sub_agents));
     }
-    // Go `agentConfig(a)` reads the config by reflection, also through an exported `Agent`
-    // field of a user agent that wraps an LLM agent. Divergence (ledger 7b-3a): gadk reads
-    // only an LLM agent's own config (`llm_agent_config`, R1(c)); a wrapper is not unwrapped.
+    // Only an LLM agent's own config is read (`llm_agent_config`); a user agent that wraps an
+    // LLM agent is not unwrapped.
     let Some(cfg) = gadk_engine::llm::llm_agent_config(a) else {
         return (None, attrs);
     };
@@ -989,9 +975,8 @@ pub(crate) fn agent_starting_data(a: &dyn Agent) -> (Option<Value>, Map<String, 
     (content, attrs)
 }
 
-/// Go `identityOf(ctx)`: the invocation fields of the callback's context (empty for a plain
-/// context). gadk's ADK contexts always have an agent and a session, so no field needs Go's
-/// per-field panic guard.
+/// The invocation fields of the callback's context (empty for a plain context). gadk's ADK
+/// contexts always have an agent and a session, so no field needs a per-field panic guard.
 pub(crate) fn identity_of(ctx: &CallbackCtx) -> Identity {
     let Some(c) = &ctx.adk else {
         return Identity::default();
@@ -1003,32 +988,32 @@ pub(crate) fn identity_of(ctx: &CallbackCtx) -> Identity {
         user_id: c.user_id().to_owned(),
         app_name: c.app_name().to_owned(),
         branch: c.branch(),
-        // Spec R8 / Go contextPath: a fresh invocation's own path falls back to its fork's.
+        // A fresh invocation's own path falls back to its fork's.
         path: c.context_path(),
         state: Some(c.readonly_state()),
     }
 }
 
-/// Go `runnerAgentOf(ctx)`: the agent of an invocation callback's context (the agent the
-/// runner runs), or `None`.
+/// The agent of an invocation callback's context (the agent the runner runs), or `None`.
 pub(crate) fn runner_agent_of(ctx: &CallbackCtx) -> Option<Arc<dyn Agent>> {
     ctx.adk.as_ref().map(|c| c.agent())
 }
 
-/// Go's value of `v` held in a `map[string]any`: its sanitized JSON tree (nothing truncated
-/// or redacted; `jsonColumn` does both later), so the JSON written for it is Go's.
+/// The sanitized JSON tree of the typed value `v` held in an `attributes` map (nothing
+/// truncated or redacted; `json_column` does both later), so the JSON written for it matches
+/// ADK's.
 fn go_value<T: Serialize + ?Sized>(v: &T) -> Value {
     sanitize_value(v, -1, false).0
 }
 
-/// Go `json.Marshal(v)` as text, or `None` when it fails.
+/// `v` serialized as JSON text, or `None` when it fails.
 fn go_json_text(v: &Value) -> Option<String> {
     gadk_model::to_go_json(v)
         .ok()
         .and_then(|b| String::from_utf8(b).ok())
 }
 
-/// Go `latencyOf`'s map.
+/// The latency object of a row.
 fn latency_object(l: Latency) -> Map<String, Value> {
     let mut m = Map::new();
     m.insert("total_ms".to_owned(), Value::from(l.total_ms));
@@ -1038,17 +1023,15 @@ fn latency_object(l: Latency) -> Map<String, Value> {
     m
 }
 
-/// Go `isNil(d.content)` for a payload: only a JSON `null` is nil.
+/// Whether the payload is nil: only a JSON `null` is.
 fn payload_is_nil(p: &Payload) -> bool {
     matches!(p, Payload::Json(Value::Null))
 }
 
-/// The JSON a content formatter receives for a payload. Divergence (ledger 7b-3a): Go passes
-/// the live Go value (`*genai.Content`, `*model.LLMRequest`, `*model.LLMResponse`) and keeps
-/// whatever Go type the formatter returns; gadk's `ContentFormatter` (7b-1) maps JSON to JSON,
-/// so a typed payload is passed as its JSON (`LlmRequest` as Go's `json.Marshal` of
-/// `model.LLMRequest`: `Model`, `Contents`, `Config`) and [`typed_like`] reads a result that
-/// still has the payload's shape back as that type.
+/// The JSON a content formatter receives for a payload. gadk's `ContentFormatter` maps JSON to
+/// JSON, so a typed payload is passed as its JSON (`LlmRequest` as an object with `Model`,
+/// `Contents` and `Config` keys, see [`llm_request_json`]) and [`typed_like`] reads a result
+/// that still has the payload's shape back as that type.
 fn payload_json(p: &Payload) -> Value {
     match p {
         Payload::Content(c) => serde_json::to_value(c).unwrap_or(Value::Null),
@@ -1058,7 +1041,8 @@ fn payload_json(p: &Payload) -> Value {
     }
 }
 
-/// Go `json.Marshal(*model.LLMRequest)` (its fields have no JSON tags; `Tools` is `json:"-"`).
+/// The JSON of a model request as an object with the keys `Model`, `Contents` (`null` when
+/// empty) and `Config` (`null` when unset); the request's tools are not included.
 fn llm_request_json(req: &LlmRequest) -> Value {
     let mut m = Map::new();
     m.insert("Model".to_owned(), Value::from(req.model.as_str()));

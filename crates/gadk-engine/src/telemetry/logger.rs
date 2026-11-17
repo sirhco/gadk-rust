@@ -13,12 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of the OTel log records of Go `internal/telemetry/logger.go`: the legacy (1.36) schema's
-//! `gen_ai.system.message`, `gen_ai.user.message` and `gen_ai.choice` records, emitted as D6
-//! `tracing` events through [`emit_log_record`](super::emit_log_record) under the
-//! `generate_content` span. Go leaves their severity unset, which D6 records as `INFO`. The
-//! environment rules of `logger.go` are in [`env`](super::env), the default schema's
-//! inference-details record in [`semconv`](super::semconv).
+//! The OTel log records of the legacy (1.36) schema: `gen_ai.system.message`, `gen_ai.user.message`
+//! and `gen_ai.choice`, emitted as `tracing` events through
+//! [`emit_log_record`](super::emit_log_record) under the `generate_content` span, at `INFO` level.
+//! The environment rules are in [`env`](super::env), the default schema's inference-details record
+//! in [`semconv`](super::semconv).
 
 use gadk_genai::Content;
 use gadk_model::{Backend, LlmRequest, LlmResponse};
@@ -27,13 +26,13 @@ use serde_json::{Map, Value, json};
 use super::env::{capture_message_content, use_legacy_schema};
 use super::{emit_log_record, gen_ai_system};
 
-/// Go `elidedContent`: what a record carries in place of message content it may not capture.
+/// What a record carries in place of message content it may not capture.
 pub(crate) const ELIDED_CONTENT: &str = "<elided>";
 
-/// Go semconv v1.36 `gen_ai.system` (Go `GenAISystemKey`).
+/// The semconv v1.36 `gen_ai.system` attribute key.
 pub(crate) const GEN_AI_SYSTEM: &str = "gen_ai.system";
 
-/// Go `logRequest`: the system message, then one `gen_ai.user.message` record per request content
+/// Logs the request: the system message, then one `gen_ai.user.message` record per request content
 /// (whatever its role), under `span`. Legacy schema only.
 pub(crate) fn log_request(span: &tracing::Span, req: &LlmRequest, backend: Option<Backend>) {
     if !use_legacy_schema() {
@@ -46,12 +45,12 @@ pub(crate) fn log_request(span: &tracing::Span, req: &LlmRequest, backend: Optio
     }
 }
 
-/// Go `logResponse`: the `gen_ai.choice` record of the inference result, under `span`. Body
+/// Logs the response: the `gen_ai.choice` record of the inference result, under `span`. Body
 /// `index` (always 0: ADK keeps one candidate), `content`, and `finish_reason` when the response
 /// reports one. Legacy schema only.
 ///
-/// Go's own note: unlike semconv, `content` sits directly in the body (not under `message`) and
-/// `tool_calls` is omitted, for consistency with ADK Python.
+/// Unlike semconv, `content` sits directly in the body (not under `message`) and `tool_calls` is
+/// omitted, for consistency with ADK Python.
 pub(crate) fn log_response(
     span: &tracing::Span,
     resp: Option<&LlmResponse>,
@@ -79,7 +78,7 @@ pub(crate) fn log_response(
     );
 }
 
-/// Go `logSystemMessage`: body `content` only (semconv's `role` is omitted, as in ADK Python).
+/// Logs the system message: body `content` only (semconv's `role` is omitted, as in ADK Python).
 fn log_system_message(span: &tracing::Span, req: &LlmRequest, attrs: &[(String, Value)]) {
     emit_log_record(
         span,
@@ -90,7 +89,7 @@ fn log_system_message(span: &tracing::Span, req: &LlmRequest, attrs: &[(String, 
     );
 }
 
-/// Go `logUserMessage`: body `content`, the whole content (its role, when set, is inside it).
+/// Logs one user message: body `content`, the whole content (its role, when set, is inside it).
 fn log_user_message(span: &tracing::Span, content: &Content, attrs: &[(String, Value)]) {
     emit_log_record(
         span,
@@ -101,16 +100,15 @@ fn log_user_message(span: &tracing::Span, content: &Content, attrs: &[(String, V
     );
 }
 
-/// Go `variantToGenAISystem` as the record's attributes: `gen_ai.system` for a backend that can
-/// be named, none otherwise.
+/// The record's attributes: `gen_ai.system` for a backend that can be named, none otherwise.
 fn system_attributes(backend: Option<Backend>) -> Vec<(String, Value)> {
     gen_ai_system(backend)
         .map(|s| vec![(GEN_AI_SYSTEM.to_owned(), json!(s))])
         .unwrap_or_default()
 }
 
-/// Go `extractSystemMessage`: [`ELIDED_CONTENT`] when content may not be captured, `null` without
-/// a system instruction, else its non-empty text parts joined by newlines.
+/// The system message value: [`ELIDED_CONTENT`] when content may not be captured, `null` without a
+/// system instruction, else its non-empty text parts joined by newlines.
 pub(crate) fn extract_system_message(req: &LlmRequest) -> Value {
     if !capture_message_content() {
         return json!(ELIDED_CONTENT);
@@ -131,9 +129,9 @@ pub(crate) fn extract_system_message(req: &LlmRequest) -> Value {
     Value::String(text.join("\n"))
 }
 
-/// Go `contentToJSONLikeValue` (and `contentToLogValue`): [`ELIDED_CONTENT`] when content may not
-/// be captured, `null` for no content, else the content's Go JSON form (gadk-genai's Go-compatible
-/// serde; `<not_serializable>` if that fails).
+/// The log value of a content: [`ELIDED_CONTENT`] when content may not be captured, `null` for no
+/// content, else the content's JSON form (gadk-genai's serde for `Content`; `<not_serializable>` if
+/// that fails).
 pub(crate) fn content_to_json_like_value(c: Option<&Content>) -> Value {
     if !capture_message_content() {
         return json!(ELIDED_CONTENT);

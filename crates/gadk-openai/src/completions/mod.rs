@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The Chat Completions API, `POST {base}chat/completions` (port of ADK-Go
-//! `model/openaimodel/internal/completions`).
+//! The Chat Completions API, `POST {base}chat/completions`.
 
 pub(crate) mod model;
 pub(crate) mod request;

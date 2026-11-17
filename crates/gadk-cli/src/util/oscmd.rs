@@ -13,10 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `internal/cli/util/oscmd.go`: the colour constants, the step [`Printer`],
+//! Console helpers: the colour constants, the step [`Printer`],
 //! [`log_start_stop`]'s banners, the [`ReprintableStream`] that prefixes child output, and
-//! [`log_command`]. Go prints to `os.Stdout`; here everything goes to the given
-//! [`SharedWriter`] (the command's `Env::out`), byte for byte as Go writes it.
+//! [`log_command`]. Everything is written to the given
+//! [`SharedWriter`] (the command's `Env::out`), byte for byte as ADK's deploy tool writes it.
 
 use std::fmt::{self, Display};
 use std::io::{self, Write};
@@ -34,10 +34,9 @@ pub const CYAN: &str = "\x1b[36m";
 pub const GRAY: &str = "\x1b[37m";
 pub const WHITE: &str = "\x1b[97m";
 
-/// Go `util.Printer` as `LogStartStop` builds it:
-/// `func(a ...any) { fmt.Println("    "+Green+"> "+Reset, a) }`. The arguments arrive as one
-/// `[]any`, so a line is the green marker, a space and Go's `%v` of the slice: `[` + the
-/// arguments' `%v` joined by single spaces + `]`.
+/// The step printer `log_start_stop` builds. The arguments of one call arrive as one list, so a
+/// line is `    `, a green `> ` and a reset, a space, then `[`, the arguments' text joined by
+/// single spaces, and `]`.
 #[derive(Clone, Debug)]
 pub struct Printer {
     out: SharedWriter,
@@ -49,21 +48,21 @@ impl Printer {
         Printer { out }
     }
 
-    /// Prints one line. Each argument's [`Display`] must be its Go `%v` (a `Cmd` displays
-    /// as Go's `Cmd.String()`, a `GoDuration` as `Duration.String()`).
+    /// Prints one line. Each argument's [`Display`] must be its plain text (a `Cmd` displays
+    /// as its command line, a `GoDuration` as its duration string such as `1m0s`).
     pub fn print(&self, a: &[&dyn Display]) {
         let args: Vec<String> = a.iter().map(|x| x.to_string()).collect();
         self.out
             .write_str(&format!("    {GREEN}> {RESET} [{}]\n", args.join(" ")));
     }
 
-    /// The writer this printer prints to (Go `os.Stdout`).
+    /// The writer this printer prints to (the command's stdout).
     pub fn out(&self) -> SharedWriter {
         self.out.clone()
     }
 }
 
-/// Go `LogStartStop`: prints `<msg> : Starting`, runs `command` with a [`Printer`], prints an
+/// Prints `<msg> : Starting`, runs `command` with a [`Printer`], prints an
 /// empty line, then `<msg> : Finished successfully` or `<msg> : Finished with error` and
 /// `Error: <err>`, and returns `command`'s result.
 pub async fn log_start_stop<F>(out: &SharedWriter, msg: &str, command: F) -> Result<(), String>
@@ -83,7 +82,7 @@ where
     result
 }
 
-/// Go `reprintableStream`: forwards a child's output to `stream`, writing `prefix` first and
+/// Forwards a child's output to `stream`, writing `prefix` first and
 /// in place of every newline, so each output line is indented under the step.
 pub struct ReprintableStream<W: Write> {
     prefix: Vec<u8>,
@@ -100,7 +99,7 @@ impl<W: Write> fmt::Debug for ReprintableStream<W> {
     }
 }
 
-/// Go `newReprintableStream(s, prefix, color)`: the prefix is
+/// Builds a stream over `s`: the prefix is
 /// `"\n       " + color + prefix + " > " + Reset`.
 pub fn new_reprintable_stream<W: Write>(s: W, prefix: &str, color: &str) -> ReprintableStream<W> {
     ReprintableStream {
@@ -111,7 +110,7 @@ pub fn new_reprintable_stream<W: Write>(s: W, prefix: &str, color: &str) -> Repr
 }
 
 impl<W: Write> Write for ReprintableStream<W> {
-    /// Go `reprintableStream.Write`: reports all of `p` written once the pieces are.
+    /// Reports all of `p` written once the pieces are.
     fn write(&mut self, p: &[u8]) -> io::Result<usize> {
         if self.clean {
             self.stream.write_all(&self.prefix)?;
@@ -136,9 +135,9 @@ impl<W: Write> Write for ReprintableStream<W> {
     }
 }
 
-/// Go `LogCommand`: prints `Running : <dir> <cmd>` (Go `p("Running : ", Yellow, c.Dir, Reset,
-/// " ", c)`), then runs `cmd` with its stdout and stderr each through a
-/// [`ReprintableStream`] onto the printer's writer (Go sends both to `os.Stdout`). A failed
+/// Prints `Running : <dir> <cmd>` (yellow `Running : `, the directory, a reset, a space and the
+/// command), then runs `cmd` with its stdout and stderr each through a
+/// [`ReprintableStream`] onto the printer's writer (both go to the command's stdout). A failed
 /// start is its error text; a non-zero exit is `exit status <n>`.
 pub async fn log_command(runner: &dyn CommandRunner, cmd: &Cmd, p: &Printer) -> Result<(), String> {
     p.print(&[&"Running : ", &YELLOW, &cmd.dir, &RESET, &" ", cmd]);
@@ -152,7 +151,7 @@ pub async fn log_command(runner: &dyn CommandRunner, cmd: &Cmd, p: &Printer) -> 
     }
 }
 
-/// Go `StripExtension(p, expected)`: `p` without its extension (Go `path.Ext`), which must be
+/// `p` without its extension, which must be
 /// `expected`.
 pub fn strip_extension(p: &str, expected: &str) -> Result<String, String> {
     let ex = path_ext(p);
@@ -167,7 +166,7 @@ pub fn strip_extension(p: &str, expected: &str) -> Result<String, String> {
     Ok(p[..p.len() - ex.len()].to_string())
 }
 
-/// Go `path.Ext`: the suffix from the final `.` of the last slash-separated element.
+/// The suffix from the final `.` of the last slash-separated element.
 fn path_ext(p: &str) -> &str {
     for (i, c) in p.bytes().enumerate().rev() {
         if c == b'/' {

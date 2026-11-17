@@ -13,26 +13,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `plugin/agentanalytics/json_formatter.go`'s sanitizer: `SmartTruncate`,
-//! `sanitizeValue`, the `sanitizer` reflection walk (`walk`, `walkMap`, `walkList`,
-//! `walkStruct`, `mapKeyString`, `number`, `floatValue`, `stringValue`, `bytes`,
-//! `marshaled`) and `truncateString`.
+//! The sanitizer behind [`smart_truncate`]: [`smart_truncate`] / [`sanitize_value`] turn a value
+//! into sanitized, truncated JSON, with [`truncate_string`] cutting text.
 //!
-//! Go walks any value by reflection; here the value drives a sanitizing [`serde::Serializer`]
-//! that builds the sanitized tree ([`San`]) as it goes and stops where Go's walk stops (depth
-//! limit, node budget), so nothing is converted twice. The tree is then written as Go's
-//! `json.Marshal` writes it (sorted keys, HTML-escaped strings, Go float format).
+//! The value drives a sanitizing [`serde::Serializer`] that builds the sanitized tree ([`San`]) as
+//! it goes and stops where the walk stops (depth limit, node budget), so nothing is converted
+//! twice. The tree is then written as the sanitized JSON text an ADK plugin writes (sorted keys,
+//! HTML-escaped strings, the shortest float format).
 //!
-//! Go → serde mapping: a Go pointer is `serialize_some` (depth check, no node), a nil pointer or
-//! interface `serialize_none` / `serialize_unit`, a struct `serialize_struct` (fields by their
-//! serde names; `skip_field` is Go's omitted field), a map `serialize_map`, a slice or array
-//! `serialize_seq` / `serialize_tuple`, `[]byte` `serialize_bytes`, a named string type a unit
-//! variant, `json.RawMessage` serde_json's `RawValue`, `json.Number` a newtype named
-//! [`JSON_NUMBER_TOKEN`]. Types with a custom `MarshalJSON` in Go serialize to that JSON in
-//! gadk already (e.g. `time.Time` ↔ chrono), so they are walked as the value they produce.
-//! Divergence (ledger 7b-1): such a value costs one node of the budget here; Go takes a node for
-//! the value, then walks the decoded `MarshalJSON` result (another node), so the two differ only
-//! when the node budget runs out on exactly that value.
+//! serde mapping: `serialize_some` is a present optional value (depth check, no node),
+//! `serialize_none` / `serialize_unit` an absent one, `serialize_struct` a struct (fields by their
+//! serde names; `skip_field` an omitted field), `serialize_map` a map, `serialize_seq` /
+//! `serialize_tuple` a list, `serialize_bytes` a byte string, a unit variant an enum or string-like
+//! type, serde_json's `RawValue` raw JSON text, and a newtype named [`JSON_NUMBER_TOKEN`] a number
+//! kept as its literal text. Types that serialize to JSON by themselves (such as timestamps) are
+//! walked as the value they produce. Such a value costs one node of the budget here; an ADK server
+//! takes a node for the value, then walks the decoded JSON it produced (another node), so the two
+//! differ only when the node budget runs out on exactly that value.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -56,16 +53,16 @@ use crate::redaction::{
 };
 
 /// serde_json's `RawValue` struct token (`serde_json::value::RawValue` serializes as a struct of
-/// this name with one field of the same name holding the JSON text): Go's `json.RawMessage`.
+/// this name with one field of the same name holding the JSON text): raw JSON text.
 const RAW_VALUE_TOKEN: &str = "$serde_json::private::RawValue";
 
-/// The newtype-struct name under which a value serializes the text of a Go `json.Number`
+/// The newtype-struct name under which a value serializes the text of a number kept as its literal
 /// (written as is when it is a valid JSON number).
 pub(crate) const JSON_NUMBER_TOKEN: &str = "$gadk_agentanalytics::json.Number";
 
-/// The gadk-genai fields that are Go `[]byte` but serialize as base64 text (gadk-genai's
-/// `serde_util::base64_bytes`): `(struct name, serde field name)`. Go's walk sees bytes there
-/// (`[BINARY_DATA]` or the UTF-8 text), so the sanitizer decodes these fields back to bytes.
+/// The gadk-genai fields that hold bytes but serialize as base64 text (gadk-genai's
+/// `serde_util::base64_bytes`): `(struct name, serde field name)`. The sanitizer decodes these
+/// fields back to bytes, so they show as `[BINARY_DATA]` or the UTF-8 text.
 const GENAI_BYTES_FIELDS: [(&str, &str); 10] = [
     ("Blob", "data"),
     ("FunctionResponseBlob", "data"),
@@ -79,8 +76,8 @@ const GENAI_BYTES_FIELDS: [(&str, &str); 10] = [
     ("SearchEntryPoint", "sdkBlob"),
 ];
 
-/// A sanitized value: the JSON-native tree Go's `sanitizeValue` builds (`nil`, `bool`, the
-/// integer kinds, `float32` / `float64`, `json.Number`, `string`, `[]any`, `map[string]any`).
+/// A sanitized value: the JSON-native tree the sanitizer builds (null, boolean, integers, 32- and
+/// 64-bit floats, number text, string, list, map).
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum San {
     Null,
@@ -89,7 +86,7 @@ pub(crate) enum San {
     U64(u64),
     F64(f64),
     F32(f32),
-    /// A `json.Number` (or an integer wider than 64 bits): JSON number text written as is.
+    /// A number kept as text (or an integer wider than 64 bits): JSON number text written as is.
     Number(String),
     Str(String),
     List(Vec<San>),
@@ -105,7 +102,7 @@ impl San {
         matches!(self, San::Str(s) if s == SANITIZE_BUDGET_PLACEHOLDER)
     }
 
-    /// Go `json.Marshal` of the tree.
+    /// The tree as compact JSON text: sorted keys, HTML-escaped strings, shortest floats.
     pub(crate) fn to_go_json(&self) -> Vec<u8> {
         let mut out = Vec::new();
         self.write(&mut out);
@@ -147,8 +144,8 @@ impl San {
         }
     }
 
-    /// The tree as a `serde_json::Value` (Go `sanitizeValue`'s `any`); a `json.Number` or
-    /// `float32` becomes the `Number` its text parses to.
+    /// The tree as a `serde_json::Value`; a number kept as text or a 32-bit float becomes the
+    /// `Number` its text parses to.
     pub(crate) fn into_value(self) -> Value {
         match self {
             San::Null => Value::Null,
@@ -159,10 +156,9 @@ impl San {
             San::F32(f) => go_json_float32(f)
                 .parse::<Number>()
                 .map_or(Value::Null, Value::Number),
-            // Divergence (ledger 7b-1): serde_json (no `arbitrary_precision`) holds an integer
-            // outside `i64` / `u64` (an `i128` / `u128`, or such a `json.Number`) as the nearest
-            // `f64`, so this `Value` form loses its low digits; Go keeps the `json.Number` text.
-            // `to_go_json` writes the text unchanged.
+            // serde_json (no `arbitrary_precision`) holds an integer outside `i64` / `u64` (an
+            // `i128` / `u128`, or such number text) as the nearest `f64`, so this `Value` form
+            // loses its low digits. `to_go_json` writes the text unchanged.
             San::Number(n) => n.parse::<Number>().map_or(Value::String(n), Value::Number),
             San::Str(s) => Value::String(s),
             San::List(items) => Value::Array(items.into_iter().map(San::into_value).collect()),
@@ -175,16 +171,15 @@ impl San {
     }
 }
 
-/// Go's encoding of a JSON string (`gadk_model::to_go_json`: `<`, `>`, `&`, U+2028 and U+2029
-/// escaped).
+/// A JSON string (`gadk_model::to_go_json`: `<`, `>`, `&`, U+2028 and U+2029 escaped).
 fn write_go_string(s: &str, out: &mut Vec<u8>) {
     if let Ok(b) = gadk_model::to_go_json(s) {
         out.extend_from_slice(&b);
     }
 }
 
-/// Go `encoding/json`'s `floatEncoder` exponent form: `'e'` output with a negative two-digit
-/// exponent's leading zero dropped and a positive exponent written `e+NN`.
+/// Rewrites Rust's `{:e}` float text into the JSON exponent form: a negative exponent loses its
+/// leading zero (`1e-7`) and a positive one is written `e+NN` (`1e+21`).
 fn go_exponent_form(e: &str) -> String {
     match e.split_once('e') {
         Some((mantissa, exp)) => match exp.strip_prefix('-') {
@@ -195,7 +190,7 @@ fn go_exponent_form(e: &str) -> String {
     }
 }
 
-/// Go `encoding/json` text of a finite `float64`.
+/// The JSON text of a finite `f64`: plain decimal from 1e-6 up to 1e21, else exponent form.
 fn go_json_float64(f: f64) -> String {
     let abs = f.abs();
     if abs != 0.0 && !(1e-6..1e21).contains(&abs) {
@@ -204,8 +199,8 @@ fn go_json_float64(f: f64) -> String {
     format!("{f}")
 }
 
-/// Go `encoding/json` text of a finite `float32` (`bits == 32`: shortest form at 32 bits, the
-/// exponent thresholds compared as `float32`).
+/// The JSON text of a finite `f32` (shortest form at 32 bits, the exponent thresholds compared as
+/// `float32`).
 fn go_json_float32(f: f32) -> String {
     let abs = f.abs();
     if abs != 0.0 && !(1e-6_f32..1e21_f32).contains(&abs) {
@@ -214,9 +209,9 @@ fn go_json_float32(f: f32) -> String {
     format!("{f}")
 }
 
-/// Go `strconv.FormatFloat(f, 'g', -1, bits)` for a map key, given the shortest `{:e}` text
-/// (`d.ddde±x`) of the value: `%e` form (`1e+21`, `1.5e-07`) when the decimal exponent is
-/// below -4 or at least 6 (Go's `eprec` for the shortest form), else `%f` form.
+/// The shortest `%g`-style text of a float map key, given the shortest `{:e}` text (`d.ddde±x`) and
+/// the plain text of the value: exponent form (`1e+21`, `1.5e-07`) when the decimal exponent is
+/// below -4 or at least 6, else the plain decimal form.
 fn go_format_g(exp_text: &str, plain: &str) -> String {
     let Some((mantissa, exp)) = exp_text.split_once('e') else {
         return plain.to_owned();
@@ -251,7 +246,7 @@ fn go_format_g32(f: f32) -> String {
     go_format_g(&format!("{f:e}"), &format!("{f}"))
 }
 
-/// Go `isJSONNumber(n)`: `n` is one JSON number with no surrounding space.
+/// Whether `n` is exactly one JSON number with no surrounding space.
 pub(crate) fn is_json_number(n: &str) -> bool {
     let b = n.as_bytes();
     let digits = |mut i: usize| {
@@ -288,8 +283,8 @@ pub(crate) fn is_json_number(n: &str) -> bool {
     i == b.len()
 }
 
-/// Go `truncateString(s, maxLength)`: `s` cut to `max_length` chars followed by
-/// [`TRUNCATION_SUFFIX`]; a negative `max_length` means no limit.
+/// `s` cut to `max_length` chars followed by [`TRUNCATION_SUFFIX`]; a negative `max_length` means
+/// no limit.
 pub(crate) fn truncate_string(s: &str, max_length: i64) -> (String, bool) {
     let Ok(max) = usize::try_from(max_length) else {
         return (s.to_owned(), false);
@@ -300,8 +295,8 @@ pub(crate) fn truncate_string(s: &str, max_length: i64) -> (String, bool) {
     }
 }
 
-/// Go `SmartTruncate(obj, maxLength)` with redaction optional (Go `smartTruncate`): `obj` as
-/// Go's sanitized JSON text and whether anything was truncated, redacted away or replaced.
+/// `obj` as sanitized JSON text, with redaction optional, and whether anything was truncated,
+/// redacted away or replaced.
 pub(crate) fn smart_truncate_bytes<T: Serialize + ?Sized>(
     obj: &T,
     max_length: i64,
@@ -311,7 +306,7 @@ pub(crate) fn smart_truncate_bytes<T: Serialize + ?Sized>(
     (v.to_go_json(), truncated)
 }
 
-/// Go `sanitizeValue(obj, maxLength, redact)` as the sanitized tree.
+/// `obj` as the sanitized tree.
 pub(crate) fn sanitize<T: Serialize + ?Sized>(
     obj: &T,
     max_length: i64,
@@ -325,9 +320,8 @@ pub(crate) fn sanitize<T: Serialize + ?Sized>(
     walk(&mut st, 0, obj)
 }
 
-/// Go `SmartTruncate(obj, maxLength)`: `obj` as sanitized, truncated JSON (redaction on) and
-/// whether anything was truncated or replaced. The `Err` case of Go's `json.Marshal` cannot
-/// happen: the sanitized tree is always encodable.
+/// `obj` as sanitized, truncated JSON (redaction on) and whether anything was truncated or
+/// replaced. The `Err` case cannot happen: the sanitized tree is always encodable.
 pub fn smart_truncate<T: Serialize + ?Sized>(
     obj: &T,
     max_length: i64,
@@ -335,7 +329,7 @@ pub fn smart_truncate<T: Serialize + ?Sized>(
     smart_truncate_with(obj, max_length, true)
 }
 
-/// Go `smartTruncate(obj, maxLength, redact)`.
+/// [`smart_truncate`] with redaction optional.
 pub(crate) fn smart_truncate_with<T: Serialize + ?Sized>(
     obj: &T,
     max_length: i64,
@@ -344,8 +338,8 @@ pub(crate) fn smart_truncate_with<T: Serialize + ?Sized>(
     Ok(smart_truncate_bytes(obj, max_length, redact))
 }
 
-/// Go `sanitizeValue(obj, maxLength, redact)`: the sanitized, truncated value (depth limit
-/// [`MAX_SANITIZE_DEPTH`], node budget `MAX_SANITIZE_NODES`) and whether anything was lost.
+/// The sanitized, truncated value (depth limit [`MAX_SANITIZE_DEPTH`], node budget
+/// `MAX_SANITIZE_NODES`) and whether anything was lost.
 pub(crate) fn sanitize_value<T: Serialize + ?Sized>(
     obj: &T,
     max_length: i64,
@@ -355,7 +349,7 @@ pub(crate) fn sanitize_value<T: Serialize + ?Sized>(
     (v.into_value(), truncated)
 }
 
-/// Go `sanitizer`: the options and node budget of one sanitization.
+/// The options and node budget of one sanitization.
 struct State {
     max_length: i64,
     redact: bool,
@@ -363,7 +357,7 @@ struct State {
 }
 
 impl State {
-    /// Go `stringValue(str, depth)`.
+    /// A string at `depth`: redacted (when enabled), then truncated to the maximum length.
     fn string_value(&mut self, s: &str, depth: usize) -> (San, bool) {
         let mut text = s.to_owned();
         let mut content_lost = false;
@@ -382,7 +376,7 @@ impl State {
         (San::Str(shown), content_lost || length_truncated)
     }
 
-    /// Go `bytes(b, depth)`.
+    /// Bytes at `depth`: UTF-8 text as a string, else `[BINARY_DATA]`.
     fn bytes(&mut self, b: &[u8], depth: usize) -> (San, bool) {
         match std::str::from_utf8(b) {
             Ok(s) => self.string_value(s, depth),
@@ -390,7 +384,7 @@ impl State {
         }
     }
 
-    /// Go `number(n)`.
+    /// Number text: kept as a number when it is a valid JSON number, else truncated as a string.
     fn number(&self, n: &str) -> (San, bool) {
         if is_json_number(n) {
             return (San::Number(n.to_owned()), false);
@@ -400,7 +394,7 @@ impl State {
     }
 }
 
-/// Go `s.walk(v, depth)`: a value that fails to serialize is Go's failing `MarshalJSON`.
+/// Sanitizes `v` at `depth`; a value whose `Serialize` impl fails is `[UNSUPPORTED_OBJECT]`.
 fn walk<T: Serialize + ?Sized>(st: &mut State, depth: usize, v: &T) -> (San, bool) {
     v.serialize(Walker {
         st,
@@ -410,7 +404,7 @@ fn walk<T: Serialize + ?Sized>(st: &mut State, depth: usize, v: &T) -> (San, boo
     .unwrap_or_else(|_| San::placeholder(UNSUPPORTED_OBJ_PLACEHOLDER))
 }
 
-/// A `Serialize` impl failed (Go: `MarshalJSON` returned an error or panicked).
+/// A `Serialize` impl failed (it returned an error).
 #[derive(Debug)]
 pub(crate) struct SanitizeError(String);
 
@@ -428,18 +422,19 @@ impl ser::Error for SanitizeError {
     }
 }
 
-/// The sanitizing serializer of one value at `depth` (Go `walk(v, depth)`).
+/// The sanitizing serializer of one value at `depth`.
 struct Walker<'s> {
     st: &'s mut State,
     depth: usize,
-    /// The value is a gadk-genai `[]byte` field written as base64 text.
+    /// The value is a gadk-genai bytes field written as base64 text.
     base64_bytes: bool,
 }
 
 type Out = (San, bool);
 
 impl<'s> Walker<'s> {
-    /// The common head of Go's walk for a non-pointer value: take a node, then check the depth.
+    /// The common head of the walk for a value that is not an optional: take a node, then check the
+    /// depth.
     fn enter(&mut self) -> Option<Out> {
         if !self.st.budget.take() {
             return Some(San::placeholder(SANITIZE_BUDGET_PLACEHOLDER));
@@ -450,7 +445,7 @@ impl<'s> Walker<'s> {
         None
     }
 
-    /// A nil pointer or interface: a node, no depth check.
+    /// An absent optional or unit value: a node, no depth check.
     fn nil(self) -> Out {
         if !self.st.budget.take() {
             return San::placeholder(SANITIZE_BUDGET_PLACEHOLDER);
@@ -527,7 +522,7 @@ impl<'s> Serializer for Walker<'s> {
         self.scalar(San::Number(v.to_string()))
     }
 
-    /// Go `floatValue` for a `float32`.
+    /// A 32-bit float: NaN and the infinities as `"NaN"`, `"+Inf"`, `"-Inf"`.
     fn serialize_f32(self, v: f32) -> Result<Out, SanitizeError> {
         self.scalar(if v.is_finite() {
             San::F32(v)
@@ -536,7 +531,7 @@ impl<'s> Serializer for Walker<'s> {
         })
     }
 
-    /// Go `floatValue` for a `float64`: NaN and the infinities as `"NaN"`, `"+Inf"`, `"-Inf"`.
+    /// A 64-bit float: NaN and the infinities as `"NaN"`, `"+Inf"`, `"-Inf"`.
     fn serialize_f64(self, v: f64) -> Result<Out, SanitizeError> {
         self.scalar(if v.is_finite() {
             San::F64(v)
@@ -545,8 +540,7 @@ impl<'s> Serializer for Walker<'s> {
         })
     }
 
-    /// Divergence (ledger 7b-1): Go has no `char` (a rune is an `int32`); a Rust `char` is
-    /// sanitized as the one-character string serde_json writes.
+    /// A `char` is sanitized as the one-character string serde_json writes.
     fn serialize_char(self, v: char) -> Result<Out, SanitizeError> {
         self.serialize_str(v.encode_utf8(&mut [0; 4]))
     }
@@ -579,7 +573,7 @@ impl<'s> Serializer for Walker<'s> {
         Ok(self.nil())
     }
 
-    /// A non-nil Go pointer: the depth check without taking a node, then the pointee.
+    /// A present optional value: the depth check without taking a node, then the value.
     fn serialize_some<T: Serialize + ?Sized>(self, value: &T) -> Result<Out, SanitizeError> {
         if self.depth >= MAX_SANITIZE_DEPTH {
             return Ok(San::placeholder(MAX_DEPTH_PLACEHOLDER));
@@ -591,12 +585,12 @@ impl<'s> Serializer for Walker<'s> {
         Ok(self.nil())
     }
 
-    /// Go `struct{}{}`: `{}`.
+    /// A unit struct: `{}`.
     fn serialize_unit_struct(self, _name: &'static str) -> Result<Out, SanitizeError> {
         self.scalar(San::Map(BTreeMap::new()))
     }
 
-    /// A Go named string type (genai's enums): its string value.
+    /// A unit enum variant (such as genai's enums): its name as a string.
     fn serialize_unit_variant(
         self,
         _name: &'static str,
@@ -606,9 +600,9 @@ impl<'s> Serializer for Walker<'s> {
         self.serialize_str(variant)
     }
 
-    /// A Go defined type: a newtype named for a credential (Go `hasSensitiveTypeName`: `type
-    /// Token string`, `type APIKey *string`, `type Credential any`, …) is written `[REDACTED]`
-    /// under redaction, without reading its value; any other is its value.
+    /// A newtype named for a credential (`Token`, `APIKey`, `Credential`, …; see
+    /// `is_sensitive_key`) is written `[REDACTED]` under redaction, without reading its value; any
+    /// other newtype is its value.
     fn serialize_newtype_struct<T: Serialize + ?Sized>(
         mut self,
         name: &'static str,
@@ -632,8 +626,8 @@ impl<'s> Serializer for Walker<'s> {
         }
     }
 
-    /// Divergence (ledger 7b-1): Go has no enum variants with data; newtype, tuple and struct
-    /// variants are sanitized as serde_json writes them, `{"variant": value}`.
+    /// Newtype, tuple and struct enum variants are sanitized as serde_json writes them,
+    /// `{"variant": value}`.
     fn serialize_newtype_variant<T: Serialize + ?Sized>(
         self,
         _name: &'static str,
@@ -703,13 +697,13 @@ impl<'s> Serializer for Walker<'s> {
 /// What a [`Compound`] builds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Kind {
-    /// Go `walkList`.
+    /// A list.
     Seq,
-    /// Go `walkMap`.
+    /// A map.
     Map,
-    /// Go `walkStruct` (the serde name of the struct).
+    /// A struct (the serde name of the struct).
     Struct(&'static str),
-    /// `json.RawMessage`: Go's `marshaled` path.
+    /// serde_json's `RawValue`: the raw JSON text is decoded, then walked.
     Raw,
     /// An enum tuple variant: a list inside `{"variant": ..}`.
     SeqVariant(&'static str),
@@ -717,7 +711,7 @@ enum Kind {
     StructVariant(&'static str),
 }
 
-/// A container being sanitized (Go `walkList` / `walkMap` / `walkStruct`).
+/// A container being sanitized (a list, map or struct).
 struct Compound<'s> {
     st: &'s mut State,
     child_depth: usize,
@@ -732,10 +726,10 @@ struct Compound<'s> {
     unsupported_keys: usize,
     /// The key of the map entry whose value comes next (`Err`: not a supported key).
     pending_key: Option<Result<String, ()>>,
-    /// The key of the map entry whose value comes next is redacted whole (Go
-    /// `mapKeyRedactsWhole`).
+    /// The key of the map entry whose value comes next is redacted whole (see
+    /// `map_key_redacts_whole`).
     pending_redacted: bool,
-    /// Go `seenNames`: struct field names already written or omitted.
+    /// Struct field names already written or omitted.
     seen: BTreeSet<String>,
     /// The JSON text of a `RawValue`.
     raw: Option<String>,
@@ -755,7 +749,7 @@ impl Compound<'_> {
         self.stopped = true;
     }
 
-    /// One element of Go's `walkList` loop.
+    /// One list element.
     fn element<T: Serialize + ?Sized>(&mut self, value: &T) {
         if self.idle() {
             return;
@@ -774,8 +768,8 @@ impl Compound<'_> {
         self.stopped = stop;
     }
 
-    /// An entry of Go's `walkMap` loop whose key is redacted whole (Go `mapKeyRedactsWhole`):
-    /// one node for the key and one for the skipped value, written `{"[REDACTED]":"[REDACTED]"}`.
+    /// A map entry whose key is redacted whole (see `map_key_redacts_whole`): one node for the key
+    /// and one for the skipped value, written `{"[REDACTED]":"[REDACTED]"}`.
     fn redacted_entry(&mut self) {
         if self.idle() {
             return;
@@ -796,7 +790,7 @@ impl Compound<'_> {
         self.truncated = true;
     }
 
-    /// One entry of Go's `walkMap` loop (`key` `Err`: `mapKeyString` failed).
+    /// One map entry (`key` `Err`: the key is not a supported key type).
     fn entry<T: Serialize + ?Sized>(&mut self, key: Result<String, ()>, value: &T) {
         if self.idle() {
             return;
@@ -820,8 +814,8 @@ impl Compound<'_> {
         }
     }
 
-    /// The part of Go's `walkMap` / `walkStruct` loops after the key is known: redaction of a
-    /// sensitive key (`check_sensitive`), else the walk of the value.
+    /// The part of the map and struct handling after the key is known: redaction of a sensitive key
+    /// (`check_sensitive`), else the walk of the value.
     fn named_value<T: Serialize + ?Sized>(
         &mut self,
         key: String,
@@ -861,7 +855,7 @@ impl Compound<'_> {
         self.truncated |= t;
     }
 
-    /// One field of Go's `walkStruct` loop.
+    /// One struct field.
     fn field<T: Serialize + ?Sized>(&mut self, name: &str, key: &'static str, value: &T) {
         if self.kind == Kind::Raw {
             if let Ok(text) = value.serialize(KeySer) {
@@ -879,8 +873,8 @@ impl Compound<'_> {
         if !self.seen.insert(key.to_owned()) {
             return;
         }
-        // Go `walkStruct`: a field whose type is redacted whole is written `[REDACTED]` (and
-        // marks the row truncated) before its name is looked at.
+        // A field whose type is redacted whole is written `[REDACTED]` (and marks the row
+        // truncated) before its name is looked at.
         if self.st.redact && value_redacts_whole(value) {
             if !self.st.budget.take() {
                 self.stop_with_budget_key();
@@ -897,7 +891,7 @@ impl Compound<'_> {
         self.named_value(key.to_owned(), value, true);
     }
 
-    /// A gadk-genai `[]byte` field (see [`GENAI_BYTES_FIELDS`]).
+    /// A gadk-genai bytes field (see [`GENAI_BYTES_FIELDS`]).
     fn base64_field<T: Serialize + ?Sized>(&mut self, key: &'static str, value: &T) {
         if self.st.redact && is_sensitive_key(key) {
             return self.named_value(key.to_owned(), value, true);
@@ -917,8 +911,8 @@ impl Compound<'_> {
         self.truncated |= t;
     }
 
-    /// A field omitted by `skip_serializing_if` (Go: an `omitempty` field, which still meets the
-    /// budget check at the top of the loop and claims its name).
+    /// A field omitted by `skip_serializing_if` (it still meets the budget check at the top of the
+    /// loop and claims its name).
     fn skipped(&mut self, key: &'static str) {
         if self.kind == Kind::Raw || self.idle() {
             return;
@@ -951,12 +945,11 @@ impl Compound<'_> {
         }
     }
 
-    /// Go `marshaled` for a `json.RawMessage`: the text decoded with `UseNumber`, then walked at
-    /// the same depth.
+    /// A `RawValue`: the text is decoded (numbers kept as text), then walked at the same depth.
     ///
-    /// Divergence (ledger 7b-1): the text is decoded by `redaction`'s Go `decodeJSONValue` port,
-    /// which stops past 100 levels, so a `RawValue` nested deeper is `[UNSUPPORTED_OBJECT]`; Go's
-    /// `json.Decoder` accepts up to 10000 levels and the walk then writes `[MAX_DEPTH_EXCEEDED]`.
+    /// The text is decoded by `redaction`'s strict decoder, which stops past 100 levels, so a
+    /// `RawValue` nested deeper is `[UNSUPPORTED_OBJECT]`; an ADK server decodes up to 10000
+    /// levels, and its walk then writes `[MAX_DEPTH_EXCEEDED]`.
     fn finish_raw(self) -> Out {
         let Some(text) = self.raw else {
             return San::placeholder(UNSUPPORTED_OBJ_PLACEHOLDER);
@@ -1091,9 +1084,9 @@ impl SerializeStructVariant for Compound<'_> {
     }
 }
 
-/// Go `mapKeyRedactsWhole(k)`: the map key is redacted whole from its type alone — a newtype,
-/// tuple struct or struct named for a credential (Go `mapKeyTypeRedactsWhole`: even a plain
-/// credential-named struct, which cannot be an object key), through `Some` (Go's pointers).
+/// Whether the map key is redacted whole from its type alone — a newtype, tuple struct or struct
+/// named for a credential (even a plain credential-named struct, which cannot be an object key),
+/// through `Some`.
 fn map_key_redacts_whole<T: Serialize + ?Sized>(key: &T) -> bool {
     matches!(
         key.serialize(KeyTypeProbe { plain_struct: true }),
@@ -1101,8 +1094,8 @@ fn map_key_redacts_whole<T: Serialize + ?Sized>(key: &T) -> bool {
     )
 }
 
-/// Go `redactsWhole(t)` of a value: a newtype named for a credential, through `Some` (a
-/// credential-named struct is written by its fields, as Go's without a marshaler is).
+/// Whether a value is redacted whole: a newtype named for a credential, through `Some` (a
+/// credential-named struct is written by its fields).
 fn value_redacts_whole<T: Serialize + ?Sized>(value: &T) -> bool {
     matches!(
         value.serialize(KeyTypeProbe {
@@ -1289,10 +1282,9 @@ impl Serializer for KeyTypeProbe {
     }
 }
 
-/// Go `mapKeyString(k)`: the JSON object key of a map key — strings, integers, booleans and
-/// floats (`'g'` format) as Go writes them, a nil interface as `"null"`; `Err` for any other
-/// key (a sequence, map, struct, bytes, ...). Also captures the text of a `RawValue` /
-/// `json.Number`.
+/// The JSON object key of a map key — strings, integers, booleans and floats (shortest `%g`-style
+/// text), a unit or `None` as `"null"`; `Err` for any other key (a sequence, map, struct, bytes,
+/// ...). Also captures the text of a `RawValue` or number-text newtype.
 struct KeySer;
 
 impl Serializer for KeySer {
@@ -1433,8 +1425,8 @@ impl Serializer for KeySer {
     }
 }
 
-/// A decoded [`JVal`] walked as the Go value `json.Decoder.Decode` with `UseNumber` builds
-/// (`nil`, `bool`, `json.Number`, `string`, `[]any`, `map[string]any`).
+/// A decoded [`JVal`] walked as the value a JSON decoder builds (null, boolean, number text,
+/// string, list, map).
 struct JValSer<'a>(&'a JVal);
 
 impl Serialize for JValSer<'_> {

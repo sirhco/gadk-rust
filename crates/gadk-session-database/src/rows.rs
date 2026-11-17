@@ -13,9 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Rows as stored (Go `storageSession`, `storageEvent`, `storageAppState`, `storageUserState`)
-//! and their mapping to gadk values. JSON columns hold Go `json.Marshal` bytes
-//! ([`gadk_model::to_go_json`]).
+//! Rows as stored (sessions, events, app states and user states) and their mapping to gadk
+//! values. JSON columns hold compact JSON with HTML-escaped strings and sorted map keys, as
+//! [`gadk_model::to_go_json`] writes it, so rows match those of ADK's database session
+//! service.
 
 use chrono::{DateTime, Utc};
 use gadk_model::{LlmResponse, to_go_json};
@@ -87,8 +88,8 @@ pub(crate) struct EventRow {
     pub(crate) interrupted: Option<bool>,
 }
 
-/// Reads one column of a result row in a dialect's storage form. A NULL `time` is Go's zero
-/// time.
+/// Reads one column of a result row in a dialect's storage form. A NULL `time` is
+/// [`gadk_session::zero_time`].
 pub(crate) trait ColumnReader {
     /// A non-NULL text column.
     fn text(&self, col: &str) -> sqlx::Result<String>;
@@ -166,12 +167,12 @@ fn go_json<T: Serialize + ?Sized>(v: &T) -> Result<String, serde_json::Error> {
     to_go_json(v).map(|b| String::from_utf8_lossy(&b).into_owned())
 }
 
-/// Go `stateMap.Value`: the state as Go `json.Marshal` text.
+/// The state as JSON text, in the form [`gadk_model::to_go_json`] writes.
 pub(crate) fn encode_state(state: &StateMap) -> Result<String, serde_json::Error> {
     go_json(state)
 }
 
-/// Go `stateMap.Scan`: `""` and `null` are the empty map; anything else must be a JSON object.
+/// Parses stored state: `""` and `null` are the empty map; anything else must be a JSON object.
 pub(crate) fn decode_state(text: &str) -> Result<StateMap, serde_json::Error> {
     if text.is_empty() {
         return Ok(StateMap::new());
@@ -182,7 +183,8 @@ pub(crate) fn decode_state(text: &str) -> Result<StateMap, serde_json::Error> {
     }
 }
 
-/// A JSON column written only when `value` is present (Go's `if x != nil` / `len(x) > 0`).
+/// A JSON column written only when `value` is present (callers pass `None` for an empty
+/// collection).
 fn column<T: Serialize + ?Sized>(
     what: &str,
     value: Option<&T>,
@@ -196,7 +198,7 @@ fn non_empty(s: &str) -> Option<String> {
     (!s.is_empty()).then(|| s.to_string())
 }
 
-/// Go `createStorageEvent`.
+/// Builds the stored row of an event.
 pub(crate) fn event_to_row(
     app_name: &str,
     user_id: &str,
@@ -252,7 +254,7 @@ fn parse<T: DeserializeOwned>(what: &str, text: Option<&str>) -> Result<Option<T
     }
 }
 
-/// Go `createEventFromStorageEvent`.
+/// Rebuilds an event from its stored row.
 pub(crate) fn row_to_event(row: &EventRow) -> Result<Event, SessionError> {
     let actions: EventActions = if row.actions.is_empty() {
         EventActions::default()

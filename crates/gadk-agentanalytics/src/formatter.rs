@@ -13,15 +13,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `plugin/agentanalytics/json_formatter.go`: [`format_content_parts`] and the
-//! parts collector, content summaries, function-response normalization and [`smart_truncate`]
-//! (Go's reflection walk is a sanitizing `serde::Serializer` that builds the truncated value
-//! directly), plus `pendingUpload`, `objectRef`, `uploadFailedText` and `textUploadContentType`
-//! from `gcs_offloader.go`.
+//! [`format_content_parts`] and the parts collector, content summaries, function-response
+//! normalization and [`smart_truncate`] (a sanitizing `serde::Serializer` that builds the truncated
+//! value directly), plus the pending upload, object reference and upload text and content type the
+//! GCS offloader shares.
 //!
-//! The bodies live in submodules, re-exported here so every item keeps its
-//! `crate::formatter::` path: `sanitize` (`SmartTruncate` and the sanitizing serializer),
-//! `parts` (`content_parts`, `normalizeFunctionResponse`) and `summary` (content summaries).
+//! The bodies live in submodules, re-exported here so every item keeps its `crate::formatter::`
+//! path: `sanitize` (`smart_truncate` and the sanitizing serializer), `parts` (`content_parts`,
+//! function-response normalization) and `summary` (content summaries).
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -48,67 +47,66 @@ pub(crate) use sanitize::{sanitize_value, smart_truncate_with, truncate_string};
 pub(crate) use summary::content_summary;
 pub(crate) use summary::format_response_content;
 
-/// Go `truncationSuffix`.
+/// The suffix of truncated text.
 pub(crate) const TRUNCATION_SUFFIX: &str = "...[TRUNCATED]";
-/// Go `inlineDataText`: the text of an inline binary part.
+/// The text of an inline binary part.
 pub(crate) const INLINE_DATA_TEXT: &str = "[BINARY DATA]";
-/// Go `binaryDataPlaceholder`: non-UTF-8 bytes in a sanitized value.
+/// Non-UTF-8 bytes in a sanitized value.
 pub(crate) const BINARY_DATA_PLACEHOLDER: &str = "[BINARY_DATA]";
-/// Go `circularRefPlaceholder`. Divergence (ledger 7b-1): unused — a `Serialize` value cannot
-/// contain itself, so there is no cycle detection (Go tracks visited maps, slices and pointers).
+/// The placeholder of a circular reference. Unused: a `Serialize` value cannot contain itself, so
+/// there is no cycle detection.
 pub(crate) const CIRCULAR_REF_PLACEHOLDER: &str = "[CIRCULAR_REFERENCE]";
 
-/// Go `collidingKeyPlaceholder`: the value of map keys that are written alike but disagree on
-/// their value, with redaction off.
+/// The value of map keys that are written alike but disagree on their value, with redaction off.
 pub(crate) const COLLIDING_KEY_PLACEHOLDER: &str = "[COLLIDING_KEY]";
-/// Go `maxDepthPlaceholder`.
+/// The placeholder of a value nested past the depth limit.
 pub(crate) const MAX_DEPTH_PLACEHOLDER: &str = "[MAX_DEPTH_EXCEEDED]";
-/// Go `sanitizeBudgetPlaceholder`.
+/// The placeholder of a value reached after the node budget ran out.
 pub(crate) const SANITIZE_BUDGET_PLACEHOLDER: &str = "[SANITIZE_BUDGET_EXCEEDED]";
-/// Go `unsupportedKeyPlaceholder`.
+/// The placeholder of a map key that is not a supported key type.
 pub(crate) const UNSUPPORTED_KEY_PLACEHOLDER: &str = "[UNSUPPORTED_KEY]";
-/// Go `unsupportedObjPlaceholder`.
+/// The placeholder of a value that cannot be sanitized.
 pub(crate) const UNSUPPORTED_OBJ_PLACEHOLDER: &str = "[UNSUPPORTED_OBJECT]";
 
-/// Go `maxSanitizeDepth` (adk-python's).
+/// The depth limit of a sanitization (adk-python's).
 pub(crate) const MAX_SANITIZE_DEPTH: usize = 50;
-/// Go `maxSanitizeNodes` (adk-python's).
+/// The node budget of a sanitization (adk-python's).
 pub(crate) const MAX_SANITIZE_NODES: i64 = 100_000;
-/// Go `maxContainerAlloc`.
+/// The most capacity preallocated for a decoded container.
 pub(crate) const MAX_CONTAINER_ALLOC: usize = 1024;
 
-/// Go `storageModeInline`.
+/// The `storage_mode` of a part kept inline.
 pub(crate) const STORAGE_MODE_INLINE: &str = "INLINE";
-/// Go `storageModeExternalURI`.
+/// The `storage_mode` of a part that refers to an external URI.
 pub(crate) const STORAGE_MODE_EXTERNAL_URI: &str = "EXTERNAL_URI";
-/// Go `storageModeGCSReference`.
+/// The `storage_mode` of a part offloaded to Cloud Storage.
 pub(crate) const STORAGE_MODE_GCS_REFERENCE: &str = "GCS_REFERENCE";
 
-/// Go `defaultBinaryMIMEType`: the MIME type of an offloaded blob that has none.
+/// The MIME type of an offloaded blob that has none.
 pub(crate) const DEFAULT_BINARY_MIME_TYPE: &str = "application/octet-stream";
 
-/// Go `uploadFailedText` (`gcs_offloader.go`): the text of a binary part whose upload failed.
+/// The text of a binary part whose upload failed.
 pub(crate) const UPLOAD_FAILED_TEXT: &str = "[UPLOAD FAILED]";
-/// Go `textUploadContentType` (`gcs_offloader.go`): the content type of uploaded text objects.
+/// The content type of uploaded text objects.
 pub(crate) const TEXT_UPLOAD_CONTENT_TYPE: &str = "text/plain; charset=utf-8";
 
-/// The node budget of one sanitization (Go `nodeBudget`), shared by the formatter's walk and
-/// redaction's JSON-text recursion.
+/// The node budget of one sanitization, shared by the formatter's walk and redaction's JSON-text
+/// recursion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct NodeBudget {
-    /// Go `remaining`.
+    /// The nodes left.
     pub(crate) remaining: i64,
 }
 
 impl NodeBudget {
-    /// A budget of [`MAX_SANITIZE_NODES`] nodes (Go `&nodeBudget{remaining: maxSanitizeNodes}`).
+    /// A budget of [`MAX_SANITIZE_NODES`] nodes.
     pub(crate) fn new() -> NodeBudget {
         NodeBudget {
             remaining: MAX_SANITIZE_NODES,
         }
     }
 
-    /// Go `take()`: uses one node; `false` once the budget is spent.
+    /// Uses one node; `false` once the budget is spent.
     pub(crate) fn take(&mut self) -> bool {
         if self.remaining <= 0 {
             return false;
@@ -124,18 +122,17 @@ impl Default for NodeBudget {
     }
 }
 
-/// A Go `any` the formatter builds by hand (`map[string]any` with `[]byte` leaves): JSON values
-/// plus raw bytes, which serialize through `serialize_bytes` so the sanitizer writes them as Go
-/// does (UTF-8 text, else `"[BINARY_DATA]"`).
+/// A value the formatter builds by hand: JSON values plus raw bytes, which serialize through
+/// `serialize_bytes` so the sanitizer writes them as UTF-8 text, else `"[BINARY_DATA]"`.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum GoAny {
     /// A JSON value.
     Json(Value),
-    /// Go `[]byte`.
+    /// Raw bytes.
     Bytes(Bytes),
-    /// Go `[]any` / `[]map[string]any`.
+    /// A list.
     List(Vec<GoAny>),
-    /// Go `map[string]any`.
+    /// A map.
     Map(BTreeMap<String, GoAny>),
 }
 
@@ -150,32 +147,32 @@ impl Serialize for GoAny {
     }
 }
 
-/// A payload to upload to Cloud Storage when its row is written, and the `content_parts` entry
-/// that then refers to it (Go `pendingUpload`, `gcs_offloader.go`). It owns its data.
+/// A payload to upload to Cloud Storage when its row is written, and the `content_parts` entry that
+/// then refers to it It owns its data.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct PendingUpload {
-    /// Go `slot`: the index of the entry in the row's `content_parts`.
+    /// The index of the entry in the row's `content_parts`.
     pub(crate) slot: usize,
-    /// Go `contentOrd`: the position of the message in its request.
+    /// The position of the message in its request.
     pub(crate) content_ord: usize,
-    /// Go `partIdx`: the index of the part in its message.
+    /// The index of the part in its message.
     pub(crate) part_idx: usize,
-    /// Go `mimeType`.
+    /// The MIME type of a binary part.
     pub(crate) mime_type: String,
-    /// Go `data`: the payload of a binary part.
+    /// The payload of a binary part.
     pub(crate) data: Bytes,
-    /// Go `text`: the payload of a text part.
+    /// The payload of a text part.
     pub(crate) text: String,
-    /// Go `isText`.
+    /// Whether the payload is text.
     pub(crate) is_text: bool,
-    /// Go `fallbackTruncated`: the inline fallback text was truncated by `max_content_len`.
+    /// The inline fallback text was truncated by `max_content_len`.
     pub(crate) fallback_truncated: bool,
-    /// Go `reserved`: bytes reserved in the batch processor's pending-upload budget.
+    /// Bytes reserved in the batch processor's pending-upload budget.
     pub(crate) reserved: i64,
 }
 
 impl PendingUpload {
-    /// Go `size()`: the payload length in bytes.
+    /// The payload length in bytes.
     pub(crate) fn size(&self) -> usize {
         if self.is_text {
             self.text.len()
@@ -184,7 +181,7 @@ impl PendingUpload {
         }
     }
 
-    /// Go `contentType()`: the content type of the object.
+    /// The content type of the object.
     pub(crate) fn content_type(&self) -> &str {
         if self.is_text {
             TEXT_UPLOAD_CONTENT_TYPE
@@ -193,7 +190,7 @@ impl PendingUpload {
         }
     }
 
-    /// Go `payload()`: the bytes of the object.
+    /// The bytes of the object.
     pub(crate) fn payload(&self) -> Bytes {
         if self.is_text {
             Bytes::from(self.text.clone().into_bytes())
@@ -203,8 +200,8 @@ impl PendingUpload {
     }
 }
 
-/// Go `objectRef(uri, details, authorizer)` (`gcs_offloader.go`): the `object_ref` of the object
-/// at `uri`; `authorizer` is left out (NULL) when empty, `version` always.
+/// The `object_ref` of the object at `uri`: `uri`, `details`, and `authorizer` only when it is
+/// non-empty (otherwise it is left out and reads as NULL).
 pub(crate) fn object_ref(uri: &str, details: &str, authorizer: &str) -> Map<String, Value> {
     let mut obj = Map::new();
     obj.insert("uri".to_owned(), Value::from(uri));
@@ -215,21 +212,20 @@ pub(crate) fn object_ref(uri: &str, details: &str, authorizer: &str) -> Map<Stri
     obj
 }
 
-/// Go `partsOptions`.
+/// The options of a [`PartsCollector`].
 #[derive(Clone, Default)]
 pub(crate) struct PartsOptions {
-    /// Go `maxLen`: the longest inline text in chars; negative means no limit.
+    /// The longest inline text in chars; negative means no limit.
     pub(crate) max_len: i64,
-    /// Go `redact`.
+    /// Whether to redact sensitive text and URIs.
     pub(crate) redact: bool,
-    /// Go `offload`: queue inline binary data and long text as [`PendingUpload`]s.
+    /// Queue inline binary data and long text as [`PendingUpload`]s.
     pub(crate) offload: bool,
-    /// Go `inlineLimit`: text longer than this many bytes is offloaded (positive when
-    /// `offload`).
+    /// Text longer than this many bytes is offloaded (positive when `offload`).
     pub(crate) inline_limit: i64,
-    /// Go `connectionID`: the authorizer of object references.
+    /// The authorizer of object references.
     pub(crate) connection_id: String,
-    /// Go `reserveBytes`: reserves `n` bytes of upload budget; `false` when over the cap.
+    /// Reserves `n` bytes of upload budget; `false` when over the cap.
     pub(crate) reserve_bytes: Option<Arc<dyn Fn(i64) -> bool + Send + Sync>>,
 }
 
@@ -246,18 +242,18 @@ impl std::fmt::Debug for PartsOptions {
     }
 }
 
-/// Go `partsCollector`: builds the `content_parts` of one row from one or more messages.
+/// Builds the `content_parts` of one row from one or more messages.
 #[derive(Debug, Default)]
 pub(crate) struct PartsCollector {
-    /// Go `opts`.
+    /// The options.
     pub(crate) opts: PartsOptions,
-    /// Go `parts`: the `content_parts` entries in order.
+    /// The `content_parts` entries in order.
     pub(crate) parts: Vec<Map<String, Value>>,
-    /// Go `pending`: the payloads to upload, each naming its entry in `parts`.
+    /// The payloads to upload, each naming its entry in `parts`.
     pub(crate) pending: Vec<PendingUpload>,
-    /// Go `truncated`.
+    /// Whether any part lost content to truncation or redaction.
     pub(crate) truncated: bool,
-    /// Go `nonUploadTruncated`.
+    /// Whether any part that is not uploaded lost content to truncation or redaction.
     pub(crate) non_upload_truncated: bool,
 }
 
@@ -271,7 +267,7 @@ impl PartsCollector {
     }
 }
 
-/// Go `summaryPiece`.
+/// One piece of a message summary.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct SummaryPiece {
     pub(crate) part_idx: usize,
@@ -281,7 +277,7 @@ pub(crate) struct SummaryPiece {
     pub(crate) omitted: bool,
 }
 
-/// Go `messageSummary`.
+/// The summary of one message.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct MessageSummary {
     pub(crate) content_ord: usize,
@@ -292,7 +288,7 @@ pub(crate) struct MessageSummary {
     pub(crate) pieces: Vec<SummaryPiece>,
 }
 
-/// Go `contentSummaryBuilder`: rebuilds a row's `content` summary once its uploads resolve.
+/// Rebuilds a row's `content` summary once its uploads resolve.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct ContentSummaryBuilder {
     pub(crate) is_llm_request: bool,

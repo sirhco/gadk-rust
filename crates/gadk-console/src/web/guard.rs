@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Request guards (R11): the Host and Origin checks, the CSRF token check and the security
+//! Request guards: the Host and Origin checks, the CSRF token check and the security
 //! response headers.
 
 use axum::extract::{Request, State};
@@ -25,7 +25,7 @@ use super::AppState;
 use super::pages::error::error_page;
 use super::pages::layout::Nav;
 
-/// The R11 Content-Security-Policy, sent on every response.
+/// The Content-Security-Policy, sent on every response.
 pub(crate) const CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; frame-ancestors 'none'; form-action 'self'";
 
 /// Loopback hosts the console answers to.
@@ -74,7 +74,7 @@ pub(crate) async fn check(State(state): State<AppState>, req: Request, next: Nex
     next.run(req).await
 }
 
-/// axum middleware (map_response): sets the R11 CSP header, `X-Content-Type-Options: nosniff`
+/// axum middleware (map_response): sets the CSP header, `X-Content-Type-Options: nosniff`
 /// and `Cache-Control: no-store` on every response, guard rejections and assets included.
 pub(crate) async fn csp(mut resp: Response) -> Response {
     let headers = resp.headers_mut();

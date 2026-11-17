@@ -13,11 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Test fixtures (feature `testutil`): a port of Go `server/adkrest/internal/fakes`
-//! `testsessionservice.go`, the session service the Go controller tests run against; the
-//! helpers the Go `adkrest` package tests share (a bare-agent loader, a fixed caller, serving on
-//! a loopback port, in-process requests, `postJSON`); and [`wire_scenario`], the Go wire probe's
-//! agents, providers and server configurations.
+//! Test fixtures (feature `testutil`): a fake in-memory session service for the controller tests;
+//! the helpers the REST tests share (a bare-agent loader, a fixed caller, serving on a loopback
+//! port, in-process requests, [`post_json`]); and [`wire_scenario`], the agents, providers and
+//! server configurations of the recorded wire scenario.
 
 use std::any::Any;
 use std::collections::BTreeMap;
@@ -44,7 +43,7 @@ use crate::rest::{LocalAddr, Server};
 
 pub mod wire_scenario;
 
-/// Go `fakes.TestState`: a map with Go map reference semantics (clones share it).
+/// Session state in a shared map (clones share it).
 #[derive(Debug, Clone, Default)]
 pub struct TestState(pub Arc<Mutex<Map<String, Value>>>);
 
@@ -55,7 +54,7 @@ impl From<Map<String, Value>> for TestState {
 }
 
 impl State for TestState {
-    /// Go: a missing key reads as `nil` without error.
+    /// A missing key reads as `null` without error.
     fn get(&self, key: &str) -> Result<Value, SessionError> {
         Ok(self.0.lock().get(key).cloned().unwrap_or(Value::Null))
     }
@@ -74,8 +73,8 @@ impl State for TestState {
     }
 }
 
-/// Go `fakes.TestEvents`: the session's events (clones share them, as the Go fake's appended
-/// session and its stored copy do).
+/// The session's events (clones share them, so an appended session and its stored copy see the
+/// same events).
 #[derive(Debug, Clone, Default)]
 pub struct TestEvents(pub Arc<Mutex<Vec<Event>>>);
 
@@ -85,7 +84,7 @@ impl From<Vec<Event>> for TestEvents {
     }
 }
 
-/// Go `fakes.SessionKey`.
+/// The key of a stored session: app name, user ID and session ID.
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SessionKey {
     /// The application name.
@@ -96,16 +95,16 @@ pub struct SessionKey {
     pub session_id: String,
 }
 
-/// Go `fakes.TestSession`.
+/// A session of [`FakeSessionService`].
 #[derive(Debug, Clone)]
 pub struct TestSession {
-    /// Go `Id`.
+    /// The session's key.
     pub id: SessionKey,
-    /// Go `SessionState`.
+    /// The session's state.
     pub session_state: TestState,
-    /// Go `SessionEvents`.
+    /// The session's events.
     pub session_events: TestEvents,
-    /// Go `UpdatedAt` (shared by clones, like the events).
+    /// The last update time (shared by clones, like the events).
     pub updated_at: Arc<Mutex<DateTime<Utc>>>,
 }
 
@@ -156,12 +155,12 @@ impl Session for TestSession {
     }
 }
 
-/// Go `fakes.FakeSessionService`: sessions in a map keyed by [`SessionKey`] (iterated in key
-/// order; Go's map order is unspecified). Errors carry Go's texts (`session already exists`,
-/// `not found`, `invalid session type`) as [`SessionError::Backend`].
+/// A session service keeping sessions in a map keyed by [`SessionKey`] (iterated in key order).
+/// Errors carry the texts `session already exists`, `not found` and `invalid session type` as
+/// [`SessionError::Backend`].
 #[derive(Debug, Default)]
 pub struct FakeSessionService {
-    /// Go `Sessions`.
+    /// The stored sessions.
     pub sessions: Mutex<BTreeMap<SessionKey, TestSession>>,
 }
 
@@ -216,7 +215,7 @@ impl SessionService for FakeSessionService {
         };
         match self.sessions.lock().get(&key) {
             Some(s) => Ok(Arc::new(s.clone())),
-            // Go wraps `session.ErrNotFound`, as the real services do.
+            // The bare not-found error, as the real services report it.
             None => Err(SessionError::NotFound),
         }
     }
@@ -259,8 +258,7 @@ impl SessionService for FakeSessionService {
     }
 }
 
-/// Go `agent.NewSingleLoader(agent.New(agent.Config{Name: name, Description: "root agent"}))`:
-/// a loader serving one bare agent.
+/// A loader serving one bare agent called `name`, described as `root agent`.
 pub fn single_agent_loader(name: &str) -> Arc<dyn Loader> {
     let root = gadk_agent::new_agent(AgentConfig {
         name: name.into(),
@@ -271,7 +269,7 @@ pub fn single_agent_loader(name: &str) -> Arc<dyn Loader> {
     Arc::new(SingleLoader::new(root))
 }
 
-/// Go `authn.NewCustom` authenticating every request as `user_id` (possibly empty).
+/// An authenticator authenticating every request as `user_id` (possibly empty).
 pub fn authenticate_as(user_id: impl Into<String>) -> Arc<dyn Authenticator> {
     let user_id: String = user_id.into();
     authn::custom(move |_parts: &http::request::Parts| {
@@ -285,7 +283,7 @@ pub fn authenticate_as(user_id: impl Into<String>) -> Arc<dyn Authenticator> {
     })
 }
 
-/// Go `httptest.NewServer(handler)`: serves `router` on a fresh 127.0.0.1 port (with the
+/// Serves `router` on a fresh 127.0.0.1 port (with the
 /// [`LocalAddr`] connect info the origin guard reads) in a spawned task and returns the address.
 pub async fn serve_loopback(router: axum::Router) -> std::io::Result<SocketAddr> {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
@@ -295,7 +293,7 @@ pub async fn serve_loopback(router: axum::Router) -> std::io::Result<SocketAddr>
     Ok(addr)
 }
 
-/// Go `handler.ServeHTTP(httptest.NewRecorder(), req)`: the status and body text of `req`
+/// The status and body text of `req`
 /// served in process.
 pub async fn record(router: &axum::Router, req: http::Request<Body>) -> (StatusCode, String) {
     let resp = match router.clone().oneshot(req).await {
@@ -309,8 +307,7 @@ pub async fn record(router: &axum::Router, req: http::Request<Body>) -> (StatusC
     (status, String::from_utf8_lossy(&body).into_owned())
 }
 
-/// Go `srv.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(method, target, nil))`: the
-/// status and body text of a bodiless request served in process.
+/// The status and body text of a bodiless request for `target` served in process.
 pub async fn serve_http(
     server: &Server,
     method: http::Method,
@@ -324,7 +321,7 @@ pub async fn serve_http(
     record(&server.router(), req).await
 }
 
-/// Go `postJSON`: POSTs `body` as JSON to `target`, requires 200 and decodes the answer.
+/// POSTs `body` as JSON to `target`, requires 200 and decodes the answer.
 pub async fn post_json<T: DeserializeOwned>(
     router: &axum::Router,
     target: &str,

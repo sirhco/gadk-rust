@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The `preload_memory` tool (port of Go `tool/preloadmemorytool`).
+//! The `preload_memory` tool.
 //!
 //! The model never calls this tool, unlike `load_memory`. On every model request it searches
 //! memory with the user's current query and puts the matching past conversations into the system
@@ -31,15 +31,15 @@ use gadk_model::LlmRequest;
 
 use crate::go_fmt::wrap_err;
 
-/// Go's zero `time.Time` as Unix seconds (`0001-01-01T00:00:00Z`).
+/// The timestamp `0001-01-01T00:00:00Z` as Unix seconds: the "unset" time.
 const GO_ZERO_UNIX_SECONDS: i64 = -62_135_596_800;
 
-/// Port of Go `preloadmemorytool.New` (tool.go:49).
+/// A `preload_memory` tool.
 pub fn new() -> Arc<dyn Tool> {
     Arc::new(PreloadMemoryTool)
 }
 
-/// Port of Go `preloadMemoryTool` (tool.go:43).
+/// The `preload_memory` tool.
 struct PreloadMemoryTool;
 
 #[async_trait]
@@ -52,9 +52,9 @@ impl Tool for PreloadMemoryTool {
         "Preloads relevant memory for the current user."
     }
 
-    /// Port of Go `preloadMemoryTool.ProcessRequest` (tool.go:73). The query is every non-empty
-    /// text part of the user content joined with spaces (Go ff9e77c5; thought parts included,
-    /// as in Go). A missing user content or an empty query is a no-op.
+    /// Searches memory and adds the matching past conversations to the system instruction. The
+    /// query is every non-empty text part of the user content joined with spaces (thought parts
+    /// included). A missing user content or an empty query is a no-op.
     async fn process_request(&self, ctx: &Context, req: &mut LlmRequest) -> Result<(), ToolError> {
         let Some(content) = ctx.user_content() else {
             return Ok(());
@@ -80,7 +80,7 @@ impl Tool for PreloadMemoryTool {
         if memory_text.is_empty() {
             return Ok(());
         }
-        // Go preloadInstructions (tool.go:34): no trailing newline after the closing tag.
+        // No trailing newline after the closing tag.
         let instructions = format!(
             "The following content is from your previous conversations with the user.\nThey may be useful for answering the user's current query.\n<PAST_CONVERSATIONS>\n{memory_text}\n</PAST_CONVERSATIONS>"
         );
@@ -93,8 +93,8 @@ impl Tool for PreloadMemoryTool {
     }
 }
 
-/// Port of Go `formatMemories` (tool.go:99). Entries with no text are skipped. A `Time:` line
-/// (Go `time.RFC3339`, no fraction) precedes the text when the timestamp is set, and the text is
+/// Formats the memories for the instruction. Entries with no text are skipped. A `Time:` line
+/// (RFC 3339, no fraction) precedes the text when the timestamp is set, and the text is
 /// `<author>: <text>` when there is an author.
 fn format_memories(memories: &[MemoryEntry]) -> String {
     let mut lines = Vec::new();
@@ -115,13 +115,12 @@ fn format_memories(memories: &[MemoryEntry]) -> String {
     lines.join("\n")
 }
 
-/// Go `Timestamp.IsZero()` on a UTC time.
+/// Whether the time is the "unset" time (`0001-01-01T00:00:00Z`).
 fn is_go_zero(t: &DateTime<Utc>) -> bool {
     t.timestamp() == GO_ZERO_UNIX_SECONDS && t.timestamp_subsec_nanos() == 0
 }
 
-/// Port of Go `extractText` (tool.go:118): the non-empty, non-thought part texts joined with one
-/// space.
+/// The non-empty, non-thought part texts joined with one space.
 fn extract_text(mem: &MemoryEntry) -> String {
     let Some(content) = &mem.content else {
         return String::new();

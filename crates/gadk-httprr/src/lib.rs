@@ -15,9 +15,9 @@
 
 //! gadk-httprr: HTTP record/replay for deterministic tests.
 //!
-//! Port of ADK-Go `internal/httprr`. A [`RecordReplay`] is an [`HttpClient`] that
-//! either records real exchanges to a trace file or replays them from one. The
-//! trace format is Go's (`httprr trace v1`), so ADK-Go fixtures replay unmodified.
+//! A [`RecordReplay`] is an [`HttpClient`] that either records real exchanges to a trace file
+//! or replays them from one. The trace format is `httprr trace v1`, the one ADK's test
+//! fixtures use, so ADK trace fixtures replay unmodified.
 //!
 //! Replay matches on method, URL (without any `key` query parameter) and
 //! [`canonical_body`], so requests that differ only in JSON key order, whitespace
@@ -103,7 +103,7 @@ enum Mode {
     Record(Mutex<RecordState>),
 }
 
-/// A record/replay [`HttpClient`] backed by a Go-compatible trace file.
+/// A record/replay [`HttpClient`] backed by an `httprr trace v1` file.
 pub struct RecordReplay {
     path: PathBuf,
     real: Arc<dyn HttpClient>,
@@ -288,7 +288,7 @@ impl RecordReplay {
     }
 
     /// Appends one entry. On a write failure the trace is deleted and every later
-    /// request (and [`close`](Self::close)) reports the failure, as in Go.
+    /// request (and [`close`](Self::close)) reports the failure.
     fn write_log(
         &self,
         state: &Mutex<RecordState>,

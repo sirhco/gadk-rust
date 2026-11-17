@@ -29,7 +29,7 @@ pub(crate) const TRACE_HEADER: &str = "httprr trace v1";
 /// One trace entry: `(request wire, response wire)`.
 pub(crate) type Entry = (Vec<u8>, Vec<u8>);
 
-/// Parses a whole trace file into entries, in file order. Port of Go `httprr.open`.
+/// Parses a whole trace file into entries, in file order.
 pub(crate) fn parse_trace(path: &Path, data: &[u8]) -> Result<Vec<Entry>, HttprrError> {
     let corrupt = || HttprrError::Corrupt(path.to_path_buf());
     let Some((line, mut data)) = cut_line(data) else {
@@ -231,7 +231,7 @@ fn dechunk(mut data: &[u8]) -> Result<Vec<u8>, HttprrError> {
     }
 }
 
-/// Go's `textproto.CanonicalMIMEHeaderKey` for ASCII names: `x-goog-api-key` →
+/// Canonical MIME header form of an ASCII name (each word capitalised): `x-goog-api-key` →
 /// `X-Goog-Api-Key`.
 fn canonical_header_name(name: &str) -> String {
     let mut upper = true;

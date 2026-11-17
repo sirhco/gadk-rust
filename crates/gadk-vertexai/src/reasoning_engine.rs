@@ -14,13 +14,12 @@
 // limitations under the License.
 
 //! A Vertex AI Reasoning Engine client (the `CreateReasoningEngine`, `UpdateReasoningEngine`
-//! and operation-wait calls of Go's `aiplatform/apiv1beta1.ReasoningEngineClient` that
-//! `adkgo deploy agentengine` makes).
+//! and operation-wait calls that the ADK deploy CLI makes for an Agent Engine).
 //!
-//! Requests follow Go's generated `v1beta1` REST client: `$alt=json;enum-encoding=int`, the
+//! Requests follow the `v1beta1` REST API: `$alt=json;enum-encoding=int`, the
 //! `x-goog-request-params` routing header, protojson (camelCase) bodies given as
-//! [`serde_json::Value`], and operations polled at `/ui/{operation name}` with
-//! `WaitWithInterval(ctx, resp, time.Minute)`'s backoff. Requests are authenticated with
+//! [`serde_json::Value`], and operations polled at `/ui/{operation name}` with a backoff
+//! (initial 1 s, ×2, cap 60 s). Requests are authenticated with
 //! Application Default Credentials unless credentials are given.
 //!
 //! ```no_run
@@ -53,20 +52,19 @@ use crate::config::resolve;
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests;
 
-/// How a [`ReasoningEngineClient`] reaches Vertex AI (the `option.ClientOption`s of Go's
-/// `aiplatform.NewReasoningEngineClient`).
+/// How a [`ReasoningEngineClient`] reaches Vertex AI.
 #[derive(Default, Clone)]
 pub struct ReasoningEngineOptions {
-    /// The base URL (Go `option.WithEndpoint`); `None` (or empty) =
+    /// The base URL; `None` (or empty) =
     /// `https://{location}-aiplatform.googleapis.com`.
     pub endpoint: Option<String>,
-    /// The credentials sent with every request (Go `option.WithAuthCredentials`); `None`
+    /// The credentials sent with every request; `None`
     /// resolves Application Default Credentials through [`env`](Self::env) with the
     /// `cloud-platform` scope.
     pub credentials: Option<Credentials>,
-    /// Send no credentials (Go `option.WithoutAuthentication`).
+    /// Send no credentials.
     pub without_authentication: bool,
-    /// The HTTP client (Go `option.WithHTTPClient`); `None` builds a reqwest client.
+    /// The HTTP client; `None` builds a reqwest client.
     pub http_client: Option<Arc<dyn HttpClient>>,
     /// Where `GOOGLE_APPLICATION_CREDENTIALS` is read; `None` = the process environment.
     pub env: Option<Arc<dyn EnvProvider>>,
@@ -84,27 +82,25 @@ impl std::fmt::Debug for ReasoningEngineOptions {
     }
 }
 
-/// A Vertex AI Reasoning Engine client (Go `aiplatform.ReasoningEngineClient`, REST transport).
+/// A Vertex AI Reasoning Engine client (REST transport).
 pub struct ReasoningEngineClient {
     client: VertexClient,
 }
 
 impl ReasoningEngineClient {
-    /// A client for the engines of `location` (Go `aiplatform.NewReasoningEngineClient(ctx,
-    /// option.WithEndpoint(location + "-aiplatform.googleapis.com:443"))`). Synchronous; only
-    /// Application Default Credentials need a Tokio runtime.
+    /// A client for the engines of `location`, at `https://{location}-aiplatform.googleapis.com`.
+    /// Synchronous; only Application Default Credentials need a Tokio runtime.
     ///
     /// # Errors
     ///
-    /// The Application Default Credentials error, unwrapped (callers add Go's `cannot create
-    /// ReasoningEngineClient: ` prefix).
+    /// The Application Default Credentials error, unwrapped (callers add the
+    /// `cannot create ReasoningEngineClient: ` prefix).
     pub fn new(
         location: &str,
         opts: ReasoningEngineOptions,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        // Divergence (ledger 6b): Go's adkgo dials gRPC at
-        // `fmt.Sprintf("%s-aiplatform.googleapis.com:443", region)`; gadk speaks REST v1beta1
-        // to the same host (no `global` special case, as Go's Sprintf has none).
+        // REST v1beta1 to `{location}-aiplatform.googleapis.com`, with no `global` special
+        // case.
         let default_endpoint = format!("https://{location}-aiplatform.googleapis.com");
         let env = opts.env.unwrap_or_else(|| Arc::new(ProcessEnv));
         let resolved = resolve(
@@ -120,14 +116,14 @@ impl ReasoningEngineClient {
         })
     }
 
-    /// Go REST `CreateReasoningEngine`: `POST /v1beta1/{parent}/reasoningEngines` with body
+    /// `CreateReasoningEngine`: `POST /v1beta1/{parent}/reasoningEngines` with body
     /// `engine` (a protojson `ReasoningEngine`) and routing header `parent={parent}`. Returns
     /// the long-running operation; pass it to [`wait`](Self::wait).
     ///
     /// # Errors
     ///
-    /// A [`VertexError`](crate::VertexError) for a non-2xx status (displayed as Go's `rpc
-    /// error: code = … desc = …`), or the transport or JSON error.
+    /// A [`VertexError`](crate::VertexError) for a non-2xx status (displayed as
+    /// `rpc error: code = … desc = …`), or the transport or JSON error.
     pub async fn create(
         &self,
         parent: &str,
@@ -144,7 +140,7 @@ impl ReasoningEngineClient {
             .await
     }
 
-    /// Go REST `UpdateReasoningEngine`: `PATCH /v1beta1/{engine.name}` with query
+    /// `UpdateReasoningEngine`: `PATCH /v1beta1/{engine.name}` with query
     /// `updateMask={update_mask joined by ","}` (the protojson field-mask form, e.g.
     /// `["spec.sourceCodeSpec", "spec.classMethods"]`), body `engine` and routing header
     /// `reasoning_engine.name={engine.name}`. Returns the long-running operation; pass it to
@@ -174,17 +170,16 @@ impl ReasoningEngineClient {
             .await
     }
 
-    /// Go `CreateReasoningEngineOperation.Wait` / `UpdateReasoningEngineOperation.Wait`:
-    /// polls `op` until done (`WaitWithInterval(ctx, resp, time.Minute)`; unbounded, so wrap
-    /// it in `tokio::time::timeout` for Go's context deadline) and returns the operation's
-    /// `response` (the `ReasoningEngine`) without its `@type`.
+    /// Waits for a create or update operation: polls `op` until done (backoff initial 1 s, ×2,
+    /// cap 60 s; unbounded, so wrap it in `tokio::time::timeout` for a deadline) and returns
+    /// the operation's `response` (the `ReasoningEngine`) without its `@type`.
     ///
     /// # Errors
     ///
-    /// The operation's error as a [`VertexError`](crate::VertexError) (Go's `rpc error: code =
-    /// … desc = …`), a failed poll's error, or Go longrunning's `unsupported result type
-    /// <nil>: <nil>` when the operation is done without a response. Callers add Go's
-    /// `operation failed: ` prefix.
+    /// The operation's error as a [`VertexError`](crate::VertexError)
+    /// (`rpc error: code = … desc = …`), a failed poll's error, or
+    /// `unsupported result type <nil>: <nil>` when the operation is done without a response.
+    /// Callers add the `operation failed: ` prefix.
     pub async fn wait(&self, op: Value) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
         let mut done = self.client.wait_operation(op).await?;
         match done.get_mut("response").map(Value::take) {

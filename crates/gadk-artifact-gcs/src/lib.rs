@@ -13,12 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A Google Cloud Storage [`ArtifactService`](gadk_artifact::ArtifactService) (port of ADK-Go
-//! `artifact/gcsartifact`).
+//! A Google Cloud Storage [`ArtifactService`](gadk_artifact::ArtifactService).
 //!
-//! Artifacts are stored under the object names, versions, content types and metadata ADK-Go
-//! uses (`{app}/{user}/{session}/{file}/{version}`, or `{app}/{user}/user/{file}/{version}` for a
-//! `user:` file), so a gadk service and an ADK-Go service can share one bucket. Requests go to
+//! Artifacts are stored under the object names, versions, content types and metadata that ADK's
+//! GCS artifact service uses (`{app}/{user}/{session}/{file}/{version}`, or
+//! `{app}/{user}/user/{file}/{version}` for a `user:` file), so a gadk service and an ADK
+//! service can share one bucket. Requests go to
 //! the GCS JSON API through gadk's own REST transport, authenticated with Application Default
 //! Credentials unless [`GcsConfig::credentials`] are given.
 //!

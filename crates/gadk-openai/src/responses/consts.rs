@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The Responses API stream event types ADK-Go's translator and stream loop switch on (port
-//! of ADK-Go `internal/responses/consts.go`).
+//! The Responses API stream event types the translator and stream loop switch on.
 
 /// `response.output_text.delta`.
 pub(crate) const RESPONSE_OUTPUT_TEXT_DELTA: &str = "response.output_text.delta";

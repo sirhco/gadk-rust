@@ -13,9 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `internal/telemetry/experimental_semconv.go`: the default (1.44) schema's request
-//! content on the `generate_content` span and its `gen_ai.client.inference.operation.details`
-//! log record.
+//! The default (1.44) schema's request content on the `generate_content` span and its
+//! `gen_ai.client.inference.operation.details` log record.
 
 use gadk_model::LlmRequest;
 use serde_json::Value;
@@ -32,16 +31,16 @@ use super::genai_messages::{
 };
 use super::inference::{GEN_AI_PROVIDER_NAME, provider_name};
 
-/// Go `inferenceOperationDetailsEventName`.
+/// The event name of the inference-details log record.
 pub(crate) const INFERENCE_OPERATION_DETAILS_EVENT_NAME: &str =
     "gen_ai.client.inference.operation.details";
 
-/// Go `operationDetails`: what the inference-details record says about the request.
+/// What the inference-details record says about the request.
 pub(crate) struct OperationDetails {
     span: tracing::Span,
-    /// Go `request`: the request content last noted.
+    /// The request content last noted.
     request: Vec<ContentAttr>,
-    /// Go `eventRequest`: that content as the record's attributes.
+    /// That content as the record's attributes.
     pub(crate) event_request: Vec<(&'static str, AttrValue)>,
 }
 
@@ -55,9 +54,9 @@ impl OperationDetails {
         }
     }
 
-    /// Go `noteLLMRequest`: converts `req` (only when content goes to the span or the record),
-    /// and on a change records it on the span and keeps it for the record. Span attributes cannot
-    /// be removed, so an edit that drops a message key leaves the earlier value.
+    /// Converts `req` (only when content goes to the span or the record), and on a change records
+    /// it on the span and keeps it for the record. Span attributes cannot be removed, so an edit
+    /// that drops a message key leaves the earlier value.
     pub(crate) fn note_llm_request(&mut self, req: &LlmRequest) {
         if use_legacy_schema() {
             return;
@@ -80,8 +79,8 @@ impl OperationDetails {
         }
     }
 
-    /// Go `emit`: the `gen_ai.client.inference.operation.details` record (DEBUG, no body) under
-    /// the span; default schema only.
+    /// Emits the `gen_ai.client.inference.operation.details` record (DEBUG, no body) under the
+    /// span; default schema only.
     pub(crate) fn emit(&self, params: &GenerateContentParams, result: &GenerateContentResult) {
         if use_legacy_schema() {
             return;

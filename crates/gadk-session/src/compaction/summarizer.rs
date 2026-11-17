@@ -13,14 +13,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go session/compaction/compaction.go `SummarizeResult` and `Summarizer`.
+//! [`SummarizeResult`] and the [`Summarizer`] trait.
 
 use gadk_genai::{Content, GenerateContentResponseUsageMetadata};
 use gadk_model::Backend;
 
 use crate::Event;
 
-/// What one summarization attempt produced (Go `compaction.SummarizeResult`). The two states are
+/// What one summarization attempt produced. The two states are
 /// told apart by `content` alone: `Some` is a summary, `None` is a decline.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SummarizeResult {
@@ -30,8 +30,8 @@ pub struct SummarizeResult {
     pub usage: Option<GenerateContentResponseUsageMetadata>,
 }
 
-/// A summarization failure that still reports what it spent (Go returns
-/// `SummarizeResult{Usage: u}` alongside the error). Return it boxed from
+/// A summarization failure that still reports what it spent (the usage travels with the
+/// error). Return it boxed from
 /// [`Summarizer::summarize_events`] when a model call was paid for and failed; the framework
 /// records the usage on the compaction span. Display and `source()` are the wrapped error's.
 #[derive(Debug)]
@@ -54,7 +54,7 @@ impl std::error::Error for SummarizeFailure {
     }
 }
 
-/// Condenses a range of events into a single piece of content (Go `compaction.Summarizer`).
+/// Condenses a range of events into a single piece of content.
 ///
 /// An implementation returns only the summary. The framework builds the event that carries it,
 /// derives the range it covers from the events it handed over, and appends it.
@@ -77,14 +77,14 @@ pub trait Summarizer: Send + Sync {
     ) -> Result<SummarizeResult, Box<dyn std::error::Error + Send + Sync>>;
 
     /// The summarizer's bare type name, put on the compaction span as
-    /// `gen_ai.compaction.summarizer_type` (Go `summarizerTypeName`). Defaults to the last `::`
+    /// `gen_ai.compaction.summarizer_type`. Defaults to the last `::`
     /// segment of the implementing type's path, without generic arguments.
     fn type_name(&self) -> &str {
         bare_type_name(std::any::type_name::<Self>())
     }
 
-    /// The Google backend the summarizer's model talks to, used for the span's `gen_ai.system`
-    /// (Go `summarizerBackend`). `None` omits the attribute.
+    /// The Google backend the summarizer's model talks to, used for the span's
+    /// `gen_ai.system`. `None` omits the attribute.
     fn google_variant(&self) -> Option<Backend> {
         None
     }

@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `controllers/triggers/eventarc.go`.
+//! The Eventarc (CloudEvents) trigger controller.
 
 use std::sync::Arc;
 
@@ -32,7 +32,7 @@ use crate::rest::ServerError;
 use crate::rest::models::{EventarcTriggerRequest, PubSubTriggerRequest};
 use crate::rest::routing::{Request, Response};
 
-/// Go `eventArcDefaultUserID`: the user of an event without a source.
+/// The user of an event without a source.
 const EVENTARC_DEFAULT_USER_ID: &str = "eventarc-caller";
 
 /// The structured-mode media type (CloudEvents HTTP binding §3.2.1).
@@ -41,16 +41,15 @@ const STRUCTURED_CONTENT_TYPE: &str = "application/cloudevents+json";
 /// The CloudEvents type of a Pub/Sub-sourced event, whose data is a push envelope.
 const PUB_SUB_EVENT_TYPE: &str = "google.cloud.pubsub.topic.v1.messagePublished";
 
-/// Port of Go `triggers.EventarcController`: handles Eventarc (CloudEvents) deliveries.
+/// Handles Eventarc (CloudEvents) deliveries.
 pub struct EventarcController {
     runner: RetriableRunner,
     semaphore: Option<Semaphore>,
 }
 
 impl EventarcController {
-    /// Go `NewEventarcControllerWithConfig`: fails when the compaction config cannot serve the
-    /// loader's apps (the error text is Go's). A non-positive `max_concurrent_runs` means no
-    /// limit (Go's Eventarc controller would block every request on a zero-capacity channel).
+    /// Fails when the compaction config cannot serve the loader's apps. A non-positive
+    /// `max_concurrent_runs` means no limit.
     pub fn new(cfg: ControllerConfig) -> Result<Self, ServerError> {
         let max_concurrent_runs = cfg.trigger_config.max_concurrent_runs;
         let runner = RetriableRunner::new(cfg);
@@ -63,11 +62,11 @@ impl EventarcController {
         })
     }
 
-    /// Go `EventarcTriggerHandler`: a CloudEvent in structured mode (`Content-Type:
+    /// Handles a delivery: a CloudEvent in structured mode (`Content-Type:
     /// application/cloudevents+json`, the event is the body) or binary mode (attributes in `ce-*`
     /// headers, the body is the data). A Pub/Sub event's data is decoded as a push envelope;
-    /// any other event is passed to the agent whole, as Go's `json.Marshal` writes it (user: the
-    /// event source, or `eventarc-caller`).
+    /// any other event is passed to the agent whole, as JSON (user: the event source, or
+    /// `eventarc-caller`).
     pub async fn eventarc_trigger_handler(&self, req: Request) -> Response {
         let structured = header(&req, CONTENT_TYPE.as_str()) == STRUCTURED_CONTENT_TYPE;
         let app = app_name(&req);
@@ -181,16 +180,17 @@ impl EventarcController {
     }
 
     /// The trigger endpoint (POST) as an axum `MethodRouter` to mount at a path of the caller's
-    /// choosing with an `{app_name}` parameter (the Go launcher uses
+    /// choosing with an `{app_name}` parameter (the web launcher uses
     /// `/apps/{app_name}/trigger/eventarc`). Other methods answer axum's 405.
     ///
     /// The body is read under the router's `axum::extract::DefaultBodyLimit`; set it explicitly
-    /// where you mount the handler (`DefaultBodyLimit::max(10 << 20)` is the Go launcher's
-    /// 10 MiB), since axum's own default is 2 MB.
+    /// where you mount the handler (`DefaultBodyLimit::max(10 << 20)` is 10 MiB, the REST
+    /// routes' default [`DEFAULT_MAX_PAYLOAD_SIZE`](crate::rest::DEFAULT_MAX_PAYLOAD_SIZE)),
+    /// since axum's own default is 2 MB.
     ///
     /// The handler does not authenticate: it runs the agent as a user ID taken from the
     /// delivery itself, so any caller that reaches it chooses who the agent runs as. Mount it
-    /// behind [`authn::middleware`](crate::authn::middleware) as the Go launcher does, normally
+    /// behind [`authn::middleware`](crate::authn::middleware) as the web launcher does, normally
     /// with [`google_oidc`](crate::authn::google_oidc) so that only an allow-listed service
     /// account may call it:
     ///
@@ -220,7 +220,7 @@ impl EventarcController {
     }
 }
 
-/// Go `r.Header.Get(name)`: the first value, or empty.
+/// The first value of header `name`, or empty.
 fn header(req: &Request, name: &str) -> String {
     req.headers()
         .get(name)
@@ -228,13 +228,13 @@ fn header(req: &Request, name: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Go `json.Marshal(event)` with `event.Data = data`: the attributes, then `data` (Go
-/// `json.RawMessage`, `omitempty`) compacted and HTML-escaped as Go's encoder does. Data that is
-/// not JSON fails as Go's `RawMessage` marshalling does.
+/// The event as JSON with `data` set: the attributes, then `data` (omitted when empty) compacted
+/// and HTML-escaped as [`gadk_model::to_go_json`] does. Data that is not JSON fails the
+/// marshalling.
 fn marshal_event(event: &EventarcTriggerRequest, data: &[u8]) -> Result<String, String> {
     let mut out = gadk_model::to_go_json(event).map_err(|e| e.to_string())?;
     if !data.is_empty() {
-        // Divergence (ledger 5a): `data` is skipped, so any depth passes (Go: 10000); see 5c.md.
+        // `data` is only checked for validity (skipped over), so any nesting depth passes.
         serde_json::from_slice::<IgnoredAny>(data).map_err(|e| {
             format!("json: error calling MarshalJSON for type json.RawMessage: {e}")
         })?;
@@ -246,8 +246,8 @@ fn marshal_event(event: &EventarcTriggerRequest, data: &[u8]) -> Result<String, 
     Ok(String::from_utf8_lossy(&out).into_owned())
 }
 
-/// Go `encoding/json` `appendCompact(dst, src, escapeHTML=true)` over valid JSON: whitespace
-/// outside strings dropped; `<`, `>`, `&`, U+2028 and U+2029 written as `\u` escapes.
+/// Compacts valid JSON into `out`: whitespace outside strings dropped; `<`, `>`, `&`, U+2028 and
+/// U+2029 written as `\u` escapes.
 fn go_compact(src: &[u8], out: &mut Vec<u8>) {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let (mut in_string, mut escaped) = (false, false);

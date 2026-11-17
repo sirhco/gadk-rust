@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go internal/llminternal/base_flow.go: the `Flow` struct and processor types, and the
-//! step loop (`Run`, `runOneStep`, `callLLM`, `generateContent`).
+//! The `Flow` struct and processor types, and the step loop (`run`, `run_one_step`, the model
+//! call and `generate_content`).
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -52,30 +52,29 @@ use crate::{
     workflow::route::go_quote,
 };
 
-/// Port of Go `func(ctx agent.InvocationContext, req *model.LLMRequest, f *Flow) iter.Seq2[*session.Event, error]`.
-/// Returns the events the processor emits; the flow yields them in order.
+/// A request processor. Returns the events the processor emits; the flow yields them in order.
 pub(crate) type RequestProcessor = for<'a> fn(
     &'a InvocationContext,
     &'a mut LlmRequest,
     &'a Flow,
 ) -> BoxFuture<'a, Result<Vec<Event>, AgentError>>;
 
-/// Port of Go `func(ctx agent.InvocationContext, req *model.LLMRequest, resp *model.LLMResponse) error`.
+/// A response processor: edits the model response in place.
 pub(crate) type ResponseProcessor = for<'a> fn(
     &'a InvocationContext,
     &'a LlmRequest,
     &'a mut LlmResponse,
 ) -> Result<(), AgentError>;
 
-/// Port of Go internal/llminternal/base_flow.go `Flow`.
+/// The LLM flow: model, tools, processors and callbacks.
 #[derive(Default)]
 pub(crate) struct Flow {
     pub(crate) model: Option<Arc<dyn Llm>>,
-    /// Go `Flow.Tools`. The tools processor (slot 2) rewrites it on every step
-    /// (`tools_processor.go:49`), and the request-confirmation processor and
-    /// `tool_preprocess` read it. Interior mutability is needed because processors get
-    /// `&Flow` (C5 D5). Never hold the guard across an `.await`. There is no `toolsets`
-    /// field: the processors read toolsets through `reveal(ctx.agent())` exactly as Go does.
+    /// The tools of the current step. The tools processor (slot 2) rewrites it on every step,
+    /// and the request-confirmation processor and `tool_preprocess` read it. Interior
+    /// mutability is needed because processors get `&Flow`. Never hold the guard across an
+    /// `.await`. There is no `toolsets` field: the processors read toolsets through
+    /// `reveal(ctx.agent())`.
     pub(crate) tools: parking_lot::RwLock<Vec<Arc<dyn Tool>>>,
     pub(crate) request_processors: Vec<RequestProcessor>,
     pub(crate) response_processors: Vec<ResponseProcessor>,
@@ -85,25 +84,25 @@ pub(crate) struct Flow {
     pub(crate) before_tool_callbacks: Vec<BeforeToolCallback>,
     pub(crate) after_tool_callbacks: Vec<AfterToolCallback>,
     pub(crate) on_tool_error_callbacks: Vec<OnToolErrorCallback>,
-    /// Go `Flow.reconnect`: bounds `run_live`'s reconnect attempts. `None` means the defaults;
+    /// Bounds `run_live`'s reconnect attempts. `None` means the defaults;
     /// only tests set it, to shrink the delays.
     pub(crate) live_reconnect: Option<LiveReconnectPolicy>,
 }
 
-/// Port of base_flow.go maxConsecutiveThoughtOnlyTurns: a safety net against a model that only
+/// A safety net against a model that only
 /// ever "thinks"; deliberately not configurable.
 pub(crate) const MAX_CONSECUTIVE_THOUGHT_ONLY_TURNS: usize = 10;
 
-/// Go `ErrModelNotConfigured` text.
+/// Error text when the flow has no model.
 pub(crate) const ERR_MODEL_NOT_CONFIGURED: &str =
     "model not configured; ensure Model is set in llmagent.Config";
 
 /// The step's callback actions: shared by the model callbacks and stamped on every model-response
-/// event of the step (Go's `stateDelta`/`artifactDelta` maps).
+/// event of the step (the state-delta and artifact-delta maps).
 type SharedActions = Arc<parking_lot::Mutex<EventActions>>;
 
 impl Flow {
-    /// Port of base_flow.go:129 `(*Flow).Run`: runs steps until a final response, a partial last
+    /// Runs steps until a final response, a partial last
     /// event, or too many consecutive thought-only turns.
     pub(crate) fn run(self: Arc<Self>, ctx: InvocationContext) -> EventStream {
         Box::pin(async_stream::try_stream! {
@@ -114,7 +113,7 @@ impl Flow {
                 while let Some(item) = step.next().await {
                     let ev = item?;
                     last_event = Some(ev.clone());
-                    // Forward the event first (Go order).
+                    // Forward the event first.
                     yield ev;
                 }
                 let Some(last) = last_event else { break };
@@ -157,7 +156,7 @@ impl Flow {
         })
     }
 
-    /// Port of base_flow.go:785 `(*Flow).runOneStep`: preprocess, the model call (with its
+    /// Runs one step: preprocess, the model call (with its
     /// callbacks), function calls, the confirmation and structured-output events, and the
     /// `transfer_to_agent` dispatch.
     pub(crate) fn run_one_step(self: Arc<Self>, ctx: InvocationContext) -> EventStream {
@@ -177,10 +176,10 @@ impl Flow {
                 };
                 let mut preprocess_yielded_final_response = false;
                 {
-                    // Go yields each processor's events as they are produced, so they are in the
-                    // session before a later processor (contents) reads it; regression:
-                    // TestDelegation_06_ChatToTaskHITLResume (the resumed tool's response comes
-                    // from the confirmation processor and must reach the same step's request).
+                    // Each processor's events are yielded as they are produced, so they are in
+                    // the session before a later processor (contents) reads it (the resumed
+                    // tool's response comes from the confirmation processor and must reach the
+                    // same step's request).
                     let mut pre = self.preprocess(&ctx, &mut req);
                     while let Some(ev) = pre.next().await {
                         let ev = ev?;
@@ -192,7 +191,7 @@ impl Flow {
                         yield ev;
                     }
                 }
-                // Go 074b0879: a preprocessor can run a tool itself, such as a call resumed after
+                // A preprocessor can run a tool itself, such as a call resumed after
                 // confirmation. When that tool's response is final, because the tool set
                 // skip_summarization, the turn ends there, as it does when the tool runs after a
                 // model call.
@@ -206,7 +205,7 @@ impl Flow {
                     ..Default::default()
                 }));
 
-                // Go callLLM lines 990-1009: before-model callbacks, plugins first. `Some`
+                // Before-model callbacks, plugins first. `Some`
                 // response short-circuits the model call (and the after-model callbacks).
                 let mut short_circuit: Option<LlmResponse> = None;
                 if let Some(pm) = ctx.plugin_manager() {
@@ -217,7 +216,7 @@ impl Flow {
                     match res {
                         Ok(r) => short_circuit = r,
                         Err(e) => {
-                            // Go newResponseWithEventID consumes a UUID before the error.
+                            // A UUID is consumed before the error.
                             let _ = ctx.platform().new_uuid();
                             Err::<(), AgentError>(e)?;
                         }
@@ -275,8 +274,8 @@ impl Flow {
                     };
                     let confirmation_ev = generate_request_confirmation_event(&ctx, &model_ev, &fr_ev);
                     // Function responses before confirmation and credential requests, so consumers
-                    // that pause for the user still persist completed tool results (Go
-                    // yieldWithAuthRequest: asking the user to sign in ends the invocation).
+                    // that pause for the user still persist completed tool results. Asking the
+                    // user to sign in ends the invocation.
                     let auth_ev = generate_auth_event(&ctx, &fr_ev);
                     yield fr_ev.clone();
                     if let Some(a) = auth_ev {
@@ -301,9 +300,8 @@ impl Flow {
                                 fr_ev.actions.transfer_to_agent
                             ))
                         })?;
-                    // Go base_flow.go:904-913: an LlmAgent target (Go's nodeRunner interface,
-                    // implemented only by llmAgent → RunLLMAgentAsNode) runs through the node
-                    // wrapper with a promoted context and a nil node input; any other agent runs
+                    // An LlmAgent target runs through the node
+                    // wrapper with a promoted context and a null node input; any other agent runs
                     // directly.
                     let mut s = if crate::llm::state::reveal(&*next).is_some() {
                         crate::llm::node_wrapper::run_llm_agent_as_node(
@@ -323,11 +321,11 @@ impl Flow {
         })
     }
 
-    /// Port of base_flow.go:922 `(*Flow).preprocess`: the request processors, then
-    /// `toolPreprocess` over `Flow.tools` and `toolsetPreprocess`. Each processor's events are
-    /// yielded before the next processor runs (Go base_flow.go:925-934), so the caller can append
-    /// them to the session first. Go yields a failing processor's events before its error; Rust
-    /// drops the events of the failing processor (those of earlier processors were yielded).
+    /// Runs the request processors, then
+    /// `tool_preprocess` over `Flow.tools` and `toolset_preprocess`. Each processor's events are
+    /// yielded before the next processor runs, so the caller can append
+    /// them to the session first. The events of a failing processor are dropped (those of
+    /// earlier processors were yielded).
     pub(crate) fn preprocess<'a>(
         &'a self,
         ctx: &'a InvocationContext,
@@ -346,7 +344,7 @@ impl Flow {
         })
     }
 
-    /// Port of the model half of base_flow.go:986 `(*Flow).callLLM` (lines 1011-1081): the
+    /// The model half of a step:
     /// streaming flag, the LLM-call limit, the model call, the on-model-error and after-model
     /// callbacks. Each item carries the event ID reserved for its response.
     pub(crate) fn call_model(
@@ -357,7 +355,7 @@ impl Flow {
         actions: SharedActions,
     ) -> BoxStream<'static, Result<(LlmResponse, String), AgentError>> {
         Box::pin(async_stream::try_stream! {
-            // Streaming mode comes from the invocation context's RunConfig (Go issue #586).
+            // Streaming mode comes from the invocation context's RunConfig.
             let use_stream = ctx.run_config().streaming_mode == StreamingMode::Sse;
             // Count this call before making it; no limiter means no limit.
             if let Some(l) = ctx.llm_call_limiter() {
@@ -365,16 +363,14 @@ impl Flow {
             }
             let token = ctx.cancellation_token().clone();
             // An already-ended context skips the model call (and its span); the cancellation
-            // is then handled as one that ends the call below. Divergence (ledger 7b-3a): Go
-            // calls the model with the ended context, inside its generate_content span (Rust
-            // models do not observe the context).
+            // is then handled as one that ends the call below. Rust
+            // models do not observe the context, so the model is not called with it.
             let mut inner = (!token.is_cancelled())
                 .then(|| generate_content(&ctx, model, req.clone(), use_stream));
             loop {
                 let next = match inner.as_mut() {
                     None => None,
-                    // Model first: Go ranges over the model's responses without checking ctx
-                    // between them, so an already-ready response wins over the cancellation;
+                    // Model first: an already-ready response wins over the cancellation;
                     // the cancellation ends the call only while the model is pending.
                     Some(inner) => tokio::select! {
                         biased;
@@ -382,10 +378,9 @@ impl Flow {
                         _ = token.cancelled() => None,
                     },
                 };
-                // Go's model observes its context's end and yields `ctx.Err()` (the test models
-                // of plugin/agentanalytics; genai's HTTP client yields the cause wrapped), which
-                // runs the on-model-error callbacks (Go base_flow.go:1031-1046). Rust models do
-                // not see the context, so the flow ends the call and yields that error for it.
+                // A cancelled call yields the context's error, which runs the on-model-error
+                // callbacks. Rust models do not see the context, so the flow ends the call and
+                // yields that error for it.
                 let (item, event_id, cancelled) = match next {
                     None => (
                         Err(ModelError::Other(Box::new(context_err(&ctx)))),
@@ -404,8 +399,8 @@ impl Flow {
                                 Err::<(), AgentError>(cb_err)?;
                                 break;
                             }
-                            // Go yields the model's error as is: for a cancelled call that is
-                            // `ctx.Err()`, gadk's `AgentError::Cancelled` / `DeadlineExceeded`.
+                            // The model's error is yielded as is: for a cancelled call that is
+                            // the context's error, `AgentError::Cancelled` / `DeadlineExceeded`.
                             Ok(None) if cancelled => {
                                 Err::<(), AgentError>(context_err(&ctx))?;
                                 break;
@@ -420,15 +415,15 @@ impl Flow {
                 };
                 // Function call IDs are optional in genai; set them for the after-model callbacks.
                 populate_client_function_call_id(ctx.platform(), resp.content.as_mut());
-                // Go passes the (now nil) model error, so the error argument is always None. The
-                // callbacks hand the (possibly edited) response back; Go yields its edited
-                // `*LLMResponse` when no callback replaces it.
+                // The model error argument is always None here. The
+                // callbacks hand the (possibly edited) response back; it is yielded when no
+                // callback replaces it.
                 let (resp, res) = self.run_after_model_callbacks(&ctx, resp, &actions).await;
                 match res? {
                     Some(r) => yield (inherit_model_fields(&resp, r), event_id),
                     None => yield (resp, event_id),
                 }
-                // Go's model returns after yielding `ctx.Err()`: a callback's reply ends the call.
+                // A cancelled call ends after yielding: a callback's reply ends the call.
                 if cancelled {
                     break;
                 }
@@ -436,7 +431,7 @@ impl Flow {
         })
     }
 
-    /// Port of base_flow.go:1110 runAfterModelCallbacks: plugins first; the first `Some`/`Err`
+    /// Runs the after-model callbacks: plugins first; the first `Some`/`Err`
     /// wins. The response is threaded through every callback (plugins, then the agent's) and
     /// handed back, so an edit made by one callback reaches the next and the flow.
     async fn run_after_model_callbacks(
@@ -466,7 +461,7 @@ impl Flow {
         (resp, Ok(None))
     }
 
-    /// Port of base_flow.go:1132 runOnModelErrorCallbacks: plugins first; the first `Some`/`Err`
+    /// Runs the on-model-error callbacks: plugins first; the first `Some`/`Err`
     /// wins.
     async fn run_on_model_error_callbacks(
         &self,
@@ -490,7 +485,7 @@ impl Flow {
         Ok(None)
     }
 
-    /// Port of base_flow.go:1159 postprocess: the response processors in order.
+    /// Runs the response processors in order.
     fn postprocess(
         &self,
         ctx: &InvocationContext,
@@ -503,7 +498,7 @@ impl Flow {
         Ok(())
     }
 
-    /// Port of base_flow.go:1169 agentToRun: the transfer target named `name`, searched among the
+    /// The transfer target named `name`, searched among the
     /// current agent's transfer targets (not the whole tree, unlike adk-python).
     fn agent_to_run(&self, ctx: &InvocationContext, name: &str) -> Option<Arc<dyn Agent>> {
         transfer_target_agents(ctx, &ctx.agent())
@@ -512,7 +507,7 @@ impl Flow {
     }
 }
 
-/// Port of base_flow.go inheritModelFields (6ae94e12): carries the fields that describe the
+/// Carries the fields that describe the
 /// model call, rather than the response content, from a response onto the after-model
 /// callback's replacement for it. A partial original keeps its replacement partial, a response
 /// that ended the turn keeps its replacement ending it, and the original's usage metadata fills
@@ -530,7 +525,7 @@ fn inherit_model_fields(original: &LlmResponse, mut replacement: LlmResponse) ->
     replacement
 }
 
-/// Go `icontext.NewCallbackContextWithDelta`: a callback context recording into `actions`.
+/// A callback context recording into `actions`.
 fn callback_ctx(ctx: &InvocationContext, actions: &SharedActions) -> Context {
     ctx.clone().into_context().with_delta(ContextDelta {
         actions: Some(actions.clone()),
@@ -554,10 +549,9 @@ impl std::error::Error for SharedModelError {
     }
 }
 
-/// Go `ctx.Err()` of an ended context: `context.DeadlineExceeded` when its deadline passed,
-/// else `context.Canceled` (also for a `WithCancelCause` context, whatever its cause). Shared by
-/// the LLM flow (Go base_flow.go: the model yields `ctx.Err()`) and the parallel worker (Go
-/// parallel_worker.go `reportFailure(ctx.Err())`).
+/// The error for an ended context: `AgentError::DeadlineExceeded` when its deadline passed,
+/// else `AgentError::Cancelled` (whatever the cancellation cause). Shared by
+/// the LLM flow (the model yields the context's error) and the parallel worker.
 pub(crate) fn context_err(ctx: &InvocationContext) -> AgentError {
     match ctx.cause() {
         Some(CancelCause::DeadlineExceeded) => AgentError::DeadlineExceeded,
@@ -574,7 +568,7 @@ pub(crate) fn model_error_into_agent(err: Arc<ModelError>) -> AgentError {
     }
 }
 
-/// Go runOneStep's tools map: every packed request tool as an `Arc<dyn Tool>`.
+/// The tools map of a step: every packed request tool as an `Arc<dyn Tool>`.
 fn tools_from_request(req: &LlmRequest) -> Result<HashMap<String, Arc<dyn Tool>>, AgentError> {
     let mut tools = HashMap::with_capacity(req.tools.len());
     for k in req.tools.keys() {
@@ -588,7 +582,8 @@ fn tools_from_request(req: &LlmRequest) -> Result<HashMap<String, Arc<dyn Tool>>
     Ok(tools)
 }
 
-/// Port of base_flow.go:1183 finalizeModelResponseEvent.
+/// Builds the event for a model response: the reserved `event_id`, the agent's name and branch,
+/// the step's state and artifact deltas, and the long-running tool call IDs.
 fn finalize_model_response_event(
     ctx: &InvocationContext,
     mut resp: LlmResponse,
@@ -598,7 +593,7 @@ fn finalize_model_response_event(
 ) -> Event {
     // Matching function calls and responses needs non-empty call IDs.
     populate_client_function_call_id(ctx.platform(), resp.content.as_mut());
-    // Go NewEvent consumes a UUID even though the ID is then replaced.
+    // `Event::new` consumes a UUID even though the ID is then replaced.
     let mut ev = Event::new(ctx.platform(), ctx.invocation_id());
     ev.id = event_id;
     ev.author = ctx.agent().name().to_owned();
@@ -613,8 +608,8 @@ fn finalize_model_response_event(
     ev
 }
 
-/// Port of base_flow.go:1204 findLongRunningFunctionCallIDs: IDs of calls (non-empty ID) to
-/// long-running tools, deduplicated. Go collects a map (random order); call order here.
+/// IDs of calls (non-empty ID) to
+/// long-running tools, deduplicated, in call order.
 pub(crate) fn find_long_running_function_call_ids(
     c: Option<&Content>,
     tools: &HashMap<String, Arc<dyn Tool>>,
@@ -631,7 +626,7 @@ pub(crate) fn find_long_running_function_call_ids(
     out
 }
 
-/// Port of base_flow.go:183 isThoughtOnlyTurn: a completed (non-partial) turn whose parts are all
+/// Whether the event is a
 /// thoughts.
 pub(crate) fn is_thought_only_turn(ev: Option<&Event>) -> bool {
     let Some(ev) = ev.filter(|e| !e.response.partial) else {
@@ -643,9 +638,9 @@ pub(crate) fn is_thought_only_turn(ev: Option<&Event>) -> bool {
     c.parts.iter().all(|p| p.thought)
 }
 
-/// Port of base_flow.go:1090 generateContent: the model call inside
-/// `telemetry.InstrumentGenerateContent`'s `generate_content` span, which covers only the model
-/// call (callbacks and plugins stay outside it). Each item carries an event ID (Go 3188db98):
+/// The model call inside
+/// a `generate_content` span, which covers only the model
+/// call (callbacks and plugins stay outside it). Each item carries an event ID:
 /// the partial chunks of a streamed response share one ID with the response that completes
 /// them. A complete response ends the ID, and so does an error, because an on-model-error
 /// callback may turn it into a saved event. A new ID is drawn when the next item arrives, never

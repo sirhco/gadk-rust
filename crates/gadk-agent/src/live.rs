@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Live (bidirectional streaming) types (port of Go `agent/live.go`).
+//! Live (bidirectional streaming) types.
 
 use std::any::Any;
 
@@ -26,11 +26,11 @@ use gadk_model::RealtimeInput;
 
 use crate::error::AgentError;
 
-/// Port of Go `agent.LiveRequest`: one client message of a live session.
+/// One client message of a live session.
 ///
-/// `realtime_input` is Go's `RealtimeInput any` (a `*genai.Blob`, `*genai.ActivityStart` or
-/// `*genai.ActivityEnd`); `content` is standard text or multimodal content, or a reply to a tool
-/// call when it carries a function-response part.
+/// `realtime_input` is a [`RealtimeInput`] (blob or activity start/end); `content` is standard
+/// text or multimodal content, or a reply to a tool call when it carries a function-response
+/// part.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct LiveRequest {
     /// Realtime input (audio/video blob or activity signal).
@@ -39,39 +39,39 @@ pub struct LiveRequest {
     pub content: Option<Content>,
 }
 
-/// Port of Go `agent.LiveSession`: the caller's handle on a running live session.
+/// The caller's handle on a running live session.
 #[async_trait]
 pub trait LiveSession: Send + Sync {
-    /// Go `Send`: delivers `req` to the session.
+    /// Delivers `req` to the session.
     async fn send(&self, req: LiveRequest) -> Result<(), AgentError>;
-    /// Go `Close`: ends the session.
+    /// Ends the session.
     async fn close(&self) -> Result<(), AgentError>;
     /// Downcasting support (the engine reaches its own session type through it).
     fn as_any(&self) -> &dyn Any;
 }
 
-/// Port of Go `agent.LiveRunConfig`: the configuration of one live run.
+/// The configuration of one live run.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct LiveRunConfig {
-    /// Go `ResponseModalities`.
+    /// The response modalities.
     pub response_modalities: Vec<Modality>,
-    /// Go `SpeechConfig`.
+    /// The speech configuration.
     pub speech_config: Option<SpeechConfig>,
-    /// Go `InputAudioTranscription`.
+    /// The input audio transcription configuration.
     pub input_audio_transcription: Option<AudioTranscriptionConfig>,
-    /// Go `OutputAudioTranscription`.
+    /// The output audio transcription configuration.
     pub output_audio_transcription: Option<AudioTranscriptionConfig>,
-    /// Go `RealtimeInputConfig` (carried; Go's flow does not send it).
+    /// The realtime input configuration (carried; the live flow does not send it).
     pub realtime_input_config: Option<RealtimeInputConfig>,
-    /// Go `EnableAffectiveDialog` (carried; Go's flow does not send it).
+    /// Enables affective dialog (carried; the live flow does not send it).
     pub enable_affective_dialog: bool,
-    /// Go `Proactivity` (carried; Go's flow does not send it).
+    /// The proactivity configuration (carried; the live flow does not send it).
     pub proactivity: Option<ProactivityConfig>,
-    /// Go `SessionResumption`.
+    /// The session resumption configuration.
     pub session_resumption: Option<SessionResumptionConfig>,
-    /// Go `SaveLiveBlob`: cache model audio and save both caches as artifacts on flush.
+    /// Cache model audio and save both caches as artifacts on flush.
     pub save_live_blob: bool,
-    /// Go `MaxLLMCalls` (carried; Go's `RunLive` does not apply it).
+    /// The LLM call limit (carried; the live run does not apply it).
     pub max_llm_calls: i32,
 }
 

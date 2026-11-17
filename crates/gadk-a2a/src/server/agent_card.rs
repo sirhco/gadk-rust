@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Agent-card skills and descriptions (port of ADK-Go `server/adka2a/v2/agent_card.go`).
+//! Agent-card skills and descriptions.
 
 use std::sync::Arc;
 
@@ -21,7 +21,7 @@ use gadk_agent::{Agent, AgentState, AgentType, Tool};
 use gadk_engine::agents::loop_agent::LoopAgentConfig;
 use gadk_engine::llm::{agent_instructions, agent_tools};
 
-/// Go `BuildAgentSkills`: the skills of `agent` and its direct sub-agents, built from the agents'
+/// The skills of `agent` and its direct sub-agents, built from the agents'
 /// descriptions and types, for the `skills` of an `a2a::AgentCard`. They help clients understand
 /// what the agent can do.
 pub fn build_agent_skills(agent: &dyn Agent) -> Vec<a2a::AgentSkill> {
@@ -30,7 +30,7 @@ pub fn build_agent_skills(agent: &dyn Agent) -> Vec<a2a::AgentSkill> {
     skills
 }
 
-/// An `a2a::AgentSkill` with Go's four fields set and every optional field absent.
+/// An `a2a::AgentSkill` with its four required fields set and every optional field absent.
 fn skill(id: String, name: String, description: String, tags: Vec<String>) -> a2a::AgentSkill {
     a2a::AgentSkill {
         id,
@@ -44,7 +44,7 @@ fn skill(id: String, name: String, description: String, tags: Vec<String>) -> a2
     }
 }
 
-/// Go `buildPrimarySkills`.
+/// The skills of `agent` itself: LLM-agent skills when it has instructions, else non-LLM skills.
 fn build_primary_skills(agent: &dyn Agent) -> Vec<a2a::AgentSkill> {
     match agent_instructions(agent) {
         Some(_) => {
@@ -55,7 +55,7 @@ fn build_primary_skills(agent: &dyn Agent) -> Vec<a2a::AgentSkill> {
     }
 }
 
-/// Go `buildSubAgentSkills`: the primary skills of each direct sub-agent, prefixed with its name
+/// The primary skills of each direct sub-agent, prefixed with its name
 /// (one level only).
 fn build_sub_agent_skills(agent: &dyn Agent) -> Vec<a2a::AgentSkill> {
     let mut result = Vec::with_capacity(agent.sub_agents().len());
@@ -74,7 +74,7 @@ fn build_sub_agent_skills(agent: &dyn Agent) -> Vec<a2a::AgentSkill> {
     result
 }
 
-/// Go `buildLLMAgentSkills`: the `model` skill, then one skill per tool.
+/// The `model` skill, then one skill per tool.
 fn build_llm_agent_skills(agent: &dyn Agent, tools: &[Arc<dyn Tool>]) -> Vec<a2a::AgentSkill> {
     let mut skills = vec![skill(
         agent.name().to_owned(),
@@ -98,7 +98,7 @@ fn build_llm_agent_skills(agent: &dyn Agent, tools: &[Arc<dyn Tool>]) -> Vec<a2a
     skills
 }
 
-/// Go `buildNonLLMAgentSkills`: the agent's own skill and, with sub-agents, an orchestration
+/// The agent's own skill and, with sub-agents, an orchestration
 /// skill listing them.
 fn build_non_llm_agent_skills(agent: &dyn Agent) -> Vec<a2a::AgentSkill> {
     let state = agent.agent_state();
@@ -131,7 +131,8 @@ fn build_non_llm_agent_skills(agent: &dyn Agent) -> Vec<a2a::AgentSkill> {
     skills
 }
 
-/// Go `buildAgentDescription`.
+/// The description of a non-LLM agent: its own description followed by the workflow description
+/// of its type, or the type's default description when both are empty.
 fn build_agent_description(agent: &dyn Agent, state: &AgentState) -> String {
     let mut parts = Vec::new();
     if !agent.description().is_empty() {
@@ -152,7 +153,7 @@ fn build_agent_description(agent: &dyn Agent, state: &AgentState) -> String {
     }
 }
 
-/// A sub-agent's description, or Go's `execute the <name> agent` when it has none.
+/// A sub-agent's description, or `execute the <name> agent` when it has none.
 fn sub_agent_description(sub: &dyn Agent) -> String {
     if sub.description().is_empty() {
         format!("execute the {} agent", sub.name())
@@ -161,7 +162,8 @@ fn sub_agent_description(sub: &dyn Agent) -> String {
     }
 }
 
-/// Go `buildSequentialAgentDescription`.
+/// The description of a sequential agent: "First, ...", "Then, ..." and "Finally, ..." clauses
+/// for its sub-agents in order.
 fn build_sequential_agent_description(agent: &dyn Agent) -> String {
     let sub_agents = agent.sub_agents();
     let last = sub_agents.len() - 1;
@@ -170,7 +172,7 @@ fn build_sequential_agent_description(agent: &dyn Agent) -> String {
         .enumerate()
         .map(|(i, sub)| {
             let description = sub_agent_description(sub.as_ref());
-            // Go's `switch` tests `case 0` first, so a single sub-agent is "First, ...".
+            // The first test wins, so a single sub-agent is "First, ...".
             if i == 0 {
                 format!("First, this agent will {description}.")
             } else if i == last {
@@ -183,8 +185,8 @@ fn build_sequential_agent_description(agent: &dyn Agent) -> String {
     descriptions.join(" ")
 }
 
-/// The sub-agent clause shared by Go's parallel and loop descriptions: `This agent will A , B and
-/// C` (Go joins `", B"` with a space, so the comma is preceded by one).
+/// The sub-agent clause shared by the parallel and loop descriptions: `This agent will A , B and
+/// C` (the clauses are joined with a space, so a comma is preceded by one).
 fn concurrent_sub_agent_clause(agent: &dyn Agent) -> String {
     let sub_agents = agent.sub_agents();
     let last = sub_agents.len() - 1;
@@ -205,12 +207,12 @@ fn concurrent_sub_agent_clause(agent: &dyn Agent) -> String {
     descriptions.join(" ")
 }
 
-/// Go `buildParallelAgentDescription`.
+/// The description of a parallel agent: its sub-agents run simultaneously.
 fn build_parallel_agent_description(agent: &dyn Agent) -> String {
     format!("{} simultaneously.", concurrent_sub_agent_clause(agent))
 }
 
-/// Go `buildLoopAgentDescription`: empty when the state carries no loop-agent config.
+/// The description of a loop agent: empty when the state carries no loop-agent config.
 fn build_loop_agent_description(agent: &dyn Agent, state: &AgentState) -> String {
     let Some(cfg) = state
         .config
@@ -230,9 +232,9 @@ fn build_loop_agent_description(agent: &dyn Agent, state: &AgentState) -> String
     )
 }
 
-/// Go `buildLLMAgentDescription`: an LLM agent is described by its own description alone,
+/// An LLM agent is described by its own description alone,
 /// else the type's default description. The card is served without authentication, so it never
-/// repeats the agent's instructions (Go 1c354701).
+/// repeats the agent's instructions.
 fn build_llm_agent_description(agent: &dyn Agent) -> String {
     if agent.description().is_empty() {
         default_agent_description(agent.agent_state()).to_owned()
@@ -241,7 +243,7 @@ fn build_llm_agent_description(agent: &dyn Agent) -> String {
     }
 }
 
-/// Go `getDefaultAgentDescription`.
+/// The description of an agent of this type that has none.
 fn default_agent_description(state: &AgentState) -> &'static str {
     match state.agent_type {
         AgentType::LoopAgent => "A loop workflow agent",
@@ -252,7 +254,7 @@ fn default_agent_description(state: &AgentState) -> &'static str {
     }
 }
 
-/// Go `getAgentTypeTag`.
+/// The skill tag of the agent type.
 fn agent_type_tag(state: &AgentState) -> &'static str {
     match state.agent_type {
         AgentType::LoopAgent => "loop_workflow",
@@ -263,7 +265,7 @@ fn agent_type_tag(state: &AgentState) -> &'static str {
     }
 }
 
-/// Go `getAgentSkillName`.
+/// The skill name for the agent type.
 fn agent_skill_name(state: &AgentState) -> &'static str {
     if state.agent_type == AgentType::LlmAgent {
         return "model";
@@ -274,8 +276,7 @@ fn agent_skill_name(state: &AgentState) -> &'static str {
     "custom"
 }
 
-/// Go `isWorkflowAgent`: loop, sequential and parallel agents (not `WorkflowAgent`, which Go's
-/// list leaves out).
+/// Loop, sequential and parallel agents (`WorkflowAgent` is not one).
 fn is_workflow_agent(state: &AgentState) -> bool {
     matches!(
         state.agent_type,

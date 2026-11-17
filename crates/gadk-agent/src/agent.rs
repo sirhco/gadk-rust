@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The agent interface and the one agent implementation every agent type builds on (port of Go
-//! `agent/agent.go`).
+//! The agent interface and the one agent implementation every agent type builds on.
 
 use crate::go_fmt::go_quote;
 use std::any::Any;
@@ -35,9 +34,9 @@ use crate::fiber;
 use crate::live::LiveSession;
 use crate::state::{AgentState, AgentType};
 
-/// Go's optional `RunLive` method (the runner's `liveAgent` and the sequential agent's
-/// `liveRunner` type assertions). Agents expose it through [`Agent::as_live`]; `None` there means
-/// the agent is not live-capable, and callers check that before doing anything else.
+/// Optional live (bidirectional streaming) capability of an agent. Agents expose it through
+/// [`Agent::as_live`]; `None` there means the agent is not live-capable, and callers check that
+/// before doing anything else.
 #[async_trait]
 pub trait LiveAgent: Send + Sync {
     /// Starts a live run in `ctx`, whose current agent is the agent being run. Returns the
@@ -48,7 +47,7 @@ pub trait LiveAgent: Send + Sync {
     ) -> Result<(Arc<dyn LiveSession>, EventStream), AgentError>;
 }
 
-/// Go `agent.Agent`: the interface every agent implements.
+/// The interface every agent implements.
 ///
 /// Agents are created with ADK constructors ([`new`] and the engine's agent constructors) to ensure
 /// correct initialisation and configuration.
@@ -61,23 +60,23 @@ pub trait Agent: Send + Sync + 'static {
     fn sub_agents(&self) -> &[Arc<dyn Agent>];
     /// Runs the agent; dropping the stream cancels the run.
     fn run(&self, ctx: InvocationContext) -> EventStream;
-    /// Go `FindAgent`: this agent or a descendant named `name`. The agent itself is found only for
-    /// agents built by [`new`]/[`new_with_state`].
+    /// This agent or a descendant named `name`. The agent itself is found only for agents
+    /// built by [`new`]/[`new_with_state`].
     fn find_agent(&self, name: &str) -> Option<Arc<dyn Agent>> {
         if self.name() == name {
             return self_arc_any(self.as_any());
         }
         self.find_sub_agent(name)
     }
-    /// Go `FindSubAgent`: a descendant named `name`.
+    /// A descendant named `name`.
     fn find_sub_agent(&self, name: &str) -> Option<Arc<dyn Agent>> {
         self.sub_agents().iter().find_map(|s| s.find_agent(name))
     }
-    /// Engine-owned state (Go `agent.internal().State`).
+    /// Engine-owned state.
     #[doc(hidden)]
     fn agent_state(&self) -> &AgentState;
 
-    /// The live entry point (Go `RunLive`), or `None` when the agent is not live-capable.
+    /// The live entry point, or `None` when the agent is not live-capable.
     ///
     /// The context passed to the returned [`LiveAgent::run_live`] must have this agent as
     /// `ctx.agent()`: live agents are stateless and resolve the agent to run from the context,
@@ -92,7 +91,7 @@ pub trait Agent: Send + Sync + 'static {
 /// The function that defines a custom agent's behavior.
 pub type AgentRunFn = Arc<dyn Fn(InvocationContext) -> EventStream + Send + Sync>;
 
-/// Go `agent.Config`: the configuration of a custom agent.
+/// The configuration of a custom agent.
 #[derive(Default, Clone)]
 pub struct AgentConfig {
     /// Must be non-empty and unique within the agent tree; `"user"` is reserved for end-user input.
@@ -110,7 +109,7 @@ pub struct AgentConfig {
     pub run: Option<AgentRunFn>,
 }
 
-/// Go `agent` struct: every agent type is this one struct, with engine state in
+/// The one struct every agent type is, with engine state in
 /// `AgentState::config`.
 pub(crate) struct CustomAgent {
     self_weak: Weak<CustomAgent>,
@@ -139,7 +138,7 @@ impl CustomAgent {
     }
 }
 
-/// Go `agent.New`: an agent with custom logic defined by `cfg.run`. Fails when `cfg.name` is
+/// An agent with custom logic defined by `cfg.run`. Fails when `cfg.name` is
 /// empty or a sub-agent appears more than once in `cfg.sub_agents`.
 pub fn new(cfg: AgentConfig) -> Result<Arc<dyn Agent>, AgentError> {
     new_with_state(
@@ -156,7 +155,7 @@ pub fn new(cfg: AgentConfig) -> Result<Arc<dyn Agent>, AgentError> {
 /// [`new`] with engine-owned state (the engine's agent constructors).
 #[doc(hidden)]
 pub fn new_with_state(cfg: AgentConfig, state: AgentState) -> Result<Arc<dyn Agent>, AgentError> {
-    // Go #2124: under an agent tool or as a transfer target, an empty name puts an empty function
+    // Under an agent tool or as a transfer target, an empty name puts an empty function
     // name or enum value in the parent's model request, which Vertex AI rejects.
     if cfg.name.is_empty() {
         return Err(AgentError::Config(
@@ -198,7 +197,7 @@ impl Agent for CustomAgent {
         &self.sub_agents
     }
 
-    /// Port of Go `(*agent).Run`: before-agent callbacks, the run function, after-agent callbacks,
+    /// Runs before-agent callbacks, the run function, after-agent callbacks,
     /// inside the agent span.
     fn run(&self, ctx: InvocationContext) -> EventStream {
         let Some(me) = self.self_weak.upgrade() else {
@@ -213,7 +212,7 @@ impl Agent for CustomAgent {
         };
         let span = agent_run_span(&me, &ctx);
         let me_dyn: Arc<dyn Agent> = me.clone();
-        // Go: icDelta{Agent: &aa, Context: &spanCtx}; PromoteWithDelta forks the ended flag.
+        // The node context forks the ended flag: ending the invocation there skips `ctx`.
         let node_ctx = ctx.into_context().with_delta(ContextDelta {
             agent: Some(me_dyn),
             ..Default::default()
@@ -258,17 +257,16 @@ struct RunState {
     phase: Phase,
     pending: VecDeque<Result<Event, AgentError>>,
     span: tracing::Span,
-    /// The last item's error: Go `err.Error()` and `errorType(err)`.
+    /// The last item's error message and its `error.type`.
     last_error: Option<(String, String)>,
-    /// This run's registration as active on the fiber that ran its before-agent callbacks (Go: the
-    /// `(*agent).Run` frame on the goroutine's stack), from then until the run ends or is dropped.
+    /// This run's registration as active on the fiber that ran its before-agent callbacks, from
+    /// then until the run ends or is dropped.
     active_run: fiber::ActiveRun,
 }
 
-/// Port of Go `telemetry.StartNodeSpan(OperationAgent)` (`internal/telemetry/node_tracing.go`):
-/// `invoke_workflow` for workflow agents only, `invoke_agent` otherwise. A workflow span started
-/// inside another `invoke_workflow` span gets `gen_ai.workflow.nested = true` (Go
-/// `startInvokeWorkflowSpan`'s workflow-scope context value; default schema only).
+/// Starts the agent's span: `invoke_workflow` for workflow agents only, `invoke_agent` otherwise.
+/// A workflow span started inside another `invoke_workflow` span gets
+/// `gen_ai.workflow.nested = true` (default schema only).
 fn agent_run_span(agent: &CustomAgent, ctx: &InvocationContext) -> tracing::Span {
     use tracing::field::Empty;
     if agent.state.agent_type == AgentType::WorkflowAgent {
@@ -305,9 +303,9 @@ fn agent_run_span(agent: &CustomAgent, ctx: &InvocationContext) -> tracing::Span
 }
 
 impl Drop for RunState {
-    /// Go `WrapYield`'s deferred `endSpan`: the span's status follows the last yielded item
-    /// (`TraceAgentResult` → `RecordError`: status, description and, in the default schema,
-    /// `error.type`), at the end of the stream or when it is dropped early.
+    /// Ends the span: its status follows the last yielded item
+    /// (status, description and, in the default schema, `error.type`), at the end of the stream
+    /// or when it is dropped early.
     fn drop(&mut self) {
         if let Some((msg, error_type)) = self.last_error.take() {
             self.span.record("otel.status_code", "ERROR");
@@ -319,7 +317,7 @@ impl Drop for RunState {
     }
 }
 
-/// Remembers the item for the span's final status (Go `WrapYield` keeps the last value and error).
+/// Remembers the item for the span's final status (the last value and error are kept).
 fn track(
     mut st: RunState,
     item: Result<Event, AgentError>,
@@ -338,9 +336,8 @@ async fn step(mut st: RunState) -> Option<(Result<Event, AgentError>, RunState)>
         }
         match std::mem::replace(&mut st.phase, Phase::Done) {
             Phase::Before => {
-                // Go `attemptSiteOfTrace`: the before-agent callbacks see the fiber's pending
-                // attempt only if no other agent run is active on it; the run stays registered
-                // as active until it ends.
+                // The before-agent callbacks see the fiber's pending attempt only if no other
+                // agent run is active on it; the run stays registered as active until it ends.
                 let claim = fiber::claim_attempt();
                 let before = run_before_agent_callbacks(&st.agent, &st.ctx).await;
                 st.active_run = claim.into_active_run();
@@ -352,13 +349,13 @@ async fn step(mut st: RunState) -> Option<(Result<Event, AgentError>, RunState)>
                         st.pending.push_back(Ok(ev));
                     }
                     Ok(None) => {}
-                    // Go yields (nil, err) and keeps going if the caller does.
+                    // An error is yielded and the run keeps going if the caller does.
                     Err(e) => {
                         run_on_agent_error_callbacks(&st.ctx, &e);
                         st.pending.push_back(Err(e));
                     }
                 }
-                // The ended check runs after the consumer took the pending item, as in Go.
+                // The ended check runs after the consumer took the pending item.
                 st.phase = Phase::StartMain;
             }
             Phase::StartMain => {
@@ -413,7 +410,7 @@ async fn step(mut st: RunState) -> Option<(Result<Event, AgentError>, RunState)>
     }
 }
 
-/// Port of Go `runOnAgentErrorCallbacks` (#2229, #2260): notifies the plugins that `err` escaped
+/// Notifies the plugins that `err` escaped
 /// the agent's run. Notification only: the caller still yields `err`. When the agent's own context
 /// is cancelled, an error that is (or wraps) `Cancelled`, `DeadlineExceeded` or the context's
 /// cancel cause is not reported, since it cannot be told apart from an echo of the cancellation;
@@ -427,7 +424,7 @@ fn run_on_agent_error_callbacks(ctx: &Context, err: &AgentError) {
     let Some(pm) = ctx.plugin_manager() else {
         return;
     };
-    // Go NewCallbackContext(ctx, nil): fresh actions nobody persists.
+    // Fresh actions that nobody persists.
     let cb_ctx = ctx.with_delta(ContextDelta {
         actions: Some(new_actions()),
         ..Default::default()
@@ -435,8 +432,7 @@ fn run_on_agent_error_callbacks(ctx: &Context, err: &AgentError) {
     pm.run_on_agent_error(cb_ctx, ctx.agent(), err);
 }
 
-/// Go `errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
-/// errors.Is(err, context.Cause(ctx))`.
+/// Whether `err` is (or wraps) `Cancelled`, `DeadlineExceeded` or the context's cancel cause.
 fn is_cancellation_echo(err: &AgentError, cause: &CancelCause) -> bool {
     chain_any(err, &|e| {
         if matches!(
@@ -453,7 +449,7 @@ fn is_cancellation_echo(err: &AgentError, cause: &CancelCause) -> bool {
     })
 }
 
-/// Go `getAuthorForEvent`.
+/// The author of a callback event: `user` when the content's role is user, else the agent's name.
 fn author_for_event(agent: &CustomAgent, ev: &Event) -> String {
     match &ev.response.content {
         Some(c) if c.role == gadk_genai::ROLE_USER => gadk_genai::ROLE_USER.to_string(),
@@ -461,7 +457,7 @@ fn author_for_event(agent: &CustomAgent, ev: &Event) -> String {
     }
 }
 
-/// Go `eventActionsFrom`: the actions a callback accumulated, less the fields that are the
+/// The actions a callback accumulated, less the fields that are the
 /// framework's to write rather than a callback's.
 fn event_actions_from(a: &EventActions) -> EventActions {
     EventActions {
@@ -470,7 +466,7 @@ fn event_actions_from(a: &EventActions) -> EventActions {
     }
 }
 
-/// The callback event (Go `session.NewEvent` + content, author, branch and the callback's actions).
+/// The callback event: the content, author, branch and the callback's actions.
 fn callback_event(
     agent: &CustomAgent,
     ctx: &Context,
@@ -492,7 +488,7 @@ fn has_delta(actions: &parking_lot::Mutex<EventActions>) -> bool {
         || a.artifact_delta.as_ref().is_some_and(|d| !d.is_empty())
 }
 
-/// Port of Go `runBeforeAgentCallbacks`: `Some` content from a plugin or a callback skips the agent
+/// `Some` content from a plugin or a callback skips the agent
 /// run and is returned as an event; otherwise a recorded delta is returned as an event.
 async fn run_before_agent_callbacks(
     agent: &CustomAgent,
@@ -533,7 +529,7 @@ async fn run_before_agent_callbacks(
     Ok(None)
 }
 
-/// Port of Go `runAfterAgentCallbacks`: `Some` content from a plugin or a callback, or a recorded
+/// `Some` content from a plugin or a callback, or a recorded
 /// delta, is returned as an event.
 async fn run_after_agent_callbacks(
     agent: &CustomAgent,
@@ -575,10 +571,10 @@ async fn run_after_agent_callbacks(
     Ok(None)
 }
 
-/// The parts of Go `internal/telemetry` that gadk-agent's agent spans and gadk-engine's
-/// `telemetry` module share (gadk-engine depends on gadk-agent): the environment provider and
-/// the legacy-schema switch, Go `errorType`, and the workflow scope of Go
-/// `startInvokeWorkflowSpan`. Applications install the provider with
+/// The parts of telemetry that gadk-agent's agent spans and gadk-engine's
+/// `telemetry` module share (gadk-engine depends on gadk-agent): the environment provider, the
+/// legacy-schema switch, the `error.type` value of an error, and the workflow scope of
+/// `invoke_workflow` spans. Applications install the provider with
 /// `gadk_engine::telemetry::set_env_provider`; the rest is the engine's.
 #[doc(hidden)]
 pub mod telemetry {
@@ -592,13 +588,14 @@ pub mod telemetry {
 
     use crate::error::AgentError;
 
-    /// Go `adkTelemetrySchemaVersionOptIn`: `otel_semconv_1_36` or `1` selects the legacy (1.36)
-    /// schema; anything else the default (1.44).
+    /// Environment variable that selects the telemetry schema: `otel_semconv_1_36` or `1` selects
+    /// the legacy (1.36) schema; anything else the default (1.44).
     pub const SCHEMA_VERSION_OPT_IN_ENV_VAR: &str = "ADK_TELEMETRY_SCHEMA_VERSION_OPT_IN";
-    /// Go `otelSemconv136`.
+    /// The value of [`SCHEMA_VERSION_OPT_IN_ENV_VAR`] that selects the legacy schema.
     pub const OTEL_SEMCONV_1_36: &str = "otel_semconv_1_36";
-    /// Go `errorType`'s value for an error that is not a `genai.APIError`: the type of a Go
-    /// `errors.New` error, which is what an ADK-Go error reaching a span usually is.
+    /// The `error.type` of an error that is neither an API error nor named by the installed
+    /// resolver. The literal is the type name ADK servers report for plain string errors, so spans
+    /// carry the same value.
     pub const GO_ERROR_STRING_TYPE: &str = "*errors.errorString";
 
     static PROVIDER: RwLock<Option<Arc<dyn EnvProvider>>> = RwLock::new(None);
@@ -618,7 +615,7 @@ pub mod telemetry {
             .unwrap_or_else(|| Arc::new(ProcessEnv))
     }
 
-    /// Go `useLegacySchema`: whether `ADK_TELEMETRY_SCHEMA_VERSION_OPT_IN` selects the 1.36
+    /// Whether `ADK_TELEMETRY_SCHEMA_VERSION_OPT_IN` selects the 1.36
     /// schema; read on every call.
     pub fn use_legacy_schema() -> bool {
         let v = env_provider()
@@ -627,23 +624,25 @@ pub mod telemetry {
         matches!(go_to_lower(v.trim()).as_str(), OTEL_SEMCONV_1_36 | "1")
     }
 
-    /// Names the Go dynamic type of an error crate gadk-agent cannot see (Go `%T`); `None` for
-    /// an error it does not name.
+    /// Names the `error.type` of an error from a crate gadk-agent cannot see; `None` for an error
+    /// it does not name. The returned string is the type name as an ADK server reports it, such
+    /// as `*errors.errorString` (see [`GO_ERROR_STRING_TYPE`]).
     pub type GoErrorTypeResolver = fn(&(dyn std::error::Error + 'static)) -> Option<&'static str>;
 
     static GO_ERROR_TYPE_RESOLVER: OnceLock<GoErrorTypeResolver> = OnceLock::new();
 
-    /// Installs the resolver [`error_type`] asks for the Go type of the error itself (the first
-    /// one installed wins). gadk-engine installs one when it builds a `workflow.NodeRunError`.
+    /// Installs the resolver [`error_type`] asks for the `error.type` of the error itself (the
+    /// first one installed wins). The resolver's strings are used verbatim, in the type-name form
+    /// of [`GoErrorTypeResolver`] (such as `*errors.errorString`). gadk-engine installs one that
+    /// names a workflow node run error.
     pub fn set_go_error_type_resolver(f: GoErrorTypeResolver) {
         let _ = GO_ERROR_TYPE_RESOLVER.set(f);
     }
 
-    /// Go `errorType`: an API error's HTTP code (Go `errors.As(err, &genai.APIError{})`, through
-    /// wrapping), else the Go type of the error itself (Go `semconv.ErrorType`'s `%T`) when the
-    /// installed resolver names it (seen through [`AgentError::Workflow`], which is transparent),
-    /// else [`GO_ERROR_STRING_TYPE`] (a Rust error has no Go type; an ADK-Go error reaching a span
-    /// is usually an `errors.New` one).
+    /// The span's `error.type` for an error: an API error's HTTP status as a decimal string
+    /// (found through wrapping), else the installed resolver's name for the error itself, returned
+    /// verbatim (seen through [`AgentError::Workflow`], which is transparent), else the
+    /// [`GO_ERROR_STRING_TYPE`] value.
     pub fn error_type(err: &(dyn std::error::Error + 'static)) -> String {
         if let Some(code) = api_error_code(err) {
             return code;
@@ -658,8 +657,7 @@ pub mod telemetry {
         GO_ERROR_STRING_TYPE.to_owned()
     }
 
-    /// Go `errors.As(err, &genai.APIError{})`: the HTTP code of the first API error in `err`'s
-    /// chain.
+    /// The HTTP code of the first API error in `err`'s chain.
     fn api_error_code(err: &(dyn std::error::Error + 'static)) -> Option<String> {
         let mut cur: Option<&(dyn std::error::Error + 'static)> = Some(err);
         while let Some(e) = cur {
@@ -677,8 +675,8 @@ pub mod telemetry {
         None
     }
 
-    /// Whether the current span is inside an `invoke_workflow` span (Go's `workflowScopeKey`
-    /// context value, which `startInvokeWorkflowSpan` sets). Read from the subscriber's span
+    /// Whether the current span is inside an `invoke_workflow` span (the scope that
+    /// workflow spans establish). Read from the subscriber's span
     /// registry; `false` under a subscriber that is not a `tracing_subscriber::Registry` stack.
     pub fn in_workflow_scope() -> bool {
         let Some(id) = tracing::Span::current().id() else {
@@ -958,8 +956,8 @@ mod span_tests {
     }
 }
 
-/// The attempt claim of [`CustomAgent::run`] (Go `attemptSiteOfTrace` for traces taken in
-/// `runBeforeAgentCallbacks`).
+/// The attempt claim of [`CustomAgent::run`] (the claim taken for traces started in
+/// the before-agent callbacks).
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod attempt_tests {

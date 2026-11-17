@@ -13,24 +13,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `fmt` verb, `strings` and `net/url` ports shared by the gadk crates: `strconv.Quote`
-//! (`%q`), `strconv.FormatFloat(f, 'g', -1, 32|64)`, `strings.ToLower`, `strings.ToUpper`,
-//! `url.QueryEscape` and `fmt` `%v` of a JSON-decoded value.
+//! Text helpers shared by the gadk crates, with exact output formats: double-quoted strings
+//! (`%q`), shortest round-trip float formatting (`g` style, 32 or 64 bits), simple one-rune
+//! lower/upper casing, query-component escaping and `%v`-style rendering of a JSON value.
 
 use std::sync::LazyLock;
 
 use serde_json::Value;
 
-/// Go `unicode.IsPrint` (= `strconv.IsPrint`): letters, marks, numbers, punctuation, symbols
-/// (categories L, M, N, P, S) and the ASCII space U+0020. Other spaces, Cc, Cf, Cs, Co and Cn
-/// are not printable. The categories come from the `regex` crate's Unicode tables, whose Unicode
-/// version may differ slightly from Go's for newly assigned code points.
+/// True for printable characters: letters, marks, numbers, punctuation, symbols (categories L,
+/// M, N, P, S) and the ASCII space U+0020. Other spaces, Cc, Cf, Cs, Co and Cn are not
+/// printable. The categories come from the `regex` crate's Unicode tables, whose Unicode
+/// version may differ slightly for newly assigned code points.
 #[allow(clippy::expect_used)] // constant pattern, cannot fail
 static GO_PRINTABLE: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r"^[\p{L}\p{M}\p{N}\p{P}\p{S}]$").expect("valid printable-class regex")
 });
 
-/// Port of Go `unicode.IsPrint`.
+/// True when `c` is printable (see [`GO_PRINTABLE`]).
 fn go_is_print(c: char) -> bool {
     if c.is_ascii() {
         return (' '..='~').contains(&c);
@@ -39,19 +39,18 @@ fn go_is_print(c: char) -> bool {
     GO_PRINTABLE.is_match(c.encode_utf8(&mut buf))
 }
 
-/// Port of Go `strconv.Quote` (Go `%q` on a string): `"` and `\` are backslash-escaped,
-/// printable runes (Go `unicode.IsPrint`) stay raw, `\a \b \f \n \r \t \v` use their short
-/// escapes, and every other rune becomes `\xNN` (below U+0020 and U+007F), `\uNNNN` or
-/// `\UNNNNNNNN`, in lowercase hex. A `&str` cannot hold invalid UTF-8, so Go's invalid-byte
-/// branch does not arise ([`go_quote_bytes`] has it).
+/// Quotes `s` as a double-quoted string: `"` and `\` are backslash-escaped, printable
+/// characters stay raw, `\a \b \f \n \r \t \v` use their short escapes, and every other
+/// character becomes `\xNN` (below U+0020 and U+007F), `\uNNNN` or `\UNNNNNNNN`, in lowercase
+/// hex. A `&str` cannot hold invalid UTF-8, so the invalid-byte case does not arise
+/// ([`go_quote_bytes`] handles it).
 #[doc(hidden)]
 pub fn go_quote(s: &str) -> String {
     go_quote_bytes(s.as_bytes())
 }
 
-/// Port of Go `strconv.Quote` on a Go string that may hold invalid UTF-8: as [`go_quote`], and
-/// each byte that is not part of a valid UTF-8 sequence becomes `\xNN` (Go's `RuneError` of
-/// width 1 branch).
+/// Quotes a byte string that may hold invalid UTF-8: as [`go_quote`], and each byte that is
+/// not part of a valid UTF-8 sequence becomes `\xNN`.
 #[doc(hidden)]
 pub fn go_quote_bytes(s: &[u8]) -> String {
     let mut out = String::with_capacity(s.len() + 2);
@@ -68,7 +67,7 @@ pub fn go_quote_bytes(s: &[u8]) -> String {
     out
 }
 
-/// One valid rune of Go `strconv.Quote`'s output.
+/// Appends one valid character as [`go_quote`] writes it.
 fn push_quoted_rune(out: &mut String, c: char) {
     match c {
         '"' => out.push_str("\\\""),
@@ -89,8 +88,8 @@ fn push_quoted_rune(out: &mut String, c: char) {
     }
 }
 
-/// Go `unicode.ToLower`: the simple (one-rune) lowercase mapping. Rust's `char::to_lowercase`
-/// is the full mapping, which differs only for U+0130 (Go `i`, Rust `i` + U+0307).
+/// The simple (one-character) lowercase mapping. Rust's `char::to_lowercase` is the full
+/// mapping, which differs only for U+0130 (here `i`, Rust `i` + U+0307).
 fn go_lower_rune(c: char) -> char {
     if c == '\u{130}' {
         return 'i';
@@ -102,10 +101,10 @@ fn go_lower_rune(c: char) -> char {
     }
 }
 
-/// Go `unicode.ToUpper`: the simple (one-rune) uppercase mapping. Where Rust's full mapping
-/// expands to several runes (`ß` → `SS`, ligatures, Greek with ypogegrammeni) Go keeps the rune,
-/// except the lowercase Greek letters with ypogegrammeni, whose simple uppercase is the
-/// matching prosgegrammeni capital.
+/// The simple (one-character) uppercase mapping. Where Rust's full mapping expands to several
+/// characters (`ß` → `SS`, ligatures, Greek with ypogegrammeni) the character is kept, except
+/// the lowercase Greek letters with ypogegrammeni, whose simple uppercase is the matching
+/// prosgegrammeni capital.
 fn go_upper_rune(c: char) -> char {
     let mut upper = c.to_uppercase();
     match (upper.next(), upper.next()) {
@@ -121,9 +120,8 @@ fn go_upper_rune(c: char) -> char {
     }
 }
 
-/// Port of Go `strings.ToLower` on valid UTF-8: `unicode.ToLower` rune by rune,
-/// with no final-sigma context. Rust's `str::to_lowercase` differs for U+0130 and a final `Σ`
-/// (Go `σ`, Rust `ς`).
+/// Lowercases `s` character by character with `go_lower_rune`, with no final-sigma context.
+/// Rust's `str::to_lowercase` differs for U+0130 and a final `Σ` (here `σ`, Rust `ς`).
 pub fn go_to_lower(s: &str) -> String {
     if s.is_ascii() {
         return s.to_ascii_lowercase();
@@ -131,8 +129,8 @@ pub fn go_to_lower(s: &str) -> String {
     s.chars().map(go_lower_rune).collect()
 }
 
-/// Port of Go `strings.ToUpper` on valid UTF-8: `unicode.ToUpper` rune by rune.
-/// Rust's `str::to_uppercase` differs wherever the full mapping has several runes (`ß` → `SS`).
+/// Uppercases `s` character by character with `go_upper_rune`. Rust's `str::to_uppercase`
+/// differs wherever the full mapping has several characters (`ß` → `SS`).
 pub fn go_to_upper(s: &str) -> String {
     if s.is_ascii() {
         return s.to_ascii_uppercase();
@@ -140,9 +138,8 @@ pub fn go_to_upper(s: &str) -> String {
     s.chars().map(go_upper_rune).collect()
 }
 
-/// Port of Go `url.QueryEscape` (net/url/url.go `escape(s, encodeQueryComponent)`): every byte
-/// except ASCII letters, digits, `-`, `.`, `_` and `~` becomes `%XX` (upper-case hex, per UTF-8
-/// byte), and a space becomes `+`.
+/// Escapes `s` as a URL query component: every byte except ASCII letters, digits, `-`, `.`,
+/// `_` and `~` becomes `%XX` (upper-case hex, per UTF-8 byte), and a space becomes `+`.
 pub fn go_query_escape(s: &str) -> String {
     const UPPER_HEX: &[u8; 16] = b"0123456789ABCDEF";
     let mut out = String::with_capacity(s.len());
@@ -162,12 +159,11 @@ pub fn go_query_escape(s: &str) -> String {
     out
 }
 
-/// Go `fmt.Sprintf("%v", v)` of a value Go decoded from JSON (`any`):
+/// Renders a JSON value as `%v` would print it after decoding into a dynamic value:
 /// - `null` → `<nil>`; a bool → `true`/`false`; a string → itself;
-/// - every number is a Go `float64`, printed as `%v` does (see `go_format_float_v`), so
-///   `1000000` → `1e+06`;
-/// - an array → `[a b c]`; an object → `map[k1:v1 k2:v2]` with the keys sorted (Go `fmt` sorts
-///   map keys).
+/// - every number is printed as a 64-bit float (see [`go_format_float_v`]), so `1000000` →
+///   `1e+06`;
+/// - an array → `[a b c]`; an object → `map[k1:v1 k2:v2]` with the keys sorted.
 pub fn go_sprint_value(v: &Value) -> String {
     match v {
         Value::Null => "<nil>".to_owned(),
@@ -197,7 +193,9 @@ pub fn go_sprint_value(v: &Value) -> String {
     }
 }
 
-/// Go `fmt.Sprintf("%T", v)` of a value Go decoded from JSON (`any` from `encoding/json`).
+/// The type name of a JSON value as a dynamically typed value prints it: `<nil>` for `null`,
+/// `bool`, `float64` for every number, `string`, `[]interface {}` for an array and
+/// `map[string]interface {}` for an object.
 pub fn go_type_name(v: &Value) -> &'static str {
     match v {
         Value::Null => "<nil>",
@@ -209,24 +207,25 @@ pub fn go_type_name(v: &Value) -> &'static str {
     }
 }
 
-/// Go `%v` of a float64 = `strconv.FormatFloat(f, 'g', -1, 64)` (see [`go_format_float_g`]):
-/// 1e6 → `1e+06`, 123456 → `123456`, 0.00001 → `1e-05`, -0.0 → `-0`.
+/// Formats a 64-bit float in `%v` style, the shortest round-trip form (see
+/// [`go_format_float_g`]): 1e6 → `1e+06`, 123456 → `123456`, 0.00001 → `1e-05`, -0.0 → `-0`.
 pub fn go_format_float_v(f: f64) -> String {
     go_format_float_g(f, 64)
 }
 
-/// Go `strconv.FormatFloat(f, 'g', -1, bits)` for `bits` 32 or 64 (any other value is treated
-/// as 64; an `f32` is passed widened): `NaN`, `+Inf`, `-Inf`; otherwise the shortest decimal
-/// digits that round-trip at that bit size (for 32, of `f as f32`), in `%e` form (`d.ddde±XX`,
-/// at least two exponent digits) when the decimal exponent is below -4 or at least 6
-/// (`internal/strconv/ftoa.go`: `if shortest { eprec = 6 }`), otherwise plain decimal.
+/// Formats a float in the shortest round-trip `g` style for `bits` 32 or 64 (any other value
+/// is treated as 64; an `f32` is passed widened): `NaN`, `+Inf`, `-Inf`; otherwise the
+/// shortest decimal digits that round-trip at that bit size (for 32, of `f as f32`), in `%e`
+/// form (`d.ddde±XX`, at least two exponent digits) when the decimal exponent is below -4 or
+/// at least 6, otherwise plain decimal.
 ///
-/// Rust's shortest formatter rounds an exact decimal tie up where Go's picks the even digit
-/// (141016749166520.625 → Go `1.4101674916652062e+14`), so the digit count comes from `{:e}`
-/// and the digits from Rust's exact formatting at that count (ties to even), unless those digits
-/// do not round-trip (an asymmetric interval at a power of two), when the shortest ones stand.
+/// Rust's shortest formatter rounds an exact decimal tie up where this function picks the
+/// even digit (141016749166520.625 → `1.4101674916652062e+14`), so the digit count comes from
+/// `{:e}` and the digits from Rust's exact formatting at that count (ties to even), unless
+/// those digits do not round-trip (an asymmetric interval at a power of two), when the
+/// shortest ones stand.
 pub fn go_format_float_g(f: f64, bits: u32) -> String {
-    // FormatFloat(f, _, _, 32) first rounds f to float32, so a finite f64 past f32::MAX
+    // With 32 bits the value is first rounded to an f32, so a finite f64 past f32::MAX
     // becomes ±Inf before the NaN/Inf checks.
     let r = if bits == 32 { f64::from(f as f32) } else { f };
     if r.is_nan() {
@@ -251,7 +250,7 @@ pub fn go_format_float_g(f: f64, bits: u32) -> String {
     if neg {
         out.push('-');
     }
-    // Go: `if exp < -4 || exp >= eprec` with `eprec = 6`.
+    // Exponent form when `exp < -4 || exp >= 6`.
     if !(-4..6).contains(&exp) {
         out.push_str(&digits[..1]);
         if digits.len() > 1 {
@@ -284,7 +283,7 @@ pub fn go_format_float_g(f: f64, bits: u32) -> String {
 }
 
 /// The shortest round-trip digits of `v` as Rust's `{:e}` writes them (`-1.2345e-6`), with an
-/// exact decimal tie between two shortest candidates resolved to the even digit as Go does.
+/// exact decimal tie between two shortest candidates resolved to the even digit.
 fn shortest_sci<T>(v: T) -> String
 where
     T: std::fmt::LowerExp + std::str::FromStr + PartialEq + Copy,

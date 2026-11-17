@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The parts of the OpenAI conversion neither API owns (port of ADK-Go
-//! `model/openaimodel/internal/shared`): schema normalisation, server-text handling, call-id
+//! The parts of the OpenAI conversion neither API owns: schema normalisation, server-text
+//! handling, call-id
 //! tracking, the generation-config fields both reject, media classification, response helpers,
 //! and the error sentinels both return.
 

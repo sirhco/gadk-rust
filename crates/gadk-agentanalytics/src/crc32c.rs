@@ -13,19 +13,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! CRC-32C (Castagnoli), as Go's `hash/crc32` with `crc32.MakeTable(crc32.Castagnoli)`
-//! computes it — the checksum `cloud.google.com/go/storage`'s writer sends with every upload
-//! (`gcs_offloader.go`'s `UploadContent`) — and its wire form: the standard base64 of the four
-//! big-endian bytes (the `crc32c` field of the object metadata, `X-Goog-Hash: crc32c=…`).
-//! Table driven, one byte at a time.
+//! CRC-32C (Castagnoli) — the checksum the GCS offloader sends with every upload — and its wire
+//! form: the standard base64 of the four big-endian bytes (the `crc32c` field of the object
+//! metadata, `X-Goog-Hash: crc32c=…`). Table driven, one byte at a time.
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 
-/// Go `crc32.Castagnoli`: the reversed Castagnoli polynomial.
+/// The reversed Castagnoli polynomial.
 const CASTAGNOLI: u32 = 0x82f6_3b78;
 
-/// Go `crc32.MakeTable(crc32.Castagnoli)`.
+/// The byte-at-a-time lookup table for [`CASTAGNOLI`].
 const TABLE: [u32; 256] = make_table(CASTAGNOLI);
 
 const fn make_table(poly: u32) -> [u32; 256] {
@@ -49,8 +47,7 @@ const fn make_table(poly: u32) -> [u32; 256] {
     table
 }
 
-/// Go `crc32.Update(crc, castagnoliTable, data)`: the checksum of the bytes so far (`crc`) and
-/// `data`.
+/// The checksum of the bytes so far (`crc`) and `data`.
 pub(crate) fn update(crc: u32, data: &[u8]) -> u32 {
     let mut crc = !crc;
     for &b in data {
@@ -59,13 +56,12 @@ pub(crate) fn update(crc: u32, data: &[u8]) -> u32 {
     !crc
 }
 
-/// Go `crc32.Checksum(data, castagnoliTable)`.
+/// The checksum of `data`.
 pub(crate) fn checksum(data: &[u8]) -> u32 {
     update(0, data)
 }
 
-/// The wire form of a CRC-32C: standard base64 of its big-endian bytes (Go
-/// `base64.StdEncoding.EncodeToString(binary.BigEndian.AppendUint32(nil, crc))`).
+/// The wire form of a CRC-32C: standard base64 of its big-endian bytes.
 pub(crate) fn base64_be(crc: u32) -> String {
     STANDARD.encode(crc.to_be_bytes())
 }

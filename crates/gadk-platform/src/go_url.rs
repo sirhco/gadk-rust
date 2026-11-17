@@ -13,46 +13,47 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A port of the parts of Go 1.27 `net/url` that gadk's crates reproduce byte for byte:
-//! `url.Parse` (its acceptance rules and error texts), `URL.Hostname`, `URL.Port`,
-//! `URL.EscapedPath`, `URL.EscapedFragment`, `URL.JoinPath` and `URL.String`, the `User`,
-//! `Path`/`RawPath`, `RawQuery` and `Fragment`/`RawFragment` fields, the path encoding
-//! (`escape`, `unescape` and `validEncoded` in `encodePath` mode), and `url.PathEscape`,
-//! `url.PathUnescape` and `url.QueryUnescape` (`url.QueryEscape` is
-//! [`go_query_escape`](crate::go_query_escape)). The WHATWG parser of the `url` crate accepts
-//! and rejects different inputs; these checks are Go's.
+//! URL parsing, escaping and serialization whose accepted inputs and error texts are
+//! byte-identical to an ADK server's. It covers [`parse`] (acceptance rules and error texts),
+//! [`Url::hostname`], [`Url::port`], [`Url::escaped_path`], [`Url::escaped_fragment`],
+//! [`Url::join_path`] and [`Url::to_go_string`], the user, path/raw path, raw query and
+//! fragment/raw fragment fields, the path encoding ([`escape_path`], [`unescape_path`] and
+//! [`valid_encoded_path`]), and [`path_escape`], [`path_unescape`] and [`query_unescape`]
+//! (query escaping is [`go_query_escape`](crate::go_query_escape)). The WHATWG parser of the
+//! `url` crate accepts and rejects different inputs, so these checks are separate.
 
 use crate::go_fmt::go_quote;
 use crate::go_path::go_path_join;
 
-/// Go `*url.URL`, as far as gadk reads it.
+/// A parsed URL, as far as gadk reads it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Url {
     /// The lower-cased scheme.
     pub scheme: String,
-    /// Go `Opaque`.
+    /// The opaque part of a URL such as `mailto:x`; empty when the URL is hierarchical.
     pub opaque: String,
-    /// Go `User`.
+    /// The user information, if any.
     user: Option<Userinfo>,
-    /// Go `Host`: the unescaped `host[:port]`.
+    /// The unescaped `host[:port]`.
     pub host: String,
-    /// Go `Path` (unescaped bytes).
+    /// The unescaped path bytes.
     pub path: Vec<u8>,
-    /// Go `RawPath`.
+    /// The path as written, kept only when it differs from the default encoding of [`Self::path`].
     raw_path: String,
-    /// Go `OmitHost`.
+    /// True when the URL has a scheme and an absolute path but no `//` authority.
     omit_host: bool,
-    /// Go `ForceQuery`.
+    /// True when the URL ended in a bare `?` with an empty query.
     force_query: bool,
-    /// Go `RawQuery`.
+    /// The query string, not including the `?`.
     raw_query: String,
-    /// Go `Fragment` (unescaped bytes).
+    /// The unescaped fragment bytes.
     fragment: Vec<u8>,
-    /// Go `RawFragment`.
+    /// The fragment as written, kept only when it differs from the default encoding of the
+    /// fragment.
     raw_fragment: String,
 }
 
-/// Go `*url.Userinfo`: the unescaped user name and password.
+/// The unescaped user name and password of a URL.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct Userinfo {
     username: Vec<u8>,
@@ -60,7 +61,7 @@ struct Userinfo {
 }
 
 impl Userinfo {
-    /// Go `Userinfo.String()`.
+    /// The escaped `user[:password]` text.
     fn to_go_string(&self) -> String {
         let mut s = escape(&self.username, Mode::UserPassword);
         if let Some(password) = &self.password {
@@ -71,7 +72,7 @@ impl Userinfo {
     }
 }
 
-/// Go `*url.Error` from `url.Parse`: `parse "<url>": <err>`.
+/// A failed [`parse`]; displays as `parse "<url>": <err>`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParseError {
     url: String,
@@ -86,7 +87,7 @@ impl std::fmt::Display for ParseError {
 
 impl std::error::Error for ParseError {}
 
-/// Go's `encoding` modes the parser needs.
+/// The escaping modes the parser needs, each with its own set of bytes that must be escaped.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {
     Path,
@@ -98,7 +99,7 @@ enum Mode {
     Fragment,
 }
 
-/// Go `url.Parse(raw)`.
+/// Parses `raw` as a URL, splitting off the fragment first.
 pub fn parse(raw: &str) -> Result<Url, ParseError> {
     let (u, frag) = match raw.split_once('#') {
         Some((u, f)) => (u, Some(f)),
@@ -117,7 +118,7 @@ pub fn parse(raw: &str) -> Result<Url, ParseError> {
     Ok(url)
 }
 
-/// Go `parse(rawURL, viaRequest=false)`.
+/// Parses a URL without its fragment.
 fn parse_no_fragment(raw: &str) -> Result<Url, String> {
     if raw.bytes().any(|b| b < b' ' || b == 0x7f) {
         return Err("net/url: invalid control character in URL".into());
@@ -170,7 +171,7 @@ fn parse_no_fragment(raw: &str) -> Result<Url, String> {
     Ok(url)
 }
 
-/// Go `getScheme`.
+/// Splits a leading `scheme:` off `raw`; returns an empty scheme when there is none.
 fn get_scheme(raw: &str) -> Result<(&str, &str), String> {
     for (i, c) in raw.bytes().enumerate() {
         match c {
@@ -192,7 +193,7 @@ fn get_scheme(raw: &str) -> Result<(&str, &str), String> {
     Ok(("", raw))
 }
 
-/// Go `parseAuthority`: the userinfo and the unescaped host.
+/// Parses the authority: the userinfo and the unescaped host.
 fn parse_authority(scheme: &str, authority: &str) -> Result<(Option<Userinfo>, String), String> {
     let at = authority.rfind('@');
     let host = parse_host(scheme, at.map_or(authority, |i| &authority[i + 1..]))?;
@@ -216,7 +217,9 @@ fn parse_authority(scheme: &str, authority: &str) -> Result<(Option<Userinfo>, S
     Ok((Some(user), host))
 }
 
-/// Go `parseHost` (with `urlstrictcolons=1`, Go 1.26+'s default).
+/// Parses a host with an optional port. Bracketed hosts must be IPv6 literals; for other
+/// hosts the port starts at the first colon for `http`/`https` and at the last colon for
+/// every other scheme.
 fn parse_host(scheme: &str, host: &str) -> Result<String, String> {
     if let Some(open) = host.rfind('[') {
         if open > 0 {
@@ -239,7 +242,7 @@ fn parse_host(scheme: &str, host: &str) -> Result<String, String> {
             }
             None => lossy(unescape(hostname, Mode::Host)?),
         };
-        // Go `netip.ParseAddr`; only an IPv6 address may sit in brackets.
+        // Only an IPv6 address may sit in brackets.
         let addr = unescaped
             .split_once('%')
             .map_or(unescaped.as_str(), |(a, _)| a);
@@ -269,7 +272,7 @@ fn parse_host(scheme: &str, host: &str) -> Result<String, String> {
     Ok(lossy(unescape(host, Mode::Host)?))
 }
 
-/// Go `validOptionalPort`: empty or `:` followed by digits.
+/// True for an empty port or `:` followed by digits.
 fn valid_optional_port(port: &str) -> bool {
     if port.is_empty() {
         return true;
@@ -280,7 +283,7 @@ fn valid_optional_port(port: &str) -> bool {
     }
 }
 
-/// Go `validUserinfo`.
+/// True when every character of `s` is allowed in userinfo.
 fn valid_userinfo(s: &str) -> bool {
     s.chars().all(|r| {
         r.is_ascii_alphanumeric()
@@ -307,7 +310,8 @@ fn valid_userinfo(s: &str) -> bool {
     })
 }
 
-/// Go `splitHostPort`: the host without a valid port and without IPv6 brackets, and the port.
+/// Splits `host[:port]` into the host (without a valid port and without IPv6 brackets) and the
+/// port.
 fn split_host_port(host_port: &str) -> (&str, &str) {
     let mut host = host_port;
     let mut port = "";
@@ -324,50 +328,50 @@ fn split_host_port(host_port: &str) -> (&str, &str) {
 }
 
 impl Url {
-    /// Go `URL.Hostname()`.
+    /// The host without port or IPv6 brackets.
     pub fn hostname(&self) -> &str {
         split_host_port(&self.host).0
     }
 
-    /// Go `URL.Port()`.
+    /// The port, or `""` when there is none.
     pub fn port(&self) -> &str {
         split_host_port(&self.host).1
     }
 
-    /// Go `u.User != nil`.
+    /// True when the URL has user information.
     pub fn has_user(&self) -> bool {
         self.user.is_some()
     }
 
-    /// Go `RawQuery`.
+    /// The query string, not including the `?`.
     pub fn raw_query(&self) -> &str {
         &self.raw_query
     }
 
-    /// Go `u.RawQuery = q`.
+    /// Replaces the query string.
     pub fn set_raw_query(&mut self, q: String) {
         self.raw_query = q;
     }
 
-    /// Go `u.Path, u.RawPath = path, raw_path` (field assignment, no validation).
+    /// Sets the path and raw path fields directly, without validation.
     pub fn set_path_fields(&mut self, path: Vec<u8>, raw_path: String) {
         self.path = path;
         self.raw_path = raw_path;
     }
 
-    /// Go `Fragment` (unescaped bytes).
+    /// The unescaped fragment bytes.
     pub fn fragment(&self) -> &[u8] {
         &self.fragment
     }
 
-    /// Go `u.Fragment, u.RawFragment = fragment, raw_fragment` (field assignment, no
-    /// validation).
+    /// Sets the fragment and raw fragment fields directly, without validation.
     pub fn set_fragment_fields(&mut self, fragment: Vec<u8>, raw_fragment: String) {
         self.fragment = fragment;
         self.raw_fragment = raw_fragment;
     }
 
-    /// Go `URL.setFragment`.
+    /// Sets the fragment from its escaped form, keeping the raw form only when it differs from
+    /// the default encoding.
     fn set_fragment(&mut self, f: &str) -> Result<(), String> {
         let frag = unescape(f, Mode::Fragment)?;
         self.raw_fragment = if escape(&frag, Mode::Fragment) == f {
@@ -379,7 +383,8 @@ impl Url {
         Ok(())
     }
 
-    /// Go `URL.EscapedFragment()`.
+    /// The fragment in escaped form: the raw fragment when it is a valid encoding of the
+    /// fragment, otherwise the default encoding.
     pub fn escaped_fragment(&self) -> String {
         if !self.raw_fragment.is_empty()
             && valid_encoded(&self.raw_fragment, Mode::Fragment)
@@ -390,7 +395,8 @@ impl Url {
         escape(&self.fragment, Mode::Fragment)
     }
 
-    /// Go `URL.setPath`.
+    /// Sets the path from its escaped form, keeping the raw form only when it differs from the
+    /// default encoding.
     fn set_path(&mut self, p: &str) -> Result<(), String> {
         let path = unescape(p, Mode::Path)?;
         self.raw_path = if escape_path(&path) == p {
@@ -402,7 +408,8 @@ impl Url {
         Ok(())
     }
 
-    /// Go `URL.EscapedPath()`.
+    /// The path in escaped form: the raw path when it is a valid encoding of the path,
+    /// otherwise the default encoding (`*` stays `*`).
     pub fn escaped_path(&self) -> String {
         if !self.raw_path.is_empty()
             && valid_encoded_path(&self.raw_path)
@@ -416,7 +423,7 @@ impl Url {
         escape_path(&self.path)
     }
 
-    /// Go `URL.joinPath(elem...)`.
+    /// Joins `elems` onto the escaped path, cleaning the result and keeping a trailing slash.
     pub fn join_path(&self, elems: &[&str]) -> Result<Url, String> {
         let mut all: Vec<String> = Vec::with_capacity(elems.len() + 1);
         all.push(self.escaped_path());
@@ -435,7 +442,7 @@ impl Url {
         Ok(url)
     }
 
-    /// Go `URL.String()`.
+    /// Serializes the URL: scheme, `//` authority, escaped path, `?query` and `#fragment`.
     pub fn to_go_string(&self) -> String {
         let mut buf = String::new();
         if !self.opaque.is_empty() {
@@ -484,7 +491,7 @@ impl Url {
     }
 }
 
-/// Go `shouldEscape(c, mode)` for the modes above.
+/// True when byte `c` must be percent-escaped in the given mode.
 fn should_escape(c: u8, mode: Mode) -> bool {
     if c.is_ascii_alphanumeric() {
         return false;
@@ -530,19 +537,18 @@ fn should_escape(c: u8, mode: Mode) -> bool {
     true
 }
 
-/// Go `escape(s, encodePath)`, upper-case hex.
+/// Escapes `s` for use in a path, with upper-case hex.
 pub fn escape_path(s: &[u8]) -> String {
     escape(s, Mode::Path)
 }
 
-/// Go `url.PathEscape(s)` (`escape(s, encodePathSegment)`): `/`, `;`, `,` and `?` are escaped
-/// too.
+/// Escapes `s` as a single path segment: `/`, `;`, `,` and `?` are escaped too.
 pub fn path_escape(s: &[u8]) -> String {
     escape(s, Mode::PathSegment)
 }
 
-/// Go `escape(s, mode)` for the modes without a space rule (every mode but
-/// `encodeQueryComponent`, which [`go_query_escape`](crate::go_query_escape) ports).
+/// Escapes `s` in `mode` (every mode but the query component, which
+/// [`go_query_escape`](crate::go_query_escape) handles because it also turns a space into `+`).
 fn escape(s: &[u8], mode: Mode) -> String {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
     // Every byte from 0x80 up is escaped in every mode, so the result is ASCII.
@@ -559,12 +565,12 @@ fn escape(s: &[u8], mode: Mode) -> String {
     out
 }
 
-/// Go `validEncoded(s, encodePath)`: `s` holds no byte that escaping would change.
+/// True when `s` is a valid path encoding: it holds no byte that escaping would change.
 pub fn valid_encoded_path(s: &str) -> bool {
     valid_encoded(s, Mode::Path)
 }
 
-/// Go `validEncoded(s, mode)`.
+/// True when `s` holds no byte that escaping in `mode` would change.
 fn valid_encoded(s: &str, mode: Mode) -> bool {
     s.bytes().all(|c| {
         matches!(
@@ -602,7 +608,7 @@ fn lossy(b: Vec<u8>) -> String {
     String::from_utf8_lossy(&b).into_owned()
 }
 
-/// Go `EscapeError`: `invalid URL escape "<up to 3 bytes>"`.
+/// The error for a bad percent escape: `invalid URL escape "<up to 3 bytes>"`.
 fn escape_error(s: &[u8]) -> String {
     let end = s.len().min(3);
     format!(
@@ -611,23 +617,24 @@ fn escape_error(s: &[u8]) -> String {
     )
 }
 
-/// Go `unescape(s, encodePath)` (how `URL.Path` is decoded), with Go's `EscapeError` text.
+/// Percent-decodes a path; a bad escape gives the `invalid URL escape` error text.
 pub fn unescape_path(s: &str) -> Result<Vec<u8>, String> {
     unescape(s, Mode::Path)
 }
 
-/// Go `url.PathUnescape(s)` (`unescape(s, encodePathSegment)`), with Go's `EscapeError` text.
+/// Percent-decodes a single path segment; a bad escape gives the `invalid URL escape` error
+/// text.
 pub fn path_unescape(s: &str) -> Result<Vec<u8>, String> {
     unescape(s, Mode::PathSegment)
 }
 
-/// Go `url.QueryUnescape(s)` (`unescape(s, encodeQueryComponent)`: `+` is a space), with Go's
-/// `EscapeError` text.
+/// Percent-decodes a query component (`+` is a space); a bad escape gives the
+/// `invalid URL escape` error text.
 pub fn query_unescape(s: &str) -> Result<Vec<u8>, String> {
     unescape(s, Mode::QueryComponent)
 }
 
-/// Go `unescape(s, mode)`, with Go's `EscapeError` / `InvalidHostError` texts.
+/// Percent-decodes `s` in `mode`, with the `invalid URL escape` and invalid-host error texts.
 fn unescape(s: &str, mode: Mode) -> Result<Vec<u8>, String> {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());

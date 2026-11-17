@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go agent/workflowagents/loopagent.
+//! A loop agent: runs its sub-agents in sequence repeatedly.
 
 use std::sync::Arc;
 
@@ -24,7 +24,7 @@ use gadk_agent::{
 
 use crate::agents::graph_resume::graph_resume_indexes;
 
-/// Port of Go loopagent.Config: the configuration of a loop agent.
+/// The configuration of a loop agent.
 #[derive(Clone, Default)]
 pub struct LoopAgentConfig {
     /// Basic agent setup; `run` must be `None`.
@@ -36,9 +36,8 @@ pub struct LoopAgentConfig {
     pub max_iterations: u32,
 }
 
-/// Port of Go loopagent.New: an agent that runs its sub-agents in sequence repeatedly, for
-/// `max_iterations` passes or until a sub-agent escalates. Use it for repetition or iterative
-/// refinement, such as revising code.
+/// An agent that runs its sub-agents in sequence repeatedly, for `max_iterations` passes or until
+/// a sub-agent escalates. Use it for repetition or iterative refinement, such as revising code.
 pub fn new(cfg: LoopAgentConfig) -> Result<Arc<dyn Agent>, AgentError> {
     if cfg.agent.run.is_some() {
         return Err(AgentError::Config(
@@ -60,7 +59,7 @@ pub fn new(cfg: LoopAgentConfig) -> Result<Arc<dyn Agent>, AgentError> {
     .map_err(|e| AgentError::Config(format!("failed to create base agent: {e}")))
 }
 
-/// Port of Go (*loopAgent).Run.
+/// Runs the passes of the loop agent.
 fn run(ctx: InvocationContext, max_iterations: u32) -> EventStream {
     Box::pin(async_stream::stream! {
         let subs: Vec<Arc<dyn Agent>> = ctx.agent().sub_agents().to_vec();
@@ -69,9 +68,9 @@ fn run(ctx: InvocationContext, max_iterations: u32) -> EventStream {
         if subs.is_empty() {
             return;
         }
-        // Go 51bc7ec5 (#2188): only the first pass narrows to the sub-agent holding the
-        // lowest-indexed caller; later passes run every sub-agent under a context marked done,
-        // so nothing beneath narrows again.
+        // Only the first pass narrows to the sub-agent holding the lowest-indexed caller; later
+        // passes run every sub-agent under a context marked done, so nothing beneath narrows
+        // again.
         let mut pass_subs: &[Arc<dyn Agent>] = &subs;
         if let Some(&first) = graph_resume_indexes(&ctx).as_ref().and_then(|ix| ix.first()) {
             pass_subs = &subs[first..];
@@ -80,8 +79,7 @@ fn run(ctx: InvocationContext, max_iterations: u32) -> EventStream {
         let mut count = max_iterations;
         loop {
             // A pass can yield no events (for example when every sub-agent is empty), so the
-            // consumer never gets a chance to stop the loop: stop on cancellation here (Go
-            // ctx.Err()).
+            // consumer never gets a chance to stop the loop: stop on cancellation here.
             if ctx.cancellation_token().is_cancelled() {
                 yield Err(AgentError::Cancelled);
                 return;

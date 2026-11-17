@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The workflow graph engine (port of ADK-Go `workflow`).
+//! The workflow graph engine.
 
 pub mod base_node;
 #[allow(unused_imports)]
@@ -59,6 +59,6 @@ pub(crate) mod persistence;
 pub(crate) mod resume;
 pub(crate) mod scheduler;
 pub(crate) mod validation;
-// Test-only: Go walkAgents' only consumer is the out-of-scope exp/appinfo.
+// Test-only: nothing in the engine walks a graph's agents.
 #[cfg(test)]
 pub(crate) mod walk;

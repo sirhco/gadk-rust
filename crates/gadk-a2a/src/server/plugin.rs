@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The `a2a-executor` plugin that captures the invocation session (port of ADK-Go
-//! `server/adka2a/v2/executor_plugin.go`).
+//! The `a2a-executor` plugin that captures the invocation session.
 
 use std::sync::Arc;
 
@@ -23,22 +22,22 @@ use gadk_agent::{InvocationContext, Plugin, PluginConfig};
 use gadk_session::Session;
 use parking_lot::Mutex;
 
-/// The plugin's name (Go `"a2a-executor"`).
+/// The plugin's name.
 pub(crate) const EXECUTOR_PLUGIN_NAME: &str = "a2a-executor";
 
-/// Go `executorPlugin`: a plugin whose before-run callback records the invocation's session, so
+/// A plugin whose before-run callback records the invocation's session, so
 /// [`super::ExecutorContext`] can show the callbacks its state and events.
 #[derive(Clone)]
 pub(crate) struct ExecutorPlugin {
     /// The plugin to install in the runner.
     pub(crate) plugin: Plugin,
-    /// Go `invocationSession`: `None` until the runner ran the before-run callback.
+    /// The invocation session: `None` until the runner ran the before-run callback.
     pub(crate) invocation_session: Arc<Mutex<Option<Arc<dyn Session>>>>,
 }
 
 impl ExecutorPlugin {
-    /// Go `newExecutorPlugin`. Go's `plugin.New` error cannot occur (`gadk_agent::Plugin::new` is
-    /// infallible), so neither can Go's `failed to create a2a-executor plugin` failure.
+    /// A fresh plugin with no captured session. Creating it cannot fail (`gadk_agent::Plugin::new`
+    /// is infallible).
     pub(crate) fn new() -> Self {
         let invocation_session: Arc<Mutex<Option<Arc<dyn Session>>>> = Arc::default();
         let captured = Arc::clone(&invocation_session);

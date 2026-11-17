@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Function tools and tool choice (port of ADK-Go `tools.go`, except `toolUseIDSanitizer`,
-//! which is [`crate::tool_id`]).
+//! Function tools and tool choice; tool-use ID sanitizing lives in [`crate::tool_id`].
 
 use std::any::Any;
 use std::collections::HashMap;
@@ -29,10 +28,10 @@ use crate::thinking::is_thinking_enabled;
 use crate::validate::invalid_config;
 use crate::wire::{ObjectTag, ToolChoiceParam, ToolInputSchema, ToolParam};
 
-/// `LlmRequest.tools` (Go `req.Tools`, `map[string]any`); only whether it is empty matters.
+/// `LlmRequest.tools`; only whether it is empty matters.
 pub(crate) type ReqTools = HashMap<String, Arc<dyn Any + Send + Sync>>;
 
-/// Go `fmt.Errorf("%w: %w: <detail>", ErrInvalidConfig, ErrUnsupportedToolType)`.
+/// An `InvalidConfig` + `UnsupportedToolType` error with `<detail>`.
 fn unsupported_tool(detail: &str) -> AnthropicError {
     AnthropicError::wrap2(
         ErrorKind::InvalidConfig,
@@ -41,14 +40,13 @@ fn unsupported_tool(detail: &str) -> AnthropicError {
     )
 }
 
-/// The mode of a function-calling config as Go switches on it:
-/// `strings.ToUpper(strings.TrimSpace(string(fcc.Mode)))` (unset is `""`).
+/// The mode of a function-calling config, trimmed and upper-cased (unset is `""`).
 fn normalized_mode(raw: &str) -> String {
     go_to_upper(raw.trim())
 }
 
-/// Go `validateTools`: `Ok(true)` when some tool has function declarations; Go's errors for
-/// every non-function tool (`ErrInvalidConfig` + `ErrUnsupportedToolType`), an entry without
+/// Validates the tools: `Ok(true)` when some tool has function declarations; errors for
+/// every non-function tool (`InvalidConfig` + `UnsupportedToolType`), an entry without
 /// declarations, and a declaration with a blank name.
 pub(crate) fn validate_tools(tools: &[Tool]) -> Result<bool, AnthropicError> {
     let mut has_decls = false;
@@ -130,7 +128,7 @@ pub(crate) fn validate_tools(tools: &[Tool]) -> Result<bool, AnthropicError> {
     Ok(has_decls)
 }
 
-/// Go `validateToolConfig`, with Go's texts per field and per mode (`AUTO`, `ANY`, `NONE`, an
+/// Validates the tool config, with texts per field and per mode (`AUTO`, `ANY`, `NONE`, an
 /// unknown mode).
 pub(crate) fn validate_tool_config(
     tc: Option<&ToolConfig>,
@@ -208,7 +206,7 @@ pub(crate) fn validate_tool_config(
     Ok(())
 }
 
-/// Go `buildToolsAndChoice`: one [`ToolParam`] per declaration, and the tool choice
+/// Builds one [`ToolParam`] per declaration, and the tool choice
 /// (`none` only with tools, `tool` for one allowed name in `ANY`, `any`, else `auto` when
 /// there are declared tools).
 pub(crate) fn build_tools_and_choice(
@@ -252,7 +250,7 @@ pub(crate) fn build_tools_and_choice(
     Ok((tools, choice))
 }
 
-/// Go `convertFunctionDeclaration`: trimmed name, the input schema, the description when
+/// Converts a function declaration: trimmed name, the input schema, the description when
 /// non-empty.
 pub(crate) fn convert_function_declaration(
     decl: &FunctionDeclaration,
@@ -266,7 +264,7 @@ pub(crate) fn convert_function_declaration(
     })
 }
 
-/// Go `buildToolInputSchema`: `parameters_json_schema`, else `parameters` (marshalled as genai
+/// Builds the input schema: `parameters_json_schema`, else `parameters` (serialized as genai
 /// JSON), else `{"properties":{}}`; types lowercased; `properties`, string `required` entries,
 /// and every other key except `type` as extras.
 pub(crate) fn build_tool_input_schema(
@@ -291,7 +289,7 @@ pub(crate) fn build_tool_input_schema(
             go_quote(&decl.name)
         ))
     })?;
-    // Go unmarshals into a map[string]any: anything but a JSON object (including null) fails.
+    // The schema must be a JSON object: anything else (including null) fails.
     let Value::Object(mut schema) = value else {
         return Err(invalid_config(format!(
             "tool schema for {} must be a JSON object",
@@ -327,7 +325,7 @@ pub(crate) fn build_tool_input_schema(
     })
 }
 
-/// Go `lowercaseSchemaTypes`: lowercases every string `type` (and the strings of an array
+/// Lowercases every string `type` (and the strings of an array
 /// `type`) at any depth.
 pub(crate) fn lowercase_schema_types(node: &mut Value) {
     match node {

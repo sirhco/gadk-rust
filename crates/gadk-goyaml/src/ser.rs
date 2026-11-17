@@ -13,20 +13,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The serializer: yaml.v3 v3.0.1 `encode.go`'s reflection path (`encoder.marshal`, `mapv`,
-//! `structv`, `slicev`) as a serde `Serializer` emitting events through `encode.rs`, plus the
+//! The serializer: a serde `Serializer` for the value dispatch (`marshal`, `mapv`, `structv`,
+//! `slicev`) emitting events through `encode.rs`, plus the
 //! `Serialize` impls of [`Document`] (routed to `nodev`) and [`GoValue`].
 //!
-//! Go reflects over a value it can walk twice; serde hands each value over once, in serde
+//! yaml.v3 reflects over a value it can walk twice; serde hands each value over once, in serde
 //! order. So a value is first captured into a [`Content`] tree (struct keys named by
 //! [`Options::key_for`], map entries sorted by `sorter.rs`, the inline map checked against the
-//! struct's keys), then [`marshal`] walks that tree exactly as Go's `encoder.marshal` walks the
-//! reflected value, through `encode.rs`'s `stringv`/`intv`/…/`mappingv`/`slicev`/`nodev`.
+//! struct's keys), then [`marshal`] walks that tree as yaml.v3's encoder walks a value,
+//! through `encode.rs`'s `stringv`/`intv`/…/`mappingv`/`slicev`/`nodev`.
 //!
 //! Three values cross the serde boundary through private newtype names instead of their serde
 //! form (the `serde_json::RawValue` technique): a [`Document`] ([`DOCUMENT_MARKER`], encoded
-//! by `nodev` like Go's `yaml.Node`), a [`GoValue::Timestamp`] ([`TIMESTAMP_MARKER`], `timev`)
-//! and a [`GoValue::Bytes`] ([`GO_STRING_MARKER`], `stringv` of a non-UTF-8 Go string). The
+//! by `nodev`), a [`GoValue::Timestamp`] ([`TIMESTAMP_MARKER`], `timev`)
+//! and a [`GoValue::Bytes`] ([`GO_STRING_MARKER`], `stringv` of a string that is not UTF-8). The
 //! value itself is handed over in a thread-local slot while the codec is "armed"; through any
 //! other serializer they serialize as unit, an RFC3339Nano string and bytes respectively.
 
@@ -47,10 +47,10 @@ use crate::node::{DOCUMENT_MARKER, Document, Kind};
 use crate::sorter::{ReflectKind, SortKey, sort_keys};
 use crate::value::GoValue;
 
-/// The newtype name a [`GoValue::Timestamp`] serializes through (Go's `time.Time` → `timev`).
+/// The newtype name a [`GoValue::Timestamp`] serializes through (→ `timev`).
 pub(crate) const TIMESTAMP_MARKER: &str = "$gadk_goyaml::Timestamp";
 
-/// The newtype name a [`GoValue::Bytes`] serializes through (a Go `string` holding bytes that
+/// The newtype name a [`GoValue::Bytes`] serializes through (a string holding bytes that
 /// are not UTF-8 → `stringv`'s `!!binary`).
 pub(crate) const GO_STRING_MARKER: &str = "$gadk_goyaml::GoString";
 
@@ -99,7 +99,7 @@ impl Serialize for Handoff<'_> {
 }
 
 impl Serialize for Document {
-    /// Go encodes a `yaml.Node` value through `nodev`; through gadk-goyaml's serializer the
+    /// A node is encoded through `nodev`; through gadk-goyaml's serializer the
     /// subtree is handed over by `crate::node::DOCUMENT_MARKER`. Other serde formats see
     /// unit.
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -108,7 +108,7 @@ impl Serialize for Document {
 }
 
 impl Serialize for GoValue {
-    /// Go's `encoder.marshal` of the dynamic value (`Timestamp` via `timev`, `Bytes` via
+    /// Encodes the dynamic value (`Timestamp` via `timev`, `Bytes` via
     /// `stringv`'s `!!binary`, maps sorted by `sorter.rs`).
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
@@ -149,10 +149,10 @@ impl Serialize for GoValue {
     }
 }
 
-/// A captured value: what Go's `encoder.marshal` dispatches on (`reflect.Kind` plus the
-/// `yaml.Node` and `time.Time` special cases).
+/// A captured value: what [`marshal`] dispatches on (the scalar and collection kinds plus the
+/// node and timestamp special cases).
 enum Content {
-    /// `nil` (a nil pointer or interface, serde `None`/unit) → `nilv`.
+    /// Null (serde `None`/unit) → `nilv`.
     Null,
     /// `bool` → `boolv`.
     Bool(bool),
@@ -162,9 +162,9 @@ enum Content {
     Uint(ReflectKind, u64),
     /// `float32` (value widened) or `float64` → `floatv`.
     Float(ReflectKind, f64),
-    /// A Go `string` (any bytes) → `stringv`.
+    /// A string (any bytes) → `stringv`.
     Str(Vec<u8>),
-    /// `time.Time` → `timev`.
+    /// timestamp → `timev`.
     Time(DateTime<FixedOffset>),
     /// A slice → `slicev`.
     Seq(Vec<Content>),
@@ -174,7 +174,7 @@ enum Content {
     InlineMap(Vec<MapEntry>),
     /// A struct → `structv`.
     Struct(StructContent),
-    /// A `yaml.Node` → `nodev`.
+    /// A node → `nodev`.
     Node(Document),
 }
 
@@ -192,7 +192,7 @@ struct StructContent {
 }
 
 impl Content {
-    /// The key as Go's `keyList.Less` sees it (after `Elem()` through interfaces/pointers).
+    /// The key as the map-key ordering sees it (looking through interfaces/pointers).
     fn sort_key(&self) -> SortKey {
         match self {
             Content::Null => SortKey::Other(ReflectKind::Interface),
@@ -213,37 +213,36 @@ impl Content {
     }
 }
 
-/// One more level of collection nesting below `depth` (plan decision D7).
+/// One more level of collection nesting below `depth` (limited by `MAX_WALK_DEPTH`).
 fn enter(depth: usize) -> Result<usize, Error> {
-    // Divergence (ledger 6c-1): plan decision D7 — values nested deeper than MAX_WALK_DEPTH
-    // collections fail instead of overflowing the stack (Go has no limit here).
+    // Values nested deeper than MAX_WALK_DEPTH collections fail instead of
+    // overflowing the stack.
     if depth >= MAX_WALK_DEPTH {
         return Err(walk_depth_exceeded());
     }
     Ok(depth + 1)
 }
 
-/// Go: `(*encoder).marshalDoc("", v)` for a value that is not a `*yaml.Node` of
-/// `DocumentNode` kind: an implicit document wrapping `v` (`e.init()` included).
+/// Encodes a value that is not a `Document` node as an implicit document wrapping it
+/// (`e.init()` included).
 pub(crate) fn marshal_doc<T: Serialize + ?Sized>(
     e: &mut Encoder<'_>,
     v: &T,
     opts: &Options,
 ) -> Result<(), Error> {
-    // Go: encode.go marshalDoc
     e.init()?;
-    // Divergence (ledger 6c-1): the value is captured before its first event is emitted, so a
-    // value that fails while being captured (inline-map conflict, flatten, a serde value nested
-    // too deep) leaves no partial document behind in an Encoder's stream, where Go panics
-    // part-way through the document. A failure during the walk that follows (e.g. a `Document`
-    // field whose nodes nest too deep: its depth is counted only on the walk) comes after
+    // The value is captured before its first event is emitted, so a value that fails while
+    // being captured (inline-map conflict, flatten, a serde value nested too deep) leaves no
+    // partial document behind in an Encoder's stream. A failure during the walk that follows
+    // (e.g. a `Document` field whose nodes nest too deep: its depth is counted only on the walk)
+    // comes after
     // events were already emitted, so the stream keeps that partial document and the Encoder's
-    // later calls fail, as after Go's mid-document panic.
+    // later calls fail.
     let content = v.serialize(Capture { opts, depth: 0 })?;
     if let Content::Node(doc) = &content
         && doc[doc.root()].kind == Kind::Document
     {
-        // A Rust reference stands for Go's pointer: `marshal(&doc)` is `Marshal(&node)`.
+        // A reference to a document node is encoded as that document.
         return e.marshal_doc_node(doc, doc.root());
     }
     crate::api::yaml_document_start_event_initialize(&mut e.event, None, Vec::new(), true);
@@ -253,11 +252,8 @@ pub(crate) fn marshal_doc<T: Serialize + ?Sized>(
     e.emit()
 }
 
-/// Go: `(*encoder).marshal("", in)` over a captured value (Go's tag is always empty here: the
-/// reflection path passes `""` everywhere but `marshalDoc`'s caller-supplied tag, which is
-/// `""` too).
+/// Encodes a captured value (the tag is always empty here).
 fn marshal(e: &mut Encoder<'_>, c: &Content) -> Result<(), Error> {
-    // Go: encode.go marshal
     match c {
         Content::Null => e.nilv(),
         Content::Bool(b) => e.boolv("", *b),
@@ -269,18 +265,18 @@ fn marshal(e: &mut Encoder<'_>, c: &Content) -> Result<(), Error> {
         Content::Seq(items) => nested(e, |e| slicev(e, items)),
         Content::Map(entries) | Content::InlineMap(entries) => nested(e, |e| mapv(e, entries)),
         Content::Struct(s) => nested(e, |e| structv(e, s)),
-        // Go: `case Node:` / `case *Node:` → nodev (its own D7 guard counts on from e.depth).
+        // A node goes to nodev (its own depth guard counts on from e.depth).
         Content::Node(doc) => e.nodev(doc, doc.root()),
     }
 }
 
-/// Runs `f` one collection level deeper (plan decision D7, on `Encoder::depth` like
-/// `Encoder::node`).
+/// Runs `f` one collection level deeper (limited by `MAX_WALK_DEPTH`, counted on
+/// `Encoder::depth` like `Encoder::node`).
 fn nested(
     e: &mut Encoder<'_>,
     f: impl FnOnce(&mut Encoder<'_>) -> Result<(), Error>,
 ) -> Result<(), Error> {
-    // Divergence (ledger 6c-1): plan decision D7 (see `enter`).
+    // The same limit as `enter`.
     if e.depth >= MAX_WALK_DEPTH {
         return Err(walk_depth_exceeded());
     }
@@ -290,9 +286,8 @@ fn nested(
     result
 }
 
-/// Go: `(*encoder).mapv` — the entries were sorted with `sort.Sort(keyList)` when captured.
+/// Encodes a map; the entries were sorted when captured.
 fn mapv(e: &mut Encoder<'_>, entries: &[MapEntry]) -> Result<(), Error> {
-    // Go: encode.go mapv
     e.mappingv("", |e| {
         for entry in entries {
             marshal(e, &entry.key)?;
@@ -302,10 +297,9 @@ fn mapv(e: &mut Encoder<'_>, entries: &[MapEntry]) -> Result<(), Error> {
     })
 }
 
-/// Go: `(*encoder).structv` — the fields in order (omitempty fields were skipped by serde),
+/// Encodes a struct: the fields in order (omitempty fields were skipped by serde),
 /// then the `,inline` map's entries, sorted (its key conflicts were checked when captured).
 fn structv(e: &mut Encoder<'_>, s: &StructContent) -> Result<(), Error> {
-    // Go: encode.go structv
     e.mappingv("", |e| {
         for (key, value) in &s.fields {
             e.stringv("", key.as_bytes())?;
@@ -324,9 +318,8 @@ fn structv(e: &mut Encoder<'_>, s: &StructContent) -> Result<(), Error> {
     })
 }
 
-/// Go: `(*encoder).slicev`.
+/// Encodes a sequence.
 fn slicev(e: &mut Encoder<'_>, items: &[Content]) -> Result<(), Error> {
-    // Go: encode.go slicev
     e.slicev_start("")?;
     for item in items {
         marshal(e, item)?;
@@ -353,7 +346,7 @@ fn take_handoff<T: Serialize + ?Sized>(
 }
 
 /// The serde `Serializer` that captures a value into a [`Content`]. `depth` is the number of
-/// collections enclosing the value (plan decision D7).
+/// collections enclosing the value (limited by `MAX_WALK_DEPTH`).
 #[derive(Clone, Copy)]
 struct Capture<'o> {
     opts: &'o Options,
@@ -423,7 +416,7 @@ impl<'o> Serializer for Capture<'o> {
         Ok(Content::Str(v.as_bytes().to_vec()))
     }
 
-    /// Go's `[]byte`: `slicev` of `uint8`s (a `!!int` sequence).
+    /// Bytes: `slicev` of `u8`s (a `!!int` sequence).
     fn serialize_bytes(self, v: &[u8]) -> Result<Content, Error> {
         enter(self.depth)?;
         Ok(Content::Seq(
@@ -445,7 +438,7 @@ impl<'o> Serializer for Capture<'o> {
         Ok(Content::Null)
     }
 
-    /// A field-less struct: Go's `struct{}` encodes as `{}`.
+    /// A field-less struct encodes as `{}`.
     fn serialize_unit_struct(self, _name: &'static str) -> Result<Content, Error> {
         enter(self.depth)?;
         Ok(Content::Struct(StructContent {
@@ -544,11 +537,11 @@ impl<'o> Serializer for Capture<'o> {
         })
     }
 
-    /// Go's maps; `None` (serde derive's `#[serde(flatten)]`) is rejected.
+    /// A map; `None` (serde derive's `#[serde(flatten)]`) is rejected.
     fn serialize_map(self, len: Option<usize>) -> Result<MapCapture<'o>, Error> {
         let Some(len) = len else {
-            // Divergence (ledger 6c-1): Go has no flatten; serde derive serializes a struct
-            // with a `#[serde(flatten)]` field as a map of unknown length.
+            // yaml.v3 has no flatten; serde derive serializes a struct with a
+            // `#[serde(flatten)]` field as a map of unknown length.
             return Err(Error::Unsupported(FLATTEN_UNSUPPORTED.to_owned()));
         };
         Ok(MapCapture {
@@ -655,7 +648,7 @@ impl SerializeTupleVariant for TupleVariantCapture<'_> {
     }
 }
 
-/// Captures a map; `end` sorts the entries with Go's `sort.Sort(keyList)`.
+/// Captures a map; `end` sorts the entries by key.
 struct MapCapture<'o> {
     inner: Capture<'o>,
     entries: Vec<MapEntry>,
@@ -688,14 +681,14 @@ impl SerializeMap for MapCapture<'_> {
     }
 }
 
-/// Captures a struct: Go's `getStructInfo` (keys, `FieldsMap`, the `,inline` map) and the
+/// Captures a struct: its keys, the set of reported field keys, the `,inline` map and the
 /// field values.
 struct StructCapture<'o> {
     inner: Capture<'o>,
     name: &'static str,
     fields: Vec<(String, Content)>,
-    /// Go's `FieldsMap` keys: every field serde reports (serialized or skipped by
-    /// `skip_serializing_if`; `#[serde(skip)]` fields, Go's `yaml:"-"`, are never reported).
+    /// The keys of every field serde reports (serialized or skipped by
+    /// `skip_serializing_if`; `#[serde(skip)]` fields are never reported).
     keys: BTreeSet<String>,
     inline: Option<Vec<MapEntry>>,
 }
@@ -711,12 +704,12 @@ impl<'o> StructCapture<'o> {
         }
     }
 
-    /// Go: `getStructInfo`'s key for a field and its duplicate check.
+    /// The key for a field, with a duplicate check.
     fn add_key(&mut self, field: &'static str) -> Result<String, Error> {
         let key = self.inner.opts.key_for(self.name, field).into_owned();
         if !self.keys.insert(key.clone()) {
-            // Go panics with this getStructInfo error (`handleErr` re-panics it).
-            // Divergence (ledger 6c-1): Go names the struct `<package>.<Type>`.
+            // yaml.v3 panics with this error; here it is returned. The struct is named by its
+            // serde name.
             return Err(Error::Unsupported(format!(
                 "duplicated key '{key}' in struct {}",
                 self.name
@@ -764,7 +757,7 @@ impl<'o> StructCapture<'o> {
         Ok(())
     }
 
-    /// Go: `structv`'s inline-map conflict check (encode.go:238-250), in sorted key order.
+    /// The inline-map conflict check, in sorted key order.
     fn finish(self) -> Result<Content, Error> {
         let inline = self.inline.unwrap_or_default();
         for entry in &inline {
@@ -773,8 +766,7 @@ impl<'o> StructCapture<'o> {
                 _ => continue,
             };
             if self.keys.contains(&key) {
-                // Divergence (ledger 6c-1): Go panics with this text (`handleErr` re-panics
-                // non-yamlError values); the port returns it.
+                // yaml.v3 panics with this text; here it is returned.
                 return Err(Error::Unsupported(format!(
                     "cannot have key {} in inlined map: conflicts with struct field",
                     gadk_platform::go_quote(&key)

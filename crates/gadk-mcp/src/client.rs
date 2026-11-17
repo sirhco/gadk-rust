@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The MCP client seam and the connection refresher (port of ADK-Go
-//! `tool/mcptoolset/client.go`: `MCPClient`, `connectionRefresher`, `withRetry`).
+//! The MCP client seam ([`McpClient`]) and the connection refresher ([`ConnectionRefresher`]),
+//! which reconnects once when an operation fails because the connection was lost.
 
 use std::error::Error as StdError;
 use std::future::Future;
@@ -36,7 +36,7 @@ use crate::config::TransportFactory;
 use crate::error::{BoxError, Error};
 
 /// What one MCP operation runs with: the identity credentials are resolved for (`auth`) and the
-/// caller's cancellation (`cancel`, Go's `ctx.Done()`).
+/// caller's cancellation (`cancel`).
 #[derive(Clone, Debug)]
 pub struct CallContext {
     /// The identity a credential provider resolves for.
@@ -51,7 +51,7 @@ impl CallContext {
         Self { auth, cancel }
     }
 
-    /// No identity and a token nothing cancels (Go `context.Background()`).
+    /// No identity and a token nothing cancels.
     pub fn background() -> Self {
         Self::new(AuthContext::anonymous(), CancellationToken::new())
     }
@@ -72,7 +72,7 @@ impl From<&gadk_agent::ReadonlyContext> for CallContext {
     }
 }
 
-/// Go `MCPClient`: the two MCP operations a toolset and its tools need.
+/// The two MCP operations a toolset and its tools need.
 #[async_trait::async_trait]
 pub trait McpClient: Send + Sync {
     /// `tools/call`.
@@ -85,14 +85,14 @@ pub trait McpClient: Send + Sync {
     async fn list_tools(&self, cx: &CallContext) -> Result<Vec<Tool>, Error>;
 }
 
-/// Go `sessionClient`: an [`McpClient`] the toolset can close.
+/// An [`McpClient`] the toolset can close.
 #[async_trait::async_trait]
 pub(crate) trait SessionClient: McpClient {
     /// Closes every session. Idempotent and concurrency-safe: every call returns the first
     /// call's result. Later operations fail with [`Error::ConnectionClosed`].
     async fn close(&self) -> Result<(), Arc<Error>>;
 
-    /// The credential session pool behind a toolset built with `auth` (for the D4 test hooks);
+    /// The credential session pool behind a toolset built with `auth` (for the test hooks);
     /// `None` for a [`ConnectionRefresher`].
     // Only the `#[cfg(test)]` hooks on `McpToolset` call it.
     #[cfg_attr(not(test), allow(dead_code))]
@@ -104,7 +104,7 @@ pub(crate) trait SessionClient: McpClient {
 /// A connected client session.
 type Session = RunningService<RoleClient, ClientConfig>;
 
-/// What the session lock guards (Go `connectionRefresher.session` and `.closed`).
+/// What the session lock guards: the connected session and whether the refresher is closed.
 #[derive(Default)]
 pub(crate) struct State {
     session: Option<Session>,
@@ -112,18 +112,18 @@ pub(crate) struct State {
     closed: bool,
 }
 
-/// Go `connectionRefresher`: one lazily connected session, reconnected once when an operation
-/// fails because the connection was lost.
+/// One lazily connected session, reconnected once when an operation fails because the connection
+/// was lost.
 ///
-/// The session lock is held only to connect or refresh. Operations run on a cloned [`Peer`]
-/// outside it, so calls on the session run concurrently (R11).
+/// The session lock is held only to connect or refresh. Operations run on a cloned [`Peer`] outside
+/// it, so calls on the session run concurrently.
 pub(crate) struct ConnectionRefresher {
     client_info: ClientConfig,
     factory: Arc<dyn TransportFactory>,
-    /// Go's one-slot `mu` channel plus the state it guards. Waiters leave when their own token
-    /// fires without disturbing the owner (see [`lock`](ConnectionRefresher::lock)).
+    /// The session lock and the state it guards. Waiters leave when their own token fires without
+    /// disturbing the owner (see [`lock`](ConnectionRefresher::lock)).
     state: Mutex<State>,
-    /// Go `closeOnce` + `closeErr`: the first `close`'s result, shared by every call.
+    /// The first `close`'s result, shared by every call.
     close_result: OnceCell<Result<(), Arc<Error>>>,
 }
 
@@ -147,10 +147,9 @@ impl ConnectionRefresher {
         }
     }
 
-    /// Go `lock`: takes the session lock, or fails with [`Error::Cancelled`] once `cx.cancel`
-    /// fires. A token that is cancelled by the time the lock is taken fails too, even when the
-    /// lock was free (Go's post-acquire `ctx.Err()` check). Leaving the wait does not disturb
-    /// the lock's owner.
+    /// Takes the session lock, or fails with [`Error::Cancelled`] once `cx.cancel` fires. A token
+    /// that is cancelled by the time the lock is taken fails too, even when the lock was free.
+    /// Leaving the wait does not disturb the lock's owner.
     pub(crate) async fn lock(&self, cx: &CallContext) -> Result<MutexGuard<'_, State>, Error> {
         let state = unless_cancelled(cx, self.state.lock()).await?;
         // The token may have fired while this call waited for the lock to be handed over.
@@ -160,8 +159,8 @@ impl ConnectionRefresher {
         Ok(state)
     }
 
-    /// Go `connect`: opens a fresh session with the response cache off (R8), giving up with
-    /// [`Error::Cancelled`] when `cx.cancel` fires. The caller holds the lock.
+    /// Opens a fresh session with the response cache off, giving up with [`Error::Cancelled`] when
+    /// `cx.cancel` fires. The caller holds the lock.
     async fn connect(&self, cx: &CallContext) -> Result<Session, BoxError> {
         let connected = unless_cancelled(cx, self.factory.connect(self.client_info.clone()))
             .await
@@ -174,7 +173,7 @@ impl ConnectionRefresher {
         Ok(connected)
     }
 
-    /// Go `getSession`: the current session's peer, connecting first when there is none.
+    /// The current session's peer, connecting first when there is none.
     pub(crate) async fn get_session(&self, cx: &CallContext) -> Result<Peer<RoleClient>, Error> {
         let mut state = self.lock(cx).await?;
         if state.closed {
@@ -189,8 +188,8 @@ impl ConnectionRefresher {
         Ok(peer)
     }
 
-    /// Go `refreshConnection`: pings the current session and keeps it if it answers (another
-    /// caller already reconnected); otherwise closes it and connects a new one.
+    /// Pings the current session and keeps it if it answers (another caller already reconnected);
+    /// otherwise closes it and connects a new one.
     pub(crate) async fn refresh_connection(
         &self,
         cx: &CallContext,
@@ -201,8 +200,8 @@ impl ConnectionRefresher {
         }
         if let Some(session) = &state.session {
             let peer = session.peer().clone();
-            // Go pings on the caller's ctx: a cancelled ping counts as failed, so the session is
-            // closed and the reconnect below fails with `context canceled`.
+            // The ping runs under the caller's token: a cancelled ping counts as failed, so the
+            // session is closed and the reconnect below fails with `context canceled`.
             let ping = peer.send_request(ClientRequest::PingRequest(Default::default()));
             let answered = matches!(unless_cancelled(cx, ping).await, Ok(Ok(_)));
             if answered {
@@ -220,13 +219,13 @@ impl ConnectionRefresher {
         Ok(peer)
     }
 
-    /// Go `withRetry`: runs `op` on the current session's peer; on a refreshable error, refreshes
-    /// the connection and runs `op` once more. Returns `op`'s value and whether a reconnect
-    /// happened. A failed refresh returns [`Error::ReconnectFailed`].
+    /// Runs `op` on the current session's peer; on a refreshable error, refreshes the connection
+    /// and runs `op` once more. Returns `op`'s value and whether a reconnect happened. A failed
+    /// refresh returns [`Error::ReconnectFailed`].
     ///
-    /// Each `op` run gives up with [`Error::Cancelled`] once `cx.cancel` fires (Go passes ctx into
-    /// `session.CallTool` / `ListTools`); dropping rmcp's request sends `notifications/cancelled`
-    /// as go-sdk does. Cancellation is not refreshable, so the session stays.
+    /// Each `op` run gives up with [`Error::Cancelled`] once `cx.cancel` fires; dropping rmcp's
+    /// request sends `notifications/cancelled`. Cancellation is not refreshable, so the session
+    /// stays.
     pub(crate) async fn with_retry<T, F, Fut>(
         &self,
         cx: &CallContext,
@@ -259,8 +258,8 @@ impl ConnectionRefresher {
     }
 }
 
-/// Runs `fut` unless `cx.cancel` fires first, which fails with [`Error::Cancelled`] (Go's
-/// ctx-aware blocking calls). A token already cancelled wins over a ready `fut`.
+/// Runs `fut` unless `cx.cancel` fires first, which fails with [`Error::Cancelled`]. A token
+/// already cancelled wins over a ready `fut`.
 async fn unless_cancelled<T>(cx: &CallContext, fut: impl Future<Output = T>) -> Result<T, Error> {
     tokio::select! {
         biased;
@@ -269,11 +268,10 @@ async fn unless_cancelled<T>(cx: &CallContext, fut: impl Future<Output = T>) -> 
     }
 }
 
-/// Go `shouldRefreshConnection`: whether `err` means the connection was lost (go-sdk
-/// `ErrConnectionClosed` / `ErrSessionMissing`, `io.ErrClosedPipe`, `io.EOF`). rmcp spells these
-/// `ServiceError::TransportClosed`, a send failure wrapping streamable HTTP's
-/// `SessionExpired` / `TransportChannelClosed` / `UnexpectedEndOfStream`, and an `io::Error` of
-/// kind `BrokenPipe` or `UnexpectedEof`; the crate's own [`Error::ConnectionClosed`] counts too.
+/// Whether `err` means the connection was lost: rmcp's `ServiceError::TransportClosed`, a send
+/// failure wrapping streamable HTTP's `SessionExpired` / `TransportChannelClosed` /
+/// `UnexpectedEndOfStream`, or an `io::Error` of kind `BrokenPipe` or `UnexpectedEof`; the
+/// crate's own [`Error::ConnectionClosed`] counts too.
 fn is_refreshable(err: &Error) -> bool {
     match err {
         Error::ConnectionClosed => true,
@@ -335,7 +333,7 @@ fn chain_is_refreshable(err: &(dyn StdError + 'static)) -> bool {
 
 #[async_trait::async_trait]
 impl McpClient for ConnectionRefresher {
-    /// Go `CallTool`: `tools/call` on the session, reconnecting once if needed.
+    /// `tools/call` on the session, reconnecting once if needed.
     async fn call_tool(
         &self,
         cx: &CallContext,
@@ -350,9 +348,9 @@ impl McpClient for ConnectionRefresher {
         Ok(result)
     }
 
-    /// Go `ListTools`: every page, following `nextCursor`. Cursors do not survive a session
-    /// (MCP spec), so after a reconnect the listing restarts from the first page; a second
-    /// reconnect in the same listing fails.
+    /// Every page, following `nextCursor`. Cursors do not survive a session (MCP spec), so after a
+    /// reconnect the listing restarts from the first page; a second reconnect in the same listing
+    /// fails.
     async fn list_tools(&self, cx: &CallContext) -> Result<Vec<Tool>, Error> {
         let mut tools = Vec::new();
         let mut cursor: Option<String> = None;
@@ -388,8 +386,8 @@ impl McpClient for ConnectionRefresher {
 
 #[async_trait::async_trait]
 impl SessionClient for ConnectionRefresher {
-    /// Go `Close`: waits for a connect or refresh in progress (no caller token), marks the
-    /// refresher closed, and closes the session after releasing the lock.
+    /// Waits for a connect or refresh in progress (no caller token), marks the refresher closed,
+    /// and closes the session after releasing the lock.
     async fn close(&self) -> Result<(), Arc<Error>> {
         self.close_result
             .get_or_init(|| async {
@@ -414,8 +412,7 @@ impl SessionClient for ConnectionRefresher {
 
 #[cfg(test)]
 impl ConnectionRefresher {
-    /// The current session's peer without connecting (Go tests' `c.session`); `None` while the
-    /// lock is held.
+    /// The current session's peer without connecting; `None` while the lock is held.
     pub(crate) fn session_peer(&self) -> Option<Peer<RoleClient>> {
         let state = self.state.try_lock().ok()?;
         state.session.as_ref().map(|s| s.peer().clone())

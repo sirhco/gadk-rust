@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `controllers/runtime.go` (`/run`, `/run_sse`) and `internal/routers/runtime.go`.
-//! The `/run_live` handler is in [`super::live`].
+//! The runtime controller (`/run`, `/run_sse`) and its routes. The `/run_live` handler is in
+//! [`super::live`].
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -45,18 +45,18 @@ use crate::rest::http_error::{
 use crate::rest::models::{Event, RunAgentRequest};
 use crate::rest::routing::{Request, Response, Route, controller_handler, route};
 
-/// Go `RuntimeAPIControllerConfig.CheckOrigin`: whether a `/run_live` upgrade carrying this
-/// request's `Origin` may proceed.
+/// Whether a `/run_live` upgrade carrying this request's `Origin` may proceed.
 pub type CheckOrigin = Arc<dyn Fn(&http::request::Parts) -> bool + Send + Sync>;
 
-/// Go `defaultSSETimeout`.
+/// The default write deadline of a `/run_sse` response.
 pub(crate) const DEFAULT_SSE_TIMEOUT: Duration = Duration::from_secs(120);
-/// Go `defaultMaxLiveMessageBytes` (16 MiB, uvicorn's `ws_max_size`).
+/// The default cap on one client message of `/run_live`: 16 MiB, matching uvicorn's
+/// `ws_max_size`.
 pub(crate) const DEFAULT_MAX_LIVE_MESSAGE_BYTES: i64 = 16 << 20;
-/// Go `defaultLiveKeepaliveTimeout`.
+/// The default `/run_live` keepalive timeout.
 pub(crate) const DEFAULT_LIVE_KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(40);
 
-/// Port of Go `controllers.RuntimeAPIControllerConfig`.
+/// Configuration of the runtime controller.
 #[derive(Clone)]
 pub struct RuntimeApiControllerConfig {
     /// The session service.
@@ -78,7 +78,7 @@ pub struct RuntimeApiControllerConfig {
     /// Context compaction for every runner.
     pub compaction: Option<CompactionConfig>,
     /// Whether a `/run_live` upgrade with this request's `Origin` may proceed (false: 403);
-    /// `None` keeps gorilla/websocket's default (no `Origin`, or its host equals `Host`).
+    /// `None` accepts a request with no `Origin` or whose `Origin` host equals its `Host`.
     pub check_origin: Option<CheckOrigin>,
     /// Cap on one client message: zero means 16 MiB, negative no cap.
     pub max_live_message_bytes: i64,
@@ -91,7 +91,7 @@ pub struct RuntimeApiControllerConfig {
 }
 
 impl RuntimeApiControllerConfig {
-    /// A config with `session_service` and every other field at Go's zero value.
+    /// A config with `session_service` and every other field at its zero value.
     pub fn new(session_service: Arc<dyn SessionService>) -> Self {
         Self {
             session_service,
@@ -112,7 +112,7 @@ impl RuntimeApiControllerConfig {
     }
 }
 
-/// Port of Go `controllers.RuntimeAPIController`. Fields hold the resolved settings.
+/// Serves `/run`, `/run_sse` and `/run_live`. Fields hold the resolved settings.
 pub struct RuntimeApiController {
     /// `None`: no write deadline.
     pub(crate) sse_timeout: Option<Duration>,
@@ -132,14 +132,14 @@ pub struct RuntimeApiController {
     pub(crate) live_ping_interval: Option<Duration>,
     /// One permit per live session the controller may serve at once; `None`: no cap.
     pub(crate) live_slots: Option<Arc<Semaphore>>,
-    /// The permits `live_slots` was built with (Go `cap(c.liveSlots)`); 0 when uncapped.
+    /// The permits `live_slots` was built with; 0 when uncapped.
     pub(crate) live_slot_cap: usize,
     pub(crate) compaction: Option<CompactionConfig>,
     pub(crate) platform: Platform,
 }
 
 impl RuntimeApiController {
-    /// Go `NewRuntimeAPIControllerWithConfig`: resolves the defaults and builds the live-session
+    /// Resolves the defaults and builds the live-session
     /// semaphore.
     pub fn new(cfg: RuntimeApiControllerConfig) -> Self {
         let max_live_message_bytes = match cfg.max_live_message_bytes {
@@ -173,8 +173,7 @@ impl RuntimeApiController {
         }
     }
 
-    /// Go `RunHandler` (through `NewErrorHandler`): the run's events as a JSON array (`[]`
-    /// when the run yields none).
+    /// The run's events as a JSON array (`[]` when the run yields none).
     pub async fn run_handler(&self, req: Request) -> Response {
         match self.run(req).await {
             Ok(resp) => resp,
@@ -182,7 +181,7 @@ impl RuntimeApiController {
         }
     }
 
-    /// Go `RunHandler`'s body; an `Err` is what Go returns to `NewErrorHandler`.
+    /// The body of [`Self::run_handler`]; an `Err` is answered by its status and message.
     async fn run(&self, req: Request) -> Result<Response, StatusError> {
         let (parts, body) = req.into_parts();
         let run_agent_request = decode_request_body(body).await?;
@@ -202,7 +201,7 @@ impl RuntimeApiController {
         Ok(encode_json_response(&events, StatusCode::OK))
     }
 
-    /// Go `runAgent`: runs to completion, skipping (and logging) compaction errors.
+    /// Runs to completion, skipping (and logging) compaction errors.
     async fn run_agent(
         &self,
         req: RunAgentRequest,
@@ -231,12 +230,10 @@ impl RuntimeApiController {
         Ok(events)
     }
 
-    /// Go `RunSSEHandler`: the run's events as server-sent events. The write deadline starts
-    /// when the request arrives; once it passes no further frame is written and the
-    /// connection is aborted (Go: the next write fails and the handler returns). Where the
-    /// server offers a [`WriteDeadline`], the connection's write deadline is moved to it too,
-    /// or cleared when there is no SSE timeout (Go `rc.SetWriteDeadline`, which overrides the
-    /// server's write timeout).
+    /// The run's events as server-sent events. The write deadline starts when the request
+    /// arrives; once it passes no further frame is written and the connection is aborted. Where
+    /// the server offers a [`WriteDeadline`], the connection's write deadline is moved to it
+    /// too, or cleared when there is no SSE timeout (overriding the server's write timeout).
     pub async fn run_sse_handler(&self, req: Request) -> Response {
         let deadline = self.sse_timeout.map(|t| Instant::now() + t);
         if let Some(hook) = req.extensions().get::<WriteDeadline>() {
@@ -279,8 +276,8 @@ impl RuntimeApiController {
             }
         };
 
-        // The charset is redundant for text/event-stream but stated, as Go does, for clients
-        // that still apply the legacy ISO-8859-1 default to text/*.
+        // The charset is redundant for text/event-stream but stated, for clients that still apply
+        // the legacy ISO-8859-1 default to text/*.
         let stream = start_run(&runner, run_agent_request, run_config);
         let mut resp = Response::new(Body::from_stream(sse_frames(stream, deadline)));
         let h = resp.headers_mut();
@@ -293,7 +290,7 @@ impl RuntimeApiController {
         resp
     }
 
-    /// Go `validateSessionExists`: answers before a run starts when the session is missing —
+    /// Answers before a run starts when the session is missing —
     /// `failed to get session: <err>`, 404 when the service reports the session missing or the
     /// request does not fully name it, else 500. With `auto_create_session` the runner creates
     /// a missing session, so there is no check.
@@ -337,7 +334,7 @@ impl RuntimeApiController {
             })
     }
 
-    /// Go `getRunner`: a runner for `req.app_name` built per request from the controller's
+    /// A runner for `req.app_name` built per request from the controller's
     /// services, plugins, compaction, auto-create flag and platform, and the run config
     /// (`Sse` streaming when `req.streaming`). Errors are 500s.
     pub(crate) fn get_runner(
@@ -345,7 +342,7 @@ impl RuntimeApiController {
         req: &RunAgentRequest,
     ) -> Result<(Runner, RunConfig), StatusError> {
         let internal = |msg: String| StatusError::new(StatusCode::INTERNAL_SERVER_ERROR, msg);
-        // Go dereferences a nil loader and panics; gadk reports it as a load failure.
+        // Without a loader the request fails as a load failure.
         let loader = self
             .agent_loader
             .as_ref()
@@ -380,8 +377,8 @@ impl RuntimeApiController {
     }
 }
 
-/// Go `r.Run(ctx, userId, sessionId, &newMessage, cfg, opts...)` with `WithStateDelta` when the
-/// request carries a state delta. `functionCallEventId` is accepted and ignored, as in Go.
+/// Starts the run of the request's new message, with its state delta when it carries one.
+/// `functionCallEventId` is accepted and ignored.
 fn start_run(runner: &Runner, req: RunAgentRequest, run_config: RunConfig) -> EventStream {
     runner.run(
         &req.user_id,
@@ -395,9 +392,9 @@ fn start_run(runner: &Runner, req: RunAgentRequest, run_config: RunConfig) -> Ev
     )
 }
 
-/// Go `decodeRequestBody`: a `json.Decoder` with `DisallowUnknownFields` reading the first JSON
-/// value of the body (trailing bytes are not read); errors are 400 `failed to decode request:
-/// <Go decoder text>`.
+/// Decodes the request body: the first JSON value of the body (trailing bytes are not read),
+/// rejecting unknown fields; errors are 400 `failed to decode request: <decoder text>` (see
+/// [`go_decode_error`]).
 async fn decode_request_body(body: Body) -> Result<RunAgentRequest, StatusError> {
     let bad_request = |msg: String| {
         StatusError::new(
@@ -408,19 +405,19 @@ async fn decode_request_body(body: Body) -> Result<RunAgentRequest, StatusError>
     let bytes = axum::body::to_bytes(body, usize::MAX)
         .await
         .map_err(|err| bad_request(err.to_string()))?;
-    // Divergence (ledger 5a): nesting past 127 is serde's error (Go: 10000); see 5c.md.
+    // Nesting deeper than 127 levels is serde's recursion-limit error.
     let mut values = serde_json::Deserializer::from_slice(&bytes).into_iter::<RunAgentRequest>();
     match values.next() {
         Some(Ok(req)) => Ok(req),
         Some(Err(err)) => Err(bad_request(go_decode_error(&err))),
-        // Go's Decoder on an empty (or all-whitespace) body.
+        // An empty (or all-whitespace) body.
         None => Err(bad_request("EOF".to_owned())),
     }
 }
 
-/// Go `json.Decoder` text for the serde errors Go and the ADK clients can tell apart: an
-/// unknown field is `json: unknown field "<name>"` and a truncated value `unexpected EOF`.
-/// Other syntax and type errors keep serde_json's text (a recorded 5a divergence).
+/// The error text for a request-body decode failure, worded as an ADK server's request decoder
+/// words the errors clients can tell apart: an unknown field is `json: unknown field "<name>"`
+/// and a truncated value `unexpected EOF`. Other syntax and type errors keep serde_json's text.
 fn go_decode_error(err: &serde_json::Error) -> String {
     if err.is_eof() {
         return "unexpected EOF".to_owned();
@@ -435,12 +432,12 @@ fn go_decode_error(err: &serde_json::Error) -> String {
 }
 
 /// The SSE write deadline passed: ends the body with an error, so the connection is aborted
-/// without the chunked terminator, as Go's failed write leaves it.
+/// without the chunked terminator.
 #[derive(Debug, thiserror::Error)]
 #[error("i/o timeout")]
 struct WriteTimeout;
 
-/// Go `RunSSEHandler`'s event loop: one `data: <event JSON>\n\n` frame per event, one
+/// The `/run_sse` event loop: one `data: <event JSON>\n\n` frame per event, one
 /// `event: error\ndata: {"error":"<text>"}\n\n` frame per run error (the stream continues),
 /// compaction errors logged and skipped, and an [`WriteTimeout`] error once `deadline` passes.
 fn sse_frames(
@@ -497,7 +494,7 @@ fn sse_frames(
     })
 }
 
-/// Go `flashEvent`: `data: <json>\n\n`.
+/// One server-sent event frame: `data: <json>\n\n`.
 fn data_frame(json: &[u8]) -> Bytes {
     let mut frame = Vec::with_capacity(json.len() + 8);
     frame.extend_from_slice(b"data: ");
@@ -506,7 +503,7 @@ fn data_frame(json: &[u8]) -> Bytes {
     Bytes::from(frame)
 }
 
-/// Go `RuntimeAPIRouter.Routes`.
+/// The runtime routes.
 pub(crate) fn runtime_routes(c: Arc<RuntimeApiController>) -> Vec<Route> {
     vec![
         route(

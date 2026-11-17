@@ -13,9 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go internal/llminternal/functions.go and the tool-execution half of base_flow.go
-//! (lines 1205-1735): parallel function-call dispatch, tool callbacks, response merging and the
-//! request-confirmation event.
+//! Tool execution for the LLM flow: parallel function-call dispatch, tool callbacks, response
+//! merging and the request-confirmation event.
 
 use std::{
     any::Any,
@@ -73,7 +72,7 @@ impl Flow {
     }
 }
 
-/// Appendix C entry point (Go `f.handleFunctionCalls(ctx, tools, resp, nil, nil)`).
+/// Dispatches the event's function calls outside live mode, with no confirmations.
 pub(crate) async fn handle_function_calls(
     ctx: &InvocationContext,
     flow: &Flow,
@@ -84,11 +83,10 @@ pub(crate) async fn handle_function_calls(
     handle_function_calls_with(ctx, flow, tools, function_call_event, filters, None).await
 }
 
-/// Port of base_flow.go:1501 `(*Flow).handleFunctionCalls`, minus live (`liveSess` is always nil
-/// in 1b). Go takes the `*model.LLMResponse`; Rust takes the event carrying it (C5 D5 signature).
-/// `filters` (adk-python's call-ID filter; Go has a TODO) keeps only calls whose ID is in the set.
+/// Dispatches the function calls of `function_call_event`, outside live mode.
+/// `filters` (adk-python's call-ID filter) keeps only calls whose ID is in the set.
 ///
-/// Every call runs as one task on the platform's task runner (Go `platform.RunTasks`); dropping
+/// Every call runs as one task on the platform's task runner; dropping
 /// the returned future lets the tool tasks still running finish (see [`FinishOnDrop`]).
 pub(crate) async fn handle_function_calls_with(
     ctx: &InvocationContext,
@@ -110,9 +108,8 @@ pub(crate) async fn handle_function_calls_with(
     .await
 }
 
-/// Port of Go handleFunctionCalls with its `liveSess` argument set (base_flow.go:1501): the live
-/// streaming-tool and `stop_streaming` branches use `live`. No filters, no confirmations (Go's live
-/// flow passes nil).
+/// As [`handle_function_calls_with`] with a live session: the live
+/// streaming-tool and `stop_streaming` branches use `live`. No filters, no confirmations.
 pub(crate) async fn handle_function_calls_live(
     ctx: &InvocationContext,
     flow: &Flow,
@@ -132,12 +129,11 @@ pub(crate) async fn handle_function_calls_live(
     .await
 }
 
-/// Port of base_flow.go:1501 `(*Flow).handleFunctionCalls`. Go takes the `*model.LLMResponse`;
-/// Rust takes the event carrying it (C5 D5 signature). `filters` (adk-python's call-ID filter; Go
-/// has a TODO) keeps only calls whose ID is in the set. `live` is Go's `liveSess` argument (`None`
-/// outside live mode).
+/// Dispatches the function calls of `function_call_event` (the event carrying the model
+/// response). `filters` (adk-python's call-ID filter) keeps only calls whose ID is in the set.
+/// `live` is the live session (`None` outside live mode).
 ///
-/// Every call runs as one task on the platform's task runner (Go `platform.RunTasks`); dropping
+/// Every call runs as one task on the platform's task runner; dropping
 /// the returned future cancels the calls' scope plainly and lets the tool tasks still running
 /// finish (see [`FinishOnDrop`]; a live streaming tool's spawned task is not one of them: it
 /// ends on its cancellation token).
@@ -155,16 +151,16 @@ async fn handle_function_calls_inner(
         .filter(|fc| filters.is_none_or(|f| f.contains(&fc.id)))
         .cloned()
         .collect();
-    // Go: map-key order (random); sorted here for determinism.
+    // Sorted so the tool-not-found error lists tools in a stable order.
     let mut names: Vec<String> = tools.keys().cloned().collect();
     names.sort();
     let names = Arc::new(names);
-    // Go: a merged span only for more than one call (otel.name "execute_tool (merged)").
+    // A merged span only for more than one call (otel.name "execute_tool (merged)").
     let merged_span = (calls.len() > 1).then(merged_tool_calls_span);
     let slots: Arc<parking_lot::Mutex<Vec<Option<Event>>>> =
         Arc::new(parking_lot::Mutex::new(vec![None; calls.len()]));
     let cbs = flow.tool_callbacks();
-    // The calls run under a scope the dispatch owns: a drop mid-await (Go: the caller's cancel)
+    // The calls run under a scope the dispatch owns: a drop mid-await (the caller's cancel)
     // cancels it plainly before the calls finish as a teardown; a completed dispatch gives it up
     // uncancelled (see [`FinishOnDrop`]).
     let (calls_ctx, calls_scope) = ctx.clone().into_context().with_agent_cancel();
@@ -200,7 +196,7 @@ async fn handle_function_calls_inner(
     let events = std::mem::take(&mut *slots.lock());
     let merged = merge_parallel_function_response_events(events);
     if let Some(s) = &merged_span {
-        // Go's deferred TraceMergedToolCallsResult(mergedToolCallSpan, mergedEvent, err).
+        // Records the merged result on the merged span.
         match &merged {
             Ok(ev) => trace_merged_tool_calls_result(s, ev.as_ref(), None),
             Err(e) => trace_merged_tool_calls_result(s, None, Some(&SpanError::new(e))),
@@ -209,13 +205,11 @@ async fn handle_function_calls_inner(
     merged
 }
 
-/// Go `platform.RunTasks` blocks until every task completed (platform/exec.go:68), and a Go
-/// consumer that stops reading early unwinds through it on its own goroutine, so the tool calls
-/// in flight finish (after-tool and on-tool-error callbacks included) before the runner's
-/// deferred after-run callbacks. Dropping a Rust future cannot wait, and a drop mid-await stands
-/// for Go's caller cancellation: dropped before completion, this cancels the calls' scope plainly
-/// (a tool that ignores cancellation still runs to completion; none is aborted) and hands the task
-/// runner's still-running future to the invocation's teardown registry
+/// Tool calls in flight must finish (after-tool and on-tool-error callbacks included) before the
+/// runner's deferred after-run callbacks. Dropping a Rust future cannot wait, so a drop mid-await
+/// stands for the caller's cancellation: dropped before completion, this cancels the calls' scope
+/// plainly (a tool that ignores cancellation still runs to completion; none is aborted) and hands
+/// the task runner's still-running future to the invocation's teardown registry
 /// ([`InvocationContext::spawn_teardown`]) on the fiber and span it was started in. Completed, it
 /// gives the scope up uncancelled ([`CancelGuard::release`]): a tool context kept beyond the call
 /// (a live streaming tool's task) stays live until the invocation ends.
@@ -272,7 +266,8 @@ impl Drop for FinishOnDrop {
     }
 }
 
-/// The body of Go's per-call task closure (base_flow.go:1521-1701).
+/// Runs one call's task: the tool (or the `stop_streaming` / not-found branch), its callbacks
+/// and the response event.
 #[allow(clippy::too_many_arguments)]
 async fn run_one_call(
     ctx: InvocationContext,
@@ -284,7 +279,8 @@ async fn run_one_call(
     live: Option<Arc<dyn LiveSession>>,
     span: tracing::Span,
 ) -> Option<Event> {
-    // Go: agent.NewToolContext(toolCallCtx, fnCall.ID, &session.EventActions{StateDelta: {}}, confirmation).
+    // The tool context: the call's ID, fresh actions with an empty state delta, and the
+    // confirmation (if any).
     let tool_ctx = ctx.clone().into_context().with_delta(ContextDelta {
         function_call_id: Some(fc.id.clone()),
         actions: Some(Arc::new(parking_lot::Mutex::new(EventActions {
@@ -296,9 +292,9 @@ async fn run_one_call(
     });
 
     let result: Option<Map<String, Value>> = if fc.name == "stop_streaming" {
-        // Go reaches this branch whenever the name matches, before the tool lookup. Without a
+        // This branch runs whenever the name matches, before the tool lookup. Without a
         // live session (or with one that is not a LiveSessionImpl) nothing can be stopped.
-        // Go: funcToStop, _ := fnCall.Args["function_name"].(string)
+        // The function to stop is empty when the argument is absent or not a string.
         let func_to_stop = fc
             .args
             .get("function_name")
@@ -320,7 +316,7 @@ async fn run_one_call(
     } else {
         match &tool {
             None => Some(not_found(&cbs, &tool_ctx, &fc, &names).await),
-            // Go checks StreamingFunctionTool before FunctionTool. Callbacks do not run here.
+            // A streaming tool is checked before a plain function tool. Callbacks do not run here.
             Some(t) if t.as_streaming().is_some() => match &live {
                 Some(live) => Some(start_live_streaming(
                     t.clone(),
@@ -337,10 +333,9 @@ async fn run_one_call(
         }
     };
 
-    // Go: `if result == nil` and the tool defers its response or is long-running, no response.
-    // Deviation (C5 D5): `RunnableTool::run` cannot return Go's nil map, so an empty result map
-    // stands in for nil; a deferring/long-running tool that returns a deliberately empty (Go
-    // non-nil) map is also skipped.
+    // With no result, a tool that defers its response or is long-running sends no response.
+    // `RunnableTool::run` has no nil result, so an empty result map stands in for it; a
+    // deferring/long-running tool that returns a deliberately empty map is also skipped.
     if result.as_ref().is_none_or(Map::is_empty)
         && tool
             .as_ref()
@@ -348,9 +343,9 @@ async fn run_one_call(
     {
         return None;
     }
-    // Go 1ced38ba: a nil result reaches the model as `{"result": null}`, as adk-python wraps a
-    // tool's `None`. Divergence (ledger 1b): a Rust tool's nil result is the empty map (see
-    // above), so a tool that returns an empty object (Go: a non-nil empty map, sent as `{}`) is
+    // A missing result reaches the model as `{"result": null}`, as adk-python wraps a
+    // tool's `None`. A Rust tool's missing result is the empty map (see
+    // above), so a tool that returns an empty object (sent as `{}`) is
     // wrapped too; `set_model_response`, whose result is the model's own arguments, keeps `{}`.
     let mut result = result.unwrap_or_default();
     if result.is_empty() && fc.name != SET_MODEL_RESPONSE_TOOL_NAME {
@@ -391,11 +386,11 @@ async fn run_one_call(
     ev.author = ctx.agent().name().to_owned();
     ev.branch = ctx.branch();
     ev.actions = tool_ctx.actions();
-    // Compaction is the framework's to write (Go session.EventActions.Compaction).
+    // Compaction is the framework's to write: a tool's actions cannot set it.
     ev.actions.compaction = None;
 
-    // Go telemetry.TraceToolResult: only a string (or error) "error" value marks the span failed;
-    // a call without a tool (stop_streaming or an unknown name) is Go's fakeTool.
+    // Only a string (or error) "error" value marks the span failed;
+    // a call without a tool (stop_streaming or an unknown name) is traced with a `FakeTool`.
     let description = match &tool {
         Some(t) if fc.name != "stop_streaming" => t.description(),
         _ => "Tool not found",
@@ -408,7 +403,7 @@ async fn run_one_call(
     Some(ev)
 }
 
-/// Go streaming (non-live) branch: concatenate the chunks; the first error ends the call.
+/// The streaming (non-live) branch: concatenate the chunks; the first error ends the call.
 async fn run_streaming(
     tool: &dyn Tool,
     tool_ctx: Context,
@@ -431,7 +426,7 @@ async fn run_streaming(
     Map::from_iter([("result".to_owned(), Value::String(out))])
 }
 
-/// Go streaming branch with a live session (base_flow.go:1560-1600): answers at once with the
+/// The streaming branch with a live session: answers at once with the
 /// pending status and streams in a spawned task that outlives the call. Each chunk goes back to the
 /// model as user content through `live.send`. The task stops on cancellation (`stop_streaming`,
 /// session teardown, or the invocation's token) and unregisters before cancelling its scope.
@@ -444,7 +439,7 @@ fn start_live_streaming(
     let Some(st) = tool.as_streaming() else {
         return Map::new();
     };
-    // Go: cancelCtx, cancel := toolCtx.WithAgentCancel()
+    // The streaming task's own cancellation scope.
     let (cancel_ctx, cancel_guard) = tool_ctx.with_agent_cancel();
     let token = cancel_ctx.cancellation_token().clone();
     let name = tool.name().to_owned();
@@ -452,7 +447,7 @@ fn start_live_streaming(
     let session = live.as_any().downcast_ref::<LiveSessionImpl>();
     if let Some(s) = session {
         s.register_streaming_tool(&name, &call_id, token.clone());
-        // R9: a teardown that already drained the registry (dropping the event stream cancels
+        // A teardown that already drained the registry (dropping the event stream cancels
         // `done` while this tool task may still be mid-poll on another worker) would never
         // cancel this entry. Teardown cancels `done` before taking the registry lock to drain, so
         // seeing `done` cancelled here means the drain may have missed us: cancel ourselves.
@@ -502,7 +497,7 @@ fn start_live_streaming(
             }
         }
         drop(stream);
-        // Go defer order: UnregisterStreamingTool, then cancel().
+        // Order: unregister the streaming tool, then cancel the scope.
         if let Some(s) = live.as_any().downcast_ref::<LiveSessionImpl>() {
             s.unregister_streaming_tool(&name, &call_id);
         }
@@ -516,7 +511,8 @@ fn start_live_streaming(
     )])
 }
 
-/// Go: `newToolNotFoundError` routed through the on-tool-error callbacks with a `fakeTool`.
+/// Builds the tool-not-found error and routes it through the on-tool-error callbacks with a
+/// [`FakeTool`].
 async fn not_found(
     cbs: &ToolCallbacks,
     tool_ctx: &Context,
@@ -539,7 +535,7 @@ fn error_map(msg: &str) -> Map<String, Value> {
     Map::from_iter([("error".to_owned(), Value::String(msg.to_owned()))])
 }
 
-/// Port of base_flow.go:1389 fakeTool.
+/// A stand-in tool carrying only a name, for calls that match no tool.
 struct FakeTool {
     name: String,
 }
@@ -556,7 +552,7 @@ impl Tool for FakeTool {
     }
 }
 
-/// Port of base_flow.go:1400 newToolNotFoundError (text verbatim, Python format).
+/// The tool-not-found error (text verbatim, Python format).
 fn new_tool_not_found_error(tool_name: &str, available_tools: &[String]) -> ToolError {
     let joined = available_tools.join(", ");
     ToolError::Execution(
@@ -578,7 +574,7 @@ Suggested fixes:
     )
 }
 
-/// Port of base_flow.go:1711 runOnToolErrorCallbacks: plugins first, then the agent callbacks.
+/// Runs the on-tool-error callbacks: plugins first, then the agent callbacks.
 async fn run_on_tool_error_callbacks(
     cbs: &ToolCallbacks,
     tool_ctx: &Context,
@@ -599,11 +595,10 @@ async fn run_on_tool_error_callbacks(
     invoke_on_tool_error_callbacks(cbs, tool_ctx, &tool, args, err).await
 }
 
-/// Port of base_flow.go:1722 `(*Flow).callTool`. Callback errors (`AgentError`) become
-/// `ToolError` so a single "current error" flows through the on-error and after callbacks, as
-/// Go's untyped `error` does.
+/// Calls the tool with its callbacks. Callback errors (`AgentError`) become
+/// `ToolError` so a single "current error" flows through the on-error and after callbacks.
 ///
-/// `args` is the call's own copy of the model's arguments (Go e0cbfd30 `cloneArgs`; the caller
+/// `args` is the call's own copy of the model's arguments (the caller
 /// passes a clone, so the function call event keeps the model's arguments). The before-tool
 /// callbacks (plugins, then the agent's) hand it back possibly edited, and the tool, the
 /// on-tool-error and the after-tool callbacks get the edited arguments.
@@ -635,7 +630,7 @@ pub(crate) async fn call_tool(
     {
         match r.run(tool_ctx.clone(), Value::Object(args.clone())).await {
             Ok(m) => response = Some(m),
-            // Go wraps the sentinel inside the tool, so every callback sees the wrapped error.
+            // The confirmation sentinel is wrapped here, so every callback sees the wrapped error.
             Err(e) => err = Some(Arc::new(wrap_confirmation_error(tool.name(), e))),
         }
     }
@@ -698,10 +693,9 @@ pub(crate) async fn call_tool(
     }
 }
 
-/// Go `fmt.Errorf("error tool %q %w", name, tool.ErrConfirmation{Required,Rejected})`
-/// (functiontool function.go:205/224, streaming_function.go:161/180, tool.go confirmCall): Go
-/// tools wrap the confirmation sentinels with the tool name, and that text reaches the model and
-/// the session as `{"error": ...}`. Rust tools return the bare sentinels, so the flow applies the
+/// Wraps the confirmation sentinels with the tool name: the error text is
+/// `error tool "<name>" <sentinel>`, and that text reaches the model and the session as
+/// `{"error": ...}`. Tools return the bare sentinels, so the flow applies the
 /// wrap where it receives the tool's error. Other errors pass through unchanged.
 fn wrap_confirmation_error(tool_name: &str, e: ToolError) -> ToolError {
     match e {
@@ -715,7 +709,7 @@ fn wrap_confirmation_error(tool_name: &str, e: ToolError) -> ToolError {
     }
 }
 
-/// Display `error tool "<name>" <sentinel>`; `source()` is the sentinel (Go `%w`), so a
+/// Display `error tool "<name>" <sentinel>`; `source()` is the sentinel, so a
 /// source-chain walk still finds `ToolError::ConfirmationRequired`/`ConfirmationRejected`.
 #[derive(Debug)]
 struct NamedToolError {
@@ -736,7 +730,7 @@ impl std::error::Error for NamedToolError {
 }
 
 /// `AgentError` → the flow's current `Arc<ToolError>`: an `AgentError::Other` holding a
-/// [`SharedToolError`] gives back its `Arc` unchanged (Go passes the same `err` value onward);
+/// [`SharedToolError`] gives back its `Arc` unchanged (the same error value is passed onward);
 /// `AgentError::Tool` is unwrapped; anything else is boxed (Display is transparent).
 fn to_tool_error(e: AgentError) -> Arc<ToolError> {
     match e {
@@ -749,8 +743,8 @@ fn to_tool_error(e: AgentError) -> Arc<ToolError> {
     }
 }
 
-/// Port of base_flow.go:1803 invokeBeforeToolCallbacks: the arguments are threaded through
-/// every callback (Go's one shared copy, e0cbfd30) and always handed back.
+/// Runs the before-tool callbacks: the arguments are threaded through
+/// every callback (one shared copy) and always handed back.
 async fn invoke_before_tool_callbacks(
     cbs: &ToolCallbacks,
     tool_ctx: &Context,
@@ -773,7 +767,7 @@ async fn invoke_before_tool_callbacks(
     (args, None, None)
 }
 
-/// Port of base_flow.go:1818 invokeAfterToolCallbacks: with no callback answering, the inputs
+/// Runs the after-tool callbacks: with no callback answering, the inputs
 /// are returned unchanged.
 async fn invoke_after_tool_callbacks(
     cbs: &ToolCallbacks,
@@ -801,7 +795,7 @@ async fn invoke_after_tool_callbacks(
     (result, err)
 }
 
-/// Port of base_flow.go:1834 invokeOnToolErrorCallbacks: with no callback answering, the
+/// Runs the on-tool-error callbacks: with no callback answering, the
 /// original error is returned.
 async fn invoke_on_tool_error_callbacks(
     cbs: &ToolCallbacks,
@@ -820,7 +814,7 @@ async fn invoke_on_tool_error_callbacks(
     (None, Some(err))
 }
 
-/// Port of base_flow.go:1850 mergeParallelFunctionResponseEvents. The first non-`None` event
+/// Merges the parallel call events. The first non-`None` event
 /// becomes the merged result: its parts are those of every event in slot order and its actions
 /// the fold of every event's actions.
 pub(crate) fn merge_parallel_function_response_events(
@@ -859,7 +853,7 @@ pub(crate) fn merge_parallel_function_response_events(
     Ok(Some(result))
 }
 
-/// Port of base_flow.go:1884 mergeEventActions (adk-python merge_parallel_function_response_events).
+/// Merges the events' actions (adk-python merge_parallel_function_response_events).
 /// Each parallel call's confirmation and credential requests are kept under its own call ID.
 pub(crate) fn merge_event_actions(
     base: Option<EventActions>,
@@ -894,8 +888,7 @@ pub(crate) fn merge_event_actions(
     Some(base)
 }
 
-/// Port of base_flow.go:1924 mergeArtifactDeltas: prefers higher versions (a deliberate
-/// divergence from adk-python's last-write-wins).
+/// Merges artifact deltas: prefers higher versions (unlike adk-python's last-write-wins).
 fn merge_artifact_deltas(
     dst: Option<BTreeMap<String, i64>>,
     src: BTreeMap<String, i64>,
@@ -907,7 +900,7 @@ fn merge_artifact_deltas(
     dst
 }
 
-/// Port of base_flow.go:1938 deepMergeMap.
+/// Recursively merges `src` into `dst`: nested objects merge, any other value replaces.
 fn deep_merge_map(mut dst: Map<String, Value>, src: Map<String, Value>) -> Map<String, Value> {
     for (k, v) in src {
         match (dst.get_mut(&k), v) {
@@ -923,10 +916,10 @@ fn deep_merge_map(mut dst: Map<String, Value>, src: Map<String, Value>) -> Map<S
     dst
 }
 
-/// Port of base_flow.go:1459 displayableToolResultText: the tool result as text for a
+/// The tool result as text for a
 /// skip-summarization event, or `None` for results with nothing worth showing (errors, empty or
 /// null results). A single plain-text `"result"` is shown as-is; anything else as JSON (sorted
-/// keys, not HTML-escaped: Go `SetEscapeHTML(false)`).
+/// keys, not HTML-escaped).
 pub(crate) fn displayable_tool_result_text(result: &Map<String, Value>) -> Option<String> {
     if result.is_empty() || result.contains_key("error") {
         return None;
@@ -943,7 +936,7 @@ pub(crate) fn displayable_tool_result_text(result: &Map<String, Value>) -> Optio
     serde_json::to_string(result).ok()
 }
 
-/// Port of functions.go:32 generateRequestConfirmationEvent: one `adk_request_confirmation` call
+/// One `adk_request_confirmation` call
 /// per function call (in parts order) whose ID has a requested confirmation.
 pub(crate) fn generate_request_confirmation_event(
     ctx: &InvocationContext,
@@ -1004,14 +997,14 @@ pub(crate) fn generate_request_confirmation_event(
     Some(ev)
 }
 
-/// Port of functions.go generateAuthEvent: the event that asks the client for the credentials
+/// The event that asks the client for the credentials
 /// the tools in `function_response_event` requested (its `requested_auth_configs`), or `None`
 /// if they requested none. It makes one `adk_request_credential` call per credential key, for
 /// the first tool that asked for it in the order of the responses, which is the order the calls
 /// were made in. A request with no key is never merged with another, as in adk-python.
 ///
-/// Go returns an error when a request cannot be encoded; a [`toolauth::Config`] always encodes
-/// (its unknown keys are kept as valid JSON text), so this cannot fail.
+/// Encoding a request cannot fail: a [`toolauth::Config`] always encodes
+/// (its unknown keys are kept as valid JSON text).
 pub(crate) fn generate_auth_event(
     ctx: &InvocationContext,
     function_response_event: &Event,

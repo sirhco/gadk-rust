@@ -13,17 +13,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! pflag-compatible clap helpers: the flag kinds `cmd/adkgo` registers (pflag `StringVarP`,
-//! `IntVar`, `DurationVar`, `BoolVar`) as clap builder [`Arg`]s that parse like pflag, the
-//! value readers, Go's `Flags().Changed` ([`passed`]) and the mapping of clap's parse errors
-//! to pflag's texts ([`pflag_error`]).
+//! Command-line flag helpers for clap: the flag kinds the `gadk deploy` commands register
+//! (string, int, duration and bool flags) as clap builder [`Arg`]s that parse like ADK's CLI
+//! flags, the value readers, [`passed`] (the flag was on the command line) and the mapping of
+//! clap's parse errors to ADK's error texts ([`pflag_error`]).
 //!
-//! pflag rules reproduced: `--f=v` and `--f v`, `-f v`, `-fv` and `-f=v`; a value-taking flag
+//! Rules reproduced: `--f=v` and `--f v`, `-f v`, `-fv` and `-f=v`; a value-taking flag
 //! takes the next argument even when it starts with `-`; a bool flag takes a value only as
-//! `--b=v` (pflag `NoOptDefVal`), so `--b v` sets it true and leaves `v` as an argument; a
-//! repeated flag keeps its last value; values parse with Go `strconv.ParseBool`,
-//! `strconv.ParseInt(s, 0, 64)` and `time.ParseDuration`; stray positional arguments are
-//! accepted and ignored (cobra without an `Args` validator).
+//! `--b=v`, so `--b v` sets it true and leaves `v` as an argument; a
+//! repeated flag keeps its last value; ints are parsed with the base chosen by the prefix
+//! (`0x`, `0o`, `0b`, a leading `0` for octal, else decimal) into an `i64`, bools accept
+//! `1 t T TRUE true True 0 f F FALSE false False`, and durations are signed sequences of
+//! decimal numbers with unit suffixes (`ns`, `us`, `ms`, `s`, `m`, `h`) such as `2h45m`; stray
+//! positional arguments are accepted and ignored.
 
 use clap::error::{ContextKind, ContextValue, ErrorKind};
 use clap::parser::ValueSource;
@@ -34,17 +36,17 @@ use gadk_platform::{GoDuration, go_parse_duration, go_quote};
 /// The id of the hidden trailing positional that swallows stray arguments.
 pub const STRAY_ARGS: &str = "args";
 
-/// A subcommand whose flags behave like a pflag `FlagSet`: a repeated flag overrides the
-/// earlier value (pflag sets it again) instead of being a clap error, and there is no `help`
-/// subcommand (cobra adds one to the root only).
+/// A subcommand whose flags are POSIX-style: a repeated flag overrides the
+/// earlier value instead of being a clap error, and there is no `help`
+/// subcommand (only the root has one).
 pub fn pflag_command(name: &'static str) -> Command {
     Command::new(name)
         .args_override_self(true)
         .disable_help_subcommand(true)
 }
 
-/// A value-taking flag: exactly one value, which may start with `-` (pflag takes the next
-/// argument whatever it is).
+/// A value-taking flag: exactly one value, which may start with `-` (the next
+/// argument is taken whatever it is).
 fn value_flag(
     long: &'static str,
     short: Option<char>,
@@ -61,7 +63,7 @@ fn value_flag(
         .num_args(1)
         .allow_hyphen_values(true)
         .default_value(default)
-        // pflag prints `(default …)` only for a non-zero default.
+        // A `(default …)` is shown only for a non-zero default.
         .hide_default_value(default == zero);
     if let Some(c) = short {
         arg = arg.short(c);
@@ -69,7 +71,7 @@ fn value_flag(
     arg
 }
 
-/// pflag `StringVarP(&v, long, short, default, help)`.
+/// A string flag.
 pub fn string_flag(
     long: &'static str,
     short: Option<char>,
@@ -79,7 +81,8 @@ pub fn string_flag(
     value_flag(long, short, default, help, "string", "")
 }
 
-/// pflag `IntVarP`: the value is Go `strconv.ParseInt(s, 0, 64)`.
+/// An int flag: the value is an `i64` with the base chosen by its prefix (`0x`, `0o`, `0b`, a
+/// leading `0` for octal, else decimal).
 pub fn int_flag(
     long: &'static str,
     short: Option<char>,
@@ -89,8 +92,9 @@ pub fn int_flag(
     value_flag(long, short, default, help, "int", "0").value_parser(go_parse_int)
 }
 
-/// pflag `DurationVarP`: the value is Go `time.ParseDuration`; `default` is Go's
-/// `Duration.String()` of the default (e.g. `1s`, `8760h0m0s`).
+/// A duration flag: the value is a signed sequence of decimal numbers with unit suffixes
+/// (`ns`, `us`, `ms`, `s`, `m`, `h`); `default` is the text form of the default
+/// (e.g. `1s`, `8760h0m0s`).
 pub fn duration_flag(
     long: &'static str,
     short: Option<char>,
@@ -100,8 +104,8 @@ pub fn duration_flag(
     value_flag(long, short, default, help, "duration", "0s").value_parser(go_parse_duration)
 }
 
-/// pflag `BoolVar`: `--b` is true (pflag `NoOptDefVal`), `--b=<v>` is Go `strconv.ParseBool`;
-/// a value is never taken from the next argument.
+/// A bool flag: `--b` is true, `--b=<v>` takes a bool value (`1 t T TRUE true True 0 f F FALSE
+/// false False`); a value is never taken from the next argument.
 pub fn bool_flag(long: &'static str, default: bool, help: &'static str) -> Arg {
     Arg::new(long)
         .long(long)
@@ -116,7 +120,7 @@ pub fn bool_flag(long: &'static str, default: bool, help: &'static str) -> Arg {
         .value_parser(go_parse_bool)
 }
 
-/// The hidden trailing positional: cobra commands without an `Args` validator accept and
+/// The hidden trailing positional: commands without a positional-argument validator accept and
 /// ignore positional arguments.
 pub fn stray_args() -> Arg {
     Arg::new(STRAY_ARGS)
@@ -125,7 +129,7 @@ pub fn stray_args() -> Arg {
         .hide(true)
 }
 
-/// Go `cmd.Flags().Changed(id)`: the flag was on the command line.
+/// Whether the flag was on the command line.
 pub fn passed(m: &ArgMatches, id: &str) -> bool {
     matches!(m.value_source(id), Some(ValueSource::CommandLine))
 }
@@ -173,7 +177,7 @@ fn context_str(e: &clap::Error, kind: ContextKind) -> Option<&str> {
     }
 }
 
-/// Go `%q` of a rune (`'x'`).
+/// A rune quoted with single quotes, as in `'x'`.
 fn quote_rune(c: char) -> String {
     let q = go_quote(&c.to_string());
     let inner = &q[1..q.len() - 1];
@@ -192,10 +196,10 @@ fn long_name(rendered: &str) -> &str {
     &s[..end]
 }
 
-/// pflag's error text for clap's parse error `e` on `cmd` (the subcommand being parsed);
-/// `raw` are the command-line arguments, used where clap does not keep what pflag reports
+/// ADK's error text for clap's parse error `e` on `cmd` (the subcommand being parsed);
+/// `raw` are the command-line arguments, used where clap does not keep what ADK's text reports
 /// (the token an unknown shorthand came from, whether a value-less flag was written short).
-/// Errors pflag cannot produce keep clap's message.
+/// Errors with no ADK text keep clap's message.
 pub fn pflag_error(e: &clap::Error, cmd: &Command, raw: &[String]) -> String {
     match e.kind() {
         ErrorKind::UnknownArgument => {
@@ -208,7 +212,7 @@ pub fn pflag_error(e: &clap::Error, cmd: &Command, raw: &[String]) -> String {
                 return format!("unknown flag: --{name}");
             }
             if let Some(c) = arg.strip_prefix('-').and_then(|s| s.chars().next()) {
-                // pflag names the shorthands left in the token from the unknown one on; an
+                // ADK names the shorthands left in the token from the unknown one on; an
                 // unknown shorthand is always first in its token here (every gadk shorthand
                 // takes a value, which swallows the rest of its token).
                 let start = format!("-{c}");

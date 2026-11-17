@@ -13,10 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The Google API HTTP error of `google.golang.org/api/googleapi` (v0.288.0,
-//! `googleapi/googleapi.go`): [`ApiError`] (Go `*googleapi.Error`, `Display` = Go `Error()`),
-//! [`ErrorItem`], and the response check that builds it ([`check_response`] = Go
-//! `CheckResponseWithBody`, [`api_error_from_response`] = its error branch).
+//! The Google API HTTP error: [`ApiError`] (its `Display` is the `googleapi: Error {code}: …`
+//! text), [`ErrorItem`], and the response check that builds it ([`check_response`], with
+//! [`api_error_from_response`] as its error branch).
 
 use std::fmt;
 
@@ -24,7 +23,7 @@ use http::HeaderMap;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 
-/// One entry of a Google API error's `errors` list (Go `googleapi.ErrorItem`).
+/// One entry of a Google API error's `errors` list.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ErrorItem {
     /// `reason`, e.g. `notFound`.
@@ -33,8 +32,8 @@ pub struct ErrorItem {
     pub message: String,
 }
 
-/// A Google API HTTP error (Go `*googleapi.Error`, built by `googleapi.CheckResponse` from a
-/// response with status ≥ 300). `Display` is Go's `Error()`.
+/// A Google API HTTP error, built by [`check_response`] from a response with status ≥ 300.
+/// `Display` renders `googleapi: Error {code}: {message}` plus any details and error items.
 #[derive(Debug, Clone, Default)]
 pub struct ApiError {
     /// The HTTP status code.
@@ -52,7 +51,7 @@ pub struct ApiError {
 }
 
 impl fmt::Display for ApiError {
-    /// Go `(*googleapi.Error).Error()`.
+    /// Formats the error as the `googleapi: …` text described on [`ApiError`].
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.errors.is_empty() && self.message.is_empty() {
             return write!(
@@ -66,7 +65,7 @@ impl fmt::Display for ApiError {
         if !self.details.is_empty()
             && let Ok(compact) = crate::to_go_json(&self.details)
         {
-            // Go `json.NewEncoder` + `SetIndent("", "  ")` + `Encode` (trailing newline).
+            // Details as pretty-printed JSON with a two-space indent and a trailing newline.
             buf.push_str("\nDetails:");
             buf.push('\n');
             buf.push_str(&go_json_indent(&compact));
@@ -90,7 +89,7 @@ impl fmt::Display for ApiError {
 
 impl std::error::Error for ApiError {}
 
-/// Go `json.Indent(dst, compact, "", "  ")` over compact Go JSON (`to_go_json` output).
+/// Re-indents compact JSON (`to_go_json` output) with two spaces per level.
 fn go_json_indent(compact: &[u8]) -> String {
     let text = String::from_utf8_lossy(compact);
     let mut out = String::with_capacity(text.len() * 2);
@@ -155,8 +154,7 @@ fn go_json_indent(compact: &[u8]) -> String {
     out
 }
 
-/// Go `googleapi.CheckResponseWithBody` (and `CheckResponse` over a read body): `Ok` for a
-/// 2xx status, else the [`ApiError`] of [`api_error_from_response`].
+/// `Ok` for a 2xx status, else the [`ApiError`] of [`api_error_from_response`].
 pub fn check_response(parts: &http::response::Parts, body: &[u8]) -> Result<(), Box<ApiError>> {
     if parts.status.is_success() {
         return Ok(());
@@ -164,9 +162,8 @@ pub fn check_response(parts: &http::response::Parts, body: &[u8]) -> Result<(), 
     Err(Box::new(api_error_from_response(parts, body)))
 }
 
-/// Go `googleapi.CheckResponse` for a response with status ≥ 300: the [`ApiError`] Go builds
-/// from the JSON error body (`error.code` / `message` / `errors` / `details`), the raw body and
-/// the headers.
+/// For a response with status ≥ 300: the [`ApiError`] built from the JSON error body
+/// (`error.code` / `message` / `errors` / `details`), the raw body and the headers.
 pub fn api_error_from_response(parts: &http::response::Parts, body: &[u8]) -> ApiError {
     let status = parts.status.as_u16();
     let mut err = ApiError {
@@ -177,14 +174,13 @@ pub fn api_error_from_response(parts: &http::response::Parts, body: &[u8]) -> Ap
     };
     if let Some(reply) = error_reply_from_body(body) {
         if reply.code != 0 {
-            // Go keeps the body's `error.code` even when it differs from the HTTP status.
-            // Divergence (ledger 7b-1): Go's `Code` is an `int`; a body code outside `u16`
-            // (negative or above 65535) keeps the HTTP status here.
+            // The body's `error.code` is kept even when it differs from the HTTP status; a code
+            // outside `u16` (negative or above 65535) keeps the HTTP status instead.
             err.code = u16::try_from(reply.code).unwrap_or(status);
         }
         err.message = reply.message;
         err.details = reply.details;
-        // Go decodes a `null` entry into a zero `ErrorItem` and keeps it.
+        // A `null` entry becomes a zero `ErrorItem` and is kept.
         err.errors = reply
             .errors
             .into_iter()
@@ -226,7 +222,7 @@ struct ErrorItemReply {
     message: String,
 }
 
-/// Go `errorReplyFromBody`: a JSON object `{"error": …}`, or the first element of a JSON array
+/// A JSON object `{"error": …}`, or the first element of a JSON array
 /// of them; `None` when the body is neither or has no `error`.
 fn error_reply_from_body(body: &[u8]) -> Option<ErrorReplyBody> {
     if body.first() == Some(&b'[') {
@@ -239,7 +235,7 @@ fn error_reply_from_body(body: &[u8]) -> Option<ErrorReplyBody> {
     serde_json::from_slice::<ErrorReply>(body).ok()?.error
 }
 
-/// A JSON `null` (or a missing field) as the type's zero value, as Go's decoder leaves it.
+/// A JSON `null` (or a missing field) as the type's zero value.
 fn nullable<'de, D, T>(d: D) -> Result<T, D::Error>
 where
     D: Deserializer<'de>,

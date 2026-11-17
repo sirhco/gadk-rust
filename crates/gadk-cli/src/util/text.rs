@@ -13,32 +13,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `internal/cli/util/text_helpers.go`.
+//! Text helpers for the generated Dockerfile and the console banners.
 //!
-//! The checks take bytes (`&str`, `String` and `&[u8]` all qualify) because Go strings can
+//! The checks take bytes (`&str`, `String` and `&[u8]` all qualify) because a byte string can
 //! hold invalid UTF-8, which both checks reject; gadk's flag values are `String`s (clap rejects
 //! a non-UTF-8 argument), so that branch is reached only by direct callers.
 
 use gadk_platform::go_quote_bytes;
 
-/// Go `CenterString`: `s` padded with spaces to width `w`, the extra space on the right; `w`
-/// counts bytes, as Go's `len`.
+/// `s` padded with spaces to width `w`, the extra space on the right; `w`
+/// counts bytes.
 pub fn center_string(s: &str, w: usize) -> String {
     let sw = w as isize - s.len() as isize;
     let lw = sw / 2;
     let rw = sw - lw;
-    // Divergence (ledger 6b): Go's `strings.Repeat` panics on the negative count a string
-    // wider than `w` gives; here the padding is empty. No caller passes such a string.
+    // A string wider than `w` gets no padding (the count is clamped at 0). No caller passes
+    // such a string.
     " ".repeat(lw.max(0) as usize) + s + &" ".repeat(rw.max(0) as usize)
 }
 
-/// Go `ValidateDockerfileSafe`: rejects `"`, `` ` ``, `\`, every C0 control byte and invalid
+/// Rejects `"`, `` ` ``, `\`, every C0 control byte and invalid
 /// UTF-8, so a value embedded in a generated Dockerfile's exec-form `CMD` keeps the line a
 /// valid JSON array and reaches the container unchanged. The weaker of the two checks; a value
 /// that reaches a `RUN` line needs [`validate_shell_arg_safe`].
 pub fn validate_dockerfile_safe(s: impl AsRef<[u8]>, label: &str) -> Result<(), String> {
     let s = s.as_ref();
-    // A byte loop, as Go's: the property is about the bytes written to the file.
+    // A byte loop: the property is about the bytes written to the file.
     if s.iter()
         .any(|&c| c == b'"' || c == b'`' || c == b'\\' || c < 0x20)
     {
@@ -56,12 +56,12 @@ pub fn validate_dockerfile_safe(s: impl AsRef<[u8]>, label: &str) -> Result<(), 
     Ok(())
 }
 
-/// Go `ValidateShellArgSafe`: admits only letters, digits, `.`, `/`, `-`, `_` and non-ASCII
+/// Admits only letters, digits, `.`, `/`, `-`, `_` and non-ASCII
 /// runes (valid UTF-8), the check for a value reaching a shell-form `RUN` line or a `COPY`
 /// operand.
 pub fn validate_shell_arg_safe(s: impl AsRef<[u8]>, label: &str) -> Result<(), String> {
     let s = s.as_ref();
-    // A byte loop, as Go's: every byte of a multi-byte rune is >= 0x80, so the class applies
+    // A byte loop: every byte of a multi-byte rune is >= 0x80, so the class applies
     // per byte and the UTF-8 check below rules out a stray high byte.
     let allowed =
         |c: u8| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'.' | b'/' | b'-') || c >= 0x80;

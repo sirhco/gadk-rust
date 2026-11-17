@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Streaming (port of ADK-Go `stream.go` `generateStreaming` and anthropic-sdk-go v1.84.0
-//! `Message.Accumulate` and `ssestream.Stream.Next`).
+//! Streaming: accumulating the SSE events of a streamed message into partial responses and a
+//! final aggregated response.
 
 use std::collections::{BTreeMap, VecDeque};
 
@@ -31,27 +31,28 @@ use crate::wire::{ContentBlock, Message, StreamEvent};
 /// Accumulates one streamed message: fed each [`SseEvent`], it returns the partial responses to
 /// yield; [`finish`](Self::finish) returns the aggregated final response.
 ///
-/// Events are selected by their SSE `event:` name as the SDK's `ssestream` does (`ping`, an
-/// absent or empty name and empty data are skipped; every other name decodes); an `error` event becomes the [`ApiError`](crate::ApiError) of
+/// Events are selected by their SSE `event:` name (`ping`, an
+/// absent or empty name and empty data are skipped; every other name decodes); an `error`
+/// event becomes the [`ApiError`](crate::ApiError) of
 /// [`crate::error::api_error_from_response`] with this response's status and `request-id`.
 pub(crate) struct StreamAccumulator {
-    /// Go `unwrapOutput`.
+    /// Whether the final text is unwrapped from the output schema.
     unwrap_output: bool,
-    /// The HTTP status of the streaming response (the SDK's `APIError.StatusCode` for an SSE
+    /// The HTTP status of the streaming response (the status of an SSE
     /// `error` event).
     status: u16,
     /// The response's `request-id` header (`""` when absent).
     request_id: String,
-    /// The message built so far (SDK `Message.Accumulate`'s receiver).
+    /// The message built so far.
     acc: Message,
-    /// Go `toolInputBuffers`: the `partial_json` of each `tool_use` block, by block index.
+    /// The `partial_json` of each `tool_use` block, by block index.
     tool_input_buffers: BTreeMap<i64, String>,
 }
 
 impl StreamAccumulator {
     /// A new accumulator for a response with HTTP `status` and `request-id` header
     /// `request_id` (`""` when absent); `unwrap_output` suppresses text partials and unwraps the
-    /// final text (Go `unwrapOutput`).
+    /// final text.
     pub(crate) fn new(unwrap_output: bool, status: u16, request_id: &str) -> Self {
         Self {
             unwrap_output,
@@ -62,12 +63,11 @@ impl StreamAccumulator {
         }
     }
 
-    /// Feeds one event (Go: `acc.Accumulate(event)` then the partial yields): the partial
+    /// Feeds one event (accumulate it, then yield the partials): the partial
     /// responses to yield, or the error that ends the stream.
     ///
     /// Errors: an SSE `error` event → the [`ApiError`](crate::ApiError); data that does not
-    /// decode, and `Accumulate`'s index errors → `anthropicmodel: request failed: <err>` (Go
-    /// `classifyError` of a plain error).
+    /// decode, and index errors of the accumulator → `anthropicmodel: request failed: <err>`.
     pub(crate) fn push(&mut self, event: SseEvent) -> Result<Vec<LlmResponse>, AnthropicError> {
         match event.event.as_deref() {
             Some("error") => {
@@ -77,14 +77,13 @@ impl StreamAccumulator {
                     event.data.as_bytes(),
                 )));
             }
-            // anthropic-sdk-go v1.84.0 `ssestream.Stream.Next`: `ping` and an absent or empty
+            // `ping` and an absent or empty
             // event name are skipped.
             None | Some("" | "ping") => return Ok(Vec::new()),
-            // Any other name decodes (v1.84.0 dropped the old allow-list of names)...
+            // Any other name decodes...
             Some(_) => {}
         }
-        // ...unless its data is empty (`len(TrimSuffix(data, "\n")) == 0`; `data` here has no
-        // trailing newline).
+        // ...unless its data is empty (`data` has no trailing newline).
         if event.data.is_empty() {
             return Ok(Vec::new());
         }
@@ -94,8 +93,7 @@ impl StreamAccumulator {
         Ok(self.partials(&ev))
     }
 
-    /// Go `generateStreaming`'s `switch event.Type` after `Accumulate`: text and thinking
-    /// partials, and the tool input buffers.
+    /// After accumulating: text and thinking partials, and the tool input buffers.
     fn partials(&mut self, ev: &StreamEvent) -> Vec<LlmResponse> {
         let mut out = Vec::new();
         match ev.kind.as_str() {
@@ -131,7 +129,7 @@ impl StreamAccumulator {
         out
     }
 
-    /// Go `yieldPartialPart`.
+    /// A partial response carrying `part`.
     fn partial(&self, part: Part) -> LlmResponse {
         LlmResponse {
             content: Some(Content {
@@ -146,7 +144,7 @@ impl StreamAccumulator {
     }
 
     /// After the body ended: applies the buffered tool inputs (unless the turn hit the token
-    /// limit) and converts the accumulated message (Go's tail of `generateStreaming`).
+    /// limit) and converts the accumulated message.
     pub(crate) fn finish(mut self) -> Result<LlmResponse, AnthropicError> {
         if self.acc.stop_reason != "max_tokens"
             && self.acc.stop_reason != "model_context_window_exceeded"
@@ -164,7 +162,7 @@ impl StreamAccumulator {
     }
 }
 
-/// A thought part (Go `&genai.Part{Thought: true, Text: …}`).
+/// A thought part with the given text.
 fn thought(text: &str) -> Part {
     Part {
         thought: true,
@@ -173,9 +171,9 @@ fn thought(text: &str) -> Part {
     }
 }
 
-/// Port of anthropic-sdk-go v1.84.0 `(*Message).Accumulate` over the fields gadk reads; the
-/// error is the SDK's text. Citations (`citations_delta`) and the SDK's raw-JSON bookkeeping
-/// are not modelled.
+/// Accumulates an event into the message, over the fields gadk reads; the
+/// error is the Anthropic SDK's text. Citations (`citations_delta`) and the SDK's raw-JSON
+/// bookkeeping are not modelled.
 fn accumulate(acc: &mut Message, event: &StreamEvent) -> Result<(), String> {
     match event.kind.as_str() {
         "message_start" => *acc = event.message.clone(),
@@ -243,7 +241,7 @@ fn accumulate(acc: &mut Message, event: &StreamEvent) -> Result<(), String> {
     Ok(())
 }
 
-/// SDK `checkContentBlockIndex`, returning the addressed block.
+/// Returns the content block that a block index addresses, or an error for a bad index.
 fn content_block_at<'a>(
     acc: &'a mut Message,
     event_type: &str,
@@ -260,7 +258,7 @@ fn content_block_at<'a>(
         })
 }
 
-/// The part of SDK `refreshContentBlockRaw` that changes a field gadk reads: a cut-off tool
+/// The part of the accumulator's block refresh that changes a field gadk reads: a cut-off tool
 /// call left non-JSON input, which is emptied to `{}`.
 fn refresh_content_block(cb: &mut ContentBlock) {
     if let Some(input) = &cb.input
@@ -271,7 +269,7 @@ fn refresh_content_block(cb: &mut ContentBlock) {
     }
 }
 
-/// Drives [`gadk_model::sse::sse_events_with_max_line`] (the SDK's 32 MiB line limit) over
+/// Drives [`gadk_model::sse::sse_events_with_max_line`] (with a 32 MiB line limit) over
 /// `body` through a [`StreamAccumulator`]: the partial responses, then the final one; the first
 /// error (a body or SSE error through
 /// [`AnthropicError::from_body_error`](crate::error::AnthropicError), or the accumulator's)
@@ -288,8 +286,7 @@ pub(crate) fn stream_responses(
         pending: VecDeque<LlmResponse>,
     }
     impl State {
-        /// Ends the stream after an error and drops the body now, as Go's deferred
-        /// `stream.Close()` does when `generateStreaming` returns, not when the caller drops
+        /// Ends the stream after an error and drops the body now, not when the caller drops
         /// the stream.
         fn release(&mut self) {
             self.acc = None;

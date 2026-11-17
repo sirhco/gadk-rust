@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `Workflow` and `WorkflowOptions` (port of Go workflow/workflow.go; the scheduler and
-//! persistence modules add impl blocks). `Workflow` is not a [`Node`](crate::workflow::Node); `WorkflowNode` wraps it.
+//! `Workflow` and `WorkflowOptions` (the scheduler and persistence modules add impl blocks).
+//! `Workflow` is not a [`Node`](crate::workflow::Node); `WorkflowNode` wraps it.
 
 use std::sync::Arc;
 
@@ -31,7 +31,7 @@ use crate::workflow::state::RunState;
 use crate::workflow::validation::{validate_nodes, validate_sub_workflow_names, validate_workflow};
 use crate::workflow::{Edge, START};
 
-/// Port of Go workflow.Option / workflowOptions: construction-time settings for [`Workflow::new`].
+/// Construction-time settings for [`Workflow::new`].
 /// Zero values mean "no override / use engine defaults".
 #[derive(Clone, Default)]
 pub struct WorkflowOptions {
@@ -45,7 +45,7 @@ pub struct WorkflowOptions {
 }
 
 impl WorkflowOptions {
-    /// Port of Go WithRootWrapper: marks this workflow as a synthetic single-node wrapper created
+    /// Marks this workflow as a synthetic single-node wrapper created
     /// by the runner to drive a standalone agent. A root wrapper's run does not stamp a parent
     /// namespace prefix onto root contexts.
     pub fn with_root_wrapper(mut self) -> Self {
@@ -53,22 +53,22 @@ impl WorkflowOptions {
         self
     }
 
-    /// Port of Go WithMaxConcurrency: caps how many graph-scheduled nodes may run concurrently in
-    /// a single run; nodes beyond the cap queue as pending. 0 disables the cap (unlimited). Does
-    /// not apply to dynamic sub-nodes invoked via RunNode.
+    /// Caps how many graph-scheduled nodes may run concurrently in a single run; nodes beyond the
+    /// cap queue as pending. 0 disables the cap (unlimited). Does not apply to dynamic sub-nodes
+    /// invoked via RunNode.
     pub fn with_max_concurrency(mut self, n: usize) -> Self {
         self.max_concurrency = Some(n);
         self
     }
 
-    /// Port of Go WithStateSchema: sets the state schema for the workflow.
+    /// Sets the state schema for the workflow.
     pub fn with_state_schema(mut self, s: Value) -> Self {
         self.state_schema = Some(s);
         self
     }
 }
 
-/// Port of Go workflow.Workflow: a validated workflow graph.
+/// A validated workflow graph.
 pub struct Workflow {
     /// The validated graph.
     pub(crate) graph: Arc<Graph>,
@@ -77,14 +77,14 @@ pub struct Workflow {
     /// Concurrency cap for graph-scheduled nodes; 0 = unlimited.
     pub(crate) max_concurrency: usize,
     /// The raw state schema (compiled and checked by [`Workflow::new`]).
-    #[allow(dead_code)] // Go workflow.go Workflow.stateSchema is never read after New either.
+    #[allow(dead_code)] // never read after construction.
     pub(crate) state_schema: Option<Value>,
     /// Marks a synthetic single-node wrapper created by the runner.
     pub(crate) is_root_wrapper: bool,
 }
 
 impl Workflow {
-    /// Port of Go workflow.New (workflow.go:268): validates `edges` and builds the workflow.
+    /// Validates `edges` and builds the workflow.
     pub fn new(
         name: &str,
         edges: Vec<Edge>,
@@ -92,7 +92,7 @@ impl Workflow {
     ) -> Result<Arc<Workflow>, WorkflowError> {
         validate_nodes(&edges)?;
         validate_sub_workflow_names(name, &edges)?;
-        // The struct keeps the raw schema (D5 pins `state_schema: Option<Value>`); it is compiled
+        // The struct keeps the raw schema (`state_schema: Option<Value>`); it is compiled
         // here to validate.
         let compiled_state = compile_schema(opts.state_schema.clone()).map_err(|e| {
             WorkflowError::new(
@@ -115,14 +115,14 @@ impl Workflow {
         }))
     }
 
-    /// Port of Go Workflow.Name: the node-path namespacing name; empty when anonymous.
+    /// The node-path namespacing name; empty when anonymous.
     pub fn name(&self) -> &str {
         &self.name
     }
 }
 
 impl Workflow {
-    /// Port of Go (*Workflow).Run: namespaces a named, non-root-wrapper workflow's node paths
+    /// Namespaces a named, non-root-wrapper workflow's node paths
     /// under `<parent>/<name>@1` and seeds START with the user content's text.
     pub fn run(self: &Arc<Self>, ctx: InvocationContext) -> EventStream {
         let c = ctx.into_context();
@@ -148,7 +148,7 @@ impl Workflow {
         self.run_node(c, input)
     }
 
-    /// Port of Go (*Workflow).RunNode: runs the graph from START with `input` under `ctx`. One
+    /// Runs the graph from START with `input` under `ctx`. One
     /// scheduler per call, created on the stream's first poll; dropping the stream stops the
     /// run (every node task is aborted and every node context cancelled).
     pub fn run_node(self: &Arc<Self>, ctx: Context, input: Value) -> EventStream {
@@ -167,9 +167,8 @@ impl Workflow {
 }
 
 impl Workflow {
-    /// Port of Go (*Workflow).ReconstructRunState: rebuilds the paused run from session history.
-    /// `Ok(None)` is Go's nil state (no interrupt or failure history); a non-empty
-    /// `invocation_id` scopes the scan to that invocation.
+    /// Rebuilds the paused run from session history. `Ok(None)` means no interrupt or failure
+    /// history; a non-empty `invocation_id` scopes the scan to that invocation.
     pub fn reconstruct_run_state(
         &self,
         session: &dyn Session,
@@ -178,7 +177,7 @@ impl Workflow {
         crate::workflow::persistence::reconstruct_run_state(self, session, invocation_id)
     }
 
-    /// Port of Go (*Workflow).Resume: continues a paused run from `state` with `responses`
+    /// Continues a paused run from `state` with `responses`
     /// (interrupt id → payload). Empty `responses` yields an empty stream.
     pub fn resume(
         self: &Arc<Self>,
@@ -190,7 +189,7 @@ impl Workflow {
     }
 }
 
-/// Port of Go userInput: the concatenated text parts of the user content; null without one.
+/// The concatenated text parts of the user content; null without one.
 fn user_input(ctx: &Context) -> Value {
     match ctx.user_content() {
         None => Value::Null,

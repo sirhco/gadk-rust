@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Authorization for the ADK REST API (port of ADK-Go `server/authz`): whether the authenticated
-//! [`Caller`] may act as the user a request names.
+//! Authorization for the ADK REST API: whether the authenticated [`Caller`] may act as the user
+//! a request names.
 
 use http::StatusCode;
 
@@ -27,21 +27,21 @@ mod strict;
 pub use noop::noop;
 pub use strict::strict;
 
-/// Go `authz.ErrUnauthorized`, optionally with a reason (Go `fmt.Errorf("%w: <reason>", …)`).
+/// An "unauthorized" error, optionally with a reason (rendered `authz: unauthorized: <reason>`).
 /// The text is sent to the client, so it must not carry PII.
 #[derive(Debug, thiserror::Error)]
 #[error("authz: unauthorized{}", .0.as_ref().map(|c| format!(": {c}")).unwrap_or_default())]
 pub struct AuthzError(pub Option<String>);
 
-/// Port of Go `authz.Authorizer`.
+/// Decides whether the authenticated caller may act as the user a request names.
 pub trait Authorizer: Send + Sync {
     /// `Ok` iff `caller` (the request's authenticated [`Caller`] extension, `None` when the
     /// request carries none) may act as `user_id`.
     fn can_act_as_user(&self, caller: Option<&Caller>, user_id: &str) -> Result<(), AuthzError>;
 }
 
-/// Port of Go `authz.WriteHTTPStatusForAuthError`: 403 with `forbidden` or
-/// `forbidden: <err>`, in Go's `http.Error` framing.
+/// A 403 response with the body `forbidden` or `forbidden: <err>`, framed like
+/// [`http_error`] (plain text plus a trailing newline).
 pub fn write_http_status_for_auth_error(err: Option<&AuthzError>) -> axum::response::Response {
     let msg = match err {
         Some(e) => format!("forbidden: {e}"),

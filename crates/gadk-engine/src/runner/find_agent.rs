@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go runner/runner.go `findAgentToRun`, `handleUserFunctionCallResponse`,
-//! `findActiveTaskIsolationScope` and `isTransferableAcrossAgentTree`.
+//! Choosing the agent that handles the next request: from the session history and any function
+//! response, the active task isolation scope, and whether an agent can transfer to its parent.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -30,8 +30,8 @@ use crate::llm::state::reveal;
 use crate::tool::finish_task::{FINISH_TASK_SUCCESS_RESULT, FINISH_TASK_TOOL_NAME};
 use crate::tool::utils::function_responses;
 
-/// Port of Go runner/runner.go `findActiveTaskIsolationScope`: the most recent isolation scope not
-/// yet closed by a successful `finish_task` function response; `""` when there is none.
+/// The most recent isolation scope not yet closed by a successful `finish_task` function response;
+/// `""` when there is none.
 pub(crate) fn find_active_task_isolation_scope(sess: Option<&dyn Session>) -> String {
     let Some(sess) = sess else {
         return String::new();
@@ -43,7 +43,7 @@ pub(crate) fn find_active_task_isolation_scope(sess: Option<&dyn Session>) -> St
             continue;
         }
         let scope = &ev.isolation_scope;
-        // Go: the first finish_task response in the event decides, then `break`.
+        // The first finish_task response in the event decides.
         if let Some(fr) = function_responses(ev.response.content.as_ref())
             .into_iter()
             .find(|fr| fr.name == FINISH_TASK_TOOL_NAME)
@@ -59,9 +59,7 @@ pub(crate) fn find_active_task_isolation_scope(sess: Option<&dyn Session>) -> St
     String::new()
 }
 
-/// Port of Go `utils.FunctionCallEvent` (runner.go `handleUserFunctionCallResponse` before
-/// 51bc7ec5): the event holding the function call that the first function response in `msg`
-/// answers.
+/// The event holding the function call that the first function response in `msg` answers.
 pub(crate) fn handle_user_function_call_response<'a>(
     events: &'a [Event],
     msg: Option<&Content>,
@@ -69,13 +67,12 @@ pub(crate) fn handle_user_function_call_response<'a>(
     if events.is_empty() {
         return None;
     }
-    // Go assumes every response in the message answers calls made by the same agent.
+    // Every response in the message is assumed to answer calls made by the same agent.
     let responses = function_responses(msg);
     find_call_event(events, &responses.first()?.id)
 }
 
-/// Port of Go runner/runner.go `(*Runner).isTransferableAcrossAgentTree`: whether `agent` and its
-/// parent chain are LlmAgents that all allow transfer to their parent.
+/// Whether `agent` and its parent chain are LlmAgents that all allow transfer to their parent.
 pub(crate) fn is_transferable(parents: &ParentMap, agent: &Arc<dyn Agent>) -> bool {
     let mut cur = Some(agent.clone());
     while let Some(a) = cur {
@@ -89,10 +86,10 @@ pub(crate) fn is_transferable(parents: &ParentMap, agent: &Arc<dyn Agent>) -> bo
     true
 }
 
-/// Test access (Go tests call these unexported methods directly).
+/// Test access to these crate-private methods.
 #[cfg(test)]
 impl super::Runner {
-    /// Port of Go `(*Runner).findAgentToRun`.
+    /// See `RunnerInner::find_agent_to_run`.
     pub(crate) fn find_agent_to_run(
         &self,
         session: &dyn Session,
@@ -101,15 +98,15 @@ impl super::Runner {
         self.inner.find_agent_to_run(session, msg)
     }
 
-    /// Port of Go `(*Runner).isTransferableAcrossAgentTree`.
+    /// See [`is_transferable`].
     pub(crate) fn is_transferable_across_agent_tree(&self, agent: &Arc<dyn Agent>) -> bool {
         is_transferable(&self.inner.parents, agent)
     }
 }
 
 impl RunnerInner {
-    /// Port of Go `(*Runner).findAgentToRun`: the agent that should handle the next request, from
-    /// session history; the root when none fits.
+    /// The agent that should handle the next request, from session history; the root when none
+    /// fits.
     pub(super) fn find_agent_to_run(
         &self,
         session: &dyn Session,

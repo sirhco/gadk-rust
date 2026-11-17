@@ -13,9 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of the compaction parts of Go runner/runner.go: config resolution
-//! (`resolveCompactionConfig`), post-invocation sliding-window compaction
-//! (`compactAfterInvocation`), and the deferred calls of `Run`/`runNode` as one guard.
+//! The runner's context compaction: config resolution, post-invocation sliding-window compaction,
+//! and the end-of-run work (after-run callbacks and compaction) as one guard.
 
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
@@ -34,12 +33,12 @@ use crate::compaction::{BoxError, apply, compactor, has_sliding_window, runtime,
 use crate::llm::state::reveal;
 use crate::tool::utils::panic_message;
 
-/// Go `defaultSummarizerTimeout`: the bound on the summarizer the runner installs itself.
+/// The bound on the summarizer the runner installs itself.
 pub(crate) const DEFAULT_SUMMARIZER_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// Port of Go resolveCompactionConfig: validates `cfg` and fills in the default summarizer
-/// (an [`LlmSummarizer`] over the root agent's model and generation config). The caller's
-/// config is never mutated; `None` means compaction is disabled.
+/// Validates `cfg` and fills in the default summarizer (an [`LlmSummarizer`] over the root agent's
+/// model and generation config). The caller's config is never mutated; `None` means compaction is
+/// disabled.
 pub(crate) fn resolve_compaction_config(
     cfg: Option<&Config>,
     root: &Arc<dyn Agent>,
@@ -82,12 +81,12 @@ pub(crate) fn resolve_compaction_config(
     Ok(Some(Arc::new(resolved)))
 }
 
-/// Go `fmt.Errorf("%w: post-invocation: %w", compaction.ErrCompaction, err)`.
+/// Wraps `err` as a compaction error with the `post-invocation` context.
 fn post_invocation(err: BoxError) -> AgentError {
     AgentError::Compaction(CompactionError::wrap("post-invocation", err))
 }
 
-/// Go compactAfterInvocation's `discardRaced`.
+/// Drops a summary that raced with another compaction, finishing its span without a record.
 fn discard_raced(finish: compactor::Finish) {
     finish.finish(
         None,
@@ -99,10 +98,9 @@ fn discard_raced(finish: compactor::Finish) {
 }
 
 impl RunnerInner {
-    /// Port of Go (*Runner).compactAfterInvocation: sliding-window compaction once an
-    /// invocation's events are persisted. The summary is stored, not yielded. A panic anywhere
-    /// inside (a summarizer's, resumed by the compactor's span) becomes a compaction error
-    /// rather than unwinding into the caller.
+    /// Sliding-window compaction once an invocation's events are persisted. The summary is stored,
+    /// not yielded. A panic anywhere inside (a summarizer's, resumed by the compactor's span)
+    /// becomes a compaction error rather than unwinding into the caller.
     pub(crate) async fn compact_after_invocation(
         &self,
         stored: &Arc<dyn Session>,
@@ -172,9 +170,8 @@ impl RunnerInner {
             Ok(false) => {}
         }
 
-        // Plugins see the summary before it is stored. Go takes a plugin's replacement as is
-        // (no fromPlugin: a plugin may rewrite a summary) and filters it like a summarizer's
-        // output.
+        // Plugins see the summary before it is stored. A plugin's replacement is taken as is (a
+        // plugin may rewrite a summary) and filtered like a summarizer's output.
         match self
             .plugin_manager
             .run_on_event(ictx.clone(), summary.clone())
@@ -226,9 +223,9 @@ impl RunnerInner {
         }
         finish.finish(None, "");
 
-        // Go RepairContext: what lands during the append is repaired after the fact, detached
-        // from the run's cancellation (spawned, so dropping this future does not stop it) and
-        // bounded by the repair timeout; failures are logged.
+        // What lands during the append is repaired after the fact, detached from the run's
+        // cancellation (spawned, so dropping this future does not stop it) and bounded by the
+        // repair timeout; failures are logged.
         let repaired = apply::repair(repair_after_append(
             Arc::clone(&self.session_service),
             Arc::clone(stored),
@@ -245,8 +242,8 @@ impl RunnerInner {
         Ok(())
     }
 
-    /// Go compactAfterInvocation's `raced`: re-reads the session and reports whether anything
-    /// landed inside the summary's range since the window was chosen.
+    /// Re-reads the session and reports whether anything landed inside the summary's range since
+    /// the window was chosen.
     async fn summary_raced(
         &self,
         stored: &Arc<dyn Session>,
@@ -258,9 +255,8 @@ impl RunnerInner {
     }
 }
 
-/// Go compactAfterInvocation's straggler repair: stores a corrected record naming every event
-/// that landed inside the stored summary's range unseen. Owns its inputs so [`apply::repair`]
-/// can detach it from the run.
+/// Straggler repair: stores a corrected record naming every event that landed inside the stored
+/// summary's range unseen. Owns its inputs so [`apply::repair`] can detach it from the run.
 async fn repair_after_append(
     svc: Arc<dyn SessionService>,
     stored: Arc<dyn Session>,
@@ -295,9 +291,9 @@ async fn repair_after_append(
     }
 }
 
-/// Go's two deferred calls in `Run`/`runNode` as one guard: `compactOnce` (registered first,
-/// so it runs last on an early return) and `RunAfterRunCallback` (registered by
-/// [`InvocationGuard::defer_after_run`], where Go registers it).
+/// The end-of-run work of an invocation as one guard: compaction (pending from construction, so on
+/// an early return it runs last) and the after-run callbacks (pending once
+/// [`InvocationGuard::defer_after_run`] is called).
 ///
 /// - Normal end: [`InvocationGuard::compact_inline`] (its error is the stream's last item),
 ///   then [`InvocationGuard::finish`] (after-run callbacks).
@@ -305,33 +301,31 @@ async fn repair_after_append(
 ///   compaction with its error logged.
 /// - Stream dropped: `Drop` spawns one task on the current runtime that runs the after-run
 ///   callbacks and then, if the stream was dropped at a yield, compaction on a context
-///   re-derived with a fresh cancellation token (Go's `break` leaves the caller's context
-///   uncancelled), inside the span and the fiber that were current when the guard was made
-///   (Go runs the deferred calls on the consumer's goroutine; the guard is made inside the
-///   runner's consumer `FiberStream`). Errors are logged.
+///   re-derived with a fresh cancellation token (stopping at a yield leaves the caller's context
+///   uncancelled), inside the span and the fiber that were current when the guard was made (the
+///   guard is made inside the runner's consumer `FiberStream`). Errors are logged.
 ///
 /// Before the after-run callbacks (inline or spawned) the guard awaits the invocation's teardown
 /// registry ([`gadk_agent::Teardowns`]): the started work that components dropped during the run
 /// handed over (a ParallelAgent's branches, a workflow scheduler's node tasks, in-flight tool
-/// calls), which in Go finishes on the consumer's goroutine before the deferred
-/// `RunAfterRunCallback`. The token is still live while it is awaited after a stop at a yield.
+/// calls), so that work finishes before the after-run callbacks. The token is still live while it
+/// is awaited after a stop at a yield.
 ///
 /// The guard also owns the invocation token's cancel-on-drop ([`InvocationGuard::cancel_on_drop`]).
-/// A drop inside an await cancels it at once (Go's caller cancelled its context, and the
-/// after-run callbacks see that). A drop at a yield (Go's `break`, after which the deferred
-/// `RunAfterRunCallback` runs on the caller's still-live context) cancels it only once the
-/// spawned after-run callbacks return, so they, and every span record holding the token, see
-/// a live context, as in Go.
+/// A drop inside an await is a cancellation: the token is cancelled at once and the after-run
+/// callbacks see that. A drop at a yield (the consumer stopped reading) cancels it only once the
+/// spawned after-run callbacks return, so they, and every span record holding the token, see a live
+/// context.
 ///
 /// Compaction is skipped once the invocation yielded an error ([`InvocationGuard::mark_failed`]),
 /// and when the stream is dropped while suspended inside an await rather than at a yield
 /// ([`InvocationGuard::at_yield`]).
 ///
-/// A drop before the summary append is Go's cancellation decline; once the summary is stored,
-/// the straggler repair is detached ([`apply::repair`] spawns it) and always runs.
+/// A drop before the summary append declines compaction as a cancellation; once the summary is
+/// stored, the straggler repair is detached ([`apply::repair`] spawns it) and always runs.
 ///
-/// The live path ([`InvocationGuard::no_compaction`]) uses only the after-run and
-/// cancel-on-drop parts: Go `RunLive` does not compact.
+/// The live path ([`InvocationGuard::no_compaction`]) uses only the after-run and cancel-on-drop
+/// parts: live runs do not compact.
 pub(crate) struct InvocationGuard {
     inner: Arc<RunnerInner>,
     stored: Arc<dyn Session>,
@@ -349,7 +343,7 @@ pub(crate) struct InvocationGuard {
 }
 
 impl InvocationGuard {
-    /// Go's `defer compactOnce()`; the after-run callbacks are not pending yet.
+    /// A guard with compaction pending; the after-run callbacks are not pending yet.
     pub(crate) fn new(
         inner: Arc<RunnerInner>,
         stored: Arc<dyn Session>,
@@ -369,7 +363,7 @@ impl InvocationGuard {
         }
     }
 
-    /// No compaction for this invocation (Go `RunLive`, which attaches no compaction runtime).
+    /// No compaction for this invocation (live runs attach no compaction runtime).
     pub(crate) fn no_compaction(&mut self) {
         self.compaction_pending = false;
     }
@@ -380,29 +374,27 @@ impl InvocationGuard {
         self.cancel_on_drop = Some(guard);
     }
 
-    /// Go's `defer pluginManager.RunAfterRunCallback(ctx)`.
+    /// Marks the after-run callbacks as pending: they run when the guard finishes or is dropped.
     pub(crate) fn defer_after_run(&mut self) {
         self.after_run_pending = true;
     }
 
-    /// Go's yield wrapper: call immediately before yielding any error.
+    /// Call immediately before yielding any error; compaction is then skipped.
     pub(crate) fn mark_failed(&mut self) {
         self.failed = true;
     }
 
     /// Brackets every `yield` (of an event or an error): `true` immediately before it, `false`
-    /// immediately after the stream resumes. A consumer can only stop early at a yield (Go's
-    /// `break`, after which the deferred after-run callbacks and compaction run on the caller's
-    /// still-live context; an error yield has already skipped compaction). A stream dropped
-    /// anywhere else was dropped inside an await (a pending model call or append), which is
-    /// Go's cancelled context: the model call returns `ctx.Err()` and sets `invocationFailed`,
-    /// or `compactAfterInvocation`'s `ctx.Err() != nil` check (runner.go) declines. So `Drop`
-    /// compacts only when this is set.
+    /// immediately after the stream resumes. A consumer can only stop early at a yield (the
+    /// after-run callbacks and compaction then run on the caller's still-live context; an error
+    /// yield has already skipped compaction). A stream dropped anywhere else was dropped inside an
+    /// await (a pending model call or append), which is a cancellation: the model call fails or
+    /// compaction declines. So `Drop` compacts only when this is set.
     pub(crate) fn at_yield(&mut self, yielding: bool) {
         self.yielding = yielding;
     }
 
-    /// Go's explicit `compactOnce()` after the event loop.
+    /// Runs the pending compaction after the event loop; its error, if any, is returned.
     pub(crate) async fn compact_inline(&mut self) -> Option<AgentError> {
         if !std::mem::take(&mut self.compaction_pending) || self.failed {
             return None;
@@ -413,7 +405,7 @@ impl InvocationGuard {
             .err()
     }
 
-    /// Go's deferred `RunAfterRunCallback`, at the end of a normal run.
+    /// Runs the after-run callbacks, at the end of a normal run.
     pub(crate) async fn finish(mut self) {
         if std::mem::take(&mut self.after_run_pending) {
             wait_teardowns(&self.ctx).await;
@@ -424,7 +416,7 @@ impl InvocationGuard {
         }
     }
 
-    /// An early `return`: Go's defers in LIFO order, after-run, then compaction (logged).
+    /// An early `return`: the after-run callbacks, then compaction (its error is logged).
     pub(crate) async fn finish_early(mut self) {
         if std::mem::take(&mut self.after_run_pending) {
             wait_teardowns(&self.ctx).await;
@@ -439,19 +431,17 @@ impl InvocationGuard {
     }
 }
 
-/// Awaits the started work that components dropped during the invocation handed to its
-/// teardown registry ([`gadk_agent::Teardowns`]): in Go that work finishes on the consumer's
-/// goroutine before the deferred `RunAfterRunCallback` runs.
+/// Awaits the started work that components dropped during the invocation handed to its teardown
+/// registry ([`gadk_agent::Teardowns`]), so that work finishes before the after-run callbacks run.
 async fn wait_teardowns(ctx: &InvocationContext) {
     if let Some(t) = ctx.teardowns() {
         t.wait().await;
     }
 }
 
-// Divergence (ledger 7b-3a): a consumer that stops early unwinds Go's iterator on its own
-// goroutine (teardown, `RunAfterRunCallback`, compaction) before its `break` returns; a dropped
-// Rust stream cannot block its dropper, so this runs that work on a spawned task re-entering the
-// consumer's fiber, which may overlap whatever the consumer does next.
+// A dropped stream cannot block its dropper, so the end-of-run work (teardown, after-run callbacks,
+// compaction) runs on a spawned task re-entering the consumer's fiber, which may overlap whatever
+// the consumer does next.
 impl Drop for InvocationGuard {
     fn drop(&mut self) {
         let after_run = std::mem::take(&mut self.after_run_pending);

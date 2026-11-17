@@ -13,9 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Responses generation-config translation (port of the config half of ADK-Go
-//! `internal/responses/request.go`: `supportedConfigFields`, `applyGenerationConfig`,
-//! `serviceTiers`, `applyThinkingConfig`).
+//! Responses generation-config translation: the supported fields, the generation config, the
+//! service tiers and the thinking config.
 
 use gadk_genai::{GenerateContentConfig, ServiceTier, ThinkingConfig};
 use gadk_model::HttpOptions;
@@ -34,7 +33,7 @@ use crate::shared::config::{
 };
 use crate::shared::contents::flatten_content_text;
 
-/// Go `supportedConfigFields`: [`SUPPORTED_CONFIG_FIELDS`](crate::shared::config::SUPPORTED_CONFIG_FIELDS)
+/// [`SUPPORTED_CONFIG_FIELDS`](crate::shared::config::SUPPORTED_CONFIG_FIELDS)
 /// plus `StopSequences` (accepted only when empty).
 pub(crate) fn supported_config_fields() -> Vec<&'static str> {
     let mut fields = SUPPORTED_CONFIG_FIELDS.to_vec();
@@ -44,15 +43,14 @@ pub(crate) fn supported_config_fields() -> Vec<&'static str> {
     fields
 }
 
-/// Go `applyGenerationConfig`: translates `cfg` (with `http_options`, Go's
-/// `cfg.HTTPOptions`) onto `params`, rejecting what the Responses API cannot express in Go's
-/// check order; `(None, None)` is Go's nil config (nothing to do).
+/// Translates `cfg` (with `http_options`) onto `params`, rejecting what the Responses API
+/// cannot express in check order; `(None, None)` is an absent config (nothing to do).
 pub(crate) fn apply_generation_config(
     params: &mut ResponseNewParams,
     cfg: Option<&GenerateContentConfig>,
     http_options: Option<&HttpOptions>,
 ) -> Result<(), OpenAiError> {
-    // Go keeps HTTPOptions inside the config, so options without a config are a config
+    // `HTTPOptions` is carried beside the config, so options without a config are a config
     // holding nothing else.
     let empty;
     let cfg = match (cfg, http_options) {
@@ -140,7 +138,7 @@ pub(crate) fn apply_generation_config(
     reject_unsupported_config_fields(cfg, http_options, &supported_config_fields())
 }
 
-/// Go `serviceTiers[tier]`: unspecified and standard → `default`, flex → `flex`, priority →
+/// The service tier: unspecified and standard → `default`, flex → `flex`, priority →
 /// `priority`; `None` for a tier the map does not know.
 pub(crate) fn service_tier_for(tier: &ServiceTier) -> Option<ResponseServiceTier> {
     match tier {
@@ -152,7 +150,7 @@ pub(crate) fn service_tier_for(tier: &ServiceTier) -> Option<ResponseServiceTier
     }
 }
 
-/// Go `applyThinkingConfig`: `reasoning.effort` from
+/// Applies the thinking config: `reasoning.effort` from
 /// [`reasoning_effort_for`](crate::shared::config::reasoning_effort_for), `reasoning.summary`
 /// `auto` when `include_thoughts`; `None` leaves `params` alone.
 pub(crate) fn apply_thinking_config(

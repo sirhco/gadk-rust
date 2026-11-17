@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A name-based model registry (port of ADK-Go `model/registry.go`).
+//! A name-based model registry.
 //!
 //! An [`Llm`] can be constructed from just a model-name string via
 //! [`Registry::new_llm`]. Registration is opt-in: provider crates do not register
@@ -89,7 +89,7 @@ impl Registry {
         Self::default()
     }
 
-    /// The process-wide registry (the equivalent of ADK-Go's package-level registry).
+    /// The process-wide registry.
     pub fn global() -> &'static Registry {
         &GLOBAL
     }
@@ -103,7 +103,7 @@ impl Registry {
     ///
     /// Returns [`RegistryError::InvalidPattern`] if `pattern` does not compile and
     /// [`RegistryError::DuplicatePattern`] if the same pattern string is already
-    /// registered (ADK-Go panics in both cases).
+    /// registered.
     pub fn register(&self, pattern: &str, f: Factory) -> Result<(), RegistryError> {
         let regex = Regex::new(pattern)
             .map_err(|e| RegistryError::InvalidPattern(pattern.to_string(), e.to_string()))?;

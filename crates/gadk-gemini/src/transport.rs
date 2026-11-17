@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! REST transport for `generateContent` / `streamGenerateContent` (port of the parts of
-//! genai `api_client.go` and `models.go` that the Gemini model uses).
+//! REST transport for `generateContent` / `streamGenerateContent`.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -34,8 +33,8 @@ use serde_json::{Map, Value};
 use crate::auth::auth_headers;
 use crate::config::ResolvedConfig;
 
-/// Port of genai `tModel` plus the Vertex AI `projects/{p}/locations/{l}/` prefix that
-/// genai `createAPIURL` adds: the request path below the API version.
+/// The request path below the API version: the model name, plus the Vertex AI
+/// `projects/{p}/locations/{l}/` prefix.
 pub(crate) fn model_path(resolved: &ResolvedConfig, model: &str) -> Result<String, ModelError> {
     if model.is_empty() {
         return Err(ModelError::Config("tModel: model is empty".into()));
@@ -109,8 +108,8 @@ fn chunk_timeout(body: BodyStream, timeout: Option<Duration>) -> BodyStream {
     .boxed()
 }
 
-/// Port of genai `generateContentResponseFrom{Mldev,Vertex}`: keeps the fields each
-/// converter copies (Gemini API: `citationMetadata.citationSources` becomes `citations`).
+/// Keeps the fields each backend's converter copies (Gemini API:
+/// `citationMetadata.citationSources` becomes `citations`).
 fn normalize_response(backend: Backend, value: Value) -> Value {
     let Value::Object(from) = value else {
         return value;
@@ -149,7 +148,7 @@ fn normalize_response(backend: Backend, value: Value) -> Value {
     Value::Object(to)
 }
 
-/// Port of genai `candidateFromMldev` / `citationMetadataFromMldev`.
+/// Converts a Gemini API candidate and its citation metadata.
 fn candidate_from_mldev(value: &Value) -> Value {
     let Some(from) = value.as_object() else {
         return value.clone();
@@ -201,10 +200,9 @@ fn decode_response(
     let value: Value = serde_json::from_slice(data)
         .map_err(|e| decode_error(format!("invalid response JSON: {e}"), data))?;
     if stream && value.get("error").is_some_and(Value::is_object) {
-        // A chunk carrying `"error"` yields that `APIError` (genai v1.77.0
-        // `iterateResponseStream`): code, status, message and details come from the body
-        // only, so a missing code is 0 as in Go. A unary 200 body is decoded as is
-        // (`deserializeUnaryResponse` has no such check; the `"error"` key is ignored).
+        // A chunk carrying `"error"` yields that API error: code, status, message and details
+        // come from the body only, so a missing code is 0. A unary 200 body is decoded as is
+        // (the `"error"` key is ignored).
         return Err(api_error_from_body(0, data));
     }
     serde_json::from_value(normalize_response(backend, value))
@@ -232,8 +230,8 @@ impl Transport {
         }
     }
 
-    /// Applies a request's base URL, API version and timeout overrides (genai
-    /// `patchHTTPOptions`: empty strings do not override).
+    /// Applies a request's base URL, API version and timeout overrides (empty strings do
+    /// not override).
     pub(crate) fn with_request_options(&self, opts: Option<&HttpOptions>) -> Self {
         let mut t = self.clone();
         if let Some(o) = opts {
@@ -250,7 +248,7 @@ impl Transport {
         t
     }
 
-    /// Port of genai `createAPIURL` for `{model}:{method}`.
+    /// The URL for `{model}:{method}`.
     fn url(&self, model: &str, method: &str) -> Result<String, ModelError> {
         let path = model_path(&self.resolved, model)?;
         let version = &self.api_version;
@@ -263,8 +261,8 @@ impl Transport {
         Ok(format!("{base}/{path}:{method}"))
     }
 
-    /// Sends `body` to `url` with `headers` plus auth and JSON content type (genai
-    /// `buildRequest`); a non-2xx status becomes the API error from the body.
+    /// Sends `body` to `url` with `headers` plus auth and JSON content type;
+    /// a non-2xx status becomes the API error from the body.
     async fn send(
         &self,
         url: String,

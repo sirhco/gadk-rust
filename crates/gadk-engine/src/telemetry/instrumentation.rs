@@ -13,9 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `internal/telemetry/instrumentation.go`: `InstrumentInvocation` (the runner's
-//! `invoke_workflow` span) and `InstrumentGenerateContent` (the `generate_content` span over a
-//! model call).
+//! Span instrumentation: [`instrument_invocation`] (the runner's `invoke_workflow` span) and
+//! [`instrument_generate_content`] (the `generate_content` span over a model call).
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -37,11 +36,11 @@ use super::logger::{log_request, log_response};
 use super::semconv::OperationDetails;
 use super::{in_workflow_scope, workflow_span};
 
-/// Go `InstrumentInvocation`: runs `run` inside an `invoke_workflow` span named after `root`
-/// (conversation `session_id`) whose status is the first error the stream yields. No span in
-/// the legacy schema, for a workflow-agent root (it opens its own), or inside another
-/// `invoke_workflow` span (a nested invocation, e.g. an agent tool). The span is entered on
-/// every poll and ends with the stream or when the stream is dropped.
+/// Runs `run` inside an `invoke_workflow` span named after `root` (conversation `session_id`) whose
+/// status is the first error the stream yields. No span in the legacy schema, for a workflow-agent
+/// root (it opens its own), or inside another `invoke_workflow` span (a nested invocation, e.g. an
+/// agent tool). The span is entered on every poll and ends with the stream or when the stream is
+/// dropped.
 pub(crate) fn instrument_invocation(
     root: &dyn Agent,
     session_id: &str,
@@ -105,18 +104,16 @@ impl Drop for InvocationStream {
     }
 }
 
-/// One item of a model call: the response or error, and the event ID reserved for it (Go's
-/// `responseWithEventID`).
+/// One item of a model call: the response or error, and the event ID reserved for it.
 pub(crate) type ModelItem = (Result<LlmResponse, ModelError>, String);
 
-/// Go `InstrumentGenerateContent`: runs `call` inside a `generate_content` span. The span ends
-/// at the first error, the first response that reports a finish reason, the first response
-/// when the call does not stream, or the end of the stream (the legacy schema: the first error
-/// or non-partial response), whichever is first, or when the stream is dropped; at its end it
-/// gets the result attributes and, in the default schema, the inference-details log record. In
-/// the legacy schema the request's log records follow the span's start and the `gen_ai.choice`
-/// record precedes the end at the first non-partial response (Go `logRequest`/`logResponse`).
-/// `call` receives `req` once the span has read it.
+/// Runs `call` inside a `generate_content` span. The span ends at the first error, the first
+/// response that reports a finish reason, the first response when the call does not stream, or the
+/// end of the stream (the legacy schema: the first error or non-partial response), whichever is
+/// first, or when the stream is dropped; at its end it gets the result attributes and, in the
+/// default schema, the inference-details log record. In the legacy schema the request's log records
+/// follow the span's start and the `gen_ai.choice` record precedes the end at the first non-partial
+/// response. `call` receives `req` once the span has read it.
 pub(crate) fn instrument_generate_content(
     params: GenerateContentParams,
     req: LlmRequest,
@@ -147,8 +144,8 @@ struct GenerateState {
 }
 
 impl GenerateState {
-    /// Go's `end`: Rust passes the request to the model by value, so the model cannot edit it
-    /// and Go's second `noteLLMRequest` has nothing to note.
+    /// Ends the span with the result attributes and the inference-details log record. The model
+    /// receives the request by value, so it cannot have edited the request the span read.
     fn end(self) {
         trace_generate_content_result(&self.span, &self.result);
         self.details.emit(&self.params, &self.result);
@@ -168,7 +165,7 @@ impl GenerateContentStream {
         }
     }
 
-    /// Go's loop body for one item.
+    /// Records one item of the model call.
     fn note(&mut self, item: &ModelItem) {
         let Some(st) = self.state.as_mut() else {
             // After the end: what an aggregator assembles from the chunks already recorded.

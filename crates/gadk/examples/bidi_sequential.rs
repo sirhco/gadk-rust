@@ -13,8 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// parity: adapted: Go example is an HTTP server on RunLiveHandler (sub-project 5)
-
 //! Live sequential agents: an idea generator hands over to a story teller when it calls the
 //! `task_completed` tool that `SequentialAgent::run_live` injects.
 //!
@@ -40,7 +38,7 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or_else(|_| "gemini-2.5-flash-native-audio-preview-12-2025".to_string());
     let model = GeminiModel::new(&model_name, ClientConfig::default()).await?;
 
-    // Go gives both agents geminitool.GoogleSearch{}; gadk has no Google Search tool yet.
+    // No Google Search tool is configured: gadk has no Google Search tool yet.
     let idea_generator = gadk::engine::llm::agent::new(LlmAgentConfig {
         name: "idea_generator".to_string(),
         description: "Brainstorms creative story ideas with the user.".to_string(),

@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `internal/llminternal/stream_aggregator.go`.
+//! Aggregation of streamed model responses: [`StreamingResponseAggregator`].
 
 use bytes::Bytes;
 use gadk_genai::{
@@ -27,8 +27,6 @@ use crate::error::ModelError;
 use crate::jsonpath::{PathSegment, parse_json_path, set_value_by_path, value_by_path};
 use crate::llm::LlmResponse;
 
-/// Port of stream_aggregator.go streamingResponseAggregator.
-///
 /// Aggregates partial streaming responses: it yields an [`LlmResponse`] for every (partial)
 /// model response, and builds one aggregated response from their content, returned by
 /// [`close`](Self::close) once the stream ends. Text is buffered and merged, function calls
@@ -60,16 +58,14 @@ pub struct StreamingResponseAggregator {
 }
 
 impl StreamingResponseAggregator {
-    /// Port of stream_aggregator.go NewStreamingResponseAggregator.
+    /// Creates an empty aggregator.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Port of stream_aggregator.go ProcessResponse.
-    ///
     /// Converts `resp` into an [`LlmResponse`] (marked partial), aggregates its content, and
     /// returns the items to yield, in order. The returned items never contain an error today;
-    /// the `Result` mirrors the Go `iter.Seq2[*LLMResponse, error]`.
+    /// the `Result` leaves room for a future error.
     pub fn process_response(
         &mut self,
         resp: GenerateContentResponse,
@@ -88,10 +84,8 @@ impl StreamingResponseAggregator {
         out
     }
 
-    /// Port of stream_aggregator.go aggregateResponse.
-    ///
-    /// Folds `llm_response` into the aggregate state and marks it partial. Like the Go
-    /// original it never produces an intermediate response.
+    /// Folds `llm_response` into the aggregate state and marks it partial. It never produces an
+    /// intermediate response.
     fn aggregate_response(&mut self, llm_response: &mut LlmResponse) -> Option<LlmResponse> {
         if llm_response.usage_metadata.is_some() {
             self.usage_metadata.clone_from(&llm_response.usage_metadata);
@@ -141,15 +135,13 @@ impl StreamingResponseAggregator {
                 }
             }
         }
-        // Go stores the response pointer before the loop above mutates its parts; storing
-        // the finished response here observes the same final state.
+        // The response is stored before the loop above mutates its parts; storing the finished
+        // response here observes the same final state.
         self.response = Some(llm_response.clone());
         None
     }
 
-    /// Port of stream_aggregator.go processFunctionCallPart.
-    ///
-    /// Takes `part` mutably because, as in Go, a propagated thought signature and a streamed
+    /// Takes `part` mutably because a propagated thought signature and a streamed
     /// call's id are written into the part itself, which is also the part of the response
     /// being yielded.
     fn process_function_call_part(&mut self, part: &mut Part) {
@@ -181,8 +173,6 @@ impl StreamingResponseAggregator {
         }
     }
 
-    /// Port of stream_aggregator.go processStreamingFunctionCallPart.
-    ///
     /// Processes a streaming function call carrying partial arguments. A chunk without an id
     /// is given the streamed call's id, in the yielded part too.
     fn process_streaming_function_call_part(&mut self, fc: &mut FunctionCall) {
@@ -210,8 +200,6 @@ impl StreamingResponseAggregator {
         self.flush_function_call_to_sequence();
     }
 
-    /// Port of stream_aggregator.go getValueFromPartialArg.
-    ///
     /// The value a partial argument carries, or `None` when it carries none. A string is
     /// streamed in chunks that all carry the same path, so a string chunk is appended to
     /// whatever of it has already been assembled.
@@ -229,7 +217,7 @@ impl StreamingResponseAggregator {
             return Some(Value::String(value));
         }
         if let Some(n) = partial_arg.number_value {
-            // Non-finite numbers have no JSON representation; Go would fail to marshal them.
+            // Non-finite numbers have no JSON representation, so they become JSON `null`.
             return Some(serde_json::Number::from_f64(n).map_or(Value::Null, Value::Number));
         }
         if let Some(b) = partial_arg.bool_value {
@@ -241,7 +229,7 @@ impl StreamingResponseAggregator {
         None
     }
 
-    /// Port of stream_aggregator.go flushTextBufferToSequence.
+    /// Moves the buffered text, if any, into the sequence as one text part.
     fn flush_text_buffer_to_sequence(&mut self) {
         if !self.current_text_buffer.is_empty() {
             self.sequence.push(Part {
@@ -254,7 +242,7 @@ impl StreamingResponseAggregator {
         }
     }
 
-    /// Port of stream_aggregator.go flushFunctionCallToSequence.
+    /// Moves the pending function call, if any, into the sequence as one function-call part.
     fn flush_function_call_to_sequence(&mut self) {
         if !self.current_function_name.is_empty() {
             let fc = FunctionCall {
@@ -274,8 +262,6 @@ impl StreamingResponseAggregator {
         }
     }
 
-    /// Port of stream_aggregator.go Close.
-    ///
     /// Generates the aggregated response at the end of the stream, if any response was
     /// processed. Call it after all the model responses are processed.
     pub fn close(&mut self) -> Option<LlmResponse> {

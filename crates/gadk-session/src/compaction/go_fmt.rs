@@ -13,18 +13,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `fmt` `%v` of a JSON-decoded value, for the summarizer transcript. A private copy of the
+//! `%v`-style rendering of a JSON value, for the summarizer transcript. A private copy of the
 //! engine's helpers: gadk-session cannot depend on gadk-engine.
 
 use serde_json::Value;
 
-/// Go `fmt.Sprintf("%v", v)` for a JSON-decoded value:
+/// Renders a JSON value as `%v` would print it:
 /// - string → itself; bool → true/false; null → `<nil>`;
 /// - integer numbers → decimal;
-/// - other numbers → `go_format_float_v` (Go %v of float64 = %g with shortest digits);
-/// - array → `[a b c]`; object → `map[k1:v1 k2:v2]` with keys sorted (Go fmt sorts map keys).
+/// - other numbers → `go_format_float_v` (the shortest-digits `%g` form of a float64);
+/// - array → `[a b c]`; object → `map[k1:v1 k2:v2]` with keys sorted.
 ///
-/// Apply [`as_go_floats`] first on values Go would have JSON-decoded.
+/// Apply [`as_go_floats`] first on tool arguments, which arrive as decoded JSON.
 pub(super) fn go_sprint(v: &Value) -> String {
     match v {
         Value::Null => "<nil>".to_owned(),
@@ -49,8 +49,8 @@ pub(super) fn go_sprint(v: &Value) -> String {
     }
 }
 
-/// `v` with every number as a float: Go decodes tool arguments from JSON, so every number is a
-/// `float64` and `fmt.Sprint` prints it in `%v` float form (`1e+06`, not `1000000`). A number
+/// `v` with every number as a float: decoded tool arguments hold every number as a
+/// `float64`, which prints in `%v` float form (`1e+06`, not `1000000`). A number
 /// with no finite float form is kept as is.
 pub(super) fn as_go_floats(v: &Value) -> Value {
     match v {

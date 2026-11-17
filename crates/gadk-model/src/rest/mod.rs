@@ -14,16 +14,16 @@
 // limitations under the License.
 
 //! The shared REST transport of the provider crates (`gadk-anthropic`, `gadk-openai`): one
-//! `POST` with the Stainless SDKs' retry loop (anthropic-sdk-go v1.84.0 and openai-go v3.91.1
-//! `internal/requestconfig`), parameterised by a [`RetryPolicy`], a [`CallTimeout`] and a
+//! `POST` with the retry loop of the official Anthropic and OpenAI SDKs, parameterised by a
+//! [`RetryPolicy`], a [`CallTimeout`] and a
 //! per-attempt [`RequestHeaders`] provider.
 //!
 //! - [`RestTransport::send`] returns a [`RestReply`]: the final response with its body read
 //!   (every status ≥ 400, and a non-streaming 2xx), or a streaming 2xx with its live body.
 //! - Failures are a provider-neutral [`RestError`]; each provider maps it to its own error
 //!   type and text.
-//! - [`googleapi`]: Go's `*googleapi.Error` ([`googleapi::ApiError`]) and
-//!   `googleapi.CheckResponse` ([`googleapi::check_response`]) for the Google REST clients.
+//! - [`googleapi`]: the Google API HTTP error ([`googleapi::ApiError`]) and the response check
+//!   that builds it ([`googleapi::check_response`]) for the Google REST clients.
 //! - Feature `test-util` adds `test_util`: a scripted in-process `HttpClient` and a
 //!   127.0.0.1 fake server.
 

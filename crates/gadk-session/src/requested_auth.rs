@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `internal/sessionutils/requested_auth.go`: the append-time check of
-//! [`crate::EventActions::requested_auth_configs`].
+//! The append-time check of [`crate::EventActions::requested_auth_configs`].
 
 use std::collections::BTreeMap;
 
@@ -23,7 +22,7 @@ use serde_json::value::RawValue;
 use crate::toolauth::Config;
 use crate::toolauth::model_json::GoJson;
 
-/// Go `sessionutils.CheckRequestedAuthConfigs`: an error when a request in `configs` would not
+/// An error when a request in `configs` would not
 /// read back from storage as a [`Config`].
 ///
 /// A [`Config`] built as a struct literal is not checked when it is built, and its encoder
@@ -34,22 +33,22 @@ use crate::toolauth::model_json::GoJson;
 ///
 /// The configs are read back with every number as a float64, as the Vertex AI service stores
 /// them through `structpb`, so an integer such as an `expiresAt` that the conversion rounds out
-/// of range is refused too. The error text is Go's.
+/// of range is refused too. The error text is byte-identical to an ADK server's.
 pub fn check_requested_auth_configs(configs: &BTreeMap<String, Config>) -> Result<(), String> {
     if configs.is_empty() {
         return Ok(());
     }
     let encoded = serde_json::to_string(configs)
         .map_err(|e| format!("encode requested auth configs: {e}"))?;
-    // Go `json.Unmarshal(b, &stored)` into `any`: every number becomes a float64.
+    // Decode into a dynamic value: every number becomes a float64.
     let stored = GoJson::parse(&encoded)
         .map_err(|e| format!("decode requested auth configs: {e}"))
         .and_then(|tree| {
             as_float64(tree).map_err(|e| format!("decode requested auth configs: {e}"))
         })?;
     let reencoded = stored.encode(true);
-    // Go `json.Unmarshal(b, &decoded)` into `map[string]toolauth.Config`: keys in text order
-    // (sorted), each value through `Config.UnmarshalJSON`, whose error is returned unwrapped.
+    // Decode into `BTreeMap<String, Config>`: keys in text order
+    // (sorted), each value through the `Config` decoder, whose error is returned unwrapped.
     let entries: BTreeMap<String, Box<RawValue>> = serde_json::from_str(&reencoded)
         .map_err(|e| format!("requested auth configs do not decode: {e}"))?;
     for raw in entries.values() {
@@ -58,7 +57,7 @@ pub fn check_requested_auth_configs(configs: &BTreeMap<String, Config>) -> Resul
     Ok(())
 }
 
-/// Go's `any` decode of a JSON number: a float64, written back by `json.Marshal`.
+/// A JSON number decoded into a dynamic value: a float64, written back in float64 form.
 fn as_float64(v: GoJson) -> Result<GoJson, String> {
     Ok(match v {
         GoJson::Number(text) => {
@@ -87,9 +86,9 @@ fn as_float64(v: GoJson) -> Result<GoJson, String> {
     })
 }
 
-/// Go `encoding/json`'s float64 encoder (`floatEncoder.encode`): `strconv` format `'f'` with
-/// the shortest digits, or `'e'` when the magnitude is below 1e-6 or at least 1e21, with the
-/// exponent's sign always written and a negative one-digit exponent not zero-padded.
+/// The float64 JSON encoder: `'f'` format with the shortest digits, or `'e'` when the
+/// magnitude is below 1e-6 or at least 1e21, with the exponent's sign always written and a
+/// negative one-digit exponent not zero-padded.
 fn go_json_float(f: f64) -> String {
     let abs = f.abs();
     if abs != 0.0 && !(1e-6..1e21).contains(&abs) {

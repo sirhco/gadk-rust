@@ -13,12 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Inbound HTTP authentication for the ADK REST API (port of ADK-Go `server/authn`).
+//! Inbound HTTP authentication for the ADK REST API.
 //!
 //! An [`Authenticator`] resolves a request's credentials to a [`Caller`]; [`middleware`] gates a
 //! route with one, answering 401 when a request carries no valid credentials, 403 when the
 //! authenticated principal is refused and 500 on a provider failure, and otherwise inserting the
-//! [`Caller`] as a request extension (Go `WithCaller` / `CallerFromContext`). Built-in providers:
+//! [`Caller`] as a request extension. Built-in providers:
 //! [`noop`], [`header`], [`identity_aware_proxy`], [`custom`] and [`google_oidc`].
 
 use std::convert::Infallible;
@@ -44,7 +44,7 @@ pub use header::header;
 pub use iap::{USER_EMAIL_HEADER, USER_ID_HEADER, identity_aware_proxy};
 pub use noop::noop;
 
-/// Port of Go `authn.Caller`: the authenticated principal resolved from a request.
+/// The authenticated principal resolved from a request.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Caller {
     /// The stable identifier of the caller.
@@ -56,20 +56,19 @@ pub struct Caller {
 /// An authentication failure. The cause is for logs only; it is never sent to the client.
 #[derive(Debug, thiserror::Error)]
 pub enum AuthnError {
-    /// Go `ErrUnauthenticated` (or an error wrapping it): no valid credentials; answered 401.
+    /// No valid credentials; answered 401.
     #[error("authn: unauthenticated{}", .0.as_ref().map(|c| format!(": {c}")).unwrap_or_default())]
     Unauthenticated(Option<String>),
-    /// Go `ErrForbidden` (or an error wrapping it): valid credentials, refused principal;
-    /// answered 403.
+    /// Valid credentials, but the principal is refused; answered 403.
     #[error("authn: forbidden{}", .0.as_ref().map(|c| format!(": {c}")).unwrap_or_default())]
     Forbidden(Option<String>),
-    /// Any other provider failure (Go text); answered 500. Also a construction error of
+    /// Any other provider failure; answered 500. Also a construction error of
     /// [`google_oidc`].
     #[error("{0}")]
     Other(String),
 }
 
-/// Port of Go `authn.Authenticator`: authenticates an inbound HTTP request.
+/// Authenticates an inbound HTTP request.
 #[async_trait::async_trait]
 pub trait Authenticator: Send + Sync {
     /// Verifies the request's credentials and returns the authenticated identity. `Ok(None)` is a
@@ -77,7 +76,7 @@ pub trait Authenticator: Send + Sync {
     async fn authenticate(&self, req: &http::request::Parts) -> Result<Option<Caller>, AuthnError>;
 }
 
-/// Port of Go `authn.Middleware`: a [`tower::Layer`] that authenticates every request before the
+/// A [`tower::Layer`] that authenticates every request before the
 /// inner service sees it.
 pub fn middleware(authenticator: Arc<dyn Authenticator>) -> AuthnLayer {
     AuthnLayer { authenticator }
@@ -142,8 +141,9 @@ where
     }
 }
 
-/// Go `writeAuthError`: 403 `forbidden`, 401 `unauthorized`, any other error 500
-/// `authentication failed`, each in Go's `http.Error` framing; the cause is logged only.
+/// The error response: 403 `forbidden`, 401 `unauthorized`, any other error 500
+/// `authentication failed`, each framed like [`http_error`] (plain text plus a trailing newline);
+/// the cause is logged only.
 fn write_auth_error(err: &AuthnError) -> axum::response::Response {
     tracing::debug!(error = %err, "authentication failed");
     match err {

@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! [`InMemoryArtifactService`]: a process-local [`ArtifactService`] (port of Go
-//! artifact/inmemory.go).
+//! [`InMemoryArtifactService`]: a process-local [`ArtifactService`].
 
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
@@ -35,10 +34,9 @@ use crate::service::{
 };
 use crate::util::{file_has_user_namespace, go_path_escape, go_sprint, validation_failed};
 
-/// Port of Go artifactKey. Derived `Ord` (with the version reversed) reproduces the
-/// `ordered.Encode(app, user, session, file, ordered.Rev(version))` byte order, so a
-/// `BTreeMap<ArtifactKey, _>` range scan visits the newest version of a file first, as Go's
-/// omap scan does.
+/// The storage key of one artifact version. Derived `Ord` (app, user, session, file, then the
+/// version reversed) makes a `BTreeMap<ArtifactKey, _>` range scan visit the newest version of
+/// a file first.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct ArtifactKey {
     app_name: String,
@@ -66,8 +64,7 @@ impl ArtifactKey {
 
 #[cfg(test)]
 impl ArtifactKey {
-    /// Port of Go artifactKey.Encode (exercised by TestArtifactKey only; the store keys by the
-    /// struct).
+    /// Encodes the key as a JSON array (used by tests only; the store keys by the struct).
     pub(crate) fn encode(&self) -> String {
         serde_json::json!([
             self.app_name,
@@ -79,7 +76,7 @@ impl ArtifactKey {
         .to_string()
     }
 
-    /// Port of Go artifactKey.Decode.
+    /// Decodes a key written by `encode`.
     pub(crate) fn decode(s: &str) -> Result<Self, ArtifactError> {
         let invalid = || ArtifactError::InvalidRequest(format!("invalid artifact key: {s}"));
         let parsed: (String, String, String, String, i64) =
@@ -89,21 +86,21 @@ impl ArtifactKey {
     }
 }
 
-/// Port of Go artifactEntry.
+/// One stored artifact version.
 struct ArtifactEntry {
     part: Part,
     create_time: DateTime<Utc>,
     custom_metadata: Map<String, Value>,
 }
 
-/// Port of Go inMemoryService: an [`ArtifactService`] that keeps every artifact version in
+/// An [`ArtifactService`] that keeps every artifact version in
 /// process memory.
 pub struct InMemoryArtifactService {
     platform: Platform,
     artifacts: RwLock<BTreeMap<ArtifactKey, ArtifactEntry>>,
 }
 
-/// Port of Go userScopedArtifactKey: the session slot user-scoped artifacts are stored under.
+/// The session slot user-scoped artifacts are stored under.
 const USER_SCOPED_ARTIFACT_KEY: &str = "user";
 
 /// Session slot an artifact is stored under: `"user"` for user-scoped file names.
@@ -141,13 +138,12 @@ fn session_file_names<'a>(
 }
 
 impl InMemoryArtifactService {
-    /// Port of Go artifact.InMemoryService, using the default [`Platform`].
+    /// An in-memory service using the default [`Platform`].
     pub fn new() -> Self {
         Self::with_platform(Platform::default())
     }
 
-    /// An in-memory service whose create times come from `platform` (Go reads the clock from
-    /// ctx via `platform.Now`).
+    /// An in-memory service whose create times come from `platform`.
     pub fn with_platform(platform: Platform) -> Self {
         Self {
             platform,
@@ -168,7 +164,7 @@ impl std::fmt::Debug for InMemoryArtifactService {
     }
 }
 
-/// Port of Go inMemoryService.find: the latest version of a file and its entry.
+/// The latest version of a file and its entry.
 fn find<'a>(
     artifacts: &'a BTreeMap<ArtifactKey, ArtifactEntry>,
     app: &str,
@@ -193,24 +189,24 @@ struct Scope<'a> {
     version: i64,
 }
 
-/// Port of Go maxArtifactRefDepth: reference hops [`resolve`] follows (adk-python's
+/// The number of reference hops [`resolve`] follows (adk-python's
 /// `_MAX_ARTIFACT_REFERENCE_DEPTH`).
 const MAX_ARTIFACT_REF_DEPTH: i32 = 5;
 
-/// Go's `errors.New("invalid artifact reference URI")`.
+/// The error for a reference URI that does not parse.
 fn invalid_reference_uri() -> ArtifactError {
     ArtifactError::InvalidRequest("invalid artifact reference URI".into())
 }
 
-/// Go's `fmt.Errorf("invalid artifact reference: %w", err)`.
+/// The error for a reference that fails the scope check; `err` is the reason.
 fn invalid_reference(err: String) -> ArtifactError {
     ArtifactError::InvalidRequest(format!("invalid artifact reference: {err}"))
 }
 
-/// Port of Go inMemoryService.resolve: the entry Load reports for the named artifact,
-/// following artifact references. Each hop re-validates scope, so a reference can never escape
-/// the app/user/session it was saved under; at most [`MAX_ARTIFACT_REF_DEPTH`] reference hops
-/// are followed (the requested artifact does not count), which bounds cycles.
+/// The entry Load reports for the named artifact, following artifact references. Each hop
+/// re-validates scope, so a reference can never escape the app/user/session it was saved
+/// under; at most [`MAX_ARTIFACT_REF_DEPTH`] reference hops are followed (the requested
+/// artifact does not count), which bounds cycles.
 fn resolve<'a>(
     artifacts: &'a BTreeMap<ArtifactKey, ArtifactEntry>,
     start: Scope<'_>,
@@ -264,7 +260,7 @@ fn resolve<'a>(
     }
 }
 
-/// Port of Go inMemoryService.get.
+/// The entry of one exact version, if stored.
 fn get<'a>(
     artifacts: &'a BTreeMap<ArtifactKey, ArtifactEntry>,
     app: &str,
@@ -278,7 +274,7 @@ fn get<'a>(
 
 #[async_trait::async_trait]
 impl ArtifactService for InMemoryArtifactService {
-    /// Port of Go inMemoryService.Save.
+    /// Saves a new version; an `artifact://` reference part is allowed and scope-checked.
     async fn save(&self, req: SaveRequest) -> Result<SaveResponse, ArtifactError> {
         // Allow artifact reference parts, which carry neither text nor inline data and are
         // only understood by this service; the scope check below re-validates that a
@@ -348,7 +344,7 @@ impl ArtifactService for InMemoryArtifactService {
         })
     }
 
-    /// Port of Go inMemoryService.Load: follows `artifact://` references.
+    /// Loads an artifact: follows `artifact://` references.
     async fn load(&self, req: LoadRequest) -> Result<LoadResponse, ArtifactError> {
         req.validate().map_err(validation_failed)?;
         let artifacts = self.artifacts.read();
@@ -367,7 +363,7 @@ impl ArtifactService for InMemoryArtifactService {
         })
     }
 
-    /// Port of Go inMemoryService.Delete.
+    /// Deletes one version, or every version when `req.version` is 0.
     async fn delete(&self, req: DeleteRequest) -> Result<(), ArtifactError> {
         req.validate().map_err(validation_failed)?;
         let session_id = storage_session(&req.session_id, &req.file_name);
@@ -397,7 +393,7 @@ impl ArtifactService for InMemoryArtifactService {
         Ok(())
     }
 
-    /// Port of Go inMemoryService.List.
+    /// Lists the file names of the session plus the user-scoped (`user:`) files.
     async fn list(&self, req: ListRequest) -> Result<ListResponse, ArtifactError> {
         req.validate().map_err(validation_failed)?;
         let artifacts = self.artifacts.read();
@@ -405,7 +401,7 @@ impl ArtifactService for InMemoryArtifactService {
             session_file_names(&artifacts, &req.app_name, &req.user_id, &req.session_id).collect();
         // Besides the session specific artifacts, also retrieve user scoped artifacts.
         // Session ID "user" shares this key range with user-scoped artifacts, so skip that
-        // session's private files. Python rejects the ID instead, but Go already accepts it.
+        // session's private files. Python rejects the ID instead, but this service accepts it.
         files.extend(
             session_file_names(
                 &artifacts,
@@ -420,7 +416,7 @@ impl ArtifactService for InMemoryArtifactService {
         })
     }
 
-    /// Port of Go inMemoryService.Versions.
+    /// Lists the versions of a file, newest first; [`ArtifactError::NotFound`] when none exist.
     async fn versions(&self, req: VersionsRequest) -> Result<VersionsResponse, ArtifactError> {
         req.validate().map_err(validation_failed)?;
         let session_id = storage_session(&req.session_id, &req.file_name);
@@ -440,7 +436,7 @@ impl ArtifactService for InMemoryArtifactService {
         Ok(VersionsResponse { versions })
     }
 
-    /// Port of Go inMemoryService.GetArtifactVersion.
+    /// Reports the metadata of one version (the latest when `req.version` is 0).
     async fn get_artifact_version(
         &self,
         req: GetArtifactVersionRequest,

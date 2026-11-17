@@ -13,9 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The invocation identity value (port of Go `agent.Identity`, agent/common_context.go:58-90).
+//! The invocation identity value.
 
-/// Go `agent.Identity`: who the invocation acts for. Read it with
+/// Who the invocation acts for. Read it with
 /// [`ReadonlyContext::identity`](crate::ReadonlyContext::identity).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct Identity {

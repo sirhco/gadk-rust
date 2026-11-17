@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Telemetry setup (port of ADK-Go `telemetry/setup_otel.go`): credentials, projects, the
-//! resource and the exporters, then the providers. Error texts are Go's.
+//! Telemetry setup: credentials, projects, the
+//! resource and the exporters, then the providers. Error texts are byte-identical to ADK's.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -46,13 +46,13 @@ use crate::http_client::RuntimeHttpClient;
 use crate::metric_reader::new_periodic_reader;
 use crate::resource::{go_default_resource, go_merge, new_with_attributes};
 
-/// Go `gcpTracesEndpoint`.
+/// The Google Cloud Telemetry traces endpoint.
 pub(crate) const GCP_TRACES_ENDPOINT: &str = "https://telemetry.googleapis.com/v1/traces";
 
-/// Go `gcpMetricsEndpoint`.
+/// The Google Cloud Telemetry metrics endpoint.
 pub(crate) const GCP_METRICS_ENDPOINT: &str = "https://telemetry.googleapis.com/v1/metrics";
 
-/// Go `gcpMetricExportInterval`.
+/// The metric export interval for Google Cloud export.
 const GCP_METRIC_EXPORT_INTERVAL: Duration = Duration::from_secs(5);
 
 /// The endpoints the GCP exporters send to (Cloud Trace, Cloud Monitoring and Cloud Logging):
@@ -65,7 +65,7 @@ pub(crate) struct GcpEndpoints<'a> {
 }
 
 impl GcpEndpoints<'static> {
-    /// Go's `gcpTracesEndpoint` and `gcpMetricsEndpoint`.
+    /// The traces and metrics endpoints of the Google Cloud Telemetry API.
     pub(crate) const TELEMETRY_API: Self = Self {
         traces: GCP_TRACES_ENDPOINT,
         metrics: GCP_METRICS_ENDPOINT,
@@ -74,11 +74,10 @@ impl GcpEndpoints<'static> {
 }
 
 /// Why an exporter could not be created outside a Tokio runtime.
-// Divergence (ledger 7a): Go has no runtime to require; gadk's exporters send on the Tokio
-// runtime that created them.
+// gadk's exporters send on the Tokio runtime that created them, so one must exist.
 const NO_RUNTIME: &str = "no Tokio runtime: telemetry exporters must be created from within one";
 
-/// Go `configure`: ADC when cloud export is on and no credentials were given, the quota and
+/// Configures telemetry: ADC when cloud export is on and no credentials were given, the quota and
 /// resource projects, the resource, then the exporters' processors and readers appended to the
 /// configured ones. `env` is the injected environment and `detector` the GCP resource detector.
 pub(crate) async fn configure(
@@ -132,7 +131,7 @@ pub(crate) async fn configure_to(
     Ok(cfg)
 }
 
-/// Go `resolveGcpQuotaProject`.
+/// Resolves the quota project.
 pub(crate) fn resolve_gcp_quota_project(
     cfg: &Config,
     env: &dyn EnvProvider,
@@ -146,7 +145,7 @@ pub(crate) fn resolve_gcp_quota_project(
     )
 }
 
-/// Go `resolveGcpResourceProject`.
+/// Resolves the resource project.
 pub(crate) fn resolve_gcp_resource_project(
     cfg: &Config,
     env: &dyn EnvProvider,
@@ -160,7 +159,7 @@ pub(crate) fn resolve_gcp_resource_project(
     )
 }
 
-/// Go `resolveProject`: the trimmed configured project, else the credentials' project ID, else
+/// Resolves one project: the trimmed configured project, else the credentials' project ID, else
 /// the trimmed `GOOGLE_CLOUD_PROJECT`; empty is an error only when `require_project`.
 pub(crate) fn resolve_project(
     configured_project: &str,
@@ -186,10 +185,10 @@ pub(crate) fn resolve_project(
     Ok(project.to_owned())
 }
 
-/// Go `resolveResource`, later layers overriding earlier ones:
+/// Resolves the resource, later layers overriding earlier ones:
 ///  1. With export to Google Cloud, a `service.instance.id` unique to this process.
-///  2. Go's default resource (`OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES`).
-///  3. `gcp.project_id`, only for a known project (Go #2082).
+///  2. The default resource (`OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES`).
+///  3. `gcp.project_id`, only for a known project.
 ///  4. With export to Google Cloud, the GCP detector's resource.
 ///  5. The configured resource.
 pub(crate) async fn resolve_resource(
@@ -207,7 +206,7 @@ pub(crate) async fn resolve_resource(
             .map_err(|e| format!("failed to merge default resource: {e}"))?;
     }
 
-    // Go `resource.New(ctx, WithAttributes(gcp.project_id), WithDetectors(gcp.NewDetector()))`.
+    // The `gcp.project_id` attribute and the GCP detector's resource.
     // Only a known project is recorded, as in adk-python: an empty one would still be merged
     // over the default resource and blank a gcp.project_id set in OTEL_RESOURCE_ATTRIBUTES.
     let project_attrs = (!cfg.gcp_resource_project.is_empty())
@@ -239,7 +238,7 @@ pub(crate) async fn resolve_resource(
     }
 }
 
-/// Go `serviceInstanceID`: an id unique to this process, in adk-python's `<uuid hex>-<pid>` form
+/// An id unique to this process, in adk-python's `<uuid hex>-<pid>` form
 /// (a random UUID from gadk-platform's provider, hyphens removed).
 fn service_instance_id() -> String {
     let uuid = Platform::default().new_uuid().replace('-', "");
@@ -252,12 +251,12 @@ fn trimmed_var(env: &dyn EnvProvider, key: &str) -> String {
 }
 
 /// The runtime exporters send on.
-// Divergence (ledger 7a): outside a Tokio runtime exporter creation fails with [`NO_RUNTIME`].
+// Outside a Tokio runtime exporter creation fails with [`NO_RUNTIME`].
 fn runtime_handle() -> Result<Handle, String> {
     Handle::try_current().map_err(|_| NO_RUNTIME.to_owned())
 }
 
-/// The processors and metric exporters [`configure_exporters`] builds (Go `exporters`).
+/// The processors and metric exporters [`configure_exporters`] builds.
 #[derive(Debug, Default)]
 pub(crate) struct Exporters {
     pub(crate) span_processors: Vec<SharedSpanProcessor>,
@@ -266,7 +265,7 @@ pub(crate) struct Exporters {
 }
 
 impl Exporters {
-    /// Go `exporters.add`.
+    /// Appends `other`'s processors and exporters.
     fn add(&mut self, other: Exporters) {
         self.span_processors.extend(other.span_processors);
         self.log_processors.extend(other.log_processors);
@@ -274,7 +273,7 @@ impl Exporters {
     }
 }
 
-/// Go `metricExporter`: a metric exporter and the interval of the periodic reader that will
+/// A metric exporter and the interval of the periodic reader that will
 /// drive it (`None`: the SDK's).
 #[derive(Debug)]
 pub(crate) struct PeriodicMetricExporter {
@@ -282,7 +281,7 @@ pub(crate) struct PeriodicMetricExporter {
     pub(crate) interval: Option<Duration>,
 }
 
-/// Go `ownProviders`: which providers [`crate::new`] builds itself, as opposed to taking from
+/// Which providers [`crate::new`] builds itself, as opposed to taking from
 /// `with_tracer_provider`, `with_logger_provider` or `with_meter_provider`.
 #[derive(Debug, Clone, Copy)]
 struct OwnProviders {
@@ -291,10 +290,10 @@ struct OwnProviders {
     meter: bool,
 }
 
-/// Go `configureExporters`: the OTLP/HTTP exporters the environment asks for and, with cloud
+/// The OTLP/HTTP exporters the environment asks for and, with cloud
 /// export on, the GCP exporters, each only for a provider [`crate::new`] builds itself.
 /// Exporters send through a [`crate::RuntimeHttpClient`] on the current Tokio runtime.
-// Divergence (ledger 7a): only the endpoints come from the injected environment; the other
+// Only the endpoints come from the injected environment; the other
 // `OTEL_EXPORTER_OTLP_*` variables (headers, timeout, compression, protocol) are read by
 // opentelemetry-otlp from the process environment.
 pub(crate) fn configure_exporters(
@@ -314,7 +313,7 @@ pub(crate) fn configure_exporters(
     Ok(exp)
 }
 
-/// Go `otlpExporters`.
+/// The OTLP/HTTP exporters the environment configures.
 fn otlp_exporters(env: &dyn EnvProvider, own: OwnProviders) -> Result<Exporters, String> {
     let endpoint = trimmed_var(env, "OTEL_EXPORTER_OTLP_ENDPOINT");
     let signal_var =
@@ -430,13 +429,13 @@ fn logs_stdout_env(env: &dyn EnvProvider) -> bool {
     v == "1" || v.eq_ignore_ascii_case("true")
 }
 
-/// The OTLP/HTTP endpoint of one signal, as Go's `otlptracehttp` / `otlploghttp` read it: the
-/// per-signal variable as is, else the generic endpoint with `path` joined to its path (Go
-/// `path.Join`, query dropped). An unparsable generic endpoint is returned as is, for the
+/// The OTLP/HTTP endpoint of one signal: the
+/// per-signal variable as is, else the generic endpoint with `path` joined to its path (query
+/// dropped). An unparsable generic endpoint is returned as is, for the
 /// exporter to reject.
 ///
-/// Divergence (ledger 7a): Go drops an unparsable endpoint and uses the default one;
-/// opentelemetry-otlp rejects it, so `new` fails with `failed to configure exporters: failed to
+/// opentelemetry-otlp rejects an unparsable endpoint, so `new` fails with
+/// `failed to configure exporters: failed to
 /// create OTLP HTTP exporter: <opentelemetry-otlp error>`.
 fn signal_endpoint(generic: &str, signal: &str, path: &str) -> String {
     if !signal.is_empty() {
@@ -451,7 +450,7 @@ fn signal_endpoint(generic: &str, signal: &str, path: &str) -> String {
     format!("{scheme}://{authority}{}", go_path_join(uri.path(), path))
 }
 
-/// Go `path.Join(base, elem)` for absolute paths: joined, then cleaned (`.`/`..` resolved,
+/// Joins two absolute paths, then cleans the result (`.`/`..` resolved,
 /// repeated and trailing slashes removed).
 fn go_path_join(base: &str, elem: &str) -> String {
     let mut out: Vec<&str> = Vec::new();
@@ -467,11 +466,11 @@ fn go_path_join(base: &str, elem: &str) -> String {
     format!("/{}", out.join("/"))
 }
 
-/// The GCP exporters' client (Go `oauth2.NewClient` with `WithHeaders`): the credentials'
+/// The GCP exporters' client: the credentials'
 /// headers and `x-goog-user-project: <quota project>` on every request.
 fn gcp_client(cfg: &Config) -> Result<RuntimeHttpClient, String> {
     let mut client = RuntimeHttpClient::new(runtime_handle()?);
-    // Go `oauth2.NewClient(ctx, nil)` is a plain client: no token source, no credentials.
+    // A plain client when there are no credentials: no token source.
     if let Some(credentials) = cfg
         .google_credentials
         .as_ref()
@@ -479,14 +478,13 @@ fn gcp_client(cfg: &Config) -> Result<RuntimeHttpClient, String> {
     {
         client = client.with_credentials(credentials);
     }
-    // Divergence (ledger 7a): Go's `WithHeaders` replaces the environment's headers;
-    // opentelemetry-otlp still adds `OTEL_EXPORTER_OTLP_HEADERS` to this exporter's requests.
+    // The explicit headers do not replace the environment's: opentelemetry-otlp still adds
+    // `OTEL_EXPORTER_OTLP_HEADERS` to this exporter's requests;
     // `x-goog-user-project` is still sent exactly once.
     // Pass the quota project id in headers to fix auth errors.
     // https://cloud.google.com/docs/authentication/adc-troubleshooting/user-creds
-    // Divergence (ledger 7a): a quota project that is not a valid header value fails here
-    // (`failed to parse header value`); Go accepts any string and `net/http` rejects the
-    // request at export time.
+    // A quota project that is not a valid header value fails here
+    // (`failed to parse header value`).
     let quota_project = HeaderValue::from_str(&cfg.gcp_quota_project).map_err(|e| e.to_string())?;
     Ok(client.with_header(
         HeaderName::from_static("x-goog-user-project"),
@@ -494,7 +492,7 @@ fn gcp_client(cfg: &Config) -> Result<RuntimeHttpClient, String> {
     ))
 }
 
-/// Go `gcpExporters`' span exporter: OTLP/HTTP protobuf to `endpoint`
+/// The GCP span exporter: OTLP/HTTP protobuf to `endpoint`
 /// ([`GCP_TRACES_ENDPOINT`] in production) through [`gcp_client`].
 pub(crate) fn new_gcp_span_exporter(
     cfg: &Config,
@@ -508,7 +506,7 @@ pub(crate) fn new_gcp_span_exporter(
         .map_err(|e| e.to_string())
 }
 
-/// Go `gcpExporters`' metric exporter: OTLP/HTTP protobuf to `endpoint`
+/// The GCP metric exporter: OTLP/HTTP protobuf to `endpoint`
 /// ([`GCP_METRICS_ENDPOINT`] in production) through [`gcp_client`].
 pub(crate) fn new_gcp_metric_exporter(
     cfg: &Config,
@@ -522,7 +520,7 @@ pub(crate) fn new_gcp_metric_exporter(
         .map_err(|e| e.to_string())
 }
 
-/// Go `initTracerProvider`: the configured provider, else `None` without span processors, else
+/// The configured tracer provider, else `None` without span processors, else
 /// a provider with the resource and the processors.
 pub(crate) fn init_tracer_provider(cfg: &Config) -> Option<SdkTracerProvider> {
     if let Some(provider) = &cfg.tracer_provider {
@@ -541,7 +539,8 @@ pub(crate) fn init_tracer_provider(cfg: &Config) -> Option<SdkTracerProvider> {
     Some(builder.build())
 }
 
-/// Go `initLoggerProvider`.
+/// The configured logger provider, else `None` without log record processors, else a
+/// provider with the resource and the processors.
 pub(crate) fn init_logger_provider(cfg: &Config) -> Option<SdkLoggerProvider> {
     if let Some(provider) = &cfg.logger_provider {
         return Some(provider.clone());
@@ -559,7 +558,7 @@ pub(crate) fn init_logger_provider(cfg: &Config) -> Option<SdkLoggerProvider> {
     Some(builder.build())
 }
 
-/// Go `initMeterProvider`: the configured provider, else `None` without readers, else a
+/// The configured meter provider, else `None` without readers, else a
 /// provider with the resource and the readers.
 pub(crate) fn init_meter_provider(cfg: &Config) -> Option<SdkMeterProvider> {
     if let Some(provider) = &cfg.meter_provider {

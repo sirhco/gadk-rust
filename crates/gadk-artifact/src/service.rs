@@ -14,7 +14,7 @@
 // limitations under the License.
 
 //! The artifact service API: [`ArtifactService`], its request/response types, request
-//! validation, and [`ArtifactError`] (port of Go artifact/service.go).
+//! validation, and [`ArtifactError`].
 
 use chrono::{DateTime, Utc};
 use gadk_genai::Part;
@@ -26,11 +26,12 @@ use crate::artifact_util::is_artifact_ref;
 #[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 pub enum ArtifactError {
-    /// The artifact (or the requested version) does not exist. Go:
-    /// `fmt.Errorf("artifact not found: %w", fs.ErrNotExist)`.
+    /// The artifact (or the requested version) does not exist. The `Display` text is
+    /// `artifact not found: file does not exist`.
     #[error("artifact not found: file does not exist")]
     NotFound,
-    /// The request failed validation; the payload is Go's exact error text.
+    /// The request failed validation; the payload is the full error text, e.g.
+    /// `invalid save request: missing required fields: AppName`.
     #[error("{0}")]
     InvalidRequest(String),
     /// A storage-backend failure.
@@ -38,7 +39,7 @@ pub enum ArtifactError {
     Backend(Box<dyn std::error::Error + Send + Sync>),
 }
 
-/// Port of Go artifact.Service: the artifact storage service.
+/// The artifact storage service.
 #[async_trait::async_trait]
 pub trait ArtifactService: Send + Sync {
     /// Save saves an artifact to the artifact service storage.
@@ -66,13 +67,13 @@ pub trait ArtifactService: Send + Sync {
     ) -> Result<GetArtifactVersionResponse, ArtifactError>;
 }
 
-/// Port of Go artifact/service.go requiredField.
+/// A named field and its value, for required-field validation.
 pub(crate) struct RequiredField<'a> {
     pub(crate) name: &'a str,
     pub(crate) value: &'a str,
 }
 
-/// Port of Go validateRequiredStrings: names of empty fields, in input order.
+/// The names of the empty fields, in input order.
 pub(crate) fn validate_required_strings<'a>(fields: &[RequiredField<'a>]) -> Vec<&'a str> {
     fields
         .iter()
@@ -81,7 +82,7 @@ pub(crate) fn validate_required_strings<'a>(fields: &[RequiredField<'a>]) -> Vec
         .collect()
 }
 
-/// Port of Go validateFileName.
+/// Rejects a file name that contains a path separator (`/` or `\`).
 fn validate_file_name(name: &str) -> Result<(), ArtifactError> {
     if name.contains('/') || name.contains('\\') {
         return Err(ArtifactError::InvalidRequest(
@@ -91,8 +92,8 @@ fn validate_file_name(name: &str) -> Result<(), ArtifactError> {
     Ok(())
 }
 
-/// The `invalid <kind> request: missing required fields: ...` error Go builds in every
-/// `Validate`, or `Ok` when no field is missing.
+/// The `invalid <kind> request: missing required fields: ...` error every
+/// `validate` builds, or `Ok` when no field is missing.
 fn missing(kind: &str, fields: &[&str]) -> Result<(), ArtifactError> {
     if fields.is_empty() {
         return Ok(());
@@ -103,7 +104,7 @@ fn missing(kind: &str, fields: &[&str]) -> Result<(), ArtifactError> {
     )))
 }
 
-/// The four identifying fields, in Go's check order.
+/// The four identifying fields, in check order (the order they appear in the error text).
 fn file_fields<'a>(
     app_name: &'a str,
     user_id: &'a str,
@@ -130,7 +131,7 @@ fn file_fields<'a>(
     ]
 }
 
-/// Port of Go artifact.SaveRequest.
+/// A request to save an artifact version.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SaveRequest {
     pub app_name: String,
@@ -149,14 +150,14 @@ pub struct SaveRequest {
 }
 
 impl SaveRequest {
-    /// Port of Go SaveRequest.Validate. A part must carry text or inline data: an
+    /// Validates the request. A part must carry text or inline data: an
     /// `artifact://` reference part is refused here, as every backend but the in-memory one
     /// relies on.
     pub fn validate(&self) -> Result<(), ArtifactError> {
         self.validate_with(false)
     }
 
-    /// Port of Go SaveRequest.validate: the shared validation, with `allow_ref` tolerating an
+    /// The shared validation, with `allow_ref` tolerating an
     /// `artifact://` reference part. Only [`crate::InMemoryArtifactService`] understands
     /// references, so it is the sole caller that sets it.
     pub(crate) fn validate_with(&self, allow_ref: bool) -> Result<(), ArtifactError> {
@@ -183,13 +184,13 @@ impl SaveRequest {
     }
 }
 
-/// Port of Go artifact.SaveResponse.
+/// The result of a save: the version that was created.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SaveResponse {
     pub version: i64,
 }
 
-/// Port of Go artifact.LoadRequest. `version` is optional (0 means the latest).
+/// A request to load an artifact. `version` is optional (0 means the latest).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct LoadRequest {
     pub app_name: String,
@@ -200,7 +201,8 @@ pub struct LoadRequest {
 }
 
 impl LoadRequest {
-    /// Port of Go LoadRequest.Validate.
+    /// Validates the request: every identifying field is set and the file name has no path
+    /// separator.
     pub fn validate(&self) -> Result<(), ArtifactError> {
         let fields = file_fields(
             &self.app_name,
@@ -213,14 +215,14 @@ impl LoadRequest {
     }
 }
 
-/// Port of Go artifact.LoadResponse.
+/// The result of a load.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct LoadResponse {
     /// The artifact stored.
     pub part: Option<Part>,
 }
 
-/// Port of Go artifact.DeleteRequest. `version` is optional (0 means every version).
+/// A request to delete an artifact. `version` is optional (0 means every version).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DeleteRequest {
     pub app_name: String,
@@ -231,7 +233,8 @@ pub struct DeleteRequest {
 }
 
 impl DeleteRequest {
-    /// Port of Go DeleteRequest.Validate.
+    /// Validates the request: every identifying field is set and the file name has no path
+    /// separator.
     pub fn validate(&self) -> Result<(), ArtifactError> {
         let fields = file_fields(
             &self.app_name,
@@ -244,7 +247,7 @@ impl DeleteRequest {
     }
 }
 
-/// Port of Go artifact.ListRequest.
+/// A request to list the artifact file names of a session.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ListRequest {
     pub app_name: String,
@@ -253,7 +256,7 @@ pub struct ListRequest {
 }
 
 impl ListRequest {
-    /// Port of Go ListRequest.Validate.
+    /// Validates the request: the app name, user ID and session ID are set.
     pub fn validate(&self) -> Result<(), ArtifactError> {
         let fields = [
             RequiredField {
@@ -273,13 +276,13 @@ impl ListRequest {
     }
 }
 
-/// Port of Go artifact.ListResponse.
+/// The artifact file names of a session.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ListResponse {
     pub file_names: Vec<String>,
 }
 
-/// Port of Go artifact.VersionsRequest.
+/// A request to list the versions of an artifact.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct VersionsRequest {
     pub app_name: String,
@@ -289,7 +292,8 @@ pub struct VersionsRequest {
 }
 
 impl VersionsRequest {
-    /// Port of Go VersionsRequest.Validate.
+    /// Validates the request: every identifying field is set and the file name has no path
+    /// separator.
     pub fn validate(&self) -> Result<(), ArtifactError> {
         let fields = file_fields(
             &self.app_name,
@@ -302,13 +306,13 @@ impl VersionsRequest {
     }
 }
 
-/// Port of Go artifact.VersionsResponse.
+/// The versions of an artifact.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct VersionsResponse {
     pub versions: Vec<i64>,
 }
 
-/// Port of Go artifact.ArtifactVersion: metadata of one stored artifact version.
+/// Metadata of one stored artifact version.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ArtifactVersion {
     pub version: i64,
@@ -326,7 +330,7 @@ pub struct ArtifactVersion {
     pub mime_type: String,
 }
 
-/// Port of Go artifact.GetArtifactVersionRequest. `version` is optional (0 means the latest).
+/// A request for the metadata of one artifact version. `version` is optional (0 means the latest).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct GetArtifactVersionRequest {
     pub app_name: String,
@@ -337,7 +341,8 @@ pub struct GetArtifactVersionRequest {
 }
 
 impl GetArtifactVersionRequest {
-    /// Port of Go GetArtifactVersionRequest.Validate.
+    /// Validates the request: every identifying field is set and the file name has no path
+    /// separator.
     pub fn validate(&self) -> Result<(), ArtifactError> {
         let fields = file_fields(
             &self.app_name,
@@ -350,7 +355,7 @@ impl GetArtifactVersionRequest {
     }
 }
 
-/// Port of Go artifact.GetArtifactVersionResponse.
+/// The metadata of one artifact version.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct GetArtifactVersionResponse {
     pub artifact_version: Option<ArtifactVersion>,

@@ -13,13 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Gemini native tools (port of Go `tool/geminitool`).
+//! Gemini native tools.
 //!
 //! [`new`] wraps any [`gadk_genai::Tool`] (for example a retrieval tool). The unit structs
 //! [`GoogleSearch`], [`GoogleMaps`], [`UrlContext`] and [`EnterpriseWebSearch`] are the default
 //! built-ins. None of them declares a function, so the flow never packs them into
 //! `LlmRequest::tools`. Each one adds its `genai::Tool` to `req.config.tools` in
-//! `process_request`, after Go's model checks.
+//! `process_request`, after its model checks.
 
 use std::any::Any;
 use std::sync::Arc;
@@ -29,7 +29,7 @@ use gadk_agent::{Context, Tool, ToolError};
 use gadk_genai::GenerateContentConfig;
 use gadk_model::{LlmRequest, is_gemini_model, is_gemini1_model};
 
-/// Port of Go `geminitool.New` (tool.go:43): a tool that adds `tool` to every model request.
+/// A tool that adds `tool` to every model request.
 pub fn new(
     name: impl Into<String>,
     description: impl Into<String>,
@@ -42,7 +42,7 @@ pub fn new(
     })
 }
 
-/// Port of Go `geminiTool` (tool.go:52): a wrapper around a `genai.Tool`.
+/// A wrapper around a [`gadk_genai::Tool`].
 struct GeminiTool {
     name: String,
     description: String,
@@ -59,7 +59,7 @@ impl Tool for GeminiTool {
         &self.description
     }
 
-    /// Port of Go `geminiTool.ProcessRequest` (tool.go:59).
+    /// Adds the wrapped tool to `req.config.tools`.
     async fn process_request(&self, _ctx: &Context, req: &mut LlmRequest) -> Result<(), ToolError> {
         set_tool(req, self.value.clone());
         Ok(())
@@ -70,7 +70,7 @@ impl Tool for GeminiTool {
     }
 }
 
-/// Port of Go `setTool` (tool.go:78). Go's nil-request check has no Rust counterpart.
+/// Adds `t` to `req.config.tools`, creating the config when there is none.
 fn set_tool(req: &mut LlmRequest, t: gadk_genai::Tool) {
     req.config
         .get_or_insert_with(GenerateContentConfig::default)
@@ -78,16 +78,16 @@ fn set_tool(req: &mut LlmRequest, t: gadk_genai::Tool) {
         .push(t);
 }
 
-/// Go `fmt.Errorf("cannot process: <tool> tool is not supported for model %v", req.Model)`.
+/// The error for a tool that does not support `model`:
+/// `cannot process: <tool> tool is not supported for model <model>`.
 fn unsupported(tool: &str, model: &str) -> ToolError {
     ToolError::InvalidArgument(format!(
         "cannot process: {tool} tool is not supported for model {model}"
     ))
 }
 
-/// Port of Go `geminitool.GoogleSearch` (google_search.go:31): a built-in tool that Gemini 2
-/// models invoke automatically to retrieve Google Search results. It runs inside the model and
-/// executes nothing locally.
+/// A built-in tool that Gemini 2 models invoke automatically to retrieve Google Search results. It
+/// runs inside the model and executes nothing locally.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct GoogleSearch;
 
@@ -101,8 +101,8 @@ impl Tool for GoogleSearch {
         "Performs a Google search to retrieve information from the web."
     }
 
-    /// Port of Go `GoogleSearch.ProcessRequest` (google_search.go:44). A Gemini 1.x model is
-    /// rejected only when the request already carries function tools (`req.tools`).
+    /// Adds Google Search to the request. A Gemini 1.x model is rejected only when the request
+    /// already carries function tools (`req.tools`).
     async fn process_request(&self, _ctx: &Context, req: &mut LlmRequest) -> Result<(), ToolError> {
         if !is_gemini_model(&req.model) {
             return Err(unsupported("Google search", &req.model));
@@ -128,8 +128,7 @@ impl Tool for GoogleSearch {
     }
 }
 
-/// Port of Go `geminitool.GoogleMaps` (google_maps.go:31): a built-in tool that Gemini 2 models
-/// invoke automatically to retrieve Google Maps results.
+/// A built-in tool that Gemini 2 models invoke automatically to retrieve Google Maps results.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct GoogleMaps;
 
@@ -143,8 +142,7 @@ impl Tool for GoogleMaps {
         "Performs a Google map search to retrieve geographical information from the web."
     }
 
-    /// Port of Go `GoogleMaps.ProcessRequest` (google_maps.go:44). Every Gemini 1.x model is
-    /// rejected.
+    /// Adds Google Maps to the request. Every Gemini 1.x model is rejected.
     async fn process_request(&self, _ctx: &Context, req: &mut LlmRequest) -> Result<(), ToolError> {
         if !is_gemini_model(&req.model) {
             return Err(unsupported("Google maps", &req.model));
@@ -170,8 +168,7 @@ impl Tool for GoogleMaps {
     }
 }
 
-/// Port of Go `geminitool.UrlContext` (url_context.go:31): a built-in tool that Gemini 2 models
-/// invoke automatically to retrieve the content of web pages.
+/// A built-in tool that Gemini 2 models invoke automatically to retrieve the content of web pages.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct UrlContext;
 
@@ -185,8 +182,7 @@ impl Tool for UrlContext {
         "Allows to access the content from web pages."
     }
 
-    /// Port of Go `UrlContext.ProcessRequest` (url_context.go:44). Every Gemini 1.x model is
-    /// rejected.
+    /// Adds URL context to the request. Every Gemini 1.x model is rejected.
     async fn process_request(&self, _ctx: &Context, req: &mut LlmRequest) -> Result<(), ToolError> {
         if !is_gemini_model(&req.model) {
             return Err(unsupported("Url context", &req.model));
@@ -211,9 +207,9 @@ impl Tool for UrlContext {
     }
 }
 
-/// Port of Go `geminitool.EnterpriseWebSearch` (enterprise_web_search.go:38): grounds responses
-/// in web search results under Enterprise compliance controls. It is a model built-in, never
-/// executed locally. It is not Vertex AI Search (formerly "Enterprise Search").
+/// A built-in tool that grounds responses in web search results under Enterprise compliance
+/// controls. It is a model built-in, never executed locally. It is not Vertex AI Search (formerly
+/// "Enterprise Search").
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct EnterpriseWebSearch;
 
@@ -227,9 +223,8 @@ impl Tool for EnterpriseWebSearch {
         "Performs web grounding for Enterprise compliance"
     }
 
-    /// Port of Go `EnterpriseWebSearch.ProcessRequest` (enterprise_web_search.go:60). The config
-    /// is created first, as Go does. A Gemini 1.x model is rejected only when `req.config.tools`
-    /// is non-empty.
+    /// Adds Enterprise web search to the request. The config is created first. A Gemini 1.x model
+    /// is rejected only when `req.config.tools` is non-empty.
     async fn process_request(&self, _ctx: &Context, req: &mut LlmRequest) -> Result<(), ToolError> {
         let has_other_tools = !req
             .config

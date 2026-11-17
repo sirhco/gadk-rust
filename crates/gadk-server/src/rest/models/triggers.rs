@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `models/triggers.go`: Pub/Sub push and Eventarc (CloudEvents) envelopes.
+//! Pub/Sub push and Eventarc (CloudEvents) envelopes.
 
 use std::collections::BTreeMap;
 
@@ -24,7 +24,7 @@ use serde_json::value::RawValue;
 
 use super::null_default;
 
-/// Port of Go `models.PubSubTriggerRequest`.
+/// A Pub/Sub push request.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PubSubTriggerRequest {
@@ -36,23 +36,23 @@ pub struct PubSubTriggerRequest {
     pub subscription: String,
 }
 
-/// Port of Go `models.PubSubMessage`.
+/// A Pub/Sub message.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct PubSubMessage {
     /// The payload (base64 on the wire).
     #[serde(with = "base64_bytes")]
     pub data: Bytes,
-    /// Go `MessageID`.
+    /// The message ID.
     #[serde(deserialize_with = "null_default")]
     pub message_id: String,
-    /// Go `PublishTime`.
+    /// When the message was published.
     #[serde(deserialize_with = "null_default")]
     pub publish_time: String,
-    /// `omitempty`.
+    /// Omitted from the JSON when empty.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attributes: Option<BTreeMap<String, String>>,
-    /// `omitempty`.
+    /// Omitted from the JSON when empty.
     #[serde(
         skip_serializing_if = "String::is_empty",
         deserialize_with = "null_default"
@@ -60,7 +60,7 @@ pub struct PubSubMessage {
     pub ordering_key: String,
 }
 
-/// Port of Go `models.EventarcTriggerRequest` (structured-mode CloudEvent).
+/// An Eventarc request (a structured-mode CloudEvent).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EventarcTriggerRequest {
@@ -76,14 +76,14 @@ pub struct EventarcTriggerRequest {
     /// CloudEvents `specversion`.
     #[serde(rename = "specversion", deserialize_with = "null_default")]
     pub spec_version: String,
-    /// `omitempty`.
+    /// Omitted from the JSON when empty.
     #[serde(
         skip_serializing_if = "String::is_empty",
         deserialize_with = "null_default"
     )]
     pub time: String,
-    /// Go `json.RawMessage`, `omitempty`: absent is `None`; a JSON `null` is kept as the raw text
-    /// `null` (as Go's `RawMessage` keeps it).
+    /// The event data as raw JSON, omitted when absent (`None`); a JSON `null` is kept as the raw
+    /// text `null`.
     #[serde(
         skip_serializing_if = "Option::is_none",
         deserialize_with = "raw_keep_null"
@@ -96,7 +96,7 @@ fn raw_keep_null<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Box<RawValue>
     Box::<RawValue>::deserialize(d).map(Some)
 }
 
-/// Port of Go `models.TriggerResponse`.
+/// The response to a trigger request.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TriggerResponse {
     /// `success` or an error message.

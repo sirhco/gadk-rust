@@ -13,10 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The parts of Go's `flag` package (`src/flag/flag.go`) the ADK-Go launcher uses: a
-//! [`FlagSet`] with `ContinueOnError` handling and string, int, int64, bool, duration, func and
-//! bool-func flags. Parsing (`parseOne`), the error texts, the usage message written on failure
-//! and `PrintDefaults` reproduce Go byte for byte.
+//! A command-line flag parser: a [`FlagSet`] that reports errors instead of exiting, with
+//! string, int, int64, bool, duration, func and bool-func flags. The flag-parsing rules and
+//! error texts, the usage message written on failure and the `print_defaults` layout are
+//! byte-identical to an ADK launcher's.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -25,11 +25,11 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::{GoDuration, go_format_duration, go_parse_duration, go_quote};
 
-/// Go `flag.ErrHelp`'s text.
+/// Text of the error returned for `-h`/`-help`.
 const ERR_HELP: &str = "flag: help requested";
-/// Go `flag.errParse`'s text.
+/// Text of a malformed-value error.
 const ERR_PARSE: &str = "parse error";
-/// Go `flag.errRange`'s text.
+/// Text of an out-of-range-value error.
 const ERR_RANGE: &str = "value out of range";
 
 /// A registered flag's current value, readable after `parse` (cheap clone; shared with the set).
@@ -63,14 +63,14 @@ impl<T> Flag<T> {
     }
 }
 
-/// A parse failure; `Display` is Go's text (the error `fs.Parse` returns).
+/// A parse failure; `Display` is the message that [`FlagSet::parse`] reports.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FlagError {
     pub message: String,
 }
 
 impl FlagError {
-    /// Go `flag.ErrHelp` (`flag: help requested`).
+    /// True for the help-requested error (`flag: help requested`).
     pub fn is_help(&self) -> bool {
         self.message == ERR_HELP
     }
@@ -84,11 +84,10 @@ impl fmt::Display for FlagError {
 
 impl std::error::Error for FlagError {}
 
-/// A func flag's callback (Go `fs.Func`): `Err(text)` becomes `invalid value "v" for flag -name: text`.
+/// A func flag's callback: `Err(text)` becomes `invalid value "v" for flag -name: text`.
 pub type FlagFunc = Box<dyn FnMut(&str) -> Result<(), String> + Send>;
 
-/// The value behind a flag: Go's `boolValue`, `intValue`, `int64Value`, `stringValue`,
-/// `durationValue`, `funcValue` and `boolFuncValue`.
+/// The value behind a flag: bool, int, int64, string, duration, func or bool-func.
 enum Value {
     Bool(Flag<bool>),
     Int(Flag<i64>),
@@ -100,7 +99,7 @@ enum Value {
 }
 
 impl Value {
-    /// Go `Value.Set`; `Err` is the error's text.
+    /// Sets the value from `s`; `Err` is the error's text.
     fn set(&mut self, s: &str) -> Result<(), String> {
         match self {
             Value::Bool(v) => {
@@ -135,7 +134,7 @@ impl Value {
         }
     }
 
-    /// Go `Value.String()`.
+    /// The value rendered as text.
     fn string(&self) -> String {
         match self {
             Value::Bool(v) => v.get().to_string(),
@@ -146,7 +145,7 @@ impl Value {
         }
     }
 
-    /// `String()` of the type's zero value (Go `isZeroValue`).
+    /// The text of the type's zero value, used to decide whether a default is printed.
     fn zero_string(&self) -> &'static str {
         match self {
             Value::Bool(_) => "false",
@@ -156,7 +155,7 @@ impl Value {
         }
     }
 
-    /// Go `boolFlag.IsBoolFlag()`.
+    /// True for flags that may be given without a value.
     fn is_bool_flag(&self) -> bool {
         matches!(self, Value::Bool(_) | Value::BoolFunc(_))
     }
@@ -173,7 +172,7 @@ impl Value {
     }
 }
 
-/// Go `flag.Flag`.
+/// A defined flag: its name, usage text, value and default.
 struct FlagDef {
     name: String,
     usage: String,
@@ -181,7 +180,7 @@ struct FlagDef {
     def_value: String,
 }
 
-/// Go `flag.FlagSet` with `ContinueOnError` (the only mode the launcher uses).
+/// A set of flags that reports parse failures as errors (the only mode the launcher uses).
 pub struct FlagSet {
     name: String,
     parsed: bool,
@@ -203,7 +202,7 @@ impl fmt::Debug for FlagSet {
 }
 
 impl FlagSet {
-    /// Go `flag.NewFlagSet(name, flag.ContinueOnError)`; output goes to stderr.
+    /// An empty flag set named `name`; output goes to stderr.
     pub fn new(name: &str) -> FlagSet {
         FlagSet {
             name: name.to_string(),
@@ -215,60 +214,60 @@ impl FlagSet {
         }
     }
 
-    /// Go `fs.Name()`.
+    /// The name of the flag set.
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    /// Go `fs.String`.
+    /// Defines a string flag.
     pub fn string(&mut self, name: &str, value: &str, usage: &str) -> Flag<String> {
         let flag = Flag::new(value.to_string());
         self.var(Value::String(flag.clone()), name, usage);
         flag
     }
 
-    /// Go `fs.Int` (Go's `int` is 64 bits on every platform gadk supports).
+    /// Defines an int flag (64 bits on every platform gadk supports).
     pub fn int(&mut self, name: &str, value: i64, usage: &str) -> Flag<i64> {
         let flag = Flag::new(value);
         self.var(Value::Int(flag.clone()), name, usage);
         flag
     }
 
-    /// Go `fs.Int64`.
+    /// Defines an int64 flag.
     pub fn int64(&mut self, name: &str, value: i64, usage: &str) -> Flag<i64> {
         let flag = Flag::new(value);
         self.var(Value::Int64(flag.clone()), name, usage);
         flag
     }
 
-    /// Go `fs.Bool`.
+    /// Defines a bool flag.
     pub fn bool(&mut self, name: &str, value: bool, usage: &str) -> Flag<bool> {
         let flag = Flag::new(value);
         self.var(Value::Bool(flag.clone()), name, usage);
         flag
     }
 
-    /// Go `fs.Duration`.
+    /// Defines a duration flag.
     pub fn duration(&mut self, name: &str, value: GoDuration, usage: &str) -> Flag<GoDuration> {
         let flag = Flag::new(value);
         self.var(Value::Duration(flag.clone()), name, usage);
         flag
     }
 
-    /// Go `fs.Func`: `f` is called with the value each time the flag is seen.
+    /// Defines a func flag: `f` is called with the value each time the flag is seen.
     pub fn func(&mut self, name: &str, usage: &str, f: FlagFunc) {
         self.var(Value::Func(f), name, usage);
     }
 
-    /// Go `fs.BoolFunc`: like [`FlagSet::func`], but the flag takes no value (`-name` calls `f`
-    /// with `"true"`; `-name=v` with `v`).
+    /// Defines a bool-func flag: like [`FlagSet::func`], but the flag takes no value (`-name`
+    /// calls `f` with `"true"`; `-name=v` with `v`).
     pub fn bool_func(&mut self, name: &str, usage: &str, f: FlagFunc) {
         self.var(Value::BoolFunc(f), name, usage);
     }
 
-    /// Go `fs.Var`. Go panics on a name that begins with `-`, contains `=` or is already
-    /// defined, after writing the message to the output; gadk writes the same message and
-    /// ignores the definition (the returned handle then keeps its default).
+    /// Registers a flag. A name that begins with `-`, contains `=` or is already defined gets
+    /// its message written to the output; the definition is then ignored (the returned handle
+    /// keeps its default).
     fn var(&mut self, value: Value, name: &str, usage: &str) {
         let problem = if name.starts_with('-') {
             Some(format!("flag {} begins with -", go_quote(name)))
@@ -299,9 +298,9 @@ impl FlagSet {
         );
     }
 
-    /// Go `fs.Parse(args)` with `ContinueOnError`: on failure writes the error line, then
-    /// `Usage of <name>:` and `print_defaults()` to the output sink, and returns the error;
-    /// `-h`/`-help` writes the usage and returns `flag: help requested`.
+    /// Parses `args`. On failure writes the error line, then `Usage of <name>:` and
+    /// `print_defaults()` to the output sink, and returns the error; `-h`/`-help` writes the
+    /// usage and returns `flag: help requested`.
     pub fn parse(&mut self, args: &[String]) -> Result<(), FlagError> {
         self.parsed = true;
         self.args = args.to_vec();
@@ -309,7 +308,7 @@ impl FlagSet {
         Ok(())
     }
 
-    /// Go `parseOne`: parses one flag and reports whether a flag was seen.
+    /// Parses one flag and reports whether a flag was seen.
     fn parse_one(&mut self) -> Result<bool, FlagError> {
         let Some(s) = self.args.first().cloned() else {
             return Ok(false);
@@ -388,31 +387,31 @@ impl FlagSet {
         }
     }
 
-    /// Go `fs.Parsed()`.
+    /// Whether [`FlagSet::parse`] has been called.
     pub fn parsed(&self) -> bool {
         self.parsed
     }
 
-    /// Go `fs.Args()`: the arguments after the flags.
+    /// The arguments after the flags.
     pub fn args(&self) -> Vec<String> {
         self.args.clone()
     }
 
-    /// Go `fs.Visit` membership: whether the flag was set on the command line.
+    /// Whether the flag was set on the command line.
     pub fn is_set(&self, name: &str) -> bool {
         self.actual.contains(name)
     }
 
-    /// Go `fs.SetOutput`; default stderr.
+    /// Replaces the output sink; the default is stderr.
     pub fn set_output(&mut self, out: Arc<Mutex<dyn Write + Send>>) {
         self.output = out;
     }
 
-    /// Go `fs.PrintDefaults()` captured as a string: one entry per flag in name order,
+    /// The defaults listing as a string: one entry per flag in name order,
     /// `  -name placeholder` (the placeholder from a back-quoted word in the usage, else the
     /// value type; none for a bool), the usage on the same line after a tab for a one-letter
     /// bool flag and on the next line after four spaces and a tab otherwise, and
-    /// ` (default v)` (`%q` for strings) when the default is not the type's zero value.
+    /// ` (default v)` (string defaults quoted) when the default is not the type's zero value.
     pub fn print_defaults(&self) -> String {
         let mut out = String::new();
         for flag in self.formal.values() {
@@ -422,7 +421,7 @@ impl FlagSet {
                 b.push(' ');
                 b.push_str(&name);
             }
-            // Boolean flags of one ASCII letter are so common Go puts their usage on the same
+            // Boolean flags of one ASCII letter are so common that their usage goes on the same
             // line.
             if b.len() <= 4 {
                 b.push('\t');
@@ -443,14 +442,14 @@ impl FlagSet {
         out
     }
 
-    /// Go `failf`: writes the message and the usage, and returns the message as the error.
+    /// Writes the message and the usage, and returns the message as the error.
     fn failf(&self, message: String) -> FlagError {
         self.write(&format!("{message}\n"));
         self.usage();
         FlagError { message }
     }
 
-    /// Go `defaultUsage`.
+    /// Writes the default usage message.
     fn usage(&self) {
         let header = if self.name.is_empty() {
             "Usage:\n".to_string()
@@ -461,7 +460,7 @@ impl FlagSet {
         self.write(&self.print_defaults());
     }
 
-    /// Writes to the output sink; like Go's `fmt.Fprint`, write errors are ignored.
+    /// Writes to the output sink; write errors are ignored.
     fn write(&self, s: &str) {
         let mut out = lock(&self.output);
         let _ = out.write_all(s.as_bytes());
@@ -469,8 +468,8 @@ impl FlagSet {
     }
 }
 
-/// Go `flag.UnquoteUsage`: the first back-quoted word of the usage as the placeholder (the
-/// back quotes removed from the usage), else the value type's name.
+/// The placeholder for a flag: the first back-quoted word of the usage (the back quotes are
+/// removed from the usage), else the value type's name.
 fn unquote_usage(flag: &FlagDef) -> (String, String) {
     let usage = &flag.usage;
     // With only one back quote, the type name is used.
@@ -487,7 +486,7 @@ fn unquote_usage(flag: &FlagDef) -> (String, String) {
     (flag.value.type_name().to_string(), usage.clone())
 }
 
-/// Go `strconv.ParseBool`.
+/// Parses a bool: `1`, `t`, `T`, `TRUE`, `true`, `True` and the false spellings.
 fn parse_bool(s: &str) -> Option<bool> {
     match s {
         "1" | "t" | "T" | "true" | "TRUE" | "True" => Some(true),
@@ -496,15 +495,15 @@ fn parse_bool(s: &str) -> Option<bool> {
     }
 }
 
-/// Go `strconv.ParseBool` with its error: `Err` is the `*strconv.NumError` text,
-/// `strconv.ParseBool: parsing "<s>": invalid syntax` (the cause pflag's bool flags report).
+/// Parses a bool; `Err` is the number-parse error text (`parsing "<s>": invalid syntax`
+/// prefixed with the parser's name), the message for an invalid bool flag value.
 pub fn go_parse_bool(s: &str) -> Result<bool, String> {
     parse_bool(s).ok_or_else(|| num_error("ParseBool", s, "invalid syntax"))
 }
 
-/// Go `strconv.ParseInt(s, 0, 64)` with its error: `Err` is the `*strconv.NumError` text,
-/// `strconv.ParseInt: parsing "<s>": invalid syntax` or `…: value out of range` (the cause
-/// pflag's int flags report).
+/// Parses an int64 (optional sign, base prefix `0x`/`0o`/`0b`/`0`, underscores); `Err` is
+/// the number-parse error text (`parsing "<s>": invalid syntax` or `…: value out of range`,
+/// prefixed with the parser's name), the messages for an invalid int flag value.
 pub fn go_parse_int(s: &str) -> Result<i64, String> {
     parse_int(s).map_err(|e| match e {
         IntError::Syntax => num_error("ParseInt", s, "invalid syntax"),
@@ -512,20 +511,20 @@ pub fn go_parse_int(s: &str) -> Result<i64, String> {
     })
 }
 
-/// Go `strconv.NumError.Error()`: `strconv.<func>: parsing <%q num>: <err>`.
+/// The text `strconv.<func>: parsing <quoted num>: <err>`.
 fn num_error(func: &str, num: &str, err: &str) -> String {
     format!("strconv.{func}: parsing {}: {err}", go_quote(num))
 }
 
-/// A `strconv.ParseInt` failure as `flag`'s `numError` sees it.
+/// An integer-parse failure.
 enum IntError {
-    /// `strconv.ErrSyntax` (flag's `parse error`).
+    /// Malformed number (the `parse error` text).
     Syntax,
-    /// `strconv.ErrRange` (flag's `value out of range`), with the clamped value Go stores.
+    /// Out of range (the `value out of range` text), with the clamped value that is stored.
     Range(i64),
 }
 
-/// Go `strconv.ParseInt(s, 0, 64)`.
+/// Parses an int64 with a base prefix (`0x`, `0o`, `0b`, `0`) and underscores.
 fn parse_int(s: &str) -> Result<i64, IntError> {
     let (neg, digits) = match s.as_bytes().first() {
         None => return Err(IntError::Syntax),
@@ -546,7 +545,8 @@ fn parse_int(s: &str) -> Result<i64, IntError> {
     }
 }
 
-/// Go `strconv.ParseUint(s, 0, 64)`: `Ok(None)` is `ErrRange` (the value overflows `u64`).
+/// Parses a u64 with a base prefix and underscores: `Ok(None)` is out of range (the value
+/// overflows `u64`).
 fn parse_uint(s0: &str) -> Result<Option<u64>, IntError> {
     let b = s0.as_bytes();
     if b.is_empty() {
@@ -596,7 +596,7 @@ fn parse_uint(s0: &str) -> Result<Option<u64>, IntError> {
     Ok(Some(n))
 }
 
-/// Go `strconv.underscoreOK`: underscores only between digits (or after the base prefix).
+/// True when underscores appear only between digits (or after the base prefix).
 fn underscore_ok(s: &str) -> bool {
     let mut s = s.as_bytes();
     let lower = |c: u8| c | (b'x' - b'X');

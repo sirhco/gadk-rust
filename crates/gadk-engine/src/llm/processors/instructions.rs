@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Instruction request processor and session-state templating (port of Go
-//! internal/llminternal/instruction_processor.go).
+//! Instruction request processor and session-state templating.
 
 use std::sync::{Arc, LazyLock};
 
@@ -44,7 +43,7 @@ static PLACEHOLDER: LazyLock<regex::Regex> =
 /// A placeholder directly after one of these bytes is literal text ("${x}", "\{x}").
 const LITERAL_PLACEHOLDER_PREFIXES: &[u8] = b"$\\";
 
-/// Port of instruction_processor.go:43 instructionsRequestProcessor.
+/// Appends the root agent's global instruction, then this agent's instruction, to the request.
 pub(crate) fn instructions_request_processor<'a>(
     ctx: &'a InvocationContext,
     req: &'a mut LlmRequest,
@@ -55,7 +54,7 @@ pub(crate) fn instructions_request_processor<'a>(
         let Some(state) = reveal(&*agent) else {
             return Ok(Vec::new());
         };
-        // Go: rootAgent := asLLMAgent(parents.RootAgent(ctx.Agent())); fall back to the agent
+        // The root agent, falling back to the agent
         // itself.
         let root = root_agent(ctx, &agent);
         let root_state = reveal(&*root).unwrap_or(state);
@@ -69,7 +68,7 @@ pub(crate) fn instructions_request_processor<'a>(
     })
 }
 
-/// Go parentmap.Map.RootAgent: walk parent links by name until none; no parent map → the agent
+/// Walks parent links by name until none; no parent map → the agent
 /// itself.
 fn root_agent(ctx: &InvocationContext, agent: &Arc<dyn Agent>) -> Arc<dyn Agent> {
     match ctx.parent_map() {
@@ -78,7 +77,7 @@ fn root_agent(ctx: &InvocationContext, agent: &Arc<dyn Agent>) -> Arc<dyn Agent>
     }
 }
 
-/// Port of instruction_processor.go:81 appendInstructions. The provider result is not templated.
+/// Appends the agent's instruction. The provider result is not templated.
 async fn append_agent_instructions(
     ctx: &InvocationContext,
     req: &mut LlmRequest,
@@ -88,14 +87,14 @@ async fn append_agent_instructions(
         let mut instruction = provider(ctx.as_readonly().clone())
             .await
             .map_err(|e| wrap_err("failed to evaluate instruction provider", e))?;
-        // Go dd39c80a (#2079): the live task_completed suffix wraps the provider, as in
+        // The live task_completed suffix wraps the provider, as in
         // adk-python's _append_instruction (the provider's text is not templated).
         instruction.push_str(state.instruction_suffix.read().as_str());
         append_instructions(req, &[instruction.as_str()]);
         return Ok(());
     }
-    // Go State.Instruction: cfg.instruction plus any live suffix; the empty check and state
-    // injection run on the combined string (instruction_processor.go:96-102).
+    // The configured instruction plus any live suffix; the empty check and state
+    // injection run on the combined string.
     let instruction = state.instruction();
     if instruction.is_empty() {
         return Ok(());
@@ -107,7 +106,7 @@ async fn append_agent_instructions(
     Ok(())
 }
 
-/// Port of instruction_processor.go:105 appendGlobalInstructions. The provider result is not
+/// Appends the global instruction. The provider result is not
 /// templated.
 async fn append_global_instructions(
     ctx: &InvocationContext,
@@ -131,7 +130,7 @@ async fn append_global_instructions(
     Ok(())
 }
 
-/// Port of instruction_processor.go:211 InjectSessionState: populates values in an instruction
+/// Populates values in an instruction
 /// template from the context.
 pub(crate) async fn inject_session_state(
     ctx: &InvocationContext,
@@ -153,9 +152,9 @@ pub(crate) async fn inject_session_state(
     Ok(out)
 }
 
-/// Port of instruction_processor.go:130 replaceMatch.
+/// Resolves one `{...}` placeholder: an artifact, or a session state value.
 pub(crate) async fn replace_match(ctx: &InvocationContext, m: &str) -> Result<String, AgentError> {
-    // Go strings.TrimSpace(strings.Trim(match, "{}")).
+    // Strip the braces, then surrounding whitespace.
     let var = m.trim_matches(|c| c == '{' || c == '}').trim();
     let (var, optional) = match var.strip_suffix('?') {
         Some(v) => (v, true),
@@ -180,19 +179,19 @@ pub(crate) async fn replace_match(ctx: &InvocationContext, m: &str) -> Result<St
     }
     let session = ctx.session();
     match session.state().get(var) {
-        // Go: value == nil → "".
+        // A null value → "".
         Ok(Value::Null) => Ok(String::new()),
-        // Go fmt.Sprintf("%v", value).
+        // Any other value is displayed with `go_sprint`.
         Ok(v) => Ok(go_sprint(&v)),
         Err(SessionError::StateKeyNotExist) if optional => Ok(String::new()),
-        // Unwrapped, as Go returns err as is.
+        // Unwrapped: the session error is returned as is.
         Err(e) => Err(AgentError::Session(e)),
     }
 }
 
-/// Port of instruction_processor.go artifactText (Go 860c7dac): renders a loaded artifact for an
-/// instruction. A text artifact can come back as inline data rather than as text (gcsartifact
-/// stores a text part as a text/plain object and loads it back as bytes). Inline data goes
+/// Renders a loaded artifact for an instruction. A text artifact can come back as inline data
+/// rather than as text (the GCS artifact service stores a text part as a text/plain object and
+/// loads it back as bytes). Inline data goes
 /// through adk-python's `as_safe_part_for_llm` checks, in the same order:
 ///
 /// 1. Inline data whose MIME type Gemini accepts inline (image/*, audio/*, video/*,
@@ -201,7 +200,7 @@ pub(crate) async fn replace_match(ctx: &InvocationContext, m: &str) -> Result<St
 ///    `_TEXT_LIKE_MIME_TYPES`, or its name has a .csv, .txt, .json or .xml extension.
 ///
 /// Anything else renders as the part's text (empty for binary data). Invalid UTF-8 becomes one
-/// U+FFFD per run of invalid bytes (Go `strings.ToValidUTF8`).
+/// U+FFFD per run of invalid bytes.
 pub(crate) fn artifact_text(name: &str, part: &gadk_genai::Part) -> String {
     let Some(blob) = &part.inline_data else {
         return part.text.clone();
@@ -216,13 +215,13 @@ pub(crate) fn artifact_text(name: &str, part: &gadk_genai::Part) -> String {
     part.text.clone()
 }
 
-/// Go normalizeMIMEType: the lowercase media type without parameters such as charset.
+/// The lowercase media type without parameters such as charset.
 fn normalize_mime_type(mime_type: &str) -> String {
     let media_type = mime_type.split_once(';').map_or(mime_type, |(m, _)| m);
     media_type.trim().to_lowercase()
 }
 
-/// Go isGeminiInlineMIMEType (adk-python `_is_inline_mime_type_supported`).
+/// Whether Gemini accepts the MIME type inline (adk-python `_is_inline_mime_type_supported`).
 fn is_gemini_inline_mime_type(mime_type: &str) -> bool {
     match mime_type {
         "image/svg" | "image/svg+xml" | "image/xml" => false,
@@ -231,7 +230,7 @@ fn is_gemini_inline_mime_type(mime_type: &str) -> bool {
     }
 }
 
-/// Go isTextLikeMIMEType: a MIME type adk-python decodes as text.
+/// A MIME type adk-python decodes as text.
 fn is_text_like_mime_type(mime_type: &str) -> bool {
     mime_type.starts_with("text/")
         || matches!(
@@ -246,8 +245,8 @@ fn is_text_like_mime_type(mime_type: &str) -> bool {
         )
 }
 
-/// Go hasTextFileExtension over `path.Ext(name)` (the suffix from the final dot of the final
-/// slash-separated element).
+/// Whether the name's extension (the suffix from the final dot of the final
+/// slash-separated element) is a text one.
 fn has_text_file_extension(name: &str) -> bool {
     let base = name.rsplit('/').next().unwrap_or(name);
     let ext = base.rfind('.').map_or("", |i| &base[i..]);
@@ -257,7 +256,7 @@ fn has_text_file_extension(name: &str) -> bool {
     )
 }
 
-/// Go `strings.ToValidUTF8(s, "\uFFFD")`: each run of invalid bytes becomes one U+FFFD.
+/// Lossy UTF-8 decode: each run of invalid bytes becomes one U+FFFD.
 fn to_valid_utf8(data: &[u8]) -> String {
     let mut out = String::with_capacity(data.len());
     let mut in_invalid_run = false;
@@ -274,7 +273,7 @@ fn to_valid_utf8(data: &[u8]) -> String {
     out
 }
 
-/// Go errors.Is(err, fs.ErrNotExist).
+/// Whether the error is, or wraps, an artifact-not-found error.
 fn is_artifact_not_found(e: &AgentError) -> bool {
     // `AgentError::Artifact` is `#[error(transparent)]`, which forwards `source()` to the inner
     // ArtifactError's own source, so a chain walk never yields the ArtifactError itself; check
@@ -305,9 +304,10 @@ fn is_artifact_not_found(e: &AgentError) -> bool {
     false
 }
 
-/// Port of instruction_processor.go:175 isIdentifier (Python `str.isidentifier()`).
+/// Whether `s` is a valid identifier (Python `str.isidentifier()`).
 ///
-/// Go's `unicode.IsLetter`/`IsDigit` are categories L and Nd; Rust's `char::is_alphabetic` and
+/// Letters and digits are `char::is_alphabetic` and `char::is_numeric`, which are slightly
+/// broader than Unicode categories L and Nd for rare scripts (Other_Alphabetic, Nl/No).
 /// `char::is_numeric` are slightly broader for rare scripts (Other_Alphabetic, Nl/No).
 fn is_identifier(s: &str) -> bool {
     let mut chars = s.chars();
@@ -320,7 +320,8 @@ fn is_identifier(s: &str) -> bool {
     chars.all(|c| c.is_alphabetic() || c.is_numeric() || c == '_')
 }
 
-/// Port of instruction_processor.go:194 isValidStateName.
+/// Whether `var` is a valid state name: an identifier, optionally prefixed by `app:`, `user:` or
+/// `temp:`.
 fn is_valid_state_name(var: &str) -> bool {
     let parts: Vec<&str> = var.split(':').collect();
     match parts.as_slice() {

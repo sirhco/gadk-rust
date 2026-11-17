@@ -14,8 +14,7 @@
 // limitations under the License.
 
 //! gadk-auth: credentials, credential providers, the credential store and the refresh-and-retry
-//! transport (port of ADK-Go `auth/`), plus per-user Google Cloud credentials (`gcp`, port of
-//! `auth/gcp`).
+//! transport, plus per-user Google Cloud credentials (`gcp`).
 //!
 //! A small authentication layer for gadk. It models the two things a consumer needs: a resolved
 //! [`Credential`] that writes itself onto an outbound HTTP request, and a [`CredentialProvider`]

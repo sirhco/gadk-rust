@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The storage seam (Go's `gcsClient`, `gcsBucket`, `gcsObject` and `gcsWriter` interfaces folded
-//! into one trait): the REST client implements it for GCS, the fake for tests.
+//! The storage seam, one trait over a bucket's objects: the REST client implements it for GCS,
+//! the fake for tests.
 
 use std::collections::BTreeMap;
 
@@ -26,12 +26,11 @@ use crate::error::GcsError;
 /// One bucket's objects.
 #[async_trait::async_trait]
 pub(crate) trait GcsBucket: Send + Sync {
-    /// The names of every object whose name starts with `prefix`, across all listing pages (Go
-    /// `bucket.objects` + `next` until `iterator.Done`). `names_only` asks only for the names
-    /// (Go `Query.SetAttrSelection([]string{"Name"})`).
+    /// The names of every object whose name starts with `prefix`, across all listing pages.
+    /// `names_only` asks only for the names.
     async fn list(&self, prefix: &str, names_only: bool) -> Result<Vec<String>, GcsError>;
-    /// Writes object `name` only if it does not exist yet (Go `object(name).ifNotExist()` +
-    /// `newWriter` + `Close`); an existing object fails with [`GcsError::PreconditionFailed`].
+    /// Writes object `name` only if it does not exist yet; an existing object fails with
+    /// [`GcsError::PreconditionFailed`].
     async fn insert_if_absent(
         &self,
         name: &str,
@@ -39,25 +38,25 @@ pub(crate) trait GcsBucket: Send + Sync {
         metadata: &BTreeMap<String, String>,
         body: Bytes,
     ) -> Result<(), GcsError>;
-    /// Object `name`'s attributes (Go `object(name).attrs`); a missing object is
+    /// Object `name`'s attributes; a missing object is
     /// [`GcsError::ObjectNotExist`].
     async fn attrs(&self, name: &str) -> Result<ObjectAttrs, GcsError>;
-    /// Object `name`'s bytes (Go `object(name).newReader` + `io.ReadAll`).
+    /// Object `name`'s bytes.
     async fn read(&self, name: &str) -> Result<Bytes, GcsError>;
-    /// Deletes object `name` (Go `object(name).delete`); a missing object is
+    /// Deletes object `name`; a missing object is
     /// [`GcsError::ObjectNotExist`].
     async fn delete(&self, name: &str) -> Result<(), GcsError>;
 }
 
-/// The attributes of one object the service reads (Go `storage.ObjectAttrs`).
+/// The attributes of one object the service reads.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct ObjectAttrs {
-    /// Go `ContentType`.
+    /// The media type.
     pub(crate) content_type: String,
-    /// Go `Metadata`.
+    /// The custom metadata.
     pub(crate) metadata: BTreeMap<String, String>,
-    /// Go `Created` (the JSON API's `timeCreated`).
+    /// The creation time (the JSON API's `timeCreated`).
     pub(crate) created: DateTime<Utc>,
-    /// Go `MediaLink`: the authenticated JSON API download URL, never the canonical URI.
+    /// The authenticated JSON API download URL, never the canonical URI.
     pub(crate) media_link: String,
 }

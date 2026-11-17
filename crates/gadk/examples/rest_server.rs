@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Serves an in-memory agent over the ADK REST API (`gadk::server`), wire-compatible with an
-//! ADK-Go server, so the ADK web UI and ADK clients can drive it. The agent (`shouter`, a
+//! Serves an in-memory agent over the ADK REST API (`gadk::server`), wire-compatible with
+//! ADK REST clients such as the ADK web UI. The agent (`shouter`, a
 //! one-node workflow that upper-cases the message) needs no model and no credentials:
 //!
 //! `cargo run -p gadk --example rest_server --features server [-- 127.0.0.1:8080]`

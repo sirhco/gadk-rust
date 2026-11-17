@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `models/event.go`: the REST view of a session event.
+//! The REST view of a session event.
 
 use std::collections::BTreeMap;
 
@@ -34,70 +34,70 @@ use serde_json::{Map, Value};
 use super::null_default;
 use super::redact::serialize_auth_configs;
 
-/// Port of Go `models.EventActions` (plain struct tags: `stateDelta` and `artifactDelta` are
-/// written as `null` when unset).
+/// The REST view of an event's actions (`stateDelta` and `artifactDelta` are written as `null`
+/// when unset).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct EventActions {
-    /// Go `StateDelta map[string]any` (`null` when `None`).
+    /// The state changes (`null` when `None`).
     pub state_delta: Option<Map<String, Value>>,
-    /// Go `ArtifactDelta map[string]int64` (`null` when `None`).
+    /// Artifact name to saved version (`null` when `None`).
     pub artifact_delta: Option<BTreeMap<String, i64>>,
-    /// `omitempty`.
+    /// Omitted from the JSON when empty.
     #[serde(skip_serializing_if = "is_zero", deserialize_with = "null_default")]
     pub escalate: bool,
-    /// `omitempty`.
+    /// Omitted from the JSON when empty.
     #[serde(skip_serializing_if = "is_zero", deserialize_with = "null_default")]
     pub skip_summarization: bool,
-    /// `omitempty`.
+    /// Omitted from the JSON when empty.
     #[serde(skip_serializing_if = "is_zero", deserialize_with = "null_default")]
     pub transfer_to_agent: String,
-    /// `omitempty`.
+    /// Omitted from the JSON when empty.
     #[serde(
         skip_serializing_if = "BTreeMap::is_empty",
         deserialize_with = "null_default"
     )]
     pub requested_tool_confirmations: BTreeMap<String, ToolConfirmation>,
-    /// Go `RequestedAuthConfigs authConfigs`, `omitempty`; written without the credential
-    /// secret keys at any depth (Go `redact.go`) and read-only over REST:
-    /// [`Event::to_session_event`] drops it.
+    /// Omitted from the JSON when empty; written without the credential secret keys at any depth
+    /// and read-only over REST: [`Event::to_session_event`] drops it.
     #[serde(
         skip_serializing_if = "BTreeMap::is_empty",
         serialize_with = "serialize_auth_configs",
         deserialize_with = "null_default"
     )]
     pub requested_auth_configs: BTreeMap<String, toolauth::Config>,
-    /// `omitempty`; read-only over REST: [`Event::to_session_event`] drops it.
+    /// Omitted from the JSON when absent; read-only over REST: [`Event::to_session_event`] drops
+    /// it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub compaction: Option<EventCompaction>,
 }
 
-/// Port of Go `models.Event`. Serialization is Go's `Event.MarshalJSON`: the fields in Go's order
-/// with `content` last, and inside it `role` before `parts`, each part's `functionCall` last and
-/// that call's `args` last and always present (`{}` when empty).
+/// The REST view of a session event. Serialization writes the fields in a fixed order with
+/// `content` last, and inside it `role` before `parts`, each part's `functionCall` last and that
+/// call's `args` last and always present (`{}` when empty); this is the field order ADK servers
+/// write.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Event {
-    /// Go `ID`.
+    /// The event ID.
     #[serde(deserialize_with = "null_default")]
     pub id: String,
-    /// Go `Timestamp float64`: epoch seconds with microseconds, `0` for no timestamp (Go's
-    /// zero time).
+    /// Epoch seconds with microseconds, `0` for no timestamp (the zero time).
     #[serde(deserialize_with = "null_default")]
     pub timestamp: f64,
-    /// Go `InvocationID`.
+    /// The invocation the event belongs to.
     #[serde(deserialize_with = "null_default")]
     pub invocation_id: String,
-    /// `omitempty`.
+    /// Omitted from the JSON when empty.
     #[serde(deserialize_with = "null_default")]
     pub branch: String,
-    /// Go `Author`.
+    /// Who produced the event.
     #[serde(deserialize_with = "null_default")]
     pub author: String,
-    /// `omitempty`.
+    /// Omitted from the JSON when empty.
     #[serde(deserialize_with = "null_default")]
     pub partial: bool,
-    /// Go `LongRunningToolIDs` (`longRunningToolIds`), `omitempty`.
+    /// The long-running tool call IDs (`longRunningToolIds`); omitted from the JSON when empty.
     #[serde(deserialize_with = "null_default")]
     pub long_running_tool_ids: Vec<String>,
     /// `null` when `None`.
@@ -106,49 +106,49 @@ pub struct Event {
     pub grounding_metadata: Option<GroundingMetadata>,
     /// `null` when `None`.
     pub usage_metadata: Option<GenerateContentResponseUsageMetadata>,
-    /// `omitempty`.
+    /// Omitted from the JSON when empty.
     #[serde(deserialize_with = "null_default")]
     pub turn_complete: bool,
-    /// `omitempty`.
+    /// Omitted from the JSON when empty.
     #[serde(deserialize_with = "null_default")]
     pub interrupted: bool,
-    /// `omitempty`.
+    /// Omitted from the JSON when empty.
     #[serde(deserialize_with = "null_default")]
     pub error_code: String,
-    /// `omitempty`.
+    /// Omitted from the JSON when empty.
     #[serde(deserialize_with = "null_default")]
     pub error_message: String,
-    /// `omitempty`.
+    /// Omitted from the JSON when empty.
     #[serde(deserialize_with = "null_default")]
     pub avg_logprobs: f64,
-    /// `omitempty`.
+    /// Omitted from the JSON when empty.
     pub finish_reason: Option<FinishReason>,
-    /// `omitempty`.
+    /// Omitted from the JSON when empty.
     #[serde(deserialize_with = "null_default")]
     pub model_version: String,
-    /// `omitempty`.
+    /// Omitted from the JSON when empty.
     pub input_transcription: Option<Transcription>,
-    /// `omitempty`.
+    /// Omitted from the JSON when empty.
     pub output_transcription: Option<Transcription>,
-    /// Go `Actions`.
+    /// The event's actions.
     #[serde(deserialize_with = "null_default")]
     pub actions: EventActions,
-    /// Go `Output any`, `omitempty` (omitted when `None` or JSON `null`).
+    /// The node output; omitted when `None` or JSON `null`.
     pub output: Option<Value>,
-    /// `omitempty`.
+    /// Omitted from the JSON when empty.
     pub node_info: Option<NodeInfo>,
-    /// `omitempty`.
+    /// Omitted from the JSON when empty.
     #[serde(deserialize_with = "null_default")]
     pub isolation_scope: String,
-    /// `omitempty`.
+    /// Omitted from the JSON when empty.
     #[serde(deserialize_with = "null_default")]
     pub routes: Vec<String>,
-    /// `omitempty`.
+    /// Omitted from the JSON when empty.
     pub requested_input: Option<RequestInput>,
 }
 
 impl Event {
-    /// Port of Go `models.FromSessionEvent`: the timestamp as epoch seconds with microseconds
+    /// The REST view of a session event: the timestamp as epoch seconds with microseconds
     /// (`0` for the zero time).
     pub fn from_session_event(ev: &gadk_session::Event) -> Event {
         let r = &ev.response;
@@ -195,7 +195,7 @@ impl Event {
         }
     }
 
-    /// Port of Go `models.ToSessionEvent`. `actions.compaction` is deliberately dropped: a
+    /// The session event for this REST event. `actions.compaction` is deliberately dropped: a
     /// client-supplied compaction record would let it erase history and speak into the gap.
     /// `actions.requested_auth_configs` is dropped too: only a tool writes a credential
     /// request. Fails when the timestamp is not a plausible date (see
@@ -237,9 +237,9 @@ impl Event {
             skip_summarization: self.actions.skip_summarization,
             transfer_to_agent: self.actions.transfer_to_agent.clone(),
             requested_tool_confirmations: self.actions.requested_tool_confirmations.clone(),
-            // Go `ToSessionEvent` ignores requestedAuthConfigs inbound (#2114): one taken from
-            // a request body would claim a sign-in no tool asked for, which compaction then
-            // holds open as an unanswered call.
+            // requestedAuthConfigs is ignored inbound: one taken from a request body would claim
+            // a sign-in no tool asked for, which compaction then holds open as an unanswered
+            // call.
             requested_auth_configs: Default::default(),
             compaction: None,
         };
@@ -252,7 +252,7 @@ impl Event {
 const MIN_TIMESTAMP_MICROS: f64 = -62_135_596_800.0 * 1e6;
 const MAX_TIMESTAMP_MICROS: f64 = 253_402_300_799.0 * 1e6;
 
-/// Go `timestampFromEpochSeconds`: a REST event timestamp as a time. Zero means the client sent
+/// A REST event timestamp as a time. Zero means the client sent
 /// none and maps to the zero time. A value outside years 1 to 9999 (most often epoch
 /// milliseconds sent as seconds) is an error rather than an instant.
 fn timestamp_from_epoch_seconds(secs: f64) -> Result<DateTime<Utc>, String> {
@@ -343,7 +343,7 @@ impl Serialize for Event {
     }
 }
 
-/// Go `to_go_json` bytes of `v` as a string.
+/// The JSON text of `v` ([`gadk_model::to_go_json`]).
 fn go_json<T: Serialize + ?Sized>(v: &T) -> Result<String, serde_json::Error> {
     let b = gadk_model::to_go_json(v)?;
     Ok(String::from_utf8_lossy(&b).into_owned())
@@ -362,8 +362,7 @@ fn append_member(obj: &str, key: &str, raw: &str) -> String {
     }
 }
 
-/// Go `ProxyContent`: the embedded `*genai.Content`'s `role` (its `parts` is shadowed) before
-/// the proxy's own `parts`.
+/// The content as JSON with `role` before `parts`, each part written by [`proxy_part`].
 fn proxy_content(c: &Content) -> Result<Box<RawValue>, serde_json::Error> {
     let mut members = Vec::new();
     if !c.role.is_empty() {
@@ -380,8 +379,8 @@ fn proxy_content(c: &Content) -> Result<Box<RawValue>, serde_json::Error> {
     RawValue::from_string(format!("{{{}}}", members.join(",")))
 }
 
-/// Go `ProxyPart`: the part's own fields, then `functionCall` (Go `ProxyFunctionCall`: the call's
-/// fields, then `args`, `{}` when empty).
+/// The part's own fields, then `functionCall` (the call's fields, then `args`, `{}` when
+/// empty).
 fn proxy_part(p: &Part) -> Result<String, serde_json::Error> {
     let Some(fc) = &p.function_call else {
         return go_json(p);

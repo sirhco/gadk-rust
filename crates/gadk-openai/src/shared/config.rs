@@ -13,14 +13,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The generation-config rules both APIs share (port of ADK-Go `internal/shared/config.go`).
+//! The generation-config rules both APIs share.
 //!
-//! Go keeps `HTTPOptions` inside `GenerateContentConfig`; gadk carries it beside the config in
-//! `LlmRequest::http_options`, so the functions that read it take it as a second argument
-//! (Go's `cfg == nil` is `cfg: None` with `http_options: None`). Go's reflection over struct
-//! fields becomes exhaustive destructuring ([`config_fields`], [`thinking_config_fields`],
-//! [`http_option_fields`]) listing `(Go field name, is set)` in genai's declaration order, so a
-//! field genai adds fails to compile here.
+//! `HttpOptions` is carried beside the config in `LlmRequest::http_options`, so the functions
+//! that read it take it as a second argument (an absent config is `cfg: None` with
+//! `http_options: None`). The config's fields are listed by exhaustive destructuring
+//! ([`config_fields`], [`thinking_config_fields`], [`http_option_fields`]) as
+//! `(field name, is set)` in the declaration order of the genai types, using the CamelCase
+//! field names that appear in error messages, so a field added to those types fails to compile
+//! here.
 
 use std::time::Duration;
 
@@ -31,16 +32,16 @@ use gadk_platform::go_quote;
 use crate::error::{ErrorKind, OpenAiError};
 use crate::oaishared::ReasoningEffort;
 
-/// Go `IgnoredHTTPOptionFields`: the `HTTPOptions` fields neither API translates nor rejects.
+/// The `HTTPOptions` fields neither API translates nor rejects.
 pub(crate) const IGNORED_HTTP_OPTION_FIELDS: &[&str] = &["Headers"];
 
-/// Go `SupportedHTTPOptionFields`: the `HTTPOptions` fields both APIs support.
+/// The `HTTPOptions` fields both APIs support.
 pub(crate) const SUPPORTED_HTTP_OPTION_FIELDS: &[&str] = &["Timeout"];
 
-/// Go `DynamicThinkingBudget`: genai's "let the model size its own thinking".
+/// The dynamic thinking budget: "let the model size its own thinking".
 pub(crate) const DYNAMIC_THINKING_BUDGET: i32 = -1;
 
-/// Go `SupportedConfigFields`: the `GenerateContentConfig` fields both APIs support (Go field
+/// The `GenerateContentConfig` fields both APIs support (CamelCase field
 /// names). Each API adds the ones only it supports.
 pub(crate) const SUPPORTED_CONFIG_FIELDS: &[&str] = &[
     "HTTPOptions",
@@ -61,19 +62,19 @@ pub(crate) const SUPPORTED_CONFIG_FIELDS: &[&str] = &[
     "AutomaticContinuation",
 ];
 
-/// Go `SupportedThinkingConfigFields`.
+/// The `ThinkingConfig` fields both APIs support.
 pub(crate) const SUPPORTED_THINKING_CONFIG_FIELDS: &[&str] =
     &["IncludeThoughts", "ThinkingBudget", "ThinkingLevel"];
 
-/// Go `RequestTimeout`: the caller's `http_options.timeout`, or `None` for none (a zero
-/// duration is none, as Go's non-positive one is).
+/// The caller's `http_options.timeout`, or `None` for none (a zero
+/// duration is none).
 pub(crate) fn request_timeout(http_options: Option<&HttpOptions>) -> Option<Duration> {
     http_options
         .and_then(|options| options.timeout)
         .filter(|timeout| !timeout.is_zero())
 }
 
-/// Go `ReasoningEfforts[level]`: every genai thinking level's reasoning effort
+/// The reasoning effort of every thinking level
 /// (`THINKING_LEVEL_UNSPECIFIED` → medium, `MINIMAL` → minimal, `LOW` → low, `MEDIUM` → medium,
 /// `HIGH` → high); `None` for a level the map does not know (`ThinkingLevel::Unknown`).
 pub(crate) fn reasoning_effort_of_level(level: &ThinkingLevel) -> Option<ReasoningEffort> {
@@ -87,10 +88,10 @@ pub(crate) fn reasoning_effort_of_level(level: &ThinkingLevel) -> Option<Reasoni
     }
 }
 
-/// Go `ReasoningEffortFor`: the reasoning effort for a thinking config; `Ok(None)` is Go's
-/// `""` (send none). A budget below [`DYNAMIC_THINKING_BUDGET`] is
-/// `ErrUnsupportedConfigField: ThinkingConfig.ThinkingBudget <n>`; an unknown level
-/// `ErrUnsupportedConfigField: ThinkingConfig.ThinkingLevel "<level>"`.
+/// The reasoning effort for a thinking config; `Ok(None)` means send none. A budget below
+/// [`DYNAMIC_THINKING_BUDGET`] is
+/// `UnsupportedConfigField: ThinkingConfig.ThinkingBudget <n>`; an unknown level
+/// `UnsupportedConfigField: ThinkingConfig.ThinkingLevel "<level>"`.
 pub(crate) fn reasoning_effort_for(
     cfg: Option<&ThinkingConfig>,
 ) -> Result<Option<ReasoningEffort>, OpenAiError> {
@@ -108,7 +109,7 @@ pub(crate) fn reasoning_effort_for(
         ));
     }
     // A level outranks a budget only when it names one: UNSPECIFIED with a budget set defers
-    // to the budget. Go's empty level is `None` (or an empty unknown value).
+    // to the budget. An empty level is `None` (or an empty unknown value).
     let level = cfg
         .thinking_level
         .as_ref()
@@ -132,12 +133,12 @@ pub(crate) fn reasoning_effort_for(
     })
 }
 
-/// Go `RejectUntranslatableValues`: `Logprobs without ResponseLogprobs`, `negative
+/// Rejects values that cannot be translated: `Logprobs without ResponseLogprobs`, `negative
 /// MaxOutputTokens`, `negative CandidateCount`, then an `HTTPOptions` field outside
 /// [`SUPPORTED_HTTP_OPTION_FIELDS`] + [`IGNORED_HTTP_OPTION_FIELDS`]
 /// (`HTTPOptions.<Field>`), then a non-positive timeout (unrepresentable in a `Duration`
 /// except zero: `non-positive HTTPOptions.Timeout 0s`), each wrapping
-/// `ErrUnsupportedConfigField`.
+/// `ErrorKind::UnsupportedConfigField`.
 pub(crate) fn reject_untranslatable_values(
     cfg: &GenerateContentConfig,
     http_options: Option<&HttpOptions>,
@@ -179,9 +180,9 @@ pub(crate) fn reject_untranslatable_values(
     Ok(())
 }
 
-/// Go `RejectUnsupportedConfigFields`: the first field the caller set ([`config_fields`]) not
+/// Rejects the first field the caller set ([`config_fields`]) not
 /// in `supported`, then the first set `ThinkingConfig` field not in
-/// [`SUPPORTED_THINKING_CONFIG_FIELDS`], each `ErrUnsupportedConfigField: <prefix><Field>`.
+/// [`SUPPORTED_THINKING_CONFIG_FIELDS`], each `UnsupportedConfigField: <prefix><Field>`.
 pub(crate) fn reject_unsupported_config_fields(
     cfg: &GenerateContentConfig,
     http_options: Option<&HttpOptions>,
@@ -198,8 +199,8 @@ pub(crate) fn reject_unsupported_config_fields(
     }
 }
 
-/// Go `rejectUnsupportedFields` over a field list: the first `(name, true)` whose name is not
-/// in `supported` is `ErrUnsupportedConfigField: <prefix><name>`.
+/// Rejects the first `(name, true)` whose name is not
+/// in `supported`: `UnsupportedConfigField: <prefix><name>`.
 pub(crate) fn reject_unsupported_fields(
     prefix: &str,
     fields: &[(&'static str, bool)],
@@ -217,9 +218,9 @@ pub(crate) fn reject_unsupported_fields(
     }
 }
 
-/// Every `GenerateContentConfig` field as `(Go field name, set)`, in genai's declaration order
-/// (`HTTPOptions` first: `http_options.is_some()`), by exhaustive destructuring. "Set" is Go's
-/// `!IsZero()`: a non-`None` option, a non-empty string, slice or map, a non-zero number, or
+/// Every `GenerateContentConfig` field as `(field name, set)`, in declaration order
+/// (`HTTPOptions` first: `http_options.is_some()`), by exhaustive destructuring. "Set" means
+/// non-zero: a non-`None` option, a non-empty string, slice or map, a non-zero number, or
 /// `true`.
 pub(crate) fn config_fields(
     cfg: &GenerateContentConfig,
@@ -320,7 +321,7 @@ pub(crate) fn config_fields(
     ]
 }
 
-/// Every `ThinkingConfig` field as `(Go field name, set)`, in genai's declaration order.
+/// Every `ThinkingConfig` field as `(field name, set)`, in declaration order.
 pub(crate) fn thinking_config_fields(cfg: &ThinkingConfig) -> Vec<(&'static str, bool)> {
     let ThinkingConfig {
         include_thoughts,
@@ -339,8 +340,8 @@ pub(crate) fn thinking_config_fields(cfg: &ThinkingConfig) -> Vec<(&'static str,
     ]
 }
 
-/// Every `HttpOptions` field as `(Go field name, set)`, in genai's declaration order (gadk's
-/// fields mapped to Go's names: `BaseURL`, `APIVersion`, `Headers`, `Timeout`,
+/// Every `HttpOptions` field as `(field name, set)`, in declaration order (gadk's
+/// fields mapped to the names `BaseURL`, `APIVersion`, `Headers`, `Timeout`,
 /// `ExtrasRequestProvider`).
 pub(crate) fn http_option_fields(http_options: &HttpOptions) -> Vec<(&'static str, bool)> {
     let HttpOptions {

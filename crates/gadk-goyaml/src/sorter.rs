@@ -13,74 +13,74 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of yaml.v3 v3.0.1 `sorter.go`: the `keyList` order used for map keys on encode
-//! (numbers before strings by `reflect.Kind`, numeric runs compared by value, letters before
-//! digits), over [`SortKey`]s — what Go's `reflect.Value` keys look like after dereferencing
-//! interfaces and pointers — and Go's `sort.Sort` (pattern-defeating quicksort, Go's
-//! `sort/zsortinterface.go`), which `encode.go` sorts them with. `keyList.Less` is not a
-//! strict weak order (e.g. `"a1" < "a01"` and `"a01" < "a1"` can both be false while their
-//! relations to a third key disagree), so the resulting order is defined by Go's algorithm,
-//! and Rust's `sort_by` (which may panic on such orders) cannot be used.
+//! The order used for map keys on encode (numbers before strings by kind, numeric runs compared
+//! by value, letters before digits), over [`SortKey`]s (a key after looking through interfaces
+//! and pointers), and the pattern-defeating quicksort yaml.v3 sorts them with. The key order
+//! ([`key_list_less`]) is not a strict weak order (e.g. `"a1" < "a01"` and `"a01" < "a1"` can
+//! both be false while their relations to a third key disagree), so the resulting order is
+//! defined by the sorting algorithm, which is reproduced exactly here; Rust's `sort_by` (which
+//! may panic on such orders) cannot be used.
 
 use crate::value::GoValue;
 
-/// Go's `reflect.Kind` numbers (the order `keyList.Less` falls back to).
-#[allow(dead_code)] // Go's whole reflect.Kind list: kinds no serde value or GoValue has stay unbuilt.
+/// Value kinds numbered as in yaml.v3's key order, which falls back to them. Kinds that no
+/// serde value or `GoValue` has stay unbuilt.
+#[allow(dead_code)] // the whole kind list is kept, though some kinds are never built
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum ReflectKind {
-    /// `reflect.Invalid`.
+    /// The Invalid kind.
     Invalid = 0,
-    /// `reflect.Bool`.
+    /// The Bool kind.
     Bool = 1,
-    /// `reflect.Int`.
+    /// The Int kind.
     Int = 2,
-    /// `reflect.Int8`.
+    /// The Int8 kind.
     Int8 = 3,
-    /// `reflect.Int16`.
+    /// The Int16 kind.
     Int16 = 4,
-    /// `reflect.Int32`.
+    /// The Int32 kind.
     Int32 = 5,
-    /// `reflect.Int64`.
+    /// The Int64 kind.
     Int64 = 6,
-    /// `reflect.Uint`.
+    /// The Uint kind.
     Uint = 7,
-    /// `reflect.Uint8`.
+    /// The Uint8 kind.
     Uint8 = 8,
-    /// `reflect.Uint16`.
+    /// The Uint16 kind.
     Uint16 = 9,
-    /// `reflect.Uint32`.
+    /// The Uint32 kind.
     Uint32 = 10,
-    /// `reflect.Uint64`.
+    /// The Uint64 kind.
     Uint64 = 11,
-    /// `reflect.Uintptr`.
+    /// The Uintptr kind.
     Uintptr = 12,
-    /// `reflect.Float32`.
+    /// The Float32 kind.
     Float32 = 13,
-    /// `reflect.Float64`.
+    /// The Float64 kind.
     Float64 = 14,
-    /// `reflect.Complex64`.
+    /// The Complex64 kind.
     Complex64 = 15,
-    /// `reflect.Complex128`.
+    /// The Complex128 kind.
     Complex128 = 16,
-    /// `reflect.Array`.
+    /// The Array kind.
     Array = 17,
-    /// `reflect.Chan`.
+    /// The Chan kind.
     Chan = 18,
-    /// `reflect.Func`.
+    /// The Func kind.
     Func = 19,
-    /// `reflect.Interface` (a nil interface key stays this kind).
+    /// The Interface kind (a null interface key stays this kind).
     Interface = 20,
-    /// `reflect.Map`.
+    /// The Map kind.
     Map = 21,
-    /// `reflect.Pointer` (a nil pointer key stays this kind).
+    /// The Pointer kind (a null pointer key stays this kind).
     Pointer = 22,
-    /// `reflect.Slice`.
+    /// The Slice kind.
     Slice = 23,
-    /// `reflect.String`.
+    /// The String kind.
     String = 24,
-    /// `reflect.Struct` (e.g. `time.Time`).
+    /// The Struct kind (e.g. a timestamp).
     Struct = 25,
-    /// `reflect.UnsafePointer`.
+    /// The UnsafePointer kind.
     UnsafePointer = 26,
 }
 
@@ -95,7 +95,7 @@ pub(crate) enum SortKey {
     Uint(ReflectKind, u64),
     /// A float key of the given kind (`Float32`/`Float64`; f32 values widened).
     Float(ReflectKind, f64),
-    /// A string key, as the runes Go's `[]rune(s)` yields (invalid UTF-8 bytes become
+    /// A string key, as its characters (invalid UTF-8 bytes become
     /// U+FFFD one byte at a time).
     String(String),
     /// Any other key: compared by kind only.
@@ -103,7 +103,7 @@ pub(crate) enum SortKey {
 }
 
 impl SortKey {
-    /// The key's `reflect.Kind`.
+    /// The key's kind.
     pub(crate) fn kind(&self) -> ReflectKind {
         match self {
             SortKey::Bool(_) => ReflectKind::Bool,
@@ -114,9 +114,9 @@ impl SortKey {
         }
     }
 
-    /// The `SortKey` of a `map[interface{}]interface{}` key holding `v` (`Null` → a nil
-    /// interface, `Int` → `int`, `Uint` → `uint64`, `Float` → `float64`, `String`/`Bytes` →
-    /// `string`, `Timestamp` → `time.Time`, `Seq` → slice, `Map`/`MapAny` → map).
+    /// The `SortKey` of a dynamically typed map key holding `v` (`Null` → a null interface,
+    /// `Int` → a signed integer, `Uint` → `uint64`, `Float` → `float64`, `String`/`Bytes` →
+    /// string, `Timestamp` → a struct, `Seq` → slice, `Map`/`MapAny` → map).
     pub(crate) fn from_go_value(v: &GoValue) -> SortKey {
         match v {
             GoValue::Null => SortKey::Other(ReflectKind::Interface),
@@ -133,9 +133,9 @@ impl SortKey {
     }
 }
 
-/// Go's `[]rune(s)` of a string holding arbitrary bytes, as a `String`: every byte that does
-/// not start a valid UTF-8 sequence becomes one U+FFFD (Go's `utf8.DecodeRune` consumes one
-/// byte on error; `String::from_utf8_lossy` would replace a whole invalid sequence once).
+/// The characters of a string holding arbitrary bytes, as a `String`: every byte that does
+/// not start a valid UTF-8 sequence becomes one U+FFFD (one byte is consumed per error;
+/// `String::from_utf8_lossy` would replace a whole invalid sequence once).
 fn go_runes_lossy(b: &[u8]) -> String {
     let mut out = String::with_capacity(b.len());
     for chunk in b.utf8_chunks() {
@@ -147,11 +147,10 @@ fn go_runes_lossy(b: &[u8]) -> String {
     out
 }
 
-/// Go: sorter.go `keyList.Less`.
+/// Whether key `a` sorts before key `b`.
 pub(crate) fn key_list_less(a: &SortKey, b: &SortKey) -> bool {
-    // Go: sorter.go Less
-    // (The `Elem()` loops through non-nil interfaces and pointers happened when the
-    // `SortKey`s were built.)
+    // (Looking through non-null interfaces and pointers happened when the `SortKey`s were
+    // built.)
     let ak = a.kind();
     let bk = b.kind();
     if let (Some(af), Some(bf)) = (key_float(a), key_float(b)) {
@@ -201,7 +200,7 @@ pub(crate) fn key_list_less(a: &SortKey, b: &SortKey) -> bool {
                 }
             }
         }
-        // Go's `int64(ar[ai]-'0')` with wrapping int64 arithmetic (any Nd rune counts).
+        // The digit value is taken with wrapping `i64` arithmetic (any Nd character counts).
         let mut ai = i;
         while ai < ar.len() && is_digit(ar[ai]) {
             an = an
@@ -227,9 +226,8 @@ pub(crate) fn key_list_less(a: &SortKey, b: &SortKey) -> bool {
     ar.len() < br.len()
 }
 
-/// Go: sorter.go `keyFloat` — the numeric value of a number/bool key.
+/// The numeric value of a number/bool key.
 pub(crate) fn key_float(v: &SortKey) -> Option<f64> {
-    // Go: sorter.go keyFloat
     match v {
         SortKey::Int(_, i) => Some(*i as f64),
         SortKey::Float(_, f) => Some(*f),
@@ -239,9 +237,8 @@ pub(crate) fn key_float(v: &SortKey) -> Option<f64> {
     }
 }
 
-/// Go: sorter.go `numLess` — `a < b` for two numeric keys of the same kind.
+/// `a < b` for two numeric keys of the same kind.
 pub(crate) fn num_less(a: &SortKey, b: &SortKey) -> bool {
-    // Go: sorter.go numLess
     match (a, b) {
         (SortKey::Int(_, a), SortKey::Int(_, b)) => a < b,
         (SortKey::Float(_, a), SortKey::Float(_, b)) => a < b,
@@ -251,12 +248,12 @@ pub(crate) fn num_less(a: &SortKey, b: &SortKey) -> bool {
     }
 }
 
-/// Go's `unicode.IsLetter`.
+/// Whether `r` is a letter (category L).
 fn is_letter(r: char) -> bool {
     in_ranges(LETTER_RANGES, r)
 }
 
-/// Go's `unicode.IsDigit`.
+/// Whether `r` is a decimal digit (category Nd).
 fn is_digit(r: char) -> bool {
     in_ranges(DIGIT_RANGES, r)
 }
@@ -278,11 +275,10 @@ fn in_ranges(pairs: &[u32], r: char) -> bool {
     lo < n && pairs[2 * lo] <= r
 }
 
-/// Go's `sort.Sort(keyList(keys))`: sorts `items` by [`key_list_less`] on `key(item)` with the
-/// exact algorithm of Go's `sort.Sort` (pdqsort), so orders of keys `Less` does not totally
-/// order match Go (and never trip Rust's total-order checks).
+/// Sorts `items` by [`key_list_less`] on `key(item)` with yaml.v3's exact sort algorithm
+/// (pdqsort), so orders of keys that [`key_list_less`] does not totally order are the ones
+/// yaml.v3 produces (and never trip Rust's total-order checks).
 pub(crate) fn sort_keys<T>(items: &mut [T], key: impl Fn(&T) -> &SortKey) {
-    // Go: sorter.go sort.Sort(keyList)
     let n = items.len();
     if n <= 1 {
         return;
@@ -293,11 +289,10 @@ pub(crate) fn sort_keys<T>(items: &mut [T], key: impl Fn(&T) -> &SortKey) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Go's sort.Sort (sort/sort.go, sort/zsortinterface.go): pattern-defeating quicksort over
-// Less/Swap, ported function by function.
+// Pattern-defeating quicksort over Less/Swap, function by function as yaml.v3's sort.
 // ---------------------------------------------------------------------------------------------
 
-/// Go's `sort.Interface` for a `keyList`: `Less` is [`key_list_less`], `Swap` swaps items.
+/// The sortable view of a key list: `Less` is [`key_list_less`], `Swap` swaps items.
 struct KeyList<'a, T, F> {
     items: &'a mut [T],
     key: F,
@@ -313,12 +308,12 @@ impl<T, F: Fn(&T) -> &SortKey> KeyList<'_, T, F> {
     }
 }
 
-/// Go's `bits.Len(uint(n))`: the number of bits needed to represent `n`.
+/// The number of bits needed to represent `n`.
 fn bits_len(n: usize) -> usize {
     (usize::BITS - n.leading_zeros()) as usize
 }
 
-/// Go: sort `sortedHint`.
+/// How sorted the input looks (the hint `choose_pivot` returns).
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SortedHint {
     Unknown,
@@ -326,12 +321,12 @@ enum SortedHint {
     Decreasing,
 }
 
-/// Go: sort `xorshift` (<https://www.jstatsoft.org/article/view/v008i14/xorshift.pdf>).
+/// A xorshift pseudo-random generator
+/// (<https://www.jstatsoft.org/article/view/v008i14/xorshift.pdf>).
 struct Xorshift(u64);
 
 impl Xorshift {
     fn next(&mut self) -> u64 {
-        // Go: sort/sort.go (*xorshift).Next
         self.0 ^= self.0 << 13;
         self.0 ^= self.0 >> 7;
         self.0 ^= self.0 << 17;
@@ -339,15 +334,13 @@ impl Xorshift {
     }
 }
 
-/// Go: sort `nextPowerOfTwo`.
+/// The smallest power of two greater than `length`.
 fn next_power_of_two(length: usize) -> u64 {
-    // Go: sort/sort.go nextPowerOfTwo
     1u64 << bits_len(length)
 }
 
-/// Go: sort `insertionSort` — sorts `data[a:b]` using insertion sort.
+/// Sorts `data[a:b]` using insertion sort.
 fn insertion_sort<T, F: Fn(&T) -> &SortKey>(data: &mut KeyList<'_, T, F>, a: usize, b: usize) {
-    // Go: sort/zsortinterface.go insertionSort
     for i in a + 1..b {
         let mut j = i;
         while j > a && data.less(j, j - 1) {
@@ -357,7 +350,7 @@ fn insertion_sort<T, F: Fn(&T) -> &SortKey>(data: &mut KeyList<'_, T, F>, a: usi
     }
 }
 
-/// Go: sort `siftDown` — implements the heap property on `data[lo:hi]`; `first` is an offset
+/// Implements the heap property on `data[lo:hi]`; `first` is an offset
 /// into the array where the root of the heap lies.
 fn sift_down<T, F: Fn(&T) -> &SortKey>(
     data: &mut KeyList<'_, T, F>,
@@ -365,7 +358,6 @@ fn sift_down<T, F: Fn(&T) -> &SortKey>(
     hi: usize,
     first: usize,
 ) {
-    // Go: sort/zsortinterface.go siftDown
     let mut root = lo;
     loop {
         let mut child = 2 * root + 1;
@@ -383,9 +375,8 @@ fn sift_down<T, F: Fn(&T) -> &SortKey>(
     }
 }
 
-/// Go: sort `heapSort`.
+/// Heap sort of `data[a:b]`.
 fn heap_sort<T, F: Fn(&T) -> &SortKey>(data: &mut KeyList<'_, T, F>, a: usize, b: usize) {
-    // Go: sort/zsortinterface.go heapSort
     let first = a;
     let lo = 0;
     let hi = b - a;
@@ -402,7 +393,7 @@ fn heap_sort<T, F: Fn(&T) -> &SortKey>(data: &mut KeyList<'_, T, F>, a: usize, b
     }
 }
 
-/// Go: sort `pdqsort` — sorts `data[a:b]`; `limit` is the number of allowed bad (very
+/// Sorts `data[a:b]`; `limit` is the number of allowed bad (very
 /// unbalanced) pivots before falling back to heapsort.
 fn pdqsort<T, F: Fn(&T) -> &SortKey>(
     data: &mut KeyList<'_, T, F>,
@@ -410,7 +401,6 @@ fn pdqsort<T, F: Fn(&T) -> &SortKey>(
     mut b: usize,
     mut limit: usize,
 ) {
-    // Go: sort/zsortinterface.go pdqsort
     const MAX_INSERTION: usize = 12;
 
     let mut was_balanced = true; // whether the last partitioning was reasonably balanced
@@ -480,7 +470,7 @@ fn pdqsort<T, F: Fn(&T) -> &SortKey>(
     }
 }
 
-/// Go: sort `partition` — partitions `data[a:b]` into elements lower than `data[pivot]`,
+/// Partitions `data[a:b]` into elements lower than `data[pivot]`,
 /// followed by elements greater than or equal to `data[pivot]`.
 fn partition<T, F: Fn(&T) -> &SortKey>(
     data: &mut KeyList<'_, T, F>,
@@ -488,7 +478,6 @@ fn partition<T, F: Fn(&T) -> &SortKey>(
     b: usize,
     pivot: usize,
 ) -> (usize, bool) {
-    // Go: sort/zsortinterface.go partition
     data.swap(a, pivot);
     let (mut i, mut j) = (a + 1, b - 1); // i and j are inclusive of the elements remaining to be partitioned
 
@@ -524,7 +513,7 @@ fn partition<T, F: Fn(&T) -> &SortKey>(
     (j, false)
 }
 
-/// Go: sort `partitionEqual` — partitions `data[a:b]` into elements equal to `data[pivot]`
+/// Partitions `data[a:b]` into elements equal to `data[pivot]`
 /// followed by elements greater than `data[pivot]`; assumes no element is smaller.
 fn partition_equal<T, F: Fn(&T) -> &SortKey>(
     data: &mut KeyList<'_, T, F>,
@@ -532,7 +521,6 @@ fn partition_equal<T, F: Fn(&T) -> &SortKey>(
     b: usize,
     pivot: usize,
 ) -> usize {
-    // Go: sort/zsortinterface.go partitionEqual
     data.swap(a, pivot);
     let (mut i, mut j) = (a + 1, b - 1); // i and j are inclusive of the elements remaining to be partitioned
 
@@ -553,14 +541,13 @@ fn partition_equal<T, F: Fn(&T) -> &SortKey>(
     i
 }
 
-/// Go: sort `partialInsertionSort` — partially sorts a slice, returns true if the slice is
+/// Partially sorts a slice, returns true if the slice is
 /// sorted at the end.
 fn partial_insertion_sort<T, F: Fn(&T) -> &SortKey>(
     data: &mut KeyList<'_, T, F>,
     a: usize,
     b: usize,
 ) -> bool {
-    // Go: sort/zsortinterface.go partialInsertionSort
     const MAX_STEPS: usize = 5; // maximum number of adjacent out-of-order pairs that will get shifted
     const SHORTEST_SHIFTING: usize = 50; // don't shift any elements on short arrays
     let mut i = a + 1;
@@ -581,7 +568,7 @@ fn partial_insertion_sort<T, F: Fn(&T) -> &SortKey>(
 
         // Shift the smaller one to the left.
         if i - a >= 2 {
-            // Go's loop runs down to index 1, not a+1.
+            // The loop runs down to index 1, not a+1.
             let mut j = i - 1;
             while j >= 1 {
                 if !data.less(j, j - 1) {
@@ -606,10 +593,9 @@ fn partial_insertion_sort<T, F: Fn(&T) -> &SortKey>(
     false
 }
 
-/// Go: sort `breakPatterns` — scatters some elements around in an attempt to break some
+/// Scatters some elements around in an attempt to break some
 /// patterns that might cause imbalanced partitions in quicksort.
 fn break_patterns<T, F: Fn(&T) -> &SortKey>(data: &mut KeyList<'_, T, F>, a: usize, b: usize) {
-    // Go: sort/zsortinterface.go breakPatterns
     let length = b - a;
     if length >= 8 {
         let mut random = Xorshift(length as u64);
@@ -626,7 +612,7 @@ fn break_patterns<T, F: Fn(&T) -> &SortKey>(data: &mut KeyList<'_, T, F>, a: usi
     }
 }
 
-/// Go: sort `choosePivot` — chooses a pivot in `data[a:b]`: [0,8): chooses a static pivot;
+/// Chooses a pivot in `data[a:b]`: [0,8): chooses a static pivot;
 /// [8,shortestNinther): uses the simple median-of-three method; [shortestNinther,∞): uses
 /// the Tukey ninther method.
 fn choose_pivot<T, F: Fn(&T) -> &SortKey>(
@@ -634,7 +620,6 @@ fn choose_pivot<T, F: Fn(&T) -> &SortKey>(
     a: usize,
     b: usize,
 ) -> (usize, SortedHint) {
-    // Go: sort/zsortinterface.go choosePivot
     const SHORTEST_NINTHER: usize = 50;
     const MAX_SWAPS: usize = 4 * 3;
 
@@ -663,14 +648,13 @@ fn choose_pivot<T, F: Fn(&T) -> &SortKey>(
     }
 }
 
-/// Go: sort `order2` — returns `(a, b)` such that `data[a] <= data[b]`.
+/// Returns `(a, b)` such that `data[a] <= data[b]`.
 fn order2<T, F: Fn(&T) -> &SortKey>(
     data: &KeyList<'_, T, F>,
     a: usize,
     b: usize,
     swaps: &mut usize,
 ) -> (usize, usize) {
-    // Go: sort/zsortinterface.go order2
     if data.less(b, a) {
         *swaps += 1;
         return (b, a);
@@ -678,7 +662,7 @@ fn order2<T, F: Fn(&T) -> &SortKey>(
     (a, b)
 }
 
-/// Go: sort `median` — returns `x` where `data[x]` is the median of `a`, `b`, `c`.
+/// Returns `x` where `data[x]` is the median of `a`, `b`, `c`.
 fn median<T, F: Fn(&T) -> &SortKey>(
     data: &KeyList<'_, T, F>,
     a: usize,
@@ -686,26 +670,23 @@ fn median<T, F: Fn(&T) -> &SortKey>(
     c: usize,
     swaps: &mut usize,
 ) -> usize {
-    // Go: sort/zsortinterface.go median
     let (a, b) = order2(data, a, b, swaps);
     let (b, _c) = order2(data, b, c, swaps);
     let (_a, b) = order2(data, a, b, swaps);
     b
 }
 
-/// Go: sort `medianAdjacent` — finds the median of `data[a - 1], data[a], data[a + 1]`.
+/// Finds the median of `data[a - 1], data[a], data[a + 1]`.
 fn median_adjacent<T, F: Fn(&T) -> &SortKey>(
     data: &KeyList<'_, T, F>,
     a: usize,
     swaps: &mut usize,
 ) -> usize {
-    // Go: sort/zsortinterface.go medianAdjacent
     median(data, a - 1, a, a + 1, swaps)
 }
 
-/// Go: sort `reverseRange`.
+/// Reverses `data[a:b]`.
 fn reverse_range<T, F: Fn(&T) -> &SortKey>(data: &mut KeyList<'_, T, F>, a: usize, b: usize) {
-    // Go: sort/zsortinterface.go reverseRange
     let mut i = a;
     let mut j = b - 1;
     while i < j {
@@ -716,11 +697,11 @@ fn reverse_range<T, F: Fn(&T) -> &SortKey>(data: &mut KeyList<'_, T, F>, a: usiz
 }
 
 // ---------------------------------------------------------------------------------------------
-// Go's unicode tables for IsLetter / IsDigit, generated from Go 1.27.2's `unicode` package
-// (the toolchain the probe runs on) as maximal runs of code points.
+// Unicode tables for `is_letter` / `is_digit` (the Unicode 17.0.0 tables yaml.v3's sort
+// consults), as maximal runs of code points.
 // ---------------------------------------------------------------------------------------------
 
-/// Go `unicode.IsLetter` (category L, Unicode 17.0.0 as in Go 1.27.2): inclusive `[lo, hi]` pairs.
+/// Letters (category L, Unicode 17.0.0): inclusive `[lo, hi]` pairs.
 const LETTER_RANGES: &[u32] = &[
     0x41, 0x5a, 0x61, 0x7a, 0xaa, 0xaa, 0xb5, 0xb5, 0xba, 0xba, 0xc0, 0xd6, 0xd8, 0xf6, 0xf8,
     0x2c1, 0x2c6, 0x2d1, 0x2e0, 0x2e4, 0x2ec, 0x2ec, 0x2ee, 0x2ee, 0x370, 0x374, 0x376, 0x377,
@@ -847,7 +828,7 @@ const LETTER_RANGES: &[u32] = &[
     0x33479,
 ];
 
-/// Go `unicode.IsDigit` (category Nd, Unicode 17.0.0 as in Go 1.27.2): inclusive `[lo, hi]` pairs.
+/// Decimal digits (category Nd, Unicode 17.0.0): inclusive `[lo, hi]` pairs.
 const DIGIT_RANGES: &[u32] = &[
     0x30, 0x39, 0x660, 0x669, 0x6f0, 0x6f9, 0x7c0, 0x7c9, 0x966, 0x96f, 0x9e6, 0x9ef, 0xa66, 0xa6f,
     0xae6, 0xaef, 0xb66, 0xb6f, 0xbe6, 0xbef, 0xc66, 0xc6f, 0xce6, 0xcef, 0xd66, 0xd6f, 0xde6,

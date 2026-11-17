@@ -13,16 +13,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `internal/configurable/conformance/functions.go`: the conformance agents' function
-//! tools (`validate_email`, `get_user_id`, `create_booking`, `search_flights`,
-//! `calculate_trip_cost`, `reimburse`, `ask_for_approval`), registered as tool factories under
-//! `tools_agent_00N.tools.*`.
+//! The conformance agents' function tools (`validate_email`, `get_user_id`, `create_booking`,
+//! `search_flights`, `calculate_trip_cost`, `reimburse`, `ask_for_approval`), registered as
+//! tool factories under `tools_agent_00N.tools.*`.
 //!
-//! The argument structs carry Go's `json` tags as field names. Their schemars schemas match
-//! what Go's `jsonschema.For` infers for the Go structs (every field required, a Go pointer
-//! field is `{"type": ["null", T]}`), so the tools' declarations — and the conformance
-//! recordings that contain them — are Go's. The structs have no doc comments on purpose:
-//! schemars would turn them into `description`s, which Go's untagged structs do not have.
+//! The argument structs use the conformance agents' JSON field names. Their schemars schemas
+//! are shaped to match the declarations in ADK's conformance recordings (every field
+//! required, an optional field is `{"type": ["null", T]}`), so the tools' declarations match
+//! those recordings. The structs have no doc comments on purpose: schemars would turn them
+//! into `description`s, which the recorded declarations do not have.
 
 use std::sync::{Arc, LazyLock};
 
@@ -36,49 +35,47 @@ use serde_json::{Map, Value, json};
 
 use crate::{ConfigError, Registry, ToolFactory};
 
-/// A JSON object result (Go `map[string]any`).
+/// A JSON object result.
 type GoResult = Map<String, Value>;
 
-/// Go `jsonschema.For` of a pointer field: `{"type": ["null", T]}` (jsonschema-go puts `"null"`
-/// first; schemars writes `[T, "null"]` and leaves an `Option` out of `required`, so these
-/// fields are also marked `#[schemars(required)]`, which keeps the bare `T` schema).
+/// Schema of an optional field: `{"type": ["null", T]}` (the recordings put `"null"` first;
+/// schemars writes `[T, "null"]` and leaves an `Option` out of `required`, so these fields are
+/// also marked `#[schemars(required)]`, which keeps the bare `T` schema).
 fn go_pointer(schema: &mut schemars::Schema) {
     if let Some(t) = schema.get("type").cloned() {
         schema.insert("type".into(), json!(["null", t]));
     }
 }
 
-// Go `ValidateEmailArgs`.
+// Arguments of `validate_email`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub(crate) struct ValidateEmailArgs {
     pub(crate) email: String,
 }
 
-// Go `emailRegex`.
+// The email format `validate_email` accepts.
 static EMAIL_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    #[allow(clippy::expect_used)] // a constant pattern (Go regexp.MustCompile)
+    #[allow(clippy::expect_used)] // a constant pattern
     Regex::new(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$").expect("valid email regex")
 });
 
-/// Go `validateEmail`.
+/// Whether the email matches the accepted format.
 pub(crate) async fn validate_email(
     _ctx: Context,
     args: ValidateEmailArgs,
 ) -> Result<bool, ToolError> {
-    // Go: functions.go validateEmail
     Ok(EMAIL_REGEX.is_match(&args.email))
 }
 
-/// Go `fnv.New32a` → `Write(data)` → `Sum32()`: 32-bit FNV-1a.
+/// 32-bit FNV-1a of the data.
 fn fnv32a(data: &[u8]) -> u32 {
     data.iter().fold(0x811c_9dc5_u32, |h, &b| {
         (h ^ u32::from(b)).wrapping_mul(0x0100_0193)
     })
 }
 
-/// Go `getUserID`: `invalid email format provided`, else FNV-1a 32 of the email modulo 10000.
+/// `invalid email format provided`, else FNV-1a 32 of the email modulo 10000.
 pub(crate) async fn get_user_id(ctx: Context, args: ValidateEmailArgs) -> Result<i64, ToolError> {
-    // Go: functions.go getUserID
     let email = args.email.clone();
     let valid = validate_email(ctx, args).await?;
     if !valid {
@@ -87,7 +84,7 @@ pub(crate) async fn get_user_id(ctx: Context, args: ValidateEmailArgs) -> Result
     Ok(i64::from(fnv32a(email.as_bytes()) % 10000))
 }
 
-// Go `CreateBookingArgs`.
+// Arguments of `create_booking`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub(crate) struct CreateBookingArgs {
     pub(crate) user_id: i64,
@@ -95,12 +92,11 @@ pub(crate) struct CreateBookingArgs {
     pub(crate) details: String,
 }
 
-/// Go `createBooking`: the arguments and their Go type names.
+/// Echoes the arguments with their type names (`int`, `bool`, `string`).
 pub(crate) async fn create_booking(
     _ctx: Context,
     args: CreateBookingArgs,
 ) -> Result<GoResult, ToolError> {
-    // Go: functions.go createBooking
     Ok(go_map(json!({
         "user_id": args.user_id,
         "is_confirmed": args.is_confirmed,
@@ -111,7 +107,7 @@ pub(crate) async fn create_booking(
     })))
 }
 
-// Go `FlightPreferences`.
+// Flight preferences of `search_flights`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub(crate) struct FlightPreferences {
     pub(crate) cabin_class: String,
@@ -121,7 +117,7 @@ pub(crate) struct FlightPreferences {
     pub(crate) flexible_dates: bool,
 }
 
-// Go `TripDetails`.
+// Trip details of `search_flights`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub(crate) struct TripDetails {
     pub(crate) origin: String,
@@ -130,7 +126,7 @@ pub(crate) struct TripDetails {
     pub(crate) return_date: String,
 }
 
-// Go `SearchFlightsArgs`.
+// Arguments of `search_flights`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub(crate) struct SearchFlightsArgs {
     pub(crate) trip: TripDetails,
@@ -138,13 +134,12 @@ pub(crate) struct SearchFlightsArgs {
     pub(crate) preferences: Option<FlightPreferences>,
 }
 
-/// Go `searchFlights`: default preferences (`economy`, 1 stop) when absent, a one-way or
-/// round-trip summary and the `available_flights` lines.
+/// Default preferences (`economy`, 1 stop) when absent, a one-way or round-trip summary and
+/// the `available_flights` lines.
 pub(crate) async fn search_flights(
     _ctx: Context,
     args: SearchFlightsArgs,
 ) -> Result<GoResult, ToolError> {
-    // Go: functions.go searchFlights
     let trip = args.trip;
     let preferences = args.preferences.unwrap_or_else(|| FlightPreferences {
         cabin_class: "economy".to_owned(),
@@ -199,7 +194,7 @@ pub(crate) async fn search_flights(
     Ok(result)
 }
 
-// Go `CalculateTripCostArgs`.
+// Arguments of `calculate_trip_cost`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub(crate) struct CalculateTripCostArgs {
     pub(crate) base_fare: f64,
@@ -209,14 +204,12 @@ pub(crate) struct CalculateTripCostArgs {
     pub(crate) baggage_count: Option<i64>,
 }
 
-/// Go `calculateTripCost`: at least one passenger, 10% insurance, $35 per checked bag after
-/// the first, per passenger.
-#[allow(clippy::cast_precision_loss)] // Go float64(int)
+/// At least one passenger, 10% insurance, $35 per checked bag after the first, per passenger.
+#[allow(clippy::cast_precision_loss)] // integer counts to f64
 pub(crate) async fn calculate_trip_cost(
     _ctx: Context,
     mut args: CalculateTripCostArgs,
 ) -> Result<GoResult, ToolError> {
-    // Go: functions.go calculateTripCost
     if args.num_passengers <= 0 {
         args.num_passengers = 1;
     }
@@ -231,7 +224,7 @@ pub(crate) async fn calculate_trip_cost(
     if let Some(count) = args.baggage_count {
         display_baggage = json!(count);
 
-        // Go `math.Max(0, float64(count-1))` (Go's int subtraction wraps).
+        // The first bag is free; the integer subtraction wraps, then the count is clamped at 0.
         let chargeable_bags = f64::max(0.0, count.wrapping_sub(1) as f64);
         baggage_cost = chargeable_bags * 35.0 * args.num_passengers as f64;
     }
@@ -250,32 +243,30 @@ pub(crate) async fn calculate_trip_cost(
     })))
 }
 
-// Go `reimburseArgs`.
+// Arguments of `reimburse`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub(crate) struct ReimburseArgs {
     pub(crate) purpose: String,
     pub(crate) amount: f64,
 }
 
-/// Go `reimburse`: `{"status": "ok"}`.
+/// `{"status": "ok"}`.
 pub(crate) async fn reimburse(_ctx: Context, _args: ReimburseArgs) -> Result<GoResult, ToolError> {
-    // Go: functions.go reimburse
     Ok(go_map(json!({ "status": "ok" })))
 }
 
-// Go `askForApprovalArgs`.
+// Arguments of `ask_for_approval`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub(crate) struct AskForApprovalArgs {
     pub(crate) purpose: String,
     pub(crate) amount: f64,
 }
 
-/// Go `askForApproval`: a pending ticket for the amount.
+/// A pending ticket for the amount.
 pub(crate) async fn ask_for_approval(
     _ctx: Context,
     args: AskForApprovalArgs,
 ) -> Result<GoResult, ToolError> {
-    // Go: functions.go askForApproval
     Ok(go_map(json!({
         "status": "pending",
         "amount": args.amount,
@@ -336,8 +327,8 @@ Returns:
   A dictionary with cost breakdown.
 ";
 
-/// Go `functiontool.New(functiontool.Config{Name, Description, IsLongRunning}, f)`, with
-/// `fmt.Errorf("<context>: %w", err)` on failure.
+/// Builds a [`FunctionTool`] from its name, description and function, wrapping a failure as
+/// `{context}: {cause}`.
 fn new_tool<Args, Out, F, Fut>(
     name: &str,
     description: &str,
@@ -358,7 +349,7 @@ where
     FunctionTool::new(cfg, f).map_err(|e| ConfigError::wrap(context, ConfigError::other(e)))
 }
 
-/// Go `func(ctx context.Context, _ map[string]any) (tool.Tool, error) { return t, nil }`.
+/// A factory that returns the given tool, ignoring the registry, context and args.
 fn constant_factory(t: Arc<dyn Tool>) -> ToolFactory {
     Arc::new(move |_, _, _| {
         let t = t.clone();
@@ -366,11 +357,9 @@ fn constant_factory(t: Arc<dyn Tool>) -> ToolFactory {
     })
 }
 
-/// Go `RegisterFunctions`: builds the seven `functiontool.New` tools
-/// (`error creating validate email tool: %w`, …) and registers a factory returning each
-/// (`error registering validate email tool: %w`, …).
+/// Builds the seven function tools (`error creating validate email tool: {cause}`, …) and
+/// registers a factory returning each (`error registering validate email tool: {cause}`, …).
 pub fn register_functions(registry: &Registry) -> Result<(), ConfigError> {
-    // Go: functions.go RegisterFunctions
     let validate_email_tool = new_tool(
         "validate_email",
         "Checks if the provided string is a valid email format.",

@@ -13,9 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! An `LlmAgent` whose sessions persist in sqlite through `gadk-session-database` (the gadk
-//! counterpart of ADK-Go's `session/database` service). It reads one line per turn from stdin
-//! in the session `session_1`; run it twice and the second run continues the first run's
+//! An `LlmAgent` whose sessions persist in sqlite through `gadk-session-database` (sessions are
+//! stored in the tables of ADK's database session service). It reads one line per turn from
+//! stdin in the session `session_1`; run it twice and the second run continues the first run's
 //! conversation.
 //!
 //! `GOOGLE_API_KEY=... cargo run -p gadk --example database_session --features database`

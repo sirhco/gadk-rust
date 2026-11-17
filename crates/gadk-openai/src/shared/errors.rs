@@ -13,11 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The error sentinels both APIs return (port of ADK-Go `internal/shared/errors.go`). The
-//! sentinels are [`ErrorKind`]s of the crate's [`OpenAiError`] (`crate::error`, D3); this module
-//! re-exports them under the Go package's name so the API modules read as Go's do
-//! (`shared::errors::ErrorKind::NoContents` ≙ `shared.ErrNoContents`).
+//! The error sentinels both APIs return. The sentinels are [`ErrorKind`]s of the crate's
+//! [`OpenAiError`] (`crate::error`); this module re-exports them so the API modules can name
+//! them as `shared::errors::ErrorKind::NoContents`.
 
-// The API modules import the sentinels from `crate::error` directly; this is Go's package path.
+// The API modules import the sentinels from `crate::error` directly; this is the shared path.
 #[allow(unused_imports)]
 pub(crate) use crate::error::{ErrorKind, OpenAiError};

@@ -13,13 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The subset of Go's `mime.ParseMediaType` that `decodeTextBlob` reaches, and ADK-Go's
-//! `hasMIMECharsetParameter` / `isTextMediaType` (`tool/mcptoolset/tool.go`).
+//! MIME media-type parsing for the text-blob decoder: a subset of RFC 2045 / RFC 2231 media-type
+//! parsing ([`parse_media_type`]), plus [`has_mime_charset_parameter`] and [`is_text_media_type`],
+//! which decide whether a resource blob is decoded as text.
 //!
-//! Go's parser works on bytes; every slice boundary below falls on an ASCII byte (a separator,
-//! a quote, or the first byte that is not a token character), so the `&str` slices are always on
-//! character boundaries. Go's whitespace (`unicode.IsSpace`) and Rust's `char::is_whitespace`
-//! are the same set.
+//! The parser works on bytes; every slice boundary below falls on an ASCII byte (a separator, a
+//! quote, or the first byte that is not a token character), so the `&str` slices are always on
+//! character boundaries. Whitespace is [`char::is_whitespace`].
 
 use std::collections::BTreeMap;
 
@@ -28,13 +28,13 @@ use std::collections::BTreeMap;
 pub(crate) enum MediaTypeError {
     /// The media type itself is malformed, or a parameter name repeats with another value.
     Invalid,
-    /// Go `mime.ErrInvalidMediaParameter`: the media type parsed, a parameter did not.
+    /// The media type parsed, but a parameter did not.
     InvalidParameter,
 }
 
-/// Go `mime.ParseMediaType`: the lowercased media type and its parameters. On
-/// [`MediaTypeError::InvalidParameter`] the error carries the media type (Go returns it with no
-/// parameters); on [`MediaTypeError::Invalid`] it carries `""`.
+/// Parses a media type: the lowercased media type and its parameters. On
+/// [`MediaTypeError::InvalidParameter`] the error carries the media type (with no parameters); on
+/// [`MediaTypeError::Invalid`] it carries `""`.
 pub(crate) fn parse_media_type(
     v: &str,
 ) -> Result<(String, BTreeMap<String, String>), (MediaTypeError, String)> {
@@ -119,7 +119,7 @@ pub(crate) fn parse_media_type(
     Ok((mediatype, params))
 }
 
-/// Go `checkMediaTypeDisposition`: `token` or `token "/" token`, nothing else.
+/// Whether `s` is `token` or `token "/" token`, nothing else.
 fn check_media_type_disposition(s: &str) -> bool {
     let (typ, rest) = consume_token(s);
     if typ.is_empty() {
@@ -135,12 +135,12 @@ fn check_media_type_disposition(s: &str) -> bool {
     !subtype.is_empty() && rest.is_empty()
 }
 
-/// Go `decode2231Enc`: `charset'language'percent-encoded`, for `us-ascii` and `utf-8` only.
-/// Go keeps the decoded bytes as they are; invalid UTF-8 becomes U+FFFD here, which no charset
-/// comparison accepts either way.
+/// Decodes an RFC 2231 `charset'language'percent-encoded` value, for `us-ascii` and `utf-8` only.
+/// Invalid UTF-8 in the decoded bytes becomes U+FFFD, which no charset comparison accepts either
+/// way.
 fn decode_2231_enc(v: &str) -> Option<String> {
     let (charset, v) = v.split_once('\'')?;
-    // The language part is ignored, as in Go.
+    // The language part is ignored.
     let (_, ext_other_vals) = v.split_once('\'')?;
     match go_to_lower(charset).as_str() {
         "us-ascii" | "utf-8" => {}
@@ -150,14 +150,14 @@ fn decode_2231_enc(v: &str) -> Option<String> {
     percent_hex_unescape(ext_other_vals).map(|b| String::from_utf8_lossy(&b).into_owned())
 }
 
-/// Go `consumeToken`: the longest prefix of token characters, and the rest.
+/// Splits `v` into its longest prefix of token characters and the rest.
 fn consume_token(v: &str) -> (&str, &str) {
     let end = v.bytes().position(|c| !is_token_char(c)).unwrap_or(v.len());
     v.split_at(end)
 }
 
-/// Go `consumeValue`: a token or a quoted string (unquoted, with Go's MSIE-tolerant escapes).
-/// `None` is Go's `("", v)` failure.
+/// Consumes a parameter value: a token or a quoted string (unquoted, tolerating the unnecessary
+/// backslash escapes MSIE emits in file paths). `None` when no value can be read.
 fn consume_value(v: &str) -> Option<(String, &str)> {
     let bytes = v.as_bytes();
     if bytes.is_empty() {
@@ -194,8 +194,9 @@ fn consume_value(v: &str) -> Option<(String, &str)> {
     None
 }
 
-/// Go `consumeMediaParam`: `; name = value`. `None` is Go's `("", "", v)` failure; the
-/// value may be empty only when it is a quoted `""`.
+/// Consumes one `; name = value` parameter, returning the lowercased name, the value and the
+/// rest. `None` when no parameter can be read; the value may be empty only when it is a quoted
+/// `""`.
 fn consume_media_param(v: &str) -> Option<(String, String, &str)> {
     let rest = v.trim_start_matches(char::is_whitespace);
     let rest = rest.strip_prefix(';')?;
@@ -212,7 +213,7 @@ fn consume_media_param(v: &str) -> Option<(String, String, &str)> {
     Some((param, value, rest))
 }
 
-/// Go `percentHexUnescape`: every `%` must start a two-digit hex escape.
+/// Percent-decodes `s`: every `%` must start a two-digit hex escape, else `None`.
 fn percent_hex_unescape(s: &str) -> Option<Vec<u8>> {
     let b = s.as_bytes();
     let mut i = 0;
@@ -250,7 +251,7 @@ fn unhex(c: u8) -> u8 {
     }
 }
 
-/// Go `isTSpecial` (RFC 2045 tspecials).
+/// Whether `c` is an RFC 2045 tspecial.
 fn is_tspecial(c: u8) -> bool {
     matches!(
         c,
@@ -271,7 +272,7 @@ fn is_tspecial(c: u8) -> bool {
     )
 }
 
-/// Go `isTokenChar`: US-ASCII except space, controls and tspecials.
+/// Whether `c` is a token character: US-ASCII except space, controls and tspecials.
 fn is_token_char(c: u8) -> bool {
     c.is_ascii_alphanumeric()
         || matches!(
@@ -295,12 +296,12 @@ fn is_token_char(c: u8) -> bool {
         )
 }
 
-/// Go `strings.ToLower` (shared port in gadk-platform).
+/// Lowercases a string (see [`gadk_platform::go_to_lower`]).
 pub(crate) use gadk_platform::go_to_lower;
 
-/// Go `hasMIMECharsetParameter`: whether `value` declares a charset parameter, or is ambiguous
-/// enough that it might (a quote that does not open a parameter value, a quoted parameter Go's
-/// parser rejects, or an unterminated quote).
+/// Whether `value` declares a charset parameter, or is ambiguous enough that it might (a quote that
+/// does not open a parameter value, a quoted parameter [`parse_media_type`] rejects, or an
+/// unterminated quote).
 pub(crate) fn has_mime_charset_parameter(value: &str) -> bool {
     let Some((_, params)) = value.split_once(';') else {
         return false;
@@ -360,7 +361,8 @@ pub(crate) fn has_mime_charset_parameter(value: &str) -> bool {
     in_quote
 }
 
-/// Go `isTextMediaType`.
+/// Whether a media type is textual: `text/*`, any `+json` / `+xml` suffix, and a fixed list of
+/// `application/*` types (JSON, JavaScript, TOML, form-urlencoded, XML, YAML).
 pub(crate) fn is_text_media_type(media_type: &str) -> bool {
     if media_type.starts_with("text/")
         || media_type.ends_with("+json")

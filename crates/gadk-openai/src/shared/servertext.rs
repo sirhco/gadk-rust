@@ -13,15 +13,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Server-chosen text in error messages (port of ADK-Go `internal/shared/servertext.go`).
+//! Server-chosen text in error messages.
 
-/// The mark a clipped string ends with (Go's `"\u2026"`, HORIZONTAL ELLIPSIS).
+/// The mark a clipped string ends with (`"…"`, HORIZONTAL ELLIPSIS).
 const TRUNCATION_MARK: char = '\u{2026}';
 
-/// Bounds any server-chosen string an error quotes (Go `MaxServerTextRunes`).
+/// Bounds any server-chosen string an error quotes.
 pub(crate) const MAX_SERVER_TEXT_RUNES: usize = 256;
 
-/// Go `ClipServerText`: trims `s` and caps it at [`MAX_SERVER_TEXT_RUNES`] characters,
+/// Trims `s` and caps it at [`MAX_SERVER_TEXT_RUNES`] characters,
 /// marking a cut with `…` (after trimming the kept prefix again). Callers render the result
 /// with [`gadk_platform::go_quote`].
 pub(crate) fn clip_server_text(s: &str) -> String {

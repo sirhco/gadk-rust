@@ -13,14 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of genai `continuation.go`: automatic continuation of a generation the model
-//! pauses with a continuation token.
+//! Automatic continuation of a generation the model pauses with a continuation token.
 //!
-//! genai merges responses by reflecting over its Go structs. The gadk-genai types encode
-//! to the same JSON with the same omission rules, so the merge here walks the JSON
-//! encoding of the responses with the same rules, keyed by the JSON field names (genai
-//! compares field names case-insensitively, so `ContinuationToken` and
-//! `continuationToken` are the same field to it).
+//! Responses are merged by walking the JSON encoding of the gadk-genai response types, keyed
+//! by the JSON field names; field names are compared case-insensitively, so
+//! `ContinuationToken` and `continuationToken` are the same field.
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
@@ -39,12 +36,12 @@ use serde_json::{Map, Number, Value};
 /// progress is surfaced to the caller (or, if there was none, the stream ends normally).
 pub(crate) const MAX_STREAM_RECONNECTS_WITHOUT_PROGRESS: usize = 3;
 
-/// genai `shouldEnableAutomaticContinuation` (a nil config is the default config here).
+/// Whether automatic continuation is enabled (it is by default).
 pub(crate) fn should_enable(cfg: &GenerateContentConfig) -> bool {
     cfg.automatic_continuation.unwrap_or(true)
 }
 
-/// Go `finishReason == ""`: absent, or decoded from an empty string.
+/// Whether the finish reason is empty: absent, or decoded from an empty string.
 fn is_empty_reason(r: Option<&FinishReason>) -> bool {
     match r {
         None => true,
@@ -53,24 +50,25 @@ fn is_empty_reason(r: Option<&FinishReason>) -> bool {
     }
 }
 
-/// Go `finishReason != "" && finishReason != FinishReasonUnspecified`.
+/// Whether the finish reason is set: neither empty nor `Unspecified`.
 fn is_set_reason(r: Option<&FinishReason>) -> bool {
     !is_empty_reason(r) && r != Some(&FinishReason::Unspecified)
 }
 
-/// Go `len(token) > 0`.
+/// The token, when it is not empty.
 fn non_empty(token: Option<&Bytes>) -> Option<&Bytes> {
     token.filter(|t| !t.is_empty())
 }
 
-/// genai `isResumableFinishReason`: per the continuation protocol, when a continuation
+/// Whether the finish reason is resumable: per the continuation protocol, when a continuation
 /// token is present the backend only sets the finish reason to empty/UNSPECIFIED
 /// (intermediate checkpoint chunk) or CONTINUATION (stream end).
 pub(crate) fn is_resumable_finish_reason(r: Option<&FinishReason>) -> bool {
     !is_set_reason(r) || r == Some(&FinishReason::Continuation)
 }
 
-/// genai `canResumeStream`.
+/// Whether the stream can be resumed: continuation is enabled, there is a non-empty token
+/// and a resumable finish reason, and no prompt feedback.
 pub(crate) fn can_resume_stream(
     enabled: bool,
     token: Option<&Bytes>,
@@ -83,7 +81,7 @@ pub(crate) fn can_resume_stream(
     enabled && non_empty(token).is_some() && is_resumable_finish_reason(reason)
 }
 
-/// genai `clearIntermediateFinishReason`: clears a resumable finish reason of the first
+/// Clears a resumable finish reason of the first
 /// candidate, so a paused chunk does not end the turn.
 fn clear_intermediate_finish_reason(
     chunk: &mut GenerateContentResponse,
@@ -100,7 +98,7 @@ fn clear_intermediate_finish_reason(
     }
 }
 
-/// The per-hop part of a [`StreamContinuation`] (genai `streamHop`).
+/// The per-hop part of a [`StreamContinuation`].
 #[derive(Default)]
 struct StreamHop {
     /// The continuation token this hop resumed from (`None` for the first hop).
@@ -126,7 +124,7 @@ impl StreamHop {
 }
 
 /// The state of one automatically continued streaming run, made of one or more
-/// streaming requests ("hops") (genai `streamContinuation`).
+/// streaming requests ("hops").
 ///
 /// Usage:
 ///
@@ -152,7 +150,7 @@ pub(crate) struct StreamContinuation {
 }
 
 impl StreamContinuation {
-    /// genai `newStreamContinuation`.
+    /// Creates the state for a run with the original `config`.
     pub(crate) fn new(config: GenerateContentConfig, enabled: bool) -> Self {
         Self {
             config,
@@ -165,7 +163,7 @@ impl StreamContinuation {
         }
     }
 
-    /// genai `startHop`: starts a new hop and returns the config to send its request
+    /// Starts a new hop and returns the config to send its request
     /// with: the original config for the first hop, or a copy carrying the resume token.
     pub(crate) fn start_hop(&mut self) -> GenerateContentConfig {
         self.hop = StreamHop {
@@ -178,7 +176,7 @@ impl StreamContinuation {
         }
     }
 
-    /// genai `observe`: records the prompt feedback, content, finish reason and
+    /// Records the prompt feedback, content, finish reason and
     /// continuation token of one chunk, and returns the chunk to yield, with an
     /// intermediate finish reason cleared and its usage metadata (if any) set to this
     /// hop's latest usage plus the usage of all previous hops.
@@ -219,7 +217,7 @@ impl StreamContinuation {
         Ok(chunk)
     }
 
-    /// genai `endHop`: finishes the current hop, which ended with `hop_err` (`None` if
+    /// Finishes the current hop, which ended with `hop_err` (`None` if
     /// the stream ended without an error). `Ok(true)` resumes with another hop;
     /// `Ok(false)` ends the stream normally; `Err` ends it with that error.
     ///
@@ -229,8 +227,7 @@ impl StreamContinuation {
     /// row. When the run gives up, the latest error since it last made progress is
     /// returned, unless the API ended the hop with a finish reason or prompt feedback.
     ///
-    /// (genai also stops when its context is done; a dropped Rust stream just stops
-    /// being polled.)
+    /// (A dropped Rust stream just stops being polled.)
     pub(crate) fn end_hop(&mut self, hop_err: Option<ModelError>) -> Result<bool, ModelError> {
         if let Some(usage) = &self.hop.usage {
             self.accumulated_usage_across_hops = Some(usage.clone());
@@ -280,7 +277,7 @@ impl StreamContinuation {
         )
     }
 
-    /// genai `nextResumeToken`: the token to resume the stream with after the current hop
+    /// The token to resume the stream with after the current hop
     /// (`None` if it should not be resumed) and the updated count of reconnects without
     /// progress.
     fn next_resume_token(&self) -> (Option<Bytes>, usize) {
@@ -305,14 +302,14 @@ impl StreamContinuation {
     }
 }
 
-/// genai `shouldContinueGeneration`: the token to continue a unary generation with.
+/// The token to continue a unary generation with.
 pub(crate) fn should_continue(resp: &GenerateContentResponse) -> Option<Bytes> {
     let cand = resp.candidates.first()?;
     let token = non_empty(cand.continuation_token.as_ref())?;
     is_resumable_finish_reason(cand.finish_reason.as_ref()).then(|| token.clone())
 }
 
-/// genai `prepareContinuationConfig`: a copy of `cfg` carrying `token`.
+/// A copy of `cfg` carrying `token`.
 pub(crate) fn prepare_config(cfg: &GenerateContentConfig, token: Bytes) -> GenerateContentConfig {
     GenerateContentConfig {
         continuation_token: Some(token),
@@ -328,7 +325,7 @@ fn from_value<T: DeserializeOwned>(v: Value) -> Result<T, ModelError> {
     serde_json::from_value(v).map_err(|e| ModelError::Other(Box::new(e)))
 }
 
-/// genai `clearStaleContinuationOnCandidate`: drops the continuation token, and a
+/// Drops the continuation token, and a
 /// CONTINUATION finish reason with its message.
 fn clear_stale_continuation_on_candidate(cand: &Value) -> Value {
     let Value::Object(c) = cand else {
@@ -349,7 +346,7 @@ fn clear_stale_continuation_on_candidate(cand: &Value) -> Value {
     Value::Object(cp)
 }
 
-/// genai `mergeCandidates`: merges candidates element-wise.
+/// Merges candidates element-wise.
 fn merge_candidates(prev: &[Value], curr: &[Value]) -> Result<Vec<Value>, ModelError> {
     if curr.is_empty() {
         return Ok(prev
@@ -370,7 +367,7 @@ fn merge_candidates(prev: &[Value], curr: &[Value]) -> Result<Vec<Value>, ModelE
         .collect()
 }
 
-/// genai `mergeContinuationResponses`: merges the responses of every hop into one.
+/// Merges the responses of every hop into one.
 /// Parts and other lists are concatenated, usage metadata and counts summed, and the
 /// latest hop's scalars and terminal fields (continuation token, finish reason and
 /// message) win.
@@ -411,7 +408,7 @@ fn candidates_of(v: &Value) -> &[Value] {
         .unwrap_or_default()
 }
 
-/// genai `mergeUsageMetadata`: every number is summed, and token details are grouped by
+/// Merges usage metadata: every number is summed, and token details are grouped by
 /// modality.
 fn merge_usage_metadata(
     prev: &GenerateContentResponseUsageMetadata,
@@ -426,14 +423,14 @@ fn merge_usage_metadata(
     from_value(merged.unwrap_or_else(|| Value::Object(Map::new())))
 }
 
-/// Fields that are Go `[]byte` in genai at a level the merge recurses into: their JSON is
-/// base64, but genai's default slice rule concatenates the bytes
+/// Fields that are byte strings at a level the merge recurses into: their JSON is
+/// base64, but the merge concatenates the bytes
 /// (`SearchEntryPoint.SDKBlob`; `continuationToken` is a terminal hop field instead).
 fn is_bytes_field(field: &str) -> bool {
     field.eq_ignore_ascii_case("sdkblob") || field.eq_ignore_ascii_case("sdk_blob")
 }
 
-/// Concatenates two base64-encoded byte strings, as genai concatenates `[]byte` slices.
+/// Concatenates two base64-encoded byte strings.
 fn concat_base64(field: &str, prev: &str, curr: &str) -> Result<Value, ModelError> {
     let decode = |s: &str| {
         BASE64.decode(s).map_err(|e| ModelError::Decode {
@@ -446,7 +443,7 @@ fn concat_base64(field: &str, prev: &str, curr: &str) -> Result<Value, ModelErro
     Ok(Value::String(BASE64.encode(bytes)))
 }
 
-/// genai `isTerminalHopField`.
+/// Whether `field` is one whose latest-hop value wins.
 fn is_terminal_hop_field(field: &str) -> bool {
     let f = field.to_ascii_lowercase();
     matches!(
@@ -460,24 +457,24 @@ fn is_terminal_hop_field(field: &str) -> bool {
     )
 }
 
-/// genai `isTokensDetailsField`.
+/// Whether `field` is a token-details list.
 fn is_tokens_details_field(field: &str) -> bool {
     let f = field.to_ascii_lowercase();
     f.ends_with("tokensdetails") || f.ends_with("tokens_details")
 }
 
-/// genai `isSafetyRatingsField`.
+/// Whether `field` is the safety-ratings list.
 fn is_safety_ratings_field(field: &str) -> bool {
     let f = field.to_ascii_lowercase();
     f == "safetyratings" || f == "safety_ratings"
 }
 
-/// genai `isCandidatesField`.
+/// Whether `field` is the candidates list.
 fn is_candidates_field(field: &str) -> bool {
     field.eq_ignore_ascii_case("candidates")
 }
 
-/// genai `isCountOrSumField`.
+/// Whether `field` is a count or sum, which are summed.
 fn is_count_or_sum_field(field: &str) -> bool {
     let f = field.to_ascii_lowercase();
     f == "tokencount" || f == "token_count" || f.ends_with("count") || f.ends_with("sum")
@@ -487,8 +484,8 @@ fn is_usage_metadata_field(field: &str) -> bool {
     field.eq_ignore_ascii_case("usagemetadata") || field.eq_ignore_ascii_case("usage_metadata")
 }
 
-/// Go `reflect.Value.IsZero` on the encoded value: absent fields, `null`, `false`, `0`,
-/// `""` and empty lists. Objects (Go pointers to structs) are never zero.
+/// Whether the encoded value is zero: absent fields, `null`, `false`, `0`,
+/// `""` and empty lists. Objects are never zero.
 fn json_is_zero(v: &Value) -> bool {
     match v {
         Value::Null => true,
@@ -500,7 +497,7 @@ fn json_is_zero(v: &Value) -> bool {
     }
 }
 
-/// genai `mergeValuesReflect` over JSON values; `None` is an absent field. Fails only on
+/// Merges two JSON values; `None` is an absent field. Fails only on
 /// an invalid base64 byte field.
 fn merge_values(
     prev: Option<&Value>,
@@ -542,7 +539,7 @@ fn merge_values(
     };
 
     Ok(match (prev, curr) {
-        // Structs (Go pointers to structs).
+        // Objects.
         (Value::Object(p), Value::Object(c)) => {
             let shifted;
             let c = if field == "candidate" {
@@ -579,7 +576,7 @@ fn merge_values(
             // Default: concatenate prev + curr in order.
             Some(Value::Array(p.iter().chain(c).cloned().collect()))
         }
-        // Go `[]byte` fields (base64 strings here): the default slice rule concatenates.
+        // Byte-string fields (base64 strings here): concatenated.
         (Value::String(p), Value::String(c)) if is_bytes_field(field) => {
             Some(concat_base64(field, p, c)?)
         }
@@ -602,7 +599,7 @@ fn sum_numbers(p: &Number, c: &Number) -> Option<Value> {
     Number::from_f64(p.as_f64()? + c.as_f64()?).map(Value::Number)
 }
 
-/// genai `mergeModalityTokenCounts`: groups by modality, in first-seen order, summing
+/// Groups by modality, in first-seen order, summing
 /// token counts.
 fn merge_modality_token_counts(prev: &[Value], curr: &[Value]) -> Value {
     let mut order: Vec<(String, i64)> = Vec::new();
@@ -640,7 +637,7 @@ fn merge_modality_token_counts(prev: &[Value], curr: &[Value]) -> Value {
     )
 }
 
-/// genai `mergeSafetyRatings`: groups by category, in first-seen order, keeping the
+/// Groups by category, in first-seen order, keeping the
 /// latest rating.
 fn merge_safety_ratings(prev: &[Value], curr: &[Value]) -> Value {
     let mut order: Vec<(String, Value)> = Vec::new();
@@ -664,7 +661,7 @@ fn array_len(v: Option<&Value>) -> usize {
     v.and_then(Value::as_array).map_or(0, Vec::len)
 }
 
-/// genai `shiftCandidateGroundingSupports`: offsets curr's grounding supports by prev's
+/// Offsets curr's grounding supports by prev's
 /// grounding chunks and content parts, which come first in the merged candidate.
 /// `None` means curr is unchanged.
 fn shift_candidate_grounding_supports(

@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `controllers/version.go` and `internal/routers/version.go` (plan 5a Task 6).
+//! The version controller and its route.
 
 use std::sync::Arc;
 
@@ -23,25 +23,24 @@ use serde::{Deserialize, Serialize};
 use crate::rest::http_error::encode_json_response;
 use crate::rest::routing::{Request, Response, Route, controller_handler, route};
 
-/// Port of Go `controllers.VersionAPIController`: the version handshake the web UI performs.
+/// The version handshake the web UI performs.
 #[derive(Debug, Default)]
 pub struct VersionApiController;
 
 impl VersionApiController {
-    /// Go `NewVersionAPIController`.
+    /// A new controller.
     pub fn new() -> Self {
         Self
     }
 
-    /// Go `VersionHandler`: Go's body shape with gadk's values (`language` is `rust`,
-    /// `language_version` the rustc release gadk was built with).
+    /// The version response with gadk's values (`language` is `rust`, `language_version` the
+    /// rustc release gadk was built with).
     pub async fn version_handler(&self, _req: Request) -> Response {
         encode_json_response(&VersionResponse::gadk(), StatusCode::OK)
     }
 }
 
-/// Port of Go `controllers.VersionResponse` (gadk's values; the field names are the ADK API
-/// contract).
+/// The version response body (the field names are the ADK API contract).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VersionResponse {
     /// The release this server was built from.
@@ -70,7 +69,7 @@ impl VersionResponse {
     }
 }
 
-/// Go `VersionAPIRouter.Routes` (public: no authentication).
+/// The version route (public: no authentication).
 pub(crate) fn version_routes(c: Arc<VersionApiController>) -> Vec<Route> {
     let mut r = route(
         "GetVersion",

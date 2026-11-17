@@ -14,9 +14,9 @@
 // limitations under the License.
 
 //! Helpers shared by the artifact services (gadk-artifact's in-memory service and
-//! gadk-artifact-gcs): the `request validation failed: ` wrapping, Go's `fmt.Sprint` of a
-//! custom-metadata value, the `user:` file-name namespace check, Go's `url.PathEscape` and the
-//! JSON API's URL path-segment escape.
+//! gadk-artifact-gcs): the `request validation failed: ` wrapping, the text form of a
+//! custom-metadata value, the `user:` file-name namespace check, URL path-segment escaping and
+//! the JSON API's stricter URL path-segment escape.
 
 use std::fmt::Write as _;
 
@@ -24,8 +24,8 @@ use serde_json::Value;
 
 use crate::service::ArtifactError;
 
-/// Wraps a validation error as Go's services do: `fmt.Errorf("request validation failed: %w",
-/// err)`. Any other error is returned unchanged.
+/// Wraps a validation error by prefixing its message with `request validation failed: `. Any
+/// other error is returned unchanged.
 pub fn validation_failed(err: ArtifactError) -> ArtifactError {
     match err {
         ArtifactError::InvalidRequest(m) => {
@@ -35,14 +35,13 @@ pub fn validation_failed(err: ArtifactError) -> ArtifactError {
     }
 }
 
-/// Port of Go fileHasUserNamespace: whether `file_name` names a user-scoped artifact (it
-/// starts with `user:`).
+/// Whether `file_name` names a user-scoped artifact (it starts with `user:`).
 pub fn file_has_user_namespace(file_name: &str) -> bool {
     file_name.starts_with("user:")
 }
 
-/// Port of Go `fmt.Sprint(value)` for a custom-metadata value. Arrays and objects use their
-/// JSON text where Go would print `[...]` / `map[...]`.
+/// The text form of a custom-metadata value: a string verbatim, a number or boolean as its
+/// display text, `null` as `<nil>`, and an array or object as its JSON text.
 pub fn go_sprint(v: &Value) -> String {
     match v {
         Value::String(s) => s.clone(),
@@ -53,15 +52,14 @@ pub fn go_sprint(v: &Value) -> String {
     }
 }
 
-/// Port of Go net/url PathEscape: keeps ALPHA / DIGIT / "-_.~" / "$&+:=@", percent-encodes
+/// Escapes one URL path segment: keeps ALPHA / DIGIT / "-_.~" / "$&+:=@", percent-encodes
 /// every other byte (upper-case hex), so `/` becomes `%2F` and a space `%20`.
 pub fn go_path_escape(s: &str) -> String {
     percent_escape(s, |b| matches!(b, b'$' | b'&' | b'+' | b':' | b'=' | b'@'))
 }
 
-/// Port of the simple-expansion escape of Go's `googleapi.Expand` (google.golang.org/api
-/// `internal/third_party/uritemplates`, `escape(s, false)`), which builds the JSON API URL
-/// path segments: keeps only the unreserved ALPHA / DIGIT / "-._~" and percent-encodes every
+/// Escapes a URL path segment of the Cloud Storage JSON API (the simple expansion of a URI
+/// template): keeps only the unreserved ALPHA / DIGIT / "-._~" and percent-encodes every
 /// other byte (upper-case hex), so `:` becomes `%3A`, `+` `%2B` and `/` `%2F`.
 pub fn go_uri_template_escape(s: &str) -> String {
     percent_escape(s, |_| false)

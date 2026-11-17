@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go tool/functiontool/streaming_function.go.
+//! The streaming function tool: a tool wrapping a function that returns a stream of text chunks.
 
 use std::any::Any;
 use std::panic::AssertUnwindSafe;
@@ -37,7 +37,7 @@ type ErasedStart = Arc<
         + Sync,
 >;
 
-/// Port of Go functiontool's streamingFunctionTool: a tool wrapping a Rust function that returns a stream of
+/// A tool wrapping a Rust function that returns a stream of
 /// text chunks.
 pub struct StreamingFunctionTool {
     cfg: FunctionToolConfig,
@@ -46,11 +46,11 @@ pub struct StreamingFunctionTool {
 }
 
 impl StreamingFunctionTool {
-    /// Port of Go functiontool.NewStreaming.
+    /// Wraps the streaming handler `f`.
     ///
     /// Fails with [`ToolError::InvalidArgument`] when `Args` is not an object type or the input schema cannot
     /// be compiled.
-    #[allow(clippy::new_ret_no_self)] // mirrors Go functiontool.NewStreaming, which returns tool.Tool (C4)
+    #[allow(clippy::new_ret_no_self)] // returns the tool as `Arc<dyn Tool>`
     pub fn new<Args, F, S>(cfg: FunctionToolConfig, f: F) -> Result<Arc<dyn Tool>, ToolError>
     where
         Args: serde::de::DeserializeOwned + schemars::JsonSchema + Send + 'static,
@@ -60,7 +60,7 @@ impl StreamingFunctionTool {
         Self::build::<Args, F, S, fn(&Args) -> bool>(cfg, f, None)
     }
 
-    /// Like [`StreamingFunctionTool::new`], with Go's `Config.RequireConfirmationProvider`: when the call
+    /// Like [`StreamingFunctionTool::new`], with a confirmation provider: when the call
     /// carries no confirmation, `provider(&args)` decides whether one is required, overriding
     /// `cfg.require_confirmation`.
     pub fn with_confirmation_provider<Args, F, S, P>(
@@ -98,7 +98,8 @@ impl StreamingFunctionTool {
         let name = cfg.name.clone();
         let require_confirmation = cfg.require_confirmation;
         let schema = input_schema.clone();
-        // The synchronous prelude of Go RunStream: argument checks, conversion, confirmation, handler call.
+        // The synchronous prelude of a run: argument checks, conversion, confirmation, handler
+        // call.
         let start: ErasedStart = Arc::new(move |ctx: Context, args: Value| {
             check_args_value(&args)?;
             let input: Args = convert_args_with_schema(&args, Some(&schema))
@@ -135,15 +136,15 @@ impl Tool for StreamingFunctionTool {
         Some(declaration(&self.cfg, &self.input_schema, None))
     }
 
-    // `process_request` is deliberately not overridden: Go's ProcessRequest is toolutils.PackTool, which
+    // `process_request` is deliberately not overridden: its job is `pack_tool`, which
     // the flow runs via `gadk_agent::pack_tool` before calling `Tool::process_request`.
 
     fn as_streaming(&self) -> Option<&dyn StreamingTool> {
         Some(self)
     }
 
-    /// [`FunctionToolConfig::origin`] (default [`ToolOriginKind::Local`]: Go's streaming function
-    /// tool is a `functiontool` type too).
+    /// [`FunctionToolConfig::origin`] (default [`ToolOriginKind::Local`]: a streaming function
+    /// tool is a function tool too).
     fn origin_kind(&self) -> ToolOriginKind {
         self.cfg.origin
     }
@@ -154,14 +155,15 @@ impl Tool for StreamingFunctionTool {
 }
 
 impl StreamingTool for StreamingFunctionTool {
-    /// Port of Go streamingFunctionTool.RunStream.
-    /// - Lazy like Go's iterator: nothing runs until the first poll.
+    /// Runs the handler and streams its chunks.
+    /// - Lazy: nothing runs until the first poll.
     /// - A panic while calling the handler or while polling its stream becomes one final
-    ///   `ToolError::Panic("panic in tool %q: %v")` item, after which the stream ends (Go recover + yield).
-    /// - Dropping the returned stream drops the handler's stream (Go: yield returns false → handler stops).
-    /// - Consumer panics and panics raised while *dropping* the handler stream are never caught: the
-    ///   consumer is not called from inside this stream, and Drop is outside catch_unwind's poll scope
-    ///   (Go "consumer panics must propagate").
+    ///   `ToolError::Panic` item (text `panic in tool "<name>": <message>`), after which the stream
+    ///   ends.
+    /// - Dropping the returned stream drops the handler's stream, which stops the handler.
+    /// - Consumer panics and panics raised while *dropping* the handler stream are never caught:
+    ///   the consumer is not called from inside this stream, and Drop is outside catch_unwind's
+    ///   poll scope, so consumer panics propagate.
     fn run_stream(
         &self,
         ctx: Context,

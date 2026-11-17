@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Event conversions (port of ADK-Go `server/adka2a/v2/events.go` and `utils.go`
-//! `WithoutPartialArtifacts`).
+//! Event conversions between A2A stream events and session events.
 
 use std::collections::HashMap;
 
@@ -35,7 +34,7 @@ use super::parts::{
 use super::{A2APartConverter, StreamResponseRef};
 use crate::Error;
 
-/// Go `NewRemoteAgentEvent`: a new event authored by the agent running in `ctx`, on its branch.
+/// A new event authored by the agent running in `ctx`, on its branch.
 pub fn new_remote_agent_event(ctx: &InvocationContext) -> Event {
     let mut event = Event::new(ctx.platform(), ctx.invocation_id());
     event.author = ctx.agent().name().to_owned();
@@ -43,8 +42,8 @@ pub fn new_remote_agent_event(ctx: &InvocationContext) -> Event {
     event
 }
 
-/// Go `EventToMessage`: the session event as an A2A message (`agent` role unless the author is
-/// `user`). Always `Some`: Go's `nil` result is only for a `nil` event.
+/// The session event as an A2A message (`agent` role unless the author is `user`). Always
+/// `Some`.
 pub fn event_to_message(event: &Event) -> Result<Option<a2a::Message>, Error> {
     let event_parts = event
         .response
@@ -69,7 +68,7 @@ pub fn event_to_message(event: &Event) -> Result<Option<a2a::Message>, Error> {
     Ok(Some(msg))
 }
 
-/// Go `ToSessionEvent`: the A2A event as a session event authored by the agent running in `ctx`;
+/// The A2A event as a session event authored by the agent running in `ctx`;
 /// `None` when the event carries nothing to record.
 pub async fn to_session_event(
     ctx: &InvocationContext,
@@ -78,7 +77,7 @@ pub async fn to_session_event(
     to_session_event_with_parts(ctx, event, None).await
 }
 
-/// Go `ToSessionEventWithParts`: [`to_session_event`] with a custom part converter (`None` uses
+/// [`to_session_event`] with a custom part converter (`None` uses
 /// [`to_genai_part`]).
 pub async fn to_session_event_with_parts(
     ctx: &InvocationContext,
@@ -133,8 +132,7 @@ pub async fn to_session_event_with_parts(
                 .await
                 .map_err(|e| Error::wrap("custom metadata conversion failed", e))?;
             result.response.turn_complete = false;
-            // Go dereferences a nil content here (a panic); a message without converted parts
-            // is skipped instead.
+            // A message without converted parts is skipped.
             if content_is_empty(&result) {
                 return Ok(None);
             }
@@ -153,8 +151,8 @@ pub async fn to_session_event_with_parts(
     }
 }
 
-/// Go `ToCustomMetadata`: session event custom metadata holding the A2A task and context IDs
-/// (empty when both are empty, Go's `nil`).
+/// Session event custom metadata holding the A2A task and context IDs (empty when both are
+/// empty).
 pub fn to_custom_metadata(task_id: &str, context_id: &str) -> Map<String, Value> {
     let mut result = Map::new();
     if !task_id.is_empty() {
@@ -172,7 +170,7 @@ pub fn to_custom_metadata(task_id: &str, context_id: &str) -> Map<String, Value>
     result
 }
 
-/// Go `GetA2ATaskInfo`: the `(task_id, context_id)` stored in the event's custom metadata (`""`
+/// The `(task_id, context_id)` stored in the event's custom metadata (`""`
 /// when absent).
 pub fn get_a2a_task_info(event: &Event) -> (String, String) {
     let get = |key: &str| match event.response.custom_metadata.get(key) {
@@ -185,7 +183,7 @@ pub fn get_a2a_task_info(event: &Event) -> (String, String) {
     )
 }
 
-/// Go `WithoutPartialArtifacts`: drops the partial artifacts (usually discarded, part-less,
+/// Drops the partial artifacts (usually discarded, part-less,
 /// after the invocation finished).
 pub fn without_partial_artifacts(artifacts: Vec<a2a::Artifact>) -> Vec<a2a::Artifact> {
     artifacts
@@ -194,7 +192,7 @@ pub fn without_partial_artifacts(artifacts: Vec<a2a::Artifact>) -> Vec<a2a::Arti
         .collect()
 }
 
-/// Whether the event has no content or no parts (Go `len(event.Content.Parts) == 0`).
+/// Whether the event has no content or no parts (`content` is `None` or has no parts).
 fn content_is_empty(event: &Event) -> bool {
     event
         .response
@@ -223,7 +221,7 @@ async fn convert_part(
     }
 }
 
-/// Go `messageToEvent`.
+/// A session event for an A2A message: its converted parts as content, with `turn_complete` set.
 async fn message_to_event(
     ctx: &InvocationContext,
     msg: &a2a::Message,
@@ -256,7 +254,7 @@ async fn message_to_event(
     Ok(event)
 }
 
-/// Go `artifactUpdateEventToEvent`.
+/// A session event for an artifact update: the converted artifact parts as model-role content.
 async fn artifact_update_event_to_event(
     ctx: &InvocationContext,
     source: &a2a::StreamResponse,
@@ -273,7 +271,8 @@ async fn artifact_update_event_to_event(
     Ok(event)
 }
 
-/// Go `taskToEvent`.
+/// A session event for a task: its artifacts' and status message's converted parts as model-role
+/// content. `None` for a non-terminal task without parts.
 async fn task_to_event(
     ctx: &InvocationContext,
     source: &a2a::StreamResponse,
@@ -319,7 +318,7 @@ async fn task_to_event(
     process_a2a_meta(source, &mut event)
         .map_err(|e| Error::wrap("metadata processing failed", e))?;
     // A completed, failed or canceled task is the remote agent's final response, even when its
-    // artifacts replay the peer's tool calls (Go d6bb1e86, adk-python's
+    // artifacts replay the peer's tool calls (as in adk-python's
     // convert_a2a_task_to_event): rejected is left out, so this is not `is_terminal()`.
     if has_parts
         && matches!(
@@ -333,7 +332,7 @@ async fn task_to_event(
     Ok(Some(event))
 }
 
-/// Go `finalTaskStatusUpdateToEvent`.
+/// A session event for a terminal or input-required status update, with `turn_complete` set.
 async fn final_task_status_update_to_event(
     ctx: &InvocationContext,
     source: &a2a::StreamResponse,
@@ -362,7 +361,7 @@ async fn final_task_status_update_to_event(
     Ok(event)
 }
 
-/// Go `getLongRunningToolIDs`: the IDs of the function calls converted from data parts marked
+/// The IDs of the function calls converted from data parts marked
 /// long-running.
 fn get_long_running_tool_ids(parts: &[a2a::Part], converted: &[Option<Part>]) -> Vec<String> {
     let mut ids = Vec::new();
@@ -379,7 +378,7 @@ fn get_long_running_tool_ids(parts: &[a2a::Part], converted: &[Option<Part>]) ->
         let Some(Some(converted)) = converted.get(i) else {
             continue;
         };
-        // Go: TODO(yarolegovich): log a warning when a long-running part is not a function call.
+        // TODO: log a warning when a long-running part is not a function call.
         if let Some(call) = &converted.function_call {
             ids.push(call.id.clone());
         }
@@ -387,7 +386,7 @@ fn get_long_running_tool_ids(parts: &[a2a::Part], converted: &[Option<Part>]) ->
     ids
 }
 
-/// Go `convertParts`: converts A2A parts keeping index alignment (a converter's `Ok(None)` stays
+/// Converts A2A parts keeping index alignment (a converter's `Ok(None)` stays
 /// a `None` entry).
 async fn convert_parts(
     source: &a2a::StreamResponse,
@@ -404,7 +403,7 @@ async fn convert_parts(
     Ok(result)
 }
 
-/// Go `convertedStatusMessage`.
+/// A converted status message: its error text, parts and long-running tool IDs.
 #[derive(Default)]
 struct ConvertedStatusMessage {
     error_message: String,
@@ -412,7 +411,7 @@ struct ConvertedStatusMessage {
     long_running_tool_ids: Vec<String>,
 }
 
-/// Go `convertStatusMessage`: the status message's parts; for a failed task, the first text part
+/// The status message's parts; for a failed task, the first text part
 /// is the error message and is dropped from the parts when flagged `adk_is_error_message`.
 async fn convert_status_message(
     source: &a2a::StreamResponse,

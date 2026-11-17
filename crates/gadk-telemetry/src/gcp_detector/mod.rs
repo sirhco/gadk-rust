@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The GCP resource detector (port of `go.opentelemetry.io/contrib/detectors/gcp` v1.47.0
-//! `NewDetector`, `detector.go` and `types.go`, over its `internal` package).
+//! The GCP resource detector: detects the GCE, GKE, App Engine, Cloud Run and Cloud Functions
+//! resource attributes from the environment and the metadata server.
 
 pub mod internal;
 pub mod metadata;
@@ -31,7 +31,7 @@ use metadata::MetadataClient;
 
 use crate::resource::{SCHEMA_URL, new_with_attributes};
 
-/// Go semconv v1.43.0 attribute keys and values the detector sets.
+/// Semantic-convention v1.43.0 attribute keys and values the detector sets.
 mod semconv {
     pub(super) const CLOUD_PROVIDER: &str = "cloud.provider";
     pub(super) const CLOUD_PROVIDER_GCP: &str = "gcp";
@@ -57,87 +57,87 @@ mod semconv {
     pub(super) const GCP_GCE_INSTANCE_HOSTNAME: &str = "gcp.gce.instance.hostname";
 }
 
-/// Go `resource.ErrPartialResource` wrapping the joined per-attribute lookup errors: the
-/// detected resource holds the attributes that were found.
+/// A partial detection: the joined per-attribute lookup errors, and the
+/// detected resource holding the attributes that were found.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 #[error("partial resource: {}", .errors.join("\n"))]
 pub struct PartialResource {
     /// The attributes that were found, under the detector's schema URL.
     pub resource: Resource,
-    /// Each failed lookup's error text, in detection order (Go `errors.Join`).
+    /// Each failed lookup's error text, in detection order.
     pub errors: Vec<String>,
 }
 
-/// Go `resource.Detector`, as `resolve_resource` consumes it.
+/// A resource detector, as `resolve_resource` consumes it.
 #[async_trait]
 pub trait ResourceDetector: Send + Sync {
-    /// Go `Detect`: `Ok(None)` adds nothing (Go `nil, nil`); a partial detection is an error
+    /// Detects the resource: `Ok(None)` adds nothing; a partial detection is an error
     /// carrying the attributes found.
     async fn detect(&self) -> Result<Option<Resource>, PartialResource>;
 }
 
-/// Go `gcpDetector` (`types.go`): the attribute lookups `Detect` uses, faked by `TestDetect`.
+/// The attribute lookups [`Detector`] uses; implementations can be faked.
 #[async_trait]
 pub trait GcpDetector: Send + Sync {
-    /// Go `ProjectID`.
+    /// The GCP project ID.
     async fn project_id(&self) -> Result<String, DetectorError>;
-    /// Go `CloudPlatform`.
+    /// The cloud platform the process runs on.
     async fn cloud_platform(&self) -> Platform;
-    /// Go `GKEAvailabilityZoneOrRegion`.
+    /// The GKE availability zone or region, and which of the two it is.
     async fn gke_availability_zone_or_region(
         &self,
     ) -> Result<(String, LocationType), DetectorError>;
-    /// Go `GKEClusterName`.
+    /// The GKE cluster name.
     async fn gke_cluster_name(&self) -> Result<String, DetectorError>;
-    /// Go `GKEHostID`.
+    /// The GKE host ID.
     async fn gke_host_id(&self) -> Result<String, DetectorError>;
-    /// Go `FaaSName`.
+    /// The Cloud Run / Cloud Functions service name.
     async fn faas_name(&self) -> Result<String, DetectorError>;
-    /// Go `FaaSVersion`.
+    /// The Cloud Run / Cloud Functions service version.
     async fn faas_version(&self) -> Result<String, DetectorError>;
-    /// Go `FaaSID`.
+    /// The Cloud Run / Cloud Functions instance ID.
     async fn faas_id(&self) -> Result<String, DetectorError>;
-    /// Go `FaaSCloudRegion`.
+    /// The Cloud Run / Cloud Functions region.
     async fn faas_cloud_region(&self) -> Result<String, DetectorError>;
-    /// Go `AppEngineFlexAvailabilityZoneAndRegion`.
+    /// The App Engine flex availability zone and region.
     async fn app_engine_flex_availability_zone_and_region(
         &self,
     ) -> Result<(String, String), DetectorError>;
-    /// Go `AppEngineStandardAvailabilityZone`.
+    /// The App Engine standard availability zone.
     async fn app_engine_standard_availability_zone(&self) -> Result<String, DetectorError>;
-    /// Go `AppEngineStandardCloudRegion`.
+    /// The App Engine standard region.
     async fn app_engine_standard_cloud_region(&self) -> Result<String, DetectorError>;
-    /// Go `AppEngineServiceName`.
+    /// The App Engine service name.
     async fn app_engine_service_name(&self) -> Result<String, DetectorError>;
-    /// Go `AppEngineServiceVersion`.
+    /// The App Engine service version.
     async fn app_engine_service_version(&self) -> Result<String, DetectorError>;
-    /// Go `AppEngineServiceInstance`.
+    /// The App Engine service instance.
     async fn app_engine_service_instance(&self) -> Result<String, DetectorError>;
-    /// Go `GCEAvailabilityZoneAndRegion`.
+    /// The GCE availability zone and region.
     async fn gce_availability_zone_and_region(&self) -> Result<(String, String), DetectorError>;
-    /// Go `GCEHostType`.
+    /// The GCE machine type.
     async fn gce_host_type(&self) -> Result<String, DetectorError>;
-    /// Go `GCEHostID`.
+    /// The GCE instance ID.
     async fn gce_host_id(&self) -> Result<String, DetectorError>;
-    /// Go `GCEHostName`.
+    /// The GCE host name.
     async fn gce_host_name(&self) -> Result<String, DetectorError>;
-    /// Go `GCEInstanceHostname`.
+    /// The GCE instance hostname.
     async fn gce_instance_hostname(&self) -> Result<String, DetectorError>;
-    /// Go `GCEInstanceName`.
+    /// The GCE instance name.
     async fn gce_instance_name(&self) -> Result<String, DetectorError>;
-    /// Go `CloudRunJobExecution`.
+    /// The Cloud Run job execution name.
     async fn cloud_run_job_execution(&self) -> Result<String, DetectorError>;
-    /// Go `CloudRunJobTaskIndex`.
+    /// The Cloud Run job task index.
     async fn cloud_run_job_task_index(&self) -> Result<String, DetectorError>;
 }
 
-/// Go's unexported `detector`: [`GcpDetector`] lookups gated on `metadata.OnGCE()`.
+/// The detector: [`GcpDetector`] lookups gated on the metadata client's `on_gce`.
 pub struct Detector<D = internal::Detector> {
     detector: D,
     metadata: MetadataClient,
 }
 
-/// Go `NewDetector`: detects GCE, GKE, App Engine, Cloud Run and Cloud Functions resources,
+/// Detects GCE, GKE, App Engine, Cloud Run and Cloud Functions resources,
 /// reading `env` and the metadata server it names.
 ///
 /// Does no I/O: the metadata server is first asked in [`ResourceDetector::detect`].
@@ -150,8 +150,7 @@ pub fn new_detector(env: Arc<dyn EnvProvider>) -> Detector {
 }
 
 impl<D: GcpDetector> Detector<D> {
-    /// A detector over `detector`'s lookups, gated on `metadata`'s `on_gce` (Go
-    /// `&detector{detector: …}` in `TestDetect`).
+    /// A detector over `detector`'s lookups, gated on `metadata`'s `on_gce`.
     pub fn with_detector(detector: D, metadata: MetadataClient) -> Self {
         Self { detector, metadata }
     }
@@ -272,7 +271,7 @@ impl<D: GcpDetector> ResourceDetector for Detector<D> {
     }
 }
 
-/// Go `resourceBuilder`: the attributes found and the lookup errors, in detection order.
+/// The attributes found and the lookup errors, in detection order.
 #[derive(Default)]
 struct ResourceBuilder {
     errs: Vec<String>,
@@ -284,7 +283,7 @@ impl ResourceBuilder {
         self.attrs.push(KeyValue::new(key, value));
     }
 
-    /// Go `add`.
+    /// Adds the attribute, or records the lookup error.
     fn add(&mut self, key: &'static str, detected: Result<String, DetectorError>) {
         match detected {
             Ok(v) => self.attrs.push(KeyValue::new(key, v)),
@@ -292,7 +291,7 @@ impl ResourceBuilder {
         }
     }
 
-    /// Go `addInt`: the value parsed with `strconv.Atoi`.
+    /// Adds the value parsed as a decimal integer.
     fn add_int(&mut self, key: &'static str, detected: Result<String, DetectorError>) {
         match detected {
             Ok(v) => match atoi(&v) {
@@ -303,7 +302,7 @@ impl ResourceBuilder {
         }
     }
 
-    /// Go `addZoneAndRegion`.
+    /// Adds the zone and region attributes.
     fn add_zone_and_region(&mut self, detected: Result<(String, String), DetectorError>) {
         match detected {
             Ok((zone, region)) => {
@@ -316,7 +315,7 @@ impl ResourceBuilder {
         }
     }
 
-    /// Go `addZoneOrRegion`.
+    /// Adds the zone or region attribute, according to its location type.
     fn add_zone_or_region(&mut self, detected: Result<(String, LocationType), DetectorError>) {
         match detected {
             Ok((v, LocationType::Zone)) => self
@@ -325,7 +324,7 @@ impl ResourceBuilder {
             Ok((v, LocationType::Region)) => {
                 self.attrs.push(KeyValue::new(semconv::CLOUD_REGION, v));
             }
-            // Go prints the `LocationType` integer: `UndefinedLocation` is 0.
+            // The location type is printed as its integer: `UndefinedLocation` is 0.
             Ok((_, LocationType::UndefinedLocation)) => self
                 .errs
                 .push("location must be zone or region. Got 0".to_owned()),
@@ -333,9 +332,8 @@ impl ResourceBuilder {
         }
     }
 
-    /// Go `build`: the resource under semconv's schema URL, and Go's
-    /// `fmt.Errorf("%w: %w", resource.ErrPartialResource, errors.Join(errs...))` when any lookup
-    /// failed.
+    /// Builds the resource under semconv's schema URL, and a [`PartialResource`] error
+    /// when any lookup failed.
     fn build(self) -> Result<Option<Resource>, PartialResource> {
         let resource = new_with_attributes(SCHEMA_URL, self.attrs);
         if self.errs.is_empty() {
@@ -349,7 +347,7 @@ impl ResourceBuilder {
     }
 }
 
-/// Go `strconv.Atoi` with its error texts.
+/// Parses a decimal integer; the error texts are byte-identical to ADK's (see the literals here).
 fn atoi(s: &str) -> Result<i64, String> {
     s.parse::<i64>().map_err(|e| {
         let reason = match e.kind() {

@@ -13,9 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! An agent run through ADK-Go's launcher with telemetry (port of Go
-//! `examples/telemetry/main.go`): the resource names the service, and the launcher starts
-//! telemetry from `Config::telemetry_options` before it serves.
+//! An agent run through the launcher with telemetry: the resource names the service, and the
+//! launcher starts telemetry from `Config::telemetry_options` before it serves.
 //!
 //! Spans and log records are exported over OTLP/HTTP when `OTEL_EXPORTER_OTLP_ENDPOINT` (or
 //! `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` / `…_LOGS_ENDPOINT`) is set, and to
@@ -59,8 +58,8 @@ async fn main() -> anyhow::Result<()> {
     })
     .map_err(|e| anyhow::anyhow!("failed to create agent: {e}"))?;
 
-    // Go `resource.New(ctx, resource.WithAttributes(semconv.ServiceName…, semconv.ServiceVersion…))`:
-    // no schema URL, so it merges with the default resource without a conflict.
+    // The service name and version attributes; no schema URL, so the resource merges with the
+    // default resource without a conflict.
     let resource = Resource::builder_empty()
         .with_attributes([
             KeyValue::new("service.name", "weather-time-agent"),
@@ -77,7 +76,7 @@ async fn main() -> anyhow::Result<()> {
     let mut l = full::new();
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let Err(e) = l.execute(CancellationToken::new(), config, args).await {
-        // Go `fmt.Errorf("run failed: %w\n\n%s", err, l.CommandLineSyntax())`, then `log.Fatal`.
+        // Print the error and the command-line syntax, then exit.
         Logger::stderr().print(&format!("run failed: {e}\n\n{}", l.command_line_syntax()));
         std::process::exit(1);
     }

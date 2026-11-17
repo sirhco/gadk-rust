@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `cmd/launcher/web/triggers`: the Pub/Sub and Eventarc trigger sub-launchers and their
-//! shared OIDC flags (`internal/triggerauth`).
+//! The Pub/Sub and Eventarc trigger sub-launchers and their shared OIDC flags (`triggerauth`).
 
 pub mod eventarc;
 pub mod pubsub;

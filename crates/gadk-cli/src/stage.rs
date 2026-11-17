@@ -13,9 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The build context a deploy ships: the two-stage Dockerfile's text (R7), the staged source
-//! tree (R8 copy, R10 archive) and the temp-dir helper (Go `os.MkdirTemp` with the
-//! `<prefix>20060102_150405__*` pattern).
+//! The build context a deploy ships: the two-stage Dockerfile's text, the staged source
+//! tree (copy and archive) and the temp-dir helper (a `<prefix>YYYYMMDD_HHMMSS__*`
+//! directory).
 
 use std::ffi::OsStr;
 use std::fs::{self, DirBuilder, File};
@@ -34,7 +34,7 @@ pub const RUNTIME_IMAGE: &str = "gcr.io/distroless/cc-debian12";
 /// The builder's `cargo build --target-dir`.
 pub const TARGET_DIR: &str = "/gadk-target";
 
-/// The builder stage of the generated Dockerfile (R7).
+/// The builder stage of the generated Dockerfile.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BuilderStage {
     /// `rust:<ver>-bookworm` or `rust:bookworm` ([`crate::target::builder_image`]).
@@ -47,16 +47,14 @@ pub struct BuilderStage {
     pub bin: String,
 }
 
-/// R7: the whole Dockerfile, starting with Go's leading newline: the builder stage, the
-/// distroless runtime stage, `EXPOSE <server_port>`, Go's comment and
+/// The whole Dockerfile, starting with a leading newline: the builder stage, the
+/// distroless runtime stage, `EXPOSE <server_port>`, a comment and
 /// `CMD ["/app/<bin>", "web", "-host", "0.0.0.0", "-port", "<server_port>"` + `cmd_tail` + `]`
-/// (`cmd_tail` is Go's segment list, each starting `, `).
-// Divergence (ledger 6b): Go's Cloud Run Dockerfile copies a locally compiled binary into
-// `distroless/static-debian11`, and its Agent Engine builder stage is `golang:<ver>` with
-// `ENV GOTOOLCHAIN=auto` and `go build`; gadk builds both remotely in a `rust:<ver>-bookworm`
-// stage (`cargo build --release --locked --target-dir /gadk-target -p <pkg> --bin <bin>`, the
-// whole staged root copied to `/app/`) and runs on `distroless/cc-debian12`. The runtime
-// stage's `EXPOSE`, comment and `CMD` are Go's.
+/// (`cmd_tail` is a segment list, each starting `, `).
+// The build happens remotely in a `rust:<ver>-bookworm` stage
+// (`cargo build --release --locked --target-dir /gadk-target -p <pkg> --bin <bin>`, the
+// whole staged root copied to `/app/`) and the image runs on `distroless/cc-debian12`. The
+// runtime stage's `EXPOSE`, comment and `CMD` match ADK's generated Dockerfile.
 pub fn dockerfile(builder: &BuilderStage, server_port: i64, cmd_tail: &str) -> String {
     let BuilderStage {
         image,
@@ -96,17 +94,16 @@ pub struct Entry {
 }
 
 /// The files of a source root in sorted path order, without `.git`, `target` (at any depth)
-/// and the excluded paths (R8, R10).
+/// and the excluded paths.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SourceTree {
     pub root: PathBuf,
     pub entries: Vec<Entry>,
 }
 
-/// Names never staged, at any depth (R8): VCS data (Go's archive `--exclude=.git`) and Cargo
-/// build output.
-// Divergence (ledger 6b): Go's archive excludes `.git` and `adkgo`; gadk excludes `.git` and
-// `target` at any depth (and stages Cloud Run sources at all, where Go uploads a binary).
+/// Names never staged, at any depth: VCS data (`.git`) and Cargo build output.
+// `.git` and `target` are excluded at any depth. Cloud Run sources are staged too: no
+// prebuilt binary is uploaded.
 const EXCLUDED_NAMES: [&str; 2] = [".git", "target"];
 
 impl SourceTree {
@@ -123,7 +120,7 @@ impl SourceTree {
         })
     }
 
-    /// Copies the entries under `dir` (R8): directories created, files copied with their
+    /// Copies the entries under `dir`: directories created, files copied with their
     /// permissions, symbolic links recreated with the same target.
     pub fn copy_into(&self, dir: &Path) -> io::Result<()> {
         for entry in &self.entries {
@@ -141,11 +138,9 @@ impl SourceTree {
     }
 
     /// Writes a gzip tar of the entries in order at `path`, then each `extra` `(name, bytes)`
-    /// file at the archive root (R10: the generated `Dockerfile` last).
-    // Divergence (ledger 6b): Go runs `tar -czf … -C <src> --exclude=.git --exclude=adkgo .
-    // -C <tmp> Dockerfile` (tar(1) order and metadata, `./`-prefixed names); gadk writes the
-    // archive in-process: sorted entries without a `./` prefix, deterministic headers (fixed
-    // mtime, uid/gid 0, mode 0644/0755), the extra files appended last.
+    /// file at the archive root (the generated `Dockerfile` last).
+    // The archive is written in-process: sorted entries without a `./` prefix, deterministic
+    // headers (fixed mtime, uid/gid 0, mode 0644/0755), the extra files appended last.
     pub fn write_tar_gz(&self, path: &Path, extra: &[(&str, &[u8])]) -> io::Result<()> {
         let mut tar = Builder::new(GzEncoder::new(File::create(path)?, Compression::default()));
         tar.mode(HeaderMode::Deterministic);
@@ -198,16 +193,16 @@ fn walk_dir(root: &Path, rel: &Path, exclude: &[PathBuf], out: &mut Vec<Entry>) 
     Ok(())
 }
 
-/// Go `os.MkdirTemp(base, prefix + now.Format("20060102_150405__") + "*")` with `now` in local
-/// time (`chrono::Local`, as Go's `time.Now()`); returns the created directory (mode 0700, a
-/// random decimal suffix, retried on a name clash up to Go's 10000 attempts).
+/// A new directory under `base` named `<prefix>YYYYMMDD_HHMMSS__<random>` with
+/// `now` in local time (`chrono::Local`); returns the created directory (mode 0700, a
+/// random decimal suffix, retried on a name clash up to 10000 attempts).
 pub fn make_temp(base: &Path, prefix: &str, now: DateTime<Utc>) -> io::Result<PathBuf> {
     let stamp = now.with_timezone(&Local).format("%Y%m%d_%H%M%S__");
     let random = RandomState::new();
     let mut builder = DirBuilder::new();
     builder.mode(0o700);
     for attempt in 0u64..10_000 {
-        // Go `nextRandom`: the decimal form of a random uint32.
+        // The decimal form of a random uint32.
         let suffix = random.hash_one(attempt) as u32;
         let dir = base.join(format!("{prefix}{stamp}{suffix}"));
         match builder.create(&dir) {

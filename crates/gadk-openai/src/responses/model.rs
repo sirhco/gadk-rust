@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The Responses model (port of ADK-Go `internal/responses/model.go`).
+//! The Responses model: talks to the Responses API.
 
 use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
@@ -45,11 +45,11 @@ use crate::shared::response::{
     parts_without_calls, single_error_sequence,
 };
 
-/// Go `FinishMessageKey` of this package: the custom-metadata key a turn that ended badly
+/// The custom-metadata key a turn that ended badly
 /// reports the provider's account under; [`crate::FINISH_MESSAGE_KEY`] must equal it.
 pub(crate) const FINISH_MESSAGE_KEY: &str = "openai_finish_message";
 
-/// Go `responses.Model`: talks to the Responses API.
+/// Talks to the Responses API.
 #[derive(Debug, Clone)]
 pub(crate) struct Model {
     /// The client.
@@ -59,7 +59,7 @@ pub(crate) struct Model {
 }
 
 impl Model {
-    /// Go `responses.New`.
+    /// Creates the model.
     pub(crate) fn new(client: Arc<OpenAiClient>, model_name: &str) -> Self {
         Self {
             client,
@@ -77,12 +77,12 @@ impl Llm for Model {
         self
     }
 
-    /// Go `GenerateContent`: builds the params, then one blocking call (`generate`, errors
-    /// wrapped `openai: call failed: %w`, metadata and finish signal attached) or one stream
-    /// (`generateStream`: terminal-event tracking, partials through the aggregator, terminal
-    /// tool-call adoption, `finalizeStreamResponse`). Nothing is sent before the stream is
-    /// first polled; the `http_options.timeout` deadline starts then (D7), so each call of
-    /// this method gets its own. Dropping the stream cancels the call (D9).
+    /// Builds the params, then one blocking call (`generate`, errors
+    /// wrapped `openai: call failed: …`, metadata and finish signal attached) or one stream
+    /// (`generate_stream`: terminal-event tracking, partials through the aggregator, terminal
+    /// tool-call adoption, `finalize_stream_response`). Nothing is sent before the stream is
+    /// first polled; the `http_options.timeout` deadline starts then, so each call of
+    /// this method gets its own. Dropping the stream cancels the call.
     fn generate_content(
         &self,
         req: LlmRequest,
@@ -101,7 +101,7 @@ impl Llm for Model {
     }
 }
 
-/// Go `generate`: one call, its errors wrapped `openai: call failed: %w`; the converted
+/// One call, its errors wrapped `openai: call failed: …`; the converted
 /// response with metadata and the finish signal attached.
 fn generate(
     client: Arc<OpenAiClient>,
@@ -131,7 +131,7 @@ async fn generate_once(
         Reply::Body { content_type, body } => {
             decode_body(&content_type, &body).map_err(OpenAiError::call_failed)?
         }
-        // `post` answers a non-streaming call with a body; an empty one reads as Go's.
+        // `post` answers a non-streaming call with a body; an empty one reads as an empty body.
         Reply::Stream(_) => {
             decode_body("application/json", b"").map_err(OpenAiError::call_failed)?
         }
@@ -143,7 +143,7 @@ async fn generate_once(
     Ok(llm_resp)
 }
 
-/// Go `terminalEvent`: what the stream's terminal event said, as distinct from what the
+/// What the stream's terminal event said, as distinct from what the
 /// response it carried repeated: a `response.incomplete` declares a turn cut short even when
 /// its payload reports no status and no reason.
 #[derive(Debug, Default)]
@@ -158,13 +158,13 @@ struct TerminalEvent {
 }
 
 impl TerminalEvent {
-    /// Go `completed`: the turn ended on a `response.completed`, the only terminal event
+    /// The turn ended on a `response.completed`, the only terminal event
     /// that states the turn's whole output.
     fn completed(&self) -> bool {
         self.seen && !self.incomplete
     }
 
-    /// Go's first-terminal-object-wins tracking: a later terminal event, or a stray
+    /// The first terminal object wins: a later terminal event, or a stray
     /// `response.created`, would relabel a truncated turn a clean stop. An event whose
     /// response never decoded is not one of those ([`carries_response`]).
     fn track(&mut self, event: &ResponseStreamEvent) {
@@ -187,7 +187,7 @@ impl TerminalEvent {
     }
 }
 
-/// Go `carriesResponse`: whether an event delivered the response object the schema marks
+/// Whether an event delivered the response object the schema marks
 /// required. Any of `id`, `status`, `output`, `incomplete_details`, `error` or `model` having
 /// decoded stands for its presence; a bare `{}` (or an omitted object) is rejected.
 fn carries_response(resp: &Response) -> bool {
@@ -213,7 +213,7 @@ enum Phase {
     Done,
 }
 
-/// Go `generateStream`'s state between yields.
+/// The state of the stream between yields.
 struct StreamRun {
     phase: Phase,
     aggregator: StreamingResponseAggregator,
@@ -222,7 +222,7 @@ struct StreamRun {
     pending: VecDeque<Result<LlmResponse, ModelError>>,
 }
 
-/// Go `generateStream`: the call starts (and its deadline with it) on the first poll; each
+/// Runs the stream: the call starts (and its deadline with it) on the first poll; each
 /// event is tracked for the terminal response, translated, and aggregated (partials carry
 /// the response's metadata once known); the first error ends the stream; the end of the
 /// stream yields the finalized turn ([`StreamRun::finish`]). The `http_options.timeout`
@@ -274,7 +274,7 @@ impl StreamRun {
                         }
                         self.phase = Phase::Events(events);
                     }
-                    // Go `stream.Err()`, unwrapped.
+                    // The stream's error, unwrapped.
                     Some(Err(err)) => return Some(Err(err.into())),
                     None => self.finish(),
                 },
@@ -299,7 +299,7 @@ impl StreamRun {
 
     /// The end of a stream that did not fail: a failure stated in the terminal body, else
     /// the aggregated turn (rebuilt from or superseded by the terminal event's content where
-    /// Go does), its tool calls adopted from the terminal event, finalized.
+    /// it applies), its tool calls adopted from the terminal event, finalized.
     fn finish(&mut self) {
         match self.finished() {
             Ok(Some(resp)) => self.pending.push_back(Ok(resp)),
@@ -366,12 +366,12 @@ impl StreamRun {
         };
         adopt_terminal_calls(&mut final_resp, term)?;
         // Retry after adoption: when the snapshot restates the call's ID and arguments,
-        // correcting an item-ID fallback can make it supersede (Go a1603c7f).
+        // correcting an item-ID fallback can make it supersede.
         if completed_content_supersedes(final_resp.content.as_ref(), completed_content.as_ref()) {
             final_resp.content = completed_content;
         }
         // Record only recovered failures; errors returned above belong to the caller.
-        // Classified without retaining provider-controlled error text (Go 450b4a54).
+        // Classified without retaining provider-controlled error text.
         if let Some(error_type) = terminal_conversion_err
             .as_ref()
             .and_then(terminal_conversion_error_type)
@@ -386,7 +386,7 @@ impl StreamRun {
     }
 }
 
-/// Go's `error.type` category of a recovered terminal conversion failure: `None` for a failure
+/// The `error.type` category of a recovered terminal conversion failure: `None` for a failure
 /// that is not recorded.
 fn terminal_conversion_error_type(err: &OpenAiError) -> Option<&'static str> {
     if err.is(ErrorKind::UnsupportedOutputItemType) {
@@ -400,8 +400,8 @@ fn terminal_conversion_error_type(err: &OpenAiError) -> Option<&'static str> {
     }
 }
 
-/// openai-go `Responses.NewStreaming` up to the first event: the body is encoded and sent
-/// now, so the call's deadline starts now. Errors are not wrapped (Go's `stream.Err()`).
+/// Starts the streaming call up to the first event: the body is encoded and sent
+/// now, so the call's deadline starts now. Errors are not wrapped.
 async fn start_stream(
     client: &OpenAiClient,
     params: &ResponseNewParams,
@@ -416,7 +416,7 @@ async fn start_stream(
     }
 }
 
-/// Go `adoptTerminalCalls`: makes the terminal event's tool calls the turn's own. They
+/// Makes the terminal event's tool calls the turn's own. They
 /// replace what streamed rather than merging with it; when the two lists are the same length
 /// each takes the slot of the streamed call it replaces, else they go where the turn's first
 /// call sat (or first, when none streamed and the event leads with a call). An incomplete
@@ -533,7 +533,7 @@ fn adopt_terminal_calls(
     Ok(())
 }
 
-/// Go `streamedCounterpart`: the index of the call the deltas built for the tool intent the
+/// The index of the call the deltas built for the tool intent the
 /// terminal item states, or `None` when the lists cannot be paired. Tried in order: the call
 /// ID; the tool's name when exactly one streamed call bears it; the position, when paired.
 /// [`names_agree`] gates every tier.
@@ -566,13 +566,13 @@ fn streamed_counterpart(
     None
 }
 
-/// Go `namesAgree`: a terminal item and a streamed call name the same tool, a name either
+/// Whether a terminal item and a streamed call name the same tool, a name either
 /// side leaves out counting as no disagreement.
 fn names_agree(item: &ResponseOutputItem, call: &FunctionCall) -> bool {
     item.name.is_empty() || call.name.is_empty() || call.name == item.name
 }
 
-/// Go `eventLeadsWithCall`: the terminal event states a function call ahead of any message
+/// Whether the terminal event states a function call ahead of any message
 /// or reasoning item.
 fn event_leads_with_call(items: &[ResponseOutputItem]) -> bool {
     for item in items {
@@ -585,7 +585,7 @@ fn event_leads_with_call(items: &[ResponseOutputItem]) -> bool {
     false
 }
 
-/// Go `restoreUnstated`: keeps what streamed for the fields the terminal item left unstated
+/// Keeps what streamed for the fields the terminal item left unstated
 /// (arguments when `args_usable` is false and some streamed; an empty name; an empty ID when
 /// `id_free`).
 fn restore_unstated(
@@ -609,7 +609,7 @@ fn restore_unstated(
     }
 }
 
-/// Go `finalizeStreamResponse`: closes out a streamed turn on the aggregated response
+/// Closes out a streamed turn on the aggregated response
 /// (`turn_complete`; metadata and model version from the last response seen; with a terminal
 /// event, its usage, finish reason, logprobs and finish signal; without one,
 /// FINISH_REASON_UNSPECIFIED and no usage).
@@ -632,7 +632,7 @@ fn finalize_stream_response(final_resp: &mut LlmResponse, term: &TerminalEvent) 
     attach_finish_signal(final_resp, resp, term.incomplete);
 }
 
-/// Go `attachFinishSignal`: why a SAFETY or OTHER turn did not end cleanly: beside content,
+/// Why a SAFETY or OTHER turn did not end cleanly: beside content,
 /// the provider's wording under [`FINISH_MESSAGE_KEY`]; with nothing to read, `error_code`
 /// (`SAFETY` as genai's blocked reason, else `OTHER`) and `error_message`.
 fn attach_finish_signal(resp: &mut LlmResponse, openai_resp: &Response, incomplete_event: bool) {
@@ -659,7 +659,7 @@ fn attach_finish_signal(resp: &mut LlmResponse, openai_resp: &Response, incomple
     resp.error_message = msg;
 }
 
-/// Go `attachMetadata`: `openai_response_id` and `openai_model` in the custom metadata.
+/// Sets `openai_response_id` and `openai_model` in the custom metadata.
 fn attach_metadata(resp: &mut LlmResponse, openai_resp: &Response) {
     resp.custom_metadata.insert(
         "openai_response_id".to_string(),

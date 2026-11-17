@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Per-request configuration validation (port of ADK-Go `config.go`
-//! `validateGenerateContentConfig`).
+//! Per-request configuration validation.
 
 use gadk_genai::GenerateContentConfig;
 use gadk_model::HttpOptions;
@@ -26,12 +25,12 @@ use crate::thinking::{
 };
 use crate::tools::{ReqTools, validate_tool_config, validate_tools};
 
-/// Go `fmt.Errorf("%w: <detail>", ErrInvalidConfig)`.
+/// An `InvalidConfig` error with `<detail>`.
 pub(crate) fn invalid_config(detail: impl std::fmt::Display) -> AnthropicError {
     AnthropicError::new(ErrorKind::InvalidConfig, detail)
 }
 
-/// Go's `HTTPOptions` block of `validateGenerateContentConfig`, on gadk's
+/// The `HTTPOptions` checks, on gadk's
 /// `LlmRequest.http_options`. The destructuring has no `..`, so a new `HttpOptions` field
 /// fails to compile until it is classified here.
 ///
@@ -40,10 +39,10 @@ pub(crate) fn invalid_config(detail: impl std::fmt::Display) -> AnthropicError {
 /// | `base_url` | rejected when non-empty (use `ClientConfig::base_url`) |
 /// | `api_version` | rejected when non-empty |
 /// | `headers` | ignored by design (backend-specific headers are never forwarded) |
-/// | `timeout` | honoured when > 0 (Go's negative check is unrepresentable) |
+/// | `timeout` | honoured when > 0 (a negative timeout is unrepresentable) |
 /// | `extras_request_provider` | rejected |
 ///
-/// Go's `BaseURLResourceScope`, `ExtraBody` and `RetryOptions` have no gadk field.
+/// There is no field for the resource scope of the base URL, extra body or retry options.
 fn validate_http_options(http_options: Option<&HttpOptions>) -> Result<(), AnthropicError> {
     let Some(HttpOptions {
         base_url,
@@ -71,7 +70,7 @@ fn validate_http_options(http_options: Option<&HttpOptions>) -> Result<(), Anthr
     Ok(())
 }
 
-/// Go `validateGenerateContentConfig`, with every rejection's Go text, in Go's order. Go's
+/// Validates a generate-content config, with every rejection's text, in a fixed order. The
 /// `HTTPOptions` checks (between the tool-config and output-format checks) apply to
 /// `LlmRequest.http_options`, which gadk keeps outside the config, and run even when `cfg` is
 /// `None`: `base_url` → `HTTPOptions.BaseURL is not supported; set ClientConfig.BaseURL
@@ -81,7 +80,7 @@ fn validate_http_options(http_options: Option<&HttpOptions>) -> Result<(), Anthr
 ///
 /// The config is destructured without `..`: a new `GenerateContentConfig` field fails to
 /// compile until it is classified as translated (checked here or by the request builder),
-/// rejected or ignored, as Go's `doc.go` table classifies every field.
+/// rejected or ignored.
 pub(crate) fn validate_generate_content_config(
     cfg: Option<&GenerateContentConfig>,
     req_tools: &ReqTools,

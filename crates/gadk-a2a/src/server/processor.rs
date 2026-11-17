@@ -13,9 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The event processor and failed-status helpers (port of ADK-Go
-//! `server/adka2a/v2/processor.go`), plus the a2a-go event constructors the executor uses
-//! (`a2a.NewStatusUpdateEvent`, `a2a.NewArtifactEvent`, …).
+//! The event processor and failed-status helpers, plus the A2A event constructors the executor
+//! uses (status updates, task messages, artifact events).
 
 use std::collections::HashMap;
 
@@ -32,7 +31,7 @@ use crate::convert::{
     GenAIPartConverter, METADATA_IS_ERR_MESSAGE_KEY, set_actions_meta, to_a2a_parts, to_event_meta,
 };
 
-/// Go `a2a.TaskInfo`: the task and context an event belongs to.
+/// The task and context an event belongs to.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct TaskInfo {
     pub(crate) task_id: String,
@@ -40,7 +39,7 @@ pub(crate) struct TaskInfo {
 }
 
 impl TaskInfo {
-    /// Go `execCtx.TaskInfo()`.
+    /// The task and context of an executor context.
     pub(crate) fn of(ctx: &a2a_server::ExecutorContext) -> Self {
         Self {
             task_id: ctx.task_id.clone(),
@@ -48,7 +47,7 @@ impl TaskInfo {
         }
     }
 
-    /// Go `task.TaskInfo()`.
+    /// The task and context of a task.
     pub(crate) fn of_task(task: &a2a::Task) -> Self {
         Self {
             task_id: task.id.clone(),
@@ -57,12 +56,12 @@ impl TaskInfo {
     }
 }
 
-/// Go's `bool` with `omitempty`: `Some(true)` or absent.
+/// `Some(true)` for `true`, else absent.
 pub(crate) fn flag(value: bool) -> Option<bool> {
     value.then_some(true)
 }
 
-/// Go `a2a.NewStatusUpdateEvent`: stamped with the current time.
+/// A status update stamped with the current time.
 pub(crate) fn new_status_update(
     task: &TaskInfo,
     state: a2a::TaskState,
@@ -80,7 +79,7 @@ pub(crate) fn new_status_update(
     }
 }
 
-/// Go `a2a.NewMessageForTask`.
+/// A message of `role` addressed to `task`.
 pub(crate) fn new_message_for_task(
     role: a2a::Role,
     task: &TaskInfo,
@@ -92,7 +91,7 @@ pub(crate) fn new_message_for_task(
     msg
 }
 
-/// Go `a2a.NewArtifactEvent`: a new artifact (fresh ID) holding `parts`.
+/// A new artifact (fresh ID) holding `parts`.
 pub(crate) fn new_artifact_event(
     task: &TaskInfo,
     parts: Vec<a2a::Part>,
@@ -114,7 +113,7 @@ pub(crate) fn new_artifact_event(
     }
 }
 
-/// Go `a2a.NewArtifactUpdateEvent`: appends `parts` to the artifact `id`.
+/// Appends `parts` to the artifact `id`.
 pub(crate) fn new_artifact_update_event(
     task: &TaskInfo,
     id: &str,
@@ -126,33 +125,33 @@ pub(crate) fn new_artifact_update_event(
     ev
 }
 
-/// `meta`, or `None` when it is empty (Go's `omitempty` drops an empty map from the wire).
+/// `meta`, or `None` when it is empty (an empty map is left off the wire).
 pub(crate) fn non_empty(meta: HashMap<String, Value>) -> Option<HashMap<String, Value>> {
     (!meta.is_empty()).then_some(meta)
 }
 
-/// Go `eventProcessor`: converts the runner's ADK events to artifact updates and tracks what
+/// Converts the runner's ADK events to artifact updates and tracks what
 /// the final status update will be.
 pub(crate) struct EventProcessor {
     task: TaskInfo,
     pub(crate) meta: InvocationMeta,
     part_converter: Option<GenAIPartConverter>,
-    /// Go `terminalActions`: the escalate and agent-transfer actions of the processed events,
+    /// The escalate and agent-transfer actions of the processed events,
     /// passed to the caller in the terminal event's metadata (intermediate events without parts
     /// might be ignored).
     terminal_actions: EventActions,
-    /// Go `failedEvent`: the final status update once an LLM error response was seen; sent after
+    /// The final status update once an LLM error response was seen; sent after
     /// the whole response was saved as an artifact.
     failed_event: Option<a2a::TaskStatusUpdateEvent>,
-    /// Go `inputRequiredProcessor`: its event is the final status update when there is no
+    /// Its event is the final status update when there is no
     /// failure.
     input_required: InputRequiredProcessor,
-    /// Go `eventToArtifact`.
+    /// Turns the converted parts of one event into an artifact update.
     event_to_artifact: Box<dyn EventToArtifactTransform>,
 }
 
 impl EventProcessor {
-    /// Go `newEventProcessor`.
+    /// A processor for `task` that builds artifacts with `transform`.
     pub(crate) fn new(
         task: TaskInfo,
         meta: InvocationMeta,
@@ -170,7 +169,7 @@ impl EventProcessor {
         }
     }
 
-    /// Go `process`: the artifact update for `event`, if it has parts left after the
+    /// The artifact update for `event`, if it has parts left after the
     /// input-required processing.
     pub(crate) async fn process(
         &mut self,
@@ -216,12 +215,12 @@ impl EventProcessor {
         )))
     }
 
-    /// Go `makeFinalArtifactUpdate`.
+    /// The update that resets the partial artifact, if one was made.
     pub(crate) fn make_final_artifact_update(&self) -> Option<a2a::TaskArtifactUpdateEvent> {
         self.event_to_artifact.make_final_update()
     }
 
-    /// Go `makeFinalStatusUpdate`: the failure, else the input-required update, else
+    /// The failure, else the input-required update, else
     /// `completed`, carrying the terminal actions.
     pub(crate) fn make_final_status_update(&self) -> a2a::TaskStatusUpdateEvent {
         if let Some(event) = self.failed_event.as_ref().or(self.input_required.event()) {
@@ -237,7 +236,7 @@ impl EventProcessor {
         ev
     }
 
-    /// Go `makeTaskFailedEvent`: a failed status update for `cause`, with the metadata of
+    /// A failed status update for `cause`, with the metadata of
     /// `event` when it converts.
     pub(crate) fn make_task_failed_event(
         &self,
@@ -257,7 +256,7 @@ impl EventProcessor {
         to_task_failed_update_event(&self.task, cause, non_empty(meta))
     }
 
-    /// Go `updateTerminalActions`.
+    /// Folds the escalate and transfer-to-agent actions of `event` into the terminal actions.
     fn update_terminal_actions(&mut self, event: &Event) {
         self.terminal_actions.escalate = self.terminal_actions.escalate || event.actions.escalate;
         if !event.actions.transfer_to_agent.is_empty() {
@@ -265,7 +264,7 @@ impl EventProcessor {
         }
     }
 
-    /// Go `convertParts`.
+    /// Converts the parts of `event` to A2A parts, through the part converter when one is set.
     async fn convert_parts(&self, event: &Event) -> Result<Vec<a2a::Part>, Error> {
         let parts = match &event.response.content {
             Some(content) if !content.parts.is_empty() => &content.parts,
@@ -284,7 +283,7 @@ impl EventProcessor {
     }
 }
 
-/// Go `setActionsMeta` over an optional map; an empty result is `None`.
+/// `meta` with the actions written to it; an empty result is `None`.
 fn with_actions(
     meta: Option<HashMap<String, Value>>,
     actions: &EventActions,
@@ -294,7 +293,7 @@ fn with_actions(
     non_empty(meta)
 }
 
-/// Go `toTaskFailedUpdateEvent`: a failed status update whose message is `cause`, marked as an
+/// A failed status update whose message is `cause`, marked as an
 /// error message.
 pub(crate) fn to_task_failed_update_event(
     task: &TaskInfo,
@@ -312,7 +311,8 @@ pub(crate) fn to_task_failed_update_event(
     ev
 }
 
-/// Go `errorFromResponse`.
+/// The error text of an LLM error response: `llm error response (code <code>): <quoted message>`,
+/// without the code part when there is none.
 pub(crate) fn error_from_response(resp: &LlmResponse) -> String {
     if resp.error_code.is_empty() {
         return format!("llm error response: {}", go_quote(&resp.error_message));
