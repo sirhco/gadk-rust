@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go internal/compactioninternal/apply.go: materializing stored summaries into a
-//! prompt, the race checks, the session re-read, and the post-append repair.
+//! Materializing stored summaries into a prompt, the race checks, the session re-read, and the
+//! post-append repair.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -28,22 +28,23 @@ use super::window::{is_subsumed_among, names_hole, same_range};
 use super::{BoxError, err_text, wrap_err};
 use crate::tool::utils::{content, function_calls, function_responses, text_parts};
 
-/// Port of Go UnwrapSession (Go-parity note 6).
+/// Unwraps a session wrapper down to the underlying session.
 pub(crate) use crate::llm::agent::underlying_session as unwrap_session;
 
-/// Port of Go repairTimeout.
+/// How long a post-append repair may take before it is abandoned.
 pub(crate) const REPAIR_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Port of Go refResolution (`time.Microsecond`), in nanoseconds.
+/// The resolution, in nanoseconds (one microsecond), at which event timestamps are compared when
+/// matching event references.
 pub(crate) const REF_RESOLUTION_NANOS: u32 = 1_000;
 
-/// Go `t.Truncate(refResolution)`.
+/// Truncates `t` to [`REF_RESOLUTION_NANOS`].
 pub(crate) fn truncate_to_ref(t: DateTime<Utc>) -> DateTime<Utc> {
     t.with_nanosecond(t.nanosecond() / REF_RESOLUTION_NANOS * REF_RESOLUTION_NANOS)
         .unwrap_or(t)
 }
 
-/// Port of Go Apply: summaries stand in for the events they cover; `events` is not modified.
+/// Summaries stand in for the events they cover; `events` is not modified.
 pub(crate) fn apply(events: &[Event]) -> Vec<Event> {
     if !events.iter().any(has_compaction) {
         return events.to_vec();
@@ -51,12 +52,13 @@ pub(crate) fn apply(events: &[Event]) -> Vec<Event> {
     recover_compacted_function_calls(substitute_summaries(events), events)
 }
 
-/// Port of Go hasCompaction.
+/// Whether the event declares a compaction.
 pub(crate) fn has_compaction(ev: &Event) -> bool {
     ev.actions.compaction.is_some()
 }
 
-/// Port of Go HasUsableSummary: deliberately only a presence check (adk-python parity).
+/// Whether the event's compaction carries summary content: deliberately only a presence check
+/// (adk-python parity).
 pub(crate) fn has_usable_summary(ev: &Event) -> bool {
     ev.actions
         .compaction
@@ -73,15 +75,15 @@ pub(crate) fn records(events: &[Event]) -> (Vec<usize>, Vec<&Event>) {
         .unzip()
 }
 
-/// Port of Go RepairContext: runs the corrective write detached from the caller and bounded by
-/// [`REPAIR_TIMEOUT`]; `None` means it timed out (Go-parity note 8).
+/// Runs the corrective write detached from the caller and bounded by [`REPAIR_TIMEOUT`]; `None`
+/// means it timed out.
 ///
-/// Go detaches the repair's context from the caller's cancellation. A Rust future has no
-/// context, and dropping it is its cancellation, so `fut` is spawned onto the runtime (inside
-/// the caller's current span, Go's carried values) and the returned future only awaits it:
-/// dropping the caller mid-repair leaves the repair running to completion or to the timeout.
-/// The summary is already stored and claims a range wider than it summarized until this lands.
-/// A panic inside `fut` resumes on the caller, as Go's inline repair would propagate it.
+/// The repair is detached from the caller's cancellation. Dropping a Rust future is its
+/// cancellation, so `fut` is spawned onto the runtime (inside the caller's current span) and the
+/// returned future only awaits it: dropping the caller mid-repair leaves the repair running to
+/// completion or to the timeout. The summary is already stored and claims a range wider than it
+/// summarized until this lands. A panic inside `fut` resumes on the caller, as an inline repair
+/// would propagate it.
 pub(crate) async fn repair<F>(fut: F) -> Option<F::Output>
 where
     F: std::future::Future + Send + 'static,
@@ -99,7 +101,7 @@ where
     }
 }
 
-/// Port of Go keptRange.
+/// A surviving summary record: the range it covers and where it came from.
 struct KeptRange {
     /// The coverage guard: only events before it can be covered.
     index: usize,
@@ -108,7 +110,7 @@ struct KeptRange {
     rng: EventCompaction,
 }
 
-/// Port of Go substituteSummaries.
+/// Replaces each covered run of events with its summary event and drops the compaction records.
 fn substitute_summaries(events: &[Event]) -> Vec<Event> {
     let (rec_at, recs) = records(events);
     let mut kept: Vec<KeptRange> = Vec::new();
@@ -167,7 +169,7 @@ fn substitute_summaries(events: &[Event]) -> Vec<Event> {
     out
 }
 
-/// Port of Go summaryIndex.
+/// The index at which the summary is emitted: that of the first event it covers, else its guard.
 fn summary_index(events: &[Event], k: &KeptRange) -> usize {
     events
         .iter()
@@ -176,17 +178,19 @@ fn summary_index(events: &[Event], k: &KeptRange) -> usize {
         .map_or(k.index, |(i, _)| i)
 }
 
-/// Port of Go isCovered.
+/// Whether any kept summary covers the event at `i`.
 fn is_covered(i: usize, ev: &Event, kept: &[KeptRange]) -> bool {
     kept.iter().any(|k| covered_by(i, ev, k))
 }
 
-/// Port of Go coveredBy: only a record later in the stream covers an event.
+/// Whether `k` covers the event at `i`: only a record later in the stream covers an event.
 fn covered_by(i: usize, ev: &Event, k: &KeptRange) -> bool {
     i < k.index && in_range(ev, &k.rng)
 }
 
-/// Port of Go recoverCompactedFunctionCalls.
+/// Re-injects the call events of long-running function calls whose responses survive compaction
+/// but whose calls were summarized away, with the freshest responses of their sibling calls, so
+/// no response is left without its call.
 fn recover_compacted_function_calls(events: Vec<Event>, source: &[Event]) -> Vec<Event> {
     let mut present_calls: HashSet<String> = HashSet::new();
     let mut present_responses: HashSet<String> = HashSet::new();
@@ -271,8 +275,7 @@ fn recover_compacted_function_calls(events: Vec<Event>, source: &[Event]) -> Vec
     result
 }
 
-/// Port of Go RangeRaced: whether `latest` gained an event inside `summary`'s range that
-/// `selected_from` did not hold.
+/// Whether `latest` gained an event inside `summary`'s range that `selected_from` did not hold.
 pub(crate) fn range_raced(
     latest: &dyn Session,
     selected_from: &dyn Session,
@@ -281,12 +284,12 @@ pub(crate) fn range_raced(
     range_raced_since(latest, &known_event_ids(selected_from), summary)
 }
 
-/// Port of Go KnownEventIDs: the reference keys ([`ref_key`]) of the session's events now.
+/// The reference keys ([`ref_key`]) of the session's events now.
 pub(crate) fn known_event_ids(sess: &dyn Session) -> HashSet<String> {
     sess.events().iter().map(ref_key).collect()
 }
 
-/// Port of Go RangeRacedSince: [`range_raced`] against identities captured earlier.
+/// [`range_raced`] against identities captured earlier.
 pub(crate) fn range_raced_since(
     latest: &dyn Session,
     known: &HashSet<String>,
@@ -313,7 +316,7 @@ pub(crate) fn range_raced_since(
     false
 }
 
-/// Port of Go excludes: `rng` names `ev` as a hole, compared at [`REF_RESOLUTION_NANOS`].
+/// Whether `rng` names `ev` as a hole, compared at [`REF_RESOLUTION_NANOS`].
 pub(crate) fn excludes(rng: &EventCompaction, ev: &Event) -> bool {
     let ev_at = truncate_to_ref(ev.timestamp);
     rng.excluded_events
@@ -321,15 +324,15 @@ pub(crate) fn excludes(rng: &EventCompaction, ev: &Event) -> bool {
         .any(|r| r.invocation_id == ev.invocation_id && truncate_to_ref(r.timestamp) == ev_at)
 }
 
-/// Port of Go coverIndex: the usable, unsuperseded records of a session in stream order.
+/// The usable, unsuperseded records of a session in stream order.
 pub(crate) struct CoverIndex {
     at: Vec<usize>,
     rngs: Vec<EventCompaction>,
 }
 
 impl CoverIndex {
-    /// Port of Go newCoverIndex: superseded and contentless records are skipped, as assembly
-    /// skips them.
+    /// Indexes the records of `events`: superseded and contentless records are skipped, as
+    /// assembly skips them.
     pub(crate) fn new(events: &[Event]) -> CoverIndex {
         let (rec_at, recs) = records(events);
         let mut idx = CoverIndex {
@@ -353,8 +356,7 @@ impl CoverIndex {
         idx
     }
 
-    /// Port of Go coverIndex.coversAfter: a record later in the stream than `i` stands in for
-    /// `ev`.
+    /// Whether a record later in the stream than `i` stands in for `ev`.
     pub(crate) fn covers_after(&self, i: usize, ev: &Event) -> bool {
         self.at
             .iter()
@@ -363,8 +365,8 @@ impl CoverIndex {
     }
 }
 
-/// Port of Go foldCorrections: merges `rng` (the record at stream position `i`) with the
-/// corrections of it over the same interval and summary text.
+/// Merges `rng` (the record at stream position `i`) with the corrections of it over the same
+/// interval and summary text.
 fn fold_corrections(
     i: usize,
     rng: &EventCompaction,
@@ -377,7 +379,7 @@ fn fold_corrections(
         let Some(o) = other.actions.compaction.as_ref() else {
             continue;
         };
-        // Go `o == rng`: the record itself.
+        // `o` is the record itself.
         if at[k] == i || !same_range(o, rng) || !same_summary_content(o, rng) {
             continue;
         }
@@ -396,12 +398,13 @@ fn fold_corrections(
     (earliest, merged)
 }
 
-/// Port of Go overlaps.
+/// Whether the two compactions' intervals overlap (inclusive).
 pub(crate) fn overlaps(a: &EventCompaction, b: &EventCompaction) -> bool {
     a.start_timestamp <= b.end_timestamp && b.start_timestamp <= a.end_timestamp
 }
 
-/// Port of Go ReloadSession (Go-parity note 7: no "disappeared" branch).
+/// Re-reads the session from its service. There is no separate "session disappeared" outcome: a
+/// failed read is an error.
 pub(crate) async fn reload_session(
     svc: Option<&dyn SessionService>,
     s: &dyn Session,
@@ -419,7 +422,7 @@ pub(crate) async fn reload_session(
     .map_err(|e| wrap_err("failed to re-read the session", Box::new(e)))
 }
 
-/// Port of Go inRange: inside the inclusive interval and not named as a hole.
+/// Whether `ev` is inside the inclusive interval and not named as a hole.
 pub(crate) fn in_range(ev: &Event, rng: &EventCompaction) -> bool {
     if ev.timestamp < rng.start_timestamp || ev.timestamp > rng.end_timestamp {
         return false;
@@ -427,8 +430,8 @@ pub(crate) fn in_range(ev: &Event, rng: &EventCompaction) -> bool {
     !excludes(rng, ev)
 }
 
-/// Port of Go RepairAfterAppend: a corrected copy of `stored` naming every event that landed
-/// inside its range unseen, or `None` when nothing did.
+/// A corrected copy of `stored` naming every event that landed inside its range unseen, or `None`
+/// when nothing did.
 pub(crate) fn repair_after_append(
     stored: &Event,
     known: &HashSet<String>,
@@ -468,7 +471,7 @@ pub(crate) fn repair_after_append(
     Some(corrected)
 }
 
-/// Port of Go sameSummaryContent.
+/// Whether both summaries have the same non-empty text.
 fn same_summary_content(a: &EventCompaction, b: &EventCompaction) -> bool {
     let at = text_parts(a.compacted_content.as_ref()).join("\n");
     let bt = text_parts(b.compacted_content.as_ref()).join("\n");

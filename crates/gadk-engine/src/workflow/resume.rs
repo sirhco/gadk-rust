@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go workflow/resume.go.
+//! Resuming a paused workflow from the user's responses.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -29,7 +29,7 @@ use crate::workflow::scheduler::{Scheduler, find_successors, wf_error};
 use crate::workflow::state::{NodeStatus, RunState};
 use crate::workflow::{Node, Workflow};
 
-/// Port of Go resumeOutput: one matched response is forwarded as itself, several as the map.
+/// One matched response is forwarded as itself, several as the map.
 pub(crate) fn resume_output(matched: Map<String, Value>) -> Value {
     if matched.len() == 1 {
         return matched
@@ -41,26 +41,25 @@ pub(crate) fn resume_output(matched: Map<String, Value>) -> Value {
     Value::Object(matched)
 }
 
-/// Port of Go validateResumeResponse: coerces `resp` through `schema`, resolved per call (Go
-/// does not cache: persisted schemas round-trip through JSON).
+/// Coerces `resp` through `schema`, resolved per call (not cached: persisted schemas round-trip
+/// through JSON).
 pub(crate) fn validate_resume_response(resp: Value, schema: &Value) -> Result<Value, String> {
     let compiled =
         CompiledSchema::new(schema.clone()).map_err(|e| format!("resolve schema: {e}"))?;
     convert_with_schema::<Value, Value>(&resp, Some(&compiled))
 }
 
-/// Port of Go (*Workflow).Resume. Pass 1 acts on the nodes whose interrupts this turn's
+/// Resumes a paused workflow. Pass 1 acts on the nodes whose interrupts this turn's
 /// responses answer (re-entry, pending or failed → Pending and re-run with the responses;
 /// handoff → Completed with the response as output). Pass 2 schedules the handoffs' successors,
 /// skipping ones already completed in history. A response failing its interrupt's schema yields
 /// `InvalidResumeResponse` and leaves that node alone. No match yields `NothingToResume`;
 /// otherwise failed siblings are retried and the scheduler runs. Empty `responses` is a clean
-/// no-op (Go's nil state is the caller's `None` from `reconstruct_run_state`).
+/// no-op (a missing state is the caller's `None` from `reconstruct_run_state`).
 ///
-/// Go's deferred cleanup (`cancelAll` + drain + `wg.Wait`) needs no code: dropping the stream
-/// drops the scheduler, which cancels every node token and hands the drain of the still-running
-/// node tasks to the invocation's teardown registry, so no successor is dispatched after the
-/// consumer leaves.
+/// Cleanup needs no code: dropping the stream drops the scheduler, which cancels every node
+/// token and hands the drain of the still-running node tasks to the invocation's teardown
+/// registry, so no successor is dispatched after the consumer leaves.
 pub(crate) fn resume_stream(
     wf: Arc<Workflow>,
     ctx: Context,
@@ -79,7 +78,7 @@ pub(crate) fn resume_stream(
         let mut scheduled = 0usize;
         let mut invalid: HashSet<String> = HashSet::new();
         let mut names: Vec<String> = s.state.nodes.keys().cloned().collect();
-        // Go iterates a map; sorted order makes the first schema error deterministic.
+        // Sorted order makes the first schema error deterministic.
         names.sort();
         for name in &names {
             let Some(node) = s.nodes_by_name.get(name).cloned() else { continue };

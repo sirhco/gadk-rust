@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `NodeConfig` and `RetryConfig` (port of Go workflow/config.go).
+//! `NodeConfig` and `RetryConfig`.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,7 +22,7 @@ use gadk_agent::AgentError;
 
 use crate::error::{WorkflowErrorKind, workflow_error};
 
-/// Port of Go workflow.NodeConfig: the configuration for a node.
+/// The configuration for a node.
 ///
 /// All fields are optional. The `Option<bool>` fields (`rerun_on_resume`, `wait_for_output`) are
 /// tri-state so node implementations can distinguish "user explicitly opted out" (`Some(false)`)
@@ -50,7 +50,7 @@ pub struct NodeConfig {
     /// "no retries".
     pub retry_config: Option<RetryConfig>,
 
-    /// When set and non-zero, bounds a single activation of the node. `None` (and Go's zero,
+    /// When set and non-zero, bounds a single activation of the node. `None` (and
     /// `Some(Duration::ZERO)`) means the node is bounded only by the parent invocation's deadline.
     pub timeout: Option<Duration>,
 
@@ -60,10 +60,10 @@ pub struct NodeConfig {
     pub emits_own_span: bool,
 }
 
-/// Port of Go workflow.RetryConfig: the parameters for retrying a failed node.
+/// The parameters for retrying a failed node.
 ///
 /// Recommended construction is via [`default_retry_config`] and overriding the fields you want to
-/// customize. `RetryConfig::default()` is Go's zero value: a valid "no retry, no backoff, no
+/// customize. `RetryConfig::default()` is the zero value: a valid "no retry, no backoff, no
 /// jitter" policy.
 #[derive(Clone, Default)]
 pub struct RetryConfig {
@@ -91,14 +91,14 @@ pub struct RetryConfig {
     pub should_retry: Option<Arc<dyn Fn(&AgentError) -> bool + Send + Sync>>,
 }
 
-/// Port of Go defaultShouldRetry (config.go:32): retry everything except input-validation failures.
+/// Retries everything except input-validation failures.
 pub(crate) fn default_should_retry(err: &AgentError) -> bool {
     !workflow_error(err).is_some_and(|w| w.is(WorkflowErrorKind::InputValidation))
 }
 
-/// Port of Go DefaultRetryConfig (config.go:46): 5 attempts, 1s initial delay, 60s cap, 2x
-/// backoff, full jitter. Every error is retried except input-validation failures, which a retry
-/// cannot fix because the input is deterministic.
+/// The default retry policy: 5 attempts, 1s initial delay, 60s cap, 2x backoff, full jitter. Every
+/// error is retried except input-validation failures, which a retry cannot fix because the input is
+/// deterministic.
 pub fn default_retry_config() -> RetryConfig {
     RetryConfig {
         max_attempts: 5,

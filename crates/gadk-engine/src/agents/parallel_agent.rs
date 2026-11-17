@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go agent/workflowagents/parallelagent.
+//! A parallel agent: runs its sub-agents concurrently, each in an isolated branch.
 
 use std::sync::Arc;
 
@@ -32,17 +32,17 @@ use tracing::Instrument;
 
 use crate::agents::graph_resume::graph_resume_indexes;
 
-/// Port of Go parallelagent.Config: the configuration of a parallel agent.
+/// The configuration of a parallel agent.
 #[derive(Clone, Default)]
 pub struct ParallelAgentConfig {
     /// Basic agent setup; `run` must be `None`.
     pub agent: AgentConfig,
 }
 
-/// Port of Go parallelagent.New: an agent that runs its sub-agents in parallel, each in an
-/// isolated branch. Useful when a task benefits from multiple perspectives or attempts, such as
-/// running different algorithms simultaneously or generating several responses for a later
-/// evaluation agent. The base-agent error is returned unwrapped, as Go does.
+/// An agent that runs its sub-agents in parallel, each in an isolated branch. Useful when a task
+/// benefits from multiple perspectives or attempts, such as running different algorithms
+/// simultaneously or generating several responses for a later evaluation agent. The base-agent
+/// error is returned unwrapped.
 pub fn new(cfg: ParallelAgentConfig) -> Result<Arc<dyn Agent>, AgentError> {
     if cfg.agent.run.is_some() {
         return Err(AgentError::Config(
@@ -62,16 +62,17 @@ pub fn new(cfg: ParallelAgentConfig) -> Result<Arc<dyn Agent>, AgentError> {
     )
 }
 
-/// Port of Go result: a sub-agent event with its acknowledgement channel, or the group's error.
-/// `Panic` carries a sub-agent task's panic payload to the consumer, which re-raises it (Go: a
-/// panicking sub-agent goroutine crashes the process; it never ends the run "successfully").
+/// A sub-agent event with its acknowledgement channel, or the group's error. `Panic` carries a
+/// sub-agent task's panic payload to the consumer, which re-raises it: a panicking sub-agent
+/// never ends the run "successfully".
 enum SubResult {
     Event(Box<Event>, oneshot::Sender<()>),
     Err(AgentError),
     Panic(Box<dyn std::any::Any + Send>),
 }
 
-/// Go `fmt.Errorf("failed to run sub-agent %q: %w", name, err)`.
+/// A sub-agent's error, displayed as `failed to run sub-agent "<name>": <err>` (the name is
+/// double-quoted and escaped) and carrying the original error as its source.
 #[derive(Debug)]
 struct SubAgentError {
     name: String,
@@ -95,10 +96,10 @@ impl std::error::Error for SubAgentError {
     }
 }
 
-/// Go's deferred cleanup in the run iterator (agent.go:118-128, ADK #1186): when the run stream
-/// is dropped, the funnel task (which ends only after every sub-agent task has returned, its
-/// teardown included) is handed to the invocation's teardown registry instead of being aborted,
-/// so the runner's after-run callbacks wait for every branch. Without a registry it is detached.
+/// Cleanup when the run stream is dropped: the funnel task (which ends only after every sub-agent
+/// task has returned, its teardown included) is handed to the invocation's teardown registry
+/// instead of being aborted, so the runner's after-run callbacks wait for every branch. Without
+/// a registry it is detached.
 struct AwaitBranchesOnDrop {
     ctx: InvocationContext,
     funnel: Option<JoinHandle<()>>,
@@ -112,8 +113,8 @@ impl Drop for AwaitBranchesOnDrop {
     }
 }
 
-/// Go `close(res.ackChan)` after `yield` returned, whether it returned true or false: sent when
-/// the consumer asks for the next item, or when it drops the stream at this event.
+/// Acknowledges an event when dropped: the ack is sent when the consumer asks for the next item,
+/// or when it drops the stream at this event.
 struct AckOnDrop(Option<oneshot::Sender<()>>);
 
 impl Drop for AckOnDrop {
@@ -124,20 +125,20 @@ impl Drop for AckOnDrop {
     }
 }
 
-/// Port of Go parallelagent run.
+/// Runs the sub-agents concurrently and streams their events.
 ///
-/// Every sub-agent runs in its own task (on a fresh fiber spawned with [`ERRGROUP_CREATOR`], Go's
-/// `errgroup.Go` goroutine) on a context with branch `<parent>.<sub>` (prefixed with the current
-/// branch when there is one), the same invocation, and the group's cancel scope (Go
-/// `errgroup.WithContext`, a `context.WithCancelCause` child of the run context). Each event is handed to the consumer with an acknowledgement, and the sub-agent does not
+/// Every sub-agent runs in its own task (on a fresh fiber spawned with [`ERRGROUP_CREATOR`]) on a
+/// context with branch `<parent>.<sub>` (prefixed with the current branch when there is one), the
+/// same invocation, and the group's cancel scope (a cancel-with-cause child of the run context).
+/// Each event is handed to the consumer with an acknowledgement, and the sub-agent does not
 /// continue until the consumer asks for the next item, i.e. after it has processed the event (for
 /// the runner: after plugins and the session append). The first sub-agent error, wrapped as
 /// `failed to run sub-agent "<name>": <err>`, cancels the group with that error as its cause
 /// (`CancelCause::Error`, the same `Arc` the yielded error carries) and is yielded once every
 /// sub-agent has finished; once every sub-agent has returned, the group is cancelled plainly
-/// (errgroup `Wait`; the first cause wins). A sub-agent panic cancels the group plainly and is
+/// (the first cause wins). A sub-agent panic cancels the group plainly and is
 /// re-raised on the consumer's poll (`resume_unwind`, as the dynamic scheduler surfaces node
-/// panics) once every sub-agent has finished. Dropping the stream (Go's early stop, agent.go:118-142)
+/// panics) once every sub-agent has finished. Dropping the stream (an early stop)
 /// acknowledges the event the consumer stopped on, cancels the group plainly and hands the
 /// funnel, which waits for every sub-agent task to return, to the invocation's teardown
 /// registry ([`InvocationContext::register_teardown`]): no sub-agent task is aborted, and the
@@ -145,17 +146,16 @@ impl Drop for AckOnDrop {
 fn run(ctx: InvocationContext) -> EventStream {
     Box::pin(async_stream::stream! {
         let cur = ctx.agent();
-        // Go: context.WithCancel(ctx) + errgroup.WithContext (one scope here: the early-stop
-        // cancel is plain, so the group reads `Canceled` either way); the guard cancels it
-        // plainly on early stop.
+        // One cancel scope serves as both the run's and the group's (the early-stop cancel is
+        // plain, so the group reads `Canceled` either way); the guard cancels it plainly on early
+        // stop.
         let (group_ctx, _cancel_on_drop) = ctx.clone().into_context().with_agent_cancel();
         let group = group_ctx.cancellation_token().clone();
         let (tx, mut rx) = mpsc::channel::<SubResult>(1);
-        // Go errgroup `err` (first error, kept once): the shared value the cause carries.
+        // The first error, kept once: the shared value the cancel cause carries.
         let first_err: Arc<Mutex<Option<CancelCause>>> = Arc::new(Mutex::new(None));
         let mut set = JoinSet::new();
-        // Go 51bc7ec5 (#2188): resuming a nested graph workflow runs only the sub-agents holding
-        // the callers.
+        // Resuming a nested graph workflow runs only the sub-agents holding the callers.
         let mut sub_agents: Vec<Arc<dyn Agent>> = cur.sub_agents().to_vec();
         if let Some(ix) = graph_resume_indexes(&ctx) {
             sub_agents = ix.iter().filter_map(|&i| sub_agents.get(i).cloned()).collect();
@@ -165,14 +165,13 @@ fn run(ctx: InvocationContext) -> EventStream {
             if !ctx.branch().is_empty() {
                 branch = format!("{}.{}", ctx.branch(), branch);
             }
-            // Go builds each sub-context with icontext.NewInvocationContext from only Artifacts,
-            // Memory, Session, Branch, IsolationScope, Agent, UserContent, RunConfig and
-            // InvocationID: a fresh, not-ended end flag (ending one branch does not end its
-            // siblings) and zero path, run id, resumed inputs and output-for-ancestors. The
-            // parent's isolation scope is kept (Go 543edd3d): a workflow node stamps it on every
-            // event the branches emit and the LLM history filter matches it exactly, so an
-            // unscoped branch would lose its own turns.
-            // The context shares the group's cancel scope (Go `NewInvocationContext(errGroupCtx, …)`).
+            // Each sub-context is built from only the artifacts, memory, session, branch,
+            // isolation scope, agent, user content, run config and invocation id: a fresh,
+            // not-ended end flag (ending one branch does not end its siblings) and zero path, run
+            // id, resumed inputs and output-for-ancestors. The parent's isolation scope is kept: a
+            // workflow node stamps it on every event the branches emit and the LLM history filter
+            // matches it exactly, so an unscoped branch would lose its own turns.
+            // The context shares the group's cancel scope.
             let sub_ctx = group_ctx.as_invocation().with_delta(ContextDelta {
                 fresh_invocation: true,
                 agent: Some(Arc::clone(sa)),
@@ -181,7 +180,7 @@ fn run(ctx: InvocationContext) -> EventStream {
                 ..Default::default()
             });
             let (sa, tx, group, first_err) = (Arc::clone(sa), tx.clone(), group.clone(), first_err.clone());
-            // Go `errGroup.Go`: a goroutine started here, by the goroutine running the agent.
+            // A fiber started here, by the fiber running the agent.
             let branch_fiber = fiber::spawn_child(ERRGROUP_CREATOR);
             set.spawn(branch_fiber.scope(async move {
                 if let Err(e) = run_sub_agent(sub_ctx.clone(), sa.clone(), tx, group).await {
@@ -189,8 +188,8 @@ fn run(ctx: InvocationContext) -> EventStream {
                         name: sa.name().to_string(),
                         source: e,
                     }));
-                    // errgroup `errOnce`: the first error is kept and cancels the group with it as
-                    // the cause (a no-op if the group was already cancelled).
+                    // The first error is kept and cancels the group with it as the cause (a
+                    // no-op if the group was already cancelled).
                     let mut first = first_err.lock();
                     if first.is_none() {
                         *first = Some(wrapped.clone());
@@ -201,8 +200,7 @@ fn run(ctx: InvocationContext) -> EventStream {
             }).in_current_span());
         }
         // The funnel: once every sub-agent has finished, report the first error; the channel
-        // closes when the funnel and every sub-agent have dropped their senders (Go
-        // close(resultsChan)).
+        // closes when the funnel and every sub-agent have dropped their senders.
         let funnel_group = group_ctx.clone();
         let funnel = tokio::spawn(async move {
             let mut panic = None;
@@ -215,8 +213,8 @@ fn run(ctx: InvocationContext) -> EventStream {
                     panic.get_or_insert(je.into_panic());
                 }
             }
-            // errgroup `Wait`: `cancel(g.err)` once every branch returned — plain when no branch
-            // failed; the first cause wins otherwise.
+            // Once every branch returned the group is cancelled: plainly when no branch failed;
+            // the first cause wins otherwise.
             funnel_group.cancel_with_cause(CancelCause::Canceled);
             if let Some(p) = panic {
                 if tx.send(SubResult::Panic(p)).await.is_err() {
@@ -239,8 +237,7 @@ fn run(ctx: InvocationContext) -> EventStream {
                 SubResult::Event(ev, ack) => {
                     // Released when the consumer asks for the next item, i.e. after it has
                     // processed this one, or when it drops the stream here: the innermost
-                    // local, so the ack is sent before the group is cancelled (Go closes the
-                    // ack channel before its deferred `cancelSubAgents`).
+                    // local, so the ack is sent before the group is cancelled.
                     let _ack = AckOnDrop(Some(ack));
                     yield Ok(*ev);
                 }
@@ -251,7 +248,7 @@ fn run(ctx: InvocationContext) -> EventStream {
     })
 }
 
-/// Port of Go runSubAgent. `Ok(())` also covers "the consumer went away" (Go `<-done`).
+/// Runs one sub-agent, forwarding its events. `Ok(())` also covers "the consumer went away".
 async fn run_sub_agent(
     ctx: InvocationContext,
     agent: Arc<dyn Agent>,
@@ -269,7 +266,7 @@ async fn run_sub_agent(
         }
         // Wait for the consumer to finish processing before continuing. A ready ack wins over
         // the group's cancellation: a consumer that stops on this event acknowledges it before
-        // cancelling the group, and Go's goroutine, parked in the select, wakes on the ack.
+        // cancelling the group, and the sub-agent, parked in the select, wakes on the ack.
         tokio::select! {
             biased;
             acked = ack_rx => if acked.is_err() { return Ok(()); },

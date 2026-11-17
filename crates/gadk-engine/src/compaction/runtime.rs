@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go internal/agent/compactionctx: the per-invocation compaction runtime. It travels in
-//! `gadk_agent`'s opaque per-invocation slot; [`from_ctx`] is the only downcast.
+//! The per-invocation compaction runtime. It travels in `gadk_agent`'s opaque per-invocation slot;
+//! [`from_ctx`] is the only downcast.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -26,10 +26,10 @@ use gadk_session::compaction::Config;
 
 use super::{ProgressGate, has_tail_retention};
 
-/// Go maxFailuresPerInvocation: failed tail-retention attempts one agent may make per invocation.
+/// Failed tail-retention attempts one agent may make per invocation.
 pub(crate) const MAX_FAILURES_PER_INVOCATION: u32 = 3;
 
-/// Go gateState.
+/// The progress state behind one [`Gate`].
 #[derive(Debug, Default)]
 struct GateState {
     /// Prompt size the last compaction ran at; 0 = none since the prompt last recovered.
@@ -37,8 +37,8 @@ struct GateState {
     failures: u32,
 }
 
-/// Port of Go compactionctx.Runtime: the compaction config and session service of one
-/// invocation, whether it has compacted, and the per-agent progress gates.
+/// The compaction config and session service of one invocation, whether it has compacted, and
+/// the per-agent progress gates.
 pub(crate) struct CompactionRuntime {
     config: Arc<Config>,
     session_service: Option<Arc<dyn SessionService>>,
@@ -47,7 +47,7 @@ pub(crate) struct CompactionRuntime {
 }
 
 impl CompactionRuntime {
-    /// Port of Go compactionctx.New (a disabled config is "no runtime" in Rust).
+    /// Creates the runtime (a disabled config is "no runtime": none is attached).
     pub(crate) fn new(
         cfg: Arc<Config>,
         svc: Option<Arc<dyn SessionService>>,
@@ -60,37 +60,37 @@ impl CompactionRuntime {
         })
     }
 
-    /// Port of Go (*Runtime).Config.
+    /// The compaction config.
     pub(crate) fn config(&self) -> &Arc<Config> {
         &self.config
     }
 
-    /// Port of Go (*Runtime).SessionService.
+    /// The session service the compaction reads from and writes to, if any.
     pub(crate) fn session_service(&self) -> Option<&Arc<dyn SessionService>> {
         self.session_service.as_ref()
     }
 
-    /// Port of Go (*Runtime).MarkCompacted: tail retention compacted in this invocation.
+    /// Records that tail retention compacted in this invocation.
     pub(crate) fn mark_compacted(&self) {
         self.compacted.store(true, Ordering::SeqCst);
     }
 
-    /// Port of Go (*Runtime).AlreadyCompacted.
+    /// Whether tail retention has compacted in this invocation.
     pub(crate) fn already_compacted(&self) -> bool {
         self.compacted.load(Ordering::SeqCst)
     }
 
-    /// Port of Go (*Runtime).Configured: a runtime always carries a config.
+    /// Whether a config is present: a runtime always carries one.
     pub(crate) fn configured(&self) -> bool {
         true
     }
 
-    /// Port of Go (*Runtime).Enabled: tail retention can run (a session service and a threshold).
+    /// Whether tail retention can run (a session service and a threshold).
     pub(crate) fn enabled(&self) -> bool {
         self.session_service.is_some() && has_tail_retention(Some(&self.config))
     }
 
-    /// Port of Go (*Runtime).GateFor: the progress gate of one agent in one branch and scope.
+    /// The progress gate of one agent in one branch and isolation scope.
     pub(crate) fn gate_for(
         self: &Arc<Self>,
         agent_name: &str,
@@ -109,62 +109,63 @@ impl CompactionRuntime {
     }
 }
 
-/// Port of Go compactionctx.Gate.
+/// The [`ProgressGate`] of one agent in one branch and isolation scope.
 pub(crate) struct Gate {
     rt: Arc<CompactionRuntime>,
     scope: String,
 }
 
 impl ProgressGate for Gate {
-    /// Port of Go (*Gate).AllowAt.
+    /// Allows a compaction when none has run since the prompt last recovered and fewer than
+    /// [`MAX_FAILURES_PER_INVOCATION`] attempts have failed.
     fn allow_at(&self) -> bool {
         self.rt.with_state(&self.scope, |st| {
             st.last_compaction_tokens == 0 && st.failures < MAX_FAILURES_PER_INVOCATION
         })
     }
 
-    /// Port of Go (*Gate).RecordAt: a zero count is kept distinct from "nothing recorded".
+    /// Records a compaction at `tokens`; a zero count is kept distinct from "nothing recorded".
     fn record_at(&self, tokens: i64) {
         self.rt
             .with_state(&self.scope, |st| st.last_compaction_tokens = tokens.max(1));
     }
 
-    /// Port of Go (*Gate).Recovered: re-arms after a success; spent retries stay spent.
+    /// Re-arms after a success; spent retries stay spent.
     fn recovered(&self) {
         self.rt
             .with_state(&self.scope, |st| st.last_compaction_tokens = 0);
     }
 
-    /// Port of Go (*Gate).Failed.
+    /// Counts a failed or declined attempt.
     fn failed(&self) {
         self.rt.with_state(&self.scope, |st| st.failures += 1);
     }
 }
 
-/// Port of Go compactionctx.FromContext.
+/// The compaction runtime attached to the invocation, if any.
 pub(crate) fn from_ctx(ctx: &InvocationContext) -> Option<Arc<CompactionRuntime>> {
     ctx.compaction_runtime()?
         .downcast::<CompactionRuntime>()
         .ok()
 }
 
-/// Port of Go compactionctx.ToContext, on the builder of the invocation context.
+/// Attaches the runtime to the builder of the invocation context.
 pub(crate) fn attach(b: ContextBuilder, rt: Arc<CompactionRuntime>) -> ContextBuilder {
     b.compaction_runtime(rt)
 }
 
-/// Go `compactionctx.FromContext(ctx).Configured()` (false without a runtime).
+/// Whether the invocation has a runtime with a config (false without a runtime).
 pub(crate) fn configured(ctx: &InvocationContext) -> bool {
     from_ctx(ctx).is_some_and(|rt| rt.configured())
 }
 
-/// Go `compactionctx.FromContext(ctx).Enabled()` (false without a runtime).
+/// Whether the invocation's runtime can run tail retention (false without a runtime).
 #[cfg(test)]
 pub(crate) fn enabled(ctx: &InvocationContext) -> bool {
     from_ctx(ctx).is_some_and(|rt| rt.enabled())
 }
 
-/// Go `compactionctx.FromContext(ctx).AlreadyCompacted()` (false without a runtime).
+/// Whether the invocation's runtime has already compacted (false without a runtime).
 pub(crate) fn already_compacted(ctx: &InvocationContext) -> bool {
     from_ctx(ctx).is_some_and(|rt| rt.already_compacted())
 }

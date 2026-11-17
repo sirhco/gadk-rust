@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go workflow/dynamic_node.go: a node whose body schedules children at run time with
+//! A node whose body schedules children at run time with
 //! [`run_node`](fn@crate::workflow::run_node).
 
 use std::any::Any;
@@ -39,7 +39,7 @@ use crate::workflow::route::go_quote;
 use crate::workflow::scheduler::is_kind;
 use crate::workflow::{BaseNode, Emit, Node, NodeConfig};
 
-/// One emitted event awaiting the consumer (Go makeEmit's serialized yield).
+/// One emitted event awaiting the consumer.
 pub(crate) struct EmitMsg {
     ev: Box<Event>,
     ack: oneshot::Sender<()>,
@@ -52,10 +52,10 @@ impl EmitMsg {
     }
 }
 
-/// Port of Go makeEmit. The returned emit resolves after the node's stream yielded the event
-/// and the consumer polled again. It fails with `AgentError::Cancelled` once the context is
-/// cancelled or the stream (the receiver) is gone. Go's consumerGone() check is implicit: a
-/// dropped stream drops the body future.
+/// Creates the emit handed to the node body, and the receiver its events arrive on. The returned
+/// emit resolves after the node's stream yielded the event and the consumer polled again. It
+/// fails with `AgentError::Cancelled` once the context is cancelled or the stream (the receiver)
+/// is gone; a dropped stream also drops the body future.
 pub(crate) fn make_emit(ctx: &Context) -> (Emit, mpsc::Receiver<EmitMsg>) {
     let (tx, rx) = mpsc::channel::<EmitMsg>(1);
     let token = ctx.cancellation_token().clone();
@@ -82,7 +82,7 @@ pub(crate) fn make_emit(ctx: &Context) -> (Emit, mpsc::Receiver<EmitMsg>) {
     (emit, rx)
 }
 
-/// Port of Go dynamicNode[IN, OUT].
+/// A node whose body takes an `In`, orchestrates children and returns an `Out`.
 struct DynamicNode<In, Out, F> {
     base: BaseNode,
     f: Arc<F>,
@@ -90,7 +90,7 @@ struct DynamicNode<In, Out, F> {
     _types: PhantomData<fn(In) -> Out>,
 }
 
-/// Port of Go applyDynamicDefaults: `rerun_on_resume` defaults to `Some(true)`.
+/// `rerun_on_resume` defaults to `Some(true)`.
 fn apply_dynamic_defaults(mut cfg: NodeConfig) -> NodeConfig {
     if cfg.rerun_on_resume.is_none() {
         cfg.rerun_on_resume = Some(true);
@@ -114,7 +114,7 @@ fn compile(
         .transpose()
 }
 
-/// Port of Go newDynamicNodeWithResolvedSchemas.
+/// Builds a dynamic node from already-compiled schemas.
 fn new_dynamic<In, Out, F, Fut>(
     name: &str,
     f: F,
@@ -136,8 +136,8 @@ where
     })
 }
 
-/// Port of Go NewDynamicNode: a node whose body orchestrates children with `run_node`. Its
-/// `rerun_on_resume` defaults to true.
+/// A node whose body orchestrates children with `run_node`. Its `rerun_on_resume` defaults to
+/// true.
 pub fn dynamic_node<In, Out, F, Fut>(name: &str, f: F, cfg: NodeConfig) -> Arc<dyn Node>
 where
     In: DeserializeOwned + JsonSchema + Send + 'static,
@@ -148,7 +148,7 @@ where
     new_dynamic::<In, Out, F, Fut>(name, f, None, None, apply_dynamic_defaults(cfg))
 }
 
-/// Port of Go NewDynamicNodeWithSchema: as [`dynamic_node`], with input and output schemas.
+/// As [`dynamic_node`], with input and output schemas.
 pub fn dynamic_node_with_schema<In, Out, F, Fut>(
     name: &str,
     f: F,
@@ -201,7 +201,7 @@ where
     fn validate_output(&self, v: Value) -> Result<Value, WorkflowError> {
         self.base.validate_output(v)
     }
-    /// Port of Go (*dynamicNode).Run.
+    /// Runs the body with an emit and a sub-scheduler for its children.
     fn run(&self, ctx: Context, input: Value) -> EventStream {
         let (f, schema, name) = (
             Arc::clone(&self.f),
@@ -224,7 +224,7 @@ where
                 }
             };
             let (emit, mut rx) = make_emit(&ctx);
-            // Go composePath.
+            // The parent path of the children: the context's path, or the node's name at the top.
             let parent_path = {
                 let p = ctx.path();
                 if p.is_empty() { name.clone() } else { p }

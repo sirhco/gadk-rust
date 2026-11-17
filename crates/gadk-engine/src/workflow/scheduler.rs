@@ -13,17 +13,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go workflow/scheduler.go (plus node_span.go and the childEventOutput/messageText
-//! helpers of agent_node.go): the static-graph scheduler.
+//! The static-graph scheduler, with the node spans and the helpers that read an agent node's
+//! output.
 //!
-//! Go runs one goroutine per activation and a single consumer loop on the caller's goroutine.
-//! Here each activation is a task in the scheduler's [`JoinSet`], and the consumer loop is the
-//! pull state machine [`Scheduler::next`], driven by the workflow's [`EventStream`]: the
-//! consumer polling again is Go's `yield` returning true, and dropping the stream (which drops
+//! Each activation is a task in the scheduler's [`JoinSet`], and the consumer loop is the pull
+//! state machine [`Scheduler::next`], driven by the workflow's [`EventStream`]: the consumer
+//! polling again means it has processed the previous event, and dropping the stream (which drops
 //! the scheduler: it releases the event the consumer stopped on, cancels every running node's
 //! context and hands the drain of the still-running tasks to the invocation's teardown registry)
-//! is Go's `yield` returning false. Each activation runs on a fresh fiber (Go's `go runNode`), and a
-//! finished node's context stays live (Go `handleCompletion` drops its CancelFunc uncalled).
+//! means the consumer is gone. Each activation runs on a fresh fiber, and a finished node's
+//! context stays live (it is not cancelled on completion).
 //!
 //! [`EventStream`]: gadk_agent::EventStream
 
@@ -57,32 +56,32 @@ use crate::workflow::route::{go_quote, is_default_route};
 use crate::workflow::state::{NodeStatus, RunState};
 use crate::workflow::{AgentNode, JoinNode, Node, START, calculate_delay, should_retry};
 
-/// Port of Go defaultEventQueueCapacity.
+/// The default capacity of the event queue between the node tasks and the consumer loop.
 pub(crate) const DEFAULT_EVENT_QUEUE_CAPACITY: usize = 16;
 
 // ---------- identity, error and output helpers ----------
 
-/// Identity of a node (Go compares Node interface values by pointer): its data address.
+/// Identity of a node: its data address.
 pub(crate) fn node_key(n: &Arc<dyn Node>) -> usize {
     Arc::as_ptr(n).cast::<()>() as usize
 }
 
-/// Go `n == Start`.
+/// Whether the node is the START sentinel.
 pub(crate) fn is_start(n: &Arc<dyn Node>) -> bool {
     node_key(n) == node_key(&START)
 }
 
-/// Go `_, ok := n.(*JoinNode)`.
+/// Whether the node is a `JoinNode`.
 pub(crate) fn is_join(n: &Arc<dyn Node>) -> bool {
     n.as_any().is::<JoinNode>()
 }
 
-/// Go `context.DeadlineExceeded` for a node's own timeout: `AgentError::DeadlineExceeded`.
+/// The error of a node's own timeout: `AgentError::DeadlineExceeded`.
 pub(crate) fn deadline_exceeded() -> AgentError {
     AgentError::DeadlineExceeded
 }
 
-/// Go `errors.Is` walk: `err` itself, then the WorkflowError source chain.
+/// Whether `pred` holds for `err` itself or any error down the WorkflowError source chain.
 pub(crate) fn chain_any(err: &AgentError, pred: &dyn Fn(&AgentError) -> bool) -> bool {
     let mut cur = Some(err);
     while let Some(e) = cur {
@@ -96,8 +95,8 @@ pub(crate) fn chain_any(err: &AgentError, pred: &dyn Fn(&AgentError) -> bool) ->
     false
 }
 
-/// Go `errors.Is(err, cause)` for one link of the chain: `e` carries the cause's shared error
-/// (the same `Arc`, as [`CancelCause::to_agent_error`] builds it).
+/// Whether this link of the chain is the cause: `e` carries the cause's shared error (the same
+/// `Arc`, as [`CancelCause::to_agent_error`] builds it).
 fn holds_cause(e: &AgentError, cause: &Arc<dyn std::error::Error + Send + Sync>) -> bool {
     match e {
         AgentError::Other(b) => b
@@ -107,23 +106,23 @@ fn holds_cause(e: &AgentError, cause: &Arc<dyn std::error::Error + Send + Sync>)
     }
 }
 
-/// Go `errors.Is(err, context.Canceled)`.
+/// Whether `err` is, or wraps, a cancellation.
 pub(crate) fn is_cancelled(err: &AgentError) -> bool {
     chain_any(err, &|e| matches!(e, AgentError::Cancelled))
 }
 
-/// Go `errors.Is(err, context.DeadlineExceeded)`.
+/// Whether `err` is, or wraps, a deadline expiry.
 #[cfg(test)]
 pub(crate) fn is_deadline_exceeded(err: &AgentError) -> bool {
     chain_any(err, &|e| matches!(e, AgentError::DeadlineExceeded))
 }
 
-/// Go `errors.Is(err, ErrX)` for workflow sentinels.
+/// Whether `err` is a workflow error of the given kind.
 pub(crate) fn is_kind(err: &AgentError, kind: WorkflowErrorKind) -> bool {
     workflow_error(err).is_some_and(|w| w.is(kind))
 }
 
-/// Go `fmt.Errorf("%w<detail>", ErrX)`: the sentinel text immediately followed by `detail`.
+/// A workflow error of `kind`: the sentinel text immediately followed by `detail`.
 pub(crate) fn wf_error(kind: WorkflowErrorKind, detail: impl std::fmt::Display) -> AgentError {
     WorkflowError::new(
         kind,
@@ -132,7 +131,7 @@ pub(crate) fn wf_error(kind: WorkflowErrorKind, detail: impl std::fmt::Display) 
     .into()
 }
 
-/// Port of Go messageText (agent_node.go): the non-thought model text; `None` without model
+/// The non-thought model text; `None` without model
 /// content.
 pub(crate) fn message_text(ev: &Event) -> Option<String> {
     let c = ev.response.content.as_ref().filter(|c| c.role == "model")?;
@@ -145,8 +144,8 @@ pub(crate) fn message_text(ev: &Event) -> Option<String> {
     )
 }
 
-/// Port of Go childEventOutput (agent_node.go): the output, or the model text when the event is
-/// MessageAsOutput. A `Value::Null` output is Go's nil (no output).
+/// The output, or the model text when the event is MessageAsOutput. A `Value::Null` output is no
+/// output.
 pub(crate) fn child_event_output(ev: &Event) -> Option<Value> {
     if let Some(v) = ev.output.as_ref().filter(|v| !v.is_null()) {
         return Some(v.clone());
@@ -157,7 +156,7 @@ pub(crate) fn child_event_output(ev: &Event) -> Option<Value> {
     None
 }
 
-/// Port of Go defaultContentRole: a FunctionResponse part is app-authored (`"user"`);
+/// The default role of content: a FunctionResponse part is app-authored (`"user"`);
 /// everything else is model-authored.
 pub(crate) fn default_content_role(c: &Content) -> &'static str {
     if c.parts.iter().any(|p| p.function_response.is_some()) {
@@ -169,8 +168,8 @@ pub(crate) fn default_content_role(c: &Content) -> &'static str {
 
 // ---------- node_span.go ----------
 
-/// Port of Go startNodeSpan: `None` (Go's noop span) for START and for nodes that emit their
-/// own span.
+/// Starts the span of a node activation: `None` for START and for nodes that emit their own
+/// span.
 pub(crate) fn start_node_span(ctx: &Context, n: &Arc<dyn Node>) -> Option<tracing::Span> {
     if is_start(n) || n.config().emits_own_span {
         return None;
@@ -178,13 +177,14 @@ pub(crate) fn start_node_span(ctx: &Context, n: &Arc<dyn Node>) -> Option<tracin
     Some(crate::telemetry::node_span(n.name(), ctx.session_id()))
 }
 
-/// Port of Go isNodeControlFlow: cancellation or a HITL / wait-for-output pause.
+/// Whether the error is control flow rather than a failure: cancellation or a HITL /
+/// wait-for-output pause.
 pub(crate) fn is_node_control_flow(err: &AgentError) -> bool {
     is_cancelled(err) || is_kind(err, WorkflowErrorKind::NodeInterrupted)
 }
 
-/// Port of Go nodeSpan.recordError. `control_flow` is the classification of Go's `classifyErr`
-/// when the caller has one; `None` classifies on `err`.
+/// Records an error on the node's span. `control_flow` is the caller's classification of the
+/// error when it has one; `None` classifies on `err`.
 pub(crate) fn record_node_error(
     span: Option<&tracing::Span>,
     err: Option<&AgentError>,
@@ -204,17 +204,17 @@ pub(crate) fn record_node_error(
 
 // ---------- queue items and per-activation accumulator ----------
 
-/// Port of Go queueItem (a sealed interface; an enum here).
+/// An item on the event queue between the node tasks and the consumer loop.
 pub(crate) enum QueueItem {
-    /// Go eventItem (boxed: an event is large).
+    /// An event from a node (boxed: an event is large).
     Event(Box<EventItem>),
-    /// Go completionItem.
+    /// The completion of an activation.
     Completion(CompletionItem),
-    /// Go retryItem.
+    /// A retry timer that fired.
     Retry(RetryItem),
 }
 
-/// Port of Go eventItem. `processed` is the back-pressure handshake (`None` for partial
+/// An event from a node. `processed` is the back-pressure handshake (`None` for partial
 /// events): the consumer fires it once the event is yielded and the consumer asked for more.
 pub(crate) struct EventItem {
     pub(crate) node_name: String,
@@ -222,14 +222,14 @@ pub(crate) struct EventItem {
     pub(crate) processed: Option<oneshot::Sender<()>>,
 }
 
-/// Port of Go completionItem: exactly one per activation.
+/// The completion of an activation: exactly one per activation.
 pub(crate) struct CompletionItem {
     pub(crate) node_name: String,
     pub(crate) err: Option<AgentError>,
     pub(crate) inventory: FailureInventory,
 }
 
-/// Port of Go retryItem.
+/// A retry timer that fired.
 pub(crate) struct RetryItem {
     pub(crate) node: Arc<dyn Node>,
     pub(crate) input: Option<Value>,
@@ -237,7 +237,7 @@ pub(crate) struct RetryItem {
     pub(crate) branch: String,
 }
 
-/// Port of Go nodeRun: the per-activation accumulator.
+/// The per-activation accumulator.
 #[derive(Default)]
 pub(crate) struct NodeRun {
     routing_event: Option<Event>,
@@ -246,7 +246,7 @@ pub(crate) struct NodeRun {
     err: Option<AgentError>,
     branch: String,
     pub(crate) node_path: String,
-    /// Insertion-ordered set (a Go map; deterministic here).
+    /// Insertion-ordered set (deterministic).
     interrupt_ids: Vec<String>,
 }
 
@@ -260,14 +260,14 @@ impl NodeRun {
         }
     }
 
-    /// Port of Go nodeRun.recordErr: keeps the first error.
+    /// Keeps the first error.
     pub(crate) fn record_err(&mut self, err: AgentError) {
         if self.err.is_none() {
             self.err = Some(err);
         }
     }
 
-    /// Port of Go nodeRun.setRoutingEvent.
+    /// Records the event whose routes decide the node's successors.
     fn set_routing_event(&mut self, ev: Event, node_name: &str) {
         if self.routing_event.is_some() {
             self.record_err(wf_error(
@@ -279,7 +279,7 @@ impl NodeRun {
         self.routing_event = Some(ev);
     }
 
-    /// Port of Go nodeRun.trackInterrupts.
+    /// Tracks the long-running tool ids the event raises as interrupts.
     fn track_interrupts(&mut self, ev: &Event) {
         for id in ev.long_running_tool_ids.iter().filter(|id| !id.is_empty()) {
             if !self.interrupt_ids.contains(id) {
@@ -288,7 +288,7 @@ impl NodeRun {
         }
     }
 
-    /// Port of Go nodeRun.setOutput.
+    /// Records the node's output.
     fn set_output(&mut self, out: Value, node_name: &str) {
         if self.has_output {
             self.record_err(wf_error(
@@ -302,7 +302,7 @@ impl NodeRun {
     }
 }
 
-/// Port of Go pendingActivation.
+/// An activation queued behind the concurrency cap.
 struct PendingActivation {
     node: Arc<dyn Node>,
     input: Option<Value>,
@@ -311,7 +311,7 @@ struct PendingActivation {
     resume_inputs: Option<Map<String, Value>>,
 }
 
-/// Port of Go successor: the per-target dispatch tuple produced by [`find_successors`].
+/// The per-target dispatch tuple produced by [`find_successors`].
 pub(crate) struct Successor {
     pub(crate) node: Arc<dyn Node>,
     pub(crate) input: Option<Value>,
@@ -319,7 +319,7 @@ pub(crate) struct Successor {
     pub(crate) branch: String,
 }
 
-/// The locals of Go's `run`, kept across pulls.
+/// The state of the consumer loop, kept across pulls.
 #[derive(Default)]
 struct LoopState {
     pending_err: Option<AgentError>,
@@ -327,7 +327,7 @@ struct LoopState {
     cancel_err: Option<AgentError>,
     consumer_gone: bool,
     draining: bool,
-    /// Go sets `doneChan = nil` after it fires once.
+    /// Set once the parent context's end has been seen, so it is handled only once.
     parent_done_seen: bool,
     /// The handshake of the event most recently handed to the consumer.
     ack: Option<oneshot::Sender<()>>,
@@ -335,8 +335,8 @@ struct LoopState {
     finished: bool,
 }
 
-/// Port of Go scheduler. Owned by the stream that drives it; dropping it is Go's consumer-gone
-/// drain (see the `Drop` impl): no node task is aborted.
+/// The static-graph scheduler. Owned by the stream that drives it; dropping it is the
+/// consumer-gone drain (see the `Drop` impl): no node task is aborted.
 pub(crate) struct Scheduler {
     pub(crate) state: RunState,
     pub(crate) graph: Arc<Graph>,
@@ -355,16 +355,15 @@ pub(crate) struct Scheduler {
     lp: LoopState,
 }
 
-/// Go `run`'s consumer-gone path (scheduler.go:595-605: `yield` returned false → `cancelAll`, keep
-/// draining until every activation returned, releasing every producer's handshake). Dropping the
-/// scheduler releases the event the consumer stopped on, cancels every running activation
-/// plainly, stops the retry timers, and hands the drain of the still-running node tasks to the
-/// invocation's teardown registry ([`gadk_agent::InvocationContext::spawn_teardown`]), which the
-/// runner awaits before its after-run callbacks (Go runs the drain on the consumer's goroutine
-/// before `Run` returns). Nothing is yielded or finalized: the consumer is gone.
+/// The consumer-gone path: cancel everything and keep draining until every activation returned,
+/// releasing every producer's handshake. Dropping the scheduler releases the event the consumer
+/// stopped on, cancels every running activation plainly, stops the retry timers, and hands the
+/// drain of the still-running node tasks to the invocation's teardown registry
+/// ([`gadk_agent::InvocationContext::spawn_teardown`]), which the runner awaits before its
+/// after-run callbacks. Nothing is yielded or finalized: the consumer is gone.
 impl Drop for Scheduler {
     fn drop(&mut self) {
-        // Go `close(it.processed)` after `yield` returned false.
+        // Release the event the consumer stopped on.
         if let Some(ack) = self.lp.ack.take() {
             let _ = ack.send(());
         }
@@ -397,8 +396,8 @@ impl Drop for Scheduler {
     }
 }
 
-/// A drained queue item: an event's producer is released (Go: always signal, even when
-/// draining, so a blocked producer does not leak); everything else is discarded.
+/// A drained queue item: an event's producer is always released (even when draining, so a
+/// blocked producer does not leak); everything else is discarded.
 fn release(item: QueueItem) {
     if let QueueItem::Event(mut it) = item
         && let Some(p) = it.processed.take()
@@ -407,7 +406,7 @@ fn release(item: QueueItem) {
     }
 }
 
-/// Port of Go buildNodesByName: the name → node lookup of every edge endpoint.
+/// The name → node lookup of every edge endpoint.
 pub(crate) fn build_nodes_by_name(g: &Graph) -> HashMap<String, Arc<dyn Node>> {
     let mut m = HashMap::new();
     for e in g.all_edges() {
@@ -418,8 +417,8 @@ pub(crate) fn build_nodes_by_name(g: &Graph) -> HashMap<String, Arc<dyn Node>> {
 }
 
 impl Scheduler {
-    /// Port of Go newScheduler. Must be called on a tokio runtime (the workflow stream creates
-    /// it on its first poll, as Go creates it inside the iterator function).
+    /// Creates a scheduler. Must be called on a tokio runtime (the workflow stream creates it on
+    /// its first poll).
     pub(crate) fn new(parent: Context, graph: Arc<Graph>, max_concurrency: usize) -> Self {
         let (tx, rx) = mpsc::channel(DEFAULT_EVENT_QUEUE_CAPACITY);
         Scheduler {
@@ -441,7 +440,7 @@ impl Scheduler {
         }
     }
 
-    /// Port of Go scheduleNode.
+    /// Schedules an activation of a node with the given input.
     pub(crate) fn schedule_node(
         &mut self,
         n: Arc<dyn Node>,
@@ -452,12 +451,12 @@ impl Scheduler {
         self.schedule_resumed_node(n, input, triggered_by, branch, None);
     }
 
-    /// Port of Go atConcurrencyLimit.
+    /// Whether the concurrency cap is reached.
     fn at_concurrency_limit(&self) -> bool {
         self.max_concurrency > 0 && self.runs_by_name.len() >= self.max_concurrency
     }
 
-    /// Port of Go tryDispatchPending: FIFO over the pending queue while the cap allows.
+    /// Dispatches queued activations, first in first out, while the cap allows.
     fn try_dispatch_pending(&mut self) {
         while !self.at_concurrency_limit() {
             let Some(next) = self.pending_queue.pop_front() else {
@@ -473,7 +472,7 @@ impl Scheduler {
         }
     }
 
-    /// Port of Go scheduleResumedNode: starts the activation, or queues it (NodePending) when
+    /// Starts the resumed activation, or queues it (NodePending) when
     /// the concurrency cap is reached.
     pub(crate) fn schedule_resumed_node(
         &mut self,
@@ -501,7 +500,7 @@ impl Scheduler {
         self.start_node(n, input, triggered_by, branch, resume_inputs);
     }
 
-    /// Port of Go startNode: the per-node context, the bookkeeping, and the runner task.
+    /// Starts an activation: the per-node context, the bookkeeping, and the runner task.
     fn start_node(
         &mut self,
         n: Arc<dyn Node>,
@@ -529,8 +528,8 @@ impl Scheduler {
             output_for_ancestors: Some(ofa),
             ..ContextDelta::default()
         });
-        // Go `cfg.Timeout > 0`: WithAgentTimeout (the scope's own timer records
-        // DeadlineExceeded), else WithAgentCancel; a zero timeout means "no timeout".
+        // A positive timeout gives the node a scope with its own timer (which records
+        // DeadlineExceeded); otherwise a plain cancel scope. A zero timeout means "no timeout".
         let (per_node, guard) = match n.config().timeout.filter(|d| !d.is_zero()) {
             Some(t) => per_node.with_agent_timeout(t),
             None => per_node.with_agent_cancel(),
@@ -549,17 +548,16 @@ impl Scheduler {
                 ..NodeRun::default()
             },
         );
-        // Go `s.runCancels[name] = cancel` overwrites a still-running earlier activation's
-        // CancelFunc without calling it: that run stays live (its parent still bounds it).
+        // Replacing the guard of a still-running earlier activation drops it without
+        // cancelling: that run stays live (its parent still bounds it).
         if let Some(replaced) = self.run_cancels.insert(name.clone(), guard) {
             replaced.release();
         }
-        // Go `go runNode(..)`: the activation runs on a fresh fiber started by this one (the
-        // goroutine startNode creates), taken here on the spawning side.
+        // The activation runs on a fresh fiber started by this one, taken here on the spawning
+        // side.
         let node_fiber = fiber::spawn_child(SCHEDULER_CREATOR);
         // `.in_current_span()`: a spawned task starts with no span, so without it node/agent
-        // spans opened inside the task would lose the runner/workflow span as their parent (Go
-        // passes the span through ctx to the goroutine).
+        // spans opened inside the task would lose the runner/workflow span as their parent.
         self.tasks.spawn(
             node_fiber
                 .scope(run_node_task(self.tx.clone(), name, n, per_node, input))
@@ -567,7 +565,7 @@ impl Scheduler {
         );
     }
 
-    /// Port of Go scheduleRetry (time.AfterFunc → an abortable spawned sleep).
+    /// Schedules a retry after the node's backoff delay (an abortable spawned sleep).
     fn schedule_retry(
         &mut self,
         n: Arc<dyn Node>,
@@ -599,10 +597,10 @@ impl Scheduler {
         self.retry_timers.insert(name, handle);
     }
 
-    /// Port of Go cancelAll: cancels every running activation, stops every retry timer and
+    /// Cancels every running activation, stops every retry timer and
     /// drops the pending queue (their NodeState stays NodePending).
     pub(crate) fn cancel_all(&mut self) {
-        // Plain cancels through each node's scope: they record `Canceled` (Go `cancel()`).
+        // Plain cancels through each node's scope: they record `Canceled`.
         for guard in self.run_cancels.values() {
             guard.cancel();
         }
@@ -612,10 +610,10 @@ impl Scheduler {
         self.pending_queue.clear();
     }
 
-    /// Port of Go `(*scheduler).run(yield, false)` as a pull state machine: each call resumes
-    /// the loop until one item is ready for the consumer (Go's `yield`). `None` means the loop
-    /// returned. Calling `next` again is Go's `yield` returning true, so the previous event's
-    /// producer handshake is released first.
+    /// The consumer loop as a pull state machine: each call resumes the loop until one item is
+    /// ready for the consumer. `None` means the loop returned. Calling `next` again means the
+    /// consumer processed the previous event, so that event's producer handshake is released
+    /// first.
     pub(crate) async fn next(&mut self) -> Option<Result<Event, AgentError>> {
         if let Some(ack) = self.lp.ack.take() {
             let _ = ack.send(());
@@ -642,9 +640,9 @@ impl Scheduler {
                 }
             };
             // External cancellation is recorded and starts draining whichever case won the
-            // select (Go lines 576-591): a queued completion can be picked ahead of it.
+            // select: a queued completion can be picked ahead of it.
             if self.lp.cancel_err.is_none() && token.is_cancelled() {
-                // Go `cancelErr = context.Cause(s.parentCtx)`.
+                // The error is the parent context's cancel cause.
                 self.lp.cancel_err = Some(
                     self.parent_ctx
                         .cause()
@@ -661,7 +659,7 @@ impl Scheduler {
                     let processed = it.processed.take();
                     if !self.lp.draining && !self.lp.consumer_gone {
                         self.lp.outbox.push_back(Ok(it.ev));
-                        // Released on the next pull (Go: after yield returned true).
+                        // Released on the next pull.
                         self.lp.ack = processed;
                     } else if let Some(p) = processed {
                         // Always release, even when draining, so a blocked producer finishes.
@@ -710,8 +708,8 @@ impl Scheduler {
         }
     }
 
-    /// Go `run(nil, true)`: the consumer already left; never yields, never finalizes. Test-only: the
-    /// production drain (Go Resume's deferred cleanup) is dropping the stream (see resume.rs).
+    /// The loop run after the consumer already left; never yields, never finalizes. Test-only:
+    /// the production drain is dropping the stream (see resume.rs).
     #[cfg(test)]
     pub(crate) async fn drain(&mut self) {
         self.lp.consumer_gone = true;
@@ -719,8 +717,8 @@ impl Scheduler {
         while self.next().await.is_some() {}
     }
 
-    /// Go run's epilogue: surface the first error (a node's own error outranks the cancellation
-    /// cause), or finalize a normally completed run.
+    /// The loop's epilogue: surface the first error (a node's own error outranks the
+    /// cancellation cause), or finalize a normally completed run.
     fn finish(&mut self) {
         self.lp.finished = true;
         if let Some(err) = self
@@ -748,7 +746,7 @@ impl Scheduler {
         }
     }
 
-    /// Port of Go terminalAncestors: the ancestor paths a terminal node's output also counts
+    /// The ancestor paths a terminal node's output also counts
     /// for; empty for a non-terminal node or a workflow running at the root.
     fn terminal_ancestors(&self, node_name: &str) -> Vec<String> {
         let parent_path = self.parent_ctx.path();
@@ -760,7 +758,7 @@ impl Scheduler {
             .collect()
     }
 
-    /// Port of Go handleEvent: updates the activation's accumulator and stamps the event (base
+    /// Updates the activation's accumulator and stamps the event (base
     /// path, branch, content role, node path, output attribution) before it is yielded.
     fn handle_event(&mut self, it: &mut EventItem) {
         let name = it.node_name.clone();
@@ -865,7 +863,7 @@ impl Scheduler {
         }
     }
 
-    /// Port of Go handleCompletion: transitions the node's status and (when
+    /// Transitions the node's status and (when
     /// `schedule_new_work`) schedules a retry or the successors. Returns the node's own error;
     /// `None` on success, sibling cancellation or a pause.
     fn handle_completion(
@@ -875,13 +873,13 @@ impl Scheduler {
         mut nr: Option<NodeRun>,
         schedule_new_work: bool,
     ) -> Option<AgentError> {
-        // Go `delete(s.runCancels, name)` without calling the CancelFunc: a finished node's
-        // context stays live until its timeout fires or its parent ends.
+        // The guard is removed without cancelling: a finished node's context stays live until
+        // its timeout fires or its parent ends.
         if let Some(guard) = self.run_cancels.remove(name) {
             guard.release();
         }
         // A dead invocation context: the cancellation came from outside the scheduler. A node
-        // that failed for its own reason keeps that error (Go echoesCancellation).
+        // that failed for its own reason keeps that error.
         if self.parent_ctx.cancellation_token().is_cancelled() {
             if let Some(e) = err
                 && !self.echoes_cancellation(&e)
@@ -977,7 +975,7 @@ impl Scheduler {
         None
     }
 
-    /// Port of Go echoesCancellation: whether `err` is the dying invocation context reflected
+    /// Whether `err` is the dying invocation context reflected
     /// back by a node — a plain cancellation, the parent's own error kind (DeadlineExceeded),
     /// or the parent's cause (the same shared error value). Only meaningful once the parent
     /// context has ended (`cause()` is `None` while it is live).
@@ -994,7 +992,7 @@ impl Scheduler {
         }
     }
 
-    /// Port of Go completionEvent: a history record for an activation that failed, was
+    /// A history record for an activation that failed, was
     /// cancelled, or completed without output (output events alone cannot tell these apart).
     pub(crate) fn completion_event(
         &self,
@@ -1046,7 +1044,7 @@ impl Scheduler {
         Some(ev)
     }
 
-    /// Port of Go finalize: errors when more than one terminal node produced output. A no-op
+    /// Errors when more than one terminal node produced output. A no-op
     /// while a node is waiting (the run has not finished).
     pub(crate) fn finalize(&self) -> Result<(), AgentError> {
         if self
@@ -1079,7 +1077,7 @@ impl Scheduler {
     }
 }
 
-/// Port of Go runNode: drives one activation and always ends with exactly one
+/// Drives one activation and always ends with exactly one
 /// [`CompletionItem`]. A panic in the node is reported as the completion's error.
 pub(crate) async fn run_node_task(
     out: mpsc::Sender<QueueItem>,
@@ -1089,8 +1087,8 @@ pub(crate) async fn run_node_task(
     input: Option<Value>,
 ) {
     let span = start_node_span(&ctx, &node);
-    // The agent of an agent node runs as this attempt (Go attemptNode: runNode, then
-    // AgentNode.Run, then the agent's Run).
+    // The agent of an agent node runs as this attempt (the node task, then the node's run, then
+    // the agent's run).
     let is_agent_node = node.as_any().is::<AgentNode>();
     let body = drive_activation(out.clone(), name.clone(), node, ctx, input);
     let body = if is_agent_node {
@@ -1114,7 +1112,7 @@ pub(crate) async fn run_node_task(
         ),
     };
     record_node_error(span.as_ref(), err.as_ref(), None);
-    // Unconditional, as in Go: the consumer's bookkeeping relies on exactly one completion.
+    // Unconditional: the consumer's bookkeeping relies on exactly one completion.
     let _ = out
         .send(QueueItem::Completion(CompletionItem {
             node_name: name,
@@ -1122,7 +1120,7 @@ pub(crate) async fn run_node_task(
             inventory,
         }))
         .await;
-    drop(span); // Go: span.end() after the completion is queued
+    drop(span); // the span ends after the completion is queued
 }
 
 /// How an activation's event loop ended.
@@ -1132,9 +1130,9 @@ enum Outcome {
     NodeError(AgentError),
 }
 
-/// The body of Go runNode: input validation, then the node's events into the queue with the
+/// The body of a node task: input validation, then the node's events into the queue with the
 /// back-pressure handshake, honoring the per-node token (whose scope carries the node's
-/// timeout, Go WithAgentTimeout).
+/// timeout).
 async fn drive_activation(
     out: mpsc::Sender<QueueItem>,
     name: String,
@@ -1198,7 +1196,7 @@ async fn drive_activation(
         // `stream` drops here, inside catch_unwind: a cleanup panic supersedes the outcome.
     });
     let outcome = drive.await;
-    // Go `ctx.Err()`: DeadlineExceeded when the node's context ended by a deadline (its own
+    // The context's error: DeadlineExceeded when the node's context ended by a deadline (its own
     // timeout, or an enclosing one), else Canceled.
     let deadline = || matches!(ctx.cause(), Some(CancelCause::DeadlineExceeded));
     match outcome {
@@ -1213,7 +1211,7 @@ async fn drive_activation(
         }
         Outcome::NodeError(e) => {
             // A node that forwards its context's cancellation (gadk nodes report it as
-            // `Cancelled`) after the deadline reports the deadline, as Go's ctx.Err() would.
+            // `Cancelled`) after the deadline reports the deadline.
             let e = if is_cancelled(&e) && deadline() {
                 deadline_exceeded()
             } else {
@@ -1224,7 +1222,7 @@ async fn drive_activation(
     }
 }
 
-/// Port of Go findSuccessors: routing, the Default fallback, de-duplication, and fan-out
+/// Finds the successors to dispatch: routing, the Default fallback, de-duplication, and fan-out
 /// sub-branches.
 pub(crate) fn find_successors(
     g: &Graph,
@@ -1295,7 +1293,7 @@ pub(crate) fn find_successors(
     out
 }
 
-/// Port of Go appendSuccessor: a join is recorded only once every predecessor completed, with
+/// Appends a successor: a join is recorded only once every predecessor completed, with
 /// the aggregated predecessor outputs as input and their common branch prefix as branch.
 fn append_successor(
     out: &mut Vec<Successor>,
@@ -1327,7 +1325,7 @@ fn append_successor(
     });
 }
 
-/// Port of Go aggregatePredecessorOutputs: `None` unless every predecessor is Completed; a
+/// The aggregated predecessor outputs: `None` unless every predecessor is Completed; a
 /// predecessor without output contributes `null`.
 fn aggregate_predecessor_outputs(
     g: &Graph,
@@ -1346,7 +1344,7 @@ fn aggregate_predecessor_outputs(
     Some(aggregated)
 }
 
-/// Port of Go aggregatePredecessorBranches: predecessor branches in predecessor-edge order.
+/// The predecessor branches, in predecessor-edge order.
 fn aggregate_predecessor_branches(
     g: &Graph,
     state: &RunState,
@@ -1364,7 +1362,7 @@ fn aggregate_predecessor_branches(
         .collect()
 }
 
-/// Shared fixtures for the ported `package workflow` tests (Go test helpers).
+/// Shared fixtures for the workflow tests.
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 pub(crate) mod test_support {
@@ -1506,7 +1504,7 @@ pub(crate) mod test_support {
         out
     }
 
-    /// Go `errors.Is(err, ErrX)` for workflow sentinels.
+    /// Whether `err` is a workflow error of the given kind.
     pub(crate) fn is_kind(err: &AgentError, kind: WorkflowErrorKind) -> bool {
         super::is_kind(err, kind)
     }

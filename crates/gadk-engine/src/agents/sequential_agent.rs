@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go agent/workflowagents/sequentialagent.
+//! A sequential agent: runs its sub-agents once each, in the order they are listed.
 
 use std::any::Any;
 use std::collections::HashSet;
@@ -33,15 +33,15 @@ use crate::llm::state::reveal;
 use crate::runner::wrap;
 use crate::tool::{FunctionTool, FunctionToolConfig};
 
-/// Port of Go sequentialagent.Config: the configuration of a sequential agent.
+/// The configuration of a sequential agent.
 #[derive(Clone, Default)]
 pub struct SequentialAgentConfig {
     /// Basic agent setup; `run` must be `None`.
     pub agent: AgentConfig,
 }
 
-/// Port of Go sequentialagent.New: an agent that runs its sub-agents once, in the order they are
-/// listed. Use it when execution must happen in a fixed, strict order.
+/// An agent that runs its sub-agents once, in the order they are listed. Use it when execution
+/// must happen in a fixed, strict order.
 pub fn new(cfg: SequentialAgentConfig) -> Result<Arc<dyn Agent>, AgentError> {
     if cfg.agent.run.is_some() {
         return Err(AgentError::Config(
@@ -56,19 +56,19 @@ pub fn new(cfg: SequentialAgentConfig) -> Result<Arc<dyn Agent>, AgentError> {
             agent_type: AgentType::SequentialAgent,
             config: Some(Arc::new(cfg)),
             on_before_agent_callback_event: None,
-            // Go: New returns *seqAgent, which has RunLive.
+            // The returned agent supports live runs.
             live: Some(Arc::new(SequentialLive)),
         },
     )
     .map_err(|e| AgentError::Config(format!("failed to create base agent: {e}")))
 }
 
-/// Port of Go (*sequentialAgent).Run.
+/// Runs the sub-agents in order.
 fn run(ctx: InvocationContext) -> EventStream {
     Box::pin(async_stream::stream! {
         let mut subs: Vec<Arc<dyn Agent>> = ctx.agent().sub_agents().to_vec();
-        // Go 51bc7ec5 (#2188): resuming a nested graph workflow starts from the sub-agent
-        // holding the lowest-indexed caller.
+        // Resuming a nested graph workflow starts from the sub-agent holding the lowest-indexed
+        // caller.
         if let Some(&first) = graph_resume_indexes(&ctx).as_ref().and_then(|ix| ix.first()) {
             subs.drain(..first);
         }
@@ -87,26 +87,27 @@ fn run(ctx: InvocationContext) -> EventStream {
     })
 }
 
-/// Go's `task_completed` tool name.
+/// Name of the `task_completed` tool.
 const TASK_COMPLETED_NAME: &str = "task_completed";
-/// Go's `task_completed` tool description.
+/// Description of the `task_completed` tool.
 const TASK_COMPLETED_DESCRIPTION: &str =
     "Signals that the agent has successfully completed the user's question or task.";
-/// Go's `instructionSuffix` (agent.go:166), appended once to each injected LLM agent.
+/// Instruction suffix appended once to each LLM agent the `task_completed` tool is injected into.
 pub(crate) const TASK_COMPLETED_INSTRUCTION_SUFFIX: &str = "\nIf you finished the user's request according to its description, call the task_completed function to exit so the next agents can take over. When calling this function, do not generate any text other than the function call.";
 
-// Go `type taskCompletedArgs struct{}`. A plain comment: a doc comment would become the schema's
-// `description`, which Go's inferred `struct{}` schema does not have.
+// The arguments of `task_completed`: none. A plain comment: a doc comment would become the
+// schema's `description`, which an empty-object schema should not have.
 #[derive(Deserialize, JsonSchema)]
 struct TaskCompletedArgs {}
 
-// Go `taskCompletedResults{Result string `json:"result"`}`.
+// The result of `task_completed`: `{"result": "<text>"}`.
 #[derive(Serialize, JsonSchema)]
 struct TaskCompletedResults {
     result: String,
 }
 
-/// Go's `functiontool.New(functiontool.Config{Name: "task_completed", …})` (agent.go:139-147).
+/// Builds the `task_completed` function tool, which the model calls to hand over to the next
+/// sub-agent.
 fn task_completed_tool() -> Result<Arc<dyn Tool>, ToolError> {
     FunctionTool::new(
         FunctionToolConfig::new(TASK_COMPLETED_NAME, TASK_COMPLETED_DESCRIPTION),
@@ -118,10 +119,10 @@ fn task_completed_tool() -> Result<Arc<dyn Tool>, ToolError> {
     )
 }
 
-/// Go `injectSubAgents` (agent.go:150-176): each LLM agent gets the tool and the suffix exactly
-/// once, through its `LiveModeToolInjection` latch (a caller-provided `task_completed` is left
-/// untouched); live-capable composites with children are recursed into; anything else is left
-/// alone. `visited` is keyed by the agent's `Arc` address (Go map[agent.Agent]bool).
+/// Each LLM agent gets the tool and the suffix exactly once, through its `live_injection` latch
+/// (a caller-provided `task_completed` is left untouched); live-capable composites with children
+/// are recursed into; anything else is left alone. `visited` is keyed by the agent's `Arc`
+/// address.
 fn inject_sub_agents(
     agents: &[Arc<dyn Agent>],
     tool: &Arc<dyn Tool>,
@@ -155,12 +156,12 @@ fn inject_sub_agents(
     }
 }
 
-/// Go `sequentialLiveSession`: forwards `send` to the active sub-agent's session.
+/// The live session of a sequential agent: forwards `send` to the active sub-agent's session.
 ///
 /// `close()` closes only the active sub-session; it does not stop the sequence. Once that
 /// sub-agent's stream ends, the next sub-agent starts, but `send` keeps refusing with
-/// "session is closed" because the closed flag stays set. This is Go's behaviour
-/// (sequentialagent/agent.go:186-218); to end the whole run, drop the event stream.
+/// "session is closed" because the closed flag stays set. To end the whole run, drop the event
+/// stream.
 #[derive(Default)]
 pub(crate) struct SequentialLiveSession {
     /// (active sub-session, closed).
@@ -168,7 +169,7 @@ pub(crate) struct SequentialLiveSession {
 }
 
 impl SequentialLiveSession {
-    /// Go setActiveSession.
+    /// Records the sub-agent session that `send` forwards to.
     fn set_active(&self, sess: Arc<dyn LiveSession>) {
         self.state.lock().0 = Some(sess);
     }
@@ -176,7 +177,8 @@ impl SequentialLiveSession {
 
 #[async_trait]
 impl LiveSession for SequentialLiveSession {
-    /// Go Send. The lock is released before the forwarded send is awaited.
+    /// Forwards the request to the active sub-session. The lock is released before the forwarded
+    /// send is awaited.
     async fn send(&self, req: LiveRequest) -> Result<(), AgentError> {
         let active = {
             let g = self.state.lock();
@@ -191,7 +193,7 @@ impl LiveSession for SequentialLiveSession {
         active.send(req).await
     }
 
-    /// Go Close: marks the session closed and closes the active sub-session.
+    /// Marks the session closed and closes the active sub-session.
     async fn close(&self) -> Result<(), AgentError> {
         let active = {
             let mut g = self.state.lock();
@@ -210,7 +212,7 @@ impl LiveSession for SequentialLiveSession {
 }
 
 /// Closes a sub-session: inline through [`CloseOnDrop::close`], or, when the consumer drops the
-/// stream mid-sub-agent (Go: `!yield` → `subSess.Close()`), from a spawned task.
+/// stream mid-sub-agent, from a spawned task.
 struct CloseOnDrop(Option<Arc<dyn LiveSession>>);
 
 impl CloseOnDrop {
@@ -238,24 +240,24 @@ impl Drop for CloseOnDrop {
     }
 }
 
-/// Go's `SequentialAgent` live entry point (`seqAgent.RunLive`), installed as `AgentState.live`
-/// by [`new`]. Stateless: it reads the sub-agents from `ctx.agent()`.
+/// The live entry point of a sequential agent, installed as `AgentState.live` by [`new`].
+/// Stateless: it reads the sub-agents from `ctx.agent()`.
 pub(crate) struct SequentialLive;
 
 #[async_trait]
 impl LiveAgent for SequentialLive {
-    /// Port of Go agent/workflowagents/sequentialagent/agent.go:132 (*sequentialAgent).RunLive.
+    /// Runs the sub-agents' live sessions in turn.
     ///
     /// Before any sub-agent runs, every LLM sub-agent (recursing into live-capable composites
     /// with children) is given the `task_completed` tool and an instruction suffix telling the
-    /// model to call it. As in Go this injection is permanent: it changes that agent's later
-    /// non-live runs too, and it happens at most once per agent (a panicking injection is retried
-    /// by the next caller).
+    /// model to call it. This injection is permanent: it changes that agent's later non-live runs
+    /// too, and it happens at most once per agent (a panicking injection is retried by the next
+    /// caller).
     ///
     /// The returned stream runs each sub-agent's live session in turn; the returned session
     /// forwards `send` to the active one. A sub-agent that is not live-capable ends the stream
     /// with `sub-agent <name> does not support Live Run` when its turn comes, after the earlier
-    /// sub-agents have run (Go-parity: Go checks lazily, per sub-agent). A sub-agent's error is
+    /// sub-agents have run (the check is lazy, per sub-agent). A sub-agent's error is
     /// forwarded and ends the sequence, closing that sub-agent's live session, as in Run.
     async fn run_live(
         &self,
@@ -275,7 +277,8 @@ impl LiveAgent for SequentialLive {
     }
 }
 
-/// Go's `wrappedIter` (agent.go:180-218).
+/// The event stream of a sequential live run: runs each sub-agent's live session in turn and
+/// records it as the active one.
 fn sequential_live_stream(
     ctx: InvocationContext,
     sub_agents: Vec<Arc<dyn Agent>>,
@@ -305,8 +308,8 @@ fn sequential_live_stream(
             // Dropping the stream here closes the sub-session from a spawned task.
             let guard = CloseOnDrop(Some(sub_sess));
             while let Some(item) = inner.next().await {
-                // A failed sub-agent ends the sequence, as in Run (Go 82b64f45): its live session
-                // is closed and no later sub-agent starts.
+                // A failed sub-agent ends the sequence, as in Run: its live session is closed and
+                // no later sub-agent starts.
                 let failed = item.is_err();
                 yield item;
                 if failed {

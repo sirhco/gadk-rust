@@ -13,13 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `NodeStatus`, `NodeState` and `RunState` (port of Go workflow/state.go).
+//! `NodeStatus`, `NodeState` and `RunState`.
 
 use std::collections::{HashMap, HashSet};
 
 use serde_json::{Map, Value};
 
-/// Port of Go workflow.NodeStatus: the lifecycle status of a node in the workflow graph.
+/// The lifecycle status of a node in the workflow graph.
 ///
 /// The status is the engine's single source of truth for what a node is doing. It mediates
 /// between the trigger buffer (what wants to run), the in-process task table (what is currently
@@ -55,7 +55,7 @@ pub enum NodeStatus {
     Cancelled,
 }
 
-/// Port of Go workflow.NodeState: the per-node lifecycle record. A [`RunState`] holds one of
+/// The per-node lifecycle record. A [`RunState`] holds one of
 /// these for every node the engine has touched.
 #[derive(Debug, Clone, Default)]
 pub struct NodeState {
@@ -83,7 +83,7 @@ pub struct NodeState {
     pub attempt: i32,
     /// Accumulated response payloads for re-entry-mode nodes that yield RequestInput more than
     /// once during a single activation lifecycle, keyed by interrupt ID. Cleared when the node
-    /// transitions to `Completed`; `None` (Go's nil map) for handoff-mode nodes.
+    /// transitions to `Completed`; `None` for handoff-mode nodes.
     pub resumed_inputs: Option<Map<String, Value>>,
     /// Maps an interrupt ID to its declared response schema, re-extracted from the pause event
     /// during rehydration. Not persisted; consumed by resume to validate the payload.
@@ -93,7 +93,7 @@ pub struct NodeState {
     pub(crate) answered_this_turn: bool,
 }
 
-/// Port of Go workflow.RunState: the per-invocation lifecycle state for a workflow run. A resume
+/// The per-invocation lifecycle state for a workflow run. A resume
 /// turn rebuilds it by scanning session event history.
 #[derive(Debug, Clone, Default)]
 pub struct RunState {
@@ -105,12 +105,12 @@ pub struct RunState {
 }
 
 impl RunState {
-    /// Port of Go NewRunState: an empty state.
+    /// An empty state.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Port of Go RunState.EnsureNode: the `NodeState` for `name`, creating an inactive entry if
+    /// The `NodeState` for `name`, creating an inactive entry if
     /// none exists. The returned reference may be mutated in place.
     pub fn ensure_node(&mut self, name: &str) -> &mut NodeState {
         self.nodes.entry(name.to_owned()).or_default()

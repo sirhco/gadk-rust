@@ -13,10 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go plugin/retryandreflect: a plugin that turns tool failures into reflection guidance
-//! for the model. It counts consecutive failures per tool within a scope (one invocation, or
-//! global), and after `max_retries` failures tells the model to stop using the tool, or returns
-//! the original error.
+//! A plugin that turns tool failures into reflection guidance for the model. It counts
+//! consecutive failures per tool within a scope (one invocation, or global), and after
+//! `max_retries` failures tells the model to stop using the tool, or returns the original error.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -33,33 +32,32 @@ use serde_json::{Map, Value, json};
 use crate::llm::processors::{as_go_floats, go_json_marshal};
 use crate::tool::utils::model_error_text;
 
-/// Go `//go:embed reflection.md` (byte-for-byte copy).
+/// The reflection guidance template (`reflection.md`), embedded verbatim.
 const REFLECTION_TEMPLATE: &str = include_str!("retry_and_reflect/reflection.md");
-/// Go `//go:embed exceeded.md` (byte-for-byte copy).
+/// The retry-exceeded template (`exceeded.md`), embedded verbatim.
 const EXCEEDED_TEMPLATE: &str = include_str!("retry_and_reflect/exceeded.md");
 
-/// Go `reflectAndRetryResponseType`: the `response_type` of every result this plugin produces.
+/// The `response_type` of every result this plugin produces.
 pub(crate) const REFLECT_AND_RETRY_RESPONSE_TYPE: &str =
     "ERROR_HANDLED_BY_REFLECT_AND_RETRY_PLUGIN";
-/// Go `globalScopeKey`: the counter scope used with [`TrackingScope::Global`].
+/// The counter scope used with [`TrackingScope::Global`].
 pub(crate) const GLOBAL_SCOPE_KEY: &str = "__global_reflect_and_retry_scope__";
 
 const NAME: &str = "RetryAndReflectPlugin";
 
 type MapResult = BoxFuture<'static, Result<Option<Map<String, Value>>, AgentError>>;
 
-/// Go `retryandreflect.TrackingScope`: the lifetime of the tool-failure counters.
+/// The lifetime of the tool-failure counters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TrackingScope {
-    /// Go `Invocation`: failures are counted per invocation.
+    /// Failures are counted per invocation.
     #[default]
     Invocation,
-    /// Go `Global`: failures are counted across all invocations, turns and users.
+    /// Failures are counted across all invocations, turns and users.
     Global,
 }
 
-/// Go `retryandreflect.New`'s options (`WithMaxRetries`, `WithErrorIfRetryExceeded`,
-/// `WithTrackingScope`) as one config.
+/// The options of the retry-and-reflect plugin.
 #[derive(Debug, Clone)]
 pub struct RetryAndReflectConfig {
     /// Consecutive failures of one tool that still get reflection guidance; must be `>= 0`.
@@ -71,7 +69,7 @@ pub struct RetryAndReflectConfig {
 }
 
 impl Default for RetryAndReflectConfig {
-    /// Go `New`'s defaults: 3 retries, no error past the limit, invocation scope.
+    /// The defaults: 3 retries, no error past the limit, invocation scope.
     fn default() -> Self {
         Self {
             max_retries: 3,
@@ -81,9 +79,9 @@ impl Default for RetryAndReflectConfig {
     }
 }
 
-/// Port of Go `retryandreflect.New`: a plugin named `RetryAndReflectPlugin` that registers only
-/// the after-tool, on-tool-error and after-run callbacks. A negative `max_retries` is rejected with Go's
-/// text, `maxRetries must be a non-negative integer`.
+/// Builds a plugin named `RetryAndReflectPlugin` that registers only the after-tool,
+/// on-tool-error and after-run callbacks. A negative `max_retries` is rejected with
+/// `maxRetries must be a non-negative integer`.
 pub fn new_retry_and_reflect_plugin(cfg: RetryAndReflectConfig) -> Result<Plugin, AgentError> {
     if cfg.max_retries < 0 {
         return Err(AgentError::Config(
@@ -142,13 +140,12 @@ fn plugin_for(r: Arc<RetryAndReflect>) -> Plugin {
     })
 }
 
-/// Go `retryAndReflect`: the plugin's settings and its failure counters, shared by both
-/// callbacks.
+/// The plugin's settings and its failure counters, shared by its callbacks.
 pub(crate) struct RetryAndReflect {
     pub(crate) max_retries: i32,
     pub(crate) error_if_retry_exceeded: bool,
     pub(crate) scope: TrackingScope,
-    /// Go `scopedFailureCounters`: scope key → tool name → consecutive failures.
+    /// Consecutive failures: scope key → tool name → count.
     pub(crate) scoped_failure_counters: Mutex<HashMap<String, HashMap<String, i32>>>,
 }
 
@@ -162,8 +159,8 @@ impl RetryAndReflect {
         }
     }
 
-    /// Port of plugin.go:128 `afterTool`. A success whose result is not this plugin's own
-    /// reflection result resets the tool's count in its scope. The result is never changed.
+    /// The after-tool callback. A success whose result is not this plugin's own reflection result
+    /// resets the tool's count in its scope. The result is never changed.
     pub(crate) fn after_tool(
         &self,
         ctx: &Context,
@@ -182,7 +179,9 @@ impl RetryAndReflect {
         Ok(None)
     }
 
-    /// Port of plugin.go:143 `onToolError` / `handleToolError`.
+    /// The on-tool-error callback: counts the failure and returns reflection guidance while the
+    /// count is within `max_retries`; past it, the original error or the "retry exceeded" result.
+    /// Confirmation requests and rejections are not failures and pass through.
     pub(crate) fn on_tool_error(
         &self,
         ctx: &Context,
@@ -190,7 +189,7 @@ impl RetryAndReflect {
         args: &Map<String, Value>,
         err: &Arc<ToolError>,
     ) -> Result<Option<Map<String, Value>>, AgentError> {
-        // Go: errors.Is(err, tool.ErrConfirmationRequired) || errors.Is(err, tool.ErrConfirmationRejected).
+        // A confirmation request or rejection is not a failure.
         if is_confirmation_error(err) {
             return Ok(None);
         }
@@ -230,8 +229,8 @@ impl RetryAndReflect {
         Ok(Some(self.retry_exceeded_msg(tool, args, err)))
     }
 
-    /// Port of plugin.go `afterRun` (7fafcbbc): drops the failure counts of an invocation once
-    /// its run has ended, since nothing reads them afterwards. Every scope but `Global` keys its
+    /// The after-run callback: drops the failure counts of an invocation once its run has ended,
+    /// since nothing reads them afterwards. Every scope but `Global` keys its
     /// counts by invocation ID. The counts of a run that paused on an unanswered long-running
     /// call are kept: the run that answers the call reuses the invocation ID and continues the
     /// same retry budget, as in adk-python.
@@ -251,7 +250,7 @@ impl RetryAndReflect {
         self.scoped_failure_counters.lock().remove(invocation_id);
     }
 
-    /// Go `scopeKey`.
+    /// The counter scope key for the context.
     fn scope_key(&self, ctx: &Context) -> String {
         match self.scope {
             TrackingScope::Global => GLOBAL_SCOPE_KEY.to_string(),
@@ -259,7 +258,7 @@ impl RetryAndReflect {
         }
     }
 
-    /// Go `resetFailuresForTool`: drops the tool's count, and the scope once it is empty.
+    /// Drops the tool's count, and the scope once it is empty.
     fn reset_failures_for_tool(&self, ctx: &Context, tool_name: &str) {
         let scope_key = self.scope_key(ctx);
         let mut counters = self.scoped_failure_counters.lock();
@@ -271,7 +270,7 @@ impl RetryAndReflect {
         }
     }
 
-    /// Go `createToolReflectionResponse`.
+    /// The result for a failure within the retry limit: reflection guidance and the retry count.
     fn reflection_response(
         &self,
         tool: &dyn Tool,
@@ -292,8 +291,8 @@ impl RetryAndReflect {
         response_map(tool, err, retry_count, &rendered)
     }
 
-    /// Go `createToolRetryExceedMsg`: the template's `RetryCount` and `MaxRetries` are both
-    /// `max_retries` (Go 4417f2d4), as is the map's `retry_count`.
+    /// The result for a failure past the retry limit: the template's `RetryCount` and
+    /// `MaxRetries` are both `max_retries`, as is the map's `retry_count`.
     fn retry_exceeded_msg(
         &self,
         tool: &dyn Tool,
@@ -314,9 +313,10 @@ impl RetryAndReflect {
     }
 }
 
-/// Go `errors.Is(err, tool.ErrConfirmationRequired) || errors.Is(err, tool.ErrConfirmationRejected)`.
+/// Whether `err` is, or wraps, `ToolError::ConfirmationRequired` or
+/// `ToolError::ConfirmationRejected`.
 /// The flow hands confirmation sentinels over wrapped (`ToolError::Execution` around a named
-/// wrapper whose `source()` is the sentinel, Go's `%w`), so this walks the chain. Transparent
+/// wrapper whose `source()` is the sentinel), so this walks the chain. Transparent
 /// layers (`ToolError::Execution`, `SharedToolError`, `AgentError::Other`) forward `source()` to
 /// their inner error's source, skipping the inner error itself, so the walk descends into them
 /// directly; any other error is followed through `source()`.
@@ -340,12 +340,12 @@ fn is_confirmation_error(err: &ToolError) -> bool {
     false
 }
 
-/// The original tool error, keeping the caller's `Arc` (Go returns the same `err` value).
+/// The original tool error, keeping the caller's `Arc` so the very same error value is returned.
 fn original_error(err: &Arc<ToolError>) -> AgentError {
     AgentError::Other(Box::new(SharedToolError(Arc::clone(err))))
 }
 
-/// Go `hasOpenLongRunningCall`: whether the invocation has a long-running call that no user
+/// Whether the invocation has a long-running call that no user
 /// function response has answered yet. A failure response from this plugin also settles the
 /// call, since no answer will follow.
 fn has_open_long_running_call(sess: &dyn Session, invocation_id: &str) -> bool {
@@ -377,13 +377,12 @@ fn has_open_long_running_call(sess: &dyn Session, invocation_id: &str) -> bool {
     !open.is_empty()
 }
 
-/// Go `panicErrorType`: the `error_type` of a recovered tool panic.
+/// The `error_type` of a recovered tool panic.
 const PANIC_ERROR_TYPE: &str = "panic";
 
-/// Go `modelError`: the type and text of a failed call that the plugin may put in its response,
-/// which the model, the session and REST clients all see. A tool panic, at any wrapping depth,
-/// becomes the type `panic` and a generic message (e83ab5b0), because the panic's own text
-/// carries the panic value.
+/// The type and text of a failed call that the plugin may put in its response, which the model,
+/// the session and REST clients all see. A tool panic, at any wrapping depth, becomes the type
+/// `panic` and a generic message, because the panic's own text carries the panic value.
 fn model_error(tool: &dyn Tool, err: &ToolError) -> (String, String) {
     match model_error_text(tool.name(), err) {
         (text, true) => (PANIC_ERROR_TYPE.to_string(), text),
@@ -392,7 +391,7 @@ fn model_error(tool: &dyn Tool, err: &ToolError) -> (String, String) {
 }
 
 /// The result map shared by the reflection and exceeded outcomes. `reflection_guidance` is the
-/// rendered template trimmed as Go's `strings.TrimSpace` trims it.
+/// rendered template with surrounding whitespace trimmed.
 fn response_map(
     tool: &dyn Tool,
     err: &ToolError,
@@ -412,8 +411,8 @@ fn response_map(
     m
 }
 
-/// Stands in for Go's `fmt.Sprintf("%T", err)`: the Rust variant path (the plugin's one accepted
-/// divergence; no Go test asserts it).
+/// The error's type name for the result's `error_type`: the `ToolError` variant path, such as
+/// `ToolError::Execution`.
 fn error_type(err: &ToolError) -> &'static str {
     match err {
         ToolError::ConfirmationRequired => "ToolError::ConfirmationRequired",
@@ -425,15 +424,14 @@ fn error_type(err: &ToolError) -> &'static str {
     }
 }
 
-/// Go's template `ErrorDetails`: `errType + ": " + errDetails` of [`model_error`].
+/// The template's `ErrorDetails`: `<type>: <details>` of [`model_error`].
 fn format_error_details(tool: &dyn Tool, err: &ToolError) -> String {
     let (err_type, err_details) = model_error(tool, err);
     format!("{err_type}: {err_details}")
 }
 
-/// Go `formatToolArgs`: `json.MarshalIndent(args, "", "  ")`. Go's nil args map gives `null`; a
-/// Rust map cannot be nil, so an empty one gives `null` too. Go decodes tool args into
-/// `float64`, hence [`as_go_floats`].
+/// The tool arguments as JSON indented by two spaces (see [`go_indent`]); an empty map gives
+/// `null`. Numbers are decoded as `f64`, as tool arguments are, hence [`as_go_floats`].
 fn format_tool_args(args: &Map<String, Value>) -> String {
     if args.is_empty() {
         return "null".to_string();
@@ -443,9 +441,9 @@ fn format_tool_args(args: &Map<String, Value>) -> String {
     ))))
 }
 
-/// Port of Go encoding/json `Indent(dst, src, "", "  ")` over compact, valid JSON. `{`/`[`
-/// defer their newline until the next element, so empty objects and arrays stay `{}`/`[]`;
-/// `:` gains one space; strings are copied untouched.
+/// Indents compact, valid JSON by two spaces per level. `{`/`[` defer their newline until the
+/// next element, so empty objects and arrays stay `{}`/`[]`; `:` gains one space; strings are
+/// copied untouched.
 fn go_indent(compact: &str) -> String {
     fn newline(out: &mut String, depth: usize) {
         out.push('\n');
@@ -494,7 +492,7 @@ fn go_indent(compact: &str) -> String {
             }
             '}' | ']' => {
                 if need_indent {
-                    // Empty object or array: Go suppresses the indent.
+                    // Empty object or array: no indent.
                     need_indent = false;
                 } else {
                     depth = depth.saturating_sub(1);
@@ -508,7 +506,7 @@ fn go_indent(compact: &str) -> String {
     out
 }
 
-/// Go `templateData`.
+/// The values substituted into the reflection and exceeded templates.
 struct TemplateData<'a> {
     tool_name: &'a str,
     error_details: &'a str,
@@ -517,9 +515,9 @@ struct TemplateData<'a> {
     max_retries: i32,
 }
 
-/// Go `text/template` execution of reflection.md / exceeded.md. Both templates use only the
-/// five `{{.Field}}` actions, so one left-to-right substitution pass gives Go's exact output.
-/// Substituted values are never re-scanned. An unknown action, which neither template has, is
+/// Renders `reflection.md` / `exceeded.md`. Both templates use only the five `{{.Field}}`
+/// actions, so one left-to-right substitution pass renders them exactly. Substituted values are
+/// never re-scanned. An unknown action, which neither template has, is
 /// copied through unchanged.
 fn render(template: &str, d: &TemplateData<'_>) -> String {
     let mut out = String::with_capacity(template.len() + d.args_summary.len() + 64);

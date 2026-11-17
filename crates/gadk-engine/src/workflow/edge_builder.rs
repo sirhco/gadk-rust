@@ -13,26 +13,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `EdgeBuilder`, `chain` and `concat` (port of Go workflow/edgebuilder.go).
+//! `EdgeBuilder`, `chain` and `concat`.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::workflow::{Edge, Node, Route, StringRoute};
 
-/// Port of Go workflow.EdgeBuilder: accumulates edges fluently.
+/// Accumulates edges fluently.
 #[derive(Clone, Default)]
 pub struct EdgeBuilder {
     edges: Vec<Edge>,
 }
 
 impl EdgeBuilder {
-    /// Port of Go NewEdgeBuilder.
+    /// An empty builder.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Port of Go EdgeBuilder.Add: adds an unconditional edge between two nodes.
+    /// Adds an unconditional edge between two nodes.
     pub fn add(&mut self, from: &Arc<dyn Node>, to: &Arc<dyn Node>) -> &mut Self {
         self.edges.push(Edge {
             from: Arc::clone(from),
@@ -42,7 +42,7 @@ impl EdgeBuilder {
         self
     }
 
-    /// Port of Go EdgeBuilder.AddRoute: adds an edge with a route condition between two nodes.
+    /// Adds an edge with a route condition between two nodes.
     pub fn add_route(
         &mut self,
         from: &Arc<dyn Node>,
@@ -57,7 +57,7 @@ impl EdgeBuilder {
         self
     }
 
-    /// Port of Go EdgeBuilder.AddFanOut: edges from one source to each target.
+    /// Adds edges from one source to each target.
     pub fn add_fan_out(&mut self, from: &Arc<dyn Node>, to: &[Arc<dyn Node>]) -> &mut Self {
         for t in to {
             self.add(from, t);
@@ -65,7 +65,7 @@ impl EdgeBuilder {
         self
     }
 
-    /// Port of Go EdgeBuilder.AddFanIn: edges from each source to one target.
+    /// Adds edges from each source to one target.
     pub fn add_fan_in(&mut self, to: &Arc<dyn Node>, from: &[Arc<dyn Node>]) -> &mut Self {
         for f in from {
             self.add(f, to);
@@ -73,10 +73,9 @@ impl EdgeBuilder {
         self
     }
 
-    /// Port of Go EdgeBuilder.AddRoutes: one `StringRoute` edge per entry, added in byte-wise
-    /// lexicographic order of the route key (so "10" precedes "2"). That order is observable: it
-    /// drives the order successors are started in. A later duplicate key replaces an earlier one
-    /// (Go map semantics).
+    /// Adds one `StringRoute` edge per entry, in byte-wise lexicographic order of the route key
+    /// (so "10" precedes "2"). That order is observable: it drives the order successors are
+    /// started in. A later duplicate key replaces an earlier one (map semantics).
     pub fn add_routes(
         &mut self,
         from: &Arc<dyn Node>,
@@ -89,13 +88,13 @@ impl EdgeBuilder {
         self
     }
 
-    /// Port of Go EdgeBuilder.Build: the accumulated edges.
+    /// The accumulated edges.
     pub fn build(&self) -> Vec<Edge> {
         self.edges.clone()
     }
 }
 
-/// Port of Go workflow.Chain: edges forming a chain of nodes; fewer than two nodes → no edges.
+/// Edges forming a chain of nodes; fewer than two nodes → no edges.
 pub fn chain(nodes: &[Arc<dyn Node>]) -> Vec<Edge> {
     nodes
         .windows(2)
@@ -107,7 +106,7 @@ pub fn chain(nodes: &[Arc<dyn Node>]) -> Vec<Edge> {
         .collect()
 }
 
-/// Port of Go workflow.Concat: combines edge lists into a single list.
+/// Combines edge lists into a single list.
 pub fn concat(parts: impl IntoIterator<Item = Vec<Edge>>) -> Vec<Edge> {
     parts.into_iter().flatten().collect()
 }

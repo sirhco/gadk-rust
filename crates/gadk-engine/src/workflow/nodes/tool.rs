@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go workflow/tool_node.go.
+//! `ToolNode`: a graph node that runs a directly runnable tool.
 
 use std::any::Any;
 use std::collections::BTreeMap;
@@ -35,18 +35,19 @@ struct ToolInner {
     tool: Arc<dyn Tool>,
 }
 
-/// Port of Go workflow.ToolNode: a graph node that runs a directly runnable tool.
+/// A graph node that runs a directly runnable tool.
 pub struct ToolNode {
     inner: Arc<ToolInner>,
 }
 
 impl ToolNode {
-    /// Port of Go NewToolNode: input and output schemas inferred as `any` (the empty schema `{}`).
+    /// A node running `tool`, with input and output schemas inferred as `any` (the empty schema
+    /// `{}`).
     pub fn new(tool: Arc<dyn Tool>, cfg: NodeConfig) -> Result<Arc<ToolNode>, WorkflowError> {
         Self::build("", tool, None, None, cfg)
     }
 
-    /// Port of Go NewNamedToolNode: as [`ToolNode::new`] with an explicit node name.
+    /// As [`ToolNode::new`] with an explicit node name.
     pub fn named(
         name: &str,
         tool: Arc<dyn Tool>,
@@ -55,7 +56,7 @@ impl ToolNode {
         Self::build(name, tool, None, None, cfg)
     }
 
-    /// Port of Go NewToolNodeWithSchemas: a `None` schema is inferred as `any` (`{}`).
+    /// A node with the given schemas: a `None` schema is inferred as `any` (`{}`).
     pub fn with_schemas(
         tool: Arc<dyn Tool>,
         input: Option<Value>,
@@ -65,8 +66,7 @@ impl ToolNode {
         Self::build("", tool, input, output, cfg)
     }
 
-    /// Port of Go newToolNodeWithSchemasTyped. (Go's "tool cannot be nil" and "resolved schema is
-    /// nil" are unreachable: an `Arc` is never null and a compiled schema always exists.)
+    /// Builds the node from the resolved schemas.
     fn build(
         name: &str,
         tool: Arc<dyn Tool>,
@@ -103,8 +103,8 @@ impl ToolNode {
     }
 }
 
-/// Go `fmt.Errorf("tool %q (type %T) is not directly runnable in workflow node", ..)`; Rust has
-/// no `%T` of a trait object, so the type is `dyn Tool`.
+/// The error for a tool that cannot run directly: `tool "<name>" (type dyn Tool) is not directly
+/// runnable in workflow node`.
 fn not_runnable(tool_name: &str) -> WorkflowError {
     WorkflowError::new(
         WorkflowErrorKind::Other,
@@ -116,7 +116,7 @@ fn not_runnable(tool_name: &str) -> WorkflowError {
 }
 
 impl ToolInner {
-    /// Port of Go (*ToolNode).runTool: a JSON-object string input is decoded into a map first
+    /// Runs the tool: a JSON-object string input is decoded into a map first
     /// (upstream LLM nodes often produce serialized arguments), then validated and run.
     async fn run_tool(&self, tool_ctx: Context, input: Value) -> Result<Value, AgentError> {
         let input = match input {
@@ -153,8 +153,8 @@ impl ToolInner {
         }
     }
 
-    /// Port of Go (*ToolNode).ValidateOutput: direct validation, then the FunctionTool
-    /// `{"result": X}` unwrap; when both fail, the original output's error wins.
+    /// Direct validation, then the FunctionTool `{"result": X}` unwrap; when both fail, the
+    /// original output's error wins.
     fn validate_output(&self, out: Value) -> Result<Value, WorkflowError> {
         if self.base.output_schema().is_none() {
             return Ok(out);
@@ -193,7 +193,7 @@ impl Node for ToolNode {
     fn validate_output(&self, v: Value) -> Result<Value, WorkflowError> {
         self.inner.validate_output(v)
     }
-    /// Port of Go (*ToolNode).Run: runs the tool under a tool context with its own call id and
+    /// Runs the tool under a tool context with its own call id and
     /// actions, and emits one event carrying the tool's actions (minus any compaction) and its
     /// output; a string output is also the event's content.
     fn run(&self, ctx: Context, input: Value) -> EventStream {
@@ -204,7 +204,7 @@ impl Node for ToolNode {
                 artifact_delta: Some(BTreeMap::new()),
                 ..EventActions::default()
             }));
-            // Go agent.NewToolContext(ctx, uuid.NewString(), eventActions, nil).
+            // A tool context with a fresh call id, its own actions and no confirmation.
             let tool_ctx = ctx.with_delta(ContextDelta {
                 function_call_id: Some(ctx.platform().new_uuid()),
                 actions: Some(Arc::clone(&actions)),
