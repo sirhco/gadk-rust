@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `controllers/apps.go` and `internal/routers/apps.go` (plan 5a Task 6).
+//! The apps controller and its route.
 
 use std::sync::Arc;
 
@@ -23,23 +23,22 @@ use http::{Method, StatusCode};
 use crate::rest::http_error::{encode_json_response, http_error};
 use crate::rest::routing::{Request, Response, Route, controller_handler, route};
 
-/// Port of Go `controllers.AppsAPIController`.
+/// Lists the applications of the agent loader.
 pub struct AppsApiController {
     loader: Option<Arc<dyn Loader>>,
 }
 
 impl AppsApiController {
-    /// Go `NewAppsAPIController`.
+    /// A controller listing the applications of `loader`.
     pub fn new(loader: Option<Arc<dyn Loader>>) -> Self {
         Self { loader }
     }
 
-    /// Go `ListAppsHandler`: [`Loader::list_agents`] as a JSON array.
+    /// [`Loader::list_agents`] as a JSON array.
     pub async fn list_apps_handler(&self, _req: Request) -> Response {
         match &self.loader {
             Some(loader) => encode_json_response(&loader.list_agents(), StatusCode::OK),
-            // parity: Go dereferences the nil loader and panics (net/http then drops the
-            // connection); gadk answers the 500 its panic handler would (ledger header).
+            // Without a loader the request answers 500, as a panic would.
             None => http_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "agent loader is not configured",
@@ -48,7 +47,7 @@ impl AppsApiController {
     }
 }
 
-/// Go `AppsAPIRouter.Routes`.
+/// The apps route.
 pub(crate) fn apps_routes(c: Arc<AppsApiController>) -> Vec<Route> {
     vec![route(
         "ListApps",

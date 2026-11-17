@@ -13,11 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `controllers/handlers.go`: `EncodeJSONResponse` and the `NewErrorHandler` rendering live in
-//! the crate-private `rest::http_error`; Go's deprecated `Unimplemented` is not ported (plan
-//! decision D9). This module holds the request plumbing every Go handler repeats: `mux.Vars`,
-//! the context's caller and platform, `CanActAsUser`, `json.NewDecoder(req.Body).Decode` and
-//! `EncodeJSONResponse(nil, …)`.
+//! The request plumbing every handler repeats: the path variables, the request's caller and
+//! platform, the authorization check, decoding an optional JSON body and answering with an empty
+//! JSON response. JSON responses and status errors live in the crate-private `rest::http_error`.
 
 use axum::body::Body;
 use gadk_platform::{Platform, go_quote};
@@ -30,7 +28,7 @@ use crate::authn::Caller;
 use crate::authz::{Authorizer, write_http_status_for_auth_error};
 use crate::rest::routing::{PathVars, Request, Response};
 
-/// Go `mux.Vars(req)`: the matched route's path variables (empty when the request carries none).
+/// The matched route's path variables (empty when the request carries none).
 pub(crate) fn path_vars(req: &Request) -> PathVars {
     req.extensions()
         .get::<PathVars>()
@@ -38,7 +36,7 @@ pub(crate) fn path_vars(req: &Request) -> PathVars {
         .unwrap_or_default()
 }
 
-/// Go `platform` on the request context: the request's [`Platform`] extension (inserted by the
+/// The request's [`Platform`] extension (inserted by the
 /// server from `ServerConfig::platform`), else [`Platform::default`].
 pub(crate) fn request_platform(req: &Request) -> Platform {
     req.extensions()
@@ -47,8 +45,7 @@ pub(crate) fn request_platform(req: &Request) -> Platform {
         .unwrap_or_default()
 }
 
-/// Go `authorizer.CanActAsUser(req.Context(), userID)` answered with
-/// `authz.WriteHTTPStatusForAuthError`: `Some(403 response)` when the [`Caller`] among the
+/// `Some(403 response)` (see [`write_http_status_for_auth_error`]) when the [`Caller`] among the
 /// request's `extensions` may not act as `user_id`.
 pub(crate) fn forbid_unless_can_act_as(
     authorizer: &dyn Authorizer,
@@ -62,30 +59,28 @@ pub(crate) fn forbid_unless_can_act_as(
         .map(|e| write_http_status_for_auth_error(Some(&e)))
 }
 
-/// Go `json.NewDecoder(req.Body).Decode(&v)` with `io.EOF` ignored, as every ADK-Go handler with
-/// an optional body calls it: an empty (or all-whitespace) body and a JSON `null` leave `T` at its
-/// zero value, only the first JSON value is read (trailing bytes are not looked at), and a
-/// truncated value is Go's `unexpected EOF`. A body read failure (e.g. the server's body limit)
-/// is reported with its own text.
+/// Decodes an optional JSON request body: an empty (or all-whitespace) body and a JSON `null` leave
+/// `T` at its zero value, only the first JSON value is read (trailing bytes are not looked at), and
+/// a truncated value is the error `unexpected EOF`. A body read failure (e.g. the server's body
+/// limit) is reported with its own text.
 pub(crate) async fn decode_optional_json_body<T: DeserializeOwned + Default>(
     body: Body,
 ) -> Result<T, String> {
     let bytes = axum::body::to_bytes(body, usize::MAX)
         .await
         .map_err(|e| e.to_string())?;
-    // Divergence (ledger 5a): nesting past 127 is serde's error (Go: 10000); see 5c.md.
+    // Nesting deeper than 127 levels is serde's recursion-limit error.
     let mut values = serde_json::Deserializer::from_slice(&bytes).into_iter::<Option<T>>();
     match values.next() {
         None => Ok(T::default()),
         Some(Ok(v)) => Ok(v.unwrap_or_default()),
-        // parity: serde's text for syntax and type errors; Go's json.Decoder words them
-        // differently (only the status is asserted by Go's tests).
+        // Syntax and type errors carry serde's text.
         Some(Err(e)) if e.is_eof() => Err("unexpected EOF".to_owned()),
         Some(Err(e)) => Err(e.to_string()),
     }
 }
 
-/// Go `EncodeJSONResponse(nil, status, rw)`: the JSON `Content-Type`, the status and no body.
+/// The JSON `Content-Type`, the status and no body.
 pub(crate) fn encode_nil_json_response(status: StatusCode) -> Response {
     let mut resp = Response::new(Body::empty());
     *resp.status_mut() = status;
@@ -96,10 +91,10 @@ pub(crate) fn encode_nil_json_response(status: StatusCode) -> Response {
     resp
 }
 
-/// The Go text of a [`gadk_session::SessionService`] error about session `session_id`. gadk
-/// reports a missing session as the bare [`SessionError::NotFound`]; Go's in-memory service wraps
-/// `ErrNotFound` with the session ID (`%w: %q` on Get, `%w: %q, cannot apply event` on
-/// AppendEvent), which is what an ADK-Go server sends.
+/// The text of a [`gadk_session::SessionService`] error about session `session_id`. The service
+/// reports a missing session as the bare [`SessionError::NotFound`]; the text adds the quoted
+/// session ID (`: "<id>"` on get, `: "<id>", cannot apply event` on append), byte-identical to an
+/// ADK server's error text.
 pub(crate) fn session_error_text(err: &SessionError, session_id: &str, append: bool) -> String {
     match err {
         SessionError::NotFound if append => {

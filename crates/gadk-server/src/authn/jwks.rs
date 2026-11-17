@@ -15,12 +15,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Google ID token verification for [`google_oidc`](super::google_oidc): a port of
-//! `google.golang.org/api/idtoken` `Validate` (v0.304.0 `validate.go`, `cache.go`). RS256 tokens
-//! verify against Google's `oauth2/v3/certs` key set, ES256 tokens against the IAP key set; each
-//! set is cached per URL until its `Cache-Control: max-age` (less `Age`) runs out. Signatures are
-//! checked with `jsonwebtoken` (aws-lc-rs); the steps, their order and the error texts are
-//! idtoken's.
+//! Google ID token verification for [`google_oidc`](super::google_oidc). RS256 tokens verify
+//! against Google's `oauth2/v3/certs` key set, ES256 tokens against the IAP key set; each set is
+//! cached per URL until its `Cache-Control: max-age` (less `Age`) runs out. Signatures are
+//! checked with `jsonwebtoken` (aws-lc-rs). Error texts are fixed strings, most prefixed
+//! `idtoken:`.
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
@@ -37,18 +36,17 @@ use parking_lot::Mutex;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-/// idtoken `googleSACertsURL`: the key set of Google-signed (RS256) ID tokens.
+/// The key set of Google-signed (RS256) ID tokens.
 pub(crate) const GOOGLE_SA_CERTS_URL: &str = "https://www.googleapis.com/oauth2/v3/certs";
-/// idtoken `googleIAPCertsURL`: the key set of IAP-signed (ES256) ID tokens.
+/// The key set of IAP-signed (ES256) ID tokens.
 pub(crate) const GOOGLE_IAP_CERTS_URL: &str = "https://www.gstatic.com/iap/verify/public_key-jwk";
 
-/// How long one key-set fetch may take. idtoken bounds it by the request's context; a hyper
-/// handler future is not reliably dropped when its client goes away, so the fetch carries its own
-/// deadline.
+/// How long one key-set fetch may take. A hyper handler future is not reliably dropped when its
+/// client goes away, so the fetch carries its own deadline rather than relying on the request's.
 const CERT_FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Go `base64.RawURLEncoding` for decoding: URL alphabet, no padding, non-zero trailing bits
-/// accepted.
+/// Base64 for decoding token segments and key components: URL alphabet, no padding, non-zero
+/// trailing bits accepted.
 const RAW_URL_ENCODING: GeneralPurpose = GeneralPurpose::new(
     &alphabet::URL_SAFE,
     GeneralPurposeConfig::new()
@@ -57,7 +55,7 @@ const RAW_URL_ENCODING: GeneralPurpose = GeneralPurpose::new(
         .with_decode_allow_trailing_bits(true),
 );
 
-/// Port of idtoken `Payload`: a token's standard claims, plus every claim in [`Payload::claims`].
+/// A token's standard claims, plus every claim in [`Payload::claims`].
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct Payload {
     /// `iss`.
@@ -74,8 +72,7 @@ pub(crate) struct Payload {
     pub(crate) claims: Map<String, Value>,
 }
 
-/// The typed half of idtoken's payload decode (Go `json.Unmarshal` into `Payload`; an absent or
-/// `null` field keeps its zero value).
+/// The typed half of the payload decode (an absent or `null` field keeps its zero value).
 #[derive(Deserialize)]
 struct StandardClaims {
     #[serde(default)]
@@ -90,7 +87,7 @@ struct StandardClaims {
     sub: Option<String>,
 }
 
-/// idtoken `jwtHeader`.
+/// The JWT header fields the validator reads.
 #[derive(Deserialize)]
 struct JwtHeader {
     #[serde(default)]
@@ -99,14 +96,14 @@ struct JwtHeader {
     kid: Option<String>,
 }
 
-/// idtoken `certResponse`.
+/// A key-set response.
 #[derive(Debug, Default, Deserialize)]
 struct CertResponse {
     #[serde(default)]
     keys: Option<Vec<Jwk>>,
 }
 
-/// idtoken `jwk` (the fields it reads).
+/// One JSON Web Key (the fields the validator reads).
 #[derive(Debug, Clone, Default, Deserialize)]
 struct Jwk {
     #[serde(default)]
@@ -121,14 +118,14 @@ struct Jwk {
     y: Option<String>,
 }
 
-/// Port of idtoken `Validator`: verifies Google ID tokens with cached key sets.
+/// Verifies Google ID tokens with cached key sets.
 pub(crate) struct Validator {
     client: CachingClient,
     sa_certs_url: String,
     iap_certs_url: String,
 }
 
-/// idtoken `defaultValidator`: the process-wide validator (and key-set cache) every
+/// The process-wide validator (and key-set cache) every
 /// [`google_oidc`](super::google_oidc) authenticator shares.
 static DEFAULT_VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
     Validator::with_cert_urls(
@@ -138,7 +135,7 @@ static DEFAULT_VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
     )
 });
 
-/// Port of idtoken `Validate`: [`Validator::validate`] on the process-wide validator.
+/// [`Validator::validate`] on the process-wide validator.
 pub(crate) async fn validate(id_token: &str, audience: &str) -> Result<Payload, String> {
     DEFAULT_VALIDATOR.validate(id_token, audience).await
 }
@@ -166,9 +163,8 @@ impl Validator {
         self
     }
 
-    /// Port of idtoken `Validator.validate`: decodes the token, checks the audience (skipped when
-    /// `audience` is empty) and expiry, then the signature (RS256 or ES256 only). The issuer is
-    /// left to the caller.
+    /// Decodes the token, checks the audience (skipped when `audience` is empty) and expiry, then
+    /// the signature (RS256 or ES256 only). The issuer is left to the caller.
     pub(crate) async fn validate(&self, id_token: &str, audience: &str) -> Result<Payload, String> {
         let jwt = parse_jwt(id_token)?;
         let header = jwt.parsed_header()?;
@@ -208,7 +204,7 @@ impl Validator {
         Ok(payload)
     }
 
-    /// idtoken `validateRS256`: PKCS #1 v1.5 with SHA-256 against the key set's `n`/`e`.
+    /// PKCS #1 v1.5 with SHA-256 against the key set's `n`/`e`.
     async fn validate_rs256(&self, key_id: &str, content: &[u8], sig: &[u8]) -> Result<(), String> {
         let certs = self.client.get_cert(&self.sa_certs_url).await?;
         let j = find_matching_key(&certs, key_id)?;
@@ -222,9 +218,8 @@ impl Validator {
         }
     }
 
-    /// idtoken `validateES256`: ECDSA P-256 with SHA-256 against the key set's `x`/`y`, the
-    /// signature being `r || s`. (idtoken panics on a signature shorter than 32 bytes; this
-    /// reports it as not valid.)
+    /// ECDSA P-256 with SHA-256 against the key set's `x`/`y`, the signature being `r || s`. A
+    /// signature shorter than 32 bytes is reported as not valid.
     async fn validate_es256(&self, key_id: &str, content: &[u8], sig: &[u8]) -> Result<(), String> {
         let certs = self.client.get_cert(&self.iap_certs_url).await?;
         let j = find_matching_key(&certs, key_id)?;
@@ -248,7 +243,7 @@ fn verify(sig: &[u8], content: &[u8], key: &DecodingKey, alg: Algorithm) -> bool
     jsonwebtoken::crypto::verify(&RAW_URL_ENCODING.encode(sig), content, key, alg).unwrap_or(false)
 }
 
-/// idtoken `findMatchingKey`.
+/// The key of `response` whose `kid` is `key_id`.
 fn find_matching_key(response: &CertResponse, key_id: &str) -> Result<Jwk, String> {
     response
         .keys
@@ -259,14 +254,14 @@ fn find_matching_key(response: &CertResponse, key_id: &str) -> Result<Jwk, Strin
         .ok_or_else(|| "idtoken: could not find matching cert keyId for the token provided".into())
 }
 
-/// idtoken `jwt`: the three dot-separated segments of a compact JWS.
+/// The three dot-separated segments of a compact JWS.
 struct Jwt<'a> {
     header: &'a str,
     payload: &'a str,
     signature: &'a str,
 }
 
-/// idtoken `parseJWT`.
+/// Splits a compact JWS into its three segments.
 fn parse_jwt(id_token: &str) -> Result<Jwt<'_>, String> {
     let segments: Vec<&str> = id_token.split('.').collect();
     match segments.as_slice() {
@@ -283,7 +278,7 @@ fn parse_jwt(id_token: &str) -> Result<Jwt<'_>, String> {
 }
 
 impl Jwt<'_> {
-    /// idtoken `parsedHeader`.
+    /// The decoded header.
     fn parsed_header(&self) -> Result<JwtHeader, String> {
         let dh = decode(self.header)
             .map_err(|e| format!("idtoken: unable to decode JWT header: {e}"))?;
@@ -291,7 +286,7 @@ impl Jwt<'_> {
             .map_err(|e| format!("idtoken: unable to unmarshal JWT header: {e}"))
     }
 
-    /// idtoken `parsedPayload`.
+    /// The decoded payload and its claims.
     fn parsed_payload(&self) -> Result<Payload, String> {
         let dp = decode(self.payload)
             .map_err(|e| format!("idtoken: unable to decode JWT payload: {e}"))?;
@@ -309,23 +304,23 @@ impl Jwt<'_> {
         })
     }
 
-    /// idtoken `decodedSignature`.
+    /// The decoded signature.
     fn decoded_signature(&self) -> Result<Vec<u8>, String> {
         decode(self.signature).map_err(|e| format!("idtoken: unable to decode JWT signature: {e}"))
     }
 
-    /// The signed bytes, `header "." payload` (idtoken hashes these in `hashedContent`).
+    /// The signed bytes, `header "." payload`.
     fn signed_content(&self) -> Vec<u8> {
         format!("{}.{}", self.header, self.payload).into_bytes()
     }
 }
 
-/// idtoken `decode`: `base64.RawURLEncoding`.
+/// Decodes unpadded URL-safe base64.
 fn decode(s: &str) -> Result<Vec<u8>, String> {
     RAW_URL_ENCODING.decode(s).map_err(|e| e.to_string())
 }
 
-/// Go `time.Now().Unix()`.
+/// The current Unix time in seconds.
 fn unix_now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -336,10 +331,9 @@ fn unix_now() -> i64 {
 /// A key-set fetch in progress, shared by every caller that misses the cache meanwhile.
 type InFlight = Shared<BoxFuture<'static, Result<Arc<CertResponse>, String>>>;
 
-/// Port of idtoken `cachingClient`: key sets cached per URL until their expiry. Concurrent misses
-/// on one URL share a single fetch (idtoken fetches once per caller; tokens are checked for
-/// audience and expiry before the fetch, so unauthenticated callers can reach it, and the shared
-/// fetch keeps them from piling up requests to Google).
+/// Key sets cached per URL until their expiry. Concurrent misses on one URL share a single fetch:
+/// tokens are checked for audience and expiry before the fetch, so unauthenticated callers can
+/// reach it, and the shared fetch keeps them from piling up requests to Google.
 struct CachingClient {
     client: reqwest::Client,
     certs: Arc<Mutex<HashMap<String, CachedResponse>>>,
@@ -347,7 +341,7 @@ struct CachingClient {
     fetch_timeout: Duration,
 }
 
-/// idtoken `cachedResponse`.
+/// A cached key set and when it expires.
 struct CachedResponse {
     resp: Arc<CertResponse>,
     exp: Instant,
@@ -363,8 +357,7 @@ impl CachingClient {
         }
     }
 
-    /// idtoken `getCert`: the cached key set of `url`, else a fresh fetch, joining one already in
-    /// progress for `url`.
+    /// The cached key set of `url`, else a fresh fetch, joining one already in progress for `url`.
     async fn get_cert(&self, url: &str) -> Result<Arc<CertResponse>, String> {
         if let Some(resp) = get(&self.certs, url) {
             return Ok(resp);
@@ -403,7 +396,7 @@ impl CachingClient {
     }
 }
 
-/// The GET half of idtoken `getCert`: only a 200 is accepted, the body's first JSON value is
+/// Fetches and caches a key set: only a 200 is accepted, the body's first JSON value is
 /// decoded and cached per the response headers. The whole fetch is bounded by `timeout`.
 async fn fetch_cert(
     client: reqwest::Client,
@@ -425,7 +418,7 @@ async fn fetch_cert(
     }
     let headers = resp.headers().clone();
     let body = resp.bytes().await.map_err(|e| e.to_string())?;
-    // Go `json.NewDecoder(body).Decode`: the first value; trailing bytes are not read.
+    // Only the body's first JSON value is decoded; trailing bytes are not read.
     let cert_resp = match serde_json::Deserializer::from_slice(&body)
         .into_iter::<CertResponse>()
         .next()
@@ -438,7 +431,7 @@ async fn fetch_cert(
     Ok(cert_resp)
 }
 
-/// idtoken `cachingClient.get`: a hit until the current time is after the entry's expiry.
+/// The cached key set of `url`, unless the current time is after the entry's expiry.
 fn get(certs: &Mutex<HashMap<String, CachedResponse>>, url: &str) -> Option<Arc<CertResponse>> {
     let certs = certs.lock();
     let cached = certs.get(url)?;
@@ -448,7 +441,7 @@ fn get(certs: &Mutex<HashMap<String, CachedResponse>>, url: &str) -> Option<Arc<
     Some(cached.resp.clone())
 }
 
-/// idtoken `cachingClient.set`.
+/// Caches `resp` for `url` until the expiry its response headers give.
 fn set(
     certs: &Mutex<HashMap<String, CachedResponse>>,
     url: &str,
@@ -461,7 +454,7 @@ fn set(
         .insert(url.to_owned(), CachedResponse { resp, exp });
 }
 
-/// Port of idtoken `calculateExpireTime`: `now` plus the last `max-age` directive of the first
+/// The expiry time: `now` plus the last `max-age` directive of the first
 /// `Cache-Control` header, less `Age`. A directive or `Age` that does not parse expires the entry
 /// at once (`now`); no `max-age` is zero.
 fn calculate_expire_time(now: Instant, headers: &http::HeaderMap) -> Instant {

@@ -13,10 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `controllers/devfeatures.go` and the builder, tests and eval routers of
-//! `internal/routers/{agentgraph,eval}.go`: the developer endpoints the web UI calls but ADK
-//! does not implement answer 501 with a body naming the missing feature (plan 5a Task 6 fills the
-//! two handlers).
+//! The developer endpoints the web UI calls but ADK servers do not implement (agent builder, tests
+//! tab, eval): they answer 501 with a body naming the missing feature.
 
 use axum::body::Body;
 use http::header::CONTENT_TYPE;
@@ -26,35 +24,35 @@ use serde::{Deserialize, Serialize};
 use crate::rest::http_error::encode_json_response;
 use crate::rest::routing::{DEV_PREFIX, Handler, Request, Response, Route, handler, route};
 
-/// Go `controllers.NotInstalledDetail`: the marker the web UI looks for in an eval error.
+/// The marker the web UI looks for in an eval error.
 pub const NOT_INSTALLED_DETAIL: &str = "not installed";
 
-/// Go `builderDetail`.
+/// The `detail` of the agent builder's 501 body.
 const BUILDER_DETAIL: &str =
     "ADK Go agents are defined in Go code, so there is no server-side agent configuration to edit.";
-/// Go `testsDetail`.
+/// The `detail` of the tests tab's 501 body.
 const TESTS_DETAIL: &str =
     "ADK Go does not implement the web UI tests tab. Write Go tests against runner.Run instead.";
 
-/// Go `evalDetail`.
+/// The `detail` of the eval endpoints' 501 body.
 fn eval_detail() -> String {
     format!(
         "agent evaluation is {NOT_INSTALLED_DETAIL} in ADK Go. Use adk-python for eval workflows."
     )
 }
 
-/// Port of Go `controllers.ErrorResponse`: a machine-readable error body.
+/// A machine-readable error body.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ErrorResponse {
     /// What failed.
     pub error: String,
-    /// What a caller can do about it; `omitempty`.
+    /// What a caller can do about it; omitted from the JSON when empty.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub detail: String,
 }
 
-/// Port of Go `controllers.NewNotImplementedHandler`: 501 with
-/// `{"error":"<feature> is not implemented in ADK Go","detail":"<detail>"}`.
+/// A handler answering 501 with an [`ErrorResponse`]: `error` names the missing `feature`,
+/// `detail` is `detail`.
 pub fn new_not_implemented_handler(feature: &str, detail: &str) -> Handler {
     let body = ErrorResponse {
         error: format!("{feature} is not implemented in ADK Go"),
@@ -66,15 +64,15 @@ pub fn new_not_implemented_handler(feature: &str, detail: &str) -> Handler {
     })
 }
 
-/// Port of Go `controllers.MetricsInfoResponse`.
+/// The metrics info response body.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct MetricsInfoResponse {
-    /// Go `MetricsInfo []any` (`metricsInfo`).
+    /// The metrics info entries (`metricsInfo`).
     #[serde(rename = "metricsInfo")]
     pub metrics_info: Vec<serde_json::Value>,
 }
 
-/// Go `controllers.MetricsInfoHandler`: `{"metricsInfo":[]}`.
+/// Answers `{"metricsInfo":[]}`.
 pub async fn metrics_info_handler(_req: Request) -> Response {
     encode_json_response(
         &MetricsInfoResponse {
@@ -84,7 +82,7 @@ pub async fn metrics_info_handler(_req: Request) -> Response {
     )
 }
 
-/// Go `controllers.AgentBuilderConfigHandler`: an empty `text/plain; charset=UTF-8` 200.
+/// Answers an empty `text/plain; charset=UTF-8` 200.
 pub async fn agent_builder_config_handler(_req: Request) -> Response {
     let mut resp = Response::new(Body::empty());
     resp.headers_mut().insert(
@@ -94,7 +92,7 @@ pub async fn agent_builder_config_handler(_req: Request) -> Response {
     resp
 }
 
-/// Go `AgentBuilderAPIRouter.Routes`.
+/// The agent builder routes.
 pub(crate) fn agent_builder_routes() -> Vec<Route> {
     let not_implemented = new_not_implemented_handler("the agent builder", BUILDER_DETAIL);
     vec![
@@ -119,7 +117,7 @@ pub(crate) fn agent_builder_routes() -> Vec<Route> {
     ]
 }
 
-/// Go `TestsAPIRouter.Routes`.
+/// The tests tab routes.
 pub(crate) fn tests_routes() -> Vec<Route> {
     let not_implemented = new_not_implemented_handler("the tests tab", TESTS_DETAIL);
     [
@@ -142,7 +140,7 @@ pub(crate) fn tests_routes() -> Vec<Route> {
     .collect()
 }
 
-/// Go `EvalAPIRouter.Routes`.
+/// The eval routes.
 pub(crate) fn eval_routes() -> Vec<Route> {
     let unavailable = new_not_implemented_handler("eval", &eval_detail());
     let mut routes = vec![route(

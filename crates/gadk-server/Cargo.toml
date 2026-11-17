@@ -12,10 +12,10 @@ keywords.workspace = true
 workspace = true
 
 [features]
-# Test fixtures: `rest::testutil` (Go `internal/fakes` `FakeSessionService` and the wire probe's
-# scenario). Enabled for this crate's own tests by the self dev-dependency.
+# Test fixtures: `rest::testutil` (a fake session service and the wire scenario). Enabled for this
+# crate's own tests by the self dev-dependency.
 testutil = ["dep:schemars"]
-# The Agent Engine server (`agentengine`, Go `server/agentengine`); off by default.
+# The Agent Engine server (`agentengine`); off by default.
 agentengine = []
 
 [dependencies]

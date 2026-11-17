@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `models/session.go`.
+//! The REST session models.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -22,19 +22,19 @@ use super::event::Event;
 use super::null_default;
 use crate::rest::routing::PathVars;
 
-/// Port of Go `models.Session`.
+/// The REST view of a session.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Session {
-    /// Go `ID`.
+    /// The session ID.
     #[serde(default, deserialize_with = "null_default")]
     pub id: String,
-    /// Go `AppName`.
+    /// The application name.
     #[serde(rename = "appName", default, deserialize_with = "null_default")]
     pub app_name: String,
-    /// Go `UserID`.
+    /// The user ID.
     #[serde(rename = "userId", default, deserialize_with = "null_default")]
     pub user_id: String,
-    /// Go `UpdatedAt` (`lastUpdateTime`): Unix seconds.
+    /// The last update time (`lastUpdateTime`) in Unix seconds.
     #[serde(rename = "lastUpdateTime", default, deserialize_with = "null_default")]
     pub updated_at: i64,
     /// The session's events.
@@ -46,7 +46,7 @@ pub struct Session {
 }
 
 impl Session {
-    /// Port of Go `models.FromSession`: the REST view of `s`, then [`Session::validate`].
+    /// The REST view of `s`, then [`Session::validate`].
     pub fn from_session(s: &dyn gadk_session::Session) -> Result<Session, String> {
         let mapped = Session {
             id: s.id().to_owned(),
@@ -60,7 +60,7 @@ impl Session {
         Ok(mapped)
     }
 
-    /// Port of Go `Session.Validate` (Go's `state is nil` and `events is nil` cannot happen).
+    /// Checks that the app name, user ID and session ID are non-empty.
     pub fn validate(&self) -> Result<(), String> {
         if self.app_name.is_empty() {
             return Err("app_name is empty in received session".into());
@@ -71,13 +71,13 @@ impl Session {
         if self.id.is_empty() {
             return Err("session_id is empty in received session".into());
         }
-        // `updated_at` is not checked (Go #1870): `updated_at == 0` never caught an unset time,
-        // but rejected every last update in the first second of 1970.
+        // `updated_at` is not checked: `updated_at == 0` never caught an unset time, but rejected
+        // every last update in the first second of 1970.
         Ok(())
     }
 }
 
-/// Port of Go `models.CreateSessionRequest`.
+/// The create-session request body.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CreateSessionRequest {
@@ -87,17 +87,17 @@ pub struct CreateSessionRequest {
     pub events: Option<Vec<Event>>,
 }
 
-/// Port of Go `models.UpdateSessionRequest`: the state keys to add or overwrite; an empty or
+/// The update-session request body: the state keys to add or overwrite; an empty or
 /// absent delta is a no-op.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UpdateSessionRequest {
-    /// Go `StateDelta` (`stateDelta`).
+    /// The state changes (`stateDelta`).
     #[serde(rename = "stateDelta")]
     pub state_delta: Option<Map<String, Value>>,
 }
 
-/// Port of Go `models.SessionID`: the session named by a request path.
+/// The session named by a request path.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SessionId {
     /// `{session_id}`; empty when the route has none.
@@ -108,7 +108,8 @@ pub struct SessionId {
     pub user_id: String,
 }
 
-/// Port of Go `models.SessionIDFromHTTPParameters`.
+/// The [`SessionId`] named by the request's path variables; `app_name` and `user_id` are
+/// required.
 pub fn session_id_from_http_parameters(vars: &PathVars) -> Result<SessionId, String> {
     let get = |k: &str| vars.0.get(k).cloned().unwrap_or_default();
     let id = SessionId {

@@ -13,11 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `controllers/triggers/config.go`.
+//! Retry and concurrency settings of the trigger controllers.
 
 use std::time::Duration;
 
-/// Port of Go `triggers.TriggerConfig`.
+/// Retry and concurrency settings of the trigger controllers.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct TriggerConfig {
     /// The maximum number of times to retry a failed agent execution.

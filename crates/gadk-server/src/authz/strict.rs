@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `server/authz/strict.go`.
+//! An [`Authorizer`] that allows a caller to act only as itself.
 
 use std::sync::Arc;
 
@@ -22,7 +22,7 @@ use crate::authn::Caller;
 
 struct Strict;
 
-/// Port of Go `authz.NewStrict`: the caller may act only as itself.
+/// The caller may act only as itself.
 pub fn strict() -> Arc<dyn Authorizer> {
     Arc::new(Strict)
 }

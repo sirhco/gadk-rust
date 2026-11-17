@@ -13,22 +13,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The gorilla/mux v1.8.1 router as the web launcher configures it (plan D6).
+//! The router of the web launcher.
 //!
-//! `mux.go` `Router.ServeHTTP`/`Router.Match`, `route.go` `Route.Match` and `regexp.go`
-//! `setMatch` as the launcher uses them: `Handle(path).Methods(...)` and
-//! `PathPrefix(prefix).Methods(...)` routes in registration order, the first route whose path and
-//! method match wins; a route whose path matched but whose method did not makes an unmatched
-//! request a 405 (empty body, no `Allow`), anything else unmatched is `http.NotFound`. Before
-//! matching, a path that is not clean is redirected (301) to its clean form. Under
-//! `StrictSlash(true)` a `Path` route also matches the path with the other trailing-slash form and
-//! answers it with `http.Redirect` (301). `Use` middleware wraps a matched route's handler only
-//! (the strict-slash redirect included), never the 404, 405 or clean-path 301.
+//! Routes are whole-path routes (with a method list) and path-prefix routes (with a method list),
+//! tried in registration order; the first route whose path and method match wins. A route whose
+//! path matched but whose method did not makes an unmatched request a 405 (empty body, no
+//! `Allow`); anything else unmatched is a 404. Before matching, a path that is not clean is
+//! redirected (301) to its clean form. With strict slash on, a whole-path route also matches the
+//! path with the other trailing-slash form and answers it with a 301 redirect. Middleware wraps a
+//! matched route's handler only (the strict-slash redirect included), never the 404, 405 or
+//! clean-path 301.
 //!
-//! What Go's `net/http` server does before and after any handler is also done here, so a request
-//! served through [`WebRouter::serve`] gets Go's server answers: `OPTIONS *` (200,
-//! `Content-Length: 0`), a request target whose escapes do not decode (400), and a HEAD response
-//! without its body.
+//! The router also does what an HTTP server does around any handler, so a request served through
+//! [`WebRouter::serve`] gets those answers: `OPTIONS *` (200, `Content-Length: 0`), a request
+//! target whose escapes do not decode (400), and a HEAD response without its body.
 
 use std::convert::Infallible;
 use std::sync::{Arc, RwLock};
@@ -42,12 +40,12 @@ use gadk_platform::go_url;
 use http::{Method, StatusCode};
 use tower::ServiceExt;
 
-/// Go `router.Use(mw)`: wraps a matched route's handler.
+/// Middleware: wraps a matched route's handler.
 pub type Middleware = std::sync::Arc<dyn Fn(Handler) -> Handler + Send + Sync>;
 
 /// How a route matches the request path.
 enum PathMatcher {
-    /// gorilla `Path(tpl)`: the whole path. With `strict_slash`, `template` is the pattern minus
+    /// The whole path. With `strict_slash`, `template` is the pattern minus
     /// its trailing slash, the path matches with or without a trailing slash, and a match whose
     /// slash differs from the pattern's is redirected.
     Path {
@@ -55,14 +53,13 @@ enum PathMatcher {
         strict_slash: bool,
         pattern_ends_with_slash: bool,
     },
-    /// gorilla `PathPrefix(tpl)`: a prefix of the path (not segment-aware; `StrictSlash` has no
-    /// effect).
+    /// A prefix of the path (not segment-aware; strict slash has no effect).
     Prefix(Template),
 }
 
 /// One registered route.
 struct Route {
-    /// gorilla `Methods(...)`; empty = any method.
+    /// The accepted methods; empty = any method.
     methods: Vec<Method>,
     matcher: PathMatcher,
     handler: Handler,
@@ -75,19 +72,19 @@ struct Inner {
     middlewares: Vec<Middleware>,
 }
 
-/// gorilla/mux v1.8.1 router as the launcher configures it (D6).
+/// The web launcher's router.
 ///
-/// Clones share one routing table, as Go code shares a `*mux.Router`: a route or middleware added
-/// through any clone is seen by all of them (Go's web launcher adds the origin guard after the
-/// sub-launchers ran, and gorilla builds a route's middleware chain when the route matches, so the
-/// guard covers routes registered before it).
+/// Clones share one routing table: a route or middleware added through any clone is seen by all
+/// of them. The middleware chain is built around a route's handler when the route matches, so a
+/// middleware added after the routes (the launcher adds the origin guard after the sub-launchers
+/// ran) still covers routes registered before it.
 #[derive(Clone)]
 pub struct WebRouter {
     strict_slash: bool,
     inner: Arc<RwLock<Inner>>,
 }
 
-/// The outcome of matching a request against the routes (gorilla `Router.Match`).
+/// The outcome of matching a request against the routes.
 enum Matched {
     /// A route matched: its handler wrapped in the middleware, and its path variables.
     Route(Handler, PathVars),
@@ -98,7 +95,8 @@ enum Matched {
 }
 
 impl WebRouter {
-    /// gorilla `NewRouter().StrictSlash(strict_slash)`.
+    /// A router with no routes; `strict_slash` makes whole-path routes match either trailing-slash
+    /// form (redirecting to the pattern's form).
     pub fn new(strict_slash: bool) -> WebRouter {
         WebRouter {
             strict_slash,
@@ -106,7 +104,7 @@ impl WebRouter {
         }
     }
 
-    /// gorilla `Handle(path).Methods(...)`; empty `methods` = any method.
+    /// Adds a whole-path route; empty `methods` = any method.
     pub fn handle(&mut self, methods: &[http::Method], path: &str, h: Handler) {
         let matcher = if self.strict_slash {
             let pattern_ends_with_slash = path.ends_with('/');
@@ -130,17 +128,18 @@ impl WebRouter {
         self.push(methods, matcher, h);
     }
 
-    /// gorilla `PathPrefix(prefix).Methods(...).Handler(h)` (not segment-aware).
+    /// Adds a path-prefix route (not segment-aware); empty `methods` = any method.
     pub fn handle_prefix(&mut self, methods: &[http::Method], prefix: &str, h: Handler) {
         self.push(methods, PathMatcher::Prefix(Template::parse(prefix)), h);
     }
 
-    /// gorilla `Use`.
+    /// Adds a middleware around every matched route's handler.
     pub fn use_middleware(&mut self, mw: Middleware) {
         write(&self.inner).middlewares.push(mw);
     }
 
-    /// Serves one request (gorilla `Router.ServeHTTP`, inside Go's `net/http` server).
+    /// Serves one request, answering `OPTIONS *`, bad request targets and HEAD as an HTTP server
+    /// would.
     pub async fn serve(&self, req: Request) -> Response {
         let head = req.method() == Method::HEAD;
         let resp = self.dispatch(req).await;
@@ -163,7 +162,7 @@ impl WebRouter {
         });
     }
 
-    /// `Router.ServeHTTP` after Go's server decoded the path.
+    /// Routes a request whose path is decoded here.
     async fn dispatch(&self, mut req: Request) -> Response {
         if req.method() == Method::OPTIONS && req.uri().path() == "*" {
             return options_star();
@@ -171,7 +170,7 @@ impl WebRouter {
         let Ok(path) = go_url::unescape_path(req.uri().path()) else {
             return bad_request();
         };
-        // Router.ServeHTTP: clean the path first (skipClean is false).
+        // Clean the path first.
         let clean = clean_path(&path);
         if clean != path {
             return clean_path_redirect(&go_request_uri(&req), &clean);
@@ -186,7 +185,7 @@ impl WebRouter {
         }
     }
 
-    /// gorilla `Router.Match`: the first route matching path and method, with the middleware
+    /// The first route matching path and method, with the middleware
     /// chain built around its handler (or around the strict-slash redirect that replaces it).
     fn find(&self, req: &Request, path: &[u8]) -> Matched {
         let inner = read(&self.inner);
@@ -237,8 +236,8 @@ impl Route {
         }
     }
 
-    /// gorilla `setMatch`'s strict-slash check: a redirect handler when the path's trailing slash
-    /// differs from the pattern's.
+    /// The strict-slash check: a redirect handler when the path's trailing slash differs from the
+    /// pattern's.
     fn strict_slash_redirect(&self, req: &Request, path: &[u8]) -> Option<Handler> {
         let PathMatcher::Path {
             strict_slash: true,
@@ -252,7 +251,7 @@ impl Route {
         if path_ends_with_slash == *pattern_ends_with_slash {
             return None;
         }
-        // `u, _ := url.Parse(req.URL.String())`, then the slash trimmed or added.
+        // The request URL with the trailing slash removed or added.
         let mut u = go_url::parse(&go_request_uri(req).to_string()).unwrap_or_default();
         if path_ends_with_slash {
             u.path.pop();
@@ -288,7 +287,7 @@ fn write(inner: &RwLock<Inner>) -> std::sync::RwLockWriteGuard<'_, Inner> {
     inner.write().unwrap_or_else(|e| e.into_inner())
 }
 
-/// gorilla `methodNotAllowed`: 405 with nothing but the status.
+/// 405 with nothing but the status.
 fn method_not_allowed() -> Response {
     let mut resp = Response::new(Body::empty());
     *resp.status_mut() = StatusCode::METHOD_NOT_ALLOWED;

@@ -13,9 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `controllers/agentgraph.go` and the agent-graph router of
-//! `internal/routers/agentgraph.go` (plan 5a Task 9): the endpoints behind the web UI's "Agent
-//! structure" panel.
+//! The endpoints behind the web UI's "Agent structure" panel.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -32,18 +30,18 @@ use crate::rest::routing::{
     DEV_PREFIX, Request, Response, Route, controller_handler, query_get, route,
 };
 
-/// Port of Go `controllers.AgentGraphAPIController`.
+/// Serves the agent tree and its DOT graph.
 pub struct AgentGraphApiController {
     loader: Option<Arc<dyn Loader>>,
 }
 
 impl AgentGraphApiController {
-    /// Go `NewAgentGraphAPIController`.
+    /// A controller over the agents of `loader`.
     pub fn new(loader: Option<Arc<dyn Loader>>) -> Self {
         Self { loader }
     }
 
-    /// Go `BuildGraphHandler`: the agent tree as [`AppInfoResponse`], which the UI builds its
+    /// The agent tree as [`AppInfoResponse`], which the UI builds its
     /// breadcrumb navigation from.
     pub async fn build_graph_handler(&self, req: Request) -> Response {
         let root = match self.load_agent(&req) {
@@ -59,7 +57,7 @@ impl AgentGraphApiController {
         )
     }
 
-    /// Go `BuildGraphImageHandler`: the agent tree's DOT source. Without a `node` query parameter
+    /// The agent tree's DOT source. Without a `node` query parameter
     /// the body maps the root agent's name to its [`DotGraph`] (the UI preloads every level);
     /// with one it is the bare [`DotGraph`] of the subtree that breadcrumb path names. The
     /// palette follows `dark_mode=true`.
@@ -83,10 +81,8 @@ impl AgentGraphApiController {
         encode_json_response(&DotGraph { dot_src: dot }, StatusCode::OK)
     }
 
-    /// Go `loadAgent`: resolves the `app_name` path variable, or the error response to send.
-    /// (Go also answers 404 `agent <name> not found` for a loader that returns a nil agent
-    /// without an error; a gadk [`Loader`] cannot.)
-    #[allow(clippy::result_large_err)] // the Err side is the response itself, as in Go
+    /// Resolves the `app_name` path variable to its agent, or the error response to send.
+    #[allow(clippy::result_large_err)] // the Err side is the response itself
     fn load_agent(&self, req: &Request) -> Result<Arc<dyn Agent>, Response> {
         let Some(loader) = &self.loader else {
             return Err(http_error(
@@ -112,7 +108,7 @@ impl AgentGraphApiController {
     }
 }
 
-/// Go `resolveAgentPath`: walks a slash-separated breadcrumb path from the root agent, with no
+/// Walks a slash-separated breadcrumb path from the root agent, with no
 /// fallback to a name search. A segment's `@<discriminator>` suffix is dropped, empty segments
 /// are skipped, and a first segment equal to the root's name is skipped.
 fn resolve_agent_path(root: &Arc<dyn Agent>, path: &str) -> Result<Arc<dyn Agent>, String> {
@@ -135,7 +131,7 @@ fn resolve_agent_path(root: &Arc<dyn Agent>, path: &str) -> Result<Arc<dyn Agent
     Ok(current)
 }
 
-/// Go `toAgentNode`.
+/// The [`AgentNode`] tree of `agent` and its sub-agents.
 fn to_agent_node(agent: &dyn Agent) -> AgentNode {
     AgentNode {
         name: agent.name().to_owned(),
@@ -148,13 +144,13 @@ fn to_agent_node(agent: &dyn Agent) -> AgentNode {
     }
 }
 
-/// Port of Go `controllers.AgentNode`: one agent of the tree `build_graph` returns. The UI walks
+/// One agent of the tree `build_graph` returns. The UI walks
 /// children through `sub_agents` entries carrying a `name`, so both are part of the contract.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentNode {
     /// The agent's name.
     pub name: String,
-    /// `omitempty`.
+    /// Omitted from the JSON when empty.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
     /// The agent's sub-agents; always a list (never `null`), even when empty.
@@ -162,7 +158,7 @@ pub struct AgentNode {
     pub sub_agents: Vec<AgentNode>,
 }
 
-/// Port of Go `controllers.AppInfoResponse`.
+/// The agent tree response: the root agent.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AppInfoResponse {
     /// The root of the agent tree.
@@ -171,15 +167,15 @@ pub struct AppInfoResponse {
     pub readme: String,
 }
 
-/// Port of Go `controllers.DotGraph`: Graphviz DOT source, which the UI renders client-side.
+/// Graphviz DOT source, which the UI renders client-side.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DotGraph {
-    /// Go `DotSrc` (`dotSrc`).
+    /// The DOT text (`dotSrc`).
     #[serde(rename = "dotSrc")]
     pub dot_src: String,
 }
 
-/// Go `AgentGraphAPIRouter.Routes`.
+/// The agent graph routes.
 pub(crate) fn agent_graph_routes(c: Arc<AgentGraphApiController>) -> Vec<Route> {
     vec![
         route(

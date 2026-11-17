@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `controllers/sessions.go` and `internal/routers/sessions.go` (plan 5a Task 6).
+//! The sessions controller and its routes.
 
 use std::sync::Arc;
 
@@ -37,14 +37,14 @@ use crate::rest::models::{
 };
 use crate::rest::routing::{Request, Response, Route, controller_handler, route};
 
-/// Port of Go `controllers.SessionsAPIController`.
+/// Serves the session CRUD endpoints.
 pub struct SessionsApiController {
     service: Arc<dyn SessionService>,
     authorizer: Arc<dyn Authorizer>,
 }
 
 impl SessionsApiController {
-    /// Go `NewSessionsAPIController` (authorizer: [`authz::noop`]).
+    /// A controller over `service` (authorizer: [`authz::noop`]).
     pub fn new(service: Arc<dyn SessionService>) -> Self {
         Self {
             service,
@@ -52,13 +52,13 @@ impl SessionsApiController {
         }
     }
 
-    /// Go `WithAuthorizer`.
+    /// This controller with `a` deciding whether the caller may act as the path's user.
     pub fn with_authorizer(mut self, a: Arc<dyn Authorizer>) -> Self {
         self.authorizer = a;
         self
     }
 
-    /// Go `CreateSessionHandler`: creates the session (with the path's session ID, or one the
+    /// Creates the session (with the path's session ID, or one the
     /// service assigns), appends the request's events and answers the session.
     pub async fn create_session_handler(&self, req: Request) -> Response {
         let sid = match session_id_from_http_parameters(&path_vars(&req)) {
@@ -89,7 +89,7 @@ impl SessionsApiController {
         }
     }
 
-    /// Go `createSession`.
+    /// Creates the session, appends `events` to it and returns it as the response model.
     async fn create_session(
         &self,
         sid: SessionId,
@@ -115,7 +115,7 @@ impl SessionsApiController {
         Session::from_session(&*session)
     }
 
-    /// Go `DeleteSessionHandler`: 200 with the JSON `Content-Type` and no body.
+    /// Deletes the session: 200 with the JSON `Content-Type` and no body.
     pub async fn delete_session_handler(&self, req: Request) -> Response {
         let sid = match session_id_from_http_parameters(&path_vars(&req)) {
             Ok(sid) => sid,
@@ -143,7 +143,7 @@ impl SessionsApiController {
         }
     }
 
-    /// Go `GetSessionHandler`.
+    /// The session as JSON, or 404 when it does not exist.
     pub async fn get_session_handler(&self, req: Request) -> Response {
         let sid = match session_id_from_http_parameters(&path_vars(&req)) {
             Ok(sid) => sid,
@@ -167,7 +167,7 @@ impl SessionsApiController {
         }
     }
 
-    /// Go `UpdateSessionHandler` (PATCH state delta): the session-scoped keys of `stateDelta`
+    /// Applies a PATCH state delta: the session-scoped keys of `stateDelta`
     /// are applied through an appended `user` event, scoped keys (`app:`, `user:`, `temp:`) are
     /// refused unless they echo the stored value, and the re-read session is answered.
     pub async fn update_session_handler(&self, req: Request) -> Response {
@@ -232,7 +232,7 @@ impl SessionsApiController {
         }
     }
 
-    /// Go `ListSessionsHandler`: always a JSON array (`[]` for a user without sessions).
+    /// The user's sessions: always a JSON array (`[]` for a user without sessions).
     pub async fn list_sessions_handler(&self, req: Request) -> Response {
         let sid = match session_id_from_http_parameters(&path_vars(&req)) {
             Ok(sid) => sid,
@@ -265,7 +265,7 @@ impl SessionsApiController {
     }
 }
 
-/// The `session.GetRequest` Go builds from the path's session ID.
+/// The session-service get request for the path's session ID.
 fn get_request(sid: &SessionId) -> GetRequest {
     GetRequest {
         app_name: sid.app_name.clone(),
@@ -275,7 +275,7 @@ fn get_request(sid: &SessionId) -> GetRequest {
     }
 }
 
-/// Go `writeSessionServiceError`: a missing session is a 404, anything else a 500.
+/// The error response: a missing session is a 404, anything else a 500.
 fn write_session_service_error(
     err: &gadk_session::SessionError,
     session_id: &str,
@@ -288,14 +288,14 @@ fn write_session_service_error(
     http_error(status, &session_error_text(err, session_id, append))
 }
 
-/// Go `isScopedStateKey`: `app:`, `user:` and `temp:` keys write outside the session.
+/// Whether `key` is scoped: `app:`, `user:` and `temp:` keys write outside the session.
 fn is_scoped_state_key(key: &str) -> bool {
     key.starts_with(KEY_PREFIX_APP)
         || key.starts_with(KEY_PREFIX_USER)
         || key.starts_with(KEY_PREFIX_TEMP)
 }
 
-/// Go `scopedStateKeys`: the scoped keys of `delta`, sorted.
+/// The scoped keys of `delta`, sorted.
 fn scoped_state_keys(delta: &Map<String, Value>) -> Vec<String> {
     let mut scoped: Vec<String> = delta
         .keys()
@@ -306,7 +306,7 @@ fn scoped_state_keys(delta: &Map<String, Value>) -> Vec<String> {
     scoped
 }
 
-/// Go `dropEchoedScopedKeys`: `delta` without the scoped keys whose value equals the stored one
+/// `delta` without the scoped keys whose value equals the stored one
 /// (the web UI's rename posts back the whole state it read).
 fn drop_echoed_scoped_keys(delta: Map<String, Value>, stored: &dyn State) -> Map<String, Value> {
     delta
@@ -315,8 +315,8 @@ fn drop_echoed_scoped_keys(delta: Map<String, Value>, stored: &dyn State) -> Map
         .collect()
 }
 
-/// Go `matchesStoredValue`: the values compared as Go's `json.Marshal` bytes, so a stored
-/// integer equals the float the client echoes back. A missing key is a change.
+/// Whether `value` equals the stored value of `key`, compared as JSON text (see [`to_go_json`]), so
+/// a stored integer equals the float the client echoes back. A missing key is a change.
 fn matches_stored_value(stored: &dyn State, key: &str, value: &Value) -> bool {
     let Ok(current) = stored.get(key) else {
         return false;
@@ -327,7 +327,7 @@ fn matches_stored_value(stored: &dyn State, key: &str, value: &Value) -> bool {
     }
 }
 
-/// Go `SessionsAPIRouter.Routes`.
+/// The session routes.
 pub(crate) fn sessions_routes(c: Arc<SessionsApiController>) -> Vec<Route> {
     const SESSION: &str = "/apps/{app_name}/users/{user_id}/sessions/{session_id}";
     const SESSIONS: &str = "/apps/{app_name}/users/{user_id}/sessions";

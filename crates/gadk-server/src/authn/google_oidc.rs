@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `server/authn/googleoidc.go`: Google-signed OIDC bearer tokens, as a Pub/Sub push
-//! subscription or an Eventarc trigger attaches them when configured with a service account.
+//! Google-signed OIDC bearer tokens, as a Pub/Sub push subscription or an Eventarc trigger
+//! attaches them when configured with a service account.
 
 use std::any::Any;
 use std::panic::AssertUnwindSafe;
@@ -28,17 +28,17 @@ use serde_json::{Map, Value};
 use super::jwks::{self, Payload};
 use super::{Authenticator, AuthnError, Caller};
 
-/// Port of Go `tokenValidator` (the signature of `idtoken.Validate`): verifies `(id_token,
-/// audience)`. `Ok(None)` is Go's `(nil, nil)`.
+/// Verifies `(id_token, audience)`, yielding the token's payload. `Ok(None)` is a success that
+/// carries no payload, which the authenticator rejects.
 pub(crate) type TokenValidator = Arc<
     dyn Fn(String, String) -> BoxFuture<'static, Result<Option<Payload>, String>> + Send + Sync,
 >;
 
-/// Go `googleIssuers`: the two spellings Google uses in `iss` (idtoken leaves the check to the
+/// The two spellings Google uses in `iss` (the token verifier leaves the issuer check to the
 /// caller).
 const GOOGLE_ISSUERS: [&str; 2] = ["accounts.google.com", "https://accounts.google.com"];
 
-/// Port of Go `authn.GoogleOIDCConfig`.
+/// Configuration of the Google OIDC authenticator.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GoogleOidcConfig {
     /// The OIDC audience a token must carry to be accepted. Required.
@@ -51,27 +51,26 @@ pub struct GoogleOidcConfig {
     pub allowed_service_accounts: Vec<String>,
 }
 
-/// Where a Google OIDC authenticator writes Go's `log.Printf` records (`adk: authn: rejected …`,
-/// `adk: authn: refused …`): the message without the log prefix. See [`google_oidc_with_log`].
+/// Where a Google OIDC authenticator writes its log records (`adk: authn: rejected …`,
+/// `adk: authn: refused …`): the message without any log prefix. See [`google_oidc_with_log`].
 pub type AuthnLog = Arc<dyn Fn(&str) + Send + Sync>;
 
-/// Port of Go `googleOIDC`.
+/// The Google OIDC [`Authenticator`].
 pub(crate) struct GoogleOidc {
     pub(crate) audience: String,
     pub(crate) allowed_service_accounts: Vec<String>,
-    /// Go `validate`: [`jwks::validate`] in production; tests install fakes. `None` is Go's nil
-    /// func, which [`GoogleOidc::validate_token`] turns into a rejection.
+    /// The token validator: [`jwks::validate`] in production; tests install fakes. `None` stands
+    /// for a missing validator, which [`GoogleOidc::validate_token`] turns into a rejection.
     pub(crate) validate: Option<TokenValidator>,
-    /// Go's `log` for the rejection records; `None` writes them as `tracing` warnings.
+    /// Sink for the rejection records; `None` writes them as `tracing` warnings.
     pub(crate) log: Option<AuthnLog>,
 }
 
-/// Port of Go `authn.NewGoogleOIDC`: an [`Authenticator`] requiring a Google-signed OIDC bearer
-/// token issued for `cfg.audience` whose verified `email` is one of
-/// `cfg.allowed_service_accounts`.
+/// An [`Authenticator`] requiring a Google-signed OIDC bearer token issued for `cfg.audience`
+/// whose verified `email` is one of `cfg.allowed_service_accounts`.
 ///
 /// Both fields are required: an empty audience would make the verifier skip the audience check,
-/// and an empty allow-list (or a blank or space-padded entry) is refused with Go's text as
+/// and an empty allow-list (or a blank or space-padded entry) is refused as
 /// [`AuthnError::Other`]. A missing, malformed or unverifiable token — including one whose
 /// signing certificates cannot be fetched — is [`AuthnError::Unauthenticated`] (401); a verified
 /// token naming an unlisted or unverified principal is [`AuthnError::Forbidden`] (403).
@@ -82,9 +81,10 @@ pub fn google_oidc(cfg: GoogleOidcConfig) -> Result<Arc<dyn Authenticator>, Auth
     Ok(Arc::new(new_google_oidc(cfg)?))
 }
 
-/// [`google_oidc`] writing its rejection records (Go's `log.Printf` lines `adk: authn: rejected an
+/// [`google_oidc`] writing its rejection records (the lines `adk: authn: rejected an
 /// OIDC-authenticated request: …` and `adk: authn: refused an OIDC-authenticated principal: …`)
-/// to `log` instead of `tracing`: the launcher passes its Go log, so they land where Go's do.
+/// to `log` instead of `tracing`: the launcher passes its own logger, so they land with the
+/// launcher's other output.
 pub fn google_oidc_with_log(
     cfg: GoogleOidcConfig,
     log: AuthnLog,
@@ -94,7 +94,7 @@ pub fn google_oidc_with_log(
     Ok(Arc::new(g))
 }
 
-/// [`google_oidc`] before type erasure (Go tests type-assert the result to `*googleOIDC`).
+/// [`google_oidc`] before type erasure: the concrete [`GoogleOidc`].
 pub(crate) fn new_google_oidc(cfg: GoogleOidcConfig) -> Result<GoogleOidc, AuthnError> {
     if cfg.audience.is_empty() {
         return Err(AuthnError::Other(
@@ -154,7 +154,7 @@ impl Authenticator for GoogleOidc {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_owned();
-        // A non-boolean email_verified fails closed (Go's type assertion).
+        // A non-boolean email_verified fails closed.
         let email_verified = payload
             .claims
             .get("email_verified")
@@ -186,8 +186,8 @@ impl Authenticator for GoogleOidc {
 }
 
 impl GoogleOidc {
-    /// Go `validateToken`: runs the validator and turns a panic (or a missing validator, Go's nil
-    /// func call) into an error, so no request can crash the handler.
+    /// Runs the validator and turns a panic (or a missing validator) into an error, so no request
+    /// can crash the handler.
     async fn validate_token(&self, token: &str) -> Result<Option<Payload>, String> {
         let Some(validate) = &self.validate else {
             return Err(
@@ -206,7 +206,7 @@ impl GoogleOidc {
     }
 }
 
-/// Go `fmt.Errorf("identity token validation panicked: %v", r)`.
+/// The error for a panic payload: `identity token validation panicked: <message>`.
 fn panicked(p: Box<dyn Any + Send>) -> String {
     let msg = p
         .downcast_ref::<&str>()
@@ -217,7 +217,7 @@ fn panicked(p: Box<dyn Any + Send>) -> String {
 }
 
 impl GoogleOidc {
-    /// Go `log.Printf(msg)` through [`GoogleOidc::log`], or a `tracing` warning without one.
+    /// Writes `msg` through [`GoogleOidc::log`], or as a `tracing` warning without one.
     fn log_printf(&self, msg: &str) {
         match &self.log {
             Some(log) => log(msg),
@@ -225,7 +225,7 @@ impl GoogleOidc {
         }
     }
 
-    /// Go `deny`: logs the reason and returns it as a credential problem (401). The reason stays
+    /// Logs the reason and returns it as a credential problem (401). The reason stays
     /// server-side.
     fn deny(&self, reason: String) -> AuthnError {
         self.log_printf(&format!(
@@ -234,7 +234,7 @@ impl GoogleOidc {
         AuthnError::Unauthenticated(Some(reason))
     }
 
-    /// Go `forbid`: logs the reason and returns it as an authorization problem (403).
+    /// Logs the reason and returns it as an authorization problem (403).
     fn forbid(&self, reason: String) -> AuthnError {
         self.log_printf(&format!(
             "adk: authn: refused an OIDC-authenticated principal: {reason}"
@@ -243,7 +243,7 @@ impl GoogleOidc {
     }
 }
 
-/// Go `bearerToken`: the credential of the single `Authorization` header, whose scheme is
+/// The credential of the single `Authorization` header, whose scheme is
 /// `Bearer` in any case (RFC 9110). More than one header is rejected rather than resolved.
 pub(crate) fn bearer_token(auth_headers: &[String]) -> Result<String, String> {
     let [header] = auth_headers else {
@@ -261,7 +261,7 @@ pub(crate) fn bearer_token(auth_headers: &[String]) -> Result<String, String> {
     if !scheme.eq_ignore_ascii_case("Bearer") {
         return Err("authorization header is not a Bearer credential".into());
     }
-    // Go `strings.TrimSpace`: `unicode.IsSpace` is Unicode `White_Space`, as `str::trim`.
+    // Trims Unicode `White_Space`, as `str::trim` does.
     let token = token.trim();
     if token.is_empty() {
         return Err("bearer credential is empty".into());

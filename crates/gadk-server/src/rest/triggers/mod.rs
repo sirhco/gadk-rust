@@ -13,10 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Pub/Sub and Eventarc push triggers (port of Go `server/adkrest/controllers/triggers`): each
-//! delivery runs the agent in a fresh session, retrying a 429 with Go's jittered backoff. The
-//! controllers' [`handler`](PubSubController::handler) is an axum `MethodRouter` the caller mounts
-//! at a path of its choosing (plan 5a Task 10).
+//! Pub/Sub and Eventarc push triggers: each delivery runs the agent in a fresh session, retrying
+//! a 429 with jittered exponential backoff. The controllers'
+//! [`handler`](PubSubController::handler) is an axum `MethodRouter` the caller mounts at a path
+//! of its choosing.
 
 use std::fmt;
 use std::sync::Arc;
@@ -53,7 +53,7 @@ pub use config::TriggerConfig;
 pub use eventarc::EventarcController;
 pub use pubsub::PubSubController;
 
-/// Port of Go `triggers.ControllerConfig`.
+/// Configuration of the trigger controllers.
 #[derive(Clone)]
 pub struct ControllerConfig {
     /// The session service.
@@ -73,32 +73,31 @@ pub struct ControllerConfig {
     /// A delivery gets a session of its own, so a sliding window (which counts completed
     /// invocations within one session) has little to count; tail retention works normally,
     /// because it measures the prompt inside a single run. A sliding-window config is accepted
-    /// and logged as a warning (Go `newRetriableRunner`).
+    /// and logged as a warning.
     pub compaction: Option<CompactionConfig>,
     /// Clock and ID source of every runner.
     pub platform: Platform,
 }
 
-/// Go's `log.Printf` text for a sliding window with `CompactionInterval` 1.
+/// The warning text for a sliding window with `CompactionInterval` 1.
 const WARN_INTERVAL_ONE: &str = "adk: sliding-window compaction is configured on a trigger \
      controller with CompactionInterval 1, so it fires on every delivery and writes a summary \
      into a session that is discarded when the delivery ends. Use TokenThreshold and \
      EventRetentionSize to compact within a single run.";
 
-/// Go's `log.Printf` text for a sliding window with `CompactionInterval` above 1.
+/// The warning text for a sliding window with `CompactionInterval` above 1.
 const WARN_INTERVAL_ABOVE_ONE: &str = "adk: sliding-window compaction is configured on a \
      trigger controller, but a delivery handled in one attempt runs a single invocation, so the \
      window will not reach its interval. Use TokenThreshold and EventRetentionSize to compact \
      within a single run.";
 
-/// Port of Go `triggers.RetriableRunner`: runs an agent with retry semantics, creating a new
-/// session per delivery.
+/// Runs an agent with retry semantics, creating a new session per delivery.
 pub struct RetriableRunner {
     cfg: ControllerConfig,
 }
 
 impl RetriableRunner {
-    /// Go `newRetriableRunner`: logs (as a `tracing` warning) a sliding-window compaction config,
+    /// Logs (as a `tracing` warning) a sliding-window compaction config,
     /// which is accepted but cannot do what it does elsewhere.
     fn new(cfg: ControllerConfig) -> Self {
         match cfg.compaction.as_ref().map(|c| c.compaction_interval) {
@@ -109,7 +108,7 @@ impl RetriableRunner {
         Self { cfg }
     }
 
-    /// Go `validateCompaction`: whether the compaction config can serve every app of the loader.
+    /// Whether the compaction config can serve every app of the loader.
     /// The base runner config's agent is a placeholder the validation replaces per app.
     fn validate_compaction(&self) -> Result<(), AgentError> {
         let base = RunnerConfig {
@@ -130,7 +129,7 @@ impl RetriableRunner {
         )
     }
 
-    /// Go `RunAgent`: runs the agent of `app_name` for `message_content` as `user_id` and returns
+    /// Runs the agent of `app_name` for `message_content` as `user_id` and returns
     /// the resulting events.
     ///
     /// One session per delivery; retries of that delivery reuse it, so a throttled message
@@ -177,10 +176,9 @@ impl RetriableRunner {
             .await
     }
 
-    /// Go `runAgentWithRetry`: exponential backoff with jitter on a 429. After `max_retries` the
-    /// error is returned so the upstream service (Pub/Sub, Eventarc) retries at a higher level.
-    /// A negative `max_retries` runs nothing and succeeds with no events (Go's loop never
-    /// enters).
+    /// Runs with exponential backoff and jitter on a 429. After `max_retries` the error is
+    /// returned so the upstream service (Pub/Sub, Eventarc) retries at a higher level. A negative
+    /// `max_retries` runs nothing and succeeds with no events.
     async fn run_agent_with_retry(
         &self,
         runner: &Runner,
@@ -233,21 +231,20 @@ impl RetriableRunner {
     }
 }
 
-/// Go `fmt.Errorf("<prefix>: %w", err)` as an [`AgentError`].
+/// `err` wrapped with `<prefix>: ` as an [`AgentError`].
 fn wrap(prefix: &str, err: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> AgentError {
     AgentError::Other(Box::new(GoWrapped::new(prefix, err)))
 }
 
-/// Go `isResourceExhausted`: whether the error text names a transient rate limit.
+/// Whether the error text names a transient rate limit.
 fn is_resource_exhausted(err: &AgentError) -> bool {
     let text = err.to_string();
     text.contains("429") || text.contains("ResourceExhausted")
 }
 
-/// Go `calculateBackoff` with Go's float math: `min(base * 2^attempt, max_delay)` plus a jitter
-/// of up to half of that; `random` is Go's `rand.Float64()` (in `[0, 1)`). Float-to-duration
-/// conversions truncate as Go's do; a backoff beyond `u64` nanoseconds saturates (Go's
-/// conversion is implementation-defined there).
+/// The retry delay: `min(base * 2^attempt, max_delay)` plus a jitter of up to half of that;
+/// `random` is in `[0, 1)`. Float-to-duration conversions truncate; a backoff beyond `u64`
+/// nanoseconds saturates.
 fn calculate_backoff(attempt: i32, base: Duration, max_delay: Duration, random: f64) -> Duration {
     let backoff = base.as_nanos() as f64 * 2f64.powi(attempt);
     let delay = Duration::from_nanos(backoff as u64).min(max_delay);
@@ -255,7 +252,7 @@ fn calculate_backoff(attempt: i32, base: Duration, max_delay: Duration, random: 
     delay.saturating_add(jitter)
 }
 
-/// Go `respondError`: `{"status":"<msg>"}` with `code`.
+/// `{"status":"<msg>"}` with `code`.
 fn respond_error(code: StatusCode, msg: &str) -> Response {
     encode_json_response(
         &TriggerResponse {
@@ -265,7 +262,7 @@ fn respond_error(code: StatusCode, msg: &str) -> Response {
     )
 }
 
-/// Go `respondSuccess`: 200 `{"status":"success"}`.
+/// 200 `{"status":"success"}`.
 fn respond_success() -> Response {
     encode_json_response(
         &TriggerResponse {
@@ -275,7 +272,7 @@ fn respond_success() -> Response {
     )
 }
 
-/// Go `appName(r)`: the `app_name` path variable.
+/// The `app_name` path variable.
 fn app_name(req: &Request) -> Result<String, String> {
     path_vars(req)
         .0
@@ -287,7 +284,7 @@ fn app_name(req: &Request) -> Result<String, String> {
 /// A request body that could not be read.
 #[derive(Debug)]
 enum BodyError {
-    /// The body exceeded the configured limit (Go `*http.MaxBytesError`).
+    /// The body exceeded the configured limit.
     TooLarge,
     /// Any other read failure.
     Other(String),
@@ -296,7 +293,7 @@ enum BodyError {
 impl fmt::Display for BodyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            // Go `http.MaxBytesError.Error()`.
+            // The same text as [`crate::rest::middleware::MaxBytesError`].
             BodyError::TooLarge => f.write_str("http: request body too large"),
             BodyError::Other(msg) => f.write_str(msg),
         }
@@ -304,9 +301,8 @@ impl fmt::Display for BodyError {
 }
 
 /// Reads the whole body under axum's limit: the caller's `DefaultBodyLimit` (axum's default when
-/// none is set), a length-limited body, or a body limited by [`max_bytes_middleware`] (Go
-/// `http.MaxBytesReader`, which the web launcher applies to every route); exceeding any of them is
-/// [`BodyError::TooLarge`].
+/// none is set), a length-limited body, or a body limited by [`max_bytes_middleware`] (which the
+/// web launcher applies to every route); exceeding any of them is [`BodyError::TooLarge`].
 ///
 /// [`max_bytes_middleware`]: crate::rest::max_bytes_middleware
 async fn read_body(req: Request) -> Result<Bytes, BodyError> {
@@ -324,10 +320,10 @@ async fn read_body(req: Request) -> Result<Bytes, BodyError> {
     }
 }
 
-/// Go `json.NewDecoder(r.Body).Decode(&v)` into a struct: decodes the first JSON value and
-/// ignores what follows it; an empty body is Go's `EOF`; `null` leaves the zero value.
+/// Decodes the first JSON value of the body and ignores what follows it; an empty body is the
+/// error `EOF`; `null` leaves the default value.
 fn decode_first<T: DeserializeOwned + Default>(body: &[u8]) -> Result<T, String> {
-    // Divergence (ledger 5a): nesting past 127 is serde's error (Go: 10000); see 5c.md.
+    // Nesting deeper than 127 levels is serde's recursion-limit error.
     match serde_json::Deserializer::from_slice(body)
         .into_iter::<Option<T>>()
         .next()
@@ -338,8 +334,8 @@ fn decode_first<T: DeserializeOwned + Default>(body: &[u8]) -> Result<T, String>
     }
 }
 
-/// Go `json.Unmarshal(data, &v)` into a struct: the whole input is one JSON value; an empty
-/// input is Go's `unexpected end of JSON input`; `null` leaves the zero value.
+/// Decodes `data`, which must be exactly one JSON value; an empty input is the error
+/// `unexpected end of JSON input`; `null` leaves the default value.
 fn unmarshal<T: DeserializeOwned + Default>(data: &[u8]) -> Result<T, String> {
     if data.iter().all(u8::is_ascii_whitespace) {
         return Err("unexpected end of JSON input".to_owned());
@@ -349,7 +345,7 @@ fn unmarshal<T: DeserializeOwned + Default>(data: &[u8]) -> Result<T, String> {
         .map_err(|e| e.to_string())
 }
 
-/// Go's `semaphore` channel: `None` (no limit) when `max_concurrent_runs` is not positive.
+/// The run-slot semaphore: `None` (no limit) when `max_concurrent_runs` is not positive.
 fn semaphore(max_concurrent_runs: i32) -> Option<Semaphore> {
     usize::try_from(max_concurrent_runs)
         .ok()
@@ -357,7 +353,7 @@ fn semaphore(max_concurrent_runs: i32) -> Option<Semaphore> {
         .map(Semaphore::new)
 }
 
-/// Waits for a run slot (Go `c.semaphore <- struct{}{}`); the permit frees it when dropped.
+/// Waits for a run slot; the permit frees it when dropped.
 async fn acquire(semaphore: Option<&Semaphore>) -> Option<SemaphorePermit<'_>> {
     match semaphore {
         // The semaphore is never closed, so acquiring only fails if it were.
@@ -366,8 +362,8 @@ async fn acquire(semaphore: Option<&Semaphore>) -> Option<SemaphorePermit<'_>> {
     }
 }
 
-/// Inserts the route's path parameters as [`PathVars`] (Go `mux.Vars`) unless the request
-/// already carries them, so a handler mounted on an axum route reads `{app_name}` as Go does.
+/// Inserts the route's path parameters as [`PathVars`] unless the request already carries them,
+/// so a handler mounted on an axum route reads `{app_name}` like one on the REST route table.
 async fn with_path_vars(req: Request) -> Request {
     if req.extensions().get::<PathVars>().is_some() {
         return req;

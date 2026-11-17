@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `controllers/debug.go` and `internal/routers/debug.go` (plan 5a Task 12).
+//! The debug controller (per-event spans, session spans, event graph) and its routes.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -36,10 +36,10 @@ use crate::rest::routing::{DEV_PREFIX, Request, Response, Route, controller_hand
 
 /// semconv `gen_ai.operation.name`.
 const OPERATION_NAME_ATTRIBUTE: &str = "gen_ai.operation.name";
-/// The operations whose span the per-event trace returns (Go `wantedOperations`).
+/// The operations whose span the per-event trace returns.
 const WANTED_OPERATIONS: [&str; 2] = ["execute_tool", "generate_content"];
 
-/// Port of Go `controllers.DebugAPIController`.
+/// Serves the debug trace and agent graph endpoints.
 pub struct DebugApiController {
     sessions: Arc<dyn SessionService>,
     loader: Option<Arc<dyn Loader>>,
@@ -48,7 +48,7 @@ pub struct DebugApiController {
 }
 
 impl DebugApiController {
-    /// Go `NewDebugAPIController` (authorizer: [`authz::noop`]).
+    /// A controller over the sessions, loader and trace store (authorizer: [`authz::noop`]).
     pub fn new(
         sessions: Arc<dyn SessionService>,
         loader: Option<Arc<dyn Loader>>,
@@ -62,13 +62,13 @@ impl DebugApiController {
         }
     }
 
-    /// Go `WithAuthorizer`.
+    /// This controller with `a` deciding whether the caller may act as the path's user.
     pub fn with_authorizer(mut self, a: Arc<dyn Authorizer>) -> Self {
         self.authorizer = a;
         self
     }
 
-    /// Go `EventSpanHandler`: the event's `execute_tool` or `generate_content` span, flattened
+    /// The event's `execute_tool` or `generate_content` span, flattened
     /// (its attributes beside the span fields), as the web UI's per-event trace view reads it.
     pub async fn event_span_handler(&self, req: Request) -> Response {
         let event_id = path_vars(&req)
@@ -96,7 +96,7 @@ impl DebugApiController {
         }
     }
 
-    /// Go `SessionSpansHandler`: every stored span of the session's traces.
+    /// Every stored span of the session's traces.
     pub async fn session_spans_handler(&self, req: Request) -> Response {
         let session_id = path_vars(&req)
             .0
@@ -110,7 +110,7 @@ impl DebugApiController {
         encode_json_response(&spans, StatusCode::OK)
     }
 
-    /// Go `EventGraphHandler`: the app's agent graph (dark theme) with the event's edges
+    /// The app's agent graph (dark theme) with the event's edges
     /// highlighted, as `{"dotSrc": …}`.
     pub async fn event_graph_handler(&self, req: Request) -> Response {
         let vars = path_vars(&req);
@@ -150,7 +150,7 @@ impl DebugApiController {
             return http_error(StatusCode::NOT_FOUND, "event not found");
         };
         let highlighted_pairs = highlighted_pairs(&event);
-        // parity: Go calls a nil loader and panics; gadk answers 500 instead.
+        // Without a loader the request answers 500.
         let Some(loader) = &self.loader else {
             return http_error(StatusCode::INTERNAL_SERVER_ERROR, "no agent loader");
         };
@@ -163,7 +163,7 @@ impl DebugApiController {
     }
 }
 
-/// Go's highlighted pairs for an event: `[call name, author]` for each named function call, else
+/// The highlighted pairs for an event: `[call name, author]` for each named function call, else
 /// for each named function response, else `[author, author]`.
 fn highlighted_pairs(event: &Event) -> Vec<Vec<String>> {
     let parts = event
@@ -194,7 +194,7 @@ fn highlighted_pairs(event: &Event) -> Vec<Vec<String>> {
         .collect()
 }
 
-/// A value of Go's flattened event span (`map[string]any`).
+/// A value of the flattened event span.
 #[derive(Serialize)]
 #[serde(untagged)]
 enum FlatValue<'a> {
@@ -204,7 +204,7 @@ enum FlatValue<'a> {
     Attribute(&'a Value),
 }
 
-/// Go `convertEventSpan`: the span fields and its attributes in one object (keys sorted, an
+/// The span fields and its attributes in one object (keys sorted, an
 /// attribute overriding a span field of the same name).
 fn convert_event_span(span: &DebugSpan) -> BTreeMap<&str, FlatValue<'_>> {
     let mut flat = BTreeMap::from([
@@ -222,7 +222,7 @@ fn convert_event_span(span: &DebugSpan) -> BTreeMap<&str, FlatValue<'_>> {
     flat
 }
 
-/// Go `DebugAPIRouter.Routes`.
+/// The debug routes.
 pub(crate) fn debug_routes(c: Arc<DebugApiController>) -> Vec<Route> {
     vec![
         route(

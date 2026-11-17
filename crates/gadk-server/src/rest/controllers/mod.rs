@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The REST API controllers (port of ADK-Go `server/adkrest/controllers`). Every handler is
-//! `async fn(&self, Request) -> Response` (plan decision D3): path variables come from the
+//! The REST API controllers. Every handler is `async fn(&self, Request) -> Response`: path
+//! variables come from the
 //! request's [`PathVars`](crate::rest::PathVars) extension and the authenticated caller from its
 //! [`Caller`](crate::authn::Caller) extension.
 

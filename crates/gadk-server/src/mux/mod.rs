@@ -13,17 +13,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The parts of gorilla/mux v1.8.1 that gadk's routers reproduce: the handler types, the path
-//! template matcher (`Route.Path` and `Route.PathPrefix`), `cleanPath` and `Router.ServeHTTP`'s
-//! clean-path redirect; and the `net/http` answers they share: `Error`, `NotFound`, `Redirect`,
-//! the server's own `OPTIONS *` and bad-request answers, and its HEAD body stripping.
+//! Routing primitives for gadk's HTTP routers: the handler types, the path template matcher
+//! (whole-path and prefix matching), path cleaning and the redirect to the cleaned path; and the
+//! plain HTTP answers they share: error and not-found responses, redirects, the answers to
+//! `OPTIONS *` and to a malformed request target, and HEAD body stripping.
 //!
 //! The REST server's route table ([`rest::Server`](crate::rest::Server)) and the launcher's web
-//! router ([`router::WebRouter`]) are both built on it, and [`WriteDeadline`] is the launcher
-//! server's `http.ResponseController.SetWriteDeadline`.
+//! router ([`router::WebRouter`]) are both built on it, and [`WriteDeadline`] is the hook the
+//! launcher server provides for moving a response's write deadline.
 //!
-//! This module mirrors gorilla/mux and `net/http` internals and is plumbing shared by gadk's
-//! own crates, not a stable API: it changes with them.
+//! This module is plumbing shared by gadk's own crates, not a stable API: it changes with them.
 
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -41,10 +40,10 @@ pub mod router;
 pub type Request = http::Request<axum::body::Body>;
 /// A handler's response.
 pub type Response = axum::response::Response;
-/// A route's handler (Go `http.Handler`).
+/// A route's handler.
 pub type Handler = Arc<dyn Fn(Request) -> BoxFuture<'static, Response> + Send + Sync>;
 
-/// Wraps an async function as a [`Handler`] (Go `http.HandlerFunc`).
+/// Wraps an async function as a [`Handler`].
 pub fn handler<F, Fut>(f: F) -> Handler
 where
     F: Fn(Request) -> Fut + Send + Sync + 'static,
@@ -53,17 +52,15 @@ where
     Arc::new(move |req| Box::pin(f(req)))
 }
 
-/// The path variables of the matched route (Go `mux.Vars`), as a request extension; tests insert
-/// it directly (Go `mux.SetURLVars`).
+/// The path variables of the matched route, as a request extension; tests insert it directly.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PathVars(pub BTreeMap<String, String>);
 
-/// The serving connection's write deadline for this request's response (Go
-/// `http.NewResponseController(rw).SetWriteDeadline`), as a request extension.
+/// The serving connection's write deadline for this request's response, as a request extension.
 ///
 /// A server that honours per-request write deadlines (the web launcher's) inserts it; a handler
 /// that finds it may move the deadline, overriding the server's write timeout for this response.
-/// `None` clears the deadline (Go: the zero time). Without the extension the server's own
+/// `None` clears the deadline. Without the extension the server's own
 /// timeouts apply unchanged.
 #[derive(Clone)]
 pub struct WriteDeadline(Arc<dyn Fn(Option<tokio::time::Instant>) + Send + Sync>);
@@ -74,7 +71,7 @@ impl WriteDeadline {
         WriteDeadline(Arc::new(set))
     }
 
-    /// Go `SetWriteDeadline`: writes after `deadline` fail; `None` means no deadline.
+    /// Writes after `deadline` fail; `None` means no deadline.
     pub fn set(&self, deadline: Option<tokio::time::Instant>) {
         (self.0)(deadline);
     }
@@ -86,27 +83,27 @@ impl std::fmt::Debug for WriteDeadline {
     }
 }
 
-/// One piece of a gorilla/mux path template.
+/// One piece of a path template.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Piece {
     /// Bytes matched exactly.
     Literal(Vec<u8>),
-    /// `{name}`: one or more bytes other than `/` (mux's default `[^/]+`).
+    /// `{name}`: one or more bytes other than `/` (the regexp `[^/]+`).
     Var(String),
 }
 
-/// A gorilla/mux v1.8.1 path template (`{name}` / `{name:regexp}` subset the code base uses).
+/// A path template with `{name}` variables (and the `{name:regexp}` form, whose `:regexp` part is
+/// dropped; no gadk route uses one).
 ///
-/// Variables match mux's default `[^/]+`; the `:regexp` of a `{name:regexp}` variable is dropped
-/// (no gadk route uses one). [`Template::matches`] is a `Route.Path` template without
-/// `StrictSlash` (anchored at both ends), [`Template::matches_prefix`] a `Route.PathPrefix`
-/// template (anchored at the start only).
+/// Variables match `[^/]+`. [`Template::matches`] matches a whole path (anchored at both ends,
+/// no trailing-slash leniency), [`Template::matches_prefix`] matches a path prefix (anchored at
+/// the start only).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Template(Vec<Piece>);
 
 impl Template {
-    /// Splits `pattern` into literals and `{name}` variables (mux `braceIndices`: nested braces
-    /// belong to the outer variable; a `:pattern` suffix is dropped).
+    /// Splits `pattern` into literals and `{name}` variables (nested braces belong to the outer
+    /// variable; a `:pattern` suffix is dropped).
     pub fn parse(pattern: &str) -> Template {
         let mut pieces = Vec::new();
         let mut literal = Vec::new();
@@ -147,19 +144,18 @@ impl Template {
         Template(pieces)
     }
 
-    /// Whole-path match (gorilla `Path`): the path variables, or `None`. `path` is Go's
-    /// `URL.Path` (decoded). Variables are greedy and backtrack, so the submatches are those of
-    /// Go's leftmost-first regexp `^…([^/]+)…$`.
+    /// Whole-path match: the path variables, or `None`. `path` is the decoded URL path. Variables
+    /// are greedy and backtrack, so the captured values are those of the leftmost-first regexp
+    /// `^…([^/]+)…$`.
     pub fn matches(&self, path: &[u8]) -> Option<PathVars> {
         let mut spans = Vec::new();
         match_from(&self.0, path, 0, true, &mut spans)?;
         Some(self.vars(path, spans))
     }
 
-    /// Prefix match (gorilla `PathPrefix`): the variables and the matched length, or `None`.
-    /// mux compiles a prefix template without the `$` anchor, so the match is the leftmost-first
-    /// match of `^…([^/]+)…`: a variable takes as much as it can and a literal need not end at a
-    /// `/` (`/foo` matches `/foobar`).
+    /// Prefix match: the variables and the matched length, or `None`. The template is matched
+    /// without the `$` anchor, as the leftmost-first match of `^…([^/]+)…`: a variable takes as
+    /// much as it can and a literal need not end at a `/` (`/foo` matches `/foobar`).
     pub fn matches_prefix(&self, path: &[u8]) -> Option<(PathVars, usize)> {
         let mut spans = Vec::new();
         let end = match_from(&self.0, path, 0, false, &mut spans)?;
@@ -220,7 +216,8 @@ fn match_from(
     }
 }
 
-/// gorilla `cleanPath`: Go `path.Clean` of a rooted path, keeping a trailing slash.
+/// Cleans a path: makes it rooted, resolves `.`, `..` and repeated `/` elements, and keeps a
+/// trailing slash.
 pub fn clean_path(p: &[u8]) -> Vec<u8> {
     if p.is_empty() {
         return b"/".to_vec();
@@ -237,8 +234,9 @@ pub fn clean_path(p: &[u8]) -> Vec<u8> {
     np
 }
 
-/// Go `path.Clean` for a path starting with `/`, on bytes (a decoded path need not be UTF-8, so
-/// `gadk_platform::go_path_clean` does not apply).
+/// Lexically cleans a path starting with `/`, on bytes (a decoded path need not be UTF-8, so
+/// `gadk_platform::go_path_clean` does not apply): drops empty and `.` elements and resolves `..`
+/// against the preceding element (it cannot climb above the root).
 fn go_path_clean_rooted(path: &[u8]) -> Vec<u8> {
     let n = path.len();
     let mut out = vec![b'/'];
@@ -249,7 +247,7 @@ fn go_path_clean_rooted(path: &[u8]) -> Vec<u8> {
             r += 1;
         } else if path[r] == b'.' && path[r + 1] == b'.' && (r + 2 == n || path[r + 2] == b'/') {
             r += 2;
-            // Back up to the previous `/` (Go's `out.w--` loop).
+            // Back up to the previous `/`.
             if out.len() > dotdot {
                 let mut w = out.len() - 1;
                 while w > dotdot && out[w] != b'/' {
@@ -270,9 +268,9 @@ fn go_path_clean_rooted(path: &[u8]) -> Vec<u8> {
     out
 }
 
-/// gorilla's clean-path redirect: 301 to `clean`, keeping the query (Router.ServeHTTP). The
-/// `Location` is Go `URL.String` of the request URL with the clean path: scheme and authority
-/// when the target had them, the escaped path, the query.
+/// The clean-path redirect: 301 to `clean`, keeping the query. The `Location` is the request URL
+/// with the clean path: scheme and authority when the target had them, the escaped path, the
+/// query.
 pub fn clean_path_redirect(uri: &Uri, clean: &[u8]) -> Response {
     let mut location = String::new();
     if let (Some(scheme), Some(authority)) = (uri.scheme_str(), uri.authority()) {
@@ -293,9 +291,9 @@ pub fn clean_path_redirect(uri: &Uri, clean: &[u8]) -> Response {
     resp
 }
 
-/// Go's `r.RequestURI` / `r.URL` of a request: an HTTP/2 request has only its `:path` (hyper adds
-/// `:scheme` and `:authority` to the URI), an HTTP/1 request its request target as sent
-/// (absolute-form included).
+/// The request target of a request: an HTTP/2 request has only its `:path` (hyper adds `:scheme`
+/// and `:authority` to the URI), an HTTP/1 request its request target as sent (absolute-form
+/// included).
 pub fn go_request_uri(req: &Request) -> Uri {
     match req.uri().path_and_query() {
         Some(pq) if req.version() == http::Version::HTTP_2 => Uri::from(pq.clone()),
@@ -303,7 +301,7 @@ pub fn go_request_uri(req: &Request) -> Uri {
     }
 }
 
-/// Go `net/http.Error`: `msg` and a newline as `text/plain; charset=utf-8`, with
+/// An error response: `msg` and a newline as `text/plain; charset=utf-8`, with
 /// `X-Content-Type-Options: nosniff`.
 pub fn http_error(status: StatusCode, msg: &str) -> Response {
     let mut resp = Response::new(Body::from(format!("{msg}\n")));
@@ -317,13 +315,13 @@ pub fn http_error(status: StatusCode, msg: &str) -> Response {
     resp
 }
 
-/// Go `net/http.NotFound`: 404 `404 page not found`.
+/// The 404 response with the body `404 page not found`.
 pub fn not_found() -> Response {
     http_error(StatusCode::NOT_FOUND, "404 page not found")
 }
 
-/// Go's `net/http` server answer to a request target whose escapes do not decode: `400 Bad
-/// Request` as plain text, and the connection closed.
+/// The answer to a request target whose escapes do not decode: `400 Bad Request` as plain text,
+/// and the connection closed.
 pub fn bad_request() -> Response {
     let mut resp = Response::new(Body::from("400 Bad Request"));
     *resp.status_mut() = StatusCode::BAD_REQUEST;
@@ -336,7 +334,7 @@ pub fn bad_request() -> Response {
     resp
 }
 
-/// Go `globalOptionsHandler`: `OPTIONS *` answers 200 with `Content-Length: 0`.
+/// The answer to `OPTIONS *`: 200 with `Content-Length: 0`.
 pub fn options_star() -> Response {
     let mut resp = Response::new(Body::empty());
     resp.headers_mut()
@@ -344,9 +342,8 @@ pub fn options_star() -> Response {
     resp
 }
 
-/// A HEAD response as Go's server writes it: the headers of the GET response, the would-be body
-/// length as `Content-Length` when the handler wrote a body of known length (Go's `chunkWriter`
-/// sets it for HEAD only when something was written), and no body.
+/// A HEAD response: the headers of the GET response, the would-be body length as
+/// `Content-Length` when the handler produced a body of known, non-zero length, and no body.
 pub fn strip_body(mut resp: Response) -> Response {
     if !resp.headers().contains_key(CONTENT_LENGTH)
         && let Some(len) = resp.body().size_hint().exact()
@@ -359,7 +356,7 @@ pub fn strip_body(mut resp: Response) -> Response {
     resp
 }
 
-/// Go `URL.EscapedPath()` of a request target's path: the path as sent when it is a valid
+/// The escaped form of a request target's path: the path as sent when it is a valid
 /// encoding, else the default escaping of its decoded form.
 pub fn escaped_path(uri: &Uri) -> String {
     let raw = uri.path();
@@ -372,8 +369,8 @@ pub fn escaped_path(uri: &Uri) -> String {
     }
 }
 
-/// Go `net/http.Redirect(w, r, url, code)` on a fresh response: a relative `url` is made absolute
-/// against the request's escaped path and cleaned (keeping a trailing slash and the query);
+/// A redirect to `url` with status `code`: a relative `url` is made absolute against the
+/// request's escaped path and cleaned (keeping a trailing slash and the query);
 /// `Location` is `url` with non-ASCII bytes hex-escaped; GET and HEAD get
 /// `Content-Type: text/html; charset=utf-8`, and GET the short HTML body.
 pub fn redirect(req: &Request, url: &str, code: StatusCode) -> Response {
@@ -387,7 +384,7 @@ pub fn redirect(req: &Request, url: &str, code: StatusCode) -> Response {
             old_path = "/".to_owned();
         }
         if !url.starts_with('/') {
-            // `path.Split(oldpath)`'s directory.
+            // The directory part of the request path.
             let old_dir = &old_path[..old_path.rfind('/').map_or(0, |i| i + 1)];
             url = format!("{old_dir}{url}");
         }
@@ -415,14 +412,14 @@ pub fn redirect(req: &Request, url: &str, code: StatusCode) -> Response {
         );
     }
     if method == Method::GET {
-        // `fmt.Fprintln(w, body)` where body already ends in a newline.
+        // The body already ends in a newline, and a second one follows it.
         let text = code.canonical_reason().unwrap_or_default();
         *resp.body_mut() = Body::from(format!("<a href=\"{}\">{text}</a>.\n\n", html_escape(&url)));
     }
     resp
 }
 
-/// Go `hexEscapeNonASCII`: bytes outside ASCII as `%` and lowercase hex.
+/// Escapes bytes outside ASCII as `%` and lowercase hex.
 pub fn hex_escape_non_ascii(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for &b in s.as_bytes() {
@@ -435,8 +432,7 @@ pub fn hex_escape_non_ascii(s: &str) -> String {
     out
 }
 
-/// Go `net/http`'s `htmlEscape` (its `htmlReplacer`), which is also `html.EscapeString`:
-/// `&`, `<`, `>`, `"` and `'` as entities.
+/// `&`, `<`, `>`, `"` and `'` as the entities `&amp;`, `&lt;`, `&gt;`, `&#34;` and `&#39;`.
 pub fn html_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {

@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `server/authn/custom.go`.
+//! An [`Authenticator`] built from a closure.
 
 use std::future::Future;
 use std::sync::Arc;
@@ -30,7 +30,7 @@ struct Custom {
     f: Box<AuthFn>,
 }
 
-/// Port of Go `authn.NewCustom`: an [`Authenticator`] that calls `f`.
+/// An [`Authenticator`] that calls `f`.
 pub fn custom<F, Fut>(f: F) -> Arc<dyn Authenticator>
 where
     F: Fn(&http::request::Parts) -> Fut + Send + Sync + 'static,
