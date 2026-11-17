@@ -130,7 +130,7 @@ impl std::fmt::Debug for AgentEngineServiceFlags {
     }
 }
 
-/// The build flags.
+/// The build flags: the temp dir and the paths derived from it by `compute_flags`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BuildFlags {
     pub temp_dir: String,
@@ -140,7 +140,7 @@ pub struct BuildFlags {
     pub archive_path: String,
 }
 
-/// The source flags.
+/// The source flags: the entry point, its original form and the derived source paths.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SourceFlags {
     pub src_base_path: String,

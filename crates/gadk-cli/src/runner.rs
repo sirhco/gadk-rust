@@ -105,7 +105,7 @@ pub struct Cmd {
 impl Cmd {
     /// A command for `name`: a `name` without a `/` is looked up in
     /// `PATH` as `env` holds it (an empty `PATH` element is `.`; relative elements are
-    /// checked against `cwd` and fail, as an executable found relative to the current directory).
+    /// checked against `cwd` and fail with the relative-executable error).
     pub fn new(env: &dyn EnvProvider, cwd: &Path, name: &str, args: &[&str]) -> Cmd {
         let mut cmd = Cmd {
             path: name.to_string(),
@@ -195,8 +195,9 @@ fn is_executable(p: &Path) -> bool {
     }
 }
 
-/// Starts processes. `Err` is the text of the error from starting the child (the lookup failure
-/// for a failed lookup, else the spawn failure); a started child that fails is an `Ok` [`Exit`].
+/// Starts processes. `Err` is the text of the error from starting the child (the lookup
+/// failure for a failed lookup, else the spawn failure); a started child that fails is an `Ok`
+/// [`Exit`].
 #[async_trait]
 pub trait CommandRunner: Send + Sync {
     /// Runs `cmd` to completion with stdin

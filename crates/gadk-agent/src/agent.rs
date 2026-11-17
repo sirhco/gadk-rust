@@ -60,8 +60,8 @@ pub trait Agent: Send + Sync + 'static {
     fn sub_agents(&self) -> &[Arc<dyn Agent>];
     /// Runs the agent; dropping the stream cancels the run.
     fn run(&self, ctx: InvocationContext) -> EventStream;
-    /// This agent or a descendant named `name`. The agent itself is found only for
-    /// agents built by [`new`]/[`new_with_state`].
+    /// This agent or a descendant named `name`. The agent itself is found only for agents
+    /// built by [`new`]/[`new_with_state`].
     fn find_agent(&self, name: &str) -> Option<Arc<dyn Agent>> {
         if self.name() == name {
             return self_arc_any(self.as_any());
@@ -625,20 +625,24 @@ pub mod telemetry {
     }
 
     /// Names the `error.type` of an error from a crate gadk-agent cannot see; `None` for an error
-    /// it does not name.
+    /// it does not name. The returned string is the type name as an ADK server reports it, such
+    /// as `*errors.errorString` (see [`GO_ERROR_STRING_TYPE`]).
     pub type GoErrorTypeResolver = fn(&(dyn std::error::Error + 'static)) -> Option<&'static str>;
 
     static GO_ERROR_TYPE_RESOLVER: OnceLock<GoErrorTypeResolver> = OnceLock::new();
 
     /// Installs the resolver [`error_type`] asks for the `error.type` of the error itself (the
-    /// first one installed wins). gadk-engine installs one that names a workflow node run error.
+    /// first one installed wins). The resolver's strings are used verbatim, in the type-name form
+    /// of [`GoErrorTypeResolver`] (such as `*errors.errorString`). gadk-engine installs one that
+    /// names a workflow node run error.
     pub fn set_go_error_type_resolver(f: GoErrorTypeResolver) {
         let _ = GO_ERROR_TYPE_RESOLVER.set(f);
     }
 
-    /// The span's `error.type` for an error: an API error's HTTP code (found through wrapping),
-    /// else the installed resolver's name for the error itself (seen through
-    /// [`AgentError::Workflow`], which is transparent), else [`GO_ERROR_STRING_TYPE`].
+    /// The span's `error.type` for an error: an API error's HTTP status as a decimal string
+    /// (found through wrapping), else the installed resolver's name for the error itself, returned
+    /// verbatim (seen through [`AgentError::Workflow`], which is transparent), else the
+    /// [`GO_ERROR_STRING_TYPE`] value.
     pub fn error_type(err: &(dyn std::error::Error + 'static)) -> String {
         if let Some(code) = api_error_code(err) {
             return code;
@@ -653,8 +657,7 @@ pub mod telemetry {
         GO_ERROR_STRING_TYPE.to_owned()
     }
 
-    /// The HTTP code of the first API error in `err`'s
-    /// chain.
+    /// The HTTP code of the first API error in `err`'s chain.
     fn api_error_code(err: &(dyn std::error::Error + 'static)) -> Option<String> {
         let mut cur: Option<&(dyn std::error::Error + 'static)> = Some(err);
         while let Some(e) = cur {
