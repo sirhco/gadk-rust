@@ -25,6 +25,10 @@ jobs:
         run: |
           python3 scripts/check-workspace-deps.py
           python3 scripts/check_workspace_deps_test.py
+      - name: go references
+        run: |
+          python3 scripts/check_go_refs_test.py
+          python3 scripts/check-go-refs.py
   msrv:
     runs-on: ubuntu-latest
     timeout-minutes: 45
