@@ -7,6 +7,11 @@ the public API.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-16
+
+Observability and evaluation: Cloud Logging export, a local web console, and an offline
+evaluator. Not published to crates.io.
+
 ### Added
 
 - `gadk-telemetry` exports log records to Cloud Logging with `with_otel_to_cloud(true)`, each
@@ -145,5 +150,6 @@ deliberately differs from ADK-Go, the source is marked `// Divergence (ledger â€
 - Some `gadk-goyaml` type-name error texts differ from yaml.v3.
 - The live GCS artifact test has not been run against a real bucket.
 
-[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/sirhco/gadk-rust/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/sirhco/gadk-rust/releases/tag/v0.1.0
