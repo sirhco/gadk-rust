@@ -66,10 +66,10 @@ impl StreamQueryHandler {
         }
     }
 
-    /// Decodes `payload` as `models.StreamQueryRequest` then
-    /// `models.StreamQueryTextRequest` (both through `go_unmarshal`; both failing →
-    /// `Err("json.Unmarshal() failed both for models.StreamQueryRequest (<e1>) and
-    /// models.StreamQueryTextRequest (<e2>)")`, also logged; a text message becomes a user
+    /// Decodes `payload` as `StreamQueryRequest` then
+    /// `StreamQueryTextRequest` (both through `go_unmarshal`; both failing →
+    /// an `Err` naming both request types with both decode errors, also
+    /// logged; a text message becomes a user
     /// `Content` with one text part), builds the runner (`Err("s.run() failed: failed to create
     /// runner: <err>")`, logged), and answers 200 with `Content-Type: application/json`,
     /// `Cache-Control: no-cache`, `Connection: keep-alive` and a streaming body: per runner
@@ -77,16 +77,16 @@ impl StreamQueryHandler {
     /// and skipped; any other error is logged `error in events: <err>\n`, written as one
     /// `emit_json_error` line, and ends the stream; a `None`/content-less event is skipped; an
     /// event is one `emit_json(&event)` line (an emit failure is logged
-    /// `helper.EmitJSON() failed: <err>`, written as an error line, and ends the stream).
+    /// with the encoder's error text, written as an error line, and ends the stream).
     pub(crate) async fn stream_jsonl(&self, payload: Bytes) -> Result<Response, String> {
-        // try to unmarshal models.StreamQueryRequest first
+        // try to unmarshal StreamQueryRequest first
         let req = match go_unmarshal::<StreamQueryRequest>(
             &payload,
             &encode_shapes::MODELS_STREAM_QUERY_REQUEST,
         ) {
             Ok(req) => req,
             Err(err) => {
-                // try to unmarshal models.StreamQueryTextRequest
+                // try to unmarshal StreamQueryTextRequest
                 match go_unmarshal::<StreamQueryTextRequest>(
                     &payload,
                     &encode_shapes::MODELS_STREAM_QUERY_TEXT_REQUEST,
@@ -171,9 +171,9 @@ pub(crate) fn new_runner(
 /// - another error: log `error in events: <err>\n`, write one [`emit_json_error`] line, end;
 /// - an event without content: skip it;
 /// - an event: the line `line(&event, &log)`; an `Err(e)` is logged
-///   `helper.EmitJSON() failed: <e>`, written as an error line, and ends the stream.
+///   with the encoder's error text, written as an error line, and ends the stream.
 ///
-/// An error line that cannot be encoded is logged `helper.EmitJSONError() failed: <err>` and
+/// An error line that cannot be encoded is logged with the encoder's error text and
 /// ends the stream without a line.
 pub(crate) fn ndjson_response<F>(events: EventStream, log: Log, line: F) -> Response
 where
@@ -221,7 +221,7 @@ where
 }
 
 /// The error line written in the stream loop, or `None` after logging
-/// `helper.EmitJSONError() failed: <err>`.
+/// the encoder's error text.
 fn error_line(text: &str, log: &Log) -> Option<Bytes> {
     match emit_json_error(text, log) {
         Ok(chunk) => Some(chunk),

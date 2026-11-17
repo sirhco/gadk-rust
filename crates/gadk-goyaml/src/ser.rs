@@ -164,7 +164,7 @@ enum Content {
     Float(ReflectKind, f64),
     /// A string (any bytes) → `stringv`.
     Str(Vec<u8>),
-    /// `time.Time` → `timev`.
+    /// timestamp → `timev`.
     Time(DateTime<FixedOffset>),
     /// A slice → `slicev`.
     Seq(Vec<Content>),

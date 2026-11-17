@@ -20,7 +20,7 @@
 //!   and tool call/response with every field) and their serde mirrors named after the
 //!   recorded types, for decoding.
 //! - [`fixups`]: the type-path fixup table (byte slices, text-marshalled values, durations,
-//!   timestamps, `genai.Schema` titles, JSON-schema values) and the struct shapes, applied by
+//!   timestamps, `Schema` titles, JSON-schema values) and the struct shapes, applied by
 //!   the node builder (zero-filling every field, declaration field order, the leaf classes),
 //!   and their inverse on decode.
 //! - [`jsonschema`]: the reshaping of a JSON-schema value into the reflection of the

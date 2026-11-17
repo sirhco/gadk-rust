@@ -138,7 +138,7 @@ pub fn sse_events(body: BodyStream) -> BoxStream<'static, Result<SseEvent, Model
 
 /// [`sse_events`] with a line limit: a line whose
 /// bytes plus its `\n` exceed `max_line`, or an unterminated tail of `max_line` bytes, ends the
-/// stream with [`ModelError::Other`] `bufio.Scanner: token too long`.
+/// stream with a [`ModelError::Other`] whose text is the `TOKEN_TOO_LONG` literal.
 pub fn sse_events_with_max_line(
     body: BodyStream,
     max_line: usize,

@@ -21,7 +21,7 @@
 //!
 //! [`reshape`] assigns each JSON keyword to its `Schema` field: it returns
 //! an object keyed by the `Schema` fields' YAML keys, which the `super::fixups::Builder` then
-//! encodes with the `jsonschema.Schema` shape (declaration order, zero-fill); nested schemas
+//! encodes with the `Schema` shape (declaration order, zero-fill); nested schemas
 //! stay JSON and are reshaped when the builder reaches them.
 
 use base64::Engine as _;

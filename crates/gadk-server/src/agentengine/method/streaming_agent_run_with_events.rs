@@ -62,8 +62,8 @@ impl StreamingAgentRunWithEventsHandler {
         }
     }
 
-    /// Decodes the request (`json.Unmarshal() failed for
-    /// models.StreamingAgentRunWithEventsRequest: <err>`), its `request_json`
+    /// Decodes the request (a decode error naming
+    /// `StreamingAgentRunWithEventsRequest`), its `request_json`
     /// ([`decode_streaming_agent_run_with_events_request`];
     /// `decodeStreamingAgentRunWithEventsRequest() failed: <err>`), runs
     /// [`Self::ensure_backend_session`] (`s.ensureBackendSession() failed: <err>`), builds the
@@ -191,8 +191,8 @@ pub(crate) fn envelope_line(
     }
 }
 
-/// Decodes `input.request_json` (via `go_unmarshal`; failure is
-/// `json.Unmarshal(input.request_json) failed: <err>`), and returns it with the session ID it
+/// Decodes `input.request_json` (via `go_unmarshal`; a failure is
+/// the decode error text, see the literal in this function), and returns it with the session ID it
 /// requested.
 pub(crate) fn decode_streaming_agent_run_with_events_request(
     req: &StreamingAgentRunWithEventsRequest,

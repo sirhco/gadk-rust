@@ -64,7 +64,7 @@ pub(crate) fn method_metadata(
 
 /// A plain JSON response of a session method: 200, the JSON (`gadk_model::to_go_json`) plus
 /// `\n`, `Content-Type: text/plain; charset=utf-8` (the type a sniffing server would pick; no
-/// other headers). An encoding failure is `json.NewEncoder failed: <err>`.
+/// other headers). An encoding failure is the `Err` of the encoder's error text.
 pub(crate) fn encode_plain<T: serde::Serialize>(v: &T) -> Result<Response, String> {
     let mut body = gadk_model::to_go_json(v).map_err(|e| format!("json.NewEncoder failed: {e}"))?;
     body.push(b'\n');

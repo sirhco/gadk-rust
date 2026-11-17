@@ -114,9 +114,9 @@ impl VertexAiMemoryService {
     ///
     /// # Errors
     ///
-    /// [`MemoryError::Backend`] with the text
-    /// `newVertexAIClient failed: aiplatform.NewMemoryBankClient failed: {adc error}`
-    /// when Application Default Credentials cannot be built.
+    /// [`MemoryError::Backend`] with the client-construction
+    /// error text (see the literal in this function) when Application Default Credentials cannot
+    /// be built.
     pub fn new(config: VertexAiMemoryServiceConfig) -> Result<Self, MemoryError> {
         // The default endpoint is the location's host, served over HTTPS.
         let default_endpoint = format!("https://{}", host_url(&config.engine.location));
@@ -189,8 +189,8 @@ fn user_scope(user_id: &str) -> Value {
 }
 
 /// The time a state value holds: an RFC 3339 string. Anything else fails with
-/// `want type time.Time, got : {type} ({value})`, the value rendered as a decoded JSON value
-/// (see [`gadk_platform::go_sprint_value`] and [`gadk_platform::go_type_name`]).
+/// a "want a timestamp, got" error naming the type and the value, the value rendered as a
+/// decoded JSON value (see [`gadk_platform::go_sprint_value`] and [`gadk_platform::go_type_name`]).
 fn state_time(value: &Value) -> Result<DateTime<Utc>, BoxError> {
     if let Value::String(s) = value
         && let Some(t) = go_parse_rfc3339(s)
@@ -212,10 +212,10 @@ impl MemoryService for VertexAiMemoryService {
     ///
     /// # Errors
     ///
-    /// [`MemoryError::Backend`] with the wrapper chain: `state.Get({key}) failed: …`,
-    /// `want type time.Time, got : …`, `v.client.addWholeSession failed: …` or
-    /// `v.client.addEventsNewerThan failed: …` around `v.client.GenerateMemories failed: …` or
-    /// `op.Wait for GenerateMemories (whole session) failed: …`.
+    /// [`MemoryError::Backend`] with a wrapper chain (see the literals in this
+    /// function): a failed state read, a state value that is not a timestamp, or a failed
+    /// whole-session or newer-events add, around a failed memory generation or a failed wait for
+    /// the whole-session generation operation.
     async fn add_session_to_memory(&self, session: &dyn Session) -> Result<(), MemoryError> {
         let Some(key) = self
             .state_key_session_last_update_time

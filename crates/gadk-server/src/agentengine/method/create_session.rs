@@ -29,7 +29,8 @@ use crate::mux::Response;
 
 /// Handler for `async_create_session`. Creates a session for `user_id` with the optional
 /// initial state, using the agent engine ID as the app name; answers `{"output":SessionData}`.
-/// Errors: `json.Unmarshal() failed: <err>`, `c.sessionservice.Create() failed: <err>`.
+/// Errors: the input-decode error and the session-service error, each wrapped with its fixed
+/// text (see the literals in this function).
 pub(crate) struct CreateSessionHandler {
     pub(crate) session_service: Arc<dyn SessionService>,
     /// The app name of every session call.

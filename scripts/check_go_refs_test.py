@@ -106,6 +106,19 @@ class ScanTest(unittest.TestCase):
             ("crates/c/src/lib.rs", 1), ("crates/c/src/lib.rs", 3), ("crates/c/src/lib.rs", 4),
         ])
 
+    def test_package_qualified_names(self):
+        self.r.write("crates/c/src/lib.rs", """\
+            /// Shape of `genai.Part`.
+            /// A `time.Duration` value.
+            /// Like `google.rpc.Status`.
+            /// Published on crates.io.
+            /// See [`Part`] and `Self::new`.
+            fn f() {}
+        """)
+        self.assertEqual(
+            sorted(self.r.hits()), [("crates/c/src/lib.rs", 1), ("crates/c/src/lib.rs", 2)]
+        )
+
     def test_string_literal_not_scanned(self):
         self.r.write("crates/c/src/lib.rs", 'const A: &str = "google.golang.org/adk/v2 Go";\n')
         self.assertEqual(self.r.hits(), [])

@@ -292,8 +292,8 @@ impl Server {
         let platform = cfg.platform;
         let handler = routing::handler(move |mut req: Request| {
             // `OPTIONS *` and an undecodable target are answered here, before
-            // `policy.Middleware` sees the request. `RouteTable::dispatch` decodes the path again
-            // on purpose: tests drive the table directly, without this handler.
+            // the origin policy's middleware sees the request. `RouteTable::dispatch` decodes the
+            // path again on purpose: tests drive the table directly, without this handler.
             if let Err(answer) = routing::decoded_path(&req) {
                 return Box::pin(std::future::ready(answer.response()))
                     as BoxFuture<'static, Response>;

@@ -28,9 +28,9 @@ use serde_json::{Map, Number, Value};
 use super::encode::{self, GoKind, GoStruct};
 
 /// The genai types reachable from the request models that have their own `UnmarshalJSON`
-/// (`genai.Content` → `Part.VideoMetadata`, `Part.AudioTranscription`): the type name, the type
+/// (`Content` → `Part.VideoMetadata`, `Part.AudioTranscription`): the type name, the type
 /// text of the anonymous aux struct they decode into, and whether that struct declares the
-/// `time.Duration` fields as `string` (`VideoMetadata`; `Transcription` uses genai's
+/// duration fields as `string` (`VideoMetadata`; `Transcription` uses genai's
 /// `*durationJSON`, taken verbatim here and parsed by gadk-genai's serde). Errors inside them
 /// are reported relative to the aux struct: a field error names the path `.fps` with no struct
 /// name, and a top-level kind mismatch names the type `struct { … }`.
@@ -47,10 +47,10 @@ const CUSTOM_UNMARSHALERS: &[(&str, &str, bool)] = &[
     ),
 ];
 
-/// How a custom unmarshaler's aux struct declares the `time.Duration` fields.
+/// How a custom unmarshaler's aux struct declares the duration fields.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Durations {
-    /// Not inside a custom unmarshaler: `time.Duration` is an integer.
+    /// Not inside a custom unmarshaler: duration is an integer.
     Int,
     /// Declared `string`.
     String,
@@ -81,10 +81,10 @@ enum Durations {
 ///    `<Struct>` is the top-level type name without package, and `<path>` is the object keys as
 ///    written in the input and the array indexes from the top level, joined by `.`; when the
 ///    value is an array element the text is `… into <Struct>.<path> of type <elem type>` (no
-///    field wording), and at the top level `… into <value> of type <pkg.Type>`; a number that
-///    does not fit an integer or float field is `number <its text>`; an invalid base64 string
-///    for `[]byte` appends `: illegal base64 data at input byte <n>`; the first error in input
-///    order wins;
+///    field wording), and at the top level `… into <value> of type <qualified type name>`; a
+///    number that does not fit an integer or float field is `number <its text>`; an invalid
+///    base64 string for `[]byte` appends `: illegal base64 data at input byte <n>`; the first
+///    error in input order wins;
 /// 4. the canonicalized value is deserialized into `T` (its serde names are the json names).
 ///
 /// Everything runs on the caller's stack: [`MAX_DEPTH`] keeps the decoded value shallow enough
@@ -199,7 +199,7 @@ struct Decoder {
     top_type: String,
     /// The path from the top-level value to the value being decoded.
     path: Vec<Seg>,
-    /// How `time.Duration` fields decode here.
+    /// How duration fields decode here.
     durations: Durations,
 }
 
@@ -274,7 +274,7 @@ fn node(raw: &RawValue) -> Result<Node<'_>, String> {
     }
 }
 
-/// The element type of a slice, array or map type string (`[]*genai.Part` → `*genai.Part`,
+/// The element type of a slice, array or map type string (`[]*Part` → `*Part`,
 /// `map[string]interface {}` → `interface {}`).
 fn elem_type(go_type: &str) -> &str {
     go_type.split_once(']').map_or(go_type, |(_, elem)| elem)
@@ -686,7 +686,7 @@ impl Decoder {
             GoKind::RawMessage => {
                 // serde_json's recursion limit (127 levels) cannot fail here: `nesting()` has
                 // already rejected any input deeper than `MAX_DEPTH`, which equals it. No
-                // request shape has a `json.RawMessage` field.
+                // request shape has a raw JSON field.
                 *slot = Some(serde_json::from_str(raw.get()).map_err(|e| e.to_string())?);
             }
             GoKind::Interface => *slot = self.interface_value(raw)?,

@@ -28,7 +28,8 @@ use crate::agentengine::unmarshal::go_unmarshal;
 use crate::mux::Response;
 
 /// Handler for `async_delete_session`. Deletes the session; answers `{"output":""}`.
-/// Errors: `json.Unmarshal() failed: <err>`, `g.sessionservice.Delete() failed: <err>`.
+/// Errors: the input-decode error and the session-service error, each wrapped with its fixed
+/// text (see the literals in this function).
 pub(crate) struct DeleteSessionHandler {
     pub(crate) session_service: Arc<dyn SessionService>,
     /// The app name of every session call.

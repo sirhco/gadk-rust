@@ -149,7 +149,7 @@ impl WebSublauncher for AgentEngineLauncher {
 
     /// Checks `Config::validate`, then builds the handler with
     /// `gadk_server::agentengine::new_handler` (either error is answered as
-    /// `agentengine.NewHandler failed: <err>`, `Error::Config`), then mounts the handler with
+    /// `Error::Config` carrying the handler-construction error text), then mounts the handler with
     /// `router.handle_prefix(&[Method::POST], prefix, strip_prefix(prefix, handler))`.
     fn setup_subrouters(&self, router: &mut WebRouter, config: &mut Config) -> Result<(), Error> {
         let wrap = |e: &dyn std::fmt::Display| {

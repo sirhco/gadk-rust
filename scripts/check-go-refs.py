@@ -22,6 +22,7 @@ import rust_lex  # noqa: E402
 PATTERN = re.compile(
     r"\bADK-Go\b|\bGo\b|golang|go-genai|(?i:\bport(?:ed)? (?:of|from)\b)|\bDivergences?\b"
     r"|\bledger\b|goroutine"
+    r"|(?<![\w.])[a-z][a-z0-9_]*\.[A-Z][A-Za-z0-9_]*"
 )
 ALLOWLIST_DIR = "scripts/go-refs-allow"
 LIMITS = {"root.txt": 10}

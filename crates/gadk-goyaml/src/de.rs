@@ -672,8 +672,8 @@ impl Mode {
             // serde exposes no key or element type, while yaml.v3 names them
             // (`map[string]int64`).
             Mode::Map => "map[string]interface {}",
-            // yaml.v3 prints the package-qualified type (`main.Inner`); serde gives the bare
-            // struct name.
+            // yaml.v3 prints the package-qualified type name; serde gives the bare struct
+            // name.
             Mode::Struct { name, .. } => name,
         }
     }
@@ -1523,7 +1523,7 @@ impl<'a, 'o> MapWalk<'a, 'o> {
                     if let Some(&(_, fi)) = self.keys.iter().find(|(k, _)| *k == sname) {
                         if self.d.unique_keys {
                             if done[fi] {
-                                // yaml.v3 names the type package-qualified (`main.T`).
+                                // yaml.v3 names the type package-qualified.
                                 self.d.terrors.push(format!(
                                     "line {}: field {sname} already set in type {name}",
                                     doc[kn].line

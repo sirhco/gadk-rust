@@ -28,7 +28,8 @@ use crate::agentengine::unmarshal::go_unmarshal;
 use crate::mux::Response;
 
 /// Handler for `async_get_session`. Gets the session; answers `{"output":SessionData}`.
-/// Errors: `json.Unmarshal() failed: <err>`, `c.sessionservice.Get() failed: <err>`.
+/// Errors: the input-decode error and the session-service error, each wrapped with its fixed
+/// text (see the literals in this function).
 pub(crate) struct GetSessionHandler {
     pub(crate) session_service: Arc<dyn SessionService>,
     /// The app name of every session call.
