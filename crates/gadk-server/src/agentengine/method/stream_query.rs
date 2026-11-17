@@ -12,7 +12,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//! Go `server/agentengine/controllers/method/stream_query.go` (`async_stream_query`).
+//! The `async_stream_query` method.
 
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -36,20 +36,20 @@ use crate::agentengine::unmarshal::go_unmarshal;
 use crate::agentengine::{AgentEngineConfig, Log};
 use crate::mux::Response;
 
-/// Go `NewStreamQueryHandler`'s handler.
+/// Handler for `async_stream_query`.
 pub(crate) struct StreamQueryHandler {
-    /// Go `config`: services, loader, plugins, compaction, platform.
+    /// Services, loader, plugins, compaction and platform.
     pub(crate) config: AgentEngineConfig,
-    /// Go `agentEngineID`: the runner's app name.
+    /// The runner's app name.
     pub(crate) agent_engine_id: String,
     pub(crate) method_name: String,
     pub(crate) api_mode: String,
-    /// Go `log` (from `config.log`).
+    /// Where log lines go (from `config.log`).
     pub(crate) log: Log,
 }
 
 impl StreamQueryHandler {
-    /// Go `NewStreamQueryHandler(config, agentEngineID, methodName, apiMode)`.
+    /// A handler serving `method_name` in `api_mode`, running the root agent of `config`.
     pub(crate) fn new(
         config: AgentEngineConfig,
         agent_engine_id: &str,
@@ -66,7 +66,7 @@ impl StreamQueryHandler {
         }
     }
 
-    /// Go `streamJSONL`: decodes `payload` as `models.StreamQueryRequest` then
+    /// Decodes `payload` as `models.StreamQueryRequest` then
     /// `models.StreamQueryTextRequest` (both through `go_unmarshal`; both failing →
     /// `Err("json.Unmarshal() failed both for models.StreamQueryRequest (<e1>) and
     /// models.StreamQueryTextRequest (<e2>)")`, also logged; a text message becomes a user
@@ -122,8 +122,8 @@ impl StreamQueryHandler {
         }))
     }
 
-    /// Go `run`: a runner (`app_name` = the agent engine ID, the loader's root agent, the config's
-    /// services, plugins, compaction and platform, `auto_create_session: true`) run for
+    /// Runs a runner (`app_name` = the agent engine ID, the loader's root agent, the config's
+    /// services, plugins, compaction and platform, `auto_create_session: true`) for
     /// `req.input` with `StreamingMode::Sse`.
     pub(crate) fn run(&self, req: &StreamQueryRequest) -> Result<EventStream, String> {
         let runner = new_runner(&self.config, &self.agent_engine_id)?;
@@ -140,9 +140,9 @@ impl StreamQueryHandler {
     }
 }
 
-/// The `runner.New` call of both stream methods' `run`: `app_name` = the agent engine ID, the
-/// loader's root agent, the config's services, plugins, compaction and platform, and
-/// `auto_create_session: true`. An error is Go's `failed to create runner: <err>`.
+/// Builds the runner both stream methods use: `app_name` = the agent engine ID, the loader's
+/// root agent, the config's services, plugins, compaction and platform, and
+/// `auto_create_session: true`. An error is `failed to create runner: <err>`.
 pub(crate) fn new_runner(
     config: &AgentEngineConfig,
     agent_engine_id: &str,
@@ -161,12 +161,12 @@ pub(crate) fn new_runner(
     .map_err(|err| format!("failed to create runner: {err}"))
 }
 
-/// The response both stream methods answer once the run has started: 200 with Go's three
-/// headers (`Content-Type: application/json`, `Cache-Control: no-cache`, `Connection:
-/// keep-alive`) and an NDJSON body streamed from `events`, one body chunk per line (Go flushes
-/// each line). Go's loop, per runner item:
+/// The response both stream methods answer once the run has started: 200 with three headers
+/// (`Content-Type: application/json`, `Cache-Control: no-cache`, `Connection: keep-alive`) and
+/// an NDJSON body streamed from `events`, one body chunk per line (each line is flushed). Per
+/// runner item:
 ///
-/// - log `Processing event: <event> err: <err>` (Go's `%+v` dumps; ledgered);
+/// - log `Processing event: <event> err: <err>` (see [`processing_event`]);
 /// - a compaction error: log `agentengine: <err>` and go on;
 /// - another error: log `error in events: <err>\n`, write one [`emit_json_error`] line, end;
 /// - an event without content: skip it;
@@ -185,7 +185,7 @@ where
             let item = events.next().await?;
             log.print(&processing_event(&item));
             let event = match item {
-                // A compaction failure is bookkeeping, not the turn (Go's comment): log, go on.
+                // A compaction failure is bookkeeping, not the turn : log, go on.
                 Err(err) if err.is_compaction() => {
                     log.print(&format!("agentengine: {err}"));
                     continue;
@@ -220,7 +220,7 @@ where
     resp
 }
 
-/// Go `helper.EmitJSONError(rw, err)` in the stream loop: the line, or `None` after logging
+/// The error line written in the stream loop, or `None` after logging
 /// `helper.EmitJSONError() failed: <err>`.
 fn error_line(text: &str, log: &Log) -> Option<Bytes> {
     match emit_json_error(text, log) {
@@ -232,9 +232,9 @@ fn error_line(text: &str, log: &Log) -> Option<Bytes> {
     }
 }
 
-/// Go `log.Printf("Processing event: %+v err: %+v\n", event, err)`: the event as Rust `Debug`
-/// and the error as its text, `<nil>` for the absent one (Go's `%+v` struct dump is a ledgered
-/// divergence; the replay fixtures drop these lines).
+/// The `Processing event: <event> err: <err>` log line: the event as Rust `Debug` and the error
+/// as its text, `<nil>` for the absent one. The event dump is Rust's `Debug` layout, so the
+/// replay fixtures drop these lines.
 fn processing_event(item: &Result<Event, gadk_agent::AgentError>) -> String {
     match item {
         Ok(event) => format!("Processing event: {event:?} err: <nil>\n"),
@@ -242,10 +242,10 @@ fn processing_event(item: &Result<Event, gadk_agent::AgentError>) -> String {
     }
 }
 
-/// Go `Metadata()`'s `description`.
+/// The method's `description` in its metadata.
 const DESCRIPTION: &str = "Streams responses asynchronously from the ADK application.\nArgs:\n    message (genai.Content):\n        Required. The message to stream responses for.\n    user_id (str):\n        Required. The ID of the user.\n    session_id (str):\n        Optional. The ID of the session. If not provided, a new session will be created for the user.\n\nYields:\n    Single lines with JSON encoded event each. Errors are also emitted as JSON.\n\n";
 
-/// Go `Metadata()`'s map for `method_name` / `api_mode` (description text verbatim).
+/// The method's metadata map for `method_name` / `api_mode` (description text verbatim).
 pub(crate) fn metadata(method_name: &str, api_mode: &str) -> Map<String, Value> {
     super::method_metadata(
         method_name,
@@ -287,7 +287,7 @@ impl MethodHandler for StreamQueryHandler {
         &self.method_name
     }
 
-    /// Go `Handle`: [`StreamQueryHandler::stream_jsonl`], an error wrapped as
+    /// Runs [`StreamQueryHandler::stream_jsonl`], an error wrapped as
     /// `s.streamJSONL() failed: <err>`.
     async fn handle(&self, payload: Bytes) -> Result<Response, String> {
         // stream_jsonl fails only before streaming; the controller answers that with a status.

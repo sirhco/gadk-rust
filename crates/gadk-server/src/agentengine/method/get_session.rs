@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `server/agentengine/controllers/method/get_session.go` (`async_get_session`).
+//! The `async_get_session` method.
 
 use std::sync::Arc;
 
@@ -27,17 +27,18 @@ use crate::agentengine::models::{GetSessionRequest, GetSessionResponse, from_ses
 use crate::agentengine::unmarshal::go_unmarshal;
 use crate::mux::Response;
 
-/// Go `NewGetSessionHandler`'s handler. Gets the session; answers `{"output":SessionData}`. Errors: `json.Unmarshal() failed: <err>`, `c.sessionservice.Get() failed: <err>`.
+/// Handler for `async_get_session`. Gets the session; answers `{"output":SessionData}`.
+/// Errors: `json.Unmarshal() failed: <err>`, `c.sessionservice.Get() failed: <err>`.
 pub(crate) struct GetSessionHandler {
     pub(crate) session_service: Arc<dyn SessionService>,
-    /// Go `agentEngineID`: the app name of every session call.
+    /// The app name of every session call.
     pub(crate) agent_engine_id: String,
     pub(crate) method_name: String,
     pub(crate) api_mode: String,
 }
 
 impl GetSessionHandler {
-    /// Go `NewGetSessionHandler(sessionService, agentEngineID, methodName, apiMode)`.
+    /// A handler serving `method_name` in `api_mode` over `session_service`.
     pub(crate) fn new(
         session_service: Arc<dyn SessionService>,
         agent_engine_id: &str,
@@ -53,10 +54,10 @@ impl GetSessionHandler {
     }
 }
 
-/// Go `Metadata()`'s `description`.
+/// The method's `description` in its metadata.
 const DESCRIPTION: &str = "Get a session for the given user.\n\nArgs:\n    user_id (str):\n        Required. The ID of the user.\n    session_id (str):\n        Required. The ID of the session.\n\nReturns:\n    Session: The session instance (if any). Returns an error on failure\n\n";
 
-/// Go `Metadata()`'s map for `method_name` / `api_mode` (description text verbatim).
+/// The method's metadata map for `method_name` / `api_mode` (description text verbatim).
 pub(crate) fn metadata(method_name: &str, api_mode: &str) -> Map<String, Value> {
     super::method_metadata(
         method_name,

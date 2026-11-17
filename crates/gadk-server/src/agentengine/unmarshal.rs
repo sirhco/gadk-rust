@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `encoding/json.Unmarshal` for the agentengine request models (`go_unmarshal`): Go's key
-//! matching and error texts, then serde.
+//! JSON decoding of the Agent Engine request models (`go_unmarshal`): key matching and error
+//! texts that are wire-compatible with the reference ADK server's decoder, then serde.
 
 use std::fmt;
 use std::marker::PhantomData;
@@ -28,11 +28,12 @@ use serde_json::{Map, Number, Value};
 use super::encode::{self, GoKind, GoStruct};
 
 /// The genai types reachable from the request models that have their own `UnmarshalJSON`
-/// (`genai.Content` → `Part.VideoMetadata`, `Part.AudioTranscription`): Go type, Go's type text
-/// of the anonymous aux struct they decode into, and whether that struct declares the
+/// (`genai.Content` → `Part.VideoMetadata`, `Part.AudioTranscription`): the type name, the type
+/// text of the anonymous aux struct they decode into, and whether that struct declares the
 /// `time.Duration` fields as `string` (`VideoMetadata`; `Transcription` uses genai's
-/// `*durationJSON`, taken verbatim here and parsed by gadk-genai's serde). Go reports their
-/// errors relative to the aux struct (`Go struct field .fps`, `Go value of type struct { … }`).
+/// `*durationJSON`, taken verbatim here and parsed by gadk-genai's serde). Errors inside them
+/// are reported relative to the aux struct: a field error names the path `.fps` with no struct
+/// name, and a top-level kind mismatch names the type `struct { … }`.
 const CUSTOM_UNMARSHALERS: &[(&str, &str, bool)] = &[
     (
         "genai.Transcription",
@@ -57,29 +58,32 @@ enum Durations {
     Verbatim,
 }
 
-/// Go `json.Unmarshal(payload, &v)` into the Go struct `shape` (a request model from
-/// [`encode_shapes`](super::encode_shapes), e.g. `MODELS_QUERY`), producing the Rust model `T`:
+/// Decodes `payload` into the struct described by `shape` (a request model from
+/// [`encode_shapes`](super::encode_shapes), e.g. `MODELS_QUERY`), producing the Rust model `T`,
+/// with the reference server's key matching and error texts:
 ///
-/// 1. syntax: the whole input must be one JSON value (Go `checkValid`); an empty or truncated
+/// 1. syntax: the whole input must be one JSON value; an empty or truncated
 ///    input is `unexpected end of JSON input`; nesting deeper than [`MAX_DEPTH`] (127 arrays and
-///    objects, serde_json's limit; Go's is 10000) is `exceeded max depth`, unless a syntax error
-///    comes earlier in the input; any other syntax error keeps serde_json's text (ledgered, as
-///    in 5a);
+///    objects, serde_json's limit; the reference server allows 10000) is `exceeded max depth`,
+///    unless a syntax error comes earlier in the input; any other syntax error keeps
+///    serde_json's text;
 /// 2. keys: in each JSON object decoded into a struct (`GoKind::Struct`, also through
 ///    `Pointer`/`Slice`/`Map` elements and into genai structs), a key matches the field whose
-///    json name (tag name, else Go name) equals it exactly, else case-insensitively (Go
-///    `foldName`); an unmatched key is ignored; a later duplicate wins (Go decodes into the
-///    existing value: a repeated struct field or map merges, a repeated slice reuses its
-///    elements); values of
+///    json name (tag name, else field name) equals it exactly, else case-insensitively
+///    (Unicode simple case folding); an unmatched key is ignored; a later duplicate wins (it
+///    decodes into the existing value: a repeated struct field or map merges, a repeated slice
+///    reuses its elements); values of
 ///    `Interface` and `Map(Interface)` fields (`input`, `state`, `FunctionCall.args`) are taken
 ///    verbatim; a JSON `null` leaves a non-interface field at its zero value (a pointer, slice,
 ///    map or interface becomes nil);
-/// 3. types: a value whose JSON kind does not fit the field's `GoKind` is Go 1.27's
-///    `json: cannot unmarshal <JSON kind> into Go struct field <Struct>.<path> of type
-///    <go_type>` (`<Struct>` the top-level type name without package, `<path>` the object keys
-///    as written in the input and the array indexes from the top level, joined by `.`); when the
-///    value is an array element the text is `… into <Struct>.<path> of type <elem type>`
-///    (no `Go struct field`), at the top level `… into Go value of type <pkg.Type>`; a number
+/// 3. types: a value whose JSON kind does not fit the field's `GoKind` is
+///    `json: cannot unmarshal <JSON kind> into <field phrase> <Struct>.<path> of type
+///    <go_type>`, where `<field phrase>` is the fixed wording `<language> struct field` with the
+///    reference server's language name, `<Struct>` is the top-level type name without package,
+///    and `<path>` is the object keys as written in the input and the array indexes from the
+///    top level, joined by `.`; when the value is an array element the text is
+///    `… into <Struct>.<path> of type <elem type>` (no field phrase), and at the top level
+///    `… into <language> value of type <pkg.Type>`; a number
 ///    that does not fit an integer or float field is `number <its text>`; an invalid base64
 ///    string for `[]byte` appends `: illegal base64 data at input byte <n>`; the first error in
 ///    input order wins;
@@ -98,15 +102,15 @@ pub(crate) fn go_unmarshal<T: DeserializeOwned>(
 }
 
 /// The agentengine server's nesting limit for request bodies: `exceeded max depth` past 127
-/// arrays and objects, the top-level value included (Go's error text and counting rule; the
-/// controller answers it 400 as Go does).
+/// arrays and objects, the top-level value included (the error text and counting rule of the
+/// reference server; the controller answers it 400).
 ///
 /// This equals serde_json's recursion limit for the values it materializes (its deserializer
 /// starts `remaining_depth` at 128 and fails at 0), so agentengine accepts exactly the nesting
 /// that gadk's serde-based decoders (REST, A2A, the session loaders) materialize, and every
 /// request-derived value stays shallow enough for the recursive clone, convert and drop past
-/// this crate on a 2 MiB stack. Go's `encoding/json` allows 10000: a ledgered divergence
-/// (ledger 5c, Agent Engine server and Workspace JSON depth).
+/// this crate on a 2 MiB stack. The reference server allows a depth of 10000; the lower limit
+/// here is deliberate.
 pub(crate) const MAX_DEPTH: usize = 127;
 
 /// The maximum nesting depth of `payload`'s arrays and objects (brackets inside strings not
@@ -141,8 +145,8 @@ fn nesting(payload: &[u8]) -> Result<usize, usize> {
     Ok(max)
 }
 
-/// The error for an input whose opener at `at` is past [`MAX_DEPTH`]: Go reports the first error
-/// in input order, so a syntax error before it (serde's text, or trailing characters after a
+/// The error for an input whose opener at `at` is past [`MAX_DEPTH`]: the first error in input
+/// order is reported, so a syntax error before it (serde's text, or trailing characters after a
 /// complete value) wins over `exceeded max depth`.
 fn too_deep(payload: &[u8], at: usize) -> String {
     let prefix = payload.get(..at).unwrap_or_default();
@@ -187,12 +191,13 @@ enum Seg {
     Index(usize),
 }
 
-/// The decode state of one `json.Unmarshal` call (Go's `decodeState` error context).
+/// The decode state of one [`go_unmarshal`] call (its error context).
 struct Decoder {
-    /// The top-level struct name in `Go struct field <name>.<path>` (empty inside a custom
-    /// unmarshaler, whose own `json.Unmarshal` call reports `.fps`).
+    /// The top-level struct name in a field error's `<name>.<path>` (empty inside a custom
+    /// unmarshaler, which reports paths such as `.fps`).
     top_name: String,
-    /// The type in `Go value of type <type>` for a top-level kind mismatch.
+    /// The type named in a top-level kind mismatch
+    /// (`… into <language> value of type <type>`).
     top_type: String,
     /// The path from the top-level value to the value being decoded.
     path: Vec<Seg>,
@@ -211,7 +216,7 @@ enum Node<'a> {
 }
 
 impl Node<'_> {
-    /// Go's JSON kind word in `cannot unmarshal <kind>`.
+    /// The JSON kind word in `cannot unmarshal <kind>`.
     fn kind(&self) -> &'static str {
         match self {
             Node::Null => "null",
@@ -277,7 +282,7 @@ fn elem_type(go_type: &str) -> &str {
     go_type.split_once(']').map_or(go_type, |(_, elem)| elem)
 }
 
-/// Go `foldName` equality: equal under Unicode simple case folding (underscores significant).
+/// Key equality: equal under Unicode simple case folding (underscores significant).
 fn fold_eq(a: &str, b: &str) -> bool {
     let mut x = a.chars();
     let mut y = b.chars();
@@ -297,7 +302,7 @@ fn fold_eq(a: &str, b: &str) -> bool {
     }
 }
 
-/// The decodable fields of `shape` with their json names (Go `cachedTypeFields`): `-`-tagged
+/// The decodable fields of `shape` with their json names: `-`-tagged
 /// and unexported fields excluded, an untagged embedded struct's fields promoted.
 fn fields_of(shape: &'static GoStruct) -> Vec<(String, &'static encode::GoField)> {
     let mut out = Vec::new();
@@ -330,7 +335,7 @@ fn fields_of(shape: &'static GoStruct) -> Vec<(String, &'static encode::GoField)
     out
 }
 
-/// Go's `encoding/base64.StdEncoding.Decode` (`\r` and `\n` ignored, padding required, trailing
+/// Standard-alphabet base64 decoding (`\r` and `\n` ignored, padding required, trailing
 /// bits not checked); `Err` is the `CorruptInputError` offset.
 fn go_base64_decode(s: &str) -> Result<Vec<u8>, usize> {
     let src = s.as_bytes();
@@ -414,7 +419,7 @@ fn base64_value(c: u8) -> Option<u8> {
     }
 }
 
-/// The bit size of a Go integer type (`int` is 64 bits, as on every target ADK-Go builds for).
+/// The bit size of an integer type name (`int` is 64 bits).
 fn int_bits(go_type: &str) -> u32 {
     match go_type {
         "int8" | "uint8" => 8,
@@ -424,10 +429,10 @@ fn int_bits(go_type: &str) -> u32 {
     }
 }
 
-/// A JSON number literal as a Go integer of `bits` (signed or not), or `None` when it has a
-/// fraction or exponent or is out of range (Go `strconv.ParseInt` / `ParseUint` on the text).
+/// A JSON number literal as an integer of `bits` (signed or not), or `None` when it has a
+/// fraction or exponent or is out of range (parsed from the text as `i64` / `u64` would be).
 fn parse_int(text: &str, bits: u32, signed: bool) -> Option<Number> {
-    // Go `ParseUint` rejects any sign, `-0` included.
+    // An unsigned integer rejects any sign, `-0` included.
     if !signed && text.starts_with('-') {
         return None;
     }
@@ -452,8 +457,8 @@ fn parse_int(text: &str, bits: u32, signed: bool) -> Option<Number> {
 }
 
 /// A JSON number literal as a float, keeping integers integral; `None` when it rounds to ±Inf
-/// (Go `strconv.ParseFloat(text, 64 or 32)`: `3.4028235e38` is `float32`'s max, `3.40282357e38`
-/// overflows).
+/// (parsed as `f64`, or as `f32` for 32-bit fields: `3.4028235e38` is `f32`'s max,
+/// `3.40282357e38` overflows).
 fn parse_float(text: &str, float32: bool) -> Option<Number> {
     let f: f64 = text.parse().ok()?;
     if !f.is_finite() || (float32 && !text.parse::<f32>().ok()?.is_finite()) {
@@ -526,7 +531,7 @@ impl<'a> Cursor<'a> {
 }
 
 impl Decoder {
-    /// Go's `UnmarshalTypeError` text for a `json` kind decoded into `go_type` here.
+    /// The type-mismatch error text for a `json` kind decoded into `go_type`.
     fn type_error(&self, json: &str, go_type: &str) -> String {
         let Some(last) = self.path.last() else {
             return format!(
@@ -550,7 +555,7 @@ impl Decoder {
         }
     }
 
-    /// Decodes `raw` into the struct `shape` (Go type `go_type`), merging into `into`.
+    /// Decodes `raw` into the struct `shape` (type name `go_type`), merging into `into`.
     fn decode_struct(
         &mut self,
         raw: &RawValue,
@@ -594,8 +599,8 @@ impl Decoder {
         Ok(())
     }
 
-    /// Decodes `raw` into a Go value of `kind` / `go_type`; `slot` is its current canonical
-    /// value (`None`: Go's zero value, the key absent).
+    /// Decodes `raw` into a value of `kind` / `go_type`; `slot` is its current canonical
+    /// value (`None`: the zero value, the key absent).
     fn decode_value(
         &mut self,
         raw: &RawValue,
@@ -605,7 +610,7 @@ impl Decoder {
     ) -> Result<(), String> {
         let n = node(raw)?;
         if let Node::Null = n {
-            // Go: null sets a pointer, slice, map or interface to nil; anything else is unchanged.
+            // null sets a pointer, slice, map or interface to nil; anything else is unchanged.
             if matches!(
                 kind,
                 GoKind::Pointer(_)
@@ -719,7 +724,7 @@ impl Decoder {
             }
             GoKind::Slice(inner) => match n {
                 Node::Array(items) => {
-                    // Go reuses the slice's existing elements (a struct element merges).
+                    // The slice's existing elements are reused (a struct element merges).
                     let existing = match slot.take() {
                         Some(Value::Array(a)) => a,
                         _ => Vec::new(),
@@ -746,7 +751,7 @@ impl Decoder {
                         _ => Map::new(),
                     };
                     for (key, item) in pairs {
-                        // Go decodes each map value into a fresh zero value.
+                        // Each map value is decoded into a fresh zero value.
                         let mut v = None;
                         self.path.push(Seg::Key(key.clone()));
                         let result = self.decode_value(item, inner, elem, &mut v);
@@ -762,11 +767,11 @@ impl Decoder {
         Ok(())
     }
 
-    /// Go's `any` value: objects, arrays, strings, bools and numbers as JSON has them (`None`
+    /// An `any` value: objects, arrays, strings, bools and numbers as JSON has them (`None`
     /// for null); a number outside the `float64` range is `number <text>` of type `float64`.
     ///
     /// One pass over the (already validated) text with an explicit stack: an `any` value may be
-    /// nested [`MAX_DEPTH`] deep (Go: 10000), so neither native recursion nor re-splitting each
+    /// nested [`MAX_DEPTH`] deep, so neither native recursion nor re-splitting each
     /// level (quadratic in the depth) is used here.
     fn interface_value(&mut self, raw: &RawValue) -> Result<Option<Value>, String> {
         let base = self.path.len();
