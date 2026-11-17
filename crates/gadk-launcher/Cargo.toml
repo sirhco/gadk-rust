@@ -13,7 +13,7 @@ workspace = true
 
 [features]
 default = ["full"]
-# The web server (Go `cmd/launcher/web`) with the ADK REST API sub-launcher (`api`).
+# The web server with the ADK REST API sub-launcher (`api`).
 web = [
   "dep:gadk-server",
   "dep:axum",
@@ -24,18 +24,17 @@ web = [
   "dep:bytes",
   "dep:url",
 ]
-# The A2A sub-launcher (Go `cmd/launcher/web/a2a`), served through gadk-a2a's executor.
+# The A2A sub-launcher, served through gadk-a2a's executor.
 a2a = ["web", "dep:gadk-a2a"]
-# The embedded ADK web UI sub-launcher (Go `cmd/launcher/web/webui`).
+# The embedded ADK web UI sub-launcher.
 webui = ["web", "dep:regex"]
-# The Pub/Sub and Eventarc trigger sub-launchers (Go `cmd/launcher/web/triggers`).
+# The Pub/Sub and Eventarc trigger sub-launchers.
 triggers = ["web"]
-# The Agent Engine sub-launcher (Go `cmd/launcher/web/agentengine`) and
-# `agentengine::new_launcher` (Go `cmd/launcher/agentengine`); not in `prod` or `full` (as in Go).
+# The Agent Engine sub-launcher and `agentengine::new_launcher`; not in `prod` or `full`.
 agentengine = ["web", "gadk-server/agentengine"]
-# Go `prod.NewLauncher()`: web(api, a2a).
+# The `prod` preset: web(api, a2a).
 prod = ["web", "a2a"]
-# Go `full.NewLauncher()`: console, web(webui, a2a, pubsub, eventarc, api).
+# The `full` preset: console, web(webui, a2a, pubsub, eventarc, api).
 full = ["web", "a2a", "webui", "triggers"]
 
 [dependencies]
@@ -47,7 +46,7 @@ gadk-memory = { workspace = true }
 gadk-genai = { workspace = true }
 gadk-model = { workspace = true }
 gadk-platform = { workspace = true }
-# Go's launcher always links telemetry (`InitAndSetGlobalOtelProviders`).
+# The launcher always links telemetry.
 gadk-telemetry = { workspace = true }
 gadk-server = { workspace = true, optional = true }
 gadk-a2a = { workspace = true, optional = true, features = ["server", "client"] }

@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Part conversions (port of ADK-Go `server/adka2a/v2/parts.go`).
+//! Part conversions between genai parts and A2A parts.
 
 use std::collections::HashMap;
 
@@ -25,29 +25,28 @@ use super::metadata::{METADATA_PARTIAL_KEY, to_map_structure, unmarshal_into_map
 use super::{A2APartConverter, StreamResponseRef};
 use crate::Error;
 
-/// Go `a2aDataPartMetaTypeKey`: the A2A data part metadata key naming the genai part type.
+/// The A2A data part metadata key naming the genai part type.
 pub(crate) const DATA_PART_META_TYPE_KEY: &str = "adk_type";
-/// Go `a2aDataPartMetaLongRunningKey`: marks a function call data part as long-running.
+/// Marks a function call data part as long-running.
 pub(crate) const DATA_PART_META_LONG_RUNNING_KEY: &str = "adk_is_long_running";
-/// Go `a2aDataPartTypeFunctionCall`.
+/// Data part type of a function call.
 pub(crate) const DATA_PART_TYPE_FUNCTION_CALL: &str = "function_call";
-/// Go `a2aDataPartTypeFunctionResponse`.
+/// Data part type of a function response.
 pub(crate) const DATA_PART_TYPE_FUNCTION_RESPONSE: &str = "function_response";
-/// Go `a2aDataPartTypeCodeExecResult`.
+/// Data part type of a code execution result.
 pub(crate) const DATA_PART_TYPE_CODE_EXEC_RESULT: &str = "code_execution_result";
-/// Go `a2aDataPartTypeCodeExecutableCode`.
+/// Data part type of executable code.
 pub(crate) const DATA_PART_TYPE_EXECUTABLE_CODE: &str = "executable_code";
-/// Go `ToA2AMetaKey("thought")`: marks a text part as a thought.
+/// Marks a text part as a thought.
 const META_THOUGHT_KEY: &str = "adk_thought";
-/// Go `a2aPartMetaVideoMetadataKey` (`ToA2AMetaKey("video_metadata")`): a file part's genai
-/// video metadata.
+/// A file part's genai video metadata.
 const META_VIDEO_METADATA_KEY: &str = "adk_video_metadata";
 
 /// The wrapper an A2A data part's JSON gets inside a genai text blob.
 const DATA_PART_JSON_PREFIX: &str = "<a2a_datapart_json>";
 const DATA_PART_JSON_SUFFIX: &str = "</a2a_datapart_json>";
 
-/// Go `IsPartial`: whether A2A metadata (of a part, artifact or event) marks the object as
+/// Whether A2A metadata (of a part, artifact or event) marks the object as
 /// partial, from the ADK partial flag set on the original ADK object.
 pub fn is_partial(meta: Option<&HashMap<String, Value>>) -> bool {
     matches!(
@@ -56,7 +55,7 @@ pub fn is_partial(meta: Option<&HashMap<String, Value>>) -> bool {
     )
 }
 
-/// Go `IsPartialFlagSet`: whether the ADK partial flag (a boolean) is present in A2A metadata.
+/// Whether the ADK partial flag (a boolean) is present in A2A metadata.
 pub fn is_partial_flag_set(meta: Option<&HashMap<String, Value>>) -> bool {
     matches!(
         meta.and_then(|m| m.get(METADATA_PARTIAL_KEY)),
@@ -64,7 +63,7 @@ pub fn is_partial_flag_set(meta: Option<&HashMap<String, Value>>) -> bool {
     )
 }
 
-/// Go `ToA2APart`: converts one genai part; `long_running_tool_ids` marks long-running function
+/// Converts one genai part; `long_running_tool_ids` marks long-running function
 /// call data parts.
 pub fn to_a2a_part(part: &Part, long_running_tool_ids: &[String]) -> Result<a2a::Part, Error> {
     if !part.text.is_empty() {
@@ -87,7 +86,7 @@ pub fn to_a2a_part(part: &Part, long_running_tool_ids: &[String]) -> Result<a2a:
     to_a2a_data_part(part, long_running_tool_ids)
 }
 
-/// Go `ToA2AParts`: converts genai parts; `long_running_tool_ids` marks long-running function
+/// Converts genai parts; `long_running_tool_ids` marks long-running function
 /// call data parts.
 pub fn to_a2a_parts(
     parts: &[Part],
@@ -99,11 +98,10 @@ pub fn to_a2a_parts(
         .collect()
 }
 
-/// Go `ToGenAIPart`: converts one A2A part.
+/// Converts one A2A part.
 pub fn to_genai_part(part: &a2a::Part) -> Result<Part, Error> {
     match &part.content {
-        // Go matches the content type, not non-empty text: an empty text part is still a text
-        // part (ee8d5ca4).
+        // The content type decides, not non-empty text: an empty text part is still a text part.
         a2a::PartContent::Text(text) => {
             let mut result = Part {
                 text: text.clone(),
@@ -136,12 +134,12 @@ pub fn to_genai_part(part: &a2a::Part) -> Result<Part, Error> {
     }
 }
 
-/// Go `ToGenAIParts`: converts A2A parts.
+/// Converts A2A parts.
 pub fn to_genai_parts(parts: &[a2a::Part]) -> Result<Vec<Part>, Error> {
     parts.iter().map(to_genai_part).collect()
 }
 
-/// Go `toGenAIContent`: the message's parts as genai content, through `converter` when set
+/// The message's parts as genai content, through `converter` when set
 /// (a converter's `Ok(None)` drops the part).
 pub async fn to_genai_content(
     msg: &a2a::Message,
@@ -165,7 +163,7 @@ pub async fn to_genai_content(
     })
 }
 
-/// Go `toGenAIRole`: `user` for a user message, `model` otherwise.
+/// `user` for a user message, `model` otherwise.
 pub(crate) fn to_genai_role(role: &a2a::Role) -> &'static str {
     if *role == a2a::Role::User {
         ROLE_USER
@@ -174,29 +172,29 @@ pub(crate) fn to_genai_role(role: &a2a::Role) -> &'static str {
     }
 }
 
-/// Go `Part.Meta()[key]`.
+/// The part's metadata value under `key`.
 pub(crate) fn part_meta<'a>(part: &'a a2a::Part, key: &str) -> Option<&'a Value> {
     part.metadata.as_ref()?.get(key)
 }
 
-/// Go `Part.SetMeta`.
+/// Sets the part's metadata value under `key`.
 fn set_meta(part: &mut a2a::Part, key: &str, value: Value) {
     part.metadata
         .get_or_insert_with(HashMap::new)
         .insert(key.to_owned(), value);
 }
 
-/// Go's `""` string fields are `None` in a2a-rs.
+/// `None` for an empty string: a2a-rs models absent string fields as `None`.
 fn non_empty(s: &str) -> Option<String> {
     (!s.is_empty()).then(|| s.to_owned())
 }
 
-/// A map from [`to_map_structure`] as data-part content (`null` for Go's nil map).
+/// A map from [`to_map_structure`] as data-part content (`null` when there is no map).
 fn map_value(map: Option<Map<String, Value>>) -> Value {
     map.map_or(Value::Null, Value::Object)
 }
 
-/// Go `validateDataPartJSON`: the JSON inside a `text/plain` blob wrapped in the data-part
+/// The JSON inside a `text/plain` blob wrapped in the data-part
 /// markers.
 fn validate_data_part_json(part: &Part) -> Option<&[u8]> {
     let blob = part.inline_data.as_ref()?;
@@ -208,7 +206,7 @@ fn validate_data_part_json(part: &Part) -> Option<&[u8]> {
         .strip_suffix(DATA_PART_JSON_SUFFIX.as_bytes())
 }
 
-/// Go `toA2AFilePart`.
+/// Converts a part holding file data or an inline blob to an A2A url or raw part.
 fn to_a2a_file_part(part: &Part) -> Result<a2a::Part, Error> {
     if let Some(file) = &part.file_data {
         let mut result = a2a::Part::url(file.file_uri.clone());
@@ -229,7 +227,7 @@ fn to_a2a_file_part(part: &Part) -> Result<a2a::Part, Error> {
     Ok(result)
 }
 
-/// Go `toGenAIFilePart`'s video metadata: `adk_video_metadata` on a raw part decodes into
+/// The video metadata of a raw part: `adk_video_metadata` on a raw part decodes into
 /// [`Part::video_metadata`] (`null` is absent). A value that does not decode is an error that
 /// does not quote the peer's value (it reaches the A2A client and the logs).
 fn to_genai_video_metadata(part: &a2a::Part) -> Result<Option<gadk_genai::VideoMetadata>, Error> {
@@ -243,7 +241,8 @@ fn to_genai_video_metadata(part: &a2a::Part) -> Result<Option<gadk_genai::VideoM
     })
 }
 
-/// Go `toA2ADataPart`.
+/// Converts a part holding a function call or response or code execution data to an A2A data
+/// part, typed by `adk_type`; any other part becomes a data part of its whole JSON.
 fn to_a2a_data_part(part: &Part, long_running_tool_ids: &[String]) -> Result<a2a::Part, Error> {
     let typed = |data, kind: &str| {
         let mut result = a2a::Part::data(map_value(data));
@@ -284,8 +283,8 @@ fn to_a2a_data_part(part: &Part, long_running_tool_ids: &[String]) -> Result<a2a
     Ok(a2a::Part::data(map_value(to_map_structure(part)?)))
 }
 
-/// Go `toGenAIDataPart`: a typed data part becomes its genai part; any other data part becomes
-/// a `text/plain` blob holding the data's JSON (Go `json.Marshal` bytes) between the data-part
+/// A typed data part becomes its genai part; any other data part becomes
+/// a `text/plain` blob holding the data's JSON between the data-part
 /// markers.
 fn to_genai_data_part(part: &a2a::Part, data: &Value) -> Result<Part, Error> {
     let bytes = gadk_model::to_go_json(data)?;

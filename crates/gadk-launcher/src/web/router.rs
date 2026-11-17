@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The web launcher's gorilla/mux router, which lives in [`gadk_server::mux::router`] (moved
-//! there in sub-project 5c so the Agent Engine server can route with it).
+//! The web launcher's router, which lives in [`gadk_server::mux::router`] so the Agent Engine
+//! server can route with it.
 
 pub(crate) use gadk_server::mux::go_request_uri;
 pub use gadk_server::mux::router::*;

@@ -13,14 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `cmd/launcher/internal/telemetry` (`InitAndSetGlobalOtelProviders`): the console and web
+//! Launcher telemetry: the console and web
 //! launchers build gadk-telemetry's providers from [`Config::telemetry_options`], set the global
 //! tracer and meter providers and install one global `tracing` subscriber: the providers' bridge
 //! layer first, then [`Config::telemetry_layers`].
 //!
-//! Divergences: Go always replaces the global OpenTelemetry providers; gadk keeps a global
-//! `tracing` subscriber that is already installed and logs that the launcher's layers were not
-//! installed (ledger 6). OpenTelemetry Rust has no global logger provider (ledger 7a).
+//! An already installed global `tracing` subscriber is kept; the launcher logs that its layers
+//! were not installed. OpenTelemetry Rust has no global logger provider, so none is set.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -38,7 +37,7 @@ use crate::golog::Logger;
 /// The log line written when a global subscriber is already installed.
 pub(crate) const KEPT_EXISTING_SUBSCRIBER: &str = "a global tracing subscriber is already installed; the launcher keeps it and does not install its telemetry layers (launcher.Config.TelemetryOptions)";
 
-/// Sets the global OpenTelemetry providers (Go `Providers.SetGlobalOtelProviders`).
+/// Sets the global OpenTelemetry providers.
 type SetProviders = Box<dyn FnOnce(&Providers) + Send>;
 /// Installs the global `tracing` subscriber; `false` when one is already installed.
 type SetSubscriber = Box<dyn FnOnce(Dispatch) -> bool + Send>;
@@ -95,13 +94,13 @@ impl Globals {
     }
 }
 
-/// Go `InitAndSetGlobalOtelProviders`: builds the providers from a copy of
+/// Builds the providers from a copy of
 /// `config.telemetry_options` (with `with_otel_to_cloud(true)` appended when `otel_to_cloud`,
-/// Go's `-otel_to_cloud` flag), sets OpenTelemetry's global tracer and meter providers, then
+/// the `-otel_to_cloud` flag), sets OpenTelemetry's global tracer and meter providers, then
 /// installs a global `tracing` subscriber of the providers' bridge layer and the drained
 /// `config.telemetry_layers`; an existing global subscriber is kept and `config.log` says so.
-/// With neither providers nor layers nothing is installed. Errors are gadk-telemetry's (Go's
-/// texts) as `Error::Telemetry`; callers wrap them as `telemetry initialization failed: <err>`.
+/// With neither providers nor layers nothing is installed. Errors are gadk-telemetry's as
+/// `Error::Telemetry`; callers wrap them as `telemetry initialization failed: <err>`.
 /// The providers export on the calling Tokio runtime: shut the guard down before it ends.
 ///
 /// # Errors
@@ -127,8 +126,7 @@ pub(crate) async fn init_with(
         .await
         .map_err(|e| Error::Telemetry(e.to_string()))?;
     (globals.set_providers)(&providers);
-    // Divergence (ledger 7a; also ledger 6): an existing global `tracing` subscriber is kept and
-    // logged; Go always replaces the global OpenTelemetry providers.
+    // An existing global `tracing` subscriber is kept and logged.
     if let Some(dispatch) = build(config, &providers)
         && !(globals.set_subscriber)(dispatch)
     {
@@ -156,14 +154,14 @@ fn log_kept_existing(log: &Logger) {
     log.print(KEPT_EXISTING_SUBSCRIBER);
 }
 
-/// Go `*telemetry.Providers`, returned by [`init`].
+/// The providers [`init`] built; shut them down with [`TelemetryGuard::shutdown`].
 #[derive(Debug)]
 pub struct TelemetryGuard {
     providers: Providers,
 }
 
 impl TelemetryGuard {
-    /// Go `Providers.Shutdown`: flushes and shuts the providers down.
+    /// Flushes and shuts the providers down.
     ///
     /// # Errors
     ///
@@ -175,13 +173,13 @@ impl TelemetryGuard {
             .map_err(|e| Error::Telemetry(e.to_string()))
     }
 
-    /// Go's deferred `telemetryService.Shutdown` under `context.WithTimeout(shutdownTimeout)`:
+    /// [`TelemetryGuard::shutdown`] bounded by `timeout`:
     /// a failure is logged as `telemetry shutdown failed: <err>`, a timeout as
     /// `telemetry shutdown failed: context deadline exceeded`.
     ///
-    /// Divergence (ledger 6): `<err>` is opentelemetry_sdk's provider error
-    /// (`Operation failed: Shutdown errors: [InternalFailure("<processor error>")]`); Go prints the
-    /// processor's error.
+    /// `<err>` is opentelemetry_sdk's provider error
+    /// (`Operation failed: Shutdown errors: [InternalFailure("<processor error>")]`), not the
+    /// processor's own error.
     pub(crate) async fn shutdown_logged(self, timeout: Duration, log: &Logger) {
         match tokio::time::timeout(timeout, self.shutdown()).await {
             Ok(Ok(())) => {}

@@ -13,12 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! gadk-launcher: run a gadk agent the way an ADK-Go binary runs (port of ADK-Go `cmd/launcher`).
+//! gadk-launcher: run a gadk agent from the command line, with the flags, help, error, log and
+//! console text of ADK launchers.
 //!
-//! A [`Launcher`] parses ADK-Go's command lines and runs one [`SubLauncher`]: the interactive
+//! A [`Launcher`] parses ADK-style command lines and runs one [`SubLauncher`]: the interactive
 //! `console`, or the `web` server with its sub-launchers (`api`, `a2a`, `webui`, `pubsub`,
-//! `eventarc`). [`full::new`] and `prod::new` are ADK-Go's presets; [`universal`] routes the
-//! first argument to a sub-launcher. Flags, help, error, log and console text are ADK-Go's.
+//! `eventarc`). [`full::new`] and `prod::new` are the presets; [`universal`] routes the
+//! first argument to a sub-launcher.
 //!
 //! Features: `web` (the web server and the REST API sub-launcher), `a2a`, `webui`, `triggers`,
 //! `prod` (`web` + `a2a`) and `full` (all of them, the default). The console is always built.

@@ -13,12 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `cmd/launcher/agentengine`: the launcher an Agent Engine deployment runs.
+//! The launcher an Agent Engine deployment runs.
 
 use crate::universal::UniversalLauncher;
 use crate::web::agentengine;
 
-/// Go `NewLauncher(agentEngineId)` = universal(web(agentengine(agentEngineId))).
+/// The Agent Engine launcher for `agent_engine_id`: universal(web(agentengine(agent_engine_id))).
 pub fn new_launcher(agent_engine_id: &str) -> UniversalLauncher {
     UniversalLauncher::new(vec![Box::new(crate::web::new(vec![Box::new(
         agentengine::new(agent_engine_id),

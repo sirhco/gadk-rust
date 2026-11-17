@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `cmd/launcher/web/triggers/eventarc`: the sub-launcher that adds the Eventarc trigger
+//! The sub-launcher that adds the Eventarc trigger
 //! endpoint to the web server.
 
 use std::io::Write;
@@ -27,12 +27,12 @@ use crate::config::Config;
 use crate::error::Error;
 use crate::web::{WebRouter, WebSublauncher};
 
-/// Go `eventarc.eventarcLauncher`.
+/// The `eventarc` web sub-launcher.
 pub struct EventarcLauncher {
     pub(crate) trigger: Trigger,
 }
 
-/// Go `eventarc.NewLauncher()`.
+/// An `eventarc` launcher with its flags.
 pub fn new() -> EventarcLauncher {
     EventarcLauncher {
         trigger: Trigger::new("eventarc", "Eventarc"),
@@ -40,7 +40,7 @@ pub fn new() -> EventarcLauncher {
 }
 
 impl EventarcLauncher {
-    /// Replaces where the flag set writes its errors and usage (Go `fs.SetOutput`; default
+    /// Replaces where the flag set writes its errors and usage (default
     /// stderr), for tests and the CLI replay.
     pub fn with_flag_output(mut self, out: Arc<Mutex<dyn Write + Send>>) -> EventarcLauncher {
         self.trigger.set_flag_output(out);
@@ -76,7 +76,8 @@ impl WebSublauncher for EventarcLauncher {
     }
 
     fn user_message(&self, web_url: &str, printer: &mut dyn FnMut(&str)) {
-        // Go's text: one space after the colon here, two in the other sub-launchers'.
+        // One space after the colon here, two in the other sub-launchers' lines, as ADK
+        // launchers print them.
         printer(&format!(
             "       eventarc: Eventarc trigger endpoint is available at {web_url}{}/apps/{{app_name}}/trigger/eventarc",
             self.trigger.path_prefix()

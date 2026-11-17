@@ -13,12 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `cmd/launcher/prod`: the web server with the REST API and A2A only.
+//! The `prod` preset: the web server with the REST API and A2A only.
 
 use crate::universal::UniversalLauncher;
 use crate::web::{a2a, api};
 
-/// Go `prod.NewLauncher()` = universal(web(api, a2a)).
+/// The `prod` launcher: universal(web(api, a2a)).
 pub fn new() -> UniversalLauncher {
     UniversalLauncher::new(vec![Box::new(crate::web::new(vec![
         Box::new(api::new()),

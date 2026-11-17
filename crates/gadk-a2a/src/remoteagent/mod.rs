@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A remote A2A agent as a gadk agent (port of ADK-Go `agent/remoteagent/v2` and
-//! `internal/agent/remoteagent`): [`new_a2a`] builds it from an [`A2AConfig`].
+//! A remote A2A agent as a gadk agent : [`new_a2a`] builds it from an [`A2AConfig`].
 
 pub(crate) mod agent;
 pub(crate) mod auth;

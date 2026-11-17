@@ -13,13 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `internal/cli/util.FormatFlagUsage` (`flagset_helpers.go`), the only `internal/cli/util`
-//! helper the launcher uses.
+//! Flag usage formatting for the launchers' help text.
 
 use gadk_platform::go_flag::FlagSet;
 
-/// Go `util.FormatFlagUsage`: the set's `PrintDefaults` text (Go swaps the output to a builder
-/// around `PrintDefaults`; `print_defaults` returns the text and writes nothing).
+/// The set's defaults text; `print_defaults` returns the text and writes nothing.
 pub(crate) fn format_flag_usage(fs: &FlagSet) -> String {
     fs.print_defaults()
 }

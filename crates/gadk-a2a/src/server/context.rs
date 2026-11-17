@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The executor context handed to callbacks (port of ADK-Go
-//! `server/adka2a/v2/executor_context.go`).
+//! The executor context handed to callbacks.
 
 use std::collections::HashMap;
 
@@ -24,7 +23,7 @@ use serde_json::Value;
 
 use super::plugin::ExecutorPlugin;
 
-/// Go `ExecutorContext`: what the after-event and after-execute callbacks see of an execution.
+/// What the after-event and after-execute callbacks see of an execution.
 pub trait ExecutorContext: Send + Sync {
     /// The session ID (the A2A context ID).
     fn session_id(&self) -> &str;
@@ -40,21 +39,21 @@ pub trait ExecutorContext: Send + Sync {
     fn user_content(&self) -> &Content;
     /// The original A2A request context.
     fn request_context(&self) -> &a2a_server::ExecutorContext;
-    /// What the before-execute callback stored (Go's returned `context.Context` values).
+    /// What the before-execute callback stored (see `BeforeExecuteCallback`).
     fn extensions(&self) -> &http::Extensions;
 }
 
-/// Go `invocationMeta`: the IDs of one execution and the metadata every event it emits carries.
+/// The IDs of one execution and the metadata every event it emits carries.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct InvocationMeta {
     pub(crate) user_id: String,
     pub(crate) session_id: String,
     pub(crate) agent_name: String,
-    /// Go `eventMeta`: `adk_app_name`, `adk_user_id`, `adk_session_id`.
+    /// The metadata every emitted event carries: `adk_app_name`, `adk_user_id`, `adk_session_id`.
     pub(crate) event_meta: HashMap<String, Value>,
 }
 
-/// Go `executorContext`.
+/// The [`ExecutorContext`] of one execution.
 pub(crate) struct ExecutorContextImpl {
     meta: InvocationMeta,
     plugin: ExecutorPlugin,
@@ -64,7 +63,7 @@ pub(crate) struct ExecutorContextImpl {
 }
 
 impl ExecutorContextImpl {
-    /// Go `newExecutorContext`.
+    /// The context of one execution.
     pub(crate) fn new(
         meta: InvocationMeta,
         plugin: ExecutorPlugin,

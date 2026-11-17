@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The artifact makers of the two output modes (port of ADK-Go
-//! `server/adka2a/v2/task_artifact.go`).
+//! The artifact makers of the two output modes.
 
 use std::collections::HashMap;
 
@@ -24,21 +23,21 @@ use serde_json::Value;
 use super::processor::{TaskInfo, flag, new_artifact_event, new_artifact_update_event};
 use crate::convert::METADATA_PARTIAL_KEY;
 
-/// Go `eventToArtifactTransform`: turns the converted parts of one ADK event into an artifact
+/// Turns the converted parts of one ADK event into an artifact
 /// update, and makes the update that closes the run.
 pub(crate) trait EventToArtifactTransform: Send + Sync {
-    /// Go `transform`.
+    /// The artifact update for one event's converted parts.
     fn transform(
         &mut self,
         event: &Event,
         parts: Vec<a2a::Part>,
         meta: &HashMap<String, Value>,
     ) -> a2a::TaskArtifactUpdateEvent;
-    /// Go `makeFinalUpdate`.
+    /// The update that closes the run, if one is needed.
     fn make_final_update(&self) -> Option<a2a::TaskArtifactUpdateEvent>;
 }
 
-/// Go `artifactMaker` ([`OutputMode::ArtifactPerEvent`](super::OutputMode)): one artifact per
+/// The maker of [`OutputMode::ArtifactPerEvent`](super::OutputMode): one artifact per
 /// author's chain of partial events, sealed by the next non-partial event.
 pub(crate) struct ArtifactMaker {
     task: TaskInfo,
@@ -46,7 +45,7 @@ pub(crate) struct ArtifactMaker {
 }
 
 impl ArtifactMaker {
-    /// Go `newArtifactMaker`.
+    /// A maker for `task`.
     pub(crate) fn new(task: TaskInfo) -> Self {
         Self {
             task,
@@ -94,19 +93,19 @@ impl EventToArtifactTransform for ArtifactMaker {
     }
 }
 
-/// Go `legacyArtifactMaker` ([`OutputMode::ArtifactPerRun`](super::OutputMode)): one artifact for
+/// The maker of [`OutputMode::ArtifactPerRun`](super::OutputMode): one artifact for
 /// the run's non-partial events, and an "ephemeral" artifact replaced by every partial event and
 /// reset when the run ends.
 pub(crate) struct LegacyArtifactMaker {
     task: TaskInfo,
-    /// Go `responseID`: set once the first non-partial update was made.
+    /// The artifact ID: set once the first non-partial update was made.
     response_id: String,
-    /// Go `partialResponseID`: set once the first partial update was made.
+    /// The partial artifact ID: set once the first partial update was made.
     partial_response_id: String,
 }
 
 impl LegacyArtifactMaker {
-    /// Go `newLegacyArtifactMaker`.
+    /// A maker for `task`.
     pub(crate) fn new(task: TaskInfo) -> Self {
         Self {
             task,
@@ -159,7 +158,7 @@ impl EventToArtifactTransform for LegacyArtifactMaker {
     }
 }
 
-/// Go `newLegacyArtifactUpdate`: a new artifact when `id` is empty, else an append to `id`,
+/// A new artifact when `id` is empty, else an append to `id`,
 /// explicitly marked as a non-partial ADK event so the consumer does not run its own
 /// aggregation.
 pub(crate) fn new_legacy_artifact_update(
@@ -179,15 +178,15 @@ pub(crate) fn new_legacy_artifact_update(
     result
 }
 
-/// Go `newLegacyPartialArtifactUpdate`: replaces the partial artifact `id` (a new one when
+/// Replaces the partial artifact `id` (a new one when
 /// empty), marking the update, the artifact and each part as ADK-partial.
 pub(crate) fn new_legacy_partial_artifact_update(
     task: &TaskInfo,
     id: &str,
     mut parts: Vec<a2a::Part>,
 ) -> a2a::TaskArtifactUpdateEvent {
-    // Go marks the parts after building the update; its parts are shared pointers, so the
-    // artifact's parts carry the mark too.
+    // The parts are marked before the artifact is built, so the artifact's parts carry the mark
+    // too.
     for part in &mut parts {
         part.metadata
             .get_or_insert_with(HashMap::new)

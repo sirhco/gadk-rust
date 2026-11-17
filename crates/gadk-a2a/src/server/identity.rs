@@ -14,10 +14,10 @@
 // limitations under the License.
 
 //! The identity header bridge: the authenticated user reaches the executor through the
-//! reserved `x-gadk-a2a-user` header (spec R5, R6).
+//! reserved `x-gadk-a2a-user` header.
 //!
-//! Go reads the user from the a2a call context; a2a-rs 0.5.3 does not propagate one into
-//! `a2a_server::ExecutorContext::user`, so [`a2a_identity_layer`] (mounted inside the
+//! The user would normally come from the a2a call context, but a2a-rs 0.5.3 does not propagate
+//! one into `a2a_server::ExecutorContext::user`, so [`a2a_identity_layer`] (mounted inside the
 //! authentication layer) writes the user into a reserved header that a2a-rs passes on as a
 //! service param, and [`identity_header_resolver`] reads it back.
 
@@ -36,7 +36,7 @@ pub fn default_user_resolver() -> UserResolver {
     Arc::new(context_user)
 }
 
-/// Go's user lookup: the a2a call context's user name, when non-empty.
+/// The a2a call context's user name, when non-empty.
 fn context_user(ctx: &a2a_server::ExecutorContext) -> Option<String> {
     ctx.user
         .as_ref()

@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `cmd/launcher/universal`: an umbrella over sub-launchers (console and web). The first
+//! The universal launcher: an umbrella over sub-launchers (console and web). The first
 //! command-line argument picks a sub-launcher by keyword; it parses the rest of the arguments and
 //! then runs.
 
@@ -25,11 +25,11 @@ use crate::config::Config;
 use crate::error::Error;
 use crate::launcher::{Launcher, SubLauncher};
 
-/// Go `ParseAndRun`'s `parseRemaining func([]string) error` hook (for example
+/// A hook that checks the arguments left after parsing (for example
 /// [`error_on_unparsed_args`]).
 pub type ParseRemaining = fn(&[String]) -> Result<(), Error>;
 
-/// Go `universal.uniLauncher`.
+/// A launcher that routes to one of its sub-launchers by keyword.
 pub struct UniversalLauncher {
     /// Index of the chosen sub-launcher, set by a successful keyword routing.
     chosen: Option<usize>,
@@ -37,7 +37,7 @@ pub struct UniversalLauncher {
 }
 
 impl UniversalLauncher {
-    /// Go `universal.NewLauncher(sublaunchers...)`: the first sub-launcher is the default when
+    /// A launcher over `sublaunchers`: the first sub-launcher is the default when
     /// there are no arguments or the first one is not a keyword.
     pub fn new(sublaunchers: Vec<Box<dyn SubLauncher>>) -> UniversalLauncher {
         UniversalLauncher {
@@ -46,7 +46,7 @@ impl UniversalLauncher {
         }
     }
 
-    /// Go `ParseAndRun`: parse, then `parse_remaining` on the leftovers, then run.
+    /// Parses, then runs `parse_remaining` on the leftovers, then runs the chosen sub-launcher.
     pub async fn parse_and_run(
         &mut self,
         cancel: CancellationToken,
@@ -61,18 +61,18 @@ impl UniversalLauncher {
         self.run(cancel, config).await
     }
 
-    /// Go `run`: runs the chosen sub-launcher.
+    /// Runs the chosen sub-launcher.
     async fn run(&self, cancel: CancellationToken, config: Config) -> Result<(), Error> {
         match self.chosen.and_then(|i| self.sublaunchers.get(i)) {
             Some(chosen) => chosen.run(cancel, config).await,
-            // Go dereferences a nil chosen launcher here; `parse` always chooses one first.
+            // `parse` always chooses one first.
             None => Err(Error::Parse(
                 "there are no sub launchers to parse the arguments".to_owned(),
             )),
         }
     }
 
-    /// Go `parse`: checks the keywords are unique, picks the sub-launcher and lets it parse.
+    /// Checks the keywords are unique, picks the sub-launcher and lets it parse.
     fn parse(&mut self, args: Vec<String>) -> Result<Vec<String>, Error> {
         let mut keywords = HashSet::new();
         for sublauncher in &self.sublaunchers {
@@ -101,7 +101,7 @@ impl UniversalLauncher {
         self.sublaunchers[0].parse(args)
     }
 
-    /// Go `simpleDescription` (its raw string keeps the trailing spaces and tab indents).
+    /// The description text, with its trailing spaces and tab indents.
     fn simple_description(&self) -> String {
         "Universal launcher acts as a router, routing command line arguments to one of its sublaunchers. \n\tThe sublauncher is chosen by the first argument - a keyword. \n\tIf there are no arguments at all or the first one is not recognized by any of the sublaunchers, the first sublauncher is used.".to_owned()
     }
@@ -109,7 +109,7 @@ impl UniversalLauncher {
 
 #[async_trait::async_trait]
 impl Launcher for UniversalLauncher {
-    /// Go `Execute`: validates the config, then `ParseAndRun` with [`error_on_unparsed_args`].
+    /// Validates the config, then parses and runs with [`error_on_unparsed_args`].
     async fn execute(
         &mut self,
         cancel: CancellationToken,
@@ -121,7 +121,7 @@ impl Launcher for UniversalLauncher {
             .await
     }
 
-    /// Go `CommandLineSyntax`.
+    /// The syntax of every sub-launcher: a keyword list, then each sub-launcher's details.
     fn command_line_syntax(&self) -> String {
         if self.sublaunchers.is_empty() {
             return self.simple_description()
@@ -143,7 +143,7 @@ impl Launcher for UniversalLauncher {
     }
 }
 
-/// Go `ErrorOnUnparsedArgs`: `cannot parse following arguments: [a b]` when any are left.
+/// `cannot parse following arguments: [a b]` when any are left.
 pub fn error_on_unparsed_args(args: &[String]) -> Result<(), Error> {
     if args.is_empty() {
         return Ok(());

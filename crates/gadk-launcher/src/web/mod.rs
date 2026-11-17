@@ -13,15 +13,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `cmd/launcher/web`: the web server and its sub-launchers.
+//! The web server and its sub-launchers.
 //!
-//! [`WebLauncher`] is Go's `webLauncher`: the `web` keyword's flags, the sub-launcher keywords
-//! that follow them, and `Run` in Go's order — in-memory service defaults, the router (request
+//! [`WebLauncher`] takes the `web` keyword's flags and the sub-launcher keywords that follow
+//! them, and runs in this order: in-memory service defaults, the router (request
 //! logger, `/health`, the request-body limit, the sub-launchers' routes in declaration order, the
 //! origin guard), telemetry, the startup log, then the server until the token is cancelled.
 //!
-//! Divergences (ledger 6): the active sub-launchers' `UserMessage` lines are printed in
-//! declaration order (Go: map order); the server's timeouts are mapped as `serve` describes.
+//! The active sub-launchers' startup lines are printed in declaration order; the server's
+//! timeouts are mapped as `serve` describes.
 
 #[cfg(feature = "a2a")]
 pub mod a2a;
@@ -58,30 +58,30 @@ use crate::launcher::{Launcher, SubLauncher};
 use crate::telemetry;
 use crate::universal::error_on_unparsed_args;
 
-/// Go `logStartingWebServer`.
+/// The prefix of the startup log line that dumps the flag values.
 const LOG_STARTING_WEB_SERVER: &str = "Starting the web server: ";
-/// Go `logWebServerStartsOn`.
+/// The prefix of the startup log line with the server URL.
 const LOG_WEB_SERVER_STARTS_ON: &str = "Web servers starts on ";
-/// Go `defaultHost`: the server stays off the network unless `-host` says otherwise.
+/// The server stays off the network unless `-host` says otherwise.
 pub(crate) const DEFAULT_HOST: &str = "127.0.0.1";
 
-/// Go `web.Sublauncher`.
+/// A sub-launcher of the web launcher: it mounts routes on the web router.
 pub trait WebSublauncher: Send + Sync {
-    /// Go `Keyword()`.
+    /// The command-line keyword that selects this sub-launcher.
     fn keyword(&self) -> String;
-    /// Go `Parse(args)`: parses this sub-launcher's flags and returns the unparsed rest.
+    /// Parses this sub-launcher's flags and returns the unparsed rest.
     fn parse(&mut self, args: Vec<String>) -> Result<Vec<String>, Error>;
-    /// Go `CommandLineSyntax()`.
+    /// This sub-launcher's flags and arguments.
     fn command_line_syntax(&self) -> String;
-    /// Go `SimpleDescription()`.
+    /// A one-line description.
     fn simple_description(&self) -> String;
-    /// Go `SetupSubrouters(router, config)`: mounts this sub-launcher's routes.
+    /// Mounts this sub-launcher's routes.
     fn setup_subrouters(&self, router: &mut WebRouter, config: &mut Config) -> Result<(), Error>;
-    /// Go `UserMessage(webURL, printer)`: the startup lines this sub-launcher prints.
+    /// The startup lines this sub-launcher prints.
     fn user_message(&self, web_url: &str, printer: &mut dyn FnMut(&str));
 }
 
-/// Go `webConfig`: the `web` flags' values.
+/// The `web` flags' values.
 struct WebConfig {
     port: Flag<i64>,
     host: Flag<String>,
@@ -100,7 +100,7 @@ impl WebConfig {
         lock(&self.allow_origins).clone()
     }
 
-    /// Go's `%+v` of the `*webConfig` (unexported durations print as nanosecond integers).
+    /// The flag values as `&{port:… host:… …}`, durations as nanosecond integers.
     fn go_dump(&self) -> String {
         format!(
             "&{{port:{} host:{} allowOrigins:[{}] writeTimeout:{} readTimeout:{} idleTimeout:{} shutdownTimeout:{} otelToCloud:{} useH2C:{} maxPayloadSize:{}}}",
@@ -118,16 +118,16 @@ impl WebConfig {
     }
 }
 
-/// Go `web.webLauncher`.
+/// The `web` launcher: the web server with its sub-launchers.
 pub struct WebLauncher {
     flags: Mutex<FlagSet>,
     config: WebConfig,
     sublaunchers: Vec<Box<dyn WebSublauncher>>,
-    /// The keywords parsed from the command line (Go `activeSublaunchers`).
+    /// The keywords parsed from the command line.
     active: Vec<String>,
 }
 
-/// Go `web.NewLauncher(sublaunchers...)`.
+/// A `web` launcher over `sublaunchers`, with its flags.
 pub fn new(sublaunchers: Vec<Box<dyn WebSublauncher>>) -> WebLauncher {
     let mut fs = FlagSet::new("web");
     let host = fs.string(
@@ -201,14 +201,14 @@ pub fn new(sublaunchers: Vec<Box<dyn WebSublauncher>>) -> WebLauncher {
 }
 
 impl WebLauncher {
-    /// Replaces where the `web` flag set writes its errors and usage (Go `fs.SetOutput`; default
+    /// Replaces where the `web` flag set writes its errors and usage (default
     /// stderr), for tests and the CLI replay.
     pub fn with_flag_output(self, out: Arc<Mutex<dyn Write + Send>>) -> WebLauncher {
         lock(&self.flags).set_output(out);
         self
     }
 
-    /// Go `CommandLineSyntax()`.
+    /// The flag usage text followed by the sub-launchers' keywords and syntax.
     fn syntax(&self) -> String {
         let mut b = format_flag_usage(&lock(&self.flags));
         b.push_str("  You may specify sublaunchers:\n");
@@ -230,22 +230,22 @@ impl WebLauncher {
         b
     }
 
-    /// Go `bindHost()`: `-host`, or the default when it is empty.
+    /// `-host`, or the default when it is empty.
     pub(crate) fn bind_host(&self) -> String {
         bind_host_of(&self.config.host.get())
     }
 
-    /// Go `buildHTTPServer(..).Addr`: `host:port` (IPv6 bracketed).
+    /// The listen address: `host:port` (IPv6 bracketed).
     pub(crate) fn server_addr(&self) -> String {
         join_host_port(&self.bind_host(), self.config.port.get())
     }
 
-    /// Go `webURL()`.
+    /// The URL the server is reached at.
     pub(crate) fn web_url(&self) -> String {
         web_url(&self.config.host.get(), self.config.port.get())
     }
 
-    /// The server options from the flags (Go `buildHTTPServer`).
+    /// The server options from the flags.
     pub(crate) fn serve_options(&self) -> serve::Options {
         serve::Options::new(
             self.config.read_timeout.get(),
@@ -263,7 +263,7 @@ impl WebLauncher {
             .map(|l| &**l)
     }
 
-    /// Go `buildRouter(config)`: the base router with `/health` and the body limit, the active
+    /// The base router with `/health` and the body limit, the active
     /// sub-launchers' routes (declaration order), then the origin guard over all of them.
     pub(crate) fn build_router(&self, config: &mut Config) -> Result<WebRouter, Error> {
         let mut router = build_base_router(&config.log);
@@ -294,8 +294,8 @@ impl WebLauncher {
             })?;
         }
 
-        // Built after setup: sub-launchers add origins while they run. gorilla builds the
-        // middleware chain when a route matches, so this still wraps every route above.
+        // Built after setup: sub-launchers add origins while they run. It still wraps every
+        // route above.
         router.use_middleware(origin_guard_middleware(
             &config.bind_host,
             &config.allowed_origins,
@@ -303,7 +303,7 @@ impl WebLauncher {
         Ok(router)
     }
 
-    /// Go `Run` with the global subscriber installation injected (`install` returns `false` when
+    /// Runs with the global subscriber installation injected (`install` returns `false` when
     /// one is already set) over an empty environment, leaving the global OpenTelemetry providers
     /// alone: tests never touch the process-global dispatcher, providers or environment.
     #[cfg(test)]
@@ -317,7 +317,7 @@ impl WebLauncher {
             .await
     }
 
-    /// Go `Run` over the telemetry [`telemetry::Globals`] given: services, router, telemetry,
+    /// Runs over the telemetry [`telemetry::Globals`] given: services, router, telemetry,
     /// then the server; telemetry is shut down under `-shutdown-timeout` however the server ends.
     pub(crate) async fn run_in(
         &self,
@@ -379,7 +379,7 @@ impl SubLauncher for WebLauncher {
         "web".to_owned()
     }
 
-    /// Go `Parse`: the `web` flags, then each known sub-launcher keyword with its own flags,
+    /// Parses the `web` flags, then each known sub-launcher keyword with its own flags,
     /// until an argument that is not a known keyword.
     fn parse(&mut self, args: Vec<String>) -> Result<Vec<String>, Error> {
         let mut keywords: Vec<String> = Vec::with_capacity(self.sublaunchers.len());
@@ -434,7 +434,7 @@ impl SubLauncher for WebLauncher {
         "starts web server with additional sub-servers specified by sublaunchers".to_owned()
     }
 
-    /// Go `Run`: serves until `cancel` is cancelled.
+    /// Serves until `cancel` is cancelled.
     async fn run(&self, cancel: CancellationToken, config: Config) -> Result<(), Error> {
         self.run_in(cancel, config, telemetry::Globals::process())
             .await
@@ -443,7 +443,7 @@ impl SubLauncher for WebLauncher {
 
 #[async_trait::async_trait]
 impl Launcher for WebLauncher {
-    /// Go `webLauncher.Execute`: validate, parse, refuse leftovers, run.
+    /// Validates, parses, refuses leftovers, runs.
     async fn execute(
         &mut self,
         cancel: CancellationToken,
@@ -467,20 +467,19 @@ impl Launcher for WebLauncher {
     }
 }
 
-/// Go `BuildBaseRouter()`: StrictSlash(true) + the request logger writing to `log`. It registers
-/// no routes (a route here would shadow the caller's route for the same path).
+/// A strict-slash router (`WebRouter::new(true)`) plus the request logger writing to `log`. It
+/// registers no routes (a route here would shadow the caller's route for the same path).
 pub fn build_base_router(log: &Logger) -> WebRouter {
     let mut router = WebRouter::new(true);
     router.use_middleware(request_logger(log.clone()));
     router
 }
 
-/// Go `logger`: after the handler, logs `<method> <RequestURI> <elapsed>` (Go `time.Duration`).
-/// Go's handler returns once it has written the whole response, so the line is logged when the
-/// response body ends or is dropped (a streamed response: after its last frame).
+/// After the handler, logs `<method> <RequestURI> <elapsed>` with the elapsed time as a
+/// duration such as `1.5ms`. The line is logged when the response body ends or is dropped (a
+/// streamed response: after its last frame).
 ///
-/// Divergence (ledger 6): a WebSocket upgrade is logged when its 101 is sent (Go's handler, and
-/// so its log line, returns when the session ends).
+/// A WebSocket upgrade is logged when its 101 is sent, not when the session ends.
 fn request_logger(log: Logger) -> Middleware {
     Arc::new(move |next: Handler| {
         let log = log.clone();
@@ -550,13 +549,13 @@ impl hyper::body::Body for LoggedBody {
     }
 }
 
-/// Go `registerHealthRoute`: `/health` for GET and HEAD.
+/// `/health` for GET and HEAD.
 pub(crate) fn register_health_route(router: &mut WebRouter) {
     router.handle(&[Method::GET, Method::HEAD], "/health", health_handler());
 }
 
-/// Go `healthHandler`: `{"status":"ok"}` and a newline as `application/json` (adkrest's
-/// `/api/health` body and type).
+/// `{"status":"ok"}` and a newline as `application/json` (the body and type of the REST
+/// server's `/api/health`).
 fn health_handler() -> Handler {
     handler(|_req: Request| async {
         let mut resp = Response::new(Body::from("{\"status\":\"ok\"}\n"));
@@ -566,7 +565,7 @@ fn health_handler() -> Handler {
     })
 }
 
-/// Go `applyServiceDefaults`: in-memory session, artifact and memory services where the caller
+/// In-memory session, artifact and memory services where the caller
 /// left them unset, each logged.
 pub(crate) fn apply_service_defaults(config: &mut Config) {
     let mut defaulted = Vec::new();
@@ -589,7 +588,7 @@ pub(crate) fn apply_service_defaults(config: &mut Config) {
     }
 }
 
-/// Go `bindHost()` for a `-host` value.
+/// The bind host for a `-host` value.
 fn bind_host_of(host: &str) -> String {
     if host.is_empty() {
         DEFAULT_HOST.to_owned()
@@ -598,7 +597,7 @@ fn bind_host_of(host: &str) -> String {
     }
 }
 
-/// Go `displayHost`: loopback-ish listen hosts shown as `localhost`.
+/// Loopback-ish listen hosts shown as `localhost`.
 fn display_host(host: &str) -> &str {
     match host {
         "127.0.0.1" | "::1" | "0.0.0.0" | "::" => "localhost",
@@ -606,7 +605,7 @@ fn display_host(host: &str) -> &str {
     }
 }
 
-/// Go `net.JoinHostPort(host, strconv.Itoa(port))`.
+/// `host:port`, with an IPv6 host in brackets.
 fn join_host_port(host: &str, port: i64) -> String {
     if host.contains(':') {
         format!("[{host}]:{port}")
@@ -615,7 +614,7 @@ fn join_host_port(host: &str, port: i64) -> String {
     }
 }
 
-/// Go `webURL()` for a `-host` value and port.
+/// The server URL for a `-host` value and port.
 pub(crate) fn web_url(host: &str, port: i64) -> String {
     format!(
         "http://{}",

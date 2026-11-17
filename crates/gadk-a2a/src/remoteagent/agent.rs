@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The remote A2A agent (port of ADK-Go `agent/remoteagent/v2/a2a_agent.go`: `A2AConfig`,
-//! `NewA2A`, the run loop, `newMessage`, `toErrorEvent`, `cleanupRemoteTask`).
+//! The remote A2A agent: [`A2AConfig`], [`new_a2a`], the run loop, the message built for each
+//! invocation and the cleanup of abandoned remote tasks.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -51,14 +51,14 @@ use crate::convert::{
 };
 use crate::error::to_a2a_error;
 
-/// Go `BeforeA2ARequestCallback`: an event short-circuits the request.
+/// Runs before the request is sent: an event short-circuits the request.
 pub type BeforeA2ARequestCallback = Arc<
     dyn Fn(&Context, &a2a::SendMessageRequest) -> BoxFuture<'static, Result<Option<Event>, Error>>
         + Send
         + Sync,
 >;
 
-/// Go `A2AEventConverter`: converts a remote response (or transport error) to a session event.
+/// Converts a remote response (or transport error) to a session event.
 pub type A2AEventConverter = Arc<
     dyn Fn(
             &InvocationContext,
@@ -69,7 +69,7 @@ pub type A2AEventConverter = Arc<
         + Sync,
 >;
 
-/// Go `AfterA2ARequestCallback`: an event replaces the converted one. The default converter
+/// Runs after the response is converted: an event replaces the converted one. The default converter
 /// passes no session event with the error on a transport or conversion failure, so a callback
 /// must check the event before use; an event returned together with an error by a
 /// `before_request_callbacks` entry or a custom `converter` is passed on as is.
@@ -84,7 +84,7 @@ pub type AfterA2ARequestCallback = Arc<
         + Sync,
 >;
 
-/// Go `A2ARemoteTaskCleanupCallback`: runs after an abandoned or failed remote task was
+/// Runs after an abandoned or failed remote task was
 /// cancelled; `task_info` is `(task_id, context_id)`.
 pub type A2ARemoteTaskCleanupCallback = Arc<
     dyn Fn(
@@ -97,7 +97,7 @@ pub type A2ARemoteTaskCleanupCallback = Arc<
         + Sync,
 >;
 
-/// Go `A2AConfig`.
+/// The configuration of a remote A2A agent ([`new_a2a`]).
 #[derive(Clone, Default)]
 pub struct A2AConfig {
     /// The agent name.
@@ -108,47 +108,48 @@ pub struct A2AConfig {
     pub agent_card: Option<a2a::AgentCard>,
     /// Resolves the card on every invocation.
     pub agent_card_provider: Option<AgentCardProvider>,
-    /// Go `BeforeAgentCallbacks`.
+    /// Callbacks run before the agent.
     pub before_agent_callbacks: Vec<BeforeAgentCallback>,
-    /// Go `BeforeRequestCallbacks`.
+    /// Callbacks run before each request; an event short-circuits it.
     pub before_request_callbacks: Vec<BeforeA2ARequestCallback>,
-    /// Go `Converter`; `None` → `to_session_event_with_parts`, and transport and conversion
+    /// Converts each response; `None` → `to_session_event_with_parts`, and transport and conversion
     /// errors are returned from the run.
     pub converter: Option<A2AEventConverter>,
-    /// Go `AfterRequestCallbacks`.
+    /// Callbacks run after each response is converted.
     pub after_request_callbacks: Vec<AfterA2ARequestCallback>,
-    /// Go `AfterAgentCallbacks`.
+    /// Callbacks run after the agent.
     pub after_agent_callbacks: Vec<AfterAgentCallback>,
-    /// Go `AllowTransferToAgent`.
+    /// Restores the `transfer_to_agent` action the remote peer set on its response metadata.
     pub allow_transfer_to_agent: bool,
-    /// Go `A2APartConverter`.
+    /// Converts A2A parts to genai parts.
     pub a2a_part_converter: Option<A2APartConverter>,
-    /// Go `GenAIPartConverter`.
+    /// Converts genai parts to A2A parts.
     pub genai_part_converter: Option<GenAIPartConverter>,
-    /// Go `ClientProvider`; `None` → `new_a2a_client_provider(None)`.
+    /// Creates the A2A client; `None` → `new_a2a_client_provider(None)`.
     pub client_provider: Option<Arc<dyn A2AClientProvider>>,
-    /// Go `Auth`: the credential every A2A call and the card fetch carry.
+    /// The credential every A2A call and the card fetch carry.
     pub auth: Option<Arc<dyn gadk_auth::CredentialProvider>>,
-    /// Go `MessageSendConfig`.
+    /// The send configuration of every message request.
     pub message_send_config: Option<a2a::SendMessageConfiguration>,
-    /// Go `RemoteTaskCleanupCallback`.
+    /// Runs instead of the default cancel when an abandoned or failed remote task is cleaned up.
     pub remote_task_cleanup_callback: Option<A2ARemoteTaskCleanupCallback>,
 }
 
-/// Go `NewA2A`'s error when `Auth` and a custom `ClientProvider` are both set (verbatim).
+/// The error when `auth` and a custom `client_provider` are both set, byte-identical to an ADK
+/// agent's error text; see the literal.
 const AUTH_WITH_CLIENT_PROVIDER: &str = "A2AConfig.Auth cannot be combined with a custom ClientProvider; wire the credential into your ClientProvider instead. When this agent runs, the context the provider receives is the ADK invocation context: compute remoteagent.CredentialScope(ctx.Session(), name) there and have the client it returns attach it with a2aclient.AttachSessionID on every call, the cleanup CancelTask included. An adka2a server cancelling an abandoned child task calls the provider with its own request context instead, which is not an agent.InvocationContext, so check the assertion. See A2AConfig.ClientProvider";
 
-/// Go `context.Canceled`'s text: the response error a cancelled invocation ends with.
+/// The text of the response error a cancelled invocation ends with.
 const CONTEXT_CANCELED: &str = "context canceled";
 
-/// Go `cleanupTimeout`: bounds the cleanup `CancelTask`, credential resolution included.
+/// Bounds the cleanup task cancel, credential resolution included.
 pub(crate) const CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Go `NewA2A`: an agent of type `RemoteAgent` backed by the remote A2A agent.
+/// An agent of type `RemoteAgent` backed by the remote A2A agent.
 ///
-/// Without `client_provider`, the client comes from [`new_a2a_client_provider`]: a2a-go's default
-/// factory, or, with `auth` set, one over the auth-aware HTTP client with the credential
-/// interceptor (Go passes `authHTTPClient` to the factory).
+/// Without `client_provider`, the client comes from [`new_a2a_client_provider`]: the a2a-rs default
+/// factory (see [`new_a2a_client_provider`]), or, with `auth` set, one over the auth-aware HTTP
+/// client with the credential interceptor.
 pub fn new_a2a(cfg: A2AConfig) -> Result<Arc<dyn Agent>, Error> {
     if cfg.agent_card.is_none() && cfg.agent_card_provider.is_none() {
         return Err(Error::msg(
@@ -162,8 +163,7 @@ pub fn new_a2a(cfg: A2AConfig) -> Result<Arc<dyn Agent>, Error> {
     let client_provider = match &cfg.client_provider {
         Some(provider) => Arc::clone(provider),
         None if cfg.auth.is_some() => {
-            // Go `cardFetchHTTPClient(authHTTPClient(cfg.Auth))`: the card fetch shares the RPC
-            // client's redirect policy, with its own timeout.
+            // The card fetch shares the RPC client's redirect policy, with its own timeout.
             card_client = Some(card_fetch_http_client()?);
             new_a2a_client_provider(Some(Arc::new(auth_client_factory()?)))
         }
@@ -208,7 +208,7 @@ pub fn new_a2a(cfg: A2AConfig) -> Result<Arc<dyn Agent>, Error> {
     Ok(agent)
 }
 
-/// Go `a2aAgent`.
+/// The remote A2A agent behind [`new_a2a`].
 struct RemoteAgent {
     cfg: Arc<A2AConfig>,
     server_config: Arc<A2AServerConfig>,
@@ -220,7 +220,7 @@ struct RemoteAgent {
 }
 
 impl RemoteAgent {
-    /// Go `authSendContext`: with `auth` set, the scope every outgoing call of one invocation
+    /// With `auth` set, the scope every outgoing call of one invocation
     /// runs in (the card fetch, the send, the cleanup cancel), with a fresh credential cell so
     /// the credential is resolved once per invocation. `None` without `auth`: nothing is
     /// attached, and any scope the caller is in stays in effect.
@@ -241,7 +241,8 @@ impl RemoteAgent {
         })
     }
 
-    /// Go `a2aAgent.run`.
+    /// Runs one invocation: resolves the card, creates the client, sends the message and streams
+    /// the converted responses, then cleans up.
     fn run(self: Arc<Self>, ctx: InvocationContext) -> EventStream {
         Box::pin(async_stream::stream! {
             let cfg = Arc::clone(&self.cfg);
@@ -281,7 +282,7 @@ impl RemoteAgent {
                     return;
                 }
             };
-            // Go `defer destroy(ctx, sender)`: the guard destroys the client when the run ends,
+            // The guard destroys the client when the run ends,
             // and, once armed, cleans the remote task up first; a dropped stream does both on a
             // spawned task.
             let mut guard = RunGuard::new(Arc::clone(&client), ctx.clone());
@@ -344,7 +345,7 @@ impl RemoteAgent {
                 last_err: None,
             });
 
-            // Go's client calls run under the invocation context: its cancellation ends the
+            // The client calls run under the invocation context: its cancellation ends the
             // response stream with the context's error (one more response to process).
             let send_client = Arc::clone(&client);
             let send_req = req.clone();
@@ -397,8 +398,8 @@ impl RemoteAgent {
                     Some(converter) => split(converter(&ctx, &req, item.as_ref()).await),
                     None => split(processor.convert_to_session_event(&ctx, a2a_event, a2a_err).await),
                 };
-                // Go's default conversion merges an artifact update's artifact metadata into the
-                // update's own metadata in place; later reads see the merged view.
+                // The default conversion merges an artifact update's artifact metadata into the
+                // update's own metadata; later reads see the merged view.
                 let view = match (&cfg.converter, &event, a2a_event) {
                     (None, Some(_), Some(a2a_event)) => converted_view(a2a_event),
                     _ => None,
@@ -464,7 +465,7 @@ impl RemoteAgent {
     }
 }
 
-/// The A2A event a `send_message` result is (Go's `SendMessageResult` is an `a2a.Event`).
+/// The stream event a `send_message` result is.
 fn send_response_event(resp: a2a::SendMessageResponse) -> a2a::StreamResponse {
     match resp {
         a2a::SendMessageResponse::Task(task) => a2a::StreamResponse::Task(task),
@@ -472,7 +473,7 @@ fn send_response_event(resp: a2a::SendMessageResponse) -> a2a::StreamResponse {
     }
 }
 
-/// A Go `(*session.Event, error)` pair from a callback or converter result.
+/// An `(event, error)` pair from a callback or converter result.
 fn split(result: Result<Option<Event>, Error>) -> (Option<Event>, Option<Error>) {
     match result {
         Ok(event) => (event, None),
@@ -485,19 +486,19 @@ fn agent_error(err: Error) -> AgentError {
     AgentError::Other(Box::new(err))
 }
 
-/// What the cleanup of an abandoned remote task needs (Go's deferred `cleanupRemoteTask` call).
+/// What the cleanup of an abandoned remote task needs (deferred until the run ends).
 struct Cleanup {
     cfg: Arc<A2AConfig>,
     card: a2a::AgentCard,
     id: Option<CallIdentity>,
     last_event: Option<a2a::StreamResponse>,
-    /// Go `lastErr` (its text: the yielded error itself goes to the caller).
+    /// The text of the last yielded error (the error itself goes to the caller).
     last_err: Option<String>,
 }
 
-/// Go's deferred `cleanupRemoteTask` and `destroy`: run inline by [`RunGuard::finish`] when the
-/// run ends, or on a spawned task when the event stream is dropped first (Go: the caller stops
-/// the iteration).
+/// The remote task cleanup and client destroy, run inline by [`RunGuard::finish`] when the run
+/// ends, or on a spawned task when the event stream is dropped first (the caller stops the
+/// iteration).
 struct RunGuard {
     state: Option<GuardState>,
 }
@@ -540,7 +541,7 @@ impl RunGuard {
 
     /// Runs the cleanup and destroys the client now, in order, before the run ends. The work
     /// runs on its own task (awaited here) so that dropping the event stream while it is in
-    /// flight does not abort it (Go's defers always run); without a runtime it runs inline.
+    /// flight does not abort it; without a runtime it runs inline.
     async fn finish(&mut self) {
         let Some(state) = self.state.take() else {
             return;
@@ -559,9 +560,8 @@ impl RunGuard {
 impl GuardState {
     async fn run(self) {
         if let Some(cleanup) = self.cleanup {
-            // Go `a2a_agent.go:572`: the cause is the last yielded error, else the context's
-            // cancellation cause (`context.Cause(ctx)`: canceled, deadline exceeded, or the
-            // shared cause error).
+            // The cause is the last yielded error, else the context's cancellation cause
+            // (canceled, deadline exceeded, or the shared cause error).
             let cause = match cleanup.last_err {
                 Some(text) => Some(Error::msg(text)),
                 None => self.ctx.cause().map(|c| Error::Agent(c.to_agent_error())),
@@ -598,7 +598,7 @@ impl Drop for RunGuard {
     }
 }
 
-/// Go `cleanupRemoteTask`: when the last event left the remote task running, hands it to
+/// When the last event left the remote task running, hands it to
 /// `remote_task_cleanup_callback`, or else cancels it (bounded by [`CLEANUP_TIMEOUT`]) unless it
 /// waits for input and the run did not fail. Runs inside the invocation's auth scope.
 pub(crate) async fn cleanup_remote_task(
@@ -657,7 +657,7 @@ pub(crate) async fn cleanup_remote_task(
     }
 }
 
-/// Go `newMessage`: the message for this invocation. On resume (the last event answers a
+/// The message for this invocation. On resume (the last event answers a
 /// function call this peer made) it carries the function response, unflattened, with the
 /// call's task and context IDs; otherwise the parts the remote session has not seen (a scoped
 /// dispatch with no history of its own seeds from the user content) and the last context ID.
@@ -700,12 +700,12 @@ pub(crate) async fn new_message(
     Ok(msg)
 }
 
-/// Go's empty-string-means-absent for message IDs.
+/// `None` for an empty message ID.
 fn non_empty(s: String) -> Option<String> {
     (!s.is_empty()).then_some(s)
 }
 
-/// Go `destroy`.
+/// Destroys the client, logging a failure.
 async fn destroy(client: &dyn A2AClient) {
     if let Err(err) = client.destroy().await {
         tracing::warn!(error = %err, "failed to destroy client");

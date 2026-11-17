@@ -13,10 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Agent-card resolution and source checks (port of ADK-Go `agent/remoteagent/v2/a2a_agent.go`
-//! `NewAgentCardProvider`, `classifyCardSource`, `validateCardInterfaceOrigins`, `urlOrigin`,
-//! `isLoopbackHost`, `requireSecureCardSource`, and of a2a-go's `agentcard.Resolver`, whose
-//! fetch gadk-a2a performs itself).
+//! Agent-card resolution and source checks: classifying a card source as a file or an http(s)
+//! URL, fetching and parsing the card, and checking that a credential only goes to a secure
+//! source and that the card's interfaces share the source's origin. The card fetch is performed by
+//! gadk-a2a itself.
 
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -29,42 +29,42 @@ use serde_json::Value;
 use super::auth::{apply_credential, current_card_fetch_client};
 use crate::Error;
 
-/// Go `AgentCardProvider`: resolves the remote agent's card.
+/// Resolves the remote agent's card.
 pub type AgentCardProvider =
     Arc<dyn Fn() -> BoxFuture<'static, Result<a2a::AgentCard, Error>> + Send + Sync>;
 
-/// Go `agentcard.ResolveOption`s that [`new_agent_card_provider`] accepts.
+/// The resolve options that [`new_agent_card_provider`] accepts.
 #[derive(Debug, Clone, Default)]
 pub struct CardResolveOptions {
-    /// Go `agentcard.WithPath`: the card path; `None` → `/.well-known/agent-card.json`.
+    /// The card path; `None` → `/.well-known/agent-card.json`.
     pub path: Option<String>,
-    /// Go `agentcard.WithRequestHeader`: extra request headers, in order.
+    /// Extra request headers, in order.
     pub request_headers: Vec<(String, String)>,
 }
 
-/// Go `ErrUnsupportedCardSource`'s text: every error [`classify_card_source`] returns starts
+/// The text every error [`classify_card_source`] returns starts
 /// with it.
 pub(crate) const UNSUPPORTED_CARD_SOURCE: &str = "unsupported agent card source";
 
-/// Go `ErrUntrustedCardInterface`'s text: every error [`validate_card_interface_origins`] and
+/// The text every error [`validate_card_interface_origins`] and
 /// [`require_secure_card_source`] return starts with it.
 pub(crate) const UNTRUSTED_CARD_INTERFACE: &str = "untrusted agent card interface";
 
-/// a2a-go `agentcard.defaultAgentCardPath`.
+/// The card path used when [`CardResolveOptions::path`] is `None`.
 const DEFAULT_AGENT_CARD_PATH: &str = "/.well-known/agent-card.json";
 
-/// a2a-go `agentcard.defaultClient`'s timeout.
+/// The timeout of the default card-fetch client.
 const DEFAULT_CARD_FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Go `NewAgentCardProvider`: a URL or file source; reads the card-fetch client and credential
+/// A provider for a URL or file source; reads the card-fetch client and credential
 /// scope from the auth scope when present.
 ///
 /// A file source is read and parsed. An http(s) source is fetched with `GET <source><path>`
-/// (a2a-go `agentcard.Resolver` URL rules, `opts.request_headers` attached); inside an auth scope
-/// that carries a card-fetch client (Go `CardFetchClientFrom`) the source must be https or
-/// loopback http (`require_secure_card_source`, checked before any request), that client sends
-/// it, and the scope's credential is applied. Every interface of a fetched card must share the source's
-/// origin (`validate_card_interface_origins`).
+/// (see `build_card_url` for the URL rules, `opts.request_headers` attached); inside an auth scope
+/// that carries a card-fetch client the source must be https or loopback http
+/// (`require_secure_card_source`, checked before any request), that client sends it, and the
+/// scope's credential is applied. Every interface of a fetched card must share the source's origin
+/// (`validate_card_interface_origins`).
 pub fn new_agent_card_provider(
     source: impl Into<String>,
     opts: CardResolveOptions,
@@ -92,7 +92,7 @@ async fn resolve_card(
     if classify_card_source(source)? {
         return read_card_file(source);
     }
-    // Go `iremoteagent.CardFetchClientFrom(ctx)`: present exactly when the remote agent owns the
+    // The card-fetch client is present exactly when the remote agent owns the
     // auth scope of this call (`new_a2a` with `auth` always attaches one).
     let card = match current_card_fetch_client() {
         Some(client) => {
@@ -107,11 +107,11 @@ async fn resolve_card(
     Ok(card)
 }
 
-/// a2a-go `agentcard.defaultClient`: a 30 s timeout and the default redirect policy.
+/// The default card-fetch client: a 30 s timeout and the default redirect policy.
 fn default_card_client() -> reqwest::Client {
     // `build` fails only when reqwest cannot initialize its TLS backend. The fallback is
     // `reqwest::Client::new()`, which panics on that same failure: this panics exactly when
-    // reqwest's own `Client::new` would. `new_agent_card_provider` (Go `NewAgentCardProvider`)
+    // reqwest's own `Client::new` would. `new_agent_card_provider`
     // does not return an error, so there is nothing to propagate it through.
     reqwest::Client::builder()
         .timeout(DEFAULT_CARD_FETCH_TIMEOUT)
@@ -119,7 +119,7 @@ fn default_card_client() -> reqwest::Client {
         .unwrap_or_default()
 }
 
-/// a2a-go `Resolver.Resolve` for an http(s) source: build the URL, send the request (with the
+/// Fetches the card of an http(s) source: build the URL, send the request (with the
 /// scope's credential when `authenticated`), require 200 and parse the body.
 async fn fetch_card(
     client: &reqwest::Client,
@@ -176,8 +176,8 @@ async fn fetch_card(
     parse_card(&body).map_err(|e| Error::wrap("card parsing failed", e))
 }
 
-/// Go `card request failed: %w` around the `*url.Error` of `http.Client.Do`
-/// (`Get "<url>": <err>`).
+/// A card request failure, displayed as `card request failed: Get "<url>": <err>` (the URL
+/// double-quoted with escapes), byte-identical to an ADK client's error text.
 fn card_request_failed(
     req_url: &str,
     err: impl Into<Box<dyn std::error::Error + Send + Sync>>,
@@ -188,8 +188,8 @@ fn card_request_failed(
     )
 }
 
-/// a2a-go `WithRequestHeader` stores headers in a map keyed by the exact name, so a later
-/// header of the same name replaces an earlier one; the survivors keep their first position.
+/// Request headers are keyed by the exact name, so a later header of the same name replaces an
+/// earlier one; the survivors keep their first position.
 fn go_request_headers(headers: &[(String, String)]) -> Vec<(&str, &str)> {
     let mut out: Vec<(&str, &str)> = Vec::with_capacity(headers.len());
     for (name, value) in headers {
@@ -201,9 +201,9 @@ fn go_request_headers(headers: &[(String, String)]) -> Vec<(&str, &str)> {
     out
 }
 
-/// a2a-go `agentcard.buildURL`: a non-empty `path` is joined to the source (Go `url.JoinPath`);
-/// otherwise a source with no path or the root path gets `/.well-known/agent-card.json` and any
-/// other source is fetched as is.
+/// The card URL: a non-empty `path` is joined to the source (path elements cleaned and joined
+/// with `/`); otherwise a source with no path or the root path gets `/.well-known/agent-card.json`
+/// and any other source is fetched as is.
 fn build_card_url(source: &str, path: Option<&str>) -> Result<String, Error> {
     let construction = |e: String| Error::wrap("url construction failed", Error::msg(e));
     let base = go_url::parse(source).map_err(|e| construction(e.to_string()))?;
@@ -220,7 +220,7 @@ fn build_card_url(source: &str, path: Option<&str>) -> Result<String, Error> {
     }
 }
 
-/// Go `os.ReadFile` + `json.Unmarshal` of a file source.
+/// Reads and parses the card file of a file source.
 fn read_card_file(source: &str) -> Result<a2a::AgentCard, Error> {
     let bytes = read_file(source).map_err(|e| {
         Error::wrap(
@@ -231,7 +231,8 @@ fn read_card_file(source: &str) -> Result<a2a::AgentCard, Error> {
     parse_card(&bytes).map_err(|e| Error::wrap("failed to unmarshal an agent card", e))
 }
 
-/// Go's `*fs.PathError` text (`open <path>: no such file or directory`).
+/// A file error displayed as `<op> <path>: <lower-cased OS error text>`, for example
+/// `open <path>: no such file or directory`.
 #[derive(Debug)]
 struct PathError {
     op: &'static str,
@@ -241,7 +242,7 @@ struct PathError {
 
 impl std::fmt::Display for PathError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Go's `syscall.Errno` texts are the C library's, lower-cased and without the code; a
+        // The OS error text is the C library's, lower-cased and without the code; a
         // non-OS error's text is lower-cased too (the OS text already is, so this is a no-op).
         let text = gadk_platform::go_errno_text(&self.err);
         let mut chars = text.chars();
@@ -259,7 +260,7 @@ impl std::error::Error for PathError {
     }
 }
 
-/// Go `os.ReadFile`: `open` then `read`, each failing with its own `PathError`.
+/// Reads a whole file: `open` then `read`, each failing with its own `PathError`.
 fn read_file(path: &str) -> Result<Vec<u8>, PathError> {
     use std::io::Read as _;
     let path_error = |op, err| PathError {
@@ -274,11 +275,11 @@ fn read_file(path: &str) -> Result<Vec<u8>, PathError> {
     Ok(bytes)
 }
 
-/// Go `json.Unmarshal` into an `a2a.AgentCard`: a field the JSON omits or sets to `null` keeps
-/// Go's zero value. a2a-rs requires `version`, `supportedInterfaces`, `capabilities` and an
+/// Parses an agent card: a field the JSON omits or sets to `null` takes its zero value. a2a-rs
+/// requires `version`, `supportedInterfaces`, `capabilities` and an
 /// interface's `url`/`protocolBinding`/`protocolVersion` and rejects `null` lists, so those are
-/// filled with their zero values before decoding (a Go-encoded card writes `null` for an empty
-/// list).
+/// filled with their zero values before decoding (a card encoded by an ADK server writes
+/// `null` for an empty list).
 pub(crate) fn parse_card(bytes: &[u8]) -> Result<a2a::AgentCard, serde_json::Error> {
     let mut value: Value = serde_json::from_slice(bytes)?;
     if value.is_null() {
@@ -299,7 +300,7 @@ pub(crate) fn parse_card(bytes: &[u8]) -> Result<a2a::AgentCard, serde_json::Err
             card.insert("capabilities".into(), Value::Object(serde_json::Map::new()));
         }
         if let Some(Value::Array(ifaces)) = card.get_mut("supportedInterfaces") {
-            // A Go `nil` interface is skipped by every reader; a2a-rs cannot hold one.
+            // A `null` interface is skipped by every reader; a2a-rs cannot hold one.
             ifaces.retain(|iface| !iface.is_null());
             for iface in ifaces.iter_mut().filter_map(Value::as_object_mut) {
                 zero_fill(iface, &["url", "protocolBinding", "protocolVersion"], &[]);
@@ -328,10 +329,10 @@ fn zero_fill(obj: &mut serde_json::Map<String, Value>, strings: &[&str], lists: 
     }
 }
 
-/// Go `classifyCardSource`: `Ok(true)` for a file source, `Ok(false)` for http(s).
+/// `Ok(true)` for a file source, `Ok(false)` for http(s).
 ///
 /// A source is a URL only once it carries `://`, and only if what precedes the first `://` is a
-/// scheme by Go `url.Parse`'s rules (it survives a parse of `prefix + ":"` unchanged, modulo
+/// scheme by URL syntax (it survives a parse of `prefix + ":"` unchanged, modulo
 /// case); anything else is a path. A scheme other than http(s) is refused.
 pub(crate) fn classify_card_source(source: &str) -> Result<bool, Error> {
     let Some((prefix, _)) = source.split_once("://") else {
@@ -351,7 +352,7 @@ pub(crate) fn classify_card_source(source: &str) -> Result<bool, Error> {
     )))
 }
 
-/// Go `validateCardInterfaceOrigins`: every interface of a card fetched from `source` must be
+/// Every interface of a card fetched from `source` must be
 /// https or loopback http, and share the origin (scheme, case-folded host, defaulted port) of
 /// the configured source.
 pub(crate) fn validate_card_interface_origins(
@@ -390,7 +391,7 @@ pub(crate) fn validate_card_interface_origins(
     Ok(())
 }
 
-/// Go `urlOrigin`: (scheme, case-folded hostname, port defaulted from the scheme).
+/// (scheme, case-folded hostname, port defaulted from the scheme).
 fn url_origin(u: &go_url::Url) -> (String, String, String) {
     let host = go_to_lower(u.hostname());
     let port = match (u.port(), u.scheme.as_str()) {
@@ -401,9 +402,8 @@ fn url_origin(u: &go_url::Url) -> (String, String, String) {
     (u.scheme.clone(), host, port.to_owned())
 }
 
-/// Go `isLoopbackHost`: `localhost`, a subdomain of it (RFC 6761), or a loopback IP address
-/// (Go `net.ParseIP(..).IsLoopback()`, which unmaps an IPv4-mapped address). A DNS name that
-/// merely starts with `127.` is not loopback.
+/// `localhost`, a subdomain of it (RFC 6761), or a loopback IP address (an IPv4-mapped IPv6
+/// address is unmapped first). A DNS name that merely starts with `127.` is not loopback.
 pub(crate) fn is_loopback_host(hostname: &str) -> bool {
     let h = go_to_lower(hostname);
     if h == "localhost" || h.ends_with(".localhost") {
@@ -418,7 +418,7 @@ pub(crate) fn is_loopback_host(hostname: &str) -> bool {
     }
 }
 
-/// Go `requireSecureCardSource`: a credential is sent only to an https or loopback card source.
+/// A credential is sent only to an https or loopback card source.
 pub(crate) fn require_secure_card_source(source: &str) -> Result<(), Error> {
     let u = go_url::parse(source).map_err(|e| {
         Error::msg(format!(

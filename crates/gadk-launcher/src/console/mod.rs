@@ -13,14 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `cmd/launcher/console`: runs an agent interactively, reading user messages line by line
+//! The console launcher: runs an agent interactively, reading user messages line by line
 //! from stdin and printing the agent's answers to stdout.
 //!
-//! Divergences (ledger 6): stdin is read on a dedicated thread (Go: a goroutine), which stays
-//! blocked on stdin after `run` returns, as Go's does; tokio's Ctrl-C handler stays installed
-//! after `run` returns (Go's `NotifyContext` stop restores the default). A cancellation during a
-//! turn ends `run` at once (Go lets the run report its context error first). A stdin read error
-//! returns an error with Go's `log.Fatal` text instead of exiting the process.
+//! Stdin is read on a dedicated thread, which stays blocked on stdin after `run` returns; tokio's
+//! Ctrl-C handler stays installed after `run` returns. A cancellation during a turn ends `run` at
+//! once. A stdin read error returns an error carrying its text instead of exiting the process.
 
 pub(crate) mod hitl;
 
@@ -51,31 +49,31 @@ use crate::universal::error_on_unparsed_args;
 
 /// Line source for the console (default: stdin read on a blocking task).
 pub type InputLines = Box<dyn Iterator<Item = std::io::Result<String>> + Send>;
-/// Output sink for the console's `fmt.Print*` text (default: stdout).
+/// Output sink for the console's printed text (default: stdout).
 pub type Output = std::sync::Arc<std::sync::Mutex<dyn std::io::Write + Send>>;
 
-/// The console's user and app; Go: "not important at this moment, we can just use any".
+/// The console's user and app; any value works.
 const USER_ID: &str = "console_user";
 const APP_NAME: &str = "console_app";
 
-/// Go `consoleLauncher` with its `consoleConfig`.
+/// The console sub-launcher with its parsed flags.
 pub struct ConsoleLauncher {
-    /// Go `flags`; a mutex because a `FlagSet` is not `Sync` (its func flags are `FnMut`).
+    /// The console flags; a mutex because a `FlagSet` is not `Sync` (its func flags are `FnMut`).
     flags: Mutex<FlagSet>,
     streaming_mode_string: Flag<String>,
     shutdown_timeout: Flag<GoDuration>,
     otel_to_cloud: Flag<bool>,
-    /// Go `consoleConfig.streamingMode`, set by `parse`; `None` is Go's empty mode (decided by
-    /// whether stdout is a character device).
+    /// The streaming mode, set by `parse`; `None` is the unset mode (decided by whether stdout is
+    /// a character device).
     streaming_mode: Option<StreamingMode>,
     /// Injected input; `None` reads stdin. Taken by the first `run`.
     input: Mutex<Option<InputLines>>,
     output: Output,
-    /// Injected answer to Go's `ModeCharDevice` check on stdout; `None` checks stdout.
+    /// Injected answer to the character-device check on stdout; `None` checks stdout.
     stdout_is_char_device: Option<bool>,
 }
 
-/// Go `console.NewLauncher()`.
+/// A console launcher with its flags (`streaming_mode`, `shutdown-timeout`, `otel_to_cloud`).
 pub fn new() -> ConsoleLauncher {
     let mut fs = FlagSet::new("console");
     let streaming_mode_string =
@@ -118,13 +116,13 @@ impl ConsoleLauncher {
         }
     }
 
-    /// Replaces the flag set's usage and error output (Go `fs.SetOutput`; default stderr).
+    /// Replaces the flag set's usage and error output (default stderr).
     pub fn with_flag_output(self, out: Arc<Mutex<dyn Write + Send>>) -> ConsoleLauncher {
         lock(&self.flags).set_output(out);
         self
     }
 
-    /// Go `consoleLauncher.Execute` over the telemetry [`telemetry::Globals`] given: validate,
+    /// Executes over the telemetry [`telemetry::Globals`] given: validate,
     /// parse, refuse leftovers, run.
     async fn execute_in(
         &mut self,
@@ -142,7 +140,7 @@ impl ConsoleLauncher {
         self.run_in(cancel, config, globals).await
     }
 
-    /// Go `Execute` with the global subscriber installation injected (`install` returns `false`
+    /// Executes with the global subscriber installation injected (`install` returns `false`
     /// when one is already set) over an empty environment, leaving the global OpenTelemetry
     /// providers alone: tests never touch the process-global dispatcher, providers or
     /// environment.
@@ -158,7 +156,7 @@ impl ConsoleLauncher {
             .await
     }
 
-    /// Go `Run` with the global subscriber installation injected, as
+    /// Runs with the global subscriber installation injected, as
     /// [`ConsoleLauncher::execute_with`].
     #[cfg(test)]
     pub(crate) async fn run_with(
@@ -171,8 +169,8 @@ impl ConsoleLauncher {
             .await
     }
 
-    /// Go `Run` over the telemetry [`telemetry::Globals`] given: Ctrl-C cancels a child token
-    /// (Go `signal.NotifyContext(ctx, os.Interrupt)`), telemetry starts, then the session,
+    /// Runs over the telemetry [`telemetry::Globals`] given: Ctrl-C cancels a child token,
+    /// telemetry starts, then the session,
     /// runner and interaction loop; telemetry is shut down under `-shutdown-timeout`.
     pub(crate) async fn run_in(
         &self,
@@ -181,7 +179,7 @@ impl ConsoleLauncher {
         globals: telemetry::Globals,
     ) -> Result<(), Error> {
         let ctx = cancel.child_token();
-        // Go `defer cancel()`: ends the Ctrl-C watcher when `run` returns.
+        // Ends the Ctrl-C watcher when `run` returns.
         let _stop = ctx.clone().drop_guard();
         {
             let ctx = ctx.clone();
@@ -199,13 +197,13 @@ impl ConsoleLauncher {
 
         let result = self.run_loop(&ctx, &config).await;
 
-        // Go's deferred `telemetry.Shutdown` under `-shutdown-timeout`.
+        // Telemetry is shut down under `-shutdown-timeout`.
         let timeout = self.shutdown_timeout.get().to_std().unwrap_or_default();
         telemetry.shutdown_logged(timeout, &config.log).await;
         result
     }
 
-    /// Go `Run` after telemetry is up: session, runner and the read-eval-print loop on `ctx`.
+    /// Runs after telemetry is up: session, runner and the read-eval-print loop on `ctx`.
     async fn run_loop(&self, ctx: &CancellationToken, config: &Config) -> Result<(), Error> {
         let session_service: Arc<dyn SessionService> = match &config.session_service {
             Some(s) => s.clone(),
@@ -271,8 +269,8 @@ impl ConsoleLauncher {
                     self.print("\nEOF detected, exiting...\n");
                     return Ok(());
                 }
-                // Go `log.Fatal(err)`: the error's text, returned instead of exiting the
-                // process (the caller's `main` prints it, as Go's examples print `Run failed`).
+                // The error's text, returned instead of exiting the process (the caller's
+                // `main` prints it).
                 Some(Err(e)) => return Err(Error::Serve(e.to_string())),
                 Some(Ok(line)) => line,
             };
@@ -383,7 +381,7 @@ impl ConsoleLauncher {
         }
     }
 
-    /// Go `fmt.Print(s)` to the console's stdout (errors ignored, as Go's are).
+    /// Prints `s` to the console's stdout (errors ignored).
     fn print(&self, s: &str) {
         let mut out = self.out();
         let _ = out.write_all(s.as_bytes());
@@ -401,7 +399,7 @@ impl SubLauncher for ConsoleLauncher {
         "console".to_owned()
     }
 
-    /// Go `Parse`: the console flags, then the remaining arguments.
+    /// Parses the console flags, then the remaining arguments.
     fn parse(&mut self, args: Vec<String>) -> Result<Vec<String>, Error> {
         let remaining = {
             let fs = self.flags.get_mut().unwrap_or_else(|e| e.into_inner());
@@ -432,7 +430,7 @@ impl SubLauncher for ConsoleLauncher {
         "runs an agent in console mode.".to_owned()
     }
 
-    /// Go `Run` over the process's telemetry globals (see `ConsoleLauncher::run_in`).
+    /// Runs over the process's telemetry globals (see `ConsoleLauncher::run_in`).
     async fn run(&self, cancel: CancellationToken, config: Config) -> Result<(), Error> {
         self.run_in(cancel, config, telemetry::Globals::process())
             .await
@@ -441,7 +439,7 @@ impl SubLauncher for ConsoleLauncher {
 
 #[async_trait::async_trait]
 impl Launcher for ConsoleLauncher {
-    /// Go `consoleLauncher.Execute`: validate, parse, refuse leftovers, run.
+    /// Validates, parses, refuses leftovers, runs.
     async fn execute(
         &mut self,
         cancel: CancellationToken,
@@ -457,9 +455,8 @@ impl Launcher for ConsoleLauncher {
     }
 }
 
-/// Go's `bufio.Reader.ReadString('\n')` loop as [`InputLines`]: each item is a line with its
-/// `\n`; a last line without one is dropped, as Go's console treats the `io.EOF` that comes with
-/// it as the end of input; a read error ends the lines after it is yielded.
+/// [`InputLines`] over `reader`: each item is a line with its `\n`; a last line without one is
+/// dropped (end of input); a read error ends the lines after it is yielded.
 pub fn input_lines(reader: impl BufRead + Send + 'static) -> InputLines {
     let mut reader = reader;
     let mut done = false;
@@ -482,8 +479,7 @@ pub fn input_lines(reader: impl BufRead + Send + 'static) -> InputLines {
     }))
 }
 
-/// Go's reader goroutine: moves `input` onto a thread feeding a one-slot channel (Go: an
-/// unbuffered channel and a buffered error channel); the channel closes at end of input.
+/// Moves `input` onto a thread feeding a one-slot channel; the channel closes at end of input.
 fn spawn_reader(
     input: InputLines,
 ) -> Result<tokio::sync::mpsc::Receiver<std::io::Result<String>>, Error> {
@@ -502,8 +498,8 @@ fn spawn_reader(
     Ok(rx)
 }
 
-/// Go's `os.Stdout.Stat()` and `ModeCharDevice` check (on Unix the file type; elsewhere whether
-/// stdout is a terminal).
+/// Whether stdout is a character device (on Unix the file type; elsewhere whether stdout is a
+/// terminal).
 fn stdout_is_char_device() -> bool {
     #[cfg(unix)]
     {
@@ -523,7 +519,7 @@ fn stdout_is_char_device() -> bool {
     }
 }
 
-/// Go `fmt.Errorf("<context>: %v", err)`.
+/// `e` with a context prefix, displayed as `<context>: <e>`.
 fn wrapped(context: &str, e: impl std::error::Error + Send + Sync + 'static) -> Error {
     Error::Wrapped {
         context: context.to_owned(),
@@ -539,9 +535,8 @@ fn take_or(slot: &Mutex<Option<InputLines>>, default: impl FnOnce() -> InputLine
     lock(slot).take().unwrap_or_else(default)
 }
 
-/// The console against the Go probe's console fixtures (`testdata/console`, recorded from
-/// ADK-Go): the probe's agent and scripted model
-/// (`test_support::probe_agent`) give the same stdout bytes and no log output.
+/// The console against recorded console fixtures (`testdata/console`): the probe's agent and
+/// scripted model (`test_support::probe_agent`) give the same stdout bytes and no log output.
 #[cfg(test)]
 mod tests {
     use std::io::Cursor;

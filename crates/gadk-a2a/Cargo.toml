@@ -13,11 +13,9 @@ workspace = true
 
 [features]
 default = ["server", "client"]
-# Serve a gadk agent over A2A (Go `server/adka2a/v2`): the executor, agent-card skills and the
-# identity header bridge.
+# Serve a gadk agent over A2A: the executor, agent-card skills and the identity header bridge.
 server = ["dep:a2a-server-lf", "dep:axum"]
-# Use a remote A2A agent as a gadk agent (Go `agent/remoteagent/v2` and
-# `internal/agent/remoteagent`).
+# Use a remote A2A agent as a gadk agent.
 client = ["dep:a2a-client-lf", "dep:reqwest", "dep:url"]
 # `server::caller_user`: reads the user of gadk-server's authn layer (`gadk_server::authn::Caller`).
 gadk-server = ["server", "dep:gadk-server"]

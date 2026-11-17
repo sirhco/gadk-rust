@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The A2A agent executor (port of ADK-Go `server/adka2a/v2/executor.go` and the
-//! `toInvocationMeta` helper of `metadata.go`).
+//! The A2A agent executor: runs a gadk agent for each A2A request and translates its events.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -51,31 +50,29 @@ use crate::remoteagent::config::{create_a2a_client, find_remote_agent_state};
 #[cfg(feature = "client")]
 use crate::remoteagent::{A2AClient, A2AServerConfig, ClientContext};
 
-/// Bounds each child-task `CancelTask` of the server cleanup (the `CancelTask` call with its
-/// credential resolution; creating the client, `create_a2a_client`, is not bounded). Go's server
-/// path has no bound (a declared divergence, ledger 5b); the 5 s value is that of Go's
-/// remote-agent `cleanupTimeout` (agent/remoteagent/v2/a2a_agent.go), which bounds the remote
-/// agent's own cleanup cancel.
+/// Bounds each child-task cancel of the server cleanup (the cancel call with its credential
+/// resolution; creating the client, `create_a2a_client`, is not bounded). The 5 s value is the
+/// bound of the remote agent's own cleanup cancel.
 #[cfg(feature = "client")]
 pub(crate) const CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum OutputMode {
-    /// Go `OutputArtifactPerRun` (`"artifact-per-run"`): one artifact per runner run.
+    /// `"artifact-per-run"`: one artifact per runner run.
     #[default]
     ArtifactPerRun,
-    /// Go `OutputArtifactPerEvent` (`"artifact-per-event"`): one artifact per non-partial event.
+    /// `"artifact-per-event"`: one artifact per non-partial event.
     ArtifactPerEvent,
 }
 
-/// Go `Runner`: the runner API the executor drives (`gadk_engine::runner::Runner` or a custom
+/// The runner API the executor drives (`gadk_engine::runner::Runner` or a custom
 /// implementation).
 pub trait Runner: Send + Sync {
-    /// Go `Run`: runs the agent for `msg`, yielding its events.
+    /// Runs the agent for `msg`, yielding its events.
     fn run(&self, user_id: &str, session_id: &str, msg: Content, cfg: RunConfig) -> EventStream;
 }
 
-/// Go `RunnerConfig`: the part of the runner configuration the executor depends on.
+/// The part of the runner configuration the executor depends on.
 #[derive(Clone)]
 pub struct RunnerConfig {
     /// The app name, used in session keys and A2A event metadata.
@@ -86,7 +83,7 @@ pub struct RunnerConfig {
     pub session_service: Arc<dyn SessionService>,
 }
 
-/// Go `RunnerProvider`: builds the runner for one request; it must install `plugin` in the
+/// Builds the runner for one request; it must install `plugin` in the
 /// returned runner.
 pub type RunnerProvider = Arc<
     dyn Fn(
@@ -97,9 +94,9 @@ pub type RunnerProvider = Arc<
         + Sync,
 >;
 
-/// Go `BeforeExecuteCallback`: runs before an execution starts; values it stores in the
+/// Runs before an execution starts; values it stores in the
 /// extensions are visible to [`AfterEventCallback`], [`AfterExecuteCallback`] and
-/// [`ExecutorContext::extensions`] (Go's returned `context.Context`). An error stops the
+/// [`ExecutorContext::extensions`]. An error stops the
 /// execution.
 pub type BeforeExecuteCallback = Arc<
     dyn Fn(
@@ -110,7 +107,7 @@ pub type BeforeExecuteCallback = Arc<
         + Sync,
 >;
 
-/// Go `AfterEventCallback`: runs after an ADK event was converted to an A2A artifact update.
+/// Runs after an ADK event was converted to an A2A artifact update.
 pub type AfterEventCallback = Arc<
     dyn Fn(
             &dyn ExecutorContext,
@@ -121,7 +118,7 @@ pub type AfterEventCallback = Arc<
         + Sync,
 >;
 
-/// Go `AfterExecuteCallback`: runs after an execution resolved into its final status update.
+/// Runs after an execution resolved into its final status update.
 pub type AfterExecuteCallback = Arc<
     dyn Fn(
             &dyn ExecutorContext,
@@ -132,7 +129,7 @@ pub type AfterExecuteCallback = Arc<
         + Sync,
 >;
 
-/// Go `A2AExecutionCleanupCallback`: runs once after an execution or cancellation completed or
+/// Runs once after an execution or cancellation completed or
 /// failed, with the remote sub-agents' cards; `result` is the folded task (`None` if no event was
 /// yielded).
 pub type A2AExecutionCleanupCallback = Arc<
@@ -150,7 +147,7 @@ pub type A2AExecutionCleanupCallback = Arc<
 /// `"A2A_USER_" + context_id`).
 pub type UserResolver = Arc<dyn Fn(&a2a_server::ExecutorContext) -> Option<String> + Send + Sync>;
 
-/// Go `ExecutorConfig`, plus [`ExecutorConfig::user_resolver`].
+/// The configuration of an [`Executor`].
 #[derive(Clone, Default)]
 pub struct ExecutorConfig {
     /// Builds the default runner provider; ignored when `runner_provider` is set.
@@ -160,28 +157,28 @@ pub struct ExecutorConfig {
     pub runner_provider: Option<RunnerProvider>,
     /// Passed to the runner on every execution.
     pub run_config: RunConfig,
-    /// Go `BeforeExecuteCallback`.
+    /// Runs before an execution starts.
     pub before_execute_callback: Option<BeforeExecuteCallback>,
-    /// Go `AfterEventCallback`.
+    /// Runs after an ADK event was converted to an artifact update.
     pub after_event_callback: Option<AfterEventCallback>,
-    /// Go `AfterExecuteCallback`.
+    /// Runs after an execution resolved into its final status update.
     pub after_execute_callback: Option<AfterExecuteCallback>,
-    /// Go `A2APartConverter`.
+    /// Converts A2A parts to genai parts.
     pub a2a_part_converter: Option<A2APartConverter>,
-    /// Go `GenAIPartConverter`.
+    /// Converts genai parts to A2A parts.
     pub genai_part_converter: Option<GenAIPartConverter>,
-    /// Go `OutputMode`.
+    /// How ADK events map to artifacts.
     pub output_mode: OutputMode,
-    /// Go `A2AExecutionCleanupCallback`; without it, failures are logged.
+    /// Runs once after an execution or cancellation; without it, failures are logged.
     pub a2a_execution_cleanup_callback: Option<A2AExecutionCleanupCallback>,
     /// The ADK user of a request; `None` uses
     /// [`default_user_resolver`](crate::server::default_user_resolver).
     pub user_resolver: Option<UserResolver>,
 }
 
-/// Go `Executor`: an `a2a_server::AgentExecutor` that runs a gadk agent.
+/// An `a2a_server::AgentExecutor` that runs a gadk agent.
 ///
-/// It translates the runner's ADK events to A2A events by Go's rules:
+/// It translates the runner's ADK events to A2A events:
 /// - a request that references no stored task first yields a `submitted` [`a2a::Task`];
 /// - right before the runner starts, a `working` status update;
 /// - per ADK event, an artifact update with the converted parts (shaped by
@@ -191,12 +188,12 @@ pub struct ExecutorConfig {
 ///   long-running function call), else `completed`.
 ///
 /// Every task and status update carries the ADK extension key
-/// ([`ADK_EXTENSION_URI`](crate::convert::ADK_EXTENSION_URI)). Go's `Cleanup` runs exactly once
+/// ([`ADK_EXTENSION_URI`](crate::convert::ADK_EXTENSION_URI)). The cleanup runs exactly once
 /// per execute or cancel stream: on its terminal event or error, at its end, or when it is
-/// dropped. A cancel stops the task's running execution at once (Go cancels its context): the
+/// dropped. A cancel stops the task's running execution at once: the
 /// execute stream ends, dropping the runner, and its cleanup sees the `canceled` task.
 ///
-/// Serving an agent over A2A JSON-RPC (Go `ExampleNewExecutor_jsonRPCHandler`): the executor
+/// Serving an agent over A2A JSON-RPC: the executor
 /// behind a2a-rs's request handler, the JSON-RPC router at `/invoke` and the static card at
 /// `/.well-known/agent-card.json`.
 ///
@@ -264,10 +261,10 @@ type Executions = Arc<parking_lot::Mutex<HashMap<String, Arc<RunningExecution>>>
 
 /// A running execute stream that a cancel of its task stops.
 struct RunningExecution {
-    /// Ends the execute stream (Go cancels the execution context).
+    /// Ends the execute stream.
     abort: AbortHandle,
-    /// The `canceled` status update the cancel yielded: in Go the cancel event goes through
-    /// the execution's own event queue, so the execution's result is the canceled task.
+    /// The `canceled` status update the cancel yielded; the execution's result is the canceled
+    /// task.
     canceled: parking_lot::Mutex<Option<a2a::StreamResponse>>,
 }
 
@@ -299,7 +296,7 @@ impl Drop for ExecutionRegistration {
 }
 
 impl Executor {
-    /// Go `NewExecutor`: without a runner provider, the default one builds a
+    /// An executor; without a runner provider, the default one builds a
     /// `gadk_engine::runner::Runner` from `runner_config` with the `a2a-executor` plugin.
     pub fn new(mut config: ExecutorConfig) -> Self {
         if config.runner_provider.is_none() {
@@ -334,8 +331,7 @@ impl Executor {
     }
 
     /// Stops the running execution of `task_id`, if any, recording the `canceled` update as
-    /// its result (Go: the canceler writes it to the execution's queue, whose consumer then
-    /// cancels the execution context).
+    /// its result.
     fn stop_execution(&self, task_id: &str, canceled: &a2a::StreamResponse) {
         let execution = self.executions.lock().get(task_id).cloned();
         if let Some(execution) = execution {
@@ -351,7 +347,7 @@ impl Executor {
             .unwrap_or_else(|| default_runner_provider(self.config.runner_config.clone()))
     }
 
-    /// Go `toInvocationMeta`: the user is the non-empty user the resolver returns, else
+    /// The user is the non-empty user the resolver returns, else
     /// `"A2A_USER_" + context_id`; the session is the context.
     pub(crate) fn invocation_meta(
         &self,
@@ -386,7 +382,7 @@ impl Executor {
         }
     }
 
-    /// Go `Execute` (without the cleanup guard).
+    /// Runs one execution (without the cleanup guard).
     fn execute_stream(
         &self,
         ctx: a2a_server::ExecutorContext,
@@ -414,8 +410,7 @@ impl Executor {
                     return;
                 }
             };
-            // Go's `BeforeExecuteCallback` returns a derived context; here it stores values in
-            // the extensions (a nil context, Go's other failure, cannot occur).
+            // The before-execute callback stores its values in the extensions.
             let mut extensions = http::Extensions::new();
             if let Some(callback) = &this.config.before_execute_callback
                 && let Err(err) = callback(&ctx, &mut extensions).await
@@ -436,8 +431,8 @@ impl Executor {
                 Ok(None) => {}
             }
 
-            // parity: divergence: a2a-rs's non-streaming send passes the submitted snapshot as
-            // `stored_task`, so on that path no `Task` is yielded (the stored task is the same).
+            // a2a-rs's non-streaming send passes the submitted snapshot as `stored_task`, so on
+            // that path no `Task` is yielded (the stored task is the same).
             if ctx.stored_task.is_none() {
                 yield Ok(stamped(a2a::StreamResponse::Task(new_submitted_task(&ctx, msg))));
             }
@@ -469,7 +464,7 @@ impl Executor {
                 transform,
             );
 
-            // Go `process`: processing failures are delivered as failed status updates.
+            // Processing failures are delivered as failed status updates.
             let mut events = runner.run(
                 &processor.meta.user_id,
                 &processor.meta.session_id,
@@ -526,7 +521,7 @@ impl Executor {
         })
     }
 
-    /// Go `writeFinalTaskStatus`: runs the after-execute callback, then yields the partial
+    /// Runs the after-execute callback, then yields the partial
     /// artifact reset (if any) and the final status update.
     async fn write_final_task_status(
         &self,
@@ -548,7 +543,7 @@ impl Executor {
         items
     }
 
-    /// Go `Cleanup`: releases what a completed request leaves behind. After a successful cancel
+    /// Releases what a completed request leaves behind. After a successful cancel
     /// of a task that was input-required, the remote sub-agents' tasks waiting for input are
     /// cancelled; then the cleanup callback runs with the remote sub-agents' cards, or a failure
     /// is logged.
@@ -583,8 +578,7 @@ impl Executor {
                 tracing::warn!(cause = %err, "failed to cancel subagent tasks waiting for input");
             }
 
-            // parity: divergence: Go passes a nil card for a sub-agent configured with a card
-            // provider; a `Vec<AgentCard>` cannot hold one, so such sub-agents are left out.
+            // A sub-agent configured with a card provider has no fixed card, so it is left out.
             remote_subagents
                 .iter()
                 .filter_map(|subagent| subagent.config.agent_card.clone())
@@ -607,7 +601,7 @@ impl Executor {
         }
     }
 
-    /// Go `cancelChildInputRequiredTasks`: cancels the remote tasks behind the pending
+    /// Cancels the remote tasks behind the pending
     /// long-running calls of `status`, each through its sub-agent's client and inside the
     /// credential scope of the invocation that created it (when the sub-agent owns its auth
     /// scope).
@@ -708,7 +702,7 @@ impl Executor {
         if failures.is_empty() {
             return Ok(());
         }
-        // Go `errors.Join`.
+        // All failures, one per line.
         Err(Error::msg(
             failures
                 .iter()
@@ -718,7 +712,7 @@ impl Executor {
         ))
     }
 
-    /// Go `createRunnerConfig`.
+    /// The runner configuration the runner provider returns for this request.
     async fn create_runner_config(
         &self,
         ctx: &a2a_server::ExecutorContext,
@@ -732,7 +726,7 @@ impl Executor {
 }
 
 impl a2a_server::AgentExecutor for Executor {
-    /// Go `Execute`, wrapped in the cleanup guard.
+    /// Runs one execution, wrapped in the cleanup guard.
     fn execute(
         &self,
         ctx: a2a_server::ExecutorContext,
@@ -747,9 +741,8 @@ impl a2a_server::AgentExecutor for Executor {
         )
     }
 
-    /// Go `Cancel`, wrapped in the cleanup guard: one `canceled` status update. The task's
-    /// running execution, if any, stops at once (Go cancels its context). A request without a
-    /// task ID yields only an error (Go 58429928).
+    /// Cancels, wrapped in the cleanup guard: one `canceled` status update. The task's running
+    /// execution, if any, stops at once. A request without a task ID yields only an error.
     fn cancel(
         &self,
         ctx: a2a_server::ExecutorContext,
@@ -767,14 +760,14 @@ impl a2a_server::AgentExecutor for Executor {
     }
 }
 
-/// Go `withADKExtensionMeta`: every yielded event carries the ADK extension key (tasks and
+/// Every yielded event carries the ADK extension key (tasks and
 /// status updates only).
 fn stamped(mut event: a2a::StreamResponse) -> a2a::StreamResponse {
     add_adk_extension_meta(&mut event);
     event
 }
 
-/// Go `a2a.NewSubmittedTask(execCtx, msg)`.
+/// A `submitted` task for `msg`, with a fresh task or context ID when the request has none.
 fn new_submitted_task(ctx: &a2a_server::ExecutorContext, msg: a2a::Message) -> a2a::Task {
     let id = if ctx.task_id.is_empty() {
         a2a::new_task_id()
@@ -800,7 +793,7 @@ fn new_submitted_task(ctx: &a2a_server::ExecutorContext, msg: a2a::Message) -> a
     }
 }
 
-/// Go `prepareSession`: gets the session, creating it when the get fails.
+/// Gets the session, creating it when the get fails.
 async fn prepare_session(cfg: &RunnerConfig, meta: &InvocationMeta) -> Result<(), Error> {
     let service = &cfg.session_service;
     let found = service
@@ -826,10 +819,10 @@ async fn prepare_session(cfg: &RunnerConfig, meta: &InvocationMeta) -> Result<()
     Ok(())
 }
 
-/// The status Go's cleanup reads the pending long-running calls from, when the request was a
+/// The status the cleanup reads the pending long-running calls from, when the request was a
 /// successful cancel of an input-required task.
 ///
-/// Go's trigger is a stored task in `input-required` and a `canceled` result for a request
+/// The trigger is a stored task in `input-required` and a `canceled` result for a request
 /// without a message. a2a-rs's `cancel_task` moves the stored task to `canceled` (keeping its
 /// status message) before the executor runs, so a `canceled` stored task is read as the
 /// `input-required` one it was (`pre_cancel_status`) when its status message still holds pending
@@ -848,13 +841,13 @@ fn child_cancel_status(
     }
     match stored.status.state {
         a2a::TaskState::InputRequired => Some(stored.status.clone()),
-        // parity: divergence: a2a-rs `begin_cancel` sets `canceled` before the executor runs.
+        // a2a-rs `begin_cancel` sets `canceled` before the executor runs.
         a2a::TaskState::Canceled => {
             let mut pre_cancel_status = stored.status.clone();
             pre_cancel_status.state = a2a::TaskState::InputRequired;
             match get_pending_long_running_call_ids(&pre_cancel_status) {
                 Ok(ids) if ids.is_empty() => None,
-                // A malformed message still reaches Go's "subtask search failed" warning.
+                // A malformed message still reaches the "subtask search failed" warning.
                 _ => Some(pre_cancel_status),
             }
         }
@@ -862,14 +855,14 @@ fn child_cancel_status(
     }
 }
 
-/// Go `remoteAgent`: a remote sub-agent and its A2A configuration.
+/// A remote sub-agent and its A2A configuration.
 #[cfg(feature = "client")]
 pub(crate) struct RemoteSubagent {
     agent: Arc<dyn Agent>,
     config: Arc<A2AServerConfig>,
 }
 
-/// Go `findRemoteSubagents`: the remote agents of the tree, not descending into them.
+/// The remote agents of the tree, not descending into them.
 #[cfg(feature = "client")]
 pub(crate) fn find_remote_subagents(root: &Arc<dyn Agent>) -> Vec<RemoteSubagent> {
     fn collect(agent: &Arc<dyn Agent>, result: &mut Vec<RemoteSubagent>) {
@@ -889,13 +882,12 @@ pub(crate) fn find_remote_subagents(root: &Arc<dyn Agent>) -> Vec<RemoteSubagent
     result
 }
 
-/// Go `AttachAuthScope`: the scope to cancel a child task in, only when the sub-agent owns its
-/// auth scope. The provider sees no identity on this path (Go carries only the session ID), and
-/// the credential is not cached across calls (Go's nil credential cell).
+/// The auth scope to cancel a child task in, only when the sub-agent owns its auth scope. The
+/// provider sees no identity on this path (only the session ID is carried), and the credential
+/// is not cached across calls.
 ///
 /// The `AUTH_SCOPE` task-local means "apply this provider's credential", so a configuration that
-/// owns its scope without a credential provider (Go: a scope with no transport keyed on it)
-/// attaches none.
+/// owns its scope without a credential provider attaches none.
 #[cfg(feature = "client")]
 fn call_identity(
     config: &A2AServerConfig,
@@ -913,13 +905,12 @@ fn call_identity(
     })
 }
 
-/// Go `newDefaultRunnerProvider`: a `gadk_engine::runner::Runner` built from `base` with the
+/// A `gadk_engine::runner::Runner` built from `base` with the
 /// executor's plugin appended to its plugins.
 fn default_runner_provider(base: Option<gadk_engine::runner::RunnerConfig>) -> RunnerProvider {
     Arc::new(move |_ctx, plugin| {
         let base = base.clone();
         Box::pin(async move {
-            // Go also rejects a nil `SessionService`; gadk's `RunnerConfig` always has one.
             let Some(mut cfg) = base else {
                 return Err(Error::msg("runner.Config.Agent is not provided"));
             };
@@ -938,7 +929,7 @@ fn default_runner_provider(base: Option<gadk_engine::runner::RunnerConfig>) -> R
     })
 }
 
-/// Go `defaultRunner`: adapts `gadk_engine::runner::Runner` to [`Runner`].
+/// Adapts `gadk_engine::runner::Runner` to [`Runner`].
 struct DefaultRunner(gadk_engine::runner::Runner);
 
 impl Runner for DefaultRunner {
