@@ -13,26 +13,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `internal/configurable/conformance/loader.go`: the conformance agent loader (agent
-//! names sorted, the first one is the root agent).
+//! The conformance agent loader (agent names sorted, the first one is the root agent).
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use gadk_agent::{Agent, Loader, LoaderError};
 
-/// Go `conformanceAgentLoader`.
+/// The loader over the conformance agents.
 pub struct ConformanceAgentLoader {
     agent_map: HashMap<String, Arc<dyn Agent>>,
     agents_names: Vec<String>,
 }
 
-/// Go `NewConformanceAgentLoader`: the names sorted (Go `sort.Strings`, byte order); Go's
-/// error is always nil. An empty map is accepted, as in Go (see [`Loader::root_agent`]).
+/// Builds the loader with the names sorted (byte order); never fails. An empty map is
+/// accepted (see [`Loader::root_agent`]).
 pub fn new_conformance_agent_loader(
     agent_map: HashMap<String, Arc<dyn Agent>>,
 ) -> Result<Arc<dyn Loader>, LoaderError> {
-    // Go: loader.go NewConformanceAgentLoader
     let mut agents_names: Vec<String> = agent_map.keys().cloned().collect();
     agents_names.sort();
     Ok(Arc::new(ConformanceAgentLoader {
@@ -41,21 +39,19 @@ pub fn new_conformance_agent_loader(
     }))
 }
 
-/// Go `%v` of a `[]string`: `[a b]`.
+/// Formats names as `[a b]`.
 fn go_sprint_strings(names: &[String]) -> String {
     format!("[{}]", names.join(" "))
 }
 
 impl Loader for ConformanceAgentLoader {
-    /// Go `ListAgents`: the sorted names.
+    /// The sorted names.
     fn list_agents(&self) -> Vec<String> {
-        // Go: loader.go ListAgents
         self.agents_names.clone()
     }
 
-    /// Go `LoadAgent`: `agent %s not found. Please specify one of those: %v`.
+    /// `agent {name} not found. Please specify one of those: {names}`.
     fn load_agent(&self, name: &str) -> Result<Arc<dyn Agent>, LoaderError> {
-        // Go: loader.go LoadAgent
         match self.agent_map.get(name) {
             Some(agent) => Ok(agent.clone()),
             None => Err(LoaderError(format!(
@@ -65,21 +61,18 @@ impl Loader for ConformanceAgentLoader {
         }
     }
 
-    /// Go `RootAgent`: the agent of the first sorted name.
+    /// The agent of the first sorted name.
     ///
     /// # Panics
     ///
-    /// On an empty loader: Go returns a nil `agent.Agent` there, which its callers either
-    /// reject (`runner.New`: `root agent is required`) or dereference (a nil-pointer panic);
-    /// gadk's `Loader::root_agent` returns an `Arc<dyn Agent>` and has no nil, so the empty
-    /// case panics at the call instead. `list_agents` / `load_agent` work on an empty loader
-    /// as in Go.
+    /// On an empty loader: there is no agent to return, and `Loader::root_agent` returns an
+    /// `Arc<dyn Agent>` with no empty value, so the empty case panics at the call. (A console
+    /// launcher would reject the missing root agent with `root agent is required`.)
+    /// `list_agents` / `load_agent` work on an empty loader.
     fn root_agent(&self) -> Arc<dyn Agent> {
-        // Go: loader.go RootAgent
-        // Divergence (ledger 6c-2): an empty loader panics where Go returns a nil agent.
         match self.agents_names.first() {
             Some(name) => self.agent_map[name].clone(),
-            #[allow(clippy::panic)] // Go returns nil; see the doc comment
+            #[allow(clippy::panic)] // no root agent to return; see the doc comment
             None => panic!("conformance agent loader has no agents (Go RootAgent returns nil)"),
         }
     }

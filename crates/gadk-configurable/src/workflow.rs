@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `internal/configurable/configurable_workflow.go`: node-function registration, the
-//! `Workflow` agent factory, edge parsing and node resolution. The config structs live in
+//! The workflow loading: node-function registration, the `Workflow` agent factory, edge
+//! parsing and node resolution. The config structs live in
 //! [`crate::config`]; the node-function and node registries are fields of [`Registry`].
 
 use std::collections::BTreeMap;
@@ -43,33 +43,29 @@ use crate::{
 };
 
 impl Registry {
-    /// Go `RegisterNodeFunction` with a `func(agent.Context, any) (any, error)`: overwrites an
-    /// existing registration silently, as Go does. (Go's bad-signature panic cannot happen with
-    /// the typed API.)
+    /// Registers a node function taking and returning a dynamic JSON value: overwrites an
+    /// existing registration silently. (A wrong signature cannot happen with the typed API.)
     pub fn register_node_function(&self, name: &str, f: NodeFn) {
-        // Go: configurable_workflow.go RegisterNodeFunction
         self.inner.write().node_functions.insert(name.to_owned(), f);
     }
 
-    /// Go `RegisterNodeFunction` with a `func(agent.Context, string) (string, error)`:
-    /// registered through `cast_node_function`'s `fmt.Sprint` coercion; overwrites.
+    /// Registers a node function taking and returning a string:
+    /// registered through `cast_node_function`'s display-text coercion; overwrites.
     pub fn register_string_node_function(&self, name: &str, f: StrNodeFn) {
-        // Go: configurable_workflow.go RegisterNodeFunction
         self.register_node_function(name, cast_node_function(f));
     }
 }
 
-/// Go `newWorkflowAgent`: `failed to unmarshal Workflow config: %w`,
-/// `workflow 'name' is required`, `failed to parse workflow edges: %w`,
-/// `failed to build workflow: %w`; the agent is `agent.New` with the collected sub-agents and
-/// the workflow's `Run`.
+/// Builds a workflow agent: `failed to unmarshal Workflow config: {cause}`,
+/// `workflow 'name' is required`, `failed to parse workflow edges: {cause}`,
+/// `failed to build workflow: {cause}`; the agent is built with the collected sub-agents and
+/// the workflow's run.
 pub(crate) async fn new_workflow_agent(
     registry: Registry,
     ctx: LoadCtx,
     data: Vec<u8>,
     config_dir: PathBuf,
 ) -> Result<Arc<dyn Agent>, ConfigError> {
-    // Go: configurable_workflow.go newWorkflowAgent
     let cfg: WorkflowYamlConfig = config::unmarshal(&data)
         .map_err(|e| ConfigError::wrap("failed to unmarshal Workflow config", e))?;
 
@@ -86,7 +82,7 @@ pub(crate) async fn new_workflow_agent(
         .await
         .map_err(|e| ConfigError::wrap("failed to parse workflow edges", e))?;
 
-    // Go `workflow.WithMaxConcurrency(n)` treats a negative `n` as 0 (unlimited).
+    // A negative `max_concurrency` counts as 0 (unlimited).
     let max_concurrency = usize::try_from(cfg.max_concurrency.max(0)).unwrap_or(usize::MAX);
     let wf = Workflow::new(
         &cfg.name,
@@ -109,16 +105,15 @@ pub(crate) async fn new_workflow_agent(
     .map_err(ConfigError::other)
 }
 
-/// Go `parseEdges`: each edge node must be a sequence of scalars (nodes) and mappings (route
-/// maps, `invalid route map format: %w`); chains without routes need two nodes, routed chains
-/// a source; route keys sorted, `default` (case-insensitive) is the default route.
+/// Parses the edges: each edge node must be a sequence of scalars (nodes) and mappings (route
+/// maps, `invalid route map format: {cause}`); chains without routes need two nodes, routed
+/// chains a source; route keys sorted, `default` (case-insensitive) is the default route.
 pub(crate) async fn parse_edges(
     registry: &Registry,
     ctx: &LoadCtx,
     config_dir: &Path,
     nodes: &[Document],
 ) -> Result<Vec<Edge>, ConfigError> {
-    // Go: configurable_workflow.go parseEdges
     let mut edges = Vec::new();
 
     for edge_doc in nodes {
@@ -130,8 +125,7 @@ pub(crate) async fn parse_edges(
         }
 
         let mut chain_nodes: Vec<Arc<dyn Node>> = Vec::new();
-        // Go `map[string]string` iterated through `slices.Sorted(maps.Keys(m))`: a BTreeMap
-        // iterates its keys in the same byte order.
+        // Route keys are visited in sorted (byte) order; a BTreeMap iterates in that order.
         let mut route_maps: Vec<BTreeMap<String, String>> = Vec::new();
 
         for &item in &edge_node.content {
@@ -147,7 +141,7 @@ pub(crate) async fn parse_edges(
                             .map_err(|e| ConfigError::wrap("invalid route map format", e))?;
                     route_maps.push(m);
                 }
-                // Go prints the `yaml.Kind` number (`%v` of a `uint32` without `String`).
+                // The error prints the YAML node kind as a number.
                 kind => {
                     return Err(ConfigError::msg(format!(
                         "unsupported YAML node kind in edge chain: {}",
@@ -184,8 +178,8 @@ pub(crate) async fn parse_edges(
                     let target_node =
                         resolve_node_like(registry, ctx, config_dir, target_ref).await?;
 
-                    // Go `strings.EqualFold(routeVal, "default")`: no non-ASCII rune
-                    // case-folds to a letter of "default", so ASCII folding is exact.
+                    // No non-ASCII character case-folds to a letter of "default", so ASCII
+                    // folding is exact.
                     let route = if route_val.eq_ignore_ascii_case("default") {
                         DEFAULT.clone()
                     } else {
@@ -205,18 +199,17 @@ pub(crate) async fn parse_edges(
     Ok(edges)
 }
 
-/// Go `resolveNodeLike`: `START`; a reference ending in `.yaml`/`.yml` is a file inside
+/// Resolves a node reference: `START`; a reference ending in `.yaml`/`.yml` is a file inside
 /// `config_dir`: the containment check ([`resolve_config_reference`]) runs ahead of the node
 /// cache (keyed by the file's real path) and [`resolve_node_from_yaml`]; anything else is a
 /// registered node function (never cached, never looked up in the node cache: a new function
-/// node per use), else `node or function reference %q not found in registries`.
+/// node per use), else `node or function reference {ref:?} not found in registries`.
 pub(crate) async fn resolve_node_like(
     registry: &Registry,
     ctx: &LoadCtx,
     config_dir: &Path,
     node_ref: &str,
 ) -> Result<Arc<dyn Node>, ConfigError> {
-    // Go: configurable_workflow.go resolveNodeLike
     if node_ref == "START" {
         return Ok(START.clone());
     }
@@ -250,7 +243,7 @@ pub(crate) async fn resolve_node_like(
     Ok(n)
 }
 
-/// Go `resolveNodeFromYAML`: `FunctionNode`, `JoinNode`, `ToolNode`, else an agent reference
+/// Resolves a node file: `FunctionNode`, `JoinNode`, `ToolNode`, else an agent reference
 /// wrapped in an agent node and appended to the context's sub-agent collector.
 pub(crate) async fn resolve_node_from_yaml(
     registry: &Registry,
@@ -259,7 +252,6 @@ pub(crate) async fn resolve_node_from_yaml(
     node_ref: &str,
     abs_path: &Path,
 ) -> Result<Arc<dyn Node>, ConfigError> {
-    // Go: configurable_workflow.go resolveNodeFromYAML
     let data = read_file(abs_path)?;
     let quoted_path = go_quote(&abs_path.to_string_lossy());
 
@@ -347,7 +339,7 @@ pub(crate) async fn resolve_node_from_yaml(
             ..Default::default()
         };
 
-        // Go passes the nil tool of a toolset reference on to NewNamedToolNode.
+        // The nil tool of a toolset reference is passed on to the named tool node.
         let Some(t) = t else {
             return Err(ConfigError::msg("tool cannot be nil"));
         };
@@ -370,12 +362,11 @@ pub(crate) async fn resolve_node_from_yaml(
     Ok(node)
 }
 
-/// Go `castNodeFunction`'s string branch: a nil input is `""`, a string input itself, any other
-/// input `fmt.Sprint(input)`; the string result is the node's output.
-// Divergence (ledger 6c-2): inputs are JSON values, so `fmt.Sprint` of a number prints it as a
-// float64 (`1e+06`) even where Go's producer returned an `int` (`1000000`).
+/// Adapts a string node function: a nil input is `""`, a string input itself, any other
+/// input its display text; the string result is the node's output.
+// Inputs are JSON values, so a number prints as a float64 (`1e+06`) even where the producer
+// returned an integer (`1000000`).
 pub(crate) fn cast_node_function(f: StrNodeFn) -> NodeFn {
-    // Go: configurable_workflow.go castNodeFunction
     Arc::new(move |ctx: Context, input: Value| {
         let s = match input {
             Value::Null => String::new(),
@@ -387,12 +378,11 @@ pub(crate) fn cast_node_function(f: StrNodeFn) -> NodeFn {
     })
 }
 
-/// Go `workflow.NewFunctionNode(name, fn, cfg)` for a registered [`NodeFn`] (input `any`), with
-/// Go's output type switch on the returned [`crate::NodeOutput`].
+/// Builds a function node for a registered [`NodeFn`] (input a dynamic value), with an
+/// output type switch on the returned [`crate::NodeOutput`].
 pub(crate) fn new_function_node(name: &str, f: NodeFn, cfg: NodeConfig) -> Arc<dyn Node> {
-    // Go: workflow NewFunctionNode (as configurable_workflow.go calls it)
     // The body returns the event gadk-engine's function node would build for the output (its
-    // `Event` output path forwards it unchanged), so all three Go output kinds keep their shape.
+    // `Event` output path forwards it unchanged), so all three output kinds keep their shape.
     function_node::<Value, Event, _, _>(
         name,
         move |ctx: Context, input: Value| {

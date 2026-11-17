@@ -13,9 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `internal/configurable/configurable.go` (`to*Config`, `resolveSubAgents`,
-//! `resolveTools`, `resolveCallbacks`) and the agent factories of `configurable_utils.go`
-//! (`newLLMAgent`, `newLoopAgent`, `newParallelAgent`, `newSequentialAgent`).
+//! Conversion of the parsed YAML agent configs into engine agent configs (`to_*_agent_config`),
+//! the sub-agent, tool and callback resolvers, and the agent factories (`new_llm_agent`,
+//! `new_loop_agent`, `new_parallel_agent`, `new_sequential_agent`).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -35,15 +35,14 @@ use crate::config::{
 };
 use crate::{AfterAgent, BeforeAgent, CallbackType, ConfigError, LoadCtx, Registry};
 
-/// Go `(*llmAgentYAMLConfig).toLLMAgentConfig`: `model %s is not supported` for a non-Gemini
-/// model, `gemini.NewModel` with `GOOGLE_API_KEY` (`failed to create model: %w`), then
+/// Builds the engine config for an LLM agent: `model {name} is not supported` for a non-Gemini
+/// model, a [`GeminiModel`] using `GOOGLE_API_KEY` (`failed to create model: {cause}`), then
 /// sub-agents, tools/toolsets and callbacks.
 pub(crate) async fn to_llm_agent_config(
     c: &LlmAgentYamlConfig,
     registry: &Registry,
     ctx: &LoadCtx,
 ) -> Result<LlmAgentConfig, ConfigError> {
-    // Go: configurable.go toLLMAgentConfig
     if !is_gemini_model(&c.model) {
         return Err(ConfigError::msg(format!(
             "model {} is not supported",
@@ -51,8 +50,8 @@ pub(crate) async fn to_llm_agent_config(
         )));
     }
 
-    // Go: `&genai.ClientConfig{APIKey: os.Getenv("GOOGLE_API_KEY")}`; genai reads the rest of
-    // its settings from the same environment.
+    // The API key comes from `GOOGLE_API_KEY`; the client reads the rest of its settings from
+    // the same environment.
     let env = registry.inner.read().env.clone();
     let model = GeminiModel::new(
         &c.model,
@@ -90,13 +89,12 @@ pub(crate) async fn to_llm_agent_config(
     })
 }
 
-/// Go `(*loopAgentYAMLConfig).toLoopAgentConfig`.
+/// Builds the engine config for a loop agent from its YAML config.
 pub(crate) async fn to_loop_agent_config(
     c: &LoopAgentYamlConfig,
     registry: &Registry,
     ctx: &LoadCtx,
 ) -> Result<LoopAgentConfig, ConfigError> {
-    // Go: configurable.go toLoopAgentConfig
     let sub_agents = resolve_sub_agents(registry, ctx, &c.config_path, &c.sub_agents).await?;
 
     Ok(LoopAgentConfig {
@@ -106,20 +104,19 @@ pub(crate) async fn to_loop_agent_config(
             sub_agents,
             ..Default::default()
         },
-        // Divergence (ledger 6c-2): Go's `MaxIterations` is a 64-bit `uint`; gadk-engine's is
-        // a `u32`, so a value above `u32::MAX` saturates (Go never errors on it, and either
-        // count outlasts any real run).
+        // `max_iterations` is a 64-bit count in the YAML config but a `u32` in gadk-engine, so
+        // a value above `u32::MAX` saturates rather than erroring (either count outlasts any
+        // real run).
         max_iterations: u32::try_from(c.max_iterations).unwrap_or(u32::MAX),
     })
 }
 
-/// Go `(*parallelAgentYAMLConfig).toParallelAgentConfig`.
+/// Builds the engine config for a parallel agent from its YAML config.
 pub(crate) async fn to_parallel_agent_config(
     c: &ParallelAgentYamlConfig,
     registry: &Registry,
     ctx: &LoadCtx,
 ) -> Result<ParallelAgentConfig, ConfigError> {
-    // Go: configurable.go toParallelAgentConfig
     let sub_agents = resolve_sub_agents(registry, ctx, &c.config_path, &c.sub_agents).await?;
 
     Ok(ParallelAgentConfig {
@@ -132,13 +129,12 @@ pub(crate) async fn to_parallel_agent_config(
     })
 }
 
-/// Go `(*sequentialAgentYAMLConfig).toSequentialAgentConfig`.
+/// Builds the engine config for a sequential agent from its YAML config.
 pub(crate) async fn to_sequential_agent_config(
     c: &SequentialAgentYamlConfig,
     registry: &Registry,
     ctx: &LoadCtx,
 ) -> Result<SequentialAgentConfig, ConfigError> {
-    // Go: configurable.go toSequentialAgentConfig
     let sub_agents = resolve_sub_agents(registry, ctx, &c.config_path, &c.sub_agents).await?;
 
     Ok(SequentialAgentConfig {
@@ -151,15 +147,15 @@ pub(crate) async fn to_sequential_agent_config(
     })
 }
 
-/// Go `resolveSubAgents`: `failed to resolve agent reference %s: %w`; an inline `code`
-/// reference fails with `inline code agent references are not yet supported for %s`.
+/// Resolves each sub-agent reference: `failed to resolve agent reference {path}: {cause}`; an
+/// inline `code` reference fails with `inline code agent references are not yet supported for
+/// {code}`.
 pub(crate) async fn resolve_sub_agents(
     registry: &Registry,
     ctx: &LoadCtx,
     config_dir: &Path,
     refs: &[AgentRefConfig],
 ) -> Result<Vec<Arc<dyn Agent>>, ConfigError> {
-    // Go: configurable.go resolveSubAgents
     let mut agents = Vec::new();
     for r in refs {
         if !r.config_path.is_empty() {
@@ -183,15 +179,15 @@ pub(crate) async fn resolve_sub_agents(
     Ok(agents)
 }
 
-/// Go `resolveTools`: sets `parentPath` in the context ([`LoadCtx::with_parent_path`]) for each
-/// named tool, `failed to resolve tool reference %s: %w`.
+/// Resolves each named tool or toolset, setting the parent path in the context
+/// ([`LoadCtx::with_parent_path`]) to the config directory first;
+/// `failed to resolve tool reference {name}: {cause}`.
 pub(crate) async fn resolve_tools(
     registry: &Registry,
     ctx: &LoadCtx,
     config_dir: &Path,
     tool_configs: &[ToolConfig],
 ) -> Result<(Vec<Arc<dyn Tool>>, Vec<Arc<dyn Toolset>>), ConfigError> {
-    // Go: configurable.go resolveTools
     let mut tools = Vec::new();
     let mut toolsets = Vec::new();
     for tc in tool_configs {
@@ -214,13 +210,13 @@ pub(crate) async fn resolve_tools(
     Ok((tools, toolsets))
 }
 
-/// Go `resolveCallbacks[T]`: `failed to resolve callback reference %s: %w`, and
-/// `callback %s is of type %T and not %T` when the registered callback is not a `T`.
+/// Resolves each named callback to a `T`: `failed to resolve callback reference {name}:
+/// {cause}`, and `callback {name} is of type {actual} and not {expected}` when the registered
+/// callback is not a `T`.
 pub(crate) fn resolve_callbacks<T: CallbackType>(
     registry: &Registry,
     callbacks: &[CodeConfig],
 ) -> Result<Vec<T::Fn>, ConfigError> {
-    // Go: configurable.go resolveCallbacks
     let mut cbs = Vec::new();
     for r in callbacks {
         if !r.name.is_empty() {
@@ -244,16 +240,15 @@ pub(crate) fn resolve_callbacks<T: CallbackType>(
     Ok(cbs)
 }
 
-/// Go `newLLMAgent`: `failed to parse LLM agent config: %w`, `'name' is required`,
-/// `'model' is required for LlmAgent`, `failed to create LLM agent config: %w`, then
-/// `llmagent.New`.
+/// Parses and builds an LLM agent: `failed to parse LLM agent config: {cause}`,
+/// `'name' is required`, `'model' is required for LlmAgent`,
+/// `failed to create LLM agent config: {cause}`, then [`llm_agent::new`].
 pub(crate) async fn new_llm_agent(
     registry: Registry,
     ctx: LoadCtx,
     data: Vec<u8>,
     config_dir: PathBuf,
 ) -> Result<Arc<dyn Agent>, ConfigError> {
-    // Go: configurable_utils.go newLLMAgent
     let mut cfg: LlmAgentYamlConfig = config::unmarshal(&data)
         .map_err(|e| ConfigError::wrap("failed to parse LLM agent config", e))?;
 
@@ -273,15 +268,14 @@ pub(crate) async fn new_llm_agent(
     llm_agent::new(agent_config).map_err(ConfigError::other)
 }
 
-/// Go `newLoopAgent`: `failed to parse Loop agent config: %w`, `'name' is required`,
-/// `failed to create Loop agent config: %w`, then `loopagent.New`.
+/// Parses and builds a loop agent: `failed to parse Loop agent config: {cause}`,
+/// `'name' is required`, `failed to create Loop agent config: {cause}`, then [`loop_agent::new`].
 pub(crate) async fn new_loop_agent(
     registry: Registry,
     ctx: LoadCtx,
     data: Vec<u8>,
     config_dir: PathBuf,
 ) -> Result<Arc<dyn Agent>, ConfigError> {
-    // Go: configurable_utils.go newLoopAgent
     let mut cfg: LoopAgentYamlConfig = config::unmarshal(&data)
         .map_err(|e| ConfigError::wrap("failed to parse Loop agent config", e))?;
 
@@ -298,15 +292,15 @@ pub(crate) async fn new_loop_agent(
     loop_agent::new(agent_config).map_err(ConfigError::other)
 }
 
-/// Go `newParallelAgent`: `failed to parse Parallel agent config: %w`, `'name' is required`,
-/// `failed to create Parallel agent config: %w`, then `parallelagent.New`.
+/// Parses and builds a parallel agent: `failed to parse Parallel agent config: {cause}`,
+/// `'name' is required`, `failed to create Parallel agent config: {cause}`, then
+/// [`parallel_agent::new`].
 pub(crate) async fn new_parallel_agent(
     registry: Registry,
     ctx: LoadCtx,
     data: Vec<u8>,
     config_dir: PathBuf,
 ) -> Result<Arc<dyn Agent>, ConfigError> {
-    // Go: configurable_utils.go newParallelAgent
     let mut cfg: ParallelAgentYamlConfig = config::unmarshal(&data)
         .map_err(|e| ConfigError::wrap("failed to parse Parallel agent config", e))?;
 
@@ -323,16 +317,15 @@ pub(crate) async fn new_parallel_agent(
     parallel_agent::new(agent_config).map_err(ConfigError::other)
 }
 
-/// Go `newSequentialAgent`: `failed to parse Sequential agent config: %w`,
-/// `'name' is required`, `failed to create Sequential agent config: %w`, then
-/// `sequentialagent.New`.
+/// Parses and builds a sequential agent: `failed to parse Sequential agent config: {cause}`,
+/// `'name' is required`, `failed to create Sequential agent config: {cause}`, then
+/// [`sequential_agent::new`].
 pub(crate) async fn new_sequential_agent(
     registry: Registry,
     ctx: LoadCtx,
     data: Vec<u8>,
     config_dir: PathBuf,
 ) -> Result<Arc<dyn Agent>, ConfigError> {
-    // Go: configurable_utils.go newSequentialAgent
     let mut cfg: SequentialAgentYamlConfig = config::unmarshal(&data)
         .map_err(|e| ConfigError::wrap("failed to parse Sequential agent config", e))?;
 

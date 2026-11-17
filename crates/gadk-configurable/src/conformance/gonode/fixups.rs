@@ -12,17 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The type-path fixup table and its application: each entry names a Go type path from a
+//! The type-path fixup table and its application: each entry names a type path from a
 //! recording root (e.g. `LLMRequest.Contents[].Parts[].InlineData.Data`, never a user map such
-//! as `args` or `response`) and its class: Go `[]byte` (an `!!int` sequence), a non-pointer
-//! `TextMarshaler` (`civil.Date`), `time.Duration` / `time.Time`, `genai.Schema` titles, and
-//! `*jsonschema.Schema` values. The table equals the probe's reflection-generated fixture
-//! (`tests/recordings_differential.rs`). Nothing outside `gonode` uses its items directly.
+//! as `args` or `response`) and its class: a byte slice (an `!!int` sequence), a non-pointer
+//! text-marshalled value (a civil date), a duration or a timestamp, `genai.Schema` titles, and
+//! JSON-schema values. The table equals the reflection-generated fixture recorded from ADK's
+//! own encoder (`tests/recordings_differential.rs`). Nothing outside `gonode` uses its items
+//! directly.
 //!
 //! The tables themselves ([`SHAPES`], [`FIXUPS`], [`JSONSCHEMA_FIELDS`], [`ROOTS`]) are
-//! generated from the probe's `fixups.json` into [`super::shapes`]. This file holds their
-//! types and lookups, the encoder that applies them (`Builder`: class 0 GoShape zero-fill
-//! and the leaf classes), and the decoder's inverse fixups (`invert`).
+//! generated from the fixture `fixups.json` into [`super::shapes`]. This file holds their
+//! types and lookups, the encoder that applies them (`Builder`: zero-filling every field of a
+//! struct, and the leaf classes), and the decoder's inverse fixups (`invert`).
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
@@ -34,16 +35,17 @@ use crate::govalue::json_to_go_value;
 
 pub use super::shapes::{FIXUPS, JSONSCHEMA_FIELDS, ROOTS, SHAPES};
 
-/// How the probe classifies a struct field's Go type (`fixups.json` `shapes[].fields[].category`).
+/// How the fixture classifies a struct field's declared type (`fixups.json`
+/// `shapes[].fields[].category`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Category {
-    /// `[]byte` / `json.RawMessage`: an `!!int` sequence.
+    /// A byte slice or raw JSON: an `!!int` sequence.
     Bytes,
-    /// A non-pointer `time.Duration`: `Duration.String()`.
+    /// A non-pointer duration: its `Duration.String()` text.
     Duration,
-    /// A non-pointer `time.Time`: yaml.v3's timestamp.
+    /// A non-pointer timestamp: yaml.v3's timestamp.
     Time,
-    /// A non-pointer `encoding.TextMarshaler` (`civil.Date`): `MarshalText`.
+    /// A non-pointer text-marshalled value (a civil date): its marshalled text.
     TextMarshaler,
     /// A pointer.
     Ptr,
@@ -65,7 +67,7 @@ pub enum Category {
     Bool,
     /// A non-pointer struct.
     Struct,
-    /// A func or chan (yaml.v3 cannot encode it).
+    /// A func or channel (yaml.v3 cannot encode it).
     Func,
 }
 
@@ -92,7 +94,7 @@ impl Category {
     }
 }
 
-/// Go's node for a field's zero value (`fixups.json` `shapes[].fields[].zero`).
+/// The node of a field's zero value (`fixups.json` `shapes[].fields[].zero`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Zero {
     /// A nil pointer, interface or func: `!!null null`.
@@ -103,15 +105,15 @@ pub enum Zero {
     Int,
     /// `false`: `!!bool false`.
     False,
-    /// A nil slice or `[]byte`: an empty flow `!!seq`.
+    /// A nil slice or byte slice: an empty flow `!!seq`.
     EmptySeq,
     /// A nil map: an empty flow `!!map`.
     EmptyMap,
-    /// `time.Duration(0)`: `!!str 0s`.
+    /// A zero duration: `!!str 0s`.
     Duration,
-    /// `time.Time{}`: `!!timestamp 0001-01-01T00:00:00Z`.
+    /// A zero timestamp: `!!timestamp 0001-01-01T00:00:00Z`.
     Time,
-    /// `civil.Date{}`: `!!str 0000-00-00`.
+    /// A zero civil date: `!!str 0000-00-00`.
     Date,
     /// A non-pointer struct: the zero mapping of the named shape.
     Struct(&'static str),
@@ -142,48 +144,49 @@ impl Zero {
     }
 }
 
-/// One exported struct field, in Go field order.
+/// One exported struct field, in declaration order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Field {
-    /// The YAML key (`strings.ToLower(GoFieldName)`).
+    /// The YAML key (the lowercased field name).
     pub key: &'static str,
-    /// The Go field name.
+    /// The declared field name.
     pub go_name: &'static str,
     /// The JSON tag name (`""` untagged, `"-"` ignored): what gadk serde names the field.
     pub json: &'static str,
     /// The field's category.
     pub category: Category,
-    /// The declared Go type.
+    /// The declared type.
     pub go_type: &'static str,
     /// The struct type reached through pointers, slices and maps, or `""`.
     pub elem: &'static str,
-    /// Go's node for the zero value.
+    /// The node of the field's zero value.
     pub zero: Zero,
 }
 
-/// A Go struct type's fields as yaml.v3 encodes them.
+/// The fields of a struct type as yaml.v3 encodes them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Shape {
-    /// The Go type name (`genai.Part`).
+    /// The declared type name (`genai.Part`).
     pub go_type: &'static str,
-    /// The exported fields in Go order.
+    /// The exported fields in declaration order.
     pub fields: &'static [Field],
 }
 
-/// A fixup class (spec Design §"Recording types and the Go-shaped encoding").
+/// A fixup class (see the design notes on recording types and their reflection-shaped
+/// encoding).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FixupClass {
-    /// Go `[]byte`.
+    /// A byte slice.
     Bytes,
-    /// Go `time.Duration`.
+    /// A duration.
     Duration,
-    /// Go `time.Time`.
+    /// A timestamp.
     Time,
-    /// A non-pointer `encoding.TextMarshaler` (`civil.Date`).
+    /// A non-pointer text-marshalled value (a civil date).
     TextMarshaler,
-    /// A `*genai.Schema` (its `title` is zero-filled).
+    /// A `genai.Schema` pointer (its `title` is zero-filled).
     SchemaTitle,
-    /// An `any` holding a `*jsonschema.Schema`.
+    /// An `any` holding a JSON-schema pointer.
     JsonSchema,
 }
 
@@ -206,38 +209,38 @@ impl FixupClass {
 pub struct Fixup {
     /// The type path from the root (`LLMResponse.citationmetadata.citations[].publicationdate`).
     pub path: &'static str,
-    /// The Go struct type holding the field.
+    /// The declared struct type holding the field.
     pub owner: &'static str,
     /// The field's YAML key.
     pub key: &'static str,
     /// The class.
     pub class: FixupClass,
-    /// The declared Go type at the position.
+    /// The declared type at the position.
     pub go_type: &'static str,
 }
 
-/// One jsonschema-go v0.4.3 `Schema` field (`fixups.json` `jsonschema_fields[]`), in
-/// declaration order.
+/// One field of the JSON-schema struct (`fixups.json` `jsonschema_fields[]`), in declaration
+/// order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct JsonSchemaField {
-    /// The Go field name.
+    /// The declared field name.
     pub go_name: &'static str,
-    /// The YAML key (lowercased Go name).
+    /// The YAML key (the lowercased field name).
     pub yaml_key: &'static str,
     /// The full JSON tag.
     pub json_tag: &'static str,
     /// The JSON keyword the field comes from (`type`, `items`, `dependencies` for the split
     /// fields, `*` for `Extra`, `""` for `PropertyOrder`).
     pub json_keyword: &'static str,
-    /// The declared Go type.
+    /// The declared type.
     pub go_type: &'static str,
-    /// The reflect kind.
+    /// The reflected kind.
     pub kind: &'static str,
-    /// `Bytes` for `Default` (`json.RawMessage`), else `""`.
+    /// `Bytes` for `Default` (raw JSON), else `""`.
     pub class: &'static str,
 }
 
-/// The shape of Go struct type `go_type`.
+/// The shape of the struct type `go_type`.
 pub fn shape(go_type: &str) -> Option<&'static Shape> {
     SHAPES
         .binary_search_by(|s| s.go_type.cmp(go_type))
@@ -255,12 +258,12 @@ pub fn fixup_class(owner: &str, key: &str) -> Option<FixupClass> {
 }
 
 /// The deepest collection nesting the builder's and the inverse fixups' recursive walks over
-/// recursive Go types (`genai.Schema`, `jsonschema.Schema`) accept: gadk-goyaml's walk limit
+/// recursive types (`genai.Schema`, the JSON-schema struct) accept: gadk-goyaml's walk limit
 /// (plan decision D7, the workspace-wide 127).
 ///
-/// Divergence (ledger 6c-2): Go's growable goroutine stacks let `node.Encode` and
-/// `node.Decode` go as deep as the data (and yaml.v3's parser, 10000) allow; gadk fails with
-/// gadk-goyaml's `yaml: exceeded max depth of 127` instead of overflowing the thread's stack.
+/// The encoder and decoder behind the recordings go as deep as the data (and yaml.v3's
+/// parser, 10000 levels) allow; gadk fails with gadk-goyaml's `yaml: exceeded max depth of
+/// 127` instead of overflowing the thread's stack.
 const MAX_WALK_DEPTH: usize = 127;
 
 /// gadk-goyaml's walk-depth error text (`yaml: exceeded max depth of 127`).
@@ -284,7 +287,7 @@ fn nested<S, T>(
     r
 }
 
-/// The Go type name of jsonschema-go's `Schema` (the `JsonSchema` root).
+/// The type name of the JSON-schema struct (the `JsonSchema` root).
 pub const JSONSCHEMA_TYPE: &str = "jsonschema.Schema";
 
 /// Where a struct's field values come from when encoding.
@@ -296,12 +299,12 @@ pub(crate) enum Keys {
     Yaml,
 }
 
-/// Builds the node tree Go's `node.Encode` builds, from the shapes table: struct mappings in
-/// Go field order with every field (class 0 zero-fill), present leaves encoded on their own
-/// by yaml.v3's rules (`gadk_goyaml::to_node`), the leaf fixup classes applied.
+/// Builds the node tree for the recordings from the shapes table: struct mappings in
+/// declaration order with every field zero-filled when absent, present leaves encoded on their
+/// own by yaml.v3's rules (`gadk_goyaml::to_node`), the leaf fixup classes applied.
 pub(crate) struct Builder {
     pub(crate) doc: Document,
-    /// gadk serde keys no shape field consumed (`<go type>.<json key>`), for the tests.
+    /// gadk serde keys no shape field consumed (`<type>.<json key>`), for the tests.
     pub(crate) unmapped: Vec<String>,
     /// The struct/slice/map nesting of the walk (below the hand-built roots, so never more
     /// than the encoded document's).
@@ -331,7 +334,7 @@ impl Builder {
         })
     }
 
-    /// A mapping (`!!map`, flow style when empty, as Go's re-parse gives it).
+    /// A mapping (`!!map`, flow style when empty, as a re-parse of the encoded text gives it).
     pub(crate) fn mapping(&mut self, content: Vec<NodeId>) -> NodeId {
         let style = if content.is_empty() {
             Style::FLOW
@@ -370,18 +373,18 @@ impl Builder {
         self.doc.push(data)
     }
 
-    /// Go's `node.Encode(v)` of a leaf value on its own, grafted in.
+    /// Encodes a leaf value on its own, grafted in.
     pub(crate) fn leaf(&mut self, v: &GoValue) -> Result<NodeId, gadk_goyaml::Error> {
         let d = gadk_goyaml::to_node(v, &Options::default())?;
         Ok(self.graft(&d, d.root()))
     }
 
-    /// A mapping key: a Go string encoded on its own (yaml.v3's `stringv` quoting, e.g. `"y"`).
+    /// A mapping key: a string encoded on its own (yaml.v3's `stringv` quoting, e.g. `"y"`).
     pub(crate) fn key(&mut self, k: &str) -> Result<NodeId, gadk_goyaml::Error> {
         self.leaf(&GoValue::String(k.to_owned()))
     }
 
-    /// Go's zero node for a field.
+    /// The zero node for a field.
     pub(crate) fn zero(&mut self, z: Zero) -> Result<NodeId, gadk_goyaml::Error> {
         match z {
             Zero::Struct(name) => self.struct_node(name, None, Keys::Json),
@@ -397,7 +400,7 @@ impl Builder {
     }
 
     /// The mapping of struct type `go_type` from its gadk JSON object (`None` = every field
-    /// zero): every Go field in Go order, absent ones as Go's zero node.
+    /// zero): every field in declaration order, absent ones as their zero node.
     pub(crate) fn struct_node(
         &mut self,
         go_type: &str,
@@ -454,17 +457,17 @@ impl Builder {
         match f.category {
             Category::Bytes => self.bytes_node(v),
             Category::Duration => self.duration_node(v),
-            // Divergence (ledger 6c-2): gadk stores `DateTime<Utc>`, so a non-UTC `time.Time`
-            // encodes with `Z` where Go keeps the source offset (the same instant).
+            // gadk stores `DateTime<Utc>`, so a non-UTC timestamp encodes with `Z`
+            // rather than keeping the source offset (the same instant).
             Category::Time => match v.as_str().and_then(gadk_platform::go_parse_rfc3339) {
                 Some(t) => self.leaf(&GoValue::Timestamp(t.fixed_offset())),
                 None => self.zero(Zero::Time),
             },
             Category::TextMarshaler => self.date_node(v),
-            // Divergence (ledger 6c-2): Go re-encodes a schema decoded from a recording (a
-            // yaml-keyed `map[string]any`) as is; gadk holds `serde_json::Value` for both that
-            // and a live `*jsonschema.Schema`, and always reshapes (reachable only through the
-            // merge path re-reading a file with Go-default keys).
+            // A schema decoded from a recording (a yaml-keyed map) would be re-encoded as is;
+            // gadk holds `serde_json::Value` for both that and a live schema, and always
+            // reshapes (reachable only through the merge path re-reading a file with default
+            // keys).
             Category::Iface if fixup_class(owner, f.key) == Some(FixupClass::JsonSchema) => {
                 if v.is_null() {
                     return Ok(self.null());
@@ -542,13 +545,13 @@ impl Builder {
         self.struct_node(elem, v.as_object(), keys)
     }
 
-    /// A `*jsonschema.Schema` held as JSON (an object or a boolean schema).
+    /// A JSON-schema pointer held as JSON (an object or a boolean schema).
     pub(crate) fn jsonschema_node(&mut self, v: &Value) -> Result<NodeId, gadk_goyaml::Error> {
         let reshaped = super::jsonschema::reshape(v);
         self.struct_node(JSONSCHEMA_TYPE, Some(&reshaped), Keys::Yaml)
     }
 
-    /// Go `[]byte` from gadk's base64 string: an `!!int` sequence.
+    /// A byte slice from gadk's base64 string: an `!!int` sequence.
     fn bytes_node(&mut self, v: &Value) -> Result<NodeId, gadk_goyaml::Error> {
         let bytes = match v {
             Value::String(s) => STANDARD.decode(s.as_bytes()).unwrap_or_default(),
@@ -561,8 +564,8 @@ impl Builder {
         self.leaf(&seq)
     }
 
-    /// Go `Duration.String()`: a JSON integer is the exact nanoseconds (the typed overlay of
-    /// [`super::roots`]), a string is parsed with Go's `time.ParseDuration`.
+    /// A duration's `Duration.String()` text: a JSON integer is the exact nanoseconds (the
+    /// typed overlay of [`super::roots`]), a string is parsed as a duration.
     fn duration_node(&mut self, v: &Value) -> Result<NodeId, gadk_goyaml::Error> {
         let nanos = match v {
             Value::Number(n) => n.as_i64(),
@@ -578,7 +581,7 @@ impl Builder {
         }
     }
 
-    /// `civil.Date.MarshalText` (`%04d-%02d-%02d`) from genai's `{year, month, day}` JSON.
+    /// A civil date's text (`%04d-%02d-%02d`) from genai's `{year, month, day}` JSON.
     fn date_node(&mut self, v: &Value) -> Result<NodeId, gadk_goyaml::Error> {
         let part = |k: &str| v.get(k).and_then(Value::as_i64).unwrap_or(0);
         let text = format!(
@@ -592,7 +595,7 @@ impl Builder {
 }
 
 /// yaml.v3's key order for a map with these string keys (its `keyList` sort): the keys
-/// encoded as a Go `map[string]int` and read back.
+/// encoded as a map with integer values and read back.
 pub(crate) fn go_key_order<'a>(
     keys: impl Iterator<Item = &'a str>,
 ) -> Result<Vec<String>, gadk_goyaml::Error> {
@@ -606,7 +609,7 @@ pub(crate) fn go_key_order<'a>(
         .collect())
 }
 
-/// The Go value of gadk JSON `v` at a non-struct position of declared type `go_type`
+/// The value of gadk JSON `v` at a non-struct position of declared type `go_type`
 /// (`*int`, `[]string`, `map[string]any`, `float32`, …): numbers take the declared number
 /// type (`any` numbers are `float64`, a `float32` keeps its 32-bit digits).
 pub(crate) fn leaf_value(go_type: &str, v: &Value) -> GoValue {
@@ -674,9 +677,9 @@ const ROOT_TYPES: [(&str, &str); 4] = [
 ];
 
 /// The inverse fixups over the recordings document at `at`, in place, before the serde
-/// decode: a Go `[]byte` `!!int` sequence becomes gadk's base64 string, a `civil.Date` text
-/// becomes genai's `{year, month, day}` (a text Go's `UnmarshalText` rejects aborts the decode
-/// with Go's error, as yaml.v3's `fail` does), the zero `time.Time` becomes gadk's `None`.
+/// decode: a byte-slice `!!int` sequence becomes gadk's base64 string, a civil-date text
+/// becomes genai's `{year, month, day}` (a text the date parser rejects aborts the decode
+/// with its error, as yaml.v3's `fail` does), the zero timestamp becomes gadk's `None`.
 /// Returns the yaml.v3 type errors found on the way (`(line, message)`), which yaml.v3 would
 /// have collected while decoding those positions.
 pub(crate) fn invert(
@@ -767,7 +770,7 @@ impl Inverse<'_> {
         }
     }
 
-    /// Walks mapping `m` as Go struct `go_type` (keys matched exactly, as yaml.v3 does).
+    /// Walks mapping `m` as struct type `go_type` (keys matched exactly, as yaml.v3 does).
     fn walk_struct(&mut self, go_type: &str, m: NodeId) -> Result<(), gadk_goyaml::Error> {
         let Some(s) = shape(go_type) else {
             return Ok(());
@@ -831,7 +834,7 @@ impl Inverse<'_> {
         self.walk_struct(elem, v)
     }
 
-    /// Go's `d.terror(n, tag, out)` text for node `v` decoded into Go type `into`.
+    /// The yaml.v3 type-error text for node `v` decoded into the declared type `into`.
     fn terror(&mut self, v: NodeId, into: &str) {
         let n = &self.doc[v];
         let tag = self.doc.short_tag(v);
@@ -868,14 +871,14 @@ impl Inverse<'_> {
         n.content.clear();
     }
 
-    /// Go `[]byte`: yaml.v3 decodes a sequence element by element into `uint8` (a failing
+    /// A byte slice: yaml.v3 decodes a sequence element by element into `uint8` (a failing
     /// element is dropped with a type error, a null one silently) and rejects any non-null
     /// scalar or mapping (`cannot unmarshal !!str `x` into []uint8`). A `!!binary` scalar with
     /// invalid base64 aborts the decode first (yaml.v3's `scalar` resolves before the target
     /// type matters), as does any hard failure inside the sequence.
     ///
-    /// Divergence (ledger 6c-2): an alias at a `[]byte`, `civil.Date` or `time.Time` position
-    /// is not followed by the inverse fixups (yaml.v3 decodes its target); Go-written files
+    /// An alias at a byte-slice, civil-date or timestamp position is not followed by the
+    /// inverse fixups (yaml.v3 decodes its target); recorded files contain no aliases.
     /// contain no aliases.
     fn bytes(&mut self, v: NodeId) -> Result<(), gadk_goyaml::Error> {
         match self.doc[v].kind {
@@ -900,8 +903,8 @@ impl Inverse<'_> {
         Ok(())
     }
 
-    /// The head of yaml.v3's `scalar` for a `!!binary` scalar: its base64-decoded data (Go's
-    /// `base64.StdEncoding.DecodeString`, line breaks ignored), or the aborting
+    /// The head of yaml.v3's `scalar` for a `!!binary` scalar: its base64-decoded data (standard
+    /// alphabet, line breaks ignored), or the aborting
     /// `yaml: !!binary value contains invalid base64 data`. `None` for any other scalar.
     fn binary_data(&self, v: NodeId) -> Result<Option<Vec<u8>>, gadk_goyaml::Error> {
         if self.doc.short_tag(v) != "!!binary" {
@@ -916,7 +919,7 @@ impl Inverse<'_> {
         ))
     }
 
-    /// `civil.Date.UnmarshalText` of a scalar (yaml.v3 hands a TextUnmarshaler the node's
+    /// Parses a civil-date scalar (yaml.v3 hands a text-unmarshalling type the node's
     /// text); its error aborts the whole decode, as yaml.v3's `fail(err)` does.
     fn date(&mut self, v: NodeId) -> Result<(), gadk_goyaml::Error> {
         match self.doc[v].kind {
@@ -960,7 +963,7 @@ impl Inverse<'_> {
         }
     }
 
-    /// Go's zero `time.Time` is gadk's `None`.
+    /// The zero timestamp becomes gadk's `None`.
     fn time(&mut self, v: NodeId) {
         if self.doc[v].kind != Kind::Scalar {
             return;
@@ -974,7 +977,7 @@ impl Inverse<'_> {
     }
 }
 
-/// Go `time.Time.IsZero`: January 1, year 1, 00:00:00 UTC.
+/// Whether the timestamp is January 1, year 1, 00:00:00 UTC (the zero timestamp).
 fn is_go_zero_time(t: &DateTime<FixedOffset>) -> bool {
     t.with_timezone(&Utc).timestamp() == -62_135_596_800 && t.timestamp_subsec_nanos() == 0
 }
@@ -1006,11 +1009,10 @@ pub(crate) fn merge_type_errors(
     })
 }
 
-/// Go `civil.ParseDate(s)` = `time.Parse("2006-01-02", s)`: `(year, month, day)` or Go's
-/// `*time.ParseError` text (`parsing time "0000-00-00": month out of range`).
+/// Parses a civil date as the layout `2006-01-02`: `(year, month, day)` or the parse error
+/// text (`parsing time "0000-00-00": month out of range`).
 pub(crate) fn parse_civil_date(s: &str) -> Result<(i64, i64, i64), String> {
-    // Go: time/format.go parse (layout "2006-01-02": stdLongYear, "-", stdZeroMonth, "-",
-    // stdZeroDay)
+    // Layout `2006-01-02`: a 4-digit year, `-`, a 2-digit month, `-`, a 2-digit day.
     const LAYOUT: &str = "2006-01-02";
     let b = s.as_bytes();
     let cannot = |value: &[u8], elem: &str| {
@@ -1064,7 +1066,7 @@ pub(crate) fn parse_civil_date(s: &str) -> Result<(i64, i64, i64), String> {
     Ok((year, month, day))
 }
 
-/// Go time's `getnum(s, fixed)`.
+/// Reads one number of up to two digits from the front of `s` (exactly two when `fixed`).
 fn getnum(s: &[u8], fixed: bool) -> Option<(i64, &[u8])> {
     let digit = |i: usize| s.get(i).is_some_and(u8::is_ascii_digit);
     if !digit(0) {
@@ -1082,7 +1084,7 @@ fn getnum(s: &[u8], fixed: bool) -> Option<(i64, &[u8])> {
     ))
 }
 
-/// Go time's `atoi` of the 4-byte year (its first byte is a digit).
+/// Parses the 4-byte year (its first byte is a digit).
 fn time_atoi(p: &[u8]) -> Option<i64> {
     if !p.iter().all(u8::is_ascii_digit) {
         return None;
@@ -1090,7 +1092,7 @@ fn time_atoi(p: &[u8]) -> Option<i64> {
     std::str::from_utf8(p).ok()?.parse().ok()
 }
 
-/// Go time's `daysIn(month, year)`.
+/// The number of days in `month` of `year`.
 fn days_in(month: i64, year: i64) -> i64 {
     match month {
         2 if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) => 29,
@@ -1100,7 +1102,7 @@ fn days_in(month: i64, year: i64) -> i64 {
     }
 }
 
-/// Go time's `quote`: `"…"` with `"` and `\` escaped and every byte of a non-ASCII or control
+/// Quotes `s` as `"…"` with `"` and `\` escaped and every byte of a non-ASCII or control
 /// character as `\xNN`.
 fn time_quote(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);

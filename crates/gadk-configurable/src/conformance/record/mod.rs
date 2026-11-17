@@ -13,13 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `internal/configurable/conformance/recordplugin/record_plugin.go`: the conformance
-//! record plugin (`record_plugin`), which writes each invocation's LLM and tool interactions
-//! to `generated-recordings.yaml` (`generated-recordings-sse.yaml` for `sse` streaming) in the
+//! The conformance record plugin (`record_plugin`), which writes each invocation's LLM and
+//! tool interactions to `generated-recordings.yaml` (`generated-recordings-sse.yaml` for `sse`
+//! streaming) in the
 //! case directory named by the session state's `_adk_recordings_config`. The YAML
 //! post-processing lives in [`clean`], the per-invocation state in `state`.
 //!
-//! Go's callbacks are synchronous; here each plugin callback is a future that calls the
+//! The plugin callbacks are synchronous in effect: here each is a future that calls the
 //! synchronous method of the same name, so neither the plugin's state map lock nor an
 //! invocation state's lock is ever held across an `.await`.
 
@@ -55,18 +55,16 @@ use crate::govalue::json_map_to_go;
 /// The session state key holding the record configuration.
 const RECORDINGS_CONFIG_KEY: &str = "_adk_recordings_config";
 
-/// Go `recordPlugin`.
+/// The record plugin's state.
 pub(crate) struct RecordPlugin {
-    /// Go `mu` + `invocationStates`, keyed by invocation id.
+    /// The invocation states, keyed by invocation id, behind a lock.
     pub(crate) invocation_states: Mutex<HashMap<String, Arc<InvocationRecordState>>>,
-    /// Go `allowedBaseDir`.
+    /// The base directory the recording case directory must lie within.
     pub(crate) allowed_base_dir: PathBuf,
 }
 
-/// Go `New(allowedBaseDir)` (and `MustNew`: Go's `plugin.New` error is always nil, so both are
-/// this function): the `record_plugin` plugin with before/after run, model and tool callbacks.
+/// Builds the `record_plugin` plugin with before/after run, model and tool callbacks.
 pub fn new(allowed_base_dir: impl Into<PathBuf>) -> Plugin {
-    // Go: record_plugin.go New
     let p = Arc::new(RecordPlugin {
         invocation_states: Mutex::new(HashMap::new()),
         allowed_base_dir: allowed_base_dir.into(),
@@ -151,13 +149,12 @@ pub fn new(allowed_base_dir: impl Into<PathBuf>) -> Plugin {
 }
 
 impl RecordPlugin {
-    /// Go `beforeRun`: creates the invocation's record state when record mode is on.
+    /// Creates the invocation's record state when record mode is on.
     pub(crate) fn before_run(
         &self,
         ctx: &InvocationContext,
     ) -> Result<Option<Content>, AgentError> {
-        // Go: record_plugin.go beforeRun
-        // Go's `ctx.Session() == nil` check: a gadk invocation context always has a session.
+        // A gadk invocation context always has a session.
         let session = ctx.session();
         if !self.is_record_mode_on(session.state())? {
             return Ok(None);
@@ -168,43 +165,40 @@ impl RecordPlugin {
         Ok(None)
     }
 
-    /// Go `beforeModel`: starts an LLM recording with the sanitized request.
+    /// Starts an LLM recording with the sanitized request.
     pub(crate) fn before_model(
         &self,
         ctx: &Context,
         req: &LlmRequest,
     ) -> Result<Option<LlmResponse>, AgentError> {
-        // Go: record_plugin.go beforeModel
         if !matches!(self.is_record_mode_on(ctx.state().as_ref()), Ok(true)) {
             return Ok(None);
         }
 
         let state = self.get_invocation_state(ctx.invocation_id())?;
 
-        // Sanitize and clone the request (Go: to prevent YAML serialization panics caused by
+        // Sanitize and clone the request (to prevent YAML serialization panics caused by
         // HTTPOptions.ExtrasRequestProvider)
-        // Divergence (ledger 6c-2): the recording is a snapshot taken now; Go keeps a shallow
-        // copy sharing `Contents`/`Config` (and, in `afterModel`, the response pointer), so a
-        // later mutation before `afterRun` would show in Go's file (no known Go path does one).
+        // The recording is a snapshot taken now, so a later mutation of the request or response
+        // before `afterRun` does not show in the file.
         let sanitized_req = sanitize_llm_request(req);
 
         state.start_llm_recording(sanitized_req);
         Ok(None)
     }
 
-    /// Go `afterModel`: appends the response; a non-partial response completes the recording.
+    /// Appends the response; a non-partial response completes the recording.
     pub(crate) fn after_model(
         &self,
         ctx: &Context,
         resp: &LlmResponse,
         err: Option<&ModelError>,
     ) -> Result<Option<LlmResponse>, AgentError> {
-        // Go: record_plugin.go afterModel
         if !matches!(self.is_record_mode_on(ctx.state().as_ref()), Ok(true)) {
             return Ok(None);
         }
 
-        // Go's `resp == nil`: gadk always hands a response.
+        // gadk always hands a response.
         if err.is_some() {
             return Ok(None);
         }
@@ -221,14 +215,13 @@ impl RecordPlugin {
         Ok(None)
     }
 
-    /// Go `beforeTool`: starts a tool recording keyed by the function call id.
+    /// Starts a tool recording keyed by the function call id.
     pub(crate) fn before_tool(
         &self,
         ctx: &Context,
         tool: &dyn Tool,
         args: &Map<String, Value>,
     ) -> Result<Option<Map<String, Value>>, AgentError> {
-        // Go: record_plugin.go beforeTool
         if !matches!(self.is_record_mode_on(ctx.state().as_ref()), Ok(true)) {
             return Ok(None);
         }
@@ -246,7 +239,7 @@ impl RecordPlugin {
         Ok(None)
     }
 
-    /// Go `afterTool`: completes the tool recording with the result.
+    /// Completes the tool recording with the result.
     pub(crate) fn after_tool(
         &self,
         ctx: &Context,
@@ -255,16 +248,15 @@ impl RecordPlugin {
         result: &Map<String, Value>,
         _err: Option<&ToolError>,
     ) -> Result<Option<Map<String, Value>>, AgentError> {
-        // Go: record_plugin.go afterTool
         if !matches!(self.is_record_mode_on(ctx.state().as_ref()), Ok(true)) {
             return Ok(None);
         }
 
         let state = self.get_invocation_state(ctx.invocation_id())?;
 
-        // gadk's flow hands a failed tool's missing result over as an empty map where Go
-        // passes a nil map; yaml.v3 encodes both as `{}` (kept inside `tool_response`), so the
-        // recording is the same.
+        // gadk's flow hands a failed tool's missing result over as an empty map; yaml.v3
+        // encodes a nil and an empty map the same, as `{}` (kept inside `tool_response`), so
+        // the recording is the same.
         let resp = RecordedFunctionResponse {
             id: ctx.function_call_id(),
             name: tool.name().to_owned(),
@@ -276,9 +268,8 @@ impl RecordPlugin {
         Ok(None)
     }
 
-    /// Go `afterRun`: saves the recordings and drops the invocation's state.
+    /// Saves the recordings and drops the invocation's state.
     pub(crate) fn after_run(&self, ctx: &InvocationContext) {
-        // Go: record_plugin.go afterRun
         let session = ctx.session();
         if !matches!(self.is_record_mode_on(session.state()), Ok(true)) {
             return;
@@ -291,20 +282,19 @@ impl RecordPlugin {
         // Serialize and save
         self.save_recordings(&state);
 
-        // Go's deferred delete.
+        // The state is dropped whether or not saving succeeded.
         self.invocation_states.lock().remove(ctx.invocation_id());
     }
 
-    /// Go `parseRecordConfig`: `(caseDir, msgIndex, streamingMode)`, `("", 0, "")` when off;
-    /// `invalid path format: %v`,
+    /// Returns `(case_dir, msg_index, streaming_mode)`, `("", 0, "")` when off;
+    /// `invalid path format: {cause}`,
     /// `record config error: 'dir' is not within the allowed base directory`,
     /// `record config 'user_message_index' is not a number`.
     pub(crate) fn parse_record_config(
         &self,
         session_state: &dyn State,
     ) -> Result<(String, i64, String), AgentError> {
-        // Go: record_plugin.go parseRecordConfig
-        // Go's `sessionState == nil` check: a gadk session always has a state.
+        // A gadk session always has a state.
         let off = || Ok((String::new(), 0, String::new()));
 
         let Ok(config_val) = session_state.get(RECORDINGS_CONFIG_KEY) else {
@@ -325,12 +315,11 @@ impl RecordPlugin {
 
         let msg_index = match config.get("user_message_index") {
             None | Some(Value::Null) => return off(),
-            // Go `int`.
+            // An integer JSON number.
             Some(Value::Number(n)) if n.is_i64() => n.as_i64().unwrap_or_default(),
-            // Go `float64` → `int(v)`: truncation toward zero. Divergence (ledger 6c-2): an
-            // out-of-range value saturates (Go's result is implementation-defined; arm64
-            // saturates, amd64 gives math.MinInt64). A u64 above i64::MAX is a JSON number
-            // Go decodes as float64.
+            // A floating-point JSON number is truncated toward zero. An out-of-range value
+            // saturates (the conversion is implementation-defined on other platforms). A u64
+            // above i64::MAX is a JSON number read as a float.
             #[allow(clippy::cast_possible_truncation)]
             Some(Value::Number(n)) => n.as_f64().unwrap_or_default() as i64,
             Some(_) => {
@@ -348,19 +337,17 @@ impl RecordPlugin {
         Ok((case_dir, msg_index, streaming_mode))
     }
 
-    /// Go `isRecordModeOn`.
+    /// Whether record mode is on.
     pub(crate) fn is_record_mode_on(&self, session_state: &dyn State) -> Result<bool, AgentError> {
-        // Go: record_plugin.go isRecordModeOn
         let (case_dir, _, _) = self.parse_record_config(session_state)?;
         Ok(!case_dir.is_empty())
     }
 
-    /// Go `getInvocationState`: `record state not initialized for invocation: %s`.
+    /// `record state not initialized for invocation: {id}` when there is none.
     pub(crate) fn get_invocation_state(
         &self,
         id: &str,
     ) -> Result<Arc<InvocationRecordState>, AgentError> {
-        // Go: record_plugin.go getInvocationState
         self.invocation_states
             .lock()
             .get(id)
@@ -370,12 +357,11 @@ impl RecordPlugin {
             })
     }
 
-    /// Go `createInvocationState`: `record state not configured` when record mode is off.
+    /// `record state not configured` when record mode is off.
     pub(crate) fn create_invocation_state(
         &self,
         ctx: &InvocationContext,
     ) -> Result<Arc<InvocationRecordState>, AgentError> {
-        // Go: record_plugin.go createInvocationState
         let session = ctx.session();
         let (case_dir, msg_index, streaming_mode) = self.parse_record_config(session.state())?;
         if case_dir.is_empty() {
@@ -395,11 +381,9 @@ impl RecordPlugin {
         Ok(state)
     }
 
-    /// Go `saveRecordings`: merge with the existing file (dropping the current
-    /// `user_message_index`), encode, `cleanYAMLNode`, marshal, write `0o644`; every error is
-    /// ignored, as in Go.
+    /// Merges with the existing file (dropping the current `user_message_index`), encodes,
+    /// cleans the YAML node, marshals and writes `0o644`; every error is ignored.
     pub(crate) fn save_recordings(&self, state: &InvocationRecordState) {
-        // Go: record_plugin.go saveRecordings
         let filename = if state.streaming_mode == "sse" {
             "generated-recordings-sse.yaml"
         } else {
@@ -408,9 +392,8 @@ impl RecordPlugin {
 
         let file_path = go_path_join(&[state.case_dir.as_str(), filename]);
 
-        // Load existing recordings if the file exists (Go `_ = yaml.Unmarshal(data, &existing)`:
-        // type errors keep the partly decoded value; a syntax error or a decode abort leaves
-        // none).
+        // Load existing recordings if the file exists (type errors keep the partly decoded
+        // value; a syntax error or a decode abort leaves none).
         let mut existing_recordings = Recordings::default();
         if let Ok(data) = std::fs::read(&file_path)
             && let Ok(doc) = gadk_goyaml::unmarshal_node(&data)
@@ -449,17 +432,16 @@ impl RecordPlugin {
     }
 }
 
-/// Go `sanitizeLLMRequest`: the request without `Tools` and `Config.HTTPOptions` (gadk's
+/// The request without `Tools` and `Config.HTTPOptions` (gadk's
 /// `LlmRequest.http_options`), as recorded.
 pub(crate) fn sanitize_llm_request(req: &LlmRequest) -> LlmRequestView {
-    // Go: record_plugin.go sanitizeLLMRequest
-    // Go's shallow copy with `Tools = nil` and `Config.HTTPOptions = nil`: the recorded view
-    // carries neither (gadk keeps `http_options` beside `config`).
+    // The recorded view carries neither the tools nor the HTTP options (gadk keeps
+    // `http_options` beside `config`).
     LlmRequestView::from(req)
 }
 
-/// Go `os.WriteFile(name, data, perm)`: create (with `perm`, before the umask) or truncate,
-/// then write; an existing file keeps its mode.
+/// Writes a file: creates it (with `perm`, before the umask) or truncates it, then writes; an
+/// existing file keeps its mode.
 fn go_write_file(path: &Path, data: &[u8], perm: u32) -> std::io::Result<()> {
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);

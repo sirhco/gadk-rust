@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `internal/configurable/conformance/nodes.go`: the `conformance.uppercase_formatter`
-//! node function.
+//! The `conformance.uppercase_formatter` node function.
 
 use std::sync::Arc;
 
@@ -25,17 +24,15 @@ use serde_json::{Map, Value};
 
 use crate::{ConfigError, NodeOutput, Registry};
 
-/// Go `uppercaseFormatter`: a string is uppercased; a map has its string values uppercased;
-/// any other input goes through `typeutil.ConvertToWithJSONSchema[any, map[string]any]`
-/// (JSON `null` → an empty map), else `node_input must be a string or a map/dict`.
+/// A string is uppercased; a map has its string values uppercased; any other input is
+/// converted to a map (JSON `null` → an empty map), else `node_input must be a string or a
+/// map/dict`.
 pub(crate) async fn uppercase_formatter(_ctx: Context, input: Value) -> Result<Value, AgentError> {
-    // Go: nodes.go uppercaseFormatter
     match input {
         Value::String(v) => Ok(Value::String(go_to_upper(&v))),
         Value::Object(v) => Ok(Value::Object(upper_values(v))),
-        // Go's default branch: `json.Marshal(input)` then `json.Unmarshal` into a
-        // `map[string]any` (no schema). For a JSON-typed input only `null` decodes (to a nil
-        // map, ranged as empty); numbers, bools and arrays fail.
+        // Any other input is converted to a map without a schema. For a JSON-typed input only
+        // `null` converts (to an empty map); numbers, bools and arrays fail.
         Value::Null => Ok(Value::Object(upper_values(Map::new()))),
         _ => Err(AgentError::other(
             "node_input must be a string or a map/dict",
@@ -43,7 +40,7 @@ pub(crate) async fn uppercase_formatter(_ctx: Context, input: Value) -> Result<V
     }
 }
 
-/// The map loop of Go `uppercaseFormatter`: string values `strings.ToUpper`ed, others kept.
+/// The map loop of [`uppercase_formatter`]: string values uppercased, others kept.
 fn upper_values(v: Map<String, Value>) -> Map<String, Value> {
     v.into_iter()
         .map(|(k, val)| match val {
@@ -53,10 +50,9 @@ fn upper_values(v: Map<String, Value>) -> Map<String, Value> {
         .collect()
 }
 
-/// Go `RegisterNodeFunctions`: registers `conformance.uppercase_formatter` (Go's
-/// `RegisterNodeFunction` overwrites and never fails, so the error is always nil).
+/// Registers `conformance.uppercase_formatter` (registering a node function overwrites and
+/// never fails, so the result is always `Ok`).
 pub fn register_node_functions(registry: &Registry) -> Result<(), ConfigError> {
-    // Go: nodes.go RegisterNodeFunctions
     registry.register_node_function(
         "conformance.uppercase_formatter",
         Arc::new(|ctx, input| {

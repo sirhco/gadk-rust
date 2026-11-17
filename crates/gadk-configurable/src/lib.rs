@@ -13,16 +13,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! gadk-configurable (sub-project 6c-2): a port of ADK-Go's `internal/configurable` (YAML agent
-//! configs), its `conformance` package (test callbacks, functions, node functions, the agent
-//! loader and the record and replay plugins) and `cmd/internal/adkcli` (the `adkcli` binary).
+//! gadk-configurable: the YAML agent configs (the `configurable` loader), the `conformance`
+//! support (test callbacks, functions, node functions, the agent loader and the record and
+//! replay plugins) and the `adkcli` binary.
 //!
-//! This file ports `configurable_utils.go`'s registry: Go's package-level registries
-//! (`registry`, `agentRegistry`, `toolRegistry`, `callbackRegistry` and, from
-//! `configurable_workflow.go`, `nodeFunctionRegistry` / `nodeRegistry`, all under one
-//! `registryMu`) are the fields of one [`Registry`] value; [`Registry::new`] is Go's `init()`.
-//! Go's context values (`parentPathKey`, `subAgentsCollectorKey`) are carried explicitly by
-//! [`LoadCtx`].
+//! This file holds the registry: the agent-class, agent, tool, callback, node-function and
+//! node registries are the fields of one [`Registry`] value, all under one lock;
+//! [`Registry::new`] registers the built-in agent classes and tools. The loading context
+//! (the parent path and the sub-agents collector) is carried explicitly by [`LoadCtx`].
 //!
 //! Internal crate (`publish = false`); never a dependency of the `gadk` façade.
 
@@ -66,10 +64,9 @@ pub use error::ConfigError;
 pub use gadk_goyaml::GoValue;
 pub use govalue::GoMap;
 
-/// Go `AgentFactory func(ctx, configBytes []byte, agentDir string) (agent.Agent, error)`:
-/// builds an agent from a config file's bytes and the absolute path of its directory (Go
-/// 0990f9e; was the file's path). The [`Registry`] (a cheap
-/// handle) and the [`LoadCtx`] stand for Go's package globals and `ctx`.
+/// Builds an agent from a config file's bytes and the absolute path of its directory. The
+/// [`Registry`] (a cheap handle) and the [`LoadCtx`] stand for the shared registries and the
+/// loading context.
 pub type AgentFactory = Arc<
     dyn Fn(
             Registry,
@@ -81,7 +78,7 @@ pub type AgentFactory = Arc<
         + Sync,
 >;
 
-/// Go `ToolFactory func(ctx, args map[string]any) (tool.Tool, error)`; `None` args is Go's nil
+/// Builds a tool from the loading context and the tool config's args; `None` args is a nil
 /// map.
 pub type ToolFactory = Arc<
     dyn Fn(
@@ -93,7 +90,7 @@ pub type ToolFactory = Arc<
         + Sync,
 >;
 
-/// Go `ToolsetFactory func(ctx, args map[string]any) (tool.Toolset, error)`.
+/// Builds a toolset from the loading context and the tool config's args.
 pub type ToolsetFactory = Arc<
     dyn Fn(
             Registry,
@@ -104,41 +101,41 @@ pub type ToolsetFactory = Arc<
         + Sync,
 >;
 
-/// Go's node function `func(agent.Context, any) (any, error)` (Go's `any` output type-switched
-/// by the workflow into an event, a content or a plain output: [`NodeOutput`]).
+/// A node function taking a dynamic JSON value and returning a dynamic output, which the
+/// workflow turns into an event, a content or a plain output ([`NodeOutput`]).
 pub type NodeFn =
     Arc<dyn Fn(Context, Value) -> BoxFuture<'static, Result<NodeOutput, AgentError>> + Send + Sync>;
 
-/// Go's node function `func(agent.Context, string) (string, error)`, registered through
-/// [`Registry::register_string_node_function`] with Go's `fmt.Sprint` input coercion.
+/// A node function taking and returning a string, registered through
+/// [`Registry::register_string_node_function`] with a display-text input coercion.
 pub type StrNodeFn =
     Arc<dyn Fn(Context, String) -> BoxFuture<'static, Result<String, AgentError>> + Send + Sync>;
 
-/// What a [`NodeFn`] returns: Go's `any` result, which the workflow's function node
-/// type-switches (`*session.Event` is forwarded, `*genai.Content` becomes the event content,
-/// anything else is the event output; Go nil = `Value(Value::Null)`, no output).
+/// What a [`NodeFn`] returns: a dynamic result, which the workflow's function node
+/// distinguishes (a `session` event is forwarded, a `genai` content becomes the event content,
+/// anything else is the event output; nil = `Value(Value::Null)`, no output).
 #[derive(Debug, Clone)]
 pub enum NodeOutput {
     /// A plain output value.
     Value(Value),
-    /// A `*session.Event` (e.g. one carrying `Routes`).
+    /// A session event (e.g. one carrying `Routes`).
     Event(Box<Event>),
-    /// A `*genai.Content`.
+    /// A genai content.
     Content(Content),
 }
 
-/// Go's `callbackRegistry` values: the `any` Go stores, restricted to the two callback types
-/// Go's resolvers assert.
+/// The values of the callback registry, restricted to the two callback types
+/// the resolvers accept.
 #[derive(Clone)]
 pub enum Callback {
-    /// Go `agent.BeforeAgentCallback`.
+    /// A before-agent callback.
     BeforeAgent(BeforeAgentCallback),
-    /// Go `agent.AfterAgentCallback`.
+    /// An after-agent callback.
     AfterAgent(AfterAgentCallback),
 }
 
 impl Callback {
-    /// Go `%T` of the stored value.
+    /// The type name of the stored callback, as shown in error messages.
     pub fn go_type_name(&self) -> &'static str {
         match self {
             Callback::BeforeAgent(_) => BeforeAgent::GO_TYPE_NAME,
@@ -153,20 +150,20 @@ impl std::fmt::Debug for Callback {
     }
 }
 
-/// Go's type parameter `T` of `resolveCallbacks[T]`: the callback type a reference must hold.
+/// The callback type `T` a reference must hold when callbacks are resolved.
 pub(crate) trait CallbackType {
     /// The Rust callback type.
     type Fn;
-    /// Go `%T` of the zero `T` (`agent.BeforeAgentCallback`).
+    /// The type name of `T` in error messages (`agent.BeforeAgentCallback`).
     const GO_TYPE_NAME: &'static str;
-    /// Go `c.(T)`: the callback when it has this type.
+    /// The callback when it has this type.
     fn from_callback(c: &Callback) -> Option<Self::Fn>;
 }
 
-/// `T = agent.BeforeAgentCallback`.
+/// The before-agent callback type.
 pub(crate) struct BeforeAgent;
 
-/// `T = agent.AfterAgentCallback`.
+/// The after-agent callback type.
 pub(crate) struct AfterAgent;
 
 impl CallbackType for BeforeAgent {
@@ -191,24 +188,23 @@ impl CallbackType for AfterAgent {
     }
 }
 
-/// Go's `subAgentsCollectorKey` value (`*[]agent.Agent`): the workflow's sub-agent list that
-/// YAML agent nodes are appended to.
+/// The workflow's sub-agent list that YAML agent nodes are appended to.
 pub type SubAgentsCollector = Arc<Mutex<Vec<Arc<dyn Agent>>>>;
 
-/// Go's `ctx` values while loading configs. Every nested `from_config` / factory call inherits
-/// the caller's `LoadCtx`, as Go's `ctx` is inherited.
+/// The values carried while loading configs. Every nested `from_config` / factory call inherits
+/// the caller's `LoadCtx`.
 #[derive(Clone, Default)]
 pub struct LoadCtx {
-    /// Go `ctx.Value(parentPathKey)`: set by `resolveTools` to the config directory of the
-    /// agent whose tools are resolved (Go 0990f9e; was its config file path); `None` = not set
+    /// Set by the tool resolver to the config directory of the
+    /// agent whose tools are resolved; `None` = not set
     /// (`parentPath not found in context`).
     pub parent_path: Option<PathBuf>,
-    /// Go `ctx.Value(subAgentsCollectorKey)`: set by the workflow factory around `parseEdges`.
+    /// Set by the workflow factory around edge parsing.
     pub sub_agents: Option<SubAgentsCollector>,
 }
 
 impl LoadCtx {
-    /// Go `context.WithValue(ctx, parentPathKey, parentPath)`.
+    /// A copy of the context with the parent path set.
     pub fn with_parent_path(&self, parent_path: &Path) -> LoadCtx {
         LoadCtx {
             parent_path: Some(parent_path.to_path_buf()),
@@ -216,7 +212,7 @@ impl LoadCtx {
         }
     }
 
-    /// Go `context.WithValue(ctx, subAgentsCollectorKey, &subAgents)`.
+    /// A copy of the context with the sub-agents collector set.
     pub fn with_sub_agents(&self, collector: SubAgentsCollector) -> LoadCtx {
         LoadCtx {
             parent_path: self.parent_path.clone(),
@@ -225,10 +221,10 @@ impl LoadCtx {
     }
 }
 
-/// The context a tool or toolset factory receives (Go passes the same `ctx`).
+/// The context a tool or toolset factory receives (the same loading context).
 pub type ToolCtx = LoadCtx;
 
-/// A `toolRegistry` value: Go stores either factory type as `any` and type-switches on it.
+/// A tool registry value: either factory type.
 #[derive(Clone)]
 pub(crate) enum ToolEntry {
     /// A [`ToolFactory`].
@@ -237,21 +233,21 @@ pub(crate) enum ToolEntry {
     Toolset(ToolsetFactory),
 }
 
-/// Go's package-level registries, guarded together like Go's single `registryMu`.
+/// The registries, guarded together by one lock.
 pub(crate) struct Registries {
-    /// Go `registry`: agent class → factory.
+    /// Agent class → factory.
     pub(crate) agent_classes: HashMap<String, AgentFactory>,
-    /// Go `agentRegistry`: absolute config path → loaded agent.
+    /// Absolute config path → loaded agent.
     pub(crate) agents: HashMap<PathBuf, Arc<dyn Agent>>,
-    /// Go `toolRegistry`: tool name → tool or toolset factory.
+    /// Tool name → tool or toolset factory.
     pub(crate) tools: HashMap<String, ToolEntry>,
-    /// Go `callbackRegistry`.
+    /// Callback name → callback.
     pub(crate) callbacks: HashMap<String, Callback>,
-    /// Go `nodeFunctionRegistry`.
+    /// Node-function name → node function.
     pub(crate) node_functions: HashMap<String, NodeFn>,
-    /// Go `nodeRegistry`: an absolute YAML path (lossy UTF-8) or a function reference → node.
+    /// An absolute YAML path (lossy UTF-8) or a function reference → node.
     pub(crate) nodes: HashMap<String, Arc<dyn Node>>,
-    /// Go's `os.Getenv` source for the `LlmAgent` factory (`GOOGLE_API_KEY`) and the Gemini
+    /// The environment source for the `LlmAgent` factory (`GOOGLE_API_KEY`) and the Gemini
     /// client it builds: the process environment ([`ProcessEnv`]) unless a test swaps it.
     pub(crate) env: Arc<dyn EnvProvider>,
 }
@@ -270,8 +266,8 @@ impl Default for Registries {
     }
 }
 
-/// Go `internal/configurable`'s global state as a value: a cheap, clonable handle (clones share
-/// the registries, as Go's globals are shared).
+/// The configurable-agent loader's shared state as a value: a cheap, clonable handle (clones
+/// share the registries).
 #[derive(Clone)]
 pub struct Registry {
     pub(crate) inner: Arc<RwLock<Registries>>,
@@ -284,19 +280,18 @@ impl Default for Registry {
 }
 
 impl Registry {
-    /// A registry with no registrations (not Go's `init()` set): for tests.
+    /// A registry with no registrations (not the built-in set): for tests.
     pub(crate) fn empty() -> Registry {
         Registry {
             inner: Arc::new(RwLock::new(Registries::default())),
         }
     }
 
-    /// Go `init()`: agent classes `LlmAgent`, `LoopAgent`, `ParallelAgent`,
+    /// A registry with the built-ins: agent classes `LlmAgent`, `LoopAgent`, `ParallelAgent`,
     /// `SequentialAgent`, `Workflow`; tools `exit_loop`, `google_search`, `url_context`,
     /// `google_maps_grounding`, `AgentTool`, `LongRunningFunctionTool`, `ExampleTool`;
-    /// toolset `McpToolset`. Go's `init` panics are unreachable (fresh maps).
+    /// toolset `McpToolset`. Registration cannot fail here (fresh maps).
     pub fn new() -> Registry {
-        // Go: configurable_utils.go init
         let registry = Registry::with_agent_classes();
         {
             let mut g = registry.inner.write();
@@ -307,7 +302,7 @@ impl Registry {
         registry
     }
 
-    /// The agent-class half of Go's `init()` (`Register("LlmAgent", newLLMAgent)` … in Go's
+    /// The agent-class half of [`Registry::new`] (`LlmAgent` … in registration
     /// order); [`Registry::new`] adds the built-in tool and toolset factories.
     pub(crate) fn with_agent_classes() -> Registry {
         let llm: AgentFactory = Arc::new(|r, c, d, p| agents::new_llm_agent(r, c, d, p).boxed());
@@ -343,9 +338,8 @@ impl Registry {
         self.inner.write().env = env;
     }
 
-    /// Go `Register`: `Register called twice for agent %s` on a duplicate.
+    /// Registers an agent class: `Register called twice for agent {name}` on a duplicate.
     pub fn register(&self, name: &str, factory: AgentFactory) -> Result<(), ConfigError> {
-        // Go: configurable_utils.go Register
         let mut g = self.inner.write();
         if g.agent_classes.contains_key(name) {
             return Err(ConfigError::msg(format!(
@@ -356,14 +350,13 @@ impl Registry {
         Ok(())
     }
 
-    /// Go `RegisterToolFactory`: `RegisterToolFactory called twice for tool %s` on a duplicate
-    /// (tools and toolsets share one namespace).
+    /// Registers a tool factory: `RegisterToolFactory called twice for tool {name}` on a
+    /// duplicate (tools and toolsets share one namespace).
     pub fn register_tool_factory(
         &self,
         name: &str,
         factory: ToolFactory,
     ) -> Result<(), ConfigError> {
-        // Go: configurable_utils.go RegisterToolFactory
         let mut g = self.inner.write();
         if g.tools.contains_key(name) {
             return Err(ConfigError::msg(format!(
@@ -374,13 +367,12 @@ impl Registry {
         Ok(())
     }
 
-    /// Go `RegisterToolsetFactory`: `RegisterToolsetFactory called twice for toolset %s`.
+    /// Registers a toolset factory: `RegisterToolsetFactory called twice for toolset {name}`.
     pub fn register_toolset_factory(
         &self,
         name: &str,
         factory: ToolsetFactory,
     ) -> Result<(), ConfigError> {
-        // Go: configurable_utils.go RegisterToolsetFactory
         let mut g = self.inner.write();
         if g.tools.contains_key(name) {
             return Err(ConfigError::msg(format!(
@@ -391,9 +383,8 @@ impl Registry {
         Ok(())
     }
 
-    /// Go `RegisterCallback`: `RegisterCallback called twice for callback %s`.
+    /// Registers a callback: `RegisterCallback called twice for callback {name}`.
     pub fn register_callback(&self, name: &str, callback: Callback) -> Result<(), ConfigError> {
-        // Go: configurable_utils.go RegisterCallback
         let mut g = self.inner.write();
         if g.callbacks.contains_key(name) {
             return Err(ConfigError::msg(format!(
@@ -404,28 +395,27 @@ impl Registry {
         Ok(())
     }
 
-    /// Go `FromConfig(context.Background(), configPath)`: the top-level entry point (an empty
+    /// The top-level entry point: loads an agent from a config file (an empty
     /// [`LoadCtx`]).
     pub async fn from_config(&self, config_path: &Path) -> Result<Arc<dyn Agent>, ConfigError> {
         self.from_config_with_ctx(&LoadCtx::default(), config_path)
             .await
     }
 
-    /// Go `FromConfig(ctx, configPath)`: `filepath.Abs`, read the file, peek `agent_class`
-    /// (default `LlmAgent`), call the factory with the file's bytes and absolute path. Boxed:
-    /// the factories recurse into it.
-    #[allow(clippy::wrong_self_convention)] // Go's `FromConfig` name; `self` is the registry.
+    /// Loads an agent from a config file with a loading context: makes the path absolute, reads
+    /// the file, peeks `agent_class` (default `LlmAgent`), calls the factory with the file's
+    /// bytes and absolute path. Boxed: the factories recurse into it.
+    #[allow(clippy::wrong_self_convention)] // a `from_*` name; `self` is the registry.
     pub(crate) fn from_config_with_ctx<'a>(
         &'a self,
         ctx: &'a LoadCtx,
         config_path: &'a Path,
     ) -> BoxFuture<'a, Result<Arc<dyn Agent>, ConfigError>> {
-        // Go: configurable_utils.go FromConfig
         async move {
             let abs_path = go_abs(config_path)
                 .map_err(|e| ConfigError::wrap("failed to resolve absolute path", e))?;
 
-            // 1. Read the file (Go os.ReadFile: `open` then `read` *PathErrors).
+            // 1. Read the file (`open` then `read` path errors).
             let data = match read_file(&abs_path) {
                 Ok(data) => data,
                 Err(e) if e.is_not_exist() => {
@@ -463,17 +453,16 @@ impl Registry {
         .boxed()
     }
 
-    /// Go `ResolveToolReference`: `(tool, None)` from a tool factory, `(None, toolset)` from a
-    /// toolset factory; `tool name cannot be empty`, `tool '%s' not found`.
-    // Go's third branch, `tool '%s' is not a tool or toolset factory`, is unreachable: the
-    // registry's values are typed (ledger 6c-2 N/A).
+    /// Resolves a tool reference: `(tool, None)` from a tool factory, `(None, toolset)` from a
+    /// toolset factory; `tool name cannot be empty`, `tool '{name}' not found`.
+    // A third branch, `tool '{name}' is not a tool or toolset factory`, is unreachable: the
+    // registry's values are typed.
     pub async fn resolve_tool_reference(
         &self,
         ctx: &ToolCtx,
         tool_name: &str,
         args: Option<&GoMap>,
     ) -> Result<(Option<Arc<dyn Tool>>, Option<Arc<dyn Toolset>>), ConfigError> {
-        // Go: configurable_utils.go ResolveToolReference
         if tool_name.is_empty() {
             return Err(ConfigError::msg("tool name cannot be empty"));
         }
@@ -491,10 +480,9 @@ impl Registry {
         }
     }
 
-    /// Go `ResolveCallbackReference`: `callback name cannot be empty`,
-    /// `callback '%s' not found`.
+    /// Resolves a callback reference: `callback name cannot be empty`,
+    /// `callback '{name}' not found`.
     pub fn resolve_callback_reference(&self, callback_name: &str) -> Result<Callback, ConfigError> {
-        // Go: configurable_utils.go ResolveCallbackReference
         if callback_name.is_empty() {
             return Err(ConfigError::msg("callback name cannot be empty"));
         }
@@ -502,9 +490,9 @@ impl Registry {
         callback.ok_or_else(|| ConfigError::msg(format!("callback '{callback_name}' not found")))
     }
 
-    /// Go `ResolveAgentReference(context.Background(), configDir, refPath)`: the top-level
-    /// entry point (an empty [`LoadCtx`]). `config_dir` is the directory of the referencing
-    /// config and `ref_path` the reference as written there.
+    /// The top-level entry point for a sub-agent reference (an empty [`LoadCtx`]). `config_dir`
+    /// is the directory of the referencing config and `ref_path` the reference as written
+    /// there.
     pub async fn resolve_agent_reference(
         &self,
         config_dir: &Path,
@@ -514,7 +502,7 @@ impl Registry {
             .await
     }
 
-    /// Go `ResolveAgentReference(ctx, configDir, refPath)`: the containment check
+    /// Resolves a sub-agent reference with a loading context: the containment check
     /// ([`resolve_config_reference`]), then the cached agent for the resolved real path, else
     /// loads it with [`Registry::from_config_with_ctx`] and caches it (double-checked insert:
     /// the first cached agent wins). Boxed: recursive.
@@ -524,7 +512,6 @@ impl Registry {
         config_dir: &'a Path,
         ref_path: &'a str,
     ) -> BoxFuture<'a, Result<Arc<dyn Agent>, ConfigError>> {
-        // Go: configurable_utils.go ResolveAgentReference
         async move {
             let abs_path = resolve_config_reference(config_dir, ref_path)?;
 
@@ -546,16 +533,15 @@ impl Registry {
     }
 }
 
-/// Go `resolveConfigReference`: the one containment check for every config reference (a
-/// `sub_agents` or AgentTool `config_path` and a workflow edge), `config reference %q: %w`
-/// around Go `utils.SafeSubpath` ([`gadk_platform::safe_subpath`]). The result is the path the
+/// The one containment check for every config reference (a
+/// `sub_agents` or AgentTool `config_path` and a workflow edge), `config reference {ref:?}:
+/// {cause}` around [`gadk_platform::safe_subpath`]. The result is the path the
 /// check followed the reference to, links replaced by their targets: it is what gets read and
 /// what keys the registries, so the file judged is the file opened.
 pub(crate) fn resolve_config_reference(
     config_dir: &Path,
     ref_path: &str,
 ) -> Result<PathBuf, ConfigError> {
-    // Go: configurable_utils.go resolveConfigReference
     match safe_subpath(config_dir, ref_path) {
         Ok((abs, _)) => Ok(abs),
         Err(e) => Err(ConfigError::wrap(
@@ -565,13 +551,13 @@ pub(crate) fn resolve_config_reference(
     }
 }
 
-/// Go `filepath.IsAbs` (Unix): a path starting with `/`.
+/// Whether a path is absolute (Unix): it starts with `/`.
 pub(crate) fn go_is_abs(path: &str) -> bool {
     path.starts_with('/')
 }
 
-/// Go `filepath.Abs` (Unix): an absolute path cleaned, a relative one joined to the working
-/// directory (`os.Getwd`, its only error) and cleaned. Lexical: `..` is resolved without
+/// The absolute form (Unix): an absolute path cleaned, a relative one joined to the working
+/// directory (its only error) and cleaned. Lexical: `..` is resolved without
 /// following symlinks, unlike `std::fs::canonicalize`.
 pub(crate) fn go_abs(path: &Path) -> Result<PathBuf, ConfigError> {
     let p = path.to_string_lossy();
@@ -585,12 +571,11 @@ pub(crate) fn go_abs(path: &Path) -> Result<PathBuf, ConfigError> {
     ])))
 }
 
-/// The conformance plugins' base-directory check (Go record_plugin.go `parseRecordConfig` and
-/// replay_plugin.go `isReplayModeOn` / `loadInvocationState` repeat it inline): `filepath.Abs`
-/// of the allowed base and of `case_dir`, `filepath.Rel` between them, and a `..`-prefixed or
-/// absolute result rejected with `<plugin> config error: 'dir' is not within the allowed base
-/// directory`; an `Abs`/`Rel` failure is `invalid path format: %v`. Returns
-/// `filepath.Abs(case_dir)`.
+/// The conformance plugins' base-directory check (the record and replay plugins repeat it
+/// inline): the absolute form of the allowed base and of `case_dir`, the relative path between
+/// them, and a `..`-prefixed or absolute result rejected with `<plugin> config error: 'dir' is
+/// not within the allowed base directory`; an absolute-form or relative-path failure is
+/// `invalid path format: {cause}`. Returns the absolute form of `case_dir`.
 pub(crate) fn check_within_base_dir(
     allowed_base_dir: &Path,
     case_dir: &str,
@@ -610,20 +595,18 @@ pub(crate) fn check_within_base_dir(
     Ok(requested_abs_path)
 }
 
-/// Go `os.Getwd` (Unix): `$PWD` when it is absolute and names the same file as `.` (Go's
-/// "clumsy but widespread kludge", so a working directory reached through a symlink keeps the
-/// spelling the shell gave it), otherwise the OS working directory (`getcwd`, symlinks
-/// resolved). `std::env::current_dir` is only the second half.
+/// The working directory (Unix): `$PWD` when it is absolute and names the same file as `.`
+/// (so a working directory reached through a symlink keeps the spelling the shell gave it),
+/// otherwise the OS working directory (`getcwd`, symlinks resolved). `std::env::current_dir`
+/// is only the second half.
 ///
-/// Errors print like Go's: a failed `stat` of `.` (only checked when `$PWD` is absolute) is
-/// the `*fs.PathError` `stat .: <errno>`, a failed `getcwd` is `os.NewSyscallError`'s
-/// `getwd: <errno>` (`getwd: no such file or directory` once the directory is deleted).
+/// Errors print like ADK's loader: a failed `stat` of `.` (only checked when `$PWD` is
+/// absolute) is the path error `stat .: <errno>`, a failed `getcwd` is `getwd: <errno>`
+/// (`getwd: no such file or directory` once the directory is deleted).
 pub fn go_getwd() -> Result<PathBuf, ConfigError> {
-    // Go: os/getwd.go Getwd
     let stat_dot =
         || std::fs::metadata(".").map_err(|e| ConfigError::path("stat", Path::new("."), &e));
-    // Clumsy but widespread kludge:
-    // if $PWD is set and matches ".", use it.
+    // Use $PWD when it is set and matches ".".
     let mut dot = None;
     if let Some(dir) = std::env::var_os("PWD")
         && dir.to_string_lossy().starts_with('/')
@@ -637,14 +620,14 @@ pub fn go_getwd() -> Result<PathBuf, ConfigError> {
         dot = Some(d0);
     }
 
-    // If the operating system provides a Getwd call, use it.
+    // Otherwise ask the operating system for the working directory.
     let err = match std::env::current_dir() {
         Ok(dir) => return Ok(dir),
         Err(e) => e,
     };
     let getwd_err = ConfigError::msg(format!("getwd: {}", error::go_errno_text(&err)));
-    // Go retries only ENAMETOOLONG, EINVAL, ERANGE and ENOMEM (ERANGE is 34 on Linux and the
-    // BSDs; std maps it to no `ErrorKind`).
+    // Only ENAMETOOLONG, EINVAL, ERANGE and ENOMEM are retryable (ERANGE is 34 on Linux and
+    // the BSDs; std maps it to no `ErrorKind`).
     let retry = matches!(
         err.kind(),
         io::ErrorKind::InvalidFilename | io::ErrorKind::InvalidInput | io::ErrorKind::OutOfMemory
@@ -656,27 +639,27 @@ pub fn go_getwd() -> Result<PathBuf, ConfigError> {
     if dot.is_none() {
         stat_dot()?;
     }
-    // Divergence (ledger 6c-2): `getcwd` is Rust std's (a 512-byte buffer grown on ERANGE, Go
-    // passes 1024 bytes), so where libc answers by buffer size (macOS, for an unlinked or
-    // unsearchable working directory) the error, or Go's success, can differ; and Go's
-    // walk-up fallback after a retryable `getcwd` error is not ported (gadk reports the error).
+    // `getcwd` is Rust std's (a 512-byte buffer grown on ERANGE, where ADK's loader passes
+    // 1024 bytes), so where libc answers by buffer size (macOS, for an unlinked or
+    // unsearchable working directory) the error, or a success, can differ; and the walk-up
+    // fallback after a retryable `getcwd` error is not implemented (gadk reports the error).
     Err(getwd_err)
 }
 
-/// Go `os.SameFile`: the same device and inode.
+/// The same device and inode.
 #[cfg(unix)]
 fn same_file(a: &std::fs::Metadata, b: &std::fs::Metadata) -> bool {
     use std::os::unix::fs::MetadataExt;
     a.dev() == b.dev() && a.ino() == b.ino()
 }
 
-/// Non-Unix: `$PWD` is never trusted (Go's Windows `Getwd` asks the OS only).
+/// Non-Unix: `$PWD` is never trusted (the OS is asked only).
 #[cfg(not(unix))]
 fn same_file(_: &std::fs::Metadata, _: &std::fs::Metadata) -> bool {
     false
 }
 
-/// Go `os.ReadFile`: an `open` *PathError when the file cannot be opened, a `read` one when it
+/// Reads a file: an `open` path error when the file cannot be opened, a `read` one when it
 /// cannot be read (a directory opens but fails with `is a directory`).
 pub(crate) fn read_file(path: &Path) -> Result<Vec<u8>, ConfigError> {
     let mut file = std::fs::File::open(path).map_err(|e| ConfigError::path("open", path, &e))?;

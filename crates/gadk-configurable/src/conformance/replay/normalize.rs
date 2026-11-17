@@ -13,15 +13,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `internal/configurable/conformance/replayplugin/yaml_utils.go`: `normalizeYAMLNode`
-//! with `toIgnore` / `toIgnoreButRecurse`, over the gadk-goyaml node arena.
+//! `normalize_yaml_node` with [`TO_IGNORE`] / [`TO_IGNORE_BUT_RECURSE`], over the gadk-goyaml
+//! node arena.
 
 use gadk_goyaml::{Document, Kind, NodeData, NodeId};
 
-/// Go `toIgnore`: freeform keys whose values are neither renamed nor recursed into.
+/// Free-form keys whose values are neither renamed nor recursed into.
 pub const TO_IGNORE: [&str; 4] = ["thought_signature", "http_options", "args", "response"];
 
-/// Go `toIgnoreButRecurse`: snake_case structural keys kept as they are, values recursed into.
+/// Snake_case structural keys kept as they are, values recursed into.
 pub const TO_IGNORE_BUT_RECURSE: [&str; 8] = [
     "user_message_index",
     "agent_name",
@@ -33,15 +33,14 @@ pub const TO_IGNORE_BUT_RECURSE: [&str; 8] = [
     "tool_response",
 ];
 
-/// Go `normalizeYAMLNode`: a scalar `system_instruction` becomes a `user` content with one
+/// A scalar `system_instruction` becomes a `user` content with one
 /// text part, a mapping `llm_response` becomes the one-element `llm_responses` sequence, and
 /// every other key loses its underscores (outside [`TO_IGNORE`] / [`TO_IGNORE_BUT_RECURSE`]).
 ///
-/// Go recurses; this walks an explicit stack of node ids in Go's visiting order (a node's
-/// pairs are rewritten, then its values are visited first to last), so a document of any
-/// depth is normalized without growing the call stack. Alias nodes are not followed, as in Go.
+/// The walk uses an explicit stack of node ids (a node's pairs are rewritten, then its values
+/// are visited first to last), so a document of any depth is normalized without growing the
+/// call stack. Alias nodes are not followed.
 pub fn normalize_yaml_node(doc: &mut Document, node: NodeId) {
-    // Go: yaml_utils.go normalizeYAMLNode
     let mut stack = vec![node];
     while let Some(id) = stack.pop() {
         match doc[id].kind {
@@ -51,9 +50,8 @@ pub fn normalize_yaml_node(doc: &mut Document, node: NodeId) {
             Kind::Mapping => {
                 let content = doc[id].content.clone();
                 let mut recurse = Vec::new();
-                // Divergence (ledger 6c-2): Go indexes `Content[i+1]` and panics on a mapping
-                // with an odd number of children (only a hand-built node); the dangling key is
-                // left alone here.
+                // A mapping with an odd number of children (only a hand-built node) has a
+                // dangling key, which is left alone.
                 for &[key, value] in content.as_chunks::<2>().0 {
                     // 1. Fix known type mismatches and singular/plural fields
                     match doc[key].value.as_str() {
@@ -88,7 +86,7 @@ pub fn normalize_yaml_node(doc: &mut Document, node: NodeId) {
                         recurse.push(value);
                         continue;
                     }
-                    // 4. Strip underscores to match camelCase Go struct field names
+                    // 4. Strip underscores to match the camelCase struct field names
                     //    case-insensitively
                     let stripped = key_value.replace('_', "");
                     doc.get_mut(key).value = stripped;
@@ -102,8 +100,8 @@ pub fn normalize_yaml_node(doc: &mut Document, node: NodeId) {
     }
 }
 
-/// Go's in-place rewrite of a scalar `system_instruction` value into
-/// `{role: user, parts: [{text: <value>}]}` (the node keeps its other fields, as Go's does).
+/// Rewrites a scalar `system_instruction` value in place into
+/// `{role: user, parts: [{text: <value>}]}` (the node keeps its other fields).
 fn system_instruction_to_content(doc: &mut Document, value: NodeId) {
     let val = std::mem::take(&mut doc.get_mut(value).value);
     let scalar = |tag: &str, v: &str| NodeData {

@@ -229,6 +229,16 @@ class CommentOnlyTest(unittest.TestCase):
         self.r.write("crates/c/src/lib.rs", '/// Go `f`.\npub fn f() -> &\'static str { "a b" }\n')
         self.assertEqual(self.problems(), ["crates/c/src/lib.rs: code changed (not only comments)"])
 
+    def test_exempt_path_literal_change_is_not_reported(self):
+        from unittest import mock
+        self.r.write("crates/c/tests/gen.rs", 'const A: &str = "a";\n')
+        self.git("add", "-A")
+        self.git("commit", "-qm", "gen")
+        self.r.write("crates/c/tests/gen.rs", 'const A: &str = "b";\n')
+        self.assertEqual(self.problems(), ["crates/c/tests/gen.rs: code changed (not only comments)"])
+        with mock.patch.dict(only.CODE_EXEMPT, {"crates/c/tests/gen.rs": "test"}):
+            self.assertEqual(self.problems(), [])
+
     def test_toml_value_change_fails(self):
         self.r.write("crates/c/Cargo.toml", '[package]\nname = "d" # Go\n')
         self.assertEqual(self.problems(), ["crates/c/Cargo.toml: non-comment change"])

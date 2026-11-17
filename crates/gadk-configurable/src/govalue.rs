@@ -12,14 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go's `map[string]any` / `any` as yaml.v3 decodes them ([`GoMap`], [`GoValue`]) and the
+//! The free-form YAML value types as yaml.v3 decodes them ([`GoMap`], [`GoValue`]) and the
 //! conversions the configurable factories and the conformance plugins share:
 //!
-//! - [`go_value_to_json`] / [`go_map_to_json`]: Go `json.Marshal` of the value (as gadk's
-//!   JSON-based APIs receive it), with Go's errors for unsupported values;
-//! - [`json_to_go_value`] / [`json_map_to_go`]: Go `json.Unmarshal` into `any` (every number
-//!   a `float64`), i.e. what Go's `map[string]any` holds for a JSON-decoded value;
-//! - [`go_sprint`] / [`go_type_name`]: Go's `%v` and `%T` of a yaml-decoded value.
+//! - [`go_value_to_json`] / [`go_map_to_json`]: the JSON encoding of the value (as gadk's
+//!   JSON-based APIs receive it), with errors for unsupported values;
+//! - [`json_to_go_value`] / [`json_map_to_go`]: the JSON decoding into a dynamic value (every
+//!   number a `float64`), i.e. what a free-form map holds for a JSON-decoded value;
+//! - [`go_sprint`] / [`go_type_name`]: the display text and type name of a yaml-decoded value,
+//!   as they appear in ADK's error messages.
 
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
@@ -28,15 +29,15 @@ use chrono::{DateTime, Datelike, FixedOffset, Timelike};
 use gadk_goyaml::GoValue;
 use serde_json::{Map, Number, Value};
 
-/// Go `map[string]any` as yaml.v3 decodes it: values are [`GoValue`]s (`int`, `float64`, …
-/// keep Go's dynamic types). Go maps are unordered; `BTreeMap` iterates sorted, as Go's
-/// encoders and `fmt` do.
+/// A free-form map as yaml.v3 decodes it: values are [`GoValue`]s (`int`, `float64`, …
+/// keep their dynamic types). `BTreeMap` iterates sorted, as the encoders and the display
+/// text do.
 pub type GoMap = BTreeMap<String, GoValue>;
 
-/// Go `json.Marshal(v)` read back as a JSON value: `int`/`uint64` stay integers, `float64`
-/// becomes a JSON number (`NaN`/`±Inf` fail as in Go), a non-UTF-8 Go string has each invalid
-/// byte replaced by U+FFFD (Go's `encoding/json`), a `time.Time` becomes its RFC 3339 text, and
-/// a `map[interface{}]interface{}` fails with Go's unsupported-type error.
+/// The JSON encoding of `v`, read back as a JSON value: `int`/`uint64` stay integers,
+/// `float64` becomes a JSON number (`NaN`/`±Inf` fail), a non-UTF-8 string has each invalid
+/// byte replaced by U+FFFD, a timestamp becomes its RFC 3339 text, and a
+/// `map[interface{}]interface{}` fails with an unsupported-type error.
 pub fn go_value_to_json(v: &GoValue) -> Result<Value, String> {
     Ok(match v {
         GoValue::Null => Value::Null,
@@ -81,7 +82,7 @@ pub fn go_value_to_json(v: &GoValue) -> Result<Value, String> {
     })
 }
 
-/// [`go_value_to_json`] of every entry of a Go `map[string]any`.
+/// [`go_value_to_json`] of every entry of a map.
 pub fn go_map_to_json(m: &GoMap) -> Result<Map<String, Value>, String> {
     let mut out = Map::new();
     for (k, v) in m {
@@ -90,7 +91,7 @@ pub fn go_map_to_json(m: &GoMap) -> Result<Map<String, Value>, String> {
     Ok(out)
 }
 
-/// Go `json.Unmarshal` into `any`: `null` → nil, numbers → `float64`, arrays →
+/// Decodes JSON into a dynamic value: `null` → nil, numbers → `float64`, arrays →
 /// `[]interface{}`, objects → `map[string]interface{}` (in the JSON map's key order).
 pub fn json_to_go_value(v: &Value) -> GoValue {
     match v {
@@ -107,16 +108,16 @@ pub fn json_to_go_value(v: &Value) -> GoValue {
     }
 }
 
-/// [`json_to_go_value`] of every entry of a JSON object (Go `map[string]any` from JSON).
+/// [`json_to_go_value`] of every entry of a JSON object.
 pub fn json_map_to_go(m: &Map<String, Value>) -> GoMap {
     m.iter()
         .map(|(k, v)| (k.clone(), json_to_go_value(v)))
         .collect()
 }
 
-/// Go `fmt.Sprint(v)` (`%v`) of a yaml-decoded value: `<nil>`, `true`, `42`, floats as
-/// `strconv.FormatFloat(f, 'g', -1, 64)`, strings verbatim, `[a b]`, `map[k:v]` with sorted
-/// keys, and `time.Time`'s `String()` form.
+/// The display text of a yaml-decoded value: `<nil>`, `true`, `42`, floats in the shortest
+/// `%g` form that round-trips (64-bit), strings verbatim, `[a b]`, `map[k:v]` with sorted
+/// keys, and a timestamp's `2006-01-02 15:04:05.999999999 -0700 MST` form.
 pub fn go_sprint(v: &GoValue) -> String {
     match v {
         GoValue::Null => "<nil>".to_owned(),
@@ -158,16 +159,14 @@ pub fn go_sprint(v: &GoValue) -> String {
     }
 }
 
-/// Go `internal/fmtsort`'s order of two `interface{}` map keys: nil first, then by dynamic
+/// The order of two `interface{}` map keys in the display text: nil first, then by dynamic
 /// type, then by value within a type (numbers numerically with NaN first, strings bytewise,
-/// `false` before `true`, `time.Time` by its `wall` then `ext` fields).
+/// `false` before `true`, timestamps by nanoseconds then seconds).
 ///
-/// Go orders the types by their `*rtype` addresses, an artifact of the linker; the order
-/// here — `string`, `uint64`, `int`, `float64`, `bool`, `time.Time` — is the one observed in
-/// Go's `adkcli` (and a standalone yaml.v3 program) at ADK-Go `0990f9e`. Keys that
+/// The type order — `string`, `uint64`, `int`, `float64`, `bool`, timestamp — is the one
+/// ADK's loader is observed to produce (and a standalone yaml.v3 program). Keys that
 /// cannot occur in a yaml.v3 map (sequences, maps) sort last.
 fn go_fmtsort_interface_cmp(a: &GoValue, b: &GoValue) -> Ordering {
-    // Go: internal/fmtsort/sort.go compare (reflect.Interface)
     fn type_rank(v: &GoValue) -> u8 {
         match v {
             GoValue::Null => 0,
@@ -194,7 +193,7 @@ fn go_fmtsort_interface_cmp(a: &GoValue, b: &GoValue) -> Ordering {
     match (a, b) {
         (GoValue::Uint(x), GoValue::Uint(y)) => x.cmp(y),
         (GoValue::Int(x), GoValue::Int(y)) => x.cmp(y),
-        // Go `cmp.Compare`: NaN before every other value, -0 equal to 0.
+        // NaN before every other value, -0 equal to 0.
         (GoValue::Float(x), GoValue::Float(y)) => match (x.is_nan(), y.is_nan()) {
             (true, true) => Ordering::Equal,
             (true, false) => Ordering::Less,
@@ -203,8 +202,8 @@ fn go_fmtsort_interface_cmp(a: &GoValue, b: &GoValue) -> Ordering {
         },
         (GoValue::Bool(x), GoValue::Bool(y)) => x.cmp(y),
         // `wall` holds the nanoseconds (no monotonic reading), `ext` the seconds.
-        // Divergence (ledger 6c-2): two timestamp keys at the same instant tie and keep document
-        // order; Go then compares their `*Location` pointers (UTC's nil first, others by address).
+        // Two timestamp keys at the same instant tie and keep document order (ADK's loader
+        // would then order them by time zone).
         (GoValue::Timestamp(x), GoValue::Timestamp(y)) => x
             .timestamp_subsec_nanos()
             .cmp(&y.timestamp_subsec_nanos())
@@ -213,7 +212,7 @@ fn go_fmtsort_interface_cmp(a: &GoValue, b: &GoValue) -> Ordering {
     }
 }
 
-/// Go `fmt.Sprintf("%T", v)` of a yaml-decoded `interface{}` value.
+/// The type name of a yaml-decoded `interface{}` value (`int`, `string`, `[]interface {}`, …).
 pub fn go_type_name(v: &GoValue) -> &'static str {
     match v {
         GoValue::Null => "<nil>",
@@ -229,8 +228,8 @@ pub fn go_type_name(v: &GoValue) -> &'static str {
     }
 }
 
-/// Go `encoding/json`'s string encoding of a Go string holding `b`: each byte that is not part
-/// of a valid UTF-8 sequence becomes U+FFFD (Go decodes it as `RuneError` of width 1).
+/// The string encoding of a byte string `b`: each byte that is not part of a valid UTF-8
+/// sequence becomes U+FFFD (one replacement per invalid byte).
 fn go_json_string_of_bytes(b: &[u8]) -> String {
     let mut out = String::with_capacity(b.len());
     for chunk in b.utf8_chunks() {
@@ -242,9 +241,9 @@ fn go_json_string_of_bytes(b: &[u8]) -> String {
     out
 }
 
-/// Go `time.Time.String()` (`2006-01-02 15:04:05.999999999 -0700 MST`) of a parsed yaml.v3
-/// timestamp: the zone abbreviation is `UTC` for a zero offset and the numeric offset otherwise
-/// (Go's `FixedZone("", off)` prints its offset as its name).
+/// A parsed yaml.v3 timestamp as `2006-01-02 15:04:05.999999999 -0700 MST`: the zone
+/// abbreviation is `UTC` for a zero offset and the numeric offset otherwise (a fixed zone
+/// without a name prints its offset as its name).
 fn go_time_string(t: &DateTime<FixedOffset>) -> String {
     let mut s = t.format("%Y-%m-%d %H:%M:%S").to_string();
     let nanos = t.nanosecond() % 1_000_000_000;

@@ -13,11 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `internal/configurable/conformance`: the conformance agents' callbacks, function tools
-//! and node function, the agent loader, the recording types
-//! (`replayplugin/recording`), the record plugin (`recordplugin`) and the replay plugin
-//! (`replayplugin`). [`gonode`] holds the Go-reflection-shaped YAML encoding and decoding of
-//! the recordings that both plugins share.
+//! The conformance support: the conformance agents' callbacks, function tools and node
+//! function, the agent loader, the recording types, the record plugin and the replay plugin.
+//! These match what ADK's conformance harness expects. [`gonode`] holds the reflection-shaped
+//! YAML encoding and decoding of the recordings that both plugins share.
 
 pub mod callbacks;
 pub mod functions;

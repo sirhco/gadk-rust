@@ -12,24 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The Go-reflection-shaped YAML encoding and decoding of [`Recordings`] (no single Go
-//! source): [`to_go_node`] builds the node tree Go's `node.Encode(&recordings)` builds,
-//! [`from_go_node`] decodes like Go's `node.Decode(&recordings)`.
+//! The reflection-shaped YAML encoding and decoding of [`Recordings`]: [`to_go_node`] builds
+//! the node tree that ADK's recorder produces by encoding its recordings, and [`from_go_node`]
+//! decodes the same shape.
 //!
-//! - [`roots`]: the recording types' Go-shaped encoding (yaml-tagged keys verbatim, the request
-//!   view and tool call/response with every Go field) and their Go-named serde mirrors for
-//!   decoding.
-//! - [`fixups`]: the type-path fixup table (Go `[]byte`, `TextMarshaler`, `time.Duration`,
-//!   `time.Time`, `genai.Schema` titles, `*jsonschema.Schema`) and the struct shapes, applied
-//!   by the node builder (class 0 GoShape zero-fill, Go field order, the leaf classes), and
-//!   their inverse on decode.
-//! - [`jsonschema`]: the reshaping of a JSON-schema value into jsonschema-go v0.4.3's
-//!   `Schema` reflection.
-//! - [`shapes`]: the tables, generated from the probe's `tests/fixtures/fixups.json`.
+//! - [`roots`]: the recording types' encoding (yaml-tagged keys verbatim, the request view
+//!   and tool call/response with every field) and their serde mirrors named after the
+//!   recorded types, for decoding.
+//! - [`fixups`]: the type-path fixup table (byte slices, text-marshalled values, durations,
+//!   timestamps, `genai.Schema` titles, JSON-schema values) and the struct shapes, applied by
+//!   the node builder (zero-filling every field, declaration field order, the leaf classes),
+//!   and their inverse on decode.
+//! - [`jsonschema`]: the reshaping of a JSON-schema value into the reflection of the
+//!   JSON-schema struct.
+//! - [`shapes`]: the tables, generated from the fixture `tests/fixtures/fixups.json`.
 //!
-//! gadk types reach the builder as gadk serde's JSON (their JSON names are Go's JSON tags),
-//! with the exact durations laid over it; numbers in Go `any` positions are Go `float64`s
-//! (`GoValue::Float`), as Go's JSON decoding made them.
+//! gadk types reach the builder as gadk serde's JSON (their JSON names are the recorded
+//! types' JSON tags), with the exact durations laid over it; numbers in `any` positions are
+//! `float64`s (`GoValue::Float`), as the recorded format's JSON decoding made them.
 
 pub mod fixups;
 pub mod jsonschema;
@@ -40,15 +40,14 @@ use gadk_goyaml::{Document, NodeId, TypeError};
 
 use super::recording::Recordings;
 
-/// Go `node.Encode(&recordings)`: the recordings' mapping node (as its own document, root =
-/// the mapping), before `cleanYAMLNode`.
+/// Encodes the recordings' mapping node (as its own document, root = the mapping), before
+/// any cleaning of the YAML node.
 pub fn to_go_node(recordings: &Recordings) -> Result<Document, gadk_goyaml::Error> {
-    // Go: record_plugin.go saveRecordings (node.Encode)
     to_go_node_unmapped(recordings).map(|(doc, _)| doc)
 }
 
-/// [`to_go_node`], also returning the gadk serde keys no Go field consumed
-/// (`<go type>.<json key>`; empty when gadk's serde names all match Go's JSON tags).
+/// [`to_go_node`], also returning the gadk serde keys no recorded field consumed
+/// (`<type>.<json key>`; empty when gadk's serde names all match the recorded JSON tags).
 pub fn to_go_node_unmapped(
     recordings: &Recordings,
 ) -> Result<(Document, Vec<String>), gadk_goyaml::Error> {
@@ -60,29 +59,26 @@ pub fn to_go_node_unmapped(
     Ok((doc, b.unmapped))
 }
 
-/// Go `node.Decode(&recordings)` of node `at` (a document or mapping node), after any
-/// `normalizeYAMLNode` the caller applied: the inverse fixups, then the Go-shaped decode;
-/// yaml.v3's type errors fail it.
+/// Decodes node `at` (a document or mapping node) into recordings, after any normalization
+/// the caller applied: the inverse fixups, then the reflection-shaped decode; yaml.v3's type
+/// errors fail it.
 pub fn from_go_node(doc: &Document, at: NodeId) -> Result<Recordings, gadk_goyaml::Error> {
-    // Go: replay_plugin.go loadInvocationState (root.Decode)
     match from_go_node_partial(doc, at)? {
         (_, Some(terr)) => Err(gadk_goyaml::Error::Type(terr)),
         (recs, None) => Ok(recs),
     }
 }
 
-/// As [`from_go_node`], keeping Go's partly decoded value next to the `*yaml.TypeError` (the
-/// record plugin's merge path ignores the error and keeps the value, as Go's
-/// `_ = yaml.Unmarshal(data, &existingRecordings)` does).
+/// As [`from_go_node`], keeping the partly decoded value next to the yaml.v3 type error (the
+/// record plugin's merge path ignores the error and keeps the value).
 ///
-/// Divergence (ledger 6c-2): a `civil.Date` `UnmarshalText` failure returns `Err` with no
-/// value; yaml.v3 aborts but leaves what it filled so far, which the merge path would keep
-/// (reachable only with Go-default keys: Go-written files snake-case `citation_metadata`).
+/// A civil-date text failure returns `Err` with no value, although yaml.v3 aborts but leaves
+/// what it filled so far, which the merge path would keep (reachable only with default keys:
+/// recorded files snake-case `citation_metadata`).
 pub fn from_go_node_partial(
     doc: &Document,
     at: NodeId,
 ) -> Result<(Recordings, Option<TypeError>), gadk_goyaml::Error> {
-    // Go: record_plugin.go saveRecordings (yaml.Unmarshal of the existing file)
     let mut work = doc.subtree(at);
     let root = work.root();
     let ours = fixups::invert(&mut work, root)?;
