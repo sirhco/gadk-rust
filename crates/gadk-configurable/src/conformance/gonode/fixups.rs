@@ -15,7 +15,7 @@
 //! The type-path fixup table and its application: each entry names a type path from a
 //! recording root (e.g. `LLMRequest.Contents[].Parts[].InlineData.Data`, never a user map such
 //! as `args` or `response`) and its class: a byte slice (an `!!int` sequence), a non-pointer
-//! text-marshalled value (a civil date), a duration or a timestamp, `genai.Schema` titles, and
+//! text-marshalled value (a civil date), a duration or a timestamp, `Schema` titles, and
 //! JSON-schema values. The table equals the reflection-generated fixture recorded from ADK's
 //! own encoder (`tests/recordings_differential.rs`). Nothing outside `gonode` uses its items
 //! directly.
@@ -117,7 +117,7 @@ pub enum Zero {
     Date,
     /// A non-pointer struct: the zero mapping of the named shape.
     Struct(&'static str),
-    /// A value yaml.v3 panics on (`genai.HTTPOptions.ExtrasRequestProvider`).
+    /// A value yaml.v3 panics on (`HTTPOptions.ExtrasRequestProvider`).
     Unencodable,
 }
 
@@ -166,7 +166,7 @@ pub struct Field {
 /// The fields of a struct type as yaml.v3 encodes them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Shape {
-    /// The declared type name (`genai.Part`).
+    /// The declared type name (`Part`).
     pub go_type: &'static str,
     /// The exported fields in declaration order.
     pub fields: &'static [Field],
@@ -184,7 +184,7 @@ pub enum FixupClass {
     Time,
     /// A non-pointer text-marshalled value (a civil date).
     TextMarshaler,
-    /// A `genai.Schema` pointer (its `title` is zero-filled).
+    /// A `Schema` pointer (its `title` is zero-filled).
     SchemaTitle,
     /// An `any` holding a JSON-schema pointer.
     JsonSchema,
@@ -258,7 +258,7 @@ pub fn fixup_class(owner: &str, key: &str) -> Option<FixupClass> {
 }
 
 /// The deepest collection nesting the builder's and the inverse fixups' recursive walks over
-/// recursive types (`genai.Schema`, the JSON-schema struct) accept: gadk-goyaml's walk limit
+/// recursive types (`Schema`, the JSON-schema struct) accept: gadk-goyaml's walk limit
 /// (plan decision D7, the workspace-wide 127).
 ///
 /// The encoder and decoder behind the recordings go as deep as the data (and yaml.v3's

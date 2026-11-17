@@ -16,9 +16,9 @@
 //! The ADK REST API server.
 //!
 //! [`Server::new`] validates the compaction config against every application, builds the routes
-//! (sessions, runtime, apps, artifacts, version, the 501 developer
-//! stubs, and, with [`DebugApiConfig::include_debug_api`], debug and agent graph) behind the
-//! origin guard, and [`Server::router`] serves them as an [`axum::Router`].
+//! (sessions, runtime, apps, artifacts, version, the 501
+//! developer stubs, and, with [`DebugApiConfig::include_debug_api`], debug and agent graph)
+//! behind the origin guard, and [`Server::router`] serves them as an [`axum::Router`].
 //! [`Server::debug_layer`] is the `tracing` layer that feeds the debug trace endpoints.
 
 use std::convert::Infallible;
@@ -292,8 +292,8 @@ impl Server {
         let platform = cfg.platform;
         let handler = routing::handler(move |mut req: Request| {
             // `OPTIONS *` and an undecodable target are answered here, before
-            // `policy.Middleware` sees the request. `RouteTable::dispatch` decodes the path again
-            // on purpose: tests drive the table directly, without this handler.
+            // the origin policy's middleware sees the request. `RouteTable::dispatch` decodes the
+            // path again on purpose: tests drive the table directly, without this handler.
             if let Err(answer) = routing::decoded_path(&req) {
                 return Box::pin(std::future::ready(answer.response()))
                     as BoxFuture<'static, Response>;

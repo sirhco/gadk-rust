@@ -29,7 +29,8 @@ use crate::mux::Response;
 
 /// Handler for `async_list_sessions`. Lists the user's sessions; answers
 /// `{"output":{"sessions":[SessionData…]}}`.
-/// Errors: `json.Unmarshal() failed: <err>`, `c.sessionservice.List() failed: <err>`.
+/// Errors: the input-decode error and the session-service error, each wrapped with its fixed
+/// text (see the literals in this function).
 pub(crate) struct ListSessionsHandler {
     pub(crate) session_service: Arc<dyn SessionService>,
     /// The app name of every session call.

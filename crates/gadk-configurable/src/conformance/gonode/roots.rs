@@ -20,8 +20,8 @@
 //! `Options` (lowercased keys). Nothing outside `gonode` uses its items directly.
 //!
 //! Encoding builds the nodes directly (`encode_recordings`): the recording types by their
-//! yaml tags, the roots below them (`model.LLMRequest`, `model.LLMResponse`,
-//! `genai.FunctionCall`, `genai.FunctionResponse`) through the shapes table of
+//! yaml tags, the roots below them (`LLMRequest`, `LLMResponse`,
+//! `FunctionCall`, `FunctionResponse`) through the shapes table of
 //! [`super::fixups`], fed with gadk serde's JSON. gadk serde writes genai's whole-second
 //! duration strings, so the exact `TimeDelta`s are laid over the JSON first
 //! (`overlay_content` and friends: a JSON integer of nanoseconds). Decoding uses private
@@ -46,7 +46,7 @@ use crate::govalue::GoMap;
 
 type Result<T> = std::result::Result<T, gadk_goyaml::Error>;
 
-/// The recordings' mapping: `recordings:` and each `recording.Recording` by its
+/// The recordings' mapping: `recordings:` and each `Recording` by its
 /// yaml tags (`llm_recording`/`tool_recording` and their fields `omitempty`).
 pub(crate) fn encode_recordings(b: &mut Builder, recs: &Recordings) -> Result<NodeId> {
     let mut items = Vec::with_capacity(recs.recordings.len());
@@ -138,7 +138,7 @@ fn to_json<T: serde::Serialize>(v: &T) -> Result<Value> {
     serde_json::to_value(v).map_err(|e| gadk_goyaml::Error::Custom(e.to_string()))
 }
 
-/// `model.LLMRequest` (untagged: `model`, `contents`, `config`, `tools`).
+/// `LLMRequest` (untagged: `model`, `contents`, `config`, `tools`).
 fn encode_llm_request(b: &mut Builder, req: &LlmRequestView) -> Result<NodeId> {
     root_struct(b, "model.LLMRequest", |b, key| match key {
         "model" if !req.model.is_empty() => b.leaf(&GoValue::String(req.model.clone())).map(Some),
@@ -165,14 +165,14 @@ fn encode_llm_request(b: &mut Builder, req: &LlmRequestView) -> Result<NodeId> {
     })
 }
 
-/// `model.LLMResponse` (JSON-tagged, so gadk serde's names are its fields' JSON names).
+/// `LLMResponse` (JSON-tagged, so gadk serde's names are its fields' JSON names).
 fn encode_llm_response(b: &mut Builder, resp: &LlmResponse) -> Result<NodeId> {
     let mut j = to_json(resp)?;
     overlay_response(&mut j, resp);
     b.struct_node("model.LLMResponse", j.as_object(), Keys::Json)
 }
 
-/// The recorded `genai.FunctionCall`: every field.
+/// The recorded `FunctionCall`: every field.
 fn encode_function_call(b: &mut Builder, fc: &RecordedFunctionCall) -> Result<NodeId> {
     root_struct(b, "genai.FunctionCall", |b, key| match key {
         "id" if !fc.id.is_empty() => b.leaf(&GoValue::String(fc.id.clone())).map(Some),
@@ -186,7 +186,7 @@ fn encode_function_call(b: &mut Builder, fc: &RecordedFunctionCall) -> Result<No
     })
 }
 
-/// The recorded `genai.FunctionResponse`: every field.
+/// The recorded `FunctionResponse`: every field.
 fn encode_function_response(b: &mut Builder, fr: &RecordedFunctionResponse) -> Result<NodeId> {
     root_struct(b, "genai.FunctionResponse", |b, key| match key {
         "willcontinue" => opt_bool(b, fr.will_continue),
@@ -352,7 +352,7 @@ pub(crate) fn decode_options() -> Options {
     o
 }
 
-/// The `recording.Recordings` root.
+/// The `Recordings` root.
 #[derive(Deserialize, Default)]
 #[serde(rename = "recording.Recordings", default)]
 pub(crate) struct RecordingsDe {

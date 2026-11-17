@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //! Struct shapes for the snake-case conversion and the request decoder: every struct reachable
-//! from `session.Event` and the Agent Engine request/response models.
+//! from `Event` and the Agent Engine request/response models.
 //!
 //! Recorded from an ADK server's type definitions at commit `0990f9e2`; the
 //! generator is no longer part of this repository, so edit with care.
@@ -21,7 +21,7 @@
 
 use super::encode::{GoField, GoKind, GoStruct};
 
-/// Shape of `civil.Date`.
+/// Shape of `Date`.
 pub(crate) const CIVIL_DATE: GoStruct = GoStruct {
     go_type: "civil.Date",
     fields: &[
@@ -31,7 +31,7 @@ pub(crate) const CIVIL_DATE: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.Blob`.
+/// Shape of `Blob`.
 pub(crate) const GENAI_BLOB: GoStruct = GoStruct {
     go_type: "genai.Blob",
     fields: &[
@@ -41,7 +41,7 @@ pub(crate) const GENAI_BLOB: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.Citation`.
+/// Shape of `Citation`.
 pub(crate) const GENAI_CITATION: GoStruct = GoStruct {
     go_type: "genai.Citation",
     fields: &[
@@ -54,7 +54,7 @@ pub(crate) const GENAI_CITATION: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.CitationMetadata`.
+/// Shape of `CitationMetadata`.
 pub(crate) const GENAI_CITATION_METADATA: GoStruct = GoStruct {
     go_type: "genai.CitationMetadata",
     fields: &[
@@ -62,7 +62,7 @@ pub(crate) const GENAI_CITATION_METADATA: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.CodeExecutionResult`.
+/// Shape of `CodeExecutionResult`.
 pub(crate) const GENAI_CODE_EXECUTION_RESULT: GoStruct = GoStruct {
     go_type: "genai.CodeExecutionResult",
     fields: &[
@@ -72,7 +72,7 @@ pub(crate) const GENAI_CODE_EXECUTION_RESULT: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.Content`.
+/// Shape of `Content`.
 pub(crate) const GENAI_CONTENT: GoStruct = GoStruct {
     go_type: "genai.Content",
     fields: &[
@@ -81,7 +81,7 @@ pub(crate) const GENAI_CONTENT: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.ExecutableCode`.
+/// Shape of `ExecutableCode`.
 pub(crate) const GENAI_EXECUTABLE_CODE: GoStruct = GoStruct {
     go_type: "genai.ExecutableCode",
     fields: &[
@@ -91,7 +91,7 @@ pub(crate) const GENAI_EXECUTABLE_CODE: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.FileData`.
+/// Shape of `FileData`.
 pub(crate) const GENAI_FILE_DATA: GoStruct = GoStruct {
     go_type: "genai.FileData",
     fields: &[
@@ -101,7 +101,7 @@ pub(crate) const GENAI_FILE_DATA: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.FunctionCall`.
+/// Shape of `FunctionCall`.
 pub(crate) const GENAI_FUNCTION_CALL: GoStruct = GoStruct {
     go_type: "genai.FunctionCall",
     fields: &[
@@ -113,7 +113,7 @@ pub(crate) const GENAI_FUNCTION_CALL: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.FunctionResponse`.
+/// Shape of `FunctionResponse`.
 pub(crate) const GENAI_FUNCTION_RESPONSE: GoStruct = GoStruct {
     go_type: "genai.FunctionResponse",
     fields: &[
@@ -126,7 +126,7 @@ pub(crate) const GENAI_FUNCTION_RESPONSE: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.FunctionResponseBlob`.
+/// Shape of `FunctionResponseBlob`.
 pub(crate) const GENAI_FUNCTION_RESPONSE_BLOB: GoStruct = GoStruct {
     go_type: "genai.FunctionResponseBlob",
     fields: &[
@@ -136,7 +136,7 @@ pub(crate) const GENAI_FUNCTION_RESPONSE_BLOB: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.FunctionResponseFileData`.
+/// Shape of `FunctionResponseFileData`.
 pub(crate) const GENAI_FUNCTION_RESPONSE_FILE_DATA: GoStruct = GoStruct {
     go_type: "genai.FunctionResponseFileData",
     fields: &[
@@ -146,7 +146,7 @@ pub(crate) const GENAI_FUNCTION_RESPONSE_FILE_DATA: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.FunctionResponsePart`.
+/// Shape of `FunctionResponsePart`.
 pub(crate) const GENAI_FUNCTION_RESPONSE_PART: GoStruct = GoStruct {
     go_type: "genai.FunctionResponsePart",
     fields: &[
@@ -156,7 +156,7 @@ pub(crate) const GENAI_FUNCTION_RESPONSE_PART: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.GenerateContentResponseUsageMetadata`.
+/// Shape of `GenerateContentResponseUsageMetadata`.
 pub(crate) const GENAI_GENERATE_CONTENT_RESPONSE_USAGE_METADATA: GoStruct = GoStruct {
     go_type: "genai.GenerateContentResponseUsageMetadata",
     fields: &[
@@ -174,7 +174,7 @@ pub(crate) const GENAI_GENERATE_CONTENT_RESPONSE_USAGE_METADATA: GoStruct = GoSt
     ],
 };
 
-/// Shape of `genai.GroundingChunk`.
+/// Shape of `GroundingChunk`.
 pub(crate) const GENAI_GROUNDING_CHUNK: GoStruct = GoStruct {
     go_type: "genai.GroundingChunk",
     fields: &[
@@ -185,7 +185,7 @@ pub(crate) const GENAI_GROUNDING_CHUNK: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.GroundingChunkCustomMetadata`.
+/// Shape of `GroundingChunkCustomMetadata`.
 pub(crate) const GENAI_GROUNDING_CHUNK_CUSTOM_METADATA: GoStruct = GoStruct {
     go_type: "genai.GroundingChunkCustomMetadata",
     fields: &[
@@ -196,7 +196,7 @@ pub(crate) const GENAI_GROUNDING_CHUNK_CUSTOM_METADATA: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.GroundingChunkImage`.
+/// Shape of `GroundingChunkImage`.
 pub(crate) const GENAI_GROUNDING_CHUNK_IMAGE: GoStruct = GoStruct {
     go_type: "genai.GroundingChunkImage",
     fields: &[
@@ -207,7 +207,7 @@ pub(crate) const GENAI_GROUNDING_CHUNK_IMAGE: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.GroundingChunkMaps`.
+/// Shape of `GroundingChunkMaps`.
 pub(crate) const GENAI_GROUNDING_CHUNK_MAPS: GoStruct = GoStruct {
     go_type: "genai.GroundingChunkMaps",
     fields: &[
@@ -220,7 +220,7 @@ pub(crate) const GENAI_GROUNDING_CHUNK_MAPS: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.GroundingChunkMapsPlaceAnswerSources`.
+/// Shape of `GroundingChunkMapsPlaceAnswerSources`.
 pub(crate) const GENAI_GROUNDING_CHUNK_MAPS_PLACE_ANSWER_SOURCES: GoStruct = GoStruct {
     go_type: "genai.GroundingChunkMapsPlaceAnswerSources",
     fields: &[
@@ -230,7 +230,7 @@ pub(crate) const GENAI_GROUNDING_CHUNK_MAPS_PLACE_ANSWER_SOURCES: GoStruct = GoS
     ],
 };
 
-/// Shape of `genai.GroundingChunkMapsPlaceAnswerSourcesAuthorAttribution`.
+/// Shape of `GroundingChunkMapsPlaceAnswerSourcesAuthorAttribution`.
 pub(crate) const GENAI_GROUNDING_CHUNK_MAPS_PLACE_ANSWER_SOURCES_AUTHOR_ATTRIBUTION: GoStruct = GoStruct {
     go_type: "genai.GroundingChunkMapsPlaceAnswerSourcesAuthorAttribution",
     fields: &[
@@ -240,7 +240,7 @@ pub(crate) const GENAI_GROUNDING_CHUNK_MAPS_PLACE_ANSWER_SOURCES_AUTHOR_ATTRIBUT
     ],
 };
 
-/// Shape of `genai.GroundingChunkMapsPlaceAnswerSourcesReviewSnippet`.
+/// Shape of `GroundingChunkMapsPlaceAnswerSourcesReviewSnippet`.
 pub(crate) const GENAI_GROUNDING_CHUNK_MAPS_PLACE_ANSWER_SOURCES_REVIEW_SNIPPET: GoStruct = GoStruct {
     go_type: "genai.GroundingChunkMapsPlaceAnswerSourcesReviewSnippet",
     fields: &[
@@ -254,7 +254,7 @@ pub(crate) const GENAI_GROUNDING_CHUNK_MAPS_PLACE_ANSWER_SOURCES_REVIEW_SNIPPET:
     ],
 };
 
-/// Shape of `genai.GroundingChunkMapsRoute`.
+/// Shape of `GroundingChunkMapsRoute`.
 pub(crate) const GENAI_GROUNDING_CHUNK_MAPS_ROUTE: GoStruct = GoStruct {
     go_type: "genai.GroundingChunkMapsRoute",
     fields: &[
@@ -264,7 +264,7 @@ pub(crate) const GENAI_GROUNDING_CHUNK_MAPS_ROUTE: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.GroundingChunkRetrievedContext`.
+/// Shape of `GroundingChunkRetrievedContext`.
 pub(crate) const GENAI_GROUNDING_CHUNK_RETRIEVED_CONTEXT: GoStruct = GoStruct {
     go_type: "genai.GroundingChunkRetrievedContext",
     fields: &[
@@ -280,7 +280,7 @@ pub(crate) const GENAI_GROUNDING_CHUNK_RETRIEVED_CONTEXT: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.GroundingChunkStringList`.
+/// Shape of `GroundingChunkStringList`.
 pub(crate) const GENAI_GROUNDING_CHUNK_STRING_LIST: GoStruct = GoStruct {
     go_type: "genai.GroundingChunkStringList",
     fields: &[
@@ -288,7 +288,7 @@ pub(crate) const GENAI_GROUNDING_CHUNK_STRING_LIST: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.GroundingChunkWeb`.
+/// Shape of `GroundingChunkWeb`.
 pub(crate) const GENAI_GROUNDING_CHUNK_WEB: GoStruct = GoStruct {
     go_type: "genai.GroundingChunkWeb",
     fields: &[
@@ -298,7 +298,7 @@ pub(crate) const GENAI_GROUNDING_CHUNK_WEB: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.GroundingMetadata`.
+/// Shape of `GroundingMetadata`.
 pub(crate) const GENAI_GROUNDING_METADATA: GoStruct = GoStruct {
     go_type: "genai.GroundingMetadata",
     fields: &[
@@ -314,7 +314,7 @@ pub(crate) const GENAI_GROUNDING_METADATA: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.GroundingMetadataSourceFlaggingURI`.
+/// Shape of `GroundingMetadataSourceFlaggingURI`.
 pub(crate) const GENAI_GROUNDING_METADATA_SOURCE_FLAGGING_URI: GoStruct = GoStruct {
     go_type: "genai.GroundingMetadataSourceFlaggingURI",
     fields: &[
@@ -323,7 +323,7 @@ pub(crate) const GENAI_GROUNDING_METADATA_SOURCE_FLAGGING_URI: GoStruct = GoStru
     ],
 };
 
-/// Shape of `genai.GroundingSupport`.
+/// Shape of `GroundingSupport`.
 pub(crate) const GENAI_GROUNDING_SUPPORT: GoStruct = GoStruct {
     go_type: "genai.GroundingSupport",
     fields: &[
@@ -334,7 +334,7 @@ pub(crate) const GENAI_GROUNDING_SUPPORT: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.LogprobsResult`.
+/// Shape of `LogprobsResult`.
 pub(crate) const GENAI_LOGPROBS_RESULT: GoStruct = GoStruct {
     go_type: "genai.LogprobsResult",
     fields: &[
@@ -344,7 +344,7 @@ pub(crate) const GENAI_LOGPROBS_RESULT: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.LogprobsResultCandidate`.
+/// Shape of `LogprobsResultCandidate`.
 pub(crate) const GENAI_LOGPROBS_RESULT_CANDIDATE: GoStruct = GoStruct {
     go_type: "genai.LogprobsResultCandidate",
     fields: &[
@@ -354,7 +354,7 @@ pub(crate) const GENAI_LOGPROBS_RESULT_CANDIDATE: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.LogprobsResultTopCandidates`.
+/// Shape of `LogprobsResultTopCandidates`.
 pub(crate) const GENAI_LOGPROBS_RESULT_TOP_CANDIDATES: GoStruct = GoStruct {
     go_type: "genai.LogprobsResultTopCandidates",
     fields: &[
@@ -362,7 +362,7 @@ pub(crate) const GENAI_LOGPROBS_RESULT_TOP_CANDIDATES: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.ModalityTokenCount`.
+/// Shape of `ModalityTokenCount`.
 pub(crate) const GENAI_MODALITY_TOKEN_COUNT: GoStruct = GoStruct {
     go_type: "genai.ModalityTokenCount",
     fields: &[
@@ -371,7 +371,7 @@ pub(crate) const GENAI_MODALITY_TOKEN_COUNT: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.Part`.
+/// Shape of `Part`.
 pub(crate) const GENAI_PART: GoStruct = GoStruct {
     go_type: "genai.Part",
     fields: &[
@@ -395,7 +395,7 @@ pub(crate) const GENAI_PART: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.PartMediaResolution`.
+/// Shape of `PartMediaResolution`.
 pub(crate) const GENAI_PART_MEDIA_RESOLUTION: GoStruct = GoStruct {
     go_type: "genai.PartMediaResolution",
     fields: &[
@@ -404,7 +404,7 @@ pub(crate) const GENAI_PART_MEDIA_RESOLUTION: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.PartialArg`.
+/// Shape of `PartialArg`.
 pub(crate) const GENAI_PARTIAL_ARG: GoStruct = GoStruct {
     go_type: "genai.PartialArg",
     fields: &[
@@ -417,7 +417,7 @@ pub(crate) const GENAI_PARTIAL_ARG: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.RAGChunk`.
+/// Shape of `RAGChunk`.
 pub(crate) const GENAI_RAG_CHUNK: GoStruct = GoStruct {
     go_type: "genai.RAGChunk",
     fields: &[
@@ -428,7 +428,7 @@ pub(crate) const GENAI_RAG_CHUNK: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.RAGChunkPageSpan`.
+/// Shape of `RAGChunkPageSpan`.
 pub(crate) const GENAI_RAG_CHUNK_PAGE_SPAN: GoStruct = GoStruct {
     go_type: "genai.RAGChunkPageSpan",
     fields: &[
@@ -437,7 +437,7 @@ pub(crate) const GENAI_RAG_CHUNK_PAGE_SPAN: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.RetrievalMetadata`.
+/// Shape of `RetrievalMetadata`.
 pub(crate) const GENAI_RETRIEVAL_METADATA: GoStruct = GoStruct {
     go_type: "genai.RetrievalMetadata",
     fields: &[
@@ -445,7 +445,7 @@ pub(crate) const GENAI_RETRIEVAL_METADATA: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.SearchEntryPoint`.
+/// Shape of `SearchEntryPoint`.
 pub(crate) const GENAI_SEARCH_ENTRY_POINT: GoStruct = GoStruct {
     go_type: "genai.SearchEntryPoint",
     fields: &[
@@ -454,7 +454,7 @@ pub(crate) const GENAI_SEARCH_ENTRY_POINT: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.Segment`.
+/// Shape of `Segment`.
 pub(crate) const GENAI_SEGMENT: GoStruct = GoStruct {
     go_type: "genai.Segment",
     fields: &[
@@ -465,7 +465,7 @@ pub(crate) const GENAI_SEGMENT: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.SpeechMetadata`.
+/// Shape of `SpeechMetadata`.
 pub(crate) const GENAI_SPEECH_METADATA: GoStruct = GoStruct {
     go_type: "genai.SpeechMetadata",
     fields: &[
@@ -474,7 +474,7 @@ pub(crate) const GENAI_SPEECH_METADATA: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.ToolCall`.
+/// Shape of `ToolCall`.
 pub(crate) const GENAI_TOOL_CALL: GoStruct = GoStruct {
     go_type: "genai.ToolCall",
     fields: &[
@@ -484,7 +484,7 @@ pub(crate) const GENAI_TOOL_CALL: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.ToolResponse`.
+/// Shape of `ToolResponse`.
 pub(crate) const GENAI_TOOL_RESPONSE: GoStruct = GoStruct {
     go_type: "genai.ToolResponse",
     fields: &[
@@ -494,7 +494,7 @@ pub(crate) const GENAI_TOOL_RESPONSE: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.Transcription`.
+/// Shape of `Transcription`.
 pub(crate) const GENAI_TRANSCRIPTION: GoStruct = GoStruct {
     go_type: "genai.Transcription",
     fields: &[
@@ -508,7 +508,7 @@ pub(crate) const GENAI_TRANSCRIPTION: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.VideoMetadata`.
+/// Shape of `VideoMetadata`.
 pub(crate) const GENAI_VIDEO_METADATA: GoStruct = GoStruct {
     go_type: "genai.VideoMetadata",
     fields: &[
@@ -518,7 +518,7 @@ pub(crate) const GENAI_VIDEO_METADATA: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `genai.WordInfo`.
+/// Shape of `WordInfo`.
 pub(crate) const GENAI_WORD_INFO: GoStruct = GoStruct {
     go_type: "genai.WordInfo",
     fields: &[
@@ -528,7 +528,7 @@ pub(crate) const GENAI_WORD_INFO: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `jsonschema.Schema`.
+/// Shape of `Schema`.
 pub(crate) const JSONSCHEMA_SCHEMA: GoStruct = GoStruct {
     go_type: "jsonschema.Schema",
     fields: &[
@@ -600,7 +600,7 @@ pub(crate) const JSONSCHEMA_SCHEMA: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `model.LLMResponse`.
+/// Shape of `LLMResponse`.
 pub(crate) const MODEL_LLM_RESPONSE: GoStruct = GoStruct {
     go_type: "model.LLMResponse",
     fields: &[
@@ -624,7 +624,7 @@ pub(crate) const MODEL_LLM_RESPONSE: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `models.CreateSessionInput`.
+/// Shape of `CreateSessionInput`.
 pub(crate) const MODELS_CREATE_SESSION_INPUT: GoStruct = GoStruct {
     go_type: "models.CreateSessionInput",
     fields: &[
@@ -633,7 +633,7 @@ pub(crate) const MODELS_CREATE_SESSION_INPUT: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `models.CreateSessionRequest`.
+/// Shape of `CreateSessionRequest`.
 pub(crate) const MODELS_CREATE_SESSION_REQUEST: GoStruct = GoStruct {
     go_type: "models.CreateSessionRequest",
     fields: &[
@@ -642,7 +642,7 @@ pub(crate) const MODELS_CREATE_SESSION_REQUEST: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `models.CreateSessionResponse`.
+/// Shape of `CreateSessionResponse`.
 pub(crate) const MODELS_CREATE_SESSION_RESPONSE: GoStruct = GoStruct {
     go_type: "models.CreateSessionResponse",
     fields: &[
@@ -650,7 +650,7 @@ pub(crate) const MODELS_CREATE_SESSION_RESPONSE: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `models.DeleteSessionInput`.
+/// Shape of `DeleteSessionInput`.
 pub(crate) const MODELS_DELETE_SESSION_INPUT: GoStruct = GoStruct {
     go_type: "models.DeleteSessionInput",
     fields: &[
@@ -659,7 +659,7 @@ pub(crate) const MODELS_DELETE_SESSION_INPUT: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `models.DeleteSessionRequest`.
+/// Shape of `DeleteSessionRequest`.
 pub(crate) const MODELS_DELETE_SESSION_REQUEST: GoStruct = GoStruct {
     go_type: "models.DeleteSessionRequest",
     fields: &[
@@ -668,7 +668,7 @@ pub(crate) const MODELS_DELETE_SESSION_REQUEST: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `models.DeleteSessionResponse`.
+/// Shape of `DeleteSessionResponse`.
 pub(crate) const MODELS_DELETE_SESSION_RESPONSE: GoStruct = GoStruct {
     go_type: "models.DeleteSessionResponse",
     fields: &[
@@ -676,7 +676,7 @@ pub(crate) const MODELS_DELETE_SESSION_RESPONSE: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `models.GetSessionInput`.
+/// Shape of `GetSessionInput`.
 pub(crate) const MODELS_GET_SESSION_INPUT: GoStruct = GoStruct {
     go_type: "models.GetSessionInput",
     fields: &[
@@ -685,7 +685,7 @@ pub(crate) const MODELS_GET_SESSION_INPUT: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `models.GetSessionRequest`.
+/// Shape of `GetSessionRequest`.
 pub(crate) const MODELS_GET_SESSION_REQUEST: GoStruct = GoStruct {
     go_type: "models.GetSessionRequest",
     fields: &[
@@ -694,7 +694,7 @@ pub(crate) const MODELS_GET_SESSION_REQUEST: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `models.GetSessionResponse`.
+/// Shape of `GetSessionResponse`.
 pub(crate) const MODELS_GET_SESSION_RESPONSE: GoStruct = GoStruct {
     go_type: "models.GetSessionResponse",
     fields: &[
@@ -702,7 +702,7 @@ pub(crate) const MODELS_GET_SESSION_RESPONSE: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `models.ListSessionInput`.
+/// Shape of `ListSessionInput`.
 pub(crate) const MODELS_LIST_SESSION_INPUT: GoStruct = GoStruct {
     go_type: "models.ListSessionInput",
     fields: &[
@@ -710,7 +710,7 @@ pub(crate) const MODELS_LIST_SESSION_INPUT: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `models.ListSessionRequest`.
+/// Shape of `ListSessionRequest`.
 pub(crate) const MODELS_LIST_SESSION_REQUEST: GoStruct = GoStruct {
     go_type: "models.ListSessionRequest",
     fields: &[
@@ -719,7 +719,7 @@ pub(crate) const MODELS_LIST_SESSION_REQUEST: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `models.ListSessionResponse`.
+/// Shape of `ListSessionResponse`.
 pub(crate) const MODELS_LIST_SESSION_RESPONSE: GoStruct = GoStruct {
     go_type: "models.ListSessionResponse",
     fields: &[
@@ -727,7 +727,7 @@ pub(crate) const MODELS_LIST_SESSION_RESPONSE: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `models.Query`.
+/// Shape of `Query`.
 pub(crate) const MODELS_QUERY: GoStruct = GoStruct {
     go_type: "models.Query",
     fields: &[
@@ -736,7 +736,7 @@ pub(crate) const MODELS_QUERY: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `models.SessionData`.
+/// Shape of `SessionData`.
 pub(crate) const MODELS_SESSION_DATA: GoStruct = GoStruct {
     go_type: "models.SessionData",
     fields: &[
@@ -749,7 +749,7 @@ pub(crate) const MODELS_SESSION_DATA: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `models.Sessions`.
+/// Shape of `Sessions`.
 pub(crate) const MODELS_SESSIONS: GoStruct = GoStruct {
     go_type: "models.Sessions",
     fields: &[
@@ -757,7 +757,7 @@ pub(crate) const MODELS_SESSIONS: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `models.StreamQueryInput`.
+/// Shape of `StreamQueryInput`.
 pub(crate) const MODELS_STREAM_QUERY_INPUT: GoStruct = GoStruct {
     go_type: "models.StreamQueryInput",
     fields: &[
@@ -767,7 +767,7 @@ pub(crate) const MODELS_STREAM_QUERY_INPUT: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `models.StreamQueryRequest`.
+/// Shape of `StreamQueryRequest`.
 pub(crate) const MODELS_STREAM_QUERY_REQUEST: GoStruct = GoStruct {
     go_type: "models.StreamQueryRequest",
     fields: &[
@@ -776,7 +776,7 @@ pub(crate) const MODELS_STREAM_QUERY_REQUEST: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `models.StreamQueryTextInput`.
+/// Shape of `StreamQueryTextInput`.
 pub(crate) const MODELS_STREAM_QUERY_TEXT_INPUT: GoStruct = GoStruct {
     go_type: "models.StreamQueryTextInput",
     fields: &[
@@ -786,7 +786,7 @@ pub(crate) const MODELS_STREAM_QUERY_TEXT_INPUT: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `models.StreamQueryTextRequest`.
+/// Shape of `StreamQueryTextRequest`.
 pub(crate) const MODELS_STREAM_QUERY_TEXT_REQUEST: GoStruct = GoStruct {
     go_type: "models.StreamQueryTextRequest",
     fields: &[
@@ -795,7 +795,7 @@ pub(crate) const MODELS_STREAM_QUERY_TEXT_REQUEST: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `models.StreamingAgentRunWithEventsInput`.
+/// Shape of `StreamingAgentRunWithEventsInput`.
 pub(crate) const MODELS_STREAMING_AGENT_RUN_WITH_EVENTS_INPUT: GoStruct = GoStruct {
     go_type: "models.StreamingAgentRunWithEventsInput",
     fields: &[
@@ -803,7 +803,7 @@ pub(crate) const MODELS_STREAMING_AGENT_RUN_WITH_EVENTS_INPUT: GoStruct = GoStru
     ],
 };
 
-/// Shape of `models.StreamingAgentRunWithEventsRequest`.
+/// Shape of `StreamingAgentRunWithEventsRequest`.
 pub(crate) const MODELS_STREAMING_AGENT_RUN_WITH_EVENTS_REQUEST: GoStruct = GoStruct {
     go_type: "models.StreamingAgentRunWithEventsRequest",
     fields: &[
@@ -812,7 +812,7 @@ pub(crate) const MODELS_STREAMING_AGENT_RUN_WITH_EVENTS_REQUEST: GoStruct = GoSt
     ],
 };
 
-/// Shape of `models.StreamingAgentRunWithEventsResponse`.
+/// Shape of `StreamingAgentRunWithEventsResponse`.
 pub(crate) const MODELS_STREAMING_AGENT_RUN_WITH_EVENTS_RESPONSE: GoStruct = GoStruct {
     go_type: "models.StreamingAgentRunWithEventsResponse",
     fields: &[
@@ -822,7 +822,7 @@ pub(crate) const MODELS_STREAMING_AGENT_RUN_WITH_EVENTS_RESPONSE: GoStruct = GoS
     ],
 };
 
-/// Shape of `models.StreamingAgentRunWithEventsRunRequest`.
+/// Shape of `StreamingAgentRunWithEventsRunRequest`.
 pub(crate) const MODELS_STREAMING_AGENT_RUN_WITH_EVENTS_RUN_REQUEST: GoStruct = GoStruct {
     go_type: "models.StreamingAgentRunWithEventsRunRequest",
     fields: &[
@@ -832,7 +832,7 @@ pub(crate) const MODELS_STREAMING_AGENT_RUN_WITH_EVENTS_RUN_REQUEST: GoStruct = 
     ],
 };
 
-/// Shape of `session.Event`.
+/// Shape of `Event`.
 pub(crate) const SESSION_EVENT: GoStruct = GoStruct {
     go_type: "session.Event",
     fields: &[
@@ -852,7 +852,7 @@ pub(crate) const SESSION_EVENT: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `session.EventActions`.
+/// Shape of `EventActions`.
 pub(crate) const SESSION_EVENT_ACTIONS: GoStruct = GoStruct {
     go_type: "session.EventActions",
     fields: &[
@@ -867,7 +867,7 @@ pub(crate) const SESSION_EVENT_ACTIONS: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `session.EventCompaction`.
+/// Shape of `EventCompaction`.
 pub(crate) const SESSION_EVENT_COMPACTION: GoStruct = GoStruct {
     go_type: "session.EventCompaction",
     fields: &[
@@ -878,7 +878,7 @@ pub(crate) const SESSION_EVENT_COMPACTION: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `session.EventRef`.
+/// Shape of `EventRef`.
 pub(crate) const SESSION_EVENT_REF: GoStruct = GoStruct {
     go_type: "session.EventRef",
     fields: &[
@@ -887,7 +887,7 @@ pub(crate) const SESSION_EVENT_REF: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `session.NodeInfo`.
+/// Shape of `NodeInfo`.
 pub(crate) const SESSION_NODE_INFO: GoStruct = GoStruct {
     go_type: "session.NodeInfo",
     fields: &[
@@ -897,7 +897,7 @@ pub(crate) const SESSION_NODE_INFO: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `session.RequestInput`.
+/// Shape of `RequestInput`.
 pub(crate) const SESSION_REQUEST_INPUT: GoStruct = GoStruct {
     go_type: "session.RequestInput",
     fields: &[
@@ -908,7 +908,7 @@ pub(crate) const SESSION_REQUEST_INPUT: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `toolauth.Config`.
+/// Shape of `Config`.
 pub(crate) const TOOLAUTH_CONFIG: GoStruct = GoStruct {
     go_type: "toolauth.Config",
     fields: &[
@@ -920,7 +920,7 @@ pub(crate) const TOOLAUTH_CONFIG: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `toolauth.Credential`.
+/// Shape of `Credential`.
 pub(crate) const TOOLAUTH_CREDENTIAL: GoStruct = GoStruct {
     go_type: "toolauth.Credential",
     fields: &[
@@ -934,7 +934,7 @@ pub(crate) const TOOLAUTH_CREDENTIAL: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `toolauth.HTTPAuth`.
+/// Shape of `HTTPAuth`.
 pub(crate) const TOOLAUTH_HTTP_AUTH: GoStruct = GoStruct {
     go_type: "toolauth.HTTPAuth",
     fields: &[
@@ -945,7 +945,7 @@ pub(crate) const TOOLAUTH_HTTP_AUTH: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `toolauth.HTTPCredentials`.
+/// Shape of `HTTPCredentials`.
 pub(crate) const TOOLAUTH_HTTP_CREDENTIALS: GoStruct = GoStruct {
     go_type: "toolauth.HTTPCredentials",
     fields: &[
@@ -956,7 +956,7 @@ pub(crate) const TOOLAUTH_HTTP_CREDENTIALS: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `toolauth.OAuth2Auth`.
+/// Shape of `OAuth2Auth`.
 pub(crate) const TOOLAUTH_O_AUTH2_AUTH: GoStruct = GoStruct {
     go_type: "toolauth.OAuth2Auth",
     fields: &[
@@ -982,7 +982,7 @@ pub(crate) const TOOLAUTH_O_AUTH2_AUTH: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `toolauth.OAuthFlow`.
+/// Shape of `OAuthFlow`.
 pub(crate) const TOOLAUTH_O_AUTH_FLOW: GoStruct = GoStruct {
     go_type: "toolauth.OAuthFlow",
     fields: &[
@@ -994,7 +994,7 @@ pub(crate) const TOOLAUTH_O_AUTH_FLOW: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `toolauth.OAuthFlows`.
+/// Shape of `OAuthFlows`.
 pub(crate) const TOOLAUTH_O_AUTH_FLOWS: GoStruct = GoStruct {
     go_type: "toolauth.OAuthFlows",
     fields: &[
@@ -1006,7 +1006,7 @@ pub(crate) const TOOLAUTH_O_AUTH_FLOWS: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `toolauth.Scheme`.
+/// Shape of `Scheme`.
 pub(crate) const TOOLAUTH_SCHEME: GoStruct = GoStruct {
     go_type: "toolauth.Scheme",
     fields: &[
@@ -1030,7 +1030,7 @@ pub(crate) const TOOLAUTH_SCHEME: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `toolauth.ServiceAccount`.
+/// Shape of `ServiceAccount`.
 pub(crate) const TOOLAUTH_SERVICE_ACCOUNT: GoStruct = GoStruct {
     go_type: "toolauth.ServiceAccount",
     fields: &[
@@ -1043,7 +1043,7 @@ pub(crate) const TOOLAUTH_SERVICE_ACCOUNT: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `toolauth.ServiceAccountCredential`.
+/// Shape of `ServiceAccountCredential`.
 pub(crate) const TOOLAUTH_SERVICE_ACCOUNT_CREDENTIAL: GoStruct = GoStruct {
     go_type: "toolauth.ServiceAccountCredential",
     fields: &[
@@ -1062,7 +1062,7 @@ pub(crate) const TOOLAUTH_SERVICE_ACCOUNT_CREDENTIAL: GoStruct = GoStruct {
     ],
 };
 
-/// Shape of `toolconfirmation.ToolConfirmation`.
+/// Shape of `ToolConfirmation`.
 pub(crate) const TOOLCONFIRMATION_TOOL_CONFIRMATION: GoStruct = GoStruct {
     go_type: "toolconfirmation.ToolConfirmation",
     fields: &[

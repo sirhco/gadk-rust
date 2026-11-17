@@ -154,7 +154,8 @@ impl std::fmt::Debug for Callback {
 pub(crate) trait CallbackType {
     /// The Rust callback type.
     type Fn;
-    /// The type name of `T` in error messages (`agent.BeforeAgentCallback`).
+    /// The type name of `T` in error messages (a qualified name such as the
+    /// before-agent callback's).
     const GO_TYPE_NAME: &'static str;
     /// The callback when it has this type.
     fn from_callback(c: &Callback) -> Option<Self::Fn>;

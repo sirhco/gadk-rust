@@ -17,14 +17,14 @@
 //! ([`convert_snake`]) and the line writers [`emit_json`] and [`emit_json_error`].
 //!
 //! The wire format depends on details of an ADK server's struct types that serde output
-//! cannot recover (pointer vs value, `omitempty`, named string types, `time.Time`, `[]byte`,
+//! cannot recover (pointer vs value, `omitempty`, named string types, timestamp, `[]byte`,
 //! `float32`), so the conversion is driven by explicit struct shapes ([`GoStruct`], generated
 //! into [`encode_shapes`](super::encode_shapes)) and each Rust type that reaches an NDJSON line
 //! implements [`GoSnake`] over its shape.
 //!
 //! Each [`GoSnake`] impl walks its shape over the Rust value's serde output (the JSON keys are
 //! the same names the shapes' tags give): a field the output lacks is the zero value for its
-//! kind. The five genai `time.Duration` fields are the exception serde cannot carry (genai
+//! kind. The five genai duration fields are the exception serde cannot carry (genai
 //! writes whole seconds), so an event's output is patched with their nanoseconds first.
 
 use std::collections::BTreeMap;
@@ -45,7 +45,7 @@ use super::models::StreamingAgentRunWithEventsResponse;
 pub(crate) enum GoKind {
     /// `bool` (or a defined bool type).
     Bool,
-    /// `int`, `int8`…`int64` or a defined int type (`time.Duration`, `time.Month`).
+    /// `int`, `int8`…`int64` or a defined int type (a duration or a month).
     Int,
     /// `uint*`: [`convert_snake`] fails (`unsupported type: uint…`).
     Uint,
@@ -55,16 +55,17 @@ pub(crate) enum GoKind {
     Float64,
     /// `string`.
     String,
-    /// A defined type over `string` (`genai.Role`, `genai.FinishReason`): returned as is, so
+    /// A defined type over `string` (`Role`, `FinishReason`): returned as is, so
     /// `omitempty` never drops it (an empty one is written `""`).
     NamedString,
     /// `[]byte`: standard base64 text.
     Bytes,
-    /// `json.RawMessage`: empty → nil (dropped); otherwise the JSON text verbatim.
+    /// Raw JSON text: empty → nil (dropped); otherwise the JSON text verbatim.
     RawMessage,
-    /// `time.Time`: Unix seconds with microseconds (`float64(UnixMicro()) / 1e6`).
+    /// A timestamp: Unix seconds with microseconds (the microsecond count as a float, divided by
+    /// 1e6).
     Time,
-    /// A struct value, by type name (`pkg.Type`, a [`GoStruct::go_type`]).
+    /// A struct value, by its qualified type name (a [`GoStruct::go_type`]).
     Struct(&'static str),
     /// `*T`: nil → nil (always dropped), else `T` at `path + "*"`.
     Pointer(&'static GoKind),
@@ -88,7 +89,7 @@ pub(crate) struct GoField {
     pub(crate) embedded: bool,
     /// Exported; an unexported field is converted by `convert_value` and never dropped as zero.
     pub(crate) exported: bool,
-    /// The field's type text (`"[]string"`, `"*genai.Content"`, `"map[string]interface {}"`),
+    /// The field's type text (`"[]string"`, `"*Content"`, `"map[string]interface {}"`),
     /// used in the request decoder's type-error text.
     pub(crate) go_type: &'static str,
     /// The field's kind.
@@ -98,7 +99,7 @@ pub(crate) struct GoField {
 /// One struct's shape: its fields in declaration order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct GoStruct {
-    /// The type name (`"session.Event"`).
+    /// The type name (`"Event"`).
     pub(crate) go_type: &'static str,
     /// The fields in declaration order.
     pub(crate) fields: &'static [GoField],
@@ -130,7 +131,7 @@ pub(crate) enum GoValue {
     Array(Vec<GoValue>),
     /// `map[string]any`: keys sorted.
     Object(BTreeMap<String, GoValue>),
-    /// `json.RawMessage`: valid JSON text, written compacted with HTML escaping and its number
+    /// Raw JSON text: valid JSON text, written compacted with HTML escaping and its number
     /// text unchanged.
     Raw(String),
 }
@@ -164,7 +165,7 @@ impl Serialize for GoValue {
     }
 }
 
-/// Compacts JSON text with HTML escaping (what the encoder does to a `json.RawMessage`):
+/// Compacts JSON text with HTML escaping (what the encoder does to raw JSON text):
 /// whitespace outside strings removed, `<`, `>`, `&`, U+2028 and U+2029 escaped, everything
 /// else (number text, string escapes) unchanged.
 fn compact_html(text: &str) -> String {
@@ -317,7 +318,7 @@ pub(crate) fn field_name(
     Ok((new_name, omit_empty, omit_zero, skip))
 }
 
-/// Unix seconds of the zero `time.Time` (`0001-01-01T00:00:00Z`).
+/// Unix seconds of the zero timestamp (`0001-01-01T00:00:00Z`).
 const ZERO_TIME_SECS: i64 = -62_135_596_800;
 
 /// Where `GoKind::Struct` names resolve: [`shape`], then `extra` (test-local shapes).
@@ -350,7 +351,7 @@ pub(crate) fn convert_struct_with(
 }
 
 /// The value of the field `name` in `obj`: its exact key, else (as the request decoder matches
-/// names) the first key equal to it ignoring ASCII case (`civil.Date`'s untagged
+/// names) the first key equal to it ignoring ASCII case (`Date`'s untagged
 /// `Year`/`Month`/`Day` against genai's `year`/`month`/`day`).
 fn lookup<'v>(obj: &'v Map<String, Value>, name: &str) -> Option<&'v Value> {
     obj.get(name).or_else(|| {
@@ -439,7 +440,7 @@ fn is_empty(val: &GoValue) -> bool {
 }
 
 /// The integer value of a field held in serde output: a number, a decimal string (genai's
-/// `,string` int64s) or a duration string (genai's `time.Duration` text).
+/// `,string` int64s) or a duration string (genai's duration text).
 fn int_of(v: &Value) -> i64 {
     match v {
         Value::Number(n) => n
@@ -456,7 +457,7 @@ fn int_of(v: &Value) -> i64 {
     }
 }
 
-/// A `time.Time` held as RFC 3339 text (the zero time when absent) as microseconds since the
+/// A timestamp held as RFC 3339 text (the zero time when absent) as microseconds since the
 /// epoch / 1e6: Unix seconds keeping the fractional microseconds.
 fn time_secs(v: Option<&Value>) -> f64 {
     match v {
@@ -644,7 +645,7 @@ impl GoSnake for Map<String, Value> {
     }
 }
 
-/// A `time.Duration` as nanoseconds (saturating to the `i64` range).
+/// A duration as nanoseconds (saturating to the `i64` range).
 fn nanos(d: TimeDelta) -> i64 {
     d.num_nanoseconds().unwrap_or(if d < TimeDelta::zero() {
         i64::MIN
@@ -654,7 +655,7 @@ fn nanos(d: TimeDelta) -> i64 {
 }
 
 /// Writes `d`'s nanoseconds under `key` of the object `v` (genai's serde text is whole seconds,
-/// but the wire value is the `time.Duration` itself).
+/// but the wire value is the duration itself).
 fn set_nanos(v: &mut Value, key: &str, d: TimeDelta) {
     if let Some(o) = v.as_object_mut() {
         o.insert(key.to_owned(), Value::from(nanos(d)));
@@ -694,7 +695,7 @@ fn patch_grounding(g: &GroundingMetadata, v: &mut Value) {
     }
 }
 
-/// The patches of the `model.LLMResponse` fields (flattened into `v`).
+/// The patches of the `LLMResponse` fields (flattened into `v`).
 fn patch_response(r: &LlmResponse, v: &mut Value) {
     if let (Some(c), Some(cv)) = (&r.content, v.get_mut("content")) {
         patch_content(c, cv);
@@ -710,7 +711,7 @@ fn patch_response(r: &LlmResponse, v: &mut Value) {
     }
 }
 
-/// `e`'s serde output (the `session.Event` JSON keys) with the five genai `time.Duration`
+/// `e`'s serde output (the `Event` JSON keys) with the five genai duration
 /// fields as integer nanoseconds, which is what [`convert_struct_in`] walks.
 fn event_value(e: &gadk_session::Event) -> Result<Value, ConvertError> {
     let mut v = serde_json::to_value(e).map_err(|err| ConvertError(err.to_string()))?;
@@ -731,8 +732,8 @@ fn event_value(e: &gadk_session::Event) -> Result<Value, ConvertError> {
 }
 
 impl GoSnake for gadk_session::Event {
-    /// `session.Event` over [`encode_shapes::SESSION_EVENT`](super::encode_shapes::SESSION_EVENT)
-    /// (embedded `model.LLMResponse` flattened, `Timestamp` as Unix seconds, top-level
+    /// `Event` over [`encode_shapes::SESSION_EVENT`](super::encode_shapes::SESSION_EVENT)
+    /// (embedded `LLMResponse` flattened, `Timestamp` as Unix seconds, top-level
     /// `LongRunningToolIDs` → `long_running_tool_ids`).
     fn go_snake(&self, path: &str) -> Result<GoValue, ConvertError> {
         let v = event_value(self)?;
@@ -746,7 +747,7 @@ impl GoSnake for gadk_session::Event {
 }
 
 impl GoSnake for StreamingAgentRunWithEventsResponse {
-    /// `models.StreamingAgentRunWithEventsResponse` over
+    /// `StreamingAgentRunWithEventsResponse` over
     /// [`encode_shapes::MODELS_STREAMING_AGENT_RUN_WITH_EVENTS_RESPONSE`](super::encode_shapes::MODELS_STREAMING_AGENT_RUN_WITH_EVENTS_RESPONSE)
     /// (its events at `.events.[]*`; the json name `longRunningToolIds` is what `convertName`
     /// sees, so it is `long_running_tool_ids` there too).

@@ -83,8 +83,9 @@ impl Controller {
     ///    `SetWriteDeadline failed: feature not supported` is logged;
     /// 2. a present body (one not already at end of stream) is read up
     ///    to `max_payload_size` bytes; a read error answers 400
-    ///    `io.ReadAll with LimitReader failed: <err>`; the bytes are decoded as `models.Query` by
-    ///    [`go_unmarshal`](super::unmarshal::go_unmarshal), an error answering 400 with its text;
+    ///    with the body-read error text (see the literal in this function); the bytes are
+    ///    decoded as `Query` by [`go_unmarshal`](super::unmarshal::go_unmarshal), an error
+    ///    answering 400 with its text;
     ///    an absent body leaves `class_method` empty and the payload empty;
     /// 3. the payload goes to the handler named `class_method`: unknown → 500
     ///    `unrecognized class method: <name>`; a handler `Err(text)` → 500 `text`; each 500 is

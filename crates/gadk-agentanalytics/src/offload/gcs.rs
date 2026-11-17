@@ -53,8 +53,8 @@ pub(crate) const SCOPES: [&str; 2] = [
     "https://www.googleapis.com/auth/cloud-platform",
 ];
 
-/// The default endpoint (`https://storage.UNIVERSE_DOMAIN/storage/v1/` in the `googleapis.com`
-/// universe).
+/// The default endpoint (`https://storage.<universe domain>/storage/v1/`, here for the
+/// `googleapis.com` universe).
 pub(crate) const DEFAULT_ENDPOINT: &str = "https://storage.googleapis.com/storage/v1/";
 
 /// The per-chunk retry deadline of a resumable upload (no chunk retry deadline is configured on

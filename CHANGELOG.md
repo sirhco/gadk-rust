@@ -16,6 +16,9 @@ The first version published to crates.io. No code changes.
 - Every published crate has a crates.io description and keywords; the README and the
   `gadk-cli`, `gadk-console` and `gadk-prompts-cli` READMEs install from crates.io.
   `gadk-goyaml` and `gadk-configurable` stay unpublished.
+- Documentation and code comments describe gadk in its own terms instead of as a port of ADK-Go
+  (compatibility notes kept where ADK interoperability is a feature). No code changes; the new
+  `scripts/check-go-refs.py` check runs in CI.
 
 ## [0.2.0] - 2026-11-16
 

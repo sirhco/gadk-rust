@@ -52,7 +52,7 @@ pub enum GoValue {
     Bool(bool),
     /// `int` (64-bit).
     Int(i64),
-    /// `uint64` (integers above `math.MaxInt64`).
+    /// `uint64` (integers above `i64::MAX`).
     Uint(u64),
     /// `float64`.
     Float(f64),
@@ -61,7 +61,7 @@ pub enum GoValue {
     /// A string that is not valid UTF-8 (only from `!!binary`).
     // yaml.v3 yields a string here; a Rust `String` must be UTF-8, hence a separate variant.
     Bytes(Vec<u8>),
-    /// `time.Time` (an instant with nanoseconds and its offset).
+    /// timestamp (an instant with nanoseconds and its offset).
     Timestamp(DateTime<FixedOffset>),
     /// `[]interface{}`.
     Seq(Vec<GoValue>),
@@ -444,9 +444,9 @@ fn kind_rank(v: &GoValue) -> char {
 }
 
 /// The debug-syntax text of a timestamp
-/// (`time.Date(2001, time.December, 14, 21, 59, 43, 0, time.UTC)`). A `Z` offset prints as
-/// `time.UTC` and any other as a fixed zone named `""` (a zone equal to the machine's local one
-/// prints as `time.Local` in yaml.v3; not reproduced).
+/// (a constructor call listing year, month name, day, time of day, nanoseconds and zone). A `Z`
+/// offset prints as the UTC zone and any other as a fixed zone named `""` (a zone equal to the
+/// machine's local one prints as the local zone in yaml.v3; not reproduced).
 fn go_time_string(t: &DateTime<FixedOffset>) -> String {
     const MONTHS: [&str; 12] = [
         "January",

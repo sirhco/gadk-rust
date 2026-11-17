@@ -44,7 +44,7 @@ const INVALID_ARGUMENT: &str = "Request contains an invalid argument.";
 ///   ID is 400 `INVALID_ARGUMENT` `Session with user-provided ID '{name}' already exists.`
 ///   (the real engine's answer); an empty `userId` is 400. The answer is an operation
 ///   `{session}/operations/{n}` whose `response` is the Session (`@type`
-///   `…v1beta1.Session`, the state as requested).
+///   the v1beta1 `Session` type, the state as requested).
 /// - **State**, as the recordings show the real engine scoping it: `app:` keys are shared by
 ///   every session of the engine, `user:` keys by the sessions of one user in the engine, other
 ///   keys (including `temp:`, so a client that leaks them is caught) belong to the session.
