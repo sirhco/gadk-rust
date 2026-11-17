@@ -13,13 +13,13 @@
 // limitations under the License.
 
 //! The reshaping of a JSON-schema `serde_json::Value` (what gadk holds where the recorded
-//! format holds a JSON-schema pointer, jsonschema-go v0.4.3) into the yaml.v3 reflection of
-//! jsonschema-go's `Schema` struct: field keys (`$ref` → `ref`, `$defs` → `defs`, …),
+//! format holds a JSON-schema pointer) into the yaml.v3 reflection of the JSON-schema
+//! `Schema` struct: field keys (`$ref` → `ref`, `$defs` → `defs`, …),
 //! declaration field order, emitted zero fields, sorted `properties`, `default` as a byte
 //! sequence, and the boolean schema `false` as `{not: {}}`. Nothing outside `gonode` uses its
 //! items directly.
 //!
-//! [`reshape`] performs jsonschema-go's `(*Schema).UnmarshalJSON` field assignment: it returns
+//! [`reshape`] assigns each JSON keyword to its `Schema` field: it returns
 //! an object keyed by the `Schema` fields' YAML keys, which the `super::fixups::Builder` then
 //! encodes with the `jsonschema.Schema` shape (declaration order, zero-fill); nested schemas
 //! stay JSON and are reshaped when the builder reaches them.

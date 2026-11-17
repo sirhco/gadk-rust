@@ -10,6 +10,8 @@
   themselves (`scripts/rust_lex.py`, `scripts/check-go-refs.py`, `scripts/check-comment-only.py`,
   `scripts/check_go_refs_test.py`, `scripts/go-refs-allow/*.txt`, `.github/workflows/ci.yml`).
 
+- Paths in `CODE_EXEMPT` (a one-off, user-approved exemption) are skipped entirely.
+
 Usage: check-comment-only.py BASE [--root DIR]. Exit 0: ok; 1: violations; 2: error.
 """
 import argparse, pathlib, re, subprocess, sys
@@ -22,6 +24,11 @@ ALLOWED = {
     "scripts/check_go_refs_test.py", ".github/workflows/ci.yml",
 }
 MAX_COLS = 100
+# Paths whose code may change, with the reason (user-approved one-offs).
+CODE_EXEMPT = {
+    "crates/gadk-configurable/tests/recordings_differential.rs":
+        "string literals of the generated shapes.rs header (user-approved one-off)",
+}
 
 
 def _git(root, *args):
@@ -83,7 +90,7 @@ def check(root, base):
     problems = []
     for rel in sorted(changed):
         path = root / rel
-        if (rel in ALLOWED or rel.startswith(("docs/", "scripts/go-refs-allow/"))
+        if (rel in ALLOWED or rel in CODE_EXEMPT or rel.startswith(("docs/", "scripts/go-refs-allow/"))
                 or pathlib.PurePosixPath(rel).name == "README.md"):
             continue
         try:

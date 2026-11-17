@@ -23,8 +23,8 @@
 //!   timestamps, `genai.Schema` titles, JSON-schema values) and the struct shapes, applied by
 //!   the node builder (zero-filling every field, declaration field order, the leaf classes),
 //!   and their inverse on decode.
-//! - [`jsonschema`]: the reshaping of a JSON-schema value into jsonschema-go v0.4.3's
-//!   `Schema` reflection.
+//! - [`jsonschema`]: the reshaping of a JSON-schema value into the reflection of the
+//!   JSON-schema struct.
 //! - [`shapes`]: the tables, generated from the fixture `tests/fixtures/fixups.json`.
 //!
 //! gadk types reach the builder as gadk serde's JSON (their JSON names are the recorded
