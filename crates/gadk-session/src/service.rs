@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `session/service.go` and the `Session`/`State` interfaces of
-//! `session/session.go`.
+//! The [`SessionService`] trait and the [`Session`] and [`State`] interfaces.
 
 use std::sync::Arc;
 
@@ -35,7 +34,7 @@ pub const KEY_PREFIX_TEMP: &str = "temp:";
 /// Prefix for user-level state keys, shared across all sessions of a user within an app.
 pub const KEY_PREFIX_USER: &str = "user:";
 
-/// A session storage service (ADK-Go `session.Service`).
+/// A session storage service.
 #[async_trait]
 pub trait SessionService: Send + Sync {
     /// Creates a session.
@@ -63,7 +62,7 @@ pub trait SessionService: Send + Sync {
     ) -> Result<(), SessionError>;
 }
 
-/// A series of interactions between a user and agents (ADK-Go `session.Session`).
+/// A series of interactions between a user and agents.
 pub trait Session: Send + Sync {
     /// The unique identifier of the session.
     fn id(&self) -> &str;
@@ -82,7 +81,7 @@ pub trait Session: Send + Sync {
 }
 
 /// The order [`SessionService::list`] documents: last update time ascending, ties by user ID,
-/// then session ID (ADK-Go `compareByLastUpdate`). Use it with a stable sort.
+/// then session ID. Use it with a stable sort.
 pub fn compare_by_last_update(a: &dyn Session, b: &dyn Session) -> std::cmp::Ordering {
     a.last_update_time()
         .cmp(&b.last_update_time())
@@ -90,7 +89,7 @@ pub fn compare_by_last_update(a: &dyn Session, b: &dyn Session) -> std::cmp::Ord
         .then_with(|| a.id().cmp(b.id()))
 }
 
-/// A key-value store (ADK-Go `session.State`).
+/// A key-value store.
 pub trait State: Send + Sync {
     /// The value for `key`; [`SessionError::StateKeyNotExist`] if absent.
     fn get(&self, key: &str) -> Result<Value, SessionError>;
@@ -100,7 +99,7 @@ pub trait State: Send + Sync {
     fn all(&self) -> Vec<(String, Value)>;
 }
 
-/// A read-only key-value store (ADK-Go `session.ReadonlyState`).
+/// A read-only key-value store.
 pub trait ReadonlyState: Send + Sync {
     /// The value for `key`; [`SessionError::StateKeyNotExist`] if absent.
     fn get(&self, key: &str) -> Result<Value, SessionError>;

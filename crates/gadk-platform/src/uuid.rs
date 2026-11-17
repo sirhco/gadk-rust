@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/// Port of ADK-Go platform/uuid.go `UUIDProvider`.
+/// A source of unique identifier strings that tests can replace.
 pub trait UuidProvider: Send + Sync {
     /// Returns a new unique identifier string.
     fn new_uuid(&self) -> String;

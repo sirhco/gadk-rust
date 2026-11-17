@@ -13,17 +13,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Event ↔ `SessionEvent` conversions (Go `vertexai_client.go`'s `createAiplatformpb*`,
-//! `aiplatformTo*`, raw-event and struct helpers). Every error carries Go's text, already
-//! wrapped with the prefixes Go's `appendEvent` / `listSessionEvents` add (e.g. `failed to
-//! convert event actions: …`).
+//! Event ↔ `SessionEvent` conversions, with the raw-event and struct helpers. Every error
+//! carries the text an ADK server shows, already wrapped with the prefixes of the append and
+//! list-events calls (e.g. `failed to convert event actions: …`).
 //!
-//! The `SessionEvent` side is the protojson form of Go's `aiplatformpb` messages as JSON
+//! The `SessionEvent` side is the protojson form of the Vertex AI protobuf messages as JSON
 //! values: camelCase names, enum numbers, standard base64 bytes, unpopulated scalars and
-//! empty lists omitted, set message fields (and Go's set `optional string` pointers) present
+//! empty lists omitted, set message fields (and set `optional string` fields) present
 //! even when empty. A `google.protobuf.Struct` holds only doubles, so every number in one
 //! (state delta, custom metadata, function args and responses, the raw event) becomes the
-//! JSON number Go writes for that `float64`: an integral value below 1e21 as an integer, so
+//! JSON number written for that `f64`: an integral value below 1e21 as an integer, so
 //! `3` stays `3` and `9007199254740993` becomes `9007199254740992`.
 
 use std::collections::BTreeMap;
@@ -46,10 +45,10 @@ use crate::protojson::{
     outcome_name, outcome_number, parse_timestamp,
 };
 
-/// The prefix Go's `listSessionEvents` puts on every failure to read an event.
+/// The prefix on every failure to read an event when listing events.
 const LIST_EVENTS: &str = "error fetching session events";
 
-/// An event as the `SessionEvent` JSON Go's `appendEvent` sends.
+/// An event as the `SessionEvent` JSON the append call sends.
 pub(crate) fn event_to_session_event(event: &Event) -> Result<Value, BoxError> {
     let actions = actions_to_wire(event).map_err(|e| wrap("failed to convert event actions", e))?;
     let content = match &event.response.content {
@@ -87,10 +86,10 @@ pub(crate) fn event_to_session_event(event: &Event) -> Result<Value, BoxError> {
     Ok(Value::Object(m))
 }
 
-/// A `SessionEvent` JSON as the event Go's `listSessionEvents` builds, including the event ID
+/// A `SessionEvent` JSON as the event listing builds, including the event ID
 /// from the last segment of `name`; `rawEvent` wins when present.
 pub(crate) fn session_event_to_event(v: &Value) -> Result<Event, BoxError> {
-    // Go decodes the whole response before reading any event, so malformed scalars anywhere in
+    // The whole response is decoded before any event is read, so malformed scalars anywhere in
     // it fail the call; the lenient readers below are only used on validated input.
     validate_scalars(v).map_err(|e| wrap(LIST_EVENTS, e))?;
     let id = event_id_from_name(str_field(v, "name")).map_err(|e| wrap(LIST_EVENTS, e))?;
@@ -135,11 +134,11 @@ pub(crate) fn session_event_to_event(v: &Value) -> Result<Event, BoxError> {
     Ok(event)
 }
 
-/// Go `sessionIdBySessionName` on an event name: the segment after the last `/`.
+/// The segment after the last `/` of an event name.
 ///
 /// # Errors
 ///
-/// Go's texts: `invalid session name format "{name}": missing separator '/'` and
+/// The texts `invalid session name format "{name}": missing separator '/'` and
 /// `invalid session name "{name}": empty session ID`.
 pub(super) fn event_id_from_name(name: &str) -> Result<String, String> {
     let Some(idx) = name.rfind('/') else {
@@ -158,7 +157,7 @@ pub(super) fn event_id_from_name(name: &str) -> Result<String, String> {
     Ok(id.to_owned())
 }
 
-/// Go `eventNeedsRawEvent`: whether the event carries state that no `SessionEvent` column
+/// Whether the event carries state that no `SessionEvent` column
 /// holds (or that ADK does not read back), so it must also travel as `rawEvent`. Plain events
 /// keep the legacy wire format.
 pub(crate) fn event_needs_raw_event(event: &Event) -> bool {
@@ -174,23 +173,22 @@ pub(crate) fn event_needs_raw_event(event: &Event) -> bool {
         || event.actions.compaction.is_some()
 }
 
-/// Go `eventToRawEvent`: the event's Go-compatible JSON as a `Struct` (its numbers as Go
-/// writes doubles).
+/// The event's JSON as a `Struct` (its numbers written as doubles).
 pub(crate) fn event_to_raw_event(event: &Event) -> Result<Value, BoxError> {
-    // Through bytes, as Go does, so float32 fields keep their shortest decimal form.
+    // Through bytes, so float32 fields keep their shortest decimal form.
     let bytes = serde_json::to_vec(event).map_err(|e| wrap("marshaling event", e))?;
     let v: Value =
         serde_json::from_slice(&bytes).map_err(|e| wrap("converting event to structpb", e))?;
     Ok(struct_value(&v))
 }
 
-/// Go `eventFromRawEvent`: decodes a `rawEvent` written by any ADK runtime. Identity fields
+/// Decodes a `rawEvent` written by any ADK runtime. Identity fields
 /// are left to the caller, which takes them from the envelope.
 pub(crate) fn event_from_raw_event(raw: &Value) -> Result<Event, BoxError> {
     serde_json::from_value(struct_value(raw)).map_err(|e| wrap("unmarshaling raw event", e))
 }
 
-/// Go `toStructPB` on a JSON value: `null` → `{}`; numbers become protobuf doubles.
+/// A JSON value as a protobuf `Struct`: `null` → `{}`; numbers become protobuf doubles.
 ///
 /// # Errors
 ///
@@ -210,7 +208,7 @@ pub(crate) fn to_struct(value: &Value) -> Result<Value, BoxError> {
     .into())
 }
 
-/// Go `filterNilValues`: `m` without its `null` values.
+/// `m` without its `null` values.
 pub(crate) fn filter_nil_values(m: &Map<String, Value>) -> Map<String, Value> {
     m.iter()
         .filter(|(_, v)| !v.is_null())
@@ -218,7 +216,7 @@ pub(crate) fn filter_nil_values(m: &Map<String, Value>) -> Map<String, Value> {
         .collect()
 }
 
-/// Go `createAiplatformpbContent`. Each part carries `thought`, `thoughtSignature` and the
+/// A content as protojson. Each part carries `thought`, `thoughtSignature` and the
 /// last set of text, inline data, function call, function response, executable code, code
 /// execution result and file data, in that order.
 pub(crate) fn content_to_wire(content: &Content) -> Result<Value, BoxError> {
@@ -284,7 +282,7 @@ pub(crate) fn content_to_wire(content: &Content) -> Result<Value, BoxError> {
     Ok(Value::Object(c))
 }
 
-/// Go `aiplatformToGenaiContent`: role and parts (thought, thought signature and the one set
+/// A content from protojson: role and parts (thought, thought signature and the one set
 /// data field).
 pub(crate) fn content_from_wire(v: &Value) -> Content {
     let parts = array_field(v, "parts")
@@ -347,7 +345,7 @@ pub(crate) fn content_from_wire(v: &Value) -> Content {
     }
 }
 
-/// Go `createAiplatformpbEventActions` (`None` when both deltas and the requested auth configs
+/// The event actions as protojson (`None` when both deltas and the requested auth configs
 /// are empty).
 ///
 /// # Errors
@@ -393,7 +391,7 @@ pub(crate) fn actions_to_wire(event: &Event) -> Result<Option<Value>, BoxError> 
     Ok(Some(Value::Object(actions)))
 }
 
-/// Go `aiplatformToSessionEventActions`: absent actions give empty actions; present ones
+/// The event actions from protojson: absent actions give empty actions; present ones
 /// always carry a state delta (`null` values dropped), an artifact delta when non-empty and the
 /// requested auth configs when non-empty.
 ///
@@ -430,7 +428,7 @@ pub(crate) fn actions_from_wire(v: Option<&Value>) -> Result<EventActions, BoxEr
     })
 }
 
-/// Go `createAiplatformpbMetadata`: always an object.
+/// The event metadata as protojson: always an object.
 pub(crate) fn metadata_to_wire(event: &Event) -> Result<Value, BoxError> {
     let r = &event.response;
     let mut m = Map::new();
@@ -439,7 +437,7 @@ pub(crate) fn metadata_to_wire(event: &Event) -> Result<Value, BoxError> {
     put_bool(&mut m, "interrupted", r.interrupted);
     put_strings(&mut m, "longRunningToolIds", &event.long_running_tool_ids);
     put_str(&mut m, "branch", &event.branch);
-    // Go writes the struct for a non-nil map; gadk keeps no nil/empty distinction here.
+    // The struct is written for a non-empty map; there is no nil/empty distinction here.
     if !r.custom_metadata.is_empty() {
         m.insert("customMetadata".into(), struct_of(&r.custom_metadata));
     }
@@ -449,12 +447,12 @@ pub(crate) fn metadata_to_wire(event: &Event) -> Result<Value, BoxError> {
     Ok(Value::Object(m))
 }
 
-/// The `groundingMetadata` part of Go `createAiplatformpbMetadata`.
+/// The `groundingMetadata` part of the event metadata.
 fn grounding_to_wire(g: &GroundingMetadata) -> Value {
     let mut m = Map::new();
     put_strings(&mut m, "webSearchQueries", &g.web_search_queries);
     put_strings(&mut m, "retrievalQueries", &g.retrieval_queries);
-    // Go sets the optional field's pointer, so it is present even when empty.
+    // The optional field is set, so it is present even when empty.
     m.insert(
         "googleMapsWidgetContextToken".into(),
         Value::String(g.google_maps_widget_context_token.clone()),
@@ -490,7 +488,7 @@ fn grounding_to_wire(g: &GroundingMetadata) -> Value {
                     .iter()
                     .map(|s| {
                         let mut sn = Map::new();
-                        // Go fills ReviewId from the genai snippet's Review.
+                        // `reviewId` comes from the snippet's `review` field.
                         put_str(&mut sn, "reviewId", &s.review);
                         put_str(&mut sn, "googleMapsUri", &s.google_maps_uri);
                         put_str(&mut sn, "title", &s.title);
@@ -567,7 +565,7 @@ fn grounding_to_wire(g: &GroundingMetadata) -> Value {
     Value::Object(m)
 }
 
-/// Go `createGroundingMetadata` on a present `groundingMetadata`.
+/// Grounding metadata from a present `groundingMetadata`.
 pub(crate) fn grounding_from_wire(v: &Value) -> GroundingMetadata {
     let mut out = GroundingMetadata {
         web_search_queries: strings_field(v, "webSearchQueries"),
@@ -671,11 +669,11 @@ pub(crate) fn grounding_from_wire(v: &Value) -> GroundingMetadata {
 
 // ---- Struct numbers ----
 
-/// The JSON number Go writes for the `float64` `f` (`encoding/json` and protojson alike), as
+/// The JSON number written for the `f64` `f` (JSON and protojson alike), as
 /// serde_json reads it back: an integral value below 1e21 has no fraction or exponent, so it
 /// reads as an integer when it fits one.
 fn go_double(f: f64) -> Value {
-    // Go writes -0 as "-0", which serde_json reads as the float -0.0.
+    // -0 is written as "-0", which serde_json reads as the float -0.0.
     let negative_zero = f == 0.0 && f.is_sign_negative();
     if f.fract() == 0.0 && f.abs() < 1e21 && !negative_zero {
         if (-9_223_372_036_854_775_808.0..9_223_372_036_854_775_808.0).contains(&f) {
@@ -689,7 +687,7 @@ fn go_double(f: f64) -> Value {
     serde_json::Number::from_f64(f).map_or(Value::Null, Value::Number)
 }
 
-/// A protojson `float` value: its shortest decimal form (as Go writes it), read as a double;
+/// A protojson `float` value: its shortest decimal form, read as a double;
 /// non-finite values as protojson's strings.
 fn go_float32(f: f32) -> Value {
     if f.is_nan() {
@@ -716,7 +714,7 @@ fn struct_value(v: &Value) -> Value {
     }
 }
 
-/// Go `toStructPB` of a map (never fails: a map is always an object).
+/// A map as a protobuf `Struct` (never fails: a map is always an object).
 fn struct_of(m: &Map<String, Value>) -> Value {
     Value::Object(
         m.iter()
@@ -725,8 +723,8 @@ fn struct_of(m: &Map<String, Value>) -> Value {
     )
 }
 
-/// Go `Struct.AsMap` of an optional `Struct` field (e.g. a session's `sessionState`): its
-/// numbers as Go's `float64`s read back; an absent field is an empty map.
+/// An optional `Struct` field (e.g. a session's `sessionState`) as a map: its
+/// numbers read back as doubles; an absent field is an empty map.
 pub(crate) fn struct_as_map(v: Option<&Value>) -> Map<String, Value> {
     match v.filter(|s| !s.is_null()).map(struct_value) {
         Some(Value::Object(m)) => m,
@@ -741,7 +739,7 @@ pub(crate) fn field<'a>(v: &'a Value, key: &str) -> Option<&'a Value> {
     v.get(key).filter(|f| !f.is_null())
 }
 
-/// A protojson string field; an absent (or non-string) one is Go's zero `""`.
+/// A protojson string field; an absent (or non-string) one is `""`.
 pub(crate) fn str_field<'a>(v: &'a Value, key: &str) -> &'a str {
     v.get(key).and_then(Value::as_str).unwrap_or_default()
 }
@@ -770,7 +768,7 @@ fn strings_field(v: &Value, key: &str) -> Vec<String> {
 
 /// A `bytes` field; text that is not base64 reads as empty. The lenience is safe because
 /// [`session_event_to_event`] has already rejected such text through [`validate_scalars`]; the
-/// infallible readers are otherwise reached by the Go-test ports with well-formed input and by
+/// infallible readers are otherwise reached by tests with well-formed input and by
 /// the Example Store's response mapping (`crate::example_store`), which first rejects such text
 /// through [`check_bytes`].
 pub(crate) fn bytes_field(v: &Value, key: &str) -> Vec<u8> {
@@ -807,8 +805,7 @@ pub(crate) fn float32_field(v: &Value, key: &str) -> f32 {
 }
 
 /// The `google.protobuf.Timestamp` field `key` of a protojson object (an event's `timestamp`,
-/// a session's `updateTime`); an absent or null one is the Unix epoch (Go
-/// `(*Timestamp)(nil).AsTime()`).
+/// a session's `updateTime`); an absent or null one is the Unix epoch.
 pub(crate) fn timestamp_field(v: &Value, key: &str) -> Result<DateTime<Utc>, String> {
     match field(v, key) {
         None => Ok(DateTime::UNIX_EPOCH),
@@ -817,7 +814,7 @@ pub(crate) fn timestamp_field(v: &Value, key: &str) -> Result<DateTime<Utc>, Str
     }
 }
 
-// ---- Strict scalar validation (Go protojson's `unmarshalScalar`) ----
+// ---- Strict scalar validation (protojson's scalar rules) ----
 
 /// protojson's `invalid value for {kind} field {name}: {raw token}`, without its
 /// `proto: (line:col): ` prefix (as `parse_timestamp`'s texts).
@@ -826,7 +823,7 @@ fn invalid_scalar(kind: &str, name: &str, v: &Value) -> String {
     format!("invalid value for {kind} field {name}: {raw}")
 }
 
-/// Whether `s` is exactly one JSON number (Go reads it with `json.NewDecoder`).
+/// Whether `s` is exactly one JSON number.
 fn is_json_number(s: &str) -> bool {
     let b = s.as_bytes();
     let digits = |start: usize| {

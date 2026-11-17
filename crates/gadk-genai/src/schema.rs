@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! OpenAPI-subset schema (port of genai v1.77.0 `types.go` `Schema`).
+//! OpenAPI-subset schema.
 
 use crate::serde_util::is_zero;
 use serde::{Deserialize, Serialize};
@@ -21,7 +21,7 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 
 crate::string_enum!(
-    /// Port of genai `Type`.
+    /// The JSON type of a [`Schema`] (OpenAPI data type).
     Type {
         Unspecified => "TYPE_UNSPECIFIED",
         String => "STRING",
@@ -34,13 +34,13 @@ crate::string_enum!(
     }
 );
 
-/// Port of genai types.go `Schema`.
+/// An OpenAPI-subset schema describing the shape of a function parameter or response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Schema {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub any_of: Vec<Schema>,
-    /// Go `any` with `omitempty`: JSON `null` decodes to `None`.
+    /// An arbitrary JSON value; a JSON `null` decodes to `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<Value>,
     #[serde(default, skip_serializing_if = "is_zero")]

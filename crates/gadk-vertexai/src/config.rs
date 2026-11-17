@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! [`AgentEngineData`] (Go `util/vertexai`), Go `aiplatform.HostURL`, and the endpoint,
-//! credential and HTTP-client resolution both services share.
+//! [`AgentEngineData`], the Vertex AI host of a location, and the endpoint, credential and
+//! HTTP-client resolution both services share.
 
 use std::sync::Arc;
 
@@ -25,7 +25,7 @@ use google_cloud_auth::credentials::Credentials;
 
 use crate::error::BoxError;
 
-/// An Agent Engine (reasoning engine) instance (Go `vertexaiutil.AgentEngineData`).
+/// An Agent Engine (reasoning engine) instance.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AgentEngineData {
     /// The Google Cloud project ID.
@@ -37,7 +37,7 @@ pub struct AgentEngineData {
 }
 
 impl AgentEngineData {
-    /// The engine's resource name (Go `AgentEngineResource`):
+    /// The engine's resource name:
     /// `projects/{project_id}/locations/{location}/reasoningEngines/{reasoning_engine}`.
     pub fn engine_resource(&self) -> String {
         format!(
@@ -46,13 +46,13 @@ impl AgentEngineData {
         )
     }
 
-    /// A session's resource name (Go `SessionResource`): `{engine_resource}/sessions/{session_id}`.
+    /// A session's resource name: `{engine_resource}/sessions/{session_id}`.
     pub fn session_resource(&self, session_id: &str) -> String {
         format!("{}/sessions/{session_id}", self.engine_resource())
     }
 }
 
-/// The Vertex AI host of a location (Go `aiplatform.HostURL`): `aiplatform.googleapis.com` for
+/// The Vertex AI host of a location: `aiplatform.googleapis.com` for
 /// `""` or `"global"`, else `{location}-aiplatform.googleapis.com`.
 pub(crate) fn host_url(location: &str) -> String {
     if location.is_empty() || location == "global" {
@@ -62,12 +62,10 @@ pub(crate) fn host_url(location: &str) -> String {
     }
 }
 
-/// The OAuth scopes requested for Application Default Credentials (Go's aiplatform clients'
-/// `DefaultAuthScopes`).
+/// The OAuth scopes requested for Application Default Credentials.
 pub(crate) const SCOPES: [&str; 1] = ["https://www.googleapis.com/auth/cloud-platform"];
 
-/// The session client's default endpoint (Go `defaultSessionRESTClientOptions`), whatever the
-/// location.
+/// The session client's default endpoint, whatever the location.
 pub(crate) const SESSION_ENDPOINT: &str = "https://aiplatform.googleapis.com";
 
 /// What a service's client needs once its config is resolved.
@@ -80,17 +78,17 @@ pub(crate) struct ResolvedClient {
     pub(crate) http: Arc<dyn HttpClient>,
 }
 
-/// Resolves a service config (Go's `option.ClientOption` handling in `NewSessionClient` /
-/// `NewMemoryBankClient`): the base URL is `endpoint` with trailing `/`s trimmed (an empty
-/// endpoint counts as none), else `default_endpoint`; the credentials are none with
-/// `without_authentication` (Go `option.WithoutAuthentication`), else `credentials`, else
+/// Resolves a service config for the session and memory-bank clients: the base URL is
+/// `endpoint` with trailing `/`s trimmed (an empty endpoint counts as none), else
+/// `default_endpoint`; the credentials are none with `without_authentication`, else
+/// `credentials`, else
 /// Application Default Credentials with [`SCOPES`], reading `GOOGLE_APPLICATION_CREDENTIALS`
 /// through `env`; the HTTP client is `http_client`, else a reqwest client.
 ///
 /// # Errors
 ///
 /// The [`AdcError`](gadk_model::gcp_auth::AdcError) when Application Default Credentials cannot
-/// be built, boxed but not wrapped: callers add Go's prefixes.
+/// be built, boxed but not wrapped: callers add their own prefixes.
 pub(crate) fn resolve(
     endpoint: Option<&str>,
     default_endpoint: &str,

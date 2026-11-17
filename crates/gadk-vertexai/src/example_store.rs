@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A [`Provider`] backed by a Vertex AI Example Store (port of ADK-Go
-//! `tool/exampletool/vertexai/vertexai.go`).
+//! A [`Provider`] backed by a Vertex AI Example Store.
 //!
 //! [`new_provider`] builds a provider for an example tool
 //! ([`gadk_tools::example::ExampleToolConfig::provider`]): for each user query it searches the
@@ -67,8 +66,7 @@ use crate::session::convert::{
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests;
 
-/// `testdata/example_store/{stem}.json`, the Go-generated goldens (shared by the wire tests and
-/// the `vertexai_test.go` parity ports).
+/// `testdata/example_store/{stem}.json`, the golden bodies shared by the wire tests.
 #[cfg(test)]
 #[allow(clippy::panic)]
 pub(crate) fn golden(stem: &str) -> Value {
@@ -80,14 +78,14 @@ pub(crate) fn golden(stem: &str) -> Value {
     serde_json::from_str(&text).unwrap_or_else(|e| panic!("parse {}: {e}", path.display()))
 }
 
-/// How many examples a search asks for (Go `topK`).
+/// How many examples a search asks for.
 pub const TOP_K: i64 = 10;
 
-/// Results scoring below this are dropped (Go `similarityThreshold`): below it an example is
+/// Results scoring below this are dropped: below it an example is
 /// more likely to mislead the model than help it.
 pub const SIMILARITY_THRESHOLD: f32 = 0.5;
 
-/// Go `exampleStoreNamePattern`.
+/// The shape of a full Example Store resource name.
 #[allow(clippy::expect_used)] // constant pattern, cannot fail
 static EXAMPLE_STORE_NAME_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
@@ -96,26 +94,26 @@ static EXAMPLE_STORE_NAME_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     .expect("valid example-store regex")
 });
 
-/// How a Vertex AI Example Store provider reaches its store (Go `ProviderConfig` plus the
-/// `option.ClientOption`s Go passes to `aiplatform.NewExampleStoreClient`).
-// Divergence (ledger 2a): fields beyond Go's `ExampleStoreName` (`endpoint`, `credentials`, `without_authentication`, `http_client`, `env`) stand in for Go's client options.
+/// How a Vertex AI Example Store provider reaches its store: the store name, plus the
+/// `endpoint`, `credentials`, `without_authentication`, `http_client` and `env` settings of
+/// the underlying client.
 #[derive(Clone)]
 pub struct ProviderConfig {
-    /// The store's full resource name (Go `ExampleStoreName`):
+    /// The store's full resource name:
     /// `projects/{project}/locations/{location}/exampleStores/{example_store}`. A bare store ID
-    /// is refused (no `GOOGLE_CLOUD_PROJECT` / `GOOGLE_CLOUD_LOCATION` fallback, as in Go).
+    /// is refused (no `GOOGLE_CLOUD_PROJECT` / `GOOGLE_CLOUD_LOCATION` fallback).
     pub example_store_name: String,
-    /// The base URL (Go `option.WithEndpoint`); `None` = `https://{location}-aiplatform.googleapis.com`
+    /// The base URL; `None` = `https://{location}-aiplatform.googleapis.com`
     /// (`https://aiplatform.googleapis.com` for the `global` location), the location taken
     /// from [`example_store_name`](Self::example_store_name).
     pub endpoint: Option<String>,
-    /// The credentials sent with every request (Go `option.WithAuthCredentials`); `None`
+    /// The credentials sent with every request; `None`
     /// resolves Application Default Credentials through [`env`](Self::env) with the
     /// `cloud-platform` scope.
     pub credentials: Option<Credentials>,
-    /// Send no credentials (Go `option.WithoutAuthentication`).
+    /// Send no credentials.
     pub without_authentication: bool,
-    /// The HTTP client (Go `option.WithHTTPClient`); `None` builds a reqwest client.
+    /// The HTTP client; `None` builds a reqwest client.
     pub http_client: Option<Arc<dyn HttpClient>>,
     /// Where `GOOGLE_APPLICATION_CREDENTIALS` is read.
     pub env: Arc<dyn EnvProvider>,
@@ -146,14 +144,13 @@ impl std::fmt::Debug for ProviderConfig {
     }
 }
 
-/// Why [`new_provider`] failed, with Go's texts.
+/// Why [`new_provider`] failed.
 #[non_exhaustive]
 #[derive(Debug)]
 pub enum ExampleStoreError {
-    /// The store name does not match Go's `exampleStoreNamePattern`.
+    /// The store name is not a full Example Store resource name.
     InvalidStoreName,
-    /// The client could not be built: Application Default Credentials failed (Go's
-    /// `aiplatform.NewExampleStoreClient` error).
+    /// The client could not be built: Application Default Credentials failed.
     CreateClient(BoxError),
 }
 
@@ -177,9 +174,9 @@ impl std::error::Error for ExampleStoreError {
     }
 }
 
-/// A provider that retrieves few-shot examples from a Vertex AI Example Store (Go
-/// `NewProvider`). Synchronous; only Application Default Credentials need a Tokio runtime. The
-/// provider has no `Close`: unlike Go's gRPC client, the REST client holds no connection.
+/// A provider that retrieves few-shot examples from a Vertex AI Example Store. Synchronous;
+/// only Application Default Credentials need a Tokio runtime. The provider has no `close`:
+/// the REST client holds no connection.
 ///
 /// # Errors
 ///
@@ -188,8 +185,7 @@ impl std::error::Error for ExampleStoreError {
 /// Credentials cannot be built.
 pub fn new_provider(config: ProviderConfig) -> Result<Arc<dyn Provider>, ExampleStoreError> {
     let location = parse_location(&config)?;
-    // Go `option.WithEndpoint(aiplatformutil.HostPortURL(location))`: `{host}:443`, served over
-    // HTTPS.
+    // The default endpoint is the location's host, served over HTTPS.
     let default_endpoint = format!("https://{}", host_url(&location));
     let resolved = resolve(
         config.endpoint.as_deref(),
@@ -208,7 +204,7 @@ pub fn new_provider(config: ProviderConfig) -> Result<Arc<dyn Provider>, Example
     )
 }
 
-/// Go `newProvider`: a provider for `config` searching through `client`.
+/// A provider for `config` searching through `client`.
 pub(crate) fn new_provider_with_client(
     config: &ProviderConfig,
     client: Arc<dyn ExampleStoreClient>,
@@ -220,7 +216,7 @@ pub(crate) fn new_provider_with_client(
     }))
 }
 
-/// Go `parseLocation`: the `{location}` of a full Example Store resource name.
+/// The `{location}` of a full Example Store resource name.
 pub(crate) fn parse_location(config: &ProviderConfig) -> Result<String, ExampleStoreError> {
     EXAMPLE_STORE_NAME_PATTERN
         .captures(&config.example_store_name)
@@ -229,7 +225,7 @@ pub(crate) fn parse_location(config: &ProviderConfig) -> Result<String, ExampleS
         .ok_or(ExampleStoreError::InvalidStoreName)
 }
 
-/// Go `exampleStoreClient`: one `SearchExamples` call, taking and returning protojson bodies.
+/// One `SearchExamples` call, taking and returning protojson bodies.
 #[async_trait]
 pub(crate) trait ExampleStoreClient: Send + Sync {
     /// Searches the store named by `req`'s `exampleStore`.
@@ -237,7 +233,7 @@ pub(crate) trait ExampleStoreClient: Send + Sync {
 }
 
 /// The REST `ExampleStoreService.SearchExamples` call.
-// Divergence (ledger 2a): Example Store over REST v1beta1 instead of gRPC; JSON wire checked against Go goldens.
+// Example Store is called over REST v1beta1, not gRPC.
 struct RestExampleStoreClient {
     client: VertexClient,
 }
@@ -245,7 +241,7 @@ struct RestExampleStoreClient {
 #[async_trait]
 impl ExampleStoreClient for RestExampleStoreClient {
     /// `POST {base}/v1beta1/{exampleStore}:searchExamples?$alt=json;enum-encoding=int` with
-    /// `x-goog-request-params: example_store={exampleStore}` (Go's REST `SearchExamples`).
+    /// `x-goog-request-params: example_store={exampleStore}`.
     async fn search_examples(&self, req: &Value) -> Result<Value, BoxError> {
         let store = str_field(req, "exampleStore");
         self.client
@@ -260,8 +256,8 @@ impl ExampleStoreClient for RestExampleStoreClient {
     }
 }
 
-/// Go `provider`.
-// Divergence (ledger 2a): no `Close` (Go's provider implements `io.Closer`): REST holds no connection.
+/// The provider that searches the store.
+// There is no `close`: REST holds no connection.
 struct VertexExampleStoreProvider {
     store_name: String,
     client: Arc<dyn ExampleStoreClient>,
@@ -269,16 +265,16 @@ struct VertexExampleStoreProvider {
 
 #[async_trait]
 impl Provider for VertexExampleStoreProvider {
-    /// Go `provider.Examples`: searches the store with `query` as a user content and the
+    /// Searches the store with `query` as a user content and the
     /// `lastEntry` search-key method, then maps the results.
     ///
     /// # Errors
     ///
-    /// [`ToolError::Execution`] with Go's text `vertexai: search examples: {err}` when the call
-    /// fails or the response holds malformed `bytes` or `Duration` text (where Go's protojson
-    /// decoding of the response fails), or `vertexai: search examples: {cause}` (wrapping
-    /// [`CancelCause::to_agent_error`]) when `ctx` is cancelled before or during the call (Go
-    /// passes `ctx` to `SearchExamples`, which aborts the RPC).
+    /// [`ToolError::Execution`] with the text `vertexai: search examples: {err}` when the call
+    /// fails or the response holds malformed `bytes` or `Duration` text (protojson decoding of
+    /// the response fails), or `vertexai: search examples: {cause}` (wrapping
+    /// [`CancelCause::to_agent_error`]) when `ctx` is cancelled before or during the call (the
+    /// request is dropped).
     async fn examples(&self, ctx: &Context, query: &str) -> Result<Vec<Example>, ToolError> {
         let req = search_request(&self.store_name, query);
         let token = ctx.cancellation_token();
@@ -304,7 +300,7 @@ impl Provider for VertexExampleStoreProvider {
     }
 }
 
-/// Go's `SearchExamplesRequest` in protojson: `topK` is an int64, so a JSON string.
+/// A `SearchExamplesRequest` in protojson: `topK` is an int64, so a JSON string.
 pub(crate) fn search_request(store_name: &str, query: &str) -> Value {
     json!({
         "exampleStore": store_name,
@@ -318,7 +314,7 @@ pub(crate) fn search_request(store_name: &str, query: &str) -> Value {
     })
 }
 
-/// Go `Examples`' result loop over a protojson `SearchExamplesResponse`: results below
+/// Maps a protojson `SearchExamplesResponse` to examples: results below
 /// [`SIMILARITY_THRESHOLD`] or without a `storedContentsExample` are skipped; the input is
 /// the search key as a user text content, the output each expected content that has a
 /// `content`, converted. An empty response gives no examples.
@@ -327,7 +323,7 @@ pub(crate) fn search_request(store_name: &str, query: &str) -> Value {
 ///
 /// protojson's text for a malformed `bytes` field (`thoughtSignature`, `inlineData.data`) or
 /// `Duration` (`videoMetadata` offsets) in any content of any result, skipped ones included:
-/// Go decodes the whole response before `Examples` looks at it.
+/// the whole response is decoded before any result is examined.
 pub(crate) fn examples_from_response(resp: &Value) -> Result<Vec<Example>, String> {
     let mut examples = Vec::new();
     for result in array_field(resp, "results") {
@@ -360,7 +356,7 @@ pub(crate) fn examples_from_response(resp: &Value) -> Result<Vec<Example>, Strin
     Ok(examples)
 }
 
-/// Go `convertContent`: the role, and each part converted by [`convert_part`].
+/// The role, and each part converted by [`convert_part`].
 fn convert_content(src: &Value) -> Result<Content, String> {
     let mut parts = Vec::new();
     for part in array_field(src, "parts") {
@@ -374,11 +370,10 @@ fn convert_content(src: &Value) -> Result<Content, String> {
     })
 }
 
-/// Go `convertContent`'s per-part conversion: thought, thought signature and video metadata,
-/// then the one set data field (enums as Go's enum names). A part with no data is dropped
-/// unless it has a thought, a thought signature or video metadata; a `null` part is dropped.
-/// Malformed `bytes` and `Duration` text fails with protojson's text, as Go's response decoding
-/// does.
+/// Converts one part: thought, thought signature and video metadata, then the one set data
+/// field (enums by their protobuf names). A part with no data is dropped unless it has a
+/// thought, a thought signature or video metadata; a `null` part is dropped. Malformed
+/// `bytes` and `Duration` text fails with protojson's text.
 fn convert_part(src: &Value) -> Result<Option<Part>, String> {
     if src.is_null() {
         return Ok(None);
@@ -445,8 +440,8 @@ fn convert_part(src: &Value) -> Result<Option<Part>, String> {
     Ok(Some(part))
 }
 
-/// A protojson `google.protobuf.Duration` field as Go `AsDuration`; an absent or `null` one is
-/// zero (Go `(*Duration)(nil).AsDuration()`).
+/// A protojson `google.protobuf.Duration` field as a [`chrono::TimeDelta`]; an absent or `null`
+/// one is zero.
 fn duration_field(v: &Value, key: &str) -> Result<chrono::TimeDelta, String> {
     field(v, key).map_or(Ok(chrono::TimeDelta::zero()), parse_duration)
 }

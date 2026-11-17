@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `tool/toolconfirmation.ToolConfirmation`.
+//! The confirmation a tool asks of the user before it runs.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -27,7 +27,7 @@ pub struct ToolConfirmation {
     /// The user's decision: `true` if approved.
     #[serde(default)]
     pub confirmed: bool,
-    /// Application-specific data related to the request (Go `any`; `None` encodes as `null`).
+    /// Application-specific data related to the request (`None` encodes as `null`).
     #[serde(default)]
     pub payload: Option<Value>,
 }

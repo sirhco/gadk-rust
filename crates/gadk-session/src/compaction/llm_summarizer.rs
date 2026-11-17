@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go session/compaction/llm_summarizer.go: the default, model-backed [`Summarizer`].
+//! The default, model-backed [`Summarizer`].
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -31,11 +31,11 @@ use crate::Event;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
-/// Go `ConversationHistoryPlaceholder`: the token an [`LlmSummarizer`] prompt template must
-/// contain. It is replaced with the rendered event transcript.
+/// The token an [`LlmSummarizer`] prompt template must contain. It is replaced with the
+/// rendered event transcript.
 pub const CONVERSATION_HISTORY_PLACEHOLDER: &str = "{conversation_history}";
 
-/// Go `defaultPromptTemplate`, fragment for fragment.
+/// The default prompt, as a single template with the placeholder.
 pub(crate) const DEFAULT_PROMPT_TEMPLATE: &str = concat!(
     "The following is a conversation history between a user and an AI agent.",
     " It may or may not start from a compacted history. Please identify and",
@@ -59,16 +59,16 @@ pub(crate) const DEFAULT_PROMPT_TEMPLATE: &str = concat!(
     "{conversation_history}"
 );
 
-/// Go `defaultMaxToolContentChars`.
+/// Default per-part character cap in the transcript.
 const DEFAULT_MAX_TOOL_CONTENT_CHARS: i32 = 2000;
-/// Go `defaultMaxTranscriptChars`.
+/// Default whole-transcript character budget.
 const DEFAULT_MAX_TRANSCRIPT_CHARS: i32 = 200_000;
-/// Go `truncationSuffixBudget`: room reserved per part for "... [truncated N chars]".
+/// Room reserved per part for "... [truncated N chars]".
 const TRUNCATION_SUFFIX_BUDGET: i32 = 32;
-/// Go `lineBreakers`: every character that can end a transcript line.
+/// Every character that can end a transcript line.
 pub(crate) const LINE_BREAKERS: &str = "\r\n\u{b}\u{c}\u{85}\u{2028}\u{2029}";
 
-/// Port of Go `LLMSummarizerConfig`.
+/// Settings for an [`LlmSummarizer`].
 #[derive(Clone, Default)]
 pub struct LlmSummarizerConfig {
     /// The model that writes the summary. Required.
@@ -87,7 +87,7 @@ pub struct LlmSummarizerConfig {
     pub generate_content_config: Option<GenerateContentConfig>,
 }
 
-/// Port of Go `LLMSummarizer`: summarizes events by asking a model.
+/// Summarizes events by asking a model.
 pub struct LlmSummarizer {
     pub(crate) model: Arc<dyn Llm>,
     pub(crate) prompt_template: String,
@@ -97,7 +97,7 @@ pub struct LlmSummarizer {
     pub(crate) timeout: Duration,
 }
 
-/// Go `fmt.Errorf("summarizer model call failed: %w", err)`.
+/// The error of a failed model call: `summarizer model call failed: <cause>`.
 #[derive(Debug, thiserror::Error)]
 enum ModelCallFailed {
     #[error("summarizer model call failed: {0}")]
@@ -107,7 +107,8 @@ enum ModelCallFailed {
 }
 
 impl LlmSummarizer {
-    /// Port of Go `NewLLMSummarizer`.
+    /// Creates a summarizer; fails when the config has no model or a prompt template without
+    /// [`CONVERSATION_HISTORY_PLACEHOLDER`].
     pub fn new(cfg: LlmSummarizerConfig) -> Result<LlmSummarizer, CompactionConfigError> {
         let Some(model) = cfg.model else {
             return Err(CompactionConfigError::new(
@@ -144,7 +145,8 @@ impl LlmSummarizer {
         })
     }
 
-    /// The model call of Go `SummarizeEvents` (the loop over `GenerateContent`).
+    /// Calls the model with `req` and returns the first complete response that has text; a finish
+    /// reason other than `Stop`, or no usable content, is an error.
     async fn call_model(&self, req: LlmRequest) -> Result<SummarizeResult, BoxError> {
         let mut responses = self.model.generate_content(req, false);
         let mut finish_reason: Option<FinishReason> = None;
@@ -185,7 +187,7 @@ impl LlmSummarizer {
         }
     }
 
-    /// Port of Go `(*LLMSummarizer).formatEvents`: one transcript line per rendered part.
+    /// One transcript line per rendered part.
     pub(crate) fn format_events(&self, events: &[Event], cap: i32) -> String {
         let mut lines: Vec<String> = Vec::new();
         for ev in events {
@@ -235,8 +237,8 @@ impl LlmSummarizer {
         lines.join("\n")
     }
 
-    /// Port of Go `(*LLMSummarizer).truncateTo`: caps `text` at `cap` characters (negative =
-    /// no cap) with Go's suffix.
+    /// Caps `text` at `cap` characters (negative =
+    /// no cap), ending with `... [truncated N chars]` when cut.
     pub(crate) fn truncate_to(&self, text: &str, cap: i32) -> String {
         let Ok(cap) = usize::try_from(cap) else {
             return text.to_owned();
@@ -252,7 +254,7 @@ impl LlmSummarizer {
         format!("{kept}... [truncated {} chars]", n - cap)
     }
 
-    /// Port of Go `(*LLMSummarizer).renderTranscript`: the transcript within the budget, after
+    /// The transcript within the budget, after
     /// one shrink pass; refused when it still does not fit.
     pub(crate) fn render_transcript(&self, events: &[Event]) -> Result<String, BoxError> {
         let mut transcript = self.format_events(events, self.max_tool_content_chars);
@@ -283,7 +285,7 @@ impl LlmSummarizer {
         .into())
     }
 
-    /// Port of Go `(*LLMSummarizer).perPartOverhead`: the longest author (in bytes) plus ": "
+    /// The longest author (in bytes) plus ": "
     /// and the newline, plus the truncation-suffix budget.
     fn per_part_overhead(&self, events: &[Event]) -> i32 {
         let longest = events.iter().map(|ev| ev.author.len()).max().unwrap_or(0);
@@ -295,7 +297,7 @@ impl LlmSummarizer {
 
 #[async_trait]
 impl Summarizer for LlmSummarizer {
-    /// Port of Go `(*LLMSummarizer).SummarizeEvents`.
+    /// Summarizes `events` by calling the model on their transcript.
     async fn summarize_events(&self, events: &[Event]) -> Result<SummarizeResult, BoxError> {
         if events.is_empty() {
             return Ok(SummarizeResult::default());
@@ -307,7 +309,7 @@ impl Summarizer for LlmSummarizer {
         let req = LlmRequest {
             model: self.model.name().to_owned(),
             contents: vec![Content::from_text(prompt, "user")],
-            // Go cloneGenConfig: every call owns its config.
+            // Every call owns its config.
             config: self.gen_config.clone(),
             ..Default::default()
         };
@@ -320,18 +322,18 @@ impl Summarizer for LlmSummarizer {
         }
     }
 
-    /// Go's reflect name, as `summarizerTypeName` reports it (Go-parity note 2).
+    /// The type name reported on the compaction span.
     fn type_name(&self) -> &str {
         "LLMSummarizer"
     }
 
-    /// Port of Go `(*LLMSummarizer).GetGoogleLLMVariant`.
+    /// The Google backend of the model, if any.
     fn google_variant(&self) -> Option<Backend> {
         self.model.google_variant()
     }
 }
 
-/// Port of Go `hasText`: a non-thought part with non-blank text.
+/// True for a non-thought part with non-blank text.
 fn has_text(c: Option<&Content>) -> bool {
     c.is_some_and(|c| {
         c.parts
@@ -340,12 +342,12 @@ fn has_text(c: Option<&Content>) -> bool {
     })
 }
 
-/// Go `utf8.RuneCountInString`, as the i32 the budgets use.
+/// The number of characters in `s`, as the i32 the budgets use.
 fn rune_count(s: &str) -> i32 {
     i32::try_from(s.chars().count()).unwrap_or(i32::MAX)
 }
 
-/// Port of Go `stringify`: `{k1: v1, k2: v2}` with sorted keys and Go `%v` values; `""` when
+/// `{k1: v1, k2: v2}` with sorted keys and `%v`-style values; `""` when
 /// empty.
 fn stringify(v: &serde_json::Map<String, serde_json::Value>) -> String {
     if v.is_empty() {
@@ -361,7 +363,7 @@ fn stringify(v: &serde_json::Map<String, serde_json::Value>) -> String {
     format!("{{{body}}}")
 }
 
-/// Port of Go `escapeLines` (a `strings.NewReplacer` whose `\r\n` pair wins over `\r`).
+/// Replaces every line break with `\n`; a `\r\n` pair becomes one `\n`.
 fn escape_lines(text: &str) -> String {
     if !text.contains(|c| LINE_BREAKERS.contains(c)) {
         return text.to_owned();
@@ -381,7 +383,7 @@ fn escape_lines(text: &str) -> String {
     out
 }
 
-/// Port of Go `summarizerGenConfig`: only what shapes prose carries over (Go-parity note 3).
+/// Keeps only what shapes prose: safety settings, temperature, top-p, top-k, seed and labels.
 pub(crate) fn summarizer_gen_config(
     cfg: Option<&GenerateContentConfig>,
 ) -> Option<GenerateContentConfig> {
@@ -397,7 +399,7 @@ pub(crate) fn summarizer_gen_config(
     })
 }
 
-/// Port of Go `placeholderKind`: the stand-in for a part the transcript cannot render.
+/// The stand-in for a part the transcript cannot render.
 fn placeholder_kind(p: &Part) -> String {
     if let Some(b) = &p.inline_data {
         mime_or(&b.mime_type, "inline data")
@@ -412,7 +414,7 @@ fn placeholder_kind(p: &Part) -> String {
     }
 }
 
-/// Port of Go `mimeOr`.
+/// `fallback` when `mime_type` is empty, else `"<mime_type> attachment"`.
 fn mime_or(mime_type: &str, fallback: &str) -> String {
     if mime_type.is_empty() {
         fallback.to_owned()
@@ -421,7 +423,7 @@ fn mime_or(mime_type: &str, fallback: &str) -> String {
     }
 }
 
-/// Port of Go `countRenderedParts`: how many transcript lines a window renders.
+/// How many transcript lines a window renders.
 pub(crate) fn count_rendered_parts(events: &[Event]) -> i32 {
     let mut n = 0i32;
     for ev in events {

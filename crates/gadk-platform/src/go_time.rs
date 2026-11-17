@@ -13,33 +13,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `time` parsing and formatting shared by the gadk crates: `time.Parse(time.RFC3339, s)`,
-//! `t.Format(time.RFC3339Nano)`, `time.Duration` ([`GoDuration`]), `time.ParseDuration`
-//! ([`go_parse_duration`]) and `Duration.String()` ([`go_format_duration`]).
+//! Time parsing and formatting shared by the gadk crates: RFC 3339 parsing
+//! ([`go_parse_rfc3339`]) and formatting ([`go_format_rfc3339_nano`]), a signed nanosecond
+//! duration ([`GoDuration`]), duration-string parsing ([`go_parse_duration`]) and formatting
+//! ([`go_format_duration`]).
 
 use std::fmt;
 
 use chrono::{DateTime, NaiveDate, TimeDelta, TimeZone, Timelike, Utc};
 
-/// Go `time.Duration`: signed nanoseconds.
+/// A duration as signed nanoseconds.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct GoDuration(pub i64);
 
 impl GoDuration {
-    /// Go `time.Nanosecond`.
+    /// One nanosecond.
     pub const NANOSECOND: GoDuration = GoDuration(1);
-    /// Go `time.Microsecond`.
+    /// One microsecond.
     pub const MICROSECOND: GoDuration = GoDuration(1_000);
-    /// Go `time.Millisecond`.
+    /// One millisecond.
     pub const MILLISECOND: GoDuration = GoDuration(1_000_000);
-    /// Go `time.Second`.
+    /// One second.
     pub const SECOND: GoDuration = GoDuration(1_000_000_000);
-    /// Go `time.Minute`.
+    /// One minute.
     pub const MINUTE: GoDuration = GoDuration(60 * 1_000_000_000);
-    /// Go `time.Hour`.
+    /// One hour.
     pub const HOUR: GoDuration = GoDuration(3600 * 1_000_000_000);
 
-    /// `s * time.Second`, saturating at the `i64` range.
+    /// `s` seconds, saturating at the `i64` range.
     pub const fn from_secs(s: i64) -> GoDuration {
         GoDuration(s.saturating_mul(1_000_000_000))
     }
@@ -57,16 +58,16 @@ impl GoDuration {
     }
 }
 
-/// Go's `%v` of a `time.Duration`: [`go_format_duration`].
+/// Displays as [`go_format_duration`] (e.g. `1m30s`).
 impl fmt::Display for GoDuration {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&go_format_duration(*self))
     }
 }
 
-/// Go `time.ParseDuration`: a possibly signed sequence of decimal numbers, each with an optional
-/// fraction and a unit suffix (`ns`, `us`/`µs`/`μs`, `ms`, `s`, `m`, `h`), such as `"300ms"`,
-/// `"-1.5h"` or `"2h45m"`. `Err` is Go's error text, e.g. `time: invalid duration "x"`,
+/// Parses a duration string: a possibly signed sequence of decimal numbers, each with an
+/// optional fraction and a unit suffix (`ns`, `us`/`µs`/`μs`, `ms`, `s`, `m`, `h`), such as
+/// `"300ms"`, `"-1.5h"` or `"2h45m"`. `Err` is the message, e.g. `time: invalid duration "x"`,
 /// `time: missing unit in duration "1"`, `time: unknown unit "d" in duration "1d"`.
 pub fn go_parse_duration(s: &str) -> Result<GoDuration, String> {
     parse_duration_bytes(s.as_bytes())
@@ -74,12 +75,12 @@ pub fn go_parse_duration(s: &str) -> Result<GoDuration, String> {
 
 const LIMIT: u64 = 1 << 63;
 
-/// Go `parseDurationError.Error()`.
+/// The error message for a malformed duration: `time: {message} "<quoted input>"`.
 fn duration_error(message: &str, orig: &[u8]) -> String {
     format!("time: {message} {}", time_quote(orig))
 }
 
-/// Go `time.ParseDuration` over the bytes of a Go string (which need not be UTF-8).
+/// Parses a duration over bytes (which need not be UTF-8).
 fn parse_duration_bytes(orig: &[u8]) -> Result<GoDuration, String> {
     let invalid = || duration_error("invalid duration", orig);
     let mut s = orig;
@@ -101,7 +102,7 @@ fn parse_duration_bytes(orig: &[u8]) -> Result<GoDuration, String> {
         if !(first == b'.' || first.is_ascii_digit()) {
             return Err(invalid());
         }
-        // Consume [0-9]* (Go leadingInt).
+        // Consume `[0-9]*`.
         let before = s.len();
         let mut v: u64 = 0;
         while let Some(&c) = s.first() {
@@ -118,7 +119,7 @@ fn parse_duration_bytes(orig: &[u8]) -> Result<GoDuration, String> {
             s = &s[1..];
         }
         let pre = before != s.len();
-        // Consume (\.[0-9]*)? (Go leadingFraction).
+        // Consume `(\.[0-9]*)?`.
         let mut f: u64 = 0;
         let mut scale: f64 = 1.0;
         let mut post = false;
@@ -180,7 +181,7 @@ fn parse_duration_bytes(orig: &[u8]) -> Result<GoDuration, String> {
         }
         v *= unit;
         if f > 0 {
-            // Go: v += uint64(float64(f) * (float64(unit) / scale)), a truncating conversion;
+            // `v += (f as f64 * (unit / scale)) as u64`, a truncating conversion;
             // the addend is at most 3.6e12 (ns per hour), so neither cast loses range.
             #[allow(
                 clippy::cast_precision_loss,
@@ -193,22 +194,22 @@ fn parse_duration_bytes(orig: &[u8]) -> Result<GoDuration, String> {
                 return Err(invalid());
             }
         }
-        // Go's uint64 addition wraps: both terms are at most 2^63, so only 2^63 + 2^63 wraps,
-        // to 0, which then passes the check (Go 1.27 parses "9223372036854775808ns" twice as 0).
+        // The u64 addition wraps: both terms are at most 2^63, so only 2^63 + 2^63 wraps,
+        // to 0, which then passes the check (`"9223372036854775808ns"` parses twice as 0).
         d = d.wrapping_add(v);
         if d > LIMIT {
             return Err(invalid());
         }
     }
     if neg {
-        // Go: -Duration(d), wrapping 2^63 to math.MinInt64.
+        // Negation wraps 2^63 to `i64::MIN`.
         return Ok(GoDuration(0i64.wrapping_sub_unsigned(d)));
     }
     i64::try_from(d).map(GoDuration).map_err(|_| invalid())
 }
 
-/// Go `time.quote` (format.go): double-quoted, `"` and `\` backslash-escaped, and every byte of
-/// a control character or a non-ASCII rune written as `\xNN` (an invalid byte is one rune of
+/// Quotes `s` in double quotes, `"` and `\` backslash-escaped, and every byte of a control
+/// character or a non-ASCII character written as `\xNN` (an invalid byte is one character of
 /// width 1; an encoded U+FFFD is three bytes).
 fn time_quote(s: &[u8]) -> String {
     let mut out = String::with_capacity(s.len() + 2);
@@ -232,8 +233,8 @@ fn time_quote(s: &[u8]) -> String {
     out
 }
 
-/// Go `utf8.DecodeRune` as `for range` over a string uses it: the first rune of `s` and its byte
-/// width; an invalid byte is U+FFFD of width 1. `s` must not be empty.
+/// The first character of `s` and its byte width; an invalid byte is U+FFFD of width 1. `s`
+/// must not be empty.
 fn decode_rune(s: &[u8]) -> (char, usize) {
     let valid = s
         .utf8_chunks()
@@ -246,7 +247,7 @@ fn decode_rune(s: &[u8]) -> (char, usize) {
     }
 }
 
-/// Go `Duration.String()`: `"0s"`; under one second the largest of ns, µs and ms that keeps an
+/// Formats a duration: `"0s"`; under one second the largest of ns, µs and ms that keeps an
 /// integer part (`"1.5µs"`, `"500ms"`); from one second up `[Nh][Nm]S[.fff]s` with hours and
 /// minutes written once a larger unit is present (`"1m0s"`, `"1h0m0s"`); a leading `-` for a
 /// negative duration.
@@ -282,8 +283,8 @@ pub fn go_format_duration(d: GoDuration) -> String {
     out
 }
 
-/// Go `fmtFrac`: divides `v` by `10^prec` and returns the fraction as `.ddd` with trailing zeros
-/// dropped (empty, without the point, when the fraction is zero).
+/// Divides `v` by `10^prec` and returns the fraction as `.ddd` with trailing zeros dropped
+/// (empty, without the point, when the fraction is zero).
 fn fmt_frac(v: &mut u64, prec: u32) -> String {
     let p = 10u64.pow(prec);
     let frac = *v % p;
@@ -295,9 +296,8 @@ fn fmt_frac(v: &mut u64, prec: u32) -> String {
     format!(".{}", digits.trim_end_matches('0'))
 }
 
-/// Go `time.Parse(time.RFC3339, s)`, reduced to the instant. That is Go's general layout
-/// parser for "2006-01-02T15:04:05Z07:00", which is what decides when its RFC 3339 fast path
-/// declines:
+/// Parses an RFC 3339 timestamp (`2006-01-02T15:04:05Z07:00` layout), reduced to the instant.
+/// The accepted forms are:
 /// - exactly four year digits and two month and day digits, with the day checked against the
 ///   month (leap years included);
 /// - a one- or two-digit hour (0-23), and two-digit minutes and seconds (0-59, so a leap
@@ -376,10 +376,10 @@ pub fn go_parse_rfc3339(s: &str) -> Option<DateTime<Utc>> {
     at.checked_sub_signed(TimeDelta::try_seconds(offset)?)
 }
 
-/// Go `t.Format(time.RFC3339Nano)` (`2006-01-02T15:04:05.999999999Z07:00`) of `t` in its own
+/// Formats `t` as RFC 3339 with nanoseconds (`2006-01-02T15:04:05.999999999Z07:00`) in its own
 /// zone: the fraction's trailing zeros trimmed (the fraction dropped when zero), `Z` for a zero
-/// offset, `±hh:mm` otherwise. Go's JSON marshalling refuses years outside 0..=9999; callers
-/// that marshal check the year themselves.
+/// offset, `±hh:mm` otherwise. Callers that marshal to JSON must check for themselves that the
+/// year is within 0..=9999.
 pub fn go_format_rfc3339_nano<Tz: TimeZone>(t: &DateTime<Tz>) -> String {
     let t = t.fixed_offset();
     let mut s = t.format("%Y-%m-%dT%H:%M:%S").to_string();

@@ -14,7 +14,7 @@
 // limitations under the License.
 
 //! [`VertexAiSessionService`]: a [`SessionService`] backed by Vertex AI Agent Engine sessions
-//! (port of ADK-Go `session/vertexai`).
+//! (the session store of an Agent Engine).
 
 pub(crate) mod client;
 pub(crate) mod convert;
@@ -40,28 +40,29 @@ use client::{SessionClient, prefix_error};
 
 pub use local::VertexSession;
 
-/// How a [`VertexAiSessionService`] reaches its Agent Engine (Go `VertexAIServiceConfig` plus
-/// the `option.ClientOption`s Go passes to `aiplatform.NewSessionClient`).
+/// How a [`VertexAiSessionService`] reaches its Agent Engine: the project, location and engine,
+/// plus the `endpoint`, `credentials`, `without_authentication`, `http_client` and `env`
+/// settings of the underlying client.
 #[derive(Clone)]
 pub struct VertexAiSessionServiceConfig {
-    /// The Google Cloud project ID (Go `ProjectID`).
+    /// The Google Cloud project ID.
     pub project_id: String,
-    /// The engine's location (Go `Location`).
+    /// The engine's location.
     pub location: String,
-    /// The reasoning engine's numeric ID (Go `ReasoningEngine`); `None` resolves the engine
+    /// The reasoning engine's numeric ID; `None` resolves the engine
     /// from each request's app name: a numeric app name is the ID, and an app name of the form
     /// `projects/…/locations/…/reasoningEngines/{id}` names it.
     pub reasoning_engine: Option<String>,
-    /// The base URL (Go `option.WithEndpoint`); `None` = `https://aiplatform.googleapis.com`,
-    /// whatever the location (Go's session client default).
+    /// The base URL; `None` = `https://aiplatform.googleapis.com`,
+    /// whatever the location.
     pub endpoint: Option<String>,
-    /// The credentials sent with every request (Go `option.WithAuthCredentials`); `None`
+    /// The credentials sent with every request; `None`
     /// resolves Application Default Credentials through [`env`](Self::env) with the
     /// `cloud-platform` scope.
     pub credentials: Option<Credentials>,
-    /// Send no credentials (Go `option.WithoutAuthentication`).
+    /// Send no credentials.
     pub without_authentication: bool,
-    /// The HTTP client (Go `option.WithHTTPClient`); `None` builds a reqwest client.
+    /// The HTTP client; `None` builds a reqwest client.
     pub http_client: Option<Arc<dyn HttpClient>>,
     /// Where `GOOGLE_APPLICATION_CREDENTIALS` is read.
     pub env: Arc<dyn EnvProvider>,
@@ -96,19 +97,18 @@ impl std::fmt::Debug for VertexAiSessionServiceConfig {
     }
 }
 
-/// A [`SessionService`] that keeps sessions and events in a Vertex AI Agent Engine (Go
-/// `vertexAIService`).
+/// A [`SessionService`] that keeps sessions and events in a Vertex AI Agent Engine.
 pub struct VertexAiSessionService {
     client: client::SessionClient,
 }
 
 impl VertexAiSessionService {
-    /// A service for `config` (Go `NewSessionService`). Synchronous; only Application Default
+    /// A service for `config`. Synchronous; only Application Default
     /// Credentials need a Tokio runtime.
     ///
     /// # Errors
     ///
-    /// [`SessionError::Backend`] with Go's text `failed to create Vertex AI client: could not
+    /// [`SessionError::Backend`] with the text `failed to create Vertex AI client: could not
     /// establish connection to the aiplatform server: {adc error}` when Application Default
     /// Credentials cannot be built.
     pub fn new(config: VertexAiSessionServiceConfig) -> Result<Self, SessionError> {
@@ -155,7 +155,7 @@ impl SessionService for VertexAiSessionService {
         Ok(Arc::new(session))
     }
 
-    /// Go `Get`: `GetSession` and `ListEvents` run concurrently; a not-found from either is
+    /// `GetSession` and `ListEvents` run concurrently; a not-found from either is
     /// [`SessionError::NotFound`], else the session's error is reported before the events'.
     async fn get(&self, req: GetRequest) -> Result<Arc<dyn Session>, SessionError> {
         validate_session_request(&req.app_name, &req.user_id, &req.session_id)?;
@@ -205,7 +205,7 @@ impl SessionService for VertexAiSessionService {
             .map_err(|e| prefix_error("failed to delete session", e))
     }
 
-    /// Go `AppendEvent`: persists the event without its `temp:` state keys (a partial event
+    /// Persists the event without its `temp:` state keys (a partial event
     /// is not sent), then applies the untrimmed event to the local session, which must be a
     /// [`VertexSession`]. `event` is not changed.
     async fn append_event(
@@ -214,7 +214,7 @@ impl SessionService for VertexAiSessionService {
         event: &mut Event,
     ) -> Result<(), SessionError> {
         if session.id().is_empty() {
-            // Go's `event == nil` half cannot happen: `event` is a reference.
+            // The "event is missing" half of the message cannot happen: `event` is a reference.
             return Err(SessionError::InvalidRequest(format!(
                 "session_id and event are required, got session_id: {}, event_id: false",
                 go_quote(session.id())
@@ -232,7 +232,7 @@ impl SessionService for VertexAiSessionService {
             .await
             .map_err(|e| prefix_error("failed to append event", e))?;
         let Some(local) = session.as_any().downcast_ref::<VertexSession>() else {
-            // Go prints the session's dynamic type with `%T`.
+            // The session's concrete type is not named in the message.
             return Err(SessionError::InvalidRequest(
                 "AppendEvent for Vertex AI service only supports sessions created by it, got \
                  another Session implementation"
@@ -245,7 +245,7 @@ impl SessionService for VertexAiSessionService {
     }
 }
 
-/// Go's Get and Delete validation.
+/// The validation `get` and `delete` share: every field must be non-empty.
 fn validate_session_request(
     app_name: &str,
     user_id: &str,

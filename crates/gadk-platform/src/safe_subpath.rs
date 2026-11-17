@@ -13,14 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! ADK-Go `internal/utils/fs.go`: [`safe_subpath`] (Go `utils.SafeSubpath`), the containment
-//! check for a relative path read from an untrusted config, with Go's two sentinels
-//! ([`ERR_NOT_VALID_RELATIVE_PATH`], [`ERR_SYMLINK_IN_RELATIVE_PATH`]) and [`is_link_like`].
+//! [`safe_subpath`]: the containment check for a relative path read from an untrusted config,
+//! with its two error kinds ([`ERR_NOT_VALID_RELATIVE_PATH`],
+//! [`ERR_SYMLINK_IN_RELATIVE_PATH`]) and [`is_link_like`].
 //!
-// Divergence (ledger 1b): Unix path semantics only, as gadk's other `filepath` ports
-// (`go_path_clean`, `go_filepath_rel`, `go_filepath_is_local`); Go's `runtime.GOOS ==
-// "windows"` branch (forbidden characters, trailing dot/space, drives, UNC prefixes, reserved
-// device names, junctions) is not ported.
+// Unix path semantics only, as in the other path helpers (`go_path_clean`, `go_filepath_rel`,
+// `go_filepath_is_local`); the Windows rules (forbidden characters, trailing dot/space,
+// drives, UNC prefixes, reserved device names, junctions) are not implemented.
 
 use std::fmt;
 use std::io;
@@ -32,30 +31,30 @@ use crate::go_path::{
     go_filepath_is_local, go_filepath_rel, go_path_clean, go_path_dir, go_path_join,
 };
 
-/// Go `utils.ErrNotValidRelativePath`'s text: the reference, read as a string, is not a
-/// relative path below the base directory.
+/// Text of the error for a reference that, read as a string, is not a relative path below the
+/// base directory.
 pub const ERR_NOT_VALID_RELATIVE_PATH: &str =
     "path is not a relative path inside the base directory";
 
-/// Go `utils.ErrSymlinkInRelativePath`'s text: a link on the way leads outside the base
-/// directory. A link that stays inside is not an error.
+/// Text of the error for a link on the way that leads outside the base directory. A link that
+/// stays inside is not an error.
 pub const ERR_SYMLINK_IN_RELATIVE_PATH: &str =
     "path leads outside the base directory through a link";
 
-/// Which Go error a [`SafeSubpathError`] wraps (Go `errors.Is` against the two sentinels).
+/// Which kind of failure a [`SafeSubpathError`] reports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SafeSubpathErrorKind {
-    /// Go `errors.Is(err, utils.ErrNotValidRelativePath)`.
+    /// The reference is not a relative path below the base ([`ERR_NOT_VALID_RELATIVE_PATH`]).
     NotValidRelativePath,
-    /// Go `errors.Is(err, utils.ErrSymlinkInRelativePath)`.
+    /// A link on the way leads outside the base ([`ERR_SYMLINK_IN_RELATIVE_PATH`]).
     SymlinkInRelativePath,
     /// Neither sentinel: a base that is not absolute, or a filesystem error while following
     /// links (`cannot resolve links: lstat …`, `too many links in …`).
     Other,
 }
 
-/// An error of [`safe_subpath`]: its [`kind`](Self::kind) and Go's full error text.
+/// An error of [`safe_subpath`]: its [`kind`](Self::kind) and full error text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SafeSubpathError {
     kind: SafeSubpathErrorKind,
@@ -84,17 +83,17 @@ impl SafeSubpathError {
         }
     }
 
-    /// Which of Go's sentinels this error wraps.
+    /// Which kind of failure this error reports.
     pub fn kind(&self) -> SafeSubpathErrorKind {
         self.kind
     }
 
-    /// Go `errors.Is(err, utils.ErrNotValidRelativePath)`.
+    /// True for [`SafeSubpathErrorKind::NotValidRelativePath`].
     pub fn is_not_valid_relative_path(&self) -> bool {
         self.kind == SafeSubpathErrorKind::NotValidRelativePath
     }
 
-    /// Go `errors.Is(err, utils.ErrSymlinkInRelativePath)`.
+    /// True for [`SafeSubpathErrorKind::SymlinkInRelativePath`].
     pub fn is_symlink_in_relative_path(&self) -> bool {
         self.kind == SafeSubpathErrorKind::SymlinkInRelativePath
     }
@@ -108,7 +107,7 @@ impl fmt::Display for SafeSubpathError {
 
 impl std::error::Error for SafeSubpathError {}
 
-/// Go `utils.SafeSubpath(base, rel)`: resolves `rel` below `base` and checks that the result
+/// Resolves `rel` below `base` and checks that the result stays inside it.
 /// stays inside it.
 ///
 /// `base` must be absolute and is trusted; `rel` is not. On success the result is the
@@ -124,7 +123,7 @@ impl std::error::Error for SafeSubpathError {}
 /// is judged by where it points. A component that does not exist, or that sits below a
 /// non-directory, is not an error: the path is returned and the caller's read reports it.
 pub fn safe_subpath(base: &Path, rel: &str) -> Result<(PathBuf, String), SafeSubpathError> {
-    // Go: internal/utils/fs.go SafeSubpath
+    // Validation order: base, empty, NUL, locality, containment, then links.
     let base = base.to_string_lossy();
     if !base.starts_with('/') {
         return Err(SafeSubpathError::other(
@@ -162,11 +161,11 @@ pub fn safe_subpath(base: &Path, rel: &str) -> Result<(PathBuf, String), SafeSub
     Ok((PathBuf::from(real), r))
 }
 
-/// Go `resolveInside`: follows the links in `target` and reports where it really lands;
+/// Follows the links in `target` and reports where it really lands;
 /// [`ERR_SYMLINK_IN_RELATIVE_PATH`] when that is not below `base`, itself followed the same
 /// way so a base reached through a link is trusted.
 fn resolve_inside(base: &str, target: &str) -> Result<String, SafeSubpathError> {
-    // Go: internal/utils/fs.go resolveInside
+    // Resolve both paths through their links, then compare them.
     let real_base = follow_links(base)
         .map_err(|e| SafeSubpathError::other(format!("cannot resolve links in base: {e}")))?;
     let real_target = follow_links(target)
@@ -180,18 +179,18 @@ fn resolve_inside(base: &str, target: &str) -> Result<String, SafeSubpathError> 
     }
 }
 
-/// Go `maxLinkFollows`: the number of links followed on one path, as `filepath.EvalSymlinks`
-/// bounds it, so a link loop is an error rather than a hang.
+/// The number of links followed on one path before giving up, so a link loop is an error
+/// rather than a hang.
 const MAX_LINK_FOLLOWS: usize = 255;
 
-/// Go `followLinks`: walks the absolute path `p` one component at a time and replaces every
+/// Walks the absolute path `p` one component at a time and replaces every
 /// link by its target, splicing the target in uncleaned so a `..` in it applies to whatever
 /// the walk has reached (in `s/../y.yaml`, what `s` points at). A link whose target does not
 /// exist is still followed by name; a component that does not exist, or sits below a
 /// non-directory, is walked past as a plain name (a later `..` can climb back into a
 /// directory that exists, and the components after it are still examined).
 fn follow_links(p: &str) -> Result<String, String> {
-    // Go: internal/utils/fs.go followLinks
+    // Components are consumed left to right; a link target is spliced in front of the rest.
     let mut cur = "/".to_owned();
     let mut rest: Vec<String> = p.trim_matches('/').split('/').map(str::to_owned).collect();
     let mut follows = 0usize;
@@ -264,10 +263,9 @@ fn follow_links(p: &str) -> Result<String, String> {
     Ok(go_path_clean(&cur))
 }
 
-/// Go `isLinkLike`: whether a directory entry may redirect a read somewhere other than where
-/// its own name sits in the tree. On Unix that is a symbolic link (Go's `ModeIrregular`
-/// reparse points exist only on Windows).
+/// Whether a directory entry may redirect a read somewhere other than where its own name sits
+/// in the tree. On Unix that is a symbolic link.
 pub fn is_link_like(file_type: &std::fs::FileType) -> bool {
-    // Go: internal/utils/fs.go isLinkLike
+    // Only symbolic links redirect a read on Unix.
     file_type.is_symlink()
 }

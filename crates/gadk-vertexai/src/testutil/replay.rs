@@ -13,9 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! [`ReplayServer`]: serves one of Go's recorded Agent Engine conversations
+//! [`ReplayServer`]: serves one recorded Agent Engine conversation
 //! (`testdata/replays/{stem}.json`) strictly, answering each REST request with the first unused
-//! recorded call of the same gRPC method and an equal request (Go `rpcreplay`'s matching).
+//! recorded call of the same gRPC method and an equal request.
 
 use std::sync::Arc;
 
@@ -27,7 +27,7 @@ use super::{error_response, full_method, grpc_request};
 
 /// A strict replay fake on 127.0.0.1 (needs a running tokio runtime).
 ///
-/// Each request is mapped back to the gRPC call Go's REST client made it from
+/// Each request is mapped back to the gRPC call the REST request stands for
 /// ([`grpc_request`](super::grpc_request)) and answered with the first unused recorded call
 /// whose method is the same and whose request is equal under [`json_eq`]: the recorded
 /// `response` as a 200 JSON body, or the recorded `error` as Google's JSON error with the

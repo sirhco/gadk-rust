@@ -13,17 +13,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go's built-in MIME table (`mime.builtinTypes`) and `http.DetectContentType`, shared by the
-//! launcher's web UI (`http.ServeContent`) and the agentanalytics GCS offloader (the storage
-//! client's `gensupport` content sniffing).
+//! A built-in MIME table (extension to type) and content sniffing ([`detect_content_type`]),
+//! shared by the launcher's web UI and the agentanalytics GCS offloader.
 //!
-//! `http.ServeContent` types a file by `mime.TypeByExtension(filepath.Ext(name))` and, when that is
-//! empty, by sniffing its first 512 bytes. Go's table is the built-in one augmented by the
-//! system's MIME database on Unix (`/etc/mime.types`, `/etc/apache2/mime.types`, FreeDesktop
-//! `globs2`); gadk uses the built-in table alone, so every machine answers alike (ledger 6). For
-//! the bundle's extensions (`.css`, `.html`, `.js`, `.json`, `.svg`) both give the same types.
+//! A file is typed by [`type_by_extension`] on its extension and, when that is empty, by
+//! sniffing its first 512 bytes. Only the built-in table is used, not the system's MIME
+//! database (`/etc/mime.types` and the like), so every machine answers alike; for the bundle's
+//! extensions (`.css`, `.html`, `.js`, `.json`, `.svg`) both give the same types.
 
-/// Go `mime.builtinTypesLower` (Go 1.27 `mime/type.go`), sorted by extension.
+/// Extension to MIME type, sorted by extension.
 const BUILTIN_TYPES: &[(&str, &str)] = &[
     (".ai", "application/postscript"),
     (".apk", "application/vnd.android.package-archive"),
@@ -101,8 +99,8 @@ const BUILTIN_TYPES: &[(&str, &str)] = &[
     (".zip", "application/zip"),
 ];
 
-/// Go `mime.TypeByExtension(ext)` over the built-in table: `ext` (with its leading dot) looked up
-/// as given, then lower-cased; `""` when unknown.
+/// The MIME type for `ext` over the built-in table: `ext` (with its leading dot) looked up as
+/// given, then lower-cased; `""` when unknown.
 pub fn type_by_extension(ext: &str) -> &'static str {
     let find = |e: &str| {
         BUILTIN_TYPES
@@ -115,11 +113,11 @@ pub fn type_by_extension(ext: &str) -> &'static str {
     }
 }
 
-/// Go `internal.SniffLen`: the sniffer reads at most this many bytes.
+/// The sniffer reads at most this many bytes.
 pub const SNIFF_LEN: usize = 512;
 
-/// Go `http.DetectContentType` (`net/http/internal/sniff.go`): the WHATWG MIME sniffing
-/// algorithm over the first [`SNIFF_LEN`] bytes, `application/octet-stream` when nothing matches.
+/// Detects a content type with the WHATWG MIME sniffing algorithm over the first [`SNIFF_LEN`]
+/// bytes, `application/octet-stream` when nothing matches.
 pub fn detect_content_type(data: &[u8]) -> &'static str {
     let data = &data[..data.len().min(SNIFF_LEN)];
     let first_non_ws = data.iter().position(|&b| !is_ws(b)).unwrap_or(data.len());
@@ -129,32 +127,33 @@ pub fn detect_content_type(data: &[u8]) -> &'static str {
         .unwrap_or("application/octet-stream")
 }
 
-/// Go `isWS`: the whitespace bytes of the MIME sniffing spec.
+/// True for the whitespace bytes of the MIME sniffing spec.
 fn is_ws(b: u8) -> bool {
     matches!(b, b'\t' | b'\n' | b'\x0c' | b'\r' | b' ')
 }
 
-/// Go `isTT`: a tag-terminating byte.
+/// True for a tag-terminating byte.
 fn is_tt(b: u8) -> bool {
     matches!(b, b' ' | b'>')
 }
 
-/// Go's `sniffSig` implementations.
+/// The kinds of sniffing signature.
 enum Sig {
-    /// Go `htmlSig`.
+    /// An HTML tag name, matched case-insensitively after leading whitespace and followed by a
+    /// tag-terminating byte.
     Html(&'static [u8]),
-    /// Go `maskedSig`.
+    /// A byte pattern under a mask, optionally after leading whitespace.
     Masked {
         mask: &'static [u8],
         pat: &'static [u8],
         skip_ws: bool,
         ct: &'static str,
     },
-    /// Go `exactSig`.
+    /// A fixed byte prefix.
     Exact(&'static [u8], &'static str),
-    /// Go `mp4Sig`.
+    /// An MP4 file-type box.
     Mp4,
-    /// Go `textSig`.
+    /// Text: no binary data byte after leading whitespace.
     Text,
 }
 
@@ -167,7 +166,7 @@ const fn masked(mask: &'static [u8], pat: &'static [u8], ct: &'static str) -> Si
     }
 }
 
-/// Go `sniffSignatures`, in order.
+/// The signatures, in the order they are tried.
 const SNIFF_SIGNATURES: &[Sig] = &[
     Sig::Html(b"<!DOCTYPE HTML"),
     Sig::Html(b"<HTML"),
@@ -270,7 +269,7 @@ const SNIFF_SIGNATURES: &[Sig] = &[
 ];
 
 impl Sig {
-    /// Go `sniffSig.match`: the type, or `None` when the signature does not match.
+    /// The content type, or `None` when the signature does not match.
     fn matches(&self, data: &[u8], first_non_ws: usize) -> Option<&'static str> {
         match self {
             Sig::Exact(sig, ct) => data.starts_with(sig).then_some(*ct),
@@ -317,7 +316,7 @@ impl Sig {
     }
 }
 
-/// Go `mp4Sig.match` (mimesniff § 6.2.1).
+/// Matches an MP4 file-type box (mimesniff § 6.2.1).
 fn mp4(data: &[u8]) -> Option<&'static str> {
     if data.len() < 12 {
         return None;

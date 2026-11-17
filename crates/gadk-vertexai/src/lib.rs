@@ -13,17 +13,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Vertex AI Agent Engine services (port of ADK-Go `session/vertexai`, `memory/vertexai` and
-//! `tool/exampletool/vertexai`).
+//! Vertex AI Agent Engine services: sessions, memory and an Example Store provider.
 //!
 //! [`session::VertexAiSessionService`] keeps sessions and their events in an Agent Engine
 //! (reasoning engine) session store; [`memory::VertexAiMemoryService`] generates and retrieves
 //! memories with the engine's Memory Bank; [`reasoning_engine::ReasoningEngineClient`] creates
-//! and updates the engine itself (the calls `adkgo deploy agentengine` makes);
+//! and updates the engine itself (the calls the ADK deploy CLI makes for an Agent Engine);
 //! [`example_store::new_provider`] builds a `gadk_tools::example::Provider` that searches a
 //! Vertex AI Example Store for few-shot examples. All speak the Vertex AI `v1beta1` REST API
 //! through gadk's own REST transport, with the resource names, request bodies and error texts
-//! ADK-Go uses, so a gadk service and an ADK-Go service can share one engine. Requests are
+//! ADK servers use, so a gadk service and an ADK service can share one engine. Requests are
 //! authenticated with Application Default Credentials unless credentials are given.
 //!
 //! ```no_run

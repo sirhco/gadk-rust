@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Generation config types (port of genai v1.77.0 `types.go`).
+//! Generation config types.
 
 use crate::content::Content;
 use crate::schema::Schema;
@@ -25,7 +25,7 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 
 crate::string_enum!(
-    /// Port of genai `ThinkingLevel`. The number of thoughts tokens that the model should generate.
+    /// The number of thoughts tokens that the model should generate.
     ThinkingLevel {
         Unspecified => "THINKING_LEVEL_UNSPECIFIED",
         Minimal => "MINIMAL",
@@ -36,7 +36,7 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// Port of genai `ProminentPeople`. Controls whether prominent people (celebrities) generation
+    /// Controls whether prominent people (celebrities) generation
     /// is allowed. If used with personGeneration, personGeneration enum would take precedence. For
     /// instance, if ALLOW_NONE is set, all person generation would be blocked. If this field is
     /// unspecified, the default behavior is to allow prominent people. This enum is not supported
@@ -49,7 +49,7 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// Port of genai `HarmCategory`. The harm category to be blocked.
+    /// The harm category to be blocked.
     HarmCategory {
         Unspecified => "HARM_CATEGORY_UNSPECIFIED",
         Harassment => "HARM_CATEGORY_HARASSMENT",
@@ -66,7 +66,7 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// Port of genai `HarmBlockMethod`. The method for blocking content. If not specified, the
+    /// The method for blocking content. If not specified, the
     /// default behavior is to use the probability score. This enum is not supported in Gemini API.
     HarmBlockMethod {
         Unspecified => "HARM_BLOCK_METHOD_UNSPECIFIED",
@@ -76,7 +76,7 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// Port of genai `HarmBlockThreshold`. The threshold for blocking content. If the harm
+    /// The threshold for blocking content. If the harm
     /// probability exceeds this threshold, the content will be blocked.
     HarmBlockThreshold {
         Unspecified => "HARM_BLOCK_THRESHOLD_UNSPECIFIED",
@@ -89,7 +89,7 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// Port of genai `AudioTranscriptionConfigMode`. Transcription mode.
+    /// Transcription mode.
     AudioTranscriptionConfigMode {
         Unspecified => "MODE_UNSPECIFIED",
         Verbatim => "VERBATIM",
@@ -98,7 +98,7 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// Port of genai `MediaResolution`. The media resolution to use.
+    /// The media resolution to use.
     MediaResolution {
         Unspecified => "MEDIA_RESOLUTION_UNSPECIFIED",
         Low => "MEDIA_RESOLUTION_LOW",
@@ -108,7 +108,7 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// Port of genai `Modality`. Server content modalities.
+    /// Server content modalities.
     Modality {
         Unspecified => "MODALITY_UNSPECIFIED",
         Text => "TEXT",
@@ -119,7 +119,7 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// Port of genai `ServiceTier`. Pricing and performance service tier.
+    /// Pricing and performance service tier.
     ServiceTier {
         Unspecified => "unspecified",
         Flex => "flex",
@@ -129,14 +129,14 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// Port of genai `ResourceScope`. Resource scope.
+    /// Resource scope.
     ResourceScope {
         Collection => "COLLECTION",
     }
 );
 
 crate::string_enum!(
-    /// Port of genai `FeatureSelectionPreference`. Options for feature selection preference.
+    /// Options for feature selection preference.
     FeatureSelectionPreference {
         Unspecified => "FEATURE_SELECTION_PREFERENCE_UNSPECIFIED",
         PrioritizeQuality => "PRIORITIZE_QUALITY",
@@ -146,7 +146,7 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// Port of genai `InteractionStatus`. The different activity states of the live session.
+    /// The different activity states of the live session.
     InteractionStatus {
         Unspecified => "INTERACTION_STATUS_UNSPECIFIED",
         InProgress => "IN_PROGRESS",
@@ -155,7 +155,7 @@ crate::string_enum!(
     }
 );
 
-/// Port of genai types.go `ModelSelectionConfig`. Config for model selection.
+/// Config for model selection.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelSelectionConfig {
@@ -163,7 +163,7 @@ pub struct ModelSelectionConfig {
     pub feature_selection_preference: Option<FeatureSelectionPreference>,
 }
 
-/// Port of genai types.go `VoiceConsentSignature`. The signature of the voice consent check.
+/// The signature of the voice consent check.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VoiceConsentSignature {
@@ -171,7 +171,7 @@ pub struct VoiceConsentSignature {
     pub signature: String,
 }
 
-/// Port of genai types.go `ReplicatedVoiceConfig`. The configuration for the replicated voice
+/// The configuration for the replicated voice
 /// to use.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -194,7 +194,7 @@ pub struct ReplicatedVoiceConfig {
     pub voice_consent_signature: Option<VoiceConsentSignature>,
 }
 
-/// Port of genai types.go `PrebuiltVoiceConfig`. Configuration for a prebuilt voice.
+/// Configuration for a prebuilt voice.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PrebuiltVoiceConfig {
@@ -202,7 +202,7 @@ pub struct PrebuiltVoiceConfig {
     pub voice_name: String,
 }
 
-/// Port of genai types.go `VoiceConfig`. The configuration for the voice to use.
+/// The configuration for the voice to use.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VoiceConfig {
@@ -214,7 +214,7 @@ pub struct VoiceConfig {
     pub voice: String,
 }
 
-/// Port of genai types.go `SpeakerVoiceConfig`. Configuration for a single speaker in a
+/// Configuration for a single speaker in a
 /// multi-speaker setup.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -225,7 +225,7 @@ pub struct SpeakerVoiceConfig {
     pub voice_config: Option<VoiceConfig>,
 }
 
-/// Port of genai types.go `MultiSpeakerVoiceConfig`. Configuration for a multi-speaker
+/// Configuration for a multi-speaker
 /// text-to-speech request.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -234,7 +234,7 @@ pub struct MultiSpeakerVoiceConfig {
     pub speaker_voice_configs: Vec<SpeakerVoiceConfig>,
 }
 
-/// Port of genai types.go `SpeechConfig`. Config for speech generation and transcription.
+/// Config for speech generation and transcription.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpeechConfig {
@@ -246,7 +246,7 @@ pub struct SpeechConfig {
     pub multi_speaker_voice_config: Option<MultiSpeakerVoiceConfig>,
 }
 
-/// Port of genai types.go `ThinkingConfig`. The thinking features configuration.
+/// The thinking features configuration.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThinkingConfig {
@@ -258,7 +258,7 @@ pub struct ThinkingConfig {
     pub thinking_level: Option<ThinkingLevel>,
 }
 
-/// Port of genai types.go `ImageConfigImageOutputOptions`. The image output format for
+/// The image output format for
 /// generated images. This data type is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -269,7 +269,7 @@ pub struct ImageConfigImageOutputOptions {
     pub mime_type: String,
 }
 
-/// Port of genai types.go `ImageConfig`. The image generation configuration to be used in
+/// The image generation configuration to be used in
 /// GenerateContentConfig.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -290,7 +290,7 @@ pub struct ImageConfig {
     pub image_output_options: Option<ImageConfigImageOutputOptions>,
 }
 
-/// Port of genai types.go `GenerationConfigRoutingConfigAutoRoutingMode`. The configuration for
+/// The configuration for
 /// automated routing. When automated routing is specified, the routing will be determined by
 /// the pretrained routing model and customer provided model routing preference. This data type
 /// is not supported in Gemini API.
@@ -301,7 +301,7 @@ pub struct GenerationConfigRoutingConfigAutoRoutingMode {
     pub model_routing_preference: String,
 }
 
-/// Port of genai types.go `GenerationConfigRoutingConfigManualRoutingMode`. The configuration
+/// The configuration
 /// for manual routing. When manual routing is specified, the model will be selected based on
 /// the model name provided. This data type is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -311,7 +311,7 @@ pub struct GenerationConfigRoutingConfigManualRoutingMode {
     pub model_name: String,
 }
 
-/// Port of genai types.go `GenerationConfigRoutingConfig`. The configuration for routing the
+/// The configuration for routing the
 /// request to a specific model. This can be used to control which model is used for the
 /// generation, either automatically or by specifying a model name. This data type is not
 /// supported in Gemini API.
@@ -324,7 +324,7 @@ pub struct GenerationConfigRoutingConfig {
     pub manual_mode: Option<GenerationConfigRoutingConfigManualRoutingMode>,
 }
 
-/// Port of genai types.go `SafetySetting`. A safety setting that affects the safety-blocking
+/// A safety setting that affects the safety-blocking
 /// behavior. A SafetySetting consists of a harm category and a threshold for that category.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -337,7 +337,7 @@ pub struct SafetySetting {
     pub threshold: Option<HarmBlockThreshold>,
 }
 
-/// Port of genai types.go `ModelArmorConfig`. Configuration for Model Armor. Model Armor is a
+/// Configuration for Model Armor. Model Armor is a
 /// Google Cloud service that provides safety and security filtering for prompts and responses.
 /// It helps protect your AI applications from risks such as harmful content, sensitive data
 /// leakage, and prompt injection attacks. This data type is not supported in Gemini API.
@@ -350,13 +350,13 @@ pub struct ModelArmorConfig {
     pub response_template_name: String,
 }
 
-/// Port of genai types.go `LanguageAuto`. Deprecated: Language auto-detection is now the
+/// Deprecated: Language auto-detection is now the
 /// default when language_codes is omitted.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LanguageAuto {}
 
-/// Port of genai types.go `LanguageHints`. Deprecated: Use
+/// Deprecated: Use
 /// AudioTranscriptionConfig.language_codes instead.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -365,7 +365,7 @@ pub struct LanguageHints {
     pub language_codes: Vec<String>,
 }
 
-/// Port of genai types.go `AudioTranscriptionConfig`. The audio transcription configuration in
+/// The audio transcription configuration in
 /// Setup.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -388,7 +388,7 @@ pub struct AudioTranscriptionConfig {
     pub mode: Option<AudioTranscriptionConfigMode>,
 }
 
-/// Port of genai types.go `GenerateContentConfig`. Optional model configuration parameters. For
+/// Optional model configuration parameters. For
 /// more information, see `Content generation parameters
 /// \<<https://cloud.google.com/vertex-ai/generative-ai/docs/multimodal/content-generation-parameters>\>`_.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -466,18 +466,17 @@ pub struct GenerateContentConfig {
     pub continuation_token: Option<Bytes>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub automatic_continuation: Option<bool>,
-    /// Optional. Configuration for persisting output assets to external storage (genai
-    /// v1.77.0; Vertex AI only).
+    /// Optional. Configuration for persisting output assets to external storage (Vertex AI
+    /// only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generation_output_config: Option<GenerationOutputConfig>,
     /// Optional. Configures the logging behavior for a given request; takes precedence over
-    /// the project-level logging config (genai v1.77.0; Gemini API only).
+    /// the project-level logging config (Gemini API only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub store: Option<bool>,
 }
 
-/// Port of genai types.go `GenerationOutputConfig` (v1.77.0). Configuration for persisting
-/// output assets to external storage.
+/// Configuration for persisting output assets to external storage.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerationOutputConfig {

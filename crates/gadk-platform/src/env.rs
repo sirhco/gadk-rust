@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Environment variable access, injectable for tests (port of genai's `envVarProvider`).
+//! Environment variable access, injectable for tests.
 //!
 //! Moved here from gadk-gemini so every model backend shares it; gadk-gemini re-exports it
 //! under the old paths (`gadk_gemini::{EnvProvider, MapEnv, ProcessEnv}`).
@@ -23,7 +23,7 @@ use std::collections::HashMap;
 /// Source of environment variables used by model backends' configuration resolution.
 pub trait EnvProvider: Send + Sync {
     /// Returns the value of `key`, or `None` if it is not set. A variable set to the empty
-    /// string returns `Some("")`, matching genai's `os.LookupEnv` presence semantics.
+    /// string returns `Some("")`: a variable that is set but empty counts as present.
     fn var(&self, key: &str) -> Option<String>;
 }
 

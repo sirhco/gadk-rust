@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Content and Part types (port of genai v1.77.0 `types.go`).
+//! Content and Part types.
 
 use crate::serde_util::{base64_bytes, decode_duration, format_go_seconds, is_zero};
 use bytes::Bytes;
@@ -21,13 +21,13 @@ use chrono::TimeDelta;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-/// genai `RoleUser`.
+/// The role of messages from the user.
 pub const ROLE_USER: &str = "user";
-/// genai `RoleModel`.
+/// The role of messages from the model.
 pub const ROLE_MODEL: &str = "model";
 
 crate::string_enum!(
-    /// Port of genai `MediaProcessing`.
+    /// How the model processes the media of a part.
     MediaProcessing {
         Unspecified => "MEDIA_PROCESSING_UNSPECIFIED",
         Static => "STATIC",
@@ -36,7 +36,7 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// Port of genai `Outcome`.
+    /// The outcome of a code execution.
     Outcome {
         Unspecified => "OUTCOME_UNSPECIFIED",
         Ok => "OUTCOME_OK",
@@ -46,7 +46,7 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// Port of genai `Language`.
+    /// The programming language of executable code.
     Language {
         Unspecified => "LANGUAGE_UNSPECIFIED",
         Python => "PYTHON",
@@ -54,7 +54,7 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// Port of genai `FunctionResponseScheduling`.
+    /// How a function response is scheduled into the conversation.
     FunctionResponseScheduling {
         Unspecified => "SCHEDULING_UNSPECIFIED",
         Silent => "SILENT",
@@ -64,7 +64,7 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// Port of genai `PartMediaResolutionLevel`.
+    /// The media resolution level of a part.
     PartMediaResolutionLevel {
         MediaResolutionUnspecified => "MEDIA_RESOLUTION_UNSPECIFIED",
         MediaResolutionLow => "MEDIA_RESOLUTION_LOW",
@@ -75,7 +75,7 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// Port of genai `ToolType`.
+    /// The type of a server-side tool.
     ToolType {
         Unspecified => "TOOL_TYPE_UNSPECIFIED",
         GoogleSearchWeb => "GOOGLE_SEARCH_WEB",
@@ -87,7 +87,7 @@ crate::string_enum!(
     }
 );
 
-/// Port of genai types.go `PartMediaResolution`.
+/// Media resolution of a part: a [`PartMediaResolutionLevel`] or a token count.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PartMediaResolution {
@@ -97,7 +97,7 @@ pub struct PartMediaResolution {
     pub num_tokens: Option<i32>,
 }
 
-/// Port of genai types.go `ToolCall` (server-side tool call).
+/// A server-side tool call.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolCall {
@@ -109,7 +109,7 @@ pub struct ToolCall {
     pub args: Map<String, Value>,
 }
 
-/// Port of genai types.go `ToolResponse`.
+/// The response to a server-side [`ToolCall`].
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolResponse {
@@ -121,7 +121,7 @@ pub struct ToolResponse {
     pub response: Map<String, Value>,
 }
 
-/// Port of genai types.go `SpeechMetadata`.
+/// Speaker and style metadata of a speech part.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpeechMetadata {
@@ -131,7 +131,7 @@ pub struct SpeechMetadata {
     pub style: String,
 }
 
-/// Port of genai types.go `CodeExecutionResult`.
+/// The result of executing [`ExecutableCode`]: an [`Outcome`] and its output.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CodeExecutionResult {
@@ -143,7 +143,7 @@ pub struct CodeExecutionResult {
     pub id: String,
 }
 
-/// Port of genai types.go `ExecutableCode`.
+/// Code in a given [`Language`] that the model generated and can run.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExecutableCode {
@@ -155,7 +155,7 @@ pub struct ExecutableCode {
     pub id: String,
 }
 
-/// Port of genai types.go `FileData`.
+/// A reference to a file by URI, with its MIME type.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileData {
@@ -167,7 +167,7 @@ pub struct FileData {
     pub mime_type: String,
 }
 
-/// Port of genai types.go `PartialArg`.
+/// One streamed fragment of a function-call argument, addressed by JSON path.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PartialArg {
@@ -185,7 +185,7 @@ pub struct PartialArg {
     pub will_continue: Option<bool>,
 }
 
-/// Port of genai types.go `FunctionCall`.
+/// A function call predicted by the model: a name and its arguments.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FunctionCall {
@@ -201,7 +201,7 @@ pub struct FunctionCall {
     pub will_continue: Option<bool>,
 }
 
-/// Port of genai types.go `FunctionResponseBlob`.
+/// Inline media data carried in a [`FunctionResponsePart`].
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FunctionResponseBlob {
@@ -217,7 +217,7 @@ pub struct FunctionResponseBlob {
     pub display_name: String,
 }
 
-/// Port of genai types.go `FunctionResponseFileData`.
+/// A file reference carried in a [`FunctionResponsePart`].
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FunctionResponseFileData {
@@ -229,13 +229,13 @@ pub struct FunctionResponseFileData {
     pub display_name: String,
 }
 
-/// Go `omitempty` for the string type `MediaProcessing`: unset or `""` is omitted (a decoded
-/// `""` is `Some(MediaProcessing::Unknown(""))`).
+/// Omission rule for an optional [`MediaProcessing`]: unset or `""` is omitted (a decoded `""`
+/// is `Some(MediaProcessing::Unknown(""))`).
 fn media_processing_is_zero(v: &Option<MediaProcessing>) -> bool {
     v.as_ref().is_none_or(|m| m.as_str().is_empty())
 }
 
-/// Port of genai types.go `FunctionResponsePart`.
+/// A media part of a [`FunctionResponse`]: inline data or a file reference.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FunctionResponsePart {
@@ -244,12 +244,12 @@ pub struct FunctionResponsePart {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file_data: Option<FunctionResponseFileData>,
     /// Optional. How the model processes this part's media (video parts only). Not supported
-    /// in Vertex AI (genai v1.77.0). Go's string-typed `omitempty`: `""` is not serialized.
+    /// in Vertex AI. `""` is not serialized.
     #[serde(default, skip_serializing_if = "media_processing_is_zero")]
     pub media_processing: Option<MediaProcessing>,
 }
 
-/// Port of genai types.go `FunctionResponse`.
+/// The result of a function call, sent back to the model.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FunctionResponse {
@@ -267,7 +267,7 @@ pub struct FunctionResponse {
     pub response: Map<String, Value>,
 }
 
-/// Port of genai types.go `Blob`.
+/// Inline binary data with its MIME type; serialized as base64.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Blob {
@@ -283,11 +283,10 @@ pub struct Blob {
     pub mime_type: String,
 }
 
-/// Port of genai types.go `VideoMetadata`.
+/// Start and end offsets (and optional frame rate) of a video part.
 ///
-/// Offsets are Go `time.Duration` values; on the wire they are duration strings,
-/// reproducing genai's custom `MarshalJSON`/`UnmarshalJSON`: encoded as whole
-/// seconds (`"%.0fs"`), zero offsets omitted, and a non-zero end offset forces
+/// Offsets are [`TimeDelta`] values; on the wire they are duration strings, encoded as whole
+/// seconds (`"3s"`), zero offsets omitted, and a non-zero end offset forces
 /// `"startOffset": "0s"` when the start offset is zero.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "VideoMetadataWire", into = "VideoMetadataWire")]
@@ -335,7 +334,7 @@ impl From<VideoMetadata> for VideoMetadataWire {
     }
 }
 
-/// Port of genai types.go `WordInfo`.
+/// A word of a transcription with its start and end offsets.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WordInfo {
@@ -347,10 +346,9 @@ pub struct WordInfo {
     pub end_offset: String,
 }
 
-/// Port of genai types.go `Transcription`.
+/// A transcription of audio, with its language and optional word-level detail.
 ///
-/// Offsets are Go `time.Duration` values; on the wire they are duration strings,
-/// reproducing genai's custom `MarshalJSON`/`UnmarshalJSON` (whole seconds,
+/// Offsets are [`TimeDelta`] values; on the wire they are duration strings (whole seconds,
 /// zero offsets omitted).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "TranscriptionWire", into = "TranscriptionWire")]
@@ -412,7 +410,8 @@ impl From<Transcription> for TranscriptionWire {
     }
 }
 
-/// Port of genai types.go `Part`.
+/// A piece of a [`Content`] message: text, inline data, a file reference, a function call or
+/// response, executable code and its result, or a server-side tool call or response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Part {
@@ -456,7 +455,7 @@ pub struct Part {
     pub speech_metadata: Option<SpeechMetadata>,
 }
 
-/// Port of genai types.go `Content`.
+/// A message: an ordered list of [`Part`]s attributed to a role.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Content {

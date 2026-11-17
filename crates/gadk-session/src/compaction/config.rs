@@ -13,13 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go session/compaction/compaction.go `Config` and `Config.Validate`.
+//! [`Config`] and [`Config::validate`].
 
 use std::sync::Arc;
 
 use super::Summarizer;
 
-/// Configures context compaction for an application (Go `compaction.Config`).
+/// Configures context compaction for an application.
 ///
 /// At least one strategy must be enabled; a `Config` that enables neither is rejected by
 /// [`Config::validate`]. Use `None` (`Option<Config>`) to disable compaction.
@@ -68,7 +68,7 @@ impl std::fmt::Debug for Config {
     }
 }
 
-/// An unusable compaction configuration; the message is Go's error text.
+/// An unusable compaction configuration; the message says which setting is wrong.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{message}")]
 pub struct CompactionConfigError {
@@ -98,9 +98,9 @@ impl Config {
         self.token_threshold > 0
     }
 
-    /// Reports whether the configuration is usable (port of Go `(*Config).Validate`; the checks
-    /// and their texts are Go's, in Go's order). A config with no strategy enabled is an error;
-    /// `None` already expresses "disabled".
+    /// Reports whether the configuration is usable: the checks run in a fixed order and each has
+    /// its own error text. A config with no strategy enabled is an error; `None` already
+    /// expresses "disabled".
     pub fn validate(&self) -> Result<(), CompactionConfigError> {
         let err = |m: String| Err(CompactionConfigError::new(m));
         if self.compaction_interval < 0 {

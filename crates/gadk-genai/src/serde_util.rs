@@ -13,17 +13,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Serde helpers that reproduce Go encoding/json `omitempty` and `[]byte` rules,
-//! plus Go `time.Duration` string parsing/formatting used by genai's custom marshalers.
+//! Serde helpers for the Gemini JSON wire format: zero-value omission (`is_zero`), base64
+//! `bytes`, duration strings such as `"300ms"`, and 64-bit integers encoded as quoted strings.
 use base64::engine::general_purpose::STANDARD;
 use chrono::TimeDelta;
 
-/// Go value-type `omitempty`: true when `v` equals the type's zero value.
+/// True when `v` equals its type's default value; used with `skip_serializing_if` to omit
+/// zero-valued fields.
 pub fn is_zero<T: Default + PartialEq>(v: &T) -> bool {
     *v == T::default()
 }
 
-/// `[]byte` ⇄ standard base64 string. Use with `#[serde(default, skip_serializing_if = "bytes::Bytes::is_empty", with = "crate::serde_util::base64_bytes")]`.
+/// `bytes::Bytes` ⇄ standard base64 string. Use as `with = "crate::serde_util::base64_bytes"`
+/// together with `default` and `skip_serializing_if = "bytes::Bytes::is_empty"`.
 pub mod base64_bytes {
     use super::STANDARD;
     use base64::Engine as _;
@@ -66,20 +68,21 @@ pub mod base64_bytes_opt {
     }
 }
 
-/// Go `time.ParseDuration` (`gadk_platform::go_parse_duration`) as a [`TimeDelta`]: a signed
+/// Parses a duration string (`gadk_platform::go_parse_duration`) into a [`TimeDelta`]: a signed
 /// sequence of decimal numbers with optional fraction and a unit suffix (`ns`, `us`/`µs`/`μs`,
-/// `ms`, `s`, `m`, `h`), e.g. `"300ms"`, `"-1.5h"`, `"2h45m"`. `Err` is Go's error text.
+/// `ms`, `s`, `m`, `h`), e.g. `"300ms"`, `"-1.5h"`, `"2h45m"`. `Err` holds the parser's message.
 pub fn parse_go_duration(orig: &str) -> Result<TimeDelta, String> {
     gadk_platform::go_parse_duration(orig).map(|d| TimeDelta::nanoseconds(d.0))
 }
 
-/// Go `fmt.Sprintf("%.0fs", d.Seconds())`: whole seconds, ties rounded to even.
+/// Formats a duration as whole seconds, e.g. `"3s"`: the value is rounded to a whole number of
+/// seconds, ties to even.
 pub fn format_go_seconds(d: TimeDelta) -> String {
     let secs = d.num_seconds() as f64 + f64::from(d.subsec_nanos()) / 1e9;
     format!("{secs:.0}s")
 }
 
-/// Decodes an optional Go duration string; `None` and `""` are the zero duration.
+/// Decodes an optional duration string; `None` and `""` are the zero duration.
 pub(crate) fn decode_duration<E: serde::de::Error>(s: Option<String>) -> Result<TimeDelta, E> {
     match s.as_deref() {
         None | Some("") => Ok(TimeDelta::zero()),
@@ -87,11 +90,11 @@ pub(crate) fn decode_duration<E: serde::de::Error>(s: Option<String>) -> Result<
     }
 }
 
-/// Go `time.Duration` field behind genai's `InternalDurationJSON` custom marshalers
-/// (e.g. `LiveServerGoAway.TimeLeft`): decoded with [`parse_go_duration`] (`""` and
-/// `null` are zero), encoded as whole seconds with [`format_go_seconds`]. Use with
+/// A [`TimeDelta`] field carried on the wire as a duration string (e.g. the time-left field of
+/// a live go-away message): decoded with [`parse_go_duration`] (`""` and `null` are zero),
+/// encoded as whole seconds with [`format_go_seconds`]. Use with
 /// `#[serde(default, skip_serializing_if = "TimeDelta::is_zero", with = "crate::serde_util::go_duration")]`
-/// so the zero duration is omitted, as genai does.
+/// so the zero duration is omitted.
 pub mod go_duration {
     use chrono::TimeDelta;
     use serde::{Deserialize, Deserializer, Serializer};
@@ -104,7 +107,7 @@ pub mod go_duration {
     }
 }
 
-/// A JSON string or number holding an `int64` (decode side of Go's `,string` option).
+/// A JSON string or number holding an `i64` (decode side of the quoted-integer encoding).
 #[derive(serde::Deserialize)]
 #[serde(untagged)]
 enum I64OrString {
@@ -121,7 +124,7 @@ impl I64OrString {
     }
 }
 
-/// Go `int64` with the `,string` JSON option: encoded as a quoted decimal string.
+/// An `i64` encoded as a quoted decimal string.
 /// Decoding also accepts a bare JSON number. Use with
 /// `#[serde(default, skip_serializing_if = "is_zero", with = "crate::serde_util::i64_string")]`.
 pub mod i64_string {
@@ -138,7 +141,7 @@ pub mod i64_string {
     }
 }
 
-/// Go `*int64` with the `,string` JSON option; `None` is skipped by
+/// An `Option<i64>` encoded as a quoted decimal string; `None` is skipped by
 /// `skip_serializing_if = "Option::is_none"`.
 pub mod i64_string_opt {
     use serde::{Deserialize, Deserializer, Serializer};

@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! GenerateContent response types (port of genai v1.77.0 `types.go`).
+//! GenerateContent response types.
 
 use crate::config::{HarmBlockThreshold, HarmCategory};
 use crate::content::Content;
@@ -26,7 +26,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::BTreeMap;
 
 crate::string_enum!(
-    /// Port of genai `FinishReason`. The reason why the model stopped generating tokens. If empty,
+    /// The reason why the model stopped generating tokens. If empty,
     /// the model has not stopped generating the tokens.
     FinishReason {
         Unspecified => "FINISH_REASON_UNSPECIFIED",
@@ -52,7 +52,7 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// Port of genai `HarmProbability`. The probability of harm for this category.
+    /// The probability of harm for this category.
     HarmProbability {
         Unspecified => "HARM_PROBABILITY_UNSPECIFIED",
         Negligible => "NEGLIGIBLE",
@@ -63,7 +63,7 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// Port of genai `HarmSeverity`. The severity of harm for this category. This enum is not
+    /// The severity of harm for this category. This enum is not
     /// supported in Gemini API.
     HarmSeverity {
         Unspecified => "HARM_SEVERITY_UNSPECIFIED",
@@ -75,7 +75,7 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// Port of genai `URLRetrievalStatus`. The status of the URL retrieval.
+    /// The status of the URL retrieval.
     URLRetrievalStatus {
         Unspecified => "URL_RETRIEVAL_STATUS_UNSPECIFIED",
         Success => "URL_RETRIEVAL_STATUS_SUCCESS",
@@ -86,7 +86,7 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// Port of genai `BlockedReason`. The reason why the prompt was blocked.
+    /// The reason why the prompt was blocked.
     BlockedReason {
         Unspecified => "BLOCKED_REASON_UNSPECIFIED",
         Safety => "SAFETY",
@@ -100,7 +100,7 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// Port of genai `TrafficType`. The traffic type for this request. This enum is not supported
+    /// The traffic type for this request. This enum is not supported
     /// in Gemini API.
     TrafficType {
         Unspecified => "TRAFFIC_TYPE_UNSPECIFIED",
@@ -113,7 +113,7 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// Port of genai `MediaModality`. The modality that this token count applies to.
+    /// The modality that this token count applies to.
     MediaModality {
         Unspecified => "MODALITY_UNSPECIFIED",
         Text => "TEXT",
@@ -125,7 +125,7 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// Port of genai `ModelStage`. The stage of the underlying model. This enum is not supported in
+    /// The stage of the underlying model. This enum is not supported in
     /// Vertex AI.
     ModelStage {
         Unspecified => "MODEL_STAGE_UNSPECIFIED",
@@ -139,7 +139,7 @@ crate::string_enum!(
     }
 );
 
-/// Port of genai types.go `Citation`. A citation for a piece of generatedcontent. This data
+/// A citation for a piece of generatedcontent. This data
 /// type is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -158,7 +158,7 @@ pub struct Citation {
     pub uri: String,
 }
 
-/// Port of genai types.go `CitationMetadata`. Citation information when the model quotes
+/// Citation information when the model quotes
 /// another source.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -167,7 +167,7 @@ pub struct CitationMetadata {
     pub citations: Vec<Citation>,
 }
 
-/// Port of genai types.go `GroundingChunkMapsPlaceAnswerSourcesAuthorAttribution`. Author
+/// Author
 /// attribution for a photo or review.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -180,7 +180,7 @@ pub struct GroundingChunkMapsPlaceAnswerSourcesAuthorAttribution {
     pub uri: String,
 }
 
-/// Port of genai types.go `GroundingChunkMapsPlaceAnswerSourcesReviewSnippet`. Encapsulates a
+/// Encapsulates a
 /// review snippet.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -201,7 +201,7 @@ pub struct GroundingChunkMapsPlaceAnswerSourcesReviewSnippet {
     pub title: String,
 }
 
-/// Port of genai types.go `GroundingChunkMapsPlaceAnswerSources`. The sources that were used to
+/// The sources that were used to
 /// generate the place answer. This includes review snippets and photos that were used to
 /// generate the answer, as well as URIs to flag content.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -215,7 +215,7 @@ pub struct GroundingChunkMapsPlaceAnswerSources {
     pub review_snippets: Vec<GroundingChunkMapsPlaceAnswerSourcesReviewSnippet>,
 }
 
-/// Port of genai types.go `GroundingChunkMapsRoute`. Route information from Google Maps. This
+/// Route information from Google Maps. This
 /// data type is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -232,7 +232,7 @@ pub struct GroundingChunkMapsRoute {
     pub encoded_polyline: String,
 }
 
-/// Port of genai types.go `GroundingChunkMaps`. A `Maps` chunk is a piece of evidence that
+/// A `Maps` chunk is a piece of evidence that
 /// comes from Google Maps. It contains information about a place, such as its name, address,
 /// and reviews. This is used to provide the user with rich, location-based information.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -252,7 +252,7 @@ pub struct GroundingChunkMaps {
     pub route: Option<GroundingChunkMapsRoute>,
 }
 
-/// Port of genai types.go `GroundingChunkImage`. An `Image` chunk is a piece of evidence that
+/// An `Image` chunk is a piece of evidence that
 /// comes from an image search result. It contains the URI of the image search result and the
 /// URI of the image. This is used to provide the user with a link to the source of the
 /// information.
@@ -269,7 +269,7 @@ pub struct GroundingChunkImage {
     pub domain: String,
 }
 
-/// Port of genai types.go `RAGChunkPageSpan`. Represents where the chunk starts and ends in the
+/// Represents where the chunk starts and ends in the
 /// document. This data type is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -280,7 +280,7 @@ pub struct RAGChunkPageSpan {
     pub last_page: i32,
 }
 
-/// Port of genai types.go `RAGChunk`. A RAGChunk includes the content of a chunk of a RAGFile,
+/// A RAGChunk includes the content of a chunk of a RAGFile,
 /// and associated metadata. This data type is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -295,7 +295,7 @@ pub struct RAGChunk {
     pub file_id: String,
 }
 
-/// Port of genai types.go `GroundingChunkStringList`. A list of string values. This data type
+/// A list of string values. This data type
 /// is not supported in Vertex AI.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -304,7 +304,7 @@ pub struct GroundingChunkStringList {
     pub values: Vec<String>,
 }
 
-/// Port of genai types.go `GroundingChunkCustomMetadata`. User provided metadata about the
+/// User provided metadata about the
 /// GroundingFact. This data type is not supported in Vertex AI.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -319,7 +319,7 @@ pub struct GroundingChunkCustomMetadata {
     pub string_value: String,
 }
 
-/// Port of genai types.go `GroundingChunkRetrievedContext`. Context retrieved from a data
+/// Context retrieved from a data
 /// source to ground the model's response. This is used when a retrieval tool fetches
 /// information from a user-provided corpus or a public dataset.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -345,7 +345,7 @@ pub struct GroundingChunkRetrievedContext {
     pub media_id: String,
 }
 
-/// Port of genai types.go `GroundingChunkWeb`. A `Web` chunk is a piece of evidence that comes
+/// A `Web` chunk is a piece of evidence that comes
 /// from a web page. It contains the URI of the web page, the title of the page, and the domain
 /// of the page. This is used to provide the user with a link to the source of the information.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -359,7 +359,7 @@ pub struct GroundingChunkWeb {
     pub uri: String,
 }
 
-/// Port of genai types.go `GroundingChunk`. A piece of evidence that supports a claim made by
+/// A piece of evidence that supports a claim made by
 /// the model. This is used to show a citation for a claim made by the model. When grounding is
 /// enabled, the model returns a `GroundingChunk` that contains a reference to the source of the
 /// information.
@@ -376,7 +376,7 @@ pub struct GroundingChunk {
     pub web: Option<GroundingChunkWeb>,
 }
 
-/// Port of genai types.go `Segment`. Segment of the content this support belongs to.
+/// Segment of the content this support belongs to.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Segment {
@@ -390,7 +390,7 @@ pub struct Segment {
     pub text: String,
 }
 
-/// Port of genai types.go `GroundingSupport`. Grounding support.
+/// Grounding support.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GroundingSupport {
@@ -404,7 +404,7 @@ pub struct GroundingSupport {
     pub rendered_parts: Vec<i32>,
 }
 
-/// Port of genai types.go `RetrievalMetadata`. Metadata returned to client when grounding is
+/// Metadata returned to client when grounding is
 /// enabled.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -413,7 +413,7 @@ pub struct RetrievalMetadata {
     pub google_search_dynamic_retrieval_score: f32,
 }
 
-/// Port of genai types.go `SearchEntryPoint`. The entry point used to search for grounding
+/// The entry point used to search for grounding
 /// sources.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -428,7 +428,7 @@ pub struct SearchEntryPoint {
     pub sdk_blob: Bytes,
 }
 
-/// Port of genai types.go `GroundingMetadataSourceFlaggingURI`. A URI that can be used to flag
+/// A URI that can be used to flag
 /// a place or review for inappropriate content. This is populated only when the grounding
 /// source is Google Maps. This data type is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -440,7 +440,7 @@ pub struct GroundingMetadataSourceFlaggingURI {
     pub source_id: String,
 }
 
-/// Port of genai types.go `GroundingMetadata`. Information for various kinds of grounding.
+/// Information for various kinds of grounding.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GroundingMetadata {
@@ -464,7 +464,7 @@ pub struct GroundingMetadata {
     pub source_flagging_uris: Vec<GroundingMetadataSourceFlaggingURI>,
 }
 
-/// Port of genai types.go `LogprobsResultCandidate`. A single token and its associated log
+/// A single token and its associated log
 /// probability.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -477,7 +477,7 @@ pub struct LogprobsResultCandidate {
     pub token_id: i32,
 }
 
-/// Port of genai types.go `LogprobsResultTopCandidates`. A list of the top candidate tokens and
+/// A list of the top candidate tokens and
 /// their log probabilities at each decoding step. This can be used to see what other tokens the
 /// model considered.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -487,7 +487,7 @@ pub struct LogprobsResultTopCandidates {
     pub candidates: Vec<LogprobsResultCandidate>,
 }
 
-/// Port of genai types.go `LogprobsResult`. The log probabilities of the tokens generated by
+/// The log probabilities of the tokens generated by
 /// the model. This is useful for understanding the model's confidence in its predictions and
 /// for debugging. For example, you can use log probabilities to identify when the model is
 /// making a less confident prediction or to explore alternative responses that the model
@@ -504,7 +504,7 @@ pub struct LogprobsResult {
     pub log_probability_sum: Option<f32>,
 }
 
-/// Port of genai types.go `SafetyRating`. A safety rating for a piece of content. The safety
+/// A safety rating for a piece of content. The safety
 /// rating contains the harm category and the harm probability level.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -525,7 +525,7 @@ pub struct SafetyRating {
     pub severity_score: f32,
 }
 
-/// Port of genai types.go `URLMetadata`. The metadata for a single URL retrieval.
+/// The metadata for a single URL retrieval.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct URLMetadata {
@@ -535,7 +535,7 @@ pub struct URLMetadata {
     pub url_retrieval_status: Option<URLRetrievalStatus>,
 }
 
-/// Port of genai types.go `URLContextMetadata`. Metadata returned when the model uses the
+/// Metadata returned when the model uses the
 /// `url_context` tool to get information from a user-provided URL.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -544,7 +544,7 @@ pub struct URLContextMetadata {
     pub url_metadata: Vec<URLMetadata>,
 }
 
-/// Port of genai types.go `Candidate`. A response candidate generated from the model.
+/// A response candidate generated from the model.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Candidate {
@@ -578,7 +578,7 @@ pub struct Candidate {
     pub continuation_token: Option<Bytes>,
 }
 
-/// Port of genai types.go `GenerateContentResponsePromptFeedback`. Content filter results for a
+/// Content filter results for a
 /// prompt sent in the request. Note: This is sent only in the first stream chunk and only if no
 /// candidates were generated due to content violations.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -592,7 +592,7 @@ pub struct GenerateContentResponsePromptFeedback {
     pub safety_ratings: Vec<SafetyRating>,
 }
 
-/// Port of genai types.go `ModalityTokenCount`. Represents a breakdown of token usage by
+/// Represents a breakdown of token usage by
 /// modality. This message is used in CountTokensResponse and
 /// GenerateContentResponse.UsageMetadata to provide a detailed view of how many tokens are used
 /// by each modality (e.g., text, image, video) in a request. This is particularly useful for
@@ -607,7 +607,7 @@ pub struct ModalityTokenCount {
     pub token_count: i32,
 }
 
-/// Port of genai types.go `GenerateContentResponseUsageMetadata`. Usage metadata about the
+/// Usage metadata about the
 /// content generation request and response. This message provides a detailed breakdown of token
 /// usage and other relevant metrics. This data type is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -637,7 +637,7 @@ pub struct GenerateContentResponseUsageMetadata {
     pub traffic_type: Option<TrafficType>,
 }
 
-/// Port of genai types.go `ModelStatus`. The status of the underlying model. This is used to
+/// The status of the underlying model. This is used to
 /// indicate the stage of the underlying model and the retirement time if applicable. This data
 /// type is not supported in Vertex AI.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -651,7 +651,7 @@ pub struct ModelStatus {
     pub retirement_time: Option<DateTime<Utc>>,
 }
 
-/// Port of genai types.go `GenerateContentResponse`. Response message for
+/// Response message for
 /// PredictionService.GenerateContent.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -672,9 +672,8 @@ pub struct GenerateContentResponse {
     pub model_status: Option<ModelStatus>,
 }
 
-/// Port of `cloud.google.com/go/civil.Date` as genai encodes it (`InternalDateJSON`):
-/// a `{"year": .., "month": .., "day": ..}` object with zero components omitted.
-/// Decoding a non-empty object without `year` is an error, as in genai; `{}` and `null`
+/// A calendar date encoded as a `{"year": .., "month": .., "day": ..}` object with zero
+/// components omitted. Decoding a non-empty object without `year` is an error; `{}` and `null`
 /// decode to the zero date, which fields omit on encode.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct CivilDate {
@@ -686,7 +685,7 @@ pub struct CivilDate {
 }
 
 impl CivilDate {
-    /// civil `Date.IsZero`: all components are zero.
+    /// Whether all components are zero.
     pub fn is_zero(&self) -> bool {
         *self == Self::default()
     }

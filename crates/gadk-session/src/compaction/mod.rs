@@ -14,7 +14,7 @@
 // limitations under the License.
 
 //! Context compaction: summarize older session events so an agent's prompt stays small as its
-//! conversation grows (port of ADK-Go `session/compaction`).
+//! conversation grows.
 //!
 //! A compaction never modifies or deletes history. Summarizing a range of events appends one new
 //! [`Event`](crate::Event) carrying an [`EventCompaction`](crate::EventCompaction) that records the

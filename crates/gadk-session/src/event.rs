@@ -13,9 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of the `Event` family of ADK-Go `session/session.go`, with ADK-Go's JSON encoding:
-//! the same keys and omission rules, RFC 3339 timestamps, numeric (adk-python) timestamps
-//! and Go's case-insensitive (legacy) key matching on decode.
+//! The `Event` family: the events of a session and their JSON encoding: the same keys and
+//! omission rules as ADK, RFC 3339 timestamps, numeric (adk-python) timestamps and
+//! case-insensitive (legacy) key matching on decode.
 
 use std::collections::BTreeMap;
 
@@ -32,7 +32,7 @@ use serde_json::{Map, Value};
 use crate::legacy::normalize_keys;
 use crate::tool_confirmation::ToolConfirmation;
 
-/// Go's zero `time.Time`, `0001-01-01T00:00:00Z`.
+/// The zero time, `0001-01-01T00:00:00Z`.
 pub fn zero_time() -> DateTime<Utc> {
     DateTime::from_timestamp(ZERO_TIME_SECS, 0).unwrap_or(DateTime::<Utc>::MIN_UTC)
 }
@@ -42,15 +42,14 @@ const ZERO_TIME_SECS: i64 = -62_135_596_800;
 /// Unix seconds of `9999-12-31T23:59:59Z`.
 const MAX_TIME_SECS: i64 = 253_402_300_799;
 
-/// Encodes and decodes a `DateTime<Utc>` the way Go's `time.Time` JSON methods do:
-/// RFC 3339 with trailing-zero-trimmed nanoseconds (`time.RFC3339Nano`); `null` decodes
-/// to [`zero_time`].
+/// Encodes and decodes a `DateTime<Utc>` as RFC 3339 with trailing-zero-trimmed nanoseconds;
+/// `null` decodes to [`zero_time`].
 pub(crate) mod go_time {
     use chrono::{DateTime, Datelike, Utc};
     use serde::{Deserialize, Deserializer, Serializer};
 
-    /// Formats `t` as Go's `time.RFC3339Nano`; `None` outside years 0..=9999, which Go
-    /// refuses to marshal.
+    /// Formats `t` as RFC 3339 with trailing-zero-trimmed nanoseconds; `None` outside years
+    /// 0..=9999, which cannot be marshalled.
     pub(crate) fn format(t: &DateTime<Utc>) -> Option<String> {
         if !(0..=9999).contains(&t.year()) {
             return None;
@@ -77,15 +76,15 @@ pub(crate) mod go_time {
     }
 }
 
-/// An interaction in a conversation between agents and users (ADK-Go `session.Event`).
+/// An interaction in a conversation between agents and users.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Event {
-    /// The model response this event carries (Go embeds `model.LLMResponse`).
+    /// The model response this event carries, flattened into the event's JSON.
     #[serde(flatten)]
     pub response: LlmResponse,
     /// Set by storage.
     pub id: String,
-    /// Set by storage; Go's zero time when unset.
+    /// Set by storage; the zero time when unset.
     #[serde(serialize_with = "go_time::serialize")]
     pub timestamp: DateTime<Utc>,
     /// Set by the agent context implementation.
@@ -176,7 +175,7 @@ const MIN_TIMESTAMP_MICROS: f64 = ZERO_TIME_SECS as f64 * 1e6;
 const MAX_TIMESTAMP_MICROS: f64 = MAX_TIME_SECS as f64 * 1e6;
 
 /// Decodes an event timestamp: an RFC 3339 string, a JSON number of epoch seconds
-/// (adk-python) resolved to microseconds, or `null`/absent for Go's zero time.
+/// (adk-python) resolved to microseconds, or `null`/absent for the zero time.
 fn decode_timestamp(raw: Option<Value>) -> Result<DateTime<Utc>, String> {
     let raw = match raw {
         None | Some(Value::Null) => return Ok(zero_time()),
@@ -204,8 +203,8 @@ fn decode_timestamp(raw: Option<Value>) -> Result<DateTime<Utc>, String> {
     }
 }
 
-/// Go decodes `null` into a non-pointer field as a no-op, which for a fresh value is the
-/// zero value; dropping null members reproduces that for every field.
+/// A `null` member decodes as if the key were absent, so a fresh value keeps its default;
+/// dropping null members gives that for every field.
 fn drop_nulls(map: &mut Map<String, Value>) {
     map.retain(|_, v| !v.is_null());
 }
@@ -264,7 +263,7 @@ impl<'de> Deserialize<'de> for Event {
 
 impl Event {
     /// Creates an event with an ID and timestamp from `platform` and both action delta maps
-    /// allocated (ADK-Go `session.NewEvent`).
+    /// allocated.
     ///
     /// ```
     /// use gadk_platform::Platform;
@@ -322,9 +321,9 @@ impl Event {
     }
 }
 
-/// The actions attached to an event (ADK-Go `session.EventActions`).
+/// The actions attached to an event.
 ///
-/// `state_delta` and `artifact_delta` keep ADK-Go's nil/empty distinction on the wire: `None`
+/// `state_delta` and `artifact_delta` keep the `None`/empty distinction on the wire: `None`
 /// omits the key and `Some` writes it, even when empty; `null` is never written.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct EventActions {
@@ -335,7 +334,7 @@ pub struct EventActions {
     /// Tool confirmations requested, keyed by function call ID.
     pub requested_tool_confirmations: BTreeMap<String, ToolConfirmation>,
     /// The credential requests that tools made in this event, keyed by function call ID, since
-    /// one function response event can answer several calls (ADK-Go `RequestedAuthConfigs`).
+    /// one function response event can answer several calls.
     ///
     /// Session services persist a request and the Agent Engine server sends it to clients
     /// unredacted, so it must not carry the secrets the tool was configured with: store the
@@ -366,8 +365,8 @@ const ACTIONS_KEYS: &[&str] = &[
 ];
 
 impl Serialize for EventActions {
-    /// Writes keys in the order ADK-Go's `EventActions.MarshalJSON` does: the promoted fields
-    /// first, then the two shadowing delta-map fields.
+    /// Writes keys in a fixed order: the promoted fields first, then the two delta-map
+    /// fields.
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let mut m = s.serialize_map(None)?;
         if !self.requested_tool_confirmations.is_empty() {
@@ -435,8 +434,7 @@ impl<'de> Deserialize<'de> for EventActions {
 }
 
 /// Records that a contiguous range of events has been replaced by one piece of content,
-/// typically a model-generated summary (ADK-Go `session.EventCompaction`). Both bounds are
-/// inclusive.
+/// typically a model-generated summary. Both bounds are inclusive.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EventCompaction {
@@ -454,8 +452,7 @@ pub struct EventCompaction {
     pub excluded_events: Vec<EventRef>,
 }
 
-/// Identifies a stored event by fields that survive a storage round trip
-/// (ADK-Go `session.EventRef`).
+/// Identifies a stored event by fields that survive a storage round trip.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EventRef {
@@ -467,8 +464,7 @@ pub struct EventRef {
     pub timestamp: DateTime<Utc>,
 }
 
-/// Per-event metadata identifying the workflow node that emitted it (ADK-Go
-/// `session.NodeInfo`).
+/// Per-event metadata identifying the workflow node that emitted it.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct NodeInfo {
@@ -483,8 +479,7 @@ pub struct NodeInfo {
     pub output_for: Vec<String>,
 }
 
-/// A single human-in-the-loop prompt emitted by a workflow node (ADK-Go
-/// `session.RequestInput`).
+/// A single human-in-the-loop prompt emitted by a workflow node.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct RequestInput {

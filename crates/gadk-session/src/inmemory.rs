@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `session/inmemory.go`.
+//! An in-memory [`SessionService`].
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -36,16 +36,16 @@ use crate::state_util::{
 };
 
 type StateMap = Map<String, Value>;
-/// `(app_name, user_id, session_id)`, ordered like Go's `ordered.Encode` key.
+/// `(app_name, user_id, session_id)`.
 type SessionKey = (String, String, String);
 
-/// An in-memory [`SessionService`] (ADK-Go `session.InMemoryService`). Thread-safe.
+/// An in-memory [`SessionService`]. Thread-safe.
 ///
 /// State keys are routed by prefix: `app:` keys are shared by every session of the app,
 /// `user:` keys by every session of the user, and the rest belong to the session. `temp:`
-/// keys in appended event deltas are never persisted; as in ADK-Go, `temp:` keys in the
-/// initial state given to `create` are kept in session state. Sessions handed out are
-/// copies of the service's record.
+/// keys in appended event deltas are never persisted; `temp:` keys in the initial state given
+/// to `create` are kept in session state. Sessions handed out are copies of the service's
+/// record.
 ///
 /// An event appended with an empty ID is given one:
 ///
@@ -109,7 +109,7 @@ impl std::fmt::Debug for InMemorySessionService {
 }
 
 impl Inner {
-    /// Go `mergeStates`: session state plus the app and user state, prefixed back.
+    /// Session state plus the app and user state, prefixed back.
     fn merged_state(&self, state: &StateMap, app_name: &str, user_id: &str) -> StateMap {
         merge_states(
             self.app_state.get(app_name),
@@ -119,8 +119,8 @@ impl Inner {
         )
     }
 
-    /// Applies a state delta to the app, user and session maps (Go `ExtractStateDeltas`
-    /// followed by `updateAppState`/`updateUserState`/`maps.Copy`).
+    /// Applies a state delta to the app, user and session maps: the delta is split by key
+    /// prefix and each part is merged into its map.
     fn apply_delta(
         app_state: &mut HashMap<String, StateMap>,
         user_state: &mut HashMap<(String, String), StateMap>,
@@ -171,9 +171,9 @@ impl SessionService for InMemorySessionService {
             app_state,
             user_state,
         } = &mut *inner;
-        // Go stores `MergeStates(app, user, req.State)` with the raw request state: app: and
-        // user: keys go to the shared maps (and are merged back on read), and every other
-        // key, temp: included, stays in session state. Only appended deltas are trimmed.
+        // Stores the raw request state: app: and user: keys go to the shared maps (and are
+        // merged back on read), and every other key, temp: included, stays in session state.
+        // Only appended deltas are trimmed.
         let mut state = StateMap::new();
         if let Some(initial) = &req.state {
             let (app, user, _) = extract_state_deltas(initial);
@@ -227,14 +227,14 @@ impl SessionService for InMemorySessionService {
         let stored = inner.sessions.get(&key).ok_or(SessionError::NotFound)?;
         let state = inner.merged_state(&stored.state, &key.0, &key.1);
 
-        // Go order: the recent-events limit first, then the timestamp filter.
+        // The recent-events limit applies first, then the timestamp filter.
         let mut events: &[Event] = &stored.events;
         if req.num_recent_events > 0 {
             let start = events.len().saturating_sub(req.num_recent_events);
             events = &events[start..];
         }
         // Test every event rather than searching for a cut point: events are kept in append
-        // order, which need not be timestamp order (Go #2089).
+        // order, which need not be timestamp order.
         let after = req.after.filter(|t| *t != zero_time());
         let events: Vec<Event> = events
             .iter()
@@ -323,8 +323,8 @@ impl SessionService for InMemorySessionService {
 
         let trimmed = trim_temp_delta_state(event);
 
-        // Update the caller's session: Go `session.appendEvent` copies the whole delta
-        // (temp: keys included) into its state and records the trimmed event.
+        // Update the caller's session: the whole delta (temp: keys included) goes into its
+        // state and the trimmed event is recorded.
         {
             let mut data = live.data.write();
             if let Some(delta) = &event.actions.state_delta {
@@ -358,7 +358,7 @@ struct InMemorySession {
     data: LiveState,
 }
 
-/// The mutable part of an [`InMemorySession`], behind one lock (Go `session.mu`).
+/// The mutable part of an [`InMemorySession`], behind one lock.
 struct LiveState(RwLock<LiveData>);
 
 struct LiveData {

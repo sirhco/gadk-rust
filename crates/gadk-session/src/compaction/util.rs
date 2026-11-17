@@ -13,20 +13,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Event and part helpers shared by the summarizer and the engine's compaction (ports of Go
-//! internal/utils `Content` and `IsProsePart`).
+//! Event and part helpers shared by the summarizer and the engine's compaction.
 
 use gadk_genai::{Content, Part};
 
 use crate::Event;
 
-/// Port of Go utils.Content: the content of the event's response.
+/// The content of the event's response.
 #[doc(hidden)]
 pub fn content(ev: &Event) -> Option<&Content> {
     ev.response.content.as_ref()
 }
 
-/// Port of Go utils.IsProsePart: plain text meant to be read, and nothing else (thoughts are not
+/// Plain text meant to be read, and nothing else (thoughts are not
 /// prose).
 #[doc(hidden)]
 pub fn is_prose_part(p: &Part) -> bool {

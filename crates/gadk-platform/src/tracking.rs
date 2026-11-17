@@ -13,10 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The ADK tracking header value (port of ADK-Go `internal/version.TrackingHeader`).
+//! The ADK tracking header value.
 
-/// The `user-agent` / `x-goog-api-client` value gadk sends with model and MCP requests (port of
-/// ADK-Go `version.TrackingHeader`, `google-adk/<version> gl-go/<go version>`):
+/// The `user-agent` / `x-goog-api-client` value gadk sends with model and MCP requests:
 /// `gadk-rust/<crate version> rust/<rustc version>`. `GADK_RUSTC_VERSION` is set by this crate's
 /// `build.rs`; every workspace crate shares one version, so the value is the same whichever crate
 /// asks.

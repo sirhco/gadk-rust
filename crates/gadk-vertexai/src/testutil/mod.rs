@@ -13,10 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Test servers for the Vertex AI services (feature `testutil`): [`ReplayServer`] serves Go's
+//! Test servers for the Vertex AI services (feature `testutil`): [`ReplayServer`] serves
 //! recorded Agent Engine conversations strictly, and [`FakeAgentEngine`] is a stateful Agent
 //! Engine fake. Both run on gadk-model's 127.0.0.1 fake HTTP server and see each request as
-//! the gRPC call Go's generated REST client made it from ([`grpc_request`]).
+//! the gRPC call the REST request stands for ([`grpc_request`]).
 
 pub mod engine;
 pub mod replay;
@@ -33,18 +33,18 @@ pub use replay::ReplayServer;
 
 use crate::session::VertexAiSessionServiceConfig;
 
-/// The project of Go's recordings (Go `ProjectID`).
+/// The project of the recordings.
 pub const PROJECT_ID: &str = "adk-go-e2e";
-/// The location of Go's recordings (Go `Location`).
+/// The location of the recordings.
 pub const LOCATION: &str = "us-central1";
-/// The reasoning engine of Go's recordings (Go `EngineID`).
+/// The reasoning engine of the recordings.
 pub const ENGINE_ID: &str = "1491331942182813696";
-/// The second reasoning engine Go's tests name (Go `EngineID2`).
+/// The second reasoning engine the tests name.
 pub const ENGINE_ID2: &str = "6857370898194759680";
 
-/// The replay fixture stem of a shared-suite case (Go `sanitizeFilename` without the
-/// extension, prefixed): `"Test_vertexaiService_" + case` with `" "`, `,` and `/` each
-/// replaced by `_` — e.g. `fixture_stem("Create/when_already_exists,_it_fails")` =
+/// The replay fixture stem of a shared-suite case: `"Test_vertexaiService_" + case` with
+/// `" "`, `,` and `/` each replaced by `_` — e.g.
+/// `fixture_stem("Create/when_already_exists,_it_fails")` =
 /// `"Test_vertexaiService_Create_when_already_exists__it_fails"`.
 pub fn fixture_stem(case: &str) -> String {
     format!(
@@ -83,9 +83,8 @@ pub fn full_method(short: &str) -> String {
     }
 }
 
-/// The gRPC call (method short name, protojson request) Go's generated REST client
-/// (`aiplatform/apiv1beta1/session_client.go`, `auxiliary.go`) sent as `req`, or `None` for
-/// a request no session-service method makes:
+/// The gRPC call (method short name, protojson request) that the REST request `req` stands
+/// for, or `None` for a request no session-service method makes:
 ///
 /// - `POST /v1beta1/{parent}/sessions[?sessionId=]`, body Session → `CreateSession`
 ///   `{parent, sessionId?, session: body}`;
@@ -96,7 +95,7 @@ pub fn full_method(short: &str) -> String {
 /// - `POST /v1beta1/{name}:appendEvent`, body SessionEvent → `AppendEvent` `{name, event: body}`;
 /// - `GET /ui/{name}` → `GetOperation` `{name}`.
 ///
-/// The path is percent-decoded (`+` stays `+`, as in Go's `r.URL.Path`); every query
+/// The path is percent-decoded (`+` stays `+`); every query
 /// parameter but `$alt` becomes a string field (the last value wins), except `pageSize`
 /// (int32), a number when it parses as one. An empty POST body is `{}`; one that is not JSON
 /// makes the request unknown.
@@ -162,9 +161,8 @@ pub fn grpc_request(req: &RecordedRequest) -> Option<(&'static str, Value)> {
     Some((method, Value::Object(out)))
 }
 
-/// A URL path percent-decoded as Go's server decodes `r.URL.Path` (`%XX` → byte, `+` kept),
-/// through `url`'s form decoder with the bytes it treats specially (`+`, `&`, `=`) escaped
-/// first. Invalid UTF-8 is replaced.
+/// A URL path percent-decoded (`%XX` → byte, `+` kept), through `url`'s form decoder with the
+/// bytes it treats specially (`+`, `&`, `=`) escaped first. Invalid UTF-8 is replaced.
 fn path_unescape(path: &str) -> String {
     let protected = path
         .replace('+', "%2B")
@@ -184,10 +182,9 @@ pub(crate) fn error_response(status_name: &str, message: &str) -> FakeResponse {
     FakeResponse::json_status(http, body.to_string())
 }
 
-/// Sends one request to a fake with gadk's reqwest client: `path` unescaped, encoded as Go's
-/// client encodes it (`EscapedPath`), and `query` encoded as `url.Values.Encode` with Go's
-/// `$alt=json;enum-encoding=int` added. Returns the status and the body as JSON (`Null`
-/// when empty or not JSON).
+/// Sends one request to a fake with gadk's reqwest client: `path` unescaped and then escaped
+/// as a URL path, and `query` encoded with sorted keys and `$alt=json;enum-encoding=int`
+/// added. Returns the status and the body as JSON (`Null` when empty or not JSON).
 #[cfg(test)]
 pub(crate) async fn send(
     base_url: &str,

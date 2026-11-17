@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Credentials (port of ADK-Go `tool/toolauth/auth_credential.go`).
+//! Credentials.
 //!
 //! The credentials are adk-python's pydantic models: each field is written under its camelCase
 //! alias and read under the alias or its snake_case Python name, the alias winning when an object
@@ -33,7 +33,7 @@ use super::model_json::{
     go_string_list, go_string_map, serialize_go,
 };
 
-/// Go `CredentialType`, open like `SchemeType`; decode rejects anything but the five.
+/// The kind of a credential, open like `SchemeType`; decode rejects anything but the five.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CredentialType(Cow<'static, str>);
 
@@ -72,7 +72,7 @@ impl From<String> for CredentialType {
     }
 }
 
-/// A JSON string, as Go writes a `CredentialType`. Any string decodes; [`Credential`]'s decode
+/// A JSON string. Any string decodes; [`Credential`]'s decode
 /// is what rejects an unknown type.
 impl Serialize for CredentialType {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
@@ -86,7 +86,8 @@ impl<'de> Deserialize<'de> for CredentialType {
     }
 }
 
-/// Writes `serde::Serialize` and `serde::Deserialize` for a model through its Go encoders.
+/// Writes `serde::Serialize` and `serde::Deserialize` for a model through its own encoder and
+/// decoder.
 macro_rules! go_serde {
     ($($ty:ty),* $(,)?) => {$(
         impl Serialize for $ty {
@@ -112,7 +113,7 @@ go_serde!(
     Credential,
 );
 
-/// Writes each non-empty string field, Go's `omitempty`.
+/// Writes each non-empty string field; empty ones are omitted.
 fn non_empty(w: &mut ObjectWriter, fields: &[(&str, &String)]) {
     for (alias, value) in fields {
         if !value.is_empty() {
@@ -182,7 +183,7 @@ pub struct HttpAuth {
 const HTTP_AUTH_FIELDS: &[&str] = &["scheme", "credentials", "additionalHeaders"];
 
 impl GoUnmarshal for HttpAuth {
-    /// Go `HTTPAuth.UnmarshalJSON`: scheme and credentials are required.
+    /// Decodes an [`HttpAuth`]: scheme and credentials are required.
     fn go_unmarshal(raw: &RawValue) -> Result<Self, String> {
         const T: &str = "HTTPAuth";
         let mut d = decode_object(raw, T, HTTP_AUTH_FIELDS, true, &["scheme", "credentials"])?;
@@ -198,7 +199,7 @@ impl GoUnmarshal for HttpAuth {
 }
 
 impl GoMarshal for HttpAuth {
-    /// Go `HTTPAuth.MarshalJSON`: credentials are written as `{}` even when empty.
+    /// Encodes an [`HttpAuth`]: credentials are written as `{}` even when empty.
     fn go_marshal(&self) -> String {
         let mut w = ObjectWriter::new();
         w.field("scheme", &go_string(&self.scheme));
@@ -265,7 +266,7 @@ const OAUTH2_AUTH_FIELDS: &[&str] = &[
 ];
 
 impl GoUnmarshal for OAuth2Auth {
-    /// Go `OAuth2Auth.UnmarshalJSON`: rejects a token endpoint auth method other than
+    /// Decodes an [`OAuth2Auth`]: rejects a token endpoint auth method other than
     /// client_secret_basic, client_secret_post, client_secret_jwt and private_key_jwt.
     fn go_unmarshal(raw: &RawValue) -> Result<Self, String> {
         const T: &str = "OAuth2Auth";
@@ -327,7 +328,7 @@ impl GoUnmarshal for OAuth2Auth {
 }
 
 impl GoMarshal for OAuth2Auth {
-    /// Go `OAuth2Auth.MarshalJSON`: an empty token endpoint auth method is written as
+    /// Encodes an [`OAuth2Auth`]: an empty token endpoint auth method is written as
     /// client_secret_basic, which is what adk-python sends.
     fn go_marshal(&self) -> String {
         let mut w = ObjectWriter::new();
@@ -427,7 +428,7 @@ const SERVICE_ACCOUNT_CREDENTIAL_FIELDS: &[&str] = &[
 ];
 
 impl GoUnmarshal for ServiceAccountCredential {
-    /// Go `ServiceAccountCredential.UnmarshalJSON`: reads a key file too, whose names are
+    /// Decodes a [`ServiceAccountCredential`]: reads a key file too, whose names are
     /// snake_case. Every field but type is required.
     fn go_unmarshal(raw: &RawValue) -> Result<Self, String> {
         const T: &str = "ServiceAccountCredential";
@@ -459,7 +460,7 @@ impl GoUnmarshal for ServiceAccountCredential {
 }
 
 impl GoMarshal for ServiceAccountCredential {
-    /// Go `ServiceAccountCredential.MarshalJSON`: every field is written, even when empty.
+    /// Encodes a [`ServiceAccountCredential`]: every field is written, even when empty.
     fn go_marshal(&self) -> String {
         let mut w = ObjectWriter::new();
         let fields = [
@@ -521,7 +522,7 @@ const SERVICE_ACCOUNT_FIELDS: &[&str] = &[
 ];
 
 impl GoUnmarshal for ServiceAccount {
-    /// Go `ServiceAccount.UnmarshalJSON`: rejects neither a key nor ADC, and an ID token without
+    /// Decodes a [`ServiceAccount`]: rejects neither a key nor ADC, and an ID token without
     /// an audience.
     fn go_unmarshal(raw: &RawValue) -> Result<Self, String> {
         const T: &str = "ServiceAccount";
@@ -605,7 +606,7 @@ const CREDENTIAL_FIELDS: &[&str] = &[
 ];
 
 impl GoUnmarshal for Credential {
-    /// Go `Credential.UnmarshalJSON`: rejects a missing or unknown auth type and an invalid
+    /// Decodes a [`Credential`]: rejects a missing or unknown auth type and an invalid
     /// credential in any field.
     fn go_unmarshal(raw: &RawValue) -> Result<Self, String> {
         const T: &str = "Credential";

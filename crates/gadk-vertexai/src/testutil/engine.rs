@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! [`FakeAgentEngine`]: a stateful Agent Engine fake (sessions, events, operations) with Go
-//! `fakeSessions`'s seeded behaviour.
+//! [`FakeAgentEngine`]: a stateful Agent Engine fake (sessions, events, operations) with
+//! seeded sessions.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -32,10 +32,10 @@ use crate::session::convert::str_field;
 const INVALID_ARGUMENT: &str = "Request contains an invalid argument.";
 
 /// A stateful Agent Engine fake on 127.0.0.1 (needs a running tokio runtime). It answers the
-/// session service's REST calls as the real engine does, as far as Go's tests and recordings
+/// session service's REST calls as the real engine does, as far as the recorded conversations
 /// show it:
 ///
-/// - **Seeded sessions** (Go `fakeSessions`): a session whose ID is `owned`, under any
+/// - **Seeded sessions**: a session whose ID is `owned`, under any
 ///   project, location and engine, exists from the start and belongs to `user1` (until it is
 ///   deleted); every call on a session whose ID is `denied` fails 403 `PERMISSION_DENIED`
 ///   (`caller cannot read {name}` / `caller cannot write {name}`); any other unknown session
@@ -49,14 +49,14 @@ const INVALID_ARGUMENT: &str = "Request contains an invalid argument.";
 ///   every session of the engine, `user:` keys by the sessions of one user in the engine, other
 ///   keys (including `temp:`, so a client that leaks them is caught) belong to the session.
 ///   GetSession and ListSessions return the union; AppendEvent merges `actions.stateDelta`.
-/// - **ListSessions**: newest first, filter `userId="…"` (Go `quoteFilterLiteral` quoting);
+/// - **ListSessions**: newest first, filter `userId="…"` (a quoted literal with `\` escapes);
 ///   **ListEvents**: append order, filter `timestamp>="…"`; both page with `pageSize` /
 ///   `pageToken` (an offset). An empty page is `{}`. Another filter is 400.
 /// - **DeleteSession**: removes the session and its events (404 afterwards); the answer is an
 ///   operation `{session}/operations/{n}` with response `google.protobuf.Empty`.
 /// - **AppendEvent**: 400 `INVALID_ARGUMENT` when `author` or `invocationId` is empty; names
 ///   the event `{session}/events/event-N` (N = 1, 2, … per session) and stores `actions: {}`
-///   when the event has none (Go `fakeVertexAiSessionService`); answers `{}`.
+///   when the event has none; answers `{}`.
 /// - **Operations**: with [`set_operations_pending(true)`](Self::set_operations_pending),
 ///   create and delete still take effect at once but answer `done: false`; `GET /ui/{op}`
 ///   answers every operation done (404 for an unknown one).
@@ -172,7 +172,7 @@ fn invalid(message: impl Into<String>) -> Failure {
     ("INVALID_ARGUMENT", message.into())
 }
 
-/// The literal of a Go `quoteFilterLiteral` (`"…"` with `\` escapes), unquoted.
+/// A filter literal (`"…"` with `\` escapes), unquoted.
 fn unquote_filter_literal(s: &str) -> Option<String> {
     let inner = s.strip_prefix('"')?.strip_suffix('"')?;
     let mut out = String::with_capacity(inner.len());
