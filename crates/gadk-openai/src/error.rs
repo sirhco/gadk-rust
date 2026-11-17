@@ -13,12 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Errors (port of ADK-Go `model/openaimodel/internal/shared/errors.go` and `errors.go`, plus
-//! openai-go v3.91.1 `internal/apierror`'s `Error()` text).
+//! Errors: the sentinel kinds, the API error and the transport failures of a call.
 //!
-//! Go's 26 sentinels become [`ErrorKind`]; an [`OpenAiError`] carries the kinds it wraps, in
-//! Go's `%w` order, and renders Go's `Error()` text as its `Display`. [`OpenAiError::is`]
-//! replaces `errors.Is`, [`OpenAiError::status`] replaces `errors.As(err, &*openai.Error)`.
+//! The 26 sentinels are [`ErrorKind`]; an [`OpenAiError`] carries the kinds it wraps, outermost
+//! first, and renders their text as its `Display`. [`OpenAiError::is`] reports a wrapped kind,
+//! [`OpenAiError::status`] the HTTP status of an API error.
 
 use std::fmt;
 
@@ -26,69 +25,68 @@ use bytes::Bytes;
 use gadk_model::rest::RestError;
 use gadk_model::{ModelError, error_chain, transport_error_detail};
 
-/// One Go sentinel error of `openaimodel` (`internal/shared/errors.go`, re-exported by
-/// `errors.go`).
+/// One sentinel error kind of the OpenAI model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum ErrorKind {
-    /// Go `ErrModelNameRequired`: a model name is not provided.
+    /// A model name is not provided.
     ModelNameRequired,
-    /// Go `ErrUnsupportedAPI`: `ClientConfig.API` names an API this package does not implement.
+    /// `ClientConfig.API` names an API this package does not implement.
     UnsupportedApi,
-    /// Go `ErrNoChoices`: a Chat Completions response carries no choices.
+    /// A Chat Completions response carries no choices.
     NoChoices,
-    /// Go `ErrRequestNil`: the provided request is nil.
+    /// The provided request is nil.
     RequestNil,
-    /// Go `ErrNoContents`: the LLM request has no contents.
+    /// The LLM request has no contents.
     NoContents,
-    /// Go `ErrFunctionCallMissingName`: a function call is missing a name.
+    /// A function call is missing a name.
     FunctionCallMissingName,
-    /// Go `ErrTopKNotSupported`: TopK is used.
+    /// TopK is used.
     TopKNotSupported,
-    /// Go `ErrStopSequencesNotSupported`: stop sequences are used with the Responses API.
+    /// Stop sequences are used with the Responses API.
     StopSequencesNotSupported,
-    /// Go `ErrMultipleCandidatesNotSupported`: multiple candidates are requested.
+    /// Multiple candidates are requested.
     MultipleCandidatesNotSupported,
-    /// Go `ErrPenaltiesNotSupported`: frequency/presence penalties are used with the Responses
+    /// Frequency/presence penalties are used with the Responses
     /// API.
     PenaltiesNotSupported,
-    /// Go `ErrLabelsNotSupported`: request labels are used.
+    /// Request labels are used.
     LabelsNotSupported,
-    /// Go `ErrSafetySettingsNotSupported`: Gemini safety settings are used.
+    /// Gemini safety settings are used.
     SafetySettingsNotSupported,
-    /// Go `ErrUnsupportedMIMEType`: an unsupported MIME type is used.
+    /// An unsupported MIME type is used.
     UnsupportedMimeType,
-    /// Go `ErrMediaMIMETypeRequired`: a part carries media without a MIME type.
+    /// A part carries media without a MIME type.
     MediaMimeTypeRequired,
-    /// Go `ErrMediaDataRequired`: a part carries inline media with no bytes.
+    /// A part carries inline media with no bytes.
     MediaDataRequired,
-    /// Go `ErrMediaURIRequired`: a part carries file data without a URI.
+    /// A part carries file data without a URI.
     MediaUriRequired,
-    /// Go `ErrMediaOnAssistantTurn`: a replayed assistant turn carries media.
+    /// A replayed assistant turn carries media.
     MediaOnAssistantTurn,
-    /// Go `ErrUnsupportedConfigField`: a generation config field has no equivalent on the
+    /// A generation config field has no equivalent on the
     /// selected API; the message names it.
     UnsupportedConfigField,
-    /// Go `ErrEmptyJSONSchema`: an empty JSON schema is provided.
+    /// An empty JSON schema is provided.
     EmptyJsonSchema,
-    /// Go `ErrEmptyResponse`: the OpenAI API returns an empty response.
+    /// The OpenAI API returns an empty response.
     EmptyResponse,
-    /// Go `ErrNoOutputItems`: the response contains no output items.
+    /// The response contains no output items.
     NoOutputItems,
-    /// Go `ErrResponseFailed`: the server reports the response itself as failed.
+    /// The server reports the response itself as failed.
     ResponseFailed,
-    /// Go `ErrUnsupportedMessageContentType`: an unsupported message content type is used.
+    /// An unsupported message content type is used.
     UnsupportedMessageContentType,
-    /// Go `ErrUnsupportedOutputItemType`: an unsupported output item type is used.
+    /// An unsupported output item type is used.
     UnsupportedOutputItemType,
-    /// Go `ErrFunctionCallArgs`: a function call's arguments are not a decodable JSON object.
+    /// A function call's arguments are not a decodable JSON object.
     FunctionCallArgs,
-    /// Go `ErrNoTextOrToolContent`: the response output does not contain text or tool content.
+    /// The response output does not contain text or tool content.
     NoTextOrToolContent,
 }
 
 impl ErrorKind {
-    /// Every kind, in Go's declaration order (`internal/shared/errors.go`).
+    /// Every kind, in declaration order.
     pub const ALL: [ErrorKind; 26] = [
         Self::ModelNameRequired,
         Self::UnsupportedApi,
@@ -118,7 +116,7 @@ impl ErrorKind {
         Self::NoTextOrToolContent,
     ];
 
-    /// The sentinel's Go `Error()` text.
+    /// The sentinel's error text.
     pub fn sentinel_text(self) -> &'static str {
         match self {
             Self::ModelNameRequired => "openai: model name is required",
@@ -163,11 +161,11 @@ impl fmt::Display for ErrorKind {
     }
 }
 
-/// An HTTP error response from the API (openai-go `*openai.Error`): the final response of a
+/// An HTTP error response from the API: the final response of a
 /// call whose status is 400 or above, after retries.
 ///
-/// `Display` is openai-go's `Error()`: `OpenAI API error: <status> <Go http.StatusText>`, or
-/// `OpenAI API error: <status>` when Go has no text for the status. The body is never part of
+/// `Display` is `OpenAI API error: <status> <status text>`, or
+/// `OpenAI API error: <status>` when the status has no standard text. The body is never part of
 /// the text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApiError {
@@ -188,7 +186,7 @@ impl fmt::Display for ApiError {
 
 impl std::error::Error for ApiError {}
 
-/// Go `net/http.StatusText`; `None` where Go returns `""`.
+/// The standard HTTP reason phrase for `code`; `None` where there is none.
 fn status_text(code: u16) -> Option<&'static str> {
     Some(match code {
         100 => "Continue",
@@ -260,30 +258,30 @@ fn status_text(code: u16) -> Option<&'static str> {
 /// Where an [`OpenAiError`] comes from; decides the accessors that are true.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Origin {
-    /// A sentinel, bare or wrapped (`fmt.Errorf("%w…", sentinel…)`).
+    /// A sentinel, bare or wrapped (`<sentinel>: …`).
     Sentinel,
-    /// An error text Go builds without a sentinel (`errors.New`, `fmt.Errorf` without `%w`).
+    /// An error text built without a sentinel.
     Plain,
     /// An [`ApiError`].
     Api,
-    /// No response was received (Go's `*url.Error` from `http.Client.Do`).
+    /// No response was received.
     Transport,
     /// No response headers arrived within the default client's response-header timeout
-    /// (Go `net/http: timeout awaiting response headers`).
+    /// (`net/http: timeout awaiting response headers`).
     Timeout,
-    /// Go `context.DeadlineExceeded`: `http_options.timeout` expired.
+    /// The call's deadline passed: `http_options.timeout` expired.
     DeadlineExceeded,
-    /// Go `context.Canceled`. gadk cancels by dropping the stream (D9), so no path builds it
-    /// today; kept so the accessor exists for callers matching Go's `errors.Is`.
+    /// The call was cancelled. gadk cancels by dropping the stream, so no path builds it
+    /// today; kept so the accessor exists.
     Canceled,
 }
 
-/// The error type of `gadk-openai`: Go's sentinel-wrapping errors, openai-go's API errors,
+/// The error type of `gadk-openai`: the sentinel-wrapping errors, the API errors,
 /// and the transport, timeout and deadline failures of a call.
 ///
-/// `Display` is Go's `Error()` text. [`is`](Self::is) replaces Go's `errors.Is` for the
-/// sentinels; [`status`](Self::status) and [`api_error`](Self::api_error) replace
-/// `errors.As(err, &*openai.Error)`. Wrapping (`openai: call failed: %w` and the like) keeps
+/// `Display` is the error text. [`is`](Self::is) reports a wrapped sentinel;
+/// [`status`](Self::status) and [`api_error`](Self::api_error) give the API error. Wrapping
+/// (`openai: call failed: …` and the like) keeps
 /// the kinds, the API error and the origin.
 #[derive(Debug, Clone)]
 pub struct OpenAiError {
@@ -308,32 +306,32 @@ impl std::error::Error for OpenAiError {
 }
 
 impl OpenAiError {
-    /// The sentinels this error wraps, outermost first (Go `%w` order).
+    /// The sentinels this error wraps, outermost first.
     pub fn kinds(&self) -> &[ErrorKind] {
         &self.kinds
     }
 
-    /// Go `errors.Is(err, <sentinel>)`.
+    /// Whether the error wraps the given sentinel.
     pub fn is(&self, kind: ErrorKind) -> bool {
         self.kinds.contains(&kind)
     }
 
-    /// The HTTP status of an API error (Go `errors.As(err, &apiErr)` then `apiErr.StatusCode`).
+    /// The HTTP status of an API error.
     pub fn status(&self) -> Option<u16> {
         self.api.as_ref().map(|e| e.status)
     }
 
-    /// Go `errors.As(err, &*openai.Error)`.
+    /// The [`ApiError`] this error carries, if any.
     pub fn api_error(&self) -> Option<&ApiError> {
         self.api.as_deref()
     }
 
-    /// Go `errors.Is(err, context.DeadlineExceeded)`.
+    /// Whether the call's deadline passed.
     pub fn is_deadline_exceeded(&self) -> bool {
         self.origin == Origin::DeadlineExceeded
     }
 
-    /// Go `errors.Is(err, context.Canceled)`.
+    /// Whether the call was cancelled.
     pub fn is_canceled(&self) -> bool {
         self.origin == Origin::Canceled
     }
@@ -343,13 +341,12 @@ impl OpenAiError {
         matches!(self.origin, Origin::Transport | Origin::Timeout)
     }
 
-    /// True for the default client's response-header timeout (Go's `*url.Error` whose
-    /// `Timeout()` is true).
+    /// True for the default client's response-header timeout.
     pub fn is_timeout(&self) -> bool {
         self.origin == Origin::Timeout
     }
 
-    /// The bare sentinel (Go returns `ErrX` itself).
+    /// The bare sentinel.
     pub(crate) fn sentinel(kind: ErrorKind) -> Self {
         Self {
             kinds: vec![kind],
@@ -359,13 +356,12 @@ impl OpenAiError {
         }
     }
 
-    /// Go `fmt.Errorf("%w: <detail>", kind)`.
+    /// An error `<kind>: <detail>` wrapping one sentinel.
     pub(crate) fn new(kind: ErrorKind, detail: impl fmt::Display) -> Self {
         Self::sentinel(kind).suffixed(format!(": {detail}"))
     }
 
-    /// An error Go builds without a sentinel (`errors.New`, or `fmt.Errorf` with no `%w` of
-    /// a sentinel).
+    /// An error with no sentinel.
     pub(crate) fn plain(message: impl Into<String>) -> Self {
         Self {
             kinds: Vec::new(),
@@ -375,7 +371,7 @@ impl OpenAiError {
         }
     }
 
-    /// openai-go's `*openai.Error` for a final response with status ≥ 400.
+    /// An API error for a final response with status ≥ 400.
     pub(crate) fn api(status: u16, body: Bytes) -> Self {
         let api = ApiError { status, body };
         Self {
@@ -386,8 +382,8 @@ impl OpenAiError {
         }
     }
 
-    /// A failure to get a response (Go's `*url.Error` cause; the `Post "<url>": ` prefix Go's
-    /// text carries is not reproduced, so no URL reaches an error).
+    /// A failure to get a response (the `Post "<url>": ` prefix is not included,
+    /// so no URL reaches an error).
     pub(crate) fn transport(detail: impl Into<String>) -> Self {
         Self {
             kinds: Vec::new(),
@@ -397,7 +393,7 @@ impl OpenAiError {
         }
     }
 
-    /// Go `net/http: timeout awaiting response headers` (the default client's 10-minute
+    /// The response-header timeout error (the default client's 10-minute
     /// response-header timeout).
     pub(crate) fn response_header_timeout() -> Self {
         Self {
@@ -408,7 +404,7 @@ impl OpenAiError {
         }
     }
 
-    /// Go `context.DeadlineExceeded`.
+    /// A passed deadline (`context deadline exceeded`).
     pub(crate) fn deadline_exceeded() -> Self {
         Self {
             kinds: Vec::new(),
@@ -418,8 +414,8 @@ impl OpenAiError {
         }
     }
 
-    /// Go `context.Canceled`.
-    #[allow(dead_code)] // gadk cancels by drop (D9); kept for Go's `errors.Is(err, context.Canceled)`
+    /// A cancelled call.
+    #[allow(dead_code)] // gadk cancels by drop; kept so the accessor exists
     pub(crate) fn canceled() -> Self {
         Self {
             kinds: Vec::new(),
@@ -429,25 +425,25 @@ impl OpenAiError {
         }
     }
 
-    /// Go `fmt.Errorf("<prefix>%w", err)`: kinds, API error and origin are kept.
+    /// Prepends `prefix` to the text: kinds, API error and origin are kept.
     pub(crate) fn prefixed(mut self, prefix: impl fmt::Display) -> Self {
         self.message = format!("{prefix}{}", self.message);
         self
     }
 
-    /// Go `fmt.Errorf("%w<suffix>", err)`: kinds, API error and origin are kept.
+    /// Appends `suffix` to the text: kinds, API error and origin are kept.
     pub(crate) fn suffixed(mut self, suffix: impl fmt::Display) -> Self {
         self.message = format!("{}{suffix}", self.message);
         self
     }
 
-    /// Go `fmt.Errorf("openai: call failed: %w", err)` (the blocking paths' wrap of a client
+    /// Prefixes `openai: call failed: ` (the blocking paths' wrap of a client
     /// error).
     pub(crate) fn call_failed(self) -> Self {
         self.prefixed("openai: call failed: ")
     }
 
-    /// A response body's read error, as openai-go reports it (a streaming body's error, or a
+    /// A response body's read error (a streaming body's error, or a
     /// final ≥ 400 body that failed to read): the body stream's own text.
     /// - `ModelError::Other(RestError::DeadlineExceeded)` (a `CallTimeout::Call` deadline
     ///   passing while the body streams) → [`deadline_exceeded`](Self::deadline_exceeded);
@@ -478,7 +474,7 @@ impl From<OpenAiError> for ModelError {
     }
 }
 
-/// The shared transport's failures in openai-go's texts (`RequestConfig.Execute`):
+/// The shared transport's failures and their texts:
 /// - no response ([`RestError::Transport`]) → a transport error with the cause's text (a
 ///   `reqwest::Error` without its URL);
 /// - a header failure ([`RestError::Headers`]) → the boxed [`OpenAiError`] as it is, else a
@@ -486,7 +482,7 @@ impl From<OpenAiError> for ModelError {
 /// - [`RestError::ResponseHeaderTimeout`] → `net/http: timeout awaiting response headers`;
 /// - [`RestError::DeadlineExceeded`] → `context deadline exceeded`;
 /// - [`RestError::DroppedBody`] → the bare read error for a final status ≥ 400, else
-///   `error reading response body: <err>` (openai-go's two texts).
+///   `error reading response body: <err>`.
 impl From<RestError> for OpenAiError {
     fn from(err: RestError) -> Self {
         match err {
@@ -512,9 +508,9 @@ impl From<RestError> for OpenAiError {
     }
 }
 
-/// Go `encoding/json`'s text for a serde_json error, where a Go test asserts it (P3): a
+/// The text for a serde_json error: a
 /// truncated document is `unexpected end of JSON input`; every other error keeps serde_json's
-/// wording (an accepted divergence, ledger 3b).
+/// wording.
 pub(crate) fn go_json_error(err: &serde_json::Error) -> String {
     if err.is_eof() {
         "unexpected end of JSON input".to_string()

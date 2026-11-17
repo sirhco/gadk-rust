@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Chat Completions stream translation (port of ADK-Go `internal/completions/stream.go`, with
-//! the parts of openai-go v3.91.1's `ChatCompletionAccumulator` it relies on).
+//! Chat Completions stream translation, including the chunk accumulator it relies on.
 
 use gadk_genai::{GenerateContentResponse, Part};
 
@@ -24,26 +23,26 @@ use crate::completions::wire::{
 use crate::error::OpenAiError;
 use crate::shared::response::single_part_response;
 
-/// Go `errToolCallChunkRejected`'s text.
+/// The text of the error for a rejected tool-call chunk.
 pub(crate) const TOOL_CALL_CHUNK_REJECTED: &str =
     "openai: streamed tool call chunk could not be accumulated";
 
-/// openai-go `maxStreamAccumulatorChoiceIndex`: choice indices 0 through 127 are accepted.
+/// Wire type `maxStreamAccumulatorChoiceIndex`: choice indices 0 through 127 are accepted.
 const MAX_CHOICE_INDEX: i64 = 127;
 
-/// openai-go `maxStreamAccumulatorToolCallGrowth`: one tool-call index may grow its choice by
+/// Wire type `maxStreamAccumulatorToolCallGrowth`: one tool-call index may grow its choice by
 /// at most this many positions.
 const MAX_TOOL_CALL_GROWTH: usize = 128;
 
-/// Go `streamTranslator`: turns chunks into partial genai responses while accumulating the
-/// whole turn (openai-go `ChatCompletionAccumulator.AddChunk`).
+/// Turns chunks into partial genai responses while accumulating the
+/// whole turn.
 ///
 /// Tool calls are not emitted as they stream: nothing marks one complete (arguments arrive as
 /// fragments until the stream ends), so they reach the caller on the final response, built from
 /// [`completion`](Self::completion) by the converter the blocking path uses.
 #[derive(Debug, Default)]
 pub(crate) struct StreamTranslator {
-    /// The accumulated turn (Go `acc.ChatCompletion`).
+    /// The accumulated turn.
     completion: ChatCompletion,
     /// The first non-empty chunk id of the stream.
     id: String,
@@ -52,12 +51,12 @@ pub(crate) struct StreamTranslator {
 }
 
 impl StreamTranslator {
-    /// Go `newStreamTranslator`.
+    /// Creates a translator with an empty turn.
     pub(crate) fn new() -> Self {
         Self::default()
     }
 
-    /// Go `process`: folds `chunk` into the turn and returns the partial it contributes
+    /// Folds `chunk` into the turn and returns the partial it contributes
     /// (text or refusal delta, via [`single_part_response`](crate::shared::response::single_part_response)),
     /// `Ok(None)` for a chunk a caller sees nothing of. A tool-call delta the accumulator
     /// refuses is [`TOOL_CALL_CHUNK_REJECTED`] (a plain error).
@@ -105,18 +104,18 @@ impl StreamTranslator {
         })))
     }
 
-    /// Go `completion`: the whole turn as the blocking path would have received it.
+    /// The whole turn as the blocking path would have received it.
     pub(crate) fn completion(&self) -> &ChatCompletion {
         &self.completion
     }
 
-    /// Go `t.usage`: the latest usage a chunk reported.
+    /// The latest usage a chunk reported.
     pub(crate) fn usage(&self) -> Option<&CompletionUsage> {
         self.usage.as_ref()
     }
 }
 
-/// Go `carriesToolCall`: whether any choice in `chunk` carries a tool-call delta.
+/// Whether any choice in `chunk` carries a tool-call delta.
 fn carries_tool_call(chunk: &ChatCompletionChunk) -> bool {
     chunk
         .choices
@@ -124,17 +123,15 @@ fn carries_tool_call(chunk: &ChatCompletionChunk) -> bool {
         .any(|choice| !choice.delta.tool_calls.is_empty())
 }
 
-/// openai-go `ChatCompletionAccumulator.AddChunk`, the parts ADK-Go's translator observes:
+/// Folds `chunk` into the accumulated completion and returns whether it was accepted:
 /// `false`, leaving `acc` untouched, for a chunk whose id differs from the accumulated one, a
 /// choice index outside `0..=127`, or a tool-call index that is negative (other than `-1`,
 /// read as `0`) or grows its choice by more than 128 positions (or the chunk's shared growth
-/// budget). openai-go's representable-`int` checks on text and logprob sizes cannot fail on a
-/// 64-bit target and are not reproduced, nor are its `JustFinished*` events, which ADK-Go does
-/// not read.
+/// budget). Size checks on text and logprobs cannot fail on a 64-bit target and are not
+/// made, and no finished-part events are produced.
 ///
-/// The snapshot's `usage` stays `None`: openai-go sums each chunk's usage into
-/// `ChatCompletion.Usage` but never sets `JSON.Usage`, so ADK-Go's `convertCompletion` reads
-/// the accumulated turn as carrying no usage. The translator keeps the latest report instead.
+/// The snapshot's `usage` stays `None`: the accumulated turn carries no usage, and the
+/// translator keeps the latest report instead.
 fn add_chunk(acc: &mut ChatCompletion, chunk: &ChatCompletionChunk) -> bool {
     if !acc.id.is_empty() && acc.id != chunk.id {
         return false;
@@ -146,7 +143,7 @@ fn add_chunk(acc: &mut ChatCompletion, chunk: &ChatCompletionChunk) -> bool {
     true
 }
 
-/// openai-go `validChatCompletionChunkIndices`: every choice index is in range and the
+/// Wire type `validChatCompletionChunkIndices`: every choice index is in range and the
 /// tool-call indices stay within their growth bounds.
 fn valid_chunk_indices(acc: &ChatCompletion, chunk: &ChatCompletionChunk) -> bool {
     // One position per received entry plus 127 of sparse slack, shared by all choices (and
@@ -185,7 +182,7 @@ fn valid_chunk_indices(acc: &ChatCompletion, chunk: &ChatCompletionChunk) -> boo
     true
 }
 
-/// openai-go `checkedStreamAccumulatorChoiceIndex`.
+/// Wire type `checkedStreamAccumulatorChoiceIndex`.
 fn checked_choice_index(index: i64) -> Option<usize> {
     if (0..=MAX_CHOICE_INDEX).contains(&index) {
         usize::try_from(index).ok()
@@ -194,7 +191,7 @@ fn checked_choice_index(index: i64) -> Option<usize> {
     }
 }
 
-/// openai-go `checkedToolCallIndex`: `-1` (AWS Bedrock's index for a single tool call) is `0`;
+/// Wire type `checkedToolCallIndex`: `-1` (AWS Bedrock's index for a single tool call) is `0`;
 /// a negative index, or one more than 127 positions past `count`, is refused.
 fn checked_tool_call_index(index: i64, count: usize) -> Option<usize> {
     let index = if index == -1 { 0 } else { index };
@@ -208,7 +205,7 @@ fn checked_tool_call_index(index: i64, count: usize) -> Option<usize> {
     Some(index)
 }
 
-/// openai-go `accumulateDelta` on a chunk [`valid_chunk_indices`] accepted.
+/// Wire type `accumulateDelta` on a chunk [`valid_chunk_indices`] accepted.
 fn accumulate_delta(acc: &mut ChatCompletion, chunk: &ChatCompletionChunk) {
     if acc.id.is_empty() {
         acc.id.clone_from(&chunk.id);
@@ -216,7 +213,7 @@ fn accumulate_delta(acc: &mut ChatCompletion, chunk: &ChatCompletionChunk) {
     for delta in &chunk.choices {
         accumulate_choice(acc, delta);
     }
-    // openai-go assigns the metadata from every chunk, an empty value included.
+    // The metadata is assigned from every chunk, an empty value included.
     acc.model.clone_from(&chunk.model);
     acc.created = chunk.created;
     acc.system_fingerprint.clone_from(&chunk.system_fingerprint);
@@ -236,7 +233,7 @@ fn accumulate_choice(acc: &mut ChatCompletion, delta: &ChatCompletionChunkChoice
     }
     let choice = &mut acc.choices[choice_index];
     choice.index = delta.index;
-    // Assigned from every delta, so a later chunk without one clears it (openai-go).
+    // Assigned from every delta, so a later chunk without one clears it.
     choice.finish_reason.clone_from(&delta.finish_reason);
     let message = &mut choice.message;
     if !delta.delta.role.is_empty() {

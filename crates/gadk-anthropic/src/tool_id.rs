@@ -13,11 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Tool-use ID sanitizing (port of ADK-Go `tools.go` `toolUseIDSanitizer`).
+//! Tool-use ID sanitizing.
 
 use std::collections::HashMap;
 
-/// Go `validToolUseIDPattern`: `^[a-zA-Z0-9_-]+$`.
+/// The pattern of a valid tool-use ID: `^[a-zA-Z0-9_-]+$`.
 fn is_valid_tool_use_id(id: &str) -> bool {
     !id.is_empty()
         && id
@@ -27,7 +27,7 @@ fn is_valid_tool_use_id(id: &str) -> bool {
 
 /// Maps invalid or empty `tool_use` IDs to deterministic fallbacks (`toolu_fallback_<n>`),
 /// pairing function calls and function responses across one conversation in the same order as
-/// adk-python (Go `toolUseIDSanitizer`). One sanitizer serves one request's contents.
+/// adk-python. One sanitizer serves one request's contents.
 #[derive(Debug, Default)]
 pub(crate) struct ToolUseIdSanitizer {
     mapping: HashMap<String, String>,
@@ -37,7 +37,7 @@ pub(crate) struct ToolUseIdSanitizer {
 }
 
 impl ToolUseIdSanitizer {
-    /// Go `newToolUseIDSanitizer`.
+    /// A new sanitizer with no waiting calls.
     pub(crate) fn new() -> Self {
         Self::default()
     }
@@ -48,7 +48,7 @@ impl ToolUseIdSanitizer {
         id
     }
 
-    /// Go `(*toolUseIDSanitizer).sanitize`: the ID to send for a function call
+    /// The ID to send for a function call
     /// (`is_call`) or a function response with ID `tool_id` and name `tool_name`.
     /// - A valid ID is kept.
     /// - An invalid non-empty ID gets one fallback, reused for every later occurrence.

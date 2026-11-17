@@ -13,12 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Chat Completions request building (port of ADK-Go `internal/completions/request.go`:
-//! `buildParams`, `convertContents`, `convertContent`, `newMediaMessage`, `newMediaPart`,
-//! `normalizeRole`, `joinText`, `newToolCall`, `newToolMessage`, `serviceTiers`,
-//! `supportedConfigFields`, `applyGenerationConfig`, `newResponseFormat`). Only
-//! [`build_params`] is shared; [`build_params_with`] and [`supported_config_fields`] are
-//! the seam for the test that swaps Go's `supportedConfigFields`.
+//! Chat Completions request building: [`build_params`] and its content, media, role, tool-call
+//! and generation-config conversions. Only [`build_params`] is shared; [`build_params_with`]
+//! and [`supported_config_fields`] are the seam for tests that swap the supported-field list.
 
 use gadk_genai::{Content, FunctionCall, FunctionResponse, GenerateContentConfig, ServiceTier};
 use gadk_model::{HttpOptions, LlmRequest};
@@ -51,23 +48,23 @@ use crate::shared::schema::{
     enforce_strict_openai_schema, normalize_schema, response_format_name, schema_to_map,
 };
 
-/// The message roles Chat Completions accepts from a caller (Go `roleUser`, `roleAssistant`,
-/// `roleSystem`, `roleDeveloper`). The tool role is absent on purpose: it comes from a
+/// The message roles Chat Completions accepts from a caller (user, assistant,
+/// system, developer). The tool role is absent on purpose: it comes from a
 /// function response, never from a content role.
 const ROLE_USER: &str = "user";
 const ROLE_ASSISTANT: &str = "assistant";
 const ROLE_SYSTEM: &str = "system";
 const ROLE_DEVELOPER: &str = "developer";
 
-/// Go `imageInputDetail`: the detail level every image input carries, named rather than left
+/// The detail level every image input carries, named rather than left
 /// to the server's default.
 const IMAGE_INPUT_DETAIL: &str = "auto";
 
-/// Go `buildParams`: the Chat Completions params for `req`, sent as `model_name` unless
+/// The Chat Completions params for `req`, sent as `model_name` unless
 /// `req.model` names a model. Order: contents ([`ErrorKind::NoContents`](crate::error::ErrorKind::NoContents)
 /// when they convert to no message), then the generation config (`req.config` with
-/// `req.http_options`), then tools, then the tool choice (sent only alongside tools). Go's
-/// nil-request check (`ErrRequestNil`) has no counterpart: an `LlmRequest` is never nil.
+/// `req.http_options`), then tools, then the tool choice (sent only alongside tools). There is
+/// no nil-request check: an `LlmRequest` is never nil.
 pub(crate) fn build_params(
     model_name: &str,
     req: &LlmRequest,
@@ -75,7 +72,7 @@ pub(crate) fn build_params(
     build_params_with(model_name, req, &supported_config_fields())
 }
 
-/// Go `supportedConfigFields`: the fields both endpoints support
+/// The fields both endpoints support
 /// ([`SUPPORTED_CONFIG_FIELDS`]) plus the ones only Chat Completions can express.
 pub(crate) fn supported_config_fields() -> Vec<&'static str> {
     let mut fields = SUPPORTED_CONFIG_FIELDS.to_vec();
@@ -88,8 +85,8 @@ pub(crate) fn supported_config_fields() -> Vec<&'static str> {
     fields
 }
 
-/// [`build_params`] against `supported` in place of [`supported_config_fields`] (Go's test
-/// swaps the package variable; gadk passes the list).
+/// [`build_params`] against `supported` in place of [`supported_config_fields`] (the list is
+/// passed in, so tests can swap it).
 pub(crate) fn build_params_with(
     model_name: &str,
     req: &LlmRequest,
@@ -133,7 +130,7 @@ pub(crate) fn build_params_with(
     Ok(params)
 }
 
-/// Go `convertContents`: the contents as a Chat Completions message list. One content can
+/// The contents as a Chat Completions message list. One content can
 /// produce several messages, because a tool result is a message of its own. A content without
 /// parts is skipped.
 fn convert_contents(contents: &[Content]) -> Result<Vec<ChatCompletionMessageParam>, OpenAiError> {
@@ -148,14 +145,14 @@ fn convert_contents(contents: &[Content]) -> Result<Vec<ChatCompletionMessagePar
     Ok(messages)
 }
 
-/// Go `contentPiece`: one piece of a message in arrival order, either text or a classified
+/// One piece of a message in arrival order, either text or a classified
 /// media value.
 enum ContentPiece {
     Text(String),
     Media(Media),
 }
 
-/// Go `convertContent`: a tool message per function response, then at most one message for
+/// A tool message per function response, then at most one message for
 /// the rest.
 fn convert_content(
     content: &Content,
@@ -258,7 +255,7 @@ fn convert_content(
     Ok(messages)
 }
 
-/// Go `newMediaMessage`: the user message for a turn that carries media. Only a user message
+/// The user message for a turn that carries media. Only a user message
 /// can, so media in an assistant turn is
 /// [`ErrorKind::MediaOnAssistantTurn`](crate::error::ErrorKind::MediaOnAssistantTurn) and in a
 /// system or developer turn `openai: media in a <role> message is not supported: <mime>`.
@@ -298,7 +295,7 @@ fn new_media_message(
     Ok(ChatCompletionMessageParam::user_parts(parts))
 }
 
-/// Go `newMediaPart`: the content part for one classified media value. The kind picks the
+/// The content part for one classified media value. The kind picks the
 /// wire field and the source picks how that field names the bytes. Errors name the kind and
 /// the source, never the URI (it can be a presigned URL).
 fn new_media_part(m: &Media) -> Result<ChatCompletionContentPartParam, OpenAiError> {
@@ -352,7 +349,7 @@ fn new_media_part(m: &Media) -> Result<ChatCompletionContentPartParam, OpenAiErr
     }
 }
 
-/// Go `normalizeRole`: a genai content role as a Chat Completions message role (`""` and
+/// A genai content role as a Chat Completions message role (`""` and
 /// `user` → user, `model` → assistant; system and developer survive); anything else is
 /// `openai: unsupported role "<role>"`.
 fn normalize_role(role: &str) -> Result<&'static str, OpenAiError> {
@@ -368,7 +365,7 @@ fn normalize_role(role: &str) -> Result<&'static str, OpenAiError> {
     }
 }
 
-/// Go `joinText`: a turn's text parts joined with `\n`, whitespace-only parts dropped.
+/// A turn's text parts joined with `\n`, whitespace-only parts dropped.
 fn join_text(texts: &[String]) -> String {
     let mut out = String::new();
     for text in texts {
@@ -383,7 +380,7 @@ fn join_text(texts: &[String]) -> String {
     out
 }
 
-/// Go `newToolCall`: a function call as the tool call an assistant message carries; an empty
+/// A function call as the tool call an assistant message carries; an empty
 /// name is [`ErrorKind::FunctionCallMissingName`](crate::error::ErrorKind::FunctionCallMissingName).
 fn new_tool_call(
     tracker: &mut CallTracker,
@@ -406,7 +403,7 @@ fn new_tool_call(
     ))
 }
 
-/// Go `newToolMessage`: a function response as the tool-role message answering its call.
+/// A function response as the tool-role message answering its call.
 fn new_tool_message(
     tracker: &mut CallTracker,
     fr: &FunctionResponse,
@@ -416,7 +413,7 @@ fn new_tool_message(
     Ok(ChatCompletionMessageParam::tool(payload, call_id))
 }
 
-/// Go `serviceTiers`: genai's processing tiers as Chat Completions tiers (unspecified reads as
+/// genai's processing tiers as Chat Completions tiers (unspecified reads as
 /// default, as on the Responses path); `None` for a tier the map does not know.
 fn service_tier(tier: &ServiceTier) -> Option<ChatCompletionServiceTier> {
     match tier {
@@ -429,9 +426,9 @@ fn service_tier(tier: &ServiceTier) -> Option<ChatCompletionServiceTier> {
     }
 }
 
-/// Go `applyGenerationConfig`: the generation config onto Chat Completions params. Stop
+/// The generation config onto Chat Completions params. Stop
 /// sequences, the penalties and seed are translated here (the Responses path rejects them).
-/// Go's nil config is `(None, None)`; `http_options` alone stands for a config carrying only
+/// An absent config is `(None, None)`; `http_options` alone stands for a config carrying only
 /// `HTTPOptions`.
 fn apply_generation_config(
     params: &mut ChatCompletionNewParams,
@@ -537,7 +534,7 @@ fn apply_generation_config(
     reject_unsupported_config_fields(cfg, http_options, supported)
 }
 
-/// Go `newResponseFormat`: `json_object` without a schema, else a strict `json_schema` format
+/// `json_object` without a schema, else a strict `json_schema` format
 /// carrying `response_json_schema` (preferred) or `response_schema`, strict-rewritten.
 fn new_response_format(
     cfg: &GenerateContentConfig,

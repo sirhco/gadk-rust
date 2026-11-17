@@ -1,0 +1,4 @@
+# Allowlist for crates/gadk-openai/ (path<TAB>substring<TAB>reason).
+crates/gadk-openai/src/client.rs	into Go value of type apierror.Error	Error text kept identical to the text an ADK OpenAI model reports.
+crates/gadk-openai/src/shared/calls.rs	bool> into Go value of type	Error text kept identical to the text an ADK OpenAI model reports.
+crates/gadk-openai/src/shared/calls.rs	<kind> into Go value	Error text kept identical to the text an ADK OpenAI model reports.

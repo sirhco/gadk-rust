@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The public constructor (port of ADK-Go `model/openaimodel/openaimodel.go`'s `NewModel` and
-//! `FinishMessageKey`).
+//! The public constructor [`new_model`] and [`FINISH_MESSAGE_KEY`].
 
 use std::sync::Arc;
 
@@ -28,18 +27,19 @@ use crate::{completions, responses};
 /// The [`LlmResponse::custom_metadata`](gadk_model::LlmResponse::custom_metadata) key under
 /// which a turn that ended badly but still carries an answer reports the provider's own
 /// account of why: a content filter's `content_filter`, an incomplete reason this crate does
-/// not map, or a server error message (Go `FinishMessageKey`). Its `finish_reason` says the
+/// not map, or a server error message. Its `finish_reason` says the
 /// turn was cut short; this says what the provider called it.
 ///
 /// A turn left with nothing to read reports the same wording in `error_code` and
 /// `error_message` instead.
 pub const FINISH_MESSAGE_KEY: &str = "openai_finish_message";
 
-/// Builds a model talking to the API [`ClientConfig::api`] names (Go `NewModel`).
+/// Builds a model talking to the API [`ClientConfig::api`] names.
 ///
-/// Go's order: an empty `model_name` is [`ErrorKind::ModelNameRequired`]; then the client is
-/// built from `cfg` (the environment is read now) and the API selects the model. Go's
-/// `ErrUnsupportedAPI` for an unknown API value comes from parsing one: [`Api`]'s `FromStr`.
+/// Order: an empty `model_name` is [`ErrorKind::ModelNameRequired`]; then the client is
+/// built from `cfg` (the environment is read now) and the API selects the model. An unknown
+/// API value fails earlier, when parsing one: [`Api`]'s `FromStr` gives
+/// [`ErrorKind::UnsupportedApi`].
 pub fn new_model(model_name: &str, cfg: ClientConfig) -> Result<Arc<dyn Llm>, OpenAiError> {
     if model_name.is_empty() {
         return Err(OpenAiError::sentinel(ErrorKind::ModelNameRequired));

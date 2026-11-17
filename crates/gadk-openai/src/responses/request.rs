@@ -13,10 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Responses request building (port of ADK-Go `internal/responses/request.go`: `buildParams`,
-//! `convertContents`, `bufferedContent`, `newMessage`, `newMediaContent`, `newOutputMessage`,
-//! `normalizeRole`, `newFunctionCall`, `newFunctionResponse`; the config half is
-//! [`crate::responses::generation_config`], the schema half [`crate::responses::schema`]).
+//! Responses request building: [`build_params`] and its content, media, role, function-call
+//! and function-response conversions; the config half is
+//! [`crate::responses::generation_config`], the schema half [`crate::responses::schema`].
 
 use gadk_genai::{Content, FunctionCall, FunctionResponse};
 use gadk_model::LlmRequest;
@@ -40,18 +39,18 @@ use crate::shared::contents::{
 };
 use crate::shared::media::{Media, MediaKind, MediaSource, classify_media};
 
-/// Go `imageInputDetail`: the detail every image input carries. openai-go drops an unset
-/// detail from the request (the field is `omitzero`), so `auto` is sent explicitly.
+/// The detail every image input carries. An unset detail is dropped from the
+/// request, so `auto` is sent explicitly.
 const IMAGE_INPUT_DETAIL: ResponseInputImageDetail = ResponseInputImageDetail::Auto;
 
-/// Go `buildParams`: the Responses params for `req`, sent as `model_name` unless `req.model`
+/// The Responses params for `req`, sent as `model_name` unless `req.model`
 /// names a model. Contents that convert to no item are the bare
 /// [`ErrorKind::NoContents`](crate::error::ErrorKind::NoContents), or
-/// `ErrNoContents: every part was dropped as replayed reasoning` when a dropped thought
+/// `ErrorKind::NoContents: every part was dropped as replayed reasoning` when a dropped thought
 /// emptied them; then the generation config
 /// ([`apply_generation_config`](crate::responses::generation_config::apply_generation_config)
-/// with `req.config` and `req.http_options`), tools, and the tool choice. Go's nil-request
-/// check has no counterpart.
+/// with `req.config` and `req.http_options`), tools, and the tool choice. There is no
+/// nil-request check.
 pub(crate) fn build_params(
     model_name: &str,
     req: &LlmRequest,
@@ -91,7 +90,7 @@ pub(crate) fn build_params(
     Ok(params)
 }
 
-/// Go `bufferedContent`: one piece of a message, held in the order it arrived (text and media
+/// One piece of a message, held in the order it arrived (text and media
 /// interleave inside a single message).
 #[derive(Debug)]
 enum Buffered {
@@ -99,7 +98,7 @@ enum Buffered {
     Media(Media),
 }
 
-/// Go `convertContents`: the input items for `contents`, and whether any part was dropped as
+/// The input items for `contents`, and whether any part was dropped as
 /// replayed reasoning.
 pub(crate) fn convert_contents(
     contents: &[Content],
@@ -176,7 +175,7 @@ pub(crate) fn convert_contents(
     Ok((items, dropped_reasoning))
 }
 
-/// Go `convertContents`' `flushText`: the buffered content as one message of `role` (an
+/// Flushes the buffered content as one message of `role` (an
 /// output message for the assistant, whose turns the API rejects as `input_text`).
 fn flush(
     role: &str,
@@ -198,7 +197,7 @@ fn flush(
     Ok(())
 }
 
-/// Go `newMessage`: an easy input message for an already-normalized role; `None` when nothing
+/// An easy input message for an already-normalized role; `None` when nothing
 /// but blank text was buffered.
 fn new_message(
     msg_role: EasyInputMessageRole,
@@ -242,10 +241,10 @@ fn new_message(
     }))
 }
 
-/// Go `newMediaContent`: one classified media value in the content field the Responses API
+/// One classified media value in the content field the Responses API
 /// has for it. The kind picks the field (`input_image` / `input_file`), the source which of
 /// its references carries the bytes; audio and video have no field
-/// (`ErrUnsupportedMIMEType: <mime>`).
+/// (`ErrorKind::UnsupportedMimeType: <mime>`).
 fn new_media_content(m: &Media) -> Result<ResponseInputContent, OpenAiError> {
     match m.kind {
         MediaKind::Image => {
@@ -281,9 +280,9 @@ fn new_media_content(m: &Media) -> Result<ResponseInputContent, OpenAiError> {
     }
 }
 
-/// Go `newOutputMessage`: an assistant output message of `output_text` items, as replaying a
+/// An assistant output message of `output_text` items, as replaying a
 /// prior assistant turn requires; media has no field there
-/// (`ErrMediaOnAssistantTurn: <mime>`). `None` when nothing but blank text was buffered.
+/// (`ErrorKind::MediaOnAssistantTurn: <mime>`). `None` when nothing but blank text was buffered.
 fn new_output_message(
     buffered: &[Buffered],
 ) -> Result<Option<ResponseOutputMessageParam>, OpenAiError> {
@@ -319,7 +318,7 @@ fn new_output_message(
     }))
 }
 
-/// Go `normalizeRole`: `""`/`user` → user, `model` → assistant, `system`, `developer`; else
+/// `""`/`user` → user, `model` → assistant, `system`, `developer`; else
 /// `openai: unsupported role "<role>"` (plain).
 pub(crate) fn normalize_role(role: &str) -> Result<EasyInputMessageRole, OpenAiError> {
     match role {
@@ -334,8 +333,8 @@ pub(crate) fn normalize_role(role: &str) -> Result<EasyInputMessageRole, OpenAiE
     }
 }
 
-/// Go `newFunctionCall`: the `function_call` item for `fc` (id from
-/// [`CallTracker::take_call_id`], arguments as Go JSON); a call without a name is the bare
+/// The `function_call` item for `fc` (id from
+/// [`CallTracker::take_call_id`], arguments as JSON); a call without a name is the bare
 /// [`ErrorKind::FunctionCallMissingName`].
 fn new_function_call(
     tracker: &mut CallTracker,
@@ -354,7 +353,7 @@ fn new_function_call(
     })
 }
 
-/// Go `newFunctionResponse`: the `function_call_output` item answering `fr`'s call
+/// The `function_call_output` item answering `fr`'s call
 /// ([`CallTracker::resolve_response_id`]; payload
 /// [`marshal_function_response`](crate::shared::calls::marshal_function_response)).
 pub(crate) fn new_function_response(

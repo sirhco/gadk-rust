@@ -13,9 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Responses API wire types: the parts of openai-go v3.91.1 `responses/response.go` that
-//! ADK-Go's `internal/responses` touches, following the conventions of [`crate::oaishared`]
-//! (declaration order, `omitzero`, `apijson` leniency).
+//! Responses API wire types: the parts of the Responses API that the OpenAI model touches,
+//! following the conventions of [`crate::oaishared`] (declaration order, zero values skipped,
+//! lenient decoding).
 
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -69,7 +69,7 @@ tag!(
     AllowedToolsTag = "allowed_tools"
 );
 
-/// openai-go `responses.ResponseNewParams`, the fields ADK-Go sets, in declaration order:
+/// The Responses API request body, the fields set, in declaration order:
 /// `instructions, max_output_tokens, temperature, top_logprobs, top_p, include, service_tier,
 /// input, model, reasoning, text, tool_choice, tools`. The streaming flag is not a field:
 /// [`crate::client::encode_body`] appends `"stream":true` after every key.
@@ -96,7 +96,7 @@ pub(crate) struct ResponseNewParams {
     /// `service_tier`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) service_tier: Option<ResponseServiceTier>,
-    /// `input` (ADK-Go sends `OfInputItemList`).
+    /// `input` (always an input item list).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) input: Option<ResponseInput>,
     /// `model`.
@@ -116,9 +116,9 @@ pub(crate) struct ResponseNewParams {
     pub(crate) tools: Vec<ToolParam>,
 }
 
-/// openai-go `responses.ResponseIncludable`.
+/// The values of `include`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
-#[allow(dead_code)] // D5: openai-go's whole value set; ADK-Go sends only `message.output_text.logprobs`.
+#[allow(dead_code)] // the whole value set of the API; only `message.output_text.logprobs` is sent.
 pub(crate) enum ResponseIncludable {
     /// `"file_search_call.results"`.
     #[serde(rename = "file_search_call.results")]
@@ -141,15 +141,15 @@ pub(crate) enum ResponseIncludable {
     /// `"reasoning.encrypted_content"`.
     #[serde(rename = "reasoning.encrypted_content")]
     ReasoningEncryptedContent,
-    /// `"message.output_text.logprobs"` (the one ADK-Go sends).
+    /// `"message.output_text.logprobs"` (the one sent).
     #[serde(rename = "message.output_text.logprobs")]
     MessageOutputTextLogprobs,
 }
 
-/// openai-go `responses.ResponseNewParamsServiceTier`.
+/// The values of `service_tier`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
-#[allow(dead_code)] // D5: openai-go's whole value set; ADK-Go never sends `auto`, `scale`, `fast` or `ultrafast`.
+#[allow(dead_code)] // the whole value set of the API; `auto`, `scale`, `fast`, `ultrafast` unsent.
 pub(crate) enum ResponseServiceTier {
     /// `"auto"`.
     Auto,
@@ -167,32 +167,32 @@ pub(crate) enum ResponseServiceTier {
     Ultrafast,
 }
 
-/// openai-go `responses.ResponseNewParamsInputUnion`.
+/// The `input` of a request: a string or an input item list.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
-#[allow(dead_code)] // D5: openai-go's whole value set; ADK-Go sends only `OfInputItemList`.
+#[allow(dead_code)] // the whole value set of the API; only an input item list is sent.
 pub(crate) enum ResponseInput {
-    /// `OfString`.
+    /// A string.
     String(String),
-    /// `OfInputItemList` (`ResponseInputParam`).
+    /// A list of input items.
     InputItemList(Vec<ResponseInputItem>),
 }
 
-/// openai-go `responses.ResponseInputItemUnionParam`, the variants ADK-Go builds.
+/// An input item, the variants built.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub(crate) enum ResponseInputItem {
-    /// `OfMessage`.
+    /// A message.
     Message(EasyInputMessageParam),
-    /// `OfOutputMessage` (a replayed assistant turn).
+    /// An output message (a replayed assistant turn).
     OutputMessage(ResponseOutputMessageParam),
-    /// `OfFunctionCall`.
+    /// A function call.
     FunctionCall(ResponseFunctionToolCallParam),
-    /// `OfFunctionCallOutput`.
+    /// A function-call output.
     FunctionCallOutput(ResponseInputItemFunctionCallOutputParam),
 }
 
-/// openai-go `responses.EasyInputMessageRole`.
+/// The role of an input message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum EasyInputMessageRole {
@@ -207,7 +207,7 @@ pub(crate) enum EasyInputMessageRole {
 }
 
 impl EasyInputMessageRole {
-    /// The wire value (Go `string(role)`, as error texts print it).
+    /// The wire value (as error texts print it).
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::User => "user",
@@ -218,7 +218,7 @@ impl EasyInputMessageRole {
     }
 }
 
-/// openai-go `responses.EasyInputMessageType`.
+/// The type of an input message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum EasyInputMessageType {
@@ -226,7 +226,7 @@ pub(crate) enum EasyInputMessageType {
     Message,
 }
 
-/// openai-go `responses.EasyInputMessageParam`, the fields ADK-Go sets: `content, role, type`
+/// An easy input message, the fields set: `content, role, type`
 /// (`phase` is never set).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct EasyInputMessageParam {
@@ -234,35 +234,35 @@ pub(crate) struct EasyInputMessageParam {
     pub(crate) content: EasyInputMessageContent,
     /// `role`.
     pub(crate) role: EasyInputMessageRole,
-    /// `type` (Go `omitzero` string; ADK-Go sets `"message"`).
+    /// `type` (a zero value is skipped; `"message"` is set).
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     pub(crate) kind: Option<EasyInputMessageType>,
 }
 
-/// openai-go `responses.EasyInputMessageContentUnionParam`.
+/// The content of an input message: a string or a list of content parts.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
-#[allow(dead_code)] // D5: openai-go's whole value set; ADK-Go sends only `OfInputItemContentList`.
+#[allow(dead_code)] // the whole value set of the API; only a content part list is sent.
 pub(crate) enum EasyInputMessageContent {
-    /// `OfString`.
+    /// A string.
     String(String),
-    /// `OfInputItemContentList` (`ResponseInputMessageContentListParam`).
+    /// A list of input content parts.
     InputItemContentList(Vec<ResponseInputContent>),
 }
 
-/// openai-go `responses.ResponseInputContentUnionParam`.
+/// An input content part.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub(crate) enum ResponseInputContent {
-    /// `OfInputText`.
+    /// A text part.
     Text(ResponseInputTextParam),
-    /// `OfInputImage`.
+    /// An image part.
     Image(ResponseInputImageParam),
-    /// `OfInputFile`.
+    /// A file part.
     File(ResponseInputFileParam),
 }
 
-/// openai-go `responses.ResponseInputTextParam`: `text, type`.
+/// An input text part: `text, type`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub(crate) struct ResponseInputTextParam {
     /// `text` (required, always sent).
@@ -272,23 +272,23 @@ pub(crate) struct ResponseInputTextParam {
     pub(crate) kind: InputTextTag,
 }
 
-/// openai-go `responses.ResponseInputImageDetail`.
+/// The detail level of an input image.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
-#[allow(dead_code)] // D5: openai-go's whole value set; ADK-Go sends only `auto`.
+#[allow(dead_code)] // the whole value set of the API; only `auto` is sent.
 pub(crate) enum ResponseInputImageDetail {
     /// `"low"`.
     Low,
     /// `"high"`.
     High,
-    /// `"auto"` (the one ADK-Go sends).
+    /// `"auto"` (the one sent).
     Auto,
     /// `"original"`.
     Original,
 }
 
-/// openai-go `responses.ResponseInputImageParam`: `detail, file_id, image_url, type`.
-/// `detail` is tagged both required and `omitzero`, so `None` drops it from the request.
+/// An input image part: `detail, file_id, image_url, type`.
+/// `None` drops `detail` from the request.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub(crate) struct ResponseInputImageParam {
     /// `detail`.
@@ -305,7 +305,7 @@ pub(crate) struct ResponseInputImageParam {
     pub(crate) kind: InputImageTag,
 }
 
-/// openai-go `responses.ResponseInputFileParam`, the fields ADK-Go sets: `file_id, file_data,
+/// An input file part, the fields set: `file_id, file_data,
 /// file_url, filename, type` (`detail` is never set).
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub(crate) struct ResponseInputFileParam {
@@ -326,21 +326,21 @@ pub(crate) struct ResponseInputFileParam {
     pub(crate) kind: InputFileTag,
 }
 
-/// openai-go `responses.ResponseOutputMessageStatus`.
+/// The status of an output message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
-#[allow(dead_code)] // D5: openai-go's whole value set; ADK-Go sends only `completed`.
+#[allow(dead_code)] // the whole value set of the API; only `completed` is sent.
 pub(crate) enum ResponseOutputMessageStatus {
     /// `"in_progress"`.
     InProgress,
-    /// `"completed"` (the one ADK-Go sends).
+    /// `"completed"` (the one sent).
     Completed,
     /// `"incomplete"`.
     Incomplete,
 }
 
-/// openai-go `responses.ResponseOutputMessageParam`, the fields ADK-Go sets: `id, content,
-/// status, role, type` (`phase` is never set; `id` is `omitzero`, so ADK-Go's empty id is
+/// An output message, the fields set: `id, content,
+/// status, role, type` (`phase` is never set; `id` is skipped when empty, so an empty id is
 /// not sent).
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub(crate) struct ResponseOutputMessageParam {
@@ -360,17 +360,16 @@ pub(crate) struct ResponseOutputMessageParam {
     pub(crate) kind: MessageTag,
 }
 
-/// openai-go `responses.ResponseOutputMessageContentUnionParam` (ADK-Go sends
-/// `OfOutputText`).
+/// The content of an output message (only an output-text part is sent).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub(crate) enum ResponseOutputMessageContent {
-    /// `OfOutputText`.
+    /// An output-text part.
     OutputText(ResponseOutputTextParam),
 }
 
-/// openai-go `responses.ResponseOutputTextParam`, the fields ADK-Go sets: `text, type`
-/// (`annotations` and `logprobs` are never set and are `omitzero`).
+/// An output-text part, the fields set: `text, type`
+/// (`annotations` and `logprobs` are never set and are skipped).
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub(crate) struct ResponseOutputTextParam {
     /// `text` (required, always sent).
@@ -380,7 +379,7 @@ pub(crate) struct ResponseOutputTextParam {
     pub(crate) kind: OutputTextTag,
 }
 
-/// openai-go `responses.ResponseFunctionToolCallParam`, the fields ADK-Go sets: `arguments,
+/// A function tool call, the fields set: `arguments,
 /// call_id, name, type`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub(crate) struct ResponseFunctionToolCallParam {
@@ -395,7 +394,7 @@ pub(crate) struct ResponseFunctionToolCallParam {
     pub(crate) kind: FunctionCallTag,
 }
 
-/// openai-go `responses.ResponseInputItemFunctionCallOutputParam`, the fields ADK-Go sets:
+/// A function-call output item, the fields set:
 /// `output, call_id, type`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct ResponseInputItemFunctionCallOutputParam {
@@ -409,16 +408,15 @@ pub(crate) struct ResponseInputItemFunctionCallOutputParam {
     pub(crate) kind: FunctionCallOutputTag,
 }
 
-/// openai-go `responses.ResponseInputItemFunctionCallOutputOutputUnionParam` (ADK-Go sends
-/// `OfString`).
+/// The output of a function call (only a string is sent).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub(crate) enum ResponseFunctionCallOutput {
-    /// `OfString`.
+    /// A string.
     String(String),
 }
 
-/// openai-go `responses.ResponseTextConfigParam`, the field ADK-Go sets: `format` (omitted
+/// The text config, the field set: `format` (omitted
 /// from the params when unset, [`is_zero`](Self::is_zero)).
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub(crate) struct ResponseTextConfigParam {
@@ -428,32 +426,32 @@ pub(crate) struct ResponseTextConfigParam {
 }
 
 impl ResponseTextConfigParam {
-    /// Go `omitzero`: no field set.
+    /// Whether no field is set.
     pub(crate) fn is_zero(&self) -> bool {
         self.format.is_none()
     }
 }
 
-/// openai-go `responses.ResponseFormatTextConfigUnionParam`.
+/// The text format of a response.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
-#[allow(dead_code)] // D5: openai-go's whole value set; ADK-Go never sends `OfText`.
+#[allow(dead_code)] // the whole value set of the API; plain text is never sent.
 pub(crate) enum ResponseFormatTextConfig {
-    /// `OfText`.
+    /// Plain text.
     Text(ResponseFormatTextParam),
-    /// `OfJSONSchema`.
+    /// A JSON schema.
     JsonSchema(ResponseFormatTextJsonSchemaConfigParam),
-    /// `OfJSONObject`.
+    /// A JSON object.
     JsonObject(ResponseFormatJsonObjectParam),
 }
 
-/// openai-go `responses.ResponseFormatTextJSONSchemaConfigParam`: `name, schema, strict,
+/// A JSON schema text format: `name, schema, strict,
 /// description, type`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub(crate) struct ResponseFormatTextJsonSchemaConfigParam {
     /// `name` (required, always sent).
     pub(crate) name: String,
-    /// `schema` (Go `map[string]any`; nil is omitted).
+    /// `schema` (a JSON object; omitted when `None`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) schema: Option<Map<String, Value>>,
     /// `strict`.
@@ -467,10 +465,10 @@ pub(crate) struct ResponseFormatTextJsonSchemaConfigParam {
     pub(crate) kind: JsonSchemaTag,
 }
 
-/// openai-go `responses.ToolChoiceOptions`.
+/// The tool-choice options.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
-#[allow(dead_code)] // D5: openai-go's whole value set; ADK-Go never sends `auto`.
+#[allow(dead_code)] // the whole value set of the API; `auto` is never sent.
 pub(crate) enum ToolChoiceOptions {
     /// `"none"`.
     None,
@@ -480,17 +478,17 @@ pub(crate) enum ToolChoiceOptions {
     Required,
 }
 
-/// openai-go `responses.ResponseNewParamsToolChoiceUnion`, the variants ADK-Go builds.
+/// The tool choice, the variants built.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub(crate) enum ResponseToolChoice {
-    /// `OfToolChoiceMode`.
+    /// A mode.
     Mode(ToolChoiceOptions),
-    /// `OfAllowedTools`.
+    /// An allowed-tools list.
     AllowedTools(ToolChoiceAllowedParam),
 }
 
-/// openai-go `responses.ToolChoiceAllowedMode`.
+/// The mode of an allowed-tools tool choice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum ToolChoiceAllowedMode {
@@ -500,34 +498,34 @@ pub(crate) enum ToolChoiceAllowedMode {
     Required,
 }
 
-/// openai-go `responses.ToolChoiceAllowedParam`: `mode, tools, type`.
+/// An allowed-tools tool choice: `mode, tools, type`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct ToolChoiceAllowedParam {
     /// `mode`.
     pub(crate) mode: ToolChoiceAllowedMode,
-    /// `tools` (Go `[]map[string]any`: `{"type":"function","name":…}`).
+    /// `tools` (a list of `{"type":"function","name":…}` objects).
     pub(crate) tools: Vec<Map<String, Value>>,
     /// `type`: `"allowed_tools"`.
     #[serde(rename = "type")]
     pub(crate) kind: AllowedToolsTag,
 }
 
-/// openai-go `responses.ToolUnionParam` (ADK-Go sends `OfFunction`).
+/// A tool declaration (only a function tool is sent).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub(crate) enum ToolParam {
-    /// `OfFunction`.
+    /// A function tool.
     Function(FunctionToolParam),
 }
 
-/// openai-go `responses.FunctionToolParam`, the fields ADK-Go sets: `strict, parameters,
+/// A function tool, the fields set: `strict, parameters,
 /// name, description, type`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub(crate) struct FunctionToolParam {
-    /// `strict` (ADK-Go pins `false`).
+    /// `strict` (always `false`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) strict: Option<bool>,
-    /// `parameters` (Go `map[string]any`; nil is omitted).
+    /// `parameters` (a JSON object; omitted when `None`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) parameters: Option<Map<String, Value>>,
     /// `name` (required, always sent).
@@ -542,31 +540,31 @@ pub(crate) struct FunctionToolParam {
 
 // ---------------------------------------------------------------- response types
 
-/// openai-go `responses.ResponseStatus` values (Go compares `resp.Status` to these).
+/// The values of a response `status`.
 pub(crate) mod status {
     /// `"completed"`.
     pub(crate) const COMPLETED: &str = "completed";
     /// `"failed"`.
     pub(crate) const FAILED: &str = "failed";
     /// `"in_progress"`.
-    #[cfg_attr(not(test), allow(dead_code))] // only the response tests name it (Go's use the SDK constant)
+    #[cfg_attr(not(test), allow(dead_code))] // only the response tests name it
     pub(crate) const IN_PROGRESS: &str = "in_progress";
     /// `"cancelled"`.
-    #[cfg_attr(not(test), allow(dead_code))] // only the response tests name it (Go's use the SDK constant)
+    #[cfg_attr(not(test), allow(dead_code))] // only the response tests name it
     pub(crate) const CANCELLED: &str = "cancelled";
     /// `"queued"`.
-    #[cfg_attr(not(test), allow(dead_code))] // only the response tests name it (Go's use the SDK constant)
+    #[cfg_attr(not(test), allow(dead_code))] // only the response tests name it
     pub(crate) const QUEUED: &str = "queued";
     /// `"incomplete"`.
     pub(crate) const INCOMPLETE: &str = "incomplete";
 }
 
-/// openai-go `responses.Response`, the fields ADK-Go reads: `id, created_at, error,
+/// A response, the fields read: `id, created_at, error,
 /// incomplete_details, model, object, output, status, usage`.
 ///
-/// The fields Go tests with `JSON.X.Valid()` (`id`, `error`, `incomplete_details`, `model`,
+/// The fields that may be absent or `null` (`id`, `error`, `incomplete_details`, `model`,
 /// `output`, `status`) are `Option`s: `Some` only when present, non-null and of the right
-/// shape. The `*_str`/accessor methods read them as Go reads the plain field (zero value when
+/// shape. The `*_str`/accessor methods read them as plain fields (zero value when
 /// `None`).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct Response {
@@ -624,37 +622,37 @@ pub(crate) struct Response {
 }
 
 impl Response {
-    /// Go `resp.ID`.
+    /// The response ID.
     pub(crate) fn id_str(&self) -> &str {
         self.id.as_deref().unwrap_or_default()
     }
 
-    /// Go `string(resp.Model)`.
+    /// The model name.
     pub(crate) fn model_str(&self) -> &str {
         self.model.as_deref().unwrap_or_default()
     }
 
-    /// Go `resp.Status`.
+    /// The status.
     pub(crate) fn status_str(&self) -> &str {
         self.status.as_deref().unwrap_or_default()
     }
 
-    /// Go `resp.Output`.
+    /// The output items.
     pub(crate) fn output_items(&self) -> &[ResponseOutputItem] {
         self.output.as_deref().unwrap_or_default()
     }
 
-    /// Go `resp.Error.Message`.
+    /// The error message.
     pub(crate) fn error_message(&self) -> &str {
         self.error.as_ref().map_or("", |e| e.message.as_str())
     }
 
-    /// Go `string(resp.Error.Code)`.
+    /// The error code.
     pub(crate) fn error_code(&self) -> &str {
         self.error.as_ref().map_or("", |e| e.code.as_str())
     }
 
-    /// Go `resp.IncompleteDetails.Reason`.
+    /// The incomplete reason.
     pub(crate) fn incomplete_reason(&self) -> &str {
         self.incomplete_details
             .as_ref()
@@ -662,7 +660,7 @@ impl Response {
     }
 }
 
-/// openai-go `responses.ResponseError`: `code, message, param, type`.
+/// A response error: `code, message, param, type`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ResponseError {
     /// `code` (`ResponseErrorCode`).
@@ -679,7 +677,7 @@ pub(crate) struct ResponseError {
     pub(crate) kind: String,
 }
 
-/// openai-go `responses.ResponseIncompleteDetails`: `reason`.
+/// The incomplete details: `reason`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ResponseIncompleteDetails {
     /// `reason`.
@@ -687,7 +685,7 @@ pub(crate) struct ResponseIncompleteDetails {
     pub(crate) reason: String,
 }
 
-/// openai-go `responses.ResponseUsage`: `input_tokens, input_tokens_details, output_tokens,
+/// The token usage: `input_tokens, input_tokens_details, output_tokens,
 /// output_tokens_details, total_tokens`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ResponseUsage {
@@ -708,7 +706,7 @@ pub(crate) struct ResponseUsage {
     pub(crate) total_tokens: i64,
 }
 
-/// openai-go `responses.ResponseUsageInputTokensDetails`: `cache_write_tokens,
+/// The input token details: `cache_write_tokens,
 /// cached_tokens`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ResponseUsageInputTokensDetails {
@@ -720,7 +718,7 @@ pub(crate) struct ResponseUsageInputTokensDetails {
     pub(crate) cached_tokens: i64,
 }
 
-/// openai-go `responses.ResponseUsageOutputTokensDetails`: `reasoning_tokens`.
+/// The output token details: `reasoning_tokens`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ResponseUsageOutputTokensDetails {
     /// `reasoning_tokens`.
@@ -728,13 +726,11 @@ pub(crate) struct ResponseUsageOutputTokensDetails {
     pub(crate) reasoning_tokens: i64,
 }
 
-/// openai-go `responses.ResponseOutputItemUnion`, the fields ADK-Go reads, in declaration
+/// A response output item, the fields read, in declaration
 /// order: `id, content, role, status, type, arguments, call_id, name, summary`.
 ///
-/// `arguments` is the field's raw JSON (Go keeps it as `ResponseOutputItemUnionArguments`,
-/// whose `OfString` is a string's value and whose `JSON.OfResponseToolSearchCallArguments.Raw()`
-/// is any other value's text): `None` when absent or `null` (Go `JSON.Arguments.Valid()` is
-/// `is_some()`).
+/// `arguments` is the field's raw JSON (a string's value, or any other value's text): `None`
+/// when absent or `null`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct ResponseOutputItem {
     /// `id`.
@@ -770,7 +766,7 @@ pub(crate) struct ResponseOutputItem {
     pub(crate) summary: Vec<ResponseReasoningItemSummary>,
 }
 
-/// openai-go `responses.ResponseOutputMessageContentUnion`, the fields ADK-Go reads: `text,
+/// An output message content part, the fields read: `text,
 /// type, logprobs, refusal`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct ResponseOutputContent {
@@ -788,7 +784,7 @@ pub(crate) struct ResponseOutputContent {
     pub(crate) refusal: String,
 }
 
-/// openai-go `responses.ResponseOutputTextLogprob`: `token, bytes, logprob, top_logprobs`.
+/// An output-text logprob: `token, bytes, logprob, top_logprobs`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct ResponseOutputTextLogprob {
     /// `token`.
@@ -805,7 +801,7 @@ pub(crate) struct ResponseOutputTextLogprob {
     pub(crate) top_logprobs: Vec<ResponseOutputTextLogprobTopLogprob>,
 }
 
-/// openai-go `responses.ResponseOutputTextLogprobTopLogprob`: `token, bytes, logprob`.
+/// A top logprob: `token, bytes, logprob`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct ResponseOutputTextLogprobTopLogprob {
     /// `token`.
@@ -819,7 +815,7 @@ pub(crate) struct ResponseOutputTextLogprobTopLogprob {
     pub(crate) logprob: f64,
 }
 
-/// openai-go `responses.ResponseReasoningItemSummary`: `text, type`.
+/// A reasoning summary part: `text, type`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ResponseReasoningItemSummary {
     /// `text`.
@@ -832,17 +828,15 @@ pub(crate) struct ResponseReasoningItemSummary {
 
 // ---------------------------------------------------------------- stream types
 
-/// openai-go `responses.ResponseStreamEventUnion`, the fields ADK-Go reads: `delta,
+/// A stream event, the fields read: `delta,
 /// sequence_number, type, item_id, output_index, code, response, content_index, message,
 /// param, arguments, item, text, refusal`.
 ///
-/// Go reads an event through `evt.AsResponseX()`, which decodes the same bytes into the
-/// event's own struct; every such struct's fields are fields of this union with the same
-/// JSON names, so the Rust code reads them here directly (`AsResponseCreated().Response` is
-/// [`response`](Self::response), `AsResponseOutputItemAdded().Item` is
+/// Every event's own fields are fields of this union with the same JSON names, so the Rust
+/// code reads them here directly (the created event's response is
+/// [`response`](Self::response), the output-item-added event's item is
 /// [`item`](Self::item), and so on). A `response` that is absent, `null`, `{}` or not an
-/// object is [`Response::default`] (every `Option` `None`), as Go's discarded unmarshal error
-/// leaves it.
+/// object is [`Response::default`] (every `Option` `None`).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct ResponseStreamEvent {
     /// `delta`.

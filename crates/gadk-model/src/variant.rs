@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `internal/llminternal/googlellm/variant.go`.
+//! Detection of the Google backend and Gemini model generation behind an [`Llm`].
 
 use std::sync::LazyLock;
 
@@ -76,14 +76,14 @@ pub fn needs_output_schema_processor(llm: Option<&dyn Llm>) -> bool {
     is_gemini_model(inner.name()) && !can_use_output_schema_with_tools(llm)
 }
 
-/// Go `isGemini3xLive`: whether `model` names a Gemini 3.x Live model other than Live
+/// Whether `model` names a Gemini 3.x Live model other than Live
 /// Translate (adk-python `_is_gemini_3_x_live`).
 pub fn is_gemini_3x_live(model: &str) -> bool {
     let name = extract_model_name(model);
     name.starts_with("gemini-3.") && name.contains("-live") && !is_gemini_35_live_translate(model)
 }
 
-/// Go `isGemini35LiveTranslate`: whether `model` names a Gemini 3.5 Live Translate model.
+/// Whether `model` names a Gemini 3.5 Live Translate model.
 pub fn is_gemini_35_live_translate(model: &str) -> bool {
     extract_model_name(model).starts_with("gemini-3.5-live-translate")
 }

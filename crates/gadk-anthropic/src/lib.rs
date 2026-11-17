@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! gadk-anthropic: Claude models on the Anthropic Messages API and on Vertex AI (port of
-//! ADK-Go `model/anthropicmodel`), with gadk's own REST transport.
+//! gadk-anthropic: Claude models on the Anthropic Messages API and on Vertex AI, with gadk's
+//! own REST transport.
 //!
 //! [`AnthropicModel::new`] builds an [`Llm`](gadk_model::Llm) from a model name
 //! (`claude-…`, `anthropic/claude-…`, or a Vertex resource name) and a [`ClientConfig`].

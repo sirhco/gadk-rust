@@ -13,14 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `internal/llminternal/converters/converters.go`.
+//! Conversion of a genai response into an [`LlmResponse`].
 
 use gadk_genai::{Content, FinishReason, GenerateContentResponse, ROLE_MODEL};
 
 use crate::llm::LlmResponse;
 
-/// Converts a genai response into an [`LlmResponse`] built from its first candidate
-/// (port of ADK-Go `converters.Genai2LLMResponse`).
+/// Converts a genai response into an [`LlmResponse`] built from its first candidate.
 pub fn llm_response_from_genai(res: &GenerateContentResponse) -> LlmResponse {
     let usage_metadata = res.usage_metadata.clone();
     if let Some(candidate) = res.candidates.first() {

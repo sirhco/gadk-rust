@@ -13,15 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Messages API wire types: the parts of anthropic-sdk-go v1.84.0 (`message.go`) that ADK-Go's
-//! `anthropicmodel` touches.
+//! Messages API wire types: the parts of the Messages API that the Anthropic model touches.
 //!
-//! Request types serialize their fields in the SDK's struct declaration order, with Go's
-//! `omitzero` as `skip_serializing_if`; each block's constant `type` is a zero-sized tag field,
-//! last, as in the SDK. Response and stream-event types decode with Go's leniency (`null` and
-//! missing fields are zero values). [`to_go_json`] writes JSON as Go's `encoding/json` does
-//! (HTML-escaped strings, Go float formatting); [`encode_request`] adds the SDK's streaming flag
-//! and the Vertex body rewrite.
+//! Request types serialize their fields in the API's declaration order, with unset or zero
+//! values skipped (`skip_serializing_if`); each block's constant `type` is a zero-sized tag
+//! field, last. Response and stream-event types decode leniently (`null` and missing fields are
+//! zero values). [`to_go_json`] writes JSON with HTML-escaped strings and shortest-form floats;
+//! [`encode_request`] adds the streaming flag and the Vertex body rewrite.
 
 use serde::de::Deserializer;
 use serde::ser::{SerializeMap, Serializer};
@@ -31,27 +29,25 @@ use serde_json::{Map, Value};
 
 use crate::config::{Effort, PromptCacheTtl};
 
-/// The `anthropic_version` the Vertex middleware adds to every body (SDK
-/// `vertex.DefaultVersion`).
+/// The `anthropic_version` the Vertex middleware adds to every body.
 pub(crate) const VERTEX_ANTHROPIC_VERSION: &str = "vertex-2023-10-16";
 
 pub(crate) use gadk_model::to_go_json;
 
-/// How the SDK's Vertex middleware treats a request body.
+/// How the Vertex middleware treats a request body.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum VertexBody {
-    /// The path is rewritten to `…:rawPredict`: `model` is removed (`sjson.DeleteBytes`).
+    /// The path is rewritten to `…:rawPredict`: `model` is removed.
     DropModel,
     /// The path is not rewritten (a base URL with a path prefix): `model` stays.
     KeepModel,
 }
 
-/// The request body the SDK sends for `params`:
+/// The request body sent for `params`:
 /// - the params as [`to_go_json`] writes them;
-/// - streaming: `,"stream":true` appended (the SDK's `option.WithJSONSet("stream", true)`);
-/// - Vertex: `,"anthropic_version":"vertex-2023-10-16"` appended after every other key (the
-///   SDK's Vertex middleware: `sjson.SetBytes` appends), and with [`VertexBody::DropModel`]
-///   without `"model"` (`sjson.DeleteBytes` removes it; omitting it gives the same bytes).
+/// - streaming: `,"stream":true` appended;
+/// - Vertex: `,"anthropic_version":"vertex-2023-10-16"` appended after every other key, and
+///   with [`VertexBody::DropModel`] without `"model"` (omitting it gives the same bytes).
 pub(crate) fn encode_request(
     mut params: MessageNewParams,
     stream: bool,
@@ -82,8 +78,8 @@ pub(crate) fn encode_request(
 
 // ---------------------------------------------------------------- request types
 
-/// Declares a zero-sized type that serializes as one constant string: the SDK's
-/// `constant.*` `type` fields.
+/// Declares a zero-sized type that serializes as one constant string: the constant `type`
+/// fields of the wire types.
 macro_rules! tag {
     ($(#[$m:meta])* $name:ident = $value:literal) => {
         $(#[$m])*
@@ -155,10 +151,10 @@ tag!(
     JsonSchemaTag = "json_schema"
 );
 
-/// SDK `MessageNewParams`, the fields Go sets, in declaration order: `max_tokens, messages,
+/// The Messages API request body, the fields set, in declaration order: `max_tokens, messages,
 /// model, temperature, top_k, top_p, output_config, stop_sequences, system, thinking,
-/// tool_choice, tools` (the SDK's `inference_geo`, `container`, `cache_control`, `diagnostics`,
-/// `metadata` and `service_tier` are never set by Go and are not modelled).
+/// tool_choice, tools` (`inference_geo`, `container`, `cache_control`, `diagnostics`,
+/// `metadata` and `service_tier` are never set and are not modelled).
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub(crate) struct MessageNewParams {
     /// `max_tokens` (required, never omitted).
@@ -169,7 +165,7 @@ pub(crate) struct MessageNewParams {
     /// `model`; omitted when empty (the Vertex body).
     #[serde(skip_serializing_if = "String::is_empty")]
     pub(crate) model: String,
-    /// `temperature` (Go `param.Opt[float64]`).
+    /// `temperature`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) temperature: Option<f64>,
     /// `top_k`.
@@ -198,7 +194,7 @@ pub(crate) struct MessageNewParams {
     pub(crate) tools: Vec<ToolParam>,
 }
 
-/// SDK `MessageParamRole`.
+/// The role of a message param.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum Role {
@@ -209,7 +205,7 @@ pub(crate) enum Role {
 }
 
 impl Role {
-    /// The wire value (Go `string(role)`, used in warnings and drop reasons).
+    /// The wire value (used in warnings and drop reasons).
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::User => "user",
@@ -218,7 +214,7 @@ impl Role {
     }
 }
 
-/// SDK `MessageParam`: `content, role`.
+/// A message param: `content, role`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct MessageParam {
     /// `content`.
@@ -228,7 +224,7 @@ pub(crate) struct MessageParam {
     pub(crate) role: Role,
 }
 
-/// SDK `ContentBlockParamUnion`, the variants Go builds; serializes as the variant's object.
+/// A content block, the variants that are built; serializes as the variant's object.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub(crate) enum ContentBlockParam {
@@ -249,16 +245,16 @@ pub(crate) enum ContentBlockParam {
 }
 
 impl ContentBlockParam {
-    /// SDK `NewTextBlock`.
+    /// A text block.
     pub(crate) fn text(text: impl Into<String>) -> Self {
         Self::Text(TextBlockParam::new(text))
     }
 }
 
-/// SDK `CacheControlEphemeralParam`: `ttl, type`.
+/// A cache-control param: `ttl, type`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub(crate) struct CacheControlEphemeral {
-    /// `ttl` (Go always sets it).
+    /// `ttl` (always set).
     pub(crate) ttl: PromptCacheTtl,
     /// `"ephemeral"`.
     #[serde(rename = "type")]
@@ -266,7 +262,7 @@ pub(crate) struct CacheControlEphemeral {
 }
 
 impl CacheControlEphemeral {
-    /// SDK `NewCacheControlEphemeralParam()` with `TTL` set.
+    /// An ephemeral cache control with `ttl` set.
     pub(crate) fn new(ttl: PromptCacheTtl) -> Self {
         Self {
             ttl,
@@ -275,7 +271,7 @@ impl CacheControlEphemeral {
     }
 }
 
-/// SDK `TextBlockParam`: `text, cache_control, type` (`citations` never set by Go).
+/// A text block: `text, cache_control, type` (`citations` is never set).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct TextBlockParam {
     /// `text` (never omitted).
@@ -299,7 +295,7 @@ impl TextBlockParam {
     }
 }
 
-/// SDK `ImageBlockParam`: `source, cache_control, type` (`transformations` never set).
+/// An image block: `source, cache_control, type` (`transformations` never set).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct ImageBlockParam {
     /// `source`.
@@ -313,7 +309,7 @@ pub(crate) struct ImageBlockParam {
 }
 
 impl ImageBlockParam {
-    /// SDK `NewImageBlockBase64(mediaType, data)`.
+    /// A base64 image block.
     pub(crate) fn base64(media_type: impl Into<String>, data: impl Into<String>) -> Self {
         Self::with_source(ImageSource::Base64(Base64ImageSource {
             data: data.into(),
@@ -322,7 +318,7 @@ impl ImageBlockParam {
         }))
     }
 
-    /// SDK `NewImageBlock(URLImageSourceParam{URL})`.
+    /// A URL image block.
     pub(crate) fn url(url: impl Into<String>) -> Self {
         Self::with_source(ImageSource::Url(UrlSource {
             url: url.into(),
@@ -339,17 +335,17 @@ impl ImageBlockParam {
     }
 }
 
-/// SDK `ImageBlockParamSourceUnion` (base64 or URL).
+/// An image block source (base64 or URL).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub(crate) enum ImageSource {
-    /// SDK `Base64ImageSourceParam`.
+    /// A base64 image source.
     Base64(Base64ImageSource),
-    /// SDK `URLImageSourceParam`.
+    /// A URL image source.
     Url(UrlSource),
 }
 
-/// SDK `Base64ImageSourceParam`: `data, media_type, type`.
+/// A base64 image source: `data, media_type, type`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct Base64ImageSource {
     /// `data` (standard base64).
@@ -362,7 +358,7 @@ pub(crate) struct Base64ImageSource {
     pub(crate) kind: Base64Tag,
 }
 
-/// SDK `URLImageSourceParam` / `URLPDFSourceParam`: `url, type`.
+/// A URL image or PDF source: `url, type`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct UrlSource {
     /// `url`.
@@ -372,7 +368,7 @@ pub(crate) struct UrlSource {
     pub(crate) kind: UrlTag,
 }
 
-/// SDK `DocumentBlockParam`: `source, cache_control, type` (`context`, `title`, `citations`
+/// A document block: `source, cache_control, type` (`context`, `title`, `citations`
 /// never set).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct DocumentBlockParam {
@@ -387,7 +383,7 @@ pub(crate) struct DocumentBlockParam {
 }
 
 impl DocumentBlockParam {
-    /// SDK `NewDocumentBlock(Base64PDFSourceParam{Data})`.
+    /// A document block with a base64 PDF source.
     pub(crate) fn base64_pdf(data: impl Into<String>) -> Self {
         Self::with_source(DocumentSource::Base64Pdf(Base64PdfSource {
             data: data.into(),
@@ -396,7 +392,7 @@ impl DocumentBlockParam {
         }))
     }
 
-    /// SDK `NewDocumentBlock(PlainTextSourceParam{Data})`.
+    /// A document block with a plain-text source.
     pub(crate) fn plain_text(data: impl Into<String>) -> Self {
         Self::with_source(DocumentSource::PlainText(PlainTextSource {
             data: data.into(),
@@ -405,7 +401,7 @@ impl DocumentBlockParam {
         }))
     }
 
-    /// SDK `NewDocumentBlock(URLPDFSourceParam{URL})`.
+    /// A document block with a URL PDF source.
     pub(crate) fn url_pdf(url: impl Into<String>) -> Self {
         Self::with_source(DocumentSource::UrlPdf(UrlSource {
             url: url.into(),
@@ -422,19 +418,19 @@ impl DocumentBlockParam {
     }
 }
 
-/// SDK `DocumentBlockParamSourceUnion`, the variants Go builds.
+/// A document block source, the variants that are built.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub(crate) enum DocumentSource {
-    /// SDK `Base64PDFSourceParam`.
+    /// A base64 PDF source.
     Base64Pdf(Base64PdfSource),
-    /// SDK `PlainTextSourceParam`.
+    /// A plain-text source.
     PlainText(PlainTextSource),
-    /// SDK `URLPDFSourceParam`.
+    /// A URL PDF source.
     UrlPdf(UrlSource),
 }
 
-/// SDK `Base64PDFSourceParam`: `data, media_type, type`.
+/// A base64 PDF source: `data, media_type, type`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct Base64PdfSource {
     /// `data` (standard base64).
@@ -446,7 +442,7 @@ pub(crate) struct Base64PdfSource {
     pub(crate) kind: Base64Tag,
 }
 
-/// SDK `PlainTextSourceParam`: `data, media_type, type`.
+/// A plain-text source: `data, media_type, type`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct PlainTextSource {
     /// `data`.
@@ -458,13 +454,13 @@ pub(crate) struct PlainTextSource {
     pub(crate) kind: TextTag,
 }
 
-/// SDK `ToolUseBlockParam`: `id, input, name, cache_control, type` (`toolset_name`, `caller`
+/// A tool-use block: `id, input, name, cache_control, type` (`toolset_name`, `caller`
 /// never set).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct ToolUseBlockParam {
     /// `id`.
     pub(crate) id: String,
-    /// `input` (Go always passes a non-nil map, so it is never omitted).
+    /// `input` (always a map, so it is never omitted).
     pub(crate) input: Map<String, Value>,
     /// `name`.
     pub(crate) name: String,
@@ -477,7 +473,7 @@ pub(crate) struct ToolUseBlockParam {
 }
 
 impl ToolUseBlockParam {
-    /// SDK `NewToolUseBlock(id, input, name)`.
+    /// A tool-use block.
     pub(crate) fn new(
         id: impl Into<String>,
         input: Map<String, Value>,
@@ -493,19 +489,19 @@ impl ToolUseBlockParam {
     }
 }
 
-/// SDK `ToolResultBlockParam`: `tool_use_id, is_error, cache_control, content, type`
+/// A tool-result block: `tool_use_id, is_error, cache_control, content, type`
 /// (`toolset_name` never set).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct ToolResultBlockParam {
     /// `tool_use_id`.
     pub(crate) tool_use_id: String,
-    /// `is_error` (Go always sets `false`).
+    /// `is_error` (always `false`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) is_error: Option<bool>,
     /// `cache_control`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) cache_control: Option<CacheControlEphemeral>,
-    /// `content`; omitted when empty (Go's nil slice).
+    /// `content`; omitted when empty.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) content: Vec<ToolResultContent>,
     /// `"tool_result"`.
@@ -513,7 +509,7 @@ pub(crate) struct ToolResultBlockParam {
     pub(crate) kind: ToolResultTag,
 }
 
-/// SDK `ToolResultBlockParamContentUnion`, the variants Go builds.
+/// A tool-result content item, the variants that are built.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub(crate) enum ToolResultContent {
@@ -525,7 +521,7 @@ pub(crate) enum ToolResultContent {
     Document(DocumentBlockParam),
 }
 
-/// SDK `ThinkingBlockParam`: `signature, thinking, type`.
+/// A thinking block: `signature, thinking, type`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct ThinkingBlockParam {
     /// `signature`.
@@ -538,7 +534,7 @@ pub(crate) struct ThinkingBlockParam {
 }
 
 impl ThinkingBlockParam {
-    /// SDK `NewThinkingBlock(signature, thinking)`.
+    /// A thinking block.
     pub(crate) fn new(signature: impl Into<String>, thinking: impl Into<String>) -> Self {
         Self {
             signature: signature.into(),
@@ -548,7 +544,7 @@ impl ThinkingBlockParam {
     }
 }
 
-/// SDK `RedactedThinkingBlockParam`: `data, type`.
+/// A redacted-thinking block: `data, type`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct RedactedThinkingBlockParam {
     /// `data`.
@@ -559,7 +555,7 @@ pub(crate) struct RedactedThinkingBlockParam {
 }
 
 impl RedactedThinkingBlockParam {
-    /// SDK `NewRedactedThinkingBlock(data)`.
+    /// A redacted-thinking block.
     pub(crate) fn new(data: impl Into<String>) -> Self {
         Self {
             data: data.into(),
@@ -568,9 +564,9 @@ impl RedactedThinkingBlockParam {
     }
 }
 
-/// SDK `ToolParam` (the `OfTool` member of `ToolUnionParam`): `input_schema, name,
+/// A tool declaration (the plain tool member of the tool union): `input_schema, name,
 /// description, cache_control` (`eager_input_streaming`, `defer_loading`, `strict`, `type`,
-/// `allowed_callers`, `input_examples` never set by Go; `description` sits between
+/// `allowed_callers`, `input_examples` are never set; `description` sits between
 /// `defer_loading` and `strict`, `cache_control` between `allowed_callers` and
 /// `input_examples`).
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -579,7 +575,7 @@ pub(crate) struct ToolParam {
     pub(crate) input_schema: ToolInputSchema,
     /// `name`.
     pub(crate) name: String,
-    /// `description` (Go sets it only when non-empty).
+    /// `description` (set only when non-empty).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) description: Option<String>,
     /// `cache_control`.
@@ -587,17 +583,16 @@ pub(crate) struct ToolParam {
     pub(crate) cache_control: Option<CacheControlEphemeral>,
 }
 
-/// SDK `ToolInputSchemaParam`: `properties, required, type`, then `ExtraFields`.
+/// A tool input schema: `properties, required, type`, then the extra fields.
 ///
-/// The SDK appends each extra field with `sjson.SetRawBytes` while ranging over a Go map, so
-/// with several extras Go's key order is random; gadk writes them sorted (`serde_json::Map`).
-/// `extra` must not hold `type`, `properties` or `required` (Go `buildToolInputSchema` skips
-/// them).
+/// With several extras the key order is not defined by the API; gadk writes them sorted
+/// (`serde_json::Map`). `extra` must not hold `type`, `properties` or `required` (the schema
+/// builder skips them).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct ToolInputSchema {
-    /// `properties` (Go `any`; Go always sets it, `{}` when the schema has none).
+    /// `properties` (always set, `{}` when the schema has none).
     pub(crate) properties: Value,
-    /// `required`; omitted when empty (Go's nil slice).
+    /// `required`; omitted when empty.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) required: Vec<String>,
     /// `"object"`.
@@ -608,20 +603,20 @@ pub(crate) struct ToolInputSchema {
     pub(crate) extra: Map<String, Value>,
 }
 
-/// SDK `ToolChoiceUnionParam`, the variants Go builds (`disable_parallel_tool_use` is never
+/// A tool choice, the variants that are built (`disable_parallel_tool_use` is never
 /// set): `{"type":"auto"}`, `{"type":"any"}`, `{"name":…,"type":"tool"}`, `{"type":"none"}`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ToolChoiceParam {
-    /// SDK `ToolChoiceAutoParam`.
+    /// Let the model decide.
     Auto,
-    /// SDK `ToolChoiceAnyParam`.
+    /// Require some tool.
     Any,
-    /// SDK `ToolChoiceToolParam` (`ToolChoiceParamOfTool(name)`).
+    /// Require the named tool.
     Tool {
         /// `name`.
         name: String,
     },
-    /// SDK `ToolChoiceNoneParam`.
+    /// No tools.
     None,
 }
 
@@ -641,18 +636,18 @@ impl Serialize for ToolChoiceParam {
     }
 }
 
-/// SDK `ThinkingConfigParamUnion`, the variants Go builds: `{"budget_tokens":N,"type":"enabled"}`,
+/// A thinking config, the variants that are built: `{"budget_tokens":N,"type":"enabled"}`,
 /// `{"type":"disabled"}`, `{"display":"summarized","type":"adaptive"}`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ThinkingConfigParam {
-    /// SDK `ThinkingConfigParamOfEnabled(budget)`.
+    /// Thinking enabled with a token budget.
     Enabled {
         /// `budget_tokens`.
         budget_tokens: i64,
     },
-    /// SDK `NewThinkingConfigDisabledParam()`.
+    /// Thinking disabled.
     Disabled,
-    /// SDK `ThinkingConfigAdaptiveParam{Display: ThinkingConfigAdaptiveDisplaySummarized}`.
+    /// Adaptive thinking with summarized display.
     AdaptiveSummarized,
 }
 
@@ -674,7 +669,7 @@ impl Serialize for ThinkingConfigParam {
     }
 }
 
-/// SDK `OutputConfigParam`: `effort, format`. Go omits the whole object when both are unset.
+/// The output config: `effort, format`. The whole object is omitted when both are unset.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct OutputConfig {
     /// `effort`.
@@ -685,7 +680,7 @@ pub(crate) struct OutputConfig {
     pub(crate) format: Option<JsonOutputFormat>,
 }
 
-/// SDK `JSONOutputFormatParam`: `schema, type`.
+/// The JSON output format: `schema, type`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct JsonOutputFormat {
     /// `schema`.
@@ -697,7 +692,7 @@ pub(crate) struct JsonOutputFormat {
 
 // ---------------------------------------------------------------- response types
 
-/// Go's decoding of `null` into a non-pointer field: the zero value.
+/// Decodes `null` into a non-pointer field as the zero value.
 fn null_default<'de, D, T>(d: D) -> Result<T, D::Error>
 where
     D: Deserializer<'de>,
@@ -706,14 +701,14 @@ where
     Ok(Option::<T>::deserialize(d)?.unwrap_or_default())
 }
 
-/// Go `json.RawMessage`: the value's JSON text as received (`null` stays `"null"`).
+/// The value's JSON text as received (`null` stays `"null"`).
 fn raw_json<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
     let raw = Box::<RawValue>::deserialize(d)?;
     Ok(Some(raw.get().to_string()))
 }
 
-/// SDK `Message`, the fields Go reads (`id, content, model, role, stop_reason, stop_sequence,
-/// type, usage`).
+/// A response message, the fields that are read (`id, content, model, role, stop_reason,
+/// stop_sequence, type, usage`).
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub(crate) struct Message {
     /// `id`.
@@ -742,7 +737,7 @@ pub(crate) struct Message {
     pub(crate) usage: Usage,
 }
 
-/// SDK `ContentBlockUnion` (flattened, as in the SDK), the fields Go reads.
+/// A response content block (flattened), the fields that are read.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub(crate) struct ContentBlock {
     /// `type`: `text`, `thinking`, `redacted_thinking`, `tool_use`, or another block type.
@@ -766,14 +761,14 @@ pub(crate) struct ContentBlock {
     /// `name` (tool use blocks).
     #[serde(default, deserialize_with = "null_default")]
     pub(crate) name: String,
-    /// `input` as raw JSON text (Go `json.RawMessage`); `None` when absent. Streaming
+    /// `input` as raw JSON text; `None` when absent. Streaming
     /// accumulation replaces it with the concatenated `partial_json` deltas, which may not be
     /// valid JSON.
     #[serde(default, deserialize_with = "raw_json")]
     pub(crate) input: Option<String>,
 }
 
-/// SDK `Usage`, the fields Go reads.
+/// Token usage, the fields that are read.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub(crate) struct Usage {
     /// `cache_creation_input_tokens`.
@@ -788,22 +783,22 @@ pub(crate) struct Usage {
     /// `output_tokens`.
     #[serde(default, deserialize_with = "null_default")]
     pub(crate) output_tokens: i64,
-    /// `output_tokens_details`; `None` when absent or `null` (Go `JSON.….Valid()` false).
+    /// `output_tokens_details`; `None` when absent or `null`.
     #[serde(default)]
     pub(crate) output_tokens_details: Option<OutputTokensDetails>,
 }
 
-/// SDK `OutputTokensDetails`.
+/// The output token details.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub(crate) struct OutputTokensDetails {
-    /// `thinking_tokens`; `None` when absent or `null` (Go `JSON.ThinkingTokens.Valid()` false).
+    /// `thinking_tokens`; `None` when absent or `null`.
     #[serde(default)]
     pub(crate) thinking_tokens: Option<i64>,
 }
 
-/// SDK `MessageStreamEventUnion`, the fields `Message.Accumulate` and Go `generateStreaming`
-/// read. `type` is the event's own `type` member (the SSE `event:` name selects whether the
-/// SDK decodes the event at all).
+/// A stream event, the fields that are read while accumulating the message and generating the
+/// streamed responses. `type` is the event's own `type` member (the SSE `event:` name selects
+/// whether the event is decoded at all).
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub(crate) struct StreamEvent {
     /// `type`.
@@ -826,7 +821,7 @@ pub(crate) struct StreamEvent {
     pub(crate) usage: MessageDeltaUsage,
 }
 
-/// SDK `MessageStreamEventUnionDelta`, the fields Go reads.
+/// A stream event delta, the fields that are read.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub(crate) struct StreamDelta {
     /// `type`: `text_delta`, `input_json_delta`, `thinking_delta`, `signature_delta`, ….
@@ -852,8 +847,8 @@ pub(crate) struct StreamDelta {
     pub(crate) stop_sequence: String,
 }
 
-/// SDK `MessageDeltaUsage`. `Option` fields are `None` when absent or `null` (Go
-/// `JSON.….Valid()` false); `output_tokens` always overwrites.
+/// The usage of a message delta event. `Option` fields are `None` when absent or `null`;
+/// `output_tokens` always overwrites.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub(crate) struct MessageDeltaUsage {
     /// `cache_creation_input_tokens`.

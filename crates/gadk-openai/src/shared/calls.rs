@@ -13,9 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Function-call ids and arguments (port of ADK-Go `internal/shared/calls.go`, plus the
-//! argument decoding ADK-Go repeats in `completions/response.go`, `responses/response.go` and
-//! `responses/stream.go`, shared here).
+//! Function-call ids and arguments, plus the argument decoding both APIs share. The decode
+//! error texts are kept identical to the texts an ADK OpenAI model reports.
 
 use gadk_genai::{FunctionCall, FunctionResponse};
 use gadk_platform::go_quote;
@@ -23,18 +22,18 @@ use serde_json::{Map, Value};
 
 use crate::error::{ErrorKind, OpenAiError, go_json_error};
 
-/// Go `CallTracker`: pairs function responses with the calls they answer, minting an id for a
+/// Pairs function responses with the calls they answer, minting an id for a
 /// call that has none (`adk-openai-call-<n>`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct CallTracker {
-    /// Go `NextID`: the number the next minted id carries.
+    /// The number the next minted id carries.
     pub(crate) next_id: u64,
-    /// Go `Pending`: the ids of calls not yet answered, oldest first.
+    /// The ids of calls not yet answered, oldest first.
     pub(crate) pending: Vec<String>,
 }
 
 impl CallTracker {
-    /// Go `ResolveResponseID`: the call id `fr` answers, consumed from
+    /// The call id `fr` answers, consumed from
     /// [`pending`](Self::pending). An empty `fr.id` takes the oldest pending id (none:
     /// `openai: response for "<name>" missing call id`); a non-empty one must be pending
     /// (else `openai: received function response for unknown or already completed call id
@@ -64,7 +63,7 @@ impl CallTracker {
         }
     }
 
-    /// Go `TakeCallID`: `fc.id`, or a minted `adk-openai-call-<next_id>` when it is empty;
+    /// `fc.id`, or a minted `adk-openai-call-<next_id>` when it is empty;
     /// either way appended to [`pending`](Self::pending).
     pub(crate) fn take_call_id(&mut self, fc: &FunctionCall) -> String {
         let call_id = if fc.id.is_empty() {
@@ -79,15 +78,15 @@ impl CallTracker {
     }
 }
 
-/// Go `MarshalFunctionArgs`: the call's arguments as Go's `json.Marshal` writes them
+/// The call's arguments as compact JSON
 /// ([`gadk_model::to_go_json`]; a call without arguments is `{}`). A marshal failure is
 /// `openai: marshal function args: <err>`.
 pub(crate) fn marshal_function_args(args: &Map<String, Value>) -> Result<String, OpenAiError> {
     marshal("openai: marshal function args: ", args)
 }
 
-/// Go `json.Marshal(fr.Response)` as both APIs send a function response's payload (Go
-/// `newToolMessage` / `newFunctionResponse`): [`gadk_model::to_go_json`] of `response`; a
+/// A function response's payload as both APIs send it:
+/// [`gadk_model::to_go_json`] of `response`; a
 /// marshal failure is `openai: marshal function response: <err>`.
 pub(crate) fn marshal_function_response(
     response: &Map<String, Value>,
@@ -95,25 +94,25 @@ pub(crate) fn marshal_function_response(
     marshal("openai: marshal function response: ", response)
 }
 
-/// Go `json.Marshal` of a `map[string]any` as a string; a failure is `<prefix><err>`.
+/// A JSON object as a string; a failure is `<prefix><err>`.
 fn marshal(prefix: &str, map: &Map<String, Value>) -> Result<String, OpenAiError> {
     let encoded =
         gadk_model::to_go_json(map).map_err(|e| OpenAiError::plain(format!("{prefix}{e}")))?;
     String::from_utf8(encoded).map_err(|e| OpenAiError::plain(format!("{prefix}{e}")))
 }
 
-/// Go `json.Unmarshal([]byte(raw), &args)` into a `map[string]any`: `Ok(None)` for JSON
-/// `null` (Go leaves the map nil), `Ok(Some(map))` for an object, else `Err` with Go
-/// `encoding/json`'s text where a Go test asserts it (`unexpected end of JSON input`;
+/// Decodes `raw` into a JSON object: `Ok(None)` for JSON
+/// `null`, `Ok(Some(map))` for an object, else `Err` with the text
+/// `unexpected end of JSON input` for truncated input,
 /// `json: cannot unmarshal <array|string|number|bool> into Go value of type
-/// map[string]interface {}`) and serde_json's otherwise.
+/// map[string]interface {}` for a value of another kind, and serde_json's text otherwise.
 pub(crate) fn unmarshal_function_args(raw: &str) -> Result<Option<Map<String, Value>>, String> {
     let value: Value = serde_json::from_str(raw).map_err(|e| go_json_error(&e))?;
     go_map(value)
 }
 
-/// Go `encoding/json` storing a decoded value into a `map[string]any`: an object is the map,
-/// `null` leaves it nil (`None`), anything else is `json: cannot unmarshal <kind> into Go value
+/// Stores a decoded value as a JSON object: an object is the map,
+/// `null` is `None`, anything else is `json: cannot unmarshal <kind> into Go value
 /// of type map[string]interface {}`.
 pub(crate) fn go_map(value: Value) -> Result<Option<Map<String, Value>>, String> {
     let kind = match value {
@@ -129,10 +128,10 @@ pub(crate) fn go_map(value: Value) -> Result<Option<Map<String, Value>>, String>
     ))
 }
 
-/// ADK-Go's `functionCallArgs` once the raw payload is in hand (both APIs): `""` and JSON
+/// Decodes the raw argument payload (both APIs): `""` and JSON
 /// `null` are a call that takes no arguments (`{}`); an undecodable payload is
-/// `fmt.Errorf("%w: %w", ErrFunctionCallArgs, err)` (`openai: parse function call args:
-/// <err>`, kind [`ErrorKind::FunctionCallArgs`](crate::error::ErrorKind::FunctionCallArgs)).
+/// `openai: parse function call args: <err>` (kind
+/// [`ErrorKind::FunctionCallArgs`](crate::error::ErrorKind::FunctionCallArgs)).
 pub(crate) fn function_call_args(raw: &str) -> Result<Map<String, Value>, OpenAiError> {
     if raw.is_empty() {
         return Ok(Map::new());

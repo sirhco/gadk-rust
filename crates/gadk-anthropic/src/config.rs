@@ -13,11 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Client configuration (port of ADK-Go `model/anthropicmodel/config.go`): [`ClientConfig`],
-//! its enums, model-name parsing and the construction-time validators.
+//! Client configuration: [`ClientConfig`], its enums, model-name parsing and the
+//! construction-time validators.
 //!
-//! Go's string enums become Rust enums whose [`FromStr`] accepts Go's values and fails with
-//! Go's invalid-value text; Go's negative `MaxTokens`/`MaxRetries` are unrepresentable.
+//! The string enums are Rust enums whose [`FromStr`] accepts the documented values and fails
+//! with an invalid-value text; negative `max_tokens` / `max_retries` are unrepresentable.
 
 use std::fmt;
 use std::str::FromStr;
@@ -32,21 +32,21 @@ use serde::{Serialize, Serializer};
 use crate::error::{AnthropicError, ErrorKind, go_quote};
 
 /// The `max_tokens` sent when neither `GenerateContentConfig.max_output_tokens` nor
-/// [`ClientConfig::max_tokens`] is set (Go `DefaultMaxTokens`).
+/// [`ClientConfig::max_tokens`] is set.
 pub const DEFAULT_MAX_TOKENS: u32 = 8192;
 
-/// The serving backend for Claude models (Go `Backend`).
+/// The serving backend for Claude models.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Backend {
-    /// The first-party Anthropic Messages API (Go `BackendAnthropic`, `"anthropic"`).
+    /// The first-party Anthropic Messages API (`"anthropic"`).
     #[default]
     Anthropic,
-    /// Claude on Google Cloud Vertex AI (Go `BackendVertex`, `"vertex"`).
+    /// Claude on Google Cloud Vertex AI (`"vertex"`).
     Vertex,
 }
 
 impl Backend {
-    /// Go's string value.
+    /// The string value.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Anthropic => "anthropic",
@@ -61,7 +61,7 @@ impl fmt::Display for Backend {
     }
 }
 
-/// Accepts Go's values; `""` is [`Backend::Anthropic`], as Go's empty `Backend` is.
+/// Accepts the string values; `""` is [`Backend::Anthropic`].
 impl FromStr for Backend {
     type Err = AnthropicError;
 
@@ -80,7 +80,7 @@ impl FromStr for Backend {
     }
 }
 
-/// How much reasoning effort Claude spends (Go `Effort`, sent as `output_config.effort`).
+/// How much reasoning effort Claude spends (sent as `output_config.effort`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Effort {
     /// `"low"`.
@@ -96,7 +96,7 @@ pub enum Effort {
 }
 
 impl Effort {
-    /// Go's string value.
+    /// The string value.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Low => "low",
@@ -120,7 +120,7 @@ impl Serialize for Effort {
     }
 }
 
-/// Accepts Go's values and fails with Go `validateEffort`'s text. Go's empty `Effort` (unset)
+/// Accepts the string values and fails with an invalid-effort text. An unset effort
 /// is `None` in [`ClientConfig::effort`], so `""` is rejected here.
 impl FromStr for Effort {
     type Err = AnthropicError;
@@ -143,18 +143,18 @@ impl FromStr for Effort {
     }
 }
 
-/// The lifetime of an ephemeral prompt-cache breakpoint (Go `PromptCacheTTL`).
+/// The lifetime of an ephemeral prompt-cache breakpoint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum PromptCacheTtl {
-    /// Five minutes (Go `PromptCacheTTL5m`, `"5m"`), the default.
+    /// Five minutes (`"5m"`), the default.
     #[default]
     FiveMinutes,
-    /// One hour (Go `PromptCacheTTL1h`, `"1h"`).
+    /// One hour (`"1h"`).
     OneHour,
 }
 
 impl PromptCacheTtl {
-    /// Go's string value.
+    /// The string value.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::FiveMinutes => "5m",
@@ -175,8 +175,8 @@ impl Serialize for PromptCacheTtl {
     }
 }
 
-/// Accepts Go's values and fails with Go `validatePromptCacheConfig`'s text; `""` is
-/// [`PromptCacheTtl::FiveMinutes`], as Go's empty TTL is.
+/// Accepts the string values and fails with an invalid-TTL text; `""` is
+/// [`PromptCacheTtl::FiveMinutes`].
 impl FromStr for PromptCacheTtl {
     type Err = AnthropicError;
 
@@ -195,7 +195,7 @@ impl FromStr for PromptCacheTtl {
     }
 }
 
-/// Ephemeral prompt caching (Go `PromptCacheConfig`). When set on
+/// Ephemeral prompt caching. When set on
 /// [`ClientConfig::prompt_cache`], cache breakpoints go on the last tool declaration, the
 /// system block and the last non-thinking content block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -204,12 +204,12 @@ pub struct PromptCacheConfig {
     pub ttl: PromptCacheTtl,
 }
 
-/// Configuration for [`AnthropicModel::new`](crate::AnthropicModel::new) (Go `ClientConfig`).
+/// Configuration for [`AnthropicModel::new`](crate::AnthropicModel::new).
 ///
-/// Not ported from Go: `TokenSource` (use a custom `google_cloud_auth` credentials provider in
-/// [`credentials`](Self::credentials)), `Logger` (warnings go through `tracing`) and
-/// `RequestOptions` (use [`base_url`](Self::base_url), [`headers`](Self::headers),
-/// [`http_client`](Self::http_client)).
+/// There is no token-source, logger or request-options field: use a custom
+/// `google_cloud_auth` credentials provider in [`credentials`](Self::credentials), warnings go
+/// through `tracing`, and use [`base_url`](Self::base_url), [`headers`](Self::headers) and
+/// [`http_client`](Self::http_client) for request options.
 #[derive(Clone)]
 pub struct ClientConfig {
     /// The backend (default [`Backend::Anthropic`]).
@@ -313,7 +313,7 @@ static VALID_VERTEX_LOCATION: LazyLock<Regex> =
 static VALID_VERTEX_PROJECT: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[a-zA-Z0-9][a-zA-Z0-9._:-]*$").expect("valid project regex"));
 
-/// Go `validateVertexProject`.
+/// Validates a Vertex project ID.
 pub(crate) fn validate_vertex_project(project: &str) -> Result<(), AnthropicError> {
     if VALID_VERTEX_PROJECT.is_match(project) {
         return Ok(());
@@ -324,7 +324,7 @@ pub(crate) fn validate_vertex_project(project: &str) -> Result<(), AnthropicErro
     ))
 }
 
-/// Go `validateVertexLocation`.
+/// Validates a Vertex location.
 pub(crate) fn validate_vertex_location(location: &str) -> Result<(), AnthropicError> {
     if VALID_VERTEX_LOCATION.is_match(location) {
         return Ok(());
@@ -338,7 +338,8 @@ pub(crate) fn validate_vertex_location(location: &str) -> Result<(), AnthropicEr
     ))
 }
 
-/// The result of [`parse_model_name`] (Go's `project, location, modelID, isResource`).
+/// The result of [`parse_model_name`]: project, location, model ID and whether the name is a
+/// resource name.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct ParsedModelName {
     /// The resource name's project; empty for a plain model ID.
@@ -351,7 +352,7 @@ pub(crate) struct ParsedModelName {
     pub(crate) is_resource: bool,
 }
 
-/// Go `parseModelName`: `claude-*`, `anthropic/claude-*`, or
+/// Parses a model name: `claude-*`, `anthropic/claude-*`, or
 /// `projects/<project>/locations/<location>/publishers/anthropic/models/<model>`.
 pub(crate) fn parse_model_name(raw: &str) -> Result<ParsedModelName, AnthropicError> {
     let name = raw.trim();
@@ -396,9 +397,9 @@ pub(crate) fn parse_model_name(raw: &str) -> Result<ParsedModelName, AnthropicEr
     })
 }
 
-/// Go `validateBaseURL`: `source` names the setting in the error (`BaseURL`,
+/// Validates a base URL: `source` names the setting in the error (`BaseURL`,
 /// `ANTHROPIC_BASE_URL`). The URL must parse with an `http`/`https` scheme and a host; an ASCII
-/// control character fails, as Go `url.Parse` does (`invalid control character in URL`).
+/// control character fails (`invalid control character in URL`).
 pub(crate) fn validate_base_url(source: &str, raw: &str) -> Result<(), AnthropicError> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -421,9 +422,9 @@ pub(crate) fn validate_base_url(source: &str, raw: &str) -> Result<(), Anthropic
     ))
 }
 
-/// Go `url.Parse` takes the host from the text between `scheme://` and the next `/`, `?` or
+/// The host is the text between `scheme://` and the next `/`, `?` or
 /// `#`, after any `userinfo@`; the WHATWG parser behind `url::Url` skips extra slashes
-/// (`https:///x` has host `x` there, none in Go), so the host is also checked Go's way.
+/// (`https:///x` has host `x` there, none here), so the host is also checked this way.
 fn go_authority_has_host(s: &str) -> bool {
     let Some((_, rest)) = s.split_once(':') else {
         return false;

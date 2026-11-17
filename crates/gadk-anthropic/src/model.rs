@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The Claude model (port of ADK-Go `anthropicmodel.go` and `request.go`
-//! `buildMessageParams`).
+//! The Claude model: construction, request building (`build_message_params`) and the
+//! [`Llm`] implementation.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -47,13 +47,13 @@ use crate::tools::build_tools_and_choice;
 use crate::validate::{invalid_config, validate_generate_content_config};
 use crate::wire::MessageNewParams;
 
-/// OAuth scope requested for Application Default Credentials (Go `cloudPlatformScope`).
+/// OAuth scope requested for Application Default Credentials.
 pub(crate) const CLOUD_PLATFORM_SCOPE: &str = "https://www.googleapis.com/auth/cloud-platform";
 
-/// Go's ADC failure detail (`resolveVertexCredentials`).
+/// The error detail for an Application Default Credentials failure.
 const ADC_FAILURE: &str = "failed to find Google Application Default Credentials for Vertex AI";
 
-/// A Claude model on the Anthropic Messages API or Vertex AI (Go `anthropicModel`).
+/// A Claude model on the Anthropic Messages API or Vertex AI.
 ///
 /// Build it with [`AnthropicModel::new`]; it implements [`Llm`]. Requests never mutate the
 /// caller's [`LlmRequest`], and one model serves concurrent requests.
@@ -90,8 +90,8 @@ impl std::fmt::Debug for AnthropicModel {
     }
 }
 
-/// What [`AnthropicModel::build_message_params`] returns (Go's `params, reqOpts,
-/// unwrapOutput`).
+/// What [`AnthropicModel::build_message_params`] returns: the params, the request options
+/// and the unwrap-output flag.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct BuiltParams {
     /// The Messages params.
@@ -104,19 +104,19 @@ pub(crate) struct BuiltParams {
     pub(crate) unwrap_output: bool,
 }
 
-/// `value` trimmed, `""` for `None` (Go `strings.TrimSpace` of a string field).
+/// `value` trimmed, `""` for `None`.
 fn trimmed(value: Option<&str>) -> &str {
     value.map(str::trim).unwrap_or_default()
 }
 
-/// The environment variable `key`, trimmed (Go `strings.TrimSpace(os.Getenv(key))`).
+/// The environment variable `key`, trimmed.
 fn env_trimmed(env: &dyn EnvProvider, key: &str) -> String {
     env.var(key)
         .map(|v| v.trim().to_string())
         .unwrap_or_default()
 }
 
-/// Go `firstNonEmpty`.
+/// The first non-empty of the values.
 fn first_non_empty(values: [&str; 4]) -> String {
     values
         .into_iter()
@@ -125,28 +125,28 @@ fn first_non_empty(values: [&str; 4]) -> String {
         .to_string()
 }
 
-/// The resolved Anthropic or Vertex half of `new` (Go's `switch backend`).
+/// The resolved Anthropic or Vertex half of `new`.
 struct Resolved {
     base_url: String,
     endpoint: Endpoint,
     auth: Auth,
     project: String,
     location: String,
-    /// Go's `defaultAnthropicHTTPClient` (10-minute response-header timeout) applies.
+    /// The default HTTP client (10-minute response-header timeout) applies.
     default_client_timeout: bool,
 }
 
 impl AnthropicModel {
-    /// Port of Go `NewModel`: validates `name` and `cfg` in Go's order with Go's error texts,
+    /// Validates `name` and `cfg` in the order given on [`new_concrete`](Self::new_concrete),
     /// resolves credentials (env, ADC) and the endpoint, and builds the model.
-    #[allow(clippy::new_ret_no_self)] // mirrors Go NewModel, which returns model.LLM
+    #[allow(clippy::new_ret_no_self)] // returns the model as `Arc<dyn Llm>`
     pub async fn new(name: &str, cfg: ClientConfig) -> Result<Arc<dyn Llm>, AnthropicError> {
         Ok(Arc::new(Self::new_concrete(name, cfg).await?))
     }
 
     /// [`new`](Self::new), returning the concrete type.
     ///
-    /// Go's order: model name, max tokens (`None`/`Some(0)` → [`DEFAULT_MAX_TOKENS`]),
+    /// Order: model name, max tokens (`None`/`Some(0)` → [`DEFAULT_MAX_TOKENS`]),
     /// `base_url` validation, then per backend:
     /// - Anthropic: a resource name is rejected; credentials are `api_key`/`auth_token`
     ///   (trimmed), else — only without a custom `base_url` — `ANTHROPIC_BASE_URL` (validated),
@@ -156,7 +156,7 @@ impl AnthropicModel {
     ///   `GOOGLE_CLOUD_LOCATION`/`CLOUD_ML_REGION`; a custom `base_url` needs explicit
     ///   `credentials`; credentials (or ADC) are built now.
     ///
-    /// Go's backend, negative-value, effort and TTL checks are enforced by the types.
+    /// The backend, negative-value, effort and TTL checks are enforced by the types.
     pub async fn new_concrete(name: &str, cfg: ClientConfig) -> Result<Self, AnthropicError> {
         let parsed = parse_model_name(name)?;
         let backend = cfg.backend;
@@ -212,8 +212,8 @@ impl AnthropicModel {
         })
     }
 
-    /// Go `resolveModelID`: the configured model ID for an empty `req_model`, else
-    /// `req_model` parsed, with Go's backend, project and location mismatch errors.
+    /// The configured model ID for an empty `req_model`, else
+    /// `req_model` parsed, with errors for a backend, project or location mismatch.
     pub(crate) fn resolve_model_id(&self, req_model: &str) -> Result<String, AnthropicError> {
         let trimmed = req_model.trim();
         if trimmed.is_empty() {
@@ -244,14 +244,13 @@ impl AnthropicModel {
         Ok(parsed.model_id)
     }
 
-    /// Go `buildMessageParams`: model ID, config validation, max tokens, system blocks, tools
+    /// Builds the request params: model ID, config validation, max tokens, system blocks, tools
     /// and choice, messages, cache breakpoints, output config, thinking, sampling parameters
-    /// (omitted with Go's `omitting sampling parameters when thinking or effort is active`
-    /// warning, fields `backend` and `model`, when thinking or effort is active), stop
+    /// (omitted with the warning `omitting sampling parameters when thinking or effort is
+    /// active`, fields `backend` and `model`, when thinking or effort is active), stop
     /// sequences, and the per-attempt timeout.
     ///
-    /// `params.model` is always set; [`Transport::encode_body`] leaves it out of a Vertex body
-    /// where the SDK does.
+    /// `params.model` is always set; [`Transport::encode_body`] leaves it out of a Vertex body.
     pub(crate) fn build_message_params(
         &self,
         req: &LlmRequest,
@@ -305,7 +304,7 @@ impl AnthropicModel {
             } else {
                 params.temperature = c.temperature.map(f64::from);
                 params.top_p = c.top_p.map(f64::from);
-                // Go `int64(*TopK)`: truncation toward zero.
+                // Truncation toward zero.
                 params.top_k = c.top_k.map(|k| k as i64);
             }
             if !c.stop_sequences.is_empty() {
@@ -328,7 +327,7 @@ impl AnthropicModel {
     }
 }
 
-/// Go `NewModel`'s `case BackendAnthropic`.
+/// Resolves the Anthropic backend.
 fn resolve_anthropic(
     cfg: &ClientConfig,
     is_resource: bool,
@@ -391,7 +390,7 @@ fn resolve_anthropic(
     })
 }
 
-/// Go `NewModel`'s `case BackendVertex`.
+/// Resolves the Vertex backend.
 fn resolve_vertex(
     cfg: &ClientConfig,
     parsed: &crate::config::ParsedModelName,
@@ -471,7 +470,7 @@ fn resolve_vertex(
     })
 }
 
-/// Go `resolveVertexCredentials`: `cfg.credentials`, else Application Default Credentials with
+/// The credentials: `cfg.credentials`, else Application Default Credentials with
 /// [`CLOUD_PLATFORM_SCOPE`] (see [`adc_credentials`]).
 pub(crate) fn resolve_vertex_credentials(
     cfg: &ClientConfig,
@@ -484,9 +483,9 @@ pub(crate) fn resolve_vertex_credentials(
 
 /// Application Default Credentials read through `env` ([`gadk_model::gcp_auth::adc_credentials`]
 /// with `env`'s `GOOGLE_APPLICATION_CREDENTIALS` and [`CLOUD_PLATFORM_SCOPE`]). Any failure is
-/// Go's `ErrInvalidConfig` + `ErrAuthentication` text `failed to find Google Application Default
-/// Credentials for Vertex AI`; the underlying detail is logged at `debug` only (Go's error
-/// carries none).
+/// the `ErrorKind::InvalidConfig` + `ErrorKind::Authentication` text `failed to find Google
+/// Application Default Credentials for Vertex AI`; the underlying detail is logged at `debug`
+/// only (the error carries none).
 pub(crate) fn adc_credentials(env: &dyn EnvProvider) -> Result<Credentials, AnthropicError> {
     let file = env.var("GOOGLE_APPLICATION_CREDENTIALS");
     gadk_model::gcp_auth::adc_credentials(file.as_deref(), &[CLOUD_PLATFORM_SCOPE]).map_err(|e| {
@@ -499,7 +498,7 @@ pub(crate) fn adc_credentials(env: &dyn EnvProvider) -> Result<Credentials, Anth
     })
 }
 
-/// One non-streaming call (Go `Messages.New` + `convertMessageToLLMResponse`).
+/// One non-streaming call, converted to an [`LlmResponse`].
 async fn generate_once(
     transport: Arc<Transport>,
     built: BuiltParams,
@@ -521,7 +520,7 @@ async fn generate_once(
     convert_message_to_llm_response(&msg, built.unwrap_output)
 }
 
-/// Opens one streaming call (Go `Messages.NewStreaming`): its responses come from
+/// Opens one streaming call: its responses come from
 /// [`stream_responses`].
 async fn open_stream(
     transport: Arc<Transport>,
@@ -542,16 +541,15 @@ async fn open_stream(
 }
 
 impl Llm for AnthropicModel {
-    /// The name given to [`AnthropicModel::new`], trimmed (Go `Name`).
+    /// The name given to [`AnthropicModel::new`], trimmed.
     fn name(&self) -> &str {
         &self.name
     }
 
-    /// Go `GenerateContent`: params (`build_message_params`), then one final response
+    /// Builds params (`build_message_params`), then returns one final response
     /// (non-streaming) or partials and a final response (streaming), every error as
-    /// `ModelError::Other(AnthropicError)`. Go's nil-request check has no counterpart
-    /// (`LlmRequest` is a value). The request is sent on the stream's first poll; dropping the
-    /// stream cancels it.
+    /// `ModelError::Other(AnthropicError)`. The request is sent on the stream's first poll;
+    /// dropping the stream cancels it.
     ///
     /// The params are built (and any sampling warning logged) when this is called; the
     /// caller's request is only read.

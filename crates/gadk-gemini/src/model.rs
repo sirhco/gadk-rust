@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `model/gemini/gemini.go`: the [`Llm`] backed by the Gemini API or
-//! Vertex AI.
+//! The [`Llm`] backed by the Gemini API or Vertex AI.
 
 use std::collections::VecDeque;
 use std::fmt;
@@ -41,8 +40,8 @@ use crate::live::LiveConnection;
 use crate::request::{Target, build_body};
 use crate::transport::Transport;
 
-/// The text of the user turn appended when the history ends on a non-user turn
-/// (gemini.go `maybeAppendUserContent`).
+/// The text of the user turn appended when the history ends on a non-user turn (see
+/// `maybe_append_user_content`).
 const CONTINUE_TEXT: &str = "Continue processing previous requests as instructed. Exit or provide a summary if no more outputs are needed.";
 
 /// A Gemini model served by the Gemini API or Vertex AI over REST.
@@ -115,9 +114,9 @@ impl Prepared {
 }
 
 impl GeminiModel {
-    /// Port of gemini.go `NewModel`: resolves `cfg` (building Application Default
+    /// Resolves `cfg` (building Application Default
     /// Credentials when needed) and returns the model as an [`Llm`].
-    #[allow(clippy::new_ret_no_self)] // mirrors Go NewModel, which returns model.LLM
+    #[allow(clippy::new_ret_no_self)] // returns the model as `Arc<dyn Llm>`
     pub async fn new(model_name: &str, cfg: ClientConfig) -> Result<Arc<dyn Llm>, GeminiError> {
         Ok(Arc::new(Self::new_concrete(model_name, cfg).await?))
     }
@@ -152,7 +151,7 @@ impl GeminiModel {
         &self.inner.resolved
     }
 
-    /// Opens a Live (bidi streaming) connection to this model (genai `Live.Connect` with
+    /// Opens a Live (bidi streaming) connection to this model (with
     /// the model's name and client configuration).
     pub async fn live_connect(
         &self,
@@ -163,7 +162,7 @@ impl GeminiModel {
 }
 
 impl Inner {
-    /// Clones and prepares `req` (gemini.go `GenerateContent` up to the SDK call). The
+    /// Clones and prepares `req` for sending. The
     /// caller's request is moved in, so nothing it holds is modified.
     fn prepare(&self, req: LlmRequest) -> Result<Prepared, ModelError> {
         let LlmRequest {
@@ -188,7 +187,7 @@ impl Inner {
         }
         add_tracking_headers(&mut headers)?;
 
-        // gemini.go configPreservingEmptyTextThoughtSignatures: the request provider takes
+        // The request provider takes
         // precedence over the client's.
         let extras: Option<ExtrasRequestProvider> = http_options
             .as_ref()
@@ -213,7 +212,7 @@ impl Inner {
     }
 }
 
-/// Port of gemini.go `maybeAppendUserContent`.
+/// Appends a user turn when the contents do not end with one.
 fn maybe_append_user_content(contents: &mut Vec<Content>) {
     // Contents are left empty to match Python ADK.
     if contents.last().is_some_and(|last| last.role != "user") {
@@ -222,7 +221,7 @@ fn maybe_append_user_content(contents: &mut Vec<Content>) {
 }
 
 /// Sets `x-goog-api-client` and `user-agent` to the tracking value, appended to any
-/// existing values (gemini.go `addHeaders` + `mergeHeadersInterceptor`): one value each.
+/// existing values: one value each.
 fn add_tracking_headers(headers: &mut HeaderMap) -> Result<(), ModelError> {
     let tracking = tracking_header();
     for name in [
@@ -241,8 +240,8 @@ fn add_tracking_headers(headers: &mut HeaderMap) -> Result<(), ModelError> {
     Ok(())
 }
 
-/// Sends the prepared request and yields the raw responses, with genai's automatic
-/// continuation (`models.go` `GenerateContent` / `GenerateContentStream`).
+/// Sends the prepared request and yields the raw responses, with automatic
+/// continuation.
 ///
 /// Unary: while the response carries a continuation token with a resumable finish reason,
 /// the request is sent again with that token, and the responses of every hop are yielded
@@ -259,7 +258,7 @@ fn run_hops(
     }
 }
 
-/// genai `Models.GenerateContent`.
+/// The unary generation loop over continuation hops.
 async fn generate_hops(prepared: Prepared) -> Result<GenerateContentResponse, ModelError> {
     let enabled = should_enable(&prepared.config);
     let mut response = prepared.generate_hop(&prepared.config).await?;
@@ -287,8 +286,8 @@ struct HopsState {
     done: bool,
 }
 
-/// genai `Models.GenerateContentStream`: within a hop the transport ends its stream at
-/// the first error, which ends the hop.
+/// The streaming generation loop over continuation hops: within a hop the transport ends its
+/// stream at the first error, which ends the hop.
 fn stream_hops(
     prepared: Prepared,
 ) -> BoxStream<'static, Result<GenerateContentResponse, ModelError>> {
@@ -336,11 +335,11 @@ fn stream_hops(
     .boxed()
 }
 
-/// gemini.go `generate`: the first candidate of the single response.
+/// The first candidate of the single response.
 ///
 /// A response without candidates is not an error: a blocked prompt reports why in
 /// `PromptFeedback`, which `llm_response_from_genai` turns into `error_code` and
-/// `error_message`, as the streaming path already does (Go 15e9d4cd).
+/// `error_message`, as the streaming path already does.
 fn generate(prepared: Prepared) -> BoxStream<'static, Result<LlmResponse, ModelError>> {
     run_hops(prepared, false)
         .take(1)
@@ -355,7 +354,7 @@ struct StreamState {
     done: bool,
 }
 
-/// gemini.go `generateStream`: every chunk through the aggregator, then its final
+/// Every chunk goes through the aggregator, then its final
 /// aggregated response; a transport error is yielded and ends the stream.
 fn generate_stream(prepared: Prepared) -> BoxStream<'static, Result<LlmResponse, ModelError>> {
     let state = StreamState {
@@ -419,7 +418,7 @@ impl Llm for GeminiModel {
         Some(self.inner.resolved.backend)
     }
 
-    /// Opens a Live connection (genai `Live.Connect` with this model's name and client
+    /// Opens a Live connection (with this model's name and client
     /// configuration) as the model-agnostic trait object. Failures convert to `ModelError`.
     fn connect_live<'a>(
         &'a self,

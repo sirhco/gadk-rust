@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The Chat Completions model (port of ADK-Go `internal/completions/model.go`).
+//! The Chat Completions model.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -46,7 +46,7 @@ use crate::shared::response::{
     single_error_sequence,
 };
 
-/// Go `completions.Model`: talks to the Chat Completions API.
+/// Talks to the Chat Completions API.
 #[derive(Debug, Clone)]
 pub(crate) struct Model {
     /// The client.
@@ -56,7 +56,7 @@ pub(crate) struct Model {
 }
 
 impl Model {
-    /// Go `completions.New`.
+    /// Creates the model.
     pub(crate) fn new(client: Arc<OpenAiClient>, model_name: &str) -> Self {
         Self {
             client,
@@ -74,11 +74,11 @@ impl Llm for Model {
         self
     }
 
-    /// Go `GenerateContent`: builds the params, then one blocking call (`generate`, errors
-    /// wrapped `openai: call failed: %w`) or one stream (`generateStream`, with
+    /// Builds the params, then one blocking call (`generate`, errors
+    /// wrapped `openai: call failed: …`) or one stream (`generate_stream`, with
     /// `stream_options.include_usage`, partials through the aggregator and a final response
     /// from the accumulated snapshot). Nothing is sent before the stream is first polled; the
-    /// `http_options.timeout` deadline starts then (D7).
+    /// `http_options.timeout` deadline starts then.
     fn generate_content(
         &self,
         req: LlmRequest,
@@ -98,9 +98,9 @@ impl Llm for Model {
     }
 }
 
-/// Go `generate`: one blocking Chat Completions call. The SDK's failures (encoding, transport,
-/// API status, body decoding) are wrapped `openai: call failed: %w`; conversion errors are not.
-/// The call deadline is computed when the stream is first polled (D7), so every run of a
+/// One blocking Chat Completions call. Failures of the call (encoding, transport,
+/// API status, body decoding) are wrapped `openai: call failed: …`; conversion errors are not.
+/// The call deadline is computed when the stream is first polled, so every run of a
 /// re-issued call gets a fresh one.
 fn generate(
     client: Arc<OpenAiClient>,
@@ -120,7 +120,7 @@ fn generate(
     .boxed()
 }
 
-/// openai-go `Chat.Completions.New`: encode, post, decode.
+/// The blocking call: encode, post, decode.
 async fn call(
     client: &OpenAiClient,
     params: &ChatCompletionNewParams,
@@ -149,10 +149,10 @@ async fn read_all(mut body: BodyStream) -> Result<Vec<u8>, OpenAiError> {
     Ok(out)
 }
 
-/// Go `generateStream`: one streamed Chat Completions call, yielding a partial per delta and
-/// one final response built from the accumulated turn. Errors are yielded as they are (Go's
-/// `stream.Err()` is not wrapped) and end the stream. Dropping the stream closes the
-/// connection (D9).
+/// One streamed Chat Completions call, yielding a partial per delta and
+/// one final response built from the accumulated turn. Errors are yielded as they are (not
+/// wrapped) and end the stream. Dropping the stream closes the
+/// connection.
 fn generate_stream(
     client: Arc<OpenAiClient>,
     mut params: ChatCompletionNewParams,
@@ -169,7 +169,7 @@ fn generate_stream(
         .boxed()
 }
 
-/// openai-go `Chat.Completions.NewStreaming`: encode, post, and the decoded chunks.
+/// The streaming call: encode, post, and the decoded chunks.
 async fn open_stream(
     client: &OpenAiClient,
     params: &ChatCompletionNewParams,
@@ -196,7 +196,7 @@ struct StreamState {
     done: bool,
 }
 
-/// Go `generateStream`'s loop over the decoded chunks, then its close-out.
+/// The loop over the decoded chunks, then its close-out.
 fn translate(
     chunks: BoxStream<'static, Result<ChatCompletionChunk, OpenAiError>>,
 ) -> BoxStream<'static, Result<LlmResponse, ModelError>> {
@@ -247,7 +247,7 @@ fn translate(
     .boxed()
 }
 
-/// The end of Go `generateStream`: the final response from the aggregate and the accumulated
+/// The end of the stream: the final response from the aggregate and the accumulated
 /// snapshot, or the snapshot's error; `None` when there is nothing to report.
 fn close_stream(
     aggregator: &mut StreamingResponseAggregator,
@@ -297,7 +297,7 @@ fn close_stream(
     Some(Ok(final_resp))
 }
 
-/// Go `functionCallParts`: the parts of `content` that carry a function call.
+/// The parts of `content` that carry a function call.
 fn function_call_parts(content: Option<&Content>) -> Vec<Part> {
     content
         .map(|content| {
@@ -311,7 +311,7 @@ fn function_call_parts(content: Option<&Content>) -> Vec<Part> {
         .unwrap_or_default()
 }
 
-/// Go `finalizeStreamResponse`: closes out a streamed turn. Deltas carry no finish reason or
+/// Closes out a streamed turn. Deltas carry no finish reason or
 /// usage, so this is the one response that reports them: the finish reason from the
 /// accumulated snapshot, and usage from the latest report, if any arrived.
 fn finalize_stream_response(
@@ -337,7 +337,7 @@ fn finalize_stream_response(
     final_resp.logprobs_result = convert_logprobs(&choice.logprobs);
 }
 
-/// Go `attachMetadata`: records the response ID and model under the keys the Responses path
+/// Records the response ID and model under the keys the Responses path
 /// uses (`openai_response_id`, `openai_model`, both strings). Nothing without an ID.
 fn attach_metadata(resp: &mut LlmResponse, completion: &ChatCompletion) {
     if completion.id.is_empty() {

@@ -13,19 +13,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Prompt-cache breakpoints (port of ADK-Go `cache.go`).
+//! Prompt-cache breakpoints.
 
 use crate::config::PromptCacheConfig;
 use crate::wire::{
     CacheControlEphemeral, ContentBlockParam, MessageParam, TextBlockParam, ToolParam,
 };
 
-/// Go `toCacheControlParam`: ephemeral with the configured TTL (5m unless 1h).
+/// The cache-control param: ephemeral with the configured TTL (5m unless 1h).
 pub(crate) fn to_cache_control_param(cfg: &PromptCacheConfig) -> CacheControlEphemeral {
     CacheControlEphemeral::new(cfg.ttl)
 }
 
-/// Go `applyCacheBreakpoints`, in place: with caching on, `cache_control` goes on the last
+/// Applies the cache breakpoints, in place: with caching on, `cache_control` goes on the last
 /// tool, the last cacheable message block and the last system block; without, nothing changes.
 pub(crate) fn apply_cache_breakpoints(
     cache: Option<&PromptCacheConfig>,
@@ -49,7 +49,7 @@ pub(crate) fn apply_cache_breakpoints(
     }
 }
 
-/// Go `markLastCacheableMessageBlock`: the last block, scanning messages and blocks from the
+/// Marks the last block, scanning messages and blocks from the
 /// end, that is not thinking or redacted thinking.
 pub(crate) fn mark_last_cacheable_message_block(
     messages: &mut [MessageParam],
@@ -71,7 +71,7 @@ pub(crate) fn mark_last_cacheable_message_block(
     }
 }
 
-/// Go `setBlockCacheControl`: sets it on text, image, document, tool use and tool result
+/// Sets cache control on text, image, document, tool use and tool result
 /// blocks; `false` for any other block.
 pub(crate) fn set_block_cache_control(
     block: &mut ContentBlockParam,

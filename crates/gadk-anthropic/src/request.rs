@@ -13,17 +13,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! genai → Messages content conversion (port of ADK-Go `request.go`, except
-//! `buildMessageParams`, which `model.rs` assembles).
+//! genai → Messages content conversion, except building the message params, which `model.rs`
+//! assembles.
 //!
-//! Go-parity notes:
-//! - Go `strings.ToLower` maps rune by rune with Unicode's simple mappings; [`go_to_lower`]
-//!   does the same (Rust's `str::to_lowercase` maps `İ` to two characters and handles a final
-//!   sigma). Go `strings.TrimSpace` and Rust `str::trim` remove the same characters.
-//! - Go `string([]byte)` keeps invalid UTF-8 and its JSON encoder writes one U+FFFD per invalid
-//!   byte; [`go_string`] produces that text.
-//! - [`is_valid_https_url`] ports the checks Go `url.Parse` makes on an `https` URL (Go 1.26
-//!   `urlstrictcolons=1`), not the WHATWG rules of the `url` crate.
+//! Text-handling notes:
+//! - [`go_to_lower`] lowercases char by char with Unicode's simple mappings (Rust's
+//!   `str::to_lowercase` maps `İ` to two characters and handles a final sigma). Trimming
+//!   uses `str::trim`.
+//! - [`go_string`] keeps invalid UTF-8 as text with one U+FFFD per invalid byte.
+//! - [`is_valid_https_url`] implements the URL syntax checks for an `https` URL itself, not
+//!   the WHATWG rules of the `url` crate.
 
 use std::net::Ipv6Addr;
 use std::sync::LazyLock;
@@ -47,7 +46,7 @@ use crate::wire::{
     ToolResultContent, ToolResultTag, ToolUseBlockParam, to_go_json,
 };
 
-/// What Go's conversion methods read from `anthropicModel`: the backend (file data is sent
+/// What the conversion functions read from the model: the backend (file data is sent
 /// only on [`Backend::Anthropic`]) and the request's model ID (a field of every warning).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ConvertCtx<'a> {
@@ -57,18 +56,19 @@ pub(crate) struct ConvertCtx<'a> {
     pub(crate) model_id: &'a str,
 }
 
-/// The result of [`convert_content_parts`] (Go's `blocks, droppedReasons, hadEmptyText`).
+/// The result of [`convert_content_parts`]: blocks, dropped reasons, and whether an empty
+/// text part was seen.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct ConvertedParts {
     /// The converted blocks, in part order.
     pub(crate) blocks: Vec<ContentBlockParam>,
-    /// Why parts were dropped (Go's reason strings, e.g. `inline_data (mime_type=audio/wav)`).
+    /// Why parts were dropped (e.g. `inline_data (mime_type=audio/wav)`).
     pub(crate) dropped_reasons: Vec<String>,
     /// Whether a part with no content (an empty text part) was seen.
     pub(crate) had_empty_text: bool,
 }
 
-/// Go `buildSystemBlocks`: the system instruction's non-empty text parts joined with `"\n\n"`
+/// The system instruction's non-empty text parts joined with `"\n\n"`
 /// as one block, or none.
 pub(crate) fn build_system_blocks(cfg: Option<&GenerateContentConfig>) -> Vec<TextBlockParam> {
     let Some(system) = cfg.and_then(|c| c.system_instruction.as_ref()) else {
@@ -86,7 +86,7 @@ pub(crate) fn build_system_blocks(cfg: Option<&GenerateContentConfig>) -> Vec<Te
     vec![TextBlockParam::new(texts.join("\n\n"))]
 }
 
-/// Go `toClaudeRole`: `model` or `assistant` (trimmed, case-insensitive) is the assistant;
+/// `model` or `assistant` (trimmed, case-insensitive) is the assistant;
 /// anything else is the user.
 pub(crate) fn to_claude_role(role: &str) -> Role {
     match go_to_lower(role.trim()).as_str() {
@@ -95,8 +95,8 @@ pub(crate) fn to_claude_role(role: &str) -> Role {
     }
 }
 
-/// Go `buildMessages`: converts every content, skips empty and fully dropped earlier
-/// contents, coalesces adjacent same-role messages, and fails with Go's `ErrNoContent` texts
+/// Converts every content, skips empty and fully dropped earlier
+/// contents, coalesces adjacent same-role messages, and fails with `ErrorKind::NoContent` texts
 /// (`contents must not be empty`, `newest message in contents is empty`, `newest message has
 /// no sendable content[ after skipping unsupported parts (<reasons>)]`, `no sendable messages in
 /// request`). One [`ToolUseIdSanitizer`] serves the whole request.
@@ -185,7 +185,7 @@ pub(crate) fn build_messages(
     Ok(messages)
 }
 
-/// Go `orderAssistantBlocks`: thinking and redacted-thinking blocks first, others after, each
+/// Orders thinking and redacted-thinking blocks first, others after, each
 /// group in its original order.
 pub(crate) fn order_assistant_blocks(blocks: Vec<ContentBlockParam>) -> Vec<ContentBlockParam> {
     let is_thinking = |b: &ContentBlockParam| {
@@ -202,9 +202,9 @@ pub(crate) fn order_assistant_blocks(blocks: Vec<ContentBlockParam>) -> Vec<Cont
     thinking
 }
 
-/// Go `convertContentParts`, part kinds in Go's order (thought, content-free signature,
-/// function call, function response, inline data, file data, executable code, code execution
-/// result, unsupported server-side/audio/video parts, text, empty).
+/// Converts the parts of one content, by part kind in this order (thought, content-free
+/// signature, function call, function response, inline data, file data, executable code, code
+/// execution result, unsupported server-side/audio/video parts, text, empty).
 pub(crate) fn convert_content_parts(
     cx: ConvertCtx<'_>,
     role: Role,
@@ -333,7 +333,7 @@ pub(crate) fn convert_content_parts(
     out
 }
 
-/// Go `isContentFreeSignature`.
+/// Whether the part carries only a thought signature and no content.
 pub(crate) fn is_content_free_signature(part: &Part) -> bool {
     if part.thought_signature.is_empty() || part.thought || !part.text.is_empty() {
         return false;
@@ -349,7 +349,7 @@ pub(crate) fn is_content_free_signature(part: &Part) -> bool {
         && part.audio_transcription.is_none()
 }
 
-/// Go's `labelMIME` / `labelScheme`: `unspecified` for an empty value.
+/// The value for a warning field: `unspecified` for an empty value.
 fn label(value: &str) -> &str {
     if value.is_empty() {
         "unspecified"
@@ -358,7 +358,7 @@ fn label(value: &str) -> &str {
     }
 }
 
-/// Go `convertInlineDataPart`: `Err(reason)` when the part is dropped (after the warning).
+/// Converts an inline-data part: `Err(reason)` when the part is dropped (after the warning).
 pub(crate) fn convert_inline_data_part(
     cx: ConvertCtx<'_>,
     role: Role,
@@ -399,7 +399,7 @@ pub(crate) fn convert_inline_data_part(
     }
 }
 
-/// Go `convertFileDataPart`: `Err(reason)` when the part is dropped (after the warning).
+/// Converts a file-data part: `Err(reason)` when the part is dropped (after the warning).
 pub(crate) fn convert_file_data_part(
     cx: ConvertCtx<'_>,
     role: Role,
@@ -437,7 +437,7 @@ pub(crate) fn convert_file_data_part(
     Err(reason())
 }
 
-/// Go `convertFunctionResponsePart`: a `tool_result` with `is_error: false`, the serialized
+/// Converts a function response part: a `tool_result` with `is_error: false`, the serialized
 /// response as a text block (if non-empty) and the media blocks.
 pub(crate) fn convert_function_response_part(
     cx: ConvertCtx<'_>,
@@ -464,11 +464,10 @@ pub(crate) fn convert_function_response_part(
     })
 }
 
-/// Go `serializeFunctionResponseData`. JSON is written with [`crate::wire::to_go_json`] (Go
-/// `json.Marshal`).
+/// Serializes a function response's data. JSON is written with [`crate::wire::to_go_json`]
+/// (compact, HTML-escaped).
 ///
-/// genai's response map holds JSON values, so Go's `[]any` case is every
-/// [`Value::Array`] (Go's typed slices, which skip that case, cannot occur).
+/// The response map holds JSON values, so every [`Value::Array`] is treated as a list.
 pub(crate) fn serialize_function_response_data(resp: &Map<String, Value>) -> String {
     if resp.is_empty() {
         return String::new();
@@ -508,8 +507,8 @@ pub(crate) fn serialize_function_response_data(resp: &Map<String, Value>) -> Str
         .unwrap_or_default()
 }
 
-/// Go `formatArbitraryValue` (a JSON string as itself, `null` as `""`, anything else as Go
-/// JSON).
+/// Formats a value as text: a JSON string as itself, `null` as `""`, anything else as JSON
+/// ([`crate::wire::to_go_json`]).
 pub(crate) fn format_arbitrary_value(value: &Value) -> String {
     match value {
         Value::Null => String::new(),
@@ -521,7 +520,7 @@ pub(crate) fn format_arbitrary_value(value: &Value) -> String {
     }
 }
 
-/// Go `convertFunctionResponseMedia`.
+/// Converts the media parts of a function response.
 pub(crate) fn convert_function_response_media(
     cx: ConvertCtx<'_>,
     role: Role,
@@ -581,9 +580,9 @@ pub(crate) fn convert_function_response_media(
     out
 }
 
-/// Go `warnSkippedPart`: `tracing::warn!` with the message
+/// Logs a skipped part: `tracing::warn!` with the message
 /// `skipping unsupported content part for Claude request` and the fields `backend`, `model`,
-/// `role`, `part_kind`, `mime_type`, `uri_scheme` (D10).
+/// `role`, `part_kind`, `mime_type`, `uri_scheme`.
 pub(crate) fn warn_skipped_part(
     cx: ConvertCtx<'_>,
     role: Role,
@@ -613,8 +612,8 @@ static VALID_MIME_TYPE: LazyLock<Regex> = LazyLock::new(|| {
 static VALID_URI_SCHEME: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[a-z][a-z0-9+.-]{0,15}$").expect("valid URI scheme regex"));
 
-/// Go `normalizeMIMEType`: the lowercased type before any `;`, `""` when blank, `invalid` when
-/// it does not match Go's `validMIMETypePattern`.
+/// Normalizes a MIME type: the lowercased type before any `;`, `""` when blank, `invalid` when
+/// it does not match the MIME type pattern.
 pub(crate) fn normalize_mime_type(raw: &str) -> String {
     let base = raw.split_once(';').map_or(raw, |(base, _)| base);
     let cleaned = go_to_lower(base.trim());
@@ -627,7 +626,8 @@ pub(crate) fn normalize_mime_type(raw: &str) -> String {
     cleaned
 }
 
-/// Go `isSupportedImageMIME`: `image/jpeg`, `image/png`, `image/gif`, `image/webp`.
+/// Whether the MIME type is supported for images: `image/jpeg`, `image/png`, `image/gif`,
+/// `image/webp`.
 pub(crate) fn is_supported_image_mime(mime_type: &str) -> bool {
     matches!(
         mime_type,
@@ -635,7 +635,7 @@ pub(crate) fn is_supported_image_mime(mime_type: &str) -> bool {
     )
 }
 
-/// Go `extractURIScheme`: the lowercased scheme, `""` for a blank URI, `unknown` when it is
+/// The lowercased URI scheme, `""` for a blank URI, `unknown` when it is
 /// malformed or not followed by `//` (except `data`, `blob`, `urn`, `mailto`).
 pub(crate) fn extract_uri_scheme(raw: &str) -> String {
     let trimmed = raw.trim();
@@ -655,13 +655,13 @@ pub(crate) fn extract_uri_scheme(raw: &str) -> String {
     scheme
 }
 
-/// Go `isValidHTTPSURL`: parses, scheme `https` (any case), non-empty host.
+/// Whether `raw` parses as a URL with scheme `https` (any case) and a non-empty host.
 ///
-/// Ports what Go `url.Parse` checks on the way to that answer: no ASCII control byte before
+/// Checks, in order: no ASCII control byte before
 /// the `#`; a scheme of letters, digits, `+`, `-`, `.` not starting with a digit or sign; the
-/// query (Go never validates it) cut at the first `?`; an authority after `//` up to the next
+/// query (not validated) cut at the first `?`; an authority after `//` up to the next
 /// `/` with a valid userinfo, an IP literal that is an IPv6 address, an optional all-digit
-/// port (one colon only, as Go 1.26 enforces for `https`) and only host-safe bytes; and
+/// port (one colon only) and only host-safe bytes; and
 /// well-formed `%` escapes in userinfo, host, path and fragment.
 pub(crate) fn is_valid_https_url(raw: &str) -> bool {
     let (url, fragment) = raw.split_once('#').unwrap_or((raw, ""));
@@ -680,7 +680,7 @@ pub(crate) fn is_valid_https_url(raw: &str) -> bool {
         rest.split_once('?').map_or(rest, |(before, _)| before)
     };
     let Some(after_slashes) = rest.strip_prefix("//") else {
-        // Opaque or host-less: Go leaves `Host` empty.
+        // Opaque or host-less: the host is empty.
         return false;
     };
     let (authority, path) = match after_slashes.find('/') {
@@ -703,7 +703,7 @@ pub(crate) fn is_valid_https_url(raw: &str) -> bool {
         && !host.is_empty()
 }
 
-/// Go `getScheme` for an absolute URL: `None` when there is no scheme (or Go errors).
+/// Splits an absolute URL into scheme and rest: `None` when there is no scheme.
 fn go_split_scheme(url: &str) -> Option<(&str, &str)> {
     for (i, b) in url.bytes().enumerate() {
         match b {
@@ -716,7 +716,7 @@ fn go_split_scheme(url: &str) -> Option<(&str, &str)> {
     None
 }
 
-/// Go `validUserinfo`.
+/// Whether every byte of the userinfo is allowed.
 fn go_valid_userinfo(s: &str) -> bool {
     s.bytes()
         .all(|b| b.is_ascii_alphanumeric() || b"-._:~!$&'()*+,;=%@".contains(&b))
@@ -733,7 +733,7 @@ enum Escape {
     Other,
 }
 
-/// Go `shouldEscape(c, encodeHost)` (= `encodeZone`) is false for these ASCII bytes.
+/// Whether `b` is an ASCII byte allowed unescaped in a host.
 fn go_host_byte_ok(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b"!$&'()*+,;=:[]<>\"-_.~".contains(&b)
 }
@@ -747,7 +747,7 @@ fn hex_val(b: u8) -> Option<u8> {
     }
 }
 
-/// Go `unescape(s, mode)`: the unescaped bytes, or `None` where Go returns an error.
+/// Unescapes `%XX` sequences: the unescaped bytes, or `None` for a malformed escape.
 fn go_unescape(s: &str, mode: Escape) -> Option<Vec<u8>> {
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -786,7 +786,7 @@ fn go_unescape_ok(s: &str, mode: Escape) -> bool {
     go_unescape(s, mode).is_some()
 }
 
-/// Go `validOptionalPort`: empty or `:` followed by digits.
+/// Whether the port is empty or `:` followed by digits.
 fn go_valid_optional_port(port: &str) -> bool {
     port.is_empty()
         || port
@@ -794,7 +794,7 @@ fn go_valid_optional_port(port: &str) -> bool {
             .is_some_and(|digits| digits.bytes().all(|b| b.is_ascii_digit()))
 }
 
-/// Go `parseHost(scheme = "https", host)` succeeds.
+/// Whether `host` is valid for an `https` URL.
 fn go_parse_host_ok(host: &str) -> bool {
     match host.rfind('[') {
         Some(i) if i > 0 => false,
@@ -827,7 +827,7 @@ fn go_parse_host_ok(host: &str) -> bool {
         }
         None => {
             if let Some(i) = host.find(':') {
-                // Go 1.26 (`urlstrictcolons=1`): an https host has at most one colon, so the
+                // An https host has at most one colon, so the
                 // port runs from the first one.
                 if !go_valid_optional_port(&host[i..]) {
                     return false;
@@ -838,7 +838,7 @@ fn go_parse_host_ok(host: &str) -> bool {
     }
 }
 
-/// Go `netip.ParseAddr(s)` succeeds and is not IPv4: an IPv6 address with an optional
+/// Whether `s` is an IPv6 address (not IPv4) with an optional
 /// non-empty `%zone`.
 fn go_is_ipv6_literal(s: &[u8]) -> bool {
     let (addr, zone) = match s.iter().position(|&b| b == b'%') {
@@ -851,7 +851,7 @@ fn go_is_ipv6_literal(s: &[u8]) -> bool {
     std::str::from_utf8(addr).is_ok_and(|a| a.parse::<Ipv6Addr>().is_ok())
 }
 
-/// Go `string(b)` as Go's JSON encoder writes it: each byte that does not start a valid
+/// Lossy text of bytes: each byte that does not start a valid
 /// UTF-8 sequence becomes one U+FFFD.
 fn go_string(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len());

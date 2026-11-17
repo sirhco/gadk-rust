@@ -13,19 +13,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `encoding/json` output for serde values (moved from gadk-anthropic's `wire.rs` in 3b so
-//! every REST provider shares it): [`to_go_json`].
+//! JSON serialization for serde values with HTML-escaped strings and shortest-form floats
+//! (`0` not `0.0`, `1e-7`, `1e+21`), shared by every REST provider: [`to_go_json`].
 
 use std::io;
 
 use serde::Serialize;
 
-/// A `serde_json` formatter that writes what Go's `encoding/json` writes for the same value:
-/// `<`, `>`, `&`, U+2028 and U+2029 in strings are escape sequences (`\u003c`, `\u003e`,
-/// `\u0026`, `\u2028`, `\u2029`); floats use Go's format (`0` not `0.0`, `1e-7`, `1e+21`).
+/// A `serde_json` formatter that writes compact JSON with `<`, `>`, `&`, U+2028 and U+2029 in
+/// strings as escape sequences (`\u003c`, `\u003e`, `\u0026`, `\u2028`, `\u2029`) and floats in
+/// the shortest form (`0` not `0.0`, `1e-7`, `1e+21`).
 struct GoFormatter;
 
-/// Go `encoding/json` `floatEncoder`: `'f'` format with the shortest representation, `'e'`
+/// Float formatting: `'f'` format with the shortest representation, `'e'`
 /// below 1e-6 or from 1e21 on, with a two-digit negative exponent's leading zero removed.
 fn go_float(value: f64, shortest: impl Fn() -> String, exponent: impl Fn() -> String) -> String {
     let abs = value.abs();
@@ -77,8 +77,8 @@ impl serde_json::ser::Formatter for GoFormatter {
     }
 }
 
-/// Serializes `value` as Go's `json.Marshal` would: compact, HTML-escaped strings, Go float
-/// formatting, and map keys sorted (as `serde_json::Map` is without `preserve_order`).
+/// Serializes `value` as compact JSON with HTML-escaped strings, the float formatting above,
+/// and map keys sorted (as `serde_json::Map` is without `preserve_order`).
 pub fn to_go_json<T: ?Sized + Serialize>(value: &T) -> Result<Vec<u8>, serde_json::Error> {
     let mut out = Vec::new();
     let mut ser = serde_json::Serializer::with_formatter(&mut out, GoFormatter);

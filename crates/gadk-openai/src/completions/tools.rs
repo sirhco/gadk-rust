@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Chat Completions tools (port of ADK-Go `internal/completions/tools.go`).
+//! Chat Completions tools.
 
 use gadk_genai::{
     FunctionCallingConfigMode, FunctionDeclaration, GenerateContentConfig, ToolConfig,
@@ -32,7 +32,7 @@ use crate::oaishared::FunctionDefinitionParam;
 use crate::shared::schema::{normalize_schema, schema_to_map};
 use crate::shared::tools::ensure_function_tool_only;
 
-/// Go `convertTools`: each function declaration of `cfg.tools` as a Chat Completions function
+/// Each function declaration of `cfg.tools` as a Chat Completions function
 /// tool (`{"function":{…},"type":"function"}`), after
 /// [`ensure_function_tool_only`](crate::shared::tools::ensure_function_tool_only); `None` or no
 /// tools is empty.
@@ -54,10 +54,10 @@ pub(crate) fn convert_tools(
     Ok(tools)
 }
 
-/// Go `convertFunctionDeclaration`: one declaration as a Chat Completions function tool,
+/// One declaration as a Chat Completions function tool,
 /// whose declaration nests under `function`. The parameters are the genai schema, else the
 /// JSON schema (not strict-rewritten: optional properties stay optional), else an empty object
-/// schema. Go's nil-declaration error has no counterpart (a `Vec` holds no nil).
+/// schema. There is no nil-declaration error (a `Vec` holds no nil).
 fn convert_function_declaration(
     fn_decl: &FunctionDeclaration,
 ) -> Result<ChatCompletionFunctionToolParam, OpenAiError> {
@@ -89,7 +89,7 @@ fn convert_function_declaration(
     })
 }
 
-/// Go `convertToolChoice`: the Chat Completions `tool_choice` for a tool config; `Ok(None)`
+/// The Chat Completions `tool_choice` for a tool config; `Ok(None)`
 /// when it names nothing (the provider's default stands).
 pub(crate) fn convert_tool_choice(
     tool_cfg: Option<&ToolConfig>,
@@ -98,7 +98,7 @@ pub(crate) fn convert_tool_choice(
         return Ok(None);
     };
     let names = &cfg.allowed_function_names;
-    // Go's `""` mode is `None` or an empty unknown value.
+    // An empty mode is `None` or an empty unknown value.
     let mode = cfg.mode.as_ref().filter(|mode| !mode.as_str().is_empty());
     let choice = match mode {
         None | Some(FunctionCallingConfigMode::Unspecified | FunctionCallingConfigMode::Auto) => {
@@ -142,7 +142,7 @@ pub(crate) fn convert_tool_choice(
     Ok(choice)
 }
 
-/// Go `soleFunctionName`: the one name `names` allows, skipping empty entries; `None` for
+/// The one name `names` allows, skipping empty entries; `None` for
 /// none or several.
 fn sole_function_name(names: &[String]) -> Option<&str> {
     let mut sole: Option<&str> = None;
@@ -158,8 +158,8 @@ fn sole_function_name(names: &[String]) -> Option<&str> {
     sole
 }
 
-/// Go `allowedToolParam`: the allowed-tools choice, each entry nesting its name under
-/// `function` (`{"function":{"name":…},"type":"function"}`, Go map key order); `None` when
+/// The allowed-tools choice, each entry nesting its name under
+/// `function` (`{"function":{"name":…},"type":"function"}`); `None` when
 /// every name is empty.
 fn allowed_tool_param(
     names: &[String],

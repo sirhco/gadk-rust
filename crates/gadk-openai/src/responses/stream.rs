@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Responses stream translation (port of ADK-Go `internal/responses/stream.go`).
+//! Responses stream translation.
 
 use std::collections::HashMap;
 
@@ -35,25 +35,25 @@ use crate::shared::calls::unmarshal_function_args;
 use crate::shared::response::single_part_response;
 use crate::shared::servertext::clip_server_text;
 
-/// Go `streamTranslator`: turns stream events into partial genai responses, buffering a
+/// Turns stream events into partial genai responses, buffering a
 /// function call's argument deltas until its `response.function_call_arguments.done`.
 #[derive(Debug, Default)]
 pub(crate) struct StreamTranslator {
-    /// Go `functionArgs`: argument deltas by item id (`""` → `"default"`).
+    /// Argument deltas by item id (`""` → `"default"`).
     function_args: HashMap<String, String>,
-    /// Go `itemToCallID`: item id → call id, from `response.output_item.added`.
+    /// Item id → call id, from `response.output_item.added`.
     item_to_call_id: HashMap<String, String>,
-    /// Go `itemToName`: item id → function name, from `response.output_item.added`.
+    /// Item id → function name, from `response.output_item.added`.
     item_to_name: HashMap<String, String>,
 }
 
 impl StreamTranslator {
-    /// Go `newStreamTranslator`.
+    /// Creates a translator with no buffered state.
     pub(crate) fn new() -> Self {
         Self::default()
     }
 
-    /// Go `process`: the partial `event` contributes (text, refusal and reasoning deltas; a
+    /// The partial `event` contributes (text, refusal and reasoning deltas; a
     /// completed function call), `Ok(None)` for an event with none. `response.failed` is
     /// [`failed_response_error`](crate::responses::response::failed_response_error); an
     /// `error` event `openai stream error: "<clipped message>"` (or `openai stream error`);
@@ -125,15 +125,15 @@ impl StreamTranslator {
         }
     }
 
-    /// Go `buffer`: the argument buffer of item `id` (`""` is `"default"`).
+    /// The argument buffer of item `id` (`""` is `"default"`).
     fn buffer(&mut self, id: &str) -> &mut String {
         let id = if id.is_empty() { "default" } else { id };
         self.function_args.entry(id.to_string()).or_default()
     }
 
-    /// Go `emitFunctionCall`: the function call a `response.function_call_arguments.done`
+    /// The function call a `response.function_call_arguments.done`
     /// completes, from its own arguments or else the buffered deltas (looked up by the event's
-    /// raw item id, as Go does), with the call id and name `response.output_item.added`
+    /// raw item id), with the call id and name `response.output_item.added`
     /// recorded. The item's buffered state is dropped.
     fn emit_function_call(&mut self, done: &ResponseStreamEvent) -> Result<Part, OpenAiError> {
         let buffered = self.function_args.remove(&done.item_id);

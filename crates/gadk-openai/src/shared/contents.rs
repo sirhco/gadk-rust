@@ -13,24 +13,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Content helpers both APIs share (port of ADK-Go `internal/shared/contents.go`).
+//! Content helpers both APIs share.
 
 use gadk_genai::{Content, Part};
 
 use crate::error::OpenAiError;
 
-/// Go `PartField`: a group of `genai.Part` fields an API emits itself and passes to
+/// A group of `genai.Part` fields an API emits itself and passes to
 /// [`unsupported_payload`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum PartField {
-    /// Go `PartFieldMedia`: `InlineData` and `FileData`.
+    /// `InlineData` and `FileData`.
     Media,
-    /// Go `PartFieldCodeExecution`: `ExecutableCode` and `CodeExecutionResult`, which both
+    /// `ExecutableCode` and `CodeExecutionResult`, which both
     /// APIs send as text (see [`code_execution_text`]).
     CodeExecution,
 }
 
-/// Go `FlattenContentText`: the content's text parts joined with `\n`; `None` is `""`. A part
+/// The content's text parts joined with `\n`; `None` is `""`. A part
 /// without text is `non-text system instruction part *genai.Part`; a part carrying anything
 /// besides its text is `unsupported system instruction part: <Field>` (plain errors; callers
 /// wrap them as `openai: system instruction: %w`).
@@ -67,7 +67,7 @@ pub(crate) fn flatten_content_text(content: Option<&Content>) -> Result<String, 
     Ok(out)
 }
 
-/// Go `ReplayedReasoning`: whether `part` is reasoning from an earlier turn carrying nothing
+/// Whether `part` is reasoning from an earlier turn carrying nothing
 /// else (dropping it loses nothing).
 pub(crate) fn replayed_reasoning(part: &Part) -> bool {
     // A signature can arrive on a part of its own with the marker unset.
@@ -84,8 +84,8 @@ pub(crate) fn replayed_reasoning(part: &Part) -> bool {
         && unsupported_payload(part, &[]).is_none()
 }
 
-/// Go `UnsupportedPayload`: the Go name of the first field on `part` the calling API has no
-/// way to send (`None` for Go's `""`), fields in `emitted` excepted. Text, `Thought`,
+/// The name of the first field on `part` the calling API has no
+/// way to send (`None` for none), fields in `emitted` excepted. Text, `Thought`,
 /// `ThoughtSignature`, `FunctionCall`, `FunctionResponse`, `PartMetadata` and (unless the part
 /// carries media an API emits) `VideoMetadata` and `MediaResolution` never count. Exhaustive
 /// over `Part`, so a field genai adds is reported by default.
@@ -146,7 +146,7 @@ pub(crate) fn unsupported_payload(part: &Part, emitted: &[PartField]) -> Option<
     .find_map(|(name, set)| set.then_some(name))
 }
 
-/// Go `CodeExecutionText`: Gemini code-execution parts rendered as the fenced text
+/// Gemini code-execution parts rendered as the fenced text
 /// adk-python's Responses converter sends, so an OpenAI model sharing the session can read
 /// the code and its output. The fence language is always python, whatever
 /// `ExecutableCode.language` says.
