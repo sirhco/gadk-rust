@@ -1,3 +1,0 @@
-# Allowlisted ADK compatibility notes in crates/gadk-launcher (at most 3).
-# One entry per line: path<TAB>substring<TAB>reason.
-crates/gadk-launcher/src/web/webui/assets.rs	ADK-Go `cmd/launcher/web/webui/distr`	Provenance line of the vendored ADK web UI bundle, emitted by scripts/sync-webui (which --check compares against); fix both together.
