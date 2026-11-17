@@ -19,10 +19,6 @@
 //! typically one per prompt-registry `Selector` — and grades each run with deterministic checks,
 //! tool-trajectory checks and an LLM judge, returning an [`EvalReport`].
 
-// Task 1 scaffolding: the modules filled in by later tasks are wired into the public API by the
-// evaluator task, which removes this allow.
-#![allow(dead_code)]
-
 mod error;
 mod evaluator;
 mod report;
@@ -34,5 +30,8 @@ mod spec;
 mod variant;
 
 pub use error::EvalError;
+pub use evaluator::Evaluator;
+pub use report::{CaseRun, EvalReport, VariantReport};
 pub use result::{Outcome, RunTranscript, ScoreResult, ToolCall, TurnRecord};
 pub use spec::{EvalCase, EvalSet, ScorerSpec, ToolExpect};
+pub use variant::Variant;

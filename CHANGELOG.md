@@ -24,6 +24,13 @@ the public API.
   [its README](crates/gadk-console/README.md).
 - `gadk-prompts-cli` exports `open_store`, which opens a store from a `file://` or
   `firestore://` URL as `--store` does.
+- `gadk-eval` (façade feature `eval`), offline agent evaluation. An eval set (YAML) holds
+  multi-turn cases with `contains`, `not_contains`, `regex`, `equals`, `tools` (trajectory),
+  `reference` and `llm_judge` scorers; `Evaluator::run` runs it against an agent built once per
+  `Variant` (for example one per prompt `Selector`) with bounded concurrency, repeats and a
+  per-run timeout, and returns an `EvalReport` with a text summary, JSON output and
+  `all_passed()`. Run, build and judge errors are reported apart from failures. See
+  [its README](crates/gadk-eval/README.md).
 
 ### Changed
 
