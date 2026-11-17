@@ -16,6 +16,7 @@
 
 use std::fmt::Write as _;
 use std::sync::Arc;
+use std::time::Duration;
 
 use futures::StreamExt as _;
 use gadk_genai::{Content, GenerateContentConfig, ROLE_USER};
@@ -30,9 +31,10 @@ const RAW_REPLY_MAX: usize = 1024;
 const REPLY_FORMAT: &str = "Reply with only a JSON object, no other text:\n\
 {\"pass\": true or false, \"score\": an integer from 1 (worst) to 5 (best), \"rationale\": \"one or two sentences\"}";
 
-/// A judge model, called at temperature 0 for a JSON verdict.
+/// A judge model, called at temperature 0 for a JSON verdict; each call is bounded by `timeout`.
 pub(crate) struct Judge {
     model: Arc<dyn Llm>,
+    timeout: Duration,
 }
 
 /// A parsed judge verdict.
@@ -44,8 +46,8 @@ pub(crate) struct Verdict {
 }
 
 impl Judge {
-    pub(crate) fn new(model: Arc<dyn Llm>) -> Self {
-        Judge { model }
+    pub(crate) fn new(model: Arc<dyn Llm>, timeout: Duration) -> Self {
+        Judge { model, timeout }
     }
 
     /// `llm_judge`: grades the whole conversation against `rubric`.
@@ -82,13 +84,20 @@ impl Judge {
         self.ask("reference", &prompt, min_score).await
     }
 
-    /// Asks the judge, retrying once on an unparseable reply; a model error is not retried.
+    /// Asks the judge, retrying once on an unparseable reply; a model error or a call that takes
+    /// longer than `timeout` is not retried.
     async fn ask(&self, kind: &str, prompt: &str, min_score: u8) -> ScoreResult {
         let mut last = String::new();
         for _ in 0..2 {
-            match self.call(prompt).await {
-                Err(e) => return ScoreResult::error(kind, format!("judge model error: {e}")),
-                Ok(text) => match parse_verdict(&text) {
+            match tokio::time::timeout(self.timeout, self.call(prompt)).await {
+                Err(_) => {
+                    return ScoreResult::error(
+                        kind,
+                        format!("judge timed out after {:?}", self.timeout),
+                    );
+                }
+                Ok(Err(e)) => return ScoreResult::error(kind, format!("judge model error: {e}")),
+                Ok(Ok(text)) => match parse_verdict(&text) {
                     Some(v) => {
                         return ScoreResult::judged(
                             kind,
@@ -170,9 +179,18 @@ pub(crate) fn parse_verdict(text: &str) -> Option<Verdict> {
 
 fn verdict(v: &Value) -> Option<Verdict> {
     let pass = v.get("pass")?.as_bool()?;
-    let score = u8::try_from(v.get("score")?.as_u64()?)
-        .ok()
-        .filter(|s| (1..=5).contains(s))?;
+    let score = v.get("score")?;
+    // An integer, or a float with no fractional part (some models reply `4.0`).
+    let score = match score.as_u64() {
+        Some(n) => u8::try_from(n).ok()?,
+        None => {
+            let f = score
+                .as_f64()
+                .filter(|f| f.fract() == 0.0 && (1.0..=5.0).contains(f))?;
+            f as u8
+        }
+    };
+    let score = (1..=5).contains(&score).then_some(score)?;
     let rationale = match v.get("rationale") {
         None | Some(Value::Null) => String::new(),
         Some(r) => r.as_str()?.to_owned(),
@@ -191,6 +209,8 @@ mod tests {
     use gadk_engine::testutil::MockModel;
     use gadk_genai::ROLE_MODEL;
     use gadk_model::LlmResponse;
+
+    const T: Duration = Duration::from_secs(120);
 
     fn reply(text: &str) -> Content {
         Content::from_text(text, ROLE_MODEL)
@@ -252,13 +272,25 @@ mod tests {
         );
     }
 
+    #[test]
+    fn accepts_a_whole_float_score() {
+        assert_eq!(
+            parse_verdict(r#"{"pass": true, "score": 4.0, "rationale": "ok"}"#).map(|v| v.score),
+            Some(4)
+        );
+        assert_eq!(parse_verdict(r#"{"pass": true, "score": 4.5}"#), None);
+        assert_eq!(parse_verdict(r#"{"pass": true, "score": 6.0}"#), None);
+        assert_eq!(parse_verdict(r#"{"pass": true, "score": 0.0}"#), None);
+        assert_eq!(parse_verdict(r#"{"pass": true, "score": -1.0}"#), None);
+    }
+
     #[tokio::test]
     async fn rubric_request_and_min_score_boundary() {
         let model = MockModel::from_contents(vec![
             reply(r#"{"pass": true, "score": 4, "rationale": "good"}"#),
             reply(r#"{"pass": true, "score": 3, "rationale": "meh"}"#),
         ]);
-        let judge = Judge::new(model.clone());
+        let judge = Judge::new(model.clone(), T);
         let r = judge.rubric(&transcript(), "Offers store credit", 4).await;
         assert_eq!(
             (r.kind.as_str(), r.outcome, r.score),
@@ -286,7 +318,7 @@ mod tests {
         let model = MockModel::from_contents(vec![reply(
             r#"{"pass": false, "score": 5, "rationale": "x"}"#,
         )]);
-        let r = Judge::new(model).rubric(&transcript(), "r", 3).await;
+        let r = Judge::new(model, T).rubric(&transcript(), "r", 3).await;
         assert_eq!(r.outcome, Outcome::Fail);
     }
 
@@ -295,7 +327,7 @@ mod tests {
         let model = MockModel::from_contents(vec![reply(
             r#"{"pass": true, "score": 5, "rationale": "same"}"#,
         )]);
-        let r = Judge::new(model.clone())
+        let r = Judge::new(model.clone(), T)
             .reference(&transcript(), Some(2), "Refunds only within 30 days.", 3)
             .await;
         assert_eq!((r.kind.as_str(), r.outcome), ("reference", Outcome::Pass));
@@ -317,7 +349,7 @@ mod tests {
             reply("I think it passes."),
             reply(r#"{"pass": true, "score": 4, "rationale": "ok"}"#),
         ]);
-        let r = Judge::new(model.clone())
+        let r = Judge::new(model.clone(), T)
             .rubric(&transcript(), "r", 3)
             .await;
         assert_eq!(r.outcome, Outcome::Pass);
@@ -328,7 +360,7 @@ mod tests {
     async fn unparseable_twice_is_an_error_with_a_bounded_excerpt() {
         let garbage = "x".repeat(5000);
         let model = MockModel::from_contents(vec![reply("nope"), reply(&garbage)]);
-        let r = Judge::new(model).rubric(&transcript(), "r", 3).await;
+        let r = Judge::new(model, T).rubric(&transcript(), "r", 3).await;
         assert_eq!((r.outcome, r.score), (Outcome::Error, None));
         assert!(
             r.rationale.starts_with("unparseable judge reply: xxx"),
@@ -350,7 +382,7 @@ mod tests {
                 ..Default::default()
             }),
         ]);
-        let r = Judge::new(model.clone())
+        let r = Judge::new(model.clone(), T)
             .rubric(&transcript(), "r", 3)
             .await;
         assert_eq!(r.outcome, Outcome::Error);

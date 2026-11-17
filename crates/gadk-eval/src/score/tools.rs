@@ -43,9 +43,30 @@ fn wanted(want: &[ToolExpect]) -> String {
     format!("[{}]", n.join(", "))
 }
 
+/// Tries to assign expectation `w` a call, re-assigning earlier expectations along an augmenting
+/// path when needed. `owner[i]` is the expectation call `i` is assigned to.
+fn augment(
+    w: usize,
+    want: &[&ToolExpect],
+    calls: &[&ToolCall],
+    seen: &mut [bool],
+    owner: &mut [Option<usize>],
+) -> bool {
+    for i in 0..calls.len() {
+        if !seen[i] && matches(calls[i], want[w]) {
+            seen[i] = true;
+            if owner[i].is_none_or(|o| augment(o, want, calls, seen, owner)) {
+                owner[i] = Some(w);
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Grades `calls` (every call of every turn, in order) against `want`.
 ///
-/// - `exact`: the calls are exactly `want`, in order.
+/// - `exact`: the calls are exactly `want`, in order (`ordered` is then ignored).
 /// - `ordered`: `want` occurs in `calls` as a subsequence (other calls may sit between).
 /// - otherwise: every `want` entry is matched by a distinct call, in any order.
 pub(crate) fn tools(
@@ -88,20 +109,20 @@ pub(crate) fn tools(
             ),
         };
     }
-    // Unordered: match the most specific expectations (with args) first, each to a distinct call.
+    // Unordered: a maximum bipartite matching of expectations to distinct calls (Kuhn's
+    // augmenting paths; the sets are tiny). Specific expectations (with args) go first so the
+    // one reported missing is the least specific.
     let mut order: Vec<&ToolExpect> = want.iter().collect();
     order.sort_by_key(|w| w.args.is_none());
-    let mut used = vec![false; calls.len()];
-    for w in order {
-        match (0..calls.len()).find(|&i| !used[i] && matches(calls[i], w)) {
-            Some(i) => used[i] = true,
-            None => {
-                return ScoreResult::check(
-                    "tools",
-                    false,
-                    format!("missing call {}; called {got}", describe(w)),
-                );
-            }
+    let mut owner: Vec<Option<usize>> = vec![None; calls.len()];
+    for w in 0..order.len() {
+        let mut seen = vec![false; calls.len()];
+        if !augment(w, &order, calls, &mut seen, &mut owner) {
+            return ScoreResult::check(
+                "tools",
+                false,
+                format!("missing call {}; called {got}", describe(order[w])),
+            );
         }
     }
     ScoreResult::check(
@@ -160,6 +181,22 @@ mod tests {
         let calls = [call("a", json!({"k": 1})), call("a", json!({"k": 2}))];
         let w = [want("a", None), want("a", Some(json!({"k": 1})))];
         assert_eq!(run(&calls, &w, false, false).outcome, Outcome::Pass);
+    }
+
+    #[test]
+    fn unordered_finds_an_assignment_when_greedy_would_not() {
+        let calls = [
+            call("a", json!({"k": 1, "j": 2})),
+            call("a", json!({"k": 1})),
+        ];
+        let w = [
+            want("a", Some(json!({"k": 1}))),
+            want("a", Some(json!({"k": 1, "j": 2}))),
+        ];
+        let r = run(&calls, &w, false, false);
+        assert_eq!(r.outcome, Outcome::Pass, "{}", r.rationale);
+        let r = run(&calls[..1], &w, false, false);
+        assert_eq!(r.outcome, Outcome::Fail, "{}", r.rationale);
     }
 
     #[test]

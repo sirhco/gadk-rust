@@ -11,9 +11,9 @@ and compare.
 ## Example
 
 ```rust
-use std::sync::Arc;
+// Inside an async fn returning Result; `judge`, `registry` and `build_agent` are yours.
 use gadk_eval::{EvalSet, Evaluator, Variant};
-use gadk_prompts::{Label, PromptRegistry, Selector};
+use gadk_prompts::{Label, Selector};
 
 let set = EvalSet::load("evals/support.yaml")?;
 let report = Evaluator::new(judge)            // any gadk model: Gemini, Claude, OpenAI, …
@@ -84,9 +84,11 @@ A result is `pass`, `fail` or `error`. Errors are counted apart from failures:
 
 - a run whose `build` failed, whose agent returned an error (or an error event), or that took
   longer than `run_timeout` (default 120 s): every scorer of that run is an error;
-- a judge model error (not retried), or a judge reply still unparseable after the retry.
+- a judge model error or a judge call longer than `run_timeout` (neither retried), or a judge
+  reply still unparseable after the retry.
 
-`EvalReport::all_passed()` is true only with no failures and no errors.
+`EvalReport::all_passed()` is true only with at least one score, no failures and no errors
+(including a run or build error in a case with no scorers).
 
 ## Report
 

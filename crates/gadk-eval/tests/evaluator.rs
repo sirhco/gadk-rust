@@ -270,6 +270,35 @@ async fn a_timed_out_run_errors_every_scorer() {
     assert_eq!(judge.requests().len(), 0, "a failed run is not judged");
 }
 
+#[tokio::test(start_paused = true)]
+async fn a_hung_judge_is_an_error_after_the_run_timeout() {
+    let set = EvalSet::from_yaml(
+        "name: s\ncases:\n  - id: a\n    turns: [hi]\n    expect: [contains: ok, llm_judge: be nice]\n",
+    )
+    .unwrap();
+    let report = Evaluator::new(Arc::new(Hang))
+        .run_timeout(Duration::from_millis(50))
+        .run(&set, &[Variant::new("v")], |_| {
+            Ok::<_, String>(agent(always("ok", 1)))
+        })
+        .await
+        .unwrap();
+    let run = &report.variants[0].runs[0];
+    assert_eq!(run.transcript.error, None);
+    let got: Vec<_> = run
+        .scores
+        .iter()
+        .map(|s| (s.kind.as_str(), s.outcome, s.rationale.as_str()))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            ("contains", Outcome::Pass, "reply contains \"ok\""),
+            ("llm_judge", Outcome::Error, "judge timed out after 50ms"),
+        ]
+    );
+}
+
 /// A model that answers after a delay and records the most calls in flight at once.
 #[derive(Default)]
 struct Slow {

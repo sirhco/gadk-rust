@@ -57,7 +57,7 @@ impl Variant {
     }
 }
 
-/// At least one variant; names non-empty (after trimming) and unique.
+/// At least one variant; names non-empty and unique (both after trimming).
 pub(crate) fn check_variants(variants: &[Variant]) -> Result<(), EvalError> {
     if variants.is_empty() {
         return Err(EvalError::Variant(
@@ -69,7 +69,7 @@ pub(crate) fn check_variants(variants: &[Variant]) -> Result<(), EvalError> {
         if v.name.trim().is_empty() {
             return Err(EvalError::Variant("variant names must be non-empty".into()));
         }
-        if !seen.insert(v.name.as_str()) {
+        if !seen.insert(v.name.trim()) {
             return Err(EvalError::Variant(format!(
                 "duplicate variant name {:?}",
                 v.name
@@ -107,6 +107,10 @@ mod tests {
             (
                 vec![Variant::new("a"), Variant::new("a")],
                 "duplicate variant name \"a\"",
+            ),
+            (
+                vec![Variant::new("a"), Variant::new(" a ")],
+                "duplicate variant name \" a \"",
             ),
         ] {
             let e = check_variants(&vs).unwrap_err().to_string();

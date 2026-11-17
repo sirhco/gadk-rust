@@ -28,8 +28,9 @@ the public API.
   multi-turn cases with `contains`, `not_contains`, `regex`, `equals`, `tools` (trajectory),
   `reference` and `llm_judge` scorers; `Evaluator::run` runs it against an agent built once per
   `Variant` (for example one per prompt `Selector`) with bounded concurrency, repeats and a
-  per-run timeout, and returns an `EvalReport` with a text summary, JSON output and
-  `all_passed()`. Run, build and judge errors are reported apart from failures. See
+  timeout per run and per judge call, and returns an `EvalReport` with a text summary, JSON
+  output and `all_passed()` (false on any failure or error, or with no scores). Run, build and
+  judge errors are reported apart from failures. See
   [its README](crates/gadk-eval/README.md).
 
 ### Changed

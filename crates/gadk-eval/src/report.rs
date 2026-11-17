@@ -97,9 +97,15 @@ impl Tally {
 }
 
 impl EvalReport {
-    /// True when no score failed or errored.
+    /// True when there is at least one score, no score failed or errored, and no run recorded an
+    /// error (a run or build error counts even when its case has no scorers).
     pub fn all_passed(&self) -> bool {
-        self.scores().all(|s| s.outcome == Outcome::Pass)
+        self.variants
+            .iter()
+            .flat_map(|v| v.runs.iter())
+            .all(|r| r.transcript.error.is_none())
+            && self.scores().next().is_some()
+            && self.scores().all(|s| s.outcome == Outcome::Pass)
     }
 
     fn scores(&self) -> impl Iterator<Item = &ScoreResult> {
@@ -261,6 +267,37 @@ v7       overall    1/1 (100%)  -           1
         r.variants[0].runs[0].scores[1] = ScoreResult::error("regex", "boom");
         assert!(!r.all_passed());
         assert!(!report().all_passed());
+    }
+
+    #[test]
+    fn all_passed_is_false_with_a_run_error_and_no_scores() {
+        let mut r = EvalReport {
+            set: "s".into(),
+            variants: vec![VariantReport {
+                name: "v".into(),
+                runs: vec![
+                    run("a", 1, vec![ScoreResult::check("contains", true, "")]),
+                    run("b", 1, vec![]),
+                ],
+            }],
+        };
+        assert!(r.all_passed());
+        r.variants[0].runs[1].transcript.error = Some("building variant v: boom".into());
+        assert!(!r.all_passed(), "a run error with no scorers is not a pass");
+    }
+
+    #[test]
+    fn all_passed_is_false_without_any_score() {
+        let mut r = EvalReport {
+            set: "s".into(),
+            variants: vec![],
+        };
+        assert!(!r.all_passed(), "an empty report");
+        r.variants.push(VariantReport {
+            name: "v".into(),
+            runs: vec![run("a", 1, vec![])],
+        });
+        assert!(!r.all_passed(), "runs without scores");
     }
 
     #[test]

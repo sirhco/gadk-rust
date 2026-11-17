@@ -86,9 +86,10 @@ impl Evaluator {
         self
     }
 
-    /// Bounds each run (all of a case's turns); a run that takes longer is an error.
+    /// Bounds each run (all of a case's turns) and each judge call; a run or judge call that takes
+    /// longer is an error (values below 1 ms mean 1 ms).
     pub fn run_timeout(mut self, d: Duration) -> Self {
-        self.run_timeout = d;
+        self.run_timeout = d.max(Duration::from_millis(1));
         self
     }
 
@@ -113,7 +114,7 @@ impl Evaluator {
             .iter()
             .map(|v| build(v).map_err(|e| format!("building variant {}: {e}", v.name())))
             .collect();
-        let judge = Judge::new(self.judge.clone());
+        let judge = Judge::new(self.judge.clone(), self.run_timeout);
         let mut jobs = Vec::new();
         for vi in 0..variants.len() {
             for ci in 0..set.cases.len() {
@@ -203,4 +204,24 @@ async fn score_run(judge: &Judge, case: &EvalCase, t: &RunTranscript) -> Vec<Sco
         });
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gadk_engine::testutil::MockModel;
+
+    #[test]
+    fn run_timeout_is_at_least_one_millisecond() {
+        let e = Evaluator::new(MockModel::from_contents(vec![]));
+        assert_eq!(
+            e.run_timeout(Duration::ZERO).run_timeout,
+            Duration::from_millis(1)
+        );
+        let e = Evaluator::new(MockModel::from_contents(vec![]));
+        assert_eq!(
+            e.run_timeout(Duration::from_secs(5)).run_timeout,
+            Duration::from_secs(5)
+        );
+    }
 }
