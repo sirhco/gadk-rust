@@ -13,10 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go plugin/functioncallmodifier: a plugin that adds configured arguments to selected
-//! tools' declarations before each model call. After the call it moves those arguments out of
-//! the model's function calls into session state under `<function_call_id>/<arg>`, so the tools
-//! never see them.
+//! A plugin that adds configured arguments to selected tools' declarations before each model
+//! call. After the call it moves those arguments out of the model's function calls into session
+//! state under `<function_call_id>/<arg>`, so the tools never see them.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -36,21 +35,21 @@ const NAME: &str = "FunctionCallModifierPlugin";
 type RequestResult = BoxFuture<'static, (LlmRequest, Result<Option<LlmResponse>, AgentError>)>;
 type ResponseResult = BoxFuture<'static, (LlmResponse, Result<Option<LlmResponse>, AgentError>)>;
 
-/// Go `functioncallmodifier.FunctionCallModifierConfig`.
+/// The configuration of the function-call-modifier plugin.
 #[derive(Clone)]
 pub struct FunctionCallModifierConfig {
-    /// Go `Predicate`: whether the named tool gets the extra arguments.
+    /// Whether the named tool gets the extra arguments.
     pub predicate: Arc<dyn Fn(&str) -> bool + Send + Sync>,
-    /// Go `Args`: the extra arguments by name. They are added to each selected declaration's
-    /// typed `parameters` and moved from its function calls into session state.
+    /// The extra arguments by name. They are added to each selected declaration's typed
+    /// `parameters` and moved from its function calls into session state.
     pub args: BTreeMap<String, Schema>,
-    /// Go `OverrideDescription`: maps a selected declaration's description to its new one.
-    #[allow(clippy::type_complexity)] // the exact Appendix C8 field type
+    /// Maps a selected declaration's description to its new one.
+    #[allow(clippy::type_complexity)] // an optional shared closure: spelled out in place
     pub override_description: Option<Arc<dyn Fn(&str) -> String + Send + Sync>>,
 }
 
-/// Port of Go `functioncallmodifier.NewPlugin` (which never fails): a plugin named
-/// `FunctionCallModifierPlugin` with a before-model and an after-model callback.
+/// Builds the plugin (construction never fails): a plugin named `FunctionCallModifierPlugin`
+/// with a before-model and an after-model callback.
 pub fn new_function_call_modifier_plugin(cfg: FunctionCallModifierConfig) -> Plugin {
     let cfg = Arc::new(cfg);
     let before_model: BeforeModelCallback = {
@@ -73,10 +72,9 @@ pub fn new_function_call_modifier_plugin(cfg: FunctionCallModifierConfig) -> Plu
     })
 }
 
-/// Port of plugin.go `beforeModelCallback`. Each declaration that is packed in `req.tools` and
-/// passes the predicate gets typed `OBJECT` parameters if it has none, gets `cfg.args` copied
-/// into its properties (overwriting, never touching `required`), and has its description
-/// overridden.
+/// The before-model callback. Each declaration that is packed in `req.tools` and passes the
+/// predicate gets typed `OBJECT` parameters if it has none, gets `cfg.args` copied into its
+/// properties (overwriting, never touching `required`), and has its description overridden.
 fn add_args(cfg: &FunctionCallModifierConfig, req: &mut LlmRequest) {
     let LlmRequest { config, tools, .. } = req;
     let Some(config) = config.as_mut() else {
@@ -101,7 +99,8 @@ fn add_args(cfg: &FunctionCallModifierConfig, req: &mut LlmRequest) {
     }
 }
 
-/// Port of plugin.go `afterModelCallback`.
+/// The after-model callback: moves the configured arguments out of the response's function calls
+/// into session state.
 fn strip_args(
     cfg: &FunctionCallModifierConfig,
     ctx: &Context,
@@ -109,16 +108,16 @@ fn strip_args(
     err: Option<Arc<ModelError>>,
 ) -> (LlmResponse, Result<Option<LlmResponse>, AgentError>) {
     if let Some(err) = err {
-        // Go: return nil, llmResponseError (pass through). The flow never reaches this: it
-        // passes `None` here and routes model errors to the on-model-error callbacks. A caller
+        // A model error passes through. The flow never reaches this: it passes `None` here and
+        // routes model errors to the on-model-error callbacks. A caller
         // going through the PluginManager keeps its own clone of the `Arc`, so the error is
         // shared and surfaces as `AgentError::Other` (same text); only the `Arc`'s sole owner
         // gets `AgentError::Model` back.
         return (resp, Err(model_error_into_agent(err)));
     }
     if resp.content.as_ref().is_none_or(|c| c.parts.is_empty()) {
-        // Go 128135a8: return nil, nil, leaving a content-less response to the rest of the
-        // after-model chain (the agent's own callbacks included).
+        // Leave a content-less response to the rest of the after-model chain (the agent's own
+        // callbacks included).
         return (resp, Ok(None));
     }
 
@@ -145,9 +144,9 @@ fn strip_args(
         }
     }
     match failure {
-        // Go: return nil, fmt.Errorf("failed to set state: %w", err).
+        // A state write failed: `failed to set state: <err>`.
         Some(e) => (resp, Err(e)),
-        // Go: return nil, nil after editing *llmResponse in place.
+        // The response was edited in place; no replacement is returned.
         None => (resp, Ok(None)),
     }
 }

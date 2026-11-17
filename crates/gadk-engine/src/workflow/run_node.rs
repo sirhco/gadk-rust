@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go workflow/run_node.go.
+//! `run_node`: scheduling a child node from a dynamic node's body.
 
 use std::sync::Arc;
 
@@ -24,29 +24,28 @@ use crate::error::WorkflowErrorKind;
 use crate::workflow::Node;
 use crate::workflow::scheduler::wf_error;
 
-/// Port of Go runNodeOptions and its RunNodeOption functional options.
+/// The options of [`run_node`].
 #[derive(Clone, Default)]
 pub struct RunNodeOptions {
-    /// Go WithRunID: a stable run id instead of the per-child auto-counter; a repeated id
+    /// A stable run id instead of the per-child auto-counter; a repeated id
     /// replays the cached output, and concurrent callers share one run.
     pub run_id: Option<String>,
-    /// Go WithUseSubBranch: runs the child on `<branch>.<name>@<run_id>`.
+    /// Runs the child on `<branch>.<name>@<run_id>`.
     pub use_sub_branch: bool,
-    /// Go WithUseAsOutput: the child's output becomes the parent's output.
+    /// The child's output becomes the parent's output.
     pub use_as_output: bool,
-    /// Go WithOverrideBranch: replaces the base branch (empty = no override).
+    /// Replaces the base branch (empty = no override).
     pub override_branch: Option<String>,
-    /// Go WithIsolationScope: the child's isolation scope (empty = none).
+    /// The child's isolation scope (empty = none).
     pub isolation_scope: Option<String>,
-    /// Go WithIsolationScopeFromNodePath: the child's isolation scope is its node path.
+    /// The child's isolation scope is its node path.
     pub isolation_scope_from_node_path: bool,
-    /// Go WithRaiseOnWait: an unresolved long-running call pauses the parent.
+    /// An unresolved long-running call pauses the parent.
     pub raise_on_wait: bool,
 }
 
-/// Port of Go workflow.RunNode (with `OUT = any`): schedules `child` under the dynamic node
-/// whose context `ctx` is, and returns its output (`Value::Null` for none). Callers convert the
-/// value to their type (Go's `OUT` assertion).
+/// Schedules `child` under the dynamic node whose context `ctx` is, and returns its output
+/// (`Value::Null` for none). Callers convert the value to their type.
 pub async fn run_node(
     ctx: &Context,
     child: Arc<dyn Node>,

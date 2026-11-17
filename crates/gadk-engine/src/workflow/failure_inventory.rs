@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go workflow/failure_inventory.go. Recovery evidence travels beside the business
-//! error. Go carries the recorder in a context value; contexts here have no value bag, so the
+//! Recovery evidence travels beside the business error. Contexts here have no value bag, so the
 //! recorder is a tokio task-local scoped around the future that polls a node's stream.
 
 use std::future::Future;
@@ -29,7 +28,7 @@ use crate::workflow::nodes::WorkflowNode;
 use crate::workflow::persistence::WORKFLOW_FAILED_CHILD_PATHS_KEY;
 use crate::workflow::scheduler::node_key;
 
-/// Port of Go failureInventory: which child paths a failed activation could not vouch for.
+/// Which child paths a failed activation could not vouch for.
 /// `known == false` means the inventory is unknown (no producer published one).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct FailureInventory {
@@ -37,8 +36,8 @@ pub(crate) struct FailureInventory {
     pub(crate) paths: Vec<String>,
 }
 
-/// Port of Go failureInventoryRecorder. Only the activation's actual producer may publish;
-/// a second publication makes the inventory ambiguous (reset to unknown), not last-wins.
+/// Collects the failure inventory of one activation. Only the activation's actual producer may
+/// publish; a second publication makes the inventory ambiguous (reset to unknown), not last-wins.
 pub(crate) struct FailureInventoryRecorder {
     producer: usize,
     state: Mutex<RecorderState>,
@@ -51,7 +50,7 @@ struct RecorderState {
 }
 
 impl FailureInventoryRecorder {
-    /// Port of Go (*failureInventoryRecorder).snapshot (returns a deep copy).
+    /// A copy of the inventory published so far.
     pub(crate) fn snapshot(&self) -> FailureInventory {
         self.state.lock().inventory.clone()
     }
@@ -66,8 +65,8 @@ pub(crate) fn graph_key(g: &Arc<Graph>) -> usize {
     Arc::as_ptr(g) as usize
 }
 
-/// Port of the producer choice in Go withFailureInventory: a WorkflowNode's producer is
-/// its sub-workflow's graph; any other node is itself.
+/// The producer of a node's inventory: a WorkflowNode's producer is its sub-workflow's graph; any
+/// other node is itself.
 pub(crate) fn node_producer_key(node: &Arc<dyn Node>) -> usize {
     match node.as_any().downcast_ref::<WorkflowNode>() {
         Some(w) => graph_key(&w.sub_workflow.graph),
@@ -75,7 +74,7 @@ pub(crate) fn node_producer_key(node: &Arc<dyn Node>) -> usize {
     }
 }
 
-/// Port of Go withFailureInventory (the recorder half; [`scope`] is the context half).
+/// A recorder for the activation of `node` (see [`scope`] for making it current).
 pub(crate) fn with_failure_inventory(node: &Arc<dyn Node>) -> Arc<FailureInventoryRecorder> {
     Arc::new(FailureInventoryRecorder {
         producer: node_producer_key(node),
@@ -83,12 +82,13 @@ pub(crate) fn with_failure_inventory(node: &Arc<dyn Node>) -> Arc<FailureInvento
     })
 }
 
-/// Runs `f` with `recorder` as the current activation's recorder (Go: the derived context).
+/// Runs `f` with `recorder` as the current activation's recorder.
 pub(crate) async fn scope<F: Future>(recorder: Arc<FailureInventoryRecorder>, f: F) -> F::Output {
     FAILURE_INVENTORY.scope(recorder, f).await
 }
 
-/// Port of Go publishFailureInventory: a no-op outside a scope or for another producer.
+/// Publishes an inventory to the current recorder: a no-op outside a scope or for another
+/// producer.
 pub(crate) fn publish_failure_inventory(producer: usize, inventory: &FailureInventory) {
     let _ = FAILURE_INVENTORY.try_with(|r| {
         if r.producer != producer {
@@ -104,8 +104,8 @@ pub(crate) fn publish_failure_inventory(producer: usize, inventory: &FailureInve
     });
 }
 
-/// Port of Go recordFailedChildPaths (dynamic_scheduler.go): a known inventory is written as
-/// a de-duplicated array (an empty array is meaningful); an unknown one writes nothing.
+/// Writes the failed child paths into the metadata: a known inventory is written as a
+/// de-duplicated array (an empty array is meaningful); an unknown one writes nothing.
 pub(crate) fn record_failed_child_paths(
     metadata: &mut Map<String, Value>,
     inventory: &FailureInventory,

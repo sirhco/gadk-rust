@@ -13,10 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Branch derivation helpers (port of Go workflow/branch.go).
+//! Branch derivation helpers.
 
-/// Port of Go deriveSubBranch (branch.go:37): appends `segment` to `parent` with a `'.'`. An empty
-/// parent yields the bare segment; an empty segment returns `parent` unchanged.
+/// Appends `segment` to `parent` with a `'.'`. An empty parent yields the bare segment; an empty
+/// segment returns `parent` unchanged.
 pub(crate) fn derive_sub_branch(parent: &str, segment: &str) -> String {
     if segment.is_empty() {
         return parent.to_owned();
@@ -27,9 +27,8 @@ pub(crate) fn derive_sub_branch(parent: &str, segment: &str) -> String {
     format!("{parent}.{segment}")
 }
 
-/// Port of Go deriveChildBranch (branch.go:59): the branch for a dynamically-scheduled child.
-/// base = `override_branch` if non-empty, else `parent`; `use_sub_branch` → `base.<name>@<run_id>`,
-/// otherwise base unchanged.
+/// The branch for a dynamically-scheduled child. base = `override_branch` if non-empty, else
+/// `parent`; `use_sub_branch` → `base.<name>@<run_id>`, otherwise base unchanged.
 pub(crate) fn derive_child_branch(
     parent: &str,
     name: &str,
@@ -48,9 +47,8 @@ pub(crate) fn derive_child_branch(
     base.to_owned()
 }
 
-/// Port of Go commonBranchPrefix (branch.go:83): the longest dot-delimited prefix shared by all
-/// input branches. Empty input or any empty branch → `""`. Segment-aware: `"a"` and `"ab"` share
-/// no prefix.
+/// The longest dot-delimited prefix shared by all input branches. Empty input or any empty
+/// branch → `""`. Segment-aware: `"a"` and `"ab"` share no prefix.
 pub(crate) fn common_branch_prefix(branches: &[String]) -> String {
     if branches.is_empty() {
         return String::new();

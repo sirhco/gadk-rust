@@ -13,11 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Workflow graph validation (port of Go workflow/validation.go).
+//! Workflow graph validation.
 //!
-//! Node identity everywhere is [`same_node`]/[`NodeId`] (Go `==` on Node interface values). Where
-//! Go iterates a map (random order), Rust iterates in first-appearance order so errors are
-//! deterministic.
+//! Node identity everywhere is [`same_node`]/[`NodeId`] (pointer identity). Iteration is in
+//! first-appearance order so errors are deterministic.
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -36,7 +35,7 @@ use crate::workflow::route::{
 };
 use crate::workflow::{AgentNode, Edge, JoinNode, Node, RouteSummary, START, WorkflowNode};
 
-/// Go `fmt.Errorf("%w: <detail>", sentinel)`.
+/// An error of `kind` whose message is `<kind's sentinel text>: <detail>`.
 fn sentinel(kind: WorkflowErrorKind, detail: impl fmt::Display) -> WorkflowError {
     WorkflowError::new(
         kind,
@@ -48,7 +47,7 @@ fn is_start(n: &dyn Node) -> bool {
     same_node(n, START.as_ref())
 }
 
-/// Port of Go validateNodes (validation.go:73): the edge-set checks.
+/// The edge-set checks.
 pub(crate) fn validate_nodes(edges: &[Edge]) -> Result<(), WorkflowError> {
     validate_unique_names(edges)?;
     validate_start_node_present(edges)?;
@@ -58,8 +57,7 @@ pub(crate) fn validate_nodes(edges: &[Edge]) -> Result<(), WorkflowError> {
     Ok(())
 }
 
-/// Port of Go validateSubWorkflowNames (validation.go:93): no sub-workflow has the parent
-/// workflow's name.
+/// No sub-workflow has the parent workflow's name.
 pub(crate) fn validate_sub_workflow_names(
     workflow_name: &str,
     edges: &[Edge],
@@ -71,7 +69,7 @@ pub(crate) fn validate_sub_workflow_names(
     Ok(())
 }
 
-/// Port of Go checkSubWorkflowName (validation.go:106).
+/// Checks one node (and, recursively, its nested workflows) against the parent workflow's name.
 pub(crate) fn check_sub_workflow_name(
     node: &dyn Node,
     workflow_name: &str,
@@ -87,8 +85,7 @@ pub(crate) fn check_sub_workflow_name(
     Ok(())
 }
 
-/// Port of Go validateUniqueNames (validation.go:118): distinct nodes have distinct names; the
-/// same node appearing twice is fine.
+/// Distinct nodes have distinct names; the same node appearing twice is fine.
 pub(crate) fn validate_unique_names(edges: &[Edge]) -> Result<(), WorkflowError> {
     let mut names: HashMap<&str, &dyn Node> = HashMap::new();
     for e in edges {
@@ -107,8 +104,8 @@ pub(crate) fn validate_unique_names(edges: &[Edge]) -> Result<(), WorkflowError>
     Ok(())
 }
 
-/// Port of Go validateStartNodePresent (validation.go:140): at least one edge starts at START.
-/// An empty edge set is valid (Go 6522e5b4): the workflow runs and produces no output.
+/// At least one edge starts at START. An empty edge set is valid: the workflow runs and produces
+/// no output.
 pub(crate) fn validate_start_node_present(edges: &[Edge]) -> Result<(), WorkflowError> {
     if edges.is_empty() || edges.iter().any(|e| is_start(e.from.as_ref())) {
         return Ok(());
@@ -116,7 +113,7 @@ pub(crate) fn validate_start_node_present(edges: &[Edge]) -> Result<(), Workflow
     Err(WorkflowError::sentinel(WorkflowErrorKind::NoStartNode))
 }
 
-/// Port of Go validateStartNodeNoIncoming (validation.go:150): no node points to START.
+/// No node points to START.
 pub(crate) fn validate_start_node_no_incoming(edges: &[Edge]) -> Result<(), WorkflowError> {
     match edges.iter().find(|e| is_start(e.to.as_ref())) {
         Some(e) => Err(sentinel(
@@ -127,7 +124,7 @@ pub(crate) fn validate_start_node_no_incoming(edges: &[Edge]) -> Result<(), Work
     }
 }
 
-/// Port of Go validateWorkflow (validation.go:160): the graph checks.
+/// The graph checks.
 pub(crate) fn validate_workflow(
     g: &Graph,
     state_schema: Option<&CompiledSchema>,
@@ -143,8 +140,8 @@ pub(crate) fn validate_workflow(
     Ok(())
 }
 
-/// Port of Go validateNoTaskModeGraphNodes (validation.go:202): task-mode LlmAgents cannot be
-/// static workflow graph nodes (the scheduler would overwrite the task brief on re-entry).
+/// Task-mode LlmAgents cannot be static workflow graph nodes (the scheduler would overwrite the
+/// task brief on re-entry).
 pub(crate) fn validate_no_task_mode_graph_nodes(edges: &[Edge]) -> Result<(), WorkflowError> {
     let mut seen = HashSet::new();
     for e in edges {
@@ -166,8 +163,8 @@ pub(crate) fn validate_no_task_mode_graph_nodes(edges: &[Edge]) -> Result<(), Wo
     Ok(())
 }
 
-/// Port of Go validateChatModeWiring (validation.go:227): a chat-mode LlmAgent may only be
-/// reached from START (it ignores the node input handed down an edge).
+/// A chat-mode LlmAgent may only be reached from START (it ignores the node input handed down an
+/// edge).
 pub(crate) fn validate_chat_mode_wiring(edges: &[Edge]) -> Result<(), WorkflowError> {
     for e in edges {
         if is_start(e.from.as_ref()) {
@@ -187,8 +184,8 @@ pub(crate) fn validate_chat_mode_wiring(edges: &[Edge]) -> Result<(), WorkflowEr
     Ok(())
 }
 
-/// Port of Go agentNodeMode (validation.go:250): the mode the LlmAgent wrapped by `node` runs
-/// under as a graph node, or `None` when `node` is not an AgentNode wrapping an LlmAgent.
+/// The mode the LlmAgent wrapped by `node` runs under as a graph node, or `None` when `node` is not
+/// an AgentNode wrapping an LlmAgent.
 pub(crate) fn agent_node_mode(node: &dyn Node) -> Option<Mode> {
     let an = node.as_any().downcast_ref::<AgentNode>()?;
     let st = crate::llm::state::reveal(an.agent.as_ref())?;
@@ -198,8 +195,7 @@ pub(crate) fn agent_node_mode(node: &dyn Node) -> Option<Mode> {
     ))
 }
 
-/// Port of Go validateUniqueEdges (validation.go:265): two edges with the same (from, to) are
-/// rejected regardless of route.
+/// Two edges with the same (from, to) are rejected regardless of route.
 pub(crate) fn validate_unique_edges(g: &Graph) -> Result<(), WorkflowError> {
     for (node, edges) in g.sources() {
         let mut targets = HashSet::new();
@@ -219,7 +215,7 @@ pub(crate) fn validate_unique_edges(g: &Graph) -> Result<(), WorkflowError> {
     Ok(())
 }
 
-/// Port of Go validateDefaultRoute (validation.go:279): at most one DEFAULT route per node.
+/// At most one DEFAULT route per node.
 pub(crate) fn validate_default_route(g: &Graph) -> Result<(), WorkflowError> {
     for (node, edges) in g.sources() {
         let mut has_default = false;
@@ -238,7 +234,7 @@ pub(crate) fn validate_default_route(g: &Graph) -> Result<(), WorkflowError> {
     Ok(())
 }
 
-/// Port of Go validateConnectivity (validation.go:293): every node is reachable from START.
+/// Every node is reachable from START.
 pub(crate) fn validate_connectivity(g: &Graph) -> Result<(), WorkflowError> {
     if g.successors.is_empty() {
         return Ok(());
@@ -271,7 +267,7 @@ pub(crate) fn validate_connectivity(g: &Graph) -> Result<(), WorkflowError> {
     ))
 }
 
-/// Port of Go validateCycles (validation.go:334): no cycle made only of unconditional
+/// No cycle made only of unconditional
 /// (`route == None`) edges. DEFAULT and every other route count as conditional.
 pub(crate) fn validate_cycles(g: &Graph) -> Result<(), WorkflowError> {
     fn traverse(
@@ -311,8 +307,7 @@ pub(crate) fn validate_cycles(g: &Graph) -> Result<(), WorkflowError> {
     Ok(())
 }
 
-/// Port of Go validateFanIn (validation.go:381): a non-JoinNode target may have at most one
-/// unconditional incoming edge.
+/// A non-JoinNode target may have at most one unconditional incoming edge.
 pub(crate) fn validate_fan_in(g: &Graph) -> Result<(), WorkflowError> {
     for (node, edges) in g.targets() {
         if node.as_any().is::<JoinNode>() {
@@ -333,7 +328,7 @@ pub(crate) fn validate_fan_in(g: &Graph) -> Result<(), WorkflowError> {
     Ok(())
 }
 
-/// Port of Go defaultValidateInput (validation.go:407): validates `data` against `schema`. When
+/// Validates `data` against `schema`. When
 /// `data` is a string and the schema expects a non-string shape, it first tries to parse the
 /// string as JSON, then the raw string (enum/literal schemas), then standard validation.
 pub(crate) fn default_validate_input(
@@ -367,8 +362,8 @@ pub(crate) fn default_validate_input(
     convert_with_schema::<Value, Value>(&data, Some(schema))
 }
 
-/// Port of Go schemaIsString (validation.go:442): the schema expects a JSON string at the top
-/// level (`"type": "string"` or a `"type"` array containing it).
+/// Whether the schema expects a JSON string at the top level (`"type": "string"` or a `"type"`
+/// array containing it).
 pub(crate) fn schema_is_string(schema: Option<&CompiledSchema>) -> bool {
     let Some(schema) = schema else { return false };
     match schema.schema().get("type") {
@@ -378,8 +373,8 @@ pub(crate) fn schema_is_string(schema: Option<&CompiledSchema>) -> bool {
     }
 }
 
-/// Port of Go validateStateSchemaConsistency (validation.go:465): every state field a node binds
-/// is declared in the workflow's state schema (app:/user:/temp: keys excepted).
+/// Every state field a node binds is declared in the workflow's state schema (app:/user:/temp: keys
+/// excepted).
 pub(crate) fn validate_state_schema_consistency(
     g: &Graph,
     schema: Option<&CompiledSchema>,
@@ -413,8 +408,7 @@ pub(crate) fn validate_state_schema_consistency(
     Ok(())
 }
 
-/// Port of Go extractFieldNames (validation.go:486): the sorted keys of the schema's
-/// `"properties"`.
+/// The sorted keys of the schema's `"properties"`.
 pub(crate) fn extract_field_names(schema: &Value) -> Vec<String> {
     let mut fields: Vec<String> = schema
         .get("properties")
@@ -425,9 +419,8 @@ pub(crate) fn extract_field_names(schema: &Value) -> Vec<String> {
     fields
 }
 
-/// Port of Go validateStaticSchemas (validation.go:497): when both ends of an edge declare a
-/// schema, they must be canonically equal. (Go's "comparing schemas" error branch is unreachable:
-/// canonicalizing a `Value` cannot fail.)
+/// When both ends of an edge declare a schema, they must be canonically equal. (Canonicalizing a
+/// `Value` cannot fail, so there is no comparison-error case.)
 pub(crate) fn validate_static_schemas(g: &Graph) -> Result<(), WorkflowError> {
     for e in g.all_edges() {
         let (Some(out), Some(input)) = (e.from.output_schema(), e.to.input_schema()) else {
@@ -448,13 +441,12 @@ pub(crate) fn validate_static_schemas(g: &Graph) -> Result<(), WorkflowError> {
     Ok(())
 }
 
-/// Port of Go schemasEqualCanonical (validation.go:517).
+/// Whether two schemas are equal in their canonical form.
 pub(crate) fn schemas_equal_canonical(a: &Value, b: &Value) -> bool {
     canonical_schema_json(a) == canonical_schema_json(b)
 }
 
-/// Port of Go validateNodeOutgoingEdges (validation.go:532): runs the registered outgoing-edge
-/// validators on every node, in name order.
+/// Runs the registered outgoing-edge validators on every node, in name order.
 pub(crate) fn validate_node_outgoing_edges(g: &Graph) -> Result<(), WorkflowError> {
     let mut nodes = g.all_nodes().to_vec();
     nodes.sort_by(|a, b| a.name().cmp(b.name()));
@@ -464,7 +456,8 @@ pub(crate) fn validate_node_outgoing_edges(g: &Graph) -> Result<(), WorkflowErro
     Ok(())
 }
 
-/// Port of Go summarizeOutgoingEdges (validation.go:586) together with summarizeMultiRoute.
+/// Summarizes a node's outgoing edges: whether it has unrouted and default edges, and a labelled
+/// value per route (a MultiRoute counts once per element).
 pub(crate) fn summarize_outgoing_edges(edges: &[Edge]) -> OutgoingSummary {
     let mut out = OutgoingSummary::default();
     for e in edges {
@@ -481,7 +474,7 @@ pub(crate) fn summarize_outgoing_edges(edges: &[Edge]) -> OutgoingSummary {
                 kind: RouteKind::Other,
                 label: "[]".into(),
             }),
-            // Go flattens a MultiRoute one level: one Value per element.
+            // A MultiRoute is flattened one level: one value per element.
             RouteSummary::Multi(items) => out.routes.extend(items.iter().map(route_value)),
             other => out.routes.push(route_value(&other)),
         }
@@ -489,7 +482,7 @@ pub(crate) fn summarize_outgoing_edges(edges: &[Edge]) -> OutgoingSummary {
     out
 }
 
-/// Go workflowroute.Value for one route or MultiRoute element.
+/// The labelled value for one route or MultiRoute element.
 fn route_value(s: &RouteSummary) -> RouteValue {
     match s {
         RouteSummary::String(v) => RouteValue {
@@ -512,7 +505,7 @@ fn route_value(s: &RouteSummary) -> RouteValue {
             kind: RouteKind::Other,
             label: "Default".into(),
         },
-        // A nested multi: Go %T fallback.
+        // A nested multi: labelled with its debug form.
         RouteSummary::Multi(_) => RouteValue {
             kind: RouteKind::Other,
             label: format!("{s:?}"),

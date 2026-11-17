@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go internal/compactioninternal/tail_retention.go: intra-invocation tail-retention
-//! compaction, run before a model call once the prompt crosses the token threshold.
+//! Intra-invocation tail-retention compaction, run before a model call once the prompt crosses
+//! the token threshold.
 
 use std::sync::Arc;
 
@@ -36,11 +36,11 @@ use crate::llm::processors::go_json_marshal;
 use crate::telemetry::{COMPACTION_TRIGGER_TOKEN_THRESHOLD, trace_compaction_declined};
 use crate::tool::utils::event_belongs_to_branch;
 
-/// Port of Go TokenCounter: estimates the prompt tokens a list of events would cost. Consulted
-/// only when no visible event reports an observed count; `0` means unknown.
+/// Estimates the prompt tokens a list of events would cost. Consulted only when no visible event
+/// reports an observed count; `0` means unknown.
 pub(crate) type TokenCounter = dyn Fn(&[Event]) -> i64 + Send + Sync;
 
-/// Port of Go TurnScope: the invocation in flight and the branch and isolation scope it sees.
+/// The invocation in flight and the branch and isolation scope it sees.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct TurnScope {
     /// The turn in flight, whose opening question must not be summarized.
@@ -52,15 +52,15 @@ pub(crate) struct TurnScope {
 }
 
 impl TurnScope {
-    /// Port of Go (TurnScope).visible: whether `ev` is part of the history this turn can see.
+    /// Whether `ev` is part of the history this turn can see.
     pub(crate) fn visible(&self, ev: &Event) -> bool {
         event_belongs_to_branch(&self.branch, &ev.branch)
             && ev.isolation_scope == self.isolation_scope
     }
 }
 
-/// Port of Go TailRetention: summarizes everything but the most recent events once the prompt
-/// has grown past `cfg.token_threshold`. `Ok((None, _))` = nothing to do, declined, or gated;
+/// Summarizes everything but the most recent events once the prompt has grown past
+/// `cfg.token_threshold`. `Ok((None, _))` = nothing to do, declined, or gated;
 /// the returned [`Finish`] must be called exactly once with what became of a produced summary.
 /// A summarizer panic is not caught here: `summarize_traced` records it and the unwind
 /// continues.
@@ -143,8 +143,8 @@ pub(crate) async fn tail_retention(
         }
         return Ok((None, Finish::noop()));
     };
-    // Go recordOnSuccess: the gate learns the outcome before the span closes. A stored summary
-    // is recorded, a failure closes the gate, a discard leaves it open.
+    // The gate learns the outcome before the span closes. A stored summary is recorded, a failure
+    // closes the gate, a discard leaves it open.
     let finish = finish.then_after(move |err, discard_reason| {
         if let Some(p) = progress {
             if err.is_some() {
@@ -157,10 +157,11 @@ pub(crate) async fn tail_retention(
     Ok((Some(summary), finish))
 }
 
-/// Port of Go charsPerToken.
+/// The characters assumed per token when estimating.
 const CHARS_PER_TOKEN: i64 = 4;
 
-/// Port of Go jsonChars: the rune count of the Go JSON encoding of `v`; 0 for an empty map.
+/// The character count of the compact JSON encoding of `v` (keys sorted, `<`, `>` and `&`
+/// written as Unicode escapes, as `go_json_marshal` writes it); 0 for an empty map.
 fn json_chars(v: &Map<String, Value>) -> i64 {
     if v.is_empty() {
         return 0;
@@ -168,9 +169,8 @@ fn json_chars(v: &Map<String, Value>) -> i64 {
     go_json_marshal(&Value::Object(v.clone())).chars().count() as i64
 }
 
-/// Port of Go promptTokenCount: the newest visible observed prompt count plus an estimate of
-/// what was appended after it, else the estimate of everything. `None` = unknown (Go
-/// `ok == false`).
+/// The newest visible observed prompt count plus an estimate of what was appended after it, else
+/// the estimate of everything. `None` = unknown.
 pub(crate) fn prompt_token_count(
     events: &[Event],
     scope: &TurnScope,
@@ -198,7 +198,7 @@ pub(crate) fn prompt_token_count(
     (tokens > 0).then_some(tokens)
 }
 
-/// Port of Go EstimateTokensFromContents: characters of text, tool names and JSON payloads,
+/// Estimates tokens from contents: characters of text, tool names and JSON payloads,
 /// four per token. A floor, not an estimate: it sees nothing outside `contents`.
 pub(crate) fn estimate_tokens_from_contents(contents: &[Content]) -> i64 {
     let mut chars: i64 = 0;
@@ -219,9 +219,9 @@ pub(crate) fn estimate_tokens_from_contents(contents: &[Content]) -> i64 {
     chars / CHARS_PER_TOKEN
 }
 
-/// Port of Go selectTailRetentionWindow: the uncovered, visible events older than the retained
-/// tail (the live turn's opening question held back), trimmed to one scope and a
-/// self-contained prefix, seeded with the scope's previous summary. Empty = nothing to compact.
+/// The uncovered, visible events older than the retained tail (the live turn's opening question
+/// held back), trimmed to one scope and a self-contained prefix, seeded with the scope's
+/// previous summary. Empty = nothing to compact.
 pub(crate) fn select_tail_retention_window(
     events: &[Event],
     retention_size: i32,
@@ -320,7 +320,7 @@ pub(crate) fn select_tail_retention_window(
     out
 }
 
-/// Port of Go traceDeclined: a compaction that was triggered but could not run.
+/// Traces a compaction that was triggered but could not run.
 fn trace_declined(cfg: &Config, sess: Option<&dyn Session>, reason: &str) {
     let id = sess.map(|s| s.id().to_owned()).unwrap_or_default();
     let params = span_params(

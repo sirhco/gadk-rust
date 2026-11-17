@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go plugin/loggingplugin: a plugin that logs key invocation activity (user messages,
-//! agent and model activity, tool calls, events and errors) for terminal debugging.
+//! A plugin that logs key invocation activity (user messages, agent and model activity, tool
+//! calls, events and errors) for terminal debugging.
 
 use std::sync::Arc;
 
@@ -43,8 +43,8 @@ type ArgsMapResult = BoxFuture<
     ),
 >;
 
-/// Port of Go `loggingplugin.New("")`: logs invocation activity through `tracing` at INFO under
-/// target `gadk_engine::plugin::logging`. Go's `MustNew` and custom name are not ported.
+/// Logs invocation activity through `tracing` at INFO under target
+/// `gadk_engine::plugin::logging`. The plugin's name is fixed (`logging_plugin`).
 pub fn logging_plugin() -> Plugin {
     let p = Arc::new(LoggingPlugin {
         name: NAME.to_string(),
@@ -165,7 +165,7 @@ pub fn logging_plugin() -> Plugin {
             },
         )
     };
-    // Go plugin.New never fails; Plugin::new is infallible.
+    // Plugin::new is infallible.
     Plugin::new(gadk_agent::PluginConfig {
         name: NAME.to_string(),
         on_user_message_callback: Some(on_user_message),
@@ -174,7 +174,7 @@ pub fn logging_plugin() -> Plugin {
         after_run_callback: Some(after_run),
         before_agent_callback: Some(before_agent),
         after_agent_callback: Some(after_agent),
-        // Go's logging plugin registers no OnAgentErrorCallback.
+        // The logging plugin registers no on-agent-error callback.
         on_agent_error_callback: None,
         before_model_callback: Some(before_model),
         after_model_callback: Some(after_model),
@@ -191,7 +191,8 @@ struct LoggingPlugin {
     name: String,
 }
 
-/// Go's byte slicing `s[:max]`, cut back to a char boundary so it cannot panic.
+/// The first `max` bytes of `s`, cut back to a char boundary so it cannot panic; `None` when `s`
+/// already fits.
 fn truncate(s: &str, max: usize) -> Option<&str> {
     if s.len() <= max {
         return None;
@@ -203,12 +204,13 @@ fn truncate(s: &str, max: usize) -> Option<&str> {
     Some(&s[..end])
 }
 
-/// Go `%v` of a `[]string`.
+/// Formats a list as its items separated by spaces, in brackets: `[a b c]`.
 fn go_list(items: &[String]) -> String {
     format!("[{}]", items.join(" "))
 }
 
-/// Port of Go `formatContent`.
+/// Summarizes content for the log: one entry per part (truncated text, function call or response
+/// name, or a part kind), joined with ` | `; `None` for absent or empty content.
 fn format_content(content: Option<&Content>, max: usize) -> String {
     let Some(content) = content.filter(|c| !c.parts.is_empty()) else {
         return "None".to_string();
@@ -237,7 +239,7 @@ fn format_content(content: Option<&Content>, max: usize) -> String {
     parts.join(" | ")
 }
 
-/// Port of Go `formatArgs`. Go prints `%v` of the map; the Rust rendering is JSON.
+/// Renders tool arguments as JSON, truncated to `max` bytes.
 fn format_args(args: &Map<String, Value>, max: usize) -> String {
     if args.is_empty() {
         return "{}".to_string();
@@ -250,7 +252,7 @@ fn format_args(args: &Map<String, Value>, max: usize) -> String {
 }
 
 impl LoggingPlugin {
-    /// Port of Go `log` (Go's ANSI grey escape is dropped; `tracing` formats colour).
+    /// Logs one line (`tracing` formats colour).
     fn log(&self, msg: impl AsRef<str>) {
         tracing::info!(target: "gadk_engine::plugin::logging", "[{}] {}", self.name, msg.as_ref());
     }
@@ -362,7 +364,7 @@ impl LoggingPlugin {
             self.log(format!("   System Instruction: '{shown}'"));
         }
         if !req.tools.is_empty() {
-            // Go map order is random; sorted here.
+            // Sorted, so the line is stable.
             let mut names: Vec<String> = req.tools.keys().cloned().collect();
             names.sort();
             self.log(format!("   Available Tools: {}", go_list(&names)));

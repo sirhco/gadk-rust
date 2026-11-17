@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `Route`, `RouteSummary`, route kinds, `DEFAULT` and `Edge` (port of Go workflow/workflow.go
-//! routes, the label logic of workflow/validation.go, and Go internal/workflowroute).
+//! `Route`, `RouteSummary`, route kinds, `DEFAULT` and `Edge`, with the labels graph validation
+//! uses to describe a node's outgoing routes.
 
 use std::any::Any;
 use std::fmt;
@@ -27,9 +27,9 @@ use serde_json::Value;
 use crate::error::WorkflowError;
 use crate::workflow::Node;
 
-/// A typed view of a route value, the input to Go validation.go summarizeOutgoingEdges
-/// (internal/workflowroute.Value). `Multi` holds one summary per MultiRoute element; `Other`
-/// carries Go's KindOther label (`%T` of a custom route or element, or `"<nil>"`).
+/// A typed view of a route value, the input to the summary of a node's outgoing edges. `Multi`
+/// holds one summary per MultiRoute element; `Other` carries a label: the type name of a custom
+/// route or element, or `"<nil>"`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RouteSummary {
     /// The `DEFAULT` route.
@@ -46,34 +46,34 @@ pub enum RouteSummary {
     Other(String),
 }
 
-/// Port of Go workflow.Route: defines the interface for matching execution results to edges.
+/// Matches execution results to edges.
 pub trait Route: Send + Sync {
     /// Reports whether `event` was routed along this route.
     fn matches(&self, event: &Event) -> bool;
-    /// The default reproduces Go's `%T` fallback for custom routes (KindOther with the type name).
+    /// The default describes a custom route as `Other` with its type name.
     fn summary(&self) -> RouteSummary {
         RouteSummary::Other(std::any::type_name::<Self>().to_string())
     }
 }
 
-/// Port of Go matchRoute (workflow.go:72).
+/// Whether the event carries `route_value` among its routes.
 fn match_route(route_value: &str, event: &Event) -> bool {
     event.routes.iter().any(|v| v == route_value)
 }
 
-/// Port of Go workflow.StringRoute: a route defined by a string value.
+/// A route defined by a string value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StringRoute(pub String);
 
-/// Port of Go workflow.IntRoute: a route defined by an integer value.
+/// A route defined by an integer value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IntRoute(pub i64);
 
-/// Port of Go workflow.BoolRoute: a route defined by a boolean value.
+/// A route defined by a boolean value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BoolRoute(pub bool);
 
-/// Port of Go workflow.MultiRoute: matches any value within a list of allowed routes.
+/// A route that matches any value within a list of allowed routes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MultiRoute<T>(pub Vec<T>);
 
@@ -126,18 +126,19 @@ impl Route for BoolRoute {
 }
 
 impl<T: fmt::Display + Send + Sync + 'static> Route for MultiRoute<T> {
-    /// Go MultiRoute.Matches: any element's fmt.Sprint form is in event.routes.
+    /// Whether any element's display form is in the event's routes.
     fn matches(&self, e: &Event) -> bool {
         self.0.iter().any(|el| match_route(&sprint(el), e))
     }
-    /// Go MultiRoute.summarizeMultiRoute (validation.go:557); an empty list yields Multi(vec![]),
-    /// which summarize_outgoing_edges renders as KindOther "[]".
+    /// One summary per element; an empty list yields `Multi(vec![])`, which
+    /// `summarize_outgoing_edges` renders as an `Other` label `"[]"`.
     fn summary(&self) -> RouteSummary {
         RouteSummary::Multi(self.0.iter().map(element_summary).collect())
     }
 }
 
-/// Go fmt.Sprint(elem). serde_json::Value strings print raw (not JSON-quoted) and null prints "<nil>".
+/// The display form of a route element. `serde_json::Value` strings print raw (not JSON-quoted)
+/// and null prints "<nil>".
 fn sprint<T: fmt::Display + 'static>(el: &T) -> String {
     if let Some(v) = (el as &dyn Any).downcast_ref::<Value>() {
         return match v {
@@ -149,8 +150,9 @@ fn sprint<T: fmt::Display + 'static>(el: &T) -> String {
     el.to_string()
 }
 
-/// Go summarizeMultiRoute's type switch, by downcast. Unquoted here: summarize_outgoing_edges applies `%q`.
-/// (The `ints!` arms convert every integer type uniformly, including i64 → i64.)
+/// The summary of one route element, by downcast. Strings are unquoted here:
+/// `summarize_outgoing_edges` quotes them. (The `ints!` arms convert every integer type
+/// uniformly, including i64 → i64.)
 #[allow(clippy::useless_conversion, clippy::unnecessary_fallible_conversions)]
 fn element_summary<T: fmt::Display + 'static>(el: &T) -> RouteSummary {
     let a = el as &dyn Any;
@@ -194,7 +196,7 @@ fn element_summary<T: fmt::Display + 'static>(el: &T) -> RouteSummary {
     RouteSummary::Other(std::any::type_name::<T>().to_owned())
 }
 
-/// Port of Go defaultRoute.
+/// The route behind [`DEFAULT`]; it never matches on its own.
 struct DefaultRoute;
 
 impl Route for DefaultRoute {
@@ -206,15 +208,15 @@ impl Route for DefaultRoute {
     }
 }
 
-/// Port of Go workflow.Default: matches when no other concrete route matched (the scheduler decides).
+/// Matches when no other concrete route matched (the scheduler decides).
 pub static DEFAULT: LazyLock<Arc<dyn Route>> = LazyLock::new(|| Arc::new(DefaultRoute));
 
-/// Go `route == Default` (identity).
+/// Whether the route is [`DEFAULT`] (identity).
 pub(crate) fn is_default_route(r: &Arc<dyn Route>) -> bool {
     std::ptr::addr_eq(Arc::as_ptr(r), Arc::as_ptr(&*DEFAULT))
 }
 
-/// Port of Go workflow.Edge: a directed connection between nodes in the workflow graph.
+/// A directed connection between nodes in the workflow graph.
 #[derive(Clone)]
 pub struct Edge {
     /// The source node.
@@ -225,15 +227,16 @@ pub struct Edge {
     pub route: Option<Arc<dyn Route>>,
 }
 
-/// Port of Go `strconv.Quote` (Go `%q` on a string); the faithful port lives in gadk-agent so
-/// both crates format `%q` identically.
+/// Quotes a string for messages and route labels: double quotes, with `"` and `\` backslash-
+/// escaped, short escapes for control characters and `\xNN`/`\uNNNN` for other non-printable
+/// ones. Shared from gadk-agent so both crates quote identically.
 pub(crate) use gadk_agent::go_quote;
 
 // ---------------------------------------------------------------------------------------------
-// internal/workflowroute
+// outgoing-route summaries
 // ---------------------------------------------------------------------------------------------
 
-/// Port of Go workflowroute.Kind: classifies a concrete route value extracted from an edge.
+/// Classifies a concrete route value extracted from an edge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RouteKind {
     /// A string route (StringRoute or string element in MultiRoute).
@@ -244,15 +247,15 @@ pub(crate) enum RouteKind {
     Other,
 }
 
-/// Port of Go workflowroute.Value: one concrete route value on an outgoing edge. `label` is a
-/// quoted string for `String`, "true"/"false" for `Bool`, and a description otherwise.
+/// One concrete route value on an outgoing edge. `label` is a quoted string for `String`,
+/// "true"/"false" for `Bool`, and a description otherwise.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RouteValue {
     pub(crate) kind: RouteKind,
     pub(crate) label: String,
 }
 
-/// Port of Go workflowroute.OutgoingSummary: all outgoing edges from a single node.
+/// All outgoing edges from a single node.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct OutgoingSummary {
     pub(crate) has_unrouted: bool,
@@ -260,23 +263,22 @@ pub(crate) struct OutgoingSummary {
     pub(crate) routes: Vec<RouteValue>,
 }
 
-/// Port of Go workflowroute.Validator.
+/// Checks the summary of one node's outgoing edges during graph validation.
 pub(crate) type RouteValidator =
     Arc<dyn Fn(&dyn Node, &OutgoingSummary) -> Result<(), WorkflowError> + Send + Sync>;
 
-/// Go workflowroute's `validators` registry.
+/// The registered route validators.
 static VALIDATORS: LazyLock<RwLock<Vec<RouteValidator>>> =
     LazyLock::new(|| RwLock::new(Vec::new()));
 
-/// Port of Go workflowroute.Register: `v` runs during workflow graph validation. Test-only: Go's
-/// only production caller is the out-of-scope exp/classifier.
+/// Registers `v` to run during workflow graph validation. Test-only: nothing in the engine
+/// registers validators.
 #[cfg(test)]
 pub(crate) fn register_route_validator(v: RouteValidator) {
     VALIDATORS.write().push(v);
 }
 
-/// Port of Go workflowroute.Validate: runs every registered validator in registration order and
-/// returns the first error.
+/// Runs every registered validator in registration order and returns the first error.
 pub(crate) fn validate_outgoing(
     node: &dyn Node,
     out: &OutgoingSummary,

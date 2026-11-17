@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go internal/compactioninternal/window.go: sliding-window selection, the
-//! self-contained prefix, and record subsumption.
+//! Sliding-window selection, the self-contained prefix, and record subsumption.
 
 use std::collections::{HashMap, HashSet};
 
@@ -24,8 +23,9 @@ use gadk_session::{Event, EventCompaction, EventRef};
 use super::apply::{CoverIndex, has_compaction, has_usable_summary, truncate_to_ref};
 use crate::tool::utils::{content, function_calls, function_responses};
 
-/// Length of Go longestSelfContainedPrefix's result: the longest cut that leaves no call, or
-/// request to the user (a tool confirmation or a credential request), open and does not split a group of events sharing a timestamp.
+/// Length of the longest self-contained prefix: the longest cut that leaves no call, or request
+/// to the user (a tool confirmation or a credential request), open and does not split a group of
+/// events sharing a timestamp.
 pub(crate) fn self_contained_len(events: &[Event]) -> usize {
     let mut open: HashSet<String> = HashSet::new();
     let mut safe = 0;
@@ -50,12 +50,12 @@ pub(crate) fn self_contained_len(events: &[Event]) -> usize {
     safe
 }
 
-/// Port of Go longestSelfContainedPrefix.
+/// The longest prefix of `events` that is self-contained (see [`self_contained_len`]).
 pub(crate) fn longest_self_contained_prefix(events: &[Event]) -> Vec<Event> {
     events[..self_contained_len(events)].to_vec()
 }
 
-/// Port of Go tieSafeCut.
+/// Whether cutting `events` at `length` splits no group of events sharing a timestamp.
 fn tie_safe_cut(events: &[Event], length: usize) -> bool {
     if length == 0 || length >= events.len() {
         return true;
@@ -63,7 +63,7 @@ fn tie_safe_cut(events: &[Event], length: usize) -> bool {
     events[length - 1].timestamp < events[length].timestamp
 }
 
-/// Port of Go callObligationKey: an ID-less call gets a key no response can match.
+/// The key of the obligation a call opens: an ID-less call gets a key no response can match.
 fn call_obligation_key(call: &FunctionCall, event_index: usize) -> String {
     if !call.id.is_empty() {
         return call.id.clone();
@@ -71,8 +71,7 @@ fn call_obligation_key(call: &FunctionCall, event_index: usize) -> String {
     format!("\u{0}no-id\u{0}{event_index}\u{0}{}", call.name)
 }
 
-/// Port of Go LatestCompactionEventInScope: Go LatestCompactionEvent over the records of
-/// one branch and isolation scope.
+/// The newest unsubsumed compaction record among those of one branch and isolation scope.
 pub(crate) fn latest_compaction_event_in_scope<'a>(
     events: &'a [Event],
     branch: &str,
@@ -87,14 +86,15 @@ pub(crate) fn latest_compaction_event_in_scope<'a>(
     latest_among(&scoped)
 }
 
-/// Port of Go LatestCompactionEvent: the newest record no other record subsumes.
+/// The newest record no other record subsumes.
 #[cfg(test)]
 pub(crate) fn latest_compaction_event(events: &[Event]) -> Option<&Event> {
     let all: Vec<&Event> = events.iter().collect();
     latest_among(&all)
 }
 
-/// Go LatestCompactionEvent over a list of references (positions are within `events`).
+/// The newest record no other record subsumes, over a list of references (positions are within
+/// `events`).
 fn latest_among<'a>(events: &[&'a Event]) -> Option<&'a Event> {
     let (at, recs): (Vec<usize>, Vec<&Event>) = events
         .iter()
@@ -107,8 +107,8 @@ fn latest_among<'a>(events: &[&'a Event]) -> Option<&'a Event> {
         let Some(rng) = ev.actions.compaction.as_ref() else {
             continue;
         };
-        // hasCompaction, not HasUsableSummary: a contentless record still marks how far
-        // compaction reached.
+        // Any compaction record counts, not only one with usable content: a contentless record
+        // still marks how far compaction reached.
         if is_subsumed_among(at[k], rng, &at, &recs) {
             continue;
         }
@@ -117,7 +117,7 @@ fn latest_among<'a>(events: &[&'a Event]) -> Option<&'a Event> {
     latest
 }
 
-/// Port of Go isSubsumedAmong: `rng` is the record at stream position `i`; `at[k]` is the
+/// Whether another record subsumes `rng`, the record at stream position `i`; `at[k]` is the
 /// position of `recs[k]`.
 pub(crate) fn is_subsumed_among(
     i: usize,
@@ -152,8 +152,8 @@ pub(crate) fn is_subsumed_among(
     false
 }
 
-/// Port of Go selectSlidingWindow: the contiguous slice a sliding-window compaction should
-/// summarize, or empty when there is nothing to compact yet.
+/// The contiguous slice a sliding-window compaction should summarize, or empty when there is
+/// nothing to compact yet.
 pub(crate) fn select_sliding_window(events: &[Event], interval: i32, overlap: i32) -> Vec<Event> {
     if interval <= 0 {
         return Vec::new();
@@ -191,14 +191,14 @@ pub(crate) fn select_sliding_window(events: &[Event], interval: i32, overlap: i3
     }
 
     // Cover at most `interval` new invocations; reach back `overlap` before the first new one.
-    // Go indexes `order` without a bound; the start is clamped so no input can panic.
+    // The start is clamped so no input can index out of bounds.
     let last_order = order.len() as i64 - 1;
     let start_pos = (first_new as i64 - i64::from(overlap)).clamp(0, last_order) as usize;
     let cap = usize::try_from(interval - 1).unwrap_or(0);
     let end_pos = new_positions[(new_positions.len() - 1).min(cap)];
 
     let position: HashMap<&str, usize> = order.iter().enumerate().map(|(i, id)| (*id, i)).collect();
-    // Go `position[ev.InvocationID] >= firstNew`, where a missing key reads as 0.
+    // A missing key reads as position 0.
     let stale_at = |idx: usize, ev: &Event| {
         position
             .get(ev.invocation_id.as_str())
@@ -249,7 +249,7 @@ pub(crate) fn select_sliding_window(events: &[Event], interval: i32, overlap: i3
     skip_blocked_head(window)
 }
 
-/// Port of Go trimToOneScope: cuts the window at the first change of branch or isolation scope.
+/// Cuts the window at the first change of branch or isolation scope.
 pub(crate) fn trim_to_one_scope(mut window: Vec<Event>) -> Vec<Event> {
     let Some(first) = window.first() else {
         return window;
@@ -264,8 +264,8 @@ pub(crate) fn trim_to_one_scope(mut window: Vec<Event>) -> Vec<Event> {
     window
 }
 
-/// Port of Go skipBlockedHead: the longest self-contained run after a head whose call never got
-/// a response, refusing a run that answers a call left in the skipped head.
+/// The longest self-contained run after a head whose call never got a response, refusing a run
+/// that answers a call left in the skipped head.
 pub(crate) fn skip_blocked_head(window: Vec<Event>) -> Vec<Event> {
     for start in 1..window.len() {
         // Resume just after an event that changed the set of open obligations.
@@ -290,7 +290,7 @@ pub(crate) fn skip_blocked_head(window: Vec<Event>) -> Vec<Event> {
     Vec::new()
 }
 
-/// Port of Go openCallIDs: the call IDs opened by `events` and not answered by them.
+/// The call IDs opened by `events` and not answered by them.
 pub(crate) fn open_call_ids(events: &[Event]) -> HashSet<String> {
     let mut open = HashSet::new();
     for (i, ev) in events.iter().enumerate() {
@@ -310,7 +310,7 @@ pub(crate) fn open_call_ids(events: &[Event]) -> HashSet<String> {
     open
 }
 
-/// Port of Go answersAnyOf: whether `events` answer any of `ids`.
+/// Whether `events` answer any of `ids`.
 pub(crate) fn answers_any_of(events: &[Event], ids: &HashSet<String>) -> bool {
     if ids.is_empty() {
         return false;
@@ -322,8 +322,8 @@ pub(crate) fn answers_any_of(events: &[Event], ids: &HashSet<String>) -> bool {
     })
 }
 
-/// Port of Go coversAllOf: `a`'s range contains `b`'s, and every hole of `a` inside `b` (at
-/// reference resolution) is a hole of `b` too.
+/// Whether `a`'s range contains `b`'s, and every hole of `a` inside `b` (at reference resolution)
+/// is a hole of `b` too.
 pub(crate) fn covers_all_of(a: &EventCompaction, b: &EventCompaction) -> bool {
     if a.start_timestamp > b.start_timestamp || a.end_timestamp < b.end_timestamp {
         return false;
@@ -345,7 +345,7 @@ pub(crate) fn covers_all_of(a: &EventCompaction, b: &EventCompaction) -> bool {
     true
 }
 
-/// Port of Go namesHole: `rng` excludes the event `r` names, compared at reference resolution.
+/// Whether `rng` excludes the event `r` names, compared at reference resolution.
 pub(crate) fn names_hole(rng: &EventCompaction, r: &EventRef) -> bool {
     let at = truncate_to_ref(r.timestamp);
     rng.excluded_events
@@ -353,7 +353,7 @@ pub(crate) fn names_hole(rng: &EventCompaction, r: &EventRef) -> bool {
         .any(|o| o.invocation_id == r.invocation_id && truncate_to_ref(o.timestamp) == at)
 }
 
-/// Port of Go sameRange.
+/// Whether both ranges have the same start and end timestamps.
 pub(crate) fn same_range(a: &EventCompaction, b: &EventCompaction) -> bool {
     a.start_timestamp == b.start_timestamp && a.end_timestamp == b.end_timestamp
 }

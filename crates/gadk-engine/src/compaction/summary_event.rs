@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go internal/compactioninternal/summary_event.go: building and sanitizing the event
-//! that carries a summary.
+//! Building and sanitizing the event that carries a summary.
 
 use std::collections::HashSet;
 
@@ -26,9 +25,9 @@ use gadk_session::{Event, EventActions, EventCompaction, EventRef};
 use super::apply::{excludes, has_compaction, in_range, truncate_to_ref};
 use super::{BoxError, err_text};
 
-/// Port of Go newSummaryEvent: the unstamped compaction event (empty ID and invocation ID, zero
-/// timestamp) for a window. Window membership is a counted value match against `all`, the
-/// Rust form of Go's pointer identity.
+/// The unstamped compaction event (empty ID and invocation ID, zero timestamp) for a window.
+/// Window membership is a counted value match against `all`: each window event claims one equal,
+/// unclaimed entry.
 pub(crate) fn new_summary_event(
     events: &[Event],
     all: &[Event],
@@ -145,13 +144,12 @@ pub(crate) fn new_summary_event(
     })
 }
 
-/// Port of Go hasProse.
+/// Whether the content holds at least one prose part.
 pub(crate) fn has_prose(c: Option<&Content>) -> bool {
     c.is_some_and(|c| c.parts.iter().any(is_prose_part))
 }
 
-/// Port of Go SanitizeSummary: keeps only prose parts of the record's content; false when nothing
-/// usable survives.
+/// Keeps only prose parts of the record's content; false when nothing usable survives.
 pub(crate) fn sanitize_summary(ev: &mut Event) -> bool {
     let Some(rng) = ev.actions.compaction.as_mut() else {
         return false;
@@ -176,7 +174,8 @@ pub(crate) fn sanitize_summary(ev: &mut Event) -> bool {
     true
 }
 
-/// Port of Go refKey: `<invocation id>@<RFC 3339 nano of the truncated UTC time>`.
+/// The identity of an event reference: `<invocation id>@<RFC 3339 nano of the truncated UTC
+/// time>`.
 pub(crate) fn ref_key(ev: &Event) -> String {
     format!(
         "{}@{}",

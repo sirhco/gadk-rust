@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `Node` trait and the `START` sentinel (port of Go workflow/workflow.go).
+//! The `Node` trait and the `START` sentinel.
 
 use std::any::Any;
 use std::sync::{Arc, LazyLock};
@@ -26,8 +26,7 @@ use serde_json::Value;
 use crate::error::WorkflowError;
 use crate::workflow::{BaseNode, NodeConfig};
 
-/// Port of Go workflow.Node (workflow/workflow.go:39) plus StateParamsAware (workflow.go:62),
-/// folded in as `state_field_names`. Go `any` inputs/outputs are `serde_json::Value`; Go nil is
+/// A node of a workflow graph. Inputs and outputs are `serde_json::Value`; "no value" is
 /// `Value::Null`.
 pub trait Node: Send + Sync + 'static {
     /// The node's name, unique within a workflow graph.
@@ -46,20 +45,21 @@ pub trait Node: Send + Sync + 'static {
     fn validate_output(&self, v: Value) -> Result<Value, WorkflowError>;
     /// Runs one activation of the node.
     fn run(&self, ctx: Context, input: Value) -> EventStream;
-    /// Port of StateParamsAware.StateFieldNames; `None` = node does not bind state params.
+    /// The names of the state fields the node binds as parameters; `None` = node does not bind
+    /// state params.
     fn state_field_names(&self) -> Option<&[String]> {
         None
     }
-    /// Downcasting support (Go type switches on concrete node types).
+    /// Downcasting support, to tell concrete node types apart.
     fn as_any(&self) -> &dyn Any;
 }
 
-/// Go `a == b` on Node interface values (pointer identity). Compares data addresses only.
+/// Whether two nodes are the same node (pointer identity). Compares data addresses only.
 pub(crate) fn same_node(a: &dyn Node, b: &dyn Node) -> bool {
     std::ptr::addr_eq(a as *const dyn Node, b as *const dyn Node)
 }
 
-/// Port of Go startNode (workflow.go:144).
+/// The entry-point sentinel node: runs nothing and emits no events.
 struct StartNode {
     base: BaseNode,
 }
@@ -83,7 +83,7 @@ impl Node for StartNode {
     fn validate_input(&self, v: Value) -> Result<Value, WorkflowError> {
         self.base.validate_input(v)
     }
-    /// Go startNode.ValidateOutput: the start node's output is passed through unchanged.
+    /// The start node's output is passed through unchanged.
     fn validate_output(&self, v: Value) -> Result<Value, WorkflowError> {
         Ok(v)
     }
@@ -95,7 +95,7 @@ impl Node for StartNode {
     }
 }
 
-/// Port of Go workflow.Start: the entry-point sentinel, named "START" with description "Start node".
+/// The entry-point sentinel, named "START" with description "Start node".
 pub static START: LazyLock<Arc<dyn Node>> = LazyLock::new(|| {
     Arc::new(StartNode {
         base: BaseNode::new("START", "Start node", NodeConfig::default()),

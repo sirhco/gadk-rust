@@ -13,9 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go internal/compactioninternal/compactor.go: the sliding-window entry point, the
-//! traced summarizer call shared with tail retention, and the view of history handed to a
-//! summarizer.
+//! The sliding-window entry point, the traced summarizer call shared with tail retention, and the
+//! view of history handed to a summarizer.
 
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
@@ -42,7 +41,7 @@ use crate::tool::utils::panic_message;
 
 type FinishFn = Box<dyn FnOnce(Option<&(dyn std::error::Error + 'static)>, &str) + Send>;
 
-/// Port of Go Finish: reports what became of a summary and closes its span. Call
+/// Reports what became of a summary and closes its span. Call
 /// [`Finish::finish`] exactly once; the summary is not stored until it is made. Dropping an
 /// unfinished `Finish` closes the span with no result and no error.
 pub(crate) struct Finish {
@@ -50,7 +49,7 @@ pub(crate) struct Finish {
 }
 
 impl Finish {
-    /// Go's `noop := func(error, string) {}`.
+    /// A `Finish` that does nothing.
     pub(crate) fn noop() -> Finish {
         Finish { f: None }
     }
@@ -75,8 +74,7 @@ impl Finish {
         }
     }
 
-    /// Runs `before` with the same arguments, then this finish (Go tail_retention.go's
-    /// `recordOnSuccess` wrapper).
+    /// Runs `before` with the same arguments, then this finish.
     pub(crate) fn then_after(
         self,
         before: impl FnOnce(Option<&(dyn std::error::Error + 'static)>, &str) + Send + 'static,
@@ -88,9 +86,9 @@ impl Finish {
     }
 }
 
-/// Port of Go SlidingWindow: summarizes a window of completed invocations once enough have
-/// accumulated. `Ok((None, _))` when there is nothing to do (interval not reached, no
-/// self-contained window, a declining summarizer); the returned `Finish` must be called once.
+/// Summarizes a window of completed invocations once enough have accumulated. `Ok((None, _))` when
+/// there is nothing to do (interval not reached, no self-contained window, a declining summarizer);
+/// the returned `Finish` must be called once.
 pub(crate) async fn sliding_window(
     platform: &Platform,
     cfg: &Config,
@@ -123,10 +121,9 @@ pub(crate) async fn sliding_window(
     .map_err(|e| wrap_err("sliding-window summarization failed", e))
 }
 
-/// Port of Go summarizeTraced: runs the summarizer inside a `compact_events` span, validates
-/// and stamps what comes back. The span stays open until the returned `Finish` runs. A
-/// summarizer panic is recorded on the span (`summarizer panicked: <payload>`), the span is
-/// closed, and the panic continues.
+/// Runs the summarizer inside a `compact_events` span, validates and stamps what comes back. The
+/// span stays open until the returned `Finish` runs. A summarizer panic is recorded on the span
+/// (`summarizer panicked: <payload>`), the span is closed, and the panic continues.
 pub(crate) async fn summarize_traced(
     platform: &Platform,
     cfg: &Config,
@@ -175,7 +172,7 @@ pub(crate) async fn summarize_traced(
     let mut summary: Option<Event> = None;
     let mut failure: Option<BoxError> = None;
     let usage = match res {
-        // A failure reports spend too (Go-parity note 4); any content is discarded.
+        // A failure reports spend too; any content is discarded.
         Err(e) => {
             let usage = failure_usage(&*e).cloned();
             failure = Some(e);
@@ -230,8 +227,8 @@ pub(crate) async fn summarize_traced(
     Ok((Some(summary), finish))
 }
 
-/// Port of Go stamp: fills the identity fields a summarizer leaves blank. The invocation ID is
-/// fresh (`"e-" + uuid`), never borrowed from a covered turn.
+/// Fills the identity fields a summarizer leaves blank. The invocation ID is fresh
+/// (`"e-" + uuid`), never borrowed from a covered turn.
 pub(crate) fn stamp(platform: &Platform, mut ev: Event) -> Event {
     if ev.id.is_empty() {
         ev.id = platform.new_uuid();
@@ -245,8 +242,8 @@ pub(crate) fn stamp(platform: &Platform, mut ev: Event) -> Event {
     ev
 }
 
-/// Port of Go snapshotForSummarizer (Go-parity note 1): the conversation, field by field, and
-/// for a summary only the range it stood for.
+/// The history handed to a summarizer: the conversation, field by field, and for a summary only
+/// the range it stood for.
 pub(crate) fn snapshot_for_summarizer(events: &[Event]) -> Vec<Event> {
     events
         .iter()
@@ -274,14 +271,14 @@ pub(crate) fn snapshot_for_summarizer(events: &[Event]) -> Vec<Event> {
         .collect()
 }
 
-/// Port of Go copyContent.
+/// Copies content, part by part through [`copy_part`].
 fn copy_content(c: &Content) -> Content {
     let mut out = c.clone();
     out.parts = c.parts.iter().map(copy_part).collect();
     out
 }
 
-/// Port of Go copyPart: exactly the members a transcript reads.
+/// Copies exactly the members of a part that a transcript reads.
 fn copy_part(p: &Part) -> Part {
     Part {
         text: p.text.clone(),
@@ -325,17 +322,17 @@ fn copy_part(p: &Part) -> Part {
     }
 }
 
-/// Port of Go summarizerTypeName: `""` without a summarizer, else its bare type name.
+/// `""` without a summarizer, else its bare type name.
 pub(crate) fn summarizer_type_name(s: Option<&Arc<dyn Summarizer>>) -> String {
     s.map(|s| s.type_name().to_owned()).unwrap_or_default()
 }
 
-/// Port of Go summarizerBackend.
+/// The model backend the summarizer uses, when it reports one.
 pub(crate) fn summarizer_backend(s: Option<&Arc<dyn Summarizer>>) -> Option<Backend> {
     s.and_then(|s| s.google_variant())
 }
 
-/// Port of Go latestInvocationID: the invocation of the newest event that has one.
+/// The invocation of the newest event that has one; `""` when none does.
 pub(crate) fn latest_invocation_id(sess: Option<&dyn Session>) -> String {
     sess.map(|s| s.events())
         .unwrap_or_default()
@@ -346,7 +343,7 @@ pub(crate) fn latest_invocation_id(sess: Option<&dyn Session>) -> String {
         .unwrap_or_default()
 }
 
-/// Port of Go spanParams.
+/// The `compact_events` span parameters for a summarization of `event_count` events.
 pub(crate) fn span_params(
     cfg: &Config,
     session_id: &str,

@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go workflow/request_input.go: human-in-the-loop input requests.
+//! Human-in-the-loop input requests.
 
 use gadk_agent::{AgentError, Context, InvocationContext};
 use gadk_genai::{Content, FunctionCall, Part};
@@ -24,20 +24,20 @@ use crate::error::WorkflowErrorKind;
 use crate::workflow::Emit;
 use crate::workflow::scheduler::wf_error;
 
-/// Port of Go WorkflowInputFunctionCallName: the function-call name of an input request (a wire
-/// identifier shared with other ADK runtimes).
+/// The function-call name of an input request (a wire identifier shared with other ADK
+/// runtimes).
 pub const WORKFLOW_INPUT_FUNCTION_CALL_NAME: &str = "adk_request_input";
 
-/// Port of Go NewRequestInputEvent: an event that pauses the workflow for human input. An empty
-/// interrupt id gets a fresh platform UUID; when the provider returns an empty string a random
-/// UUID is used, so the key is never empty (Go e2614290). The request rides as a long-running
-/// `adk_request_input` function call whose id is the interrupt id.
+/// An event that pauses the workflow for human input. An empty interrupt id gets a fresh
+/// platform UUID; when the provider returns an empty string a random UUID is used, so the key is
+/// never empty. The request rides as a long-running `adk_request_input` function call whose id
+/// is the interrupt id.
 pub fn new_request_input_event(ctx: &InvocationContext, mut req: RequestInput) -> Event {
     if req.interrupt_id.is_empty() {
         req.interrupt_id = ctx.platform().new_uuid();
         if req.interrupt_id.is_empty() {
             // The scheduler ignores an empty ID, so the node would not pause for input.
-            // Go `uuid.NewString()`: the default platform draws a random v4 UUID.
+            // The default platform draws a random v4 UUID.
             req.interrupt_id = gadk_platform::Platform::default().new_uuid();
         }
     }
@@ -65,14 +65,14 @@ pub fn new_request_input_event(ctx: &InvocationContext, mut req: RequestInput) -
         }],
     });
     ev.long_running_tool_ids = vec![req.interrupt_id.clone()];
-    // Go sets the author only when ctx.Agent() != nil; a Rust context always has an agent.
+    // A context always has an agent.
     ev.author = ctx.agent().name().to_string();
     ev.branch = ctx.branch();
     ev.requested_input = Some(req);
     ev
 }
 
-/// Port of Go ResumeOrRequestInput: the reply when the node is re-run after the human answered;
+/// The reply when the node is re-run after the human answered;
 /// otherwise emits the request and returns the NodeInterrupted sentinel (an emit failure is
 /// returned instead).
 pub async fn resume_or_request_input(
