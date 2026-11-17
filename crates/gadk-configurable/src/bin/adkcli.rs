@@ -13,9 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `cmd/internal/adkcli/main.go`: registers the conformance callbacks, functions and node
-//! functions on a fresh `Registry`, loads every `root_agent.yaml` under the working directory
-//! (folder name = agent key), and runs the full launcher with the replay and record plugins.
+//! The conformance CLI: registers the conformance callbacks, functions and node functions on a
+//! fresh `Registry`, loads every `root_agent.yaml` under the working directory (folder name =
+//! agent key), and runs the full launcher with the replay and record plugins.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -41,15 +41,15 @@ use gadk_platform::{go_path_base, go_path_dir, go_path_join, go_quote};
 /// The file name the walk collects.
 const ROOT_AGENT_YAML: &str = "root_agent.yaml";
 
-/// Go `log.Fatalf`: the message on stderr through Go's default logger, then exit 1.
+/// Prints the message on stderr through the launcher's logger, then exits with status 1.
 fn fatal(log: &Logger, msg: &str) -> ! {
     log.print(msg);
     std::process::exit(1)
 }
 
-/// Go's `main` returning ends the process with any goroutine still blocked (a replay waiter
-/// whose turn never comes, see `conformance::replay`); a tokio runtime's drop would wait for
-/// such a blocking task forever, so the runtime is built by hand and shut down without waiting.
+/// Builds the tokio runtime by hand and shuts it down without waiting: a blocking task may
+/// still be parked (a replay waiter whose turn never comes, see `conformance::replay`), and
+/// dropping a runtime would wait for such a task forever.
 fn main() {
     let rt = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -62,9 +62,8 @@ fn main() {
     rt.shutdown_background();
 }
 
-/// The body of Go's `main`.
+/// Registers the conformance extensions, loads the agents and runs the launcher.
 async fn run() {
-    // Go: cmd/internal/adkcli/main.go main
     let log = Logger::stderr();
 
     // 1. Get the Current Working Directory (where the user typed 'adk')
@@ -73,7 +72,7 @@ async fn run() {
         Err(e) => fatal(&log, &format!("Error getting current directory: {e}")),
     };
 
-    // Go registers on its package globals; gadk's registry is a value (one per process here).
+    // The registry is a value, not a global: one per process here.
     let registry = Registry::new();
     // Register callbacks for the conformance agents
     if let Err(e) = register_callbacks(&registry) {
@@ -102,8 +101,8 @@ async fn run() {
             }
         }
     });
-    // Go's `log.Fatalf("Error walking the path: %v", err)` is unreachable: the callback never
-    // returns an error, and `filepath.WalkDir` reports every failure through it.
+    // An "Error walking the path" failure is unreachable: the callback never returns an error,
+    // and `walk_dir` reports every failure through it.
 
     // 3. Check if we found anything
     if agent_configs.is_empty() {
@@ -167,20 +166,19 @@ async fn run() {
     }
 }
 
-/// What Go's `fs.WalkDirFunc` is handed for an entry: its name and whether it is a directory
-/// (`fs.DirEntry.Name` / `IsDir`; symlinks are not followed).
+/// What the walk callback is handed for an entry: its name and whether it is a directory
+/// (symlinks are not followed).
 struct DirEntry {
     name: String,
     is_dir: bool,
 }
 
-/// Go `filepath.WalkDir(root, fn)` for a callback that never returns an error (adkcli's): the
-/// root, then each directory's entries in lexical (byte) order, depth first. `fn(path, Err)`
-/// reports an `lstat` failure of the root, and a directory's `ReadDir` failure after the
-/// directory itself was visited (Go's second call); the walk then goes on with the entries
-/// read before the error.
+/// Walks `root` with a callback that never returns an error (adkcli's): the root, then each
+/// directory's entries in lexical (byte) order, depth first. `f(path, Err)` reports an `lstat`
+/// failure of the root, and a directory's read failure after the directory itself was visited
+/// (a second call for that path); the walk then goes on with the entries read before the
+/// error.
 fn walk_dir(root: &str, f: &mut dyn FnMut(&str, Result<&DirEntry, ConfigError>)) {
-    // Go: path/filepath/path.go WalkDir
     match std::fs::symlink_metadata(root) {
         Err(e) => f(root, Err(ConfigError::path("lstat", Path::new(root), &e))),
         Ok(info) => {
@@ -193,9 +191,8 @@ fn walk_dir(root: &str, f: &mut dyn FnMut(&str, Result<&DirEntry, ConfigError>))
     }
 }
 
-/// Go `filepath.walkDir`.
+/// Visits one entry and, for a directory, its children.
 fn walk(path: &str, d: &DirEntry, f: &mut dyn FnMut(&str, Result<&DirEntry, ConfigError>)) {
-    // Go: path/filepath/path.go walkDir
     f(path, Ok(d));
     if !d.is_dir {
         return;
@@ -211,7 +208,7 @@ fn walk(path: &str, d: &DirEntry, f: &mut dyn FnMut(&str, Result<&DirEntry, Conf
     }
 }
 
-/// Go `os.ReadDir`: the entries sorted by name, plus the error that stopped the read (`open`
+/// Lists a directory's entries sorted by name, plus the error that stopped the read (`open`
 /// when the directory cannot be opened; the entries read before a later failure are kept).
 fn read_dir(path: &str) -> (Vec<DirEntry>, Option<ConfigError>) {
     let rd = match std::fs::read_dir(path) {
@@ -228,7 +225,7 @@ fn read_dir(path: &str) -> (Vec<DirEntry>, Option<ConfigError>) {
     for entry in rd {
         match entry {
             Ok(entry) => {
-                // Go's `ReadDir` skips an entry that vanished between the read and its lstat.
+                // An entry that vanished between the read and its `lstat` is skipped.
                 let Ok(file_type) = entry.file_type() else {
                     continue;
                 };
@@ -247,15 +244,15 @@ fn read_dir(path: &str) -> (Vec<DirEntry>, Option<ConfigError>) {
     (dirs, err)
 }
 
-/// A failure while reading directory entries: Go's `readdirent` `*PathError`.
-/// Divergence (ledger 6c-2): Go's op name for a failed directory read after a successful open
-/// is platform-specific (only the `open` failure is verified byte-identical).
+/// A failure while reading directory entries, reported with op `readdirent`. The op name for a
+/// failed read after a successful open is platform-specific (only the `open` failure is
+/// verified byte-identical to an ADK conformance run).
 fn read_dir_error(path: &str, e: &io::Error) -> ConfigError {
     ConfigError::path("readdirent", Path::new(path), e)
 }
 
-/// Go's `full.NewLauncher()` with the console replaced by [`NilRootConsole`]: the launcher
-/// adkcli runs when no agent loaded, so the loader has no root agent.
+/// The full launcher with the console replaced by [`NilRootConsole`]: the launcher adkcli runs
+/// when no agent loaded, so the loader has no root agent.
 fn nil_root_full_launcher() -> UniversalLauncher {
     UniversalLauncher::new(vec![
         Box::new(NilRootConsole(gadk_launcher::console::new())),
@@ -269,17 +266,16 @@ fn nil_root_full_launcher() -> UniversalLauncher {
     ])
 }
 
-/// Go's console sub-launcher over a loader whose `RootAgent()` is nil (an empty agent map).
+/// A console sub-launcher over a loader that has no root agent (an empty agent map).
 ///
-/// Go's console `Run` hands the nil root agent to `runner.New`, which fails with
-/// `root agent is required`, so `Run` returns `failed to create runner: root agent is
-/// required`. gadk's `Loader::root_agent` cannot return nil (the conformance loader panics on
-/// an empty map), so this wrapper returns Go's error instead of running the console; keyword,
-/// flags and syntax are the console's own.
+/// With no root agent the console cannot create its runner, so `run` returns `failed to create
+/// runner: root agent is required`. `Loader::root_agent` cannot return nothing (the
+/// conformance loader panics on an empty map), so this wrapper returns that error instead of
+/// running the console; keyword, flags and syntax are the console's own.
 ///
-/// Divergence (ledger 6c-2): Go initializes telemetry (`-otel_to_cloud`) and creates the
-/// console session before `runner.New` fails; the wrapper fails first, so a telemetry
-/// initialization failure that Go would report instead is not reported.
+/// The console would initialize telemetry (`-otel_to_cloud`) and create its session before
+/// failing to build the runner; the wrapper fails first, so a telemetry initialization failure
+/// that would have been reported instead is not reported.
 struct NilRootConsole(ConsoleLauncher);
 
 impl SubLauncher for NilRootConsole {
@@ -308,7 +304,6 @@ impl SubLauncher for NilRootConsole {
         'life0: 'async_trait,
         Self: 'async_trait,
     {
-        // Go: cmd/launcher/console/console.go Run → runner.New (runner/runner.go New)
         Box::pin(async {
             Err(Error::Wrapped {
                 context: "failed to create runner".to_owned(),

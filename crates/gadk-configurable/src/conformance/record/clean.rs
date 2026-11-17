@@ -13,11 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `internal/configurable/conformance/recordplugin/record_plugin.go`'s YAML post-processing:
-//! `shouldPruneYAMLField`, `snakeCaseFieldMap` (+ its `init()`), `findKeyNode`,
-//! `cleanYAMLNode`, `injectSchemaTitles` and `toCamelCaseTitle`, as loops over the
-//! gadk-goyaml node arena with Go's in-place mutation order (Go's `*yaml.Node` is a
-//! [`NodeId`] into the [`Document`]).
+//! The record plugin's YAML post-processing: pruning of empty fields, the snake_case key map,
+//! key lookup, node cleaning, schema-title injection and title-casing, as loops over the
+//! gadk-goyaml node arena with in-place mutation in a fixed order (a node is a [`NodeId`]
+//! into the [`Document`]).
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -26,14 +25,13 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use gadk_goyaml::{Document, Kind, NodeData, NodeId, Style};
 
-/// Go `shouldPruneYAMLField`: whether the field `key` with value `value` is dropped.
+/// Whether the field `key` with value `value` is dropped.
 pub fn should_prune_yaml_field(
     key: &str,
     doc: &Document,
     value: NodeId,
     in_tool_args: bool,
 ) -> bool {
-    // Go: record_plugin.go shouldPruneYAMLField
     if key == "usermessageindex" || key == "user_message_index" {
         return false;
     }
@@ -69,7 +67,7 @@ pub fn should_prune_yaml_field(
     false
 }
 
-/// Go `init`'s `snakeCaseKeys`, in Go's order.
+/// The snake_case keys of the recorded types, in declaration order.
 const SNAKE_CASE_KEYS: [&str; 83] = [
     // Top-level and Recording structs
     "user_message_index",
@@ -165,7 +163,6 @@ const SNAKE_CASE_KEYS: [&str; 83] = [
 ];
 
 static SNAKE_CASE_FIELD_MAP: LazyLock<HashMap<String, &'static str>> = LazyLock::new(|| {
-    // Go: record_plugin.go init
     let mut m = HashMap::new();
     for key in SNAKE_CASE_KEYS {
         let cleaned = key.replace('_', "");
@@ -177,17 +174,14 @@ static SNAKE_CASE_FIELD_MAP: LazyLock<HashMap<String, &'static str>> = LazyLock:
     m
 });
 
-/// Go `snakeCaseFieldMap` after its `init()`: the key with `_` removed → the snake_case key,
-/// plus `propertyordering` → `property_order`.
+/// The key with `_` removed → the snake_case key, plus `propertyordering` → `property_order`.
 pub fn snake_case_field_map() -> &'static HashMap<String, &'static str> {
-    // Go: record_plugin.go init (snakeCaseFieldMap)
     &SNAKE_CASE_FIELD_MAP
 }
 
-/// Go `findKeyNode`: the value node of `key` in mapping `node`; `None` when `node` is not a
-/// mapping or has no such key.
+/// The value node of `key` in mapping `node`; `None` when `node` is not a mapping or has no
+/// such key.
 pub fn find_key_node(doc: &Document, node: NodeId, key: &str) -> Option<NodeId> {
-    // Go: record_plugin.go findKeyNode
     let node = &doc[node];
     if node.kind != Kind::Mapping {
         return None;
@@ -202,7 +196,7 @@ pub fn find_key_node(doc: &Document, node: NodeId, key: &str) -> Option<NodeId> 
     None
 }
 
-/// One pending level of [`clean_yaml_node`]'s walk (Go recurses; see there).
+/// One pending level of [`clean_yaml_node`]'s walk (an explicit stack replaces recursion).
 enum Frame {
     /// A document or sequence node: its children are cleaned in order.
     List {
@@ -222,12 +216,11 @@ enum Frame {
     },
 }
 
-/// Go `cleanYAMLNode`: snake_case keys, `system_instruction` → scalar, `thought_signature`
-/// int sequence → base64, schema title injection, pruning outside tool args.
+/// Snake_cases keys, turns `system_instruction` into a scalar, turns a `thought_signature`
+/// int sequence into base64, injects schema titles and prunes outside tool args.
 pub fn clean_yaml_node(doc: &mut Document, node: NodeId, in_tool_args: bool) {
-    // Go: record_plugin.go cleanYAMLNode
-    // Go recurses; this walks an explicit stack (same visiting and mutation order, no depth
-    // cap) so arbitrarily deep input cannot overflow the thread's stack. Output is identical.
+    // The walk uses an explicit stack (parents before children, no depth cap) so arbitrarily
+    // deep input cannot overflow the thread's stack.
     let mut stack = Vec::new();
     enter_node(doc, &mut stack, node, in_tool_args);
     while let Some(frame) = stack.last_mut() {
@@ -279,11 +272,10 @@ pub fn clean_yaml_node(doc: &mut Document, node: NodeId, in_tool_args: bool) {
     }
 }
 
-/// The start of Go's `cleanYAMLNode(node, inToolArgs)`: a document or sequence pushes its
+/// The start of one node's cleaning: a document or sequence pushes its
 /// children; a mapping first injects the schema titles of a function declaration, then pushes
 /// its pairs; scalars and aliases are left alone.
 fn enter_node(doc: &mut Document, stack: &mut Vec<Frame>, node: NodeId, in_tool_args: bool) {
-    // Go: record_plugin.go cleanYAMLNode (switch node.Kind)
     match doc[node].kind {
         Kind::Document | Kind::Sequence => stack.push(Frame::List {
             content: doc[node].content.clone(),
@@ -332,11 +324,10 @@ fn enter_node(doc: &mut Document, stack: &mut Vec<Frame>, node: NodeId, in_tool_
     }
 }
 
-/// The body of Go `cleanYAMLNode`'s mapping loop before it recurses into the value: map the key
+/// The body of the mapping loop before it recurses into the value: map the key
 /// to snake_case, collapse `system_instruction`, coalesce `thought_signature`; returns the
 /// value's tool-args context.
 fn prepare_mapping_value(doc: &mut Document, k: NodeId, v: NodeId, in_tool_args: bool) -> bool {
-    // Go: record_plugin.go cleanYAMLNode (mapping loop)
     // Translate lowercase serialized struct fields back to canonical snake_case
     if let Some(mapped_key) = snake_case_field_map().get(&doc[k].value) {
         doc.get_mut(k).value = (*mapped_key).to_string();
@@ -381,7 +372,7 @@ fn prepare_mapping_value(doc: &mut Document, k: NodeId, v: NodeId, in_tool_args:
                 && (child.tag == "!!int" || child.tag.is_empty())
                 && let Some(b) = go_sscan_int(&child.value)
             {
-                // Go `byte(b)`: the low 8 bits.
+                // The low 8 bits.
                 bytes.push(b as u8);
             }
         }
@@ -396,12 +387,11 @@ fn prepare_mapping_value(doc: &mut Document, k: NodeId, v: NodeId, in_tool_args:
     next_in_tool_args
 }
 
-/// Go `fmt.Sscan(s, &b)` with `b int` (64-bit): `Some(b)` when it returns a nil error. The
-/// operand is the first space-separated token (leading Unicode spaces and newlines skipped,
-/// trailing input ignored): an optional sign, then decimal digits, or `0b`/`0o`/`0x`/`0`
-/// prefixed digits, `_` allowed, parsed by `strconv.ParseInt(tok, 0, 64)`.
+/// Scans an integer from `s` the way a formatted scan of a 64-bit integer does: `Some(b)`
+/// when it succeeds. The operand is the first space-separated token (leading Unicode spaces
+/// and newlines skipped, trailing input ignored): an optional sign, then decimal digits, or
+/// `0b`/`0o`/`0x`/`0` prefixed digits, `_` allowed, parsed with base-prefix detection.
 fn go_sscan_int(s: &str) -> Option<i64> {
-    // Go: fmt/scan.go (*ss).scanInt (verb 'v') + scanBasePrefix + scanNumber
     let mut chars = s.chars().peekable();
     // SkipSpace (nlIsSpace: `\r\n` and `\n` are spaces too).
     while let Some(&c) = chars.peek() {
@@ -457,9 +447,8 @@ fn go_sscan_int(s: &str) -> Option<i64> {
     go_parse_int_base0(&tok)
 }
 
-/// fmt's `isSpace` (scan.go `space` table) for the runes `SkipSpace` skips.
+/// Whether `c` is a space the scan skips.
 fn go_fmt_is_space(c: char) -> bool {
-    // Go: fmt/scan.go space, isSpace
     matches!(
         c as u32,
         0x0009..=0x000d
@@ -475,9 +464,9 @@ fn go_fmt_is_space(c: char) -> bool {
     )
 }
 
-/// Go `strconv.ParseInt(s, 0, 64)`: `None` on a syntax or range error.
+/// Parses a 64-bit integer with base-prefix detection (base 0): `None` on a syntax or range
+/// error.
 fn go_parse_int_base0(s: &str) -> Option<i64> {
-    // Go: strconv/atoi.go ParseInt + ParseUint (base 0) + underscoreOK
     let (neg, unsigned) = match s.as_bytes().first() {
         Some(b'+') => (false, &s[1..]),
         Some(b'-') => (true, &s[1..]),
@@ -529,9 +518,8 @@ fn go_parse_int_base0(s: &str) -> Option<i64> {
     })
 }
 
-/// Go `strconv.underscoreOK`: whether `_` only separates digits (base prefix counts as one).
+/// Whether `_` only separates digits (a base prefix counts as one).
 fn go_underscore_ok(s: &[u8]) -> bool {
-    // Go: strconv/atoi.go underscoreOK
     let mut saw = b'^';
     let mut i = 0;
     let s = match s.first() {
@@ -566,8 +554,7 @@ fn go_underscore_ok(s: &[u8]) -> bool {
     saw != b'_'
 }
 
-/// A `!!str` scalar, double-quoted when `quoted` (Go's `&yaml.Node{Kind: ScalarNode, Tag:
-/// "!!str", …}` literals).
+/// A `!!str` scalar node, double-quoted when `quoted`.
 fn str_node(value: String, quoted: bool) -> NodeData {
     NodeData {
         kind: Kind::Scalar,
@@ -582,8 +569,7 @@ fn str_node(value: String, quoted: bool) -> NodeData {
     }
 }
 
-/// Fill an existing `title` node that is empty or null in place (Go's `titleNode.Kind = …`
-/// block).
+/// Fills an existing `title` node that is empty or null, in place.
 fn fill_empty_title(doc: &mut Document, title_node: NodeId, title: String) {
     let t = doc.get_mut(title_node);
     if t.value.is_empty() || t.tag == "!!null" || t.value == "null" {
@@ -595,8 +581,7 @@ fn fill_empty_title(doc: &mut Document, title_node: NodeId, title: String) {
     }
 }
 
-/// Prepend a `title: "<title>"` pair to mapping `node` (Go's
-/// `append([]*yaml.Node{titleKey, titleValue}, node.Content...)`).
+/// Prepends a `title: "<title>"` pair to mapping `node`.
 fn prepend_title(doc: &mut Document, node: NodeId, title: String) {
     let title_key = doc.push(str_node("title".to_string(), false));
     let title_value = doc.push(str_node(title, true));
@@ -604,9 +589,8 @@ fn prepend_title(doc: &mut Document, node: NodeId, title: String) {
     content.splice(0..0, [title_key, title_value]);
 }
 
-/// Go `injectSchemaTitles`: `<tool>Params` on the schema, `Title Case` on each property.
+/// Injects `<tool>Params` as the schema's title and `Title Case` on each property.
 pub fn inject_schema_titles(doc: &mut Document, schema_node: NodeId, tool_name: &str) {
-    // Go: record_plugin.go injectSchemaTitles
     if doc[schema_node].kind != Kind::Mapping {
         return;
     }
@@ -636,10 +620,8 @@ pub fn inject_schema_titles(doc: &mut Document, schema_node: NodeId, tool_name: 
     }
 }
 
-/// Go `toCamelCaseTitle`: `phone_number` → `Phone Number` (byte-wise `ToUpper` of each part's
-/// first byte, as Go's `strings.ToUpper(part[:1])`).
+/// `phone_number` → `Phone Number` (byte-wise upper-casing of each part's first byte).
 pub fn to_camel_case_title(s: &str) -> String {
-    // Go: record_plugin.go toCamelCaseTitle
     let mut out: Vec<u8> = Vec::with_capacity(s.len());
     for (i, part) in s.split('_').enumerate() {
         if i > 0 {
@@ -650,16 +632,16 @@ pub fn to_camel_case_title(s: &str) -> String {
             if first.is_ascii() {
                 out.push(first.to_ascii_uppercase());
             } else {
-                // Go's `part[:1]` is a lone UTF-8 lead byte, which `strings.ToUpper` replaces
-                // with U+FFFD.
+                // A non-ASCII first byte is a lone UTF-8 lead byte, which upper-casing
+                // replaces with U+FFFD.
                 out.extend_from_slice("\u{FFFD}".as_bytes());
             }
             out.extend_from_slice(rest);
         }
     }
-    // Divergence (ledger 6c-2): Go's result keeps the orphaned continuation bytes of a
-    // non-ASCII first character (invalid UTF-8, so yaml.Marshal then fails and the record
-    // file is not written); a Rust String replaces each with U+FFFD.
+    // The orphaned continuation bytes of a non-ASCII first character make the result invalid
+    // UTF-8 (the YAML encoding of it would fail and the record file not be written); a Rust
+    // `String` replaces each with U+FFFD instead.
     String::from_utf8(out).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned())
 }
 

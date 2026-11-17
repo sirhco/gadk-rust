@@ -13,19 +13,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `internal/configurable/conformance/replayplugin/recording/recording.go`: the recording
-//! types the record plugin writes and the replay plugin reads.
+//! The recording types the record plugin writes and the replay plugin reads.
 //!
-//! Go's types hold `*model.LLMRequest` and `*genai.FunctionCall` / `*genai.FunctionResponse`,
-//! which yaml.v3 encodes by reflection. Here:
-//! - [`LlmRequestView`] is Go's `model.LLMRequest` as recorded (`Model`, `Contents`, `Config`,
-//!   `Tools`); gadk's `LlmRequest` has no serde shape and keeps `http_options` beside `config`.
-//! - [`RecordedFunctionCall`] / [`RecordedFunctionResponse`] are Go's `genai.FunctionCall` /
-//!   `genai.FunctionResponse` with every Go field and Go's `map[string]any` as [`GoMap`]
-//!   (`None` = Go's nil map), so recorded tool args keep yaml.v3's dynamic types for Go's
-//!   `cmp.Diff`.
+//! The recorded request, function call and function response are the types ADK's recorder
+//! holds, which yaml.v3 encodes by reflection. Here:
+//! - [`LlmRequestView`] is the request as recorded (`model`, `contents`, `config`, `tools`);
+//!   gadk's `LlmRequest` has no serde shape and keeps `http_options` beside `config`.
+//! - [`RecordedFunctionCall`] / [`RecordedFunctionResponse`] are the function call and
+//!   response with every field, and their free-form maps are [`GoMap`] (`None` = nil map), so
+//!   recorded tool args keep yaml.v3's dynamic types for the replay comparison.
 //!
-//! The Go-shaped `Serialize`/`Deserialize` impls and the node encoding live in
+//! The reflection-shaped `Serialize`/`Deserialize` impls and the node encoding live in
 //! [`super::gonode`].
 
 use gadk_genai::{
@@ -35,65 +33,65 @@ use gadk_model::{LlmRequest, LlmResponse};
 
 use crate::govalue::GoMap;
 
-/// Go `Recordings`: all recordings in chronological order.
+/// All recordings in chronological order.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Recordings {
-    /// Go `Recordings []Recording yaml:"recordings"`.
+    /// The `recordings` key.
     pub recordings: Vec<Recording>,
 }
 
-/// Go `Recording`: a single interaction recording, ordered by request timestamp.
+/// A single interaction recording, ordered by request timestamp.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Recording {
-    /// Go `UserMessageIndex int yaml:"user_message_index"` (0-based).
+    /// The `user_message_index` key (0-based).
     pub user_message_index: i64,
-    /// Go `AgentName string yaml:"agent_name"`.
+    /// The `agent_name` key.
     pub agent_name: String,
-    /// Go `LLMRecording *LLMRecording yaml:"llm_recording,omitempty"` (oneof).
+    /// The `llm_recording` key (one of this and `tool_recording`).
     pub llm_recording: Option<LlmRecording>,
-    /// Go `ToolRecording *ToolRecording yaml:"tool_recording,omitempty"` (oneof).
+    /// The `tool_recording` key (one of this and `llm_recording`).
     pub tool_recording: Option<ToolRecording>,
-    /// Go `Index int yaml:"-"`: the LLM recording's index within its user message (replay
+    /// The LLM recording's index within its user message (replay
     /// sync), `-1` for tool recordings; never serialized.
     pub index: i64,
 }
 
-/// Go `LLMRecording`: a paired LLM request and its responses.
+/// A paired LLM request and its responses.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LlmRecording {
-    /// Go `LLMRequest *model.LLMRequest yaml:"llm_request,omitempty"`.
+    /// The `llm_request` key.
     pub llm_request: Option<LlmRequestView>,
-    /// Go `LLMResponses []*model.LLMResponse yaml:"llm_responses,omitempty"`.
+    /// The `llm_responses` key.
     pub llm_responses: Vec<LlmResponse>,
 }
 
-/// Go `ToolRecording`: a paired tool call and response.
+/// A paired tool call and response.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ToolRecording {
-    /// Go `ToolCall *genai.FunctionCall yaml:"tool_call,omitempty"`.
+    /// The `tool_call` key.
     pub tool_call: Option<RecordedFunctionCall>,
-    /// Go `ToolResponse *genai.FunctionResponse yaml:"tool_response,omitempty"`.
+    /// The `tool_response` key.
     pub tool_response: Option<RecordedFunctionResponse>,
 }
 
-/// Go `model.LLMRequest` as recorded (untagged: keys `model`, `contents`, `config`, `tools`).
+/// The LLM request as recorded (untagged: keys `model`, `contents`, `config`, `tools`).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LlmRequestView {
-    /// Go `Model string`.
+    /// The model name.
     pub model: String,
-    /// Go `Contents []*genai.Content`.
+    /// The request contents.
     pub contents: Vec<Content>,
-    /// Go `Config *genai.GenerateContentConfig` (Go's `Config.HTTPOptions` is gadk's
+    /// The generation config (the request's HTTP options are gadk's
     /// `LlmRequest.http_options`, never recorded).
     pub config: Option<GenerateContentConfig>,
-    /// Go `Tools map[string]any json:"-"`: nil after the record plugin's sanitizing (yaml.v3
+    /// The tools map: nil after the record plugin's sanitizing (yaml.v3
     /// encodes a nil map as `{}`); decoded but ignored by replay matching.
     pub tools: GoMap,
 }
 
 impl From<&LlmRequest> for LlmRequestView {
-    /// The recorded view of `req`: model, contents and config; Go's sanitized `Tools` (nil)
-    /// and `Config.HTTPOptions` (nil) are not carried.
+    /// The recorded view of `req`: model, contents and config; the sanitized tools (nil)
+    /// and HTTP options (nil) are not carried.
     fn from(req: &LlmRequest) -> Self {
         LlmRequestView {
             model: req.model.clone(),
@@ -104,35 +102,35 @@ impl From<&LlmRequest> for LlmRequestView {
     }
 }
 
-/// Go `genai.FunctionCall` as recorded, every Go field in Go's order.
+/// A function call as recorded, every field in declaration order.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RecordedFunctionCall {
-    /// Go `ID string`.
+    /// The call id.
     pub id: String,
-    /// Go `Args map[string]any` (`None` = nil map).
+    /// The arguments (`None` = nil map).
     pub args: Option<GoMap>,
-    /// Go `Name string`.
+    /// The function name.
     pub name: String,
-    /// Go `PartialArgs []*PartialArg`.
+    /// The partial arguments.
     pub partial_args: Vec<PartialArg>,
-    /// Go `WillContinue *bool`.
+    /// Whether the call continues.
     pub will_continue: Option<bool>,
 }
 
-/// Go `genai.FunctionResponse` as recorded, every Go field in Go's order.
+/// A function response as recorded, every field in declaration order.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RecordedFunctionResponse {
-    /// Go `WillContinue *bool`.
+    /// Whether the response continues.
     pub will_continue: Option<bool>,
-    /// Go `Scheduling FunctionResponseScheduling` (a non-pointer string: `None` = Go's `""`).
+    /// The scheduling (a non-pointer string: `None` = `""`).
     pub scheduling: Option<FunctionResponseScheduling>,
-    /// Go `Parts []*FunctionResponsePart`.
+    /// The response parts.
     pub parts: Vec<FunctionResponsePart>,
-    /// Go `ID string`.
+    /// The call id.
     pub id: String,
-    /// Go `Name string`.
+    /// The function name.
     pub name: String,
-    /// Go `Response map[string]any` (`None` = nil map).
+    /// The response map (`None` = nil map).
     pub response: Option<GoMap>,
 }
 

@@ -13,46 +13,45 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `internal/configurable/conformance/replayplugin/invocation_replay_state.go`: the
-//! per-invocation replay state, isolating concurrent runs. Go's `mu` + `cond` are a
-//! `std::sync` `Mutex` + `Condvar` (waited on inside `tokio::task::spawn_blocking`, so the
-//! runtime's worker threads never block); the fields Go guards with `mu` are [`ReplayInner`].
+//! The per-invocation replay state, isolating concurrent runs. The lock and condition
+//! variable are a `std::sync` `Mutex` + `Condvar` (waited on inside
+//! `tokio::task::spawn_blocking`, so the runtime's worker threads never block); the fields the
+//! lock guards are [`ReplayInner`].
 
 use std::collections::HashMap;
 use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
 
 use crate::conformance::recording::Recordings;
 
-/// Go `invocationReplayState`.
+/// The replay state of one invocation.
 pub(crate) struct InvocationReplayState {
-    /// Go `testCasePath` (read only by Go's unused `GetTestCasePath`).
+    /// The test case path (read only by the unused `get_test_case_path`).
     #[allow(dead_code)]
     pub(crate) test_case_path: String,
-    /// Go `userMessageIndex`.
+    /// The index of the user message being replayed.
     pub(crate) user_message_index: i64,
-    /// Go `recordings` (with each recording's `index` assigned at load).
+    /// The recordings (with each recording's `index` assigned at load).
     pub(crate) recordings: Recordings,
-    /// Go `mu` and the fields it guards.
+    /// The mutable fields, behind a lock.
     pub(crate) mu: Mutex<ReplayInner>,
-    /// Go `cond` (on `mu`).
+    /// The condition variable, used with the lock.
     pub(crate) cond: Condvar,
 }
 
-/// The fields of Go's `invocationReplayState` guarded by `mu`.
+/// The mutable fields of [`InvocationReplayState`], guarded by its lock.
 #[derive(Default)]
 pub(crate) struct ReplayInner {
-    /// Go `agentReplayIndices`: agent name → its next replay index.
+    /// Agent name → its next replay index.
     pub(crate) agent_replay_indices: HashMap<String, i64>,
-    /// Go `consumedRecordings`: indices into `recordings.recordings`.
+    /// Indices into `recordings.recordings` that have been consumed.
     pub(crate) consumed_recordings: HashMap<usize, bool>,
-    /// Go `curIndex`.
+    /// The index of the recording currently being replayed.
     pub(crate) cur_index: i64,
 }
 
 impl InvocationReplayState {
-    /// Go `newInvocationReplayState`.
+    /// Creates the state for an invocation.
     pub(crate) fn new(test_case_path: String, user_message_index: i64, recs: Recordings) -> Self {
-        // Go: invocation_replay_state.go newInvocationReplayState
         InvocationReplayState {
             test_case_path,
             user_message_index,
@@ -62,30 +61,26 @@ impl InvocationReplayState {
         }
     }
 
-    /// Go `GetTestCasePath`. Unused by Go's plugin too.
+    /// The test case path. Unused by the plugin.
     #[allow(dead_code)]
     pub(crate) fn get_test_case_path(&self) -> &str {
-        // Go: invocation_replay_state.go GetTestCasePath
         &self.test_case_path
     }
 
-    /// Go `GetUserMessageIndex`. Unused by Go's plugin too.
+    /// The user message index. Unused by the plugin.
     #[allow(dead_code)]
     pub(crate) fn get_user_message_index(&self) -> i64 {
-        // Go: invocation_replay_state.go GetUserMessageIndex
         self.user_message_index
     }
 
-    /// Go `GetRecordings`. Unused by Go's plugin too.
+    /// The recordings. Unused by the plugin.
     #[allow(dead_code)]
     pub(crate) fn get_recordings(&self) -> &Recordings {
-        // Go: invocation_replay_state.go GetRecordings
         &self.recordings
     }
 
-    /// Go `GetAgentReplayIndex`: `(index, found)`.
+    /// `(index, found)` of an agent's next replay index.
     pub(crate) fn get_agent_replay_index(&self, agent_name: &str) -> (i64, bool) {
-        // Go: invocation_replay_state.go GetAgentReplayIndex
         let inner = self.lock();
         match inner.agent_replay_indices.get(agent_name) {
             Some(v) => (*v, true),
@@ -93,8 +88,8 @@ impl InvocationReplayState {
         }
     }
 
-    /// Go `s.mu.Lock()`. A panic while holding the lock does not poison the state for the other
-    /// agents (Go's `sync.Mutex` has no poisoning).
+    /// Locks the state. A panic while holding the lock does not poison the state for the other
+    /// agents (the poison flag is ignored).
     pub(crate) fn lock(&self) -> MutexGuard<'_, ReplayInner> {
         self.mu.lock().unwrap_or_else(PoisonError::into_inner)
     }
