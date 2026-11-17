@@ -1936,8 +1936,8 @@ pub(crate) fn panic_type_name(payload: &(dyn std::any::Any + Send)) -> &'static 
     }
 }
 
-/// The type name logged for a formatter error. Rust has no runtime type name for a `Box<dyn
-/// Error>`, so every error is `error`.
+/// The type name logged for a formatter error. Rust has no runtime type name for a
+/// `Box<dyn Error>`, so every error is `error`.
 const FORMATTER_ERROR_TYPE: &str = "error";
 
 /// Runs the formatter fail-closed. Returns `(result, err_note, failed)`; on an error or a panic the

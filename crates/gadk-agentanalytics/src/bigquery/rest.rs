@@ -496,8 +496,8 @@ impl BigQueryClient {
 }
 
 /// One request's headers: gadk's tracking `User-Agent`, the client's headers, the credentials'
-/// headers (fetched per request, so a refreshed token is used), `Content-Type:
-/// application/json` with a body, and `If-Match` for an etag-guarded patch.
+/// headers (fetched per request, so a refreshed token is used), `Content-Type: application/json`
+/// with a body, and `If-Match` for an etag-guarded patch.
 struct CallHeaders<'a> {
     client: &'a BigQueryClient,
     json_body: bool,
@@ -916,8 +916,9 @@ enum Step<T> {
 }
 
 /// Runs `f` until it stops; between turns it pauses per `backoff` under `ctx`. When `ctx` ends
-/// during a pause the result is the context error, or the wrapped call error (`retry failed with
-/// <ctx err>; last error: <err>`) when a turn failed with an error other than a bare context error.
+/// during a pause the result is the context error, or the wrapped call error
+/// (`retry failed with <ctx err>; last error: <err>`) when a turn failed with an error other than a
+/// bare context error.
 async fn retry<T, F, Fut>(ctx: &Context, backoff: &mut Pauses, mut f: F) -> Result<T, Error>
 where
     F: FnMut() -> Fut,

@@ -18,7 +18,7 @@
 //! content summary builder, the deferred uploads) are typed fields of [`QueuedRow`].
 //!
 //! Every reader (the Arrow encoder, the size estimate, the upload orchestration) reads a value
-//! through the accessors below, each of which accepts exactly one variant: [`RowValue::as_str`] a
+//! through the accessors below, each of which accepts only the variants it names: [`RowValue::as_str`] a
 //! string, [`RowValue::as_int64_like`] an integer or a float (truncated), and so on. A value of a
 //! type no accessor accepts (an `i32`, a list of anything but rows, a map of strings, a byte
 //! string, …) is [`RowValue::Other`]. A lookup of a missing key misses, so an empty [`Row`] is a

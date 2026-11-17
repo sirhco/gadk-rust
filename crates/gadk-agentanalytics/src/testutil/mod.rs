@@ -14,7 +14,7 @@
 // limitations under the License.
 
 //! Test support (feature `testutil`): the in-process BigQuery Write fake
-//! ([`fake_write_server`]) and the probe's *row specs* (the fixtures' row format) as
+//! ([`fake_write_server`]) and the *row specs* of the recorded fixtures (the fixtures' row format) as
 //! [`Row`]s.
 
 use serde_json::Value;
@@ -24,7 +24,7 @@ use crate::row::{Row, RowValue};
 pub mod arrow_rows;
 pub mod fake_write_server;
 
-/// The [`Row`] of a probe row spec: an object of value specs, or `null` (an empty row).
+/// The [`Row`] of a fixture row spec: an object of value specs, or `null` (an empty row).
 ///
 /// # Errors
 ///
@@ -41,7 +41,7 @@ pub fn row_from_spec(spec: &Value) -> Result<Row, String> {
     }
 }
 
-/// The [`RowValue`] of a probe value spec `{"t": tag, "v": value}`: `str` → `Str`, `ts` →
+/// The [`RowValue`] of a fixture value spec `{"t": tag, "v": value}`: `str` → `Str`, `ts` →
 /// `Timestamp`, `bool` → `Bool`, `int64` / `int` → `Int`, `float64` → `Float`, `null` → `Null`,
 /// `parts` → `Parts` (a `null` element is an empty row, a `null` list an empty one), `map` →
 /// `Map`; `int32`, `any_list`, `str_map` and `bytes` (types no assertion accepts) →

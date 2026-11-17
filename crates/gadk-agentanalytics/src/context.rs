@@ -32,8 +32,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::error::Error;
 
-/// Why a [`Context`] ended (canceled or deadline exceeded). `Display` is the text `context
-/// canceled` / `context deadline exceeded`.
+/// Why a [`Context`] ended (canceled or deadline exceeded). `Display` is the text
+/// `context canceled` / `context deadline exceeded`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ContextError {
     /// The context was canceled: `context canceled`.

@@ -146,8 +146,8 @@ impl fmt::Display for Code {
     }
 }
 
-/// A BigQuery job error (from a job status's `errorResult` / `errors`). `Display` is `{Location:
-/// "…"; Message: "…"; Reason: "…"}`.
+/// A BigQuery job error (from a job status's `errorResult` / `errors`). `Display` is
+/// `{Location: "…"; Message: "…"; Reason: "…"}`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BigQueryError {
     /// `location`.

@@ -54,7 +54,7 @@
 //! The `gadk` façade re-exports this crate as `gadk::agentanalytics` (feature `agentanalytics`).
 //! Feature `testutil` adds the in-memory fakes of `bigquery::fake`, the in-process BigQuery
 //! Write server `testutil::fake_write_server`, the Arrow row decoder `testutil::arrow_rows` and
-//! the probe's row specs. Behavior, SQL, schemas, request bytes and error texts follow ADK's
+//! the row specs of the recorded fixtures. Behavior, SQL, schemas, request bytes and error texts follow ADK's
 //! BigQuery Agent Analytics plugin; the few accepted differences are noted where they live.
 
 #![forbid(unsafe_code)]

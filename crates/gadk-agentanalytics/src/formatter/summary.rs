@@ -15,8 +15,8 @@
 
 //! Content summaries: [`SummaryPiece`] and [`MessageSummary`] (built for a request message or a
 //! response, then rendered), the [`ContentSummaryBuilder`] that omits or retains text once its
-//! upload resolves and rebuilds the row's `content`, `content_summary` and
-//! [`format_response_content`].
+//! upload resolves and rebuilds the row's `content`, and the functions that summarize content
+//! text and format a model response ([`format_response_content`]).
 
 use gadk_genai::Content;
 use serde_json::{Map, Value};
@@ -46,8 +46,8 @@ pub(crate) fn content_summary(
     MessageSummary::new(content, 0, max_length, redact).render(max_length)
 }
 
-/// Model output the way adk-python writes `content.response` — one entry per part joined by `" |
-/// "`, or `"None"` if there are no parts.
+/// Model output the way adk-python writes `content.response` — one entry per part joined by
+/// `" | "`, or `"None"` if there are no parts.
 pub(crate) fn format_response_content(
     content: Option<&Content>,
     max_length: i64,

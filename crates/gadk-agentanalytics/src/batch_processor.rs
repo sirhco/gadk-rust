@@ -169,9 +169,9 @@ impl BatchProcessor {
     ///
     /// # Errors
     ///
-    /// The config error; `failed to serialize arrow schema: …`; `agentanalytics:
-    /// ExactlyOnceDelivery requires an empty streamName (got …)`; the `CreateWriteStream`
-    /// error.
+    /// The config error; `failed to serialize arrow schema: …`;
+    /// `agentanalytics: ExactlyOnceDelivery requires an empty streamName (got …)`; the
+    /// `CreateWriteStream` error.
     pub async fn new(
         ctx: &Context,
         write_client: Option<WriteClient>,
@@ -323,9 +323,9 @@ impl BatchProcessor {
         }));
     }
 
-    /// Queues `row` without blocking; a full queue drops it (logging `WARNING: BigQuery event queue
-    /// is full, dropping event.`), a closed processor discards it; when the queue reaches
-    /// `batch_size` rows a flush is spawned.
+    /// Queues `row` without blocking; a full queue drops it (logging
+    /// `WARNING: BigQuery event queue is full, dropping event.`), a closed processor discards it;
+    /// when the queue reaches `batch_size` rows a flush is spawned.
     pub fn append(self: &Arc<Self>, row: QueuedRow) {
         let (dropped, should_flush) = self.enqueue(row);
         // Log and flush only after enqueue has released append_mu, so that a panicking Logger

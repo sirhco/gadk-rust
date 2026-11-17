@@ -24,8 +24,8 @@ use gadk_platform::Platform;
 use crate::context::Context;
 use crate::error::Error;
 
-/// Backoff settings: the pause before retry *n* is `1 + rand(cur)` ns (jittered), then `cur =
-/// min(cur * multiplier, max)`. Zero settings take defaults ([`Pauses::new`]).
+/// Backoff settings: the pause before retry *n* is `1 + rand(cur)` ns (jittered), then
+/// `cur = min(cur * multiplier, max)`. Zero settings take defaults ([`Pauses::new`]).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub(crate) struct Backoff {
     /// The first pause's upper bound (1s when zero).
@@ -89,8 +89,9 @@ pub(crate) async fn sleep(ctx: &Context, d: Duration) -> Result<(), Error> {
     .await
 }
 
-/// The error of a retry loop cut short by its context: `retry failed with <ctx err>; last error:
-/// <err>`, both errors in its tree (a match against either succeeds).
+/// The error of a retry loop cut short by its context:
+/// `retry failed with <ctx err>; last error: <err>`, both errors in its tree (a match against
+/// either succeeds).
 pub(crate) fn wrapped_call_err(ctx_err: Error, last: Error) -> Error {
     Error::wrap_text(
         format!("retry failed with {ctx_err}; last error: {last}"),
