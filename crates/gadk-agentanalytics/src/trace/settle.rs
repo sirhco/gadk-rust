@@ -825,8 +825,12 @@ impl TraceManager {
 }
 
 impl InvocationTrace {
-    /// Settles the popped activation `i`'s subtree and counts it as a retired peer when a
-    /// concurrent peer of the same agent, path and branch exists.
+    /// Settles the popped activation `i`'s subtree and counts it as a retired peer when it was
+    /// a concurrent peer or live peers of the same agent, path and branch exist. If it never
+    /// responded, its missing response is reconciled against the live peers (consuming a peer's
+    /// `extra_responses`, else taking over a peer's `has_response` from a non-model response),
+    /// bumping `unresponded_retired` when neither is available; if it responded, its pending
+    /// model and tool event credits are added to `unresponded_retired` instead.
     pub(crate) fn reconcile_concurrent_response_on_pop_locked(
         &self,
         st: &mut InvocationState,
@@ -902,7 +906,8 @@ impl InvocationTrace {
         }
     }
 
-    /// The index of the activation the response ends.
+    /// The index of the activation the response ends; `None` when no activation matches or
+    /// several do.
     pub(crate) fn finished_task_locked(
         &self,
         st: &mut InvocationState,
@@ -1187,8 +1192,10 @@ impl InvocationTrace {
         purged
     }
 
-    /// Marks the runs started after tool call `call` as done (attribution: no activation has a
-    /// fiber).
+    /// Marks the runs started after tool call `call` as done (attribution): only open
+    /// activations that started after `call`, have a fiber and run on the current fiber are
+    /// marked; activations with fiber id 0 are skipped, and the method returns early when the
+    /// current fiber id is 0.
     pub(crate) fn mark_tool_runs_done_locked(&self, st: &mut InvocationState, call: &SpanRef) {
         let call_seq = call.lock().seq;
         let mut goid = 0;

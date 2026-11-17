@@ -268,14 +268,14 @@ fn unexpected_type(field: &Field) -> Error {
 /// logging `ERROR: Failed to get record batch payload: …` / `ERROR: Failed to write payload: …`
 /// through `logger`.
 ///
-/// The bytes are arrow-rs's encoding of the message, which differs from other Arrow
-/// implementations' (such as arrow-go's) in layout but not in content. Both write 8-byte-aligned
-/// buffers with the same field nodes, buffer order and body bytes, but the flatbuffer header is
-/// laid out differently (same length except for an empty batch: 8 bytes shorter), and a
-/// validity bitmap is `ceil(rows / 8)` bytes where arrow-go writes its builder's allocation (4
-/// or 64 bytes for small batches), so a message is at most 63 bytes per NULL-bearing column
-/// shorter than arrow-go's — the serialized request size the stream writer compares with the
-/// 9 MiB limit follows.
+/// The bytes are arrow-rs's encoding of the message, which differs from other Arrow IPC
+/// writers' in layout but not in content. Both write 8-byte-aligned buffers with the same field
+/// nodes, buffer order and body bytes, but the flatbuffer header is laid out differently (same
+/// length except for an empty batch: 8 bytes shorter), and a validity bitmap is
+/// `ceil(rows / 8)` bytes where other writers use their builder's allocation (4 or 64 bytes
+/// for small batches), so a message is at most 63 bytes per NULL-bearing column shorter than
+/// theirs — the serialized request size the stream writer compares with the 9 MiB limit
+/// follows.
 pub fn serialize_record(record: &RecordBatch, logger: Option<&dyn Logger>) -> Option<Vec<u8>> {
     // Pad each body buffer to 8 bytes (arrow-rs's default is 64), as other Arrow
     // implementations do; metadata version V5.

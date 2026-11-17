@@ -476,7 +476,9 @@ pub fn as_bigquery_agent_analytics_plugin(p: &Plugin) -> Option<BigQueryAgentAna
 /// Creates the plugin with the default config for the table.
 ///
 /// Register the plugin before any plugin whose callbacks return replacement events, model
-/// responses, tool results or agent content, so that it still sees the events they replace.
+/// responses, tool results or agent content: plugins run in registration order and the first
+/// callback that returns a replacement ends the chain for that event, so a plugin registered
+/// after it never sees the event.
 ///
 /// # Errors
 ///

@@ -172,7 +172,8 @@ pub(crate) struct StreamState {
     pub(crate) stream_ctx: Option<Context>,
     /// The stream offset can no longer be trusted (an earlier batch's outcome is unknown).
     pub(crate) offset_desynced: bool,
-    /// The stream was just rotated.
+    /// The stream was just rotated and no request has succeeded on it yet (cleared by the first
+    /// confirmed batch); a failure in that state arms the rotation cooldown.
     pub(crate) freshly_rotated: bool,
     /// The earliest instant of the next rotation; `None` means no cooldown.
     pub(crate) rotate_retry_at: Option<Instant>,

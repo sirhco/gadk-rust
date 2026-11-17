@@ -403,7 +403,7 @@ impl WriteClient {
         Ok(())
     }
 
-    /// One unary attempt under `ctx` : the request with this call's metadata
+    /// One unary attempt under `ctx`: the request with this call's metadata
     /// and `grpc-timeout`, ended by `ctx` with its status.
     async fn unary<Req, Resp, F, Fut>(
         &self,

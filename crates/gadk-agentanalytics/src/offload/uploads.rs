@@ -540,8 +540,9 @@ impl BatchProcessor {
     }
 
     /// [`gcs_object_path_from_clean_prefix`] with the effective prefix resolved at construction
-    /// (cleaned per call when unresolved, as in struct literals), the row's timestamp (now when
-    /// it has none), ids and the payload's extension.
+    /// (a processor built without the constructor, such as in a test, cleans the configured
+    /// prefix on each call), the row's timestamp (now when it has none), ids and the payload's
+    /// extension.
     pub(crate) fn object_path(&self, row: &Row, u: &PendingUpload) -> String {
         let ts = row
             .timestamp(TIMESTAMP_FIELD)
@@ -772,9 +773,9 @@ pub(crate) fn text_preview(text: &str) -> String {
     format!("{cut}{TEXT_PREVIEW_SUFFIX}")
 }
 
-/// The standard MIME table by type, for the types [`MIME_EXTENSIONS`] does not fix: the first of
-/// each type's sorted extensions (all safe), which is what a host without MIME tables answers
-/// first.
+/// Extensions of further common MIME types (such as `application/gzip` → `.gz`) that
+/// [`MIME_EXTENSIONS`] does not fix, sorted by type: for each type, the alphabetically first of
+/// its standard extensions (all safe).
 const GO_BUILTIN_MIME_EXTENSIONS: [(&str, &str); 35] = [
     ("application/gzip", ".gz"),
     ("application/msword", ".doc"),
@@ -1120,11 +1121,11 @@ pub(crate) fn safe_upload_error_summary(err: &Error) -> String {
     format!("error type {}", go_error_type(err))
 }
 
-/// The error type name reported in the summary (`error type <name>`), by the [`Error`] variant,
-/// in the spelling an ADK server logs, so summaries match its logs (for example
-/// `*errors.errorString` for a message, `*googleapi.Error` for an API error). An `Error::Other`
-/// (a custom offloader's own error type) or an Arrow error is `error`, as Rust has no runtime
-/// type name for a `Box<dyn Error>`.
+/// The error type name reported in the summary (`error type <name>`), chosen by the [`Error`]
+/// variant. The names are the ones an ADK server writes into these summaries, so they match
+/// across implementations; the literals are in the match below. An `Error::Other` (a custom
+/// offloader's own error type) or an Arrow error is `error`, as Rust has no runtime type name
+/// for a `Box<dyn Error>`.
 fn go_error_type(err: &Error) -> &'static str {
     match err {
         Error::Message(_) => "*errors.errorString",
