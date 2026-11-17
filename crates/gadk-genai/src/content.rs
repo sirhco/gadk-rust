@@ -229,8 +229,8 @@ pub struct FunctionResponseFileData {
     pub display_name: String,
 }
 
-/// Omission rule for an optional [`MediaProcessing`]: unset or `""` is omitted (a decoded `""`
-/// is `Some(MediaProcessing::Unknown(""))`).
+/// Omission rule for an optional [`MediaProcessing`]: unset or `""` is omitted (a decoded `""` is
+/// `Some(MediaProcessing::Unknown(""))`).
 fn media_processing_is_zero(v: &Option<MediaProcessing>) -> bool {
     v.as_ref().is_none_or(|m| m.as_str().is_empty())
 }
@@ -286,8 +286,8 @@ pub struct Blob {
 /// Start and end offsets (and optional frame rate) of a video part.
 ///
 /// Offsets are [`TimeDelta`] values; on the wire they are duration strings, encoded as whole
-/// seconds (`"3s"`), zero offsets omitted, and a non-zero end offset forces
-/// `"startOffset": "0s"` when the start offset is zero.
+/// seconds (`"3s"`), zero offsets omitted, and a non-zero end offset forces `"startOffset": "0s"`
+/// when the start offset is zero.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "VideoMetadataWire", into = "VideoMetadataWire")]
 pub struct VideoMetadata {
@@ -348,8 +348,8 @@ pub struct WordInfo {
 
 /// A transcription of audio, with its language and optional word-level detail.
 ///
-/// Offsets are [`TimeDelta`] values; on the wire they are duration strings (whole seconds,
-/// zero offsets omitted).
+/// Offsets are [`TimeDelta`] values; on the wire they are duration strings (whole seconds, zero
+/// offsets omitted).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "TranscriptionWire", into = "TranscriptionWire")]
 pub struct Transcription {

@@ -53,8 +53,8 @@ impl StdError for GoWrapped {
 }
 
 /// The text of the OS error `err`: the C library's message for the OS error code with its first
-/// letter lowercased (e.g. `no such file or directory`, `permission denied`, `is a
-/// directory`); an error without an OS code keeps its own text.
+/// letter lowercased (e.g. `no such file or directory`, `permission denied`,
+/// `is a directory`); an error without an OS code keeps its own text.
 pub fn go_errno_text(err: &io::Error) -> String {
     let Some(code) = err.raw_os_error() else {
         return err.to_string();

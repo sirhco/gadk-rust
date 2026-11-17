@@ -26,8 +26,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::BTreeMap;
 
 crate::string_enum!(
-    /// The reason why the model stopped generating tokens. If empty,
-    /// the model has not stopped generating the tokens.
+    /// The reason why the model stopped generating tokens. If empty, the model has not stopped
+    /// generating the tokens.
     FinishReason {
         Unspecified => "FINISH_REASON_UNSPECIFIED",
         Stop => "STOP",
@@ -63,8 +63,7 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// The severity of harm for this category. This enum is not
-    /// supported in Gemini API.
+    /// The severity of harm for this category. This enum is not supported in Gemini API.
     HarmSeverity {
         Unspecified => "HARM_SEVERITY_UNSPECIFIED",
         Negligible => "HARM_SEVERITY_NEGLIGIBLE",
@@ -100,8 +99,7 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// The traffic type for this request. This enum is not supported
-    /// in Gemini API.
+    /// The traffic type for this request. This enum is not supported in Gemini API.
     TrafficType {
         Unspecified => "TRAFFIC_TYPE_UNSPECIFIED",
         OnDemand => "ON_DEMAND",
@@ -125,8 +123,7 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// The stage of the underlying model. This enum is not supported in
-    /// Vertex AI.
+    /// The stage of the underlying model. This enum is not supported in Vertex AI.
     ModelStage {
         Unspecified => "MODEL_STAGE_UNSPECIFIED",
         UnstableExperimental => "UNSTABLE_EXPERIMENTAL",
@@ -139,8 +136,7 @@ crate::string_enum!(
     }
 );
 
-/// A citation for a piece of generatedcontent. This data
-/// type is not supported in Gemini API.
+/// A citation for a piece of generatedcontent. This data type is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Citation {
@@ -158,8 +154,7 @@ pub struct Citation {
     pub uri: String,
 }
 
-/// Citation information when the model quotes
-/// another source.
+/// Citation information when the model quotes another source.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CitationMetadata {
@@ -167,8 +162,7 @@ pub struct CitationMetadata {
     pub citations: Vec<Citation>,
 }
 
-/// Author
-/// attribution for a photo or review.
+/// Author attribution for a photo or review.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GroundingChunkMapsPlaceAnswerSourcesAuthorAttribution {
@@ -180,8 +174,7 @@ pub struct GroundingChunkMapsPlaceAnswerSourcesAuthorAttribution {
     pub uri: String,
 }
 
-/// Encapsulates a
-/// review snippet.
+/// Encapsulates a review snippet.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GroundingChunkMapsPlaceAnswerSourcesReviewSnippet {
@@ -201,9 +194,8 @@ pub struct GroundingChunkMapsPlaceAnswerSourcesReviewSnippet {
     pub title: String,
 }
 
-/// The sources that were used to
-/// generate the place answer. This includes review snippets and photos that were used to
-/// generate the answer, as well as URIs to flag content.
+/// The sources that were used to generate the place answer. This includes review snippets and
+/// photos that were used to generate the answer, as well as URIs to flag content.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GroundingChunkMapsPlaceAnswerSources {
@@ -215,8 +207,7 @@ pub struct GroundingChunkMapsPlaceAnswerSources {
     pub review_snippets: Vec<GroundingChunkMapsPlaceAnswerSourcesReviewSnippet>,
 }
 
-/// Route information from Google Maps. This
-/// data type is not supported in Gemini API.
+/// Route information from Google Maps. This data type is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GroundingChunkMapsRoute {
@@ -232,9 +223,9 @@ pub struct GroundingChunkMapsRoute {
     pub encoded_polyline: String,
 }
 
-/// A `Maps` chunk is a piece of evidence that
-/// comes from Google Maps. It contains information about a place, such as its name, address,
-/// and reviews. This is used to provide the user with rich, location-based information.
+/// A `Maps` chunk is a piece of evidence that comes from Google Maps. It contains information about
+/// a place, such as its name, address, and reviews. This is used to provide the user with rich,
+/// location-based information.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GroundingChunkMaps {
@@ -252,10 +243,9 @@ pub struct GroundingChunkMaps {
     pub route: Option<GroundingChunkMapsRoute>,
 }
 
-/// An `Image` chunk is a piece of evidence that
-/// comes from an image search result. It contains the URI of the image search result and the
-/// URI of the image. This is used to provide the user with a link to the source of the
-/// information.
+/// An `Image` chunk is a piece of evidence that comes from an image search result. It contains the
+/// URI of the image search result and the URI of the image. This is used to provide the user with a
+/// link to the source of the information.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GroundingChunkImage {
@@ -269,8 +259,8 @@ pub struct GroundingChunkImage {
     pub domain: String,
 }
 
-/// Represents where the chunk starts and ends in the
-/// document. This data type is not supported in Gemini API.
+/// Represents where the chunk starts and ends in the document. This data type is not supported in
+/// Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RAGChunkPageSpan {
@@ -280,8 +270,8 @@ pub struct RAGChunkPageSpan {
     pub last_page: i32,
 }
 
-/// A RAGChunk includes the content of a chunk of a RAGFile,
-/// and associated metadata. This data type is not supported in Gemini API.
+/// A RAGChunk includes the content of a chunk of a RAGFile, and associated metadata. This data type
+/// is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RAGChunk {
@@ -295,8 +285,7 @@ pub struct RAGChunk {
     pub file_id: String,
 }
 
-/// A list of string values. This data type
-/// is not supported in Vertex AI.
+/// A list of string values. This data type is not supported in Vertex AI.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GroundingChunkStringList {
@@ -304,8 +293,7 @@ pub struct GroundingChunkStringList {
     pub values: Vec<String>,
 }
 
-/// User provided metadata about the
-/// GroundingFact. This data type is not supported in Vertex AI.
+/// User provided metadata about the GroundingFact. This data type is not supported in Vertex AI.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GroundingChunkCustomMetadata {
@@ -319,9 +307,8 @@ pub struct GroundingChunkCustomMetadata {
     pub string_value: String,
 }
 
-/// Context retrieved from a data
-/// source to ground the model's response. This is used when a retrieval tool fetches
-/// information from a user-provided corpus or a public dataset.
+/// Context retrieved from a data source to ground the model's response. This is used when a
+/// retrieval tool fetches information from a user-provided corpus or a public dataset.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GroundingChunkRetrievedContext {
@@ -345,9 +332,9 @@ pub struct GroundingChunkRetrievedContext {
     pub media_id: String,
 }
 
-/// A `Web` chunk is a piece of evidence that comes
-/// from a web page. It contains the URI of the web page, the title of the page, and the domain
-/// of the page. This is used to provide the user with a link to the source of the information.
+/// A `Web` chunk is a piece of evidence that comes from a web page. It contains the URI of the web
+/// page, the title of the page, and the domain of the page. This is used to provide the user with a
+/// link to the source of the information.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GroundingChunkWeb {
@@ -359,10 +346,9 @@ pub struct GroundingChunkWeb {
     pub uri: String,
 }
 
-/// A piece of evidence that supports a claim made by
-/// the model. This is used to show a citation for a claim made by the model. When grounding is
-/// enabled, the model returns a `GroundingChunk` that contains a reference to the source of the
-/// information.
+/// A piece of evidence that supports a claim made by the model. This is used to show a citation for
+/// a claim made by the model. When grounding is enabled, the model returns a `GroundingChunk` that
+/// contains a reference to the source of the information.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GroundingChunk {
@@ -404,8 +390,7 @@ pub struct GroundingSupport {
     pub rendered_parts: Vec<i32>,
 }
 
-/// Metadata returned to client when grounding is
-/// enabled.
+/// Metadata returned to client when grounding is enabled.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RetrievalMetadata {
@@ -413,8 +398,7 @@ pub struct RetrievalMetadata {
     pub google_search_dynamic_retrieval_score: f32,
 }
 
-/// The entry point used to search for grounding
-/// sources.
+/// The entry point used to search for grounding sources.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchEntryPoint {
@@ -428,9 +412,8 @@ pub struct SearchEntryPoint {
     pub sdk_blob: Bytes,
 }
 
-/// A URI that can be used to flag
-/// a place or review for inappropriate content. This is populated only when the grounding
-/// source is Google Maps. This data type is not supported in Gemini API.
+/// A URI that can be used to flag a place or review for inappropriate content. This is populated
+/// only when the grounding source is Google Maps. This data type is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GroundingMetadataSourceFlaggingURI {
@@ -464,8 +447,7 @@ pub struct GroundingMetadata {
     pub source_flagging_uris: Vec<GroundingMetadataSourceFlaggingURI>,
 }
 
-/// A single token and its associated log
-/// probability.
+/// A single token and its associated log probability.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogprobsResultCandidate {
@@ -477,9 +459,8 @@ pub struct LogprobsResultCandidate {
     pub token_id: i32,
 }
 
-/// A list of the top candidate tokens and
-/// their log probabilities at each decoding step. This can be used to see what other tokens the
-/// model considered.
+/// A list of the top candidate tokens and their log probabilities at each decoding step. This can
+/// be used to see what other tokens the model considered.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogprobsResultTopCandidates {
@@ -487,12 +468,11 @@ pub struct LogprobsResultTopCandidates {
     pub candidates: Vec<LogprobsResultCandidate>,
 }
 
-/// The log probabilities of the tokens generated by
-/// the model. This is useful for understanding the model's confidence in its predictions and
-/// for debugging. For example, you can use log probabilities to identify when the model is
-/// making a less confident prediction or to explore alternative responses that the model
-/// considered. A low log probability can also indicate that the model is "hallucinating" or
-/// generating factually incorrect information.
+/// The log probabilities of the tokens generated by the model. This is useful for understanding the
+/// model's confidence in its predictions and for debugging. For example, you can use log
+/// probabilities to identify when the model is making a less confident prediction or to explore
+/// alternative responses that the model considered. A low log probability can also indicate that
+/// the model is "hallucinating" or generating factually incorrect information.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogprobsResult {
@@ -504,8 +484,8 @@ pub struct LogprobsResult {
     pub log_probability_sum: Option<f32>,
 }
 
-/// A safety rating for a piece of content. The safety
-/// rating contains the harm category and the harm probability level.
+/// A safety rating for a piece of content. The safety rating contains the harm category and the
+/// harm probability level.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SafetyRating {
@@ -535,8 +515,8 @@ pub struct URLMetadata {
     pub url_retrieval_status: Option<URLRetrievalStatus>,
 }
 
-/// Metadata returned when the model uses the
-/// `url_context` tool to get information from a user-provided URL.
+/// Metadata returned when the model uses the `url_context` tool to get information from a
+/// user-provided URL.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct URLContextMetadata {
@@ -578,9 +558,8 @@ pub struct Candidate {
     pub continuation_token: Option<Bytes>,
 }
 
-/// Content filter results for a
-/// prompt sent in the request. Note: This is sent only in the first stream chunk and only if no
-/// candidates were generated due to content violations.
+/// Content filter results for a prompt sent in the request. Note: This is sent only in the first
+/// stream chunk and only if no candidates were generated due to content violations.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateContentResponsePromptFeedback {
@@ -592,9 +571,8 @@ pub struct GenerateContentResponsePromptFeedback {
     pub safety_ratings: Vec<SafetyRating>,
 }
 
-/// Represents a breakdown of token usage by
-/// modality. This message is used in CountTokensResponse and
-/// GenerateContentResponse.UsageMetadata to provide a detailed view of how many tokens are used
+/// Represents a breakdown of token usage by modality. This message is used in CountTokensResponse
+/// and GenerateContentResponse.UsageMetadata to provide a detailed view of how many tokens are used
 /// by each modality (e.g., text, image, video) in a request. This is particularly useful for
 /// multimodal models, allowing you to track and manage token consumption for billing and quota
 /// purposes.
@@ -607,9 +585,9 @@ pub struct ModalityTokenCount {
     pub token_count: i32,
 }
 
-/// Usage metadata about the
-/// content generation request and response. This message provides a detailed breakdown of token
-/// usage and other relevant metrics. This data type is not supported in Gemini API.
+/// Usage metadata about the content generation request and response. This message provides a
+/// detailed breakdown of token usage and other relevant metrics. This data type is not supported in
+/// Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateContentResponseUsageMetadata {
@@ -637,9 +615,8 @@ pub struct GenerateContentResponseUsageMetadata {
     pub traffic_type: Option<TrafficType>,
 }
 
-/// The status of the underlying model. This is used to
-/// indicate the stage of the underlying model and the retirement time if applicable. This data
-/// type is not supported in Vertex AI.
+/// The status of the underlying model. This is used to indicate the stage of the underlying model
+/// and the retirement time if applicable. This data type is not supported in Vertex AI.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelStatus {
@@ -651,8 +628,7 @@ pub struct ModelStatus {
     pub retirement_time: Option<DateTime<Utc>>,
 }
 
-/// Response message for
-/// PredictionService.GenerateContent.
+/// Response message for PredictionService.GenerateContent.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateContentResponse {
@@ -672,9 +648,9 @@ pub struct GenerateContentResponse {
     pub model_status: Option<ModelStatus>,
 }
 
-/// A calendar date encoded as a `{"year": .., "month": .., "day": ..}` object with zero
-/// components omitted. Decoding a non-empty object without `year` is an error; `{}` and `null`
-/// decode to the zero date, which fields omit on encode.
+/// A calendar date encoded as a `{"year": .., "month": .., "day": ..}` object with zero components
+/// omitted. Decoding a non-empty object without `year` is an error; `{}` and `null` decode to the
+/// zero date, which fields omit on encode.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct CivilDate {
     pub year: i32,

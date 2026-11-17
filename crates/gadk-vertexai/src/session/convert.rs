@@ -14,8 +14,8 @@
 // limitations under the License.
 
 //! Event ↔ `SessionEvent` conversions, with the raw-event and struct helpers. Every error
-//! carries the text an ADK server shows, already wrapped with the prefixes of the append and
-//! list-events calls (e.g. `failed to convert event actions: …`).
+//! text is byte-identical to an ADK server's, already wrapped with the prefixes of the append
+//! and list-events calls (e.g. `failed to convert event actions: …`).
 //!
 //! The `SessionEvent` side is the protojson form of the Vertex AI protobuf messages as JSON
 //! values: camelCase names, enum numbers, standard base64 bytes, unpopulated scalars and
@@ -193,8 +193,8 @@ pub(crate) fn event_from_raw_event(raw: &Value) -> Result<Event, BoxError> {
 /// # Errors
 ///
 /// A value that is not an object or `null` fails with protojson's text, e.g.
-/// `failed to unmarshal JSON data to structpb: proto: syntax error (line 1:1): unexpected
-/// token "hello"`.
+/// `failed to unmarshal JSON data to structpb: ` followed by
+/// `proto: syntax error (line 1:1): unexpected token "hello"`.
 pub(crate) fn to_struct(value: &Value) -> Result<Value, BoxError> {
     let token = match value {
         Value::Null => return Ok(json!({})),

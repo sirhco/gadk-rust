@@ -32,8 +32,7 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// Enum that controls the safety filter level for
-    /// objectionable content.
+    /// Enum that controls the safety filter level for objectionable content.
     SafetyFilterLevel {
         BlockLowAndAbove => "BLOCK_LOW_AND_ABOVE",
         BlockMediumAndAbove => "BLOCK_MEDIUM_AND_ABOVE",
@@ -43,8 +42,7 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// Enum that specifies the language of the text in the
-    /// prompt.
+    /// Enum that specifies the language of the text in the prompt.
     ImagePromptLanguage {
         Auto => "auto",
         En => "en",
@@ -136,8 +134,7 @@ pub struct Image {
     pub mime_type: String,
 }
 
-/// Safety attributes of a GeneratedImage or the
-/// user-provided prompt.
+/// Safety attributes of a GeneratedImage or the user-provided prompt.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SafetyAttributes {

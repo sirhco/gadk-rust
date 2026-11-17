@@ -93,8 +93,8 @@ impl ReasoningEngineClient {
     ///
     /// # Errors
     ///
-    /// The Application Default Credentials error, unwrapped (callers add the `cannot create
-    /// ReasoningEngineClient: ` prefix).
+    /// The Application Default Credentials error, unwrapped (callers add the
+    /// `cannot create ReasoningEngineClient: ` prefix).
     pub fn new(
         location: &str,
         opts: ReasoningEngineOptions,
@@ -122,8 +122,8 @@ impl ReasoningEngineClient {
     ///
     /// # Errors
     ///
-    /// A [`VertexError`](crate::VertexError) for a non-2xx status (displayed as `rpc error:
-    /// code = … desc = …`), or the transport or JSON error.
+    /// A [`VertexError`](crate::VertexError) for a non-2xx status (displayed as
+    /// `rpc error: code = … desc = …`), or the transport or JSON error.
     pub async fn create(
         &self,
         parent: &str,
@@ -176,10 +176,10 @@ impl ReasoningEngineClient {
     ///
     /// # Errors
     ///
-    /// The operation's error as a [`VertexError`](crate::VertexError) (`rpc error: code =
-    /// … desc = …`), a failed poll's error, or `unsupported result type
-    /// <nil>: <nil>` when the operation is done without a response. Callers add the
-    /// `operation failed: ` prefix.
+    /// The operation's error as a [`VertexError`](crate::VertexError)
+    /// (`rpc error: code = … desc = …`), a failed poll's error, or
+    /// `unsupported result type <nil>: <nil>` when the operation is done without a response.
+    /// Callers add the `operation failed: ` prefix.
     pub async fn wait(&self, op: Value) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
         let mut done = self.client.wait_operation(op).await?;
         match done.get_mut("response").map(Value::take) {

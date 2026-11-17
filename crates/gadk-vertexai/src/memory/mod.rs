@@ -114,9 +114,9 @@ impl VertexAiMemoryService {
     ///
     /// # Errors
     ///
-    /// [`MemoryError::Backend`] with the text `newVertexAIClient failed:
-    /// aiplatform.NewMemoryBankClient failed: {adc error}` when Application Default Credentials
-    /// cannot be built.
+    /// [`MemoryError::Backend`] with the text
+    /// `newVertexAIClient failed: aiplatform.NewMemoryBankClient failed: {adc error}`
+    /// when Application Default Credentials cannot be built.
     pub fn new(config: VertexAiMemoryServiceConfig) -> Result<Self, MemoryError> {
         // The default endpoint is the location's host, served over HTTPS.
         let default_endpoint = format!("https://{}", host_url(&config.engine.location));

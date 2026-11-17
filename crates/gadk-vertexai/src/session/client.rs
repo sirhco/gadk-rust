@@ -85,8 +85,9 @@ impl SessionClient {
     ///
     /// # Errors
     ///
-    /// [`SessionError::InvalidRequest`] with the text `app name "{app}" is not valid. It
-    /// should be the full ReasoningEngine resource name or the reasoning engine numeric ID`.
+    /// [`SessionError::InvalidRequest`] with the message `app name "{app}" is not valid.`
+    /// followed by a space and
+    /// `It should be the full ReasoningEngine resource name or the reasoning engine numeric ID`.
     pub(crate) fn reasoning_engine_id(&self, app_name: &str) -> Result<String, SessionError> {
         if !self.reasoning_engine.is_empty() {
             return Ok(self.reasoning_engine.clone());
@@ -255,7 +256,7 @@ impl SessionClient {
         let mut query = Vec::new();
         // The filter is added only when `after` is set and not the zero time.
         if let Some(after) = after.filter(|t| *t != zero_time()) {
-            // The UTC time as `2006-01-02T15:04:05+00:00`, quoted.
+            // The UTC time as RFC 3339 with seconds and a `+00:00` offset, quoted.
             let formatted = after.format("%Y-%m-%dT%H:%M:%S+00:00").to_string();
             query.push(("filter", format!("timestamp>={}", go_quote(&formatted))));
         }
@@ -441,8 +442,9 @@ pub(crate) fn session_id_by_session_name(name: &str) -> Result<String, String> {
 ///
 /// # Errors
 ///
-/// The texts `invalid operation name "{name}": missing "/sessions/"`, `… missing
-/// "/operations/"`, `… structure malformed or segments out of order`, `… empty session ID`.
+/// The texts `invalid operation name "{name}": missing "/sessions/"`,
+/// `… missing "/operations/"`, `… structure malformed or segments out of order` and
+/// `… empty session ID`.
 pub(crate) fn session_id_by_operation_name(name: &str) -> Result<String, String> {
     const SESSION_PREFIX: &str = "/sessions/";
     const OPS_SUFFIX: &str = "/operations/";

@@ -31,8 +31,8 @@ use crate::Event;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
-/// The token an [`LlmSummarizer`] prompt template must contain. It is replaced with the
-/// rendered event transcript.
+/// The token an [`LlmSummarizer`] prompt template must contain. It is replaced with the rendered
+/// event transcript.
 pub const CONVERSATION_HISTORY_PLACEHOLDER: &str = "{conversation_history}";
 
 /// The default prompt, as a single template with the placeholder.
@@ -237,8 +237,8 @@ impl LlmSummarizer {
         lines.join("\n")
     }
 
-    /// Caps `text` at `cap` characters (negative =
-    /// no cap), ending with `... [truncated N chars]` when cut.
+    /// Caps `text` at `cap` characters (negative = no cap), ending with `... [truncated N chars]`
+    /// when cut.
     pub(crate) fn truncate_to(&self, text: &str, cap: i32) -> String {
         let Ok(cap) = usize::try_from(cap) else {
             return text.to_owned();
@@ -254,8 +254,7 @@ impl LlmSummarizer {
         format!("{kept}... [truncated {} chars]", n - cap)
     }
 
-    /// The transcript within the budget, after
-    /// one shrink pass; refused when it still does not fit.
+    /// The transcript within the budget, after one shrink pass; refused when it still does not fit.
     pub(crate) fn render_transcript(&self, events: &[Event]) -> Result<String, BoxError> {
         let mut transcript = self.format_events(events, self.max_tool_content_chars);
         let mut size = rune_count(&transcript);
@@ -285,8 +284,7 @@ impl LlmSummarizer {
         .into())
     }
 
-    /// The longest author (in bytes) plus ": "
-    /// and the newline, plus the truncation-suffix budget.
+    /// The longest author (in bytes) plus ": " and the newline, plus the truncation-suffix budget.
     fn per_part_overhead(&self, events: &[Event]) -> i32 {
         let longest = events.iter().map(|ev| ev.author.len()).max().unwrap_or(0);
         i32::try_from(longest)
@@ -347,8 +345,7 @@ fn rune_count(s: &str) -> i32 {
     i32::try_from(s.chars().count()).unwrap_or(i32::MAX)
 }
 
-/// `{k1: v1, k2: v2}` with sorted keys and `%v`-style values; `""` when
-/// empty.
+/// `{k1: v1, k2: v2}` with sorted keys and `%v`-style values; `""` when empty.
 fn stringify(v: &serde_json::Map<String, serde_json::Value>) -> String {
     if v.is_empty() {
         return String::new();

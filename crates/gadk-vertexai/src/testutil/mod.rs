@@ -88,8 +88,9 @@ pub fn full_method(short: &str) -> String {
 ///
 /// - `POST /v1beta1/{parent}/sessions[?sessionId=]`, body Session → `CreateSession`
 ///   `{parent, sessionId?, session: body}`;
-/// - `GET /v1beta1/{parent}/sessions?…` → `ListSessions` `{parent, filter?, orderBy?,
-///   pageSize?, pageToken?}`; `GET /v1beta1/{parent}/events?…` → `ListEvents` (same fields);
+/// - `GET /v1beta1/{parent}/sessions?…` → `ListSessions`
+///   `{parent, filter?, orderBy?, pageSize?, pageToken?}`; `GET /v1beta1/{parent}/events?…` →
+///   `ListEvents` (same fields);
 /// - `GET /v1beta1/{name}` → `GetSession` `{name}`; `DELETE /v1beta1/{name}` →
 ///   `DeleteSession` `{name}`;
 /// - `POST /v1beta1/{name}:appendEvent`, body SessionEvent → `AppendEvent` `{name, event: body}`;

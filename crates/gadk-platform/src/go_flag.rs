@@ -14,9 +14,9 @@
 // limitations under the License.
 
 //! A command-line flag parser: a [`FlagSet`] that reports errors instead of exiting, with
-//! string, int, int64, bool, duration, func and bool-func flags. The parsing rules, error
-//! texts, the usage message written on failure and the `print_defaults` layout are
-//! byte-identical to the flag handling of an ADK launcher.
+//! string, int, int64, bool, duration, func and bool-func flags. The flag-parsing rules and
+//! error texts, the usage message written on failure and the `print_defaults` layout are
+//! byte-identical to an ADK launcher's.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;

@@ -89,7 +89,7 @@ pub fn compare_by_last_update(a: &dyn Session, b: &dyn Session) -> std::cmp::Ord
         .then_with(|| a.id().cmp(b.id()))
 }
 
-/// A key-value store.
+/// A key-value store of JSON values: read, write and list the state of a session.
 pub trait State: Send + Sync {
     /// The value for `key`; [`SessionError::StateKeyNotExist`] if absent.
     fn get(&self, key: &str) -> Result<Value, SessionError>;
@@ -99,7 +99,7 @@ pub trait State: Send + Sync {
     fn all(&self) -> Vec<(String, Value)>;
 }
 
-/// A read-only key-value store.
+/// A read-only view of a key-value store of JSON values.
 pub trait ReadonlyState: Send + Sync {
     /// The value for `key`; [`SessionError::StateKeyNotExist`] if absent.
     fn get(&self, key: &str) -> Result<Value, SessionError>;

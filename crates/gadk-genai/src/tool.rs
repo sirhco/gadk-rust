@@ -36,8 +36,7 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// The location of the API key. This enum is not supported
-    /// in Gemini API.
+    /// The location of the API key. This enum is not supported in Gemini API.
     HTTPElementLocation {
         HttpInUnspecified => "HTTP_IN_UNSPECIFIED",
         HttpInQuery => "HTTP_IN_QUERY",
@@ -49,8 +48,7 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// The API spec that the external API implements. This enum is not
-    /// supported in Gemini API.
+    /// The API spec that the external API implements. This enum is not supported in Gemini API.
     APISpec {
         Unspecified => "API_SPEC_UNSPECIFIED",
         SimpleSearch => "SIMPLE_SEARCH",
@@ -83,8 +81,8 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// Sites with confidence level chosen & above this value
-    /// will be blocked from the search results. This enum is not supported in Gemini API.
+    /// Sites with confidence level chosen & above this value will be blocked from the search
+    /// results. This enum is not supported in Gemini API.
     PhishBlockThreshold {
         Unspecified => "PHISH_BLOCK_THRESHOLD_UNSPECIFIED",
         BlockLowAndAbove => "BLOCK_LOW_AND_ABOVE",
@@ -97,9 +95,8 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// Specifies the function Behavior. If not specified, the system
-    /// keeps the current function call behavior. This field is currently only supported by the
-    /// BidiGenerateContent method.
+    /// Specifies the function Behavior. If not specified, the system keeps the current function
+    /// call behavior. This field is currently only supported by the BidiGenerateContent method.
     Behavior {
         Unspecified => "UNSPECIFIED",
         Blocking => "BLOCKING",
@@ -108,8 +105,7 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// The mode of the predictor to be used in dynamic
-    /// retrieval.
+    /// The mode of the predictor to be used in dynamic retrieval.
     DynamicRetrievalConfigMode {
         Unspecified => "MODE_UNSPECIFIED",
         Dynamic => "MODE_DYNAMIC",
@@ -127,8 +123,7 @@ crate::string_enum!(
     }
 );
 
-/// Config for authentication with API key. This data
-/// type is not supported in Gemini API.
+/// Config for authentication with API key. This data type is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct APIKeyConfig {
@@ -142,8 +137,7 @@ pub struct APIKeyConfig {
     pub name: String,
 }
 
-/// Config for Google Service
-/// Account Authentication. This data type is not supported in Gemini API.
+/// Config for Google Service Account Authentication. This data type is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthConfigGoogleServiceAccountConfig {
@@ -151,8 +145,7 @@ pub struct AuthConfigGoogleServiceAccountConfig {
     pub service_account: String,
 }
 
-/// Config for HTTP Basic
-/// Authentication. This data type is not supported in Gemini API.
+/// Config for HTTP Basic Authentication. This data type is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthConfigHTTPBasicAuthConfig {
@@ -160,8 +153,7 @@ pub struct AuthConfigHTTPBasicAuthConfig {
     pub credential_secret: String,
 }
 
-/// Config for user oauth. This data type is not
-/// supported in Gemini API.
+/// Config for user oauth. This data type is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthConfigOauthConfig {
@@ -171,8 +163,7 @@ pub struct AuthConfigOauthConfig {
     pub service_account: String,
 }
 
-/// Config for user OIDC auth. This data type is
-/// not supported in Gemini API.
+/// Config for user OIDC auth. This data type is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthConfigOidcConfig {
@@ -202,22 +193,20 @@ pub struct AuthConfig {
     pub oidc_config: Option<AuthConfigOidcConfig>,
 }
 
-/// Grounding with Google Maps Places data (e.g.
-/// QueryPlaces). This is the default Google Maps grounding type when no other type is
-/// specified. This data type is not supported in Gemini API.
+/// Grounding with Google Maps Places data (e.g. QueryPlaces). This is the default Google Maps
+/// grounding type when no other type is specified. This data type is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GoogleMapsPlaces {}
 
-/// Grounding with Google Maps Routing APIs
-/// (ComputeRoutes and SearchAlongRoute). This data type is not supported in Gemini API.
+/// Grounding with Google Maps Routing APIs (ComputeRoutes and SearchAlongRoute). This data type is
+/// not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GoogleMapsRouting {}
 
-/// Defines the types of Google Maps
-/// grounding that can be enabled and their configurations. This data type is not supported in
-/// Gemini API.
+/// Defines the types of Google Maps grounding that can be enabled and their configurations. This
+/// data type is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GoogleMapsGroundingTypes {
@@ -239,8 +228,7 @@ pub struct GoogleMaps {
     pub grounding_types: Option<GoogleMapsGroundingTypes>,
 }
 
-/// The API secret. This data type is not
-/// supported in Gemini API.
+/// The API secret. This data type is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct APIAuthAPIKeyConfig {
@@ -250,9 +238,9 @@ pub struct APIAuthAPIKeyConfig {
     pub api_key_string: String,
 }
 
-/// The generic reusable API auth config. Deprecated. Please
-/// use AuthConfig (google/cloud/aiplatform/master/auth.proto) instead. This data type is not
-/// supported in Gemini API.
+/// The generic reusable API auth config. Deprecated. Please use AuthConfig
+/// (google/cloud/aiplatform/master/auth.proto) instead. This data type is not supported in Gemini
+/// API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct APIAuth {
@@ -260,8 +248,8 @@ pub struct APIAuth {
     pub api_key_config: Option<APIAuthAPIKeyConfig>,
 }
 
-/// The search parameters to use for
-/// the ELASTIC_SEARCH spec. This data type is not supported in Gemini API.
+/// The search parameters to use for the ELASTIC_SEARCH spec. This data type is not supported in
+/// Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalAPIElasticSearchParams {
@@ -273,15 +261,15 @@ pub struct ExternalAPIElasticSearchParams {
     pub search_template: String,
 }
 
-/// The search parameters to use for
-/// SIMPLE_SEARCH spec. This data type is not supported in Gemini API.
+/// The search parameters to use for SIMPLE_SEARCH spec. This data type is not supported in Gemini
+/// API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalAPISimpleSearchParams {}
 
-/// Retrieve from data source powered by external API for
-/// grounding. The external API is not owned by Google, but need to follow the pre-defined API
-/// spec. This data type is not supported in Gemini API.
+/// Retrieve from data source powered by external API for grounding. The external API is not owned
+/// by Google, but need to follow the pre-defined API spec. This data type is not supported in
+/// Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalAPI {
@@ -332,8 +320,7 @@ pub struct VertexAISearch {
     pub max_results: Option<i32>,
 }
 
-/// The definition of the RAG resource. This
-/// data type is not supported in Gemini API.
+/// The definition of the RAG resource. This data type is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VertexRAGStoreRAGResource {
@@ -343,8 +330,7 @@ pub struct VertexRAGStoreRAGResource {
     pub rag_file_ids: Vec<String>,
 }
 
-/// Config for filters. This data type is not
-/// supported in Gemini API.
+/// Config for filters. This data type is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RAGRetrievalConfigFilter {
@@ -356,8 +342,7 @@ pub struct RAGRetrievalConfigFilter {
     pub vector_similarity_threshold: Option<f64>,
 }
 
-/// Config for Hybrid Search. This data
-/// type is not supported in Gemini API.
+/// Config for Hybrid Search. This data type is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RAGRetrievalConfigHybridSearch {
@@ -365,8 +350,7 @@ pub struct RAGRetrievalConfigHybridSearch {
     pub alpha: Option<f32>,
 }
 
-/// Config for LlmRanker. This data
-/// type is not supported in Gemini API.
+/// Config for LlmRanker. This data type is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RAGRetrievalConfigRankingLlmRanker {
@@ -374,8 +358,7 @@ pub struct RAGRetrievalConfigRankingLlmRanker {
     pub model_name: String,
 }
 
-/// Config for Rank Service. This
-/// data type is not supported in Gemini API.
+/// Config for Rank Service. This data type is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RAGRetrievalConfigRankingRankService {
@@ -383,8 +366,7 @@ pub struct RAGRetrievalConfigRankingRankService {
     pub model_name: String,
 }
 
-/// Config for ranking and reranking. This
-/// data type is not supported in Gemini API.
+/// Config for ranking and reranking. This data type is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RAGRetrievalConfigRanking {
@@ -394,8 +376,7 @@ pub struct RAGRetrievalConfigRanking {
     pub rank_service: Option<RAGRetrievalConfigRankingRankService>,
 }
 
-/// Specifies the context retrieval config. This
-/// data type is not supported in Gemini API.
+/// Specifies the context retrieval config. This data type is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RAGRetrievalConfig {
@@ -430,8 +411,8 @@ pub struct VertexRAGStore {
     pub vector_distance_threshold: Option<f64>,
 }
 
-/// Defines a retrieval tool that model can call to access
-/// external knowledge. This data type is not supported in Gemini API.
+/// Defines a retrieval tool that model can call to access external knowledge. This data type is not
+/// supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Retrieval {
@@ -459,9 +440,9 @@ pub struct ComputerUse {
     pub disabled_safety_policies: Vec<SafetyPolicy>,
 }
 
-/// The FileSearch tool that retrieves knowledge from
-/// Semantic Retrieval corpora. Files are imported to Semantic Retrieval corpora using the
-/// ImportFile API. This data type is not supported in Vertex AI.
+/// The FileSearch tool that retrieves knowledge from Semantic Retrieval corpora. Files are imported
+/// to Semantic Retrieval corpora using the ImportFile API. This data type is not supported in
+/// Vertex AI.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileSearch {
@@ -473,8 +454,7 @@ pub struct FileSearch {
     pub metadata_filter: String,
 }
 
-/// Standard web search for grounding and related
-/// configurations. Only text results are returned.
+/// Standard web search for grounding and related configurations. Only text results are returned.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WebSearch {}
@@ -484,8 +464,7 @@ pub struct WebSearch {}
 #[serde(rename_all = "camelCase")]
 pub struct ImageSearch {}
 
-/// Different types of search that can be enabled on the
-/// GoogleSearch tool.
+/// Different types of search that can be enabled on the GoogleSearch tool.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchTypes {
@@ -495,10 +474,10 @@ pub struct SearchTypes {
     pub image_search: Option<ImageSearch>,
 }
 
-/// Represents a time interval, encoded as a Timestamp start
-/// (inclusive) and a Timestamp end (exclusive). The start must be less than or equal to the
-/// end. When the start equals the end, the interval is empty (matches no time). When both start
-/// and end are unspecified, the interval matches any time.
+/// Represents a time interval, encoded as a Timestamp start (inclusive) and a Timestamp end
+/// (exclusive). The start must be less than or equal to the end. When the start equals the end, the
+/// interval is empty (matches no time). When both start and end are unspecified, the interval
+/// matches any time.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Interval {
@@ -508,8 +487,7 @@ pub struct Interval {
     pub start_time: Option<DateTime<Utc>>,
 }
 
-/// GoogleSearch tool type. Tool to support Google Search
-/// in Model. Powered by Google.
+/// GoogleSearch tool type. Tool to support Google Search in Model. Powered by Google.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GoogleSearch {
@@ -523,16 +501,15 @@ pub struct GoogleSearch {
     pub time_range_filter: Option<Interval>,
 }
 
-/// Tool that executes code generated by the model,
-/// and automatically returns the result to the model. See also ExecutableCode and
-/// CodeExecutionResult, which are input and output to this tool. This data type is not
-/// supported in Gemini API.
+/// Tool that executes code generated by the model, and automatically returns the result to the
+/// model. See also ExecutableCode and CodeExecutionResult, which are input and output to this tool.
+/// This data type is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolCodeExecution {}
 
-/// Tool to search public web data, powered by
-/// Vertex AI Search and Sec4 compliance. This data type is not supported in Gemini API.
+/// Tool to search public web data, powered by Vertex AI Search and Sec4 compliance. This data type
+/// is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EnterpriseWebSearch {
@@ -542,12 +519,11 @@ pub struct EnterpriseWebSearch {
     pub exclude_domains: Vec<String>,
 }
 
-/// Structured representation of a function
-/// declaration as defined by the \[OpenAPI 3.0
-/// specification\](<https://spec.openapis.org/oas/v3.0.3>). Included in this declaration are
-/// the function name, description, parameters and response type. This FunctionDeclaration is a
-/// representation of a block of code that can be used as a `Tool` by the model and executed by
-/// the client.
+/// Structured representation of a function declaration as defined by the \[OpenAPI 3.0
+/// specification\](<https://spec.openapis.org/oas/v3.0.3>). Included in this declaration are the
+/// function name, description, parameters and response type. This FunctionDeclaration is a
+/// representation of a block of code that can be used as a `Tool` by the model and executed by the
+/// client.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FunctionDeclaration {
@@ -567,8 +543,7 @@ pub struct FunctionDeclaration {
     pub behavior: Option<Behavior>,
 }
 
-/// Describes the options to customize dynamic
-/// retrieval.
+/// Describes the options to customize dynamic retrieval.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DynamicRetrievalConfig {
@@ -578,8 +553,7 @@ pub struct DynamicRetrievalConfig {
     pub mode: Option<DynamicRetrievalConfigMode>,
 }
 
-/// Tool to retrieve public web data for
-/// grounding, powered by Google.
+/// Tool to retrieve public web data for grounding, powered by Google.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GoogleSearchRetrieval {
@@ -587,8 +561,8 @@ pub struct GoogleSearchRetrieval {
     pub dynamic_retrieval_config: Option<DynamicRetrievalConfig>,
 }
 
-/// ParallelAISearch tool type. A tool that uses
-/// the Parallel.ai search engine for grounding. This data type is not supported in Gemini API.
+/// ParallelAISearch tool type. A tool that uses the Parallel.ai search engine for grounding. This
+/// data type is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolParallelAISearch {
@@ -607,8 +581,8 @@ pub struct ToolParallelAISearch {
 #[serde(rename_all = "camelCase")]
 pub struct URLContext {}
 
-/// A transport that can stream HTTP requests
-/// and responses. Next ID: 6. This data type is not supported in Vertex AI.
+/// A transport that can stream HTTP requests and responses. Next ID: 6. This data type is not
+/// supported in Vertex AI.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StreamableHTTPTransport {
@@ -632,9 +606,8 @@ pub struct StreamableHTTPTransport {
     pub url: String,
 }
 
-/// A MCPServer is a server that can be called by the model
-/// to perform actions. It is a server that implements the MCP protocol. Next ID: 7. This data
-/// type is not supported in Vertex AI.
+/// A MCPServer is a server that can be called by the model to perform actions. It is a server that
+/// implements the MCP protocol. Next ID: 7. This data type is not supported in Vertex AI.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MCPServer {
@@ -644,8 +617,8 @@ pub struct MCPServer {
     pub streamable_http_transport: Option<StreamableHTTPTransport>,
 }
 
-/// ExaAISearch tool type. A tool that uses the Exa.ai
-/// search engine for grounding. This data type is not supported in Gemini API.
+/// ExaAISearch tool type. A tool that uses the Exa.ai search engine for grounding. This data type
+/// is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolExaAISearch {
@@ -655,8 +628,7 @@ pub struct ToolExaAISearch {
     pub custom_configs: Map<String, Value>,
 }
 
-/// Tool details of a tool that the model may use to generate a
-/// response.
+/// Tool details of a tool that the model may use to generate a response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Tool {
@@ -688,10 +660,9 @@ pub struct Tool {
     pub exa_ai_search: Option<ToolExaAISearch>,
 }
 
-/// An object that represents a latitude/longitude pair. This
-/// is expressed as a pair of doubles to represent degrees latitude and degrees longitude.
-/// Unless specified otherwise, this object must conform to the WGS84 standard. Values must be
-/// within normalized ranges.
+/// An object that represents a latitude/longitude pair. This is expressed as a pair of doubles to
+/// represent degrees latitude and degrees longitude. Unless specified otherwise, this object must
+/// conform to the WGS84 standard. Values must be within normalized ranges.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LatLng {
@@ -723,8 +694,7 @@ pub struct FunctionCallingConfig {
     pub stream_function_call_arguments: Option<bool>,
 }
 
-/// Tool config. This config is shared for all tools
-/// provided in the request.
+/// Tool config. This config is shared for all tools provided in the request.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolConfig {

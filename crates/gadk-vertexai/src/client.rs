@@ -165,10 +165,10 @@ impl VertexClient {
         }
     }
 
-    /// One call: `{base_url}{go_escaped_path(path)}?{go_values_encode(query + ("$alt",
-    /// "json;enum-encoding=int"))}`, header `x-goog-request-params:
-    /// {routing.0}={go_query_escape(routing.1)}` (none when `routing.0` is empty: the list
-    /// methods send none), gadk's tracking `User-Agent`, credential headers, and
+    /// One call: URL `{base_url}{go_escaped_path(path)}?{query}` where the query is `query`
+    /// plus `$alt=json;enum-encoding=int`, encoded by `go_values_encode`; header
+    /// `x-goog-request-params: {routing.0}={go_query_escape(routing.1)}` (none when `routing.0`
+    /// is empty: the list methods send none), gadk's tracking `User-Agent`, credential headers, and
     /// `Content-Type: application/json` (on every call). `path` is unescaped and
     /// starts with `/` (`/v1beta1/projects/…:appendEvent`). A 2xx reply is its body as JSON
     /// (`{}` when empty); any other status is `VertexError::from_response`. No retries.

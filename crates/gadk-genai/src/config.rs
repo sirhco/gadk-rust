@@ -36,11 +36,10 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// Controls whether prominent people (celebrities) generation
-    /// is allowed. If used with personGeneration, personGeneration enum would take precedence. For
-    /// instance, if ALLOW_NONE is set, all person generation would be blocked. If this field is
-    /// unspecified, the default behavior is to allow prominent people. This enum is not supported
-    /// in Gemini API.
+    /// Controls whether prominent people (celebrities) generation is allowed. If used with
+    /// personGeneration, personGeneration enum would take precedence. For instance, if ALLOW_NONE
+    /// is set, all person generation would be blocked. If this field is unspecified, the default
+    /// behavior is to allow prominent people. This enum is not supported in Gemini API.
     ProminentPeople {
         Unspecified => "PROMINENT_PEOPLE_UNSPECIFIED",
         AllowProminentPeople => "ALLOW_PROMINENT_PEOPLE",
@@ -66,8 +65,8 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// The method for blocking content. If not specified, the
-    /// default behavior is to use the probability score. This enum is not supported in Gemini API.
+    /// The method for blocking content. If not specified, the default behavior is to use the
+    /// probability score. This enum is not supported in Gemini API.
     HarmBlockMethod {
         Unspecified => "HARM_BLOCK_METHOD_UNSPECIFIED",
         Severity => "SEVERITY",
@@ -76,8 +75,8 @@ crate::string_enum!(
 );
 
 crate::string_enum!(
-    /// The threshold for blocking content. If the harm
-    /// probability exceeds this threshold, the content will be blocked.
+    /// The threshold for blocking content. If the harm probability exceeds this threshold, the
+    /// content will be blocked.
     HarmBlockThreshold {
         Unspecified => "HARM_BLOCK_THRESHOLD_UNSPECIFIED",
         BlockLowAndAbove => "BLOCK_LOW_AND_ABOVE",
@@ -171,8 +170,7 @@ pub struct VoiceConsentSignature {
     pub signature: String,
 }
 
-/// The configuration for the replicated voice
-/// to use.
+/// The configuration for the replicated voice to use.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReplicatedVoiceConfig {
@@ -214,8 +212,7 @@ pub struct VoiceConfig {
     pub voice: String,
 }
 
-/// Configuration for a single speaker in a
-/// multi-speaker setup.
+/// Configuration for a single speaker in a multi-speaker setup.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpeakerVoiceConfig {
@@ -225,8 +222,7 @@ pub struct SpeakerVoiceConfig {
     pub voice_config: Option<VoiceConfig>,
 }
 
-/// Configuration for a multi-speaker
-/// text-to-speech request.
+/// Configuration for a multi-speaker text-to-speech request.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MultiSpeakerVoiceConfig {
@@ -258,8 +254,7 @@ pub struct ThinkingConfig {
     pub thinking_level: Option<ThinkingLevel>,
 }
 
-/// The image output format for
-/// generated images. This data type is not supported in Gemini API.
+/// The image output format for generated images. This data type is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageConfigImageOutputOptions {
@@ -269,8 +264,7 @@ pub struct ImageConfigImageOutputOptions {
     pub mime_type: String,
 }
 
-/// The image generation configuration to be used in
-/// GenerateContentConfig.
+/// The image generation configuration to be used in GenerateContentConfig.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageConfig {
@@ -290,10 +284,9 @@ pub struct ImageConfig {
     pub image_output_options: Option<ImageConfigImageOutputOptions>,
 }
 
-/// The configuration for
-/// automated routing. When automated routing is specified, the routing will be determined by
-/// the pretrained routing model and customer provided model routing preference. This data type
-/// is not supported in Gemini API.
+/// The configuration for automated routing. When automated routing is specified, the routing will
+/// be determined by the pretrained routing model and customer provided model routing preference.
+/// This data type is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerationConfigRoutingConfigAutoRoutingMode {
@@ -301,9 +294,8 @@ pub struct GenerationConfigRoutingConfigAutoRoutingMode {
     pub model_routing_preference: String,
 }
 
-/// The configuration
-/// for manual routing. When manual routing is specified, the model will be selected based on
-/// the model name provided. This data type is not supported in Gemini API.
+/// The configuration for manual routing. When manual routing is specified, the model will be
+/// selected based on the model name provided. This data type is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerationConfigRoutingConfigManualRoutingMode {
@@ -311,10 +303,9 @@ pub struct GenerationConfigRoutingConfigManualRoutingMode {
     pub model_name: String,
 }
 
-/// The configuration for routing the
-/// request to a specific model. This can be used to control which model is used for the
-/// generation, either automatically or by specifying a model name. This data type is not
-/// supported in Gemini API.
+/// The configuration for routing the request to a specific model. This can be used to control which
+/// model is used for the generation, either automatically or by specifying a model name. This data
+/// type is not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerationConfigRoutingConfig {
@@ -324,8 +315,8 @@ pub struct GenerationConfigRoutingConfig {
     pub manual_mode: Option<GenerationConfigRoutingConfigManualRoutingMode>,
 }
 
-/// A safety setting that affects the safety-blocking
-/// behavior. A SafetySetting consists of a harm category and a threshold for that category.
+/// A safety setting that affects the safety-blocking behavior. A SafetySetting consists of a harm
+/// category and a threshold for that category.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SafetySetting {
@@ -337,10 +328,10 @@ pub struct SafetySetting {
     pub threshold: Option<HarmBlockThreshold>,
 }
 
-/// Configuration for Model Armor. Model Armor is a
-/// Google Cloud service that provides safety and security filtering for prompts and responses.
-/// It helps protect your AI applications from risks such as harmful content, sensitive data
-/// leakage, and prompt injection attacks. This data type is not supported in Gemini API.
+/// Configuration for Model Armor. Model Armor is a Google Cloud service that provides safety and
+/// security filtering for prompts and responses. It helps protect your AI applications from risks
+/// such as harmful content, sensitive data leakage, and prompt injection attacks. This data type is
+/// not supported in Gemini API.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelArmorConfig {
@@ -350,14 +341,12 @@ pub struct ModelArmorConfig {
     pub response_template_name: String,
 }
 
-/// Deprecated: Language auto-detection is now the
-/// default when language_codes is omitted.
+/// Deprecated: Language auto-detection is now the default when language_codes is omitted.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LanguageAuto {}
 
-/// Deprecated: Use
-/// AudioTranscriptionConfig.language_codes instead.
+/// Deprecated: Use AudioTranscriptionConfig.language_codes instead.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LanguageHints {
@@ -365,8 +354,7 @@ pub struct LanguageHints {
     pub language_codes: Vec<String>,
 }
 
-/// The audio transcription configuration in
-/// Setup.
+/// The audio transcription configuration in Setup.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AudioTranscriptionConfig {
@@ -466,8 +454,7 @@ pub struct GenerateContentConfig {
     pub continuation_token: Option<Bytes>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub automatic_continuation: Option<bool>,
-    /// Optional. Configuration for persisting output assets to external storage (Vertex AI
-    /// only).
+    /// Optional. Configuration for persisting output assets to external storage (Vertex AI only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generation_output_config: Option<GenerationOutputConfig>,
     /// Optional. Configures the logging behavior for a given request; takes precedence over

@@ -296,7 +296,8 @@ fn fmt_frac(v: &mut u64, prec: u32) -> String {
     format!(".{}", digits.trim_end_matches('0'))
 }
 
-/// Parses an RFC 3339 timestamp (`2006-01-02T15:04:05Z07:00` layout), reduced to the instant.
+/// Parses an RFC 3339 timestamp (`YYYY-MM-DDThh:mm:ss`, optional fraction, then `Z` or an
+/// offset), reduced to the instant.
 /// The accepted forms are:
 /// - exactly four year digits and two month and day digits, with the day checked against the
 ///   month (leap years included);
@@ -376,7 +377,7 @@ pub fn go_parse_rfc3339(s: &str) -> Option<DateTime<Utc>> {
     at.checked_sub_signed(TimeDelta::try_seconds(offset)?)
 }
 
-/// Formats `t` as RFC 3339 with nanoseconds (`2006-01-02T15:04:05.999999999Z07:00`) in its own
+/// Formats `t` as RFC 3339 with up to nanosecond precision, in its own
 /// zone: the fraction's trailing zeros trimmed (the fraction dropped when zero), `Z` for a zero
 /// offset, `±hh:mm` otherwise. Callers that marshal to JSON must check for themselves that the
 /// year is within 0..=9999.

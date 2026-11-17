@@ -13,7 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Credentials.
+//! Credentials: HTTP, OAuth2 and service-account credentials and the [`Credential`] that wraps
+//! them.
 //!
 //! The credentials are adk-python's pydantic models: each field is written under its camelCase
 //! alias and read under the alias or its snake_case Python name, the alias winning when an object

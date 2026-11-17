@@ -108,9 +108,10 @@ impl VertexAiSessionService {
     ///
     /// # Errors
     ///
-    /// [`SessionError::Backend`] with the text `failed to create Vertex AI client: could not
-    /// establish connection to the aiplatform server: {adc error}` when Application Default
-    /// Credentials cannot be built.
+    /// [`SessionError::Backend`] with the message
+    /// `failed to create Vertex AI client: ` followed by
+    /// `could not establish connection to the aiplatform server: {adc error}` when Application
+    /// Default Credentials cannot be built.
     pub fn new(config: VertexAiSessionServiceConfig) -> Result<Self, SessionError> {
         let resolved = resolve(
             config.endpoint.as_deref(),
