@@ -154,7 +154,11 @@ ENGINE_DEPENDENTS = ("gadk", "gadk-tools", "gadk-server", "gadk-a2a", "gadk-laun
                      "gadk-agentanalytics", "gadk-prompts", "gadk-eval")  # the only crates that may depend on gadk-engine
 TOOLS_DEPENDENT = "gadk"  # the only crate that may depend on gadk-tools
 OPENAI_DEPENDENT = "gadk"  # the only crate that may depend on gadk-openai (3b)
-LICENSE_OVERRIDES = {"gadk-goyaml": "Apache-2.0 AND MIT"}  # 6c-1: libyaml-derived files stay MIT
+LICENSE_OVERRIDES = {
+    "gadk-goyaml": "Apache-2.0 AND MIT",  # libyaml-derived files stay MIT
+    "gadk-server": "Apache-2.0 AND BSD-3-Clause",  # authn/jwks.rs: google-api-go-client
+    "gadk-agentanalytics": "Apache-2.0 AND BSD-3-Clause",  # vendored protobuf well-known types
+}
 
 
 def reaches(src, dst, seen=None):

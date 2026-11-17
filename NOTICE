@@ -1,4 +1,4 @@
-gadk — a Rust port of the Agent Development Kit (ADK) for Go.
+gadk — an Agent Development Kit for Rust.
 Copyright 2026 Chris Olson
 
 This product includes software derived from ADK-Go
@@ -6,9 +6,15 @@ This product includes software derived from ADK-Go
 licensed under the Apache License, Version 2.0, and test fixtures
 copied from that project.
 
-This product's behavior is ported from the Google Gen AI Go SDK
-(https://github.com/googleapis/go-genai), Copyright Google LLC,
-licensed under the Apache License, Version 2.0.
+This product includes software whose behavior is derived from the
+Google Gen AI Go SDK (https://github.com/googleapis/go-genai),
+Copyright Google LLC, licensed under the Apache License, Version 2.0.
+
+crates/gadk-server/src/authn/jwks.rs includes software derived from
+google-api-go-client (https://github.com/googleapis/google-api-go-client),
+Copyright 2011 Google Inc. and Copyright 2020 Google LLC, licensed under
+the BSD 3-Clause License (see
+crates/gadk-server/LICENSE-google-api-go-client).
 
 crates/gadk-launcher/webui/distr is the prebuilt ADK web UI bundle
 (https://github.com/google/adk-web), Copyright Google LLC, licensed
@@ -25,3 +31,7 @@ licensed under the BSD 3-Clause License (see
 crates/gadk-agentanalytics/proto/google/protobuf/LICENSE). The Rust code
 in crates/gadk-agentanalytics/src/storagepb/google.*.rs is generated
 from them by scripts/gen-storagepb.
+
+crates/gadk-goyaml (not published) includes software derived from
+gopkg.in/yaml.v3 and libyaml; see crates/gadk-goyaml/NOTICE-yaml-v3 and
+crates/gadk-goyaml/LICENSE-yaml-v3.

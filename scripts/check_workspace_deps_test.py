@@ -33,7 +33,7 @@ class EdgeTest(unittest.TestCase):
     def test_agent_dev_dependency_on_engine_is_rejected(self):
         self.edit("gadk-agent", "[dev-dependencies]\n", "[dev-dependencies]\ngadk-engine = { workspace = true }\n")
         errs = cwd.check(self.repo)
-        self.assertTrue(any("only gadk, gadk-tools, gadk-server, gadk-a2a, gadk-launcher, gadk-agentregistry, gadk-telemetry, gadk-configurable, gadk-agentanalytics and gadk-prompts may depend on gadk-engine" in e for e in errs), errs)
+        self.assertTrue(any("only gadk, gadk-tools, gadk-server, gadk-a2a, gadk-launcher, gadk-agentregistry, gadk-telemetry, gadk-configurable, gadk-agentanalytics, gadk-prompts and gadk-eval may depend on gadk-engine" in e for e in errs), errs)
 
     def test_tools_dev_dependency_on_engine_is_allowed(self):
         text = (self.repo / "crates/gadk-tools/Cargo.toml").read_text()
@@ -355,7 +355,7 @@ class EdgeTest(unittest.TestCase):
         self.assertTrue(any("gadk-goyaml -> gadk-platform is missing" in e for e in errs), errs)
 
     def test_goyaml_license_must_be_apache_and_mit(self):
-        self.assertEqual(cwd.LICENSE_OVERRIDES, {"gadk-goyaml": "Apache-2.0 AND MIT"})
+        self.assertEqual(cwd.LICENSE_OVERRIDES["gadk-goyaml"], "Apache-2.0 AND MIT")
         self.edit("gadk-goyaml", 'license = "Apache-2.0 AND MIT"', "license.workspace = true")
         errs = cwd.check(self.repo)
         self.assertTrue(any("package.license must be 'Apache-2.0 AND MIT'" in e for e in errs), errs)
@@ -405,7 +405,7 @@ class EdgeTest(unittest.TestCase):
         self.assertIn(("gadk", "gadk-agentanalytics"), cwd.OPTIONAL)
         # 7b-3a: the plugin reads the engine's LLM agent config and ADK span IDs.
         self.assertIn("gadk-agentanalytics", cwd.ENGINE_DEPENDENTS)
-        self.assertNotIn("gadk-agentanalytics", cwd.LICENSE_OVERRIDES)
+        self.assertEqual(cwd.LICENSE_OVERRIDES["gadk-agentanalytics"], "Apache-2.0 AND BSD-3-Clause")
 
     def test_agentanalytics_missing_engine_edge_is_rejected(self):
         self.edit("gadk-agentanalytics", "gadk-engine = { workspace = true }\n", "")

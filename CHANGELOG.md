@@ -7,7 +7,7 @@ the public API.
 
 ## [Unreleased]
 
-## [0.2.1] - 2026-11-16
+## [0.2.1] - 2026-11-17
 
 The first version published to crates.io. No code changes.
 
@@ -19,6 +19,11 @@ The first version published to crates.io. No code changes.
 - Documentation and code comments describe gadk in its own terms instead of as a port of ADK-Go
   (compatibility notes kept where ADK interoperability is a feature). No code changes; the new
   `scripts/check-go-refs.py` check runs in CI.
+- Every published crate ships `LICENSE` and `NOTICE`. `NOTICE` describes gadk as an Agent
+  Development Kit for Rust and now also credits google-api-go-client (BSD-3-Clause), from which
+  `gadk-server`'s JWKS handling is derived; `gadk-server` ships that license as
+  `LICENSE-google-api-go-client`. `gadk-server` and `gadk-agentanalytics` (which vendors the
+  BSD-3-Clause protobuf well-known types) declare `Apache-2.0 AND BSD-3-Clause`.
 
 ## [0.2.0] - 2026-11-16
 

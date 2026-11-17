@@ -4,7 +4,7 @@ description = "BigQuery agent analytics plugin for gadk"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license.workspace = true
+license = "Apache-2.0 AND BSD-3-Clause"
 repository.workspace = true
 keywords.workspace = true
 
