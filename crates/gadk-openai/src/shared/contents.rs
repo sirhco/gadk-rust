@@ -19,7 +19,7 @@ use gadk_genai::{Content, Part};
 
 use crate::error::OpenAiError;
 
-/// A group of `genai.Part` fields an API emits itself and passes to
+/// A group of [`Part`] fields an API emits itself and passes to
 /// [`unsupported_payload`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum PartField {
@@ -30,10 +30,10 @@ pub(crate) enum PartField {
     CodeExecution,
 }
 
-/// The content's text parts joined with `\n`; `None` is `""`. A part
-/// without text is `non-text system instruction part *genai.Part`; a part carrying anything
-/// besides its text is `unsupported system instruction part: <Field>` (plain errors; callers
-/// wrap them as `openai: system instruction: %w`).
+/// The content's text parts joined with `\n`; `None` is `""`. A part without text is a
+/// `non-text system instruction part` error (see the literal in the body); a part carrying
+/// anything besides its text is `unsupported system instruction part: <Field>` (plain errors;
+/// callers prefix them with `openai: system instruction: `).
 pub(crate) fn flatten_content_text(content: Option<&Content>) -> Result<String, OpenAiError> {
     let Some(content) = content else {
         return Ok(String::new());

@@ -207,8 +207,7 @@ impl OpenAiClient {
     ///   [`OpenAiError::is_deadline_exceeded`], never retried.
     /// - A final status ≥ 400 is [`OpenAiError::api`]; when the body's
     ///   top-level `error` is present but not an object, an unmarshal error instead
-    ///   (`json: cannot unmarshal string into Go value of type apierror.Error`, the text an ADK
-    ///   OpenAI model reports).
+    ///   (see the literal in `api_error`).
     /// - A body that fails to read: the bare read error for a final status ≥ 400, else
     ///   `error reading response body: <err>`.
     /// - Errors are not wrapped: the blocking paths add `openai: call failed: ` with

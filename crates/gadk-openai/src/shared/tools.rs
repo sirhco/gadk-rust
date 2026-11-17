@@ -20,7 +20,7 @@ use gadk_genai::Tool;
 use crate::error::OpenAiError;
 use crate::shared::config::reject_unsupported_fields;
 
-/// The only `genai.Tool` field this crate sends. Every
+/// The only [`Tool`] field this crate sends. Every
 /// other field is refused, so a field genai adds cannot be dropped silently.
 const SUPPORTED_FUNCTION_TOOL_FIELDS: &[&str] = &["FunctionDeclarations"];
 

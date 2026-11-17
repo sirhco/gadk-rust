@@ -27,8 +27,7 @@ use http::HeaderMap;
 
 use crate::error::{ErrorKind, OpenAiError};
 
-/// The base URL a client uses when neither the configuration nor `OPENAI_BASE_URL` names one
-/// (Wire type `WithEnvironmentProduction`).
+/// The base URL a client uses when neither the configuration nor `OPENAI_BASE_URL` names one.
 pub const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1/";
 
 /// The OpenAI HTTP API a model talks to. The default is [`Api::Responses`].

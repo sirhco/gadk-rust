@@ -56,7 +56,7 @@ macro_rules! tag {
 }
 pub(crate) use tag;
 
-/// Wire type `ReasoningEffort`.
+/// The `reasoning.effort` request value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
 #[allow(dead_code)] // the whole value set of the API; `xhigh` or `max` is never sent.
@@ -77,7 +77,7 @@ pub(crate) enum ReasoningEffort {
     Max,
 }
 
-/// Wire type `ReasoningSummary`.
+/// The `reasoning.summary` request value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
 #[allow(dead_code)] // the whole value set of the API; only `auto` is sent.
@@ -110,7 +110,7 @@ impl ReasoningParam {
     }
 }
 
-/// Wire type `FunctionDefinitionParam`: `name, strict, description, parameters`.
+/// A function definition: `name, strict, description, parameters`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub(crate) struct FunctionDefinitionParam {
     /// `name` (required, always sent).
@@ -140,7 +140,7 @@ tag!(
     TextTag = "text"
 );
 
-/// Wire type `ResponseFormatJSONObjectParam`: `type`.
+/// The `json_object` response format: `type`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub(crate) struct ResponseFormatJsonObjectParam {
     /// `type`: `"json_object"`.
@@ -148,7 +148,7 @@ pub(crate) struct ResponseFormatJsonObjectParam {
     pub(crate) kind: JsonObjectTag,
 }
 
-/// Wire type `ResponseFormatTextParam`: `type`.
+/// The `text` response format: `type`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub(crate) struct ResponseFormatTextParam {
     /// `type`: `"text"`.
@@ -156,7 +156,7 @@ pub(crate) struct ResponseFormatTextParam {
     pub(crate) kind: TextTag,
 }
 
-/// Wire type `ResponseFormatJSONSchemaParam`: `json_schema, type` (Chat Completions'
+/// The `json_schema` response format: `json_schema, type` (Chat Completions'
 /// `response_format`).
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub(crate) struct ResponseFormatJsonSchemaParam {
@@ -167,7 +167,7 @@ pub(crate) struct ResponseFormatJsonSchemaParam {
     pub(crate) kind: JsonSchemaTag,
 }
 
-/// Wire type `ResponseFormatJSONSchemaJSONSchemaParam`: `name, strict, description,
+/// The JSON schema of a `json_schema` response format: `name, strict, description,
 /// schema`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub(crate) struct ResponseFormatJsonSchemaJsonSchemaParam {

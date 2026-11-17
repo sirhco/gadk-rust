@@ -27,10 +27,10 @@ use crate::shared::response::single_part_response;
 pub(crate) const TOOL_CALL_CHUNK_REJECTED: &str =
     "openai: streamed tool call chunk could not be accumulated";
 
-/// Wire type `maxStreamAccumulatorChoiceIndex`: choice indices 0 through 127 are accepted.
+/// Choice indices 0 through 127 are accepted.
 const MAX_CHOICE_INDEX: i64 = 127;
 
-/// Wire type `maxStreamAccumulatorToolCallGrowth`: one tool-call index may grow its choice by
+/// One tool-call index may grow its choice by
 /// at most this many positions.
 const MAX_TOOL_CALL_GROWTH: usize = 128;
 
@@ -143,7 +143,7 @@ fn add_chunk(acc: &mut ChatCompletion, chunk: &ChatCompletionChunk) -> bool {
     true
 }
 
-/// Wire type `validChatCompletionChunkIndices`: every choice index is in range and the
+/// Whether every choice index is in range and the
 /// tool-call indices stay within their growth bounds.
 fn valid_chunk_indices(acc: &ChatCompletion, chunk: &ChatCompletionChunk) -> bool {
     // One position per received entry plus 127 of sparse slack, shared by all choices (and
@@ -182,7 +182,7 @@ fn valid_chunk_indices(acc: &ChatCompletion, chunk: &ChatCompletionChunk) -> boo
     true
 }
 
-/// Wire type `checkedStreamAccumulatorChoiceIndex`.
+/// The choice index as a `usize`, or `None` when it is outside `0..=127`.
 fn checked_choice_index(index: i64) -> Option<usize> {
     if (0..=MAX_CHOICE_INDEX).contains(&index) {
         usize::try_from(index).ok()
@@ -191,7 +191,7 @@ fn checked_choice_index(index: i64) -> Option<usize> {
     }
 }
 
-/// Wire type `checkedToolCallIndex`: `-1` (AWS Bedrock's index for a single tool call) is `0`;
+/// The tool-call index as a `usize`: `-1` (AWS Bedrock's index for a single tool call) is `0`;
 /// a negative index, or one more than 127 positions past `count`, is refused.
 fn checked_tool_call_index(index: i64, count: usize) -> Option<usize> {
     let index = if index == -1 { 0 } else { index };
@@ -205,7 +205,7 @@ fn checked_tool_call_index(index: i64, count: usize) -> Option<usize> {
     Some(index)
 }
 
-/// Wire type `accumulateDelta` on a chunk [`valid_chunk_indices`] accepted.
+/// Folds a chunk's delta into the accumulator, for a chunk [`valid_chunk_indices`] accepted.
 fn accumulate_delta(acc: &mut ChatCompletion, chunk: &ChatCompletionChunk) {
     if acc.id.is_empty() {
         acc.id.clone_from(&chunk.id);

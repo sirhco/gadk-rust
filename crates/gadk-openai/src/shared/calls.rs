@@ -14,7 +14,8 @@
 // limitations under the License.
 
 //! Function-call ids and arguments, plus the argument decoding both APIs share. The decode
-//! error texts are kept identical to the texts an ADK OpenAI model reports.
+//! error texts are byte-identical to an ADK OpenAI model's JSON-decoding errors; see the
+//! literals in the function bodies.
 
 use gadk_genai::{FunctionCall, FunctionResponse};
 use gadk_platform::go_quote;
@@ -103,17 +104,17 @@ fn marshal(prefix: &str, map: &Map<String, Value>) -> Result<String, OpenAiError
 
 /// Decodes `raw` into a JSON object: `Ok(None)` for JSON
 /// `null`, `Ok(Some(map))` for an object, else `Err` with the text
-/// `unexpected end of JSON input` for truncated input,
-/// `json: cannot unmarshal <array|string|number|bool> into Go value of type
-/// map[string]interface {}` for a value of another kind, and serde_json's text otherwise.
+/// `unexpected end of JSON input` for truncated input, a `json: cannot unmarshal <kind> into …`
+/// text for a value of another kind (see the literal in [`go_map`]), and serde_json's text
+/// otherwise.
 pub(crate) fn unmarshal_function_args(raw: &str) -> Result<Option<Map<String, Value>>, String> {
     let value: Value = serde_json::from_str(raw).map_err(|e| go_json_error(&e))?;
     go_map(value)
 }
 
 /// Stores a decoded value as a JSON object: an object is the map,
-/// `null` is `None`, anything else is `json: cannot unmarshal <kind> into Go value
-/// of type map[string]interface {}`.
+/// `null` is `None`, anything else is an `Err` naming the value's kind (see the literal
+/// in the body).
 pub(crate) fn go_map(value: Value) -> Result<Option<Map<String, Value>>, String> {
     let kind = match value {
         Value::Object(map) => return Ok(Some(map)),
