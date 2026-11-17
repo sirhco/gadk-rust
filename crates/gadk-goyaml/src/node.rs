@@ -13,13 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The node tree: yaml.v3 v3.0.1 `yaml.go`'s `Node`, `Kind` and `Style` (as an arena
-//! [`Document`] of [`NodeData`] addressed by [`NodeId`]) with `IsZero`, `LongTag`, `ShortTag`,
-//! `indicatedString` and `SetString`, and `decode.go`'s `parser` (the composer that builds the
-//! tree from the event stream, incl. the `textless` mode).
+//! The node tree: yaml.v3's node, kind and style (as an arena [`Document`] of [`NodeData`]
+//! addressed by [`NodeId`]) with the zero check, long/short tags, indicated-string check and
+//! `set_string`, and the composer that builds the tree from the event stream (incl. the
+//! `textless` mode).
 //!
-//! Go's `*Node` graph may share nodes (an alias points at its anchored node) and may contain
-//! cycles; here identity is `NodeId` equality and an alias is `alias: Some(id)`.
+//! A node graph may share nodes (an alias points at its anchored node) and may contain cycles;
+//! here identity is `NodeId` equality and an alias is `alias: Some(id)`.
 
 use std::collections::HashMap;
 use std::io::Read;
@@ -44,7 +44,7 @@ use crate::yamlh::{
 /// subtree over through a thread-local slot instead of serializing it.
 pub(crate) const DOCUMENT_MARKER: &str = "$gadk_goyaml::Document";
 
-/// A node handle inside a [`Document`] (Go: a `*Node`; equality is Go's pointer identity).
+/// A node handle inside a [`Document`] (equality is node identity).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NodeId(pub(crate) u32);
 
@@ -55,52 +55,52 @@ impl NodeId {
     }
 }
 
-/// Go's `yaml.Kind`: whether a node is a document, a mapping, a sequence, a scalar value, or
-/// an alias to another node. Values are Go's (`DocumentNode = 1 << 0` …); `Zero` is Go's
-/// `Kind(0)`, the kind of the zero `Node`.
+/// Whether a node is a document, a mapping, a sequence, a scalar value, or an alias to another
+/// node. The numeric values match yaml.v3's (`Document = 1`, `Sequence = 2`, …); `Zero` is
+/// kind 0, the kind of the zero node.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Kind {
-    /// Go's zero kind (an unset node).
+    /// An unset node.
     #[default]
     Zero = 0,
-    /// Go's `DocumentNode`.
+    /// A document.
     Document = 1,
-    /// Go's `SequenceNode`.
+    /// A sequence.
     Sequence = 2,
-    /// Go's `MappingNode`.
+    /// A mapping.
     Mapping = 4,
-    /// Go's `ScalarNode`.
+    /// A scalar.
     Scalar = 8,
-    /// Go's `AliasNode`.
+    /// An alias to another node.
     Alias = 16,
 }
 
 impl Kind {
-    /// Go's numeric value (`%d` in `cannot encode node with unknown kind %d`).
+    /// The numeric value (`%d` in `cannot encode node with unknown kind %d`).
     pub fn bits(self) -> u32 {
         self as u32
     }
 }
 
-/// Go's `yaml.Style` bit flags.
+/// Node style bit flags.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Style(u32);
 
 impl Style {
-    /// Go's `TaggedStyle`.
+    /// The tag is written explicitly.
     pub const TAGGED: Style = Style(1);
-    /// Go's `DoubleQuotedStyle`.
+    /// Double-quoted scalar.
     pub const DOUBLE_QUOTED: Style = Style(2);
-    /// Go's `SingleQuotedStyle`.
+    /// Single-quoted scalar.
     pub const SINGLE_QUOTED: Style = Style(4);
-    /// Go's `LiteralStyle`.
+    /// Literal block scalar (`|`).
     pub const LITERAL: Style = Style(8);
-    /// Go's `FoldedStyle`.
+    /// Folded block scalar (`>`).
     pub const FOLDED: Style = Style(16);
-    /// Go's `FlowStyle`.
+    /// Flow collection (`[...]` / `{...}`).
     pub const FLOW: Style = Style(32);
 
-    /// No flags (Go's `Style(0)`).
+    /// No flags.
     pub const fn empty() -> Style {
         Style(0)
     }
@@ -110,7 +110,7 @@ impl Style {
         self.0
     }
 
-    /// A style from raw bits (any value, as Go's `Style(n)`).
+    /// A style from raw bits (any value).
     pub const fn from_bits(bits: u32) -> Style {
         Style(bits)
     }
@@ -125,7 +125,7 @@ impl Style {
         self.0 & other.0 == other.0
     }
 
-    /// Some flag of `other` is set (Go's `s&other != 0`).
+    /// Some flag of `other` is set (`self & other != 0`).
     pub const fn intersects(self, other: Style) -> bool {
         self.0 & other.0 != 0
     }
@@ -157,8 +157,8 @@ impl BitAndAssign for Style {
     }
 }
 
-/// One node: Go's `yaml.Node` exported fields. `alias` and `content` refer to nodes of the
-/// same [`Document`].
+/// One node: its kind, style, tag, value, comments, position and links. `alias` and
+/// `content` refer to nodes of the same [`Document`].
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct NodeData {
     /// Whether the node is a document, a mapping, a sequence, a scalar value, or an alias.
@@ -168,8 +168,8 @@ pub struct NodeData {
     /// The YAML tag defining the data type for the value (always the resolved tag on decode).
     pub tag: String,
     /// The unescaped and unquoted representation of the value.
-    // Divergence (ledger 6c-1): a Go `string` may hold any bytes; parsed values are always
-    // UTF-8 (the reader rejects invalid input), so only hand-built Go nodes differ.
+    // A string may hold any bytes in yaml.v3, but parsed values are always UTF-8 (the reader
+    // rejects invalid input) and a Rust `String` must be UTF-8.
     pub value: String,
     /// The anchor name for this node, which allows aliases to point to it.
     pub anchor: String,
@@ -190,11 +190,10 @@ pub struct NodeData {
 }
 
 impl NodeData {
-    /// Go's `(*Node).IsZero`: whether the node has all of its fields unset.
+    /// Whether the node has all of its fields unset.
     pub fn is_zero(&self) -> bool {
-        // Go: yaml.go IsZero
-        // Divergence (ledger 6c-1): Go tells a nil `Content` from an empty non-nil one; an
-        // empty `Vec` is Go's nil.
+        // An empty `content` counts as unset (there is no distinction between an absent and an
+        // empty list).
         self.kind == Kind::Zero
             && self.style.is_empty()
             && self.tag.is_empty()
@@ -209,10 +208,9 @@ impl NodeData {
             && self.column == 0
     }
 
-    /// Go's `(*Node).indicatedString`: a scalar explicitly tagged `!!str`, or untagged and
+    /// Whether the node is a scalar explicitly tagged `!!str`, or untagged and
     /// quoted/literal/folded.
     pub(crate) fn indicated_string(&self) -> bool {
-        // Go: yaml.go indicatedString
         self.kind == Kind::Scalar
             && (short_tag(&self.tag) == STR_TAG
                 || (self.tag.is_empty() || self.tag == "!")
@@ -224,12 +222,11 @@ impl NodeData {
                     ))
     }
 
-    /// Go's `(*Node).SetString`: make the node a `!!str` scalar holding `s`, literal style when
+    /// Makes the node a `!!str` scalar holding `s`, literal style when
     /// it contains a newline.
     pub fn set_string(&mut self, s: &str) {
-        // Go: yaml.go SetString
-        // Divergence (ledger 6c-1): Go base64-encodes a string that is not valid UTF-8 as
-        // `!!binary`; a Rust `&str` is always valid UTF-8, so that branch cannot occur.
+        // There is no `!!binary` base64 branch for a string that is not valid UTF-8: a Rust
+        // `&str` is always valid UTF-8.
         self.kind = Kind::Scalar;
         self.value = s.to_string();
         self.tag = STR_TAG.to_string();
@@ -239,8 +236,8 @@ impl NodeData {
     }
 }
 
-/// An arena of nodes with a root: what Go's `yaml.Unmarshal(data, &node)` fills (`root` is the
-/// `DocumentNode`) or any detached subtree (`root` of another kind).
+/// An arena of nodes with a root: what parsing fills (`root` is the
+/// document node) or any detached subtree (`root` of another kind).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Document {
     pub(crate) nodes: Vec<NodeData>,
@@ -248,7 +245,7 @@ pub struct Document {
 }
 
 impl Default for Document {
-    /// A document whose root is the zero node (Go's `var node yaml.Node`).
+    /// A document whose root is the zero node (an unset node).
     fn default() -> Self {
         Document::new(NodeData::default())
     }
@@ -295,11 +292,10 @@ impl Document {
         self.nodes.is_empty()
     }
 
-    /// Go's `(*Node).ShortTag`: the short form of the tag, computed from the node's properties
+    /// The short form of the tag, computed from the node's properties
     /// when `Tag` is unset (`!!map`, `!!seq`, the alias target's, the resolved scalar tag, or
     /// `!!null` for the zero node).
     pub fn short_tag(&self, id: NodeId) -> String {
-        // Go: yaml.go ShortTag
         let n = &self[id];
         if n.indicated_string() {
             return STR_TAG.to_string();
@@ -333,16 +329,15 @@ impl Document {
         short_tag(&n.tag)
     }
 
-    /// Go's `(*Node).LongTag`: the long form of [`Document::short_tag`].
+    /// The long form of [`Document::short_tag`].
     pub fn long_tag(&self, id: NodeId) -> String {
-        // Go: yaml.go LongTag
         long_tag(&self.short_tag(id))
     }
 
     /// A new document holding a deep copy of the subtree at `at` (content and alias targets,
     /// followed transitively, identity and sharing preserved); its root is the copy of `at`.
-    /// This is how a Go `*Node` subtree becomes a value of its own (`*n = *doc.Content[0]`,
-    /// `yaml.Node` struct fields).
+    /// This is how a subtree becomes a value of its own (for example a node held in a
+    /// struct field).
     pub fn subtree(&self, at: NodeId) -> Document {
         let mut out = Document {
             nodes: Vec::new(),
@@ -393,18 +388,18 @@ impl IndexMut<NodeId> for Document {
 }
 
 // ---------------------------------------------------------------------------------------------
-// decode.go: Parser, produces a node tree out of a libyaml event stream.
+// Parser: produces a node tree out of a libyaml event stream.
 // ---------------------------------------------------------------------------------------------
 
-/// Go: decode.go `parser`. Every node it builds lives in `arena` (Go's heap), so anchors stay
-/// valid across the documents of a stream as in Go (`anchors` is created once, in `init`).
+/// The composer. Every node it builds lives in `arena`, so anchors stay valid across the
+/// documents of a stream (`anchors` is created once, in `init`).
 pub(crate) struct Parser<'r> {
     /// The libyaml parser.
     pub(crate) parser: YamlParser<'r>,
     /// The current event (`YamlEventType::No` when consumed).
     pub(crate) event: YamlEvent,
-    /// Go's `doc`: the document node being parsed (set like Go; nothing reads it).
-    #[allow(dead_code)] // Go's `parser.doc` is written but never read.
+    /// The document node being parsed (nothing reads it).
+    #[allow(dead_code)] // written but never read
     pub(crate) doc: Option<NodeId>,
     /// Holds every node built so far.
     pub(crate) arena: Document,
@@ -416,8 +411,8 @@ pub(crate) struct Parser<'r> {
     pub(crate) textless: bool,
 }
 
-/// A collection the composer has opened and not yet closed: the explicit-stack form of Go's
-/// recursive `document` / `sequence` / `mapping` calls (see [`Parser::compose`]).
+/// A collection the composer has opened and not yet closed: the explicit-stack form of
+/// the recursive document / sequence / mapping parsing (see [`Parser::compose`]).
 pub(crate) enum Frame {
     /// A document node awaiting its single child.
     Document(NodeId),
@@ -431,16 +426,15 @@ pub(crate) enum Frame {
     },
 }
 
-/// Go's `string(b)` for event bytes. The reader only lets valid UTF-8 through and the scanner
+/// Event bytes as a string. The reader only lets valid UTF-8 through and the scanner
 /// writes escapes as UTF-8, so this is lossless except for a tag URI whose `%`-escapes pass
 /// the scanner's octet checks without being UTF-8 (e.g. an encoded surrogate).
-// Divergence (ledger 6c-1): such a tag keeps Go's raw bytes in a Go string; here the
-// invalid sequences become U+FFFD.
+// Such a tag's invalid sequences become U+FFFD (yaml.v3 keeps the raw bytes).
 fn go_string(b: &[u8]) -> String {
     String::from_utf8_lossy(b).into_owned()
 }
 
-/// A parser around an initialized libyaml parser (Go's `p := parser{}` +
+/// A parser around an initialized libyaml parser (set up with
 /// `yaml_parser_initialize`).
 fn new_parser_state<'r>() -> Parser<'r> {
     let mut p = Parser {
@@ -461,27 +455,24 @@ fn new_parser_state<'r>() -> Parser<'r> {
     p
 }
 
-/// Go: decode.go `newParser` (empty input is parsed as `"\n"`).
+/// A parser over `b` (empty input is parsed as `"\n"`).
 pub(crate) fn new_parser(b: &[u8]) -> Parser<'_> {
-    // Go: decode.go newParser
     let mut p = new_parser_state();
     let b: &[u8] = if b.is_empty() { b"\n" } else { b };
     yaml_parser_set_input_string(&mut p.parser, b);
     p
 }
 
-/// Go: decode.go `newParserFromReader`.
+/// A parser reading from `r`.
 pub(crate) fn new_parser_from_reader<'r, R: Read + 'r>(r: R) -> Parser<'r> {
-    // Go: decode.go newParserFromReader
     let mut p = new_parser_state();
     yaml_parser_set_input_reader(&mut p.parser, Box::new(r));
     p
 }
 
 impl<'r> Parser<'r> {
-    /// Go: `(*parser).init`.
+    /// Initializes the parser (once).
     pub(crate) fn init(&mut self) -> Result<(), Error> {
-        // Go: decode.go init
         if self.done_init {
             return Ok(());
         }
@@ -491,18 +482,16 @@ impl<'r> Parser<'r> {
         Ok(())
     }
 
-    /// Go: `(*parser).destroy`.
+    /// Releases the libyaml parser.
     pub(crate) fn destroy(&mut self) {
-        // Go: decode.go destroy
         if self.event.typ != YamlEventType::No {
             yaml_event_delete(&mut self.event);
         }
         yaml_parser_delete(&mut self.parser);
     }
 
-    /// Go: `(*parser).expect` — consume an event of type `e`.
+    /// Consume an event of type `e`.
     pub(crate) fn expect(&mut self, e: YamlEventType) -> Result<(), Error> {
-        // Go: decode.go expect
         if self.event.typ == YamlEventType::No
             && !yaml_parser_parse(&mut self.parser, &mut self.event)
         {
@@ -522,9 +511,8 @@ impl<'r> Parser<'r> {
         Ok(())
     }
 
-    /// Go: `(*parser).peek` — the next event's type, parsing it into `event` if needed.
+    /// The next event's type, parsing it into `event` if needed.
     pub(crate) fn peek(&mut self) -> Result<YamlEventType, Error> {
-        // Go: decode.go peek
         if self.event.typ != YamlEventType::No {
             return Ok(self.event.typ);
         }
@@ -539,10 +527,9 @@ impl<'r> Parser<'r> {
         Ok(self.event.typ)
     }
 
-    /// Go: `(*parser).fail` — the error for the libyaml parser's current problem
+    /// The error for the libyaml parser's current problem
     /// (`yaml: line N: …`).
     pub(crate) fn fail(&self) -> Error {
-        // Go: decode.go fail
         let mut line = 0;
         if self.parser.context_mark.line != 0 {
             line = self.parser.context_mark.line;
@@ -570,10 +557,9 @@ impl<'r> Parser<'r> {
         failf(format_args!("{where_}{msg}"))
     }
 
-    /// Go: `(*parser).anchor` — record `anchor` (empty = Go's nil) for node `n`.
+    /// Record `anchor` (empty = none) for node `n`.
     pub(crate) fn anchor(&mut self, n: NodeId, anchor: Vec<u8>) {
-        // Go: decode.go anchor
-        // Go: `anchor != nil`; an ANCHOR token's value is never empty.
+        // An ANCHOR token's value is never empty.
         if !anchor.is_empty() {
             let name = go_string(&anchor);
             self.arena[n].anchor = name.clone();
@@ -581,9 +567,8 @@ impl<'r> Parser<'r> {
         }
     }
 
-    /// Go: `(*parser).parse` — the next node, `None` at the end of the stream.
+    /// The next node, `None` at the end of the stream.
     pub(crate) fn parse(&mut self) -> Result<Option<NodeId>, Error> {
-        // Go: decode.go parse
         self.init()?;
         match self.peek()? {
             YamlEventType::Scalar => self.scalar().map(Some),
@@ -613,7 +598,7 @@ impl<'r> Parser<'r> {
         }
     }
 
-    /// Go: `(*parser).node` — a new node from the current event.
+    /// A new node from the current event.
     pub(crate) fn node(
         &mut self,
         kind: Kind,
@@ -621,7 +606,6 @@ impl<'r> Parser<'r> {
         tag: &str,
         value: &str,
     ) -> Result<NodeId, Error> {
-        // Go: decode.go node
         let mut style = Style::empty();
         let tag = if !tag.is_empty() && tag != "!" {
             style = Style::TAGGED;
@@ -650,10 +634,10 @@ impl<'r> Parser<'r> {
         Ok(self.arena.push(n))
     }
 
-    /// Go's recursion `document`/`sequence`/`mapping` → `parseChild` → `parse` → …, run with an
-    /// explicit stack of open collections starting at `first`; returns `first`'s node once its
-    /// end event is consumed. Go's goroutine stacks grow; a Rust thread's does not, and the
-    /// scanner lets collections nest 10000 deep before `exceeded max depth of 10000`.
+    /// The recursion document/sequence/mapping → child → parse → …, run with an explicit stack of
+    /// open collections starting at `first`; returns `first`'s node once its end event is
+    /// consumed. A native thread stack does not grow, and the scanner lets collections nest
+    /// 10000 deep before `exceeded max depth of 10000`.
     pub(crate) fn compose(&mut self, first: Frame) -> Result<NodeId, Error> {
         let mut stack = vec![first];
         let mut child = None;
@@ -669,15 +653,15 @@ impl<'r> Parser<'r> {
                 child = Some(done);
                 continue;
             }
-            // Go: `parseChild` → `parse` (init is done; `parse` re-checks it).
+            // The next child (init is done; `parse` re-checks it).
             match self.peek()? {
                 YamlEventType::Scalar => child = Some(self.scalar()?),
                 YamlEventType::Alias => child = Some(self.alias()?),
                 YamlEventType::MappingStart => stack.push(self.mapping()?),
                 YamlEventType::SequenceStart => stack.push(self.sequence()?),
                 YamlEventType::DocumentStart => stack.push(self.document()?),
-                // Go appends a nil child when `parse` meets STREAM-END; the event grammar puts
-                // a node (or an empty scalar) wherever a child is parsed, so it cannot happen.
+                // The event grammar puts a node (or an empty scalar) wherever a child is parsed,
+                // so STREAM-END cannot happen here.
                 YamlEventType::StreamEnd => {
                     panic!("internal error: missing child node (please report)")
                 }
@@ -691,8 +675,8 @@ impl<'r> Parser<'r> {
         }
     }
 
-    /// The rest of Go's `document` / `sequence` / `mapping` bodies after their start event:
-    /// `child` is the node just parsed for `frame` (Go's `parseChild` result, appended here),
+    /// The rest of a document / sequence / mapping body after its start event: `child` is the
+    /// node just parsed for `frame` (appended here),
     /// `None` right after the collection opened. Returns the collection's node once its end
     /// event is consumed, `None` when it needs its next child.
     pub(crate) fn resume(
@@ -702,7 +686,6 @@ impl<'r> Parser<'r> {
     ) -> Result<Option<NodeId>, Error> {
         match frame {
             Frame::Document(n) => {
-                // Go: decode.go document
                 let n = *n;
                 let Some(child) = child else {
                     return Ok(None); // p.parseChild(n)
@@ -715,7 +698,6 @@ impl<'r> Parser<'r> {
                 Ok(Some(n))
             }
             Frame::Sequence(n) => {
-                // Go: decode.go sequence
                 let n = *n;
                 if let Some(child) = child {
                     self.arena[n].content.push(child);
@@ -729,7 +711,6 @@ impl<'r> Parser<'r> {
                 Ok(Some(n))
             }
             Frame::Mapping { n, block, key } => {
-                // Go: decode.go mapping
                 let (n, block) = (*n, *block);
                 if let Some(child) = child {
                     self.arena[n].content.push(child);
@@ -787,18 +768,16 @@ impl<'r> Parser<'r> {
         }
     }
 
-    /// Go: `(*parser).document` up to its `parseChild` (the rest is in [`Parser::resume`]).
+    /// A document up to its first child (the rest is in [`Parser::resume`]).
     pub(crate) fn document(&mut self) -> Result<Frame, Error> {
-        // Go: decode.go document
         let n = self.node(Kind::Document, "", "", "")?;
         self.doc = Some(n);
         self.expect(YamlEventType::DocumentStart)?;
         Ok(Frame::Document(n))
     }
 
-    /// Go: `(*parser).alias`.
+    /// An alias node.
     pub(crate) fn alias(&mut self) -> Result<NodeId, Error> {
-        // Go: decode.go alias
         let value = go_string(&self.event.anchor);
         let n = self.node(Kind::Alias, "", "", &value)?;
         let target = self.anchors.get(&value).copied();
@@ -810,9 +789,8 @@ impl<'r> Parser<'r> {
         Ok(n)
     }
 
-    /// Go: `(*parser).scalar`.
+    /// A scalar node.
     pub(crate) fn scalar(&mut self) -> Result<NodeId, Error> {
-        // Go: decode.go scalar
         let parsed_style = self.event.scalar_style() as YamlStyle;
         let node_style = if parsed_style & YamlScalarStyle::DoubleQuoted as YamlStyle != 0 {
             Style::DOUBLE_QUOTED
@@ -840,9 +818,8 @@ impl<'r> Parser<'r> {
         Ok(n)
     }
 
-    /// Go: `(*parser).sequence` up to its child loop (the rest is in [`Parser::resume`]).
+    /// A sequence up to its child loop (the rest is in [`Parser::resume`]).
     pub(crate) fn sequence(&mut self) -> Result<Frame, Error> {
-        // Go: decode.go sequence
         let tag = go_string(&self.event.tag);
         let n = self.node(Kind::Sequence, SEQ_TAG, &tag, "")?;
         if self.event.sequence_style() as YamlStyle & YamlSequenceStyle::Flow as YamlStyle != 0 {
@@ -854,9 +831,8 @@ impl<'r> Parser<'r> {
         Ok(Frame::Sequence(n))
     }
 
-    /// Go: `(*parser).mapping` up to its pair loop (the rest is in [`Parser::resume`]).
+    /// A mapping up to its pair loop (the rest is in [`Parser::resume`]).
     pub(crate) fn mapping(&mut self) -> Result<Frame, Error> {
-        // Go: decode.go mapping
         let tag = go_string(&self.event.tag);
         let n = self.node(Kind::Mapping, MAP_TAG, &tag, "")?;
         let mut block = true;

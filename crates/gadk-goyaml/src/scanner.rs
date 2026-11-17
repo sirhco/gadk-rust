@@ -20,17 +20,16 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-//! Port of yaml.v3 v3.0.1 `scannerc.go`: the tokenizer (simple keys, indentation, flow
-//! levels, every scalar style, directives, tags, anchors, comment capture).
+//! The tokenizer (simple keys, indentation, flow levels, every scalar style, directives, tags,
+//! anchors, comment capture).
 //!
-//! `scannerc.go` opens with libyaml's long introduction to the token stream (block collection
-//! starts, simple keys, examples); read it there, it is not repeated here. Go's `cache` helper
-//! (unused: every call site inlines `parser.unread < n && !yaml_parser_update_buffer(...)`) and
-//! `trace` (a debug printer, never called) are not ported. Go functions that append to a
-//! `[]byte` and return it (`read`, `read_line`) take `&mut Vec<u8>`; Go's out-parameters
-//! (`*[]byte`, `*int8`, `*int`, `*yaml_mark_t`) are `&mut`. Go `int`s that can be negative
-//! (indentation columns, the token queue position) are `isize`; the comparisons that mix them
-//! with `usize` marks cast the mark to `isize` and never subtract below zero in `usize`.
+//! libyaml's scanner opens with a long introduction to the token stream (block collection
+//! starts, simple keys, examples); it is not repeated here. There is no `cache` helper (every
+//! call site inlines `parser.unread < n && !yaml_parser_update_buffer(...)`) nor a debug
+//! `trace` printer. Functions that append to a byte buffer (`read`, `read_line`) take
+//! `&mut Vec<u8>`, and out-parameters are `&mut`. Values that can be negative (indentation
+//! columns, the token queue position) are `isize`; the comparisons that mix them with `usize`
+//! marks cast the mark to `isize` and never subtract below zero in `usize`.
 
 use crate::api::yaml_insert_token;
 use crate::reader::yaml_parser_update_buffer;
@@ -42,7 +41,6 @@ use crate::yamlh::{
 
 /// Advance the buffer pointer.
 fn skip(parser: &mut YamlParser<'_>) {
-    // Go: scannerc.go skip
     if !is_blank(&parser.buffer, parser.buffer_pos) {
         parser.newlines = 0;
     }
@@ -53,7 +51,6 @@ fn skip(parser: &mut YamlParser<'_>) {
 }
 
 fn skip_line(parser: &mut YamlParser<'_>) {
-    // Go: scannerc.go skip_line
     if is_crlf(&parser.buffer, parser.buffer_pos) {
         parser.mark.index += 2;
         parser.mark.column = 0;
@@ -73,7 +70,6 @@ fn skip_line(parser: &mut YamlParser<'_>) {
 
 /// Copy a character to a string buffer and advance pointers.
 fn read(parser: &mut YamlParser<'_>, s: &mut Vec<u8>) {
-    // Go: scannerc.go read
     if !is_blank(&parser.buffer, parser.buffer_pos) {
         parser.newlines = 0;
     }
@@ -90,7 +86,6 @@ fn read(parser: &mut YamlParser<'_>, s: &mut Vec<u8>) {
 
 /// Copy a line break character to a string buffer and advance pointers.
 fn read_line(parser: &mut YamlParser<'_>, s: &mut Vec<u8>) {
-    // Go: scannerc.go read_line
     let buf = &parser.buffer;
     let pos = parser.buffer_pos;
     if buf[pos] == b'\r' && buf[pos + 1] == b'\n' {
@@ -128,9 +123,8 @@ fn read_line(parser: &mut YamlParser<'_>, s: &mut Vec<u8>) {
 /// through `peek_token`/`skip_token` instead, so only tests call it).
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn yaml_parser_scan(parser: &mut YamlParser<'_>, token: &mut YamlToken) -> bool {
-    // Go: scannerc.go yaml_parser_scan
     // Erase the token object.
-    *token = YamlToken::default(); // [Go] Is this necessary?
+    *token = YamlToken::default(); // erases the token
 
     // No tokens after STREAM-END or error.
     if parser.stream_end_produced || parser.error != YamlErrorType::No {
@@ -161,7 +155,6 @@ fn yaml_parser_set_scanner_error(
     context_mark: YamlMark,
     problem: &str,
 ) -> bool {
-    // Go: scannerc.go yaml_parser_set_scanner_error
     parser.error = YamlErrorType::Scanner;
     parser.context = context.to_string();
     parser.context_mark = context_mark;
@@ -176,7 +169,6 @@ fn yaml_parser_set_scanner_tag_error(
     context_mark: YamlMark,
     problem: &str,
 ) -> bool {
-    // Go: scannerc.go yaml_parser_set_scanner_tag_error
     let context = if directive {
         "while parsing a %TAG directive"
     } else {
@@ -188,15 +180,12 @@ fn yaml_parser_set_scanner_tag_error(
 /// Ensure that the tokens queue contains at least one token which can be returned to the
 /// parser.
 pub(crate) fn yaml_parser_fetch_more_tokens(parser: &mut YamlParser<'_>) -> bool {
-    // Go: scannerc.go yaml_parser_fetch_more_tokens
     // While we need more tokens to fetch, do it.
     loop {
-        // [Go] The comment parsing logic requires a lookahead of two tokens
-        // so that foot comments may be parsed in time of associating them
-        // with the tokens that are parsed before them, and also for line
-        // comments to be transformed into head comments in some edge cases.
-        //
-        // (Go: `tokens_head < len(tokens)-2`.)
+        // The comment parsing logic requires a lookahead of two tokens so that foot comments
+        // may be parsed in time of associating them with the tokens that are parsed before
+        // them, and also for line comments to be transformed into head comments in some edge
+        // cases.
         if parser.tokens_head + 2 < parser.tokens.len() {
             // If a potential simple key is at the head position, we need to fetch
             // the next token to disambiguate it.
@@ -222,7 +211,6 @@ pub(crate) fn yaml_parser_fetch_more_tokens(parser: &mut YamlParser<'_>) -> bool
 
 /// The dispatcher for token fetchers.
 fn yaml_parser_fetch_next_token(parser: &mut YamlParser<'_>) -> bool {
-    // Go: scannerc.go yaml_parser_fetch_next_token
     // Ensure that the buffer is initialized.
     if parser.unread < 1 && !yaml_parser_update_buffer(parser, 1) {
         return false;
@@ -240,9 +228,8 @@ fn yaml_parser_fetch_next_token(parser: &mut YamlParser<'_>) -> bool {
         return false;
     }
 
-    // [Go] While unrolling indents, transform the head comments of prior
-    // indentation levels observed after scan_start into foot comments at
-    // the respective indexes.
+    // While unrolling indents, transform the head comments of prior indentation levels
+    // observed after scan_start into foot comments at the respective indexes.
 
     // Check the indentation level against the current column.
     let column = parser.mark.column as isize;
@@ -298,7 +285,7 @@ fn yaml_parser_fetch_next_token(parser: &mut YamlParser<'_>) -> bool {
         comment_mark = parser.tokens[parser.tokens.len() - 1].start_mark;
     }
 
-    // Go returns from each branch below through a deferred function (run after the label).
+    // Each branch below leaves through the code after the block (the common epilogue).
     let ok = 'fetch: {
         // Is it the flow sequence start indicator?
         if parser.buffer[parser.buffer_pos] == b'[' {
@@ -409,7 +396,7 @@ fn yaml_parser_fetch_next_token(parser: &mut YamlParser<'_>) -> bool {
         // if it is followed by a non-space character.
         //
         // The last rule is more restrictive than the specification requires.
-        // [Go] TODO Make this logic more reasonable.
+        // TODO: make this logic more reasonable.
         let c = parser.buffer[parser.buffer_pos];
         if !(is_blankz(&parser.buffer, parser.buffer_pos)
             || c == b'-'
@@ -449,7 +436,7 @@ fn yaml_parser_fetch_next_token(parser: &mut YamlParser<'_>) -> bool {
         )
     };
 
-    // Go's deferred function.
+    // The common epilogue.
     if !ok {
         return false;
     }
@@ -463,10 +450,8 @@ fn yaml_parser_fetch_next_token(parser: &mut YamlParser<'_>) -> bool {
     yaml_parser_scan_line_comment(parser, comment_mark)
 }
 
-/// Go returns `(valid, ok)`; `simple_key` is Go's `*yaml_simple_key_t`, here its index in
-/// `parser.simple_keys`.
+/// Returns `(valid, ok)`; `simple_key` is an index into `parser.simple_keys`.
 fn yaml_simple_key_is_valid(parser: &mut YamlParser<'_>, simple_key: usize) -> (bool, bool) {
-    // Go: scannerc.go yaml_simple_key_is_valid
     let key = parser.simple_keys[simple_key];
     if !key.possible {
         return (false, true);
@@ -501,7 +486,6 @@ fn yaml_simple_key_is_valid(parser: &mut YamlParser<'_>, simple_key: usize) -> (
 
 /// Check if a simple key may start at the current position and add it if needed.
 fn yaml_parser_save_simple_key(parser: &mut YamlParser<'_>) -> bool {
-    // Go: scannerc.go yaml_parser_save_simple_key
     // A simple key is required at the current position if the scanner is in
     // the block context and the current column coincides with the indentation
     // level.
@@ -533,7 +517,6 @@ fn yaml_parser_save_simple_key(parser: &mut YamlParser<'_>) -> bool {
 
 /// Remove a potential simple key at the current flow level.
 fn yaml_parser_remove_simple_key(parser: &mut YamlParser<'_>) -> bool {
-    // Go: scannerc.go yaml_parser_remove_simple_key
     let i = parser.simple_keys.len() - 1;
     if parser.simple_keys[i].possible {
         // If the key is required, it is an error.
@@ -559,7 +542,6 @@ const MAX_FLOW_LEVEL: usize = 10000;
 
 /// Increase the flow level and resize the simple key list if needed.
 fn yaml_parser_increase_flow_level(parser: &mut YamlParser<'_>) -> bool {
-    // Go: scannerc.go yaml_parser_increase_flow_level
     // Reset the simple key on the next level.
     parser.simple_keys.push(YamlSimpleKey {
         possible: false,
@@ -584,7 +566,6 @@ fn yaml_parser_increase_flow_level(parser: &mut YamlParser<'_>) -> bool {
 
 /// Decrease the flow level.
 fn yaml_parser_decrease_flow_level(parser: &mut YamlParser<'_>) -> bool {
-    // Go: scannerc.go yaml_parser_decrease_flow_level
     if parser.flow_level > 0 {
         parser.flow_level -= 1;
         let last = parser.simple_keys.len() - 1;
@@ -608,7 +589,6 @@ fn yaml_parser_roll_indent(
     typ: YamlTokenType,
     mark: YamlMark,
 ) -> bool {
-    // Go: scannerc.go yaml_parser_roll_indent
     // In the flow context, do nothing.
     if parser.flow_level > 0 {
         return true;
@@ -652,23 +632,21 @@ fn yaml_parser_unroll_indent(
     column: isize,
     scan_mark: YamlMark,
 ) -> bool {
-    // Go: scannerc.go yaml_parser_unroll_indent
     // In the flow context, do nothing.
     if parser.flow_level > 0 {
         return true;
     }
 
     let mut block_mark = scan_mark;
-    // Go decrements an int. The loop body below needs `indent > column`, i.e. an indentation
-    // rolled by an earlier token, so the scan mark is past index 0 whenever the value is used.
+    // The loop body below needs `indent > column`, i.e. an indentation rolled by an earlier
+    // token, so the scan mark is past index 0 whenever the value is used.
     block_mark.index = block_mark.index.wrapping_sub(1);
 
     // Loop through the indentation levels in the stack.
     while parser.indent > column {
-        // [Go] Reposition the end token before potential following
-        //      foot comments of parent blocks. For that, search
-        //      backwards for recent comments that were at the same
-        //      indent as the block that is ending now.
+        // Reposition the end token before potential following foot comments of parent
+        // blocks. For that, search backwards for recent comments that were at the same indent
+        // as the block that is ending now.
         let mut stop_index = block_mark.index;
         for i in (0..parser.comments.len()).rev() {
             let comment = &parser.comments[i];
@@ -709,7 +687,6 @@ fn yaml_parser_unroll_indent(
 
 /// Initialize the scanner and produce the STREAM-START token.
 fn yaml_parser_fetch_stream_start(parser: &mut YamlParser<'_>) -> bool {
-    // Go: scannerc.go yaml_parser_fetch_stream_start
     // Set the initial indentation.
     parser.indent = -1;
 
@@ -738,7 +715,6 @@ fn yaml_parser_fetch_stream_start(parser: &mut YamlParser<'_>) -> bool {
 
 /// Produce the STREAM-END token and shut down the scanner.
 fn yaml_parser_fetch_stream_end(parser: &mut YamlParser<'_>) -> bool {
-    // Go: scannerc.go yaml_parser_fetch_stream_end
     // Force new line.
     if parser.mark.column != 0 {
         parser.mark.column = 0;
@@ -771,7 +747,6 @@ fn yaml_parser_fetch_stream_end(parser: &mut YamlParser<'_>) -> bool {
 
 /// Produce a VERSION-DIRECTIVE or TAG-DIRECTIVE token.
 fn yaml_parser_fetch_directive(parser: &mut YamlParser<'_>) -> bool {
-    // Go: scannerc.go yaml_parser_fetch_directive
     // Reset the indentation level.
     let mark = parser.mark;
     if !yaml_parser_unroll_indent(parser, -1, mark) {
@@ -797,7 +772,6 @@ fn yaml_parser_fetch_directive(parser: &mut YamlParser<'_>) -> bool {
 
 /// Produce the DOCUMENT-START or DOCUMENT-END token.
 fn yaml_parser_fetch_document_indicator(parser: &mut YamlParser<'_>, typ: YamlTokenType) -> bool {
-    // Go: scannerc.go yaml_parser_fetch_document_indicator
     // Reset the indentation level.
     let mark = parser.mark;
     if !yaml_parser_unroll_indent(parser, -1, mark) {
@@ -837,7 +811,6 @@ fn yaml_parser_fetch_flow_collection_start(
     parser: &mut YamlParser<'_>,
     typ: YamlTokenType,
 ) -> bool {
-    // Go: scannerc.go yaml_parser_fetch_flow_collection_start
     // The indicators '[' and '{' may start a simple key.
     if !yaml_parser_save_simple_key(parser) {
         return false;
@@ -870,7 +843,6 @@ fn yaml_parser_fetch_flow_collection_start(
 
 /// Produce the FLOW-SEQUENCE-END or FLOW-MAPPING-END token.
 fn yaml_parser_fetch_flow_collection_end(parser: &mut YamlParser<'_>, typ: YamlTokenType) -> bool {
-    // Go: scannerc.go yaml_parser_fetch_flow_collection_end
     // Reset any potential simple key on the current flow level.
     if !yaml_parser_remove_simple_key(parser) {
         return false;
@@ -904,7 +876,6 @@ fn yaml_parser_fetch_flow_collection_end(parser: &mut YamlParser<'_>, typ: YamlT
 
 /// Produce the FLOW-ENTRY token.
 fn yaml_parser_fetch_flow_entry(parser: &mut YamlParser<'_>) -> bool {
-    // Go: scannerc.go yaml_parser_fetch_flow_entry
     // Reset any potential simple keys on the current flow level.
     if !yaml_parser_remove_simple_key(parser) {
         return false;
@@ -931,7 +902,6 @@ fn yaml_parser_fetch_flow_entry(parser: &mut YamlParser<'_>) -> bool {
 
 /// Produce the BLOCK-ENTRY token.
 fn yaml_parser_fetch_block_entry(parser: &mut YamlParser<'_>) -> bool {
-    // Go: scannerc.go yaml_parser_fetch_block_entry
     // Check if the scanner is in the block context.
     if parser.flow_level == 0 {
         // Check if we are allowed to start a new entry.
@@ -987,7 +957,6 @@ fn yaml_parser_fetch_block_entry(parser: &mut YamlParser<'_>) -> bool {
 
 /// Produce the KEY token.
 fn yaml_parser_fetch_key(parser: &mut YamlParser<'_>) -> bool {
-    // Go: scannerc.go yaml_parser_fetch_key
     // In the block context, additional checks are required.
     if parser.flow_level == 0 {
         // Check if we are allowed to start a new key (not nessesary simple).
@@ -1039,8 +1008,7 @@ fn yaml_parser_fetch_key(parser: &mut YamlParser<'_>) -> bool {
 
 /// Produce the VALUE token.
 fn yaml_parser_fetch_value(parser: &mut YamlParser<'_>) -> bool {
-    // Go: scannerc.go yaml_parser_fetch_value
-    // Go's `simple_key` pointer: the last entry of `parser.simple_keys`.
+    // The simple key is the last entry of `parser.simple_keys`.
     let simple_key = parser.simple_keys.len() - 1;
 
     // Have we found a simple key?
@@ -1131,7 +1099,6 @@ fn yaml_parser_fetch_value(parser: &mut YamlParser<'_>) -> bool {
 
 /// Produce the ALIAS or ANCHOR token.
 fn yaml_parser_fetch_anchor(parser: &mut YamlParser<'_>, typ: YamlTokenType) -> bool {
-    // Go: scannerc.go yaml_parser_fetch_anchor
     // An anchor or an alias could be a simple key.
     if !yaml_parser_save_simple_key(parser) {
         return false;
@@ -1151,7 +1118,6 @@ fn yaml_parser_fetch_anchor(parser: &mut YamlParser<'_>, typ: YamlTokenType) -> 
 
 /// Produce the TAG token.
 fn yaml_parser_fetch_tag(parser: &mut YamlParser<'_>) -> bool {
-    // Go: scannerc.go yaml_parser_fetch_tag
     // A tag could be a simple key.
     if !yaml_parser_save_simple_key(parser) {
         return false;
@@ -1171,7 +1137,6 @@ fn yaml_parser_fetch_tag(parser: &mut YamlParser<'_>) -> bool {
 
 /// Produce the SCALAR(...,literal) or SCALAR(...,folded) tokens.
 fn yaml_parser_fetch_block_scalar(parser: &mut YamlParser<'_>, literal: bool) -> bool {
-    // Go: scannerc.go yaml_parser_fetch_block_scalar
     // Remove any potential simple keys.
     if !yaml_parser_remove_simple_key(parser) {
         return false;
@@ -1191,7 +1156,6 @@ fn yaml_parser_fetch_block_scalar(parser: &mut YamlParser<'_>, literal: bool) ->
 
 /// Produce the SCALAR(...,single-quoted) or SCALAR(...,double-quoted) tokens.
 fn yaml_parser_fetch_flow_scalar(parser: &mut YamlParser<'_>, single: bool) -> bool {
-    // Go: scannerc.go yaml_parser_fetch_flow_scalar
     // A plain scalar could be a simple key.
     if !yaml_parser_save_simple_key(parser) {
         return false;
@@ -1211,7 +1175,6 @@ fn yaml_parser_fetch_flow_scalar(parser: &mut YamlParser<'_>, single: bool) -> b
 
 /// Produce the SCALAR(...,plain) token.
 fn yaml_parser_fetch_plain_scalar(parser: &mut YamlParser<'_>) -> bool {
-    // Go: scannerc.go yaml_parser_fetch_plain_scalar
     // A plain scalar could be a simple key.
     if !yaml_parser_save_simple_key(parser) {
         return false;
@@ -1231,7 +1194,6 @@ fn yaml_parser_fetch_plain_scalar(parser: &mut YamlParser<'_>) -> bool {
 
 /// Eat whitespaces and comments until the next token is found.
 fn yaml_parser_scan_to_next_token(parser: &mut YamlParser<'_>) -> bool {
-    // Go: scannerc.go yaml_parser_scan_to_next_token
     let scan_mark = parser.mark;
 
     // Until the next token is not found.
@@ -1285,7 +1247,7 @@ fn yaml_parser_scan_to_next_token(parser: &mut YamlParser<'_>) -> bool {
                 let mark = parser.mark;
                 let comment = &mut parser.comments[comment];
                 comment.head = std::mem::take(&mut comment.line);
-                // Go: comment.start_mark.line == parser.mark.line-1
+                // The comment started on the line before the current mark.
                 if comment.start_mark.line + 1 == mark.line {
                     comment.token_mark = mark;
                 }
@@ -1327,7 +1289,6 @@ fn yaml_parser_scan_to_next_token(parser: &mut YamlParser<'_>) -> bool {
 ///      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 /// ```
 fn yaml_parser_scan_directive(parser: &mut YamlParser<'_>, token: &mut YamlToken) -> bool {
-    // Go: scannerc.go yaml_parser_scan_directive
     // Eat '%'.
     let start_mark = parser.mark;
     skip(parser);
@@ -1402,7 +1363,7 @@ fn yaml_parser_scan_directive(parser: &mut YamlParser<'_>, token: &mut YamlToken
     }
 
     if parser.buffer[parser.buffer_pos] == b'#' {
-        // [Go] Discard this inline comment for the time being.
+        // Discard this inline comment for the time being.
         //if !yaml_parser_scan_line_comment(parser, start_mark) {
         //	return false
         //}
@@ -1450,7 +1411,6 @@ fn yaml_parser_scan_directive_name(
     start_mark: YamlMark,
     name: &mut Vec<u8>,
 ) -> bool {
-    // Go: scannerc.go yaml_parser_scan_directive_name
     // Consume the directive name.
     if parser.unread < 1 && !yaml_parser_update_buffer(parser, 1) {
         return false;
@@ -1502,7 +1462,6 @@ fn yaml_parser_scan_version_directive_value(
     major: &mut i8,
     minor: &mut i8,
 ) -> bool {
-    // Go: scannerc.go yaml_parser_scan_version_directive_value
     // Eat whitespaces.
     if parser.unread < 1 && !yaml_parser_update_buffer(parser, 1) {
         return false;
@@ -1554,7 +1513,6 @@ fn yaml_parser_scan_version_directive_number(
     start_mark: YamlMark,
     number: &mut i8,
 ) -> bool {
-    // Go: scannerc.go yaml_parser_scan_version_directive_number
     // Repeat while the next character is digit.
     if parser.unread < 1 && !yaml_parser_update_buffer(parser, 1) {
         return false;
@@ -1605,7 +1563,6 @@ fn yaml_parser_scan_tag_directive_value(
     handle: &mut Vec<u8>,
     prefix: &mut Vec<u8>,
 ) -> bool {
-    // Go: scannerc.go yaml_parser_scan_tag_directive_value
     let mut handle_value = Vec::new();
     let mut prefix_value = Vec::new();
 
@@ -1677,7 +1634,6 @@ fn yaml_parser_scan_anchor(
     token: &mut YamlToken,
     typ: YamlTokenType,
 ) -> bool {
-    // Go: scannerc.go yaml_parser_scan_anchor
     let mut s = Vec::new();
 
     // Eat the indicator character.
@@ -1748,7 +1704,6 @@ fn yaml_parser_scan_anchor(
  */
 
 fn yaml_parser_scan_tag(parser: &mut YamlParser<'_>, token: &mut YamlToken) -> bool {
-    // Go: scannerc.go yaml_parser_scan_tag
     let mut handle = Vec::new();
     let mut suffix = Vec::new();
 
@@ -1849,7 +1804,6 @@ fn yaml_parser_scan_tag_handle(
     start_mark: YamlMark,
     handle: &mut Vec<u8>,
 ) -> bool {
-    // Go: scannerc.go yaml_parser_scan_tag_handle
     // Check the initial '!' character.
     if parser.unread < 1 && !yaml_parser_update_buffer(parser, 1) {
         return false;
@@ -1909,7 +1863,6 @@ fn yaml_parser_scan_tag_uri(
     start_mark: YamlMark,
     uri: &mut Vec<u8>,
 ) -> bool {
-    // Go: scannerc.go yaml_parser_scan_tag_uri
     //size_t length = head ? strlen((char *)head) : 0
     let mut s = Vec::new();
     let mut has_tag = !head.is_empty();
@@ -1931,7 +1884,7 @@ fn yaml_parser_scan_tag_uri(
     //      '0'-'9', 'A'-'Z', 'a'-'z', '_', '-', ';', '/', '?', ':', '@', '&',
     //      '=', '+', '$', ',', '.', '!', '~', '*', '\'', '(', ')', '[', ']',
     //      '%'.
-    // [Go] TODO Convert this into more reasonable logic.
+    // TODO: convert this into more reasonable logic.
     while is_alpha(&parser.buffer, parser.buffer_pos)
         || matches!(
             parser.buffer[parser.buffer_pos],
@@ -1990,7 +1943,6 @@ fn yaml_parser_scan_uri_escapes(
     start_mark: YamlMark,
     s: &mut Vec<u8>,
 ) -> bool {
-    // Go: scannerc.go yaml_parser_scan_uri_escapes
     // Decode the required number of characters.
     let mut w: usize = 1024;
     while w > 0 {
@@ -2054,7 +2006,6 @@ fn yaml_parser_scan_block_scalar(
     token: &mut YamlToken,
     literal: bool,
 ) -> bool {
-    // Go: scannerc.go yaml_parser_scan_block_scalar
     // Eat the indicator '|' or '>'.
     let start_mark = parser.mark;
     skip(parser);
@@ -2285,7 +2236,6 @@ fn yaml_parser_scan_block_scalar_breaks(
     start_mark: YamlMark,
     end_mark: &mut YamlMark,
 ) -> bool {
-    // Go: scannerc.go yaml_parser_scan_block_scalar_breaks
     *end_mark = parser.mark;
 
     // Eat the indentation spaces and line breaks.
@@ -2328,7 +2278,7 @@ fn yaml_parser_scan_block_scalar_breaks(
         if parser.unread < 2 && !yaml_parser_update_buffer(parser, 2) {
             return false;
         }
-        // [Go] Should really be returning breaks instead.
+        // TODO: should really be returning breaks instead.
         read_line(parser, breaks);
         *end_mark = parser.mark;
     }
@@ -2352,7 +2302,6 @@ fn yaml_parser_scan_flow_scalar(
     token: &mut YamlToken,
     single: bool,
 ) -> bool {
-    // Go: scannerc.go yaml_parser_scan_flow_scalar
     // Eat the left quote.
     let start_mark = parser.mark;
     skip(parser);
@@ -2618,7 +2567,6 @@ fn yaml_parser_scan_flow_scalar(
 
 /// Scan a plain scalar.
 fn yaml_parser_scan_plain_scalar(parser: &mut YamlParser<'_>, token: &mut YamlToken) -> bool {
-    // Go: scannerc.go yaml_parser_scan_plain_scalar
     let mut s = Vec::new();
     let mut leading_break = Vec::new();
     let mut trailing_breaks = Vec::new();
@@ -2774,7 +2722,6 @@ fn yaml_parser_scan_plain_scalar(parser: &mut YamlParser<'_>, token: &mut YamlTo
 }
 
 fn yaml_parser_scan_line_comment(parser: &mut YamlParser<'_>, token_mark: YamlMark) -> bool {
-    // Go: scannerc.go yaml_parser_scan_line_comment
     if parser.newlines > 0 {
         return true;
     }
@@ -2827,7 +2774,6 @@ fn yaml_parser_scan_line_comment(parser: &mut YamlParser<'_>, token_mark: YamlMa
 }
 
 fn yaml_parser_scan_comments(parser: &mut YamlParser<'_>, scan_mark: YamlMark) -> bool {
-    // Go: scannerc.go yaml_parser_scan_comments
     let mut scan_mark = scan_mark;
     let mut token = &parser.tokens[parser.tokens.len() - 1];
 
@@ -2863,7 +2809,7 @@ fn yaml_parser_scan_comments(parser: &mut YamlParser<'_>, scan_mark: YamlMark) -
         }
     }
 
-    // Go's `for ; peek < 512; peek++`: each Go `continue` is `peek += 1; continue`.
+    // Every `continue` below advances `peek` by one first.
     let mut peek: usize = 0;
     while peek < 512 {
         if parser.unread < peek + 1 && !yaml_parser_update_buffer(parser, peek + 1) {

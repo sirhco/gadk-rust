@@ -13,17 +13,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The decoder: yaml.v3 v3.0.1 `decode.go`'s reflection path (`decoder`) as a serde
-//! `Deserializer` over a node of a [`Document`] — alias expansion and the alias-ratio limit,
-//! `<<` merges, type-error collection, `Document` fields and the `InlineMap` catch-all.
+//! The decoder: a serde `Deserializer` over a node of a [`Document`] — alias expansion and the
+//! alias-ratio limit, `<<` merges, type-error collection, `Document` fields and the `InlineMap`
+//! catch-all.
 //!
-//! Go fills a value in place; serde builds it from visitor calls. Where Go leaves a target
-//! untouched after a type error, the deserializer hands the visitor the zero value of the
-//! entry point (`0`, `false`, `""`, an empty map, an empty sequence for a slice, `len` zero
-//! elements for an array or tuple) and records the error; Go's
-//! `good` result travels in [`DecodeState::good`] so sequences and maps drop the entries Go
-//! drops. Go type names in `TypeError` texts come from the serde entry point (`int64`,
-//! `[]uint8`, the serde struct name, `[]interface {}`, `map[string]interface {}`).
+//! yaml.v3 fills a value in place; serde builds it from visitor calls. Where yaml.v3 leaves a
+//! target untouched after a type error, the deserializer hands the visitor the zero value of
+//! the entry point (`0`, `false`, `""`, an empty map, an empty sequence for a slice, `len` zero
+//! elements for an array or tuple) and records the error; the success flag of each decode
+//! travels in [`DecodeState::good`] so sequences and maps drop the entries yaml.v3 drops. The
+//! type names in `TypeError` texts come from the serde entry point (`int64`, `[]uint8`, the
+//! serde struct name, `[]interface {}`, `map[string]interface {}`).
 
 use std::borrow::Cow;
 use std::cell::RefCell;
@@ -51,52 +51,51 @@ use crate::value::{
     unmarshal_value, unmarshal_value_entered,
 };
 
-/// Go: `alias_ratio_range_low` — 400,000 decode operations is ~500kb of dense object
+/// The lower end of the alias-ratio range: 400,000 decode operations is ~500kb of dense object
 /// declarations, or ~5kb of dense object declarations with 10000% alias expansion.
 pub(crate) const ALIAS_RATIO_RANGE_LOW: usize = 400_000;
 
-/// Go: `alias_ratio_range_high` — 4,000,000 decode operations is ~5MB of dense object
+/// The upper end of the alias-ratio range: 4,000,000 decode operations is ~5MB of dense object
 /// declarations, or ~4.5MB of dense object declarations with 10% alias expansion.
 pub(crate) const ALIAS_RATIO_RANGE_HIGH: usize = 4_000_000;
 
-/// Go: `alias_ratio_range` — the range over which we scale allowed alias ratios.
+/// The range over which the allowed alias ratio is scaled.
 pub(crate) const ALIAS_RATIO_RANGE: f64 = (ALIAS_RATIO_RANGE_HIGH - ALIAS_RATIO_RANGE_LOW) as f64;
 
-/// Go: decode.go `decoder` — the state shared by one decode (`de.rs` and `value.rs`).
+/// The state shared by one decode (`de.rs` and `value.rs`).
 pub(crate) struct DecodeState<'o> {
     /// The key-naming options.
     pub(crate) opts: &'o Options,
-    /// Go's `doc`: the document node being decoded.
-    #[allow(dead_code)] // Go's decoder.doc is written but never read.
+    /// The document node being decoded.
+    #[allow(dead_code)] // written but never read
     pub(crate) doc: Option<NodeId>,
-    /// Go's `aliases`: alias nodes being expanded (`anchor '…' value contains itself`).
+    /// The alias nodes being expanded (`anchor '…' value contains itself`).
     pub(crate) aliases: HashSet<NodeId>,
-    /// Go's `terrors`: the collected `line N: …` type errors.
+    /// The collected `line N: …` type errors.
     pub(crate) terrors: Vec<String>,
-    /// Go's `uniqueKeys` (always true: `newDecoder` sets it).
+    /// Whether repeated mapping keys are reported (always true).
     pub(crate) unique_keys: bool,
-    /// Go's `decodeCount`.
+    /// The number of decode operations so far (for the alias-ratio check).
     pub(crate) decode_count: usize,
-    /// Go's `aliasCount`.
+    /// The number of alias expansions so far.
     pub(crate) alias_count: usize,
-    /// Go's `aliasDepth`.
+    /// The current alias expansion depth.
     pub(crate) alias_depth: usize,
-    /// Go's `mergedFields` (`map[interface{}]bool`, nil = `None`): the keys already set while
-    /// a `<<` merge is applied, compared with Go's interface equality (`GoValue` `==`).
+    /// The keys already set while a `<<` merge is applied (`None` outside a merge), compared
+    /// by type and value (`GoValue` `==`).
     pub(crate) merged_fields: Option<Vec<GoValue>>,
     /// Current nesting of the recursive walk: collections and alias expansions (plan
-    /// decision D7; no Go field).
+    /// decision D7).
     pub(crate) depth: usize,
-    /// Go's `good` result of the last `unmarshal` (serde visitors return values, not flags).
+    /// Whether the last decode succeeded (serde visitors return values, not flags).
     pub(crate) good: bool,
-    /// Go's `k.Interface()` of the last map key decoded through a key cursor, when the Go
-    /// key type compares equal to the `interface{}` keys a merge records.
+    /// The last map key decoded through a key cursor, when its type compares equal to the
+    /// dynamically typed keys a merge records.
     pub(crate) last_key: Option<GoValue>,
 }
 
-/// Go: decode.go `newDecoder`.
+/// A fresh decode state.
 pub(crate) fn new_decoder(opts: &Options) -> DecodeState<'_> {
-    // Go: decode.go newDecoder
     DecodeState {
         opts,
         doc: None,
@@ -116,9 +115,9 @@ pub(crate) fn new_decoder(opts: &Options) -> DecodeState<'_> {
 /// What [`DecodeState::enter`] resolved; hand it back to [`DecodeState::leave`].
 pub(crate) struct Entered {
     /// The node to decode (document content and alias targets followed), or `None` for a
-    /// document without exactly one content node (Go's `document` returning false).
+    /// document without exactly one content node (the document decodes to nothing).
     pub(crate) node: Option<NodeId>,
-    /// Whether a document node was unwrapped (Go's `document` reports success whatever its
+    /// Whether a document node was unwrapped (a document reports success whatever its
     /// content's result).
     pub(crate) document: bool,
     /// The alias nodes being expanded, outermost first.
@@ -128,10 +127,9 @@ pub(crate) struct Entered {
 }
 
 impl DecodeState<'_> {
-    /// Go: `(*decoder).terror` — record `line N: cannot unmarshal <tag>[ `value`] into
-    /// <out_type>`, `out_type` being Go's type name for the target.
+    /// Records `line N: cannot unmarshal <tag>[ `value`] into <out_type>`, `out_type` being the
+    /// type name yaml.v3 prints for the target.
     pub(crate) fn terror(&mut self, n: &NodeData, tag: &str, out_type: &str) {
-        // Go: decode.go terror
         let tag = if n.tag.is_empty() {
             tag
         } else {
@@ -139,15 +137,15 @@ impl DecodeState<'_> {
         };
         let value = if tag != SEQ_TAG && tag != MAP_TAG {
             if n.value.len() > 10 {
-                // Divergence (ledger 6c-1): Go cuts the first 7 bytes even inside a UTF-8
-                // sequence and prints the raw bytes; a Rust `String` shows U+FFFD there.
+                // The first 7 bytes are cut even inside a UTF-8 sequence; a Rust `String` shows
+                // U+FFFD there (yaml.v3 prints the raw bytes).
                 let head = String::from_utf8_lossy(&n.value.as_bytes()[..7]);
                 format!(" `{head}...`")
             } else {
                 format!(" `{}`", n.value)
             }
         } else {
-            // Go appends a `!!seq`/`!!map` node's value as is (`!!mapfoo` for `!!map foo`).
+            // A `!!seq`/`!!map` node's value is appended as is (`!!mapfoo` for `!!map foo`).
             n.value.clone()
         };
         self.terrors.push(format!(
@@ -159,9 +157,8 @@ impl DecodeState<'_> {
         ));
     }
 
-    /// Go: the counters at the head of `(*decoder).unmarshal` and the alias-ratio check.
+    /// Counts one decode operation and applies the alias-ratio check.
     pub(crate) fn count(&mut self) -> Result<(), Error> {
-        // Go: decode.go unmarshal (head)
         self.decode_count += 1;
         if self.alias_depth > 0 {
             self.alias_count += 1;
@@ -178,9 +175,8 @@ impl DecodeState<'_> {
 
     /// One more level of nesting (plan decision D7).
     fn descend(&mut self) -> Result<(), Error> {
-        // Divergence (ledger 6c-1): plan decision D7 — collections and alias expansions
-        // nested deeper than MAX_WALK_DEPTH fail instead of overflowing the stack (Go has no
-        // limit here).
+        // Plan decision D7: collections and alias expansions nested deeper than MAX_WALK_DEPTH
+        // fail instead of overflowing the stack.
         if self.depth >= MAX_WALK_DEPTH {
             return Err(walk_depth_exceeded());
         }
@@ -188,9 +184,9 @@ impl DecodeState<'_> {
         Ok(())
     }
 
-    /// Go: `(*decoder).unmarshal` up to its kind switch — the counters (`count`), then
-    /// `document` and `alias` (each a nested `unmarshal`, counted again) until a node of
-    /// another kind; a sequence, mapping or alias also counts one level of nesting (D7).
+    /// Starts decoding node `n`: the counters (`count`), then unwraps documents and aliases
+    /// (each counted again) until a node of another kind; a sequence,
+    /// mapping or alias also counts one level of nesting (D7).
     pub(crate) fn enter(&mut self, doc: &Document, mut n: NodeId) -> Result<Entered, Error> {
         let mut e = Entered {
             node: None,
@@ -203,7 +199,6 @@ impl DecodeState<'_> {
             let node = &doc[n];
             match node.kind {
                 Kind::Document => {
-                    // Go: decode.go document
                     if node.content.len() != 1 {
                         return Ok(e);
                     }
@@ -212,7 +207,6 @@ impl DecodeState<'_> {
                     n = node.content[0];
                 }
                 Kind::Alias => {
-                    // Go: decode.go alias
                     if self.aliases.contains(&n) {
                         // TODO this could actually be allowed in some circumstances.
                         return Err(failf(format_args!(
@@ -220,7 +214,7 @@ impl DecodeState<'_> {
                             node.value
                         )));
                     }
-                    // Go dereferences a nil `Alias` (a panic); only hand-built nodes lack one.
+                    // Only hand-built alias nodes lack a target.
                     let Some(target) = node.alias else {
                         return Err(failf(format_args!(
                             "unknown anchor '{}' referenced",
@@ -246,8 +240,8 @@ impl DecodeState<'_> {
         }
     }
 
-    /// The end of the `unmarshal` calls [`DecodeState::enter`] began: Go's `alias` deletes
-    /// each expanded alias and decrements `aliasDepth`.
+    /// The end of the decodes [`DecodeState::enter`] began: each expanded alias is removed
+    /// and the alias depth decremented.
     pub(crate) fn leave(&mut self, e: Entered) {
         for a in e.aliases.iter().rev() {
             self.aliases.remove(a);
@@ -257,9 +251,9 @@ impl DecodeState<'_> {
     }
 }
 
-/// Go: decode.go `allowedAliasRatio`.
+/// The alias ratio allowed after `decode_count` decode operations (scaled linearly over the
+/// alias-ratio range).
 pub(crate) fn allowed_alias_ratio(decode_count: usize) -> f64 {
-    // Go: decode.go allowedAliasRatio
     if decode_count <= ALIAS_RATIO_RANGE_LOW {
         // allow 99% to come from alias expansion for small-to-medium documents
         0.99
@@ -274,9 +268,8 @@ pub(crate) fn allowed_alias_ratio(decode_count: usize) -> f64 {
     }
 }
 
-/// Go: decode.go `isStringMap` — every key of the mapping is `!!str` or `!!merge`.
+/// Whether every key of the mapping is `!!str` or `!!merge`.
 pub(crate) fn is_string_map(doc: &Document, n: NodeId) -> bool {
-    // Go: decode.go isStringMap
     let node = &doc[n];
     if node.kind != Kind::Mapping {
         return false;
@@ -287,25 +280,22 @@ pub(crate) fn is_string_map(doc: &Document, n: NodeId) -> bool {
     })
 }
 
-/// Go: decode.go `failWantMap`.
+/// The error for a node that must be a mapping.
 pub(crate) fn fail_want_map() -> Error {
-    // Go: decode.go failWantMap
     failf("map merge requires map or sequence of maps as the value")
 }
 
-/// Go: decode.go `isMerge` — an untagged or `!!merge` scalar `<<`.
+/// Whether the node is an untagged or `!!merge` scalar `<<`.
 pub(crate) fn is_merge(n: &NodeData) -> bool {
-    // Go: decode.go isMerge
     n.kind == Kind::Scalar
         && n.value == "<<"
         && (n.tag.is_empty() || n.tag == "!" || short_tag(&n.tag) == MERGE_TAG)
 }
 
-/// Go: the unique-keys check at the head of `(*decoder).mapping`: records `line N: mapping
+/// The unique-keys check at the head of a mapping: records `line N: mapping
 /// key "k" already defined at line M` for every repeated key (same kind and text) and
 /// returns whether there was none.
 pub(crate) fn check_unique_keys(d: &mut DecodeState<'_>, doc: &Document, n: NodeId) -> bool {
-    // Go: decode.go mapping (uniqueKeys)
     if !d.unique_keys {
         return true;
     }
@@ -329,7 +319,7 @@ pub(crate) fn check_unique_keys(d: &mut DecodeState<'_>, doc: &Document, n: Node
     d.terrors.len() == nerrs
 }
 
-/// Go's `base64.StdEncoding`: padded, CR/LF ignored, non-zero trailing bits accepted.
+/// Standard base64: padded, CR/LF ignored, non-zero trailing bits accepted.
 const GO_STD_ENCODING: GeneralPurpose = GeneralPurpose::new(
     &base64::alphabet::STANDARD,
     GeneralPurposeConfig::new()
@@ -337,17 +327,15 @@ const GO_STD_ENCODING: GeneralPurpose = GeneralPurpose::new(
         .with_decode_padding_mode(DecodePaddingMode::RequireCanonical),
 );
 
-/// Go's `base64.StdEncoding.DecodeString`.
+/// Decodes standard base64 (see `GO_STD_ENCODING`); `None` on invalid input.
 fn go_base64_decode(s: &str) -> Option<Vec<u8>> {
     let clean: Vec<u8> = s.bytes().filter(|&b| b != b'\r' && b != b'\n').collect();
     GO_STD_ENCODING.decode(clean).ok()
 }
 
-/// Go: the head of `(*decoder).scalar` — the tag and value of a scalar node: a quoted or
-/// `!!str` scalar is its text, else `resolve`'s result, with `!!binary` base64-decoded (a
-/// Go string: [`GoValue::Bytes`] when not UTF-8).
+/// The tag and value of a scalar node: a quoted or `!!str` scalar is its text, else
+/// `resolve`'s result, with `!!binary` base64-decoded ([`GoValue::Bytes`] when not UTF-8).
 pub(crate) fn resolve_scalar(n: &NodeData) -> Result<(String, GoValue), Error> {
-    // Go: decode.go scalar (resolution)
     if n.indicated_string() {
         return Ok((STR_TAG.to_string(), GoValue::String(n.value.clone())));
     }
@@ -368,14 +356,13 @@ pub(crate) fn resolve_scalar(n: &NodeData) -> Result<(String, GoValue), Error> {
     Ok((tag, resolved))
 }
 
-/// The text Go stores in a `string` target from a resolved scalar: the decoded `!!binary`
+/// The text stored in a string target from a resolved scalar: the decoded `!!binary`
 /// data, else the node's text.
 fn go_string_of(tag: &str, resolved: &GoValue, n: &NodeData) -> String {
     if tag == BINARY_TAG {
         match resolved {
             GoValue::String(s) => return s.clone(),
-            // Divergence (ledger 6c-1): Go stores the raw bytes in the string; a Rust
-            // `String` holds them with U+FFFD for invalid sequences.
+            // A Rust `String` holds invalid sequences as U+FFFD (yaml.v3 stores the raw bytes).
             GoValue::Bytes(b) => return String::from_utf8_lossy(b).into_owned(),
             _ => {}
         }
@@ -383,14 +370,13 @@ fn go_string_of(tag: &str, resolved: &GoValue, n: &NodeData) -> String {
     n.value.clone()
 }
 
-/// Go: `(*decoder).unmarshal(n, out)` with `out` a `string`: the text, or `None` where Go's
-/// `good` is false (a null, or a collection — recorded as a type error).
+/// Decodes node `n` into a string: the text, or `None` where the decode is not good (a null,
+/// or a collection — recorded as a type error).
 pub(crate) fn unmarshal_string(
     d: &mut DecodeState<'_>,
     doc: &Document,
     n: NodeId,
 ) -> Result<Option<String>, Error> {
-    // Go: decode.go unmarshal (string target)
     let entered = d.enter(doc, n)?;
     let result = match entered.node {
         Some(n) => string_entered(d, doc, n),
@@ -430,7 +416,7 @@ fn string_entered(
     }
 }
 
-/// Go's `failf("cannot decode node with unknown kind %d", n.Kind)`.
+/// The `cannot decode node with unknown kind <n>` error.
 fn unknown_kind(node: &NodeData) -> Error {
     failf(format_args!(
         "cannot decode node with unknown kind {}",
@@ -438,14 +424,13 @@ fn unknown_kind(node: &NodeData) -> Error {
     ))
 }
 
-/// Go's `(*Node).Decode(&v)` for node `at` of `doc`: `Err(Error::Type)` when type errors were
+/// Decodes node `at` of `doc`: `Err(Error::Type)` when type errors were
 /// collected.
 pub(crate) fn from_node<T: DeserializeOwned>(
     doc: &Document,
     at: NodeId,
     opts: &Options,
 ) -> Result<T, Error> {
-    // Go: yaml.go (*Node).Decode
     let mut d = new_decoder(opts);
     let v = T::deserialize(NodeDe::new(&mut d, doc, at))?;
     if !d.terrors.is_empty() {
@@ -454,13 +439,12 @@ pub(crate) fn from_node<T: DeserializeOwned>(
     Ok(v)
 }
 
-/// Go's `(*Node).Decode(&v)` keeping Go's partly filled value next to the `*TypeError`.
+/// Decodes node `at` of `doc`, keeping the partly filled value next to the [`TypeError`].
 pub(crate) fn from_node_partial<T: DeserializeOwned + Default>(
     doc: &Document,
     at: NodeId,
     opts: &Options,
 ) -> Result<(T, Option<TypeError>), Error> {
-    // Go: yaml.go (*Node).Decode
     let mut d = new_decoder(opts);
     match T::deserialize(NodeDe::new(&mut d, doc, at)) {
         Ok(v) => {
@@ -468,7 +452,7 @@ pub(crate) fn from_node_partial<T: DeserializeOwned + Default>(
             Ok((v, terr))
         }
         // A type error serde cannot answer with a zero value (an enum) ends the decode;
-        // `T::default()` stands for Go's untouched value.
+        // `T::default()` stands for the untouched value.
         Err(Error::Type(e)) => Ok((T::default(), Some(e))),
         Err(e) => Err(e),
     }
@@ -499,14 +483,14 @@ impl<'de> Visitor<'de> for DocumentVisitor {
 }
 
 impl<'de> Deserialize<'de> for Document {
-    /// A `Document` field receives the raw sub-node (Go's `yaml.Node` field) through
+    /// A `Document` field receives the raw sub-node (a node field) through
     /// `crate::node::DOCUMENT_MARKER`.
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         deserializer.deserialize_newtype_struct(DOCUMENT_MARKER, DocumentVisitor)
     }
 }
 
-/// A Go scalar kind a serde entry point stands for.
+/// The scalar kind a serde entry point stands for.
 #[derive(Clone, Copy)]
 enum Prim {
     Bool,
@@ -517,7 +501,7 @@ enum Prim {
 }
 
 impl Prim {
-    /// Go's type name in `TypeError` texts.
+    /// The type name in `TypeError` texts.
     fn go_name(self) -> &'static str {
         match self {
             Prim::Bool => "bool",
@@ -535,9 +519,8 @@ impl Prim {
         }
     }
 
-    /// Go: the kind switch of `(*decoder).scalar` for a non-nil resolved value.
+    /// Converts a non-null resolved value to this kind (`None` when it does not fit).
     fn convert(self, tag: &str, resolved: &GoValue, n: &NodeData) -> Option<GoValue> {
-        // Go: decode.go scalar (kind switch)
         match self {
             Prim::Str => Some(GoValue::String(go_string_of(tag, resolved, n))),
             Prim::Bool => match resolved {
@@ -559,8 +542,8 @@ impl Prim {
                 let v = match *resolved {
                     GoValue::Int(i) => i,
                     GoValue::Uint(u) => i64::try_from(u).ok()?,
-                    // Divergence (ledger 6c-1): Go's `int64(f)` of an out-of-range float is
-                    // platform-defined; Rust saturates, as Go does on arm64.
+                    // An out-of-range float saturates (yaml.v3's behaviour here is
+                    // platform-defined).
                     GoValue::Float(f) if f <= i64::MAX as f64 => f as i64,
                     _ => return None,
                 };
@@ -571,7 +554,7 @@ impl Prim {
                 let v = match *resolved {
                     GoValue::Int(i) => u64::try_from(i).ok()?,
                     GoValue::Uint(u) => u,
-                    // Divergence (ledger 6c-1): as above, `uint64(f)` saturates (Go on arm64).
+                    // As above, an out-of-range float saturates.
                     GoValue::Float(f) if f <= u64::MAX as f64 => f as u64,
                     _ => return None,
                 };
@@ -586,9 +569,9 @@ impl Prim {
         }
     }
 
-    /// Go's `k.Interface()` of a key decoded into this kind, when it can equal one of the
-    /// `interface{}` keys a merge records (Go compares type and value: `string`, `bool`,
-    /// `float64`, and `uint64` above `math.MaxInt64` match; sized ints and `int64` never do).
+    /// The key as a dynamically typed value, when a key decoded into this kind can equal one of
+    /// the keys a merge records (type and value are compared: `string`, `bool`, `float64`, and
+    /// `uint64` above `i64::MAX` match; sized ints and `int64` never do).
     fn key_identity(self, v: &GoValue) -> Option<GoValue> {
         match (self, v) {
             (Prim::Str | Prim::Bool, _) | (Prim::Float(64), _) => Some(v.clone()),
@@ -617,7 +600,7 @@ impl Prim {
         }
     }
 
-    /// The zero value Go leaves in a target it did not set.
+    /// The zero value of a target that was not set.
     fn zero<'de, V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
         match self {
             Prim::Bool => visitor.visit_bool(false),
@@ -639,11 +622,11 @@ impl Prim {
 /// The sequence-shaped serde entry points.
 #[derive(Clone, Copy)]
 enum SeqWant {
-    /// `deserialize_seq`: Go `[]interface {}`.
+    /// `deserialize_seq`: a `[]interface {}`.
     Seq,
-    /// `deserialize_bytes` / `deserialize_byte_buf`: Go `[]uint8`.
+    /// `deserialize_bytes` / `deserialize_byte_buf`: a `[]uint8`.
     Bytes,
-    /// `deserialize_tuple` / `deserialize_tuple_struct`: a Go array of this length.
+    /// `deserialize_tuple` / `deserialize_tuple_struct`: an array of this length.
     Tuple(usize),
 }
 
@@ -651,8 +634,7 @@ impl SeqWant {
     fn go_name(self) -> &'static str {
         match self {
             SeqWant::Bytes => "[]uint8",
-            // Divergence (ledger 6c-1): serde exposes no element type; Go names it
-            // (`[]int64`, `[]yaml.Node`, `[2]int`).
+            // serde exposes no element type, while yaml.v3 names it (`[]int64`, `[2]int`).
             SeqWant::Seq | SeqWant::Tuple(_) => "[]interface {}",
         }
     }
@@ -665,7 +647,7 @@ impl SeqWant {
     ) -> Result<V::Value, Error> {
         match self {
             SeqWant::Bytes => visitor.visit_byte_buf(Vec::new()),
-            // A Go array keeps its length: `len` zero elements.
+            // An array keeps its length: `len` zero elements.
             SeqWant::Seq => visitor.visit_seq(SeqWalk::new(d, doc, &[], 0)),
             SeqWant::Tuple(len) => visitor.visit_seq(SeqWalk::new(d, doc, &[], len)),
         }
@@ -675,9 +657,9 @@ impl SeqWant {
 /// The map-shaped serde entry points.
 #[derive(Clone, Copy)]
 enum Mode {
-    /// `deserialize_map`: Go `map[string]interface {}` (any key type).
+    /// `deserialize_map`: a `map[string]interface {}` (any key type).
     Map,
-    /// `deserialize_struct`: Go's struct of that name.
+    /// `deserialize_struct`: the struct of that name.
     Struct {
         name: &'static str,
         fields: &'static [&'static str],
@@ -687,24 +669,24 @@ enum Mode {
 impl Mode {
     fn go_name(self) -> &'static str {
         match self {
-            // Divergence (ledger 6c-1): serde exposes no key or element type; Go names them
+            // serde exposes no key or element type, while yaml.v3 names them
             // (`map[string]int64`).
             Mode::Map => "map[string]interface {}",
-            // Divergence (ledger 6c-1): Go prints the package-qualified type (`main.Inner`);
-            // serde gives the bare struct name.
+            // yaml.v3 prints the package-qualified type (`main.Inner`); serde gives the bare
+            // struct name.
             Mode::Struct { name, .. } => name,
         }
     }
 }
 
-/// The serde `Deserializer` over node `n` of a [`Document`]: one Go `unmarshal(n, out)` call
-/// whose `out` type is the serde entry point used.
+/// The serde `Deserializer` over node `n` of a [`Document`]: one decode of `n` into the
+/// type of the serde entry point used.
 pub(crate) struct NodeDe<'a, 'o> {
     d: &'a mut DecodeState<'o>,
     doc: &'a Document,
     n: NodeId,
-    /// Whether Go's `unmarshal` head already ran for `n` (a cursor handed on by `Option` or
-    /// a newtype, Go's `prepare` loop over pointers).
+    /// Whether the decode head already ran for `n` (a cursor handed on by `Option` or a
+    /// newtype).
     entered: bool,
     /// Whether this cursor decodes a map key (records [`DecodeState::last_key`]).
     key: bool,
@@ -721,7 +703,7 @@ impl<'a, 'o> NodeDe<'a, 'o> {
         }
     }
 
-    /// The cursor for the same node after `enter` (Go's `prepare` dereferencing a pointer).
+    /// The cursor for the same node after `enter` (dereferencing an `Option`).
     fn same(&mut self) -> NodeDe<'_, 'o> {
         NodeDe {
             d: &mut *self.d,
@@ -732,7 +714,7 @@ impl<'a, 'o> NodeDe<'a, 'o> {
         }
     }
 
-    /// Runs `f` on the node Go's `unmarshal` reaches after `document`/`alias` (`None` for a
+    /// Runs `f` on the node reached after unwrapping documents and aliases (`None` for a
     /// document without one content node), then undoes the alias bookkeeping.
     fn run<R>(
         mut self,
@@ -749,14 +731,14 @@ impl<'a, 'o> NodeDe<'a, 'o> {
         self.entered = true;
         let r = f(&mut self, e.node);
         if e.document {
-            // Go's `document` returns true whatever its content's result.
+            // A document reports success whatever its content's result.
             self.d.good = true;
         }
         self.d.leave(e);
         r
     }
 
-    /// Go: `unmarshal` into a scalar kind (`scalar`, or a type error for a collection).
+    /// Decodes into a scalar kind (a type error for a collection).
     fn primitive<'de, V: Visitor<'de>>(
         &mut self,
         n: Option<NodeId>,
@@ -772,7 +754,7 @@ impl<'a, 'o> NodeDe<'a, 'o> {
             Kind::Scalar => {
                 let (tag, resolved) = resolve_scalar(node)?;
                 if resolved == GoValue::Null {
-                    // Go's `null(out)` leaves a non-nillable target untouched.
+                    // A null leaves a non-nullable target untouched.
                     self.d.good = false;
                     return want.zero(visitor);
                 }
@@ -811,8 +793,8 @@ impl<'a, 'o> NodeDe<'a, 'o> {
         }
     }
 
-    /// Go: `unmarshal` into a slice or array (`sequence`; a scalar or mapping is a type
-    /// error, a null sets the nil slice).
+    /// Decodes into a slice or array (a scalar or mapping is a type error, a null sets an
+    /// empty slice).
     fn sequence<'de, V: Visitor<'de>>(
         &mut self,
         n: Option<NodeId>,
@@ -827,7 +809,6 @@ impl<'a, 'o> NodeDe<'a, 'o> {
         let node = &doc[n];
         match node.kind {
             Kind::Sequence => {
-                // Go: decode.go sequence
                 if let SeqWant::Tuple(len) = want
                     && node.content.len() != len
                 {
@@ -847,7 +828,7 @@ impl<'a, 'o> NodeDe<'a, 'o> {
             Kind::Scalar => {
                 let (tag, resolved) = resolve_scalar(node)?;
                 if resolved == GoValue::Null {
-                    // Go's `null(out)` sets a slice to nil (an array is left untouched).
+                    // A null sets a slice to nil (an array is left untouched).
                     self.d.good = !matches!(want, SeqWant::Tuple(_));
                 } else {
                     self.d.terror(node, &tag, want.go_name());
@@ -875,8 +856,8 @@ impl<'a, 'o> NodeDe<'a, 'o> {
         }
     }
 
-    /// Go: `unmarshal` into a map or struct (`mapping` / `mappingStruct`; a scalar or
-    /// sequence is a type error, a null sets a nil map and leaves a struct untouched).
+    /// Decodes into a map or struct (a scalar or sequence is a type error, a null sets a nil
+    /// map and leaves a struct untouched).
     fn mapping<'de, V: Visitor<'de>>(
         &mut self,
         n: Option<NodeId>,
@@ -920,7 +901,7 @@ impl<'a, 'o> NodeDe<'a, 'o> {
         r
     }
 
-    /// Go: `unmarshal` into `struct {}` (serde's unit and unit structs).
+    /// Decodes into an empty struct (serde's unit and unit structs).
     fn unit<'de, V: Visitor<'de>>(
         &mut self,
         n: Option<NodeId>,
@@ -974,8 +955,8 @@ impl<'a, 'o> NodeDe<'a, 'o> {
                 let terrors = self.d.terrors.len();
                 let Some(variant) = unmarshal_string(self.d, doc, node.content[0])? else {
                     if self.d.terrors.len() == terrors {
-                        // A null key: Go's null into a string is "not good" with no type
-                        // error, so report serde's, as for a null enum scalar.
+                        // A null key: a null into a string is "not good" with no type error, so
+                        // report serde's, as for a null enum scalar.
                         return Err(de::Error::invalid_type(Unexpected::Unit, &visitor));
                     }
                     return Err(Error::Type(TypeError {
@@ -1020,7 +1001,7 @@ impl<'a, 'o> NodeDe<'a, 'o> {
 impl<'de> Deserializer<'de> for NodeDe<'_, '_> {
     type Error = Error;
 
-    /// Go's `interface{}` target: the [`GoValue`] rules (R5), handed to the visitor by shape.
+    /// An untyped target: the [`GoValue`] rules, handed to the visitor by shape.
     fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
         let v = if self.entered {
             unmarshal_value_entered(self.d, self.doc, self.n)?
@@ -1092,7 +1073,7 @@ impl<'de> Deserializer<'de> for NodeDe<'_, '_> {
         self.run(|c, n| c.primitive(n, Prim::Str, visitor))
     }
 
-    /// Go's `[]byte`: a sequence of `uint8`; v3.0.1 rejects a `!!str`/`!!binary` scalar
+    /// Bytes: a sequence of `u8`; yaml.v3 v3.0.1 rejects a `!!str`/`!!binary` scalar
     /// (`cannot unmarshal !!binary `…` into []uint8`).
     fn deserialize_bytes<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
         self.run(|c, n| c.sequence(n, SeqWant::Bytes, visitor))
@@ -1102,7 +1083,7 @@ impl<'de> Deserializer<'de> for NodeDe<'_, '_> {
         self.run(|c, n| c.sequence(n, SeqWant::Bytes, visitor))
     }
 
-    /// Go's pointer: nil for a null node, else allocated and decoded (Go's `prepare`).
+    /// An `Option`: `None` for a null node, else the decoded value.
     fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
         self.run(|c, n| match n {
             Some(n) if c.doc.short_tag(n) != NULL_TAG => visitor.visit_some(c.same()),
@@ -1125,18 +1106,17 @@ impl<'de> Deserializer<'de> for NodeDe<'_, '_> {
         self.run(|c, n| c.unit(n, name, visitor))
     }
 
-    /// Newtypes are transparent (Go's named types), except the private markers: a
-    /// [`Document`] field receives the node (Go's `out.Type() == nodeType`, checked before
-    /// `document`/`alias`), a [`GoValue`] the `interface{}` decode.
+    /// Newtypes are transparent, except the private markers: a [`Document`] field receives the
+    /// node (checked before documents and aliases are unwrapped), a [`GoValue`] the untyped
+    /// decode.
     fn deserialize_newtype_struct<V: Visitor<'de>>(
         mut self,
         name: &'static str,
         visitor: V,
     ) -> Result<V::Value, Error> {
         if name == DOCUMENT_MARKER {
-            // Divergence (ledger 6c-1): an `Option<Document>` (Go `*yaml.Node`) receives the
-            // node too; Go checks for `yaml.Node` before `prepare` only, so a non-null value
-            // into `*yaml.Node` is decoded as an ordinary struct there.
+            // An `Option<Document>` receives the node too; yaml.v3 decodes a non-null value
+            // into a pointer to a node as an ordinary struct instead.
             if !self.entered {
                 self.d.count()?;
             }
@@ -1181,14 +1161,14 @@ impl<'de> Deserializer<'de> for NodeDe<'_, '_> {
         self.run(|c, n| c.sequence(n, SeqWant::Tuple(len), visitor))
     }
 
-    /// Go's map target. serde derive decodes a struct with a `#[serde(flatten)]` field
+    /// A map target. serde derive decodes a struct with a `#[serde(flatten)]` field
     /// through `deserialize_map` with a visitor expecting `struct Name`; that is rejected
     /// (spec R6/R8).
     fn deserialize_map<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
         let expected = format!("{}", &visitor as &dyn Expected);
         if expected.starts_with("struct ") {
-            // Divergence (ledger 6c-1): Go has no flatten; serde's flatten needs maps of
-            // unknown shape, which yaml.v3's rules cannot express.
+            // yaml.v3 has no flatten; serde's flatten needs maps of unknown shape, which its
+            // rules cannot express.
             return Err(Error::Unsupported(format!(
                 "serde flatten is unsupported ({expected})"
             )));
@@ -1218,17 +1198,17 @@ impl<'de> Deserializer<'de> for NodeDe<'_, '_> {
         self.deserialize_string(visitor)
     }
 
-    /// Go skips unknown keys without decoding their values.
+    /// Unknown keys are skipped without decoding their values.
     fn deserialize_ignored_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
         self.d.good = true;
         visitor.visit_unit()
     }
 }
 
-/// The items of a sequence node as a serde sequence (Go's `sequence` loop): `next_element`
-/// drops items whose decode was not good (Go stores only those, at index `j`, so a Go array's
-/// good elements move toward the front), then yields zero elements until `len` were yielded
-/// (a Go array's untouched tail; `len` is 0 for a slice).
+/// The items of a sequence node as a serde sequence: `next_element` drops items whose decode
+/// was not good (only good ones are stored, so an array's good elements move toward the
+/// front), then yields zero elements until `len` were yielded (an array's untouched tail;
+/// `len` is 0 for a slice).
 struct SeqWalk<'a, 'o> {
     d: &'a mut DecodeState<'o>,
     doc: &'a Document,
@@ -1250,8 +1230,8 @@ impl<'a, 'o> SeqWalk<'a, 'o> {
         }
     }
 
-    /// The next zero element of a Go array's tail, decoded from the zero node without
-    /// counting a Go `unmarshal` call (Go never visits it).
+    /// The next zero element of an array's tail, decoded from the zero node without counting a
+    /// decode operation (the tail is never visited).
     fn zero_element<'de, T: DeserializeSeed<'de>>(
         &mut self,
         seed: T,
@@ -1307,11 +1287,11 @@ impl<'de> SeqAccess<'de> for SeqWalk<'_, '_> {
     }
 }
 
-/// A step of Go's `mapping`/`mappingStruct`/`merge` recursion, run iteratively so the pairs
+/// A step of the mapping/merge recursion, run iteratively so the pairs
 /// of merged mappings reach the same visitor.
 enum Task {
-    /// The pair loop over mapping `node` (Go's local `mergedFields` is `mf`, `doneFields` is
-    /// `done`; `merge` is the last `<<` value seen).
+    /// The pair loop over mapping `node` (`mf` holds the merged-field keys, `done` the struct
+    /// fields already set; `merge` is the last `<<` value seen).
     Pairs {
         node: NodeId,
         i: usize,
@@ -1319,8 +1299,8 @@ enum Task {
         mf: Option<Vec<GoValue>>,
         done: Vec<bool>,
     },
-    /// Go's `merge`: `items` decoded into the same target in turn (`restore_none`: Go's
-    /// local `mergedFields` was nil).
+    /// A merge: `items` decoded into the same target in turn (`restore_none`: the merged-field
+    /// keys were `None` before).
     Merge {
         items: Vec<NodeId>,
         check_items: bool,
@@ -1348,8 +1328,8 @@ enum Pending {
     Inline(Vec<(String, GoValue)>),
 }
 
-/// The pairs of a mapping node (with `<<` merges applied) as a serde map: Go's `mapping` with
-/// a map target or `mappingStruct`.
+/// The pairs of a mapping node (with `<<` merges applied) as a serde map, for a map or
+/// struct target.
 struct MapWalk<'a, 'o> {
     d: &'a mut DecodeState<'o>,
     doc: &'a Document,
@@ -1357,7 +1337,7 @@ struct MapWalk<'a, 'o> {
     /// Struct mode: each field's YAML key ([`Options::key_for`]) and index, without
     /// `INLINE_FIELD`.
     keys: Vec<(Cow<'static, str>, usize)>,
-    /// Struct mode with an `INLINE_FIELD`: the unmatched pairs (Go's inline map), until handed
+    /// Struct mode with an `INLINE_FIELD`: the unmatched pairs (the inline map), until handed
     /// over after every other pair.
     inline: Option<Vec<(String, GoValue)>>,
     /// Struct fields already handed to the visitor (serde accepts each once).
@@ -1399,7 +1379,7 @@ impl<'a, 'o> MapWalk<'a, 'o> {
         w
     }
 
-    /// Go: the head of `mapping`/`mappingStruct` — take `mergedFields` for this loop.
+    /// The head of a mapping: takes the merged-field keys for this loop.
     fn push_pairs(&mut self, node: NodeId) {
         let done = match self.mode {
             Mode::Struct { fields, .. } => vec![false; fields.len()],
@@ -1414,9 +1394,8 @@ impl<'a, 'o> MapWalk<'a, 'o> {
         });
     }
 
-    /// Go: `(*decoder).merge` up to its kind switch.
+    /// Starts a merge, up to the dispatch on the merge value's kind.
     fn start_merge(&mut self, parent: NodeId, merge: NodeId) -> Result<(), Error> {
-        // Go: decode.go merge
         let doc = self.doc;
         let restore_none = self.d.merged_fields.is_none();
         if restore_none {
@@ -1491,7 +1470,7 @@ impl<'a, 'o> MapWalk<'a, 'o> {
                             return Err(fail_want_map());
                         }
                     }
-                    // Go: d.unmarshal(item, out) — a mapping into the same target.
+                    // A mapping into the same target.
                     let e = self.d.enter(doc, ni)?;
                     match e.node {
                         Some(m)
@@ -1513,7 +1492,7 @@ impl<'a, 'o> MapWalk<'a, 'o> {
                 } => {
                     let content = &doc[*node].content;
                     if *i + 1 >= content.len() {
-                        // Go: the end of the loop, then `merge`.
+                        // The end of the loop, then the merge.
                         let (node, merge, mf) = (*node, *merge, mf.take());
                         self.stack.pop();
                         self.d.merged_fields = mf;
@@ -1531,7 +1510,6 @@ impl<'a, 'o> MapWalk<'a, 'o> {
                     let Mode::Struct { name, fields } = self.mode else {
                         return Ok(Some(Yield::Pair(kn, vn)));
                     };
-                    // Go: decode.go mappingStruct (pair)
                     let Some(sname) = unmarshal_string(self.d, doc, kn)? else {
                         continue;
                     };
@@ -1545,8 +1523,7 @@ impl<'a, 'o> MapWalk<'a, 'o> {
                     if let Some(&(_, fi)) = self.keys.iter().find(|(k, _)| *k == sname) {
                         if self.d.unique_keys {
                             if done[fi] {
-                                // Divergence (ledger 6c-1): Go names the type
-                                // package-qualified (`main.T`).
+                                // yaml.v3 names the type package-qualified (`main.T`).
                                 self.d.terrors.push(format!(
                                     "line {}: field {sname} already set in type {name}",
                                     doc[kn].line
@@ -1555,7 +1532,7 @@ impl<'a, 'o> MapWalk<'a, 'o> {
                             }
                             done[fi] = true;
                         }
-                        // serde takes each field once; Go would set it again only for a merged
+                        // serde takes each field once; yaml.v3 would set it again only for a merged
                         // key whose recorded form differs in type (`1` vs `"1"`).
                         if self.given[fi] {
                             continue;
@@ -1577,7 +1554,7 @@ impl<'a, 'o> MapWalk<'a, 'o> {
         }
     }
 
-    /// Go's handling of a decoded map key `k.Interface()` (from [`DecodeState::last_key`]):
+    /// Handles a decoded map key (from [`DecodeState::last_key`]):
     /// false when a merge already set it; `invalid map key` for a slice or map.
     fn check_key(&mut self) -> Result<bool, Error> {
         let Some(k) = self.d.last_key.take() else {
@@ -1646,7 +1623,7 @@ impl<'de> MapAccess<'de> for MapWalk<'_, '_> {
         }
     }
 
-    /// Go's map pair loop: a key whose decode was not good, or that a merge already set, is
+    /// The map pair loop: a key whose decode was not good, or that a merge already set, is
     /// skipped, as is a value whose decode was not good (unless it is null).
     fn next_entry<K: Deserialize<'de>, V: Deserialize<'de>>(
         &mut self,
@@ -1657,7 +1634,6 @@ impl<'de> MapAccess<'de> for MapWalk<'_, '_> {
             };
             return Ok(Some((k, self.next_value::<V>()?)));
         }
-        // Go: decode.go mapping (pair)
         loop {
             let Some(Yield::Pair(kn, vn)) = self.next_yield()? else {
                 return Ok(None);
@@ -1670,7 +1646,7 @@ impl<'de> MapAccess<'de> for MapWalk<'_, '_> {
                 continue;
             }
             let v = V::deserialize(NodeDe::new(self.d, self.doc, vn))?;
-            // Go's `mapIsNew` holds for every map serde builds.
+            // A null value is stored for a key not yet present (every map serde builds is new).
             if self.d.good || self.doc.short_tag(vn) == NULL_TAG {
                 return Ok(Some((k, v)));
             }

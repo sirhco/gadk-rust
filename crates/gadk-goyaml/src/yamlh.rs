@@ -20,27 +20,27 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-//! Port of yaml.v3 v3.0.1 `yamlh.go` (libyaml's data types: tokens, events, parser and
-//! emitter state) and `yamlprivateh.go` (buffer sizes and character-class helpers).
+//! libyaml's data types (tokens, events, parser and emitter state) and the buffer sizes and
+//! character-class helpers.
 //!
-//! Naming: Go's `yaml_xxx_t` types are `YamlXxx` structs/enums; enum variants are Go's constant
-//! names in CamelCase without the `yaml_` prefix and without the prefix/suffix every constant
-//! of that type shares (`yaml_STREAM_START_TOKEN` → `YamlTokenType::StreamStart`,
+//! Naming: libyaml's `yaml_xxx_t` types are `YamlXxx` structs/enums; enum variants are the
+//! constant names in CamelCase without the `yaml_` prefix and without the prefix/suffix every
+//! constant of that type shares (`yaml_STREAM_START_TOKEN` → `YamlTokenType::StreamStart`,
 //! `yaml_PARSE_BLOCK_NODE_STATE` → `YamlParserState::BlockNode`, `yaml_NO_ERROR` →
-//! `YamlErrorType::No`). Go `[]byte` fields are `Vec<u8>` (nil and empty are not distinguished:
-//! every nil check in yaml.v3 v3.0.1 is on a value that is never set empty). Go `int` positions,
-//! counts and marks are `usize`; Go `int`s that can be negative (indentation levels, widths,
-//! the emitter's line/column) are `isize`.
+//! `YamlErrorType::No`). Byte-string fields are `Vec<u8>` (absent and empty are not
+//! distinguished: every absence check in yaml.v3 v3.0.1 is on a value that is never set
+//! empty). Positions, counts and marks are `usize`; values that can be negative (indentation
+//! levels, widths, the emitter's line/column) are `isize`.
 
 use std::collections::HashMap;
 use std::fmt;
 use std::io::{Read, Write};
 
 // ---------------------------------------------------------------------------------------------
-// yamlh.go
+// Types
 // ---------------------------------------------------------------------------------------------
 
-/// Go: `yaml_version_directive_t` — the version directive data.
+/// The version directive data.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct YamlVersionDirective {
     /// The major version number.
@@ -49,7 +49,7 @@ pub(crate) struct YamlVersionDirective {
     pub(crate) minor: i8,
 }
 
-/// Go: `yaml_tag_directive_t` — the tag directive data.
+/// The tag directive data.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct YamlTagDirective {
     /// The tag handle.
@@ -58,7 +58,7 @@ pub(crate) struct YamlTagDirective {
     pub(crate) prefix: Vec<u8>,
 }
 
-/// Go: `yaml_encoding_t` — the stream encoding.
+/// The stream encoding.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum YamlEncoding {
     /// Let the parser choose the encoding.
@@ -72,30 +72,30 @@ pub(crate) enum YamlEncoding {
     Utf16be = 3,
 }
 
-/// Go: `yaml_break_t` — line break types.
+/// Line break types.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum YamlBreak {
     /// Let the parser choose the break type.
     #[default]
     Any = 0,
     /// Use CR for line breaks (Mac style).
-    #[allow(dead_code)] // Go's emitter handles it; yaml.v3 never selects it.
+    #[allow(dead_code)] // The emitter handles it; yaml.v3 never selects it.
     Cr = 1,
     /// Use LN for line breaks (Unix style).
     Ln = 2,
     /// Use CR LN for line breaks (DOS style).
-    #[allow(dead_code)] // Go's emitter handles it; yaml.v3 never selects it.
+    #[allow(dead_code)] // The emitter handles it; yaml.v3 never selects it.
     Crln = 3,
 }
 
-/// Go: `yaml_error_type_t` — many bad things could happen with the parser and emitter.
+/// Many bad things could happen with the parser and emitter.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum YamlErrorType {
     /// No error is produced.
     #[default]
     No = 0,
     /// Cannot allocate or reallocate a block of memory.
-    #[allow(dead_code)] // Go declares it; yaml.v3 never sets it.
+    #[allow(dead_code)] // Kept from libyaml; yaml.v3 never sets it.
     Memory = 1,
     /// Cannot read or decode the input stream.
     Reader = 2,
@@ -104,7 +104,7 @@ pub(crate) enum YamlErrorType {
     /// Cannot parse the input stream.
     Parser = 4,
     /// Cannot compose a YAML document.
-    #[allow(dead_code)] // Go declares it; yaml.v3 never sets it.
+    #[allow(dead_code)] // Kept from libyaml; yaml.v3 never sets it.
     Composer = 5,
     /// Cannot write to the output stream.
     Writer = 6,
@@ -112,7 +112,7 @@ pub(crate) enum YamlErrorType {
     Emitter = 7,
 }
 
-/// Go: `yaml_mark_t` — the pointer position.
+/// The pointer position.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct YamlMark {
     /// The position index.
@@ -125,11 +125,11 @@ pub(crate) struct YamlMark {
 
 // Node Styles
 
-/// Go: `yaml_style_t` — the raw style stored in events; read it back through
+/// The raw style stored in events; read it back through
 /// [`YamlEvent::scalar_style`], [`YamlEvent::sequence_style`] or [`YamlEvent::mapping_style`].
 pub(crate) type YamlStyle = i8;
 
-/// Go: `yaml_scalar_style_t` — scalar styles (Go's values: `0` then `1 << iota` from 2).
+/// Scalar styles (the values are `0`, then `2`, `4`, `8`, `16`, `32`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum YamlScalarStyle {
     /// Let the emitter choose the style.
@@ -148,7 +148,7 @@ pub(crate) enum YamlScalarStyle {
 }
 
 impl YamlScalarStyle {
-    /// Go's `yaml_scalar_style_t(style)` conversion (values other than the constants map to
+    /// Converts a raw style (values other than the constants map to
     /// `Any`; yaml.v3 never stores any).
     pub(crate) fn from_style(style: YamlStyle) -> YamlScalarStyle {
         match style {
@@ -162,7 +162,7 @@ impl YamlScalarStyle {
     }
 }
 
-/// Go: `yaml_sequence_style_t` — sequence styles.
+/// Sequence styles.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum YamlSequenceStyle {
     /// Let the emitter choose the style.
@@ -175,7 +175,7 @@ pub(crate) enum YamlSequenceStyle {
 }
 
 impl YamlSequenceStyle {
-    /// Go's `yaml_sequence_style_t(style)` conversion.
+    /// Converts a raw style.
     pub(crate) fn from_style(style: YamlStyle) -> YamlSequenceStyle {
         match style {
             1 => YamlSequenceStyle::Block,
@@ -185,7 +185,7 @@ impl YamlSequenceStyle {
     }
 }
 
-/// Go: `yaml_mapping_style_t` — mapping styles.
+/// Mapping styles.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum YamlMappingStyle {
     /// Let the emitter choose the style.
@@ -198,7 +198,7 @@ pub(crate) enum YamlMappingStyle {
 }
 
 impl YamlMappingStyle {
-    /// Go's `yaml_mapping_style_t(style)` conversion.
+    /// Converts a raw style.
     pub(crate) fn from_style(style: YamlStyle) -> YamlMappingStyle {
         match style {
             1 => YamlMappingStyle::Block,
@@ -210,7 +210,7 @@ impl YamlMappingStyle {
 
 // Tokens
 
-/// Go: `yaml_token_type_t` — token types.
+/// Token types.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum YamlTokenType {
     /// An empty token.
@@ -262,7 +262,6 @@ pub(crate) enum YamlTokenType {
 
 impl fmt::Display for YamlTokenType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Go: yamlh.go yaml_token_type_t.String
         let s = match self {
             YamlTokenType::No => "yaml_NO_TOKEN",
             YamlTokenType::StreamStart => "yaml_STREAM_START_TOKEN",
@@ -291,7 +290,7 @@ impl fmt::Display for YamlTokenType {
     }
 }
 
-/// Go: `yaml_token_t` — the token structure.
+/// The token structure.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct YamlToken {
     /// The token type.
@@ -319,7 +318,7 @@ pub(crate) struct YamlToken {
 
 // Events
 
-/// Go: `yaml_event_type_t` — event types.
+/// Event types.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum YamlEventType {
     /// An empty event.
@@ -351,7 +350,6 @@ pub(crate) enum YamlEventType {
 
 impl fmt::Display for YamlEventType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Go: yamlh.go yaml_event_type_t.String (eventStrings)
         let s = match self {
             YamlEventType::No => "none",
             YamlEventType::StreamStart => "stream start",
@@ -370,7 +368,7 @@ impl fmt::Display for YamlEventType {
     }
 }
 
-/// Go: `yaml_event_t` — the event structure.
+/// The event structure.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct YamlEvent {
     /// The event type.
@@ -381,7 +379,7 @@ pub(crate) struct YamlEvent {
     pub(crate) end_mark: YamlMark,
     /// The document encoding (for `StreamStart`).
     pub(crate) encoding: YamlEncoding,
-    /// The version directive (for `DocumentStart`); Go's pointer, `None` = nil.
+    /// The version directive (for `DocumentStart`); `None` = absent.
     pub(crate) version_directive: Option<YamlVersionDirective>,
     /// The list of tag directives (for `DocumentStart`).
     pub(crate) tag_directives: Vec<YamlTagDirective>,
@@ -409,21 +407,18 @@ pub(crate) struct YamlEvent {
 }
 
 impl YamlEvent {
-    /// Go: `(*yaml_event_t).scalar_style`.
+    /// The scalar style stored in `style`.
     pub(crate) fn scalar_style(&self) -> YamlScalarStyle {
-        // Go: yamlh.go scalar_style
         YamlScalarStyle::from_style(self.style)
     }
 
-    /// Go: `(*yaml_event_t).sequence_style`.
+    /// The sequence style stored in `style`.
     pub(crate) fn sequence_style(&self) -> YamlSequenceStyle {
-        // Go: yamlh.go sequence_style
         YamlSequenceStyle::from_style(self.style)
     }
 
-    /// Go: `(*yaml_event_t).mapping_style`.
+    /// The mapping style stored in `style`.
     pub(crate) fn mapping_style(&self) -> YamlMappingStyle {
-        // Go: yamlh.go mapping_style
         YamlMappingStyle::from_style(self.style)
     }
 }
@@ -431,46 +426,46 @@ impl YamlEvent {
 // Nodes
 
 /// The tag `!!null` with the only possible value: null.
-#[allow(dead_code)] // Go declares it; yaml.v3 never reads it (resolve.go has its own tags).
+#[allow(dead_code)] // Kept from libyaml; yaml.v3 never reads it (resolve.rs has its own tags).
 pub(crate) const YAML_NULL_TAG: &str = "tag:yaml.org,2002:null";
 /// The tag `!!bool` with the values: true and false.
-#[allow(dead_code)] // Go declares it; yaml.v3 never reads it (resolve.go has its own tags).
+#[allow(dead_code)] // Kept from libyaml; yaml.v3 never reads it (resolve.rs has its own tags).
 pub(crate) const YAML_BOOL_TAG: &str = "tag:yaml.org,2002:bool";
 /// The tag `!!str` for string values.
-#[allow(dead_code)] // Go declares it; yaml.v3 never reads it (resolve.go has its own tags).
+#[allow(dead_code)] // Kept from libyaml; yaml.v3 never reads it (resolve.rs has its own tags).
 pub(crate) const YAML_STR_TAG: &str = "tag:yaml.org,2002:str";
 /// The tag `!!int` for integer values.
-#[allow(dead_code)] // Go declares it; yaml.v3 never reads it (resolve.go has its own tags).
+#[allow(dead_code)] // Kept from libyaml; yaml.v3 never reads it (resolve.rs has its own tags).
 pub(crate) const YAML_INT_TAG: &str = "tag:yaml.org,2002:int";
 /// The tag `!!float` for float values.
-#[allow(dead_code)] // Go declares it; yaml.v3 never reads it (resolve.go has its own tags).
+#[allow(dead_code)] // Kept from libyaml; yaml.v3 never reads it (resolve.rs has its own tags).
 pub(crate) const YAML_FLOAT_TAG: &str = "tag:yaml.org,2002:float";
 /// The tag `!!timestamp` for date and time values.
-#[allow(dead_code)] // Go declares it; yaml.v3 never reads it (resolve.go has its own tags).
+#[allow(dead_code)] // Kept from libyaml; yaml.v3 never reads it (resolve.rs has its own tags).
 pub(crate) const YAML_TIMESTAMP_TAG: &str = "tag:yaml.org,2002:timestamp";
 /// The tag `!!seq` is used to denote sequences.
-#[allow(dead_code)] // Go declares it; yaml.v3 never reads it (resolve.go has its own tags).
+#[allow(dead_code)] // Kept from libyaml; yaml.v3 never reads it (resolve.rs has its own tags).
 pub(crate) const YAML_SEQ_TAG: &str = "tag:yaml.org,2002:seq";
 /// The tag `!!map` is used to denote mapping.
-#[allow(dead_code)] // Go declares it; yaml.v3 never reads it (resolve.go has its own tags).
+#[allow(dead_code)] // Kept from libyaml; yaml.v3 never reads it (resolve.rs has its own tags).
 pub(crate) const YAML_MAP_TAG: &str = "tag:yaml.org,2002:map";
 /// Not in original libyaml.
-#[allow(dead_code)] // Go declares it; yaml.v3 never reads it (resolve.go has its own tags).
+#[allow(dead_code)] // Kept from libyaml; yaml.v3 never reads it (resolve.rs has its own tags).
 pub(crate) const YAML_BINARY_TAG: &str = "tag:yaml.org,2002:binary";
 /// Not in original libyaml.
-#[allow(dead_code)] // Go declares it; yaml.v3 never reads it (resolve.go has its own tags).
+#[allow(dead_code)] // Kept from libyaml; yaml.v3 never reads it (resolve.rs has its own tags).
 pub(crate) const YAML_MERGE_TAG: &str = "tag:yaml.org,2002:merge";
 /// The default scalar tag is `!!str`.
-#[allow(dead_code)] // Go declares it; yaml.v3 never reads it (resolve.go has its own tags).
+#[allow(dead_code)] // Kept from libyaml; yaml.v3 never reads it (resolve.rs has its own tags).
 pub(crate) const YAML_DEFAULT_SCALAR_TAG: &str = YAML_STR_TAG;
 /// The default sequence tag is `!!seq`.
-#[allow(dead_code)] // Go declares it; yaml.v3 never reads it (resolve.go has its own tags).
+#[allow(dead_code)] // Kept from libyaml; yaml.v3 never reads it (resolve.rs has its own tags).
 pub(crate) const YAML_DEFAULT_SEQUENCE_TAG: &str = YAML_SEQ_TAG;
 /// The default mapping tag is `!!map`.
-#[allow(dead_code)] // Go declares it; yaml.v3 never reads it (resolve.go has its own tags).
+#[allow(dead_code)] // Kept from libyaml; yaml.v3 never reads it (resolve.rs has its own tags).
 pub(crate) const YAML_DEFAULT_MAPPING_TAG: &str = YAML_MAP_TAG;
 
-/// Go: `yaml_node_type_t` — node types (libyaml's document API; unused by yaml.v3).
+/// Node types (libyaml's document API; unused by yaml.v3).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum YamlNodeType {
     /// An empty node.
@@ -487,10 +482,10 @@ pub(crate) enum YamlNodeType {
     Mapping,
 }
 
-/// Go: `yaml_node_item_t` — an element of a sequence node.
+/// An element of a sequence node.
 pub(crate) type YamlNodeItem = isize;
 
-/// Go: `yaml_node_pair_t` — an element of a mapping node.
+/// An element of a mapping node.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct YamlNodePair {
     /// The key of the element.
@@ -499,7 +494,7 @@ pub(crate) struct YamlNodePair {
     pub(crate) value: isize,
 }
 
-/// Go: `yaml_node_t.scalar` — the scalar parameters (for `YamlNodeType::Scalar`).
+/// The scalar parameters (for `YamlNodeType::Scalar`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct YamlNodeScalar {
     /// The scalar value.
@@ -510,7 +505,7 @@ pub(crate) struct YamlNodeScalar {
     pub(crate) style: YamlScalarStyle,
 }
 
-/// Go: `yaml_node_t.sequence` — the sequence parameters (for `YamlNodeType::Sequence`).
+/// The sequence parameters (for `YamlNodeType::Sequence`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct YamlNodeSequence {
     /// The stack of sequence items.
@@ -519,8 +514,8 @@ pub(crate) struct YamlNodeSequence {
     pub(crate) style: YamlSequenceStyle,
 }
 
-/// Go: `yaml_node_t.mapping` — the mapping parameters (for `YamlNodeType::Mapping`). Go's
-/// `pairs_start`/`pairs_end`/`pairs_top` pointers are indices into `pairs_data`.
+/// The mapping parameters (for `YamlNodeType::Mapping`). The
+/// `pairs_start`/`pairs_end`/`pairs_top` positions are indices into `pairs_data`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct YamlNodeMapping {
     /// The stack of mapping pairs (key, value).
@@ -535,7 +530,7 @@ pub(crate) struct YamlNodeMapping {
     pub(crate) style: YamlMappingStyle,
 }
 
-/// Go: `yaml_node_t` — the node structure (libyaml's document API; unused by yaml.v3).
+/// The node structure (libyaml's document API; unused by yaml.v3).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct YamlNode {
     /// The node type.
@@ -554,7 +549,7 @@ pub(crate) struct YamlNode {
     pub(crate) end_mark: YamlMark,
 }
 
-/// Go: `yaml_document_t` — the document structure (libyaml's document API; unused by yaml.v3).
+/// The document structure (libyaml's document API; unused by yaml.v3).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct YamlDocument {
     /// The document nodes.
@@ -577,14 +572,14 @@ pub(crate) struct YamlDocument {
     pub(crate) end_mark: YamlMark,
 }
 
-/// Go: `yaml_read_handler_t` — called when the parser needs to read more bytes from the source.
+/// Called when the parser needs to read more bytes from the source.
 ///
 /// The handler writes at most `buffer.len()` bytes into `buffer` and returns how many it wrote.
-/// Go's `(0, io.EOF)` is `Ok(0)`; any other error is `Err` (reported as `input error: …`).
+/// End of input is `Ok(0)`; any other error is `Err` (reported as `input error: …`).
 /// The `buffer` is not part of `parser` (the caller lends the raw buffer out for the call).
 pub(crate) type YamlReadHandler = fn(&mut YamlParser<'_>, &mut [u8]) -> std::io::Result<usize>;
 
-/// Go: `yaml_simple_key_t` — information about a potential simple key.
+/// Information about a potential simple key.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct YamlSimpleKey {
     /// Is a simple key possible?
@@ -597,7 +592,7 @@ pub(crate) struct YamlSimpleKey {
     pub(crate) mark: YamlMark,
 }
 
-/// Go: `yaml_parser_state_t` — the states of the parser.
+/// The states of the parser.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum YamlParserState {
     /// Expect STREAM-START.
@@ -614,10 +609,10 @@ pub(crate) enum YamlParserState {
     /// Expect a block node.
     BlockNode,
     /// Expect a block node or indentless sequence.
-    #[allow(dead_code)] // Go's parser handles it; yaml.v3 never enters it.
+    #[allow(dead_code)] // The parser handles it; yaml.v3 never enters it.
     BlockNodeOrIndentlessSequence,
     /// Expect a flow node.
-    #[allow(dead_code)] // Go's parser handles it; yaml.v3 never enters it.
+    #[allow(dead_code)] // The parser handles it; yaml.v3 never enters it.
     FlowNode,
     /// Expect the first entry of a block sequence.
     BlockSequenceFirstEntry,
@@ -655,7 +650,6 @@ pub(crate) enum YamlParserState {
 
 impl fmt::Display for YamlParserState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Go: yamlh.go yaml_parser_state_t.String
         let s = match self {
             YamlParserState::StreamStart => "yaml_PARSE_STREAM_START_STATE",
             YamlParserState::ImplicitDocumentStart => "yaml_PARSE_IMPLICIT_DOCUMENT_START_STATE",
@@ -698,7 +692,7 @@ impl fmt::Display for YamlParserState {
     }
 }
 
-/// Go: `yaml_alias_data_t` — aliases data.
+/// Aliases data.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct YamlAliasData {
     /// The anchor.
@@ -709,11 +703,11 @@ pub(crate) struct YamlAliasData {
     pub(crate) mark: YamlMark,
 }
 
-/// Go: `yaml_parser_t` — the parser structure. All members are internal; manage it with the
+/// The parser structure. All members are internal; manage it with the
 /// `yaml_parser_` family of functions (`api.rs`, `reader.rs`, `scanner.rs`, `parser.rs`).
 ///
-/// `'r` is the lifetime of the input: the borrowed string input (`input`, Go's `[]byte` slice)
-/// or the boxed reader (`input_reader`, Go's `io.Reader`).
+/// `'r` is the lifetime of the input: the borrowed string input (`input`)
+/// or the boxed reader (`input_reader`).
 #[derive(Default)]
 pub(crate) struct YamlParser<'r> {
     // Error handling
@@ -816,14 +810,14 @@ pub(crate) struct YamlParser<'r> {
 
     // Dumper stuff
     /// The alias data.
-    #[allow(dead_code)] // Go declares it; yaml.v3 never reads it.
+    #[allow(dead_code)] // Kept from libyaml; yaml.v3 never reads it.
     pub(crate) aliases: Vec<YamlAliasData>,
     /// The currently parsed document.
-    #[allow(dead_code)] // Go declares it; yaml.v3 never reads it.
+    #[allow(dead_code)] // Kept from libyaml; yaml.v3 never reads it.
     pub(crate) document: Option<Box<YamlDocument>>,
 }
 
-/// Go: `yaml_comment_t`.
+/// A comment captured by the scanner.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct YamlComment {
     /// Position where scanning for comments started.
@@ -844,13 +838,13 @@ pub(crate) struct YamlComment {
 
 // Emitter Definitions
 
-/// Go: `yaml_write_handler_t` — called when the emitter needs to flush the accumulated
+/// Called when the emitter needs to flush the accumulated
 /// characters to the output. The handler writes all of `buffer`; an `Err` becomes the emitter's
 /// `write error: …`. The `buffer` is not part of `emitter` (the caller lends it out for the
 /// call).
 pub(crate) type YamlWriteHandler = fn(&mut YamlEmitter<'_>, &[u8]) -> std::io::Result<()>;
 
-/// Go: `yaml_emitter_state_t` — the emitter states.
+/// The emitter states.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum YamlEmitterState {
     /// Expect STREAM-START.
@@ -896,7 +890,7 @@ pub(crate) enum YamlEmitterState {
     End,
 }
 
-/// Go: `yaml_emitter_t.anchor_data` — anchor analysis.
+/// Anchor analysis.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct YamlAnchorData {
     /// The anchor value.
@@ -905,7 +899,7 @@ pub(crate) struct YamlAnchorData {
     pub(crate) alias: bool,
 }
 
-/// Go: `yaml_emitter_t.tag_data` — tag analysis.
+/// Tag analysis.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct YamlTagData {
     /// The tag handle.
@@ -914,7 +908,7 @@ pub(crate) struct YamlTagData {
     pub(crate) suffix: Vec<u8>,
 }
 
-/// Go: `yaml_emitter_t.scalar_data` — scalar analysis.
+/// Scalar analysis.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct YamlScalarData {
     /// The scalar value.
@@ -933,7 +927,7 @@ pub(crate) struct YamlScalarData {
     pub(crate) style: YamlScalarStyle,
 }
 
-/// Go: `yaml_emitter_t.anchors` — the information associated with the document nodes
+/// The information associated with the document nodes
 /// (libyaml's dumper; unused by yaml.v3).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct YamlEmitterAnchors {
@@ -945,11 +939,11 @@ pub(crate) struct YamlEmitterAnchors {
     pub(crate) serialized: bool,
 }
 
-/// Go: `yaml_emitter_t` — the emitter structure. All members are internal; manage it with the
+/// The emitter structure. All members are internal; manage it with the
 /// `yaml_emitter_` family of functions (`api.rs`, `emitter.rs`, `writer.rs`).
 ///
-/// Go's string output (`output_buffer *[]byte`, pointing at the encoder's `out`) is the owned
-/// `output_buffer` here; `'w` is the lifetime of the boxed writer (`output_writer`).
+/// The string output is the owned `output_buffer`; `'w` is the lifetime of the boxed writer
+/// (`output_writer`).
 #[derive(Default)]
 pub(crate) struct YamlEmitter<'w> {
     // Error handling
@@ -970,10 +964,10 @@ pub(crate) struct YamlEmitter<'w> {
     /// The current position of the buffer.
     pub(crate) buffer_pos: usize,
     /// The raw buffer.
-    #[allow(dead_code)] // Go declares it; yaml.v3 never reads it.
+    #[allow(dead_code)] // Kept from libyaml; yaml.v3 never reads it.
     pub(crate) raw_buffer: Vec<u8>,
     /// The current position of the raw buffer.
-    #[allow(dead_code)] // Go declares it; yaml.v3 never reads it.
+    #[allow(dead_code)] // Kept from libyaml; yaml.v3 never reads it.
     pub(crate) raw_buffer_pos: usize,
     /// The stream encoding.
     pub(crate) encoding: YamlEncoding,
@@ -1048,24 +1042,24 @@ pub(crate) struct YamlEmitter<'w> {
 
     // Dumper stuff
     /// If the stream was already opened?
-    #[allow(dead_code)] // Go declares it; yaml.v3 never reads it.
+    #[allow(dead_code)] // Kept from libyaml; yaml.v3 never reads it.
     pub(crate) opened: bool,
     /// If the stream was already closed?
-    #[allow(dead_code)] // Go declares it; yaml.v3 never reads it.
+    #[allow(dead_code)] // Kept from libyaml; yaml.v3 never reads it.
     pub(crate) closed: bool,
     /// The information associated with the document nodes.
-    #[allow(dead_code)] // Go declares it; yaml.v3 never reads it.
+    #[allow(dead_code)] // Kept from libyaml; yaml.v3 never reads it.
     pub(crate) anchors: Option<YamlEmitterAnchors>,
     /// The last assigned anchor id.
-    #[allow(dead_code)] // Go declares it; yaml.v3 never reads it.
+    #[allow(dead_code)] // Kept from libyaml; yaml.v3 never reads it.
     pub(crate) last_anchor_id: isize,
     /// The currently emitted document.
-    #[allow(dead_code)] // Go declares it; yaml.v3 never reads it.
+    #[allow(dead_code)] // Kept from libyaml; yaml.v3 never reads it.
     pub(crate) document: Option<Box<YamlDocument>>,
 }
 
 // ---------------------------------------------------------------------------------------------
-// yamlprivateh.go
+// Buffer sizes and character classes
 // ---------------------------------------------------------------------------------------------
 
 /// The size of the input raw buffer.
@@ -1085,13 +1079,12 @@ pub(crate) const INITIAL_STACK_SIZE: usize = 16;
 /// The initial queue size.
 pub(crate) const INITIAL_QUEUE_SIZE: usize = 16;
 /// The initial string size.
-#[allow(dead_code)] // Go declares it; yaml.v3 never reads it.
+#[allow(dead_code)] // Kept from libyaml; yaml.v3 never reads it.
 pub(crate) const INITIAL_STRING_SIZE: usize = 16;
 
 /// Check if the character at the specified position is an alphabetical character, a digit,
 /// '_', or '-'.
 pub(crate) fn is_alpha(b: &[u8], i: usize) -> bool {
-    // Go: yamlprivateh.go is_alpha
     b[i].is_ascii_digit()
         || b[i].is_ascii_uppercase()
         || b[i].is_ascii_lowercase()
@@ -1101,25 +1094,21 @@ pub(crate) fn is_alpha(b: &[u8], i: usize) -> bool {
 
 /// Check if the character at the specified position is a digit.
 pub(crate) fn is_digit(b: &[u8], i: usize) -> bool {
-    // Go: yamlprivateh.go is_digit
     b[i].is_ascii_digit()
 }
 
 /// Get the value of a digit.
 pub(crate) fn as_digit(b: &[u8], i: usize) -> isize {
-    // Go: yamlprivateh.go as_digit
     isize::from(b[i]) - isize::from(b'0')
 }
 
 /// Check if the character at the specified position is a hex-digit.
 pub(crate) fn is_hex(b: &[u8], i: usize) -> bool {
-    // Go: yamlprivateh.go is_hex
     b[i].is_ascii_digit() || (b'A'..=b'F').contains(&b[i]) || (b'a'..=b'f').contains(&b[i])
 }
 
 /// Get the value of a hex-digit.
 pub(crate) fn as_hex(b: &[u8], i: usize) -> isize {
-    // Go: yamlprivateh.go as_hex
     let bi = b[i];
     if (b'A'..=b'F').contains(&bi) {
         return isize::from(bi) - isize::from(b'A') + 10;
@@ -1132,13 +1121,11 @@ pub(crate) fn as_hex(b: &[u8], i: usize) -> isize {
 
 /// Check if the character is ASCII.
 pub(crate) fn is_ascii(b: &[u8], i: usize) -> bool {
-    // Go: yamlprivateh.go is_ascii
     b[i] <= 0x7F
 }
 
 /// Check if the character at the start of the buffer can be printed unescaped.
 pub(crate) fn is_printable(b: &[u8], i: usize) -> bool {
-    // Go: yamlprivateh.go is_printable
     (b[i] == 0x0A) // . == #x0A
         || (b[i] >= 0x20 && b[i] <= 0x7E) // #x20 <= . <= #x7E
         || (b[i] == 0xC2 && b[i + 1] >= 0xA0) // #0xA0 <= . <= #xD7FF
@@ -1152,38 +1139,32 @@ pub(crate) fn is_printable(b: &[u8], i: usize) -> bool {
 
 /// Check if the character at the specified position is NUL.
 pub(crate) fn is_z(b: &[u8], i: usize) -> bool {
-    // Go: yamlprivateh.go is_z
     b[i] == 0x00
 }
 
-/// Check if the beginning of the buffer is a BOM. As in Go, the position is ignored: the
+/// Check if the beginning of the buffer is a BOM. The position is ignored: the
 /// check is always on the first three bytes of `b`.
 pub(crate) fn is_bom(b: &[u8], _i: usize) -> bool {
-    // Go: yamlprivateh.go is_bom
     b[0] == 0xEF && b[1] == 0xBB && b[2] == 0xBF
 }
 
 /// Check if the character at the specified position is space.
 pub(crate) fn is_space(b: &[u8], i: usize) -> bool {
-    // Go: yamlprivateh.go is_space
     b[i] == b' '
 }
 
 /// Check if the character at the specified position is tab.
 pub(crate) fn is_tab(b: &[u8], i: usize) -> bool {
-    // Go: yamlprivateh.go is_tab
     b[i] == b'\t'
 }
 
 /// Check if the character at the specified position is blank (space or tab).
 pub(crate) fn is_blank(b: &[u8], i: usize) -> bool {
-    // Go: yamlprivateh.go is_blank
     b[i] == b' ' || b[i] == b'\t'
 }
 
 /// Check if the character at the specified position is a line break.
 pub(crate) fn is_break(b: &[u8], i: usize) -> bool {
-    // Go: yamlprivateh.go is_break
     b[i] == b'\r' // CR (#xD)
         || b[i] == b'\n' // LF (#xA)
         || b[i] == 0xC2 && b[i + 1] == 0x85 // NEL (#x85)
@@ -1193,13 +1174,11 @@ pub(crate) fn is_break(b: &[u8], i: usize) -> bool {
 
 /// Check if the character at the specified position is CR LF.
 pub(crate) fn is_crlf(b: &[u8], i: usize) -> bool {
-    // Go: yamlprivateh.go is_crlf
     b[i] == b'\r' && b[i + 1] == b'\n'
 }
 
 /// Check if the character is a line break or NUL.
 pub(crate) fn is_breakz(b: &[u8], i: usize) -> bool {
-    // Go: yamlprivateh.go is_breakz
     // is_break:
     b[i] == b'\r' // CR (#xD)
         || b[i] == b'\n' // LF (#xA)
@@ -1211,9 +1190,8 @@ pub(crate) fn is_breakz(b: &[u8], i: usize) -> bool {
 }
 
 /// Check if the character is a line break, space, or NUL.
-#[allow(dead_code)] // Go declares it; yaml.v3 never calls it.
+#[allow(dead_code)] // Kept from libyaml; yaml.v3 never calls it.
 pub(crate) fn is_spacez(b: &[u8], i: usize) -> bool {
-    // Go: yamlprivateh.go is_spacez
     // is_space:
     b[i] == b' '
         // is_breakz:
@@ -1227,7 +1205,6 @@ pub(crate) fn is_spacez(b: &[u8], i: usize) -> bool {
 
 /// Check if the character is a line break, space, tab, or NUL.
 pub(crate) fn is_blankz(b: &[u8], i: usize) -> bool {
-    // Go: yamlprivateh.go is_blankz
     // is_blank:
     b[i] == b' ' || b[i] == b'\t'
         // is_breakz:
@@ -1241,7 +1218,6 @@ pub(crate) fn is_blankz(b: &[u8], i: usize) -> bool {
 
 /// Determine the width of the character (0 for a byte that cannot start a UTF-8 sequence).
 pub(crate) fn width(b: u8) -> usize {
-    // Go: yamlprivateh.go width
     // Don't replace these by a switch without first
     // confirming that it is being inlined.
     if b & 0x80 == 0x00 {

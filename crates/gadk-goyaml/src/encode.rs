@@ -13,12 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of yaml.v3 v3.0.1 `encode.go`'s event layer: the `encoder` (emitter setup, `init`,
-//! `finish`, `emit`, `must`), the scalar writers shared with `ser.rs` (`stringv`, `boolv`,
-//! `intv`, `uintv`, `timev`, `floatv`, `nilv`, `emitScalar`), the collection brackets
-//! (`mappingv`, `slicev`) and the `*yaml.Node` encoder (`nodev`, `node`). The reflection
-//! dispatch (`marshal`, `mapv`, `structv`) is `ser.rs`; `isBase60Float` and `isOldBool` live in
-//! `resolve.rs` beside the resolver.
+//! The encoder's event layer: the `Encoder` (emitter setup, `init`, `finish`, `emit`, `must`),
+//! the scalar writers shared with `ser.rs` (`stringv`, `boolv`, `intv`, `uintv`, `timev`,
+//! `floatv`, `nilv`, `emit_scalar`), the collection brackets (`mappingv`, `slicev`) and the node
+//! encoder (`nodev`, `node`). The dispatch over serde values (`marshal`, `mapv`, `structv`) is
+//! `ser.rs`; the base-60 float and old-style bool checks live in `resolve.rs` beside the
+//! resolver.
 
 use std::io::Write;
 
@@ -44,23 +44,24 @@ use crate::yamlh::{
     YamlEmitter, YamlEncoding, YamlEvent, YamlMappingStyle, YamlScalarStyle, YamlSequenceStyle,
 };
 
-/// Go: encode.go `encoder`. Go's `out` (the string output) is `emitter.output_buffer`.
+/// The encoder state. The string output is `emitter.output_buffer`.
 pub(crate) struct Encoder<'w> {
     /// The libyaml emitter.
     pub(crate) emitter: YamlEmitter<'w>,
     /// The event being emitted.
     pub(crate) event: YamlEvent,
-    /// Emit the next collection in flow style (Go's `,flow`), and quote multi-line strings.
+    /// Emit the next collection in flow style (yaml.v3's `,flow` option), and quote multi-line
+    /// strings.
     pub(crate) flow: bool,
-    /// Indentation (0 = the default 4; Go's `int`, never negative: `SetIndent` panics first).
+    /// Indentation (0 = the default 4; never negative).
     pub(crate) indent: usize,
     /// Whether `init` ran (the STREAM-START event was emitted).
     pub(crate) done_init: bool,
-    /// Current collection nesting of the recursive walk (plan decision D7; no Go field).
+    /// Current collection nesting of the recursive walk (plan decision D7).
     pub(crate) depth: usize,
 }
 
-/// An encoder around an initialized emitter (Go's `&encoder{}` + `yaml_emitter_initialize`).
+/// An encoder around an initialized emitter (initialized with `yaml_emitter_initialize`).
 fn blank_encoder<'w>() -> Encoder<'w> {
     let mut e = Encoder {
         emitter: YamlEmitter::default(),
@@ -74,18 +75,16 @@ fn blank_encoder<'w>() -> Encoder<'w> {
     e
 }
 
-/// Go: encode.go `newEncoder` — output to `emitter.output_buffer`, unicode allowed.
+/// An encoder with output to `emitter.output_buffer`, unicode allowed.
 pub(crate) fn new_encoder() -> Encoder<'static> {
-    // Go: encode.go newEncoder
     let mut e = blank_encoder();
     yaml_emitter_set_output_string(&mut e.emitter);
     yaml_emitter_set_unicode(&mut e.emitter, true);
     e
 }
 
-/// Go: encode.go `newEncoderWithWriter` — output to `w`, unicode allowed.
+/// An encoder with output to `w`, unicode allowed.
 pub(crate) fn new_encoder_with_writer<'w>(w: Box<dyn Write + 'w>) -> Encoder<'w> {
-    // Go: encode.go newEncoderWithWriter
     let mut e = blank_encoder();
     yaml_emitter_set_output_writer(&mut e.emitter, w);
     yaml_emitter_set_unicode(&mut e.emitter, true);
@@ -93,16 +92,15 @@ pub(crate) fn new_encoder_with_writer<'w>(w: Box<dyn Write + 'w>) -> Encoder<'w>
 }
 
 impl<'w> Encoder<'w> {
-    /// Go: `(*encoder).init` — once: default indent 4, STREAM-START.
+    /// Initializes once: default indent 4, STREAM-START.
     pub(crate) fn init(&mut self) -> Result<(), Error> {
-        // Go: encode.go init
         if self.done_init {
             return Ok(());
         }
         if self.indent == 0 {
             self.indent = 4;
         }
-        // Values outside 2..=9 become 2 in yaml_emitter_emit_stream_start, as in Go.
+        // Values outside 2..=9 become 2 in yaml_emitter_emit_stream_start.
         self.emitter.best_indent = isize::try_from(self.indent).unwrap_or(isize::MAX);
         yaml_stream_start_event_initialize(&mut self.event, YamlEncoding::Utf8);
         self.emit()?;
@@ -110,32 +108,28 @@ impl<'w> Encoder<'w> {
         Ok(())
     }
 
-    /// Go: `(*encoder).finish` — STREAM-END (flushes the output).
+    /// Emits STREAM-END (flushes the output).
     pub(crate) fn finish(&mut self) -> Result<(), Error> {
-        // Go: encode.go finish
         self.emitter.open_ended = false;
         yaml_stream_end_event_initialize(&mut self.event);
         self.emit()
     }
 
-    /// Go: `(*encoder).destroy`.
+    /// Releases the emitter.
     pub(crate) fn destroy(&mut self) {
-        // Go: encode.go destroy
         yaml_emitter_delete(&mut self.emitter);
     }
 
-    /// Go: `(*encoder).emit` — emit `self.event`.
+    /// Emits `self.event`.
     pub(crate) fn emit(&mut self) -> Result<(), Error> {
-        // Go: encode.go emit
         // This will internally delete the self.event value.
         let ok = yaml_emitter_emit(&mut self.emitter, &mut self.event);
         self.must(ok)
     }
 
-    /// Go: `(*encoder).must` — `Ok` when `ok`, else `failf("%s", emitter.problem)` (or
+    /// `Ok` when `ok`, else `failf("%s", emitter.problem)` (or
     /// `unknown problem generating YAML content`).
     pub(crate) fn must(&mut self, ok: bool) -> Result<(), Error> {
-        // Go: encode.go must
         if !ok {
             let mut msg = self.emitter.problem.as_str();
             if msg.is_empty() {
@@ -146,31 +140,29 @@ impl<'w> Encoder<'w> {
         Ok(())
     }
 
-    /// Go: `(*encoder).marshalDoc("", node)` for a `*yaml.Node` value: a `DocumentNode` is
-    /// encoded as is, any other node inside an implicit document (`e.init()` included).
+    /// Encodes a node as a document: a `Document` node is encoded as is, any
+    /// other node inside an implicit document (`e.init()` included).
     pub(crate) fn marshal_doc_node(&mut self, doc: &Document, at: NodeId) -> Result<(), Error> {
-        // Go: encode.go marshalDoc
         self.init()?;
         if doc[at].kind == Kind::Document {
             self.nodev(doc, at)
         } else {
             yaml_document_start_event_initialize(&mut self.event, None, Vec::new(), true);
             self.emit()?;
-            // Go: e.marshal(tag, in) with a non-nil `*Node` goes straight to nodev.
+            // A node goes straight to nodev.
             self.nodev(doc, at)?;
             yaml_document_end_event_initialize(&mut self.event, true);
             self.emit()
         }
     }
 
-    /// Go: `(*encoder).mappingv` — MAPPING-START (flow if `self.flow`, which it resets),
+    /// MAPPING-START (flow if `self.flow`, which it resets),
     /// `f`, MAPPING-END.
     pub(crate) fn mappingv(
         &mut self,
         tag: &str,
         f: impl FnOnce(&mut Self) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        // Go: encode.go mappingv
         self.mappingv_start(tag)?;
         f(self)?;
         self.mappingv_end()
@@ -178,7 +170,6 @@ impl<'w> Encoder<'w> {
 
     /// The MAPPING-START half of [`Encoder::mappingv`] (serde's streaming `serialize_map`).
     pub(crate) fn mappingv_start(&mut self, tag: &str) -> Result<(), Error> {
-        // Go: encode.go mappingv
         let implicit = tag.is_empty();
         let mut style = YamlMappingStyle::Block;
         if self.flow {
@@ -197,15 +188,13 @@ impl<'w> Encoder<'w> {
 
     /// The MAPPING-END half of [`Encoder::mappingv`].
     pub(crate) fn mappingv_end(&mut self) -> Result<(), Error> {
-        // Go: encode.go mappingv
         yaml_mapping_end_event_initialize(&mut self.event);
         self.emit()
     }
 
-    /// The SEQUENCE-START half of Go's `(*encoder).slicev` (flow if `self.flow`, which it
+    /// The SEQUENCE-START half of a sequence (flow if `self.flow`, which it
     /// resets).
     pub(crate) fn slicev_start(&mut self, tag: &str) -> Result<(), Error> {
-        // Go: encode.go slicev
         let implicit = tag.is_empty();
         let mut style = YamlSequenceStyle::Block;
         if self.flow {
@@ -223,19 +212,16 @@ impl<'w> Encoder<'w> {
         self.emit()
     }
 
-    /// The SEQUENCE-END half of Go's `(*encoder).slicev`.
+    /// The SEQUENCE-END half of a sequence.
     pub(crate) fn slicev_end(&mut self) -> Result<(), Error> {
-        // Go: encode.go slicev
         let ok = yaml_sequence_end_event_initialize(&mut self.event);
         self.must(ok)?;
         self.emit()
     }
 
-    /// Go: `(*encoder).stringv` — `s` is a Go string (any bytes): `!!binary` base64 when not
-    /// UTF-8, else plain / literal / double-quoted by Go's rules. `tag` is a short tag (Go's
-    /// `marshal` applies `shortTag` first) or empty.
+    /// Writes a string: `s` is any bytes; `!!binary` base64 when not UTF-8, else plain / literal /
+    /// double-quoted by yaml.v3's rules. `tag` is a short tag or empty.
     pub(crate) fn stringv(&mut self, tag: &str, s: &[u8]) -> Result<(), Error> {
-        // Go: encode.go stringv
         let mut tag = tag;
         let text: String;
         let mut can_use_plain = true;
@@ -285,16 +271,14 @@ impl<'w> Encoder<'w> {
         self.emit_scalar(text.as_bytes(), b"", tag, style, b"", b"", b"", b"")
     }
 
-    /// Go: `(*encoder).boolv`.
+    /// Writes a bool.
     pub(crate) fn boolv(&mut self, tag: &str, b: bool) -> Result<(), Error> {
-        // Go: encode.go boolv
         let s: &[u8] = if b { b"true" } else { b"false" };
         self.emit_scalar(s, b"", tag, YamlScalarStyle::Plain, b"", b"", b"", b"")
     }
 
-    /// Go: `(*encoder).intv`.
+    /// Writes a signed integer.
     pub(crate) fn intv(&mut self, tag: &str, i: i64) -> Result<(), Error> {
-        // Go: encode.go intv
         let s = i.to_string();
         self.emit_scalar(
             s.as_bytes(),
@@ -308,9 +292,8 @@ impl<'w> Encoder<'w> {
         )
     }
 
-    /// Go: `(*encoder).uintv`.
+    /// Writes an unsigned integer.
     pub(crate) fn uintv(&mut self, tag: &str, u: u64) -> Result<(), Error> {
-        // Go: encode.go uintv
         let s = u.to_string();
         self.emit_scalar(
             s.as_bytes(),
@@ -324,9 +307,8 @@ impl<'w> Encoder<'w> {
         )
     }
 
-    /// Go: `(*encoder).timev` — RFC3339Nano text.
+    /// Writes a timestamp as RFC3339Nano text.
     pub(crate) fn timev(&mut self, tag: &str, t: &DateTime<FixedOffset>) -> Result<(), Error> {
-        // Go: encode.go timev
         let s = gadk_platform::go_format_rfc3339_nano(t);
         self.emit_scalar(
             s.as_bytes(),
@@ -340,10 +322,10 @@ impl<'w> Encoder<'w> {
         )
     }
 
-    /// Go: `(*encoder).floatv` — `strconv.FormatFloat(f, 'g', -1, precision)` with
-    /// `.inf`/`-.inf`/`.nan`; `precision` is 32 for `float32` (value passed widened) or 64.
+    /// Writes a float: the shortest representation that round-trips at `precision`, formatted
+    /// like `%g`, with `.inf`/`-.inf`/`.nan`; `precision` is 32 for
+    /// `float32` (value passed widened) or 64.
     pub(crate) fn floatv(&mut self, tag: &str, f: f64, precision: u32) -> Result<(), Error> {
-        // Go: encode.go floatv
         // Issue #352: When formatting, use the precision of the underlying value
         let mut s = gadk_platform::go_format_float_g(f, precision);
         match s.as_str() {
@@ -364,14 +346,13 @@ impl<'w> Encoder<'w> {
         )
     }
 
-    /// Go: `(*encoder).nilv` — plain `null`.
+    /// Writes a plain `null`.
     pub(crate) fn nilv(&mut self) -> Result<(), Error> {
-        // Go: encode.go nilv
         self.emit_scalar(b"null", b"", "", YamlScalarStyle::Plain, b"", b"", b"", b"")
     }
 
-    /// Go: `(*encoder).emitScalar`.
-    #[allow(clippy::too_many_arguments)] // Go's signature.
+    /// Emits a SCALAR event.
+    #[allow(clippy::too_many_arguments)] // One argument per scalar event field.
     pub(crate) fn emit_scalar(
         &mut self,
         value: &[u8],
@@ -383,8 +364,8 @@ impl<'w> Encoder<'w> {
         foot: &[u8],
         tail: &[u8],
     ) -> Result<(), Error> {
-        // Go: encode.go emitScalar
-        // TODO Kill this function. Replace all initialize calls by their underlining Go literals.
+        // TODO: kill this function; replace all initialize calls by their underlying struct
+        // literals.
         let implicit = tag.is_empty();
         let tag = if implicit {
             String::new()
@@ -408,14 +389,13 @@ impl<'w> Encoder<'w> {
         self.emit()
     }
 
-    /// Go: `(*encoder).nodev` — encode node `at` of `doc`.
+    /// Encodes node `at` of `doc`.
     pub(crate) fn nodev(&mut self, doc: &Document, at: NodeId) -> Result<(), Error> {
-        // Go: encode.go nodev
         self.node(doc, &doc[at], "")
     }
 
-    /// Go: `(*encoder).node(node, tail)` — `node` is passed by value so mapping keys can be
-    /// encoded from a copy with the foot comment cleared, as Go does; its `content` and
+    /// Encodes `node` with the comment `tail`. `node` is passed by value so mapping keys can be
+    /// encoded from a copy with the foot comment cleared; its `content` and
     /// `alias` refer to `doc`.
     pub(crate) fn node(
         &mut self,
@@ -423,9 +403,8 @@ impl<'w> Encoder<'w> {
         node: &NodeData,
         tail: &str,
     ) -> Result<(), Error> {
-        // Go: encode.go node
-        // Divergence (ledger 6c-1): plan decision D7 — collections nested deeper than
-        // MAX_WALK_DEPTH fail instead of overflowing the stack (Go has no limit here).
+        // Plan decision D7: collections nested deeper than MAX_WALK_DEPTH fail instead of
+        // overflowing the stack.
         let nests = matches!(node.kind, Kind::Sequence | Kind::Mapping);
         if nests {
             if self.depth >= MAX_WALK_DEPTH {
@@ -440,7 +419,7 @@ impl<'w> Encoder<'w> {
         result
     }
 
-    /// The body of Go's `(*encoder).node`; [`Encoder::node`] wraps it with the D7 depth guard.
+    /// The body of [`Encoder::node`], which wraps it with the D7 depth guard.
     fn node_unguarded(&mut self, doc: &Document, node: &NodeData, tail: &str) -> Result<(), Error> {
         // Zero nodes behave as nil.
         if node.kind == Kind::Zero && node.is_zero() {
@@ -578,9 +557,9 @@ impl<'w> Encoder<'w> {
             }
 
             Kind::Scalar => {
-                // Divergence (ledger 6c-1): Go's `!utf8.ValidString(value)` branch (failf for
-                // `!!binary` / other explicit tags, else `!!binary` + encodeBase64) cannot occur:
-                // `NodeData::value` is a Rust `String`, always valid UTF-8.
+                // There is no invalid-UTF-8 branch (an error for `!!binary` / other explicit
+                // tags, else `!!binary` plus base64): `NodeData::value` is a Rust `String`,
+                // always valid UTF-8.
                 let value = &node.value;
 
                 let style = if node.style.intersects(Style::DOUBLE_QUOTED) {

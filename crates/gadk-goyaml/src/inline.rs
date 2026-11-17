@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go's `,inline` catch-all map (yaml.v3 v3.0.1 `yaml.go` `getStructInfo`, `structInfo.InlineMap`):
-//! a struct field of type [`InlineMap`] named [`INLINE_FIELD`] receives every mapping key no
+//! The catch-all map of a struct (yaml.v3's `,inline` map field): a struct field of type
+//! [`InlineMap`] named [`INLINE_FIELD`] receives every mapping key no
 //! other field matched (decode) and is written after all fields, keys sorted (encode).
 //!
 //! The codec recognises the field by its serde name; the value crosses the serde boundary as
@@ -36,8 +36,8 @@ pub const INLINE_FIELD: &str = "$gadk_goyaml::inline";
 /// The serde newtype-struct name an [`InlineMap`] serializes and deserializes through.
 pub(crate) const INLINE_MAP_MARKER: &str = "$gadk_goyaml::InlineMap";
 
-/// Go's `map[string]X` `,inline` field, with values decoded as Go's `interface{}`
-/// ([`GoValue`]). Entries keep document order; encode sorts the keys.
+/// A catch-all map field with string keys, whose values are decoded as dynamically typed
+/// values ([`GoValue`]). Entries keep document order; encode sorts the keys.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct InlineMap(pub Vec<(String, GoValue)>);
 
@@ -52,7 +52,7 @@ impl InlineMap {
         self.0.len()
     }
 
-    /// Whether there are no entries (Go's `m.Len() > 0` check skips an empty inline map).
+    /// Whether there are no entries (an empty inline map writes nothing on encode).
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
