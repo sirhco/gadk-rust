@@ -228,8 +228,8 @@ impl LiveSessionImpl {
             });
     }
 
-    /// Removes the first entry with `call_id` (without cancelling it)
-    /// and deletes an emptied name.
+    /// Removes the first entry with `call_id` (without cancelling it) and deletes an emptied
+    /// name.
     pub(crate) fn unregister_streaming_tool(&self, tool_name: &str, call_id: &str) {
         let mut tools = self.active_tools.lock();
         let Some(tasks) = tools.get_mut(tool_name) else {
@@ -243,8 +243,7 @@ impl LiveSessionImpl {
         }
     }
 
-    /// Cancels every running instance of `tool_name`; `false` when
-    /// there was none.
+    /// Cancels every running instance of `tool_name`; `false` when there was none.
     pub(crate) fn cancel_all_streaming_tools(&self, tool_name: &str) -> bool {
         let mut tools = self.active_tools.lock();
         match tools.remove(tool_name) {
@@ -298,7 +297,7 @@ impl LiveSession for LiveSessionImpl {
         }
     }
 
-    /// Closes the session once, plus cancelling the streaming tools.
+    /// Closes the session and cancels every streaming tool.
     async fn close(&self) -> Result<(), AgentError> {
         self.done.cancel();
         self.cancel_every_streaming_tool();

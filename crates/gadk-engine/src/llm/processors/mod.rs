@@ -93,11 +93,11 @@ pub(crate) fn wrap_err(
     }))
 }
 
-/// Compact JSON of a decoded JSON value: object keys sorted, `<`, `>` and `&` (and U+2028 /
-/// U+2029) in strings written as `\u` escapes, and floats with the shortest digits and an
-/// `e+06`-style exponent for large or small magnitudes, via
-/// [`gadk_model::to_go_json`]. Used where JSON text reaches the model or an event: stringified
-/// function-call content, structured model responses, and workflow node inputs.
+/// Compact JSON of a decoded JSON value, via [`gadk_model::to_go_json`]: object keys sorted,
+/// `<`, `>` and `&` (and U+2028 / U+2029) in strings written as `\u` escapes, and floats in
+/// shortest form with an exponent only below 1e-6 or from 1e21 on (`1e-7`, `1e+21`). Used where
+/// JSON text reaches the model or an event: stringified function-call content, structured
+/// model responses, and workflow node inputs.
 pub(crate) fn go_json_marshal(v: &Value) -> String {
     gadk_model::to_go_json(v)
         .map(|b| String::from_utf8_lossy(&b).into_owned())
@@ -138,8 +138,8 @@ pub(crate) fn go_sprint(v: &Value) -> String {
 }
 
 /// `v` with every number as a float, so [`go_sprint`] prints tool arguments and model output in
-/// float form (`1e+06`, not `1000000`). A number
-/// with no finite float form is kept as is. Apply before [`go_sprint`] on JSON-decoded values.
+/// float form (`1e+06`, not `1000000`). A number with no finite float form is kept as is.
+/// Apply before [`go_sprint`] on JSON-decoded values.
 pub(crate) fn as_go_floats(v: &Value) -> Value {
     match v {
         Value::Number(n) => n
