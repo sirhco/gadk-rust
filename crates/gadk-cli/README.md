@@ -9,7 +9,7 @@ annotated in the source with `// Divergence (ledger 6b)`.
 ## Install
 
 ```sh
-cargo install --path crates/gadk-cli    # installs the `gadk` binary
+cargo install gadk-cli    # installs the `gadk` binary
 ```
 
 ## Usage

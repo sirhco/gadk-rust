@@ -1,10 +1,12 @@
 [package]
 name = "gadk-genai"
+description = "Gemini-compatible content and generation config types for gadk"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+keywords.workspace = true
 
 [lints]
 workspace = true

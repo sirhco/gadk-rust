@@ -1,10 +1,14 @@
 [package]
 name = "gadk"
+description = "Agent Development Kit for Rust: build, run and deploy LLM agents with Gemini, Claude and OpenAI models"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+keywords.workspace = true
+categories = ["development-tools"]
+readme = "../../README.md"
 # Examples are declared explicitly below: examples/toolsearch_catalog.rs is a module shared
 # with tests/examples_toolsearch_main.rs through #[path], not an example.
 autoexamples = false

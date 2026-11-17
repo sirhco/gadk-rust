@@ -1,10 +1,12 @@
 [package]
 name = "gadk-engine"
+description = "The gadk runtime: LLM agent and flow, workflow agents and graphs, and the runner"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+keywords.workspace = true
 
 [lints]
 workspace = true

@@ -1,10 +1,12 @@
 [package]
 name = "gadk-session"
+description = "Sessions, events and the in-memory session service for gadk"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+keywords.workspace = true
 
 [lints]
 workspace = true

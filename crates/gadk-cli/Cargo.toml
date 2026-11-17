@@ -1,10 +1,12 @@
 [package]
 name = "gadk-cli"
+description = "The gadk deploy CLI: deploy gadk agents to Cloud Run and Vertex AI Agent Engine"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+keywords.workspace = true
 
 [lints]
 workspace = true

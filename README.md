@@ -16,11 +16,11 @@ formats, error texts and outputs, checked against ADK-Go's own tests (see
 
 ## Quick start
 
-gadk is not published to crates.io yet; depend on it from Git:
+Add gadk from crates.io:
 
 ```toml
 [dependencies]
-gadk = { git = "https://github.com/sirhco/gadk-rust" }   # default features: gemini, gcp, mcp
+gadk = "0.2"   # default features: gemini, gcp, mcp
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"
 ```

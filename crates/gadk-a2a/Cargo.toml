@@ -1,10 +1,12 @@
 [package]
 name = "gadk-a2a"
+description = "Agent2Agent (A2A) protocol support for gadk: serve agents over A2A and call remote A2A agents"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+keywords.workspace = true
 
 [lints]
 workspace = true

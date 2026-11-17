@@ -1,10 +1,12 @@
 [package]
 name = "gadk-server"
+description = "The gadk REST API server, with inbound authentication"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+keywords.workspace = true
 
 [lints]
 workspace = true

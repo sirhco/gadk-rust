@@ -1,10 +1,12 @@
 [package]
 name = "gadk-model"
+description = "The gadk LLM abstraction: the Llm trait, model registry, HTTP seam and REST transport"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+keywords.workspace = true
 
 [lints]
 workspace = true

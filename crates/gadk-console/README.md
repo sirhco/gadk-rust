@@ -6,7 +6,7 @@ to Cloud Trace, with each span's Cloud Logging entries attached, and it browses 
 127.0.0.1 only, and reads Google Cloud with your Application Default Credentials.
 
 ```sh
-cargo install --path crates/gadk-console
+cargo install gadk-console
 
 gcloud auth application-default login
 gadk-console --project my-project --store 'firestore://my-project/(default)'

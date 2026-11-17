@@ -4,7 +4,7 @@
 or Firestore store.
 
 ```sh
-cargo install --path crates/gadk-prompts-cli
+cargo install gadk-prompts-cli
 
 STORE=file://./prompts            # or firestore://<project>/<database>[/<root>]
 gadk-prompts --store $STORE push support-triage --template triage.txt -m "Tighten tone"
