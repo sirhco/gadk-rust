@@ -20,7 +20,7 @@ use crate::error::ModelError;
 /// Why [`RestTransport::send`](super::RestTransport::send) failed, or (boxed in
 /// [`ModelError::Other`]) why a streaming body under a deadline ended.
 ///
-/// `Display` carries no provider prefix: the Go runtime texts the transport produces itself
+/// `Display` carries no provider prefix: the transport's own texts
 /// (`net/http: timeout awaiting response headers`, `context deadline exceeded`), else the
 /// cause's `Display` (a [`ModelError`]'s, e.g. `transport error: …`). Each provider maps the
 /// variants to its own error type and text instead of using this `Display`.
@@ -28,7 +28,7 @@ use crate::error::ModelError;
 pub enum RestError {
     /// The last attempt received no response: [`HttpClient::send`](crate::HttpClient::send)
     /// failed (connection error, invalid request, …). The cause is kept as it is so the
-    /// provider can classify it (Go `classifyError`) and strip URLs.
+    /// provider can classify it and strip URLs.
     #[error("{0}")]
     Transport(ModelError),
     /// The last attempt's [`RequestHeaders::headers`](super::RequestHeaders::headers) failed
@@ -36,10 +36,10 @@ pub enum RestError {
     #[error("{0}")]
     Headers(Box<dyn std::error::Error + Send + Sync>),
     /// The last attempt's response headers did not arrive within the transport's
-    /// `response_header_timeout` (Go `http.Transport.ResponseHeaderTimeout`).
+    /// `response_header_timeout`.
     #[error("net/http: timeout awaiting response headers")]
     ResponseHeaderTimeout,
-    /// The call's deadline passed (Go `context.DeadlineExceeded`): the last attempt's
+    /// The call's deadline passed: the last attempt's
     /// [`CallTimeout::PerAttempt`](super::CallTimeout::PerAttempt) deadline, or the
     /// [`CallTimeout::Call`](super::CallTimeout::Call) deadline at any point of the call.
     #[error("context deadline exceeded")]

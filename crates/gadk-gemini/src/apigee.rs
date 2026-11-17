@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Gemini through an Apigee proxy (port of ADK-Go `model/apigee/apigee.go`).
+//! Gemini through an Apigee proxy.
 //!
 //! An Apigee model name is `apigee/[vertex_ai/|gemini/][vN/]<model>`. The model is served by a
 //! [`GeminiModel`] whose base URL is the proxy URL; the name selects the backend (Vertex AI or
@@ -36,15 +36,15 @@ const GOOGLE_GENAI_USE_VERTEX_AI_ENV_VAR: &str = "GOOGLE_GENAI_USE_VERTEXAI";
 const PROJECT_ENV_VAR: &str = "GOOGLE_CLOUD_PROJECT";
 const LOCATION_ENV_VAR: &str = "GOOGLE_CLOUD_LOCATION";
 
-/// Configuration for [`ApigeeModel::new`] (port of Go `apigee.Config` and its options).
+/// Configuration for [`ApigeeModel::new`].
 #[derive(Clone)]
 pub struct ApigeeConfig {
-    /// Proxy URL (Go `WithProxyURL`). When `None` or empty, `APIGEE_PROXY_URL` is read from
+    /// Proxy URL. When `None` or empty, `APIGEE_PROXY_URL` is read from
     /// [`env`](Self::env).
     pub proxy_url: Option<String>,
-    /// Headers sent with every request (Go `WithCustomHeaders`).
+    /// Headers sent with every request.
     pub custom_headers: http::HeaderMap,
-    /// Custom HTTP client (Go `WithHTTPClient`).
+    /// Custom HTTP client.
     pub http_client: Option<Arc<dyn HttpClient>>,
     /// Environment variable source (`APIGEE_PROXY_URL`, `GOOGLE_GENAI_USE_VERTEXAI`,
     /// `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`, and the Gemini client's variables).
@@ -79,7 +79,7 @@ impl fmt::Debug for ApigeeConfig {
     }
 }
 
-/// The parts of an Apigee model name (Go `modelInfo`).
+/// The parts of an Apigee model name.
 #[doc(hidden)]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ModelInfo {
@@ -91,14 +91,14 @@ pub struct ModelInfo {
     pub is_vertex_ai: bool,
 }
 
-/// Go's `invalid model string: <name>`.
+/// The `invalid model string: <name>` error.
 fn invalid_model_string(model_name: &str) -> GeminiError {
     GeminiError::Config(format!("invalid model string: {model_name}"))
 }
 
-/// Go `parseModelName`: `apigee/[vertex_ai/|gemini/][vN/]<model>`, with
-/// `GOOGLE_GENAI_USE_VERTEXAI` read through `env`; Go's `invalid model string: <name>` as
-/// [`GeminiError::Config`]. Hidden: public only for the parity test.
+/// Parses `apigee/[vertex_ai/|gemini/][vN/]<model>`, with
+/// `GOOGLE_GENAI_USE_VERTEXAI` read through `env`; a malformed name is
+/// [`GeminiError::Config`] `invalid model string: <name>`. Hidden: public only for tests.
 #[doc(hidden)]
 pub fn parse_model_name(model_name: &str, env: &dyn EnvProvider) -> Result<ModelInfo, GeminiError> {
     let Some(model_part) = model_name.strip_prefix("apigee/") else {
@@ -146,7 +146,7 @@ pub fn parse_model_name(model_name: &str, env: &dyn EnvProvider) -> Result<Model
     Ok(info)
 }
 
-/// Go `resolveProxyURL`: the configured URL, else `APIGEE_PROXY_URL` (empty when unset).
+/// The configured URL, else `APIGEE_PROXY_URL` (empty when unset).
 fn resolve_proxy_url(proxy_url: Option<&str>, env: &dyn EnvProvider) -> String {
     match proxy_url {
         Some(u) if !u.is_empty() => u.to_string(),
@@ -154,7 +154,7 @@ fn resolve_proxy_url(proxy_url: Option<&str>, env: &dyn EnvProvider) -> String {
     }
 }
 
-/// Go `generateHTTPOptions`: the proxy URL as base URL, the custom headers, and the API version
+/// The proxy URL as base URL, the custom headers, and the API version
 /// when the name carries one.
 fn generate_http_options(
     proxy_url: String,
@@ -169,7 +169,7 @@ fn generate_http_options(
     }
 }
 
-/// Go `backendType`.
+/// The backend for a Vertex AI / Gemini API flag.
 fn backend_type(is_vertex_ai: bool) -> Backend {
     if is_vertex_ai {
         Backend::VertexAi
@@ -178,14 +178,14 @@ fn backend_type(is_vertex_ai: bool) -> Backend {
     }
 }
 
-/// Go `isEnabled`: the variable is `true` (any case) or `1`.
+/// Whether the variable is `true` (any case) or `1`.
 fn is_enabled(env: &dyn EnvProvider, env_var_name: &str) -> bool {
     let val = env.var(env_var_name).unwrap_or_default();
     go_to_lower(&val) == "true" || val == "1"
 }
 
-/// Go `generateClientConfig`: Vertex AI requires `GOOGLE_CLOUD_PROJECT` and
-/// `GOOGLE_CLOUD_LOCATION` (read from `env`, Go's error texts), which become the config's
+/// Builds the client config: Vertex AI requires `GOOGLE_CLOUD_PROJECT` and
+/// `GOOGLE_CLOUD_LOCATION` (read from `env`), which become the config's
 /// project and location.
 fn generate_client_config(
     is_vertex_ai: bool,
@@ -222,7 +222,7 @@ fn generate_client_config(
     Ok(client_config)
 }
 
-/// A Gemini model reached through an Apigee proxy (port of Go `apigeeModel`): it configures a
+/// A Gemini model reached through an Apigee proxy: it configures a
 /// [`GeminiModel`] and delegates every request to it.
 pub struct ApigeeModel {
     delegate: GeminiModel,
@@ -239,7 +239,7 @@ impl fmt::Debug for ApigeeModel {
 }
 
 impl ApigeeModel {
-    /// Port of Go `apigee.NewModel`: parses `apigee/[vertex_ai|gemini/][vN/]<model>`,
+    /// Parses `apigee/[vertex_ai|gemini/][vN/]<model>`,
     /// resolves the proxy URL and the Vertex environment, and builds the delegate Gemini model.
     pub async fn new(name: &str, cfg: ApigeeConfig) -> Result<ApigeeModel, GeminiError> {
         let ApigeeConfig {
@@ -275,12 +275,12 @@ impl ApigeeModel {
 }
 
 impl Llm for ApigeeModel {
-    /// The full `apigee/…` name given to [`ApigeeModel::new`] (Go `Name`).
+    /// The full `apigee/…` name given to [`ApigeeModel::new`].
     fn name(&self) -> &str {
         &self.name
     }
 
-    /// Delegates to the Gemini model (Go `GenerateContent`).
+    /// Delegates to the Gemini model.
     fn generate_content(
         &self,
         mut req: LlmRequest,
@@ -288,15 +288,15 @@ impl Llm for ApigeeModel {
     ) -> BoxStream<'static, Result<LlmResponse, ModelError>> {
         // The flow sets req.model to name(), the full "apigee/..." string, and the
         // delegate prefers req.model over the model ID it was built with. Only the
-        // model ID, the last path component, names a model on the proxy (Go 71b0761f).
+        // model ID, the last path component, names a model on the proxy.
         if let Some(i) = req.model.rfind('/') {
             req.model = req.model[i + 1..].to_string();
         }
         self.delegate.generate_content(req, stream)
     }
 
-    // `google_variant` keeps the trait default (`None`): Go's `apigeeModel` has no
-    // `GetGoogleLLMVariant` method, so it is not a `model.GoogleLLM`.
+    // `google_variant` keeps the trait default (`None`): an Apigee model is not reported as a
+    // Google backend model.
 
     fn as_any(&self) -> &dyn std::any::Any {
         self

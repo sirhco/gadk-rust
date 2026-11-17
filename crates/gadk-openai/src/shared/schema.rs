@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! JSON-schema helpers both APIs share (port of ADK-Go `internal/shared/schema.go`).
+//! JSON-schema helpers both APIs share.
 
 use gadk_genai::Schema;
 use gadk_platform::go_to_lower;
@@ -22,11 +22,11 @@ use serde_json::{Map, Value};
 use crate::error::{ErrorKind, OpenAiError};
 use crate::shared::calls::go_map;
 
-/// Go `DefaultResponseFormatName`: the structured-output format name when the schema's title
+/// The structured-output format name when the schema's title
 /// is not one OpenAI accepts.
 pub(crate) const DEFAULT_RESPONSE_FORMAT_NAME: &str = "adk_response";
 
-/// Go `ResponseFormatName`: the schema's title when it matches `^[a-zA-Z0-9_-]{1,64}$`, else
+/// The format name: the schema's title when it matches `^[a-zA-Z0-9_-]{1,64}$`, else
 /// [`DEFAULT_RESPONSE_FORMAT_NAME`].
 pub(crate) fn response_format_name(schema: Option<&Schema>) -> String {
     match schema {
@@ -35,7 +35,7 @@ pub(crate) fn response_format_name(schema: Option<&Schema>) -> String {
     }
 }
 
-/// Go `responseFormatNamePattern` (`^[a-zA-Z0-9_-]{1,64}$`; RE2's `$` is the end of the
+/// The pattern of an allowed format name (`^[a-zA-Z0-9_-]{1,64}$`; `$` is the end of the
 /// text, so a trailing newline does not match). Every allowed character is ASCII, so the
 /// byte length is the character count.
 fn is_response_format_name(title: &str) -> bool {
@@ -45,9 +45,9 @@ fn is_response_format_name(title: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
-/// Go `NormalizeSchema`: a JSON schema of any shape as a map, numbers kept as decoded. `None`
-/// (Go nil) is the bare [`ErrorKind::EmptyJsonSchema`](crate::error::ErrorKind::EmptyJsonSchema);
-/// JSON `null` is `Ok(None)` (Go's nil map, no error); a non-object is
+/// A JSON schema of any shape as a map, numbers kept as decoded. `None`
+/// is the bare [`ErrorKind::EmptyJsonSchema`](crate::error::ErrorKind::EmptyJsonSchema);
+/// JSON `null` is `Ok(None)` (no map, no error); a non-object is
 /// `openai: unmarshal json schema: <err>`.
 pub(crate) fn normalize_schema(
     schema: Option<&Value>,
@@ -55,13 +55,13 @@ pub(crate) fn normalize_schema(
     let Some(schema) = schema else {
         return Err(OpenAiError::sentinel(ErrorKind::EmptyJsonSchema));
     };
-    // Go marshals the value and decodes it back with `UseNumber`, keeping every number as
-    // written; a `serde_json::Value` already holds the numbers it was built with.
+    // A `serde_json::Value` already holds the numbers it was built with, so every number is
+    // kept as written.
     go_map(schema.clone())
         .map_err(|err| OpenAiError::plain(format!("openai: unmarshal json schema: {err}")))
 }
 
-/// Go `EnforceStrictOpenAISchema`: every object type gets `properties` (added empty when
+/// Makes a schema strict: every object type gets `properties` (added empty when
 /// missing), `additionalProperties: false` and a sorted `required` naming every property; a
 /// `$ref` keeps no siblings; recurses through `$defs`, `properties`, `anyOf`/`oneOf`/`allOf`
 /// and an object `items`. Mutates in place.
@@ -76,7 +76,7 @@ pub(crate) fn enforce_strict_openai_schema(schema: &mut Map<String, Value>) {
             schema.insert("properties".to_string(), Value::Object(Map::new()));
         }
         let required: Vec<Value> = match schema.get("properties") {
-            // `Map` iterates in key order: Go's `sort.Strings`.
+            // `Map` iterates in key order, so the names are sorted.
             Some(Value::Object(props)) => props.keys().cloned().map(Value::String).collect(),
             _ => Vec::new(),
         };
@@ -100,7 +100,7 @@ pub(crate) fn enforce_strict_openai_schema(schema: &mut Map<String, Value>) {
     }
 }
 
-/// [`enforce_strict_openai_schema`] on any JSON value (Go's `val any`): only an object is
+/// [`enforce_strict_openai_schema`] on any JSON value: only an object is
 /// touched.
 fn enforce_strict_value(value: &mut Value) {
     if let Value::Object(schema) = value {
@@ -108,7 +108,7 @@ fn enforce_strict_value(value: &mut Value) {
     }
 }
 
-/// Go `SchemaToMap`: a genai schema as the JSON-schema map both APIs take, type names
+/// A genai schema as the JSON-schema map both APIs take, type names
 /// lowercased at every depth; `None` is `Ok(None)`. Failures are `openai: marshal schema: …` /
 /// `openai: unmarshal schema: …`.
 pub(crate) fn schema_to_map(
@@ -123,7 +123,7 @@ pub(crate) fn schema_to_map(
     go_map(value).map_err(|err| OpenAiError::plain(format!("openai: unmarshal schema: {err}")))
 }
 
-/// Go `lowercaseSchemaTypes`: every `type` string (or string in a `type` array) lowercased,
+/// Lowercases every `type` string (or string in a `type` array),
 /// at every depth.
 fn lowercase_schema_types(value: &mut Value) {
     match value {
@@ -136,7 +136,7 @@ fn lowercase_schema_types(value: &mut Value) {
     }
 }
 
-/// The `type` member of one map, lowercased (Go `strings.ToLower`).
+/// The `type` member of one map, lowercased.
 fn lowercase_type_field(map: &mut Map<String, Value>) {
     match map.get_mut("type") {
         Some(Value::String(t)) => *t = go_to_lower(t),

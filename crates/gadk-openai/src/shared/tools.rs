@@ -13,22 +13,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Tool validation both APIs share (port of ADK-Go `internal/shared/tools.go`).
+//! Tool validation both APIs share.
 
 use gadk_genai::Tool;
 
 use crate::error::OpenAiError;
 use crate::shared::config::reject_unsupported_fields;
 
-/// Go `supportedFunctionToolFields`: the only `genai.Tool` field this package sends. Every
+/// The only [`Tool`] field this crate sends. Every
 /// other field is refused, so a field genai adds cannot be dropped silently.
 const SUPPORTED_FUNCTION_TOOL_FIELDS: &[&str] = &["FunctionDeclarations"];
 
-/// Go `EnsureFunctionToolOnly`: rejects a nil tool (`None`: `openai: tool <idx> is nil`), one
+/// Rejects a missing tool (`None`: `openai: tool <idx> is nil`), one
 /// carrying any field besides `FunctionDeclarations` (`openai: non-function tools are not
-/// supported (tool <idx>): ` wrapping `ErrUnsupportedConfigField: <Field>`, the first set field
-/// in genai's declaration order), and one declaring no functions (`openai: tool <idx> does not
-/// declare any functions`). The nil and no-functions errors are plain.
+/// supported (tool <idx>): ` wrapping `UnsupportedConfigField: <Field>`, the first set field
+/// in declaration order), and one declaring no functions (`openai: tool <idx> does not
+/// declare any functions`). The missing-tool and no-functions errors are plain.
 pub(crate) fn ensure_function_tool_only(
     idx: usize,
     tool: Option<&Tool>,
@@ -51,8 +51,8 @@ pub(crate) fn ensure_function_tool_only(
     Ok(())
 }
 
-/// Every `Tool` field as `(Go field name, set)`, in genai's declaration order, by exhaustive
-/// destructuring (Go walks the struct by reflection), so a field genai adds fails to compile
+/// Every `Tool` field as `(field name, set)`, in declaration order, by exhaustive
+/// destructuring, so a field genai adds fails to compile
 /// here until it is listed.
 fn tool_fields(tool: &Tool) -> [(&'static str, bool); 13] {
     let Tool {

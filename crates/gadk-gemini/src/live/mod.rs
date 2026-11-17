@@ -15,8 +15,8 @@
 
 //! The Live (bidi streaming) connection over a WebSocket, for the Gemini API and Vertex AI.
 //!
-//! Ports genai v1.77.0 `live.go` (`Live.Connect`, `Session` send/receive) and ADK-Go
-//! `internal/llminternal/googlellm/live_connection.go` (`LiveConnection`).
+//! Dials the Live endpoint, sends the setup message, and implements the send and receive
+//! sides of a [`LiveConnection`].
 
 mod messages;
 pub(crate) mod proxy;
@@ -50,19 +50,17 @@ use crate::error::GeminiError;
 
 type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
-/// Bound on the dial, proxy CONNECT, TLS and WebSocket upgrade together (gorilla
-/// `DefaultDialer.HandshakeTimeout`).
+/// Bound on the dial, proxy CONNECT, TLS and WebSocket upgrade together.
 pub(crate) const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(45);
 
-/// The PNG file signature (Go `SendRealtime` MIME detection).
+/// The PNG file signature, used to detect the MIME type of realtime image data.
 const PNG_SIGNATURE: [u8; 8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
 
-/// A live connection to a model (port of ADK-Go `googlellm.LiveConnection` over a genai
-/// `Session`).
+/// A live connection to a model over a WebSocket.
 ///
 /// Every method takes `&self`, so a connection can be shared through an `Arc` and used
-/// from several tasks at once, as ADK-Go's live flow does (one goroutine receiving while
-/// another sends). The write half and the read half sit behind separate async mutexes:
+/// from several tasks at once (one receiving while another sends). The write half and the
+/// read half sit behind separate async mutexes:
 /// frames from concurrent sends are never interleaved, and a pending
 /// [`recv`](Self::recv) never blocks a send. Concurrent `recv` calls are served one at a
 /// time.
@@ -76,14 +74,14 @@ pub struct LiveConnection {
 /// The read half of a [`LiveConnection`] and the state the receive path keeps.
 struct RecvHalf {
     stream: SplitStream<Ws>,
-    /// genai `Session.bufferedMessage`: the setupComplete message, returned by the first
+    /// The setupComplete message, returned by the first
     /// receive.
     buffered_message: Option<LiveServerMessage>,
     state: RecvState,
 }
 
 impl RecvHalf {
-    /// genai `Session.Receive`: the buffered message, else the next data frame decoded.
+    /// The buffered message, else the next data frame decoded.
     /// `None` when the stream ended without a close frame; a received close frame is an error
     /// with its code.
     async fn receive(
@@ -104,7 +102,7 @@ impl RecvHalf {
                 }
                 Some(Ok(Message::Text(t))) => t.as_bytes().to_vec(),
                 Some(Ok(Message::Binary(b))) => b.to_vec(),
-                // gorilla surfaces a received close frame as *CloseError carrying its code.
+                // A received close frame is an error carrying its code.
                 Some(Ok(Message::Close(frame))) => {
                     return Err(GeminiError::Live(close_frame_error(
                         "failed to receive message",
@@ -128,8 +126,8 @@ impl fmt::Debug for LiveConnection {
     }
 }
 
-/// gorilla `CloseError.Error()` (websocket v1.5.3 conn.go:113): `websocket: close <code>`, the code's
-/// name in parentheses for the codes gorilla names, then `: <reason>` when the reason is non-empty.
+/// The text of a WebSocket close error: `websocket: close <code>`, the code's
+/// name in parentheses for the named codes, then `: <reason>` when the reason is non-empty.
 pub fn gorilla_close_text(code: u16, reason: &str) -> String {
     let name = match code {
         1000 => " (normal)",
@@ -154,8 +152,8 @@ pub fn gorilla_close_text(code: u16, reason: &str) -> String {
     s
 }
 
-/// `<context>: <e>`, classified: a closed connection, a socket I/O failure (Go `*net.OpError`) or a
-/// reset without a closing handshake (gorilla's close 1006) is `ConnectionLost`; anything else is
+/// `<context>: <e>`, classified: a closed connection, a socket I/O failure or a
+/// reset without a closing handshake (close 1006) is `ConnectionLost`; anything else is
 /// `Other`. The tungstenite error is kept as the source.
 pub fn classify_ws_error(context: &str, e: tokio_tungstenite::tungstenite::Error) -> LiveConnError {
     use tokio_tungstenite::tungstenite::Error as WsError;
@@ -171,8 +169,8 @@ pub fn classify_ws_error(context: &str, e: tokio_tungstenite::tungstenite::Error
     LiveConnError::new(kind, format!("{context}: {e}")).with_source(e)
 }
 
-/// A received close frame (Go `*websocket.CloseError`): kind `Closed { code }`, code 1005 for a
-/// frame without a payload, message `<context>: <gorilla text>`.
+/// A received close frame: kind `Closed { code }`, code 1005 for a
+/// frame without a payload, message `<context>: <close text>` (see [`gorilla_close_text`]).
 pub fn close_frame_error(context: &str, frame: Option<&CloseFrame>) -> LiveConnError {
     let (code, reason) = match frame {
         Some(f) => (u16::from(f.code), f.reason.as_str()),
@@ -184,7 +182,7 @@ pub fn close_frame_error(context: &str, frame: Option<&CloseFrame>) -> LiveConnE
     )
 }
 
-/// Go `fmt.Errorf("<context>: %w", err)`: prefixes the text, keeps the kind, keeps `e` as source.
+/// Prefixes the text with `<context>: `, keeps the kind, and keeps `e` as the source.
 pub fn wrap_conn_error(context: &str, e: LiveConnError) -> LiveConnError {
     LiveConnError::new(e.kind, format!("{context}: {}", e.message)).with_source(e)
 }
@@ -207,11 +205,11 @@ fn into_conn_error(e: GeminiError) -> LiveConnError {
     }
 }
 
-/// Port of genai `Live.Connect`: dials the Live endpoint (through `HTTPS_PROXY`/`HTTP_PROXY`
+/// Dials the Live endpoint (through `HTTPS_PROXY`/`HTTP_PROXY`
 /// unless `NO_PROXY` or a loopback host says otherwise), sends the setup message and waits for
 /// `setupComplete`, which is buffered for the first receive.
 ///
-/// gadk deviation: the setup message is built before dialing, so an invalid configuration
+/// The setup message is built before dialing, so an invalid configuration
 /// fails without opening a connection.
 pub(crate) async fn connect(
     resolved: &ResolvedConfig,
@@ -248,7 +246,7 @@ pub(crate) async fn connect_with_timeout(
         .into_client_request()
         .map_err(|e| live_other(format!("invalid Live request: {e}")))?;
     let headers = request.headers_mut();
-    // genai mergeHeaders: the client headers, every value added.
+    // The client headers, every value added.
     for (name, value) in &resolved.http_options.headers {
         headers.append(name.clone(), value.clone());
     }
@@ -256,7 +254,7 @@ pub(crate) async fn connect_with_timeout(
     headers.extend(auth_headers(&resolved.auth).await?);
 
     // A dial failure is never a lost established connection: it is `Other`.
-    // gorilla DefaultDialer: Proxy = http.ProxyFromEnvironment, then a TCP (or CONNECT
+    // The dial uses the proxy from the environment, then a TCP (or CONNECT
     // tunnel) dial; TLS for wss is layered on the same stream.
     let proxy = proxy::proxy_for_with(&url, env);
     if let Some(p) = &proxy {
@@ -266,7 +264,7 @@ pub(crate) async fn connect_with_timeout(
             "dialing Live through a proxy"
         );
     }
-    // gorilla DefaultDialer.HandshakeTimeout bounds the dial, the proxy CONNECT, TLS and the
+    // The handshake timeout bounds the dial, the proxy CONNECT, TLS and the
     // WebSocket upgrade together, so a black-holed endpoint cannot park a (re)connect forever.
     let handshake = async {
         let tcp = proxy::dial(&url, proxy.as_ref()).await.map_err(|e| {
@@ -346,8 +344,8 @@ impl LiveConnection {
         self.model_name.contains("gemini-3.1")
     }
 
-    /// Go `isGemini3xLive(c.modelName)`: a Gemini 3.x Live model (not Live Translate), on
-    /// either backend (Go d8e47448).
+    /// A Gemini 3.x Live model (not Live Translate), on
+    /// either backend.
     fn is_gemini_3x_live(&self) -> bool {
         gadk_model::is_gemini_3x_live(&self.model_name)
     }
@@ -370,12 +368,12 @@ impl LiveConnection {
         self.write(messages::realtime_input_message(&input)?).await
     }
 
-    /// Port of Go `SendHistory`: sends `history` without audio inline-data parts and without
-    /// internal live-artifact references ([`gadk_model::is_internal_live_artifact_part`], Go
-    /// 22ff1839) as one client-content message, completing the turn when the last content is
+    /// Sends `history` without audio inline-data parts and without
+    /// internal live-artifact references ([`gadk_model::is_internal_live_artifact_part`])
+    /// as one client-content message, completing the turn when the last content is
     /// the user's. Nothing is sent when no part remains, or for gemini-3.1 models.
     pub async fn send_history(&self, history: &[Content]) -> Result<(), GeminiError> {
-        // TODO(adk-go): genai seems to be missing initial_history_in_client_content.
+        // TODO: `initial_history_in_client_content` is not sent.
         if self.is_gemini_31() {
             tracing::debug!("skipping sending history for gemini 3.1");
             return Ok(());
@@ -413,8 +411,8 @@ impl LiveConnection {
         .map_err(|e| wrap_live("failed to send history", e))
     }
 
-    /// Port of Go `SendContent`: function responses (when the first part is one) go as a
-    /// tool response; single-text content to a Gemini 3.x Live model goes as realtime text;
+    /// Sends function responses (when the first part is one) as a
+    /// tool response; single-text content to a Gemini 3.x Live model as realtime text;
     /// anything else as a complete client-content turn.
     pub async fn send_content(&self, content: Content) -> Result<(), GeminiError> {
         if content.parts.is_empty() {
@@ -447,10 +445,10 @@ impl LiveConnection {
         .map_err(|e| wrap_live("failed to send content", e))
     }
 
-    /// Port of Go `SendRealtime`. Blobs go as `mediaChunks`, or for a Gemini 3.x Live or
+    /// Sends realtime input. Blobs go as `mediaChunks`, or for a Gemini 3.x Live or
     /// Gemini 3.5 Live Translate model as `video` (image MIME types) or `audio` (everything
     /// else, where the server rejects a type other than `audio/*`; the error goes to the
-    /// caller, as in Go).
+    /// caller).
     pub async fn send_realtime(&self, input: RealtimeInput) -> Result<(), GeminiError> {
         let input = match input {
             RealtimeInput::Blob(mut blob) => {
@@ -504,7 +502,7 @@ impl LiveConnection {
         self.send_realtime_input(input).await
     }
 
-    /// genai `SendToolResponse`: replies to a tool call.
+    /// Replies to a tool call.
     pub async fn send_tool_response(
         &self,
         responses: Vec<FunctionResponse>,
@@ -516,7 +514,7 @@ impl LiveConnection {
             .await
     }
 
-    /// genai `SendContextUpdate` (v1.77.0, preview): updates the system instruction and/or
+    /// Updates (preview) the system instruction and/or
     /// the tools of the current session. Only the fields that are set are updated; the
     /// update is processed in order with the rest of the inputs.
     pub async fn send_context_update(
@@ -527,7 +525,7 @@ impl LiveConnection {
             .await
     }
 
-    /// Port of Go `Recv`: the next response. `None` when the stream ended without a close
+    /// The next response. `None` when the stream ended without a close
     /// frame; a received close frame is an error with its code.
     ///
     /// Takes `&self` and locks only the read half, so it may be awaited while other tasks

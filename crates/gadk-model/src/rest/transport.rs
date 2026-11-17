@@ -13,10 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The attempt loop (port of anthropic-sdk-go v1.84.0 `RequestConfig.Execute`/`send` and
-//! openai-go v3.91.1 `RequestConfig.Execute`): headers per attempt, the response-header
-//! timeout, retries with backoff, which bodies are read, dropped bodies, and both timeout
-//! models.
+//! The attempt loop, following the official Anthropic and OpenAI SDKs: headers per attempt,
+//! the response-header timeout, retries with backoff, which bodies are read, dropped bodies,
+//! and both timeout models.
 
 use std::sync::Arc;
 use std::task::Poll;
@@ -32,8 +31,7 @@ use super::policy::{RetryAfter, RetryPolicy, should_retry, should_retry_dropped_
 use crate::error::ModelError;
 use crate::http::{BodyStream, HttpClient, collect_body};
 
-/// Both Go SDKs' default client `ResponseHeaderTimeout` (`defaultResponseHeaderTimeout`,
-/// 10 minutes).
+/// The default client response-header timeout of both SDKs: 10 minutes.
 pub const DEFAULT_RESPONSE_HEADER_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// The timeout model of one call.
@@ -42,13 +40,13 @@ pub enum CallTimeout {
     /// No timeout (cancellation is by drop only).
     #[default]
     None,
-    /// anthropic-sdk-go `WithRequestTimeout`: each attempt gets its own deadline, `d` after it
+    /// Each attempt gets its own deadline, `d` after it
     /// starts, covering the header fetch, the send and the read of a body that ends the call;
     /// a timed-out attempt is retried like a connection error unless it is the last, which
     /// fails with [`RestError::DeadlineExceeded`]; a streaming body stays under the last
     /// attempt's deadline. `PerAttempt(Duration::ZERO)` is [`CallTimeout::None`].
     PerAttempt(Duration),
-    /// Go `context.WithTimeout` around the whole call (openai-go): one deadline over every
+    /// One deadline around the whole call: over every
     /// attempt, every backoff sleep and the streaming body. Reaching it ends the call at once
     /// with [`RestError::DeadlineExceeded`], never retried; a deadline already passed sends
     /// nothing. The caller computes it when the call (or stream) starts running.
@@ -108,9 +106,8 @@ pub struct RestTransport {
     pub policy: RetryPolicy,
     /// A timeout on each `HttpClient::send` (until the response headers):
     /// [`DEFAULT_RESPONSE_HEADER_TIMEOUT`] when the provider built the client itself, `None`
-    /// for a caller's client. It covers connecting and writing the request too (Go's
-    /// `ResponseHeaderTimeout` starts once the request is written), never a body; the header
-    /// fetch before `send` is outside it.
+    /// for a caller's client. It covers connecting and writing the request too, never a body;
+    /// the header fetch before `send` is outside it.
     pub response_header_timeout: Option<Duration>,
 }
 
@@ -167,9 +164,9 @@ fn body_with_deadline(body: BodyStream, deadline: Instant) -> BodyStream {
 }
 
 impl RestTransport {
-    /// One attempt, up to the point Go's loop decides on it: fetch the headers, send (under
+    /// One attempt, up to the point where the loop decides on it: fetch the headers, send (under
     /// `response_header_timeout`), then either decide to retry (unread) or read the body of a
-    /// response that ends the call unless it is a streaming status < 400 (SDK `readsBody`).
+    /// response that ends the call unless it is a streaming status < 400.
     async fn attempt(
         &self,
         method: &Method,
@@ -216,8 +213,8 @@ impl RestTransport {
         }
     }
 
-    /// The wait before retry `retry_count` after an attempt without a response (Go's `res` is
-    /// `nil`, so only the backoff applies).
+    /// The wait before retry `retry_count` after an attempt without a response (so only the
+    /// backoff applies).
     fn backoff(&self, retry_count: u32) -> Duration {
         match self.policy.retry_delay(None, retry_count) {
             RetryAfter::Wait(d) => d,
@@ -249,7 +246,7 @@ impl RestTransport {
     /// - A response is retried per [`should_retry`](super::should_retry) (a 2xx with
     ///   `x-should-retry: true` included) after
     ///   [`RetryPolicy::retry_delay`] with its headers, unread; a [`RetryAfter::Stop`] makes it
-    ///   the final response instead (openai-go preserves it).
+    ///   the final response instead (the OpenAI SDK preserves it).
     /// - The final response's body is read, unless the call streams and the status is < 400:
     ///   [`RestReply::Read`], or [`RestReply::Streaming`] with the live body.
     /// - A body that fails to read is retried with that response's headers when
@@ -277,7 +274,7 @@ impl RestTransport {
                 return Err(RestError::DeadlineExceeded);
             }
             let last_attempt = retry_count >= self.policy.max_retries;
-            // A per-attempt deadline past `Instant`'s range is none (Go saturates).
+            // A per-attempt deadline past `Instant`'s range is none (the deadline saturates).
             let deadline = per_attempt
                 .and_then(|t| Instant::now().checked_add(t))
                 .or(call_deadline);

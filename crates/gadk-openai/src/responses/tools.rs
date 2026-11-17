@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Responses tools (port of ADK-Go `internal/responses/tools.go`).
+//! Responses tools.
 
 use gadk_genai::{
     FunctionCallingConfigMode, FunctionDeclaration, GenerateContentConfig, ToolConfig,
@@ -29,7 +29,7 @@ use crate::responses::wire::{
 use crate::shared::schema::{normalize_schema, schema_to_map};
 use crate::shared::tools::ensure_function_tool_only;
 
-/// Go `convertTools`: each function declaration of `cfg.tools` as a Responses function tool,
+/// Each function declaration of `cfg.tools` as a Responses function tool,
 /// after [`ensure_function_tool_only`](crate::shared::tools::ensure_function_tool_only);
 /// `None` or no tools is empty.
 pub(crate) fn convert_tools(
@@ -50,7 +50,7 @@ pub(crate) fn convert_tools(
     Ok(tools)
 }
 
-/// Go `convertFunctionDeclaration`: `None` is `openai: nil function declaration`, an empty
+/// Converts a function declaration: an empty
 /// name `openai: function declaration missing name` (plain); parameters from `parameters`,
 /// else `parameters_json_schema`, else `{"type":"object","properties":{}}`; `strict` pinned
 /// `false`.
@@ -92,7 +92,7 @@ pub(crate) fn convert_function_declaration(
     })
 }
 
-/// Go `convertToolChoice`: the Responses `tool_choice` for a tool config; `Ok(None)` when it
+/// The Responses `tool_choice` for a tool config; `Ok(None)` when it
 /// names nothing.
 ///
 /// Mode unset, unspecified or `AUTO` is `None` (the API's own `auto`) unless function names
@@ -134,7 +134,7 @@ pub(crate) fn convert_tool_choice(
     Ok(choice)
 }
 
-/// The auto arm of Go `convertToolChoice`: no choice (letting the API decide) unless function
+/// The auto arm of the tool choice: no choice (letting the API decide) unless function
 /// names are allowed.
 fn auto_choice(names: &[String]) -> Option<ResponseToolChoice> {
     if names.is_empty() {
@@ -143,7 +143,7 @@ fn auto_choice(names: &[String]) -> Option<ResponseToolChoice> {
     allowed_tool_param(names, ToolChoiceAllowedMode::Auto).map(ResponseToolChoice::AllowedTools)
 }
 
-/// Go `allowedToolParam`: an `allowed_tools` choice naming each non-empty function; `None`
+/// An `allowed_tools` choice naming each non-empty function; `None`
 /// when every name is empty.
 fn allowed_tool_param(
     names: &[String],

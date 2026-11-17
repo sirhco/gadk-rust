@@ -13,11 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Errors (port of ADK-Go `model/anthropicmodel/errors.go`, plus the parts of anthropic-sdk-go
-//! v1.84.0 `internal/apierror` that decide an error response's type and request ID).
+//! Errors, plus the logic that decides an error response's type and request ID.
 //!
-//! Go's sentinels become [`ErrorKind`]; an [`AnthropicError`] carries the kinds it wraps, in
-//! Go's `%w` order, and renders Go's `Error()` text as its `Display`.
+//! Each sentinel is an [`ErrorKind`]; an [`AnthropicError`] carries the kinds it wraps,
+//! outermost first, and renders their text as its `Display`.
 
 use std::fmt;
 
@@ -25,35 +24,35 @@ use gadk_model::ModelError;
 use gadk_model::rest::RestError;
 use serde_json::{Map, Value};
 
-/// The HTTP status code Anthropic uses when it is overloaded (Go `StatusOverloaded`).
+/// The HTTP status code Anthropic uses when it is overloaded.
 pub const STATUS_OVERLOADED: u16 = 529;
 
-/// One Go sentinel error of `anthropicmodel` (`errors.go`).
+/// One sentinel error kind of the Anthropic model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum ErrorKind {
-    /// Go `ErrNoContent`: a request has no sendable content blocks.
+    /// A request has no sendable content blocks.
     NoContent,
-    /// Go `ErrInvalidConfig`: `ClientConfig` or `GenerateContentConfig` is invalid.
+    /// `ClientConfig` or `GenerateContentConfig` is invalid.
     InvalidConfig,
-    /// Go `ErrUnsupportedToolType`: a `Tool` contains a non-function tool.
+    /// A `Tool` contains a non-function tool.
     UnsupportedToolType,
-    /// Go `ErrUnsupportedContent`: unsupported content caused a message to fail.
+    /// Unsupported content caused a message to fail.
     UnsupportedContent,
-    /// Go `ErrAuthentication`: authentication or permission failure (HTTP 401/403).
+    /// Authentication or permission failure (HTTP 401/403).
     Authentication,
-    /// Go `ErrBadRequest`: invalid request error from the API (HTTP 400).
+    /// Invalid request error from the API (HTTP 400).
     BadRequest,
-    /// Go `ErrRateLimited`: the API reports a rate limit (HTTP 429 or `rate_limit_error`).
+    /// The API reports a rate limit (HTTP 429 or `rate_limit_error`).
     RateLimited,
-    /// Go `ErrOverloaded`: the API reports overload (HTTP 529 or `overloaded_error`).
+    /// The API reports overload (HTTP 529 or `overloaded_error`).
     Overloaded,
-    /// Go `ErrAPIStatus`: any other non-2xx API response.
+    /// Any other non-2xx API response.
     ApiStatus,
 }
 
 impl ErrorKind {
-    /// The sentinel's Go `Error()` text.
+    /// The sentinel's error text.
     pub fn sentinel_text(self) -> &'static str {
         match self {
             Self::NoContent => "anthropicmodel: request contains no sendable content",
@@ -76,7 +75,7 @@ impl fmt::Display for ErrorKind {
 }
 
 /// A structured error returned by the Anthropic API or the Vertex AI Claude endpoint, as an
-/// HTTP status response or as a mid-stream SSE `error` event (Go `APIError`).
+/// HTTP status response or as a mid-stream SSE `error` event.
 ///
 /// Its `Display` holds only the status, error type, request ID and a sanitized message, never
 /// prompts, model output, URLs or credentials.
@@ -90,11 +89,12 @@ pub struct ApiError {
     pub request_id: String,
     /// A short, sanitized description; may be empty.
     pub message: String,
-    /// The sentinel the error classifies as (Go `APIError.Err`).
+    /// The sentinel the error classifies as.
     pub kind: ErrorKind,
 }
 
-/// Go `(*APIError).Error`.
+/// Formats `anthropicmodel: api error`, then the status, error type and request ID when known,
+/// then `: <message>`.
 impl fmt::Display for ApiError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("anthropicmodel: api error")?;
@@ -119,25 +119,25 @@ impl std::error::Error for ApiError {}
 /// Where an [`AnthropicError`] comes from; decides the accessors that are true.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Origin {
-    /// `fmt.Errorf("%w: …", sentinel…)`.
+    /// A sentinel wrapped with a detail (`<sentinel>: <detail>`).
     Sentinel,
     /// An [`ApiError`].
     Api,
-    /// Go `context.DeadlineExceeded` (a per-attempt timeout on the last attempt).
+    /// A deadline passed (a per-attempt timeout on the last attempt).
     DeadlineExceeded,
     /// `anthropicmodel: transport error: …`.
     Transport,
     /// `anthropicmodel: request failed: …`.
     Request,
-    /// An error text Go builds without a sentinel.
+    /// An error text built without a sentinel.
     Plain,
 }
 
-/// The error type of `gadk-anthropic` (Go's sentinel-wrapping errors, [`ApiError`],
-/// `context.DeadlineExceeded`, and the transport and request failures of Go `classifyError`).
+/// The error type of `gadk-anthropic`: the sentinel-wrapping errors, [`ApiError`], a passed
+/// deadline, and the transport and request failures.
 ///
-/// `Display` is Go's `Error()` text. [`is`](Self::is) replaces Go's `errors.Is` for the
-/// sentinels: Go's double wraps (`%w: %w`) report both kinds.
+/// `Display` is the error text. [`is`](Self::is) reports every sentinel the error wraps, so a
+/// double-wrapped error reports both kinds.
 #[derive(Debug, Clone)]
 pub struct AnthropicError {
     kinds: Vec<ErrorKind>,
@@ -161,22 +161,22 @@ impl std::error::Error for AnthropicError {
 }
 
 impl AnthropicError {
-    /// The sentinels this error wraps, outermost first (Go `%w` order).
+    /// The sentinels this error wraps, outermost first.
     pub fn kinds(&self) -> &[ErrorKind] {
         &self.kinds
     }
 
-    /// Go `errors.Is(err, <sentinel>)`.
+    /// Whether the error wraps the given sentinel.
     pub fn is(&self, kind: ErrorKind) -> bool {
         self.kinds.contains(&kind)
     }
 
-    /// Go `errors.As(err, &*APIError)`.
+    /// The [`ApiError`] this error carries, if any.
     pub fn api_error(&self) -> Option<&ApiError> {
         self.api.as_deref()
     }
 
-    /// Go `errors.Is(err, context.DeadlineExceeded)`.
+    /// Whether the error is a passed deadline.
     pub fn is_deadline_exceeded(&self) -> bool {
         self.origin == Origin::DeadlineExceeded
     }
@@ -186,7 +186,7 @@ impl AnthropicError {
         self.origin == Origin::Transport
     }
 
-    /// Go `fmt.Errorf("%w: <detail>", kind)`.
+    /// An error `<kind>: <detail>` wrapping one sentinel.
     pub(crate) fn new(kind: ErrorKind, detail: impl fmt::Display) -> Self {
         Self {
             kinds: vec![kind],
@@ -196,7 +196,7 @@ impl AnthropicError {
         }
     }
 
-    /// Go `fmt.Errorf("%w: %w: <detail>", outer, inner)`.
+    /// An error `<outer>: <inner>: <detail>` wrapping two sentinels.
     pub(crate) fn wrap2(outer: ErrorKind, inner: ErrorKind, detail: impl fmt::Display) -> Self {
         Self {
             kinds: vec![outer, inner],
@@ -206,7 +206,7 @@ impl AnthropicError {
         }
     }
 
-    /// An [`ApiError`] returned as it is (Go returns the `*APIError`).
+    /// An [`ApiError`] returned as it is.
     pub(crate) fn api(err: ApiError) -> Self {
         Self {
             kinds: vec![err.kind],
@@ -216,7 +216,7 @@ impl AnthropicError {
         }
     }
 
-    /// Go `context.DeadlineExceeded`.
+    /// A passed deadline (`context deadline exceeded`).
     pub(crate) fn deadline_exceeded() -> Self {
         Self {
             kinds: Vec::new(),
@@ -226,7 +226,7 @@ impl AnthropicError {
         }
     }
 
-    /// Go `fmt.Errorf("anthropicmodel: transport error: %w", urlErr.Err)`. `detail` must not
+    /// The error `anthropicmodel: transport error: <detail>`. `detail` must not
     /// contain the request URL.
     pub(crate) fn transport(detail: impl fmt::Display) -> Self {
         Self {
@@ -237,7 +237,7 @@ impl AnthropicError {
         }
     }
 
-    /// Go `fmt.Errorf("anthropicmodel: request failed: %w", err)`.
+    /// The error `anthropicmodel: request failed: <detail>`.
     pub(crate) fn request_failed(detail: impl fmt::Display) -> Self {
         Self {
             kinds: Vec::new(),
@@ -247,7 +247,7 @@ impl AnthropicError {
         }
     }
 
-    /// An error Go builds with `fmt.Errorf` and no `%w` (for example
+    /// An error with no sentinel (for example
     /// `anthropicmodel: failed to decode tool_use input for "x"`).
     pub(crate) fn plain(message: impl Into<String>) -> Self {
         Self {
@@ -258,7 +258,7 @@ impl AnthropicError {
         }
     }
 
-    /// Port of Go `classifyError` for the errors an [`HttpClient`](gadk_model::HttpClient) or a
+    /// Classifies the errors an [`HttpClient`](gadk_model::HttpClient) or a
     /// body stream returns:
     /// - an `AnthropicError` boxed in [`ModelError::Other`] (how gadk-anthropic's own body
     ///   streams report a deadline) is returned as it is;
@@ -266,9 +266,8 @@ impl AnthropicError {
     ///   from a `reqwest::Error` and the source chain joined with `": "`;
     /// - anything else becomes `anthropicmodel: request failed: <err>`.
     ///
-    /// Not ported (ruling R-g): Go's fallback that decodes an error envelope from the text of
-    /// an arbitrary error (`strings.Index(msg, "{")`); gadk classifies a mid-stream `error`
-    /// event directly from its JSON instead.
+    /// A mid-stream `error` event is classified directly from its JSON, not by decoding an
+    /// error envelope out of the text of an arbitrary error.
     pub(crate) fn from_model_error(err: ModelError) -> Self {
         match err {
             ModelError::Other(boxed) => match boxed.downcast::<AnthropicError>() {
@@ -280,9 +279,9 @@ impl AnthropicError {
         }
     }
 
-    /// Port of Go `classifyError` for an error reading a response body after the response
-    /// arrived (the SDK's SSE scanner error, or `requestconfig`'s `error reading response
-    /// body: %w`, which `prefix` carries): neither is a `*url.Error`, so the result is
+    /// Classifies an error reading a response body after the response
+    /// arrived (an SSE scanner error, or `error reading response
+    /// body: <cause>`, which `prefix` carries): the result is
     /// `anthropicmodel: request failed: <prefix><err>` even when the body stream reports a
     /// [`ModelError::Transport`] (a `reqwest::Error` loses its URL). An `AnthropicError` boxed in
     /// [`ModelError::Other`] (a body deadline) is returned as it is.
@@ -309,8 +308,7 @@ impl From<AnthropicError> for ModelError {
     }
 }
 
-/// The shared transport's failures in Go's texts (anthropic-sdk-go `RequestConfig.Execute` +
-/// ADK-Go `classifyError`):
+/// The shared transport's failures and their texts:
 /// - no response ([`RestError::Transport`]): classified as `from_model_error` does (a
 ///   connection error is `anthropicmodel: transport error: …`);
 /// - a header failure ([`RestError::Headers`]): the boxed [`AnthropicError`] as it is;
@@ -338,7 +336,7 @@ impl From<RestError> for AnthropicError {
 
 // ---------------------------------------------------------------- API error classification
 
-/// Go `json.Unmarshal` into a `string` field: absent or `null` leave `""`; any other non-string
+/// Reads a string field: absent or `null` leave `""`; any other non-string
 /// value is an error.
 fn go_string(obj: &Map<String, Value>, key: &str) -> Result<String, ()> {
     match go_field(obj, key) {
@@ -348,7 +346,7 @@ fn go_string(obj: &Map<String, Value>, key: &str) -> Result<String, ()> {
     }
 }
 
-/// Go's JSON field matching: an exact key, else a case-insensitive one.
+/// Finds a JSON field: an exact key, else a case-insensitive one.
 fn go_field<'a>(obj: &'a Map<String, Value>, key: &str) -> Option<&'a Value> {
     obj.get(key).or_else(|| {
         obj.iter()
@@ -357,7 +355,7 @@ fn go_field<'a>(obj: &'a Map<String, Value>, key: &str) -> Option<&'a Value> {
     })
 }
 
-/// Go `json.Unmarshal` into a struct field: absent or `null` leave the zero value; a non-object
+/// Reads an object field: absent or `null` leave the zero value; a non-object
 /// is an error.
 fn go_object<'a>(
     obj: &'a Map<String, Value>,
@@ -370,7 +368,7 @@ fn go_object<'a>(
     }
 }
 
-/// Go `errorEnvelope` (`errors.go`), decoded with `json.Unmarshal` semantics.
+/// The error envelope of an API error body.
 #[derive(Debug, Default, PartialEq, Eq)]
 struct Envelope {
     envelope_type: String,
@@ -397,7 +395,7 @@ fn parse_envelope(v: &Value) -> Option<Envelope> {
     Some(env)
 }
 
-/// anthropic-sdk-go `(*apierror.Error).UnmarshalJSON`'s error type: `error.type` of the
+/// The error type of an API error body: `error.type` of the
 /// envelope, or `""` when the body is not JSON or does not decode.
 fn sdk_error_type(v: &Value) -> String {
     let Value::Object(obj) = v else {
@@ -411,9 +409,9 @@ fn sdk_error_type(v: &Value) -> String {
 
 /// The [`ApiError`] for an error response, or for the data of a mid-stream `error` event.
 ///
-/// Port of anthropic-sdk-go's `apierror.Error` decoding (type from `{"error":{"type"}}`,
-/// request ID from the `request-id` header) followed by Go `classifySDKError` and
-/// `buildAPIError`: the header's request ID wins over the body's `request_id`; the message is
+/// Decodes the type from `{"error":{"type"}}` and the
+/// request ID from the `request-id` header, then classifies and builds the error: the
+/// header's request ID wins over the body's `request_id`; the message is
 /// the envelope's `error.message`, sanitized. `status` is the HTTP status of the response (200
 /// for a mid-stream event), `request_id_header` the `request-id` header (`""` when absent).
 pub(crate) fn api_error_from_response(
@@ -437,7 +435,7 @@ pub(crate) fn api_error_from_response(
     build_api_error(status, &error_type, &request_id, &message)
 }
 
-/// Go `buildAPIError`: the sentinel from the status or the error type, and a status filled in
+/// Builds the [`ApiError`]: the sentinel from the status or the error type, and a status filled in
 /// when the response had none (0) or was 200 (a mid-stream event).
 pub(crate) fn build_api_error(
     status: u16,
@@ -487,7 +485,7 @@ pub(crate) fn build_api_error(
     }
 }
 
-/// Go `sanitizeErrorMessage`: `""` for a blank message; `api request rejected` when the
+/// Sanitizes an error message: `""` for a blank message; `api request rejected` when the
 /// message holds a URL, a `gs://` URI, an `sk-ant-` key or a bearer token; otherwise the
 /// trimmed message cut to at most 256 bytes on a character boundary.
 pub(crate) fn sanitize_error_message(msg: &str) -> String {
@@ -512,9 +510,10 @@ pub(crate) fn sanitize_error_message(msg: &str) -> String {
     msg.to_string()
 }
 
-// ---------------------------------------------------------------- Go %q
+// ---------------------------------------------------------------- quoting
 
-/// Port of Go `strconv.Quote` (Go `%q` on a string), shared with the other gadk crates.
+/// Quotes a string in double quotes with backslash escapes (`\"`, `\\`, `\n`, `\xNN`, `\uNNNN`
+/// for non-printable characters), shared with the other gadk crates.
 pub(crate) use gadk_platform::go_quote;
 
 #[cfg(test)]

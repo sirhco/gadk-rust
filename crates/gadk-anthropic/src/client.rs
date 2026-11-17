@@ -14,9 +14,8 @@
 // limitations under the License.
 
 //! The Messages transport: endpoints, request headers, and the request body, sent through
-//! [`gadk_model::rest`] with anthropic-sdk-go v1.84.0's retry policy and per-attempt timeouts
-//! (port of `RequestConfig.Execute`'s Anthropic specifics and `vertex.WithCredentials`'s URL
-//! rules).
+//! [`gadk_model::rest`] with the Anthropic SDK's retry policy and per-attempt timeouts and
+//! the Vertex URL rules.
 
 use std::time::Duration;
 
@@ -34,16 +33,16 @@ use http::{HeaderMap, HeaderValue, Uri};
 use crate::error::{AnthropicError, api_error_from_response, go_quote};
 use crate::wire::{MessageNewParams, VertexBody, encode_request};
 
-/// The Anthropic backend's default base URL (SDK `WithEnvironmentProduction`).
+/// The Anthropic backend's default base URL.
 pub(crate) const ANTHROPIC_DEFAULT_BASE_URL: &str = "https://api.anthropic.com/";
 
 /// The `Anthropic-Version` header value.
 pub(crate) const ANTHROPIC_VERSION: &str = "2023-06-01";
 
-/// Go's default client `ResponseHeaderTimeout` (`defaultResponseHeaderTimeout`).
+/// The default client response-header timeout.
 pub(crate) use gadk_model::rest::DEFAULT_RESPONSE_HEADER_TIMEOUT;
 
-/// The Messages API path, relative to the base URL (SDK `"v1/messages"`).
+/// The Messages API path, relative to the base URL.
 const MESSAGES_PATH: &str = "v1/messages";
 
 /// Where a model's requests go.
@@ -64,8 +63,7 @@ pub(crate) enum Endpoint {
 /// How requests authenticate.
 #[derive(Clone)]
 pub(crate) enum Auth {
-    /// Anthropic: `x-api-key` and/or `Authorization: Bearer` (both when both are set, as Go's
-    /// SDK sends both).
+    /// Anthropic: `x-api-key` and/or `Authorization: Bearer` (both when both are set).
     Anthropic {
         /// The API key.
         api_key: Option<String>,
@@ -85,7 +83,7 @@ impl std::fmt::Debug for Auth {
     }
 }
 
-/// SDK `vertex.WithCredentials`'s base URL for `location`: `global` →
+/// The Vertex base URL for `location`: `global` →
 /// `https://aiplatform.googleapis.com/`, `us` → `https://aiplatform.us.rep.googleapis.com/`,
 /// `eu` → `https://aiplatform.eu.rep.googleapis.com/`, else
 /// `https://{location}-aiplatform.googleapis.com/`.
@@ -98,9 +96,8 @@ pub(crate) fn vertex_base_url(location: &str) -> String {
     }
 }
 
-/// `v1/messages` resolved against `base_url` as the SDK does: `option.WithBaseURL` gives a
-/// non-empty path a trailing `/`, then `url.Parse` + `ResolveReference` keep the base's path as
-/// a prefix and drop its query and fragment.
+/// `v1/messages` resolved against `base_url`: a non-empty path gets a trailing `/`, then the
+/// base's path is kept as a prefix and its query and fragment are dropped.
 fn messages_url(base_url: &str) -> Result<url::Url, AnthropicError> {
     let parse_err = |e: url::ParseError| {
         AnthropicError::request_failed(format!(
@@ -115,8 +112,8 @@ fn messages_url(base_url: &str) -> Result<url::Url, AnthropicError> {
     base.join(MESSAGES_PATH).map_err(parse_err)
 }
 
-/// Whether the SDK's Vertex middleware rewrites a request on `url`: only when its path is
-/// exactly `/v1/messages` (`r.URL.Path == "/v1/messages"`), which a base URL with a path prefix
+/// Whether the Vertex middleware rewrites a request on `url`: only when its path is
+/// exactly `/v1/messages`, which a base URL with a path prefix
 /// never gives.
 fn vertex_rewrites(url: &url::Url) -> bool {
     url.path() == "/v1/messages"
@@ -125,11 +122,11 @@ fn vertex_rewrites(url: &url::Url) -> bool {
 /// The request URL: the endpoint's API path joined to `base_url` with exactly one `/`
 /// (a base URL's own path is kept as a prefix).
 ///
-/// On Vertex the SDK sends `v1/messages` through its middleware, which rewrites the path to
+/// On Vertex the path `v1/messages` is rewritten, as the Anthropic SDK's Vertex middleware does, to
 /// `/v1/projects/{p}/locations/{l}/publishers/anthropic/models/{model}:rawPredict`
 /// (`:streamRawPredict` when streaming) only when the resolved path is exactly `/v1/messages`;
 /// with a base URL that carries a path prefix the request stays at `{prefix}/v1/messages`
-/// (and [`Transport::encode_body`] keeps `model` in the body), as in Go.
+/// (and [`Transport::encode_body`] keeps `model` in the body).
 pub(crate) fn request_url(
     base_url: &str,
     endpoint: &Endpoint,
@@ -152,7 +149,7 @@ pub(crate) fn request_url(
     Ok(url.into())
 }
 
-/// A header value marked sensitive; an invalid one fails the attempt as Go's `net/http` does
+/// A header value marked sensitive; an invalid one fails the attempt
 /// (a transport error).
 fn sensitive_value(name: &str, value: &str) -> Result<HeaderValue, AnthropicError> {
     let mut v = HeaderValue::from_str(value).map_err(|_| {
@@ -183,7 +180,7 @@ pub(crate) struct Transport {
     /// The HTTP client, the retry policy ([`gadk_model::rest::RetryPolicy::ANTHROPIC`] with
     /// `ClientConfig.max_retries`), and the response-header timeout
     /// ([`DEFAULT_RESPONSE_HEADER_TIMEOUT`] when gadk built the client, `None` for a custom
-    /// one; the credential fetch before each send is outside it, as in Go).
+    /// one; the credential fetch before each send is outside it).
     pub(crate) rest: RestTransport,
     /// The effective base URL (custom, `ANTHROPIC_BASE_URL`, or the backend default).
     pub(crate) base_url: String,
@@ -207,16 +204,14 @@ impl RequestHeaders for Transport {
 }
 
 impl Transport {
-    /// The headers of one attempt, in Go's precedence (a later step replaces an earlier one's
+    /// The headers of one attempt, in this precedence (a later step replaces an earlier one's
     /// values for the same name):
     /// 1. `Accept: application/json`, `Anthropic-Version`, `Content-Type: application/json`;
-    /// 2. `user-agent` set to `gadk_platform::tracking_header()` (the Go SDK sends
-    ///    `Anthropic/Go 1.84.0`; ADK-Go overrides it only on Vertex); Anthropic: `x-api-key` and/or `Authorization: Bearer` (SDK
-    ///    `WithAPIKey` / `WithAuthToken`); Vertex: `x-goog-api-client` set to the tracking value
+    /// 2. `user-agent` set to `gadk_platform::tracking_header()`; Anthropic: `x-api-key`
+    ///    and/or `Authorization: Bearer`; Vertex: `x-goog-api-client` set to the tracking value
     ///    too;
-    /// 3. [`headers`](Self::headers) (Go's `option.WithHeader`, applied after the above);
-    /// 4. Vertex: the credentials' headers, fetched now (Go's `oauth2.Transport` sets
-    ///    `Authorization` on the outgoing request last).
+    /// 3. [`headers`](Self::headers), applied after the above;
+    /// 4. Vertex: the credentials' headers, fetched now (`Authorization` is set last).
     pub(crate) async fn request_headers(&self) -> Result<HeaderMap, AnthropicError> {
         let mut h = HeaderMap::new();
         h.insert(ACCEPT, HeaderValue::from_static("application/json"));
@@ -252,7 +247,7 @@ impl Transport {
                 h.insert("x-goog-api-client", tracking);
                 h.extend(user);
                 // A failure is a transport error whose detail is google-cloud-auth's error
-                // text (Go's is `oauth2`'s), a ledgered divergence.
+                // text.
                 h.extend(
                     credential_headers(credentials)
                         .await
@@ -263,10 +258,10 @@ impl Transport {
         Ok(h)
     }
 
-    /// The request body the SDK sends for `params` (whose `model` is set): [`encode_request`],
+    /// The request body sent for `params` (whose `model` is set): [`encode_request`],
     /// on Vertex dropping `model` only when the middleware rewrites the path (see
     /// [`request_url`]); with a base URL whose path it does not rewrite `model` stays and only
-    /// `,"anthropic_version":"vertex-2023-10-16"` is appended, as the SDK's middleware does.
+    /// `,"anthropic_version":"vertex-2023-10-16"` is appended.
     pub(crate) fn encode_body(
         &self,
         params: MessageNewParams,
@@ -284,13 +279,13 @@ impl Transport {
             .map_err(AnthropicError::request_failed)
     }
 
-    /// Sends `body` with anthropic-sdk-go's retry policy ([`RestTransport::send`] with
+    /// Sends `body` with the Anthropic SDK's retry policy ([`RestTransport::send`] with
     /// [`CallTimeout::PerAttempt`] for `timeout`) and returns the response that ends the call.
     ///
     /// - A connection error (including a credential failure and the response-header timeout),
     ///   or `timeout` (> 0, per attempt) expiring, is retried like a connection error;
     ///   [`AnthropicError::deadline_exceeded`] surfaces only when the last attempt timed out.
-    /// - A body that fails to read is retried per `shouldRetryDroppedBody`, else returned as
+    /// - A body that fails to read is retried per `should_retry_dropped_body`, else returned as
     ///   `anthropicmodel: request failed: error reading response body: …`.
     /// - A status ≥ 400 that ends the call is returned as `Err` with
     ///   [`crate::error::api_error_from_response`] (header `request-id`).

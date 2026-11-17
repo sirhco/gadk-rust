@@ -13,9 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Chat Completions wire types: the parts of openai-go v3.91.1 (`chatcompletion.go`,
-//! `completion.go`) that ADK-Go's `internal/completions` touches, following the conventions of
-//! [`crate::oaishared`] (declaration order, `omitzero`, `apijson` leniency).
+//! Chat Completions wire types: the parts of the Chat Completions API that the OpenAI model
+//! touches, following the conventions of [`crate::oaishared`] (declaration order, zero values
+//! skipped, lenient decoding).
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -69,12 +69,11 @@ tag!(
     AllowedToolsTag = "allowed_tools"
 );
 
-/// openai-go `ChatCompletionNewParams`, the fields ADK-Go sets, in declaration order:
+/// The Chat Completions request body, the fields set, in declaration order:
 /// `messages, model, frequency_penalty, logprobs, max_completion_tokens, presence_penalty,
 /// seed, temperature, top_logprobs, top_p, reasoning_effort, service_tier, stop,
 /// stream_options, response_format, tool_choice, tools`. The streaming flag is not a field:
-/// [`crate::client::encode_body`] appends `"stream":true` after every key, as openai-go's
-/// `option.WithJSONSet("stream", true)` does.
+/// [`crate::client::encode_body`] appends `"stream":true` after every key.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub(crate) struct ChatCompletionNewParams {
     /// `messages`.
@@ -107,7 +106,7 @@ pub(crate) struct ChatCompletionNewParams {
     /// `top_p`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) top_p: Option<f64>,
-    /// `reasoning_effort` (Go `shared.ReasoningEffort`, `""` omitted).
+    /// `reasoning_effort` (`""` omitted).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) reasoning_effort: Option<ReasoningEffort>,
     /// `service_tier`.
@@ -130,10 +129,10 @@ pub(crate) struct ChatCompletionNewParams {
     pub(crate) tools: Vec<ChatCompletionToolParam>,
 }
 
-/// openai-go `ChatCompletionNewParamsServiceTier`.
+/// The values of `service_tier`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
-#[allow(dead_code)] // D5: openai-go's whole value set; ADK-Go never sends `auto`, `scale` or `fast`.
+#[allow(dead_code)] // the whole value set of the API; `auto`, `scale` or `fast` is never sent.
 pub(crate) enum ChatCompletionServiceTier {
     /// `"auto"`.
     Auto,
@@ -149,54 +148,53 @@ pub(crate) enum ChatCompletionServiceTier {
     Fast,
 }
 
-/// openai-go `ChatCompletionNewParamsStopUnion` (ADK-Go sends `OfStringArray`).
+/// The `stop` of a request: a string or a string array (only a string array is sent).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
-#[allow(dead_code)] // D5: openai-go's whole value set; ADK-Go sends only `OfStringArray`.
+#[allow(dead_code)] // the whole value set of the API; only `OfStringArray` is sent.
 pub(crate) enum ChatCompletionStop {
-    /// `OfString`.
+    /// A string.
     String(String),
-    /// `OfStringArray`.
+    /// A string array.
     StringArray(Vec<String>),
 }
 
-/// openai-go `ChatCompletionStreamOptionsParam`: `include_obfuscation, include_usage`.
+/// The stream options: `include_obfuscation, include_usage`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub(crate) struct ChatCompletionStreamOptionsParam {
     /// `include_obfuscation`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) include_obfuscation: Option<bool>,
-    /// `include_usage` (ADK-Go sets it on every streamed call).
+    /// `include_usage` (set on every streamed call).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) include_usage: Option<bool>,
 }
 
 impl ChatCompletionStreamOptionsParam {
-    /// Go `omitzero`: no field set.
+    /// Whether no field is set.
     pub(crate) fn is_zero(&self) -> bool {
         self.include_obfuscation.is_none() && self.include_usage.is_none()
     }
 }
 
-/// openai-go `ChatCompletionMessageParamUnion`, the variants ADK-Go builds; serializes as the
-/// variant's object.
+/// A request message, the variants built; serializes as the variant's object.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub(crate) enum ChatCompletionMessageParam {
-    /// `OfDeveloper`.
+    /// A developer message.
     Developer(ChatCompletionDeveloperMessageParam),
-    /// `OfSystem`.
+    /// A system message.
     System(ChatCompletionSystemMessageParam),
-    /// `OfUser`.
+    /// A user message.
     User(ChatCompletionUserMessageParam),
-    /// `OfAssistant`.
+    /// An assistant message.
     Assistant(ChatCompletionAssistantMessageParam),
-    /// `OfTool`.
+    /// A tool message.
     Tool(ChatCompletionToolMessageParam),
 }
 
 impl ChatCompletionMessageParam {
-    /// openai-go `SystemMessage(text)`.
+    /// A system message with `text`.
     pub(crate) fn system(text: impl Into<String>) -> Self {
         Self::System(ChatCompletionSystemMessageParam {
             content: ChatCompletionTextContent::String(text.into()),
@@ -205,7 +203,7 @@ impl ChatCompletionMessageParam {
         })
     }
 
-    /// openai-go `DeveloperMessage(text)`.
+    /// A developer message with `text`.
     pub(crate) fn developer(text: impl Into<String>) -> Self {
         Self::Developer(ChatCompletionDeveloperMessageParam {
             content: ChatCompletionTextContent::String(text.into()),
@@ -214,7 +212,7 @@ impl ChatCompletionMessageParam {
         })
     }
 
-    /// openai-go `UserMessage(text)`.
+    /// A user message with `text`.
     pub(crate) fn user(text: impl Into<String>) -> Self {
         Self::User(ChatCompletionUserMessageParam {
             content: ChatCompletionUserMessageContent::String(text.into()),
@@ -223,7 +221,7 @@ impl ChatCompletionMessageParam {
         })
     }
 
-    /// openai-go `UserMessage(parts)`.
+    /// A user message with content parts.
     pub(crate) fn user_parts(parts: Vec<ChatCompletionContentPartParam>) -> Self {
         Self::User(ChatCompletionUserMessageParam {
             content: ChatCompletionUserMessageContent::ArrayOfContentParts(parts),
@@ -232,7 +230,7 @@ impl ChatCompletionMessageParam {
         })
     }
 
-    /// openai-go `ToolMessage(content, toolCallID)`.
+    /// A tool message with `content` for `tool_call_id`.
     pub(crate) fn tool(content: impl Into<String>, tool_call_id: impl Into<String>) -> Self {
         Self::Tool(ChatCompletionToolMessageParam {
             content: ChatCompletionTextContent::String(content.into()),
@@ -242,19 +240,18 @@ impl ChatCompletionMessageParam {
     }
 }
 
-/// The content union of the system, developer and tool messages (openai-go
-/// `ChatCompletion{System,Developer,Tool}MessageParamContentUnion`).
+/// The content of the system, developer and tool messages: a string or an array of text parts.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
-#[allow(dead_code)] // D5: openai-go's whole value set; ADK-Go sends only `OfString`.
+#[allow(dead_code)] // the whole value set of the API; only `OfString` is sent.
 pub(crate) enum ChatCompletionTextContent {
-    /// `OfString`.
+    /// A string.
     String(String),
-    /// `OfArrayOfContentParts`.
+    /// An array of content parts.
     ArrayOfContentParts(Vec<ChatCompletionContentPartTextParam>),
 }
 
-/// openai-go `ChatCompletionSystemMessageParam`: `content, name, role`.
+/// A system message: `content, name, role`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct ChatCompletionSystemMessageParam {
     /// `content`.
@@ -266,7 +263,7 @@ pub(crate) struct ChatCompletionSystemMessageParam {
     pub(crate) role: SystemRoleTag,
 }
 
-/// openai-go `ChatCompletionDeveloperMessageParam`: `content, name, role`.
+/// A developer message: `content, name, role`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct ChatCompletionDeveloperMessageParam {
     /// `content`.
@@ -278,17 +275,17 @@ pub(crate) struct ChatCompletionDeveloperMessageParam {
     pub(crate) role: DeveloperRoleTag,
 }
 
-/// openai-go `ChatCompletionUserMessageParamContentUnion`.
+/// The content of a user message: a string or an array of content parts.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub(crate) enum ChatCompletionUserMessageContent {
-    /// `OfString`.
+    /// A string.
     String(String),
-    /// `OfArrayOfContentParts`.
+    /// An array of content parts.
     ArrayOfContentParts(Vec<ChatCompletionContentPartParam>),
 }
 
-/// openai-go `ChatCompletionUserMessageParam`: `content, name, role`.
+/// A user message: `content, name, role`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct ChatCompletionUserMessageParam {
     /// `content`.
@@ -300,15 +297,15 @@ pub(crate) struct ChatCompletionUserMessageParam {
     pub(crate) role: UserRoleTag,
 }
 
-/// openai-go `ChatCompletionAssistantMessageParamContentUnion` (ADK-Go sends `OfString`).
+/// The content of an assistant message (only a string is sent).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub(crate) enum ChatCompletionAssistantContent {
-    /// `OfString`.
+    /// A string.
     String(String),
 }
 
-/// openai-go `ChatCompletionAssistantMessageParam`, the fields ADK-Go sets, in declaration
+/// An assistant message, the fields set, in declaration
 /// order: `refusal, name, content, tool_calls, role` (`audio` and `function_call` are never
 /// set).
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
@@ -319,7 +316,7 @@ pub(crate) struct ChatCompletionAssistantMessageParam {
     /// `name`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) name: Option<String>,
-    /// `content` (omitted when ADK-Go has no text for the turn).
+    /// `content` (omitted when there is no text for the turn).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) content: Option<ChatCompletionAssistantContent>,
     /// `tool_calls`.
@@ -329,7 +326,7 @@ pub(crate) struct ChatCompletionAssistantMessageParam {
     pub(crate) role: AssistantRoleTag,
 }
 
-/// openai-go `ChatCompletionToolMessageParam`: `content, tool_call_id, role`.
+/// A tool message: `content, tool_call_id, role`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct ChatCompletionToolMessageParam {
     /// `content`.
@@ -340,20 +337,20 @@ pub(crate) struct ChatCompletionToolMessageParam {
     pub(crate) role: ToolRoleTag,
 }
 
-/// openai-go `ChatCompletionContentPartUnionParam`, the variants ADK-Go builds.
+/// A content part, the variants built.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub(crate) enum ChatCompletionContentPartParam {
-    /// `OfText` (openai-go `TextContentPart`).
+    /// A text part.
     Text(ChatCompletionContentPartTextParam),
-    /// `OfImageURL` (openai-go `ImageContentPart`).
+    /// An image part.
     ImageUrl(ChatCompletionContentPartImageParam),
-    /// `OfFile` (openai-go `FileContentPart`).
+    /// A file part.
     File(ChatCompletionContentPartFileParam),
 }
 
 impl ChatCompletionContentPartParam {
-    /// openai-go `TextContentPart(text)`.
+    /// A text part.
     pub(crate) fn text(text: impl Into<String>) -> Self {
         Self::Text(ChatCompletionContentPartTextParam {
             text: text.into(),
@@ -361,7 +358,7 @@ impl ChatCompletionContentPartParam {
         })
     }
 
-    /// openai-go `ImageContentPart(imageURL)`.
+    /// An image part.
     pub(crate) fn image(image_url: ChatCompletionContentPartImageImageUrlParam) -> Self {
         Self::ImageUrl(ChatCompletionContentPartImageParam {
             image_url,
@@ -369,7 +366,7 @@ impl ChatCompletionContentPartParam {
         })
     }
 
-    /// openai-go `FileContentPart(file)`.
+    /// A file part.
     pub(crate) fn file(file: ChatCompletionContentPartFileFileParam) -> Self {
         Self::File(ChatCompletionContentPartFileParam {
             file,
@@ -378,7 +375,7 @@ impl ChatCompletionContentPartParam {
     }
 }
 
-/// openai-go `ChatCompletionContentPartTextParam`: `text, type`.
+/// A text content part: `text, type`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct ChatCompletionContentPartTextParam {
     /// `text` (required, always sent).
@@ -388,7 +385,7 @@ pub(crate) struct ChatCompletionContentPartTextParam {
     pub(crate) kind: TextPartTag,
 }
 
-/// openai-go `ChatCompletionContentPartImageParam`: `image_url, type`.
+/// An image content part: `image_url, type`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct ChatCompletionContentPartImageParam {
     /// `image_url`.
@@ -398,17 +395,17 @@ pub(crate) struct ChatCompletionContentPartImageParam {
     pub(crate) kind: ImageUrlPartTag,
 }
 
-/// openai-go `ChatCompletionContentPartImageImageURLParam`: `url, detail`.
+/// An image URL: `url, detail`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub(crate) struct ChatCompletionContentPartImageImageUrlParam {
     /// `url` (required, always sent).
     pub(crate) url: String,
-    /// `detail` (`omitzero` string).
+    /// `detail` (a zero value is skipped).
     #[serde(skip_serializing_if = "String::is_empty")]
     pub(crate) detail: String,
 }
 
-/// openai-go `ChatCompletionContentPartFileParam`: `file, type`.
+/// A file content part: `file, type`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct ChatCompletionContentPartFileParam {
     /// `file`.
@@ -418,7 +415,7 @@ pub(crate) struct ChatCompletionContentPartFileParam {
     pub(crate) kind: FilePartTag,
 }
 
-/// openai-go `ChatCompletionContentPartFileFileParam`: `file_data, file_id, filename`.
+/// A file: `file_data, file_id, filename`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub(crate) struct ChatCompletionContentPartFileFileParam {
     /// `file_data`.
@@ -432,15 +429,15 @@ pub(crate) struct ChatCompletionContentPartFileFileParam {
     pub(crate) filename: Option<String>,
 }
 
-/// openai-go `ChatCompletionMessageToolCallUnionParam` (ADK-Go sends `OfFunction`).
+/// A tool call of an assistant message (only a function tool call is sent).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub(crate) enum ChatCompletionMessageToolCallParam {
-    /// `OfFunction`.
+    /// A function tool call.
     Function(ChatCompletionMessageFunctionToolCallParam),
 }
 
-/// openai-go `ChatCompletionMessageFunctionToolCallParam`: `id, function, type`.
+/// A function tool call: `id, function, type`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct ChatCompletionMessageFunctionToolCallParam {
     /// `id` (required, always sent).
@@ -452,7 +449,7 @@ pub(crate) struct ChatCompletionMessageFunctionToolCallParam {
     pub(crate) kind: FunctionTag,
 }
 
-/// openai-go `ChatCompletionMessageFunctionToolCallFunctionParam`: `arguments, name`.
+/// A function call: `arguments, name`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub(crate) struct ChatCompletionMessageFunctionToolCallFunctionParam {
     /// `arguments` (required, always sent).
@@ -461,15 +458,15 @@ pub(crate) struct ChatCompletionMessageFunctionToolCallFunctionParam {
     pub(crate) name: String,
 }
 
-/// openai-go `ChatCompletionToolUnionParam` (ADK-Go sends `OfFunction`).
+/// A tool declaration (only a function tool is sent).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub(crate) enum ChatCompletionToolParam {
-    /// `OfFunction`.
+    /// A function tool.
     Function(ChatCompletionFunctionToolParam),
 }
 
-/// openai-go `ChatCompletionFunctionToolParam`: `function, type`.
+/// A function tool: `function, type`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct ChatCompletionFunctionToolParam {
     /// `function`.
@@ -479,19 +476,19 @@ pub(crate) struct ChatCompletionFunctionToolParam {
     pub(crate) kind: FunctionTag,
 }
 
-/// openai-go `ChatCompletionToolChoiceOptionUnionParam`, the variants ADK-Go builds.
+/// The tool choice, the variants built.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub(crate) enum ChatCompletionToolChoiceOption {
-    /// `OfAuto`: `"none"`, `"auto"` or `"required"`.
+    /// A mode: `"none"`, `"auto"` or `"required"`.
     Auto(String),
-    /// `OfAllowedTools`.
+    /// An allowed-tools list.
     AllowedTools(ChatCompletionAllowedToolChoiceParam),
-    /// `OfFunctionToolChoice`.
+    /// A named function.
     FunctionToolChoice(ChatCompletionNamedToolChoiceParam),
 }
 
-/// openai-go `ChatCompletionAllowedToolChoiceParam`: `allowed_tools, type`.
+/// An allowed-tools tool choice: `allowed_tools, type`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct ChatCompletionAllowedToolChoiceParam {
     /// `allowed_tools`.
@@ -501,16 +498,16 @@ pub(crate) struct ChatCompletionAllowedToolChoiceParam {
     pub(crate) kind: AllowedToolsTag,
 }
 
-/// openai-go `ChatCompletionAllowedToolsParam`: `mode, tools`.
+/// The allowed tools: `mode, tools`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct ChatCompletionAllowedToolsParam {
     /// `mode`.
     pub(crate) mode: ChatCompletionAllowedToolsMode,
-    /// `tools` (Go `[]map[string]any`: `{"type":"function","function":{"name":…}}`).
+    /// `tools` (a list of `{"type":"function","function":{"name":…}}` objects).
     pub(crate) tools: Vec<Map<String, Value>>,
 }
 
-/// openai-go `ChatCompletionAllowedToolsMode`.
+/// The mode of the allowed tools.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum ChatCompletionAllowedToolsMode {
@@ -520,7 +517,7 @@ pub(crate) enum ChatCompletionAllowedToolsMode {
     Required,
 }
 
-/// openai-go `ChatCompletionNamedToolChoiceParam`: `function, type`.
+/// A named tool choice: `function, type`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct ChatCompletionNamedToolChoiceParam {
     /// `function`.
@@ -530,31 +527,31 @@ pub(crate) struct ChatCompletionNamedToolChoiceParam {
     pub(crate) kind: FunctionTag,
 }
 
-/// openai-go `ChatCompletionNamedToolChoiceFunctionParam`: `name`.
+/// A named function: `name`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub(crate) struct ChatCompletionNamedToolChoiceFunctionParam {
     /// `name` (required, always sent).
     pub(crate) name: String,
 }
 
-/// openai-go `ChatCompletionNewParamsResponseFormatUnion`.
+/// The response format.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
-#[allow(dead_code)] // D5: openai-go's whole value set; ADK-Go never sends `OfText`.
+#[allow(dead_code)] // the whole value set of the API; `OfText` is never sent.
 pub(crate) enum ChatCompletionResponseFormat {
-    /// `OfText`.
+    /// Plain text.
     Text(ResponseFormatTextParam),
-    /// `OfJSONSchema`.
+    /// A JSON schema.
     JsonSchema(ResponseFormatJsonSchemaParam),
-    /// `OfJSONObject`.
+    /// A JSON object.
     JsonObject(ResponseFormatJsonObjectParam),
 }
 
 // ---------------------------------------------------------------- response types
 
-/// openai-go `ChatCompletion`, the fields ADK-Go and the stream accumulator read: `id,
+/// A chat completion, the fields the stream accumulator reads: `id,
 /// choices, created, model, object, service_tier, system_fingerprint, usage`. `usage` is
-/// `Some` only when present and an object (Go `JSON.Usage.Valid()`).
+/// `Some` only when present and an object.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct ChatCompletion {
     /// `id`.
@@ -578,7 +575,7 @@ pub(crate) struct ChatCompletion {
     /// `system_fingerprint`.
     #[serde(default, deserialize_with = "go_string")]
     pub(crate) system_fingerprint: String,
-    /// `usage` (Go `JSON.Usage.Valid()` is `is_some()`).
+    /// `usage` (`Some` only when present and an object).
     #[serde(
         default,
         deserialize_with = "lenient",
@@ -587,7 +584,7 @@ pub(crate) struct ChatCompletion {
     pub(crate) usage: Option<CompletionUsage>,
 }
 
-/// openai-go `ChatCompletionChoice`: `finish_reason, index, logprobs, message`.
+/// A choice: `finish_reason, index, logprobs, message`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct ChatCompletionChoice {
     /// `finish_reason`.
@@ -604,7 +601,7 @@ pub(crate) struct ChatCompletionChoice {
     pub(crate) message: ChatCompletionMessage,
 }
 
-/// openai-go `ChatCompletionChoiceLogprobs` (and `ChatCompletionChunkChoiceLogprobs`, the same
+/// The choice logprobs (and the chunk choice logprobs, the same
 /// shape): `content, refusal`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct ChatCompletionChoiceLogprobs {
@@ -616,7 +613,7 @@ pub(crate) struct ChatCompletionChoiceLogprobs {
     pub(crate) refusal: Vec<ChatCompletionTokenLogprob>,
 }
 
-/// openai-go `ChatCompletionMessage`, the fields ADK-Go reads: `content, refusal, role,
+/// A message, the fields read: `content, refusal, role,
 /// tool_calls`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct ChatCompletionMessage {
@@ -634,7 +631,7 @@ pub(crate) struct ChatCompletionMessage {
     pub(crate) tool_calls: Vec<ChatCompletionMessageToolCall>,
 }
 
-/// openai-go `ChatCompletionMessageToolCallUnion`, the fields ADK-Go reads: `id, function,
+/// A tool call, the fields read: `id, function,
 /// type`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct ChatCompletionMessageToolCall {
@@ -649,7 +646,7 @@ pub(crate) struct ChatCompletionMessageToolCall {
     pub(crate) kind: String,
 }
 
-/// openai-go `ChatCompletionMessageFunctionToolCallFunction`: `arguments, name`.
+/// A function call: `arguments, name`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ChatCompletionMessageFunctionToolCallFunction {
     /// `arguments`.
@@ -660,7 +657,7 @@ pub(crate) struct ChatCompletionMessageFunctionToolCallFunction {
     pub(crate) name: String,
 }
 
-/// openai-go `ChatCompletionTokenLogprob`: `token, bytes, logprob, top_logprobs`.
+/// A token logprob: `token, bytes, logprob, top_logprobs`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct ChatCompletionTokenLogprob {
     /// `token`.
@@ -677,7 +674,7 @@ pub(crate) struct ChatCompletionTokenLogprob {
     pub(crate) top_logprobs: Vec<ChatCompletionTokenLogprobTopLogprob>,
 }
 
-/// openai-go `ChatCompletionTokenLogprobTopLogprob`: `token, bytes, logprob`.
+/// A top logprob: `token, bytes, logprob`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct ChatCompletionTokenLogprobTopLogprob {
     /// `token`.
@@ -691,7 +688,7 @@ pub(crate) struct ChatCompletionTokenLogprobTopLogprob {
     pub(crate) logprob: f64,
 }
 
-/// openai-go `CompletionUsage`: `completion_tokens, prompt_tokens, total_tokens,
+/// The token usage: `completion_tokens, prompt_tokens, total_tokens,
 /// completion_tokens_details, prompt_tokens_details`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct CompletionUsage {
@@ -712,7 +709,7 @@ pub(crate) struct CompletionUsage {
     pub(crate) prompt_tokens_details: CompletionUsagePromptTokensDetails,
 }
 
-/// openai-go `CompletionUsageCompletionTokensDetails`: `accepted_prediction_tokens,
+/// The completion token details: `accepted_prediction_tokens,
 /// audio_tokens, reasoning_tokens, rejected_prediction_tokens, text_tokens`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct CompletionUsageCompletionTokensDetails {
@@ -733,7 +730,7 @@ pub(crate) struct CompletionUsageCompletionTokensDetails {
     pub(crate) text_tokens: i64,
 }
 
-/// openai-go `CompletionUsagePromptTokensDetails`: `audio_tokens, cache_write_tokens,
+/// The prompt token details: `audio_tokens, cache_write_tokens,
 /// cached_tokens, image_tokens, text_tokens`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct CompletionUsagePromptTokensDetails {
@@ -756,9 +753,9 @@ pub(crate) struct CompletionUsagePromptTokensDetails {
 
 // ---------------------------------------------------------------- stream types
 
-/// openai-go `ChatCompletionChunk`, the fields ADK-Go and the stream accumulator read: `id,
+/// A chat completion chunk, the fields the stream accumulator reads: `id,
 /// choices, created, model, object, service_tier, system_fingerprint, usage`. `usage` is
-/// `Some` only when present and an object (Go `JSON.Usage.Valid()`).
+/// `Some` only when present and an object.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct ChatCompletionChunk {
     /// `id`.
@@ -782,7 +779,7 @@ pub(crate) struct ChatCompletionChunk {
     /// `system_fingerprint`.
     #[serde(default, deserialize_with = "go_string")]
     pub(crate) system_fingerprint: String,
-    /// `usage` (Go `JSON.Usage.Valid()` is `is_some()`).
+    /// `usage` (`Some` only when present and an object).
     #[serde(
         default,
         deserialize_with = "lenient",
@@ -791,7 +788,7 @@ pub(crate) struct ChatCompletionChunk {
     pub(crate) usage: Option<CompletionUsage>,
 }
 
-/// openai-go `ChatCompletionChunkChoice`: `delta, finish_reason, index, logprobs`.
+/// A chunk choice: `delta, finish_reason, index, logprobs`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct ChatCompletionChunkChoice {
     /// `delta`.
@@ -808,7 +805,7 @@ pub(crate) struct ChatCompletionChunkChoice {
     pub(crate) logprobs: ChatCompletionChoiceLogprobs,
 }
 
-/// openai-go `ChatCompletionChunkChoiceDelta`, the fields ADK-Go and the accumulator read:
+/// A chunk choice delta, the fields the accumulator reads:
 /// `content, refusal, role, tool_calls`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct ChatCompletionChunkChoiceDelta {
@@ -826,7 +823,7 @@ pub(crate) struct ChatCompletionChunkChoiceDelta {
     pub(crate) tool_calls: Vec<ChatCompletionChunkChoiceDeltaToolCall>,
 }
 
-/// openai-go `ChatCompletionChunkChoiceDeltaToolCall`: `index, id, function, type`.
+/// A chunk tool call: `index, id, function, type`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct ChatCompletionChunkChoiceDeltaToolCall {
     /// `index`.
@@ -843,7 +840,7 @@ pub(crate) struct ChatCompletionChunkChoiceDeltaToolCall {
     pub(crate) kind: String,
 }
 
-/// openai-go `ChatCompletionChunkChoiceDeltaToolCallFunction`: `arguments, name`.
+/// A chunk function call: `arguments, name`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ChatCompletionChunkChoiceDeltaToolCallFunction {
     /// `arguments`.

@@ -114,8 +114,8 @@ pub struct CredentialHeadersError {
     pub detail: String,
 }
 
-/// The headers `credentials` authenticate a request with, typically `Authorization: Bearer …`
-/// (Go's `oauth2.Transport`), fetched for every request so a refreshed token is used.
+/// The headers `credentials` authenticate a request with, typically `Authorization: Bearer …`,
+/// fetched for every request so a refreshed token is used.
 pub async fn credential_headers(
     credentials: &Credentials,
 ) -> Result<HeaderMap, CredentialHeadersError> {

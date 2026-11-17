@@ -13,9 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The Responses API, `POST {base}responses` (port of ADK-Go
-//! `model/openaimodel/internal/responses`). Go's `request.go` is split three ways:
-//! [`request`] (contents, messages, media, calls), [`generation_config`] (config translation,
+//! The Responses API, `POST {base}responses`, split three ways: [`request`] (contents,
+//! messages, media, calls), [`generation_config`] (config translation,
 //! thinking, service tiers) and [`schema`] (the JSON-schema text format).
 
 pub(crate) mod consts;

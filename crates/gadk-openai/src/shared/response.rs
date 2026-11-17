@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Response helpers both APIs share (port of ADK-Go `internal/shared/response.go`).
+//! Response helpers both APIs share.
 
 use futures::StreamExt as _;
 use futures::stream::{self, BoxStream};
@@ -23,9 +23,9 @@ use serde_json::{Map, Value};
 
 use crate::error::{ErrorKind, OpenAiError};
 
-/// Go `SafeInt32`: a token count narrowed to `i32`, saturating at `i32::MAX`.
+/// A token count narrowed to `i32`, saturating at `i32::MAX`.
 pub(crate) fn safe_int32(v: i64) -> i32 {
-    // Below the cap, `as` truncates exactly as Go's `int32(v)` does.
+    // Below the cap, `as` truncates exactly.
     if v > i64::from(i32::MAX) {
         i32::MAX
     } else {
@@ -33,7 +33,7 @@ pub(crate) fn safe_int32(v: i64) -> i32 {
     }
 }
 
-/// Go `SingleErrorSequence`: a response stream that yields `err` (as
+/// A response stream that yields `err` (as
 /// [`ModelError::Other`]) and ends.
 pub(crate) fn single_error_sequence(
     err: OpenAiError,
@@ -41,7 +41,7 @@ pub(crate) fn single_error_sequence(
     stream::iter([Err(ModelError::from(err))]).boxed()
 }
 
-/// Go `IsEmptyOutput`: whether `err` is [`ErrorKind::NoOutputItems`](crate::error::ErrorKind::NoOutputItems),
+/// Whether `err` is [`ErrorKind::NoOutputItems`](crate::error::ErrorKind::NoOutputItems),
 /// [`ErrorKind::NoTextOrToolContent`](crate::error::ErrorKind::NoTextOrToolContent) or
 /// [`ErrorKind::NoChoices`](crate::error::ErrorKind::NoChoices).
 pub(crate) fn is_empty_output(err: &OpenAiError) -> bool {
@@ -50,13 +50,13 @@ pub(crate) fn is_empty_output(err: &OpenAiError) -> bool {
         || err.is(ErrorKind::NoChoices)
 }
 
-/// Go `CarriesContent`: whether the response has content with at least one part.
+/// Whether the response has content with at least one part.
 pub(crate) fn carries_content(resp: Option<&LlmResponse>) -> bool {
     resp.and_then(|resp| resp.content.as_ref())
         .is_some_and(|content| !content.parts.is_empty())
 }
 
-/// Go `PartsWithoutCalls`: the parts that are not function calls, the calls (both in stream
+/// The parts that are not function calls, the calls (both in stream
 /// order), and the index among the kept parts where the first call sat (the number of kept
 /// parts when there is none). `None` is `(vec![], vec![], 0)`.
 pub(crate) fn parts_without_calls(
@@ -80,7 +80,7 @@ pub(crate) fn parts_without_calls(
     (kept, calls, at)
 }
 
-/// Go `CompletedContentSupersedes`: whether a terminal snapshot can replace content assembled
+/// Whether a terminal snapshot can replace content assembled
 /// from deltas (it carries visible text or a call, its text contains the aggregate's, and it
 /// holds every aggregated call). `completed: None` is `false`; `aggregate: None` has no parts.
 pub(crate) fn completed_content_supersedes(
@@ -109,8 +109,8 @@ pub(crate) fn completed_content_supersedes(
     })
 }
 
-/// Go `reflect.DeepEqual` on two calls whose `Args` ADK-Go decoded with `encoding/json` into
-/// `map[string]any`, where every JSON number is a `float64`: numbers compare by their `f64`
+/// Whether two calls are equal, their `args` compared as JSON values where every
+/// number is an `f64`: numbers compare by their `f64`
 /// value (`1` equals `1.0`; integers past 2^53 equal when they round to the same `f64`).
 fn go_call_eq(a: &FunctionCall, b: &FunctionCall) -> bool {
     let FunctionCall {
@@ -159,7 +159,7 @@ fn visible_text_and_calls(parts: &[Part]) -> (String, Vec<&FunctionCall>) {
     (text, calls)
 }
 
-/// Go `AnswerText`: the content's non-thought text, concatenated.
+/// The content's non-thought text, concatenated.
 pub(crate) fn answer_text(content: Option<&Content>) -> String {
     content
         .map(|content| {
@@ -173,7 +173,7 @@ pub(crate) fn answer_text(content: Option<&Content>) -> String {
         .unwrap_or_default()
 }
 
-/// Go `SinglePartResponse`: one streamed part as a genai response (one candidate, role
+/// One streamed part as a genai response (one candidate, role
 /// `model`, no finish reason).
 pub(crate) fn single_part_response(part: Part) -> GenerateContentResponse {
     GenerateContentResponse {

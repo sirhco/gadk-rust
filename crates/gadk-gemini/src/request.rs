@@ -15,10 +15,10 @@
 
 //! Request body construction.
 //!
-//! Ports genai `models.go` `generateContentParametersToMldev` /
-//! `generateContentParametersToVertex` with their config, content, part, tool, tool-config,
-//! safety-setting, image-config and speech-config converters (genai v1.77.0), and ADK-Go
-//! `model/gemini/gemini.go` `preserveEmptyTextThoughtSignatureParts`.
+//! Builds the Gemini API (`Mldev`) and Vertex AI request bodies for `generateContent`, with
+//! their config, content, part, tool, tool-config, safety-setting, image-config and
+//! speech-config converters, and fills in an empty `text` on parts that carry only a thought
+//! signature.
 
 use gadk_genai::{Content, GenerateContentConfig};
 use gadk_model::{Backend, ExtrasRequestProvider, ModelError};
@@ -27,7 +27,7 @@ use serde_json::{Map, Value};
 pub(crate) type Obj = Map<String, Value>;
 
 /// Where a request is going: the backend plus the Vertex AI project and location used to
-/// expand resource names (genai `tResourceName`).
+/// expand resource names.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Target<'a> {
     pub backend: Backend,
@@ -68,9 +68,7 @@ pub(crate) fn build_body(
     Ok(body)
 }
 
-/// Port of gemini.go `preserveEmptyTextThoughtSignatureParts` (works around
-/// googleapis/go-genai#931): every part with a `thoughtSignature` but no data field gets
-/// `"text": ""`.
+/// Gives every part with a `thoughtSignature` but no data field `"text": ""`.
 pub fn preserve_empty_text_thought_signature_parts(body: &mut Obj) {
     for content in maps_from_slice(body.get_mut("contents")) {
         for part in maps_from_slice(content.get_mut("parts")) {
@@ -82,7 +80,7 @@ pub fn preserve_empty_text_thought_signature_parts(body: &mut Obj) {
     }
 }
 
-/// Port of gemini.go `mapsFromSlice`: the object entries of an array (others skipped).
+/// The object entries of an array (others skipped).
 fn maps_from_slice(value: Option<&mut Value>) -> impl Iterator<Item = &mut Obj> {
     let items: &mut [Value] = match value {
         Some(Value::Array(items)) => items,
@@ -91,7 +89,7 @@ fn maps_from_slice(value: Option<&mut Value>) -> impl Iterator<Item = &mut Obj> 
     items.iter_mut().filter_map(Value::as_object_mut)
 }
 
-/// Port of gemini.go `partHasData`.
+/// Whether `part` has any data field (a field other than the metadata-only ones).
 fn part_has_data(part: &Obj) -> bool {
     part.keys().any(|field| {
         !matches!(
@@ -108,13 +106,13 @@ fn part_has_data(part: &Obj) -> bool {
     })
 }
 
-// ---- genai converters ---------------------------------------------------------------
+// ---- converters ----------------------------------------------------------------------
 
 pub(crate) fn to_value<T: serde::Serialize>(v: &T) -> Result<Value, ModelError> {
     serde_json::to_value(v).map_err(|e| ModelError::Other(Box::new(e)))
 }
 
-/// The error genai returns for a field the backend does not support.
+/// The error for a field the backend does not support.
 fn unsupported(field: &str, backend: Backend) -> ModelError {
     let msg = match backend {
         Backend::GeminiApi => format!(
@@ -135,7 +133,7 @@ pub(crate) fn reject(from: &Obj, fields: &[&str], backend: Backend) -> Result<()
     }
 }
 
-/// genai `getValueByPath(...) != nil`.
+/// Whether `field` is present and not `null`.
 fn present(from: &Obj, field: &str) -> bool {
     from.get(field).is_some_and(|v| !v.is_null())
 }
@@ -149,7 +147,7 @@ pub(crate) fn copy(from: &Obj, to: &mut Obj, fields: &[&str]) {
     }
 }
 
-/// genai `setValueByPath` for a single key: an existing object value is merged into.
+/// Sets a single key: an existing object value is merged into.
 fn set_merge(to: &mut Obj, key: &str, value: Value) {
     match (to.get_mut(key), value) {
         (Some(Value::Object(existing)), Value::Object(new)) => existing.extend(new),
@@ -195,7 +193,7 @@ pub(crate) fn convert_obj(
     Ok(())
 }
 
-/// Port of `generateContentParametersTo{Mldev,Vertex}` (minus the `_url.model`, which
+/// Builds the request body for the Gemini API or Vertex AI (minus the model name, which
 /// the transport turns into the request path).
 fn generate_content_parameters(
     target: Target<'_>,
@@ -203,7 +201,7 @@ fn generate_content_parameters(
     cfg: &GenerateContentConfig,
 ) -> Result<Obj, ModelError> {
     let mut to = Obj::new();
-    // A nil Go slice marshals to null and is skipped; gadk has no nil/empty distinction.
+    // An empty slice is skipped, like an absent one: gadk has no nil/empty distinction.
     if !contents.is_empty() {
         let converted = contents
             .iter()
@@ -212,13 +210,13 @@ fn generate_content_parameters(
         to.insert("contents".into(), Value::Array(converted));
     }
     let from = as_obj(&to_value(cfg)?);
-    // ADK always passes a non-nil config, so genai always emits generationConfig.
+    // The config is always passed, so `generationConfig` is always emitted.
     let generation_config = generate_content_config(target, &from, &mut to)?;
     to.insert("generationConfig".into(), Value::Object(generation_config));
     Ok(to)
 }
 
-/// Port of `generateContentConfigTo{Mldev,Vertex}`: returns the `generationConfig` object
+/// Converts the generation config: returns the `generationConfig` object
 /// and moves the request-level fields into `parent`.
 fn generate_content_config(
     target: Target<'_>,
@@ -310,7 +308,7 @@ fn generate_content_config(
     Ok(to)
 }
 
-/// Port of `safetySettingToMldev`.
+/// Converts a safety setting for the Gemini API.
 pub(crate) fn safety_setting_mldev(from: &Obj) -> Result<Obj, ModelError> {
     reject(from, &["method"], Backend::GeminiApi)?;
     let mut to = Obj::new();
@@ -318,7 +316,7 @@ pub(crate) fn safety_setting_mldev(from: &Obj) -> Result<Obj, ModelError> {
     Ok(to)
 }
 
-/// Port of `contentTo{Mldev,Vertex}`.
+/// Converts a content for the given backend.
 pub(crate) fn content(from: &Obj, backend: Backend) -> Result<Obj, ModelError> {
     let mut to = Obj::new();
     convert_list(from, &mut to, "parts", |p| part(p, backend))?;
@@ -326,7 +324,7 @@ pub(crate) fn content(from: &Obj, backend: Backend) -> Result<Obj, ModelError> {
     Ok(to)
 }
 
-/// Port of `partTo{Mldev,Vertex}`.
+/// Converts a part for the given backend.
 fn part(from: &Obj, backend: Backend) -> Result<Obj, ModelError> {
     let mut to = Obj::new();
     copy(
@@ -377,7 +375,7 @@ fn part(from: &Obj, backend: Backend) -> Result<Obj, ModelError> {
     Ok(to)
 }
 
-/// Port of `functionResponseToVertex` (with `functionResponsePartToVertex`), genai v1.77.0:
+/// Converts a function response (and its parts) for Vertex AI:
 /// `willContinue` and a part's `mediaProcessing` are Gemini API only.
 pub(crate) fn function_response_vertex(from: &Obj) -> Result<Obj, ModelError> {
     let backend = Backend::VertexAi;
@@ -394,8 +392,8 @@ pub(crate) fn function_response_vertex(from: &Obj) -> Result<Obj, ModelError> {
     Ok(to)
 }
 
-/// Port of `toolTo{Mldev,Vertex}` (with `googleSearchToMldev`, `googleMapsToMldev`,
-/// `authConfigToMldev`, `mcpServerToVertex`).
+/// Converts a tool (including its Google Search, Google Maps, auth-config and MCP-server
+/// entries) for the given backend.
 pub(crate) fn tool(from: &Obj, backend: Backend) -> Result<Obj, ModelError> {
     let mut to = Obj::new();
     match backend {
@@ -470,7 +468,7 @@ pub(crate) fn tool(from: &Obj, backend: Backend) -> Result<Obj, ModelError> {
     Ok(to)
 }
 
-/// Port of `toolConfigTo{Mldev,Vertex}` (with `functionCallingConfigToMldev`).
+/// Converts a tool config (with its function-calling config) for the given backend.
 fn tool_config(from: &Obj, backend: Backend) -> Result<Obj, ModelError> {
     let mut to = Obj::new();
     copy(from, &mut to, &["retrievalConfig"]);
@@ -492,7 +490,7 @@ fn tool_config(from: &Obj, backend: Backend) -> Result<Obj, ModelError> {
     Ok(to)
 }
 
-/// Port of `imageConfigTo{Mldev,Vertex}`.
+/// Converts an image config for the given backend.
 fn image_config(from: &Obj, backend: Backend) -> Result<Obj, ModelError> {
     let mut to = Obj::new();
     copy(from, &mut to, &["aspectRatio", "imageSize"]);
@@ -528,9 +526,8 @@ fn image_config(from: &Obj, backend: Backend) -> Result<Obj, ModelError> {
     Ok(to)
 }
 
-/// Port of `speechConfigToVertex` (with `voiceConfigToVertex`,
-/// `multiSpeakerVoiceConfigToVertex`, `speakerVoiceConfigToVertex`,
-/// `replicatedVoiceConfigToVertex`).
+/// Converts a speech config for Vertex AI (with its voice, multi-speaker, speaker and
+/// replicated voice configs).
 pub(crate) fn speech_config_vertex(from: &Obj) -> Result<Obj, ModelError> {
     let mut to = Obj::new();
     convert_obj(from, &mut to, "voiceConfig", voice_config_vertex)?;
@@ -564,7 +561,8 @@ fn voice_config_vertex(from: &Obj) -> Result<Obj, ModelError> {
     Ok(to)
 }
 
-/// Port of genai `tCachedContentName` / `tResourceName(name, "cachedContents", 2)`.
+/// The full resource name of a cached content: for Vertex AI it is prefixed with
+/// `projects/{project}/locations/{location}/` when the name is a bare ID or `cachedContents/…`.
 fn cached_content_name(target: Target<'_>, name: &str) -> String {
     const COLLECTION: &str = "cachedContents";
     let full = format!("{COLLECTION}/{name}");

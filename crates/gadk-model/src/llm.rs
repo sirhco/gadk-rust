@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `model/llm.go`: the [`Llm`] trait and its request/response types.
+//! The [`Llm`] trait and its request/response types.
 
 use std::any::Any;
 use std::collections::HashMap;
@@ -35,8 +35,7 @@ use serde_json::Value;
 use crate::error::ModelError;
 use crate::live::LiveConnection;
 
-/// Which Google backend serves a model (port of genai `Backend`, minus `BackendUnspecified`,
-/// which is represented as `None`).
+/// Which Google backend serves a model; an unspecified backend is represented as `None`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Backend {
     /// The Gemini Developer API.
@@ -45,7 +44,7 @@ pub enum Backend {
     VertexAi,
 }
 
-/// Access to an underlying LLM (port of ADK-Go `model.LLM`).
+/// Access to an underlying LLM.
 pub trait Llm: Send + Sync {
     /// The model name.
     fn name(&self) -> &str;
@@ -58,13 +57,13 @@ pub trait Llm: Send + Sync {
         stream: bool,
     ) -> BoxStream<'static, Result<LlmResponse, ModelError>>;
 
-    /// The Google backend variant, for Google models (port of ADK-Go `GoogleLLM`).
+    /// The Google backend variant, for Google models.
     fn google_variant(&self) -> Option<Backend> {
         None
     }
 
     /// Opens a live (bidi streaming) connection. Models without live support keep this default,
-    /// which fails with Go's text `model does not support live connection`.
+    /// which fails with `model does not support live connection`.
     fn connect_live<'a>(
         &'a self,
         cfg: LiveConnectConfig,
@@ -87,7 +86,7 @@ pub trait Llm: Send + Sync {
 pub type ExtrasRequestProvider =
     Arc<dyn Fn(serde_json::Map<String, Value>) -> serde_json::Map<String, Value> + Send + Sync>;
 
-/// Per-request HTTP options (port of genai `HTTPOptions`).
+/// Per-request HTTP options.
 ///
 /// The `Debug` output lists header names only; header values are redacted.
 #[derive(Clone, Default)]
@@ -131,7 +130,7 @@ impl fmt::Debug for RedactedHeaders<'_> {
     }
 }
 
-/// The raw LLM request (port of ADK-Go `model.LLMRequest`).
+/// The raw LLM request.
 #[derive(Clone, Default)]
 pub struct LlmRequest {
     /// The model name.
@@ -160,7 +159,7 @@ impl fmt::Debug for LlmRequest {
     }
 }
 
-/// The raw LLM response (port of ADK-Go `model.LLMResponse`).
+/// The raw LLM response.
 /// It provides the first candidate response from the model if available.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

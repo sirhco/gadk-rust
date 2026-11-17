@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Message → `LlmResponse` (port of ADK-Go `response.go`), and the decoding of a
+//! Message → `LlmResponse`, and the decoding of a
 //! non-streaming response body.
 
 use std::collections::HashMap;
@@ -32,20 +32,19 @@ use crate::thinking::WRAPPED_OUTPUT_SCHEMA_KEY;
 use crate::wire::{ContentBlock, Message, Usage};
 
 /// `LlmResponse.custom_metadata` key holding the raw Claude `stop_reason` when it does not map
-/// one to one to a finish reason (Go `StopReasonMetadataKey`).
+/// one to one to a finish reason.
 pub const STOP_REASON_METADATA_KEY: &str = "anthropic_stop_reason";
 
-/// `LlmResponse.custom_metadata` key holding the prompt-cache creation token count when > 0
-/// (Go `CacheCreationInputTokensMetadataKey`).
+/// `LlmResponse.custom_metadata` key holding the prompt-cache creation token count when > 0.
 pub const CACHE_CREATION_INPUT_TOKENS_METADATA_KEY: &str = "anthropic_cache_creation_input_tokens";
 
-/// Decodes a 2xx non-streaming body as anthropic-sdk-go's `decode` does: a non-JSON
-/// `content_type` fails with the SDK's `expected destination type of 'string' or '[]byte' for
+/// Decodes a 2xx non-streaming body: a non-JSON
+/// `content_type` fails with `expected destination type of 'string' or '[]byte' for
 /// responses with content-type '<ct>' that is not 'application/json'`, a JSON decode error with
 /// `error parsing response json: <err>`, both wrapped by
-/// [`AnthropicError::request_failed`](crate::error::AnthropicError) as Go `classifyError` does.
+/// [`AnthropicError::request_failed`](crate::error::AnthropicError).
 ///
-/// As Go's `json.Decoder.Decode`, only the first JSON value of the body is decoded (trailing
+/// Only the first JSON value of the body is decoded (trailing
 /// bytes are ignored) and an empty body fails with `EOF`. Other decode error texts are
 /// serde_json's.
 pub(crate) fn decode_message(content_type: &str, body: &[u8]) -> Result<Message, AnthropicError> {
@@ -68,11 +67,10 @@ pub(crate) fn decode_message(content_type: &str, body: &[u8]) -> Result<Message,
     }
 }
 
-/// The media type of Go `mime.ParseMediaType` as the SDK reads it (the error is ignored):
+/// The media type of a `Content-Type` value (a parse error is ignored):
 /// lowercased, parameters dropped, or `""` when it is not `type[/subtype]` of MIME token
-/// characters or when a parameter name repeats with a different value (Go
-/// `errDuplicateParamName`). A malformed parameter ends parsing and keeps the media type (Go
-/// `ErrInvalidMediaParameter`); parameter values are otherwise unused.
+/// characters or when a parameter name repeats with a different value. A malformed parameter
+/// ends parsing and keeps the media type; parameter values are otherwise unused.
 fn media_type(content_type: &str) -> String {
     let (base, mut rest) = match content_type.find(';') {
         Some(i) => content_type.split_at(i),
@@ -107,7 +105,7 @@ fn media_type(content_type: &str) -> String {
     media
 }
 
-/// Go `mime` `consumeToken`: the leading run of token bytes and the rest.
+/// The leading run of token bytes and the rest.
 fn consume_token(v: &str) -> (&str, &str) {
     let end = v
         .bytes()
@@ -116,8 +114,8 @@ fn consume_token(v: &str) -> (&str, &str) {
     v.split_at(end)
 }
 
-/// Go `mime` `consumeValue`: a token or a quoted string (with Go's MSIE-tolerant escapes);
-/// `None` when no value can be read (Go's `value == "" && rest2 == rest`).
+/// A token or a quoted string (with MSIE-tolerant escapes);
+/// `None` when no value can be read.
 fn consume_value(v: &str) -> Option<(Vec<u8>, &str)> {
     if !v.starts_with('"') {
         let (token, rest) = consume_token(v);
@@ -145,7 +143,7 @@ fn consume_value(v: &str) -> Option<(Vec<u8>, &str)> {
     None
 }
 
-/// Go `mime` `consumeMediaParam`: `; name=value` with the name lowercased, or `None`.
+/// `; name=value` with the name lowercased, or `None`.
 fn consume_media_param(v: &str) -> Option<(String, Vec<u8>, &str)> {
     let rest = v.trim_start().strip_prefix(';')?.trim_start();
     let (name, rest) = consume_token(rest);
@@ -157,22 +155,22 @@ fn consume_media_param(v: &str) -> Option<(String, Vec<u8>, &str)> {
     Some((name.to_ascii_lowercase(), value, rest))
 }
 
-/// Go `mime` `isTSpecial`.
+/// Whether `b` is a MIME special character.
 fn is_tspecial(b: u8) -> bool {
     b"()<>@,;:\\\"/[]?=".contains(&b)
 }
 
-/// Go `mime` `isTokenChar`.
+/// Whether `b` is a MIME token character.
 fn is_mime_token_byte(b: u8) -> bool {
     b > 0x20 && b < 0x7f && !is_tspecial(b)
 }
 
-/// Go `mime` `isToken`: non-empty, every byte a token character.
+/// Whether `s` is a token: non-empty, every byte a token character.
 fn is_mime_token(s: &str) -> bool {
     !s.is_empty() && s.bytes().all(is_mime_token_byte)
 }
 
-/// Go `convertMessageToLLMResponse`: role `model`, the converted blocks (tool use dropped when
+/// Converts a message: role `model`, the converted blocks (tool use dropped when
 /// the turn hit the token limit), finish reason, usage, `model_version`, `turn_complete`, and
 /// the custom metadata keys above.
 pub(crate) fn convert_message_to_llm_response(
@@ -226,7 +224,7 @@ pub(crate) fn convert_message_to_llm_response(
     })
 }
 
-/// Go `convertContentBlock`: `None` for block types Go skips; Go's
+/// Converts a content block: `None` for block types that are skipped;
 /// `anthropicmodel: failed to decode tool_use input for "<name>"` (no sentinel) when the input
 /// is not a JSON object.
 pub(crate) fn convert_content_block(
@@ -283,7 +281,7 @@ pub(crate) fn convert_content_block(
     }
 }
 
-/// Go `unwrapOutputSchemaText`: the `result` member's JSON text when `text` is an object with
+/// The `result` member's JSON text when `text` is an object with
 /// exactly that member, else `text`.
 pub(crate) fn unwrap_output_schema_text(text: &str) -> String {
     let Ok(wrapper) = serde_json::from_str::<HashMap<String, Box<RawValue>>>(text) else {
@@ -295,7 +293,7 @@ pub(crate) fn unwrap_output_schema_text(text: &str) -> String {
     }
 }
 
-/// Go `mapStopReason`: the finish reason and the raw stop reason to record (`""` when it maps
+/// The finish reason and the raw stop reason to record (`""` when it maps
 /// one to one).
 pub(crate) fn map_stop_reason(stop_reason: &str) -> (FinishReason, String) {
     match stop_reason {
@@ -309,18 +307,18 @@ pub(crate) fn map_stop_reason(stop_reason: &str) -> (FinishReason, String) {
     }
 }
 
-/// Go `extractUsageMetadata`: the usage metadata and the cache creation token count.
+/// The usage metadata and the cache creation token count.
 ///
-/// Counts are clamped at 0 and summed with wrapping, as Go's `int64` sums; thinking tokens (when the response reports them) are capped at the
-/// output tokens and excluded from the candidates count. The `int32` conversions wrap as Go's
-/// do.
+/// Counts are clamped at 0 and summed with wrapping (`i64` sums);
+/// thinking tokens (when the response reports them) are capped at the
+/// output tokens and excluded from the candidates count. The `int32` conversions wrap.
 pub(crate) fn extract_usage_metadata(usage: &Usage) -> (GenerateContentResponseUsageMetadata, i64) {
     let input_tokens = usage.input_tokens.max(0);
     let cache_read = usage.cache_read_input_tokens.max(0);
     let cache_create = usage.cache_creation_input_tokens.max(0);
     let output_tokens = usage.output_tokens.max(0);
 
-    // Go's int64 sums wrap; so do these (no panic on absurd server counts).
+    // The `i64` sums wrap, with no panic on absurd server counts.
     let prompt_total = input_tokens
         .wrapping_add(cache_read)
         .wrapping_add(cache_create);

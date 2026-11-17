@@ -13,18 +13,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `internal/llminternal/googlellm/live_artifacts.go`.
+//! Recognition of the artifact references the live flow caches for itself.
 
 use gadk_genai::Part;
 
-/// Go `LiveArtifactNamespace`: the path segment the live audio cache stores its blobs under
+/// The path segment the live audio cache stores its blobs under
 /// when it builds an `artifact://` reference. Callers that assemble such a URI and callers that
 /// recognize one must agree on this value.
 pub const LIVE_ARTIFACT_NAMESPACE: &str = "_adk_live";
 
 const ARTIFACT_URI_SCHEME: &str = "artifact://";
 
-/// Go `IsInternalLiveArtifactPart`: whether `part` is an `artifact://` reference to a blob the
+/// Whether `part` is an `artifact://` reference to a blob the
 /// live flow cached for itself, such as the recorded input and output audio the audio cache
 /// saves.
 ///

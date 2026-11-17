@@ -14,8 +14,7 @@
 // limitations under the License.
 
 //! The OpenAI transport: request headers, the request body, and the reply, sent through
-//! [`gadk_model::rest`] with openai-go v3.91.1's retry policy and ADK-Go's call deadline
-//! (port of openai-go `RequestConfig.Execute`'s OpenAI specifics and `packages/ssestream`).
+//! [`gadk_model::rest`] with the OpenAI SDK's retry policy and the model's call deadline.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -40,10 +39,10 @@ use serde_json::value::RawValue;
 use crate::config::{ClientConfig, Resolved, UrlError, request_url, resolve};
 use crate::error::{OpenAiError, go_json_error};
 
-/// The Chat Completions path, relative to the base URL (openai-go `"chat/completions"`).
+/// The Chat Completions path, relative to the base URL.
 pub(crate) const CHAT_COMPLETIONS_PATH: &str = "chat/completions";
 
-/// The Responses path, relative to the base URL (openai-go `"responses"`).
+/// The Responses path, relative to the base URL.
 pub(crate) const RESPONSES_PATH: &str = "responses";
 
 /// What a successful call returned.
@@ -74,13 +73,13 @@ impl fmt::Debug for Reply {
     }
 }
 
-/// One OpenAI client (Go `*openai.Client` as ADK-Go builds it): the shared transport with
+/// One OpenAI client: the shared transport with
 /// [`RetryPolicy::OPENAI`], and the configuration resolved against the environment once.
 #[derive(Clone)]
 pub(crate) struct OpenAiClient {
     /// The HTTP client, the retry policy and the response-header timeout
     /// ([`DEFAULT_RESPONSE_HEADER_TIMEOUT`] when gadk built the client, `None` for a custom
-    /// one, as openai-go's `defaultHTTPClient`).
+    /// one).
     pub(crate) rest: RestTransport,
     /// The base URL, key and headers.
     pub(crate) resolved: Resolved,
@@ -105,7 +104,7 @@ impl RequestHeaders for OpenAiClient {
     }
 }
 
-/// A header value as Go's `net/http` sends it, or the transport error it fails the call with.
+/// A header value as the HTTP client sends it, or the transport error it fails the call with.
 fn header_value(name: &str, value: &str) -> Result<HeaderValue, OpenAiError> {
     HeaderValue::from_str(value).map_err(|_| {
         OpenAiError::transport(format!(
@@ -116,7 +115,7 @@ fn header_value(name: &str, value: &str) -> Result<HeaderValue, OpenAiError> {
 }
 
 impl OpenAiClient {
-    /// Builds the client for `cfg` (Go `openai.NewClient` with the options `NewModel` derives):
+    /// Builds the client for `cfg` (with the options derived from it):
     /// the environment is read now; a custom [`ClientConfig::http_client`] gets no
     /// response-header timeout.
     pub(crate) fn new(cfg: &ClientConfig) -> Self {
@@ -138,17 +137,17 @@ impl OpenAiClient {
         }
     }
 
-    /// The headers of one attempt, in openai-go's order (a later step replaces an earlier
+    /// The headers of one attempt, in this order (a later step replaces an earlier
     /// one's values for the same name):
     /// 1. `Accept: application/json`, `Content-Type: application/json`, `User-Agent` =
-    ///    [`gadk_platform::tracking_header`] (openai-go sends `OpenAI/Go 3.91.1`);
+    ///    [`gadk_platform::tracking_header`];
     /// 2. the environment's headers (`OpenAI-Organization`, `OpenAI-Project`,
     ///    `OPENAI_CUSTOM_HEADERS`);
     /// 3. [`ClientConfig::headers`];
     /// 4. `Authorization: Bearer <key>` when the key is non-empty and no `Authorization` was
-    ///    set after the last key assignment (openai-go `ApplySecurity`).
+    ///    set after the last key assignment.
     ///
-    /// An invalid environment header name or value fails the attempt as Go's `net/http` does.
+    /// An invalid environment header name or value fails the attempt as the HTTP client does.
     pub(crate) fn request_headers(&self) -> Result<HeaderMap, OpenAiError> {
         let mut h = HeaderMap::new();
         h.insert(ACCEPT, HeaderValue::from_static("application/json"));
@@ -183,7 +182,7 @@ impl OpenAiClient {
     }
 
     /// The request URL for `path` ([`crate::config::request_url`]); a base without a scheme is
-    /// Go's `unsupported protocol scheme ""` transport error.
+    /// an `unsupported protocol scheme ""` transport error.
     pub(crate) fn request_uri(&self, path: &str) -> Result<Uri, OpenAiError> {
         match request_url(&self.resolved.base_url, path) {
             Ok(url) => url
@@ -199,19 +198,19 @@ impl OpenAiClient {
         }
     }
 
-    /// Sends `body` to `path` with openai-go's retry policy ([`RestTransport::send`]) and
+    /// Sends `body` to `path` with the OpenAI SDK's retry policy ([`RestTransport::send`]) and
     /// returns the reply that ends the call.
     ///
-    /// - `timeout` (ADK-Go `shared.RequestTimeout`, D7) is one deadline computed now, when the
+    /// - `timeout` is one deadline computed now, when the
     ///   call starts running ([`CallTimeout::Call`]): it covers every attempt, the backoff
     ///   sleeps and a streaming body; its expiry is
     ///   [`OpenAiError::is_deadline_exceeded`], never retried.
-    /// - A final status ≥ 400 is [`OpenAiError::api`] (openai-go `apierror`); when the body's
-    ///   top-level `error` is present but not an object, openai-go's unmarshal error instead
-    ///   (`json: cannot unmarshal string into Go value of type apierror.Error`).
+    /// - A final status ≥ 400 is [`OpenAiError::api`]; when the body's
+    ///   top-level `error` is present but not an object, an unmarshal error instead
+    ///   (see the literal in `api_error`).
     /// - A body that fails to read: the bare read error for a final status ≥ 400, else
-    ///   `error reading response body: <err>` (openai-go's texts).
-    /// - Errors are not wrapped: the blocking paths add Go's `openai: call failed: ` with
+    ///   `error reading response body: <err>`.
+    /// - Errors are not wrapped: the blocking paths add `openai: call failed: ` with
     ///   [`OpenAiError::call_failed`]; the streaming paths report them as they are.
     /// - Dropping the future cancels the call (no task is spawned).
     pub(crate) async fn post(
@@ -221,7 +220,7 @@ impl OpenAiClient {
         stream: bool,
         timeout: Option<Duration>,
     ) -> Result<Reply, OpenAiError> {
-        // Go's `context.WithTimeout` saturates: a deadline past `Instant`'s range is none.
+        // A deadline past `Instant`'s range is none.
         let timeout = timeout
             .and_then(|d| tokio::time::Instant::now().checked_add(d))
             .map_or(CallTimeout::None, CallTimeout::Call);
@@ -242,8 +241,8 @@ impl OpenAiClient {
     }
 }
 
-/// openai-go's handling of a final ≥ 400 body: `gjson.GetBytes(contents, "error").Raw`
-/// unmarshalled into `apierror.Error`. Absent, `null`, an object, or a body that is not a
+/// The error for a final ≥ 400 body: the top-level `error` is decoded as the API error.
+/// Absent, `null`, an object, or a body that is not a
 /// JSON object all give the API error; a top-level `error` that is a string, number, boolean
 /// or array fails the unmarshal, whose error is returned instead.
 fn api_error(status: u16, body: Bytes) -> OpenAiError {
@@ -267,9 +266,9 @@ fn api_error(status: u16, body: Bytes) -> OpenAiError {
     OpenAiError::api(status, body)
 }
 
-/// The request body openai-go sends for `params`: the params as
+/// The request body for `params`: the params as
 /// [`gadk_model::to_go_json`] writes them, and for a streaming call `"stream":true` appended
-/// after every key (openai-go's `option.WithJSONSet("stream", true)`).
+/// after every key.
 pub(crate) fn encode_body<T: Serialize>(params: &T, stream: bool) -> Result<Bytes, OpenAiError> {
     let mut body = gadk_model::to_go_json(params).map_err(|e| OpenAiError::plain(e.to_string()))?;
     if stream {
@@ -284,14 +283,14 @@ pub(crate) fn encode_body<T: Serialize>(params: &T, stream: bool) -> Result<Byte
     Ok(Bytes::from(body))
 }
 
-/// openai-go's decoding of a non-streaming body into `T` (`RequestConfig.Execute`):
+/// Decodes a non-streaming body into `T`:
 /// - a `Content-Type` whose media type is neither `application/json`-containing nor `+json`
-///   fails with openai-go's `expected destination type of 'string' or '[]byte' for responses
+///   fails with `expected destination type of 'string' or '[]byte' for responses
 ///   with content-type '<ct>' that is not 'application/json'`;
-/// - otherwise Go's `json.NewDecoder(…).Decode`: the first JSON value is decoded and anything
+/// - otherwise the first JSON value is decoded and anything
 ///   after it is ignored; an empty body is `error parsing response json: EOF`, a truncated one
 ///   `error parsing response json: unexpected EOF`, any other failure
-///   `error parsing response json: <serde_json's text>` (an accepted divergence).
+///   `error parsing response json: <serde_json's text>`.
 pub(crate) fn decode_body<T: DeserializeOwned>(
     content_type: &str,
     body: &[u8],
@@ -320,18 +319,17 @@ pub(crate) fn decode_body<T: DeserializeOwned>(
     })
 }
 
-/// openai-go `ssestream.Stream[T]` over a streaming body: each SSE event's data decoded into
-/// `T`, in order, as `Stream.Next` does:
+/// Decodes a streaming body into a stream of `T`: each SSE event's data is decoded into
+/// `T`, in order:
 /// - data starting with `[DONE]` ends the stream;
-/// - data whose top-level JSON has an `error` key ends it with openai-go's `StreamError`:
+/// - data whose top-level JSON has an `error` key ends it with a stream error:
 ///   `received error while streaming: <error>` (a string's value, else the raw JSON);
-/// - data that does not decode ends it with Go `json.Unmarshal`'s error
+/// - data that does not decode ends it with a JSON decode error
 ///   ([`go_json_error`]: `unexpected end of JSON input` for truncated data);
 /// - a body error ends it with [`OpenAiError::from_body_error`] (a passed call deadline is
 ///   [`OpenAiError::is_deadline_exceeded`]).
 ///
-/// Nothing follows the first error. Uses [`gadk_model::sse::sse_events`] (3a's accepted SSE
-/// divergences apply).
+/// Nothing follows the first error. Uses [`gadk_model::sse::sse_events`].
 pub(crate) fn event_stream<T>(body: BodyStream) -> BoxStream<'static, Result<T, OpenAiError>>
 where
     T: DeserializeOwned + Send + 'static,
@@ -351,7 +349,7 @@ where
                     .and_then(|mut top| top.remove("error"));
                 match error {
                     Some(raw) => {
-                        // gjson `Result.String()`: a string's value, `""` for null, else
+                        // A string's value, `""` for null, else
                         // the raw JSON.
                         let text = match raw.get() {
                             "null" => String::new(),

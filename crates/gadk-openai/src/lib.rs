@@ -13,13 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! gadk-openai: OpenAI models on the Responses and Chat Completions APIs (port of ADK-Go
-//! `model/openaimodel`), with gadk's own REST transport ([`gadk_model::rest`]).
+//! gadk-openai: OpenAI models on the Responses and Chat Completions APIs, with gadk's own REST
+//! transport ([`gadk_model::rest`]).
 //!
 //! [`new_model`] builds an [`Llm`](gadk_model::Llm) from a model name and a [`ClientConfig`];
 //! [`ClientConfig::api`] selects the API ([`Api::Responses`] by default). Every
 //! `GenerateContentConfig` field is translated, rejected with an error naming it, or ignored,
-//! per API, as ADK-Go documents in `doc.go`.
+//! per API.
 //!
 //! A successful fallback from a `response.completed` conversion failure records the `tracing`
 //! event `openai.terminal_response_conversion_failed` (an OpenTelemetry layer turns it into a

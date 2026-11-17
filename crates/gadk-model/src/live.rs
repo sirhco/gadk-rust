@@ -13,7 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Live (bidi streaming) connection abstraction (port of ADK-Go internal/llminternal/googlellm/live_connection.go's interface and base_flow.go isResumable).
+//! Live (bidi streaming) connection abstraction: [`LiveConnection`], its error type and the
+//! rule for when a failed connection can be resumed.
 
 use std::error::Error;
 use std::fmt;
@@ -23,8 +24,8 @@ use gadk_genai::{Blob, Content};
 
 use crate::LlmResponse;
 
-/// Realtime input for [`LiveConnection::send_realtime`] (the types Go `SendRealtime` accepts, plus
-/// genai's `audioStreamEnd`). Moved from gadk-gemini, which re-exports it.
+/// Realtime input for [`LiveConnection::send_realtime`]: a blob, activity start/end markers
+/// and the end of the audio stream. Moved from gadk-gemini, which re-exports it.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RealtimeInput {
     /// Audio or image data. An empty MIME type is detected by the connection.
@@ -37,14 +38,14 @@ pub enum RealtimeInput {
     AudioStreamEnd,
 }
 
-/// What kind of failure a [`LiveConnError`] is, for Go `isResumable`'s typed checks.
+/// What kind of failure a [`LiveConnError`] is, as [`LiveConnError::is_resumable`] checks it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum LiveConnErrorKind {
-    /// The socket of an established connection failed (Go `*net.OpError`), or the stream ended
-    /// without a close frame.
+    /// The socket of an established connection failed, or the stream ended without a close
+    /// frame.
     ConnectionLost,
-    /// A close frame was received (Go `*websocket.CloseError`); a frame without a payload is 1005.
+    /// A close frame was received; a frame without a payload is 1005.
     Closed {
         /// The close code.
         code: u16,
@@ -53,7 +54,7 @@ pub enum LiveConnErrorKind {
     Other,
 }
 
-/// A failure on a live connection. `message` is the full error text (Go `err.Error()`).
+/// A failure on a live connection. `message` is the full error text.
 #[derive(Debug)]
 pub struct LiveConnError {
     /// The classification.
@@ -64,10 +65,10 @@ pub struct LiveConnError {
     pub source: Option<Box<dyn Error + Send + Sync>>,
 }
 
-/// The text fragments Go `isResumable` treats as a lost connection (base_flow.go:401-405).
+/// The text fragments that mark an error as a lost connection.
 const RESUMABLE_TEXT: [&str; 4] = ["broken pipe", "connection reset", "EOF", "GoAway"];
 
-/// Go `websocket.ClosePolicyViolation`.
+/// The WebSocket close code for a policy violation.
 const CLOSE_POLICY_VIOLATION: u16 = 1008;
 
 impl LiveConnError {
@@ -86,14 +87,14 @@ impl LiveConnError {
         self
     }
 
-    /// Go `io.EOF`: the stream ended without a close frame.
+    /// The stream ended without a close frame.
     pub fn eof() -> Self {
         Self::new(LiveConnErrorKind::ConnectionLost, "EOF")
     }
 
-    /// Port of Go internal/llminternal/base_flow.go isResumable: a lost connection, a close frame
-    /// with code 1008, or text naming a dropped connection. The text rule applies to every kind, as
-    /// Go reaches it after a close error with any other code.
+    /// Whether the session can be resumed after this error: a lost connection, a close frame
+    /// with code 1008, or text naming a dropped connection. The text rule applies to every
+    /// kind, including a close frame with any other code.
     pub fn is_resumable(&self) -> bool {
         match self.kind {
             LiveConnErrorKind::ConnectionLost => true,
@@ -115,20 +116,21 @@ impl Error for LiveConnError {
     }
 }
 
-/// A live (bidi streaming) connection to a model (port of ADK-Go `googlellm.LiveConnection`,
-/// model-agnostic). `recv` must be cancel-safe and may run concurrently with a send.
+/// A live (bidi streaming) connection to a model, model-agnostic. `recv` must be cancel-safe
+/// and may run concurrently with a send.
 #[async_trait]
 pub trait LiveConnection: Send + Sync {
-    /// Go `SendHistory`.
+    /// Sends the earlier conversation turns to the model.
     async fn send_history(&self, history: &[Content]) -> Result<(), LiveConnError>;
-    /// Go `SendContent`.
+    /// Sends one content turn.
     async fn send_content(&self, content: Content) -> Result<(), LiveConnError>;
-    /// Go `SendRealtime`.
+    /// Sends realtime input (audio or image data, or an activity marker).
     async fn send_realtime(&self, input: RealtimeInput) -> Result<(), LiveConnError>;
-    /// Go `Recv`. `Ok(None)`: the stream ended without a close frame (callers treat it as
-    /// [`LiveConnError::eof`]). A received close frame is `Err` with kind `Closed { code }`.
+    /// Receives the next response. `Ok(None)`: the stream ended without a close frame (callers
+    /// treat it as [`LiveConnError::eof`]). A received close frame is `Err` with kind
+    /// `Closed { code }`.
     async fn recv(&self) -> Result<Option<LlmResponse>, LiveConnError>;
-    /// Go `Close`.
+    /// Closes the connection.
     async fn close(&self) -> Result<(), LiveConnError>;
 }
 

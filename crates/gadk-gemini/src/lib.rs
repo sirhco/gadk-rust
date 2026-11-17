@@ -31,7 +31,7 @@ pub use gadk_platform::env::{EnvProvider, MapEnv, ProcessEnv};
 pub use live::{LiveConnection, RealtimeInput};
 pub use model::GeminiModel;
 
-/// Internals exposed for the integration tests and the engine's parity tests. Not part of the
+/// Internals exposed for the integration tests and the engine's tests. Not part of the
 /// public API.
 #[doc(hidden)]
 pub mod internal {

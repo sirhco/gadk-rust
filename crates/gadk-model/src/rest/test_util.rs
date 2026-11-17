@@ -16,18 +16,18 @@
 //! Test doubles for code that sends through an [`HttpClient`] (feature `test-util`), shared
 //! by the provider crates' tests:
 //!
-//! - [`ScriptedClient`]: an in-process [`HttpClient`] (Go `roundTripFunc` behind an
-//!   `http.Client`) that records every request ([`RecordedRequest`], with the tokio time it
-//!   arrived) and answers from a handler or a script of [`FakeResponse`]s;
-//! - [`FakeServer`]: the same handlers behind a real HTTP/1 server on `127.0.0.1` (Go
-//!   `httptest.NewServer`), for code that builds its own `reqwest` client;
+//! - [`ScriptedClient`]: an in-process [`HttpClient`] that records every request
+//!   ([`RecordedRequest`], with the tokio time it arrived) and answers from a handler or a
+//!   script of [`FakeResponse`]s;
+//! - [`FakeServer`]: the same handlers behind a real HTTP/1 server on `127.0.0.1`, for code
+//!   that builds its own `reqwest` client;
 //! - [`FakeResponse`]: status, headers, body chunks, pauses, a body error
 //!   ([`FakeResponse::fail`], a dropped connection), a body that never ends
 //!   ([`FakeResponse::hang`]), a request never answered ([`FakeResponse::never`]) and a
 //!   connection error ([`FakeResponse::reset`]);
-//! - [`sse_event`] / [`sse_lines`]: SSE transcripts as Go's tests write them;
+//! - [`sse_event`] / [`sse_lines`]: SSE transcripts;
 //! - [`fixed_header_credentials`] / [`bearer_credentials`]: Google credentials whose headers
-//!   are fixed (Go's tests' static token sources).
+//!   are fixed (static token sources).
 //!
 //! [`ScriptedClient`] works under paused tokio time (`start_paused`); [`FakeServer`] needs a
 //! running tokio runtime and real time.
@@ -67,9 +67,9 @@ pub struct RecordedRequest {
     /// Absolute URL: `http://127.0.0.1:<port>/v1/messages?…` for [`FakeServer`], the request
     /// URI as sent for [`ScriptedClient`].
     pub url: String,
-    /// URL path (Go `r.URL.Path`), e.g. `/v1/messages`.
+    /// URL path, e.g. `/v1/messages`.
     pub path: String,
-    /// Raw query without `?` (Go `r.URL.RawQuery`); `None` when the URL has none.
+    /// Raw query without `?`; `None` when the URL has none.
     pub query: Option<String>,
     /// Request headers as received.
     pub headers: http::HeaderMap,
@@ -88,7 +88,7 @@ impl RecordedRequest {
         }
     }
 
-    /// Go `r.Header.Get(name)`: the first value, or `""` when absent (case-insensitive name).
+    /// The first value of header `name`, or `""` when absent (case-insensitive name).
     pub fn header(&self, name: &str) -> String {
         self.headers
             .get(name)
@@ -105,13 +105,12 @@ impl RecordedRequest {
             .collect()
     }
 
-    /// The body decoded as JSON; `Value::Null` when it is not JSON (Go's handlers ignore the
-    /// `json.Unmarshal` error and keep a nil map).
+    /// The body decoded as JSON; `Value::Null` when it is not JSON.
     pub fn json(&self) -> serde_json::Value {
         serde_json::from_slice(&self.body).unwrap_or(serde_json::Value::Null)
     }
 
-    /// Go `lastBody["stream"] == true`: the body is a JSON object whose `stream` is `true`.
+    /// Whether the body is a JSON object whose `stream` is `true`.
     pub fn is_stream(&self) -> bool {
         self.json().get("stream") == Some(&serde_json::Value::Bool(true))
     }
@@ -139,7 +138,7 @@ impl RecordedRequest {
 /// One step of a scripted response body.
 #[derive(Debug, Clone)]
 pub enum BodyStep {
-    /// Send these bytes as one chunk (Go `io.WriteString` + `Flush`).
+    /// Send these bytes as one chunk, flushed immediately.
     Chunk(Bytes),
     /// Wait this long before the next step.
     Delay(Duration),
@@ -154,8 +153,7 @@ pub enum BodyStep {
 pub enum BodyEnd {
     /// The body ends normally.
     Finish,
-    /// The body never ends: the connection stays open until the client drops it (Go's handler
-    /// blocking on `<-blockCh` after flushing).
+    /// The body never ends: the connection stays open until the client drops it.
     Hang,
 }
 
@@ -164,7 +162,7 @@ pub enum BodyEnd {
 pub enum Outcome {
     /// Answer with `status`, `headers` and the body steps.
     Respond,
-    /// Never answer: the handler blocks until the client goes away (Go `<-release`). Counted
+    /// Never answer: the handler blocks until the client goes away. Counted
     /// as a drop when the client gives up.
     Never,
     /// No response: [`FakeServer`] closes the connection, [`ScriptedClient`] returns
@@ -202,7 +200,7 @@ impl FakeResponse {
         }
     }
 
-    /// 200 with `Content-Type: application/json` and `body` (Go's most common handler).
+    /// 200 with `Content-Type: application/json` and `body`.
     pub fn json(body: impl Into<String>) -> Self {
         Self::json_status(200, body)
     }
@@ -221,7 +219,7 @@ impl FakeResponse {
             .chunk(body.into())
     }
 
-    /// 200 `text/event-stream`, one chunk per item (Go's write-and-`Flush` loop).
+    /// 200 `text/event-stream`, one flushed chunk per item.
     pub fn sse_chunks<I, S>(events: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -256,7 +254,7 @@ impl FakeResponse {
         self
     }
 
-    /// Appends a response header (Go `w.Header().Set`; call once per name).
+    /// Appends a response header (call once per name).
     pub fn header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.headers.push((name.into(), value.into()));
         self
@@ -562,9 +560,9 @@ fn transport_error(message: String) -> ModelError {
 
 // --------------------------------------------------------------------------------- fake server
 
-/// A local HTTP/1 server on `127.0.0.1` (Go `httptest.NewServer`). Every request is recorded,
+/// A local HTTP/1 server on `127.0.0.1`. Every request is recorded,
 /// counted and answered by the handler. Dropping the server stops it and closes its
-/// connections (Go `srv.Close()`).
+/// connections.
 pub struct FakeServer {
     addr: SocketAddr,
     shared: Arc<Shared>,
@@ -642,7 +640,7 @@ impl FakeServer {
         }
     }
 
-    /// Go `srv.URL`: `http://127.0.0.1:<port>`, no trailing slash.
+    /// The base URL: `http://127.0.0.1:<port>`, no trailing slash.
     pub fn url(&self) -> String {
         format!("http://{}", self.addr)
     }
@@ -664,7 +662,7 @@ impl FakeServer {
             .expect("the fake server received no request")
     }
 
-    /// Number of requests received (Go's `calls++` / `requestCount++`).
+    /// Number of requests received.
     pub fn hits(&self) -> usize {
         self.shared.hits()
     }
@@ -677,7 +675,7 @@ impl FakeServer {
         self.shared.drops()
     }
 
-    /// Waits until at least `n` requests arrived (Go `<-started`); panics after
+    /// Waits until at least `n` requests arrived; panics after
     /// [`WAIT_TIMEOUT`].
     pub async fn wait_for_hits(&self, n: usize) {
         self.shared
@@ -736,7 +734,7 @@ async fn serve(
 
 // ------------------------------------------------------------------------------ scripted client
 
-/// An in-process [`HttpClient`] (Go `roundTripFunc`): records each request and answers it
+/// An in-process [`HttpClient`]: records each request and answers it
 /// from the handler without a socket. [`Outcome::Reset`] becomes
 /// `ModelError::Transport(<message>)`; a [`BodyStep::Fail`] becomes a body item
 /// `Err(ModelError::Transport(<message>))`. Clone the `Arc` into a provider's `http_client`.
@@ -853,12 +851,12 @@ impl HttpClient for ScriptedClient {
 
 // ------------------------------------------------------------------------------------------ SSE
 
-/// One SSE event as Go's tests write it: `event: <name>\ndata: <data>\n\n`.
+/// One SSE event: `event: <name>\ndata: <data>\n\n`.
 pub fn sse_event(name: &str, data: &str) -> String {
     format!("event: {name}\ndata: {data}\n\n")
 }
 
-/// Go `strings.Join(lines, "\n")` over an SSE transcript written line by line.
+/// An SSE transcript written line by line, joined with `"\n"`.
 pub fn sse_lines(lines: &[&str]) -> String {
     lines.join("\n")
 }
@@ -895,8 +893,8 @@ pub fn fixed_header_credentials(
     google_cloud_auth::credentials::Credentials::from(FixedHeaders(headers))
 }
 
-/// Credentials whose headers are always `Authorization: Bearer {token}` (Go's tests'
-/// `staticTokenSource`). Panics if `token` is not a valid header value.
+/// Credentials whose headers are always `Authorization: Bearer {token}`. Panics if `token` is
+/// not a valid header value.
 pub fn bearer_credentials(token: &str) -> google_cloud_auth::credentials::Credentials {
     fixed_header_credentials(http::HeaderMap::from_iter([(
         http::header::AUTHORIZATION,

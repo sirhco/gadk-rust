@@ -13,9 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Proxy resolution and HTTP CONNECT tunnelling for the Live dial. Port of Go
-//! `golang.org/x/net/http/httpproxy` (as reached through `http.ProxyFromEnvironment`, which
-//! gorilla/websocket's `DefaultDialer` uses) and gorilla/websocket v1.5.3 `httpProxyDialer`.
+//! Proxy resolution (the `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` environment variables) and
+//! HTTP CONNECT tunnelling for the Live dial.
 
 use std::net::IpAddr;
 use std::str::FromStr;
@@ -33,7 +32,7 @@ pub(crate) type EnvLookup<'a> = &'a (dyn Fn(&str) -> Option<String> + Send + Syn
 /// Upper bound on a CONNECT response head.
 const MAX_CONNECT_RESPONSE_HEAD: usize = 8192;
 
-/// Go `getEnvAny`: the first non-empty value among `names`.
+/// The first non-empty value among `names`.
 fn get_env_any(env: &dyn Fn(&str) -> Option<String>, names: &[&str]) -> String {
     names
         .iter()
@@ -41,16 +40,16 @@ fn get_env_any(env: &dyn Fn(&str) -> Option<String>, names: &[&str]) -> String {
         .unwrap_or_default()
 }
 
-/// Port of Go httpproxy `(*config).proxyForURL` for the URL gorilla passes to `Dialer.Proxy`
-/// (`ws` rewritten to `http`, `wss` to `https`): the proxy to use for `target`, if any.
+/// The proxy to use for `target`, if any; the URL's scheme maps `ws` to `http` and `wss` to
+/// `https`.
 pub(crate) fn proxy_for_with(target: &Url, env: impl Fn(&str) -> Option<String>) -> Option<Url> {
     let env: &dyn Fn(&str) -> Option<String> = &env;
     let proxy = match target.scheme() {
         "wss" | "https" => parse_proxy(&get_env_any(env, &["HTTPS_PROXY", "https_proxy"])),
         "ws" | "http" => {
             let p = parse_proxy(&get_env_any(env, &["HTTP_PROXY", "http_proxy"]));
-            // Go refuses HTTP_PROXY when REQUEST_METHOD is set (golang.org/s/cgihttpproxy) and
-            // fails the dial; returning no proxy here dials direct instead (Option return type).
+            // HTTP_PROXY is ignored when REQUEST_METHOD is set (a CGI environment): no proxy
+            // is returned, so the dial goes direct.
             if p.is_some() && env("REQUEST_METHOD").is_some_and(|v| !v.is_empty()) {
                 return None;
             }
@@ -71,8 +70,8 @@ pub(crate) fn proxy_for_with(target: &Url, env: impl Fn(&str) -> Option<String>)
     no_proxy.use_proxy(host, &port).then_some(proxy)
 }
 
-/// Go `parseProxy`: a value with no scheme or no host is retried as `http://<value>`; an
-/// unparseable value means no proxy (Go `init` ignores the error).
+/// A value with no scheme or no host is retried as `http://<value>`; an
+/// unparseable value means no proxy.
 fn parse_proxy(proxy: &str) -> Option<Url> {
     if proxy.is_empty() {
         return None;
@@ -83,7 +82,7 @@ fn parse_proxy(proxy: &str) -> Option<Url> {
     }
 }
 
-/// Go httpproxy `config.ipMatchers` / `domainMatchers`.
+/// The parsed `NO_PROXY` entries.
 #[derive(Debug, Default)]
 struct NoProxy {
     all: bool,
@@ -93,13 +92,13 @@ struct NoProxy {
 
 #[derive(Debug)]
 enum IpMatcher {
-    /// Go `cidrMatch`.
+    /// A CIDR range.
     Cidr(IpAddr, u8),
-    /// Go `ipMatch`: an empty port matches every port.
+    /// A single address: an empty port matches every port.
     Ip(IpAddr, String),
 }
 
-/// Go `domainMatch`: `host` always starts with `.`; `match_host` also matches the bare name.
+/// A domain entry: `host` always starts with `.`; `match_host` also matches the bare name.
 #[derive(Debug)]
 struct DomainMatch {
     host: String,
@@ -108,7 +107,7 @@ struct DomainMatch {
 }
 
 impl NoProxy {
-    /// Go httpproxy `(*config).init` (the NO_PROXY half).
+    /// Parses the `NO_PROXY` value.
     fn parse(no_proxy: &str) -> NoProxy {
         let mut np = NoProxy::default();
         for p in no_proxy.split(',') {
@@ -161,7 +160,8 @@ impl NoProxy {
         np
     }
 
-    /// Go httpproxy `(*config).useProxy` for `host` (no brackets) and `port`.
+    /// Whether `host` (no brackets) and `port` go through the proxy: `localhost`, loopback
+    /// addresses and `NO_PROXY` matches do not.
     fn use_proxy(&self, host: &str, port: &str) -> bool {
         if host == "localhost" {
             return false;
@@ -207,7 +207,7 @@ impl DomainMatch {
     }
 }
 
-/// Go `net.IP.IsLoopback`, which also treats v4-mapped IPv6 loopback as loopback.
+/// Whether `ip` is a loopback address; a v4-mapped IPv6 loopback address counts as loopback.
 fn is_loopback(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => v4.is_loopback(),
@@ -217,7 +217,7 @@ fn is_loopback(ip: IpAddr) -> bool {
     }
 }
 
-/// Go `net.ParseCIDR` (address and prefix length only).
+/// Parses a CIDR (address and prefix length only).
 fn parse_cidr(s: &str) -> Option<(IpAddr, u8)> {
     let (ip, bits) = s.split_once('/')?;
     let ip = IpAddr::from_str(ip).ok()?;
@@ -244,7 +244,7 @@ fn prefix_eq(a: u128, b: u128, bits: u8, width: u32) -> bool {
     (a >> shift) == (b >> shift)
 }
 
-/// Go `net.SplitHostPort` for NO_PROXY entries: `host:port` or `[host]:port`; `None` when the
+/// Splits a NO_PROXY entry into host and port: `host:port` or `[host]:port`; `None` when the
 /// entry has no port (or too many colons, e.g. a bare IPv6 address).
 fn split_host_port(s: &str) -> Option<(String, String)> {
     if let Some(rest) = s.strip_prefix('[') {
@@ -259,7 +259,7 @@ fn split_host_port(s: &str) -> Option<(String, String)> {
     Some((host.to_string(), port.to_string()))
 }
 
-/// Go `idnaASCII` for a NO_PROXY domain that starts with `.`: non-ASCII labels become punycode
+/// IDNA-encodes a NO_PROXY domain that starts with `.`: non-ASCII labels become punycode
 /// (the `url` crate's IDNA); on failure the entry is kept as written.
 fn idna_ascii(v: &str) -> String {
     if v.is_ascii() {
@@ -275,7 +275,7 @@ fn idna_ascii(v: &str) -> String {
     }
 }
 
-/// `host:port` of `u` with its scheme's default port (gorilla `hostPortNoPort`); IPv6 hosts
+/// `host:port` of `u` with its scheme's default port; IPv6 hosts
 /// keep their brackets.
 fn host_port(u: &Url) -> Result<String, String> {
     let host = u
@@ -288,7 +288,7 @@ fn host_port(u: &Url) -> Result<String, String> {
     Ok(format!("{host}:{port}"))
 }
 
-/// Percent-decodes URL userinfo (Go `url.Userinfo` holds it decoded).
+/// Percent-decodes URL userinfo.
 fn percent_decode(s: &str) -> String {
     fn hex(c: u8) -> Option<u8> {
         char::from(c)
@@ -314,7 +314,7 @@ fn percent_decode(s: &str) -> String {
 }
 
 /// Dials `target` (`host:port`, the scheme's default port) directly, or through an HTTP CONNECT
-/// tunnel to `proxy` (port of gorilla `httpProxyDialer.Dial`). The error is the bare cause; the
+/// tunnel to `proxy`. The error is the bare cause; the
 /// caller adds the `Connect to <url> failed` context.
 pub(crate) async fn dial(target: &Url, proxy: Option<&Url>) -> Result<TcpStream, String> {
     let addr = host_port(target)?;
@@ -333,7 +333,7 @@ pub(crate) async fn dial(target: &Url, proxy: Option<&Url>) -> Result<TcpStream,
         .await
         .map_err(|e| e.to_string())?;
     let mut req = format!("CONNECT {addr} HTTP/1.1\r\nHost: {addr}\r\n");
-    // gorilla sets the header only when the userinfo has a password (`passwordSet`).
+    // The header is sent only when the userinfo has a password.
     if let Some(password) = proxy.password() {
         let credential = base64::engine::general_purpose::STANDARD.encode(format!(
             "{}:{}",
@@ -350,7 +350,7 @@ pub(crate) async fn dial(target: &Url, proxy: Option<&Url>) -> Result<TcpStream,
     let status_line = head.split("\r\n").next().unwrap_or_default();
     let (code, text) = parse_status_line(status_line)?;
     if code != "200" {
-        // gorilla: errors.New(strings.SplitN(resp.Status, " ", 2)[1]).
+        // The error is the status text (the part after the code), or the code when none.
         return Err(if text.is_empty() { code } else { text });
     }
     Ok(conn)
@@ -374,7 +374,7 @@ async fn read_response_head(conn: &mut TcpStream) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&head).into_owned())
 }
 
-/// Go `http.ReadResponse` status-line parsing: `(code, text)`.
+/// Parses an HTTP status line into `(code, text)`.
 fn parse_status_line(line: &str) -> Result<(String, String), String> {
     let malformed = || format!("malformed HTTP response {line:?}");
     let (proto, status) = line.split_once(' ').ok_or_else(malformed)?;

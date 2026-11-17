@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Client configuration (port of ADK-Go `model/openaimodel/openaimodel.go`'s `ClientConfig`
-//! and `API`, plus openai-go v3.91.1's `DefaultClientOptions` environment defaults).
+//! Client configuration: [`ClientConfig`], the [`Api`] choice, and the environment defaults
+//! (`OPENAI_BASE_URL`, `OPENAI_API_KEY`, ...).
 
 use std::fmt;
 use std::str::FromStr;
@@ -27,24 +27,22 @@ use http::HeaderMap;
 
 use crate::error::{ErrorKind, OpenAiError};
 
-/// The base URL a client uses when neither the configuration nor `OPENAI_BASE_URL` names one
-/// (openai-go `WithEnvironmentProduction`).
+/// The base URL a client uses when neither the configuration nor `OPENAI_BASE_URL` names one.
 pub const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1/";
 
-/// The OpenAI HTTP API a model talks to (Go `API`). The default is [`Api::Responses`], as Go's
-/// zero value is.
+/// The OpenAI HTTP API a model talks to. The default is [`Api::Responses`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Api {
-    /// OpenAI's Responses API, `POST {base}responses` (Go `APIResponses`, `"responses"`).
+    /// OpenAI's Responses API, `POST {base}responses` (`"responses"`).
     #[default]
     Responses,
-    /// OpenAI's Chat Completions API, `POST {base}chat/completions` (Go `APIChatCompletions`,
-    /// `"chat_completions"`), the surface most OpenAI-compatible providers implement.
+    /// OpenAI's Chat Completions API, `POST {base}chat/completions`
+    /// (`"chat_completions"`), the surface most OpenAI-compatible providers implement.
     ChatCompletions,
 }
 
 impl Api {
-    /// Go's string value.
+    /// The string value.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Responses => "responses",
@@ -59,8 +57,8 @@ impl fmt::Display for Api {
     }
 }
 
-/// Accepts Go's values; `""` is [`Api::Responses`], as Go's zero `API` is. Anything else fails
-/// as Go's `NewModel` does: `fmt.Errorf("%w: %q", ErrUnsupportedAPI, cfg.API)`.
+/// Accepts the string values; `""` is [`Api::Responses`]. Anything else fails with
+/// [`ErrorKind::UnsupportedApi`](crate::error::ErrorKind::UnsupportedApi) and the quoted value.
 impl FromStr for Api {
     type Err = OpenAiError;
 
@@ -73,34 +71,34 @@ impl FromStr for Api {
     }
 }
 
-/// Configuration for [`new_model`](crate::new_model) (Go `ClientConfig`).
+/// Configuration for [`new_model`](crate::new_model).
 ///
-/// Resolution follows openai-go's `NewClient`: the environment applies first (`OPENAI_BASE_URL`,
+/// Resolution follows the OpenAI client: the environment applies first (`OPENAI_BASE_URL`,
 /// `OPENAI_API_KEY`, `OPENAI_ORG_ID` → `OpenAI-Organization`, `OPENAI_PROJECT_ID` →
 /// `OpenAI-Project`, `OPENAI_CUSTOM_HEADERS` lines `Name: value`), then the non-empty fields
-/// here. A variable set to the empty string still applies (Go `os.LookupEnv`): an empty
+/// here. A variable set to the empty string still applies: an empty
 /// `OPENAI_API_KEY` sends no `Authorization`, an empty `OPENAI_BASE_URL` makes every call fail.
 ///
 /// Make sure `api_key` is non-empty when `base_url` points at another provider: otherwise
-/// `OPENAI_API_KEY` is read and sent there, as in Go.
+/// `OPENAI_API_KEY` is read and sent there.
 ///
-/// Not ported from Go: `Options []option.RequestOption` (use [`headers`](Self::headers) and
+/// There is no general request-options field (use [`headers`](Self::headers) and
 /// [`http_client`](Self::http_client)).
 #[derive(Clone)]
 pub struct ClientConfig {
     /// The API key, sent as `Authorization: Bearer <key>`. Empty: `OPENAI_API_KEY`.
     pub api_key: String,
     /// The base URL, for OpenAI-compatible endpoints. Empty: `OPENAI_BASE_URL`, else
-    /// [`DEFAULT_BASE_URL`]. A base whose path does not end in `/` gets one (openai-go
-    /// `WithBaseURL`), so `http://host/v1` sends to `http://host/v1/responses`.
+    /// [`DEFAULT_BASE_URL`]. A base whose path does not end in `/` gets one,
+    /// so `http://host/v1` sends to `http://host/v1/responses`.
     pub base_url: String,
     /// The API to talk to (default [`Api::Responses`]).
     pub api: Api,
-    /// A custom HTTP client. Without one gadk builds a `reqwest` client with openai-go's
+    /// A custom HTTP client. Without one gadk builds a `reqwest` client with the OpenAI SDK's
     /// 10-minute response-header timeout; a custom client gets none.
     pub http_client: Option<Arc<dyn HttpClient>>,
-    /// Headers sent with every request, after the environment's (Go `option.WithHeader` in
-    /// `Options`). An `Authorization` here replaces the API key's.
+    /// Headers sent with every request, after the environment's. An `Authorization` here
+    /// replaces the API key's.
     pub headers: HeaderMap,
     /// Environment variable source (`OPENAI_*`); tests inject a [`MapEnv`](gadk_platform::env::MapEnv).
     pub env: Arc<dyn EnvProvider>,
@@ -143,10 +141,10 @@ pub(crate) struct Resolved {
     pub(crate) base_url: String,
     /// The effective API key; `""` sends no `Authorization`.
     pub(crate) api_key: String,
-    /// Whether an `Authorization` header was set after the last API-key assignment (openai-go
-    /// `headerOverride`): the bearer token is then not applied.
+    /// Whether an `Authorization` header was set after the last API-key assignment:
+    /// the bearer token is then not applied.
     pub(crate) authorization_overridden: bool,
-    /// The environment's headers, in openai-go's order (`OpenAI-Organization`,
+    /// The environment's headers, in order (`OpenAI-Organization`,
     /// `OpenAI-Project`, then each `OPENAI_CUSTOM_HEADERS` line); each replaces an earlier
     /// value of the same name.
     pub(crate) env_headers: Vec<(String, String)>,
@@ -172,10 +170,9 @@ impl fmt::Debug for Resolved {
     }
 }
 
-/// openai-go `DefaultClientOptions` + `NewClient(opts...)` for the options ADK-Go passes, in
-/// openai-go's assignment order: env base URL, env key (`SetAPIKey` clears `headerOverride`),
-/// env headers (`SetHeader("Authorization")` sets it), config key, config base URL, config
-/// headers.
+/// Resolves the environment defaults and the config's options, in this order: env base URL,
+/// env key (clears a header override), env headers (a header `Authorization` sets one),
+/// config key, config base URL, config headers.
 pub(crate) fn resolve(cfg: &ClientConfig) -> Resolved {
     let env = cfg.env.as_ref();
     let mut base_url = DEFAULT_BASE_URL.to_string();
@@ -229,16 +226,15 @@ pub(crate) fn resolve(cfg: &ClientConfig) -> Resolved {
 /// How a request URL could not be built from the base URL.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum UrlError {
-    /// The base has no scheme (`""` or a relative reference): Go's `http.Client` fails the
+    /// The base has no scheme (`""` or a relative reference): the HTTP client fails the
     /// call with `unsupported protocol scheme ""`.
     NoScheme,
-    /// The base does not parse (Go `requestoption: WithBaseURL failed to parse url …`).
+    /// The base does not parse (`requestoption: WithBaseURL failed to parse url …`).
     Parse(String),
 }
 
-/// `path` resolved against `base_url` as openai-go does: `WithBaseURL` gives a non-empty path
-/// a trailing `/`, then `url.Parse` + `ResolveReference` keep the base's path as a prefix and
-/// drop its query and fragment.
+/// `path` resolved against `base_url`: a non-empty path gets a trailing `/`, then the
+/// base's path is kept as a prefix and its query and fragment are dropped.
 pub(crate) fn request_url(base_url: &str, path: &str) -> Result<url::Url, UrlError> {
     let mut base = match url::Url::parse(base_url) {
         Ok(u) => u,
