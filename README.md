@@ -86,6 +86,7 @@ The `gadk` crate re-exports the member crates as modules (`gadk::agent`, `gadk::
 | `telemetry` | | OpenTelemetry export (`gadk::telemetry`) |
 | `agentregistry` | | Google Cloud Agent Registry client (`gadk::agentregistry`) |
 | `agentanalytics` | | BigQuery Agent Analytics plugin (`gadk::agentanalytics`) |
+| `eval` | | Offline agent evaluation: eval sets, scorers, LLM judge (`gadk::eval`) |
 
 ## Crates
 
@@ -120,6 +121,7 @@ The `gadk` crate re-exports the member crates as modules (`gadk::agent`, `gadk::
 | `gadk-configurable` | YAML agent configs, conformance record/replay, `adkcli` (internal) ([README](crates/gadk-configurable/README.md)) | `internal/configurable`, `cmd/internal/adkcli` |
 | `gadk-httprr` | HTTP record/replay for deterministic tests | `internal/httprr` |
 | [`gadk-console`](crates/gadk-console/README.md) | Local web console: Cloud Trace traces with their Cloud Logging entries, and the prompt registry | — |
+| [`gadk-eval`](crates/gadk-eval/README.md) | Offline agent evaluation: YAML eval sets, deterministic, tool-trajectory and LLM-judge scorers, per-variant reports | — |
 
 Binaries: `gadk` (the deploy CLI, [README](crates/gadk-cli/README.md)), `gadk-console` (the
 local web console, [README](crates/gadk-console/README.md)) and `adkcli` (the conformance CLI in
