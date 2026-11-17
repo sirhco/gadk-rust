@@ -279,14 +279,14 @@ impl Runner {
     /// Runs the agent for `msg` (`None` for no new message) in the session, yielding its events.
     /// Dropping the returned stream ends the invocation, depending on where it is dropped:
     ///
-    /// - Dropped at a yield (the consumer stopped reading): work the run had already
-    ///   started — in-flight tool calls, ParallelAgent branches, workflow node tasks — is
-    ///   finished first (each component cancels it plainly and hands it to the invocation's
+    /// - Dropped at a yield (the consumer stopped reading): work the run had already started
+    ///   (in-flight tool calls, ParallelAgent branches, workflow node tasks) is finished first
+    ///   (each component cancels it plainly and hands it to the invocation's
     ///   [`gadk_agent::Teardowns`]), then the after-run callbacks run on a spawned task with the
     ///   invocation's context still live, and only then is the invocation cancelled.
-    /// - Dropped inside an await (a cancellation): the invocation is
-    ///   cancelled at once; started work still finishes before the after-run callbacks, which
-    ///   see the cancellation.
+    /// - Dropped inside an await (the run was still waiting on a model call, tool or append): the
+    ///   invocation is cancelled at once; started work still finishes before the after-run
+    ///   callbacks, which see the cancellation.
     ///
     /// Started work is never aborted, so a tool that ignores cancellation runs to completion and
     /// delays the after-run callbacks until it returns.

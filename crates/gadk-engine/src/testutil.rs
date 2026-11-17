@@ -181,7 +181,7 @@ impl Llm for MockModel {
 }
 
 /// Drives `s`, passing each event with content to `f`; fails on a stream error or an event without
-/// content .
+/// content.
 async fn collect_with(mut s: EventStream, mut f: impl FnMut(Event)) -> Result<(), AgentError> {
     while let Some(item) = s.next().await {
         let ev = item?;

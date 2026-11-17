@@ -14,7 +14,8 @@
 // limitations under the License.
 
 //! The engine's ADK telemetry as `tracing` spans and events: the spans (`invoke_workflow`,
-//! `invoke_node`, `generate_content`, `execute_tool`, `compact_events`) and the OTel log records.
+//! `invoke_node`, `generate_content`, `execute_tool`, `compact_events`; agents' own `invoke_agent`
+//! spans come from gadk-agent) and the OTel log records.
 //! No OpenTelemetry: the static span name is the operation and `otel.name` the full span name;
 //! every other field is an OTel attribute (structured values per `converters`). All spans are
 //! `INFO`. A `tracing` span records only the fields it declares, so each constructor declares every
